@@ -873,7 +873,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         x_inferred_shape = (ps.constant(1), ps.constant(1))
 
         res_shape = z.owner.op.infer_shape(
-            None, z.owner, [x_inferred_shape, x_inferred_shape]
+            z.owner, [x_inferred_shape, x_inferred_shape]
         )
 
         assert len(res_shape) == 1
@@ -902,7 +902,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
             as_tensor_variable(np.eye(1)),
         )
         in_1_shape = (ps.constant(1), ps.constant(1))
-        outs = z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_1_shape])
+        outs = z_1.owner.op.infer_shape(z_1.owner, [in_1_shape, in_1_shape])
         for out in outs:
             assert out[0].eval() == 1
             assert out[1].eval() == 1
@@ -911,7 +911,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
             as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(3))
         )
         in_2_shape = (ps.constant(3), ps.constant(3))
-        outs = z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_2_shape])
+        outs = z_1.owner.op.infer_shape(z_1.owner, [in_1_shape, in_2_shape])
         for out in outs:
             assert out[0].eval() == 3
             assert out[1].eval() == 3
@@ -924,7 +924,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
 
         assert isinstance(z.owner.op, Elemwise)
 
-        (out_shape,) = z.owner.op.infer_shape(None, z.owner, [(lscalar(), 1), (50, 10)])
+        (out_shape,) = z.owner.op.infer_shape(z.owner, [(lscalar(), 1), (50, 10)])
 
         assert all(isinstance(v.type, TensorType) for v in out_shape)
 

@@ -65,7 +65,7 @@ class Expm(Op):
 
         return [result]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 

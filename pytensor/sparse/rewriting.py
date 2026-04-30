@@ -176,7 +176,7 @@ class AddSD_ccode(_NoPythonCOp):
              """
         return code
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[3]]
 
     def c_code_cache_version(self):

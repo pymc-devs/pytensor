@@ -74,7 +74,7 @@ class SVD(Op):
             (s,) = outputs
             s[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (x_shape,) = shapes
         M, N = x_shape
         K = ptm.minimum(M, N)

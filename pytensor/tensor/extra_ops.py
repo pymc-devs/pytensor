@@ -150,7 +150,7 @@ class SearchsortedOp(COp):
                 raise TypeError("sorter must be an integer vector", sorter.type)
             return Apply(self, [x, v, sorter], [out_type()])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[1]]
 
     def perform(self, node, inputs, output_storage):
@@ -340,7 +340,7 @@ class CumOp(COp):
                 f'{type(self).__name__}: unknown gradient for mode "{self.mode}"'
             )
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return shapes
 
     def c_code(self, node, name, inames, onames, sub):
@@ -717,7 +717,7 @@ class Repeat(Op):
 
         return [gx, disconnected_type()]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         i0_shapes = ins_shapes[0]
         repeats = node.inputs[1]
         out_shape = list(i0_shapes)
@@ -849,7 +849,7 @@ class Bartlett(Op):
         (out,) = out_
         out[0] = np.bartlett(M)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         temp = node.inputs[0]
         M = ptb.switch(lt(temp, 0), ptb.cast(0, temp.dtype), temp)
         return [[M]]
@@ -892,7 +892,7 @@ class FillDiagonal(Op):
     # See function fill_diagonal for docstring
     __props__ = ()
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [in_shapes[0]]
 
     def make_node(self, a, val):
@@ -993,7 +993,7 @@ class FillDiagonalOffset(Op):
     # See function fill_diagonal_offset for docstring
     __props__ = ()
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [in_shapes[0]]
 
     def make_node(self, a, val, offset):
@@ -1240,7 +1240,7 @@ class Unique(Op):
         else:
             output_storage[0][0] = outs
 
-    def infer_shape(self, fgraph, node, i0_shapes):
+    def infer_shape(self, node, i0_shapes):
         [x_shape] = i0_shapes
         shape0_op = Shape_i(0)
         out_shapes = [(shape0_op(out),) for out in node.outputs]
@@ -1310,7 +1310,7 @@ class UnravelIndex(Op):
             [out_type() for _i in range(ptb.get_vector_length(dims))],
         )
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [input_shapes[0]] * len(node.outputs)
 
     def perform(self, node, inp, out):
@@ -1387,7 +1387,7 @@ class RavelMultiIndex(Op):
             [out_type()],
         )
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
 
     def perform(self, node, inp, out):

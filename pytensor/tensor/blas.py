@@ -247,7 +247,7 @@ class Gemv(Op):
                     out += y
             out_storage[0][0] = np.asarray(out, dtype=y.dtype)
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
 
 
@@ -320,7 +320,7 @@ class Ger(Op):
                 A = ger_func(alpha, x, y, a=A, overwrite_a=self.destructive)
         output_storage[0][0] = A
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
 
 
@@ -945,7 +945,7 @@ class Gemm(GemmRelated):
                 z += a * np.dot(x, y)
             zout[0] = z
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         z_shape, _, x_shape, y_shape, _ = input_shapes
         return [
             (
@@ -1150,7 +1150,7 @@ class Dot22(GemmRelated):
     def perform(self, node, inputs, output_storage):
         output_storage[0][0] = np.dot(*inputs)
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [[input_shapes[0][0], input_shapes[1][1]]]
 
     setup_z_Nz_Sz = """
@@ -1253,7 +1253,7 @@ class Dot22Scalar(GemmRelated):
             e.args = (*e.args, x.shape, y.shape)
             raise
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [[input_shapes[0][0], input_shapes[1][1]]]
 
     setup_z_Nz_Sz = Dot22.setup_z_Nz_Sz
@@ -1642,7 +1642,7 @@ class BatchedDot(COp):
         else:
             return [t2]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         xshp, yshp = shapes
         return [xshp[:-1] + yshp[2:]]
 

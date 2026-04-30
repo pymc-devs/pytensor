@@ -78,7 +78,7 @@ class AbstractConvolveNd:
         out = tensor(dtype=dtype, shape=out_shape)
         return Apply(self, [in1, in2, full_mode], [out])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         _, _, full_mode = node.inputs
         in1_shape, in2_shape, _ = shapes
         out_shape = [

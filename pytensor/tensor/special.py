@@ -57,7 +57,7 @@ class SoftmaxGrad(COp):
 
         return g_dy, g_sm
 
-    def infer_shape(self, fgraph, node, shape):
+    def infer_shape(self, node, shape):
         return [shape[1]]
 
     def c_code_cache_version(self):
@@ -284,7 +284,7 @@ class Softmax(COp):
             return [disconnected_type()]
         return self.pullback(inputs, outputs, eval_points)
 
-    def infer_shape(self, fgraph, node, shape):
+    def infer_shape(self, node, shape):
         return shape
 
     def c_headers(self, **kwargs):
@@ -537,7 +537,7 @@ class LogSoftmax(COp):
             return [disconnected_type()]
         return self.pullback(inputs, outputs, eval_points)
 
-    def infer_shape(self, fgraph, node, shape):
+    def infer_shape(self, node, shape):
         return shape
 
     def c_headers(self, **kwargs):

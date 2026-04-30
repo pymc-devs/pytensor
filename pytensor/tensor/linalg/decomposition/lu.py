@@ -43,7 +43,7 @@ class LU(Op):
         if self.overwrite_a:
             self.destroy_map = {0: [0]} if self.permute_l else {1: [0]}
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         n = shapes[0][0]
         if self.permute_l:
             return [(n, n), (n, n)]
@@ -259,7 +259,7 @@ class LUFactor(Op):
 
         return Apply(self, [A], [LU, pivots])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         n = shapes[0][0]
         return [(n, n), (n,)]
 

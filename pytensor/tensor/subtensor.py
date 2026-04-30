@@ -843,7 +843,7 @@ class Subtensor(BaseSubtensor, COp):
         cdata = unflatten_index_variables(index_variables, self.idx_list)
         out[0] = np.asarray(x.__getitem__(tuple(cdata)))
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         def _is_constant(const, x):
             return isinstance(const, Constant) and const.data.item() == x
 
@@ -1689,7 +1689,7 @@ class IncSubtensor(BaseSubtensor, COp):
                 {fail};
             }}"""
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
     def pushforward(self, inputs, outputs, eval_points):
@@ -1867,7 +1867,7 @@ class AdvancedSubtensor1(COp):
         _x, *index_variables = inputs
         return self.make_node(eval_points[0], *index_variables).outputs
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         x, ilist = ishapes
         return [ilist + x[1:]]
 
@@ -2217,7 +2217,7 @@ class AdvancedIncSubtensor1(BaseSubtensor, COp):
 
         output_storage[0][0] = x
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         x, _y, _ilist = ishapes
         return [x]
 
@@ -2392,7 +2392,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         _x, *index_variables = inputs
         return self.make_node(eval_points[0], *index_variables).outputs
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         def is_bool_index(idx):
             return (
                 isinstance(idx, np.bool_ | bool)
@@ -2619,7 +2619,7 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         else:
             np.add.at(out[0], tuple(full_indices), y)
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         return [ishapes[0]]
 
     def connection_pattern(self, node):

@@ -65,7 +65,7 @@ class Eig(Op):
         outputs[0][0] = w.astype(dtype, copy=False)
         outputs[1][0] = v.astype(dtype, copy=False)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (x_shapes,) = shapes
         n, _ = x_shapes
 
@@ -206,7 +206,7 @@ class Eigh(Op):
             return self
         return type(self)(**new_props)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         n = shapes[0][0]
         return [(n,), (n, n)]
 
@@ -416,7 +416,7 @@ class Eigvalsh(Op):
         w = vector(dtype=out_dtype, shape=(N,))
         return Apply(self, inputs, [w])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         n = shapes[0][0]
         return [
             (n,),

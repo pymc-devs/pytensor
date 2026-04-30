@@ -884,7 +884,7 @@ class OpFromGraph(Op, HasInnerGraph):
         self._connection_pattern = ret
         return ret
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         # TODO: Use `fgraph.shape_feature` to do this instead.
         out_shapes = infer_shape(self.inner_outputs, self.inner_inputs, shapes)
 

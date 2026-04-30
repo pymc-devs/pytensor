@@ -35,7 +35,7 @@ class BaseBlockDiagonal(Op):
         ]
         return [gout[0][slc] for slc in slices]
 
-    def infer_shape(self, fgraph, nodes, shapes):
+    def infer_shape(self, nodes, shapes):
         first, second = unzip(shapes, n=2, strict=True)
         return [(pt.add(*first), pt.add(*second))]
 

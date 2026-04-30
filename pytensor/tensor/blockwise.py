@@ -6,7 +6,6 @@ from numpy import broadcast_shapes, empty
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
-from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
@@ -321,9 +320,7 @@ class Blockwise(COp):
     def batch_ndim(self, node: Apply) -> int:
         return cast(int, node.outputs[0].type.ndim - len(self.outputs_sig[0]))
 
-    def infer_shape(
-        self, fgraph, node, input_shapes
-    ) -> list[tuple[TensorVariable, ...]]:
+    def infer_shape(self, node, input_shapes) -> list[tuple[TensorVariable, ...]]:
         from pytensor.tensor import broadcast_shape
         from pytensor.tensor.shape import Shape_i
 
@@ -354,13 +351,10 @@ class Blockwise(COp):
                 return_dummy_inputs=True,
                 propagate_unbatched_core_inputs=True,
             )
-            dummy_fgraph = FunctionGraph(outputs=dummy_core_node.outputs, clone=False)
             core_input_shapes = [
                 input_shape[batch_ndims:] for input_shape in input_shapes
             ]
-            core_output_shapes = core_op_infer_shape(
-                dummy_fgraph, dummy_core_node, core_input_shapes
-            )
+            core_output_shapes = core_op_infer_shape(dummy_core_node, core_input_shapes)
 
             if not dummy_core_inputs:
                 # All inputs are unbatched, so the core_shape can be used as is

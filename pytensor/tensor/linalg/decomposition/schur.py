@@ -147,7 +147,7 @@ class Schur(Op):
             T_out[0] = T
             Z_out[0] = Z
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0], shapes[0]]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
@@ -490,7 +490,7 @@ class QZ(Op):
                 alpha_out[0] = alpha
                 beta_out[0] = beta
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         A_shape, B_shape = shapes
         if self.return_eigenvalues:
             return [A_shape, B_shape, (A_shape[0],), (A_shape[0],), A_shape, B_shape]

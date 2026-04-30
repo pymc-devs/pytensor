@@ -628,7 +628,7 @@ class TensorFromScalar(COp):
         (out,) = out_
         out[0] = np.asarray(s)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [()]
 
     def pullback(self, inp, outputs, grads):
@@ -689,7 +689,7 @@ class ScalarFromTensor(COp):
         # not using .item() because that returns a Python scalar, not a numpy scalar
         output_storage[0][0] = inputs[0][()]
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [()]
 
     def pullback(self, inp, outputs, grads):
@@ -1370,7 +1370,7 @@ class Eye(Op):
         (out,) = out_
         out[0] = np.eye(n, m, k, dtype=self.dtype)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
@@ -1699,7 +1699,7 @@ class Alloc(COp):
     def c_code_cache_version(self):
         return (5,)
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [node.inputs[1:]]
 
     def connection_pattern(self, node):
@@ -1957,7 +1957,7 @@ class MakeVector(COp):
             """
         return ret
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         return [(len(ishapes),)]
 
     def pullback(self, inputs, outputs, output_gradients):
@@ -2245,7 +2245,7 @@ class Split(COp):
         for out_storage, out in zip(outputs_storage, split_outs, strict=False):
             out_storage[0] = out
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         axis = node.inputs[1]
         splits = node.inputs[2]
         shp_x, _shp_axis, _shp_splits = in_shapes
@@ -2701,7 +2701,7 @@ class Join(COp):
 
         return rval
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         from pytensor.tensor.math import eq, ge
 
         # ishapes[0] contains the size of the axis on which we join
@@ -3255,7 +3255,7 @@ class ARange(COp):
         return Apply(self, inputs, outputs)
 
     @config.change_flags(warn_float64="ignore")
-    def infer_shape(self, fgraph, node, i_shapes):
+    def infer_shape(self, node, i_shapes):
         from pytensor.tensor.math import ceil, maximum
 
         # Note start, stop and step can be float numbers.
@@ -3632,7 +3632,7 @@ class PermuteRowElements(Op):
 
         self._rec_perform(node, x, y, self.inverse, outs[0], curdim=0)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         from pytensor.tensor.math import maximum
 
         shp_x = in_shapes[0]
@@ -3884,7 +3884,7 @@ class ExtractDiag(COp):
         x_grad = moveaxis(x_grad, (0, 1), (axis1, axis2))
         return [x_grad]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         from pytensor.tensor.math import clip, minimum
 
         (in_shape,) = shapes
@@ -4233,7 +4233,7 @@ class Choose(Op):
         assert mode in ("raise", "wrap", "clip")
         self.mode = mode
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         a_shape, choices_shape = shapes
         if choices_shape is None:
             # choices is a TypedList, not a tensor; no shape to broadcast
@@ -4264,9 +4264,7 @@ class Choose(Op):
             choice = as_tensor_variable(choices)
             choice_dtype = choice.dtype
 
-        (out_shape,) = self.infer_shape(
-            None, None, [shape_tuple(a), shape_tuple(choice)]
-        )
+        (out_shape,) = self.infer_shape(None, [shape_tuple(a), shape_tuple(choice)])
 
         static_out_shape = ()
         for s in out_shape:
@@ -4369,7 +4367,7 @@ class AllocEmpty(COp):
         """
         return str
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [node.inputs]
 
     def c_code_cache_version(self):

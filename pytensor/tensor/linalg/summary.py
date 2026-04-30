@@ -71,7 +71,7 @@ class Det(Op):
         (x,) = inputs
         return [gz * self(x) * matrix_inverse(x).T]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [()]
 
     def __str__(self):
@@ -106,7 +106,7 @@ class SLogDet(Op):
         except Exception as e:
             raise ValueError("Failed to compute determinant", x) from e
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(), ()]
 
     def __str__(self):

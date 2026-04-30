@@ -77,8 +77,7 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
     else:
         input_shapes = [tuple(inp.shape) for inp in node.inputs]
         core_shapes = [
-            out_shape[batch_ndim:]
-            for out_shape in op.infer_shape(None, node, input_shapes)
+            out_shape[batch_ndim:] for out_shape in op.infer_shape(node, input_shapes)
         ]
 
     core_shapes = [
