@@ -7,7 +7,6 @@ import warnings
 from collections.abc import Callable, Sequence
 from copy import copy
 from functools import partial
-from itertools import chain
 from typing import cast
 
 from pytensor.compile.maker import function
@@ -23,70 +22,54 @@ from pytensor.graph.basic import (
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import clone_replace, graph_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
 
 
 def infer_shape(outs, inputs, input_shapes):
+    """Compute the shape of ``outs`` given the shape of ``inputs``.
+
+    Builds per-Apply shape kernels via ``ShapeFeature`` and then
+    rebinds each inner-input leaf — surfaced as ``Shape_i(j)(inp)`` in
+    the materialized exprs — to the caller-supplied outer dim. No
+    compile of the inner function required.
     """
-    Compute the shape of the outputs given the shape of the inputs of an PyTensor
-    graph.
-
-    We do it this way to avoid compiling the inner function just to get
-    the shape. Changes to ShapeFeature could require changes in this function.
-
-    """
-    # We use a ShapeFeature because it has all the necessary logic
-    # inside.  We don't use the full ShapeFeature interface, but we
-    # let it initialize itself with an empty fgraph, otherwise we will
-    # need to do it manually
-
     # TODO: ShapeFeature should live elsewhere
     from pytensor.tensor.rewriting.shape import ShapeFeature
 
     for inp, inp_shp in zip(inputs, input_shapes, strict=True):
         if inp_shp is not None and len(inp_shp) != inp.type.ndim:
-            assert len(inp_shp) == inp.type.ndim
+            raise ValueError(
+                f"input {inp} has {inp.type.ndim} dims, got shape with {len(inp_shp)}"
+            )
 
-    shape_feature = ShapeFeature()
-    fgraph = FunctionGraph([], [], features=[shape_feature])
-    for v in chain.from_iterable(s for s in input_shapes if s is not None):
-        # Import input_shape nodes, as for some graphs ShapeFeature assumes these were seen before
-        if (node := v.owner) is not None:
-            fgraph.import_node(node, import_missing=True)
+    feature = ShapeFeature()
+    out_shapes = [feature.shape_tuple(o) for o in outs]
 
-    # Initialize shape_of with the input shapes
+    # ``feature.get_shape(inp, j)`` is the same memoized instance that
+    # appears at the leaves of ``out_shapes`` — ``Shape_i(j)(inp)`` for
+    # unknown dims, ``Constant`` for static dims. Rebind the Shape_i
+    # leaves to the caller-supplied scalars; static-dim Constants are
+    # skipped (no owner) so the static type wins, matching prior behavior.
+    replacements = {}
     for inp, inp_shp in zip(inputs, input_shapes, strict=True):
-        shape_feature.set_shape(inp, inp_shp, override=True)
+        if inp_shp is None or not hasattr(inp.type, "ndim"):
+            continue
+        for j in range(inp.type.ndim):
+            leaf = feature.get_shape(inp, j)
+            if leaf.owner is not None:
+                replacements[leaf] = inp_shp[j]
 
-    def local_traverse(out):
-        """
-        Go back in the graph, from out, adding computable shapes to shape_of.
+    if not replacements:
+        return out_shapes
 
-        """
-        if out in shape_feature.shape_of:
-            # Its shape is already known
-            return
-        elif out.owner is None:
-            # This is an input of the graph
-            shape_feature.init_r(out)
-        else:
-            # Recurse over inputs
-            for inp in out.owner.inputs:
-                if inp not in shape_feature.shape_of:
-                    local_traverse(inp)
-
-            # shape_feature.on_import does not actually use an fgraph
-            # It will call infer_shape and set_shape appropriately
-            dummy_fgraph = None
-            shape_feature.on_import(dummy_fgraph, out.owner, reason="dummy")
-
-    ret = []
-    for o in outs:
-        local_traverse(o)
-        ret.append(shape_feature.shape_of[o])
-    return ret
+    # ``strict=False``: an inner input may not be reachable from every
+    # output, so its leaf won't appear in every shape expression.
+    return [
+        None if s is None else tuple(graph_replace(list(s), replacements, strict=False))
+        for s in out_shapes
+    ]
 
 
 def construct_nominal_fgraph(

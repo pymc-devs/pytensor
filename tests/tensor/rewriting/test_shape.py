@@ -3,6 +3,7 @@ import copy
 import numpy as np
 import pytest
 
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.compile.maker import function
@@ -10,7 +11,8 @@ from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.destroyhandler import DestroyHandler, _contains_cycle
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import check_stack_trace, node_rewriter, out2in
 from pytensor.graph.rewriting.utils import rewrite_graph
@@ -33,6 +35,7 @@ from pytensor.tensor.shape import (
     shape,
     specify_shape,
 )
+from pytensor.tensor.signal import convolve1d
 from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.type import (
     fmatrix,
@@ -591,6 +594,307 @@ class TestSameShape:
             shape_feature.same_shape(x, o, 1, 0)
         with pytest.raises(IndexError):
             shape_feature.same_shape(x, o, 0, 1)
+
+    def test_distinct_passthrough_ops(self):
+        # Different unary Elemwises (exp vs cos) over the same input have
+        # passthrough kernels that bottom out at the same input shape.
+        x = vector()
+        a = pt.exp(x)
+        b = pt.cos(x)
+        fgraph = FunctionGraph([x], [a, b], clone=False)
+        shape_feature = ShapeFeature()
+        fgraph.attach_feature(shape_feature)
+        assert shape_feature.same_shape(a, b)
+
+    def test_chained_passthrough(self):
+        # ``exp(x)`` and ``exp(x + 1)`` should be same_shape: the inner Add
+        # passthrough cascades through the outer Elemwise's passthrough
+        # back to ``shape_key(x, 0)``.
+        x = vector()
+        a = pt.exp(x)
+        b = pt.exp(x + 1)
+        fgraph = FunctionGraph([x], [a, b], clone=False)
+        shape_feature = ShapeFeature()
+        fgraph.attach_feature(shape_feature)
+        assert shape_feature.same_shape(a, b)
+
+    def test_distinct_sources_shared_shape_arg(self):
+        # ``alloc(0., n)`` and ``alloc(1., n)`` have different sources but
+        # share the same shape input ``n``. The dim_kernel for Alloc has
+        # ``input_slot`` bindings to the shape args; both Allocs bind to
+        # the same live ``n``, so same_shape must hold.
+        n = iscalar("n")
+        a = alloc(np.float64(0.0), n)
+        b = alloc(np.float64(1.0), n)
+        fgraph = FunctionGraph([n], [a, b], clone=False)
+        shape_feature = ShapeFeature()
+        fgraph.attach_feature(shape_feature)
+        assert shape_feature.same_shape(a, b)
+
+        # Same shape vars at swapped positions: ``alloc(0., n, n+1)``
+        # vs ``alloc(0., n+1, n)``. Per-dim queries should detect the
+        # cross-dim equivalences; the overall ``same_shape`` (no dims)
+        # compares dim-by-dim positionally and should fail.
+        n_plus_1 = n + 1
+        c = alloc(np.float64(0.0), n, n_plus_1)
+        d = alloc(np.float64(0.0), n_plus_1, n)
+        fgraph = FunctionGraph([n], [c, d], clone=False)
+        shape_feature = ShapeFeature()
+        fgraph.attach_feature(shape_feature)
+        # Overall fails (dim 0 of c is n, dim 0 of d is n+1, etc.).
+        assert not shape_feature.same_shape(c, d)
+        # Cross-dim works: same shape var on each side.
+        assert shape_feature.same_shape(c, d, 0, 1)  # n == n
+        assert shape_feature.same_shape(c, d, 1, 0)  # n+1 == n+1
+        # Same-dim comparisons should not match.
+        assert not shape_feature.same_shape(c, d, 0, 0)
+        assert not shape_feature.same_shape(c, d, 1, 1)
+
+    def test_baked_in_shape_subexpr_limitation(self):
+        # KNOWN LIMITATION (documented on ``shape_key``): kernel input
+        # bindings compare the live ``node.inputs[k]`` by ``id``, not by
+        # structural shape-equivalence. Two structurally-equivalent
+        # live shape inputs that happen to be distinct ``Variable``
+        # objects yield different ``same_shape`` results.
+        #
+        # ``reshape(x, exp(s).shape)`` and ``reshape(x, cos(s).shape)``
+        # both have output shape equal to ``s.shape`` at runtime, but
+        # the live shape inputs (``exp(s).shape`` vs ``cos(s).shape``)
+        # are distinct Variables. Reshape's kernel binds the shape
+        # input via ``input_slot``, which compares by ``id`` only, so
+        # ``same_shape`` returns ``False``.
+        #
+        # Closing this gap requires inlining sub-kernels at build time
+        # (so the parent kernel resolves through ``exp/cos`` into ``s``
+        # directly, content-addressing the whole chain). If that lands,
+        # flip the assert.
+        x = vector()
+        s = vector()
+        a = reshape(x, pt.exp(s).shape)
+        b = reshape(x, pt.cos(s).shape)
+        fgraph = FunctionGraph([x, s], [a, b], clone=False)
+        shape_feature = ShapeFeature()
+        fgraph.attach_feature(shape_feature)
+        assert not shape_feature.same_shape(a, b)
+
+
+def test_unaliased_shape_tuple_blockwise_convolve():
+    """Recreate the ``Blockwise(Convolve1d)`` situation from the convolve1d
+    gradient that originally triggered the destroy-handler cycle.
+
+    The setup mirrors what late inplace fusion produces: an inplace
+    ``Composite{(i + j) - 1}`` over two ``Shape_i`` scalars feeding an
+    ``Alloc`` that's the first input of a ``Blockwise(Convolve1d)``. Lazy
+    shape materialization traces through the Alloc and pulls the live
+    destroyer output into the shape arithmetic. With the second convolve
+    input also derived from ``larger`` (same source as the destroyed
+    scalar), the shape ends up with an Apply reading *both* the destroyed
+    ``Shape_i`` and the destroyer's output — the dual-reference pattern
+    that breaks scheduling.
+
+    Asserts:
+
+    1. the naive ``shape_tuple``, once imported into the fgraph alongside
+       the inplace destroyer, is flagged as cyclic by the destroy handler
+       (this is the bug);
+    2. ``unaliased_shape_tuple`` produces the same shape with the cycle-
+       pattern Applys rerouted through ``deep_copy_op``, so importing it
+       is cycle-free.
+    """
+    larger = pt.matrix("larger", shape=(8, None))
+    smaller = pt.matrix("smaller", shape=(8, None))
+
+    # Pre-warm the ShapeFeature ``Shape_i`` cache so the destroyer's
+    # destroyed inputs are the *same* Apply nodes the lazy shape
+    # materialization will return later.
+    warm_fg = FunctionGraph([larger, smaller], [larger], clone=False)
+    warm_sf = ShapeFeature()
+    warm_fg.attach_feature(warm_sf)
+    larger_s1 = warm_sf.get_shape(larger, 1)
+    smaller_s1 = warm_sf.get_shape(smaller, 1)
+
+    # Inplace Composite{(i + j) - 1}: destroys input 0 (= ``larger.shape[1]``).
+    sx, sy = ps.int64(), ps.int64()
+    inplace_comp = Elemwise(
+        ps.Composite([sx, sy], [ps.sub(ps.add(sx, sy), ps.constant(1, dtype="int64"))]),
+        inplace_pattern={0: 0},
+    )
+    new_dim = inplace_comp(larger_s1, smaller_s1)
+    a = alloc(pt.zeros((1, 1)), 1, new_dim)
+    # Slice of ``larger`` as the second convolve input — its shape depends
+    # on ``larger.shape[1]`` (= the destroyed scalar) too. That's what
+    # makes the convolve shape arithmetic combine the destroyer's output
+    # with the destroyed scalar in a single Apply.
+    out = convolve1d(a, larger[:, ::-1], mode="full")
+
+    fg = FunctionGraph([larger, smaller], [out], clone=False)
+    sf = ShapeFeature()
+    fg.attach_feature(sf)
+    fg.attach_feature(DestroyHandler())
+    sf._shape_i_cache[(id(larger), 1)] = larger_s1
+    sf._shape_i_cache[(id(smaller), 1)] = smaller_s1
+
+    naive_shape = sf.shape_tuple(out)
+    safe_shape = sf.unaliased_shape_tuple(out)
+
+    # Importing each shape into a fresh fgraph (with the destroyer present)
+    # tells us whether the destroy handler accepts it. A new fgraph per
+    # check keeps the cycle from the naive case from poisoning the safe one.
+    def imports_with_cycle(shape_vars):
+        check_fg = FunctionGraph([larger, smaller], [out, *shape_vars], clone=False)
+        check_fg.attach_feature(DestroyHandler())
+        dh = check_fg.destroy_handler
+        return _contains_cycle(check_fg, dh.orderings(check_fg, ordered=False))
+
+    # Naive lazy shape: destroy handler rejects it.
+    assert imports_with_cycle(naive_shape)
+    # Cycle-broken version: imports cleanly.
+    assert not imports_with_cycle(safe_shape)
+
+
+class _NoShapeOp(Op):
+    """Op without ``infer_shape``, used to drive the kernel-borrow
+    override path in ``ShapeFeature.on_change_input``."""
+
+    __props__ = ()
+
+    def make_node(self, x):
+        return Apply(self, [x], [x.type()])
+
+    def perform(self, node, inputs, outputs):
+        outputs[0][0] = inputs[0]
+
+
+_no_shape = _NoShapeOp()
+
+
+class TestKernelReroute:
+    """When ``r`` is replaced by ``new_r`` whose Op has no
+    ``infer_shape``, ``ShapeFeature.on_change_input`` rederives r's
+    shape kernel against ``new_r.owner.inputs`` by matching kernel-
+    input bindings via ``shape_key``. The override stores
+    ``(dim_kernel, role_bindings)`` per dim — no live ``Variable``
+    is pinned. None of these paths are exercised by in-tree rewriters
+    today (every common Op has an ``infer_shape``), so each test
+    wires up the replacement explicitly.
+    """
+
+    def test_passthrough_reroute(self):
+        """Passthrough kernel (``exp(x)``: shape = ``[x.shape]``)
+        reroutes against ``new_r.owner.inputs = [x]``. The override
+        stores only ``(dim_kernel, ((0, 0),))``; ``shape_key`` matches
+        ``x.shape[0]`` exactly.
+        """
+        x = vector("x")
+        r = exp(x)
+        new_r = _no_shape(x)
+
+        fg = FunctionGraph([x], [r], clone=False)
+        sf = ShapeFeature()
+        fg.attach_feature(sf)
+        fg.replace(r, new_r, reason="reroute_test")
+
+        assert new_r in sf._overrides
+        ov = sf._overrides[new_r]
+        assert len(ov) == 1
+        dim_kernel, role_bindings = ov[0]
+
+        # Pure-kernel structure: no live Variables.
+        assert isinstance(dim_kernel, FrozenFunctionGraph)
+        assert role_bindings == ((0, 0),)
+        for binding in role_bindings:
+            assert all(isinstance(b, int) for b in binding)
+
+        live = sf.get_shape(new_r, 0)
+        assert live.owner is not None and isinstance(live.owner.op, Shape_i)
+        assert live.owner.op.i == 0
+        assert live.owner.inputs[0] is x
+
+        assert sf.shape_key(new_r, 0) == sf.shape_key(x, 0)
+        assert sf.same_shape(new_r, x, 0, 0)
+
+    def test_no_shape_key_match(self):
+        """When the only role's binding has no ``shape_key`` match in
+        ``new_r.owner.inputs``, reroute gives up for that dim. Here r
+        depends on ``a.shape[0]`` but ``new_r.owner.inputs = [b]`` —
+        ``id``-keyed leaves of two distinct vectors don't match, so
+        no override is installed.
+        """
+        a = vector("a")
+        b = vector("b")
+        r = exp(a)
+        new_r = _no_shape(b)
+
+        fg = FunctionGraph([a, b], [r], clone=False)
+        sf = ShapeFeature()
+        fg.attach_feature(sf)
+        fg.replace(r, new_r, reason="reroute_test")
+
+        # Reroute returned None for every dim (here, just dim 0), so
+        # no override entry is recorded.
+        assert new_r not in sf._overrides
+        # Shape lookups fall back to Shape_i on new_r itself.
+        live = sf.get_shape(new_r, 0)
+        assert isinstance(live.owner.op, Shape_i) and live.owner.inputs[0] is new_r
+
+    def test_input_slot_kernel_skipped(self):
+        """A kernel with an ``input_slot`` role (Alloc — its shape
+        elements are input *values*, not input *shapes*) can't be
+        rerouted by shape-key matching. Reroute bails before searching
+        new_r's inputs.
+        """
+        n = iscalar("n")
+        r = alloc(np.float64(0.0), n)
+        other = pt.tensor("other", dtype="float64", shape=(None,))
+        new_r = _no_shape(other)
+
+        fg = FunctionGraph([n, other], [r], clone=False)
+        sf = ShapeFeature()
+        fg.attach_feature(sf)
+        fg.replace(r, new_r, reason="reroute_test")
+
+        # input_slot role → reroute returns None for every dim.
+        assert new_r not in sf._overrides
+
+    def test_partial_reroute(self):
+        """Per-dim independence: with ``r = dot(A, B)`` and
+        ``new_r = no_shape(A)``, dim 0 (``A.shape[0]``) reroutes
+        cleanly while dim 1 (``B.shape[1]``) has no counterpart in
+        ``[A]``. The override is installed but with ``None`` at dim 1
+        — falling back to ``Shape_i`` for that dim only.
+        """
+        A = matrix("A")
+        B = matrix("B")
+        r = pt.dot(A, B)
+        new_r = _no_shape(A)
+
+        fg = FunctionGraph([A, B], [r], clone=False)
+        sf = ShapeFeature()
+        fg.attach_feature(sf)
+        fg.replace(r, new_r, reason="reroute_test")
+
+        assert new_r in sf._overrides
+        ov = sf._overrides[new_r]
+        assert len(ov) == 2
+
+        # Dim 0 rerouted to A.shape[0].
+        assert ov[0] is not None
+        dim_kernel0, role_bindings0 = ov[0]
+        assert isinstance(dim_kernel0, FrozenFunctionGraph)
+        assert role_bindings0 == ((0, 0),)
+
+        # Dim 1's binding (B.shape[1]) has no counterpart in [A].
+        assert ov[1] is None
+
+        s0 = sf.get_shape(new_r, 0)
+        assert isinstance(s0.owner.op, Shape_i) and s0.owner.op.i == 0
+        assert s0.owner.inputs[0] is A
+        s1 = sf.get_shape(new_r, 1)
+        assert isinstance(s1.owner.op, Shape_i) and s1.owner.op.i == 1
+        assert s1.owner.inputs[0] is new_r
+
+        assert sf.shape_key(new_r, 0) == sf.shape_key(A, 0)
+        assert sf.shape_key(new_r, 1) == ("leaf", id(new_r), 1)
 
 
 def test_useless_specify_shape():

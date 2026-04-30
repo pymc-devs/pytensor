@@ -70,8 +70,10 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
 
     shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
+        # Core dims only, cycle-broken — import won't trip the destroy
+        # handler.
         core_shapes = [
-            [shape_feature.get_shape(out, i) for i in range(batch_ndim, out.type.ndim)]
+            shape_feature.unaliased_shape_tuple(out, range(batch_ndim, out.type.ndim))
             for out in node.outputs
         ]
     else:

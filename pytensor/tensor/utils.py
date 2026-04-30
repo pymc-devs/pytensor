@@ -7,8 +7,7 @@ import numpy as np
 from numpy import nditer
 from numpy.lib.array_utils import normalize_axis_tuple
 
-import pytensor
-from pytensor.graph import FunctionGraph, Variable
+from pytensor.graph import Variable
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.utils import hash_from_code
 
@@ -38,76 +37,6 @@ def hash_from_ndarray(data) -> str:
         + hash_from_code(str(data.strides))
         + hash_from_code(str(data.dtype))
     )
-
-
-def shape_of_variables(
-    fgraph: FunctionGraph, input_shapes
-) -> dict[Variable, tuple[int, ...]]:
-    """
-    Compute the numeric shape of all intermediate variables given input shapes.
-
-    Parameters
-    ----------
-    fgraph
-        The FunctionGraph in question.
-    input_shapes : dict
-        A dict mapping input to shape.
-
-    Returns
-    -------
-    shapes : dict
-        A dict mapping variable to shape
-
-    .. warning:: This modifies the fgraph. Not pure.
-
-    Examples
-    --------
-    >>> import pytensor.tensor as pt
-    >>> from pytensor.graph.fg import FunctionGraph
-    >>> x = pt.matrix("x")
-    >>> y = x[512:]
-    >>> y.name = "y"
-    >>> fgraph = FunctionGraph([x], [y], clone=False)
-    >>> d = shape_of_variables(fgraph, {x: (1024, 1024)})
-    >>> d[y]
-    (array(512), array(1024))
-    >>> d[x]
-    (array(1024), array(1024))
-    """
-
-    if not hasattr(fgraph, "shape_feature"):
-        from pytensor.tensor.rewriting.shape import ShapeFeature
-
-        fgraph.attach_feature(ShapeFeature())
-
-    shape_feature = fgraph.shape_feature  # type: ignore[attr-defined]
-
-    input_dims = [
-        dimension for inp in fgraph.inputs for dimension in shape_feature.shape_of[inp]
-    ]
-
-    output_dims = [
-        dimension for shape in shape_feature.shape_of.values() for dimension in shape
-    ]
-
-    compute_shapes = pytensor.function(input_dims, output_dims)
-
-    if any(i not in fgraph.inputs for i in input_shapes):
-        raise ValueError(
-            "input_shapes keys aren't in the fgraph.inputs. FunctionGraph()"
-            " interface changed. Now by default, it clones the graph it receives."
-            " To have the old behavior, give it this new parameter `clone=False`."
-        )
-
-    numeric_input_dims = [dim for inp in fgraph.inputs for dim in input_shapes[inp]]
-    numeric_output_dims = compute_shapes(*numeric_input_dims)
-
-    sym_to_num_dict = dict(zip(output_dims, numeric_output_dims, strict=True))
-
-    l = {}
-    for var in shape_feature.shape_of:
-        l[var] = tuple(sym_to_num_dict[sym] for sym in shape_feature.shape_of[var])
-    return l
 
 
 def import_func_from_string(func_string: str):  # -> Optional[Callable]:

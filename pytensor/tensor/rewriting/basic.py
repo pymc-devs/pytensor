@@ -144,7 +144,7 @@ def alloc_like(
     if value.type.is_super(template.type):
         return value
     if hasattr(fgraph, "shape_feature"):
-        new_shape = fgraph.shape_feature.shape_of[template]
+        new_shape = fgraph.shape_feature.shape_tuple(template)
     else:
         new_shape = template.shape
     rval = alloc(value, *new_shape)

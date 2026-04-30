@@ -4,15 +4,22 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import config, function, shared
+from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.graph.basic import equal_computations
+from pytensor.graph.destroyhandler import DestroyHandler, _contains_cycle
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import (
     _vectorize_node,
+    break_aliasing_cycles,
     clone_replace,
     graph_replace,
     vectorize_graph,
 )
-from pytensor.graph.traversal import graph_inputs
+from pytensor.graph.traversal import ancestors, graph_inputs
 from pytensor.tensor import dvector, fvector, vector
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import maximum
+from pytensor.tensor.type import scalar
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs
 from tests.unittest_tools import assert_equal_computations
@@ -373,3 +380,115 @@ class TestVectorizeGraph:
             batch_out.eval({x: 3, y: 4}),
             np.zeros((2, 3, 4)),
         )
+
+
+class TestBreakAliasingCycles:
+    """``break_aliasing_cycles`` re-routes aliased-scalar reads on Apply
+    nodes whose dual reference to ``x`` and the inplace op's output ``y``
+    would otherwise be unschedulable.
+
+    The bad pattern (the one we patch): a single Apply ``A`` that reads
+    an aliased scalar ``x`` directly *and* whose other inputs reach the
+    inplace op's output ``y``. The fix: replace ``x`` on that one Apply
+    with ``deep_copy_op(x)``.
+    """
+
+    @staticmethod
+    def _inplace_add():
+        import pytensor.scalar as ps
+
+        return Elemwise(ps.add, inplace_pattern={0: 0})
+
+    def _setup_with_inplace(self):
+        """Build an fgraph containing an inplace destroyer ``y = x + x'``
+        (destroys ``x``).
+        """
+        x = scalar("x")
+        x2 = scalar("x2")
+        y = self._inplace_add()(x, x2)
+        fg = FunctionGraph([x, x2], [y], clone=False)
+        fg.attach_feature(DestroyHandler())
+        # Sanity: dh sees the destroyer.
+        assert fg.destroy_handler.destroyers
+        return fg, x, x2, y
+
+    @staticmethod
+    def _has_cycle(fgraph, patched):
+        """Add ``patched`` as a fresh output of ``fgraph`` and ask the
+        destroy handler whether the resulting graph contains a cycle.
+        """
+        for var in patched:
+            fgraph.add_output(var, reason="test_break_aliasing_cycles")
+        dh = fgraph.destroy_handler
+        return _contains_cycle(fgraph, dh.orderings(fgraph, ordered=False))
+
+    def test_clean_subgraph_unchanged(self):
+        """Subgraph that only reads ``x`` (no ``y``) passes through."""
+        fg, x, _x2, _y = self._setup_with_inplace()
+        v = pt.add(x, x)
+        (result,) = break_aliasing_cycles([v], fg.destroyers)
+        assert result is v
+        assert not self._has_cycle(fg, [result])
+
+    def test_subgraph_reads_only_y_unchanged(self):
+        """Subgraph that only reads ``y`` (not ``x`` directly) passes."""
+        fg, _x, x2, y = self._setup_with_inplace()
+        v = pt.add(y, x2)
+        (result,) = break_aliasing_cycles([v], fg.destroyers)
+        assert result is v
+        assert not self._has_cycle(fg, [result])
+
+    def test_split_pattern_unchanged(self):
+        """``zar(y, bar(x))`` schedules cleanly: no Apply has both x and
+        y as direct inputs."""
+        fg, x, x2, y = self._setup_with_inplace()
+        bar = pt.add(x, x2)
+        zar = pt.add(y, bar)
+        (result,) = break_aliasing_cycles([zar], fg.destroyers)
+        assert result is zar
+        # Original x edge in bar still present (no surgery).
+        assert x in set(ancestors([result]))
+        assert not self._has_cycle(fg, [result])
+
+    def test_dual_reference_pattern_is_patched(self):
+        """A single Apply that reads x AND y is the bad pattern — patch it."""
+        fg, x, _x2, y = self._setup_with_inplace()
+        bad = maximum(y, x)
+        (result,) = break_aliasing_cycles([bad], fg.destroyers)
+        expected = maximum(y, deep_copy_op(x))
+        utt.assert_equal_computations([result], [expected], original=bad)
+        # The destroyer (inplace add) still reads x directly — left alone.
+        for a in fg.apply_nodes:
+            if a.op.destroy_map:
+                assert x in a.inputs
+        assert not self._has_cycle(fg, [result])
+
+    def test_transitive_y_via_sibling(self):
+        """A's other input transitively reaches y via an intermediate node.
+
+        The intermediate ``add(y, x2)`` doesn't equal ``y`` by identity,
+        but its ancestors include ``y``. Walking ``deps`` upward must
+        catch that, so ``maximum(intermediate, x)`` still gets the surgery.
+        """
+        fg, x, x2, y = self._setup_with_inplace()
+        intermediate = pt.add(y, x2)
+        bad = maximum(intermediate, x)
+        (result,) = break_aliasing_cycles([bad], fg.destroyers)
+        expected = maximum(intermediate, deep_copy_op(x))
+        utt.assert_equal_computations([result], [expected], original=bad)
+        assert not self._has_cycle(fg, [result])
+
+    def test_multiple_outputs_share_substitute(self):
+        """When two outputs both need to patch the same destroyed scalar,
+        a single DeepCopyOp(x) Apply is shared between them."""
+        fg, x, _x2, y = self._setup_with_inplace()
+        bad1 = maximum(y, x)
+        bad2 = pt.add(y, x)
+        results = break_aliasing_cycles([bad1, bad2], fg.destroyers)
+        deep_copies = set()
+        for r in results:
+            for a in {anc.owner for anc in ancestors([r]) if anc.owner}:
+                if isinstance(a.op, DeepCopyOp):
+                    deep_copies.add(a)
+        assert len(deep_copies) == 1
+        assert not self._has_cycle(fg, results)

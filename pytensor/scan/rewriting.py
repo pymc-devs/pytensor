@@ -1405,13 +1405,7 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
         position in the outer circular buffer. This would invalidate results,
         if the input is still needed for some other output computation.
     """
-    if hasattr(fgraph, "shape_feature"):
-        shape_of = fgraph.shape_feature.shape_of
-    else:
-        # Each access to shape_of is in a try..except block in order to
-        # use a default version when the variable is not in the shape_of
-        # dictionary.
-        shape_of = {}
+    shape_feature = getattr(fgraph, "shape_feature", None)
     # 1. Initialization of variables
     # Note 1) We do not actually care about outputs representing shared
     # variables (those have no intermediate values) so it is safer to
@@ -1503,14 +1497,14 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
 
                 # 2.3.2 extract the begin/end of the first dimension
                 if i >= op_info.n_mit_mot:
-                    try:
-                        length = shape_of[out][0]
-                    except KeyError:
+                    if shape_feature is not None and shape_feature.tracks_shape(out):
+                        length = shape_feature.get_shape(out, 0)
+                    else:
                         length = node.inputs[0] + init_l[i]
                 else:
-                    try:
-                        length = shape_of[out][0]
-                    except KeyError:
+                    if shape_feature is not None and shape_feature.tracks_shape(out):
+                        length = shape_feature.get_shape(out, 0)
+                    else:
                         length = out.shape[0]
                 cf_slice = get_canonical_form_slice(this_slice[0], length)
                 slices[i] += [(cf_slice, this_slice)]  # type: ignore

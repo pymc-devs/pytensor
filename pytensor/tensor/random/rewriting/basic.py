@@ -275,7 +275,7 @@ def local_subtensor_rv_lift(fgraph, node):
 
         # Use shape_feature to facilitate inferring final shape.
         # Check that neither the RV nor the old Subtensor are in the shape graph.
-        output_shape = fgraph.shape_feature.shape_of.get(indexed_rv, None)
+        output_shape = shape_feature.shape_tuple(indexed_rv)
         if output_shape is None or {indexed_rv, rv} & set(ancestors(output_shape)):
             return None
 

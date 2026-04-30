@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from functools import singledispatch
 from typing import cast, overload
 
@@ -11,6 +11,7 @@ from pytensor.graph.basic import (
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.traversal import (
+    general_toposort,
     toposort,
     truncated_graph_inputs,
 )
@@ -210,6 +211,111 @@ def graph_replace(
         return list(fg.outputs)
     else:
         return fg.outputs[0]
+
+
+def break_aliasing_cycles(
+    outputs: Sequence[Variable],
+    destroyers_of: Callable[[Variable], Collection[Apply]],
+) -> list[Variable]:
+    """Break aliasing-induced ordering cycles in ``outputs``.
+
+    An inplace Op ``D`` overwrites one of its inputs ``x`` in place, so
+    ``D``'s output ``y`` aliases ``x``'s storage. Any client that reads
+    the pre-overwrite ``x`` must therefore run *before* ``D``, and any
+    client that reads ``y`` must run *after*. A cycle arises when a
+    single Apply ``A`` does both — reads ``x`` directly *and* has another
+    input that (directly or transitively) depends on ``y``. ``A`` would
+    have to run before ``D`` and after it. No valid schedule exists.
+
+    This function finds every such ``A`` in ``outputs``' ancestry and
+    re-routes ``x`` *on that one Apply only* through ``deep_copy_op``.
+    ``A`` then reads the copy instead of the aliased original, lifting
+    the "before" constraint. ``D`` keeps reading ``x`` directly; the
+    rest of the graph is untouched.
+
+    Multiple outputs share one topological pass; an Apply reachable from
+    more than one output is analyzed once, and an aliased value patched
+    across outputs gets a single shared ``deep_copy_op`` wrapper. Returns
+    ``outputs`` unchanged when no Apply exhibits the pattern.
+
+    Parameters
+    ----------
+    outputs
+        Roots of the sub-graph to scan.
+    destroyers_of
+        Callable returning the Apply nodes that overwrite a given
+        Variable in place (empty when none). Typically
+        ``fgraph.destroyers`` from a ``FunctionGraph`` with an attached
+        ``DestroyHandler``, but this function makes no assumption about
+        provenance — the caller is responsible for the lookup's
+        meaningfulness, and for skipping the call when there are no
+        inplace ops in the first place (the ancestry is walked
+        unconditionally).
+    """
+    from pytensor.compile.ops import deep_copy_op
+
+    deps: dict[Variable, frozenset[Variable]] = {}
+    substitutes: dict[Variable, Variable] = {}
+    replacements: dict[Variable, Variable] = {}
+    # ``general_toposort`` guarantees inputs are visited before consumers,
+    # so ``deps`` for every input is final by the time we look at an Apply.
+    for v in general_toposort(
+        outputs, lambda v: v.owner.inputs if v.owner is not None else []
+    ):
+        if v.owner is None:
+            deps[v] = frozenset()
+            continue
+        node = v.owner
+
+        # Accumulate this Variable's destroyer-output reach: union of the
+        # parents' reaches, plus any parent that is itself an output of an
+        # inplace Apply.
+        d: set[Variable] = set()
+        for inp in node.inputs:
+            d |= deps[inp]
+            if inp.owner is not None and inp.owner.op.destroy_map:
+                d.add(inp)
+        deps[v] = frozenset(d)
+
+        if node.op.destroy_map:
+            # Inplace Apply — preserve as-is; never enters ``replacements``
+            # so ``graph_replace`` leaves it alone.
+            continue
+
+        # Cycle-pattern check per destroyed input on ``node``: a destroyed
+        # input ``i`` triggers the pattern iff some *other* input has the
+        # destroyer's output in its reach.
+        new_inputs = list(node.inputs)
+        changed = False
+        for i, inp in enumerate(node.inputs):
+            inp_destroyers = destroyers_of(inp)
+            if not inp_destroyers:
+                continue
+            other_deps: set[Variable] = set()
+            for j, other_inp in enumerate(node.inputs):
+                if j == i:
+                    continue
+                other_deps |= deps[other_inp]
+                if other_inp.owner is not None and other_inp.owner.op.destroy_map:
+                    other_deps.add(other_inp)
+            if any(
+                out in other_deps for c_app in inp_destroyers for out in c_app.outputs
+            ):
+                if inp not in substitutes:
+                    substitutes[inp] = cast(Variable, deep_copy_op(inp))
+                new_inputs[i] = substitutes[inp]
+                changed = True
+        if changed:
+            new_node = node.op.make_node(*new_inputs)
+            replacements.update(zip(node.outputs, new_node.outputs, strict=True))
+
+    if not replacements:
+        return list(outputs)
+
+    # ``graph_replace`` walks each output, substitutes any matched Apply
+    # outputs with the patched version, and rebuilds whatever's downstream
+    # — composing stacked patches automatically.
+    return graph_replace(list(outputs), replace=replacements)
 
 
 @singledispatch
