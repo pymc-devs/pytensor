@@ -54,7 +54,7 @@ class SortOp(Op):
         z = output_storage[0]
         z[0] = np.sort(a, axis, self.kind)
 
-    def infer_shape(self, fgraph, node, inputs_shapes):
+    def infer_shape(self, node, inputs_shapes):
         assert node.inputs[0].ndim == node.outputs[0].ndim
         assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
@@ -185,7 +185,7 @@ class ArgSortOp(Op):
             dtype=node.outputs[0].dtype,
         )
 
-    def infer_shape(self, fgraph, node, inputs_shapes):
+    def infer_shape(self, node, inputs_shapes):
         assert node.inputs[0].ndim == node.outputs[0].ndim
         assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]

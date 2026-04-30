@@ -327,7 +327,7 @@ class SpSum(Op):
             r = psb.SparseFromDense(o_format)(r)
         return [r]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         r = None
         if self.axis is None:
             r = [()]
@@ -406,7 +406,7 @@ class AddSS(Op):
         assert psb._is_sparse_variable(gz)
         return gz, gz
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -467,7 +467,7 @@ class AddSSData(Op):
         derivative = {True: gz, False: None}
         return [derivative[b] for b in is_continuous]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -509,7 +509,7 @@ class AddSD(Op):
         assert psb._is_dense_variable(gz)
         return psb.sp_ones_like(x) * gz, gz
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[1]]
 
 
@@ -569,7 +569,7 @@ class StructuredAddSV(Op):
         assert psb._is_sparse_variable(gz)
         return gz, sp_sum(gz, axis=0, sparse_grad=True)
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -699,7 +699,7 @@ class SparseSparseMultiply(Op):
         (gz,) = gout
         return y * gz, x * gz
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -788,7 +788,7 @@ class SparseDenseMultiply(Op):
         assert psb._is_sparse_variable(gz)
         return y * gz, psb.dense_from_sparse(x * gz)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -871,7 +871,7 @@ class SparseDenseVectorMultiply(Op):
 
         return mul_s_v(gz, y), sp_sum(x * gz, axis=0, sparse_grad=True)
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -989,7 +989,7 @@ class __ComparisonOpSS(Op):
             self.comparison(x, y).astype("uint8").asformat(node.outputs[0].type.format)
         )
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -1034,7 +1034,7 @@ class __ComparisonOpSD(Op):
         o = np.asarray(o)
         out[0] = o
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -1284,7 +1284,7 @@ class TrueDot(Op):
                 rval[1] = psb.dense_from_sparse(rval[1])
         return rval
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[0][0], shapes[1][1])]
 
 
@@ -1412,7 +1412,7 @@ class StructuredDot(Op):
         (g_out,) = gout
         return [structured_dot_grad(a, b, g_out), structured_dot(a.T, g_out)]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[0][0], shapes[1][1])]
 
 
@@ -1596,7 +1596,7 @@ class StructuredDotGradCSC(COp):
 
         """
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -1731,7 +1731,7 @@ class StructuredDotGradCSR(COp):
 
         """
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -1829,7 +1829,7 @@ class SamplingDot(Op):
 
         return rval
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[2]]
 
 
@@ -1842,7 +1842,7 @@ class Dot(Op):
     def __str__(self):
         return "Sparse" + self.__class__.__name__
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         xshp, yshp = shapes
         x, y = node.inputs
         if x.ndim == 2 and y.ndim == 2:
