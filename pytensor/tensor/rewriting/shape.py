@@ -44,7 +44,6 @@ from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
     IncSubtensor,
     Subtensor,
-    get_idx_list,
 )
 from pytensor.tensor.type import TensorType, integer_dtypes, lscalar
 from pytensor.tensor.type_other import NoneTypeT
@@ -72,53 +71,20 @@ class ShapeFeature(Feature):
     - ``same_shape(x, y, dim_x=None, dim_y=None)`` — via content-addressed ``shape_key``.
     """
 
+    _scalar_shape = constant(np.array([], dtype="int64"))
+
     def __init__(self):
-        # Per-Apply kernel cache: ``node -> (kernel, meta)`` from
-        # ``_build_kernel``. The kernel is a ``FrozenFunctionGraph`` rooted
-        # in dummy inputs; ``get_shape`` materializes it against today's
-        # live ``node.inputs``. Populated lazily on ``get_shape`` /
-        # ``shape_key`` / ``_reroute_dim``; dropped in ``on_prune``.
+        # node -> (kernel, meta) from _build_kernel, lazily populated
         self._cache: dict = {}
-        # Kernel-borrow overrides keyed by ``Variable``: an ndim-tuple
-        # whose entries are either ``None`` (Shape_i fallback) or
-        # ``(dim_kernel, role_bindings)``. ``dim_kernel`` is the per-dim
-        # ``FrozenFunctionGraph`` borrowed from the *replaced* var's
-        # kernel; ``role_bindings`` is a tuple of ``(input_idx, dim)``
-        # aligned with ``dim_kernel.inputs``, indexing into the keying
-        # var's ``.owner.inputs``. No live Variables are pinned: the
-        # live shape is rebuilt at access time by walking the dim_kernel
-        # against ``v.owner.inputs[input_idx].shape[dim]``. Installed by
-        # ``on_change_input`` when ``new_r`` replaces ``r`` and
-        # ``new_r``'s Op has no ``infer_shape``.
-        self._overrides: dict = {}
-        # Memoizes ``Shape_i(i)(v)`` for leaves/fallbacks so callers that
-        # cross-reference shape entries with ``Shape_i`` nodes in the graph
-        # observe Apply identity (the graph's MergeFeature would otherwise
-        # merge structurally equal copies, but by then compare-by-identity
-        # rewrites may have already bailed out).
-        # Keyed by ``(id(v), i)``; safe because the fgraph holds a strong
-        # ref to ``v`` for the feature's lifetime. ``on_prune`` drops the
-        # entries for removed Apply outputs; graph-input removal would
-        # leak entries but is not a path we currently exercise.
-        self._shape_i_cache: dict = {}
-        # Memoize the canonicalized result of ``get_shape(v, i)`` so a
-        # second caller observes identity, not a fresh equivalent tree.
-        # Safe to hold strong refs because the cached expression is
-        # canonical: ``Shape_i{j}(graph_input_leaf)``, lscalars, constants,
-        # and arithmetic — none of those participate in the rewrite cycles
-        # that would otherwise replace nodes out from under us.  Dropped
-        # in ``on_prune`` when the keying ``v`` is removed.
-        self._materialized: dict = {}
-        # Per-dim sub-views of the per-node kernel, used by
-        # ``same_shape``/``shape_key``. Keyed ``node -> {slot: (dim_kernel,
-        # used_roles) | None}``. ``dim_kernel`` is a single-output
-        # ``FrozenFunctionGraph`` over only the kernel inputs reachable
-        # from ``kernel.outputs[slot]``. Because ``FrozenApply`` and
-        # ``NominalVariable`` are globally interned, structurally
-        # identical shape expressions yield ``__eq__`` dim kernels — so
-        # ``same_shape`` reduces to a content-addressed kernel match plus
-        # a roles/binding compare, instead of a recursive op-tree walk.
+        # node -> {slot: (dim_kernel, used_roles) | None}, per-dim views of _cache
         self._dim_kernel_cache: dict = {}
+        # var -> ndim-tuple of (dim_kernel, role_bindings) | None,
+        # installed by on_change_input when new_r's Op has no infer_shape
+        self._overrides: dict = {}
+        # (id(v), i) -> Shape_i(i)(v), ensures Apply identity for leaves
+        self._shape_i_cache: dict = {}
+        # (id(v), i) -> canonicalized get_shape result, avoids re-materialization
+        self._materialized: dict = {}
         self.fgraph: FunctionGraph | None = None
 
     def tracks_shape(self, v) -> bool:
@@ -172,31 +138,29 @@ class ShapeFeature(Feature):
         node = s.owner
         op = node.op
 
-        if isinstance(op, Subtensor):
-            base = node.inputs[0]
-            if base.owner is not None and isinstance(base.owner.op, Shape):
+        if isinstance(op, Subtensor) and op.idx_list == (0,):
+            base, idx = node.inputs
+            if isinstance(base.owner_op, Shape):
                 x = base.owner.inputs[0]
-                if hasattr(x.type, "ndim"):
-                    try:
-                        idx_list = get_idx_list(node.inputs, op.idx_list)
-                        if len(idx_list) == 1:
-                            i = int(get_scalar_constant_value(idx_list[0]))
-                            if 0 <= i < x.type.ndim:
-                                result = self.get_shape(x, i)
-                                memo[s] = result
-                                return result
-                    except (NotScalarConstantError, IndexError, TypeError):
-                        pass
+                try:
+                    idx_const = int(get_scalar_constant_value(idx))
+                    memo[s] = result = self.get_shape(x, idx_const)
+                    return result
+                except (NotScalarConstantError, IndexError):
+                    pass
 
         if isinstance(op, Shape):
             x = node.inputs[0]
-            if hasattr(x.type, "ndim") and x.type.ndim > 0:
-                result = stack([self.get_shape(x, j) for j in range(x.type.ndim)])
-                memo[s] = result
-                return result
+            dims = [self.get_shape(x, j) for j in range(x.type.ndim)]
+            if dims:
+                result = stack(dims)
+            else:
+                result = self._scalar_shape
+            memo[s] = result
+            return result
 
         new_inputs = [self._canonicalize_live_shape(inp, memo) for inp in node.inputs]
-        if all(ni is oi for ni, oi in zip(new_inputs, node.inputs, strict=True)):
+        if all(ni is oi for ni, oi in zip(new_inputs, node.inputs)):
             memo[s] = s
             return s
         new_node = op.make_node(*new_inputs)
@@ -321,25 +285,6 @@ class ShapeFeature(Feature):
                 return None
             role_bindings.append(match)
         return (dim_kernel, tuple(role_bindings))
-
-    def _materialize_override(self, v, i, entry):
-        """Walk a borrowed dim_kernel against ``v.owner.inputs``."""
-        if entry is None:
-            return self._shape_i_var(v, i)
-        dim_kernel, role_bindings = entry
-        new_owner_inputs = v.owner.inputs
-        memo: dict = {
-            k_input: self.get_shape(new_owner_inputs[idx], dim)
-            for k_input, (idx, dim) in zip(
-                dim_kernel.inputs, role_bindings, strict=True
-            )
-        }
-        for fa in dim_kernel.toposort():
-            new_inputs = [memo.get(inp, inp) for inp in fa.inputs]
-            new_node = fa.op.make_node(*new_inputs)
-            memo.update(zip(fa.outputs, new_node.outputs, strict=True))
-        raw = memo.get(dim_kernel.outputs[0], dim_kernel.outputs[0])
-        return self._canonicalize_live_shape(raw)
 
     def _override_shape_key(self, v, i, entry):
         """Content-addressed key for an override entry; see ``shape_key``."""
@@ -570,41 +515,52 @@ class ShapeFeature(Feature):
         if hasattr(v.type, "shape") and v.type.shape[i] is not None:
             return constant(v.type.shape[i], dtype="int64")
         cache_key = (id(v), i)
-        if (ov := self._overrides.get(v)) is not None:
-            cached = self._materialized.get(cache_key)
-            if cached is not None:
-                return cached
-            result = self._materialize_override(v, i, ov[i])
-            self._materialized[cache_key] = result
-            return result
-        if v.owner is None:
-            return self._shape_i_var(v, i)
 
-        cached = self._materialized.get(cache_key)
-        if cached is not None:
+        if (cached := self._materialized.get(cache_key)) is not None:
             return cached
 
+        if (ov := self._overrides.get(v)) is not None:
+            entry = ov[i]
+            if entry is None:
+                return self._shape_i_var(v, i)
+            dim_kernel, role_bindings = entry
+            new_owner_inputs = v.owner.inputs
+            memo: dict = {
+                k_input: self.get_shape(new_owner_inputs[idx], dim)
+                for k_input, (idx, dim) in zip(
+                    dim_kernel.inputs, role_bindings, strict=True
+                )
+            }
+            for fa in dim_kernel.toposort():
+                new_inputs = [memo.get(inp, inp) for inp in fa.inputs]
+                new_node = fa.op.make_node(*new_inputs)
+                memo.update(zip(fa.outputs, new_node.outputs))
+            raw = memo.get(dim_kernel.outputs[0], dim_kernel.outputs[0])
+            result = self._materialized[cache_key] = self._canonicalize_live_shape(raw)
+            return result
+
         node = v.owner
+
+        if node is None:
+            return self._shape_i_var(v, i)
+
         if (entry := self._cache.get(node)) is None:
-            entry = self._build_kernel(node)
-            self._cache[node] = entry
+            self._cache[node] = entry = self._build_kernel(node)
+
         kernel, meta = entry
         if kernel is None:
-            result = self._shape_i_var(v, i)
-            self._materialized[cache_key] = result
+            self._materialized[cache_key] = result = self._shape_i_var(v, i)
             return result
 
         out_idx = node.outputs.index(v)
         layout = meta["output_layout"]
         if layout[out_idx] is None:
-            result = self._shape_i_var(v, i)
-            self._materialized[cache_key] = result
+            self._materialized[cache_key] = result = self._shape_i_var(v, i)
             return result
         slot = sum((layout[k] or 0) for k in range(out_idx)) + i
         dk = self._dim_kernel(node, slot)
         if dk is None:
-            result = self._shape_i_var(v, i)
-            self._materialized[cache_key] = result
+            self._materialized[cache_key] = result = self._shape_i_var(v, i)
             return result
         dim_kernel, used_roles = dk
 
@@ -624,8 +580,7 @@ class ShapeFeature(Feature):
                 memo[k_input] = self.get_shape(
                     node.inputs[slot_to_input_idx[role[1]]], role[2]
                 )
-            else:
-                # self_out
+            else:  # self_out
                 memo[k_input] = node.outputs[role[1]]
         for fa in dim_kernel.toposort():
             new_inputs = [memo.get(inp, inp) for inp in fa.inputs]
