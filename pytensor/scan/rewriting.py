@@ -65,7 +65,7 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import local_upcast_elemwise_constant_inputs
 from pytensor.tensor.rewriting.math import local_abs_merge, local_mul_switch_sink
-from pytensor.tensor.shape import shape
+from pytensor.tensor.shape import Shape_i, shape
 from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
@@ -1358,6 +1358,15 @@ def _is_default_scan_buffer(final_buffer: TensorVariable, taps: int) -> bool:
         return not broadcasted_by(init_value_.squeeze(0), init_buffer[0])
 
 
+def _inferred_shape_or_fallback(shape_feature, v, i, fallback):
+    """Return ``shape_feature.get_shape(v, i)`` if it's better than ``Shape_i(v)``, else *fallback*."""
+    if shape_feature is not None:
+        s = shape_feature.get_shape(v, i)
+        if not (s.owner and isinstance(s.owner.op, Shape_i) and s.owner.inputs[0] is v):
+            return s
+    return fallback
+
+
 def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: bool):
     r"""Graph optimizer that reduces scan memory consumption.
 
@@ -1497,15 +1506,13 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
 
                 # 2.3.2 extract the begin/end of the first dimension
                 if i >= op_info.n_mit_mot:
-                    if shape_feature is not None and shape_feature.tracks_shape(out):
-                        length = shape_feature.get_shape(out, 0)
-                    else:
-                        length = node.inputs[0] + init_l[i]
+                    length = _inferred_shape_or_fallback(
+                        shape_feature, out, 0, node.inputs[0] + init_l[i]
+                    )
                 else:
-                    if shape_feature is not None and shape_feature.tracks_shape(out):
-                        length = shape_feature.get_shape(out, 0)
-                    else:
-                        length = out.shape[0]
+                    length = _inferred_shape_or_fallback(
+                        shape_feature, out, 0, out.shape[0]
+                    )
                 cf_slice = get_canonical_form_slice(this_slice[0], length)
                 slices[i] += [(cf_slice, this_slice)]  # type: ignore
 

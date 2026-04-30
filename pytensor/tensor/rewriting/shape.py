@@ -54,7 +54,7 @@ class ShapeFeature(Feature):
     r"""Kernel-based `Feature` that tracks shape information in a graph.
 
     For each `Apply`, a `FrozenFunctionGraph` "kernel" is built once and
-    stored in ``self._cache[node]``. The kernel is rooted in *dummy*
+    stored in ``_shape_kernel_cache[node]``. The kernel is rooted in *dummy*
     variables — never the live outer variables — so it can't go stale
     as the fgraph mutates. Shape requests materialize the kernel
     against today's ``node.inputs`` (and recursive shape lookups), so
@@ -67,7 +67,6 @@ class ShapeFeature(Feature):
     - ``unaliased_shape_tuple(v, dims=None)`` — like ``shape_tuple`` but
       breaks aliasing-induced cycles so the result is safe to import
       into the attached fgraph alongside its inplace destroyers.
-    - ``tracks_shape(v)`` — does the feature know a shape for ``v``?
     - ``same_shape(x, y, dim_x=None, dim_y=None)`` — via content-addressed ``shape_key``.
     """
 
@@ -75,33 +74,17 @@ class ShapeFeature(Feature):
 
     def __init__(self):
         # node -> (kernel, meta) from _build_kernel, lazily populated
-        self._cache: dict = {}
-        # node -> {slot: (dim_kernel, used_roles) | None}, per-dim views of _cache
+        self._shape_kernel_cache: dict = {}
+        # node -> {slot: (dim_kernel, used_roles) | None}, per-dim views of _shape_kernel_cache
         self._dim_kernel_cache: dict = {}
         # var -> ndim-tuple of (dim_kernel, role_bindings) | None,
         # installed by on_change_input when new_r's Op has no infer_shape
         self._overrides: dict = {}
         # (id(v), i) -> Shape_i(i)(v), ensures Apply identity for leaves
         self._shape_i_cache: dict = {}
-        # (id(v), i) -> canonicalized get_shape result, avoids re-materialization
-        self._materialized: dict = {}
+        # node -> {(out_idx, i): result}, canonicalized get_shape results
+        self._materialized_dim_cache: dict = {}
         self.fgraph: FunctionGraph | None = None
-
-    def tracks_shape(self, v) -> bool:
-        """``True`` iff this feature has shape information for ``v``.
-
-        A var is tracked when its owner has a kernel cached (it was
-        hit by a ``get_shape`` / ``shape_key`` call), or it carries an
-        explicit override, or it's a graph input of the attached fgraph.
-        """
-        if v is None or not hasattr(v.type, "ndim"):
-            return False
-        if v in self._overrides:
-            return True
-        if v.owner is not None:
-            return v.owner in self._cache
-        fg = self.fgraph
-        return fg is not None and v in fg.inputs
 
     def _shape_i_var(self, v, i):
         key = (id(v), i)
@@ -177,25 +160,23 @@ class ShapeFeature(Feature):
         fgraph.shape_feature = self
 
     def on_detach(self, fgraph):
-        self._cache.clear()
+        self._shape_kernel_cache.clear()
         self._overrides.clear()
         self._shape_i_cache.clear()
-        self._materialized.clear()
+        self._materialized_dim_cache.clear()
         self._dim_kernel_cache.clear()
         self.fgraph = None
         if hasattr(fgraph, "shape_feature"):
             del fgraph.shape_feature
 
     def on_prune(self, fgraph, node, reason):
-        self._cache.pop(node, None)
+        self._shape_kernel_cache.pop(node, None)
         self._dim_kernel_cache.pop(node, None)
-        # Drop cached Shape_i variables whose owner is being pruned — without
-        # this the memo grows monotonically over a long canonicalize pass.
+        self._materialized_dim_cache.pop(node, None)
         for out in node.outputs:
             oid = id(out)
-            for j in range(getattr(out.type, "ndim", 0) or 0):
+            for j in range(getattr(out.type, "ndim", 0)):
                 self._shape_i_cache.pop((oid, j), None)
-                self._materialized.pop((oid, j), None)
             self._overrides.pop(out, None)
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason):
@@ -210,6 +191,7 @@ class ShapeFeature(Feature):
         # ``Shape_i``".
         if r is new_r or not hasattr(new_r.type, "ndim"):
             return
+        self._materialized_dim_cache.pop(node, None)
         if new_r in self._overrides:
             return
         if new_r.owner is None:
@@ -246,9 +228,9 @@ class ShapeFeature(Feature):
         """
         if r.owner is None:
             return None
-        if (entry := self._cache.get(r.owner)) is None:
+        if (entry := self._shape_kernel_cache.get(r.owner)) is None:
             entry = self._build_kernel(r.owner)
-            self._cache[r.owner] = entry
+            self._shape_kernel_cache[r.owner] = entry
         kernel, meta = entry
         if kernel is None:
             return None
@@ -294,12 +276,11 @@ class ShapeFeature(Feature):
         new_owner_inputs = v.owner.inputs
         sv = dim_kernel.outputs[0]
         if sv.owner is None:
-            # Passthrough: the dim_kernel output is a kernel input directly.
+            # Passthrough: kernel output is one of its inputs (no computation).
+            # Collapse to the source input's shape_key directly so equality
+            # is transitive across chains of passthrough overrides.
             if isinstance(sv, Constant):
-                try:
-                    return ("const", int(sv.data))
-                except Exception:
-                    return ("const", id(sv))
+                return ("const", int(sv.data))
             try:
                 k_idx = dim_kernel.inputs.index(sv)
             except ValueError:
@@ -312,13 +293,11 @@ class ShapeFeature(Feature):
         return (dim_kernel, bindings)
 
     def _build_kernel(self, node):
+        # Phase 1: Deduplicate inputs.
         # When the same live input appears at multiple positions (e.g.
-        # ``Elemwise.add(x, x)``), share the dummy clone AND the dummy
-        # input-shape lscalars between those positions.  Ops like Elemwise
-        # call ``broadcast_shape(*i_shapes)``, which only drops the runtime
-        # ``Assert`` guard when the incoming shape expressions are
-        # identical — so identity here is what lets ``x + x`` infer a
-        # clean shape instead of ``Assert(x.shape[0], ...)``.
+        # ``add(x, x)``), share the dummy clone and shape scalars so
+        # ``broadcast_shape`` sees identity-equal shapes and elides
+        # the runtime Assert.
         input_slot: dict[int, int] = {}
         unique_dummies: list[Variable] = []
         unique_shape_tuples: list[tuple | None] = []
@@ -345,6 +324,7 @@ class ShapeFeature(Feature):
             dummy_inputs.append(unique_dummies[slot])
             dummy_input_shapes.append(unique_shape_tuples[slot])
 
+        # Phase 2: Call infer_shape with dummy node.
         dummy_outputs = [out.clone() for out in node.outputs]
         dummy_node = Apply(node.op, dummy_inputs, dummy_outputs)
 
@@ -369,13 +349,10 @@ class ShapeFeature(Feature):
         if output_shapes is None:
             output_shapes = [None] * len(dummy_outputs)
 
-        # Fallback: Shape_i(i)(dummy_output) where the op couldn't provide
-        # an infer_shape for a given output. Reuse dummy_outputs — no extra
-        # placeholders.
+        # Phase 3: Coerce and validate each shape element returned by
+        # infer_shape. Static type shape overrides infer_shape when known,
+        # ensuring the canonical constant form.
         def coerce_shape_el(s, dummy_out):
-            # Accept any integer scalar Variable verbatim, and any Python /
-            # NumPy integer scalar as an int64 constant. Floats and
-            # non-scalar arrays are buggy returns and raise.
             if isinstance(s, np.ndarray):
                 if s.ndim != 0:
                     raise TypeError(
@@ -407,10 +384,9 @@ class ShapeFeature(Feature):
                 f"shape element of type {type(s).__name__}: {s!r}"
             )
 
-        # An output with missing/malformed ``infer_shape`` gets ``None``
-        # here, which propagates to ``output_layout[k] = None``. ``get_shape``
-        # / ``shape_key`` short-circuit that case to ``_shape_i_var(v, i)``
-        # — no kernel slot, no ``fallback_out`` role.
+        # Outputs with missing/malformed infer_shape get None, which
+        # propagates to output_layout[k] = None. get_shape / shape_key
+        # short-circuit to _shape_i_var(v, i) for those.
         coerced_output_shapes = []
         for k, dummy_out in enumerate(dummy_outputs):
             sh = output_shapes[k] if k < len(output_shapes) else None
@@ -431,6 +407,8 @@ class ShapeFeature(Feature):
                 coerced.append(coerce_shape_el(s, dummy_out))
             coerced_output_shapes.append(tuple(coerced))
 
+        # Phase 4: Flatten per-output shape tuples into a single list.
+        # layout[k] records how many dims output k contributed (or None).
         flat_out = []
         layout = []
         for sh in coerced_output_shapes:
@@ -440,16 +418,14 @@ class ShapeFeature(Feature):
             layout.append(len(sh))
             flat_out.extend(sh)
 
-        # ``meta`` carries only what ``get_shape`` / ``shape_key`` need to
-        # re-wire the frozen kernel against live ``node.inputs``.
         meta = {"output_layout": tuple(layout)}
         if not flat_out:
             return (None, meta)
 
-        # Build kernel_inputs with unique dummies only.  Shape slots are
-        # attached by unique-slot index so duplicate live inputs share the
-        # same set of kernel-input positions.  Each kernel_input needs a
-        # role that maps back to the live graph at materialization time.
+        # Phase 5: Build kernel inputs with roles.
+        # Three role types: input_slot (the dummy tensor itself),
+        # input_shape_slot (a shape scalar of a dummy), self_out (a dummy
+        # output referenced by infer_shape, e.g. Scan).
         kernel_inputs: list[Variable] = []
         roles: list[tuple] = []
         for slot, dummy in enumerate(unique_dummies):
@@ -462,40 +438,16 @@ class ShapeFeature(Feature):
                 kernel_inputs.append(s)
                 roles.append(("input_shape_slot", slot, j))
 
-        # Some ``infer_shape`` impls (e.g. Scan) reference ``dummy_node.outputs``
-        # directly inside the returned shape expression. Without an explicit
-        # substitution, ``_materialize_frozen`` would walk into ``dummy_node``
-        # and rebuild it via ``make_node`` against live inputs, producing
-        # fresh-but-equivalent Apply nodes on every call and stalling
-        # EquilibriumGraphRewriter (``local_track_shape_i``).
+        # Some infer_shape impls (e.g. Scan) reference dummy_node.outputs
+        # in the returned expression. Register those as self_out inputs so
+        # materialization can substitute live outputs.
         anc_set = set(ancestors(flat_out))
         for k, dummy_out in enumerate(dummy_outputs):
             if dummy_out in anc_set and dummy_out not in kernel_inputs:
                 kernel_inputs.append(dummy_out)
                 roles.append(("self_out", k))
 
-        # Sanity: every free Variable in flat_out should be in kernel_inputs.
-        # An orphan indicates a buggy ``infer_shape`` that leaked a variable
-        # outside of ``node.inputs`` / their shape scalars. In development
-        # mode (config.on_shape_error == "raise") we surface this eagerly
-        # instead of silently falling back to ``Shape_i``.
-        kernel_input_set = set(kernel_inputs)
-        for anc in ancestors(flat_out):
-            if anc.owner is None:
-                if isinstance(anc, Constant):
-                    continue
-                if anc not in kernel_input_set:
-                    msg = (
-                        f"Op {node.op}.infer_shape leaked an orphan variable "
-                        f"{anc!r} that is not one of node.inputs or their "
-                        f"shape scalars; falling back to Shape_i."
-                    )
-                    if config.on_shape_error == "raise":
-                        raise ShapeError(msg)
-                    return (None, dict(meta, kernel_build_error=msg))
-
-        # Find any live input index that maps to this slot, so materialization
-        # can look up ``node.inputs[<any representative>]``.
+        # Phase 6: Map unique slots back to live input indices.
         slot_to_input_idx: list[int] = [-1] * len(unique_dummies)
         for inp_idx, inp in enumerate(node.inputs):
             s = input_slot[id(inp)]
@@ -514,64 +466,65 @@ class ShapeFeature(Feature):
     def get_shape(self, v, i):
         if hasattr(v.type, "shape") and v.type.shape[i] is not None:
             return constant(v.type.shape[i], dtype="int64")
-        cache_key = (id(v), i)
 
-        if (cached := self._materialized.get(cache_key)) is not None:
-            return cached
+        node = v.owner
+        if node is None:
+            return self._shape_i_var(v, i)
+
+        node_cache = self._materialized_dim_cache.get(node)
+        if node_cache is not None:
+            cached = node_cache.get((v, i))
+            if cached is not None:
+                return cached
+        else:
+            node_cache = {}
+            self._materialized_dim_cache[node] = node_cache
+
+        def _walk(dim_kernel, memo):
+            for fa in dim_kernel.toposort():
+                new_inputs = [memo.get(inp, inp) for inp in fa.inputs]
+                new_node = fa.op.make_node(*new_inputs)
+                memo.update(zip(fa.outputs, new_node.outputs, strict=True))
+            raw = memo.get(dim_kernel.outputs[0], dim_kernel.outputs[0])
+            return self._canonicalize_live_shape(raw)
+
+        def _fallback():
+            node_cache[(v, i)] = result = self._shape_i_var(v, i)
+            return result
 
         if (ov := self._overrides.get(v)) is not None:
             entry = ov[i]
             if entry is None:
-                return self._shape_i_var(v, i)
+                return _fallback()
             dim_kernel, role_bindings = entry
-            new_owner_inputs = v.owner.inputs
-            memo: dict = {
-                k_input: self.get_shape(new_owner_inputs[idx], dim)
+            memo = {
+                k_input: self.get_shape(node.inputs[idx], dim)
                 for k_input, (idx, dim) in zip(
                     dim_kernel.inputs, role_bindings, strict=True
                 )
             }
-            for fa in dim_kernel.toposort():
-                new_inputs = [memo.get(inp, inp) for inp in fa.inputs]
-                new_node = fa.op.make_node(*new_inputs)
-                memo.update(zip(fa.outputs, new_node.outputs))
-            raw = memo.get(dim_kernel.outputs[0], dim_kernel.outputs[0])
-            result = self._materialized[cache_key] = self._canonicalize_live_shape(raw)
+            node_cache[(v, i)] = result = _walk(dim_kernel, memo)
             return result
 
-        node = v.owner
-
-        if node is None:
-            return self._shape_i_var(v, i)
-
-        if (entry := self._cache.get(node)) is None:
-            self._cache[node] = entry = self._build_kernel(node)
+        if (entry := self._shape_kernel_cache.get(node)) is None:
+            self._shape_kernel_cache[node] = entry = self._build_kernel(node)
 
         kernel, meta = entry
         if kernel is None:
-            self._materialized[cache_key] = result = self._shape_i_var(v, i)
-            return result
+            return _fallback()
 
         out_idx = node.outputs.index(v)
         layout = meta["output_layout"]
         if layout[out_idx] is None:
-            self._materialized[cache_key] = result = self._shape_i_var(v, i)
-            return result
+            return _fallback()
         slot = sum((layout[k] or 0) for k in range(out_idx)) + i
         dk = self._dim_kernel(node, slot)
         if dk is None:
-            self._materialized[cache_key] = result = self._shape_i_var(v, i)
-            return result
+            return _fallback()
         dim_kernel, used_roles = dk
 
-        # Seed memo with the live binding for each used kernel input,
-        # then walk the kernel's cached topological order rebuilding
-        # each ``FrozenApply`` against live ``make_node`` calls. Fresh
-        # ``make_node`` (rather than ``graph_replace``) is required —
-        # the latter would mutate the globally-interned ``FrozenApply``
-        # nodes via ``Apply.clone_with_new_inputs``.
         slot_to_input_idx = meta["slot_to_input_idx"]
-        memo: dict = {}
+        memo = {}
         for k_input, role in zip(dim_kernel.inputs, used_roles, strict=True):
             tag = role[0]
             if tag == "input_slot":
@@ -580,15 +533,9 @@ class ShapeFeature(Feature):
                 memo[k_input] = self.get_shape(
                     node.inputs[slot_to_input_idx[role[1]]], role[2]
                 )
-            else:  # self_out
+            else:
                 memo[k_input] = node.outputs[role[1]]
-        for fa in dim_kernel.toposort():
-            new_inputs = [memo.get(inp, inp) for inp in fa.inputs]
-            new_node = fa.op.make_node(*new_inputs)
-            memo.update(zip(fa.outputs, new_node.outputs, strict=True))
-        raw = memo.get(dim_kernel.outputs[0], dim_kernel.outputs[0])
-        result = self._canonicalize_live_shape(raw)
-        self._materialized[cache_key] = result
+        node_cache[(v, i)] = result = _walk(dim_kernel, memo)
         return result
 
     def unaliased_shape_tuple(self, v, dims=None):
@@ -653,18 +600,18 @@ class ShapeFeature(Feature):
         ``shape_key`` collapse the structural comparison to one hash and
         only descend into inputs that are themselves shape lookups.
         """
-        per_node = self._dim_kernel_cache.get(node)
-        if per_node is None:
-            per_node = {}
-            self._dim_kernel_cache[node] = per_node
-        if slot in per_node:
-            return per_node[slot]
-        if (entry := self._cache.get(node)) is None:
+        node_cache = self._dim_kernel_cache.get(node)
+        if node_cache is None:
+            node_cache = {}
+            self._dim_kernel_cache[node] = node_cache
+        if slot in node_cache:
+            return node_cache[slot]
+        if (entry := self._shape_kernel_cache.get(node)) is None:
             entry = self._build_kernel(node)
-            self._cache[node] = entry
+            self._shape_kernel_cache[node] = entry
         kernel, meta = entry
         if kernel is None:
-            per_node[slot] = None
+            node_cache[slot] = None
             return None
         sv = kernel.outputs[slot]
         kernel_input_set = set(kernel.inputs)
@@ -677,10 +624,10 @@ class ShapeFeature(Feature):
         try:
             dim_kernel = FrozenFunctionGraph(used_inputs, [sv])
         except Exception:
-            per_node[slot] = None
+            node_cache[slot] = None
             return None
         result = (dim_kernel, used_roles)
-        per_node[slot] = result
+        node_cache[slot] = result
         return result
 
     def shape_key(self, v, i):
@@ -737,9 +684,9 @@ class ShapeFeature(Feature):
         node = v.owner
         if node is None:
             return ("leaf", id(v), i)
-        if (entry := self._cache.get(node)) is None:
+        if (entry := self._shape_kernel_cache.get(node)) is None:
             entry = self._build_kernel(node)
-            self._cache[node] = entry
+            self._shape_kernel_cache[node] = entry
         kernel, meta = entry
         if kernel is None:
             return ("leaf", id(v), i)
@@ -768,10 +715,7 @@ class ShapeFeature(Feature):
         # key matches the underlying live var's own shape_key.
         if sv.owner is None:
             if isinstance(sv, Constant):
-                try:
-                    return ("const", int(sv.data))
-                except Exception:
-                    return ("const", id(sv))
+                return ("const", int(sv.data))
             try:
                 k_idx = kernel.inputs.index(sv)
             except ValueError:
