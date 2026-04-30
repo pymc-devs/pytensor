@@ -254,7 +254,7 @@ class Argmax(COp):
     def c_code_cache_version(self):
         return (3,)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (ishape,) = shapes
         if self.axis is None:
             return [()]
@@ -3106,7 +3106,7 @@ class Dot(Op):
         else:
             return [t2]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         xshp, yshp = shapes
         return [[xshp[0], yshp[1]]]
 

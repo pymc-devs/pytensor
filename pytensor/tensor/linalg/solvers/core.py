@@ -71,7 +71,7 @@ class SolveBase(Op):
         x = tensor(dtype=o_dtype, shape=b.type.shape)
         return Apply(self, [A, b], [x])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         Ashape, Bshape = shapes
         rows = Ashape[1]
         if len(Bshape) == 1:
