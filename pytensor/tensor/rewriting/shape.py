@@ -36,7 +36,6 @@ from pytensor.tensor.rewriting.basic import (
     register_useless,
     topo_constant_folding,
 )
-from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -965,51 +964,41 @@ def local_reshape_to_dimshuffle(fgraph, node):
         - reshape(x, (1, m, 1, n, 1, 1)) -> expand_dims(reshape(x, (m, n)), axis=(0, 2, 4, 5))
 
     """
-    inp, output_shape = node.inputs
+    inp, shape = node.inputs
     [output] = node.outputs
 
-    # Trivial case, all dimensions of input/output are known to be broadcastable:
-    # there's nothing to reshape
-    if all(inp.type.broadcastable) or all(output.type.broadcastable):
-        squeeze_axes = tuple(range(inp.type.ndim))
-        new_output_shape = []
-        expand_axes = tuple(range(output.type.ndim))
+    new_output_shape = []
+    expand_axes = []
+    # We look at both output.type.broadcastable and shape
+    # The first may encode understanding about -1, but may miss knowledge about
+    # constant 1 shape that only simplified later
+    for i, (static_one, dim_length) in enumerate(
+        zip(output.type.broadcastable, _unpack_shape_vector(shape))
+    ):
+        # -1 can be an implicit expand_dims, but it's tricky to prove
+        # Example: np.zeros((2, 2, 2)).reshape((2, -1, 4))
+        # We rely on the output static shape which will already have figured it out (sometimes)
+        if static_one or (isinstance(dim_length, Constant) and dim_length.data == 1):
+            expand_axes.append(i)
+        else:
+            new_output_shape.append(dim_length)
 
-    else:
-        squeeze_axes = [i for i, bcast in enumerate(inp.type.broadcastable) if bcast]
-        unpacked_shape = _unpack_shape_vector(output_shape)
-        new_output_shape = []
-        expand_axes = []
-        for i, dim_length in enumerate(unpacked_shape):
-            if isinstance(dim_length, Constant) and (
-                dim_length.data == 1
-                # -1 can be an implicit expand_dims, but it's tricky to prove
-                # as we would need to check whether all other dimensions
-                # already explain the full size of the array.
-                # Example: np.zeros((2, 2, 2)).reshape((8, -1))
-                # We rely on the output static shape which will already have figured
-                # it out for some (but not all) cases
-                or (dim_length.data == -1 and output.type.shape[i] == 1)
-            ):
-                expand_axes.append(i)
-            else:
-                new_output_shape.append(dim_length)
-
-    if squeeze_axes or expand_axes:
-        new_out = inp.squeeze(squeeze_axes)
-
-        if new_output_shape:
-            new_out = new_out.reshape(new_output_shape)
-            copy_stack_trace(output, new_out)
-
-        new_out = expand_dims(new_out, expand_axes)
-
-        if not new_output_shape:
-            # Eagerly merge consecutive squeeze and expand_dims
-            new_out = apply_local_dimshuffle_lift(fgraph, new_out)
-
+    if all(inp.type.broadcastable) or not new_output_shape:
+        # Trivial case we have provably size 1 as input or output, reshape can't be doing anything useful
+        new_out = inp.dimshuffle(["x"] * output.type.ndim)
         copy_stack_trace(output, new_out)
         return [new_out]
+
+    squeeze_axes = [i for i, b in enumerate(inp.type.broadcastable) if b]
+
+    if not squeeze_axes and not expand_axes:
+        return None
+
+    new_out = inp.squeeze(squeeze_axes)
+    new_out = new_out.reshape(new_output_shape)
+    new_out = expand_dims(new_out, expand_axes)
+    copy_stack_trace(output, new_out)
+    return [new_out]
 
 
 @register_specialize
