@@ -494,7 +494,7 @@ class CSM(Op):
             disconnected_type(),
         ]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         # node.inputs[3] is of length as we only support sparse matrix.
         return [(node.inputs[3][0], node.inputs[3][1])]
 
@@ -584,7 +584,7 @@ class CSMGrad(Op):
 
         g_out[0] = gout_data
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[1]]
 
 
@@ -629,7 +629,7 @@ class Cast(Op):
             else:
                 return [Cast(inputs[0].dtype)(gz)]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return ins_shapes
 
     def __str__(self):
@@ -742,7 +742,7 @@ class DenseFromSparse(Op):
         else:
             return [SparseFromDense(x.type.format)(gz)]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -806,7 +806,7 @@ class SparseFromDense(Op):
         )
         return (gx,)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -820,7 +820,7 @@ class GetItemList(Op):
 
     __props__ = ()
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[1][0], shapes[0][1])]
 
     def make_node(self, x, index):
@@ -865,7 +865,7 @@ get_item_list = GetItemList()
 class GetItemListGrad(Op):
     __props__ = ()
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[0])]
 
     def make_node(self, x, index, gz):
@@ -958,7 +958,7 @@ get_item_2lists = GetItem2Lists()
 class GetItem2ListsGrad(Op):
     __props__ = ()
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[0])]
 
     def make_node(self, x, ind1, ind2, gz):
@@ -1139,7 +1139,7 @@ class GetItemScalar(Op):
 
     __props__ = ()
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [()]
 
     def make_node(self, x, index):
@@ -1239,7 +1239,7 @@ class Transpose(Op):
         assert _is_sparse_variable(x) and _is_sparse_variable(gz)
         return (transpose(gz),)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0][::-1]]
 
 
@@ -1288,7 +1288,7 @@ class ColScaleCSC(Op):
         (gz,) = gout
         return [col_scale(gz, s), sp_sum(x * gz, axis=0)]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -1339,7 +1339,7 @@ class RowScaleCSC(Op):
         (gz,) = gout
         return [row_scale(gz, s), sp_sum(x * gz, axis=1)]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -1438,7 +1438,7 @@ class Diag(Op):
         (gz,) = gout
         return [square_diagonal(gz)]
 
-    def infer_shape(self, fgraph, nodes, shapes):
+    def infer_shape(self, nodes, shapes):
         return [(minimum(*shapes[0]),)]
 
 
@@ -1498,7 +1498,7 @@ class EnsureSortedIndices(Op):
     def pullback(self, inputs, outputs, output_grad):
         return [output_grad[0]]
 
-    def infer_shape(self, fgraph, node, i0_shapes):
+    def infer_shape(self, node, i0_shapes):
         return i0_shapes
 
     def __str__(self):
@@ -1614,7 +1614,7 @@ class HStack(Stack):
 
         return [choose(c, d) for c, d in zip(is_continuous, derivative, strict=True)]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         d = sum(shape[1] for shape in ins_shapes)
         return [(ins_shapes[0][0], d)]
 
@@ -1711,7 +1711,7 @@ class VStack(Stack):
 
         return [choose(c, d) for c, d in zip(is_continuous, derivative, strict=True)]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         d = sum(shape[0] for shape in ins_shapes)
         return [(d, ins_shapes[0][1])]
 
@@ -1800,7 +1800,7 @@ class Remove0(Op):
         (gz,) = gout
         return [gz]
 
-    def infer_shape(self, fgraph, node, i0_shapes):
+    def infer_shape(self, node, i0_shapes):
         return i0_shapes
 
 
@@ -1880,7 +1880,7 @@ class ConstructSparseFromList(Op):
             (data, indices, indptr), shape=out_shape, dtype=values.dtype
         )
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         x = node.inputs[0]
         return [[x[0], x[1]]]
 

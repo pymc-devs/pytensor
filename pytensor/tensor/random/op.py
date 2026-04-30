@@ -306,7 +306,7 @@ class RandomVariable(RNGConsumerOp):
 
         return shape
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         _, size, *dist_params = node.inputs
         _, _, *param_shapes = input_shapes
 
