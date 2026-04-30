@@ -9,6 +9,8 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import ancestors
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.traversal import io_toposort
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -25,7 +27,6 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
 from pytensor.tensor.rewriting.linalg.solvers import (
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
-    solve_of_inv_to_matmul,
 )
 from pytensor.tensor.type import matrix, tensor
 
@@ -454,13 +455,14 @@ def test_solve_of_inv_to_matmul(b_ndim):
     out = solve(pt.linalg.inv(X), b, b_ndim=b_ndim)
 
     # Graph rewrite test
-    rewrite_name = solve_of_inv_to_matmul.__name__
-    mode = get_default_mode()
+    # We include 'stabilize' because solve_of_inv_to_matmul is registered there.
+    # This avoids dependency on the global config.mode (e.g. FAST_COMPILE).
+    rewritten_out = rewrite_graph(out, include=["stabilize"])
 
-    fn_opt = function([X, b], out, mode=mode.including(rewrite_name))
-    opt_nodes = fn_opt.maker.fgraph.apply_nodes
+    # Get all nodes in the rewritten graph
+    all_nodes = io_toposort([], [rewritten_out])
 
     assert not any(
         isinstance(getattr(node.op, "core_op", node.op), Solve | MatrixInverse)
-        for node in opt_nodes
+        for node in all_nodes
     )
