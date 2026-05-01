@@ -2,8 +2,9 @@ import inspect
 import sys
 import time
 import warnings
+from dataclasses import dataclass
 from io import StringIO
-from typing import Any, NamedTuple
+from typing import Any
 
 import numpy as np
 
@@ -14,11 +15,17 @@ from pytensor.graph.traversal import toposort
 from pytensor.graph.utils import InconsistencyError
 
 
-class HistoryEntry(NamedTuple):
+@dataclass(slots=True)
+class HistoryEntry:
     """A recorded edit to a `FunctionGraph` input.
 
     Used by `History` and `FullHistory` to remember a ``change_node_input``
     that can later be replayed (forward) or undone (backward).
+
+    Not ``frozen=True`` despite being a logical record: the frozen-dataclass
+    ``__init__`` routes through ``object.__setattr__`` to bypass the immutability
+    check, which is ~4x slower to construct. We allocate one of these per
+    ``change_node_input``, so we rely on convention for "don't mutate".
     """
 
     node: Any
@@ -620,22 +627,30 @@ class FullHistory(Feature):
 
         # Go backwards
         while pointer > checkpoint - 1:
-            node, i, r, reason = self.bw[pointer]
+            entry = self.bw[pointer]
             if verbose:
-                print(reason)  # noqa: T201
+                print(entry.reason)  # noqa: T201
             self.fg.change_node_input(
-                node, i, r, reason=("Revert", reason), check=False
+                entry.node,
+                entry.i,
+                entry.var,
+                reason=("Revert", entry.reason),
+                check=False,
             )
             pointer -= 1
 
         # Go forward
         while pointer < checkpoint - 1:
             pointer += 1
-            node, i, r, reason = self.fw[pointer]
+            entry = self.fw[pointer]
             if verbose:
-                print(reason)  # noqa: T201
+                print(entry.reason)  # noqa: T201
             self.fg.change_node_input(
-                node, i, r, reason=("Revert", reason), check=False
+                entry.node,
+                entry.i,
+                entry.var,
+                reason=("Revert", entry.reason),
+                check=False,
             )
 
         # Remove history changes caused by the foward/backward!
