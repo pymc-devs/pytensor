@@ -9,13 +9,12 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import ancestors
+from pytensor.graph.rewriting.basic import WalkingGraphRewriter
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.graph.traversal import io_toposort
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
-from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -27,8 +26,10 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
 from pytensor.tensor.rewriting.linalg.solvers import (
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
+    solve_of_inv_to_matmul,
 )
 from pytensor.tensor.type import matrix, tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_generic_solve_to_solve_triangular():
@@ -447,22 +448,24 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
 def test_solve_of_inv_to_matmul(b_ndim):
     X = pt.dmatrix("X")
-    if b_ndim == 1:
-        b = pt.dvector("b")
-    else:
-        b = pt.dmatrix("b")
-
+    b = pt.dvector("b") if b_ndim == 1 else pt.dmatrix("b")
     out = solve(pt.linalg.inv(X), b, b_ndim=b_ndim)
 
-    # Graph rewrite test
-    # We include 'stabilize' because solve_of_inv_to_matmul is registered there.
-    # This avoids dependency on the global config.mode (e.g. FAST_COMPILE).
-    rewritten_out = rewrite_graph(out, include=["stabilize"])
+    # Just include the rewrite we are testing
+    rewriter = WalkingGraphRewriter(solve_of_inv_to_matmul)
+    rewritten_out = rewrite_graph(out, custom_rewrite=rewriter)
 
-    # Get all nodes in the rewritten graph
-    all_nodes = io_toposort([], [rewritten_out])
+    # Verify the rewrite
+    expected = X @ b
+    assert_equal_computations([rewritten_out], [expected])
 
-    assert not any(
-        isinstance(getattr(node.op, "core_op", node.op), Solve | MatrixInverse)
-        for node in all_nodes
-    )
+    # Numerical check
+    rng = np.random.default_rng(42)
+    X_val = (rng.random((4, 4)) + np.eye(4) * 4).astype(X.type.dtype)
+    b_val = rng.random((4,) if b_ndim == 1 else (4, 3)).astype(b.type.dtype)
+
+    f_opt = function([X, b], rewritten_out)
+    res_opt = f_opt(X_val, b_val)
+    res_expected = np.linalg.solve(np.linalg.inv(X_val), b_val)
+
+    np.testing.assert_allclose(res_opt, res_expected, rtol=1e-7)
