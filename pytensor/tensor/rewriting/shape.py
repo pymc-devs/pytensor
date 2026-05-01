@@ -75,6 +75,8 @@ class ShapeFeature(Feature):
 
     - ``get_shape(var, i)`` / ``shape_tuple(var)`` for the shape expressed in
       terms of the graph inputs (recursing through the ancestors of ``var``);
+    - ``get_non_recursive_shape(var, i)`` for the shape expressed in terms of
+      ``var.owner``'s direct inputs only;
     - ``same_shape(x, y)`` to statically compare two shapes.
 
     Inferred shapes are cached per node, but the cache is invalidated whenever
@@ -84,14 +86,15 @@ class ShapeFeature(Feature):
 
     def __init__(self):
         self.fgraph: FunctionGraph | None = None
-        # node -> tuple of (tuple of shape vars) per output, lazily populated.
-        # The cached shape of a node embeds the shapes of its whole ancestor cone,
-        # so a change anywhere above a cached node invalidates it.
+        # node -> tuple of (tuple of shape vars) per output, recursive shapes only,
+        # lazily populated. Non-recursive shapes read only the node's own inputs, so
+        # they are cheap and recomputed on demand rather than cached.
         self._cache: dict = {}
-        # Nodes whose input changed since the last query. Invalidation is deferred
-        # to the next query, which walks ``fgraph.clients`` downstream from these
-        # nodes; the live graph already encodes the dependencies, so no reverse map
-        # is kept.
+        # Nodes whose input changed since the last query. The recursive shape of a node
+        # embeds the shapes of its whole ancestor cone, so a change anywhere above a
+        # cached node invalidates it. We defer that to the next query and walk
+        # ``fgraph.clients`` downstream from these nodes then — the live graph already
+        # encodes the dependencies, so no reverse-dependency map is kept.
         self._stale: set = set()
         # var -> {i: Shape_i(i)(v)}, ensures Apply identity for leaves
         self._shape_i_cache: dict = {}
@@ -114,6 +117,18 @@ class ShapeFeature(Feature):
             res = Shape_i(i)(v)
         per_dim[i] = res
         return res
+
+    @staticmethod
+    def _fresh_shape_i(v, i):
+        """Like ``_shape_i_var``, but never reusing a cached variable.
+
+        The cached variable may live in the graph with its own constraints
+        (e.g. its buffer destroyed by an inplace Op); a fresh read carries no
+        constraints beyond reading ``v``, which non-recursive consumers rely on.
+        """
+        if hasattr(v.type, "shape") and v.type.shape[i] is not None:
+            return constant(v.type.shape[i], dtype="int64")
+        return Shape_i(i)(v)
 
     def _coerce_shape_element(self, element, node):
         """Validate and normalize a single shape element from infer_shape."""
@@ -151,10 +166,19 @@ class ShapeFeature(Feature):
             f"shape element of type {type(element).__name__}: {element!r}"
         )
 
-    def _get_node_shapes(self, node):
-        """Return validated per-output shape tuples for ``node``."""
+    def _get_node_shapes(self, node, recursive=True):
+        """Return validated per-output shape tuples for ``node``.
+
+        With ``recursive=False``, input shapes are fresh constant/``Shape_i``
+        reads of the node's own inputs instead of inferred expressions, so the
+        result references no variables beyond those inputs (and nothing is
+        cached).
+        """
         if self._stale:
             self._flush_stale()
+
+        if not recursive:
+            return self._compute_node_shapes(node, recursive=False)
 
         cache = self._cache
         cached = cache.get(node)
@@ -187,21 +211,26 @@ class ShapeFeature(Feature):
                     ready = False
             if ready:
                 stack.pop()
-                cache[top] = self._compute_node_shapes(top)
+                cache[top] = self._compute_node_shapes(top, recursive=True)
 
         return cache[node]
 
-    def _compute_node_shapes(self, node):
+    def _compute_node_shapes(self, node, recursive):
         """Call ``infer_shape`` for ``node`` and validate the result.
 
-        The caller must have cached the input-producing nodes already, so
-        ``get_shape`` resolves them from the cache without recursing.
+        Input shapes are taken from ``get_shape`` (recursive) or from fresh
+        ``Shape_i`` reads of the node's own inputs (non-recursive). In the
+        recursive case the caller must have cached the input-producing nodes
+        already, so ``get_shape`` resolves them from the cache without recursing.
         """
+        input_shape_of = self.get_shape if recursive else self._fresh_shape_i
+        shape_i_var = self._shape_i_var if recursive else self._fresh_shape_i
+
         input_shapes = []
         for inp in node.inputs:
             if hasattr(inp.type, "ndim"):
                 input_shapes.append(
-                    tuple(self.get_shape(inp, j) for j in range(inp.type.ndim))
+                    tuple(input_shape_of(inp, j) for j in range(inp.type.ndim))
                 )
             else:
                 input_shapes.append(None)
@@ -232,9 +261,7 @@ class ShapeFeature(Feature):
             if output_shapes is not None and k < len(output_shapes):
                 sh = output_shapes[k]
             if sh is None or not isinstance(sh, list | tuple):
-                result.append(
-                    tuple(self._shape_i_var(out, j) for j in range(out.type.ndim))
-                )
+                result.append(tuple(shape_i_var(out, j) for j in range(out.type.ndim)))
                 continue
             coerced = []
             for j, s in enumerate(sh):
@@ -258,6 +285,33 @@ class ShapeFeature(Feature):
         if sh is not None:
             return sh[idx]
         return self._shape_i_var(var, idx)
+
+    def get_non_recursive_shape(self, var, idx):
+        """Return an expression for ``var.shape[idx]`` reading only ``var.owner``'s inputs.
+
+        Unlike ``get_shape``, input shapes are not recursively expanded: the
+        expression references the direct inputs of ``var.owner`` (through
+        constants and fresh ``Shape_i`` reads) and nothing else. It can
+        therefore be introduced next to any consumer of those inputs no matter
+        what the destroy maps in the surrounding graph are, whereas the
+        recursion of ``get_shape`` may surface variables that an inplace Op
+        destroys.
+
+        Works on an unattached feature.
+        """
+        if hasattr(var.type, "shape") and var.type.shape[idx] is not None:
+            return constant(var.type.shape[idx], dtype="int64")
+
+        node = var.owner
+        if node is None:
+            return self._fresh_shape_i(var, idx)
+
+        node_shapes = self._get_node_shapes(node, recursive=False)
+        out_idx = node.outputs.index(var)
+        sh = node_shapes[out_idx]
+        if sh is not None:
+            return sh[idx]
+        return self._fresh_shape_i(var, idx)
 
     def shape_tuple(self, var):
         if not hasattr(var.type, "ndim"):
