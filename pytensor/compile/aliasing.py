@@ -97,7 +97,7 @@ class Supervisor(Feature):
         fgraph._supervisor = self
         self.fgraph = fgraph
 
-    def validate(self, fgraph):
+    def on_validate(self, fgraph):
         if config.cycle_detection == "fast" and hasattr(fgraph, "has_destroyers"):
             if fgraph.has_destroyers(self.protected):
                 raise InconsistencyError("Trying to destroy protected variables.")

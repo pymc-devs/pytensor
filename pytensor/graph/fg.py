@@ -4,6 +4,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Sequence, Set
+from functools import partial
 from typing import Any, Union, cast
 
 from pytensor.configdefaults import config
@@ -142,12 +143,12 @@ class FunctionGraph(AbstractFunctionGraph):
             inputs = [cast(Variable, _memo[i]) for i in inputs]
 
         self.execute_callbacks_time: float = 0.0
-        self.execute_callbacks_times: dict[Feature, float] = defaultdict(float)
 
         if features is None:
             features = []
 
         self._features: list[Feature] = []
+        self._feature_methods: dict[str, Feature] = {}
         # All apply nodes in the subgraph defined by inputs and
         # outputs are cached in this field
         self.apply_nodes: set[Apply] = set()
@@ -682,8 +683,9 @@ class FunctionGraph(AbstractFunctionGraph):
         #    raise TypeError("Expected Feature instance, got "+\
         #            str(type(feature)))
 
-        # Add the feature
         self._features.append(feature)
+        for name in getattr(feature, "provides", ()):
+            self._feature_methods[name] = feature
 
     def remove_feature(self, feature: Feature) -> None:
         """Remove a feature from the graph.
@@ -693,48 +695,56 @@ class FunctionGraph(AbstractFunctionGraph):
 
         """
         try:
-            # Why do we catch the exception anyway?
             self._features.remove(feature)
         except ValueError:
             return
+        for name in list(self._feature_methods):
+            if self._feature_methods[name] is feature:
+                del self._feature_methods[name]
         detach = getattr(feature, "on_detach", None)
         if detach is not None:
             detach(self)
 
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            feature_methods = self.__dict__["_feature_methods"]
+        except KeyError:
+            raise AttributeError(name)
+        try:
+            feature = feature_methods[name]
+        except KeyError:
+            raise AttributeError(name)
+        return partial(getattr(feature, name), self)
+
     def execute_callbacks(self, name: str, *args, **kwargs) -> None:
         """Execute callbacks.
 
-        Calls ``getattr(feature, name)(*args)`` for each feature which has
-        a method called after name.
-
+        For each attached feature whose class registered ``name`` via
+        ``@register_feature_callback``, call ``feature.<name>(self, *args)``.
         """
         t0 = time.perf_counter()
         for feature in self._features:
-            try:
-                fn = getattr(feature, name)
-            except AttributeError:
-                # this is safe because there is no work done inside the
-                # try; the AttributeError really must come from feature.${name}
-                # not existing
+            if name not in type(feature)._feature_callbacks:
                 continue
             tf0 = time.perf_counter()
-            fn(self, *args, **kwargs)
+            getattr(feature, name)(self, *args, **kwargs)
             self.execute_callbacks_times[feature] += time.perf_counter() - tf0
         self.execute_callbacks_time += time.perf_counter() - t0
 
     def collect_callbacks(self, name: str, *args) -> dict[Feature, Any]:
-        """Collects callbacks
+        """Collect callback return values.
 
-        Returns a dictionary d such that ``d[feature] == getattr(feature, name)(*args)``
-        For each feature which has a method called after name.
+        Returns a dict mapping each attached feature whose class registered
+        ``name`` via ``@register_feature_callback`` to the result of
+        ``feature.<name>(*args)``.
         """
         d = {}
         for feature in self._features:
-            try:
-                fn = getattr(feature, name)
-            except AttributeError:
+            if name not in type(feature)._feature_callbacks:
                 continue
-            d[feature] = fn(*args)
+            d[feature] = getattr(feature, name)(*args)
         return d
 
     def toposort(self) -> list[Apply]:
@@ -885,29 +895,26 @@ class FunctionGraph(AbstractFunctionGraph):
                 e.attach_feature(feature.clone())
         return e, equiv
 
+    @property
+    def execute_callbacks_times(self) -> dict[Feature, float]:
+        """Per-feature accumulator of callback execution time.
+
+        Lazily initialized and stored under a private key so it stays out of
+        ``__dict__`` until first read. ``__getstate__`` drops it on pickle
+        (callback-time entries may close over optimizer references that
+        aren't picklable); the property re-creates it transparently.
+        """
+        d = self.__dict__
+        cbt: dict[Feature, float] | None = d.get("_execute_callbacks_times_dict")
+        if cbt is None:
+            cbt = defaultdict(float)
+            d["_execute_callbacks_times_dict"] = cbt
+        return cbt
+
     def __getstate__(self):
-        # This is needed as some features introduce instance methods
-        # This is not picklable
         d = self.__dict__.copy()
-        for feature in self._features:
-            for attr in getattr(feature, "pickle_rm_attr", []):
-                del d[attr]
-
-        # XXX: The `Feature` `DispatchingFeature` takes functions as parameter
-        # and they can be lambda functions, making them unpicklable.
-
-        # execute_callbacks_times have reference to optimizer, and they can't
-        # be pickled as the decorators with parameters aren't pickable.
-        if "execute_callbacks_times" in d:
-            del d["execute_callbacks_times"]
-
+        d.pop("_execute_callbacks_times_dict", None)
         return d
-
-    def __setstate__(self, dct):
-        self.__dict__.update(dct)
-        for feature in self._features:
-            if hasattr(feature, "unpickle"):
-                feature.unpickle(self)
 
     def __contains__(self, item: Variable | Apply) -> bool:
         if isinstance(item, Variable):

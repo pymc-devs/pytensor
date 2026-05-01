@@ -2,8 +2,9 @@ import inspect
 import sys
 import time
 import warnings
-from functools import partial
+from dataclasses import dataclass
 from io import StringIO
+from typing import Any
 
 import numpy as np
 
@@ -12,6 +13,39 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.traversal import toposort
 from pytensor.graph.utils import InconsistencyError
+
+
+@dataclass(slots=True)
+class HistoryEntry:
+    """A recorded edit to a `FunctionGraph` input.
+
+    Used by `History` and `FullHistory` to remember a ``change_node_input``
+    that can later be replayed (forward) or undone (backward).
+
+    Not ``frozen=True`` despite being a logical record: the frozen-dataclass
+    ``__init__`` routes through ``object.__setattr__`` to bypass the immutability
+    check, which is ~4x slower to construct. We allocate one of these per
+    ``change_node_input``, so we rely on convention for "don't mutate".
+    """
+
+    node: Any
+    i: int
+    var: Any
+    reason: Any
+
+    def __reduce__(self):
+        # `reason` is typically a rewriter instance passed by
+        # `replace_all_validate(..., reason=node_rewriter)`. Decorated
+        # rewriters (`@graph_rewriter` / `@node_rewriter`) aren't picklable
+        # — the decorator rebinds the module attribute to the wrapper, so
+        # pickle can't resolve the inner function back to itself by qualname.
+        # Since `reason` is only used for display in verbose revert, drop
+        # the live object and keep a string at pickle time.
+        reason = self.reason
+        if reason is not None and not isinstance(reason, str):
+            name = getattr(reason, "__name__", None)
+            reason = name if isinstance(name, str) else str(reason)
+        return type(self), (self.node, self.i, self.var, reason)
 
 
 class AlreadyThere(Exception):
@@ -248,13 +282,38 @@ class BadOptimization(Exception):
         return sio.getvalue()
 
 
+def register_feature_callback(method):
+    """Mark a Feature method as dispatched by ``execute_callbacks``.
+
+    The decorated method's name is collected into the owning class's
+    ``_feature_callbacks`` set at class-definition time. Subclasses inherit
+    the registration via the MRO walk in ``Feature.__init_subclass__`` —
+    they can override the method without re-decorating; the override will
+    still be invoked by ``execute_callbacks``.
+    """
+    method._is_feature_callback = True
+    return method
+
+
 class Feature:
     """
     Base class for FunctionGraph extensions.
 
-    A Feature is an object with several callbacks that are triggered
-    by various operations on FunctionGraphs. It can be used to enforce
-    graph properties at all stages of graph optimization.
+    A Feature has two ways to integrate with a ``FunctionGraph``:
+
+    1. **Callbacks.** Methods decorated with ``@register_feature_callback``
+       are invoked by ``FunctionGraph.execute_callbacks`` (or
+       ``collect_callbacks``) at well-defined points in the graph's lifecycle
+       — attach/detach, import/prune, input change, validation, and toposort
+       ordering queries. The registered name is what ``execute_callbacks``
+       dispatches by.
+
+    2. **Provided methods.** Names listed in ``provides`` become callable
+       as ``fgraph.<name>(...)``, dispatched through
+       ``FunctionGraph.__getattr__`` to ``feature.<name>(fgraph, ...)``.
+
+    A name cannot appear in both ``provides`` and the callback registry —
+    ``__init_subclass__`` enforces this at import time.
 
     See Also
     --------
@@ -262,6 +321,25 @@ class Feature:
 
     """
 
+    provides: tuple[str, ...] = ()
+    _feature_callbacks: frozenset[str] = frozenset()
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        callbacks: set[str] = set()
+        for base in cls.__mro__:
+            for name, val in vars(base).items():
+                if getattr(val, "_is_feature_callback", False):
+                    callbacks.add(name)
+        cls._feature_callbacks = frozenset(callbacks)
+        clash = set(cls.provides) & callbacks
+        if clash:
+            raise TypeError(
+                f"{cls.__name__}: names {sorted(clash)} appear in both "
+                "`provides` and as callbacks; pick one role per name"
+            )
+
+    @register_feature_callback
     def on_attach(self, fgraph):
         """
         Called by `FunctionGraph.attach_feature`, the method that attaches the
@@ -274,11 +352,9 @@ class Feature:
         implementing the same functionality is already attached to the
         `FunctionGraph`.
 
-        The feature has great freedom in what it can do with the `fgraph`: it
-        may, for example, add methods to it dynamically.
-
         """
 
+    @register_feature_callback
     def on_detach(self, fgraph):
         """
         Called by `FunctionGraph.remove_feature`.  Should remove any
@@ -286,6 +362,7 @@ class Feature:
 
         """
 
+    @register_feature_callback
     def on_import(self, fgraph, node, reason):
         """
         Called whenever a node is imported into `fgraph`, which is just before
@@ -297,6 +374,7 @@ class Feature:
 
         """
 
+    @register_feature_callback
     def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         """
         Called whenever ``node.inputs[i]`` is changed from `var` to `new_var`.
@@ -307,6 +385,7 @@ class Feature:
 
         """
 
+    @register_feature_callback
     def on_prune(self, fgraph, node, reason):
         """
         Called whenever a node is pruned (removed) from the `fgraph`, after it
@@ -314,6 +393,16 @@ class Feature:
 
         """
 
+    @register_feature_callback
+    def on_validate(self, fgraph):
+        """
+        Called by ``Validator.validate`` to give each Feature a chance to
+        veto the current graph state. Implementations should raise
+        ``InconsistencyError`` if the graph is invalid.
+
+        """
+
+    @register_feature_callback
     def orderings(self, fgraph):
         """
         Called by `FunctionGraph.toposort`. It should return a dictionary of
@@ -348,32 +437,6 @@ class Bookkeeper(Feature):
             self.on_prune(fgraph, node, "Bookkeeper.detach")
 
 
-class GetCheckpoint:
-    def __init__(self, history, fgraph):
-        self.h = history
-        self.fgraph = fgraph
-        self.nb = 0
-
-    def __call__(self):
-        self.h.history[self.fgraph] = []
-        self.nb += 1
-        return self.nb
-
-
-class LambdaExtract:
-    def __init__(self, fgraph, node, i, r, reason=None):
-        self.fgraph = fgraph
-        self.node = node
-        self.i = i
-        self.r = r
-        self.reason = reason
-
-    def __call__(self):
-        return self.fgraph.change_node_input(
-            self.node, self.i, self.r, reason=("Revert", self.reason), check=False
-        )
-
-
 class History(Feature):
     """Keep an history of changes to an FunctionGraph.
 
@@ -383,58 +446,57 @@ class History(Feature):
 
     """
 
-    pickle_rm_attr = ["checkpoint", "revert"]
+    provides: tuple[str, ...] = ("checkpoint", "revert")
 
     def __init__(self):
-        self.history = {}
+        self.history: dict = {}
+        self._checkpoint_counters: dict = {}
 
     def on_attach(self, fgraph):
-        if hasattr(fgraph, "checkpoint") or hasattr(fgraph, "revert"):
+        if "checkpoint" in fgraph._feature_methods:
             raise AlreadyThere(
                 "History feature is already present or in conflict with another plugin."
             )
         self.history[fgraph] = []
-        # Don't call unpickle here, as ReplaceValidate.on_attach()
-        # call to History.on_attach() will call the
-        # ReplaceValidate.unpickle and not History.unpickle
-        fgraph.checkpoint = GetCheckpoint(self, fgraph)
-        fgraph.revert = partial(self.revert, fgraph)
+        self._checkpoint_counters[fgraph] = 0
 
     def clone(self):
         return type(self)()
 
-    def unpickle(self, fgraph):
-        fgraph.checkpoint = GetCheckpoint(self, fgraph)
-        fgraph.revert = partial(self.revert, fgraph)
-
     def on_detach(self, fgraph):
-        """
-        Should remove any dynamically added functionality
-        that it installed into the function_graph
-        """
-        del fgraph.checkpoint
-        del fgraph.revert
         del self.history[fgraph]
+        del self._checkpoint_counters[fgraph]
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
-        if self.history[fgraph] is None:
-            return
         h = self.history[fgraph]
-        h.append(LambdaExtract(fgraph, node, i, r, reason))
+        if h is None:
+            return
+        h.append(HistoryEntry(node, i, r, reason))
+
+    def checkpoint(self, fgraph):
+        self.history[fgraph] = []
+        self._checkpoint_counters[fgraph] += 1
+        return self._checkpoint_counters[fgraph]
 
     def revert(self, fgraph, checkpoint):
         """
         Reverts the graph to whatever it was at the provided
-        checkpoint (undoes all replacements). A checkpoint at any
-        given time can be obtained using self.checkpoint().
+        checkpoint (undoes all replacements).
 
         """
         h = self.history[fgraph]
         self.history[fgraph] = None
-        assert fgraph.checkpoint.nb == checkpoint
+        # Reject stale tokens: only the most recent checkpoint can be reverted to.
+        assert self._checkpoint_counters[fgraph] == checkpoint
         while h:
-            f = h.pop()
-            f()
+            entry = h.pop()
+            fgraph.change_node_input(
+                entry.node,
+                entry.i,
+                entry.var,
+                reason=("Revert", entry.reason),
+                check=False,
+            )
         self.history[fgraph] = h
 
 
@@ -545,8 +607,8 @@ class FullHistory(Feature):
         self.fg = fgraph
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
-        self.bw.append(LambdaExtract(fgraph, node, i, r, reason))
-        self.fw.append(LambdaExtract(fgraph, node, i, new_r, reason))
+        self.bw.append(HistoryEntry(node, i, r, reason))
+        self.fw.append(HistoryEntry(node, i, new_r, reason))
         self.pointer += 1
         if self.callback:
             self.callback()
@@ -565,19 +627,31 @@ class FullHistory(Feature):
 
         # Go backwards
         while pointer > checkpoint - 1:
-            reverse_fn = self.bw[pointer]
+            entry = self.bw[pointer]
             if verbose:
-                print(reverse_fn.reason)  # noqa: T201
-            reverse_fn()
+                print(entry.reason)  # noqa: T201
+            self.fg.change_node_input(
+                entry.node,
+                entry.i,
+                entry.var,
+                reason=("Revert", entry.reason),
+                check=False,
+            )
             pointer -= 1
 
         # Go forward
         while pointer < checkpoint - 1:
             pointer += 1
-            forward_fn = self.fw[pointer]
+            entry = self.fw[pointer]
             if verbose:
-                print(forward_fn.reason)  # noqa: T201
-            forward_fn()
+                print(entry.reason)  # noqa: T201
+            self.fg.change_node_input(
+                entry.node,
+                entry.i,
+                entry.var,
+                reason=("Revert", entry.reason),
+                check=False,
+            )
 
         # Remove history changes caused by the foward/backward!
         self.bw = self.bw[:history_len]
@@ -605,34 +679,16 @@ class FullHistory(Feature):
 
 
 class Validator(Feature):
-    pickle_rm_attr = ["validate", "consistent"]
+    provides: tuple[str, ...] = ("validate", "consistent")
 
     def on_attach(self, fgraph):
-        for attr in ("validate", "validate_time"):
-            if hasattr(fgraph, attr):
-                raise AlreadyThere(
-                    "Validator feature is already present or in"
-                    " conflict with another plugin."
-                )
-        # Don't call unpickle here, as ReplaceValidate.on_attach()
-        # call to History.on_attach() will call the
-        # ReplaceValidate.unpickle and not History.unpickle
-        fgraph.validate = partial(self.validate_, fgraph)
-        fgraph.consistent = partial(self.consistent_, fgraph)
+        if "validate" in fgraph._feature_methods:
+            raise AlreadyThere(
+                "Validator feature is already present or in"
+                " conflict with another plugin."
+            )
 
-    def unpickle(self, fgraph):
-        fgraph.validate = partial(self.validate_, fgraph)
-        fgraph.consistent = partial(self.consistent_, fgraph)
-
-    def on_detach(self, fgraph):
-        """
-        Should remove any dynamically added functionality
-        that it installed into the function_graph
-        """
-        del fgraph.validate
-        del fgraph.consistent
-
-    def validate_(self, fgraph):
+    def validate(self, fgraph):
         """
         If the caller is replace_all_validate, just raise the
         exception. replace_all_validate will print out the
@@ -640,7 +696,7 @@ class Validator(Feature):
         """
         t0 = time.perf_counter()
         try:
-            ret = fgraph.execute_callbacks("validate")
+            ret = fgraph.execute_callbacks("on_validate")
         except Exception as e:
             cf = inspect.currentframe()
             uf = cf.f_back
@@ -664,7 +720,7 @@ class Validator(Feature):
             fgraph.profile.validate_time += t1 - t0
         return ret
 
-    def consistent_(self, fgraph):
+    def consistent(self, fgraph):
         try:
             fgraph.validate()
             return True
@@ -673,54 +729,36 @@ class Validator(Feature):
 
 
 class ReplaceValidate(History, Validator):
-    pickle_rm_attr = [
+    provides: tuple[str, ...] = (
+        *History.provides,
+        *Validator.provides,
         "replace_validate",
         "replace_all_validate",
         "replace_all_validate_remove",
-        *History.pickle_rm_attr,
-        *Validator.pickle_rm_attr,
-    ]
+    )
+
+    def __init__(self):
+        super().__init__()
+        self._nodes_removed: set = set()
+        self.fail_validate: bool = False
 
     def on_attach(self, fgraph):
-        for attr in (
-            "replace_validate",
-            "replace_all_validate",
-            "replace_all_validate_remove",
-        ):
-            if hasattr(fgraph, attr):
-                raise AlreadyThere(
-                    "ReplaceValidate feature is already present"
-                    " or in conflict with another plugin."
-                )
+        if "replace_validate" in fgraph._feature_methods:
+            raise AlreadyThere(
+                "ReplaceValidate feature is already present"
+                " or in conflict with another plugin."
+            )
         self._nodes_removed = set()
         self.fail_validate = False
         History.on_attach(self, fgraph)
         Validator.on_attach(self, fgraph)
-        self.unpickle(fgraph)
 
     def clone(self):
         return type(self)()
 
-    def unpickle(self, fgraph):
-        History.unpickle(self, fgraph)
-        Validator.unpickle(self, fgraph)
-        fgraph.replace_validate = partial(self.replace_validate, fgraph)
-        fgraph.replace_all_validate = partial(self.replace_all_validate, fgraph)
-        fgraph.replace_all_validate_remove = partial(
-            self.replace_all_validate_remove, fgraph
-        )
-
     def on_detach(self, fgraph):
-        """
-        Should remove any dynamically added functionality
-        that it installed into the function_graph
-        """
         History.on_detach(self, fgraph)
         Validator.on_detach(self, fgraph)
-        del self._nodes_removed
-        del fgraph.replace_validate
-        del fgraph.replace_all_validate
-        del fgraph.replace_all_validate_remove
 
     def replace_validate(self, fgraph, r, new_r, reason=None, **kwargs):
         self.replace_all_validate(fgraph, [(r, new_r)], reason=reason, **kwargs)
@@ -811,17 +849,11 @@ class ReplaceValidate(History, Validator):
                     )
                 raise ReplacementDidNotRemoveError()
 
-    def __getstate__(self):
-        d = self.__dict__.copy()
-        if "history" in d:
-            del d["history"]
-        return d
-
     def on_import(self, fgraph, node, reason):
         if node in self._nodes_removed:
             self.fail_validate = True
 
-    def validate(self, fgraph):
+    def on_validate(self, fgraph):
         if self.fail_validate:
             self.fail_validate = False
             raise InconsistencyError("Trying to reintroduce a removed node")
@@ -858,7 +890,7 @@ class NoOutputFromInplace(Feature):
     def clone(self):
         return type(self)(self.protected_out_ids)
 
-    def validate(self, fgraph):
+    def on_validate(self, fgraph):
         if not hasattr(fgraph, "destroyers"):
             return True
 
