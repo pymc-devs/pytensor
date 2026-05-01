@@ -210,6 +210,16 @@ class ShapeFeature(Feature):
             r = self.shape_of[var][idx]
         return r
 
+    def get_shape_no_cycle(self, var, idx):
+        """Like ``get_shape`` but breaks destroy-handler aliasing cycles."""
+        from pytensor.graph.replace import break_aliasing_cycles
+
+        s = self.get_shape(var, idx)
+        destroyers = getattr(self.fgraph, "destroyers", None)
+        if destroyers is not None:
+            [s] = break_aliasing_cycles([s], destroyers)
+        return s
+
     def shape_ir(self, i, r):
         """Return symbolic r.shape[i] for tensor variable r, int i."""
         if hasattr(r.type, "shape") and r.type.shape[i] is not None:

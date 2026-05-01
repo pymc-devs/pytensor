@@ -60,7 +60,8 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
         core_shape = [
-            shape_feature.get_shape(rv, -i - 1) for i in reversed(range(op.ndim_supp))
+            shape_feature.get_shape_no_cycle(rv, -i - 1)
+            for i in reversed(range(op.ndim_supp))
         ]
     else:
         core_shape = op._supp_shape_from_params(op.dist_params(node))

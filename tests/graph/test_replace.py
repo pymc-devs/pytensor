@@ -2,17 +2,26 @@ import numpy as np
 import pytest
 import scipy.special
 
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import config, function, shared
+from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import equal_computations
+from pytensor.graph.destroyhandler import DestroyHandler, _contains_cycle
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import (
     _vectorize_node,
+    break_aliasing_cycles,
     clone_replace,
     graph_replace,
     vectorize_graph,
 )
-from pytensor.graph.traversal import graph_inputs
+from pytensor.graph.traversal import applys_between, graph_inputs
 from pytensor.tensor import dvector, fvector, vector
+from pytensor.tensor.basic import alloc
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.signal import convolve1d
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs
 from tests.unittest_tools import assert_equal_computations
@@ -373,3 +382,59 @@ class TestVectorizeGraph:
             batch_out.eval({x: 3, y: 4}),
             np.zeros((2, 3, 4)),
         )
+
+
+def test_break_aliasing_cycles():
+    """Reading a destroyed scalar and a transitive dependent of the destroyer
+    in the same Apply creates a destroy-handler cycle. ``break_aliasing_cycles``
+    re-routes the destroyed scalar through ``deep_copy_op`` on the offending
+    Apply, lifting the conflict. When the destroyed scalar feeds the same
+    downstream Apply only transitively (via another op), no re-routing is needed.
+    """
+    larger = pt.matrix("larger", shape=(8, None))
+    smaller = pt.matrix("smaller", shape=(8, None))
+
+    larger_s1 = Shape_i(1)(larger)
+    smaller_s1 = Shape_i(1)(smaller)
+
+    sx, sy = ps.int64(), ps.int64()
+    inplace_comp = Elemwise(
+        ps.Composite([sx, sy], [ps.sub(ps.add(sx, sy), ps.constant(1, dtype="int64"))]),
+        inplace_pattern={0: 0},
+    )
+    new_dim = inplace_comp(larger_s1, smaller_s1)
+    a = alloc(pt.zeros((1, 1)), 1, new_dim)
+    out = convolve1d(a, larger[:, ::-1], mode="full")
+
+    fg = FunctionGraph([larger, smaller], [out], clone=False)
+    fg.attach_feature(DestroyHandler())
+
+    def imports_with_cycle(shape_vars):
+        check_fg = FunctionGraph([larger, smaller], [out, *shape_vars], clone=False)
+        check_fg.attach_feature(DestroyHandler())
+        dh = check_fg.destroy_handler
+        return _contains_cycle(check_fg, dh.orderings(check_fg, ordered=False))
+
+    def deep_copy_inputs(shape_vars):
+        return [
+            n.inputs[0]
+            for n in applys_between([larger, smaller], shape_vars)
+            if isinstance(n.op, DeepCopyOp)
+        ]
+
+    # Direct conflict: the outer Add reads both larger_s1 (destroyed) and new_dim
+    # (the destroyer's output). break_aliasing_cycles must re-route larger_s1.
+    direct = [(new_dim + larger_s1) - 1]
+    assert imports_with_cycle(direct)
+    safe_direct = break_aliasing_cycles(direct, fg.destroyers)
+    assert not imports_with_cycle(safe_direct)
+    assert deep_copy_inputs(safe_direct) == [larger_s1]
+
+    # Indirect consumer: the outer Add reads new_dim and (larger_s1 - 1), not
+    # larger_s1 directly. No per-Apply conflict — the destroyer just orders after
+    # the inner Sub, so break_aliasing_cycles must leave the graph alone.
+    indirect = [new_dim + (larger_s1 - 1)]
+    assert not imports_with_cycle(indirect)
+    safe_indirect = break_aliasing_cycles(indirect, fg.destroyers)
+    assert safe_indirect == indirect
+    assert deep_copy_inputs(safe_indirect) == []
