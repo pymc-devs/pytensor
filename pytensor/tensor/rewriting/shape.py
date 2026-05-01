@@ -77,7 +77,7 @@ class ShapeFeature(Feature):
 
     def __init__(self):
         self.fgraph: FunctionGraph | None = None
-        # node -> tuple of (tuple of shape vars) per output, lazily populated
+        # (node, recursive) -> tuple of (tuple of shape vars) per output, lazily populated
         self._cache: dict = {}
         # var -> {i: Shape_i(i)(v)}, ensures Apply identity for leaves
         self._shape_i_cache: dict = {}
@@ -100,6 +100,18 @@ class ShapeFeature(Feature):
             res = Shape_i(i)(v)
         per_dim[i] = res
         return res
+
+    @staticmethod
+    def _fresh_shape_i(v, i):
+        """Like ``_shape_i_var``, but never reusing a cached variable.
+
+        The cached variable may live in the graph with its own constraints
+        (e.g. its buffer destroyed by an inplace Op); a fresh read carries no
+        constraints beyond reading ``v``, which non-recursive consumers rely on.
+        """
+        if hasattr(v.type, "shape") and v.type.shape[i] is not None:
+            return constant(v.type.shape[i], dtype="int64")
+        return Shape_i(i)(v)
 
     def _coerce_shape_element(self, element, node):
         """Validate and normalize a single shape element from infer_shape."""
@@ -137,18 +149,30 @@ class ShapeFeature(Feature):
             f"shape element of type {type(element).__name__}: {element!r}"
         )
 
-    def _get_node_shapes(self, node):
-        """Call infer_shape and return validated per-output shape tuples."""
-        cached = self._cache.get(node)
+    def _get_node_shapes(self, node, recursive=True):
+        """Call infer_shape and return validated per-output shape tuples.
+
+        With ``recursive=False``, input shapes are fresh constant/``Shape_i``
+        reads of the node's own inputs instead of inferred expressions, so the
+        result references no variables beyond those inputs.
+        """
+        cached = self._cache.get((node, recursive))
         if cached is not None:
             return cached
+
+        shape_i_var = self._shape_i_var if recursive else self._fresh_shape_i
 
         input_shapes = []
         for inp in node.inputs:
             if hasattr(inp.type, "ndim"):
-                input_shapes.append(
-                    tuple(self.get_shape(inp, j) for j in range(inp.type.ndim))
-                )
+                if recursive:
+                    input_shapes.append(
+                        tuple(self.get_shape(inp, j) for j in range(inp.type.ndim))
+                    )
+                else:
+                    input_shapes.append(
+                        tuple(self._fresh_shape_i(inp, j) for j in range(inp.type.ndim))
+                    )
             else:
                 input_shapes.append(None)
 
@@ -178,9 +202,7 @@ class ShapeFeature(Feature):
             if output_shapes is not None and k < len(output_shapes):
                 sh = output_shapes[k]
             if sh is None or not isinstance(sh, list | tuple):
-                result.append(
-                    tuple(self._shape_i_var(out, j) for j in range(out.type.ndim))
-                )
+                result.append(tuple(shape_i_var(out, j) for j in range(out.type.ndim)))
                 continue
             coerced = []
             for j, s in enumerate(sh):
@@ -188,7 +210,7 @@ class ShapeFeature(Feature):
             result.append(tuple(coerced))
 
         result = tuple(result)
-        self._cache[node] = result
+        self._cache[(node, recursive)] = result
         return result
 
     def get_shape(self, var, idx):
@@ -206,6 +228,33 @@ class ShapeFeature(Feature):
         if sh is not None:
             return sh[idx]
         return self._shape_i_var(var, idx)
+
+    def get_non_recursive_shape(self, var, idx):
+        """Return an expression for ``var.shape[idx]`` reading only ``var.owner``'s inputs.
+
+        Unlike ``get_shape``, input shapes are not recursively expanded: the
+        expression references the direct inputs of ``var.owner`` (through
+        constants and fresh ``Shape_i`` reads) and nothing else. It can
+        therefore be introduced next to any consumer of those inputs no matter
+        what the destroy maps in the surrounding graph are, whereas the
+        recursion of ``get_shape`` may surface variables that an inplace Op
+        destroys.
+
+        Works on an unattached feature.
+        """
+        if hasattr(var.type, "shape") and var.type.shape[idx] is not None:
+            return constant(var.type.shape[idx], dtype="int64")
+
+        node = var.owner
+        if node is None:
+            return self._fresh_shape_i(var, idx)
+
+        node_shapes = self._get_node_shapes(node, recursive=False)
+        out_idx = node.outputs.index(var)
+        sh = node_shapes[out_idx]
+        if sh is not None:
+            return sh[idx]
+        return self._fresh_shape_i(var, idx)
 
     def shape_tuple(self, var):
         if not hasattr(var.type, "ndim"):
@@ -239,7 +288,8 @@ class ShapeFeature(Feature):
             del fgraph.shape_feature
 
     def on_prune(self, fgraph, node, reason):
-        self._cache.pop(node, None)
+        self._cache.pop((node, True), None)
+        self._cache.pop((node, False), None)
         for out in node.outputs:
             self._shape_i_cache.pop(out, None)
 
@@ -247,7 +297,8 @@ class ShapeFeature(Feature):
         if r is new_r:
             return
         # Invalidate cached shapes for the node whose input changed
-        self._cache.pop(node, None)
+        self._cache.pop((node, True), None)
+        self._cache.pop((node, False), None)
 
         # Schedule Shape_i(r) replacements for local_track_shape_i
         if hasattr(r.type, "ndim"):
