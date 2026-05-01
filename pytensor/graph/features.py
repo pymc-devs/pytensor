@@ -26,6 +26,20 @@ class HistoryEntry(NamedTuple):
     var: Any
     reason: Any
 
+    def __reduce__(self):
+        # `reason` is typically a rewriter instance passed by
+        # `replace_all_validate(..., reason=node_rewriter)`. Decorated
+        # rewriters (`@graph_rewriter` / `@node_rewriter`) aren't picklable
+        # — the decorator rebinds the module attribute to the wrapper, so
+        # pickle can't resolve the inner function back to itself by qualname.
+        # Since `reason` is only used for display in verbose revert, drop
+        # the live object and keep a string at pickle time.
+        reason = self.reason
+        if reason is not None and not isinstance(reason, str):
+            name = getattr(reason, "__name__", None)
+            reason = name if isinstance(name, str) else str(reason)
+        return type(self), (self.node, self.i, self.var, reason)
+
 
 class AlreadyThere(Exception):
     """

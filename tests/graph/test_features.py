@@ -13,6 +13,7 @@ from pytensor.graph.features import (
     register_feature_callback,
 )
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import node_rewriter
 from tests.graph.utils import MyVariable, op1
 
 
@@ -123,6 +124,36 @@ class TestPickleRoundTrip:
         assert fg2.destroyers(fg2.inputs[0]) == []
         assert fg2.has_destroyers([fg2.inputs[0]]) is False
         assert isinstance(fg2.destroy_handler, DestroyHandler)
+
+    def test_history_reason_is_stringified_on_pickle(self):
+        """Decorated rewriters captured as History `reason` must not block pickling.
+
+        ``replace_all_validate(reason=node_rewriter)`` (e.g. basic.py:process_node)
+        stores the rewriter on every ``HistoryEntry``. Decorated rewriters
+        aren't picklable — the decorator rebinds the name to the wrapper, so
+        pickle's qualname lookup can't roundtrip ``self.fn``. A function-local
+        rewriter is unpicklable for an even simpler reason (``<locals>`` in
+        qualname), so this test would fail outright without the stringify.
+        """
+
+        @node_rewriter(None)
+        def local_rewriter(fgraph, node):
+            return None
+
+        x = pt.vector("x")
+        fg = FunctionGraph([x], [x * 2 + 1])
+        out = fg.outputs[0]
+        fg.replace_all_validate([(out, out + 0)], reason=local_rewriter)
+
+        fg2 = self._round_trip(fg)
+
+        replace_validate = next(
+            f for f in fg2._features if isinstance(f, ReplaceValidate)
+        )
+        entries = replace_validate.history[fg2]
+        assert entries, "expected at least one HistoryEntry post-replace"
+        assert all(isinstance(e.reason, str) for e in entries)
+        assert any(e.reason == "local_rewriter" for e in entries)
 
 
 def test_provides_callback_collision_rejected_at_class_time():
