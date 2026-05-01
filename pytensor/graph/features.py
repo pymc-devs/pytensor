@@ -465,6 +465,7 @@ class History(Feature):
         """
         h = self.history[fgraph]
         self.history[fgraph] = None
+        # Reject stale tokens: only the most recent checkpoint can be reverted to.
         assert self._checkpoint_counters[fgraph] == checkpoint
         while h:
             entry = h.pop()
