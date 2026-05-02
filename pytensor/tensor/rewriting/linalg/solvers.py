@@ -169,12 +169,18 @@ def scalar_solve_to_division(fgraph, node):
 def block_diag_solve_to_block_diag_solves(fgraph, node):
     """Push ``solve(block_diag(A_1, ..., A_n), b)`` into per-block solves.
 
-    Splits ``b`` along axis ``-2`` into per-block chunks, solves each block independently with the
-    *same* solve op (preserving ``assume_a``, ``lower``, ``unit_diagonal``, etc.), and concatenates
-    the results. Vector ``b`` is reshaped to a column, solved, then squeezed back.
+    Two cases:
 
-    Re-using the solve properties is valid because of a block diagonal matrix to be symmetric, diagonal,
-    psd, or triangular, each component matrix must also have these properties.
+    - ``b`` is also ``block_diag(B_1, ..., B_n)`` with matching block sizes:
+      decompose into ``block_diag(solve(A_i, B_i))`` (each per-block solve is
+      ``(m_i, m_i)`` instead of ``(m_i, m_total)``).
+    - Otherwise: split ``b`` into per-block row chunks and solve each block
+      independently, then concatenate.
+
+    Both paths reuse the user's solve op (preserving ``assume_a``, ``lower``,
+    ``unit_diagonal``, etc.) — valid because for a block-diagonal matrix to be
+    symmetric / diagonal / psd / triangular, each block must individually
+    satisfy that property.
 
     See also :func:`local_block_diag_dot_to_dot_block_diag`.
     """
@@ -198,11 +204,36 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
         return None
 
     core_op = node.op.core_op
+    per_block_op = Blockwise(core_op)
+
+    # If b is also a block_diag with matching block sizes, solve per matching
+    # pair and rebuild block_diag. Strictly better than the row-split path:
+    # avoids solving against the zero off-diagonal columns of each row-chunk.
+    b_owner_op = getattr(b.owner, "op", None)
+    b_blocks_match = (
+        core_op.b_ndim == 2
+        and isinstance(b_owner_op, Blockwise)
+        and isinstance(b_owner_op.core_op, BlockDiagonal)
+        and len(b.owner.inputs) == len(blocks)
+        and all(
+            B_i.type.shape[-2] == size and B_i.type.shape[-1] == size
+            for B_i, size in zip(b.owner.inputs, block_sizes)
+        )
+    )
+    if b_blocks_match:
+        per_block_solutions = [
+            per_block_op(A_i, B_i) for A_i, B_i in zip(blocks, b.owner.inputs)
+        ]
+        for sol in per_block_solutions:
+            copy_stack_trace(node.outputs[0], sol)
+        new_out = pt.linalg.block_diag(*per_block_solutions)
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
+
     # For vector b (b_ndim=1) split along its only axis; for matrix b (b_ndim=2)
     # split along the row axis. Either way the per-block solve preserves b_ndim.
     split_axis = -1 if core_op.b_ndim == 1 else -2
     chunks = split(b, splits_size=block_sizes, n_splits=len(blocks), axis=split_axis)
-    per_block_op = Blockwise(core_op)
 
     per_block_solutions = []
     for block, chunk in zip(blocks, chunks):
