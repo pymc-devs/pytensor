@@ -12,9 +12,10 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
-from pytensor.tensor.basic import atleast_Nd
+from pytensor.tensor.basic import atleast_Nd, split
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.solvers.core import SolveBase
@@ -159,6 +160,58 @@ def scalar_solve_to_division(fgraph, node):
 
     copy_stack_trace(old_out, new_out)
 
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def block_diag_solve_to_block_diag_solves(fgraph, node):
+    """Push ``solve(block_diag(A_1, ..., A_n), b)`` into per-block solves.
+
+    Splits ``b`` along axis ``-2`` into per-block chunks, solves each block independently with the
+    *same* solve op (preserving ``assume_a``, ``lower``, ``unit_diagonal``, etc.), and concatenates
+    the results. Vector ``b`` is reshaped to a column, solved, then squeezed back.
+
+    Re-using the solve properties is valid because of a block diagonal matrix to be symmetric, diagonal,
+    psd, or triangular, each component matrix must also have these properties.
+
+    See also :func:`local_block_diag_dot_to_dot_block_diag`.
+    """
+    A, b = node.inputs
+    A_owner_op = getattr(A.owner, "op", None)
+    if not isinstance(A_owner_op, Blockwise) or not isinstance(
+        A_owner_op.core_op, BlockDiagonal
+    ):
+        return None
+
+    blocks = A.owner.inputs
+    block_sizes = [block.type.shape[-1] for block in blocks]
+
+    # Rewrite is conservative: we require all component matrices to be provably square.
+    # It is possible to have a square matrix block_diagonal matrix comprised of non-square
+    # components. In that case the original graph is valid, but it is not decomposable.
+    if any(
+        size is None or block.type.shape[-2] != size
+        for size, block in zip(block_sizes, blocks)
+    ):
+        return None
+
+    core_op = node.op.core_op
+    # For vector b (b_ndim=1) split along its only axis; for matrix b (b_ndim=2)
+    # split along the row axis. Either way the per-block solve preserves b_ndim.
+    split_axis = -1 if core_op.b_ndim == 1 else -2
+    chunks = split(b, splits_size=block_sizes, n_splits=len(blocks), axis=split_axis)
+    per_block_op = Blockwise(core_op)
+
+    per_block_solutions = []
+    for block, chunk in zip(blocks, chunks):
+        sol = per_block_op(block, chunk)
+        copy_stack_trace(node.outputs[0], sol)
+        per_block_solutions.append(sol)
+
+    new_out = pt.concatenate(per_block_solutions, axis=split_axis)
+    copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 
 

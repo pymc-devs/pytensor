@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.linalg
 from numpy.testing import assert_allclose
 
 import pytensor
@@ -11,6 +12,7 @@ from pytensor.gradient import grad
 from pytensor.graph import ancestors
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
 from pytensor.tensor.linalg.solvers.core import SolveBase
@@ -439,3 +441,86 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+def test_block_diag_solve_pushdown(b_ndim):
+    A = pt.matrix("A", shape=(3, 3))
+    B = pt.matrix("B", shape=(2, 2))
+    b_shape = (5,) if b_ndim == 1 else (5, 4)
+    b_var = pt.tensor("b", shape=b_shape)
+    f = function([A, B, b_var], pt.linalg.solve(pt.linalg.block_diag(A, B), b_var))
+
+    assert not [
+        n
+        for n in f.maker.fgraph.toposort()
+        if isinstance(getattr(n.op, "core_op", n.op), BlockDiagonal)
+    ]
+
+    rng = np.random.default_rng(0)
+    A_v, B_v, b_v = (
+        rng.normal(size=(3, 3)),
+        rng.normal(size=(2, 2)),
+        rng.normal(size=b_shape),
+    )
+    expected = np.linalg.solve(scipy.linalg.block_diag(A_v, B_v), b_v)
+    assert_allclose(f(A_v, B_v, b_v), expected, atol=1e-10)
+
+
+def test_block_diag_solve_pushdown_preserves_solve_op_type():
+    """``solve_triangular(block_diag(L1, L2), b)`` must keep SolveTriangular
+    per block, not silently downgrade to generic Solve."""
+    L1, L2 = pt.matrix("L1", shape=(3, 3)), pt.matrix("L2", shape=(2, 2))
+    y = pt.vector("y", shape=(5,))
+    f = function(
+        [L1, L2, y], solve_triangular(pt.linalg.block_diag(L1, L2), y, lower=True)
+    )
+    ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+    assert not any(isinstance(op, Solve) for op in ops)
+    assert any(isinstance(op, SolveTriangular) for op in ops)
+
+
+@pytest.mark.parametrize(
+    "second_shape", [(2, 5), (None, None)], ids=["non_square", "unknown_shape"]
+)
+def test_block_diag_solve_pushdown_bails_when_blocks_not_provably_square(second_shape):
+    A = pt.matrix("A", shape=(3, 3))
+    second = pt.matrix("second", shape=second_shape)
+    y = pt.vector("y")
+    f = function([A, second, y], pt.linalg.solve(pt.linalg.block_diag(A, second), y))
+    assert [
+        n
+        for n in f.maker.fgraph.toposort()
+        if isinstance(getattr(n.op, "core_op", n.op), BlockDiagonal)
+    ]
+
+
+def test_block_diag_solve_pushdown_batched():
+    """Both Blockwise(BlockDiagonal) and Blockwise(Solve) handle batching,
+    so the rewrite should also fire on a batched A."""
+    batch = 4
+    A = pt.tensor("A", shape=(batch, 3, 3))
+    B = pt.tensor("B", shape=(batch, 2, 2))
+    b_var = pt.tensor("b", shape=(batch, 5))
+    f = function(
+        [A, B, b_var],
+        pt.linalg.solve(pt.linalg.block_diag(A, B), b_var, b_ndim=1),
+    )
+
+    assert not [
+        n
+        for n in f.maker.fgraph.toposort()
+        if isinstance(getattr(n.op, "core_op", n.op), BlockDiagonal)
+    ]
+
+    rng = np.random.default_rng(0)
+    A_v = rng.normal(size=(batch, 3, 3))
+    B_v = rng.normal(size=(batch, 2, 2))
+    b_v = rng.normal(size=(batch, 5))
+    expected = np.stack(
+        [
+            np.linalg.solve(scipy.linalg.block_diag(A_v[i], B_v[i]), b_v[i])
+            for i in range(batch)
+        ]
+    )
+    assert_allclose(f(A_v, B_v, b_v), expected, atol=1e-10)
