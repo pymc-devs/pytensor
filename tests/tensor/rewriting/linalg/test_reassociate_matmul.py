@@ -16,6 +16,12 @@ from pytensor.tensor.rewriting.linalg.reassociate_matmul import (
 )
 
 
+requires_fast_run = pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="reassociate_matmul_chain is only registered for FAST_RUN",
+)
+
+
 def _matmul_nodes(fgraph):
     """Apply nodes that perform a matmul-like contraction."""
     nodes = []
@@ -100,6 +106,7 @@ class TestProvablyLess:
 
 
 class TestReassociateChain:
+    @requires_fast_run
     def test_optimal_static_ordering(self):
         # (100x2) @ (2x100) @ (100x100): optimal is A @ (B @ C) with B@C producing
         # a (2, 100) intermediate, far cheaper than (A @ B) @ C.
@@ -124,11 +131,12 @@ class TestReassociateChain:
         np.testing.assert_allclose(
             f(*np_arrays), np.linalg.multi_dot(np_arrays), rtol=1e-5
         )
-        # Optimal split for these shapes is A @ (B @ (C @ D)) with cost 1350 vs.
-        # naive 3400. Pin the smallest internal intermediate as a sentinel that the
-        # rewriter chose this tree.
-        shapes_seen = _matmul_output_shapes(f.maker.fgraph)
-        assert (5, 3) in shapes_seen, shapes_seen
+        if config.mode != "FAST_COMPILE":
+            # Optimal split for these shapes is A @ (B @ (C @ D)) with cost 1350
+            # vs. naive 3400. Pin the smallest internal intermediate as a
+            # sentinel that the rewriter chose this tree.
+            shapes_seen = _matmul_output_shapes(f.maker.fgraph)
+            assert (5, 3) in shapes_seen, shapes_seen
 
     def test_symbolic_shapes_preserve_user_order(self):
         # When all dims are symbolic, no parenthesization is provably cheaper, so
@@ -212,9 +220,11 @@ class TestReassociateChain:
             np_arrays[0] @ np_arrays[1] @ np_arrays[2],
             rtol=1e-5,
         )
-        shapes_seen = _matmul_output_shapes(f.maker.fgraph)
-        assert (7, 2, 5) in shapes_seen, shapes_seen
+        if config.mode != "FAST_COMPILE":
+            shapes_seen = _matmul_output_shapes(f.maker.fgraph)
+            assert (7, 2, 5) in shapes_seen, shapes_seen
 
+    @requires_fast_run
     def test_dot22_chain_post_blas(self):
         # By the time the rewriter runs (post-BLAS), 2-D dots may have been
         # promoted to Dot22. The chain extender must treat Dot22 as a chain link
@@ -255,9 +265,12 @@ class TestReassociateChain:
         np.testing.assert_allclose(
             f(*np_arrays), np.linalg.multi_dot(np_arrays), rtol=1e-5
         )
-        shapes = set(_matmul_output_shapes(f.maker.fgraph))
-        missing = must_contain - shapes
-        assert not missing, f"Missing expected intermediates {missing}; got {shapes}"
+        if config.mode != "FAST_COMPILE":
+            shapes = set(_matmul_output_shapes(f.maker.fgraph))
+            missing = must_contain - shapes
+            assert not missing, (
+                f"Missing expected intermediates {missing}; got {shapes}"
+            )
 
     def test_balanced_tree_decomposition(self):
         # User's explicit `(A @ B) @ (C @ D)` is a non-linear tree. The recursive
@@ -282,11 +295,12 @@ class TestReassociateChain:
             f(a_v, b_v, c_v, d_v), (a_v @ b_v) @ (c_v @ d_v), rtol=1e-5
         )
 
-        shapes = _matmul_output_shapes(f.maker.fgraph)
-        n_big = sum(1 for s in shapes if s == (100, 100))
-        assert n_big <= 1, (
-            f"Expected at most one (100,100) (the final output); got {shapes}"
-        )
+        if config.mode != "FAST_COMPILE":
+            shapes = _matmul_output_shapes(f.maker.fgraph)
+            n_big = sum(1 for s in shapes if s == (100, 100))
+            assert n_big <= 1, (
+                f"Expected at most one (100,100) (the final output); got {shapes}"
+            )
 
 
 class TestLifting:
@@ -311,13 +325,14 @@ class TestLifting:
             f(a_v, b_v, c_v, d_v), (a_v @ b_v)[None] @ c_v @ d_v, rtol=1e-5
         )
 
-        # The unavoidable (100, 100) (or (1, 100, 100)) is the final output. Any
-        # internal contraction with that shape means the lift didn't fire.
-        shapes = _matmul_output_shapes(f.maker.fgraph)
-        non_final = shapes[:-1] if shapes else []
-        assert (1, 100, 100) not in non_final and (100, 100) not in non_final, (
-            f"Lift+reorder should avoid the (100,100) intermediate; got {shapes}"
-        )
+        if config.mode != "FAST_COMPILE":
+            # The unavoidable (100, 100) (or (1, 100, 100)) is the final output.
+            # Any internal contraction with that shape means the lift didn't fire.
+            shapes = _matmul_output_shapes(f.maker.fgraph)
+            non_final = shapes[:-1] if shapes else []
+            assert (1, 100, 100) not in non_final and (100, 100) not in non_final, (
+                f"Lift+reorder should avoid the (100,100) intermediate; got {shapes}"
+            )
 
     def test_lift_matrix_transpose(self):
         # `(L @ R).T @ C` lifts to `R.T @ L.T @ C` (operand order swapped). Shapes
@@ -339,12 +354,13 @@ class TestLifting:
         c_v = rng.normal(size=(100, 100)).astype(config.floatX)
         np.testing.assert_allclose(f(l_v, r_v, c_v), (l_v @ r_v).T @ c_v, rtol=1e-5)
 
-        # Optimal lifted tree's intermediate is L.T @ C = (2, 100).
-        shapes = _matmul_output_shapes(f.maker.fgraph)
-        assert (2, 100) in shapes, (
-            f"Expected matrix-transpose lift to enable a (2, 100) intermediate; "
-            f"got {shapes}"
-        )
+        if config.mode != "FAST_COMPILE":
+            # Optimal lifted tree's intermediate is L.T @ C = (2, 100).
+            shapes = _matmul_output_shapes(f.maker.fgraph)
+            assert (2, 100) in shapes, (
+                f"Expected matrix-transpose lift to enable a (2, 100) "
+                f"intermediate; got {shapes}"
+            )
 
     def test_lift_atomic_gating_no_extra_nodes(self):
         # All-symbolic shapes -> no provable win -> no rewrite. The lift must NOT
@@ -387,13 +403,14 @@ class TestLifting:
             (a_v @ b_v).squeeze(axis=0) @ c_v @ d_v,
             rtol=1e-5,
         )
-        # Final output is (100, 100); any internal one means the lift didn't fire.
-        shapes = _matmul_output_shapes(f.maker.fgraph)
-        non_final = shapes[:-1] if shapes else []
-        assert (100, 100) not in non_final, (
-            f"Squeeze lift should expose a chain that avoids the (100,100) "
-            f"intermediate; got {shapes}"
-        )
+        if config.mode != "FAST_COMPILE":
+            # Final output is (100, 100); any internal one means the lift didn't fire.
+            shapes = _matmul_output_shapes(f.maker.fgraph)
+            non_final = shapes[:-1] if shapes else []
+            assert (100, 100) not in non_final, (
+                f"Squeeze lift should expose a chain that avoids the (100,100) "
+                f"intermediate; got {shapes}"
+            )
 
     def test_lift_through_heterogeneous_ndim_does_not_crash(self):
         # A DimShuffle wrapping a Blockwise(Dot) whose operands have different
