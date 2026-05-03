@@ -1,4 +1,7 @@
-from contextlib import nullcontext
+import shutil
+import tempfile
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -22,6 +25,20 @@ from pytensor.tensor import (
 from pytensor.tensor import (
     sum as pt_sum,
 )
+
+
+@contextmanager
+def _fresh_numba_cache():
+    import pytensor.link.numba.cache as cache_mod
+
+    original = cache_mod.NUMBA_CACHE_PATH
+    tmp = Path(tempfile.mkdtemp(prefix="bench_numba_cache_"))
+    cache_mod.NUMBA_CACHE_PATH = tmp
+    try:
+        yield tmp
+    finally:
+        cache_mod.NUMBA_CACHE_PATH = original
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def create_radon_model(
@@ -183,10 +200,11 @@ def test_radon_model_compile_repeatedly_benchmark(mode, cache, radon_model, benc
         )
         fn(x)
 
-    ctx = (
+    cache_ctx = _fresh_numba_cache() if cache else nullcontext()
+    flag_ctx = (
         config.change_flags(numba__cache=cache) if cache is not None else nullcontext()
     )
-    with ctx:
+    with cache_ctx, flag_ctx:
         benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
 
 
@@ -201,23 +219,27 @@ def test_radon_model_compile_variants_benchmark(
     rng = np.random.default_rng(1)
     x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
 
-    # Compile base function once to populate the cache
-    fn = function(
-        [joined_inputs], [model_logp, model_dlogp], mode=mode, trust_input=True
-    )
-    fn(x)
-
-    def compile_and_call_once():
-        for joined_inputs, [model_logp, model_dlogp] in radon_model_variants:
-            fn = function(
-                [joined_inputs], [model_logp, model_dlogp], mode=mode, trust_input=True
-            )
-            fn(x)
-
-    ctx = (
+    cache_ctx = _fresh_numba_cache() if cache else nullcontext()
+    flag_ctx = (
         config.change_flags(numba__cache=cache) if cache is not None else nullcontext()
     )
-    with ctx:
+    with cache_ctx, flag_ctx:
+        # Compile base function once to populate the cache
+        fn = function(
+            [joined_inputs], [model_logp, model_dlogp], mode=mode, trust_input=True
+        )
+        fn(x)
+
+        def compile_and_call_once():
+            for joined_inputs, [model_logp, model_dlogp] in radon_model_variants:
+                fn = function(
+                    [joined_inputs],
+                    [model_logp, model_dlogp],
+                    mode=mode,
+                    trust_input=True,
+                )
+                fn(x)
+
         benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
 
 

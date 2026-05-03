@@ -58,7 +58,7 @@ _filter_numba_warnings()
 
 
 def numba_njit(
-    *args, fastmath=None, final_function: bool = False, **kwargs
+    *args, fastmath=None, inline=None, final_function: bool = False, **kwargs
 ) -> Callable:
     """A thin wrapper around `numba.njit`.
 
@@ -87,6 +87,9 @@ def numba_njit(
         # These slow down compilation and are not necessary for functions not called directly from Python
         kwargs.setdefault("no_cpython_wrapper", True)
         kwargs.setdefault("no_cfunc_wrapper", True)
+
+    if inline is not None:
+        kwargs["inline"] = inline
 
     if len(args) > 0 and callable(args[0]):
         return _njit(*args[1:], fastmath=fastmath, **kwargs)(args[0])  # type: ignore
@@ -448,15 +451,19 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
         if config.numba__cache and config.compiler_verbose:
             print(f"{op} of type {type(op)} will not be cached by PyTensor.\n")  # noqa: T201
         return jitable_func, None
-    else:
-        op_name = jitable_func.__name__
-        cached_func = compile_numba_function_src(
-            src=f"def {op_name}(*args): return jitable_func(*args)",
-            function_name=op_name,
-            global_env=globals() | {"jitable_func": jitable_func},
-            cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
-        )
-        return numba_njit(cached_func, cache=True), cache_key
+
+    # Inline functions get baked into the caller's cache entry and can't be independently cached
+    if getattr(jitable_func, "targetoptions", {}).get("inline") == "always":
+        return jitable_func, cache_key
+
+    op_name = jitable_func.__name__
+    cached_func = compile_numba_function_src(
+        src=f"def {op_name}(*args): return jitable_func(*args)",
+        function_name=op_name,
+        global_env=globals() | {"jitable_func": jitable_func},
+        cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
+    )
+    return numba_njit(cached_func, cache=True), cache_key
 
 
 def cache_key_for_constant(data):
