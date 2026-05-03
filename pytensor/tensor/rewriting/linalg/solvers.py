@@ -185,13 +185,13 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
     See also :func:`local_block_diag_dot_to_dot_block_diag`.
     """
     A, b = node.inputs
-    A_owner_op = getattr(A.owner, "op", None)
-    if not isinstance(A_owner_op, Blockwise) or not isinstance(
-        A_owner_op.core_op, BlockDiagonal
-    ):
-        return None
 
-    blocks = A.owner.inputs
+    match A.owner_op_and_inputs:
+        case (Blockwise(BlockDiagonal()), *blocks):
+            pass
+        case _:
+            return None
+
     block_sizes = [block.type.shape[-1] for block in blocks]
 
     # Rewrite is conservative: we require all component matrices to be provably square.
@@ -209,31 +209,28 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
     # If b is also a block_diag with matching block sizes, solve per matching
     # pair and rebuild block_diag. Strictly better than the row-split path:
     # avoids solving against the zero off-diagonal columns of each row-chunk.
-    b_owner_op = getattr(b.owner, "op", None)
-    b_blocks_match = (
-        core_op.b_ndim == 2
-        and isinstance(b_owner_op, Blockwise)
-        and isinstance(b_owner_op.core_op, BlockDiagonal)
-        and len(b.owner.inputs) == len(blocks)
-        and all(
-            B_i.type.shape[-2] == size and B_i.type.shape[-1] == size
-            for B_i, size in zip(b.owner.inputs, block_sizes)
-        )
-    )
-    if b_blocks_match:
-        per_block_solutions = [
-            per_block_op(A_i, B_i) for A_i, B_i in zip(blocks, b.owner.inputs)
-        ]
-        for sol in per_block_solutions:
-            copy_stack_trace(node.outputs[0], sol)
-        new_out = pt.linalg.block_diag(*per_block_solutions)
-        copy_stack_trace(node.outputs[0], new_out)
-        return [new_out]
+    match b.owner_op_and_inputs:
+        case (Blockwise(BlockDiagonal()), *b_blocks) if (
+            core_op.b_ndim == 2
+            and len(b_blocks) == len(blocks)
+            and all(
+                B_i.type.shape[-2] == size and B_i.type.shape[-1] == size
+                for B_i, size in zip(b_blocks, block_sizes)
+            )
+        ):
+            per_block_solutions = [
+                per_block_op(A_i, B_i) for A_i, B_i in zip(blocks, b_blocks)
+            ]
+            for sol in per_block_solutions:
+                copy_stack_trace(node.outputs[0], sol)
+            new_out = pt.linalg.block_diag(*per_block_solutions)
+            copy_stack_trace(node.outputs[0], new_out)
+            return [new_out]
 
     # For vector b (b_ndim=1) split along its only axis; for matrix b (b_ndim=2)
     # split along the row axis. Either way the per-block solve preserves b_ndim.
     split_axis = -1 if core_op.b_ndim == 1 else -2
-    chunks = split(b, splits_size=block_sizes, n_splits=len(blocks), axis=split_axis)
+    chunks = split(b, splits_size=block_sizes, axis=split_axis)
 
     per_block_solutions = []
     for block, chunk in zip(blocks, chunks):
