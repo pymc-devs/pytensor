@@ -53,8 +53,8 @@ class TestReplaceValidate:
 
 
 def test_full_history():
-    x = pt.scalar("x")
-    out = pt.log(pt.exp(x) / pt.sum(pt.exp(x)))
+    x = pt.vector("x")
+    out = pt.log(pt.exp(x) / pt.sum(pt.exp(x), keepdims=True))
     fg = FunctionGraph(outputs=[out], clone=True, copy_inputs=False)
     history = FullHistory()
     fg.attach_feature(history)
@@ -64,22 +64,22 @@ def test_full_history():
     assert equal_computations(fg.outputs, [out])
 
     history.end()
-    assert equal_computations(fg.outputs, [pt.special.log_softmax(x)])
+    assert equal_computations(fg.outputs, [pt.special.log_softmax(x, axis=None)])
 
     history.prev()
-    assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x))])
+    assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x, axis=None))])
 
     for i in range(10):
         history.prev()
     assert equal_computations(fg.outputs, [out])
 
     history.goto(2)
-    assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x))])
+    assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x, axis=None))])
 
     for i in range(10):
         history.next()
 
-    assert equal_computations(fg.outputs, [pt.special.log_softmax(x)])
+    assert equal_computations(fg.outputs, [pt.special.log_softmax(x, axis=None)])
 
 
 class TestPickleRoundTrip:

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+from pytensor.tensor.special import LogSoftmax, Softmax
 
 
 @jax_funcify.register(Elemwise)
@@ -92,17 +92,6 @@ def jax_funcify_Softmax(op, **kwargs):
         return jax.nn.softmax(x, axis=axis)
 
     return softmax
-
-
-@jax_funcify.register(SoftmaxGrad)
-def jax_funcify_SoftmaxGrad(op, **kwargs):
-    axis = op.axis
-
-    def softmax_grad(dy, sm):
-        dy_times_sm = dy * sm
-        return dy_times_sm - jnp.sum(dy_times_sm, axis=axis, keepdims=True) * sm
-
-    return softmax_grad
 
 
 @jax_funcify.register(LogSoftmax)

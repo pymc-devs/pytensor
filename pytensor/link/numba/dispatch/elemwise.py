@@ -36,13 +36,10 @@ from pytensor.scalar.basic import (
     Sub,
     TrueDiv,
     get_scalar_type,
-    maximum,
 )
-from pytensor.scalar.basic import add as add_as
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, Dot, MulWithoutZeros, Sum
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
 @singledispatch
@@ -503,122 +500,6 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
 
     cache_version = 2
     return dimshuffle, cache_version
-
-
-@register_funcify_default_op_cache_key(Softmax)
-def numba_funcify_Softmax(op, node, **kwargs):
-    ndim = node.inputs[0].type.ndim
-    inp_dtype = node.inputs[0].type.numpy_dtype
-    axis = op.axis
-
-    if ndim > 1 and axis is not None:
-        reduce_max_py = create_multiaxis_reducer(
-            maximum,
-            identity=-np.inf,
-            axes=(axis,),
-            ndim=ndim,
-            out_dtype=inp_dtype,
-            keepdims=True,
-        )
-        reduce_sum_py = create_multiaxis_reducer(
-            add_as,
-            identity=0.0,
-            axes=(axis,),
-            ndim=ndim,
-            out_dtype=inp_dtype,
-            keepdims=True,
-        )
-
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
-        reduce_max = jit_fn(reduce_max_py)
-        reduce_sum = jit_fn(reduce_sum_py)
-    else:
-        reduce_max = np.max
-        reduce_sum = np.sum
-
-    @numba_basic.numba_njit(boundscheck=False)
-    def softmax(x):
-        z = reduce_max(x)
-        e_x = np.exp(x - z)
-        w = reduce_sum(e_x)
-        sm = e_x / w
-        return sm
-
-    cache_version = 1
-    return softmax, cache_version
-
-
-@register_funcify_default_op_cache_key(SoftmaxGrad)
-def numba_funcify_SoftmaxGrad(op, node, **kwargs):
-    ndim = node.inputs[0].type.ndim
-    inp_dtype = node.inputs[0].type.numpy_dtype
-
-    axis = op.axis
-    if ndim > 1 and axis is not None:
-        reduce_sum_py = create_multiaxis_reducer(
-            add_as,
-            identity=0.0,
-            axes=(axis,),
-            ndim=ndim,
-            out_dtype=inp_dtype,
-            keepdims=True,
-        )
-
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
-        reduce_sum = jit_fn(reduce_sum_py)
-    else:
-        reduce_sum = np.sum
-
-    @numba_basic.numba_njit(boundscheck=False)
-    def softmax_grad(dy, sm):
-        dy_times_sm = dy * sm
-        sum_dy_times_sm = reduce_sum(dy_times_sm)
-        dx = dy_times_sm - sum_dy_times_sm * sm
-        return dx
-
-    cache_version = 1
-    return softmax_grad, cache_version
-
-
-@register_funcify_default_op_cache_key(LogSoftmax)
-def numba_funcify_LogSoftmax(op, node, **kwargs):
-    ndim = node.inputs[0].type.ndim
-    inp_dtype = node.inputs[0].type.numpy_dtype
-    axis = op.axis
-
-    if ndim > 1 and axis is not None:
-        reduce_max_py = create_multiaxis_reducer(
-            maximum,
-            identity=-np.inf,
-            axes=(axis,),
-            ndim=ndim,
-            out_dtype=inp_dtype,
-            keepdims=True,
-        )
-        reduce_sum_py = create_multiaxis_reducer(
-            add_as,
-            identity=0.0,
-            axes=(axis,),
-            ndim=ndim,
-            out_dtype=inp_dtype,
-            keepdims=True,
-        )
-
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
-        reduce_max = jit_fn(reduce_max_py)
-        reduce_sum = jit_fn(reduce_sum_py)
-    else:
-        reduce_max = np.max
-        reduce_sum = np.sum
-
-    @numba_basic.numba_njit(boundscheck=False)
-    def log_softmax(x):
-        xdev = x - reduce_max(x)
-        lsm = xdev - np.log(reduce_sum(np.exp(xdev)))
-        return lsm
-
-    cache_version = 1
-    return log_softmax, cache_version
 
 
 @register_funcify_default_op_cache_key(Argmax)

@@ -10,8 +10,8 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.tensor.math import add, exp, log, true_div
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, softmax
+from pytensor.tensor.math import exp, log
+from pytensor.tensor.special import LogSoftmax, Softmax, softmax
 from pytensor.tensor.type import matrix
 from tests import unittest_tools as utt
 
@@ -96,31 +96,6 @@ class TestLogSoftmaxRewrites:
         f = FunctionGraph([sa], [myfunc(sa)])
         _fast_run_rewrites(f)
         assert check_stack_trace(f, ops_to_check="all")
-
-    def test_logsoftmax_grad_true_div_elemwise(self):
-        """
-        Checks that the gradient of an expression similar to a ``log(softmax)`` but
-        with a different elemwise operation than true_div is not rewritten.
-        """
-
-        x = matrix("x")
-        y = log(softmax(x, axis=-1))
-        g = pytensor.tensor.grad(y.sum(), x)
-
-        softmax_grad_node = g.owner
-        assert softmax_grad_node.op == SoftmaxGrad(axis=-1)
-        true_div_node = softmax_grad_node.inputs[0].owner
-        assert true_div_node.op == true_div
-
-        # We replace thk elemwise true_div op by an elemwise add.
-        new_g = SoftmaxGrad(axis=-1)(
-            add(*true_div_node.inputs), softmax_grad_node.inputs[1]
-        )
-
-        fgraph = FunctionGraph([x], [new_g])
-        _fast_run_rewrites.rewrite(fgraph)
-
-        assert SoftmaxGrad(axis=-1) in [n.op for n in fgraph.toposort()]
 
 
 def test_softmax_graph():

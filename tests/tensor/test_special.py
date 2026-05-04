@@ -147,10 +147,7 @@ def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
 
     new_out = vectorize_graph(out, {x: batch_x})
     assert isinstance(new_out.owner.op, op)
-    if len(batch_axis) == 1:
-        assert (new_out.owner.op.axis,) == batch_axis
-    else:
-        assert new_out.owner.op.axis == batch_axis
+    assert new_out.owner.op.axis == batch_axis
 
 
 def test_poch():

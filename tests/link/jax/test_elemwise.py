@@ -8,7 +8,7 @@ from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import prod
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
+from pytensor.tensor.special import log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector, vectors
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_elemwise import check_elemwise_runtime_broadcast
@@ -83,17 +83,6 @@ def test_logsoftmax(axis):
     out = log_softmax(x, axis=axis)
 
     compare_jax_and_py([x], [out], [x_test_value])
-
-
-@pytest.mark.parametrize("axis", [None, 0, 1])
-def test_softmax_grad(axis):
-    dy = matrix("dy")
-    dy_test_value = np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-    sm = matrix("sm")
-    sm_test_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
-    out = SoftmaxGrad(axis=axis)(dy, sm)
-
-    compare_jax_and_py([dy, sm], [out], [dy_test_value, sm_test_value])
 
 
 def test_multiple_input_multiply():
