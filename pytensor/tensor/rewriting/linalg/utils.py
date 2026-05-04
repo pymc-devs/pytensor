@@ -14,11 +14,14 @@ from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Mul
 from pytensor.tensor.basic import (
     Eye,
+    Join,
     TensorVariable,
     atleast_Nd,
     diagonal,
+    get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 from pytensor.tensor.math import variadic_mul
 from pytensor.tensor.rewriting.basic import (
@@ -41,6 +44,83 @@ ASSUME_A_OF_TRANSPOSE = {
     "sym": "sym",
     "gen": "gen",
 }
+
+
+def match_2x2_nested_join(var):
+    """Match ``Join(-2, Join(-1, A_11, A_12), Join(-1, A_21, A_22))`` — a 2x2
+    block-matrix-shaped concat.
+
+    Returns ``[[A_11, A_12], [A_21, A_22]]`` when:
+
+      - The outer ``Join`` concatenates along the row axis (``ndim - 2``).
+      - Both inner ``Join`` ops concatenate along the column axis (``ndim - 1``).
+      - The grid is uniform 2x2.
+      - All four leaves' relevant dims are statically known and the diagonal
+        blocks are square; row heights and column widths line up.
+
+    Else returns ``None``.
+    """
+    if var.owner is None or not isinstance(var.owner.op, Join):
+        return None
+
+    out_ndim = var.type.ndim
+    if out_ndim < 2:
+        return None
+
+    try:
+        outer_axis = int(
+            get_underlying_scalar_constant_value(
+                var.owner.inputs[0], raise_not_constant=True
+            )
+        )
+    except NotScalarConstantError:
+        return None
+    if outer_axis < 0:
+        outer_axis += out_ndim
+    if outer_axis != out_ndim - 2:
+        return None
+
+    rows = var.owner.inputs[1:]
+    if len(rows) != 2:
+        return None
+
+    leaves = []
+    for row in rows:
+        if row.owner is None or not isinstance(row.owner.op, Join):
+            return None
+        try:
+            inner_axis = int(
+                get_underlying_scalar_constant_value(
+                    row.owner.inputs[0], raise_not_constant=True
+                )
+            )
+        except NotScalarConstantError:
+            return None
+        if inner_axis < 0:
+            inner_axis += row.type.ndim
+        if inner_axis != row.type.ndim - 1:
+            return None
+        row_leaves = list(row.owner.inputs[1:])
+        if len(row_leaves) != 2:
+            return None
+        leaves.append(row_leaves)
+
+    [[A_11, A_12], [A_21, A_22]] = leaves
+
+    m1 = A_11.type.shape[-2]
+    m2 = A_22.type.shape[-2]
+    n1 = A_11.type.shape[-1]
+    n2 = A_22.type.shape[-1]
+    if any(s is None for s in (m1, m2, n1, n2)):
+        return None
+    if m1 != n1 or m2 != n2:
+        return None  # diagonal blocks not square
+    if A_12.type.shape[-2] != m1 or A_12.type.shape[-1] != n2:
+        return None
+    if A_21.type.shape[-2] != m2 or A_21.type.shape[-1] != n1:
+        return None
+
+    return leaves
 
 
 def matrix_diagonal_product(x):
