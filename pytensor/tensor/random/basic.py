@@ -19,11 +19,11 @@ from pytensor.tensor.random.utils import (
     normalize_size_param,
 )
 from pytensor.tensor.utils import faster_broadcast_to, faster_ndindex
+from pytensor.utils import lazy_scipy_module
 
 
-# Scipy.stats is considerably slow to import
-# We import scipy.stats lazily inside `ScipyRandomVariable`
-stats = None
+# scipy.stats is considerably slow to import; defer to first use
+stats = lazy_scipy_module("stats")
 
 
 try:
@@ -62,9 +62,6 @@ class ScipyRandomVariable(RandomVariable):
 
     @classmethod
     def rng_fn(cls, *args, **kwargs):
-        global stats
-        if stats is None:
-            import scipy.stats as stats
         size = args[-1]
         res = cls.rng_fn_scipy(*args, **kwargs)
 

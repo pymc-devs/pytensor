@@ -21,10 +21,40 @@ __all__ = [
     "NoDuplicateOptWarningFilter",
     "call_subprocess_Popen",
     "get_unbound_function",
+    "lazy_scipy_module",
     "maybe_add_to_os_environ_pathlist",
     "output_subprocess_Popen",
     "subprocess_Popen",
 ]
+
+
+class _LazyScipyModule:
+    """Proxy that defers `scipy.<sub>` import until first attribute access."""
+
+    __slots__ = ("_name", "_real")
+
+    def __init__(self, name):
+        self._name = name
+        self._real = None
+
+    def __getattr__(self, name):
+        # `_real` is in __slots__, so this lookup hits the slot, not __getattr__.
+        if self._real is None:
+            import importlib
+
+            self._real = importlib.import_module(self._name)
+        return getattr(self._real, name)
+
+
+def lazy_scipy_module(submodule):
+    """Return a lazy proxy for `scipy.<submodule>` that defers the import.
+
+    Use this for slow scipy submodules that are only needed at runtime in
+    `Op.perform` / `impl()` paths (e.g. `scipy.signal`, `scipy.special`,
+    `scipy.linalg`, `scipy.stats`). The proxy caches the real module on
+    first attribute access; subsequent calls hit the cached module directly.
+    """
+    return _LazyScipyModule(f"scipy.{submodule}")
 
 
 __excepthooks: list = []
