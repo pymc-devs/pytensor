@@ -37,6 +37,7 @@ from pytensor.tensor.basic import (
     ones_like,
     register_infer_shape,
     split,
+    stack,
     switch,
     zeros,
     zeros_like,
@@ -229,6 +230,96 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
 
         copy_stack_trace(node.outputs[0], new_output)
         return {client.outputs[0]: new_output}
+
+
+@register_stabilize
+@node_rewriter([Join])
+def local_dot_of_join(fgraph, node):
+    r"""Push ``dot`` inside a :class:`Join`, decomposing the matmul into per-leaf products.
+
+    When ``Join`` runs along the matmul-contracted axis, ``Y`` is split by symbolic per-leaf sizes and
+    the per-leaf products are summed. Otherwise each leaf multiplies ``Y`` directly and the results are concatenated.
+
+    Walks through chains of left-``expand_dims`` ``DimShuffle`` nodes between the Join and the matmul
+    (Blockwise stacks pads this way).
+    """
+    try:
+        join_axis = int(
+            get_underlying_scalar_constant_value(
+                node.inputs[0], raise_not_constant=True
+            )
+        )
+    except NotScalarConstantError:
+        return None
+
+    out_ndim = node.outputs[0].type.ndim
+    if join_axis < 0:
+        join_axis += out_ndim
+    # Only the last two axes participate in matmul; other axes are batch.
+    if join_axis not in (out_ndim - 1, out_ndim - 2):
+        return None
+
+    leaves = node.inputs[1:]
+    if len(leaves) < 2:
+        return None
+
+    join_out = node.outputs[0]
+    # Translate Join's axis (in its own ndim) to a "matmul axis" tag:
+    #   join_matmul_axis = -1  -> Join concatenates along the inner mat axis
+    #   join_matmul_axis = -2  -> Join concatenates along the outer mat axis
+    join_matmul_axis = join_axis - out_ndim  # -1 or -2
+
+    def _walk_to_matmul(var):
+        """Yield ``(matmul_node, input_idx)`` for every Dot/_matmul reachable
+        from ``var`` through a chain of left-expand-dims DimShuffles."""
+        for client, input_idx in fgraph.clients[var]:
+            if client.op in (_dot, _matmul):
+                yield client, input_idx
+            elif isinstance(client.op, DimShuffle) and client.op.is_left_expand_dims:
+                yield from _walk_to_matmul(client.outputs[0])
+
+    replacements: dict = {}
+    for client, client_idx in _walk_to_matmul(join_out):
+        if client.outputs[0] in replacements:
+            # ``dot(J, J)`` reaches the same matmul via both inputs, and
+            # ``ds(ds(J))`` (chained DimShuffles) reaches it via multiple
+            # paths. Either way: decompose once, let the next pass handle
+            # any side still wrapping the (now-fewer-clients) Join.
+            continue
+
+        other = client.inputs[1 - client_idx]
+        dot_op = client.op
+        old_out = client.outputs[0]
+
+        if client_idx == 0:
+            # Join @ other
+            if join_matmul_axis == -1:
+                widths = stack([leaf.shape[-1] for leaf in leaves])
+                other_chunks = split(other, splits_size=widths, axis=-2)
+                terms = [
+                    dot_op(leaf, chunk) for leaf, chunk in zip(leaves, other_chunks)
+                ]
+                new_output = add(*terms)
+            else:
+                terms = [dot_op(leaf, other) for leaf in leaves]
+                new_output = concat_with_broadcast(terms, axis=-2)
+        else:
+            # other @ Join
+            if join_matmul_axis == -1:
+                terms = [dot_op(other, leaf) for leaf in leaves]
+                new_output = concat_with_broadcast(terms, axis=-1)
+            else:
+                heights = stack([leaf.shape[-2] for leaf in leaves])
+                other_chunks = split(other, splits_size=heights, axis=-1)
+                terms = [
+                    dot_op(chunk, leaf) for chunk, leaf in zip(other_chunks, leaves)
+                ]
+                new_output = add(*terms)
+
+        copy_stack_trace(old_out, new_output)
+        replacements[old_out] = new_output
+
+    return replacements or None
 
 
 @register_canonicalize
