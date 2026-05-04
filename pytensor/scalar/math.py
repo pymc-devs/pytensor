@@ -9,7 +9,6 @@ from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
-from scipy import special
 
 from pytensor.configdefaults import config
 from pytensor.gradient import grad_not_implemented, grad_undefined
@@ -43,6 +42,11 @@ from pytensor.scalar.basic import (
 )
 from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.loop import ScalarLoop
+from pytensor.utils import lazy_scipy_module
+
+
+# scipy.special is considerably slow to import; defer to first use
+special = lazy_scipy_module("special")
 
 
 C_CODE_PATH = Path(__file__).parent / "c_code"
