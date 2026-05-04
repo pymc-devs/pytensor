@@ -6,15 +6,16 @@ from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import logit as scipy_logit
 from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
+from scipy.special import xlog1py as scipy_xlog1py
+from scipy.special import xlogy as scipy_xlogy
 
+from pytensor import grad
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import vectorize_graph
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.special import (
     LogSoftmax,
     Softmax,
-    SoftmaxGrad,
     beta,
     betaln,
     factorial,
@@ -22,6 +23,8 @@ from pytensor.tensor.special import (
     logit,
     poch,
     softmax,
+    xlog1py,
+    xlogy,
 )
 from pytensor.tensor.type import matrix, tensor, tensor3, tensor4, vector, vectors
 from tests import unittest_tools as utt
@@ -74,15 +77,15 @@ class TestSoftmax(utt.InferShapeTester):
         with pytest.raises(TypeError):
             Softmax(1.5)
 
-        x = [tensor3()] * LogSoftmax.nin
-        Softmax(2)(*x)
-        Softmax(-3)(*x)
+        x = tensor3()
+        Softmax(axis=2)(x)
+        Softmax(axis=-3)(x)
 
         with pytest.raises(ValueError):
-            Softmax(3)(*x)
+            Softmax(axis=3)(x)
 
         with pytest.raises(ValueError):
-            Softmax(-4)(*x)
+            Softmax(axis=-4)(x)
 
 
 class TestLogSoftmax(utt.InferShapeTester):
@@ -114,44 +117,15 @@ class TestLogSoftmax(utt.InferShapeTester):
         with pytest.raises(TypeError):
             LogSoftmax(1.5)
 
-        x = [tensor3()] * LogSoftmax.nin
-        LogSoftmax(2)(*x)
-        LogSoftmax(-3)(*x)
+        x = tensor3()
+        LogSoftmax(axis=2)(x)
+        LogSoftmax(axis=-3)(x)
 
         with pytest.raises(ValueError):
-            LogSoftmax(3)(*x)
+            LogSoftmax(axis=3)(x)
 
         with pytest.raises(ValueError):
-            LogSoftmax(-4)(*x)
-
-
-class TestSoftmaxGrad(utt.InferShapeTester):
-    def test_infer_shape(self):
-        admat = matrix()
-        bdmat = matrix()
-        rng = np.random.default_rng(utt.fetch_seed())
-        admat_val = rng.random((3, 4)).astype(config.floatX)
-        bdmat_val = rng.random((3, 4)).astype(config.floatX)
-        self._compile_and_check(
-            [admat, bdmat],
-            [SoftmaxGrad(axis=-1)(admat, bdmat)],
-            [admat_val, bdmat_val],
-            SoftmaxGrad,
-        )
-
-    def test_valid_axis(self):
-        with pytest.raises(TypeError):
-            SoftmaxGrad(1.5)
-
-        x = [tensor3()] * SoftmaxGrad.nin
-        SoftmaxGrad(2)(*x)
-        SoftmaxGrad(-3)(*x)
-
-        with pytest.raises(ValueError):
-            SoftmaxGrad(3)(*x)
-
-        with pytest.raises(ValueError):
-            SoftmaxGrad(-4)(*x)
+            LogSoftmax(axis=-4)(x)
 
 
 @pytest.mark.parametrize(
@@ -172,14 +146,11 @@ def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
     assert isinstance(out.owner.op, op)
 
     new_out = vectorize_graph(out, {x: batch_x})
+    assert isinstance(new_out.owner.op, op)
     if len(batch_axis) == 1:
-        assert isinstance(new_out.owner.op, op)
         assert (new_out.owner.op.axis,) == batch_axis
     else:
-        assert isinstance(new_out.owner.op, Blockwise) and isinstance(
-            new_out.owner.op.core_op, op
-        )
-        assert new_out.owner.op.core_op.axis == core_axis
+        assert new_out.owner.op.axis == batch_axis
 
 
 def test_poch():
@@ -244,3 +215,74 @@ def test_betaln():
     np.testing.assert_allclose(
         actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
+
+
+def test_xlogy():
+    x, y = vectors("x", "y")
+    out = xlogy(x, y)
+
+    f = function([x, y], out)
+    x_test = np.array([0.0, 0.5, 1.0, 2.0])
+    y_test = np.array([0.0, 0.5, 1.0, 2.0])
+    np.testing.assert_allclose(f(x_test, y_test), scipy_xlogy(x_test, y_test))
+
+    # test grad edge cases
+    gx, gy = grad(out.sum(), [x, y])
+    gf = function([x, y], [gx, gy])
+    # x=0, y=0: grad_x = log(0) = -inf, grad_y = 0/0 = nan
+    [gxv], [gyv] = gf(np.array([0.0]), np.array([0.0]))
+    assert gxv == -np.inf
+    assert np.isnan(gyv)
+    # x=0, y=1: grad_x = log(1) = 0, grad_y = 0/1 = 0
+    [gxv], [gyv] = gf(np.array([0.0]), np.array([1.0]))
+    np.testing.assert_allclose(gxv, 0.0)
+    np.testing.assert_allclose(gyv, 0.0)
+
+    rng = np.random.default_rng(239)
+    utt.verify_grad(xlogy, [rng.random((3, 4)), rng.random((3, 4))])
+
+
+def test_xlogy_as_xlogx():
+    x = vector("x")
+    out = xlogy(x, x)
+
+    f = function([x], out)
+    x_test = np.array([0.0, 0.5, 1.0, 2.0])
+    np.testing.assert_allclose(f(x_test), scipy_xlogy(x_test, x_test))
+
+    # test grad edge cases
+    gx = grad(out.sum(), x)
+    gf = function([x], gx)
+    # x=0: 1+log(0) = -inf
+    np.testing.assert_equal(gf(np.array([0.0]))[0], -np.inf)
+    # x=1: 1+log(1) = 1
+    np.testing.assert_allclose(gf(np.array([1.0]))[0], 1.0)
+
+    rng = np.random.default_rng(260)
+    utt.verify_grad(lambda x: xlogy(x, x), [rng.random((3, 4))])
+
+
+def test_xlog1py():
+    x, y = vectors("x", "y")
+    out = xlog1py(x, y)
+
+    f = function([x, y], out)
+
+    x_test = np.array([0.0, 0.5, 1.0, 2.0])
+    y_test = np.array([-1.0, 0.0, 1.0, 2.0])
+    np.testing.assert_allclose(f(x_test, y_test), scipy_xlog1py(x_test, y_test))
+
+    # test grad edge cases
+    gx, gy = grad(out.sum(), [x, y])
+    gf = function([x, y], [gx, gy])
+    # x=0, y=-1: grad_x = log1p(-1) = -inf, grad_y = 0/(1+(-1)) = nan
+    [gxv], [gyv] = gf(np.array([0.0]), np.array([-1.0]))
+    assert gxv == -np.inf
+    assert np.isnan(gyv)
+    # x=0, y=0: grad_x = log1p(0) = 0, grad_y = 0/1 = 0
+    [gxv], [gyv] = gf(np.array([0.0]), np.array([0.0]))
+    np.testing.assert_allclose(gxv, 0.0)
+    np.testing.assert_allclose(gyv, 0.0)
+
+    rng = np.random.default_rng(286)
+    utt.verify_grad(xlog1py, [rng.random((3, 4)), rng.random((3, 4))])
