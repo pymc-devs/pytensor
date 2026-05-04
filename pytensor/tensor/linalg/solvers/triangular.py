@@ -1,11 +1,11 @@
 from typing import cast
 
 import numpy as np
-from scipy.linalg import get_lapack_funcs
 
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.solvers.core import SolveBase, _default_b_ndim
 from pytensor.tensor.variable import TensorVariable
 
@@ -38,7 +38,7 @@ class SolveTriangular(SolveBase):
         if A.shape[0] != b.shape[0]:
             raise ValueError(f"shapes of a {A.shape} and b {b.shape} are incompatible")
 
-        (trtrs,) = get_lapack_funcs(("trtrs",), (A, b))
+        (trtrs,) = scipy_linalg.get_lapack_funcs(("trtrs",), (A, b))
 
         # Quick return for empty arrays
         if b.size == 0:

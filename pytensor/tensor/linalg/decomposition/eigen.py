@@ -2,7 +2,6 @@ import warnings
 from typing import cast
 
 import numpy as np
-import scipy.linalg as scipy_linalg
 
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
@@ -10,6 +9,7 @@ from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable, diag, eye, tril, triu
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_real_output_dtype
 from pytensor.tensor.math import sub, switch
 from pytensor.tensor.type import Variable, tensor, vector

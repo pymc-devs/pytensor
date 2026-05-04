@@ -2,11 +2,11 @@ import typing
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.linalg import get_lapack_funcs
 
 from pytensor.graph import Apply, Op
 from pytensor.tensor.basic import as_tensor, diagonal
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.type import tensor, vector
 from pytensor.tensor.variable import TensorVariable
 
@@ -64,7 +64,7 @@ class LUFactorTridiagonal(Op):
                 n = None
 
         dummy_arrays = [np.zeros((), dtype=inp.type.dtype) for inp in (dl, d, du)]
-        out_dtype = get_lapack_funcs("gttrf", dummy_arrays).dtype
+        out_dtype = scipy_linalg.get_lapack_funcs("gttrf", dummy_arrays).dtype
         outputs = [
             vector(shape=(None if n is None else (n - 1),), dtype=out_dtype),
             vector(shape=(n,), dtype=out_dtype),
@@ -75,7 +75,7 @@ class LUFactorTridiagonal(Op):
         return Apply(self, [dl, d, du], outputs)
 
     def perform(self, node, inputs, output_storage):
-        gttrf = get_lapack_funcs("gttrf", dtype=node.outputs[0].type.dtype)
+        gttrf = scipy_linalg.get_lapack_funcs("gttrf", dtype=node.outputs[0].type.dtype)
         dl, d, du, du2, ipiv, _ = gttrf(
             *inputs,
             overwrite_dl=self.overwrite_dl,
@@ -148,7 +148,7 @@ class SolveLUFactorTridiagonal(Op):
         dummy_arrays = [
             np.zeros((), dtype=inp.type.dtype) for inp in (dl, d, du, du2, b)
         ]
-        out_dtype = get_lapack_funcs("gttrs", dummy_arrays).dtype
+        out_dtype = scipy_linalg.get_lapack_funcs("gttrs", dummy_arrays).dtype
         if self.b_ndim == 1:
             output_shape = (n,)
         else:
@@ -158,7 +158,7 @@ class SolveLUFactorTridiagonal(Op):
         return Apply(self, [dl, d, du, du2, ipiv, b], outputs)
 
     def perform(self, node, inputs, output_storage):
-        gttrs = get_lapack_funcs("gttrs", dtype=node.outputs[0].type.dtype)
+        gttrs = scipy_linalg.get_lapack_funcs("gttrs", dtype=node.outputs[0].type.dtype)
         x, _ = gttrs(
             *inputs,
             overwrite_b=self.overwrite_b,

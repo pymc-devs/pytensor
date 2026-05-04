@@ -2,7 +2,6 @@ import warnings
 from typing import Literal
 
 import numpy as np
-from scipy import linalg as scipy_linalg
 
 from pytensor.graph import Apply, Op
 from pytensor.raise_op import CheckAndRaise
@@ -11,6 +10,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import tensor
 
