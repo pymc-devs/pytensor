@@ -7,7 +7,7 @@ import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
 from pytensor.scalar.basic import ScalarOp, get_scalar_type
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
+from pytensor.tensor.special import log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, tensor3, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
@@ -130,16 +130,6 @@ def test_logsoftmax(axis, dtype):
             compare_pytorch_and_py([x], [out], [test_input])
     else:
         compare_pytorch_and_py([x], [out], [test_input])
-
-
-@pytest.mark.parametrize("axis", [None, 0, 1])
-def test_softmax_grad(axis):
-    dy = matrix("dy")
-    dy_value = np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-    sm = matrix("sm")
-    sm_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
-    out = SoftmaxGrad(axis=axis)(dy, sm)
-    compare_pytorch_and_py([dy, sm], [out], [dy_value, sm_value])
 
 
 def test_cast():

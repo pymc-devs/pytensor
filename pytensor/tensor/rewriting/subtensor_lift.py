@@ -365,10 +365,10 @@ def local_subtensor_of_softmax(fgraph, node):
         else:
             # All dimensions are mixed, we can't lift the subtensor
             return None
+    elif len(axis) == 1:
+        axis = normalize_axis_index(axis[0], sm.ndim)
     else:
-        # Softmax currently only allows None or a single integer axis
-        # Unlike CAReduce it does not normalize negative indices
-        axis = normalize_axis_index(axis, sm.ndim)
+        return None
 
     [old_out] = node.outputs
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)

@@ -6,7 +6,7 @@ from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar import ScalarLoop
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, Sum
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+from pytensor.tensor.special import LogSoftmax, Softmax
 
 
 @pytorch_funcify.register(Elemwise)
@@ -129,9 +129,34 @@ def pytorch_funcify_min(op, **kwargs):
     return torch_min
 
 
+def _pytorch_softmax_dispatch(torch_fn, axis):
+    if axis is None:
+
+        def fn(x):
+            return torch_fn(x.ravel(), dim=0).reshape(x.shape)
+
+    elif len(axis) == 1:
+
+        def fn(x):
+            return torch_fn(x, dim=axis[0])
+
+    else:
+
+        def fn(x):
+            orig_shape = x.shape
+            x = torch.movedim(x, axis, tuple(range(-len(axis), 0)))
+            unflatten_shape = x.shape[: -len(axis)]
+            x = x.reshape(*unflatten_shape, -1)
+            x = torch_fn(x, dim=-1)
+            x = x.reshape(*unflatten_shape, *[orig_shape[a] for a in axis])
+            x = torch.movedim(x, tuple(range(-len(axis), 0)), axis)
+            return x
+
+    return fn
+
+
 @pytorch_funcify.register(Softmax)
 def pytorch_funcify_Softmax(op, **kwargs):
-    axis = op.axis
     dtype = kwargs["node"].inputs[0].dtype
 
     if not dtype.startswith("float"):
@@ -139,18 +164,11 @@ def pytorch_funcify_Softmax(op, **kwargs):
             "Pytorch Softmax is not currently implemented for non-float types."
         )
 
-    def softmax(x):
-        if axis is not None:
-            return torch.softmax(x, dim=axis)
-        else:
-            return torch.softmax(x.ravel(), dim=0).reshape(x.shape)
-
-    return softmax
+    return _pytorch_softmax_dispatch(torch.softmax, op.axis)
 
 
 @pytorch_funcify.register(LogSoftmax)
 def pytorch_funcify_LogSoftmax(op, **kwargs):
-    axis = op.axis
     dtype = kwargs["node"].inputs[0].dtype
 
     if not dtype.startswith("float"):
@@ -158,24 +176,7 @@ def pytorch_funcify_LogSoftmax(op, **kwargs):
             "Pytorch LogSoftmax is not currently implemented for non-float types."
         )
 
-    def log_softmax(x):
-        if axis is not None:
-            return torch.log_softmax(x, dim=axis)
-        else:
-            return torch.log_softmax(x.ravel(), dim=0).reshape(x.shape)
-
-    return log_softmax
-
-
-@pytorch_funcify.register(SoftmaxGrad)
-def jax_funcify_SoftmaxGrad(op, **kwargs):
-    axis = op.axis
-
-    def softmax_grad(dy, sm):
-        dy_times_sm = dy * sm
-        return dy_times_sm - torch.sum(dy_times_sm, dim=axis, keepdim=True) * sm
-
-    return softmax_grad
+    return _pytorch_softmax_dispatch(torch.log_softmax, op.axis)
 
 
 def elemwise_ravel_fn(base_fn, op, node, **kwargs):

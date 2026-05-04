@@ -15,7 +15,7 @@ from pytensor.scalar import add as scalar_add
 from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+from pytensor.tensor.special import LogSoftmax, Softmax
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     numba_mode,
@@ -409,53 +409,6 @@ def test_scalar_Elemwise_Clip():
     c = pt.clip(z, 1, 3)
 
     compare_numba_and_py(inputs, [c], [1, 1])
-
-
-@pytest.mark.parametrize(
-    "dy, sm, axis, exc",
-    [
-        (
-            (pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)),
-            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
-            None,
-            None,
-        ),
-        (
-            (pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)),
-            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
-            0,
-            None,
-        ),
-        (
-            (pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)),
-            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
-            1,
-            None,
-        ),
-    ],
-)
-def test_SoftmaxGrad(dy, sm, axis, exc):
-    dy, dy_test_value = dy
-    sm, sm_test_value = sm
-    g = SoftmaxGrad(axis=axis)(dy, sm)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [dy, sm],
-            [g],
-            [dy_test_value, sm_test_value],
-        )
-
-
-def test_SoftMaxGrad_constant_dy():
-    dy = pt.constant(np.zeros((3,), dtype=config.floatX))
-    sm = pt.vector(shape=(3,))
-    inputs = [sm]
-
-    g = SoftmaxGrad(axis=None)(dy, sm)
-
-    compare_numba_and_py(inputs, [g], [np.ones((3,), dtype=config.floatX)])
 
 
 @pytest.mark.parametrize(

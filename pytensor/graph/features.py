@@ -510,8 +510,8 @@ class FullHistory(Feature):
         from pytensor.graph.features import FullHistory
         from pytensor.graph.rewriting.utils import rewrite_graph
 
-        x = pt.scalar("x")
-        out = pt.log(pt.exp(x) / pt.sum(pt.exp(x)))
+        x = pt.vector("x")
+        out = pt.log(pt.exp(x) / pt.sum(pt.exp(x), keepdims=True))
 
         fg = FunctionGraph(outputs=[out])
         history = FullHistory()
@@ -528,22 +528,24 @@ class FullHistory(Feature):
                 pytensor.dprint(history.next())
 
     .. testoutput::
+        Log [id A] 5
+         └─ True_div [id B] 4
+            ├─ Exp [id C] 3
+            │  └─ x [id D]
+            └─ ExpandDims{axis=0} [id E] 2
+               └─ Sum{axes=None} [id F] 1
+                  └─ Exp [id G] 0
+                     └─ x [id D]
+        >> MergeOptimizer
         Log [id A] 4
          └─ True_div [id B] 3
-            ├─ Exp [id C] 2
-            │  └─ x [id D]
-            └─ Sum{axes=None} [id E] 1
-               └─ Exp [id F] 0
-                  └─ x [id D]
-        >> MergeOptimizer
-        Log [id A] 3
-         └─ True_div [id B] 2
             ├─ Exp [id C] 0
             │  └─ x [id D]
-            └─ Sum{axes=None} [id E] 1
-               └─ Exp [id C] 0
-                  └─ ···
-        >> local_mul_canonizer
+            └─ ExpandDims{axis=0} [id E] 2
+               └─ Sum{axes=None} [id F] 1
+                  └─ Exp [id C] 0
+                     └─ ···
+        >> local_softmax_stabilize
         Log [id A] 1
          └─ Softmax{axis=None} [id B] 0
             └─ x [id C]
@@ -564,22 +566,24 @@ class FullHistory(Feature):
         Log [id A] 1
          └─ Softmax{axis=None} [id B] 0
             └─ x [id C]
-        >> local_mul_canonizer
-        Log [id A] 3
-         └─ True_div [id B] 2
-            ├─ Exp [id C] 0
-            │  └─ x [id D]
-            └─ Sum{axes=None} [id E] 1
-               └─ Exp [id C] 0
-                  └─ ···
-        >> MergeOptimizer
+        >> local_softmax_stabilize
         Log [id A] 4
          └─ True_div [id B] 3
-            ├─ Exp [id C] 2
+            ├─ Exp [id C] 0
             │  └─ x [id D]
-            └─ Sum{axes=None} [id E] 1
-               └─ Exp [id F] 0
-                  └─ x [id D]
+            └─ ExpandDims{axis=0} [id E] 2
+               └─ Sum{axes=None} [id F] 1
+                  └─ Exp [id C] 0
+                     └─ ···
+        >> MergeOptimizer
+        Log [id A] 5
+         └─ True_div [id B] 4
+            ├─ Exp [id C] 3
+            │  └─ x [id D]
+            └─ ExpandDims{axis=0} [id E] 2
+               └─ Sum{axes=None} [id F] 1
+                  └─ Exp [id G] 0
+                     └─ x [id D]
 
 
     .. testcode::

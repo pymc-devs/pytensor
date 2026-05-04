@@ -50,7 +50,9 @@ def numba_deepcopy_tensor(x):
 
 
 @register_funcify_and_cache_key(OpFromGraph)
-def numba_funcify_OpFromGraph(op, node=None, **kwargs):
+def numba_funcify_OpFromGraph(
+    op, node=None, mode=NUMBA.excluding("symbolic_op_recognition"), **kwargs
+):
     _ = kwargs.pop("storage_map", None)
 
     # Apply inner rewrites
@@ -64,7 +66,7 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
         input_specs=input_specs,
         accept_inplace=True,
     )
-    NUMBA.optimizer(fgraph)
+    mode.optimizer(fgraph)
     output_specs = [Out(o, borrow=False) for o in fgraph.outputs]
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
     fgraph_fn, fgraph_cache_key = numba_funcify_and_cache_key(
