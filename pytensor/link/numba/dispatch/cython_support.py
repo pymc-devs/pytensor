@@ -27,6 +27,7 @@ _C_TO_NUMPY: dict[str, DTypeLike] = {
     "long double": np.longdouble,
     "float complex": np.csingle,
     "double complex": np.cdouble,
+    "Py_ssize_t": np.intp,
 }
 
 
@@ -83,8 +84,10 @@ class Signature:
         raw_args = groups["args"]
 
         decl_expr = re.compile(
-            rb"\s*(?P<type>((long )|(unsigned )|(signed )|(double )|)"
-            rb"((double)|(float)|(int)|(short)|(char)|(long)|(bool)|(complex)))"
+            rb"\s*(?P<type>"
+            rb"((long )|(unsigned )|(signed )|(double )|)"
+            rb"((double)|(float)|(int)|(short)|(char)|(long)|(bool)|(complex))"
+            rb"|Py_ssize_t)"
             rb"(\s(?P<name>[\w_]*))?\s*"
         )
 
