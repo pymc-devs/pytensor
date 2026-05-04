@@ -18,6 +18,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
+from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve
 from pytensor.tensor.linalg.solvers.linear_control import (
@@ -161,6 +162,23 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def solve_of_inv_to_matmul(fgraph, node):
+    """Replace solve(matrix_inverse(X), b) with X @ b.
+
+    If A = inv(X), then solve(A, b) finds x such that A @ x = b,
+    i.e., inv(X) @ x = b, so x = X @ b.
+    """
+    A, b = node.inputs
+
+    match A.owner_op_and_inputs:
+        case (Blockwise(MatrixInverse()), X):
+            new_out = X @ b
+            copy_stack_trace(node.outputs[0], new_out)
+            return [new_out]
 
 
 @register_canonicalize
