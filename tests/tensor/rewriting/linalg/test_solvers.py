@@ -10,6 +10,7 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import ancestors
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -28,6 +29,7 @@ from pytensor.tensor.rewriting.linalg.solvers import (
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_generic_solve_to_solve_triangular():
@@ -441,6 +443,22 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+def test_solve_of_inv_to_matmul(b_ndim):
+    X = pt.dmatrix("X")
+    b = pt.dvector("b") if b_ndim == 1 else pt.dmatrix("b")
+    out = solve(pt.linalg.inv(X), b, b_ndim=b_ndim)
+
+    # We include 'stabilize' because solve_of_inv_to_matmul is registered there.
+    # Note: rewrite_graph includes 'canonicalize' by default.
+    rewritten_out = rewrite_graph(out, include=["stabilize"])
+
+    # Verify the rewrite against stabilized 'X @ b' to ensure structural equality.
+    # stabilization lowers 'X @ b' (Matmul) to specific BLAS ops (like Dot).
+    expected = rewrite_graph(X @ b, include=["stabilize"])
+    assert_equal_computations([rewritten_out], [expected])
 
 
 @pytest.mark.parametrize(
