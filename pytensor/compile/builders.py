@@ -11,6 +11,7 @@ from itertools import chain
 from typing import cast
 
 from pytensor.compile.maker import function
+from pytensor.compile.mode import get_mode
 from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import DisconnectedType, disconnected_type, grad, pushforward
@@ -917,7 +918,9 @@ class OpFromGraph(Op, HasInnerGraph):
         if getattr(self, "_fn", None) is not None:
             return self._fn
 
-        self._fn = function(self.inner_inputs, self.inner_outputs, **self.kwargs)
+        kwargs = self.kwargs.copy()
+        mode = get_mode(kwargs.pop("mode", None)).excluding("symbolic_op_recognition")
+        self._fn = function(self.inner_inputs, self.inner_outputs, mode=mode, **kwargs)
         self._fn.trust_input = True
 
         return self._fn
@@ -940,3 +943,64 @@ class OpFromGraph(Op, HasInnerGraph):
         # zip strict not specified because we are in a hot loop
         for output, variable in zip(outputs, variables):
             output[0] = variable
+
+
+class SymbolicOp(OpFromGraph):
+    r"""OpFromGraph subclass that builds the inner graph from input types.
+
+    Subclasses define the forward graph via :meth:`build_inner_graph` and
+    optionally override :meth:`pullback` / :meth:`pushforward`.
+
+    Override :meth:`filter_inputs` to coerce raw arguments (e.g. Python
+    scalars) into typed Variables at call sites.
+
+    Set the class attribute ``inline`` to control whether the inner graph is
+    inlined during compilation (default ``False``).
+    """
+
+    inline: bool = False
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "__props__" in cls.__dict__:
+            # MetaType installs props-only __hash__ and __eq__ which ignores the inner graph
+            # override with fgraph-aware version
+            cls.__hash__ = OpFromGraph.__hash__
+            cls.__eq__ = OpFromGraph.__eq__
+
+    @staticmethod
+    def filter_inputs(*inputs):
+        return inputs
+
+    def build_inner_graph(self, *inputs) -> list[Variable]:
+        raise NotImplementedError
+
+    def __init__(self, input_types=None, **kwargs):
+        """Construct op for the given input Types.
+
+        When input_types is None, construction is deferred until the first
+        __call__, which inspects the actual input types and builds the graph.
+        """
+        for prop in getattr(type(self), "__props__", ()):
+            if prop in kwargs:
+                setattr(self, prop, kwargs.pop(prop))
+        self._init_kwargs = kwargs
+        if input_types is not None:
+            kwargs.setdefault("inline", type(self).inline)
+            kwargs.setdefault("strict", True)
+            dummy_inputs = [t() for t in input_types]
+            outputs = self.build_inner_graph(*dummy_inputs)
+            super().__init__(dummy_inputs, outputs, **kwargs)
+
+    def __call__(self, *inputs, **kwargs):
+        inputs = self.filter_inputs(*inputs)
+        input_types = tuple(inp.type for inp in inputs)
+
+        if hasattr(self, "fgraph") and input_types == tuple(self.input_types):
+            return super().__call__(*inputs, **kwargs)
+
+        init_kwargs = dict(self._init_kwargs)
+        for prop in getattr(type(self), "__props__", ()):
+            init_kwargs[prop] = getattr(self, prop)
+        op = type(self)(input_types=list(input_types), **init_kwargs)
+        return super(SymbolicOp, op).__call__(*inputs, **kwargs)
