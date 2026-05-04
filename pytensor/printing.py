@@ -540,6 +540,7 @@ def debugprint(
     print_destroy_map: bool = False,
     print_view_map: bool = False,
     print_memory_map: bool = False,
+    print_inner_graphs: bool | Literal["auto"] = "auto",
     print_fgraph_inputs: bool = False,
 ) -> "str | TextIO | Any":  # rich.tree.Tree when file="rich"
     r"""Print a graph as text.
@@ -600,6 +601,8 @@ def debugprint(
         Whether to print the `view_map`\s of printed objects
     print_memory_map
         Whether to set both `print_destroy_map` and `print_view_map` to ``True``.
+    print_inner_graphs: bool or "auto", optional.
+        Whether to print inner graphs. Default "auto" leaves it to PyTensor discretion, or a per Op basis.
     print_fgraph_inputs
         Print the inputs of `FunctionGraph`\s.
 
@@ -631,6 +634,20 @@ def debugprint(
     if print_memory_map:
         print_destroy_map = True
         print_view_map = True
+
+    if print_inner_graphs == "auto":
+        from pytensor.compile.builders import SymbolicOp
+
+        def _show_inner_graph(op):
+            return isinstance(op, HasInnerGraph) and not isinstance(op, SymbolicOp)
+    elif print_inner_graphs:
+
+        def _show_inner_graph(op):
+            return isinstance(op, HasInnerGraph)
+    else:
+
+        def _show_inner_graph(op):
+            return False
 
     inputs_to_print = []
     outputs_to_print = []
@@ -784,6 +801,17 @@ N.B.:
             print_destroy_map=print_destroy_map,
             print_view_map=print_view_map,
         )
+
+    # Look at inner Op of Elemwise | Blockwise, as those don't document themselves as HasInnerGraph Ops
+    inner_graph_vars = [
+        v
+        for v in inner_graph_vars
+        if _show_inner_graph(v.owner.op)
+        or (
+            hasattr(v.owner.op, "scalar_op") and _show_inner_graph(v.owner.op.scalar_op)
+        )
+        or (hasattr(v.owner.op, "core_op") and _show_inner_graph(v.owner.op.core_op))
+    ]
 
     if len(inner_graph_vars) > 0:
         print("", file=_file)
