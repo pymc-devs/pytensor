@@ -3,7 +3,6 @@ from typing import cast as type_cast
 
 import numpy as np
 from numpy import convolve as numpy_convolve
-from scipy.signal import convolve as scipy_convolve
 
 from pytensor.gradient import disconnected_type
 from pytensor.graph import Apply, Constant
@@ -18,6 +17,11 @@ from pytensor.tensor.pad import pad
 from pytensor.tensor.subtensor import flip
 from pytensor.tensor.type import tensor
 from pytensor.tensor.variable import TensorVariable
+from pytensor.utils import lazy_scipy_module
+
+
+# scipy.signal is considerably slow to import; defer to first use
+scipy_signal = lazy_scipy_module("signal")
 
 
 if TYPE_CHECKING:
@@ -256,7 +260,7 @@ class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
     def perform(self, node, inputs, outputs):
         in1, in2, full_mode = inputs
         mode = "full" if full_mode else "valid"
-        outputs[0][0] = scipy_convolve(in1, in2, mode=mode, method=self.method)
+        outputs[0][0] = scipy_signal.convolve(in1, in2, mode=mode, method=self.method)
 
 
 def convolve2d(
