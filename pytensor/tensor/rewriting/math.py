@@ -33,6 +33,7 @@ from pytensor.tensor.basic import (
     diagonal,
     expand_dims,
     get_underlying_scalar_constant_value,
+    join,
     moveaxis,
     ones_like,
     register_infer_shape,
@@ -320,6 +321,47 @@ def local_dot_of_join(fgraph, node):
         replacements[old_out] = new_output
 
     return replacements or None
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([DimShuffle])
+def local_transpose_of_join(fgraph, node):
+    r"""Rewrite Join(axis, *inputs).mT to Join(axis, *[inp.mT for inp in inputs])
+
+    Swap axis=-1 <-> axis=-2 when axis is one of the matrix axes and leave batch axes unchanged.
+    """
+    if not node.op.is_matrix_transpose:
+        return None
+
+    [src] = node.inputs
+    if src.owner is None or not isinstance(src.owner.op, Join):
+        return None
+
+    try:
+        join_axis = int(
+            get_underlying_scalar_constant_value(
+                src.owner.inputs[0], raise_not_constant=True
+            )
+        )
+    except NotScalarConstantError:
+        return None
+
+    src_ndim = src.type.ndim
+    if join_axis < 0:
+        join_axis += src_ndim
+
+    if join_axis == src_ndim - 1:
+        new_axis = src_ndim - 2
+    elif join_axis == src_ndim - 2:
+        new_axis = src_ndim - 1
+    else:
+        new_axis = join_axis  # batch axis, mT doesn't touch it
+
+    transposed_inputs = [inp.mT for inp in src.owner.inputs[1:]]
+    new_out = join(new_axis, *transposed_inputs)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize
