@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.linalg
 from numpy.testing import assert_allclose
 
 import pytensor
@@ -11,6 +12,7 @@ from pytensor.gradient import grad
 from pytensor.graph import ancestors
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
 from pytensor.tensor.linalg.solvers.core import SolveBase
@@ -439,3 +441,97 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "b_ndim, solve_fn, expected_op, batch",
+    [
+        (1, pt.linalg.solve, Solve, 0),
+        (2, pt.linalg.solve, Solve, 4),
+        (1, lambda T, b: solve_triangular(T, b, lower=True), SolveTriangular, 0),
+    ],
+    ids=["vector_b", "matrix_b_batched", "solve_triangular"],
+)
+def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, batch):
+    A_shape = (batch, 3, 3) if batch else (3, 3)
+    B_shape = (batch, 2, 2) if batch else (2, 2)
+    if b_ndim == 1:
+        b_shape = (batch, 5) if batch else (5,)
+    else:
+        b_shape = (batch, 5, 4) if batch else (5, 4)
+    A = pt.tensor("A", shape=A_shape)
+    B = pt.tensor("B", shape=B_shape)
+    b_var = pt.tensor("b", shape=b_shape)
+    f = function([A, B, b_var], solve_fn(pt.linalg.block_diag(A, B), b_var))
+
+    ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+    assert not any(isinstance(op, BlockDiagonal) for op in ops)
+    assert any(isinstance(op, expected_op) for op in ops)
+    if expected_op is SolveTriangular:
+        assert not any(isinstance(op, Solve) for op in ops)
+
+    rng = np.random.default_rng(0)
+    A_v, B_v, b_v = (
+        rng.normal(size=A_shape),
+        rng.normal(size=B_shape),
+        rng.normal(size=b_shape),
+    )
+    if expected_op is SolveTriangular:
+        # Make A and B lower-triangular so the per-block solve_triangular is valid.
+        A_v = np.tril(A_v) if not batch else np.stack([np.tril(a) for a in A_v])
+        B_v = np.tril(B_v) if not batch else np.stack([np.tril(b) for b in B_v])
+    if batch:
+        expected = np.stack(
+            [
+                np.linalg.solve(scipy.linalg.block_diag(A_v[i], B_v[i]), b_v[i])
+                for i in range(batch)
+            ]
+        )
+    else:
+        expected = np.linalg.solve(scipy.linalg.block_diag(A_v, B_v), b_v)
+    assert_allclose(f(A_v, B_v, b_v), expected, atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    "second_shape", [(2, 5), (None, None)], ids=["non_square", "unknown_shape"]
+)
+def test_block_diag_solve_pushdown_bails_when_blocks_not_provably_square(second_shape):
+    A = pt.matrix("A", shape=(3, 3))
+    second = pt.matrix("second", shape=second_shape)
+    y = pt.vector("y")
+    f = function([A, second, y], pt.linalg.solve(pt.linalg.block_diag(A, second), y))
+    assert [
+        n
+        for n in f.maker.fgraph.toposort()
+        if isinstance(getattr(n.op, "core_op", n.op), BlockDiagonal)
+    ]
+
+
+def test_block_diag_solve_pushdown_both_sides_block_diag():
+    A1, A2 = pt.matrix("A1", shape=(3, 3)), pt.matrix("A2", shape=(2, 2))
+    B1, B2 = pt.matrix("B1", shape=(3, 3)), pt.matrix("B2", shape=(2, 2))
+    A = pt.linalg.block_diag(A1, A2)
+    B = pt.linalg.block_diag(B1, B2)
+    f = function([A1, A2, B1, B2], pt.linalg.solve(A, B))
+
+    # Each Solve must consume the original A_i and B_i directly (not a slice or
+    # the materialized A/B block_diag). The output BlockDiagonal that wraps the
+    # per-block solves back together is expected and fine.
+    block_names = {"A1", "A2", "B1", "B2"}
+    solves = [
+        n
+        for n in f.maker.fgraph.toposort()
+        if isinstance(getattr(n.op, "core_op", n.op), Solve)
+    ]
+    assert len(solves) == 2
+    for n in solves:
+        assert {n.inputs[0].name, n.inputs[1].name} <= block_names
+
+    rng = np.random.default_rng(0)
+    A1_v, A2_v = rng.normal(size=(3, 3)), rng.normal(size=(2, 2))
+    B1_v, B2_v = rng.normal(size=(3, 3)), rng.normal(size=(2, 2))
+    expected = np.linalg.solve(
+        scipy.linalg.block_diag(A1_v, A2_v),
+        scipy.linalg.block_diag(B1_v, B2_v),
+    )
+    assert_allclose(f(A1_v, A2_v, B1_v, B2_v), expected, atol=1e-10)
