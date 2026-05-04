@@ -5366,3 +5366,150 @@ class TestDotOfJoin:
         fn = pytensor.function([a, b, c, d, x], out, mode=rewrite_mode)
         assert self._n_dots(fn) == 4
 
+    def test_depth_2_block_at_block(self):
+        # ``pt.block(X) @ pt.block(Y)`` cascades through the rewrite. With
+        # split-of-join lifting, every leaf product is exposed: 4 result
+        # entries x 2 inner products = 8 leaf-level dots.
+        a = pt.tensor("a", shape=(3, 3))
+        b = pt.tensor("b", shape=(3, 4))
+        c = pt.tensor("c", shape=(4, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        X = pt.block([[a, b], [c, d]])
+        fn = pytensor.function([a, b, c, d], X @ X, mode=rewrite_mode)
+        assert self._n_dots(fn) == 8
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 3))
+        b_v = rng.standard_normal((3, 4))
+        c_v = rng.standard_normal((4, 3))
+        d_v = rng.standard_normal((4, 4))
+        X_v = np.block([[a_v, b_v], [c_v, d_v]])
+        np.testing.assert_allclose(
+            fn(a_v, b_v, c_v, d_v), X_v @ X_v, atol=1e-12, rtol=1e-12
+        )
+
+    @pytest.mark.parametrize(
+        "lhs_t, rhs_t",
+        [(False, True), (True, False), (True, True)],
+        ids=["X@X.T", "X.T@X", "X.T@X.T"],
+    )
+    def test_depth_2_block_at_block_with_transpose(self, lhs_t, rhs_t):
+        # Matrix-transposed nested-Joins get canonicalized via
+        # ``local_transpose_of_join`` (transpose pushes to leaves). Then the
+        # ``Block @ Block`` cascade applies.
+        a = pt.tensor("a", shape=(3, 3))
+        b = pt.tensor("b", shape=(3, 4))
+        c = pt.tensor("c", shape=(4, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        X = pt.block([[a, b], [c, d]])
+        lhs = X.mT if lhs_t else X
+        rhs = X.mT if rhs_t else X
+        fn = pytensor.function([a, b, c, d], lhs @ rhs, mode=rewrite_mode)
+        assert self._n_dots(fn) == 8
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 3))
+        b_v = rng.standard_normal((3, 4))
+        c_v = rng.standard_normal((4, 3))
+        d_v = rng.standard_normal((4, 4))
+        X_v = np.block([[a_v, b_v], [c_v, d_v]])
+        ref_lhs = X_v.T if lhs_t else X_v
+        ref_rhs = X_v.T if rhs_t else X_v
+        np.testing.assert_allclose(
+            fn(a_v, b_v, c_v, d_v),
+            ref_lhs @ ref_rhs,
+            atol=1e-12,
+            rtol=1e-12,
+        )
+
+
+class TestSplitOfJoin:
+    @staticmethod
+    def _has_split(fn):
+        from pytensor.tensor.basic import Split
+
+        return any(isinstance(n.op, Split) for n in fn.maker.fgraph.toposort())
+
+    def test_matching_axis_matching_sizes_returns_inputs(self):
+        # Split(Join(axis=-2, A, B), [3, 4], axis=-2) -> A, B directly.
+        a = pt.tensor("a", shape=(3, 5))
+        b = pt.tensor("b", shape=(4, 5))
+        joined = pt.concatenate([a, b], axis=-2)
+        out_a, out_b = pt.split(joined, splits_size=[3, 4], n_splits=2, axis=-2)
+
+        fn = pytensor.function([a, b], [out_a, out_b], mode=rewrite_mode)
+        assert not self._has_split(fn)
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 5))
+        b_v = rng.standard_normal((4, 5))
+        ra, rb = fn(a_v, b_v)
+        np.testing.assert_array_equal(ra, a_v)
+        np.testing.assert_array_equal(rb, b_v)
+
+    def test_matching_axis_mismatched_sizes_skips(self):
+        # Split sizes don't match Join input sizes: don't fire.
+        a = pt.tensor("a", shape=(3, 5))
+        b = pt.tensor("b", shape=(4, 5))
+        joined = pt.concatenate([a, b], axis=-2)
+        # 3+4=7 total, but split as [2, 5] -- boundaries don't align with [3, 4].
+        out_a, out_b = pt.split(joined, splits_size=[2, 5], n_splits=2, axis=-2)
+
+        fn = pytensor.function([a, b], [out_a, out_b], mode=rewrite_mode)
+        assert self._has_split(fn)
+
+    def test_different_axis_distributes(self):
+        # Split(Join(axis=-2, A, B), [2, 3], axis=-1) distributes as
+        # Join(-2, Split(A, [2,3], -1)[k], Split(B, [2,3], -1)[k]) per k.
+        a = pt.tensor("a", shape=(3, 5))
+        b = pt.tensor("b", shape=(4, 5))
+        joined = pt.concatenate([a, b], axis=-2)  # shape (7, 5)
+        c0, c1 = pt.split(joined, splits_size=[2, 3], n_splits=2, axis=-1)
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 5))
+        b_v = rng.standard_normal((4, 5))
+        joined_v = np.concatenate([a_v, b_v], axis=-2)
+        ref0 = joined_v[:, :2]
+        ref1 = joined_v[:, 2:]
+
+        fn = pytensor.function([a, b], [c0, c1], mode=rewrite_mode)
+        r0, r1 = fn(a_v, b_v)
+        np.testing.assert_allclose(r0, ref0)
+        np.testing.assert_allclose(r1, ref1)
+
+    def test_x_at_s_at_xT_no_intermediate_materialization(self):
+        # X @ S @ X.T with X = Block. The (M, N) intermediate of X @ S no
+        # longer materializes -- no Split feeds from a Join (which would mean
+        # we just rebuilt and re-split a Block-shaped tensor).
+        a = pt.tensor("a", shape=(3, 3))
+        b = pt.tensor("b", shape=(3, 4))
+        c = pt.tensor("c", shape=(4, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        S = pt.tensor("S", shape=(7, 7))
+        X = pt.block([[a, b], [c, d]])
+        fn = pytensor.function([a, b, c, d, S], X @ S @ X.mT, mode=rewrite_mode)
+
+        from pytensor.tensor.basic import Join, Split
+
+        for n in fn.maker.fgraph.toposort():
+            if isinstance(n.op, Split):
+                src = n.inputs[0]
+                assert src.owner is None or not isinstance(src.owner.op, Join), (
+                    f"Split feeds from a Join -- intermediate concat not "
+                    f"decomposed: {n}"
+                )
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 3))
+        b_v = rng.standard_normal((3, 4))
+        c_v = rng.standard_normal((4, 3))
+        d_v = rng.standard_normal((4, 4))
+        S_v = rng.standard_normal((7, 7))
+        X_v = np.block([[a_v, b_v], [c_v, d_v]])
+        np.testing.assert_allclose(
+            fn(a_v, b_v, c_v, d_v, S_v),
+            X_v @ S_v @ X_v.T,
+            atol=1e-12,
+            rtol=1e-12,
+        )

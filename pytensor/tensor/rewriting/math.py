@@ -24,6 +24,7 @@ from pytensor.tensor.basic import (
     Alloc,
     Join,
     MakeVector,
+    Split,
     alloc,
     alloc_diag,
     as_tensor_variable,
@@ -447,6 +448,115 @@ def local_nested_join_to_block_diagonal(fgraph, node):
     new_out = block_diag(*diag_blocks)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+def _const_int_vector(var):
+    """Extract a Python ``list[int]`` from a vector :class:`Variable` if its
+    contents are statically known. Handles ``Constant`` and ``MakeVector`` of
+    scalar constants. Returns ``None`` otherwise.
+    """
+    if isinstance(var, Constant):
+        try:
+            arr = np.asarray(var.data)
+        except Exception:
+            return None
+        if arr.ndim != 1:
+            return None
+        return [int(x) for x in arr]
+    if var.owner is not None and isinstance(var.owner.op, MakeVector):
+        try:
+            return [
+                int(get_underlying_scalar_constant_value(inp, raise_not_constant=True))
+                for inp in var.owner.inputs
+            ]
+        except NotScalarConstantError:
+            return None
+    return None
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Split])
+def local_split_of_join(fgraph, node):
+    r"""Push :class:`Split` through :class:`Join`.
+
+    Two cases are handled:
+
+    - **Same axis, matching sizes.** ``Split(Join(a, X_0, ..., X_k),
+      [s_0, ..., s_k], axis=a)`` with ``s_i == X_i.shape[a]`` returns the
+      ``Join``'s inputs directly. The split exactly undoes the concat.
+
+    - **Different axis.** ``Split(Join(a, X_0, ..., X_k), [s_0, ...], axis=b)``
+      with ``a != b`` distributes the split through the join: each cut output
+      becomes ``Join(a, *[Split(X_i, axis=b)[k] for i])``. Slicing along an
+      orthogonal axis commutes with concatenation.
+
+    Together these unblock the cascades that show up after dot-of-Join
+    decomposition (e.g. ``Block @ Block``, ``X @ S @ X.T``): the resulting
+    ``Split(Join(...))`` patterns collapse to per-leaf operations instead of
+    materializing the assembled intermediate.
+    """
+    x, axis_var, splits_size_var = node.inputs
+    if x.owner is None or not isinstance(x.owner.op, Join):
+        return None
+
+    try:
+        split_axis = int(
+            get_underlying_scalar_constant_value(axis_var, raise_not_constant=True)
+        )
+        join_axis = int(
+            get_underlying_scalar_constant_value(
+                x.owner.inputs[0], raise_not_constant=True
+            )
+        )
+    except NotScalarConstantError:
+        return None
+
+    out_ndim = x.type.ndim
+    if split_axis < 0:
+        split_axis += out_ndim
+    if join_axis < 0:
+        join_axis += out_ndim
+
+    join_inputs = list(x.owner.inputs[1:])
+    n_splits = len(node.outputs)
+
+    if split_axis == join_axis:
+        # Matching axis: return Join's inputs directly when sizes line up.
+        if len(join_inputs) != n_splits:
+            return None
+        join_sizes = [inp.type.shape[join_axis] for inp in join_inputs]
+        if any(s is None for s in join_sizes):
+            return None
+        split_sizes = _const_int_vector(splits_size_var)
+        if split_sizes is None:
+            return None
+        if join_sizes != split_sizes:
+            return None
+        for inp in join_inputs:
+            copy_stack_trace(node.outputs[0], inp)
+        return list(join_inputs)
+
+    # Different axis: distribute Split through Join.
+    per_input_splits = [
+        split(
+            inp,
+            splits_size=splits_size_var,
+            n_splits=n_splits,
+            axis=split_axis,
+        )
+        for inp in join_inputs
+    ]
+    new_outputs = [
+        join(
+            join_axis,
+            *[per_input_splits[i][k] for i in range(len(join_inputs))],
+        )
+        for k in range(n_splits)
+    ]
+    for new_out in new_outputs:
+        copy_stack_trace(node.outputs[0], new_out)
+    return new_outputs
 
 
 @register_canonicalize
