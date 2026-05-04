@@ -19,6 +19,7 @@ __all__ = [
     "NPY_RAVEL_AXIS",
     "PYTHON_INT_BITWIDTH",
     "NoDuplicateOptWarningFilter",
+    "add_lazy_dispatcher",
     "call_subprocess_Popen",
     "get_unbound_function",
     "lazy_scipy_module",
@@ -55,6 +56,50 @@ def lazy_scipy_module(submodule):
     first attribute access; subsequent calls hit the cached module directly.
     """
     return _LazyScipyModule(f"scipy.{submodule}")
+
+
+def add_lazy_dispatcher(dispatcher):
+    """Extend a `functools.singledispatch` dispatcher with lazy fallback handlers.
+
+    The dispatcher gains a `register_lazy(fallback)` method. A fallback is
+    a callable `fallback(obj) -> handler | None`. When standard dispatch falls
+    through to the `object` default, registered fallbacks are tried in order;
+    the first to return a non-None handler has that handler registered for
+    `type(obj)` (so subsequent calls dispatch directly) and is then called.
+
+    This lets a package register a handler for a third-party type without
+    importing the third-party module at registration time -- the fallback can
+    detect the type by `type(obj).__module__` and trigger a lazy import only
+    when an instance actually shows up.
+
+    Calling this more than once on the same dispatcher is a no-op (returns
+    the already-extended dispatcher unchanged).
+    """
+    if hasattr(dispatcher, "register_lazy"):
+        return dispatcher
+
+    fallbacks: list = []
+    original_default = dispatcher.registry[object]
+
+    @dispatcher.register(object)
+    def _wrapped_default(arg, *args, **kwargs):
+        for fallback in fallbacks:
+            handler = fallback(arg)
+            # Guard against a fallback that hands back the wrapped default
+            # itself (e.g. when a lazy import didn't actually register a
+            # specific handler for type(arg)) -- registering it would cause
+            # infinite recursion on the next call.
+            if handler is not None and handler is not _wrapped_default:
+                dispatcher.register(type(arg))(handler)
+                return handler(arg, *args, **kwargs)
+        return original_default(arg, *args, **kwargs)
+
+    def register_lazy(fallback):
+        fallbacks.append(fallback)
+        return fallback
+
+    dispatcher.register_lazy = register_lazy
+    return dispatcher
 
 
 __excepthooks: list = []
