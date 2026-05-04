@@ -21,7 +21,7 @@ import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import config, printing
 from pytensor import scalar as ps
-from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.builders import SymbolicOp
 from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
@@ -3962,37 +3962,48 @@ def trace(a, offset=0, axis1=0, axis2=1):
     return diagonal(a, offset=offset, axis1=axis1, axis2=axis2).sum(-1)
 
 
-class AllocDiag(OpFromGraph):
-    """
-    Wrapper Op for alloc_diag graphs
-    """
+class AllocDiag(SymbolicOp):
+    """Allocate a diagonal matrix from a vector."""
 
-    def __init__(self, *args, axis1, axis2, offset, **kwargs):
+    __props__ = ("axis1", "axis2", "offset")
+
+    @staticmethod
+    def filter_inputs(*inputs):
+        return tuple(as_tensor_variable(inp) for inp in inputs)
+
+    def __init__(self, *, axis1, axis2, offset, **kwargs):
         self.axis1 = axis1
         self.axis2 = axis2
+        assert axis2 > axis1
         self.offset = offset
+        super().__init__(**kwargs)
 
-        super().__init__(*args, **kwargs, strict=True)
+    def build_inner_graph(self, diag):
+        result_shape = tuple(diag.shape)[:-1] + (diag.shape[-1] + abs(self.offset),) * 2
+        result = zeros(result_shape, dtype=diag.dtype)
+
+        idxs = arange(diag.shape[-1])
+        diagonal_slice = (slice(None),) * (len(result_shape) - 2) + (
+            idxs + np.maximum(0, -self.offset),
+            idxs + np.maximum(0, self.offset),
+        )
+
+        result = result[diagonal_slice].set(diag)
+
+        if diag.type.ndim > 1:
+            axes = list(range(diag.type.ndim - 1))
+            last_idx = axes[-1]
+            axes = [*axes[: self.axis1], last_idx + 1, *axes[self.axis1 :]]
+            axes = [*axes[: self.axis2], last_idx + 2, *axes[self.axis2 :]]
+            result = result.transpose(axes)
+
+        return [result]
 
     def __str__(self):
         return f"AllocDiag{{{self.axis1=}, {self.axis2=}, {self.offset=}}}"
 
     @staticmethod
     def is_offset_zero(node) -> bool:
-        """
-        Test if an AllocDiag Op has a diagonal offset of zero
-
-        Parameters
-        ----------
-        node
-            AllocDiag node to test
-
-        Returns
-        -------
-        is_offset_zero: bool
-            True if the offset is zero (``k = 0``).
-        """
-
         return node.op.offset == 0
 
 
@@ -4001,39 +4012,11 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
 
     diagonal(alloc_diag(x)) == x
     """
-    from pytensor.tensor import set_subtensor
-
     diag = as_tensor_variable(diag)
-
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
     if axis1 > axis2:
         axis1, axis2 = axis2, axis1
-
-    # Create array with one extra dimension for resulting matrix
-    result_shape = tuple(diag.shape)[:-1] + (diag.shape[-1] + abs(offset),) * 2
-    result = zeros(result_shape, dtype=diag.dtype)
-
-    # Create slice for diagonal in final 2 axes
-    idxs = arange(diag.shape[-1])
-    diagonal_slice = (slice(None),) * (len(result_shape) - 2) + (
-        idxs + np.maximum(0, -offset),
-        idxs + np.maximum(0, offset),
-    )
-
-    # Fill in final 2 axes with diag
-    result = set_subtensor(result[diagonal_slice], diag)
-
-    if diag.type.ndim > 1:
-        # Re-order axes so they correspond to diagonals at axis1, axis2
-        axes = list(range(diag.type.ndim - 1))
-        last_idx = axes[-1]
-        axes = [*axes[:axis1], last_idx + 1, *axes[axis1:]]
-        axes = [*axes[:axis2], last_idx + 2, *axes[axis2:]]
-        result = result.transpose(axes)
-
-    return AllocDiag(
-        inputs=[diag], outputs=[result], axis1=axis1, axis2=axis2, offset=offset
-    )(diag)
+    return AllocDiag(axis1=axis1, axis2=axis2, offset=offset)(diag)
 
 
 def diag(v, k=0):
