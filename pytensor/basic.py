@@ -2,6 +2,7 @@ from functools import singledispatch
 from typing import Any
 
 from pytensor.graph import Variable
+from pytensor.utils import add_lazy_dispatcher
 
 
 def as_symbolic(x: Any, name: str | None = None, **kwargs) -> Variable:
@@ -40,3 +41,6 @@ def _as_symbolic(x: Any, **kwargs) -> Variable:
     from pytensor.tensor import as_tensor_variable
 
     return as_tensor_variable(x, **kwargs)
+
+
+add_lazy_dispatcher(_as_symbolic)

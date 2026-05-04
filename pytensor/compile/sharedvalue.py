@@ -10,6 +10,7 @@ from pytensor.graph.basic import Variable
 from pytensor.graph.utils import add_tag_trace
 from pytensor.link.basic import Container
 from pytensor.link.c.type import generic
+from pytensor.utils import add_lazy_dispatcher
 
 
 if TYPE_CHECKING:
@@ -223,3 +224,6 @@ def shared_constructor(value, name=None, strict=False, allow_downcast=None, **kw
         allow_downcast=allow_downcast,
         name=name,
     )
+
+
+add_lazy_dispatcher(shared_constructor)
