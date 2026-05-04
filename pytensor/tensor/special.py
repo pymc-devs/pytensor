@@ -9,7 +9,18 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
-from pytensor.tensor.math import gamma, gammaln, log, neg, sum
+from pytensor.tensor.math import (
+    eq,
+    gamma,
+    gammaln,
+    log,
+    log1p,
+    mul,
+    neg,
+    sum,
+    switch,
+)
+from pytensor.tensor.symbolic import TensorSymbolicOp
 
 
 class SoftmaxGrad(COp):
@@ -808,6 +819,76 @@ def betaln(a, b):
     return gammaln(a) + gammaln(b) - gammaln(a + b)
 
 
+class XLogY(TensorSymbolicOp):
+    """Compute x * log(y), returning 0 when x = 0.
+
+    Matches :func:`scipy.special.xlogy`. The gradient is not masked at x=0,
+    matching the mathematically correct result (``-inf`` when y=0).
+    """
+
+    inline = True
+
+    def build_inner_graph(self, x, y):
+        return [switch(eq(x, 0), 0, mul(x, log(y)))]
+
+    def pullback(self, inputs, outputs, output_grads):
+        x, y = inputs
+        (gz,) = output_grads
+        return [gz * log(y), gz * x / y]
+
+
+_xlogy = XLogY()
+
+
+def xlogy(x, y):
+    """Compute x * log(y), returning 0 when x = 0.
+
+    Matches :func:`scipy.special.xlogy`.
+
+    Parameters
+    ----------
+    x : array_like
+    y : array_like
+
+    """
+    return _xlogy(x, y)
+
+
+class XLog1PY(TensorSymbolicOp):
+    """Compute x * log(1 + y), returning 0 when x = 0.
+
+    Matches :func:`scipy.special.xlog1py`. The gradient is not masked at x=0,
+    matching the mathematically correct result.
+    """
+
+    inline = True
+
+    def build_inner_graph(self, x, y):
+        return [switch(eq(x, 0), 0, mul(x, log1p(y)))]
+
+    def pullback(self, inputs, outputs, output_grads):
+        x, y = inputs
+        (gz,) = output_grads
+        return [gz * log1p(y), gz * x / (1 + y)]
+
+
+_xlog1py = XLog1PY()
+
+
+def xlog1py(x, y):
+    """Compute x * log(1 + y), returning 0 when x = 0.
+
+    Matches :func:`scipy.special.xlog1py`.
+
+    Parameters
+    ----------
+    x : array_like
+    y : array_like
+
+    """
+    return _xlog1py(x, y)
+
+
 __all__ = [
     "beta",
     "betaln",
@@ -816,4 +897,6 @@ __all__ = [
     "logit",
     "poch",
     "softmax",
+    "xlog1py",
+    "xlogy",
 ]
