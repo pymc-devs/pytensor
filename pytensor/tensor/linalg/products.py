@@ -1,13 +1,13 @@
 import scipy.linalg as scipy_linalg
 
 from pytensor import tensor as pt
-from pytensor.compile.builders import OpFromGraph
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.symbolic import TensorSymbolicOp
 from pytensor.tensor.type import matrix
 
 
@@ -72,50 +72,45 @@ class Expm(Op):
 expm = Blockwise(Expm())
 
 
-class KroneckerProduct(OpFromGraph):
-    """
-    Wrapper Op for Kronecker graphs
-    """
+class KroneckerProduct(TensorSymbolicOp):
+    """Kronecker product Op."""
+
+    def build_inner_graph(self, a, b):
+        if a.ndim + b.ndim <= 2:
+            raise TypeError(
+                "kron: inputs dimensions must sum to 3 or more. "
+                f"You passed {int(a.ndim)} and {int(b.ndim)}."
+            )
+        if a.ndim < b.ndim:
+            a = ptb.expand_dims(a, tuple(range(b.ndim - a.ndim)))
+        elif b.ndim < a.ndim:
+            b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
+        a_reshaped = ptb.expand_dims(a, tuple(range(1, 2 * a.ndim, 2)))
+        b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
+        out_shape = tuple(a.shape[i] * b.shape[i] for i in range(a.ndim))
+        output = (a_reshaped * b_reshaped).reshape(out_shape)
+        return [output]
+
+
+_kron = KroneckerProduct()
 
 
 def kron(a, b):
     """Kronecker product.
 
-    Same as np.kron(a, b)
+    Same as ``np.kron(a, b)``.
 
     Parameters
     ----------
-    a: array_like
-    b: array_like
+    a : array_like
+    b : array_like
 
     Returns
     -------
     array_like with a.ndim + b.ndim - 2 dimensions
+
     """
-    a = as_tensor_variable(a)
-    b = as_tensor_variable(b)
-
-    if a is b:
-        # In case a is the same as b, we need a different variable to build the OFG
-        b = a.copy()
-
-    if a.ndim + b.ndim <= 2:
-        raise TypeError(
-            "kron: inputs dimensions must sum to 3 or more. "
-            f"You passed {int(a.ndim)} and {int(b.ndim)}."
-        )
-
-    if a.ndim < b.ndim:
-        a = ptb.expand_dims(a, tuple(range(b.ndim - a.ndim)))
-    elif b.ndim < a.ndim:
-        b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
-    a_reshaped = ptb.expand_dims(a, tuple(range(1, 2 * a.ndim, 2)))
-    b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
-    out_shape = tuple(a.shape[i] * b.shape[i] for i in range(a.ndim))
-    output_out_of_shape = a_reshaped * b_reshaped
-    output_reshaped = output_out_of_shape.reshape(out_shape)
-
-    return KroneckerProduct(inputs=[a, b], outputs=[output_reshaped])(a, b)
+    return _kron(a, b)
 
 
 def matrix_dot(*args):
