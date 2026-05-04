@@ -46,7 +46,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
-from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor.math import (
     Dot,
     Prod,
@@ -360,6 +360,91 @@ def local_transpose_of_join(fgraph, node):
 
     transposed_inputs = [inp.mT for inp in src.owner.inputs[1:]]
     new_out = join(new_axis, *transposed_inputs)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Join])
+def local_nested_join_to_block_diagonal(fgraph, node):
+    r"""Recognize a square 2-D block-matrix-shaped concatenation whose
+    off-diagonal entries are statically zero, and rewrite to :func:`block_diag`.
+
+    Detects ``Join(axis=-2, *Join(axis=-1, ...))`` -- an outer row-concat whose
+    every input is itself a column-concat -- with uniform structure (n x n
+    square grid) and statically-zero off-diagonal leaves. Replaces with
+    ``BlockDiagonal`` to unlock its targeted rewrites (det, diag, trace, dot,
+    solve pushdowns).
+    """
+    out_ndim = node.outputs[0].type.ndim
+    if out_ndim < 2:
+        return None
+
+    try:
+        outer_axis = int(
+            get_underlying_scalar_constant_value(
+                node.inputs[0], raise_not_constant=True
+            )
+        )
+    except NotScalarConstantError:
+        return None
+    if outer_axis < 0:
+        outer_axis += out_ndim
+    if outer_axis != out_ndim - 2:
+        return None
+
+    rows = node.inputs[1:]
+    n_rows = len(rows)
+    if n_rows < 2:
+        return None
+
+    leaves = []
+    n_cols = None
+    for row in rows:
+        if row.owner is None or not isinstance(row.owner.op, Join):
+            return None
+        try:
+            inner_axis = int(
+                get_underlying_scalar_constant_value(
+                    row.owner.inputs[0], raise_not_constant=True
+                )
+            )
+        except NotScalarConstantError:
+            return None
+        if inner_axis < 0:
+            inner_axis += row.type.ndim
+        if inner_axis != row.type.ndim - 1:
+            return None
+        row_leaves = list(row.owner.inputs[1:])
+        if n_cols is None:
+            n_cols = len(row_leaves)
+        elif len(row_leaves) != n_cols:
+            return None  # ragged
+        leaves.append(row_leaves)
+
+    # Square grid only.
+    if n_rows != n_cols:
+        return None
+
+    diag_blocks = []
+    for i in range(n_rows):
+        for j in range(n_cols):
+            leaf = leaves[i][j]
+            if i == j:
+                diag_blocks.append(leaf)
+            elif (
+                get_underlying_scalar_constant_value(
+                    leaf, only_process_constants=False, raise_not_constant=False
+                )
+                != 0
+            ):
+                return None
+
+    if len(diag_blocks) < 2:
+        return None
+
+    new_out = block_diag(*diag_blocks)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 

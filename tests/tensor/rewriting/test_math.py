@@ -5118,6 +5118,54 @@ class TestBlockDiagDotToDotBlockDiag:
         assert_equal_computations([rewritten], [original])
 
 
+class TestNestedJoinToBlockDiagonal:
+    @staticmethod
+    def _has_block_diagonal(fn):
+        return any(
+            isinstance(n.op, Blockwise) and isinstance(n.op.core_op, BlockDiagonal)
+            for n in fn.maker.fgraph.toposort()
+        )
+
+    def test_zeros_off_diagonal_canonicalizes(self):
+        # Square nested-Join with statically-zero off-diagonals -> BlockDiagonal.
+        a = pt.tensor("a", shape=(3, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        M = pt.block([[a, pt.zeros((3, 4))], [pt.zeros((4, 3)), d]])
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 3))
+        d_v = rng.standard_normal((4, 4))
+        fn = pytensor.function([a, d], M, mode=rewrite_mode)
+        np.testing.assert_allclose(
+            fn(a_v, d_v),
+            np.block([[a_v, np.zeros((3, 4))], [np.zeros((4, 3)), d_v]]),
+            atol=1e-12,
+            rtol=1e-12,
+        )
+
+    def test_nonzero_off_diagonal_skips(self):
+        # Off-diagonal isn't statically zero -> don't canonicalize.
+        a = pt.tensor("a", shape=(3, 3))
+        b = pt.tensor("b", shape=(3, 4))
+        c = pt.tensor("c", shape=(4, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        M = pt.block([[a, b], [c, d]])
+
+        fn = pytensor.function([a, b, c, d], M, mode=rewrite_mode)
+        assert not self._has_block_diagonal(fn)
+
+    def test_non_square_skips(self):
+        # 2x3 grid (non-square) -> not a candidate.
+        a = pt.tensor("a", shape=(3, 4))
+        b = pt.tensor("b", shape=(3, 4))
+        c = pt.tensor("c", shape=(3, 4))
+        z = pt.zeros((3, 4))
+        M = pt.block([[a, z, z], [b, z, c]])
+
+        fn = pytensor.function([a, b, c], M, mode=rewrite_mode)
+        assert not self._has_block_diagonal(fn)
+
+
 class TestDotOfJoin:
     @staticmethod
     def _n_dots(fn):
