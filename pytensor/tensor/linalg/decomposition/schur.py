@@ -1,14 +1,13 @@
 from typing import Literal
 
 import numpy as np
-from scipy import linalg as scipy_linalg
-from scipy.linalg import get_lapack_funcs
 
 import pytensor
 from pytensor.graph import Apply, Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import matrix, vector
 from pytensor.tensor.variable import TensorVariable
@@ -443,7 +442,7 @@ class QZ(Op):
             sort_function, _ = self.make_sort_function()
             select = sort_function(alpha, beta)
 
-            tgsen = get_lapack_funcs("tgsen", (AA, BB))
+            tgsen = scipy_linalg.get_lapack_funcs("tgsen", (AA, BB))
             lwork = 4 * AA.shape[0] + 16 if gges_type in "sd" else 1
             AA, BB, *ab, Q, Z, _, _, _, _, info = tgsen(
                 select,

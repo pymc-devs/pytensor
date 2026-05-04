@@ -83,9 +83,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
-from scipy.linalg import get_blas_funcs
 
 from pytensor.graph import Variable, vectorize_graph
+from pytensor.tensor.linalg._lazy import scipy_linalg
 
 
 try:
@@ -135,13 +135,11 @@ def view_roots(node: Variable) -> list[Variable]:
 
 def must_initialize_y_gemv():
     # Check whether Scipy GEMV could output nan if y in not initialized
-    from scipy.linalg.blas import get_blas_funcs
-
     if must_initialize_y_gemv._result is None:
         y = np.full((2,), np.nan)
         x = np.ones((2,))
         A = np.ones((2, 2))
-        gemv = get_blas_funcs("gemv", dtype=y.dtype)
+        gemv = scipy_linalg.get_blas_funcs("gemv", dtype=y.dtype)
         gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
         must_initialize_y_gemv._result = np.isnan(y).any()
 
@@ -200,15 +198,13 @@ class Gemv(Op):
         return Apply(self, inputs, [y.type()])
 
     def perform(self, node, inputs, out_storage):
-        from scipy.linalg.blas import get_blas_funcs
-
         y, alpha, A, x, beta = inputs
         if (
             y.shape[0] != 0
             and x.shape[0] != 0
             and y.dtype in {"float32", "float64", "complex64", "complex128"}
         ):
-            gemv = get_blas_funcs("gemv", dtype=y.dtype)
+            gemv = scipy_linalg.get_blas_funcs("gemv", dtype=y.dtype)
 
             if A.shape[0] != y.shape[0] or A.shape[1] != x.shape[0]:
                 raise ValueError(
@@ -312,7 +308,7 @@ class Ger(Op):
         A, alpha, x, y = inputs
         if A.size:
             # GER doesn't handle zero-sized inputs
-            ger_func = get_blas_funcs("ger", dtype=A.dtype)
+            ger_func = scipy_linalg.get_blas_funcs("ger", dtype=A.dtype)
             if A.flags["C_CONTIGUOUS"]:
                 # Work on transposed system to avoid copying
                 A = ger_func(alpha, y, x, a=A.T, overwrite_a=self.destructive).T

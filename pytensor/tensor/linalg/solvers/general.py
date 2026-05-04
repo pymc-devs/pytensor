@@ -2,12 +2,12 @@ import warnings
 from functools import partial
 
 import numpy as np
-import scipy.linalg as scipy_linalg
 
 from pytensor import tensor as pt
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import diagonal
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.decomposition.lu import pivot_to_permutation
 from pytensor.tensor.linalg.solvers.core import SolveBase, _default_b_ndim
 from pytensor.tensor.linalg.solvers.triangular import solve_triangular

@@ -1,7 +1,6 @@
 from typing import Literal, cast
 
 import numpy as np
-from scipy.linalg import get_lapack_funcs
 
 import pytensor
 import pytensor.tensor.basic as ptb
@@ -12,6 +11,7 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable, zeros
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.functional import vectorize
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.decomposition.lu import lu
 from pytensor.tensor.linalg.decomposition.qr import qr
 from pytensor.tensor.linalg.decomposition.schur import qz, schur
@@ -69,7 +69,7 @@ class TRSYL(Op):
         X = outputs_storage[0]
 
         out_dtype = node.outputs[0].type.dtype
-        (trsyl,) = get_lapack_funcs(("trsyl",), (A, B, C))
+        (trsyl,) = scipy_linalg.get_lapack_funcs(("trsyl",), (A, B, C))
 
         if A.size == 0 or B.size == 0:
             return np.empty_like(C, dtype=out_dtype)

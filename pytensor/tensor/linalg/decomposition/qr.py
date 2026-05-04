@@ -1,7 +1,6 @@
 from typing import Literal, cast
 
 import numpy as np
-from scipy.linalg import get_lapack_funcs
 
 from pytensor import ifelse
 from pytensor import tensor as pt
@@ -13,6 +12,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import tensor
 
@@ -156,13 +156,13 @@ class QR(Op):
         M, N = x.shape
 
         if self.pivoting:
-            (geqp3,) = get_lapack_funcs(("geqp3",), (x,))
+            (geqp3,) = scipy_linalg.get_lapack_funcs(("geqp3",), (x,))
             qr, jpvt, tau, *_work_info = self._call_and_get_lwork(
                 geqp3, x, lwork=-1, overwrite_a=self.overwrite_a
             )
             jpvt -= 1  # geqp3 returns a 1-based index array, so subtract 1
         else:
-            (geqrf,) = get_lapack_funcs(("geqrf",), (x,))
+            (geqrf,) = scipy_linalg.get_lapack_funcs(("geqrf",), (x,))
             qr, tau, *_work_info = self._call_and_get_lwork(
                 geqrf, x, lwork=-1, overwrite_a=self.overwrite_a
             )
@@ -194,7 +194,7 @@ class QR(Op):
             outputs[2][0] = R
             return
 
-        (gor_un_gqr,) = get_lapack_funcs(("orgqr",), (qr,))
+        (gor_un_gqr,) = scipy_linalg.get_lapack_funcs(("orgqr",), (qr,))
 
         if M < N:
             Q, _work, _info = self._call_and_get_lwork(

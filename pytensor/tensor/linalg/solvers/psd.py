@@ -1,11 +1,11 @@
 import numpy as np
-from scipy.linalg import get_lapack_funcs
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.linalg.solvers.core import SolveBase, _default_b_ndim
 from pytensor.tensor.type import tensor
@@ -35,7 +35,7 @@ class CholeskySolve(SolveBase):
     def perform(self, node, inputs, output_storage):
         c, b = inputs
 
-        (potrs,) = get_lapack_funcs(("potrs",), (c, b))
+        (potrs,) = scipy_linalg.get_lapack_funcs(("potrs",), (c, b))
 
         if c.shape[0] != c.shape[1]:
             raise ValueError("The factored matrix c is not square.")

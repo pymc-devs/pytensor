@@ -2,8 +2,6 @@ from collections.abc import Sequence
 from typing import cast
 
 import numpy as np
-from scipy import linalg as scipy_linalg
-from scipy.linalg import get_lapack_funcs
 
 from pytensor import tensor as pt
 from pytensor.gradient import DisconnectedType
@@ -12,6 +10,7 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import (
     linalg_output_dtype,
     linalg_real_output_dtype,
@@ -280,7 +279,7 @@ class LUFactor(Op):
             outputs[1][0] = np.array([], dtype=np.int32)
             return
 
-        (getrf,) = get_lapack_funcs(("getrf",), (A,))
+        (getrf,) = scipy_linalg.get_lapack_funcs(("getrf",), (A,))
         LU, p, info = getrf(A, overwrite_a=self.overwrite_a)
         if info != 0:
             LU[...] = np.nan
