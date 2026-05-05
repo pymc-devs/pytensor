@@ -153,7 +153,7 @@ class XLogY(TensorSymbolicOp):
     matching the mathematically correct result (``-inf`` when y=0).
     """
 
-    # Inlined late (at specialize) by `late_inline_xlogy_xlog1py` so the inner
+    # Inlined late (at specialize) by `late_inline_OpFromGraph` so the inner
     # `x * log(y)` is hidden from canonicalize/stabilize rewrites that are
     # unsafe at infinity (e.g. `local_greedy_distributor` turns
     # `(a-1)*log(y)` into `a*log(y) - log(y)`, which yields nan when log(y) is
