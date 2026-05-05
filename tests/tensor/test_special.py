@@ -283,3 +283,35 @@ def test_xlog1py():
 
     rng = np.random.default_rng(286)
     utt.verify_grad(xlog1py, [rng.random((3, 4)), rng.random((3, 4))])
+
+
+def test_xlogy_no_distribute_at_boundary():
+    """Regression test: ``xlogy((a - 1), y)`` must not be algebraically
+    distributed into ``a*log(y) - log(y)`` when canonicalize/stabilize run.
+
+    The distribution is mathematically valid for finite values but breaks at
+    the boundary where ``log(y) = -inf``: ``a*(-inf) - (-inf) = nan``.
+
+    This pattern shows up in the chi-squared log-pdf
+    ``xlogy(nu/2 - 1, x)`` at ``x = 0`` with ``nu > 2``, where the answer
+    must be ``-inf`` (so the pdf at 0 is 0).
+
+    Achieved by keeping ``XLogY.inline = False``, which hides the inner
+    ``x * log(y)`` from `local_greedy_distributor`.
+    """
+    nu = tensor("nu", shape=(), dtype="int64")
+    x = vector("x")
+    f = function([nu, x], xlogy(nu / 2 - 1, x))
+    out = f(np.int64(3), np.array([0.0, 1.0, 2.0]))
+    np.testing.assert_array_equal(out, np.array([-np.inf, 0.0, 0.5 * np.log(2.0)]))
+
+
+def test_xlog1py_no_distribute_at_boundary():
+    """See ``test_xlogy_no_distribute_at_boundary``. Same hazard for
+    ``xlog1py`` at ``y = -1`` where ``log1p(y) = -inf``.
+    """
+    a = tensor("a", shape=(), dtype="int64")
+    y = vector("y")
+    f = function([a, y], xlog1py(a / 2 - 1, y))
+    out = f(np.int64(3), np.array([-1.0, 0.0, 1.0]))
+    np.testing.assert_array_equal(out, np.array([-np.inf, 0.0, 0.5 * np.log(2.0)]))
