@@ -153,7 +153,12 @@ class XLogY(TensorSymbolicOp):
     matching the mathematically correct result (``-inf`` when y=0).
     """
 
-    inline = True
+    # Inlined late (at specialize) by `late_inline_OpFromGraph` so the inner
+    # `x * log(y)` is hidden from canonicalize/stabilize rewrites that are
+    # unsafe at infinity (e.g. `local_greedy_distributor` turns
+    # `(a-1)*log(y)` into `a*log(y) - log(y)`, which yields nan when log(y) is
+    # -inf at the boundary). After stabilize the body is exposed for fusion.
+    inline = False
 
     def build_inner_graph(self, x, y):
         return [switch(eq(x, 0), 0, mul(x, log(y)))]
@@ -188,7 +193,8 @@ class XLog1PY(TensorSymbolicOp):
     matching the mathematically correct result.
     """
 
-    inline = True
+    # See note on `XLogY.inline`. Same hazard at y = -1 where log1p(y) = -inf.
+    inline = False
 
     def build_inner_graph(self, x, y):
         return [switch(eq(x, 0), 0, mul(x, log1p(y)))]

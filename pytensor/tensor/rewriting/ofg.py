@@ -6,6 +6,7 @@ from pytensor.graph import Apply, Variable, clone_replace, node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.special import XLog1PY, XLogY
 
 
 def inline_ofg_node(node: Apply) -> list[Variable]:
@@ -44,7 +45,7 @@ optdb.register(
 
 
 @register_specialize("inline_ofg")
-@node_rewriter([AllocDiag])
+@node_rewriter([AllocDiag, XLogY, XLog1PY])
 def late_inline_OpFromGraph(fgraph, node):
     """
     Inline `OpFromGraph` nodes.
