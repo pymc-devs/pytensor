@@ -21,21 +21,6 @@ DimEntry = int | Variable
 Shape = tuple[DimEntry, ...]
 
 
-def _is_one(d: DimEntry) -> bool:
-    return isinstance(d, int) and d == 1
-
-
-def _sym_sort_key(sym: Variable) -> tuple[str, int]:
-    """Stable sort key for symbol ordering inside a monomial. Prefers `name` so the
-    same dim across runs sorts deterministically; falls back to id only as a tiebreak
-    between unnamed symbols within one process."""
-    return (getattr(sym, "name", None) or "", id(sym))
-
-
-class _BailOutError(Exception):
-    """Internal signal: the rewriter should skip this chain (not raise to the user)."""
-
-
 class CostExpr:
     """Polynomial in positive dim symbols.
 
@@ -59,7 +44,12 @@ class CostExpr:
 
     @classmethod
     def from_dim_product(cls, dims: Sequence[DimEntry]) -> "CostExpr":
-        """Build a single monomial from the product of `dims`."""
+        """Build a single monomial from the product of `dims`.
+
+        Symbol ordering within the monomial sorts on ``name`` first so the same dim
+        across runs sorts deterministically, falling back to ``id`` only as a tiebreak
+        between unnamed symbols within one process.
+        """
         coef = 1
         sym_exps: dict[Variable, int] = defaultdict(int)
         for d in dims:
@@ -67,7 +57,12 @@ class CostExpr:
                 coef *= d
             else:
                 sym_exps[d] += 1
-        key = tuple(sorted(sym_exps.items(), key=lambda kv: _sym_sort_key(kv[0])))
+        key = tuple(
+            sorted(
+                sym_exps.items(),
+                key=lambda kv: (getattr(kv[0], "name", None) or "", id(kv[0])),
+            )
+        )
         return cls({key: coef})
 
     def __add__(self, other: "CostExpr") -> "CostExpr":
@@ -161,41 +156,17 @@ def _operand_shape_raw(var: Variable, fgraph: FunctionGraph) -> Shape:
     return tuple(int(s) if s is not None else symbolic[i] for i, s in enumerate(static))
 
 
-def _apply_lift_to_shape(lift: DimShuffle, shape: Shape) -> Shape:
-    """Apply a DimShuffle to a shape tuple. ``'x'`` becomes literal 1; ints index `shape`.
-
-    Raises ``_BailOutError`` when `lift` references an input dim outside `shape`. This
-    happens when the chain extender constructed `lift` against a wider matmul output
-    (e.g., a Blockwise with broadcasting between heterogeneous-ndim operands) and the
-    decomposition is now propagating it down to a narrower operand it can't legally
-    apply to.
-    """
-    out: list[DimEntry] = []
-    for x in lift.new_order:
-        if x == "x":
-            out.append(1)
-            continue
-        if not (0 <= x < len(shape)):
-            raise _BailOutError(
-                f"DimShuffle.new_order references index {x} outside operand shape "
-                f"of length {len(shape)}; lift cannot legally apply."
-            )
-        out.append(shape[x])
-    return tuple(out)
-
-
-def _broadcast_batch(left_batch: Shape, right_batch: Shape) -> Shape:
-    """Right-align two batch tuples and broadcast, preferring the non-literal-1 side."""
+def _matmul_result_shape(left: Shape, right: Shape) -> Shape:
+    """Shape of ``left @ right``: right-align the leading batch tuples, broadcast
+    them (preferring the non-literal-1 side), then append ``(m, n)`` from
+    ``left[-2]`` and ``right[-1]``."""
+    left_batch, right_batch = left[:-2], right[:-2]
     n = max(len(left_batch), len(right_batch))
     pad_l = (1,) * (n - len(left_batch)) + tuple(left_batch)
     pad_r = (1,) * (n - len(right_batch)) + tuple(right_batch)
-    return tuple(b if _is_one(a) else a for a, b in zip(pad_l, pad_r))
-
-
-def _matmul_result_shape(left: Shape, right: Shape) -> Shape:
-    """Shape of ``left @ right``: ``(*broadcast_batch, m, n)`` where left ends in
-    ``(m, k)`` and right ends in ``(k, n)``."""
-    batch = _broadcast_batch(left[:-2], right[:-2])
+    batch = tuple(
+        b if (isinstance(a, int) and a == 1) else a for a, b in zip(pad_l, pad_r)
+    )
     return (*batch, left[-2], right[-1])
 
 
@@ -300,16 +271,15 @@ def _decompose_operand(
 
     Two descent paths grow the chain:
 
-    - Single-client chain-link matmul: descend into both inputs.
+    - Single-client chain-link matmul: descend into both inputs. When the parent
+      carries inherited lifts, both children must share the parent's output ndim --
+      otherwise an inherited lift would reference indices missing on a narrower
+      operand (``Blockwise(Dot)`` broadcasts heterogeneous-ndim operands).
     - Single-client liftable DimShuffle wrapping a single-client chain-link matmul:
       descend into the inner matmul's two inputs with the DimShuffle prepended to the
       inherited-lift list. For matrix-transpose lifts, swapping operand order:
-      (``(L @ R).T = R.T @ L.T``).
-
-    A lift only descends when both inner-matmul operands have ndim equal to the
-    DimShuffle's ``input_ndim``; this guards against propagating a lift into a
-    Blockwise(Dot) where the operands have heterogeneous ndim (the lift's
-    ``new_order`` would reference indices that don't exist on the narrower operand).
+      (``(L @ R).T = R.T @ L.T``). Both inner-matmul operands must have ndim equal
+      to the DimShuffle's ``input_ndim`` for the same reason.
 
     Append each chain-link Apply we descend into to `consumed` and add to `visited`.
     """
@@ -353,6 +323,9 @@ def _decompose_operand(
             _is_chain_link(owner)
             and owner not in visited
             and len(fgraph.clients[var]) == 1
+            and (
+                not lifts or all(inp.type.ndim == var.type.ndim for inp in owner.inputs)
+            )
         ):
             visited.add(owner)
             consumed.append(owner)
@@ -363,19 +336,6 @@ def _decompose_operand(
         out.append((var, lifts))
 
     return out
-
-
-def _operand_shape(
-    operand: tuple[Variable, tuple[DimShuffle, ...]], fgraph: FunctionGraph
-) -> Shape:
-    """Compute a chain operand's shape after applying its pending lifts."""
-    base, lifts = operand
-    shape = _operand_shape_raw(base, fgraph)
-    # `lifts` is outermost-first; apply outermost-last so the innermost transformation
-    # touches the raw shape first.
-    for lift in reversed(lifts):
-        shape = _apply_lift_to_shape(lift, shape)
-    return shape
 
 
 def _build_unification(
@@ -392,11 +352,12 @@ def _build_unification(
       operand must agree at runtime (broadcasting requires it); unioning them as one
       class catches transitive equalities a 1 in the middle would otherwise mask.
 
-    A literal-int conflict (``ra != rb`` for two ints in the same class) signals an
-    inconsistent input graph -- raise ``_BailOutError`` so the caller skips the
-    rewrite rather than aborting compilation. The unification also seeds `parent`
-    with `extra_shapes` so the caller can canonicalize shapes outside the chain
-    (e.g., raw inputs of consumed inner matmuls).
+    The unification also seeds `parent` with `extra_shapes` so the caller can
+    canonicalize shapes outside the chain (e.g., raw inputs of consumed inner
+    matmuls). Two ints unifying to different values would mean the input graph is
+    ill-formed (matmul construction rejects mismatched contract dims and
+    non-broadcastable batch dims), so the union prefers the int representative
+    without checking for conflict.
     """
     parent: dict[DimEntry, DimEntry] = {}
     for shape in (*chain_shapes, *extra_shapes):
@@ -413,13 +374,7 @@ def _build_unification(
         ra, rb = find(a), find(b)
         if ra == rb:
             return
-        if isinstance(ra, int) and isinstance(rb, int):
-            if ra != rb:
-                raise _BailOutError(
-                    f"Conflicting static dims in matmul chain: {ra} != {rb}."
-                )
-            parent[rb] = ra
-        elif isinstance(ra, int):
+        if isinstance(ra, int):
             parent[rb] = ra
         elif isinstance(rb, int):
             parent[ra] = rb
@@ -440,7 +395,7 @@ def _build_unification(
             if pos >= n_batch:
                 continue
             d = s[n_batch - 1 - pos]
-            if _is_one(d):
+            if isinstance(d, int) and d == 1:
                 continue
             if anchor is None:
                 anchor = d
@@ -504,13 +459,12 @@ def _existing_cost(
 ) -> CostExpr:
     """Total FLOPs of the user's existing chain.
 
-    Walks consumed matmul nodes in topological order (reversed insertion order, since
-    ``_decompose_operand`` adds the top first then descends). Each step looks up its
-    input shapes in the running ``var_shape`` table -- chain leaves take shapes from
-    ``_operand_shape_raw + canonicalize``; intermediate matmul outputs come from
-    ``_matmul_result_shape``. Lifted DimShuffles preserve FLOPs (they only touch
-    size-1 batch dims or swap core dims), so the canonicalized raw-shape sum
-    compares directly to ``_solve_chain``'s symbolic cost.
+    Walks consumed matmul nodes in topological order (reversed insertion order). Each step looks up its input shapes
+    in the running ``var_shape`` table. The chain leaves take shapes from ``_operand_shape_raw + canonicalize`` while
+    intermediate matmul outputs come from ``_matmul_result_shape``.
+
+    Lifted DimShuffles preserve FLOPs (they only touch size-1 batch dims or swap core dims), so the canonicalized
+    raw-shape sum compares directly to ``_solve_chain``'s symbolic cost.
     """
     var_shape: dict[Variable, Shape] = {}
     total = CostExpr.zero()
@@ -533,13 +487,14 @@ _BLAS_DTYPES = ("float16", "float32", "float64", "complex64", "complex128")
 
 
 def _select_emit_op(left: Variable, right: Variable) -> Variable:
-    """Pick the cheapest op equivalent to ``left @ right`` *without changing semantics*.
+    """Emit ``left @ right`` via the cheapest semantically-equivalent op.
 
-    ``Dot22`` handles 2-D float/complex pairs safely (no broadcasting possible).
-    ``BatchedDot`` does **not** handle broadcasting -- its ``perform``/C path errors
-    when ``x.shape[0] != y.shape[0]``. Emit it only when both static batch dims are
-    known and equal. Anything else falls through to ``matmul()``, which lowers to
-    ``Blockwise(Dot)`` and broadcasts correctly.
+    Routing:
+
+    - 2-D float/complex pair: ``Dot22``.
+    - 3-D float/complex pair whose batch dims share static broadcastability (both statically ``1``, or neither
+      statically ``1``): ``BatchedDot``.
+    - Anything else: ``matmul()``, which lowers to ``Blockwise(Dot)``.
     """
     l_dt, r_dt = left.type.dtype, right.type.dtype
     if l_dt != r_dt or l_dt not in _BLAS_DTYPES:
@@ -547,8 +502,7 @@ def _select_emit_op(left: Variable, right: Variable) -> Variable:
     if left.type.ndim == right.type.ndim == 2:
         return cast(Variable, Dot22()(left, right))
     if left.type.ndim == right.type.ndim == 3:
-        l_batch, r_batch = left.type.shape[0], right.type.shape[0]
-        if l_batch is not None and r_batch is not None and l_batch == r_batch:
+        if (left.type.shape[0] == 1) == (right.type.shape[0] == 1):
             return cast(Variable, BatchedDot()(left, right))
     return matmul(left, right)  # type: ignore[arg-type,no-any-return]
 
@@ -561,9 +515,8 @@ def _build_tree(
 ) -> Variable:
     """Materialize the optimal matmul tree from the DP table.
 
-    Walks the DP split tree in post-order using an explicit work stack -- same
-    reason ``_decompose_operand`` avoids recursion: deep chains can blow the
-    Python stack.
+    Walks the DP split tree in post-order using an explicit work stack. Like ``_decompose_operand``, this function
+    avoids recursion because deep chains can blow the Python stack.
     """
     materialized: dict[tuple[int, int], Variable] = {}
     work: list[tuple[int, int, bool]] = [(i_top, j_top, False)]
@@ -633,38 +586,43 @@ class ReassociateMatmulChain(GraphRewriter):
             local_visited = set(visited)
             local_visited.add(top)
             consumed: list[Apply] = [top]
-            try:
-                left_ops = _decompose_operand(
-                    top.inputs[0], fgraph, local_visited, consumed
-                )
-                right_ops = _decompose_operand(
-                    top.inputs[1], fgraph, local_visited, consumed
-                )
-                operands = [*left_ops, *right_ops]
+            left_ops = _decompose_operand(
+                top.inputs[0], fgraph, local_visited, consumed
+            )
+            right_ops = _decompose_operand(
+                top.inputs[1], fgraph, local_visited, consumed
+            )
+            operands = [*left_ops, *right_ops]
 
-                if len(operands) < 3:
-                    continue
-
-                op_shapes = [_operand_shape(op, fgraph) for op in operands]
-                if any(len(s) < 2 for s in op_shapes):
-                    continue
-
-                # Pre-collect raw input shapes of every consumed matmul so
-                # unification canonicalizes those symbols too. `_existing_cost`
-                # then uses the same canonical reps as the DP, so the comparison
-                # can see equalities through ShapeFeature symbols on either side
-                # of the chain.
-                raw_extras = [
-                    _operand_shape_raw(inp, fgraph)
-                    for c in consumed
-                    for inp in c.inputs
-                ]
-
-                unified, canonicalize = _build_unification(op_shapes, raw_extras)
-                new_cost, dp = _solve_chain(unified)
-                old_cost = _existing_cost(consumed, fgraph, canonicalize)
-            except _BailOutError:
+            if len(operands) < 3:
                 continue
+
+            # Compute each operand's shape after applying its pending lifts. `lifts`
+            # is outermost-first; apply in reverse so the innermost transformation
+            # touches the raw shape first. ``_decompose_operand`` only propagates a
+            # lift through a chain-link whose operand ndim matches the lift's input
+            # ndim, so indexing into ``shape`` by ``lift.new_order`` is in-bounds.
+            op_shapes: list[Shape] = []
+            for base, lifts in operands:
+                shape: Shape = _operand_shape_raw(base, fgraph)
+                for lift in reversed(lifts):
+                    shape = tuple(1 if x == "x" else shape[x] for x in lift.new_order)
+                op_shapes.append(shape)
+
+            if any(len(s) < 2 for s in op_shapes):
+                continue
+
+            # Pre-collect raw input shapes of every consumed matmul so unification
+            # canonicalizes those symbols too. `_existing_cost` then uses the same
+            # canonical reps as the DP, so the comparison can see equalities through
+            # ShapeFeature symbols on either side of the chain.
+            raw_extras = [
+                _operand_shape_raw(inp, fgraph) for c in consumed for inp in c.inputs
+            ]
+
+            unified, canonicalize = _build_unification(op_shapes, raw_extras)
+            new_cost, dp = _solve_chain(unified)
+            old_cost = _existing_cost(consumed, fgraph, canonicalize)
 
             if not _provably_less(new_cost, old_cost):
                 continue
