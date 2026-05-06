@@ -33,7 +33,7 @@ from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
-from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal

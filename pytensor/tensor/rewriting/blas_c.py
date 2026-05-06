@@ -2,7 +2,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import gemv_inplace, gemv_no_inplace, ger, ger_destructive
-from pytensor.tensor.blas_c import (
+from pytensor.tensor.blas.blas_c import (
     CGemv,
     CGer,
     cgemv_inplace,

@@ -37,7 +37,7 @@ from pytensor.tensor import (
 )
 from pytensor.tensor.basic import MakeVector, concatenate, expand_dims, make_vector
 from pytensor.tensor.blas import Dot22, Gemv
-from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
