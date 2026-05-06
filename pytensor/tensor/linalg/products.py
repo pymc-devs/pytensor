@@ -1,3 +1,5 @@
+import warnings
+
 import scipy.linalg as scipy_linalg
 
 from pytensor import tensor as pt
@@ -126,6 +128,12 @@ def matrix_dot(*args):
     :math:`A_0 \cdot A_1 \cdot A_2 \cdot .. \cdot A_N`.
 
     """
+    warnings.warn(
+        "matrix_dot is deprecated and will be removed in future version.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     rval = args[0]
     for a in args[1:]:
         rval = ptm.matmul(rval, a)
