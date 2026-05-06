@@ -182,5 +182,13 @@ def test_jax_solve_sylvester():
     C_val = rng.normal(size=(3, 3)).astype(config.floatX)
 
     out = linear_control.solve_sylvester(A, B, C)
+    out_grads = pt.grad(out.sum(), [A, B, C])
+    _, out_grad_vals = compare_jax_and_py([A, B, C], out_grads, [A_val, B_val, C_val])
 
-    compare_jax_and_py([A, B, C], [out], [A_val, B_val, C_val])
+    # We're manually overriding the jax jvp for this Op, so we test the gradients too
+    jax_fn, _ = compare_jax_and_py([A, B, C], [out], [A_val, B_val, C_val])
+    jax_grads = jax.grad(
+        lambda *args: jax_fn.vm.jit_fn(*args)[0].sum(), argnums=[0, 1, 2]
+    )(A_val, B_val, C_val)
+    for g1, g2 in zip(out_grad_vals, jax_grads):
+        np.testing.assert_allclose(g1, g2)

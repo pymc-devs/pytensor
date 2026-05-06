@@ -82,8 +82,22 @@ def jax_funcify_ChoSolve(op, **kwargs):
 
 
 @jax_funcify.register(SolveSylvester)
-def jax_funcify_SolveSylsterer(op, **kwargs):
+def jax_funcify_SolveSylvester(op, **kwargs):
+    @jax.custom_vjp
     def solve_sylvester(a, b, c):
         return jax.scipy.linalg.solve_sylvester(a, b, c)
+
+    def _fwd(a, b, c):
+        x = jax.scipy.linalg.solve_sylvester(a, b, c)
+        return x, (a, b, x)
+
+    def _bwd(res, dx):
+        a, b, x = res
+        dc = jax.scipy.linalg.solve_sylvester(a.conj().T, b.conj().T, dx)
+        da = -dc @ x.conj().T
+        db = -x.conj().T @ dc
+        return da, db, dc
+
+    solve_sylvester.defvjp(_fwd, _bwd)
 
     return solve_sylvester
