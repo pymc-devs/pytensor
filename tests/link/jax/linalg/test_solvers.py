@@ -184,3 +184,7 @@ def test_jax_solve_sylvester():
     out = linear_control.solve_sylvester(A, B, C)
 
     compare_jax_and_py([A, B, C], [out], [A_val, B_val, C_val])
+
+    # We're manually overriding the jax jvp for this Op, so we test the gradients too
+    A_bar, B_bar, C_bar = pt.grad(out.sum(), [A, B, C])
+    compare_jax_and_py([A, B, C], [A_bar, B_bar, C_bar], [A_val, B_val, C_val])
