@@ -12,7 +12,6 @@ from pytensor.tensor.linalg import (
     matrix_power,
     pinv,
 )
-from pytensor.tensor.math import _allclose
 from pytensor.tensor.type import matrix, tensor, vector
 from tests import unittest_tools as utt
 
@@ -20,19 +19,14 @@ from tests import unittest_tools as utt
 def test_matrix_dot():
     rng = np.random.default_rng(utt.fetch_seed())
     n = rng.integers(4) + 2
-    rs = []
-    xs = []
-    for k in range(n):
-        rs += [rng.standard_normal((4, 4)).astype(config.floatX)]
-        xs += [matrix()]
+    rs = [rng.normal(size=(4, 4)).astype(config.floatX) for _ in range(n)]
+    xs = [matrix() for _ in range(n)]
     sol = matrix_dot(*xs)
 
     pytensor_sol = function(xs, sol)(*rs)
-    numpy_sol = rs[0]
-    for r in rs[1:]:
-        numpy_sol = np.dot(numpy_sol, r)
+    numpy_sol = np.linalg.multi_dot(rs)
 
-    assert _allclose(numpy_sol, pytensor_sol)
+    np.testing.assert_allclose(numpy_sol, pytensor_sol)
 
 
 class TestMatrixPower:

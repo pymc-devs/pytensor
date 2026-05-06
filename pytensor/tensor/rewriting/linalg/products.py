@@ -1,7 +1,4 @@
-from pytensor.graph.rewriting.basic import (
-    copy_stack_trace,
-    node_rewriter,
-)
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import ExtractDiag, concatenate, diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
