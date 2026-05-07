@@ -630,10 +630,8 @@ class TestAlgebraicCanonizer:
                 ((dv / dy) / dv, [dv, dy], [dvv, dyv], 1, "float64"),
                 ((fv / fy) / fv, [fv, fy], [fvv, fyv], 1, "float32"),
                 # must broadcast as there is a dimshuffle in the computation
-                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 2, "float64"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float64, row)>), Alloc]
-                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 2, "float32"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float32, row)>), Alloc]
+                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 1, "float64"),
+                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 1, "float32"),
             ]
         ):
             f = function(list(sym_inputs), g, mode=mode)
