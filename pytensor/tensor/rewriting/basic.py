@@ -18,7 +18,7 @@ alloc(x, broadcast_shapes(x.shape, y.shape)) + alloc(y, broadcast_shapes(x.shape
 second(y, x) + second(x, y) -> x + y
 
 Theano developers (mostly) preferred to use the first form during canonicalization and introduce the second form later,
-via rewrites like `local_fill_to_alloc`, and using the `alloc_like` helper inside rewrites.
+via rewrites like `local_second_to_alloc`, and using the `alloc_like` helper inside rewrites.
 Many stabilize and stabilization rewrites refuse to be applied when a variable has multiple clients, so this is important.
 """
 
@@ -70,11 +70,11 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     atleast_Nd,
     cast,
-    fill,
     get_scalar_constant_value,
     join,
     ones_like,
     register_infer_shape,
+    second,
     switch,
     tensor_copy,
     tile,
@@ -347,10 +347,10 @@ def local_elemwise_alloc(fgraph, node):
 
 
 @node_rewriter([Elemwise])
-def local_fill_sink(fgraph, node):
+def local_second_sink(fgraph, node):
     """
-    f(fill(a, b), fill(c, d), e) -> fill(c, fill(a, f(b, d, e)))
-    f need to be an elemwise that isn't a fill.
+    f(second(a, b), second(c, d), e) -> second(c, second(a, f(b, d, e)))
+    f need to be an elemwise that isn't a second.
     """
     if isinstance(node.op.scalar_op, Second):
         return False
@@ -358,10 +358,10 @@ def local_fill_sink(fgraph, node):
     models = []
     inputs = []
     for inp in node.inputs:
-        if inp.owner and inp.owner.op == fill:
+        if inp.owner and inp.owner.op == second:
             a, b = inp.owner.inputs
             if b.type.dtype != inp.dtype:
-                # The input was implicitly casted by the fill operation
+                # The input was implicitly casted by the second operation
                 b = b.cast(inp.dtype)
             models.append(a)
             inputs.append(b)
@@ -373,35 +373,35 @@ def local_fill_sink(fgraph, node):
 
     outputs = node.op.make_node(*inputs).outputs
 
-    # Check if we need to propagate the fill to the new outputs
+    # Check if we need to propagate the second to the new outputs
     # It's enough to check the first output, as Elemwise outputs must all have the same shapes
-    # Note: There are orderings that may require fewer fills.
+    # Note: There are orderings that may require fewer seconds.
     for model in models:
         # Only apply this model if it would actually do anything
         if broadcasted_by(outputs[0], model):
-            outputs = [fill(model, output) for output in outputs]
+            outputs = [second(model, output) for output in outputs]
 
     return outputs
 
 
 # The rewrite is wrapped in an in2out GraphRewriter
-# so that fill can be sinked until the terminal nodes in a single pass through the graph
+# so that second can be sinked until the terminal nodes in a single pass through the graph
 # without triggering other rewrites after each local substitution
-topological_fill_sink = in2out(local_fill_sink)
-register_canonicalize(topological_fill_sink, "shape_unsafe")
+topological_second_sink = in2out(local_second_sink)
+register_canonicalize(topological_second_sink, "shape_unsafe")
 
 
 @register_specialize("shape_unsafe")
 @register_stabilize("shape_unsafe")
-@node_rewriter([fill])
-def local_fill_to_alloc(fgraph, node):
-    r"""Remove `fill`\s or replace them with `Alloc`\s.
+@node_rewriter([second])
+def local_second_to_alloc(fgraph, node):
+    r"""Remove `second`\s or replace them with `Alloc`\s.
 
     `Alloc`\s are preferable because they replace explicit tensor dependencies
     with their dependencies on those tensors' shapes, and sometimes those
     shapes can be computed without needing to compute the tensors themselves.
 
-    Like `local_fill_sink` this rewrites assumes non-broadcastable shapes are equivalent,
+    Like `local_second_sink` this rewrites assumes non-broadcastable shapes are equivalent,
     which could mask shape errors.
     """
     shape_ref, values_ref = node.inputs
@@ -409,12 +409,12 @@ def local_fill_to_alloc(fgraph, node):
 
     if values_ref.type.broadcastable == out_type.broadcastable:
         # The assumption here is that `values_ref` already has the same shape
-        # as `shape_ref`, so a `fill`/`Alloc` is unnecessary.
+        # as `shape_ref`, so a `second`/`Alloc` is unnecessary.
         return [values_ref]
 
     if shape_ref.type.broadcastable == out_type.broadcastable:
         # In this case, we assume that some broadcasting is needed (otherwise
-        # the condition above would've been true), so we replace the `fill`
+        # the condition above would've been true), so we replace the `second`
         # with an `Alloc`.
         o = alloc_like(values_ref, shape_ref, fgraph, dtype=values_ref.dtype)
         copy_stack_trace(node.outputs[0], o)
@@ -429,9 +429,9 @@ def local_fill_to_alloc(fgraph, node):
 # Register this after stabilize at 1.5 to make sure stabilize don't
 # get affected by less canonicalized graph due to alloc.
 compile.optdb.register(
-    "local_fill_to_alloc", in2out(local_fill_to_alloc), "fast_run", position=1.51
+    "local_second_to_alloc", in2out(local_second_to_alloc), "fast_run", position=1.51
 )
-# Needed to clean some extra alloc added by local_fill_to_alloc
+# Needed to clean some extra alloc added by local_second_to_alloc
 compile.optdb.register(
     "local_elemwise_alloc", in2out(local_elemwise_alloc), "fast_run", position=1.52
 )
@@ -440,12 +440,12 @@ compile.optdb.register(
 @register_infer_shape
 @register_canonicalize("fast_compile", "shape_unsafe")
 @register_useless("shape_unsafe")
-@node_rewriter([fill])
+@node_rewriter([second])
 def local_useless_fill(fgraph, node):
-    """fill(s,v) -> v
+    """second(s, v) -> v
 
     This rewrite is only needed in FAST_COMPILE mode to make the code
-    more readable. Normally, it is done by the `local_fill_to_alloc`
+    more readable. Normally, it is done by the `local_second_to_alloc`
     rewrite.
 
     """

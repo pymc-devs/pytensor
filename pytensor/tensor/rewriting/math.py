@@ -100,7 +100,7 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
     broadcasted_by,
-    local_fill_sink,
+    local_second_sink,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -2486,7 +2486,7 @@ def local_add_remove_zeros(fgraph, node):
 
 mul_canonizer = in2out(
     SequentialNodeRewriter(
-        local_mul_canonizer, local_fill_sink, apply_all_rewrites=True
+        local_mul_canonizer, local_second_sink, apply_all_rewrites=True
     ),
     name="mul_canonizer_groups",
 )
@@ -2582,7 +2582,7 @@ def local_log1p(fgraph, node):
         scalars, _scalar_inputs, nonconsts = scalarconsts_rest(
             log_arg.owner.inputs, only_process_constants=True
         )
-        # scalar_inputs are potentially dimshuffled and fill'd scalars
+        # scalar_inputs are potentially dimshuffled and second'd scalars
         if scalars and isclose(np.sum(scalars), 1):
             if nonconsts:
                 ninp = variadic_add(*nonconsts)
@@ -2720,7 +2720,7 @@ def add_calculate(num, denum, aslist=False, out_type=None):
 local_add_canonizer = AlgebraicCanonizer(add, sub, neg, add_calculate)
 add_canonizer = in2out(
     SequentialNodeRewriter(
-        local_add_canonizer, local_fill_sink, apply_all_rewrites=True
+        local_add_canonizer, local_second_sink, apply_all_rewrites=True
     ),
     name="add_canonizer_group",
 )
@@ -3777,7 +3777,7 @@ def local_reciprocal_1_plus_exp(fgraph, node):
         scalars_, _scalar_inputs, nonconsts = scalarconsts_rest(
             reciprocal_arg.owner.inputs, only_process_constants=True
         )
-        # scalar_inputs are potentially dimshuffled and fill'd scalars
+        # scalar_inputs are potentially dimshuffled and second'd scalars
         if len(nonconsts) == 1:
             if nonconsts[0].owner and nonconsts[0].owner.op == exp:
                 if scalars_ and isclose(np.sum(scalars_), 1):

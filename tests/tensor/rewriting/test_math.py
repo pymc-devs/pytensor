@@ -574,7 +574,7 @@ class TestAlgebraicCanonizer:
         mode = get_default_mode()
 
         rewrite_query = RewriteDatabaseQuery(["canonicalize"])
-        rewrite_query = rewrite_query.including("ShapeOpt", "local_fill_to_alloc")
+        rewrite_query = rewrite_query.including("ShapeOpt", "local_second_to_alloc")
         rewrite_query = rewrite_query.excluding("local_elemwise_fusion")
         mode = mode.__class__(linker=mode.linker, optimizer=rewrite_query)
         # test x / x -> 1
@@ -1225,7 +1225,7 @@ def test_local_elemwise_sub_zeros():
             "canonicalize",
             "uncanonicalize",
             "ShapeOpt",
-            "local_fill_to_alloc",
+            "local_second_to_alloc",
             "local_elemwise_alloc",
         )
         .including("local_elemwise_sub_zeros")
