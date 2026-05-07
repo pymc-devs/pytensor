@@ -2243,9 +2243,9 @@ def local_mul_to_sqr(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([int_div])
-def local_intdiv_by_one(fgraph, node):
-    """x // 1 -> x"""
+@node_rewriter([true_div, int_div])
+def local_div_by_one(fgraph, node):
+    """x / 1 -> x"""
     if isinstance(node.inputs[1], TensorConstant) and np.all(node.inputs[1].value == 1):
         return [node.inputs[0].astype(node.outputs[0].dtype)]
 
