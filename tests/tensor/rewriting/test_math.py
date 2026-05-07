@@ -3623,7 +3623,7 @@ def test_local_div_to_reciprocal():
 class TestIntDivByOne:
     def setup_method(self):
         self.mode = get_default_mode()
-        self.mode = self.mode.including("local_intdiv_by_one")
+        self.mode = self.mode.including("local_div_by_one")
 
     def test_remove_floor(self):
         """Tests removing the extra floor_div by 1 introduced by `local_subtensor_merge` rewrite."""
