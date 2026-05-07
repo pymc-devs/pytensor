@@ -257,7 +257,7 @@ def test_local_second_to_alloc():
     y = pt.fill(m, x)
 
     mode = rewrite_mode.including("stabilize", "local_second_to_alloc").excluding(
-        "useless", "local_useless_fill"
+        "useless", "local_useless_fill", "local_useless_alloc"
     )
 
     f = function([m, x], y, mode=mode)
@@ -1841,7 +1841,9 @@ class TestLocalElemwiseAlloc:
         z_opt = pytensor.function(
             [x, y],
             z,
-            mode=get_default_mode().including("local_elemwise_alloc"),
+            mode=get_default_mode().including(
+                "local_dimshuffle_alloc", "local_elemwise_alloc"
+            ),
             on_unused_input="ignore",
         )
 
@@ -1938,11 +1940,8 @@ class TestLocalElemwiseAlloc:
             self.alloc_w_dep_broad2 + self.mat,
             mode=self.fast_run_mode,
         )
-        # This graph requires one outer Alloc and an Assert
-        # To make sure `mat` is square since we end up doing
-        # broadcast_to(x, mat[..., None].shape) + mat[None, ...]
         self.verify_op_count(func, 1, Alloc)
-        self.verify_op_count(func, 1, Assert)
+        self.verify_op_count(func, 0, Assert)
 
     def test_remove_alloc_w_dimshuffle(self):
         func = function(

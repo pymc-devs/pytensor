@@ -17,7 +17,7 @@ from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.raise_op import assert_op
-from pytensor.scalar.basic import Composite, float64
+from pytensor.scalar.basic import EQ, Composite, float64
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import abs as pt_abs
@@ -1509,12 +1509,17 @@ def test_local_inline_composite_constants(op, np_op, const_shape):
     fn = pytensor.function(
         [x, y], out, mode=get_default_mode().including("specialize", "fusion")
     )
-    # There should be a single Composite after optimization
-    [node] = [
+    # There should be a single Composite Elemwise after optimization
+    # There may be another Elemwise for the equality of shapes.
+    nodes = [
         node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Elemwise)
     ]
-    assert isinstance(node.op.scalar_op, Composite)
-    assert len(node.inputs) == 2  # x and y, but not const
+    if len(nodes) == 2:
+        [composite_node] = [n for n in nodes if isinstance(n.op.scalar_op, Composite)]
+        assert sum(isinstance(n.op.scalar_op, EQ) for n in nodes) == 1
+    else:
+        [composite_node] = [n for n in nodes if isinstance(n.op.scalar_op, Composite)]
+    assert len(composite_node.inputs) == 2  # x and y, but not const
 
     x_test_value = np.arange(5).astype(config.floatX)
     y_test_value = np.ones(5).astype(config.floatX)

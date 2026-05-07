@@ -46,7 +46,7 @@ from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
-    alloc_like,
+    broadcast_like_elemwise,
     broadcasted_by,
     elemwise_of,
     register_canonicalize,
@@ -1089,15 +1089,9 @@ def local_inline_composite_constants(fgraph, node):
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
 
-    # Some of the inlined constants were broadcasting the output shape
-    if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
-        new_outputs = [
-            alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
-            for new_out in new_outputs
-        ]
-
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    return broadcast_like_elemwise(
+        list(new_outputs), node, fgraph=fgraph, stack_trace=True
+    )
 
 
 @node_rewriter(tracks=[add, mul])
