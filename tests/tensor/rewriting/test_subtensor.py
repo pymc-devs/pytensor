@@ -13,16 +13,18 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
-from pytensor.graph.rewriting.basic import check_stack_trace, in2out
+from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
 from pytensor.graph.traversal import ancestors
 from pytensor.tensor import as_tensor
-from pytensor.tensor.basic import Alloc, _convert_to_int8
+from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
     local_add_of_sparse_write,
+    local_adv_idx_to_slice,
     local_replace_AdvancedSubtensor,
+    local_useless_slice,
 )
 from pytensor.tensor.shape import (
     SpecifyShape,
@@ -486,7 +488,11 @@ class TestLocalUselessSubtensor:
             assert prog[1].op == exp
             assert len(prog) == 2
         else:
-            assert any(isinstance(node.op, AdvancedSubtensor1) for node in prog)
+            # Arange-with-offset indices get rewritten to a Subtensor slice;
+            # other advanced indices stay as AdvancedSubtensor1.
+            assert any(
+                isinstance(node.op, AdvancedSubtensor1 | Subtensor) for node in prog
+            )
 
         x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx.eval() if isinstance(idx, Variable) else idx
@@ -1400,11 +1406,17 @@ class TestReadOfWriteSameIndices:
 class TestReadOfWriteConstantIndices:
     def setup_method(self):
         mode = get_default_mode()
+        # Exclude ``local_adv_idx_to_slice`` (the canonical arange→
+        # slice rewrite): otherwise it rewrites reads like ``[2, 4]`` into a basic
+        # ``Subtensor`` *before* the collapse rewrite gets a chance, hiding
+        # the AdvancedIncSubtensor parent the test is exercising. In
+        # FAST_RUN the diag_lift_pass's ``local_subtensor_of_write_to_advanced``
+        # gate would undo it in specialize, but FAST_COMPILE skips that.
         self.mode = mode.including(
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_advanced_read_of_write_constant_indices",
-        ).excluding("fusion")
+        ).excluding("fusion", "local_adv_idx_to_slice")
 
     def test_inc_multi_axis_unique_const(self):
         """Multi-axis ``x[idx_a, idx_b].inc(v)[idx_a, idx_b]`` with
@@ -1894,7 +1906,9 @@ def test_local_IncSubtensor_serialize():
 
 def test_local_set_to_inc_subtensor():
     v = fmatrix()
-    s = v[[2, 1]]
+    # Non-constant-step index keeps the AdvancedSubtensor1 in place for
+    # ``local_set_to_inc_subtensor`` to match against.
+    s = v[[2, 0, 1]]
     g = s + 3
     r = set_subtensor(s, g)
 
@@ -2453,6 +2467,111 @@ class TestUselessSlice:
         )
 
 
+class TestArangeRewrites:
+    """Coverage for the arange-recognition rewrites in ``rewriting/subtensor.py``:
+    ``local_adv_idx_to_slice`` and
+    ``local_adv_idx_to_diagonal``.
+    """
+
+    rewrite_kw = dict(
+        include=("canonicalize", "specialize"),
+        exclude=("local_replace_AdvancedSubtensor",),
+    )
+
+    @pytest.mark.parametrize("offset", [0, 2])
+    def test_constant_arange_step_one(self, offset):
+        """``x[arange(d) + r]`` with constant ``d``, ``r`` rewrites to ``x[r:r+d]``."""
+        x = pt.vector("x", shape=(10,))
+        out = x[pt.constant(np.arange(4, dtype=np.int64) + offset)]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = x[offset : offset + 4] if offset else x[:4]
+        utt.assert_equal_computations([rewritten], [expected])
+
+    def test_constant_arange_positive_step(self):
+        """Stepped constant arange ``[2, 4, 6, 8]`` rewrites to ``x[2::2]``."""
+        x = pt.vector("x", shape=(10,))
+        idx = pt.constant(np.array([2, 4, 6, 8], dtype=np.int64))
+        rewritten = rewrite_graph(x[idx], **self.rewrite_kw)
+        expected = x[2::2]
+        utt.assert_equal_computations([rewritten], [expected])
+
+    def test_constant_arange_negative_step(self):
+        """Descending constant arange ``[5, 4, 3, 2, 1, 0]`` rewrites to ``x[5::-1]``.
+
+        Exercises the ``step < 0`` branch in ``_arange_index_to_slice`` that
+        rewrites a would-be-negative ``stop`` to ``None`` so the slice doesn't
+        wrap.
+        """
+        x = pt.vector("x", shape=(10,))
+        idx = pt.constant(np.array([5, 4, 3, 2, 1, 0], dtype=np.int64))
+        rewritten = rewrite_graph(x[idx], **self.rewrite_kw)
+        expected = x[5::-1]
+        utt.assert_equal_computations([rewritten], [expected])
+
+    def test_symbolic_arange_with_provably_non_negative_stop(self):
+        """``x[arange(n)]`` with provably non-negative symbolic ``n`` rewrites to a slice."""
+        x = pt.vector("x", shape=(10,))
+        n = pt.scalar("n", dtype="uint32")
+        out = x[pt.arange(n)]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = x[: pt.cast(n, "int64")]
+        utt.assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_uniformly_negative_constant_does_not_rewrite(self):
+        """A constant arange whose first value is negative doesn't rewrite; numpy
+        wraps negative advanced indices to the tail, but a forward slice can't.
+        """
+        x = pt.vector("x", shape=(10,))
+        idx = pt.constant(np.array([-2, -1, 0], dtype=np.int64))
+        out = x[idx]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        utt.assert_equal_computations([rewritten], [out])
+
+    @pytest.mark.parametrize("offset", [0, 2])
+    def test_arange_to_slice_roundtrip(self, offset):
+        """``x[k:]`` -> ``x[arange(n)+k]`` -> rewrite back -> ``x[k:]``."""
+        x = pt.vector("x", shape=(10,))
+        n = 10 - offset
+        slice_form = x[offset:] if offset else x
+
+        ar = pt.arange(n, dtype="int64")
+        arange_form = x[ar + offset] if offset else x[ar]
+        assert isinstance(arange_form.owner.op, AdvancedSubtensor | AdvancedSubtensor1)
+
+        folded = rewrite_graph(
+            arange_form,
+            include=(),
+            custom_rewrite=out2in(local_adv_idx_to_slice, local_useless_slice),
+        )
+        utt.assert_equal_computations([folded], [slice_form])
+
+    def test_paired_arange_both_nonzero_offsets_does_not_rewrite(self):
+        """``x[arange(d)+r, arange(d)+c]`` with both ``r`` and ``c`` non-zero
+        is a sub-diagonal gather that ``diagonal()`` can't express.
+        """
+        x = pt.matrix("x", shape=(5, 5))
+        d = pt.constant(np.int64(3))
+        out = x[pt.arange(d) + 1, pt.arange(d) + 2]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        utt.assert_equal_computations([rewritten], [out])
+
+    def test_paired_arange_partial_coverage_does_not_rewrite(self):
+        """``x[arange(2), arange(2)]`` on a (5, 5) matrix is a sub-diagonal gather, not a diagonal."""
+        x = pt.matrix("x", shape=(5, 5))
+        d = pt.constant(np.int64(2))
+        out = x[pt.arange(d), pt.arange(d)]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        utt.assert_equal_computations([rewritten], [out])
+
+    def test_paired_constant_arange_zero_offset(self):
+        """``x[[0,1,2], [0,1,2]]`` on (3, 3) rewrites to ``diagonal(x)``."""
+        x = pt.matrix("x", shape=(3, 3))
+        idx = pt.constant(np.arange(3, dtype=np.int64))
+        out = x[idx, idx]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        utt.assert_equal_computations([rewritten], [pt.diagonal(x)])
+
+
 @pytest.mark.skipif(
     config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
 )
@@ -2550,6 +2669,7 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         IncSubtensor,
         AdvancedIncSubtensor1,
         AdvancedIncSubtensor,
+        ExtractDiag,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
     assert n_idx == 6

@@ -16,10 +16,11 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.raise_op import Assert
-from pytensor.scalar import Add, ScalarConstant, ScalarMinimum
+from pytensor.scalar import Add, ScalarConstant, ScalarMinimum, Sub
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
+    ARange,
     ExtractDiag,
     Join,
     ScalarFromTensor,
@@ -39,7 +40,7 @@ from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.blockwise import _squeeze_left
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import broadcast_to
+from pytensor.tensor.extra_ops import broadcast_to, squeeze
 from pytensor.tensor.math import (
     add,
     and_,
@@ -74,6 +75,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    _is_provably_non_negative,
     _non_consecutive_adv_indexing,
     advanced_inc_subtensor1,
     advanced_subtensor1,
@@ -203,6 +205,126 @@ def get_advsubtensor_axis(indices):
         indices[axis], TensorConstant | TensorVariable | TensorSharedVariable
     ):
         return axis
+
+
+def _constant_has_unique_indices(idx) -> bool:
+    """Check whether a constant index has no duplicate entries.
+
+    Boolean indices, scalars, and single-element arrays are trivially unique.
+    For larger integer arrays, indices that mix positive and negative values
+    may alias, so those are treated as potentially duplicated.  The result
+    is cached on ``idx.tag``.
+    """
+    if not isinstance(idx, Constant):
+        return False
+    cached = getattr(idx.tag, "unique_indices", None)
+    if cached is not None:
+        return bool(cached)
+    idx_val = np.asarray(idx.data)
+    if idx_val.dtype == bool:
+        result = True
+    elif idx_val.size <= 1:
+        result = True
+    else:
+        has_pos = (idx_val >= 0).any()
+        has_neg = (idx_val < 0).any()
+        result = not (has_pos and has_neg) and np.unique(idx_val).size == idx_val.size
+    idx.tag.unique_indices = result
+    return result
+
+
+def _constant_is_arange(idx) -> tuple[int, int, int] | None:
+    """Match ``idx`` to ``np.arange(offset, offset + d * step, step)``
+    and return ``(d, offset, step)``, else ``None``.
+
+    Single-element constants return ``(1, value, 1)``.  The result is cached
+    on ``idx.tag.is_arange`` (``False`` sentinels a no-match).
+    """
+    if not isinstance(idx, Constant):
+        return None
+    cached = getattr(idx.tag, "is_arange", None)
+    if cached is not None:
+        return cached if cached is not False else None
+    idx_val = np.asarray(idx.data)
+    if idx_val.ndim != 1 or idx_val.size == 0 or idx_val.dtype.kind not in "iu":
+        result: tuple[int, int, int] | None = None
+    elif idx_val.size == 1:
+        result = (1, int(idx_val[0]), 1)
+    else:
+        diffs = np.diff(idx_val)
+        step = int(diffs[0])
+        if step != 0 and np.all(diffs == step):
+            result = (int(idx_val.size), int(idx_val[0]), step)
+        else:
+            result = None
+    idx.tag.is_arange = result if result is not None else False
+    return result
+
+
+def _match_arange_0_to_d_plus_offset(idx):
+    """Match ``arange(0, d, 1) + offset`` and return ``(arange_node, offset)``
+    where ``arange_node`` is the ``arange(0, d, 1)`` output and ``offset`` is
+    a scalar ``TensorVariable`` (``constant(0)`` for bare aranges), else
+    ``None``.
+    """
+    if not isinstance(idx, TensorVariable):
+        return None
+    if isinstance(idx.owner_op, ARange):
+        start, _stop, step = idx.owner.inputs
+        if not (isinstance(start, TensorConstant) and int(start.data) == 0):
+            return None
+        if not (isinstance(step, TensorConstant) and int(step.data) == 1):
+            return None
+        return idx, tensor_constant(np.zeros((), dtype=idx.type.dtype))
+    if not (
+        isinstance(idx.owner_op, Elemwise) and isinstance(idx.owner.op.scalar_op, Add)
+    ):
+        return None
+    arange_node = None
+    offset_terms = []
+    for inp in idx.owner.inputs:
+        if (
+            arange_node is None
+            and isinstance(inp.owner_op, ARange)
+            and isinstance(inp.owner.inputs[0], TensorConstant)
+            and int(inp.owner.inputs[0].data) == 0
+            and isinstance(inp.owner.inputs[2], TensorConstant)
+            and int(inp.owner.inputs[2].data) == 1
+        ):
+            arange_node = inp
+        elif inp.type.shape == (1,):
+            offset_terms.append(inp)
+        else:
+            return None
+    if arange_node is None:
+        return None
+    return arange_node, variadic_add(*offset_terms)
+
+
+def eager_add_zero(x, y):
+    """``x + y``, but return ``x`` when ``y`` is provably zero."""
+    if isinstance(y, int | np.integer):
+        return x if y == 0 else x + y
+    try:
+        if int(get_underlying_scalar_constant_value(y)) == 0:
+            return x
+    except NotScalarConstantError:
+        pass
+    return x + y
+
+
+def _eager_scalar(x):
+    """Reduce a 0d or ``(1,)``-shaped tensor to the simplest scalar form."""
+    if isinstance(x, TensorConstant):
+        return int(x.data)
+    if isinstance(x.owner_op, DimShuffle) and x.owner.op.input_ndim == 0:
+        inner = x.owner.inputs[0]
+        return int(inner.data) if isinstance(inner, TensorConstant) else inner
+    if isinstance(x.owner_op, TensorFromScalar):
+        return x.owner.inputs[0]
+    if x.type.ndim > 0:
+        return squeeze(x)
+    return x
 
 
 @register_specialize
@@ -896,6 +1018,200 @@ def local_useless_AdvancedSubtensor1(fgraph, node):
     return [node.inputs[0]]
 
 
+def _arange_index_to_slice(idx):
+    """Return the Python ``slice`` equivalent to ``idx`` if it is a constant or
+    symbolic arange with non-negative offset, else ``None``.
+
+    Negative offsets are not currently supported — some could be mapped to
+    negative-start slices, but mixed-sign indices (where some wrap and some
+    don't) cannot.  Symbolic matching covers
+    step=1 only and additionally requires the arange ``stop`` to be provably
+    non-negative — for negative ``stop``, ``arange`` returns empty whereas
+    the slice ``[0:stop]`` wraps, and the two cannot be safely interchanged.
+    """
+    if not isinstance(idx, TensorVariable) or idx.type.ndim != 1:
+        return None
+
+    const_match = _constant_is_arange(idx)
+    if const_match is not None:
+        d, offset, step = const_match
+        if offset < 0 or offset + (d - 1) * step < 0:
+            return None
+        stop_int = offset + d * step
+        if step > 0:
+            return (
+                slice(offset, stop_int, step) if step != 1 else slice(offset, stop_int)
+            )
+        # Negative step: a negative ``stop`` would wrap, so walk through 0 with None.
+        stop = stop_int if stop_int >= 0 else None
+        return slice(offset, stop, step)
+
+    sym_match = _match_arange_0_to_d_plus_offset(idx)
+    if sym_match is None:
+        return None
+    arange_node, offset = sym_match
+    _, arange_stop, _ = arange_node.owner.inputs
+    arange_stop = _eager_scalar(arange_stop)
+    if isinstance(arange_stop, TensorVariable) and arange_stop.type.dtype != "int64":
+        arange_stop = arange_stop.astype("int64")
+    offset = _eager_scalar(offset)
+    if not _is_provably_non_negative(offset):
+        return None
+    if not _is_provably_non_negative(arange_stop):
+        return None
+    stop = eager_add_zero(arange_stop, offset)
+    return slice(offset, stop)
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([AdvancedSubtensor, AdvancedSubtensor1])
+def local_adv_idx_to_diagonal(fgraph, node):
+    """Rewrite paired-arange advanced indices to ``base.diagonal(...)``.
+
+    Recognizes ``base[arange(d)+r, arange(d)+c]`` on consecutive axes
+    ``(a1, a2)`` and rewrites it to ``base.diagonal(offset=c-r, axis1=a1,
+    axis2=a2)``. The const arm requires ``d == min(dim_a - r, dim_b - c)``
+    (full diagonal coverage at this offset), making the rewrite shape-safe.
+    """
+    var, *idx_inputs = node.inputs
+    indices = list(indices_from_subtensor(idx_inputs, node.op.idx_list))
+    indices += [slice(None)] * (var.type.ndim - len(indices))
+
+    adv_axes = [axis for axis, idx in enumerate(indices) if not isinstance(idx, slice)]
+    if len(adv_axes) != 2 or adv_axes[1] != adv_axes[0] + 1:
+        return None
+    if any(isinstance(idx, slice) and idx != slice(None) for idx in indices):
+        return None
+
+    a1, a2 = adv_axes
+    idx1, idx2 = indices[a1], indices[a2]
+
+    # Match both indices as arange(d) + offset (const or symbolic).
+    # Both must be the same kind (both const or both symbolic).
+    def _match_arange(idx):
+        const = _constant_is_arange(idx)
+        if const is not None and const[2] == 1:
+            return "const", const[0], const[1]
+        sym = _match_arange_0_to_d_plus_offset(idx)
+        if sym is not None:
+            arange_node, offset = sym
+            try:
+                off_val = int(get_underlying_scalar_constant_value(offset))
+            except NotScalarConstantError:
+                return None
+            return "sym", arange_node, off_val
+        return None
+
+    m1 = _match_arange(idx1)
+    m2 = _match_arange(idx2)
+    if m1 is None or m2 is None or m1[0] != m2[0]:
+        return None
+    kind, const_d_or_arange_to_d, row_off = m1
+    _, const_d_or_arange_to_d2, col_off = m2
+
+    # diagonal(offset=k) maps to [arange(d), arange(d)+k] (k>=0) or
+    # [arange(d)+|k|, arange(d)] (k<0). Both offsets nonzero means this
+    # is a sub-range gather that diagonal() can't express.
+    if row_off != 0 and col_off != 0:
+        return None
+
+    # Both indices must cover the same number of elements.
+    if const_d_or_arange_to_d != const_d_or_arange_to_d2:
+        return None
+    if kind == "const":
+        stop = tensor_constant(np.int64(const_d_or_arange_to_d))
+    else:
+        stop = const_d_or_arange_to_d.owner.inputs[1]
+
+    # Verify that the arange spans the full diagonal at this offset:
+    # d == min(shape[a1] - row_off, shape[a2] - col_off).
+    def _is_diag_length_term(term, axis, offset):
+        if offset == 0:
+            return _is_shape_of_x_at(term, var, axis)
+        if not isinstance(term.owner_op, Elemwise):
+            return False
+        if not isinstance(term.owner.op.scalar_op, Sub):
+            return False
+        sub_a, sub_b = term.owner.inputs
+        if not _is_shape_of_x_at(sub_a, var, axis):
+            return False
+        try:
+            return int(get_underlying_scalar_constant_value(sub_b)) == offset
+        except NotScalarConstantError:
+            return False
+
+    try:
+        stop_val = int(get_underlying_scalar_constant_value(stop))
+    except NotScalarConstantError:
+        stop_val = None
+    if stop_val is not None:
+        dim_a, dim_b = var.type.shape[a1], var.type.shape[a2]
+        if dim_a is None or dim_b is None:
+            return None
+        if stop_val != min(dim_a - row_off, dim_b - col_off):
+            return None
+    else:
+        if not isinstance(stop.owner_op, Elemwise):
+            return None
+        if not isinstance(stop.owner.op.scalar_op, ScalarMinimum):
+            return None
+        term_a, term_b = stop.owner.inputs
+        if not (
+            (
+                _is_diag_length_term(term_a, a1, row_off)
+                and _is_diag_length_term(term_b, a2, col_off)
+            )
+            or (
+                _is_diag_length_term(term_a, a2, col_off)
+                and _is_diag_length_term(term_b, a1, row_off)
+            )
+        ):
+            return None
+
+    offset = col_off - row_off
+    out = var.diagonal(offset=offset, axis1=a1, axis2=a2)
+    # ``diagonal`` appends the diagonal as the last axis, but the original
+    # ``base[..., arange, arange, ...]`` keeps the broadcast group at ``a1``
+    # (consecutive advanced axes preserve their position in numpy).
+    if a1 != out.type.ndim - 1:
+        out = moveaxis(out, -1, a1)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([AdvancedSubtensor, AdvancedSubtensor1])
+def local_adv_idx_to_slice(fgraph, node):
+    """Rewrite a single arange-shaped advanced index to a basic slice.
+
+    ``base[..., arange(d)+offset, ...]`` (all other axes full slices) becomes
+    ``base[..., offset:offset+d, ...]``. Tagged ``shape_unsafe``: the slice
+    silently truncates when the gather would be out-of-bounds, masking the
+    ``IndexError`` the original ``AdvancedSubtensor`` would raise.
+    """
+    var, *idx_inputs = node.inputs
+    indices = list(indices_from_subtensor(idx_inputs, node.op.idx_list))
+    indices += [slice(None)] * (var.type.ndim - len(indices))
+
+    adv_axes = [axis for axis, idx in enumerate(indices) if not isinstance(idx, slice)]
+    if len(adv_axes) != 1:
+        return None
+    if any(isinstance(idx, slice) and idx != slice(None) for idx in indices):
+        return None
+
+    [axis] = adv_axes
+    sl = _arange_index_to_slice(indices[axis])
+    if sl is None:
+        return None
+    new_indices = list(indices)
+    new_indices[axis] = sl
+    out = var[tuple(new_indices)]
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
 def merge_two_slices(fgraph, slice1, len1, slice2, len2):
     """
      This function merges two slices into a single slice. The code works on
@@ -1283,32 +1599,6 @@ def local_setsubtensor_of_constants(fgraph, node):
             return False
 
 
-def _constant_has_unique_indices(idx) -> bool:
-    """Check whether a constant index has no duplicate entries.
-
-    Boolean indices, scalars, and single-element arrays are trivially unique.
-    For larger integer arrays, indices that mix positive and negative values
-    may alias, so those are treated as potentially duplicated.  The result
-    is cached on ``idx.tag``.
-    """
-    if not isinstance(idx, Constant):
-        return False
-    cached = getattr(idx.tag, "unique_indices", None)
-    if cached is not None:
-        return bool(cached)
-    idx_val = np.asarray(idx.data)
-    if idx_val.dtype == bool:
-        result = True
-    elif idx_val.size <= 1:
-        result = True
-    else:
-        has_pos = (idx_val >= 0).any()
-        has_neg = (idx_val < 0).any()
-        result = not (has_pos and has_neg) and np.unique(idx_val).size == idx_val.size
-    idx.tag.unique_indices = result
-    return result
-
-
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([Subtensor, AdvancedSubtensor1, AdvancedSubtensor])
@@ -1331,7 +1621,7 @@ def local_read_of_write_same_indices(fgraph, node):
 
     - ``local_advanced_read_of_write_constant_indices`` handles the multi-axis
       case when read and write indices differ but are both constant.
-    - ``local_write_of_write_same_indices`` folds nested write chains.
+    - ``local_write_of_write_same_indices`` collapses nested write chains.
     """
     if isinstance(node.op, Subtensor):
         write_type = IncSubtensor
@@ -1403,7 +1693,7 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
 
     - ``local_read_of_write_same_indices`` handles the identity-check case
       (symbolic indices allowed) for basic and advanced subtensors.
-    - ``local_write_of_write_same_indices`` folds nested write chains.
+    - ``local_write_of_write_same_indices`` collapses nested write chains.
     """
     inner = node.inputs[0]
     if not (inner.owner and isinstance(inner.owner.op, AdvancedIncSubtensor)):
@@ -1588,7 +1878,7 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
 @register_specialize
 @node_rewriter([IncSubtensor, AdvancedIncSubtensor1, AdvancedIncSubtensor])
 def local_write_of_write_same_indices(fgraph, node):
-    """Fold nested write ops that share the same indices.
+    """Collapse nested write ops that share the same indices.
 
     .. code::
 
