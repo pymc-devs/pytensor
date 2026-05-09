@@ -733,6 +733,8 @@ def local_subtensor_make_vector(fgraph, node):
                 node.op.idx_list, node.inputs, allow_partial=False
             )[0]
             sliced_inputs = x.owner.inputs[const_slice]
+            if not sliced_inputs:
+                return False
             if len(sliced_inputs) == 1:
                 ret = expand_dims(sliced_inputs[0], axis=0)
             else:
