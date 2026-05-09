@@ -593,7 +593,9 @@ class TestLocalSubtensorMakeVector:
 
         opt_fgraph = f.maker.fgraph
         assert opt_fgraph.outputs[0].dtype == "int32"
-        assert isinstance(opt_fgraph.outputs[0].owner.op, MakeVector)
+        assert_equal_computations(
+            [opt_fgraph.outputs[0].owner.inputs[0]], [expand_dims(x, 0)]
+        )
         assert f(0, 1, 2) == np.array([0], dtype=np.int32)
 
     def test_slice_idx_start(self):
@@ -771,10 +773,14 @@ def test_local_subtensor_shape_constant():
 @pytest.mark.parametrize(
     "original_fn, supported",
     [
-        (lambda x: x[:, [0, 1]][0], True),
-        (lambda x: x[:, [0, 1], [0, 0]][1:], True),
-        (lambda x: x[:, [[0, 1], [0, 0]]][1:], True),
-        (lambda x: x[:, None, [0, 1]][0], True),
+        # Use non-constant-step index permutations ([2, 0, 1] not [1, 0]) so
+        # ``local_adv_idx_to_slice`` doesn't rewrite the
+        # AdvancedSubtensor to a Subtensor before this rewrite gets a chance
+        # to fire.
+        (lambda x: x[:, [2, 0, 1]][0], True),
+        (lambda x: x[:, [2, 0, 1], [0, 0, 0]][1:], True),
+        (lambda x: x[:, [[2, 0], [0, 1]]][1:], True),
+        (lambda x: x[:, None, [2, 0, 1]][0], True),
         # Not supported, basic indexing on advanced indexing dim
         (lambda x: x[[0, 1]][0], False),
         # Not supported, basic indexing on the right of advanced indexing
@@ -792,10 +798,13 @@ def test_local_subtensor_of_adv_subtensor(original_fn, supported):
 
     out = original_fn(x)
     opt_out = rewrite_graph(
-        out, include=("canonicalize", "local_subtensor_of_adv_subtensor")
+        out,
+        include=("canonicalize", "local_subtensor_of_adv_subtensor"),
+        exclude=(
+            "local_advanced_read_of_write_constant_indices",
+            "local_adv_idx_to_slice",
+        ),
     )
-    # The graphs generated are too complicated to assert
-    # We simply check that the happens before the advanced subtensor
     toposort = FunctionGraph(outputs=[opt_out], clone=False).toposort()
     [idx_subtensor] = [
         i for i, node in enumerate(toposort) if isinstance(node.op, Subtensor)
