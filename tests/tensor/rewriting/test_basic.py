@@ -113,6 +113,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.unittest_tools import assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -2073,3 +2074,30 @@ def test_topological_second_sink_broadcastable_change():
     topological_second_sink.rewrite(fg)
     [new_out] = fg.outputs
     assert equal_computations([new_out], [a + b])
+
+
+class TestExtractDiagOfTranspose:
+    """Coverage for ``extract_diag_of_transpose`` in ``rewriting/basic.py``."""
+
+    rewrite_kw = dict(include=("canonicalize", "stabilize", "specialize"))
+
+    def test_extract_diag_of_transpose(self):
+        x = pt.matrix("x", shape=(4, 6))
+        out = pt.diagonal(x.T)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_transpose_offset(self):
+        x = pt.matrix("x", shape=(4, 6))
+        out = pt.diagonal(x.T, offset=2)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x, offset=-2)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_batched_transpose(self):
+        x = pt.tensor("x", shape=(3, 4, 5))
+        out = pt.diagonal(x.mT, axis1=-2, axis2=-1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x, axis1=-2, axis2=-1)
+        assert_equal_computations([rewritten], [expected])
