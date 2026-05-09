@@ -19,7 +19,13 @@ from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, pprint, set_precedence
-from pytensor.scalar.basic import ScalarConstant, ScalarVariable
+from pytensor.scalar.basic import (
+    Cast,
+    ScalarConstant,
+    ScalarMaximum,
+    ScalarMinimum,
+    ScalarVariable,
+)
 from pytensor.tensor import (
     TensorLike,
     _get_vector_length,
@@ -27,7 +33,9 @@ from pytensor.tensor import (
     get_vector_length,
 )
 from pytensor.tensor.basic import (
+    MakeVector,
     ScalarFromTensor,
+    TensorFromScalar,
     alloc,
     get_scalar_constant_value,
     nonzero,
@@ -36,11 +44,12 @@ from pytensor.tensor.basic import (
     constant as tensor_constant,
 )
 from pytensor.tensor.blockwise import vectorize_node_fallback
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.math import add, clip
+from pytensor.tensor.math import add, clip, minimum
 from pytensor.tensor.shape import (
     Reshape,
+    Shape,
     Shape_i,
     specify_broadcastable,
 )
@@ -50,6 +59,7 @@ from pytensor.tensor.type import (
     discrete_dtypes,
     integer_dtypes,
     tensor,
+    uint_dtypes,
 )
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorConstant, TensorVariable
@@ -230,6 +240,54 @@ def as_index_literal(
     raise NotScalarConstantError()
 
 
+def _is_provably_non_negative(var) -> bool:
+    """``True`` when ``var`` can be statically shown to be non-negative.
+
+    Recognized cases:
+
+    - Python ``int`` / ``np.integer`` ``>= 0``.
+    - ``TensorConstant`` / ``ScalarConstant`` whose data is all ``>= 0``
+      (cached via ``tag.is_non_negative``).
+    - Unsigned-integer dtype.
+    - ``Shape`` / ``Shape_i`` outputs.
+    - ``MakeVector`` of provably non-negative inputs.
+    - View / shape-permutation ops — ``Subtensor``, ``ScalarFromTensor``,
+      ``TensorFromScalar``, ``DimShuffle`` — recurse to their input.
+    - ``Cast`` of a provably non-negative input.
+    - ``minimum(a, b)`` when both ``a`` and ``b`` are non-negative.
+    - ``maximum(a, b)`` when at least one of ``a``, ``b`` is non-negative.
+    """
+    if isinstance(var, int | np.integer):
+        return bool(var >= 0)
+    if isinstance(var, ScalarConstant | TensorConstant):
+        cached: bool | None = getattr(var.tag, "is_non_negative", None)
+        if cached is not None:
+            return cached
+        result = bool((np.asarray(var.data) >= 0).all())
+        var.tag.is_non_negative = result
+        return result
+    if not isinstance(var, Variable):
+        return False
+    if var.type.dtype in uint_dtypes:
+        return True
+    op = var.owner_op
+    if isinstance(op, Shape | Shape_i):
+        return True
+    if isinstance(op, MakeVector):
+        return all(_is_provably_non_negative(i) for i in var.owner.inputs)
+    if isinstance(op, Subtensor | ScalarFromTensor | TensorFromScalar | DimShuffle):
+        return _is_provably_non_negative(var.owner.inputs[0])
+    if isinstance(op, Elemwise):
+        scalar_op = op.scalar_op
+        if isinstance(scalar_op, Cast):
+            return _is_provably_non_negative(var.owner.inputs[0])
+        if isinstance(scalar_op, ScalarMinimum):
+            return all(_is_provably_non_negative(i) for i in var.owner.inputs)
+        if isinstance(scalar_op, ScalarMaximum):
+            return any(_is_provably_non_negative(i) for i in var.owner.inputs)
+    return False
+
+
 def get_idx_list(inputs, idx_list):
     return indices_from_subtensor(inputs[1:], idx_list)
 
@@ -367,8 +425,8 @@ def get_canonical_form_slice(
             if is_stop_length:
                 # Full slice.
                 return slice(0, length, 1), 1
-            if is_stop_constant and stop >= 0:
-                return (slice(0, switch(lt(stop, length), stop, length), 1), 1)
+            if _is_provably_non_negative(stop):
+                return (slice(0, minimum(stop, length), 1), 1)
             stop_plus_len = stop + length
             stop = switch(
                 lt(stop, 0),
@@ -484,6 +542,15 @@ def slice_len(slc, n):
     start, stop, step = tuple(
         as_index_constant(a) for a in [canon_slc.start, canon_slc.stop, canon_slc.step]
     )
+    # 0:stop:1 with non-negative stop: length is just ``stop``.
+    if (
+        isinstance(canon_slc.step, int)
+        and canon_slc.step == 1
+        and isinstance(canon_slc.start, int)
+        and canon_slc.start == 0
+        and _is_provably_non_negative(stop)
+    ):
+        return stop
     return switch(
         and_(gt(step, 0), lt(start, stop)),
         1 + (stop - 1 - start) // step,
@@ -594,6 +661,16 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
         if basic:
             grp_shapes = tuple(array_shape[dim] for dim in dim_nums)
             res_shape += basic_shape(grp_shapes, grp_indices)
+        elif (
+            not indices_are_shapes
+            and len(grp_indices) > 1
+            and all(idx is grp_indices[0] for idx in grp_indices[1:])
+        ):
+            # All advanced indices in this group are the same Variable, so
+            # they share the same shape by construction — skip
+            # ``broadcast_shape``, which would emit a runtime broadcast
+            # assertion even though the shapes are already known to match.
+            res_shape += tuple(grp_indices[0].shape)
         else:
             from pytensor.tensor.extra_ops import broadcast_shape
 
