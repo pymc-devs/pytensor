@@ -327,6 +327,36 @@ def _eager_scalar(x):
     return x
 
 
+def _idx_to_int_array(idx):
+    """Materialize a 1-D integer index as a numpy array.
+
+    Handles ``TensorConstant`` (read ``.data``) and symbolic
+    ``arange(n) + offset`` with constant ``n`` and ``offset``
+    (eager constant-fold). Boolean masks are converted to integer positions.
+    Return ``None`` when the index can't be materialized at rewrite time.
+    """
+    if isinstance(idx, TensorConstant):
+        arr = np.asarray(idx.data)
+        if arr.dtype == bool:
+            return np.flatnonzero(arr)
+        return arr
+    sym = _match_arange_0_to_d_plus_offset(idx)
+    if sym is None:
+        return None
+    arange_node, offset = sym
+    _, stop, _ = arange_node.owner.inputs
+    if not isinstance(stop, TensorConstant):
+        return None
+    n = int(stop.data)
+    if n < 0:
+        return None
+    try:
+        off_val = int(get_underlying_scalar_constant_value(offset))
+    except NotScalarConstantError:
+        return None
+    return np.arange(n, dtype=np.int64) + off_val
+
+
 @register_specialize
 @node_rewriter([AdvancedSubtensor])
 def local_replace_AdvancedSubtensor(fgraph, node):
@@ -1685,9 +1715,12 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
             x[r_idx]                      (no coverage)
             x[r_idx].inc(v[k])[...]       (partial, unique writes)
 
-    Fires only when all advanced indices on both sides are 1-D integer
-    constants with matching ``idx_list``.  The inc case additionally requires
-    unique joint write coords so each read coord matches at most one write.
+    Fires when each advanced index is materializable: a 1-D integer
+    ``TensorConstant`` (boolean masks accepted) or a symbolic
+    ``arange(n_const) + offset`` whose stop is a ``TensorConstant``.  The
+    ``idx_list`` must match between read and write.  The inc case
+    additionally requires unique joint write coords so each read coord
+    matches at most one write.
 
     Companion rewrites:
 
@@ -1719,19 +1752,12 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
     read_arrs = []
     for w, r in zip(write_indices, read_indices, strict=True):
         if isinstance(w, TensorVariable) and isinstance(r, TensorVariable):
-            if not (isinstance(w, TensorConstant) and isinstance(r, TensorConstant)):
-                return None
-            # Require proper 1-D array indices, not broadcastable length-1.
             if w.type.broadcastable != (False,) or r.type.broadcastable != (False,):
                 return None
-            w_arr = np.asarray(w.data)
-            r_arr = np.asarray(r.data)
-            # Convert boolean masks to integer positions so coord-matching below
-            # works uniformly; `a[mask]` and `a[flatnonzero(mask)]` are equivalent.
-            if w_arr.dtype == bool:
-                w_arr = np.flatnonzero(w_arr)
-            if r_arr.dtype == bool:
-                r_arr = np.flatnonzero(r_arr)
+            w_arr = _idx_to_int_array(w)
+            r_arr = _idx_to_int_array(r)
+            if w_arr is None or r_arr is None:
+                return None
             # Reject only cross-sign within an axis — negatives can alias
             # positives on the same axis, but uniformly negative (or
             # uniformly non-negative) indices compare correctly as raw values.
