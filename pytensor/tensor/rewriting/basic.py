@@ -63,6 +63,7 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
+    ExtractDiag,
     Join,
     MakeVector,
     ScalarFromTensor,
@@ -72,6 +73,7 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     atleast_Nd,
     cast,
+    diagonal,
     get_scalar_constant_value,
     join,
     register_infer_shape,
@@ -1444,3 +1446,25 @@ def local_join_of_alloc(fgraph, node):
     new_out = alloc(new_join, *post_join_shape)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([ExtractDiag])
+def extract_diag_of_transpose(fgraph, node):
+    """ExtractDiag(X.T, offset=k) -> ExtractDiag(X, offset=-k)
+
+    Strip a matrix transpose so it cannot block other ExtractDiag rewrites.
+    """
+    op = node.op
+    [inp] = node.inputs
+    ndim = inp.type.ndim
+    if op.axis1 != ndim - 2 or op.axis2 != ndim - 1:
+        return None
+
+    match inp.owner_op_and_inputs:
+        case (DimShuffle(is_matrix_transpose=True), inner):
+            return [diagonal(inner, offset=-op.offset, axis1=op.axis1, axis2=op.axis2)]
+        case _:
+            return None
