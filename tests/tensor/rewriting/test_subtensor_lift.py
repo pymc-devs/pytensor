@@ -47,7 +47,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_of_batch_dims,
     local_subtensor_shape_constant,
 )
-from pytensor.tensor.shape import SpecifyShape, _shape
+from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
@@ -443,53 +443,212 @@ def test_local_subtensor_of_transpose(original_fn, expected_fn):
     )
 
 
-def test_local_subtensor_of_alloc():
-    # DebugMode should detect if something goes wrong.
-    # test shape combination of odd and event shape.
-    for s in [(3, 5), (4, 6), (3, 8), (4, 7), (1, 5), (5, 1)]:
-        x = tensor(
-            dtype=config.floatX,
-            shape=(1 if s[0] == 1 else None, 1 if s[1] == 1 else None),
+class TestSubtensorOfAlloc:
+    """Coverage for ``local_subtensor_of_alloc`` — basic and advanced indexing."""
+
+    rewrite_kw = dict(
+        include=("ShapeOpt", "canonicalize", "specialize"),
+        exclude=("local_replace_AdvancedSubtensor",),
+        clone=True,
+    )
+
+    def test_basic_subtensor(self):
+        for s in [(3, 5), (4, 6), (3, 8), (4, 7), (1, 5), (5, 1)]:
+            x = tensor(
+                dtype=config.floatX,
+                shape=(1 if s[0] == 1 else None, 1 if s[1] == 1 else None),
+            )
+
+            xval = np.zeros(s, dtype=config.floatX)
+            yval = np.arange(s[1], dtype=config.floatX)
+
+            for y in [shared(yval), pt.constant([1.0])]:
+                yx = pt.alloc(y, x.shape[0], x.shape[1])
+
+                slicess: list = []
+                if s[0] != 1:
+                    slicess.append((2, slice(None)))
+                if s[1] != 1:
+                    slicess.append((slice(None), 3))
+                slicess += [
+                    (slice(None), slice(3, None)),
+                    (slice(3, None),),
+                    (slice(3, None), slice(3, None)),
+                    (slice(1, 3), slice(None, -1)),
+                    (slice(None, None, 2)),
+                    (slice(1, None, 2)),
+                ]
+                for slices in slicess:
+                    z = yx.__getitem__(slices)
+                    f = function([x], z)
+                    if config.mode != "FAST_COMPILE":
+                        assert not isinstance(
+                            f.maker.fgraph.toposort()[-1].op, Subtensor
+                        )
+                    val = f(xval)
+                    assert xval.__getitem__(slices).shape == val.shape
+
+    @pytest.mark.parametrize("idx_ndim", (0, 1, 2))
+    def test_adv_int_indexing(self, idx_ndim):
+        v = pt.vector("v", shape=(7,))
+        # ``n`` is uint so the slice rewrite can prove non-negativity for the
+        # ``arange(n) -> slice(0, n)`` round-trip; ``uint32`` (not ``uint64``)
+        # because ``ShapeFeature`` rejects ``uint64`` shape dims.
+        n = pt.scalar("n", dtype="uint32")
+        idx = pt.tensor("idx", shape=(None,) * idx_ndim, dtype="int64")
+
+        # On broadcasted axis idx is a no-op, only contributes shape
+        out = pt.alloc(v, 5, 5, 7)[idx]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        match idx_ndim:
+            case 0:
+                expected = pt.alloc(v, 5, 7)
+            case 1:
+                expected = pt.alloc(v, Shape_i(0)(idx), 5, 7)
+            case 2:
+                expected = pt.alloc(v, Shape_i(0)(idx), Shape_i(1)(idx), 5, 7)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        # On real axis it could cause more work
+        out = pt.alloc(v, 5, 5, 7)[..., idx]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        match idx_ndim:
+            case 0:
+                expected = pt.alloc(v[idx], 5, 5)
+            case 1 | 2:
+                expected = out
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        if idx_ndim == 0:
+            return
+
+        # But if we know it's less work, we're back on game
+        core_shape = (2,) * idx_ndim
+        out = pt.alloc(v, 5, 5, 7)[..., pt.specify_shape(idx, core_shape)]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(v[pt.specify_shape(idx, core_shape)], 5, 5, *core_shape)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        cast_n = n.astype("int64")
+        match idx_ndim:
+            case 1:
+                arange_idx = pt.arange(n)
+                # The lift's inner slice uses ``cast_n`` directly (slice clips
+                # at runtime), but the outer Alloc dim uses
+                # ``minimum(cast_n, dim_length)`` since arange-to-slice clamps
+                # against ``v.shape[0]`` to keep the gather in bounds.
+                expected_v_indexed = v[:cast_n]
+                index_shape = (pt.minimum(cast_n, v.type.shape[0]),)
+            case 2:
+                arange_idx = pt.arange(n).reshape((2, -1))
+                # The reshape-of-arange index isn't recognized by
+                # ``arange-to-slice``, so the lifted gather keeps its
+                # ``AdvancedSubtensor`` form. The outer Alloc shape uses
+                # ``cast_n // 2`` because ``arange`` casts the uint stop.
+                expected_v_indexed = v[arange_idx]
+                index_shape = (2, cast_n // 2)
+        out = pt.alloc(v, 5, 5, 7)[..., arange_idx]
+        expected = pt.alloc(expected_v_indexed, 5, 5, *index_shape)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_multiple_adv_int_indexing(self):
+        # Index on kept dims
+        val = pt.matrix("val", shape=(5, 7))
+        idx_a = pt.constant(np.array([0, 2], dtype=np.int64))
+        idx_b = pt.constant(np.array([1, 1], dtype=np.int64))
+
+        out = pt.alloc(val, 3, 4, 5, 7)[idx_a, idx_b, :, :]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(val, 2, 5, 7)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        out = pt.alloc(val, 3, 4, 5, 7)[:, idx_a, idx_b, :]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(val[idx_b], 3, 2, 7)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        out = pt.alloc(val, 3, 4, 5, 7)[:, :, idx_a, idx_b]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(val[idx_a, idx_b], 3, 4, 2)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        # Non-consecutive advanced indices make everything harder, we don't try
+        out = pt.alloc(val, 3, 4, 5, 7)[:, idx_a, :, idx_b]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = out
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_index_on_broadcast_val_dim(self):
+        v = pt.tensor("v", shape=(7, 1))
+
+        out = pt.alloc(v, 7, 5)[:3, :2]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(v[:3], 3, 2)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        out = pt.alloc(v, 7, 5)[:3, 2]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = v[:3].squeeze(axis=1)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+        idx_a = pt.constant(np.array([0, 2], dtype=np.int64))
+        idx_b = pt.constant(np.array([0, 3], dtype=np.int64))
+
+        out = pt.alloc(v, 7, 5)[idx_a, idx_b]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        rng = np.random.default_rng(0)
+        v_test = rng.normal(size=(7, 1))
+        np.testing.assert_allclose(
+            rewritten.eval({v: v_test}, mode=NO_OPTIMIZATION_MODE),
+            np.broadcast_to(v_test, (7, 5))[[0, 2], [0, 3]],
         )
 
-        xval = np.zeros(s, dtype=config.floatX)
-        yval = np.arange(s[1], dtype=config.floatX)
+        out = pt.alloc(v, 7, 5)[:3, idx_b]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(v[:3], 3, 2)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
-        for y in [shared(yval), pt.constant([1.0])]:
-            # The rows of yx are copies of y
-            yx = pt.alloc(y, x.shape[0], x.shape[1])
+    def test_boolean_idx_bails(self):
+        """A boolean mask on a non-broadcast val dim does not lift through Alloc."""
+        val = pt.vector("val", shape=(7,))
+        mask = pt.tensor("mask", shape=(None,), dtype="bool")
 
-            # Slice of each row
-            z_mat = yx[:, 3:]
-            assert z_mat.ndim == 2
+        out = pt.alloc(val, 5, 7)[:, mask]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [out], strict_dtype=False)
 
-            # Only one column
-            z_vec = yx[:, 3]
-            assert z_vec.ndim == 1
-            # results are vector
-            slicess = []
-            if s[0] != 1:
-                slicess.append((2, slice(None)))
-            if s[1] != 1:
-                slicess.append((slice(None), 3))
+    def test_const_idx_with_duplicates_bails(self):
+        """A constant integer index larger than the val dim does not lift through Alloc."""
+        val = pt.vector("val", shape=(3,))
+        idx = pt.constant(np.array([0, 0, 0, 0, 0], dtype=np.int64))
 
-            # results are matrix
-            slicess += [
-                (slice(None), slice(3, None)),
-                (slice(3, None),),
-                (slice(3, None), slice(3, None)),
-                (slice(1, 3), slice(None, -1)),
-                (slice(None, None, 2)),
-                (slice(1, None, 2)),
-            ]
-            for slices in slicess:
-                z = yx.__getitem__(slices)
-                f = function([x], z)
-                if config.mode != "FAST_COMPILE":
-                    # Subtensor can be in the input of Alloc
-                    assert not isinstance(f.maker.fgraph.toposort()[-1].op, Subtensor)
-                val = f(xval)
-                assert xval.__getitem__(slices).shape == val.shape
+        out = pt.alloc(val, 5, 3)[:, idx]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [out], strict_dtype=False)
+
+    def test_negative_step_idx_to_slice(self):
+        """Negative-step constant arange ``[7, 5, 3, 1]`` rewrites to ``x[7::-2]``."""
+        x = pt.vector("x", shape=(10,))
+        rng = np.random.default_rng(0)
+        x_test = rng.normal(size=10)
+
+        out = x[pt.constant(np.array([7, 5, 3, 1], dtype=np.int64))]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        np.testing.assert_allclose(
+            rewritten.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+            x_test[7::-2],
+        )
+
+    def test_mixed_slice_and_adv_index(self):
+        """A mix of slice and adv index across alloc dims lifts each to its own dim."""
+        val = pt.matrix("val", shape=(4, 6))
+        idx = pt.constant(np.array([0, 1, 3], dtype=np.int64))
+
+        out = pt.alloc(val, 3, 4, 6)[:2, idx]
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(val[idx], 2, 3, 6)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
 
 class TestLocalSubtensorSpecifyShapeLift:
