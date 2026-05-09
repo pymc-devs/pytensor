@@ -29,7 +29,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.math import Dot, ceil_intdiv, dot
+from pytensor.tensor.math import Dot, dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -53,9 +53,9 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     _non_consecutive_adv_indexing,
     as_index_literal,
-    get_canonical_form_slice,
     get_constant_idx,
     get_idx_list,
+    indexed_result_shape,
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
@@ -690,74 +690,87 @@ def local_subtensor_of_transpose(fgraph, node):
     return [new_out]
 
 
+def lift_subtensor_through_alloc(fgraph, node):
+    """``alloc(val, *shape)[idx]`` -> ``alloc(val[idx_on_kept_dims], *out_shape)``.
+
+    Push the read past Alloc so the broadcast happens at most once and
+    indexing operates on ``val`` (smaller) where possible. Covers basic
+    ``Subtensor``, ``AdvancedSubtensor``, and ``AdvancedSubtensor1`` reads.
+
+    On non-broadcast ``val`` dims an advanced index could expand ``val[idx]``
+    past ``val.size``; only fire when the index is provably smaller or when
+    the resulting Alloc is dropped.
+
+    Bail on boolean masks and non-consecutive advanced indexing.
+    """
+    src = node.inputs[0]
+    match src.owner_op_and_inputs:
+        case (Alloc(), val, *alloc_dims):
+            pass
+        case _:
+            return None
+    n_added_dims = src.type.ndim - val.type.ndim
+
+    indices = list(get_idx_list(node.inputs, node.op.idx_list))
+    indices += [slice(None)] * (src.type.ndim - len(indices))
+
+    if any(
+        isinstance(idx, TensorVariable) and idx.type.dtype == "bool" for idx in indices
+    ):
+        return None
+    # Non-consecutive advanced indices get hoisted to position 0 in the result
+    # but stay in place inside ``val[val_indexer]``, misaligning the Alloc shape.
+    if _non_consecutive_adv_indexing(indices):
+        return None
+
+    val_indexer: list = []
+    dangerous_index_reaches_val = False
+    for axis, idx in enumerate(indices):
+        if axis < n_added_dims:
+            # Axis was added by Alloc; index doesn't reach val.
+            continue
+        val_static_dim = val.type.shape[axis - n_added_dims]
+        if val_static_dim == 1:
+            # Broadcast val dim: slices stay (Alloc broadcasts on top);
+            # advanced indices become length-1 zeros for squeeze.
+            if isinstance(idx, slice):
+                val_indexer.append(slice(None))
+            else:
+                val_indexer.append(np.zeros((1,) * idx.type.ndim, dtype=np.int64))
+            continue
+        val_indexer.append(idx)
+        if not _index_provably_smaller(idx, val_static_dim):
+            # Per-axis check; doesn't account for net effect across all axes.
+            dangerous_index_reaches_val = True
+
+    nw_val = _canonical_indexing(val, val_indexer)
+    new_shape = indexed_result_shape(alloc_dims, indices)
+    drops_alloc = nw_val.type.broadcastable == node.outputs[0].type.broadcastable
+
+    if dangerous_index_reaches_val and not drops_alloc:
+        return None
+
+    if drops_alloc:
+        result = nw_val
+    else:
+        result = alloc(nw_val, *new_shape)
+
+    copy_stack_trace(node.outputs[0], result)
+    return [result]
+
+
 @register_infer_shape
+@node_rewriter([Subtensor])
+def local_basic_subtensor_of_alloc(fgraph, node):
+    return lift_subtensor_through_alloc(fgraph, node)
+
+
 @register_useless
 @register_canonicalize
 @register_specialize
-@node_rewriter([Subtensor])
+@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
 def local_subtensor_of_alloc(fgraph, node):
-    """
-
-    alloc(val)[x:y] -> alloc(val[...])
-    alloc(val)[x:y] -> alloc(val)
-    This can be seen as a lift, but it also reduce the number of computation/memory.
-
-    """
-    if not isinstance(node.op, Subtensor):
-        return False
-    u = node.inputs[0]
-    if u.owner is None:
-        return False
-    if not isinstance(u.owner.op, Alloc):
-        return False
-    slices = get_idx_list(node.inputs, node.op.idx_list)
-    val = u.owner.inputs[0]
-    dims = u.owner.inputs[1:]
-    assert len(slices) <= len(dims)
-
-    # Number of dimensions added to val
-    n_added_dims = u.ndim - val.ndim
-    # Dimensions of the returned alloc
-    nw_dims = []
-    # Slices to take from val
-    val_slices = []
-
-    for i, (sl, dim) in enumerate(zip(slices, dims, strict=False)):
-        # If val was not copied over that dim,
-        # we need to take the appropriate subtensor on it.
-        if i >= n_added_dims:
-            # We check that the corresponding val dimensions was
-            # not a broadcasted dimensions.
-            if (
-                val.type.ndim > (i - n_added_dims)
-                and val.type.broadcastable[i - n_added_dims]
-            ):
-                val_slices.append(slice(None))
-            else:
-                val_slices.append(sl)
-
-        csl, _ = get_canonical_form_slice(sl, dim)
-        if type(csl) is not slice:
-            # That dimension is removed.
-            pass
-        else:
-            nw_dim = csl.stop - csl.start
-
-            if csl.step != 1:
-                # Do not add the ceil_intdiv() graphs in the graphs
-                # when this is not needed as it prevent detecting the
-                # correct broadcast pattern.
-                nw_dim = ceil_intdiv(nw_dim, csl.step)
-            nw_dims += [nw_dim]
-
-    nw_val = val[tuple(val_slices)]
-    nw_dims += dims[len(slices) :]
-    if nw_val.ndim > len(nw_dims):
-        return False
-    rval = alloc(nw_val, *nw_dims)
-    if not isinstance(rval, list | tuple):
-        rval = [rval]
-    return rval
+    return lift_subtensor_through_alloc(fgraph, node)
 
 
 @register_canonicalize
