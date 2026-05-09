@@ -16,7 +16,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.raise_op import Assert
-from pytensor.scalar import Add, ScalarConstant
+from pytensor.scalar import Add, ScalarConstant, ScalarMinimum
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
@@ -37,7 +37,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.blockwise import _squeeze_left
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.math import (
@@ -60,6 +60,8 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.shape import (
+    Shape,
+    Shape_i,
     shape_padleft,
     shape_padright,
     shape_tuple,
@@ -265,6 +267,37 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     return [new_res]
 
 
+def _is_shape_of_x_at(var, x, axis):
+    """``True`` when ``var`` is statically equivalent to ``x.shape[axis]``."""
+    if isinstance(var, TensorConstant):
+        s = x.type.shape[axis]
+        return s is not None and int(var.data) == s
+    op = var.owner_op
+    if isinstance(op, Shape_i):
+        return op.i == axis and var.owner.inputs[0] is x
+    if isinstance(op, Subtensor):
+        shape_node = var.owner.inputs[0]
+        if not isinstance(shape_node.owner_op, Shape):
+            return False
+        if shape_node.owner.inputs[0] is not x:
+            return False
+        try:
+            idx_val = get_constant_idx(
+                var.owner.op.idx_list, var.owner.inputs, allow_partial=False
+            )
+        except NotScalarConstantError:
+            return False
+        return len(idx_val) == 1 and idx_val[0] == axis
+    if isinstance(op, DimShuffle) and op.new_order == ():
+        # ``Squeeze(Shape(x))`` collapses Shape(x) (length-1 vector) to scalar:
+        # only valid when ``x`` is 1-D, in which case it's ``x.shape[0]``.
+        shape_node = var.owner.inputs[0]
+        if not isinstance(shape_node.owner_op, Shape):
+            return False
+        return axis == 0 and shape_node.owner.inputs[0] is x
+    return False
+
+
 @register_infer_shape
 @register_useless
 @register_canonicalize
@@ -356,6 +389,33 @@ def local_useless_slice(fgraph, node):
                 if -stop_val > dim_length:
                     change_flag = True
                     stop = None
+
+        # Drop a redundant stop that equals ``x.shape[dim]`` or is wrapped in
+        # ``min(..., x.shape[dim])``: ``Subtensor`` already clips at runtime,
+        # so such stops are just noise. Peek through ``ScalarFromTensor``.
+        if positive_step and stop is not None:
+            tensor_stop = (
+                stop.owner.inputs[0]
+                if isinstance(stop.owner_op, ScalarFromTensor)
+                else stop
+            )
+            if _is_shape_of_x_at(tensor_stop, x, dim):
+                change_flag = True
+                stop = None
+            elif isinstance(tensor_stop.owner_op, Elemwise) and isinstance(
+                tensor_stop.owner.op.scalar_op, ScalarMinimum
+            ):
+                a, b = tensor_stop.owner.inputs
+                kept = (
+                    a
+                    if _is_shape_of_x_at(b, x, dim)
+                    else b
+                    if _is_shape_of_x_at(a, x, dim)
+                    else None
+                )
+                if kept is not None:
+                    change_flag = True
+                    stop = kept
 
         if start is not None or stop is not None or step is not None:
             last_useful_idx = dim
