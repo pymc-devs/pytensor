@@ -49,7 +49,10 @@ from pytensor.tensor.rewriting.subtensor_lift import (
 )
 from pytensor.tensor.shape import SpecifyShape, _shape
 from pytensor.tensor.special import softmax
-from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
+from pytensor.tensor.subtensor import (
+    AdvancedSubtensor,
+    Subtensor,
+)
 from tests.unittest_tools import assert_equal_computations
 
 
@@ -180,6 +183,25 @@ class TestLocalSubtensorOfBatchDims:
         # Otherwise it should work
         fgraph.remove_output(0)
         assert local_subtensor_of_batch_dims.transform(fgraph, out2.owner) is not None
+
+    def test_elemwise_adv_index_provably_smaller(self):
+        """An adv index provably smaller than the non-broadcast Elemwise inputs lifts through Elemwise."""
+        x = pt.matrix("x", shape=(10, 5))
+        y = pt.matrix("y", shape=(10, 5))
+        idx = pt.constant(np.array([0, 2, 5]), dtype="int64")
+        out = pt.add(x, y)[idx]
+        rewritten = rewrite_graph(out)
+        expected = pt.add(x[idx], y[idx])
+        assert_equal_computations([rewritten], [expected])
+
+    def test_elemwise_adv_index_not_provably_smaller_bails(self):
+        """An adv index whose size cannot be bounded does not lift through Elemwise."""
+        x = pt.matrix("x", shape=(10, 5))
+        y = pt.matrix("y", shape=(10, 5))
+        idx = pt.tensor("idx", shape=(None,), dtype="int64")
+        out = pt.add(x, y)[idx]
+        rewritten = rewrite_graph(out)
+        assert equal_computations([rewritten], [out])
 
     def test_blockwise(self):
         class CoreTestOp(Op):
