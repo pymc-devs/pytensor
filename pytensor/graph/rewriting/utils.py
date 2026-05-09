@@ -47,7 +47,7 @@ def rewrite_graph(
         fgraph = graph
     else:
         outputs = [graph] if isinstance(graph, Variable) else graph
-        fgraph = FunctionGraph(outputs=outputs, clone=clone)
+        fgraph = FunctionGraph(outputs=outputs, clone=clone, copy_inputs=False)
 
     query_rewrites = optdb.query(RewriteDatabaseQuery(include=include, **kwargs))
     query_rewrites.rewrite(fgraph)
