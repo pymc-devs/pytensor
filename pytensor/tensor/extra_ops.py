@@ -1534,14 +1534,17 @@ def broadcast_shape_iter(
             # Only one shape might not be broadcastable in this dimension
             result_dims.extend(non_bcast_shapes)
         else:
-            # More than one shape might not be broadcastable in this dimension
-            nonconst_nb_shapes: set[int] = set()
-            const_nb_shapes: set[Variable] = set()
+            # More than one shape might not be broadcastable in this dimension.
+            # ``nonconst_nb_shapes`` is a dict (used as ordered set) so iteration
+            # order is deterministic across processes — set iteration is
+            # hash-randomized and would yield non-deterministic graphs.
+            const_nb_shapes: set[int] = set()
+            nonconst_nb_shapes: dict[Variable, None] = {}
             for shape in non_bcast_shapes:
                 if isinstance(shape, Constant):
                     const_nb_shapes.add(shape.value.item())
                 else:
-                    nonconst_nb_shapes.add(shape)
+                    nonconst_nb_shapes[shape] = None
 
             if len(const_nb_shapes) > 1:
                 raise ValueError(
@@ -1550,7 +1553,7 @@ def broadcast_shape_iter(
 
             if len(const_nb_shapes) == 1:
                 (first_length,) = const_nb_shapes
-                other_lengths = nonconst_nb_shapes
+                other_lengths = list(nonconst_nb_shapes)
                 first_length = ps.as_scalar(first_length)
             else:
                 first_length, *other_lengths = nonconst_nb_shapes
