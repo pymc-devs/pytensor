@@ -441,6 +441,10 @@ class _tensor_py_operators:
                 hasattr(args_el, "dtype") and args_el.dtype == "bool"
             ):
                 return True
+            # 0-d ndarrays satisfy ``isinstance(_, Iterable)`` but raise on
+            # iteration; the dtype branch above already handles them.
+            if isinstance(args_el, np.ndarray) and args_el.ndim == 0:
+                return False
             if not isinstance(args_el, Variable) and isinstance(args_el, Iterable):
                 for el in args_el:
                     if includes_bool(el):
