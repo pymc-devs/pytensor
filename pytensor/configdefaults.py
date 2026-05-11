@@ -250,7 +250,7 @@ def add_basic_configvars():
         "cast_policy",
         "Rules for implicit type casting",
         EnumStr(
-            "custom",
+            "numpy+floatX",
             ["numpy+floatX"],
             # The 'numpy' policy was originally planned to provide a
             # smooth transition from numpy. It was meant to behave the
