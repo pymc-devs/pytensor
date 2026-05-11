@@ -47,7 +47,6 @@ keywords = [
     "differentiation",
 ]
 dependencies = [
-    "setuptools>=59.0.0",
     "scipy>=1,<2",
     "numpy>=2.0,<3",
     "numba>=0.58,<=0.65.1",
