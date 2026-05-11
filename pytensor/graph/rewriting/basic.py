@@ -26,12 +26,18 @@ from pytensor.graph.basic import (
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
-from pytensor.graph.rewriting.unify import OpPattern, Var, convert_strs_to_vars
+from pytensor.graph.rewriting.unify import (
+    OpPattern,
+    PatternNode,
+    PatternVar,
+    convert_strs_to_vars,
+    match_pattern,
+    reify_pattern,
+)
 from pytensor.graph.traversal import (
     apply_ancestors,
     applys_between,
     toposort,
-    vars_between,
 )
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
@@ -1551,9 +1557,14 @@ class PatternNodeRewriter(NodeRewriter):
         frequent `Op`, which will prevent the rewrite from being tried as often.
 
         """
-        var_map: dict[str, Var] = {}
+        var_map: dict[str, PatternVar] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
+        if not isinstance(self.in_pattern, PatternNode):
+            raise TypeError(
+                "The in_pattern must be a tuple starting with an Op or OpPattern; "
+                f"got {in_pattern!r} of type {type(in_pattern)}"
+            )
         self.values_eq_approx = values_eq_approx
         self.allow_cast = allow_cast
         self.allow_multiple_clients = allow_multiple_clients
@@ -1565,27 +1576,15 @@ class PatternNodeRewriter(NodeRewriter):
                 raise ValueError("Custom `tracks` requires `get_nodes` to be provided.")
             self._tracks = tracks
         else:
-            if isinstance(in_pattern, list | tuple):
-                op = self.in_pattern[0]
-            elif isinstance(in_pattern, dict):
-                op = self.in_pattern["pattern"][0]
-            else:
-                raise TypeError(
-                    f"The in_pattern must be a sequence or a dict, but got {in_pattern} of type {type(in_pattern)}"
-                )
+            op = self.in_pattern.op_match
             if isinstance(op, Op):
                 self._tracks = [op]
-            elif isinstance(op, type) and issubclass(op, Op):
-                raise ValueError(
-                    f"The in_pattern starts with an Op class {op}, not an instance.\n"
-                    "You can use pytensor.graph.unify.OpPattern instead if you want to match instances of a class."
-                )
             elif isinstance(op, OpPattern):
                 self._tracks = [op.op_type]
             else:
                 raise ValueError(
                     f"The in_pattern must start with a specific Op or an OpPattern instance. "
-                    f"Got {op}, with type {type(op)}."
+                    f"Got {op!r}, with type {type(op)}."
                 )
 
     def tracks(self):
@@ -1597,9 +1596,6 @@ class PatternNodeRewriter(NodeRewriter):
         If it does, it constructs ``out_pattern`` and performs the replacement.
 
         """
-        from etuples.core import ExpressionTuple
-        from unification import reify, unify
-
         if get_nodes and self.get_nodes is not None:
             for real_node in self.get_nodes(fgraph, node):
                 ret = self.transform(fgraph, real_node, get_nodes=False)
@@ -1610,20 +1606,14 @@ class PatternNodeRewriter(NodeRewriter):
             # PatternNodeRewriter doesn't support replacing multi-output nodes
             return False
 
-        s = unify(self.in_pattern, node.out, {})
-
-        if s is False:
+        fgraph_clients = None if self.allow_multiple_clients else fgraph.clients
+        s = match_pattern(
+            self.in_pattern,
+            node,
+            fgraph_clients=fgraph_clients,
+        )
+        if s is None:
             return False
-
-        if not self.allow_multiple_clients:
-            input_vars = set(s.values())
-            clients = fgraph.clients
-            if any(
-                len(clients[v]) > 1
-                for v in vars_between(input_vars, node.inputs)
-                if v not in input_vars
-            ):
-                return False
 
         if callable(self.out_pattern):
             # token is the variable name used in the original pattern
@@ -1636,9 +1626,7 @@ class PatternNodeRewriter(NodeRewriter):
                     f"The output of the PatternNodeRewriter callable must be a variable got {ret} of type {type(ret)}."
                 )
         else:
-            ret = reify(self.out_pattern, s)
-            if isinstance(ret, ExpressionTuple):
-                ret = ret.evaled_obj
+            ret = reify_pattern(self.out_pattern, s)
 
         if self.values_eq_approx:
             ret.tag.values_eq_approx = self.values_eq_approx
