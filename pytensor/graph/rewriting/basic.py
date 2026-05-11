@@ -27,6 +27,7 @@ from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import (
+    Asterisk,
     OpPattern,
     PatternNode,
     PatternVar,
@@ -1488,6 +1489,9 @@ class PatternNodeRewriter(NodeRewriter):
             (sub, (log, "x"), (log, "c")),
         )
 
+    Inputs of commutative ops (such as ``add`` and ``mul``) are matched in any
+    order automatically, so there is no need to write both orderings of a pattern.
+
     You can use OpPattern to match a subtype of an Op, with some parameter constraints
     You can also specify a callable as the output pattern, which will be called with (fgraph, node, subs_dict) as arguments.
 
@@ -1699,6 +1703,8 @@ class PatternNodeRewriter(NodeRewriter):
                 if pattern.constraint is not None:
                     return f"{pattern.token} subject to {pattern.constraint}"
                 return pattern.token
+            elif isinstance(pattern, Asterisk):
+                return f"*{pattern.token}"
             else:
                 return str(pattern)
 
