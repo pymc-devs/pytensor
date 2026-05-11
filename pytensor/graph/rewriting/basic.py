@@ -1473,6 +1473,9 @@ class PatternNodeRewriter(NodeRewriter):
             (sub, (log, "x"), (log, "c")),
         )
 
+    Inputs of commutative ops (such as ``add`` and ``mul``) are matched in any
+    order automatically, so there is no need to write both orderings of a pattern.
+
     You can use OpPattern to match a subtype of an Op, with some parameter constraints
     You can also specify a callable as the output pattern, which will be called with (fgraph, node, subs_dict) as arguments.
 
