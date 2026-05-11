@@ -6,6 +6,7 @@ import pytensor.tensor as pt
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import (
+    Asterisk,
     ConstrainedVar,
     LiteralString,
     OpPattern,
@@ -195,6 +196,93 @@ def test_match_literal_int_constant():
     out = pt.add(x, pt.as_tensor_variable(2.0))
     pat = convert_strs_to_vars((pt.add, "x", 2.0))
     assert match_pattern(pat, out.owner) is not None
+
+
+def test_match_commutative_add_swapped():
+    x = pt.scalar("x")
+    out_left = pt.add(pt.as_tensor_variable(1.0), x)
+    out_right = pt.add(x, pt.as_tensor_variable(1.0))
+    pat = convert_strs_to_vars((pt.add, 1.0, "x"))
+
+    s1 = match_pattern(pat, out_left.owner)
+    s2 = match_pattern(pat, out_right.owner)
+    assert s1 is not None
+    assert s2 is not None
+    [(_, b1)] = s1.items()
+    [(_, b2)] = s2.items()
+    assert b1 is x
+    assert b2 is x
+
+
+def test_match_commutative_does_not_apply_to_sub():
+    x = pt.scalar("x")
+    out = pt.sub(pt.as_tensor_variable(1.0), x)
+    pat_swapped = convert_strs_to_vars((pt.sub, "x", 1.0))
+    assert match_pattern(pat_swapped, out.owner) is None
+
+
+def test_match_variadic_asterisk():
+    a = pt.vector("a")
+    b = pt.vector("b")
+    c = pt.vector("c")
+    out = pt.add(a, b, c)
+    pat = convert_strs_to_vars((pt.add, "first", Asterisk("rest")))
+
+    subs = match_pattern(pat, out.owner)
+    assert subs is not None
+    by_name = {
+        (p.token if isinstance(p, (PatternVar, Asterisk)) else p): v
+        for p, v in subs.items()
+    }
+    assert by_name["first"] is a
+    assert by_name["rest"] == (b, c)
+
+
+def test_match_variadic_too_few_inputs():
+    a = pt.vector("a")
+    out = pt.exp(a)
+    pat = convert_strs_to_vars((pt.exp, "x", "y", Asterisk("rest")))
+    assert match_pattern(pat, out.owner) is None
+
+
+def test_match_variadic_preserves_input_order_under_commutative_backtrack():
+    a = pt.vector("a", dtype="float32")
+    b = pt.vector("b", dtype="float64")
+    c = pt.vector("c", dtype="float32")
+
+    pat = convert_strs_to_vars(
+        (
+            pt.add,
+            {"pattern": "first", "constraint": lambda v: v.dtype == "float64"},
+            Asterisk("rest"),
+        )
+    )
+
+    s1 = match_pattern(pat, pt.add(a, b, c).owner)
+    n1 = {k.token: v for k, v in s1.items()}
+    assert n1["first"] is b
+    assert n1["rest"] == (a, c)
+
+    s2 = match_pattern(pat, pt.add(c, a, b).owner)
+    n2 = {k.token: v for k, v in s2.items()}
+    assert n2["first"] is b
+    assert n2["rest"] == (c, a)
+
+
+def test_reify_variadic():
+    a = pt.vector("a")
+    b = pt.vector("b")
+    c = pt.vector("c")
+    rest = Asterisk("rest")
+    var_map = {}
+    in_pat = convert_strs_to_vars((pt.add, "first", rest), var_map=var_map)
+    subs = match_pattern(in_pat, pt.add(a, b, c).owner)
+    assert subs is not None
+
+    out_pat = convert_strs_to_vars((pt.mul, "first", rest), var_map=var_map)
+    result = reify_pattern(out_pat, subs)
+    assert result.owner.op == pt.mul
+    assert result.owner.inputs == [a, b, c]
 
 
 def test_reify_simple():
