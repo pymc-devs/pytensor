@@ -49,6 +49,23 @@ class ConstrainedVar(PatternVar):
         super().__init__(token=token, constraint=constraint)
 
 
+class Asterisk:
+    """Pattern element that captures the remaining inputs of a node as a tuple.
+
+    Must appear in last position of a pattern node's children. The captured
+    tuple is reified (during ``reify_pattern``) by splatting the bound tuple
+    back into the output op's input list.
+    """
+
+    __slots__ = ("token",)
+
+    def __init__(self, token: str):
+        self.token = token
+
+    def __repr__(self) -> str:
+        return f"Asterisk({self.token!r})"
+
+
 @dataclass(unsafe_hash=True)
 class OpPattern:
     """Class that can be unified with Op instances of a given type (or instance) and parameters.
@@ -185,11 +202,52 @@ class OpPattern:
 class PatternNode:
     """Pattern for an Apply node: an Op (or OpPattern) head plus patterns for its inputs."""
 
-    __slots__ = ("inputs", "op_match")
+    __slots__ = (
+        "asterisk",
+        "inputs",
+        "match_order",
+        "n_fixed",
+        "needs_commutative",
+        "op_match",
+    )
 
     def __init__(self, op_match, inputs: tuple):
+        for i, c in enumerate(inputs):
+            if isinstance(c, Asterisk) and i != len(inputs) - 1:
+                raise TypeError(
+                    "Asterisk must appear in last position of a pattern's children; "
+                    f"got it at index {i} of {inputs}"
+                )
         self.op_match = op_match
         self.inputs = inputs
+        asterisk = inputs[-1] if (inputs and isinstance(inputs[-1], Asterisk)) else None
+        self.asterisk = asterisk
+        n_fixed = self.n_fixed = len(inputs) - (asterisk is not None)
+        # Match deterministic children before nested PatternNodes, so that shared-variable
+        # conflicts surface while a nested commutative node can still try alternative orders
+        self.match_order = tuple(
+            sorted(range(n_fixed), key=lambda i: isinstance(inputs[i], PatternNode))
+        )
+        # n_fixed == 1 without asterisk has only one possible assignment, so
+        # commutativity doesn't add any choice — skip the backup/backtrack.
+        if not (n_fixed > 1 or (n_fixed == 1 and asterisk is not None)):
+            self.needs_commutative = False
+        elif isinstance(op_match, OpPattern):
+            op_type = op_match.op_type
+            if isinstance(op_type, UnionType):
+                op_type = op_type.__args__
+            elif not isinstance(op_type, tuple):
+                op_type = (op_type,)
+            # Commutative matching permutes inputs, so it's only sound when every op
+            # the head can match is commutative (always a class-level attribute).
+            self.needs_commutative = all(
+                getattr(t, "commutative", False) for t in op_type
+            )
+        else:
+            self.needs_commutative = bool(
+                getattr(op_match, "commutative", False)
+                or getattr(getattr(op_match, "scalar_op", None), "commutative", False)
+            )
 
     def __repr__(self) -> str:
         return f"PatternNode({self.op_match!r}, {self.inputs!r})"
@@ -200,7 +258,7 @@ type PatternElement = PatternVar | PatternNode | Variable | Any
 
 def convert_strs_to_vars(
     x: tuple | str | dict | OpPattern,
-    var_map: dict[str, PatternVar] | None = None,
+    var_map: dict[str, PatternVar | Asterisk] | None = None,
 ):
     r"""Convert tuples and strings to pattern trees and logic variables, respectively.
 
@@ -217,9 +275,25 @@ def convert_strs_to_vars(
             if v is None:
                 v = PatternVar(token=y)
                 var_map[y] = v
+            elif isinstance(v, Asterisk):
+                raise TypeError(
+                    f"Token {y!r} is already bound to an Asterisk; "
+                    "cannot reuse as PatternVar"
+                )
             return v
         if isinstance(y, LiteralString):
             return y.value
+        if isinstance(y, Asterisk):
+            existing = var_map.get(y.token)
+            if existing is None:
+                var_map[y.token] = y
+                return y
+            if not isinstance(existing, Asterisk):
+                raise TypeError(
+                    f"Token {y.token!r} is already bound to a PatternVar; "
+                    "cannot reuse as Asterisk"
+                )
+            return existing
         if isinstance(y, dict):
             pattern = y["pattern"]
             if not isinstance(pattern, str):
@@ -231,6 +305,11 @@ def convert_strs_to_vars(
             if v is None:
                 v = PatternVar(token=pattern, constraint=constraint)
                 var_map[pattern] = v
+            elif isinstance(v, Asterisk):
+                raise TypeError(
+                    f"Token {pattern!r} is already bound to an Asterisk; "
+                    "cannot reuse as PatternVar"
+                )
             elif v.constraint is None:
                 v.constraint = constraint
             elif v.constraint is not constraint:
@@ -266,7 +345,7 @@ def convert_strs_to_vars(
 def match_pattern(
     pattern: PatternNode,
     node,
-    subs: dict[PatternVar, Any] | None = None,
+    subs: dict[PatternVar | Asterisk, Any] | None = None,
 ):
     """Match ``pattern`` against an Apply ``node``.
 
@@ -282,9 +361,12 @@ def match_pattern(
 def _match_node(
     pattern: PatternNode,
     node,
-    subs: dict[PatternVar, Any],
+    subs: dict[PatternVar | Asterisk, Any],
 ) -> bool:
-    """Match a PatternNode against an Apply node, binding into ``subs`` as it recurses."""
+    """Match a PatternNode against an Apply node, binding into ``subs`` as it recurses.
+
+    Children are matched positionally first, then by permutation for commutative ops.
+    """
     op_match = pattern.op_match
     node_op = node.op
     if isinstance(op_match, OpPattern):
@@ -295,19 +377,83 @@ def _match_node(
     elif node_op != op_match:
         return False
 
-    if len(pattern.inputs) != len(node.inputs):
+    # Match children
+    pattern_inputs = pattern.inputs
+    node_inputs = node.inputs
+    n_fixed = pattern.n_fixed
+    asterisk_pat = pattern.asterisk
+
+    if asterisk_pat is not None:
+        if len(node_inputs) < n_fixed:
+            return False
+    elif n_fixed != len(node_inputs):
         return False
 
-    for sub_pat, sub_var in zip(pattern.inputs, node.inputs):
-        if not _match_element(sub_pat, sub_var, subs):
-            return False
-    return True
+    saved_subs = dict(subs) if pattern.needs_commutative else None
+    ok = True
+    for i in pattern.match_order:
+        if not _match_element(pattern_inputs[i], node_inputs[i], subs):
+            ok = False
+            break
+    if ok:
+        if asterisk_pat is not None:
+            return _bind_asterisk(asterisk_pat, tuple(node_inputs[n_fixed:]), subs)
+        return True
+
+    if saved_subs is None:
+        return False
+
+    subs.clear()
+    subs.update(saved_subs)
+    return _commutative_backtrack(
+        tuple(pattern_inputs[i] for i in pattern.match_order),
+        node_inputs,
+        [False] * len(node_inputs),
+        0,
+        subs,
+        asterisk_pat,
+    )
+
+
+def _commutative_backtrack(
+    fixed_pats,
+    node_inputs,
+    used,
+    idx,
+    subs,
+    asterisk_pat,
+) -> bool:
+    """Depth-first search assigning each pattern in ``fixed_pats`` to any unused node input."""
+    if idx == len(fixed_pats):
+        if asterisk_pat is not None:
+            remainder = tuple(v for v, u in zip(node_inputs, used) if not u)
+            return _bind_asterisk(asterisk_pat, remainder, subs)
+        return True
+    pat = fixed_pats[idx]
+    for j, var in enumerate(node_inputs):
+        if used[j]:
+            continue
+        saved_subs = dict(subs)
+        used[j] = True
+        if _match_element(pat, var, subs) and _commutative_backtrack(
+            fixed_pats,
+            node_inputs,
+            used,
+            idx + 1,
+            subs,
+            asterisk_pat,
+        ):
+            return True
+        used[j] = False
+        subs.clear()
+        subs.update(saved_subs)
+    return False
 
 
 def _match_element(
     pattern,
     var,
-    subs: dict[PatternVar, Any],
+    subs: dict[PatternVar | Asterisk, Any],
 ) -> bool:
     """Match a single pattern element (var, nested node, Variable or raw value) against a variable."""
     if isinstance(pattern, PatternVar):
@@ -332,7 +478,9 @@ def _match_element(
     return False
 
 
-def _bind_var(pat_var: PatternVar, value, subs: dict[PatternVar, Any]) -> bool:
+def _bind_var(
+    pat_var: PatternVar, value, subs: dict[PatternVar | Asterisk, Any]
+) -> bool:
     """Bind a PatternVar, checking its constraint on first bind and value agreement afterwards."""
     existing = subs.get(pat_var, _MISSING)
     if existing is not _MISSING:
@@ -340,6 +488,17 @@ def _bind_var(pat_var: PatternVar, value, subs: dict[PatternVar, Any]) -> bool:
     if pat_var.constraint is not None and not pat_var.constraint(value):
         return False
     subs[pat_var] = value
+    return True
+
+
+def _bind_asterisk(asterisk_pat: Asterisk, value: tuple, subs: dict) -> bool:
+    """Bind the tuple of remaining inputs, or check agreement with an existing binding."""
+    existing = subs.get(asterisk_pat, _MISSING)
+    if existing is not _MISSING:
+        if len(existing) != len(value):
+            return False
+        return all(_values_equal(a, b) for a, b in zip(existing, value))
+    subs[asterisk_pat] = value
     return True
 
 
@@ -360,7 +519,9 @@ def _values_equal(a, b) -> bool:
     return bool(a == b)
 
 
-def _bind_op_parameters(op_pat: OpPattern, op: Op, subs: dict[PatternVar, Any]) -> bool:
+def _bind_op_parameters(
+    op_pat: OpPattern, op: Op, subs: dict[PatternVar | Asterisk, Any]
+) -> bool:
     """Match OpPattern parameters against an Op, binding PatternVar parameters into ``subs``."""
     for key, param in op_pat.parameters:
         op_val = getattr(op, key)
@@ -378,7 +539,7 @@ def _bind_op_parameters(op_pat: OpPattern, op: Op, subs: dict[PatternVar, Any]) 
     return True
 
 
-def reify_pattern(pattern, subs: Mapping[PatternVar, Any]):
+def reify_pattern(pattern, subs: Mapping[PatternVar | Asterisk, Any]):
     """Build the replacement Variable described by ``pattern`` using the bindings of a match.
 
     OpPatterns reify to concrete Op instances by instantiating their op_type with the
@@ -399,7 +560,18 @@ def reify_pattern(pattern, subs: Mapping[PatternVar, Any]):
             if isinstance(op_match, OpPattern)
             else op_match
         )
-        inputs = [reify_pattern(p, subs) for p in pattern.inputs]
+        inputs = []
+        for p in pattern.inputs:
+            if isinstance(p, Asterisk):
+                try:
+                    captured = subs[p]
+                except KeyError:
+                    raise ValueError(
+                        f"Output pattern references unbound asterisk {p.token!r}"
+                    )
+                inputs.extend(captured)
+            else:
+                inputs.append(reify_pattern(p, subs))
         return op.make_node(*inputs).default_output()
 
     if isinstance(pattern, OpPattern):
