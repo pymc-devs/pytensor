@@ -2,6 +2,7 @@ from numpy.lib.array_utils import normalize_axis_tuple
 
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.replace import _vectorize_node
+from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import (
     eq,
@@ -53,6 +54,7 @@ class Softmax(TensorSymbolicOp):
 
 
 def softmax(c, axis=None):
+    c = as_tensor_variable(c)
     if axis is not None:
         axis = normalize_axis_tuple(axis, c.type.ndim)
     return Softmax(axis=axis)(c)
@@ -88,6 +90,7 @@ class LogSoftmax(TensorSymbolicOp):
 
 
 def log_softmax(c, axis=None):
+    c = as_tensor_variable(c)
     if axis is not None:
         axis = normalize_axis_tuple(axis, c.type.ndim)
     return LogSoftmax(axis=axis)(c)
