@@ -73,6 +73,11 @@ class TestSoftmax(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         utt.verify_grad(f, [rng.random(4)])
 
+    def test_raw_input(self):
+        out = softmax([1.0, 2.0, 3.0], axis=-1)
+        assert out.type.ndim == 1
+        assert out.type.dtype == "float64"
+
     def test_valid_axis(self):
         with pytest.raises(TypeError):
             Softmax(1.5)
@@ -112,6 +117,11 @@ class TestLogSoftmax(utt.InferShapeTester):
 
         rng = np.random.default_rng(utt.fetch_seed())
         utt.verify_grad(f, [rng.random((4,))])
+
+    def test_raw_input(self):
+        out = log_softmax([1.0, 2.0, 3.0], axis=-1)
+        assert out.type.ndim == 1
+        assert out.type.dtype == "float64"
 
     def test_valid_axis(self):
         with pytest.raises(TypeError):
