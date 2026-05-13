@@ -385,14 +385,13 @@ def test_inplace_taps(n_steps_constant):
                 node.inputs[idx] for idx in chain.from_iterable(dm.values())
             )
 
-    if n_steps_constant:
-        assert len(sit_sot_inps) == 0
-        assert len(untraced_sit_sot_inps) == 1
-        assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
-    else:
-        # This is not a feature, but a current limitation
-        # https://github.com/pymc-devs/pytensor/issues/1283
-        assert not destroyed_inputs
+    # ``local_subtensor_merge_integer`` + ``scan_reduce_buffer`` reduce the buffers
+    # the same way for both constant and symbolic ``n_steps`` (xs collapses
+    # to an untraced sit_sot, the mit_sot buffers reduce to ``taps + 1``),
+    # so inplace fires identically in both cases.
+    assert len(sit_sot_inps) == 0
+    assert len(untraced_sit_sot_inps) == 1
+    assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
 
 
 @pytest.mark.parametrize(
