@@ -3,8 +3,6 @@
 These rewrites drop work and storage that nothing downstream actually
 needs:
 
-* :func:`while_scan_merge_subtensor_last_element` — collapse a
-  ``while``-Scan's ``out[-1]`` reads onto the inner-output value.
 * :func:`scan_save_mem_rewrite` (registered as ``scan_save_mem_prealloc``
   / ``scan_save_mem_no_prealloc``) — shorten outer buffers and the
   ``n_steps`` to the smallest range any client actually reads.
@@ -18,15 +16,12 @@ from typing import cast
 
 import numpy as np
 
-import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.fg import Output
-from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.traversal import apply_depends_on
-from pytensor.raise_op import Assert
 from pytensor.scalar import ScalarConstant
 from pytensor.scan.op import Scan
 from pytensor.scan.utils import expand_empty
@@ -68,71 +63,6 @@ def sanitize(x):
         return None
     else:
         return pt.as_tensor_variable(x)
-
-
-@node_rewriter([Scan])
-def while_scan_merge_subtensor_last_element(fgraph, scan_node):
-    """
-    Replace while_scan_out[abs(min(tap)):][-1] by while_scan_out[-1], for
-    recurring outputs, asserting that at least one step occurs.
-    Only the first step can be ensured by the inputs alone (i.e., `n_steps > 0`),
-    as the while scan could abort earlier anytime after that. This means it is
-    not possible to replace while_scan_out[abs(min(tap)):][-i]
-    by while_scan_out[-i], for -i != -1.
-    """
-    op = scan_node.op
-
-    if not op.info.as_while:
-        return None
-
-    # Optimization is not implemented form mit-mot
-    recurrent_outputs = op.outer_mitsot_outs(scan_node.outputs) + op.outer_sitsot_outs(
-        scan_node.outputs
-    )
-    recurrent_outputs_taps_slices = (
-        op.info.mit_sot_in_slices + op.info.sit_sot_in_slices
-    )
-
-    n_steps = scan_node.inputs[0]
-    non_zero_steps_cond = n_steps > 0
-    assert_non_zero_steps_op = Assert("n_steps > 0")
-
-    subtensor_merge_replacements = {}
-
-    # Iterate over all nodes that are two computations below the while scan
-    for node2 in get_clients_at_depth(fgraph, scan_node, depth=2):
-        if not isinstance(node2.op, Subtensor):
-            continue
-
-        node1 = node2.inputs[0].owner
-        if not (node1 and isinstance(node1.op, Subtensor)):
-            continue
-
-        x = node1.inputs[0]
-        if x not in recurrent_outputs:
-            continue
-
-        slice1 = get_idx_list(node1.inputs, node1.op.idx_list)
-        slice2 = get_idx_list(node2.inputs, node2.op.idx_list)
-
-        min_tap = abs(min(recurrent_outputs_taps_slices[recurrent_outputs.index(x)]))
-
-        if (
-            len(slice1) == 1
-            and isinstance(slice1[0], slice)
-            and isinstance(slice1[0].start, ps.ScalarConstant)
-            and slice1[0].start.data == min_tap
-            and slice1[0].stop is None
-            and slice1[0].step is None
-            and len(slice2) == 1
-            and isinstance(slice2[0], ps.ScalarConstant)
-            and slice2[0].data == -1
-        ):
-            out = assert_non_zero_steps_op(x[-1], non_zero_steps_cond)
-            copy_stack_trace([node2.outputs[0], node2.inputs[0]], out)
-            subtensor_merge_replacements[node2.outputs[0]] = out
-
-    return subtensor_merge_replacements
 
 
 def _is_default_scan_buffer(final_buffer: TensorVariable, taps: int) -> bool:

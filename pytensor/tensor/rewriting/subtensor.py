@@ -976,6 +976,7 @@ def local_subtensor_merge_slice(fgraph, node):
     return _local_subtensor_merge_rewrite(fgraph, node, merge_integer_index=False)
 
 
+@register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([Subtensor])
 def local_subtensor_merge_integer(fgraph, node):

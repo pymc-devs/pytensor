@@ -21,5 +21,4 @@ from pytensor.scan.rewriting.trace import (
     scan_save_mem_no_prealloc,
     scan_save_mem_prealloc,
     scan_sit_sot_to_untraced,
-    while_scan_merge_subtensor_last_element,
 )

@@ -448,14 +448,6 @@ class TestSaveMem:
 
         np.testing.assert_equal(f(n_steps=1000, x0=[1, 1]), 55)
         np.testing.assert_equal(f(n_steps=1, x0=[1, 1]), 2)
-        with pytest.raises(AssertionError, match="n_steps > 0"):
-            f(n_steps=0, x0=[1, 1])
-
-        # ys_trace is an Alloc that controls the size of the inner buffer,
-        # it should have shape[0] == 3, with two entries for the taps and one
-        # extra entry to prevent aliasing between the inputs and outputs
-        # of the pre-allocation mechanism. JIT linkers don't use pre-allocation
-        # so the buffer is one element smaller.
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, ys_trace = scan_node.inputs
         debug_fn = pytensor.function(
