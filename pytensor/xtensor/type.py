@@ -61,6 +61,8 @@ class XTensorType(Type, HasDataType, HasShape):
         else:
             self.dtype = np.dtype(dtype).name
 
+        if isinstance(dims, str):
+            dims = (dims,)
         self.dims = tuple(dims)
         if len(set(dims)) < len(dims):
             raise ValueError(f"Dimensions must be unique. Found duplicates in {dims}: ")
@@ -989,6 +991,8 @@ def _extract_data_and_dims(
     else:
         x_data = tensor_constant(x).data
         if dims is not None:
+            if isinstance(dims, str):
+                dims = (dims,)
             x_dims = tuple(dims)
         else:
             if x_data.ndim == 0:
