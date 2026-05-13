@@ -1969,18 +1969,19 @@ def local_reduce_join(fgraph, node):
 @register_uncanonicalize  # Needed for Min which is formed from Neg(Max(Neg))
 @node_rewriter([CAReduce])
 def local_careduce_join(fgraph, node):
-    r"""CAReduce(Join(axis, \*tensors), axis=ax) -> Elemwise{scalar.op}(\*[CAReduce(axis=ax, t) for t in tensors])
+    r"""CAReduce(Join(axis, \*tensors), axis=ax) -> CAReduce(..t1), .. combined via scalar.op
 
     When the reduction axis includes the join axis (or reduces all elements),
-    this avoids creating the concatenated intermediate array.
+    this avoids creating the concatenated intermediate array by reducing each
+    join input separately and combining results with the scalar op.
 
-    For >2 joined inputs, only scalar ops with variadic support
-    (Add, Mul) are rewritten, since Elemwise can't combine >2
-    binary-only ops (e.g. Maximum, Minimum) at once.
+    For >2 joined inputs with binary-only ops (e.g. Maximum, Minimum), the
+    combine step uses nested applications since Elemwise{nin > 2} is not
+    currently supported for those ops.
 
     """
     [joined_out] = node.inputs
-    if joined_out.owner is None or not isinstance(joined_out.owner.op, Join):
+    if not isinstance(joined_out.owner_op, Join):
         return None
 
     join_axis_tensor, *joined_inputs = joined_out.owner.inputs
@@ -1991,9 +1992,6 @@ def local_careduce_join(fgraph, node):
     if not isinstance(join_axis_tensor, Constant):
         return None
 
-    if len(joined_inputs) > 2 and not isinstance(node.op.scalar_op, ps.Add | ps.Mul):
-        return None
-
     join_axis = int(join_axis_tensor.data)
     if join_axis < 0:
         join_axis += joined_out.type.ndim
@@ -2002,8 +2000,9 @@ def local_careduce_join(fgraph, node):
     if reduce_op.axis is not None and join_axis not in reduce_op.axis:
         return None
 
-    reduced = [reduce_op.clone(axis=reduce_op.axis)(inp) for inp in joined_inputs]
-    ret = Elemwise(reduce_op.scalar_op)(*reduced)
+    reduced = [reduce_op(inp) for inp in joined_inputs]
+    scalar_op = reduce_op.scalar_op
+    ret = reduce(lambda a, b: Elemwise(scalar_op)(a, b), reduced)
 
     if ret.dtype != node.outputs[0].dtype:
         return None

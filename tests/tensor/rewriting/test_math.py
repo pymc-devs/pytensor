@@ -103,6 +103,7 @@ from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
+    local_careduce_join,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
@@ -3513,19 +3514,22 @@ class TestReduceJoin:
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
-    def test_not_supported_axis_none(self):
-        # Test that the rewrite does not crash in one case where it
-        # is not applied.  Reported at
-        # https://groups.google.com/d/topic/theano-users/EDgyCU00fFA/discussion
-        vx = matrix()
-        vy = matrix()
-        vz = matrix()
+    def test_careduce_join_list_sum_axis_none(self):
+        """Sum([a, b, c], axis=None) -> Add(Sum(ExpandDims(a)), Sum(ExpandDims(b)), Sum(ExpandDims(c))) with list inputs (via Join)"""
+        vx, vy, vz = matrices("xyz")
+        out = pt_sum([vx, vy, vz], axis=None)
+
+        fg = FunctionGraph([vx, vy, vz], [out], clone=False)
+        [rewritten_out] = local_careduce_join.transform(fg, out.owner)
+        expected_out = add(add(pt_sum(vx[None]), pt_sum(vy[None])), pt_sum(vz[None]))
+        assert equal_computations([rewritten_out], [expected_out])
+
         x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
         y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
         z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
-
-        out = pt_sum([vx, vy, vz], axis=None)
-        f = function([vx, vy, vz], out, mode=self.mode)
+        # Use py linker to avoid a pre-existing Numba bug with Sum(ExpandDims(...))
+        py_mode = self.mode.__class__("py", self.mode.optimizer)
+        f = function([vx, vy, vz], out, mode=py_mode)
         np.testing.assert_allclose(f(x, y, z), np.sum([x, y, z]))
 
     def test_not_supported_unequal_shapes(self):
@@ -3562,40 +3566,64 @@ class TestReduceJoin:
     def test_careduce_join_sum_2(self):
         """Sum(concat(a, b), axis=None) -> Add(Sum(a), Sum(b)) with 2 inputs"""
         x, y = vectors("xy")
-        xv, yv = (
-            np.random.rand(100).astype(config.floatX),
-            np.random.rand(200).astype(config.floatX),
-        )
         out = pt_sum(pt.concatenate([x, y]), axis=None)
+
+        fg = FunctionGraph([x, y], [out], clone=False)
+        [rewritten_out] = local_careduce_join.transform(fg, out.owner)
+        expected_out = add(pt_sum(x), pt_sum(y))
+        assert equal_computations([rewritten_out], [expected_out])
+
+        xv = np.random.rand(100).astype(config.floatX)
+        yv = np.random.rand(200).astype(config.floatX)
         f = function([x, y], out, mode=self.mode)
         np.testing.assert_allclose(f(xv, yv), np.sum(np.concatenate([xv, yv])))
-        topo = f.maker.fgraph.toposort()
-        assert not any(isinstance(n.op, Join) for n in topo)
 
     def test_careduce_join_sum_3(self):
-        """Sum(concat(a, b, c), axis=None) -> Add(Sum(a), Sum(b), Sum(c)) with 3 inputs (variadic combine)"""
+        """Sum(concat(a, b, c), axis=None) with 3 inputs applied via nested Add combine"""
         x, y, z = vectors("xyz")
+        out = pt_sum(pt.concatenate([x, y, z]), axis=None)
+
+        fg = FunctionGraph([x, y, z], [out], clone=False)
+        [rewritten_out] = local_careduce_join.transform(fg, out.owner)
+        expected_out = add(add(pt_sum(x), pt_sum(y)), pt_sum(z))
+        assert equal_computations([rewritten_out], [expected_out])
+
         xv = np.random.rand(100).astype(config.floatX)
         yv = np.random.rand(150).astype(config.floatX)
         zv = np.random.rand(200).astype(config.floatX)
-        out = pt_sum(pt.concatenate([x, y, z]), axis=None)
         f = function([x, y, z], out, mode=self.mode)
         np.testing.assert_allclose(f(xv, yv, zv), np.sum(np.concatenate([xv, yv, zv])))
-        topo = f.maker.fgraph.toposort()
-        assert not any(isinstance(n.op, Join) for n in topo)
 
     def test_careduce_join_max_2(self):
         """Max(concat(a, b), axis=None) -> Maximum(Max(a), Max(b)) with 2 inputs (binary combine)"""
         x, y = vectors("xy")
-        xv, yv = (
-            np.random.rand(100).astype(config.floatX),
-            np.random.rand(200).astype(config.floatX),
-        )
         out = pt_max(pt.concatenate([x, y]), axis=None)
+
+        fg = FunctionGraph([x, y], [out], clone=False)
+        [rewritten_out] = local_careduce_join.transform(fg, out.owner)
+        expected_out = maximum(pt_max(x), pt_max(y))
+        assert equal_computations([rewritten_out], [expected_out])
+
+        xv = np.random.rand(100).astype(config.floatX)
+        yv = np.random.rand(200).astype(config.floatX)
         f = function([x, y], out, mode=self.mode)
         np.testing.assert_allclose(f(xv, yv), np.max(np.concatenate([xv, yv])))
-        topo = f.maker.fgraph.toposort()
-        assert not any(isinstance(n.op, Join) for n in topo)
+
+    def test_careduce_join_max_3(self):
+        """Max(concat(a, b, c), axis=None) applied via nested binary Maximum ops"""
+        x, y, z = vectors("xyz")
+        out = pt_max(pt.concatenate([x, y, z]), axis=None)
+
+        fg = FunctionGraph([x, y, z], [out], clone=False)
+        [rewritten_out] = local_careduce_join.transform(fg, out.owner)
+        expected_out = maximum(maximum(pt_max(x), pt_max(y)), pt_max(z))
+        assert equal_computations([rewritten_out], [expected_out])
+
+        xv = np.random.rand(100).astype(config.floatX)
+        yv = np.random.rand(150).astype(config.floatX)
+        zv = np.random.rand(200).astype(config.floatX)
+        f = function([x, y, z], out, mode=self.mode)
+        np.testing.assert_allclose(f(xv, yv, zv), np.max(np.concatenate([xv, yv, zv])))
 
     def test_careduce_join_sum_specific_axis(self):
         """Sum(concat(mat_a, mat_b), axis=0) -> Add(Sum(mat_a, axis=0), Sum(mat_b, axis=0))
@@ -3603,25 +3631,17 @@ class TestReduceJoin:
         join_axis=0 is included in the reduction axes, so the rewrite applies.
         """
         x, y = matrices("xy")
+        out = pt_sum(pt.concatenate([x, y], axis=0), axis=0)
+
+        fg = FunctionGraph([x, y], [out], clone=False)
+        [rewritten_out] = local_careduce_join.transform(fg, out.owner)
+        expected_out = add(pt_sum(x, axis=0), pt_sum(y, axis=0))
+        assert equal_computations([rewritten_out], [expected_out])
+
         xv = np.array([[1, 2], [3, 4]], dtype=config.floatX)
         yv = np.array([[5, 6]], dtype=config.floatX)
-        out = pt_sum(pt.concatenate([x, y], axis=0), axis=0)
         f = function([x, y], out, mode=self.mode)
         np.testing.assert_allclose(f(xv, yv), np.sum(np.concatenate([xv, yv]), axis=0))
-        topo = f.maker.fgraph.toposort()
-        assert not any(isinstance(n.op, Join) for n in topo)
-
-    def test_careduce_join_max_3_not_applied(self):
-        """Max(concat(a, b, c), axis=None) should NOT trigger (binary-only combine can't take >2)
-
-        Elemwise{maximum} is a binary op with nin=2, so it can't combine
-        three individual Max results at once like Add/Mul can.
-        """
-        x, y, z = vectors("xyz")
-        out = pt_max(pt.concatenate([x, y, z]), axis=None)
-        f = function([x, y, z], out, mode=self.mode)
-        topo = f.maker.fgraph.toposort()
-        assert any(isinstance(n.op, Join) for n in topo)
 
     def test_careduce_join_not_applied_axis_excludes_join(self):
         """Sum(concat(mat_a, mat_b), axis=1) should NOT trigger (axis excludes join axis 0)"""
