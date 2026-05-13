@@ -931,6 +931,12 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         """Generalized dot product with another XTensorVariable."""
         return px.math.dot(self, other, dim=dim)
 
+    def __matmul__(self, other):
+        return px.math.dot(self, other)
+
+    def __rmatmul__(self, other):
+        return px.math.dot(other, self)
+
     def broadcast_like(self, other, exclude=None):
         """Broadcast against another XTensorVariable."""
         _, self_bcast = px.shape.broadcast(other, self, exclude=exclude)

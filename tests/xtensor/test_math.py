@@ -355,6 +355,42 @@ def test_xelemwise_vectorize():
     check_vectorization([ab, bc], [ab + bc])
 
 
+def test_matmul():
+    """Test basic @ operator."""
+    # Matrix-vector
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b",), shape=(3,))
+    z = x @ y
+    assert z.type.dims == ("a",)
+
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones(3), dims=("b",))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Matrix-matrix
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    z = x @ y
+    assert z.type.dims == ("a", "c")
+
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.add.outer(np.arange(2.0), np.arange(3.0)), dims=("a", "b"))
+    y_test = DataArray(np.add.outer(np.arange(3.0), np.arange(4.0)), dims=("b", "c"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+
+def test_matmul_vectorize():
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b",), shape=(3,))
+
+    check_vectorization([x, y], [x @ y])
+
+
 def test_dot_vectorize():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b", "c"), shape=(3, 4))
