@@ -8,11 +8,9 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
-from pytensor.graph.traversal import ancestors
 from pytensor.link.basic import JITLinker
 from pytensor.scan.op import Scan
 from pytensor.scan.utils import until
-from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.math import dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import (
@@ -85,9 +83,12 @@ class TestReduceNsteps:
         n_steps_fn = pytensor.function(
             [u, idx, jdx], n_steps, accept_inplace=True, on_unused_input="ignore"
         )
-        # The old scan_reduce_trace still reduces n_steps via global_nsteps,
-        # so both branches see the same reduction here.
-        assert n_steps_fn(u=v_u, idx=3, jdx=15) == 11  # x5[-10]
+        if with_symbolic_slice:
+            # Symbolic slices prevent scan_reduce_nsteps from firing,
+            # so n_steps stays at the original sequence length.
+            assert n_steps_fn(u=v_u, idx=3, jdx=15) == 20
+        else:
+            assert n_steps_fn(u=v_u, idx=3, jdx=15) == 11  # x5[-10]
         if not with_symbolic_slice:
             assert n_steps_fn(u=v_u, idx=3, jdx=3) == 18  # x6[-3]
             assert n_steps_fn(u=v_u, idx=16, jdx=15) == 17  # x3[16]
@@ -269,46 +270,38 @@ class TestReduceTrace:
         np.testing.assert_allclose(tx4, v_u[-1] + 4.0, rtol=rtol)
         np.testing.assert_allclose(tx5, v_u[-1] + 5.0, rtol=rtol)
 
-        # Confirm reduction in buffer sizes
         [scan_node] = [
             node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
         ]
-        # x6 and x7 are dropped because they are not used
+        # x6 and x7 are dropped because they are not used. Under JIT linkers
+        # (no prealloc) x5 further collapses to an untraced sit_sot (scalar
+        # input); under CVM/prealloc it stays as a size-2 sit_sot buffer.
         [_n_steps, _seq, x4_buffer, x5_buffer, x1_len, x2_len, x3_len] = (
             scan_node.inputs
         )
-        [x4_underlying_alloc] = [
-            var
-            for var in ancestors([x4_buffer])
-            if var.owner and isinstance(var.owner.op, AllocEmpty)
-        ]
-        [x5_underlying_alloc] = [
-            var
-            for var in ancestors([x5_buffer])
-            if var.owner and isinstance(var.owner.op, AllocEmpty)
-        ]
+        is_jit = isinstance(f.maker.linker, JITLinker)
+        if is_jit:
+            assert x5_buffer.type.shape == ()
+        else:
+            assert x5_buffer.type.shape == (None,)
         buffer_lengths = pytensor.function(
             [u, x10, x20, x30, x40],
             [
                 x1_len,
                 x2_len,
                 x3_len,
-                x4_underlying_alloc.shape[0],
-                x5_underlying_alloc.shape[0],
+                x4_buffer.shape[0],
             ],
             accept_inplace=True,
             on_unused_input="ignore",
             allow_input_downcast=True,
         )(v_u, [0, 0], 0, [0, 0], 0)
-        # ScanSaveMem keeps +1 entries to handle taps with preallocated outputs, unless we are using a JITLinker
-        maybe_one = 0 if isinstance(f.maker.linker, JITLinker) else 1
-
+        maybe_one = 0 if is_jit else 1
         assert [int(i) for i in buffer_lengths] == [
             7,  # entry -7 of a map variable is kept, we need at least that many
             3,  # entries [-3, -2] of a map variable are kept, we need at least 3
             6,  # last six entries of a map variable are kept
             2 + maybe_one,  # last entry of a double tap variable is kept
-            1 + maybe_one,  # last entry of a single tap variable is kept
         ]
 
     def test_does_not_duplicate_scan_nodes(self):
@@ -458,10 +451,16 @@ class TestReduceTrace:
 
         np.testing.assert_equal(f(n_steps=1000, x0=[1, 1]), 55)
         np.testing.assert_equal(f(n_steps=1, x0=[1, 1]), 2)
+
+        # ys_trace is the buffer for the sit-sot output.
+        # Buffer size = taps + 1 (prealloc) = 3 for C backend, 2 for JIT.
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, ys_trace = scan_node.inputs
         debug_fn = pytensor.function(
-            [n_steps, x0], ys_trace.shape[0], accept_inplace=True
+            [n_steps, x0],
+            ys_trace.shape[0],
+            accept_inplace=True,
+            on_unused_input="ignore",
         )
         expected_size = 2 if isinstance(f.maker.linker, JITLinker) else 3
         assert debug_fn(n_steps=1000, x0=[1, 1]) == expected_size
@@ -484,7 +483,9 @@ class TestReduceTrace:
 
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, _, len_ys = scan_node.inputs
-        debug_fn = pytensor.function([xs], len_ys, accept_inplace=True)
+        debug_fn = pytensor.function(
+            [xs], len_ys, accept_inplace=True, on_unused_input="ignore"
+        )
         assert debug_fn(xs=np.zeros((100,), dtype=config.floatX)) == 1
 
     def test_while_scan_taps_and_map(self):
@@ -512,16 +513,19 @@ class TestReduceTrace:
         with pytest.raises((AssertionError, IndexError)):
             f(x0=0, seq=test_seq, n_steps=0)
 
-        # Evaluate the shape of ys_trace and len_zs to confirm the rewrite worked correctly.
-        # JIT linkers don't use pre-allocation so the buffer is one element smaller.
+        # Confirm the rewrite worked. Under JIT linkers (no prealloc) ys
+        # collapses to an untraced sit_sot (ys_trace is a scalar input);
+        # under CVM/prealloc it stays as a size-2 sit_sot buffer. len_zs is 1.
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, _, ys_trace, len_zs = scan_node.inputs
+        if isinstance(f.maker.linker, JITLinker):
+            assert ys_trace.type.shape == ()
+        else:
+            assert ys_trace.type.shape == (None,)
         debug_fn = pytensor.function(
-            [x0, n_steps], [ys_trace.shape[0], len_zs], accept_inplace=True
+            [n_steps], [len_zs], accept_inplace=True, on_unused_input="ignore"
         )
-        stored_ys_steps, stored_zs_steps = debug_fn(x0=0, n_steps=200)
-        expected_y_steps = 1 if isinstance(f.maker.linker, JITLinker) else 2
-        assert stored_ys_steps == expected_y_steps
+        [stored_zs_steps] = debug_fn(n_steps=200)
         assert stored_zs_steps == 1
 
     def test_while_scan_untraced_sit_sot_shape(self):
@@ -555,21 +559,52 @@ class TestReduceTrace:
         fn = pytensor.function([val], out, mode=self.mode)
         assert fn(val_test).shape == (50,)
 
-        # Check that rewrite worked
+        # ``ys[:-50]`` lets ``scan_reduce_nsteps`` drop n_steps to 50, so
+        # the buffer is the full reduced trace = init_l + 50 = 52.
+        # ``ys[-50:]`` needs all 100 iterations (recurrence) but
+        # ``scan_reduce_trace`` recognizes the strip + ``[-50:]`` chain (or its
+        # merged ``[a:L]`` equivalent) and trims the buffer to 50 by
+        # collapsing the chain to a dynamic slice on the smaller buffer --
+        # no ``init_l`` overhead remains in either constant or symbolic
+        # ``n_steps``.
         [scan_node] = (n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, ys_trace = scan_node.inputs
         buffer_size_fn = pytensor.function(
             [val], ys_trace.shape[0], accept_inplace=True
         )
-        assert buffer_size_fn(val_test) == 52 if keep_beginning else 50
+        if keep_beginning:
+            assert buffer_size_fn(val_test) == 52
+        else:
+            assert buffer_size_fn(val_test) == 50
+
+    def test_symbolic_stop_not_dropped(self):
+        x0 = scalar("x0")
+        sym_stop = iscalar("sym_stop")
+
+        [_xs, ws] = scan(
+            lambda xtm1: (xtm1 + 1, xtm1 * 2),
+            outputs_info=[x0, None],
+            n_steps=10,
+            return_updates=False,
+        )
+        # ws is nit_sot with constant n_steps=10.
+        # A symbolic stop must not be silently dropped by the rewrite.
+        out = ws[3:sym_stop]
+        fn = function([x0, sym_stop], out, mode=self.mode)
+
+        # x0=0: step k produces xtm1=k, ws[k]=k*2
+        ws_ref = np.arange(10, dtype=config.floatX) * 2
+        np.testing.assert_allclose(fn(0, 5), ws_ref[3:5])
+        np.testing.assert_allclose(fn(0, 8), ws_ref[3:8])
+        np.testing.assert_allclose(fn(0, 10), ws_ref[3:10])
 
 
 def test_scan_sit_sot_to_untraced():
     """Test sit_sot to untraced_sit_sot conversion.
 
-    4 outputs: xs (sit_sot, all values used → stays), ys (sit_sot, only last
-    → converted), ws (nit_sot, unaffected), rs (sit_sot, required orphan
-    → converted). Result: 1 sit_sot, 1 nit_sot, 2 untraced_sit_sot.
+    4 outputs: xs (sit_sot, all values used -> stays), ys (sit_sot, only last
+    -> converted), ws (nit_sot, unaffected), rs (sit_sot, required orphan
+    -> converted). Result: 1 sit_sot, 1 nit_sot, 2 untraced_sit_sot.
     """
     mode = (
         get_default_mode()

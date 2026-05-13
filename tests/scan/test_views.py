@@ -68,23 +68,27 @@ def test_reduce_memory_consumption():
     mode = get_mode("FAST_RUN")
     mode = mode.excluding("inplace")
     f1 = function([], o, mode=mode)
-    inputs, outputs = clone_optimized_graph(f1)
+    _, outputs = clone_optimized_graph(f1)
 
     scan_nodes = grab_scan_node(outputs[0])
     assert scan_nodes is not None
     scan_node = scan_nodes[0]
-    f1 = function(inputs, scan_node.inputs[2])
 
-    # Originally, the shape would have been 1 due to the SaveMem
-    # optimization reducing the size to the number of taps (in this case
-    # 1) provided to the inner function. Now, because of the memory-reuse
-    # feature in Scan it can be 2 because SaveMem needs to keep a
-    # larger buffer to avoid aliasing between the inputs and the outputs.
-    # JIT linkers don't do this optimization so it's still 1
+    # The chain ``xs[1:][-1]`` folds to ``raw[-1]`` and save_mem trims the
+    # buffer.  Under prealloc (CVM) the buffer keeps an extra slot to dodge
+    # input/output aliasing -> shape (2,) and the sit_sot stays.  Under JIT
+    # linkers (no prealloc) it shrinks to (1,) and ``sit_sot_to_untraced``
+    # collapses it to a 0-d untraced scalar.
     if not isinstance(mode.linker, JITLinker) and config.scan__allow_output_prealloc:
-        assert f1().shape[0] == 2
+        # Symbolic n_steps -> save_mem caps ``extra_size`` via ``minimum``,
+        # leaving the buffer's static shape symbolic. Runtime length is 2.
+        assert scan_node.inputs[2].type.shape == (None,)
+        assert scan_node.op.info.n_sit_sot == 1
+        assert scan_node.op.info.n_untraced_sit_sot == 0
     else:
-        assert f1().shape[0] == 1
+        assert scan_node.inputs[2].type.ndim == 0
+        assert scan_node.op.info.n_sit_sot == 0
+        assert scan_node.op.info.n_untraced_sit_sot == 1
 
     gx = grad(o, x)
     f2 = function([], gx)
@@ -109,23 +113,23 @@ def test_foldl_memory_consumption(return_updates):
     mode = get_mode("FAST_RUN")
     mode = mode.excluding("inplace")
     f0 = function([], o, mode=mode)
-    inputs, outputs = clone_optimized_graph(f0)
+    _, outputs = clone_optimized_graph(f0)
 
     scan_nodes = grab_scan_node(outputs[0])
     assert scan_nodes is not None
     scan_node = scan_nodes[0]
-    f1 = function(inputs, scan_node.inputs[2])
 
-    # Originally, the shape would have been 1 due to the SaveMem
-    # optimization reducing the size to the number of taps (in this case
-    # 1) provided to the inner function. Now, because of the memory-reuse
-    # feature in Scan it can be 2 because SaveMem needs to keep a
-    # larger buffer to avoid aliasing between the inputs and the outputs.
-    # JIT linkers don't do this optimization so it's still 1
+    # See ``test_reduce_memory_consumption`` for the linker split.
     if not isinstance(mode.linker, JITLinker) and config.scan__allow_output_prealloc:
-        assert f1().shape[0] == 2
+        # Symbolic n_steps -> save_mem caps ``extra_size`` via ``minimum``,
+        # leaving the buffer's static shape symbolic. Runtime length is 2.
+        assert scan_node.inputs[2].type.shape == (None,)
+        assert scan_node.op.info.n_sit_sot == 1
+        assert scan_node.op.info.n_untraced_sit_sot == 0
     else:
-        assert f1().shape[0] == 1
+        assert scan_node.inputs[2].type.ndim == 0
+        assert scan_node.op.info.n_sit_sot == 0
+        assert scan_node.op.info.n_untraced_sit_sot == 1
 
     gx = grad(o, x)
     f2 = function([], gx)
@@ -150,23 +154,23 @@ def test_foldr_memory_consumption(return_updates):
     mode = get_mode("FAST_RUN")
     mode = mode.excluding("inplace")
     f1 = function([], o, mode=mode)
-    inputs, outputs = clone_optimized_graph(f1)
+    _, outputs = clone_optimized_graph(f1)
 
     scan_nodes = grab_scan_node(outputs[0])
     assert scan_nodes is not None
     scan_node = scan_nodes[0]
-    f1 = function(inputs, scan_node.inputs[2])
 
-    # Originally, the shape would have been 1 due to the SaveMem
-    # optimization reducing the size to the number of taps (in this case
-    # 1) provided to the inner function. Now, because of the memory-reuse
-    # feature in Scan it can be 2 because SaveMem needs to keep a
-    # larger buffer to avoid aliasing between the inputs and the outputs.
-    # JIT linkers don't do this optimization so it's still 1
+    # See ``test_reduce_memory_consumption`` for the linker split.
     if not isinstance(mode.linker, JITLinker) and config.scan__allow_output_prealloc:
-        assert f1().shape[0] == 2
+        # Symbolic n_steps -> save_mem caps ``extra_size`` via ``minimum``,
+        # leaving the buffer's static shape symbolic. Runtime length is 2.
+        assert scan_node.inputs[2].type.shape == (None,)
+        assert scan_node.op.info.n_sit_sot == 1
+        assert scan_node.op.info.n_untraced_sit_sot == 0
     else:
-        assert f1().shape[0] == 1
+        assert scan_node.inputs[2].type.ndim == 0
+        assert scan_node.op.info.n_sit_sot == 0
+        assert scan_node.op.info.n_untraced_sit_sot == 1
 
     gx = grad(o, x)
     f2 = function([], gx)

@@ -197,6 +197,14 @@ def _test_sit_sot_buffer_benchmark(
         xs_kept = xs[-1]
         expected_buffer_size = 1 + mode_preallocs_output
         expected_untraced_sit_sot = not mode_preallocs_output
+    elif buffer_size == "unit_slice":
+        # ``xs[-1:]`` (keepdim) should reach the same untraced sit_sot
+        # outcome as the scalar ``xs[-1]`` -- save_mem's strip-chain
+        # collapse gives the symbolic-``n_steps`` chain parity with the
+        # constant case.
+        xs_kept = xs[-1:]
+        expected_buffer_size = 1 + mode_preallocs_output
+        expected_untraced_sit_sot = not mode_preallocs_output
     elif buffer_size == "aligned":
         xs_kept = xs[-2:]
         expected_buffer_size = 2
@@ -220,7 +228,7 @@ def _test_sit_sot_buffer_benchmark(
     [scan_node] = [
         node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
     ]
-    if buffer_size == "unit" and expected_untraced_sit_sot:
+    if buffer_size in ("unit", "unit_slice") and expected_untraced_sit_sot:
         # sit_sot was converted to untraced_sit_sot (no buffer dimension)
         assert scan_node.op.info.n_sit_sot == 0
         assert scan_node.op.info.n_untraced_sit_sot == 1
@@ -231,7 +239,8 @@ def _test_sit_sot_buffer_benchmark(
 
 
 @pytest.mark.parametrize(
-    "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
+    "buffer_size",
+    ("unit", "unit_slice", "aligned", "misaligned", "whole", "whole+init"),
 )
 @pytest.mark.parametrize("n_steps, op_size", [(10, 2), (512, 2), (512, 256)])
 def test_sit_sot_buffer_benchmark_c(n_steps, op_size, buffer_size, benchmark):
@@ -241,7 +250,8 @@ def test_sit_sot_buffer_benchmark_c(n_steps, op_size, buffer_size, benchmark):
 
 
 @pytest.mark.parametrize(
-    "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
+    "buffer_size",
+    ("unit", "unit_slice", "aligned", "misaligned", "whole", "whole+init"),
 )
 @pytest.mark.parametrize("n_steps, op_size", [(10, 2), (512, 2), (512, 256)])
 def test_sit_sot_buffer_benchmark_numba(n_steps, op_size, buffer_size, benchmark):
@@ -601,17 +611,14 @@ def test_scan_grad_subtensor_compile_benchmark(benchmark):
     function(*build(), mode=no_fusion)  # warm
     fn = benchmark(lambda: function(*build(), mode=no_fusion))
 
-    # Gating ``local_subtensor_merge`` cuts the graph from hundreds of
-    # switch/min/max nodes down to ~110. Subsequent rewrite work in
-    # later commits tightens this further.
     n_apply = len(fn.maker.fgraph.apply_nodes)
-    assert n_apply <= 110, f"Graph has {n_apply} nodes, expected <= 110"
+    assert n_apply <= 20, f"Graph has {n_apply} nodes, expected <= 20"
 
     subtensor_nodes = [
         n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Subtensor)
     ]
-    assert len(subtensor_nodes) == 6, (
-        f"Expected 6 Subtensor, got {len(subtensor_nodes)}"
+    assert len(subtensor_nodes) <= 4, (
+        f"Expected <= 4 Subtensor, got {len(subtensor_nodes)}"
     )
 
     scan_nodes = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]

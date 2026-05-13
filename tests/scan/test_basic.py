@@ -4210,14 +4210,18 @@ def test_zero_steps_untraced_sit_sot(mode):
         return_updates=False,
         mode=mode,
     )
-    x = xs[-1]
+    # Index the raw scan output (which always includes the initial state) so
+    # ``[-1]`` is well-defined even when ``n_steps == 0``.  ``xs`` itself is
+    # ``raw[1:]`` (stripped of the initial), and ``xs[-1]`` would be
+    # out-of-bounds in that case.
+    x = xs.owner.inputs[0][-1]
 
     f = function([n_steps], x, updates={rng: final_rng}, mode=mode)
 
     assert f(n_steps=0) == np.pi
 
     # This is a regression test, scan would return None for the final_rng
-    # and cause a failure in the second coll
+    # and cause a failure in the second call
     assert f(n_steps=0) == np.pi
 
     # Non-zero steps should still work
