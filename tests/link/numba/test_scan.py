@@ -457,7 +457,7 @@ class TestScanSITSOTBuffer:
 @pytest.mark.parametrize("n_steps_val", [1, 1000])
 class TestScanMITSOTBuffer:
     def buffer_tester(self, constant_n_steps, n_steps_val, benchmark=None):
-        """Make sure we can handle storage changes caused by the `scan_save_mem` rewrite."""
+        """Make sure we can handle storage changes caused by the `scan_reduce_trace` rewrite."""
 
         def f_pow2(x_tm2, x_tm1):
             return 2 * x_tm1 + x_tm2

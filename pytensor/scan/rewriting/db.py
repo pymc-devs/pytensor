@@ -24,8 +24,9 @@ from pytensor.scan.rewriting.push_out import (
     scan_push_out_seq,
 )
 from pytensor.scan.rewriting.trace import (
-    scan_save_mem_no_prealloc,
-    scan_save_mem_prealloc,
+    scan_reduce_nsteps,
+    scan_reduce_trace_no_prealloc,
+    scan_reduce_trace_prealloc,
     scan_sit_sot_to_untraced,
 )
 from pytensor.tensor.rewriting.basic import constant_folding
@@ -54,25 +55,7 @@ optdb.register("scan_eqopt1", scan_eqopt1, "fast_run", "scan", position=0.05)
 # We run before blas opt at 1.7 and specialize 2.0
 # but after stabilize at 1.5. Should we put it before stabilize?
 optdb.register("scan_eqopt2", scan_eqopt2, "fast_run", "scan", position=1.6)
-# ScanSaveMem should execute only once per node.
-optdb.register(
-    "scan_save_mem_prealloc",
-    dfs_rewriter(scan_save_mem_prealloc, ignore_newtrees=True),
-    "fast_run",
-    "scan",
-    "scan_save_mem",
-    position=1.61,
-)
-optdb.register(
-    "scan_save_mem_no_prealloc",
-    dfs_rewriter(scan_save_mem_no_prealloc, ignore_newtrees=True),
-    "numba",
-    "jax",
-    "pytorch",
-    use_db_name_as_tag=False,
-    position=1.61,
-)
-# After scan_save_mem (it could be merged with it, but that rewrite is already a beast as is)
+# Before scan_reduce_{nsteps,trace} so they don't process outputs that will be pruned
 optdb.register(
     "scan_remove_unused_top",
     dfs_rewriter(scan_remove_unused, ignore_newtrees=True),
@@ -80,6 +63,33 @@ optdb.register(
     "scan",
     "scan_remove_unused",
     position=1.605,
+)
+optdb.register(
+    "scan_reduce_nsteps",
+    dfs_rewriter(scan_reduce_nsteps, ignore_newtrees=True),
+    "fast_run",
+    "scan",
+    "scan_save_mem",
+    position=1.611,
+)
+optdb.register(
+    "scan_reduce_trace_prealloc",
+    dfs_rewriter(scan_reduce_trace_prealloc, ignore_newtrees=True),
+    "fast_run",
+    "scan",
+    "scan_save_mem",  # backcompat
+    "scan_save_mem_prealloc",  # backcompat
+    position=1.612,
+)
+optdb.register(
+    "scan_reduce_trace_no_prealloc",
+    dfs_rewriter(scan_reduce_trace_no_prealloc, ignore_newtrees=True),
+    "numba",
+    "jax",
+    "pytorch",
+    "scan_save_mem_no_prealloc",  # backcompat
+    use_db_name_as_tag=False,
+    position=1.612,
 )
 optdb.register(
     "scan_sit_sot_to_untraced",

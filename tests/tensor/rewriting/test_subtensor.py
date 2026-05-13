@@ -158,7 +158,7 @@ def test_local_useless_inc_subtensor(op, s):
 def test_local_useless_setsubtensor_alloc_empty():
     """SetSubtensor(AllocEmpty(1, n), y, :1) -> y when y fills the buffer.
 
-    This is the pattern produced by scan_save_mem for sit_sot with buffer=1.
+    This is the pattern produced by scan_reduce_trace for sit_sot with buffer=1.
     local_useless_slice canonicalizes [:1] to [:] on the size-1 dim,
     then local_useless_inc_subtensor removes the SetSubtensor entirely.
     """

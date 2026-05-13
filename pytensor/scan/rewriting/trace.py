@@ -3,8 +3,12 @@
 These rewrites drop work and storage that nothing downstream actually
 needs:
 
-* :func:`scan_save_mem_rewrite` (registered as ``scan_save_mem_prealloc``
-  / ``scan_save_mem_no_prealloc``) — shorten outer buffers and the
+* :func:`scan_reduce_nsteps` — when every client of a Scan output reads a
+  constant scalar index, shorten ``n_steps`` to the minimum that covers
+  those reads and rewrite each client to a negative index against the
+  trimmed trace.
+* :func:`scan_reduce_trace_rewrite` (registered as ``scan_reduce_trace_prealloc``
+  / ``scan_reduce_trace_no_prealloc``) — shorten outer buffers and the
   ``n_steps`` to the smallest range any client actually reads.
 * :func:`scan_sit_sot_to_untraced` — convert sit_sot states whose
   history is unused into the cheaper ``untraced_sit_sot`` form.
@@ -30,16 +34,63 @@ from pytensor.tensor.basic import (
     atleast_Nd,
     get_scalar_constant_value,
 )
-from pytensor.tensor.math import maximum, minimum
+from pytensor.tensor.basic import switch as pt_switch
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import ge, maximum, minimum
 from pytensor.tensor.rewriting.basic import broadcasted_by
 from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
+    as_index_constant,
     basic_subtensor,
     get_canonical_form_slice,
     get_idx_list,
 )
 from pytensor.tensor.variable import TensorVariable
+
+
+def _maybe_constant_int(v) -> int | None:
+    """Return *v* as a Python int if it is a constant scalar, else ``None``.
+
+    *v* must be a tensor variable (or Python/NumPy scalar), **not** ``None``.
+    Callers dealing with slice components that may be ``None`` (= omitted)
+    must check for that case themselves before calling.
+    """
+    try:
+        return int(get_scalar_constant_value(v, max_recur=4))
+    except NotScalarConstantError:
+        return None
+
+
+def _init_l_per_output(op_info) -> list[int]:
+    """Per-output strip length: ``abs(min(taps))`` for mit_sot/sit_sot, ``0``
+    for mit_mot and nit_sot."""
+    return (
+        [0] * op_info.n_mit_mot
+        + [
+            abs(min(v))
+            for v in chain(op_info.mit_sot_in_slices, op_info.sit_sot_in_slices)
+        ]
+        + [0] * op_info.n_nit_sot
+    )
+
+
+def _python_slice_from_idx(entry):
+    """Convert an idx_list entry into a pure-Python ``slice(int|None, ...)`` or
+    Python int. Returns ``None`` if any present component is non-constant.
+    """
+    if isinstance(entry, slice):
+        a = None if entry.start is None else _maybe_constant_int(entry.start)
+        b = None if entry.stop is None else _maybe_constant_int(entry.stop)
+        s = None if entry.step is None else _maybe_constant_int(entry.step)
+        if entry.start is not None and a is None:
+            return None
+        if entry.stop is not None and b is None:
+            return None
+        if entry.step is not None and s is None:
+            return None
+        return slice(a, b, s)
+    return _maybe_constant_int(entry)
 
 
 def select_min(x, y):
@@ -111,7 +162,191 @@ def _is_default_scan_buffer(final_buffer: TensorVariable, taps: int) -> bool:
         return not broadcasted_by(init_value_.squeeze(0), init_buffer[0])
 
 
-def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: bool):
+@node_rewriter([Scan])
+def scan_reduce_nsteps(fgraph, node):
+    """Reduce the number of scan iterations when clients don't need all steps.
+
+    Analyzes constant indices on scan outputs to find the minimum n_steps
+    needed. Adjusts client subtensors so negative indices are preserved,
+    enabling the downstream buffer reduction rewrite to reason about them.
+
+    Examples:
+        scan(n)[-2]    → scan(n-1)[-1]      (one fewer step)
+        scan(10)[7]    → scan(8)[-1]         (positive → negative)
+        scan(n)[-3:-1] → scan(n-1)[-2:None]  (slice adjustment)
+    """
+    op = node.op
+    op_info = op.info
+
+    if op_info.as_while or op_info.n_untraced_sit_sot:
+        return None
+
+    c_outs = (
+        op_info.n_mit_mot + op_info.n_mit_sot + op_info.n_sit_sot + op_info.n_nit_sot
+    )
+    init_l = _init_l_per_output(op_info)
+
+    n_steps = node.inputs[0]
+    n_steps_const = _maybe_constant_int(n_steps)
+
+    # Collect the maximum needed steps across all outputs and their clients.
+    # Negative-index requirements are tracked as ``offset = idx + 1`` (each
+    # ``<= 0``); if any equals 0 some client wants ``raw[-1]`` and we must
+    # bail. Tracking the constant offset directly avoids producing
+    # ``n_steps - minimum(n_steps, n_steps)`` style "no-op" deltas that
+    # ``scan_reduce_trace`` can't read through.
+    max_needed: int = 0  # max constant-position requirement (for non-negative idx)
+    neg_offsets: list[int] = []  # collected ``idx + 1`` over negative-idx clients
+    sym_constraints: list = []  # symbolic ``nw_steps_min`` contributions
+    can_reduce = True
+
+    for i, out in enumerate(node.outputs[:c_outs]):
+        for cl, _ in fgraph.clients[out]:
+            if not isinstance(cl.op, Subtensor):
+                can_reduce = False
+                break
+
+            s0 = get_idx_list(cl.inputs, cl.op.idx_list)[0]
+
+            if isinstance(s0, slice):
+                if s0.step is not None and _maybe_constant_int(s0.step) != 1:
+                    can_reduce = False
+                    break
+                stop_int = None if s0.stop is None else _maybe_constant_int(s0.stop)
+                if stop_int is None:
+                    can_reduce = False
+                    break
+                if stop_int < 0:
+                    neg_offsets.append(stop_int)
+                elif stop_int > 0:
+                    max_needed = max(max_needed, stop_int - init_l[i])
+            else:
+                if (idx_int := _maybe_constant_int(s0)) is not None:
+                    if idx_int == -1:
+                        can_reduce = False
+                        break
+                    if idx_int < 0:
+                        neg_offsets.append(idx_int + 1)
+                    else:
+                        max_needed = max(max_needed, idx_int + 1 - init_l[i])
+                else:
+                    sym_constraints.append(
+                        pt_switch(
+                            ge(s0, 0),
+                            s0 + (1 - init_l[i]),
+                            n_steps + s0 + 1,
+                        )
+                    )
+        if not can_reduce:
+            break
+
+    if not can_reduce:
+        return None
+
+    contributions: list = []
+    if max_needed > 0:
+        contributions.append(max_needed)
+    if neg_offsets:
+        contributions.append(n_steps + max(neg_offsets))
+    contributions.extend(sym_constraints)
+    if not contributions:
+        return None
+
+    nw_steps: int | Variable = contributions[0]
+    for c in contributions[1:]:
+        nw_steps = maximum(nw_steps, c)
+    if not isinstance(nw_steps, int) or sym_constraints or n_steps_const is None:
+        nw_steps = minimum(nw_steps, n_steps)
+
+    if (
+        isinstance(nw_steps, int)
+        and n_steps_const is not None
+        and nw_steps >= n_steps_const
+    ):
+        return None
+
+    delta = n_steps - nw_steps
+
+    nw_inputs = list(node.inputs)
+    nw_inputs[0] = pt.as_tensor_variable(nw_steps)
+
+    offset = 1 + op_info.n_seqs + op_info.n_mit_mot
+    for idx in range(op_info.n_mit_sot + op_info.n_sit_sot):
+        i = idx + op_info.n_mit_mot
+        taps = init_l[i]
+        nw_input = nw_inputs[offset + idx]
+        if _is_default_scan_buffer(nw_input, taps):
+            nw_input = expand_empty(nw_input.owner.inputs[1], nw_steps)
+        else:
+            nw_input = nw_input[: (taps + nw_steps)]
+        nw_inputs[offset + idx] = nw_input
+
+    nitsot_offset = (
+        offset + op_info.n_mit_sot + op_info.n_sit_sot + op_info.n_untraced_sit_sot
+    )
+    for idx in range(op_info.n_nit_sot):
+        pos = nitsot_offset + idx
+        if nw_inputs[pos] == n_steps:
+            nw_inputs[pos] = pt.as_tensor_variable(nw_steps)
+
+    new_outs = cast(list[TensorVariable], op(*nw_inputs, return_list=True))
+
+    old_new = []
+    for i, out in enumerate(node.outputs[:c_outs]):
+        old_raw_length = node.inputs[0] + init_l[i]
+        new_length = nw_steps + init_l[i]
+        for cl, _ in fgraph.clients[out]:
+            if not isinstance(cl.op, Subtensor):
+                continue
+            this_slice = get_idx_list(cl.inputs, cl.op.idx_list)
+            s0 = this_slice[0]
+            rest = this_slice[1:]
+
+            if isinstance(s0, slice):
+
+                def _maybe_to_positive(b):
+                    if b is None:
+                        return None
+                    b_int = _maybe_constant_int(b)
+                    if b_int is not None and b_int < 0:
+                        return old_raw_length + b
+                    return b
+
+                new_s0 = slice(
+                    _maybe_to_positive(s0.start),
+                    _maybe_to_positive(s0.stop),
+                    s0.step,
+                )
+            else:
+                idx_int = _maybe_constant_int(s0)
+                if idx_int is None:
+                    new_s0 = pt_switch(ge(s0, 0), s0 - new_length, s0 + delta)
+                elif idx_int >= 0:
+                    new_s0 = s0 - new_length
+                else:
+                    new_s0 = s0 + delta
+            nw_slice = (
+                as_index_constant(new_s0),
+                *(as_index_constant(s) for s in rest),
+            )
+
+            new_o = basic_subtensor(new_outs[i], *nw_slice)
+            old_new.append((cl.outputs[0], new_o))
+
+    if not old_new:
+        return None
+
+    if any(apply_depends_on(new.owner, node) for _, new in old_new):
+        return False
+
+    replacements = dict(old_new)
+    replacements["remove"] = [node]
+    return replacements
+
+
+def scan_reduce_trace_rewrite(
+    fgraph, node, backend_supports_output_pre_allocation: bool
+):
     r"""Graph optimizer that reduces scan memory consumption.
 
     This optimizations attempts to determine if a `Scan` node, during its execution,
@@ -603,15 +838,15 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
 
 
 @node_rewriter([Scan])
-def scan_save_mem_prealloc(fgraph, node):
-    return scan_save_mem_rewrite(
+def scan_reduce_trace_prealloc(fgraph, node):
+    return scan_reduce_trace_rewrite(
         fgraph, node, backend_supports_output_pre_allocation=True
     )
 
 
 @node_rewriter([Scan])
-def scan_save_mem_no_prealloc(fgraph, node):
-    return scan_save_mem_rewrite(
+def scan_reduce_trace_no_prealloc(fgraph, node):
+    return scan_reduce_trace_rewrite(
         fgraph, node, backend_supports_output_pre_allocation=False
     )
 
@@ -620,7 +855,7 @@ def scan_save_mem_no_prealloc(fgraph, node):
 def scan_sit_sot_to_untraced(fgraph, node):
     """Convert sit_sot with buffer size=1 to untraced_sit_sot.
 
-    After scan_save_mem has reduced buffer sizes, sit_sot outputs that only
+    After scan_reduce_trace has reduced buffer sizes, sit_sot outputs that only
     need one state stored (buffer size=1) can be converted to untraced_sit_sot,
     which avoids the overhead of reading/writing circular buffers each iteration.
     """
