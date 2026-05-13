@@ -1018,10 +1018,9 @@ class TestLocalSubtensorMerge:
 
     def test_const6(self):
         # Bug reported by Graham. Slice+scalar merges with symbolic shape
-        # only fire under ``local_subtensor_merge_unsafe`` (shape_unsafe);
-        # under FAST_COMPILE the safe merge bails out and the chain stays
-        # as two Subtensors.
-        is_fast_compile = config.mode == "FAST_COMPILE"
+        # only fire under ``local_subtensor_merge_integer`` (shape_unsafe).
+        # That rewrite is registered for canonicalize too, so the merge
+        # fires in both FAST_COMPILE and FAST_RUN.
         data = self.rng.uniform(size=(8, 8, 8)).astype(config.floatX)
         x = tensor3("x")
 
@@ -1030,10 +1029,10 @@ class TestLocalSubtensorMerge:
         fun = function([x], y)
         val = fun(data)
         assert np.all(val == data[3:6, 2:6, 1:7][1])
-        n_subs = len(
-            [n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)]
+        assert (
+            len([n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)])
+            == 1
         )
-        assert n_subs == (2 if is_fast_compile else 1)
 
         # test 2) all-scalar chain -- merges by simple concatenation, no
         # safe-merge gate involved.
@@ -1051,10 +1050,10 @@ class TestLocalSubtensorMerge:
         fun = function([x], y)
         val = fun(data)
         assert np.all(val == data[3:6, 2, 1:7][1])
-        n_subs = len(
-            [n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)]
+        assert (
+            len([n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)])
+            == 1
         )
-        assert n_subs == (2 if is_fast_compile else 1)
 
     def test_partial_merge_alignment(self):
         # Regression: when some dims merge and others don't, the unmerged
