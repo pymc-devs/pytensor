@@ -3527,9 +3527,7 @@ class TestReduceJoin:
         x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
         y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
         z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
-        # Use py linker to avoid a pre-existing Numba bug with Sum(ExpandDims(...))
-        py_mode = self.mode.__class__("py", self.mode.optimizer)
-        f = function([vx, vy, vz], out, mode=py_mode)
+        f = function([vx, vy, vz], out, mode=get_mode("FAST_COMPILE"))
         np.testing.assert_allclose(f(x, y, z), np.sum([x, y, z]))
 
     def test_not_supported_unequal_shapes(self):
