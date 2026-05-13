@@ -18,7 +18,8 @@ from pytensor.scan.rewriting.push_out import (
     scan_push_out_seq,
 )
 from pytensor.scan.rewriting.trace import (
-    scan_save_mem_no_prealloc,
-    scan_save_mem_prealloc,
+    scan_reduce_nsteps,
+    scan_reduce_trace_no_prealloc,
+    scan_reduce_trace_prealloc,
     scan_sit_sot_to_untraced,
 )

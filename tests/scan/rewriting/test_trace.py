@@ -27,14 +27,133 @@ from tests import unittest_tools as utt
 from tests.scan.test_basic import asarrayX
 
 
-class TestSaveMem:
-    mode = (
-        get_default_mode()
-        .including("scan_save_mem", "scan_remove_unused")
-        .excluding("scan_pushout")
-    )
+_mode = (
+    get_default_mode()
+    .including("scan_save_mem", "scan_remove_unused")
+    .excluding("scan_pushout")
+)
 
-    def test_save_mem(self):
+
+class TestReduceNsteps:
+    mode = _mode
+
+    @pytest.mark.parametrize("with_symbolic_slice", (False, True))
+    def test_reduced_number_of_steps(self, with_symbolic_slice):
+        # Symbolic slice bounds prevent scan_reduce_nsteps from reducing.
+        def f_rnn(u_t):
+            return (
+                u_t + 1.0,
+                u_t + 2.0,
+                u_t + 3.0,
+                u_t + 4.0,
+                u_t + 5.0,
+                u_t + 6.0,
+                u_t + 7.0,
+            )
+
+        u = vector("u")
+        idx = iscalar("idx")
+        jdx = iscalar("jdx")
+        [x1, x2, x3, x4, x5, x6, x7] = scan(
+            f_rnn,
+            u,
+            n_steps=None,
+            truncate_gradient=-1,
+            go_backwards=False,
+            return_updates=False,
+        )
+
+        if with_symbolic_slice:
+            outs = [x1[:2], x2[4], x3[idx], x4[:idx], x5[-10], x6[-jdx], x7[:-jdx]]
+        else:
+            outs = [x1[:2], x2[4], x3[idx], x5[-10], x6[-jdx]]
+
+        f2 = function(
+            [u, idx, jdx],
+            outs,
+            allow_input_downcast=True,
+            mode=self.mode.excluding("scan_push_out_seq"),
+        )
+        [scan_node] = [
+            node for node in f2.maker.fgraph.toposort() if isinstance(node.op, Scan)
+        ]
+
+        rng = np.random.default_rng(utt.fetch_seed())
+        v_u = rng.uniform(-5.0, 5.0, size=(20,)).astype(u.type.dtype)
+
+        n_steps = scan_node.inputs[0]
+        n_steps_fn = pytensor.function(
+            [u, idx, jdx], n_steps, accept_inplace=True, on_unused_input="ignore"
+        )
+        # The old scan_reduce_trace still reduces n_steps via global_nsteps,
+        # so both branches see the same reduction here.
+        assert n_steps_fn(u=v_u, idx=3, jdx=15) == 11  # x5[-10]
+        if not with_symbolic_slice:
+            assert n_steps_fn(u=v_u, idx=3, jdx=3) == 18  # x6[-3]
+            assert n_steps_fn(u=v_u, idx=16, jdx=15) == 17  # x3[16]
+            assert n_steps_fn(u=v_u, idx=-5, jdx=15) == 16  # x3[-5]
+            assert n_steps_fn(u=v_u, idx=19, jdx=15) == 20  # x3[19] (no reduction)
+
+        if with_symbolic_slice:
+            tx1, tx2, tx3, tx4, tx5, tx6, tx7 = f2(v_u, 3, 15)
+            utt.assert_allclose(tx4, v_u[:3] + 4.0)
+            utt.assert_allclose(tx7, v_u[:-15] + 7.0)
+        else:
+            tx1, tx2, tx3, tx5, tx6 = f2(v_u, 3, 15)
+        utt.assert_allclose(tx1, v_u[:2] + 1.0)
+        utt.assert_allclose(tx2, v_u[4] + 2.0)
+        utt.assert_allclose(tx3, v_u[3] + 3.0)
+        utt.assert_allclose(tx5, v_u[-10] + 5.0)
+        utt.assert_allclose(tx6, v_u[-15] + 6.0)
+
+    def test_reduced_number_of_steps_constant(self):
+        x0 = pt.scalar("x0")
+        xs = scan(
+            lambda xtm1: xtm1 + 1, outputs_info=[x0], n_steps=10, return_updates=False
+        )
+
+        # scan_reduce_nsteps reduces n_steps from 10 to 8
+        fn = function([x0], xs[-3], mode=self.mode)
+        [scan_node] = [
+            node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
+        ]
+        n_steps = scan_node.inputs[0]
+        assert isinstance(n_steps, Constant) and n_steps.data == 8
+
+        np.testing.assert_allclose(fn(0), np.arange(1, 11)[-3])
+
+    def test_cannot_reduce_constant_number_of_steps(self):
+        x0 = pt.scalar("x0")
+        [xs, ys] = scan(
+            lambda xtm1, ytm1: (xtm1 + 1, ytm1 - 1),
+            outputs_info=[x0, x0],
+            n_steps=10,
+            return_updates=False,
+        )
+
+        # Because of ys[-1] we need all the steps!
+        fn = function([x0], [xs[:5], ys[-1]], mode=self.mode)
+        [scan_node] = [
+            node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
+        ]
+        n_steps = scan_node.inputs[0]
+        assert isinstance(n_steps, Constant) and n_steps.data == 10
+
+        res_x, res_y = fn(0)
+        np.testing.assert_allclose(
+            res_x,
+            np.arange(1, 11)[:5],
+        )
+        np.testing.assert_allclose(
+            res_y,
+            -np.arange(1, 11)[-1],
+        )
+
+
+class TestReduceTrace:
+    mode = _mode
+
+    def test_basic(self):
         rng = np.random.default_rng(utt.fetch_seed())
 
         vW_in2 = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
@@ -95,110 +214,7 @@ class TestSaveMem:
         utt.assert_allclose(pytensor_x, v_x[-1:])
         utt.assert_allclose(pytensor_y, v_y[-1:])
 
-    def test_save_mem_reduced_number_of_steps(self):
-        def f_rnn(u_t):
-            return (
-                u_t + 1.0,
-                u_t + 2.0,
-                u_t + 3.0,
-                u_t + 4.0,
-                u_t + 5.0,
-                u_t + 6.0,
-                u_t + 7.0,
-            )
-
-        u = vector("u")
-        idx = iscalar("idx")
-        jdx = iscalar("jdx")
-        [x1, x2, x3, x4, x5, x6, x7] = scan(
-            f_rnn,
-            u,
-            n_steps=None,
-            truncate_gradient=-1,
-            go_backwards=False,
-            return_updates=False,
-        )
-
-        f2 = function(
-            [u, idx, jdx],
-            [x1[:2], x2[4], x3[idx], x4[:idx], x5[-10], x6[-jdx], x7[:-jdx]],
-            allow_input_downcast=True,
-            mode=self.mode.excluding("scan_push_out_seq"),
-        )
-        # Check we actually have a Scan in the compiled function
-        [scan_node] = [
-            node for node in f2.maker.fgraph.toposort() if isinstance(node.op, Scan)
-        ]
-
-        # get random initial values
-        rng = np.random.default_rng(utt.fetch_seed())
-        v_u = rng.uniform(-5.0, 5.0, size=(20,)).astype(u.type.dtype)
-
-        # Check the number of steps is actually reduced from 20
-        n_steps = scan_node.inputs[0]
-        n_steps_fn = pytensor.function(
-            [u, idx, jdx], n_steps, accept_inplace=True, on_unused_input="ignore"
-        )
-        assert n_steps_fn(u=v_u, idx=3, jdx=15) == 11  # x5[const=-10] requires 11 steps
-        assert n_steps_fn(u=v_u, idx=3, jdx=3) == 18  # x6[jdx=-3] requires 18 steps
-        assert n_steps_fn(u=v_u, idx=16, jdx=15) == 17  # x3[idx=16] requires 17 steps
-        assert n_steps_fn(u=v_u, idx=-5, jdx=15) == 16  # x3[idx=-5] requires 16 steps
-        assert n_steps_fn(u=v_u, idx=19, jdx=15) == 20  # x3[idx=19] requires 20 steps
-
-        # compute the output in numpy
-        tx1, tx2, tx3, tx4, tx5, tx6, tx7 = f2(v_u, 3, 15)
-
-        utt.assert_allclose(tx1, v_u[:2] + 1.0)
-        utt.assert_allclose(tx2, v_u[4] + 2.0)
-        utt.assert_allclose(tx3, v_u[3] + 3.0)
-        utt.assert_allclose(tx4, v_u[:3] + 4.0)
-        utt.assert_allclose(tx5, v_u[-10] + 5.0)
-        utt.assert_allclose(tx6, v_u[-15] + 6.0)
-        utt.assert_allclose(tx7, v_u[:-15] + 7.0)
-
-    def test_save_mem_reduced_number_of_steps_constant(self):
-        x0 = pt.scalar("x0")
-        xs = scan(
-            lambda xtm1: xtm1 + 1, outputs_info=[x0], n_steps=10, return_updates=False
-        )
-
-        fn = function([x0], xs[:5], mode=self.mode)
-        [scan_node] = [
-            node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
-        ]
-        n_steps = scan_node.inputs[0]
-        assert isinstance(n_steps, Constant) and n_steps.data == 5
-
-        np.testing.assert_allclose(fn(0), np.arange(1, 11)[:5])
-
-    def test_save_mem_cannot_reduce_constant_number_of_steps(self):
-        x0 = pt.scalar("x0")
-        [xs, ys] = scan(
-            lambda xtm1, ytm1: (xtm1 + 1, ytm1 - 1),
-            outputs_info=[x0, x0],
-            n_steps=10,
-            return_updates=False,
-        )
-
-        # Because of ys[-1] we need all the steps!
-        fn = function([x0], [xs[:5], ys[-1]], mode=self.mode)
-        [scan_node] = [
-            node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
-        ]
-        n_steps = scan_node.inputs[0]
-        assert isinstance(n_steps, Constant) and n_steps.data == 10
-
-        res_x, res_y = fn(0)
-        np.testing.assert_allclose(
-            res_x,
-            np.arange(1, 11)[:5],
-        )
-        np.testing.assert_allclose(
-            res_y,
-            -np.arange(1, 11)[-1],
-        )
-
-    def test_save_mem_store_steps(self):
+    def test_store_steps(self):
         def step(u_t, x1_tm1, x1_tm3, x2_tm1, x3tm2, x3_tm1, x4_tm1):
             return (
                 u_t + 1.0,
@@ -295,7 +311,7 @@ class TestSaveMem:
             1 + maybe_one,  # last entry of a single tap variable is kept
         ]
 
-    def test_savemem_does_not_duplicate_number_of_scan_nodes(self):
+    def test_does_not_duplicate_scan_nodes(self):
         var = pt.ones(())
         values = scan(
             lambda x: ([x], (), until(x)),
@@ -310,7 +326,7 @@ class TestSaveMem:
         ]
         assert len(scan_nodes) == 1
 
-    def test_savemem_opt_0_step(self):
+    def test_0_step(self):
         """
         Test a case where the savemem optimization has the opportunity to
         lower the number of steps of a Scan to 0.
@@ -363,9 +379,7 @@ class TestSaveMem:
         output = f(x_value, w_value)
         utt.assert_allclose(output, expected_output)
 
-    def test_savemem_0_steps_does_not_point_to_unitialized_memory(self):
-        # Regression test for https://github.com/pymc-devs/pytensor/issues/1878
-
+    def test_0_steps_does_not_point_to_unitialized_memory(self):
         n = pt.tensor("n", shape=(), dtype=int)
         init_state = pt.tensor("init_state", shape=(3,))
         buffer_withot_init = pytensor.scan(
@@ -374,8 +388,6 @@ class TestSaveMem:
             n_steps=n,
             return_updates=False,
         )
-        # Access the last state of the Scan output buffer (which includes the initial state)
-        # It should never point to unitialized memory
         full_buffer = buffer_withot_init.owner.inputs[0]
         buffer_last_entry = full_buffer[-1]
 
@@ -433,13 +445,11 @@ class TestSaveMem:
         x0 = vector("x0")
 
         ys = pytensor.scan(
-            # Fibonacci Sequence
             lambda xtm2, xtm1: (xtm1 + xtm2, {}, until(xtm1 >= 34)),
             outputs_info=[{"initial": x0, "taps": [-2, -1]}],
             n_steps=n_steps,
             return_updates=False,
         )
-        # Save memory is triggered by choosing only last value
         y = ys[-1]
 
         f = pytensor.function(
@@ -464,7 +474,6 @@ class TestSaveMem:
             sequences=[xs],
             return_updates=False,
         )
-        # Save memory is triggered by choosing only last value
         y = ys[-1]
 
         f = pytensor.function([xs], y, mode=get_default_mode().including("scan"))
@@ -473,8 +482,6 @@ class TestSaveMem:
         with pytest.raises(IndexError):
             f(xs=[])
 
-        # len_ys is a numerical input that controls the shape of the inner buffer
-        # It should be 1, as only the last output is needed
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, _, len_ys = scan_node.inputs
         debug_fn = pytensor.function([xs], len_ys, accept_inplace=True)
@@ -485,7 +492,6 @@ class TestSaveMem:
         seq = vector("seq")
         n_steps = scalar("n_steps", dtype="int64")
 
-        # while loop
         [ys, zs] = pytensor.scan(
             lambda s, xtm1: ((xtm1 + 1, xtm1 + 1 + s), {}, until(xtm1 >= 99)),
             sequences=[seq],
@@ -493,7 +499,6 @@ class TestSaveMem:
             n_steps=n_steps,
             return_updates=False,
         )
-        # Save memory is triggered by choosing only last value
         y = ys[-1]
         z = zs[-1]
 
@@ -520,10 +525,6 @@ class TestSaveMem:
         assert stored_zs_steps == 1
 
     def test_while_scan_untraced_sit_sot_shape(self):
-        # Regression: ``Scan.infer_shape`` for while-scans used to call
-        # ``Shape_i(0)`` on every output, including untraced sit_sot ones
-        # that are 0-d (no leading time dimension), which crashed
-        # compilation under ``on_shape_error=raise``.
         x0 = scalar("x0")
         n_steps = scalar("n_steps", dtype="int64")
         [ys, zs] = pytensor.scan(
@@ -538,8 +539,6 @@ class TestSaveMem:
     @pytest.mark.parametrize("val_ndim", (0, 1))
     @pytest.mark.parametrize("keep_beginning", (False, True))
     def test_broadcasted_init(self, keep_beginning, val_ndim):
-        # Regression test when the original value is a broadcasted alloc
-        # The scan save mem rewrite used to wrongly slice on the unbroadcasted value
         val_shape = (1,) * val_ndim
         val = pt.tensor("val", shape=val_shape)
         val_test = np.zeros(val_shape, dtype=val.dtype)
