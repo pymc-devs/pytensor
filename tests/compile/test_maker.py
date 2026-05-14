@@ -36,8 +36,10 @@ floatX = "float32"
 def test_function_name():
     x = vector("x")
     func = function([x], x + 1.0)
+    assert func.name is None
 
-    assert __file__ in func.name
+    func_named = function([x], x + 1.0, name="my_func")
+    assert func_named.name == "my_func"
 
 
 class TestFunctionIn:
