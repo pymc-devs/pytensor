@@ -1045,7 +1045,7 @@ def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
 class TestExtractDiagLiftPass:
     """Coverage for ``extract_diag_lift_pass`` and its constituent rewrites:
     ``local_extract_diag_of_alloc_diag``, ``local_extract_diag_of_eye``,
-    ``local_extract_diag_lift``.
+    ``local_extract_diag_lift``, and ``local_slice_read_of_write``.
     """
 
     rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))

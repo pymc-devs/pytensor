@@ -1,6 +1,6 @@
-import itertools
 import sys
 import warnings
+from itertools import pairwise, zip_longest
 
 import numpy as np
 
@@ -79,6 +79,7 @@ from pytensor.tensor.subtensor import (
     advanced_inc_subtensor1,
     advanced_subtensor1,
     as_index_constant,
+    as_index_literal,
     basic_subtensor,
     flatten_index_variables,
     get_canonical_form_slice,
@@ -87,6 +88,7 @@ from pytensor.tensor.subtensor import (
     get_slice_elements,
     inc_subtensor,
     indices_from_subtensor,
+    unflatten_index_variables,
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
@@ -1696,6 +1698,90 @@ def local_read_of_write_same_indices(fgraph, node):
         return [r]
 
 
+def _slice_to_arange(sl, dim_length):
+    """Convert ``sl`` to the equivalent ``arange``-shaped index, or ``None``.
+
+    - constant ``slice(start, stop, step)`` with all ``>= 0`` and ``step > 0``
+      → ``tensor_constant(np.arange(start, stop, step))``.
+    - symbolic ``slice(0|None, stop, 1|None)`` with provably non-negative
+      ``stop`` → ``arange(minimum(stop, dim_length))``.
+    - ``slice(None, None, None)`` → ``arange(dim_length)``.
+    """
+    try:
+        start = 0 if sl.start is None else int(as_index_literal(sl.start))
+        stop = int(as_index_literal(sl.stop))
+        step = 1 if sl.step is None else int(as_index_literal(sl.step))
+        if start >= 0 and stop >= 0 and step > 0:
+            return tensor_constant(np.arange(start, stop, step))
+        return None
+    except (TypeError, NotScalarConstantError):
+        pass
+    if sl.start is not None:
+        try:
+            if int(as_index_literal(sl.start)) != 0:
+                return None
+        except (TypeError, NotScalarConstantError):
+            return None
+    if sl.step is not None:
+        try:
+            if int(as_index_literal(sl.step)) != 1:
+                return None
+        except (TypeError, NotScalarConstantError):
+            return None
+    if sl.stop is None:
+        return arange(dim_length)
+    if not _is_provably_non_negative(sl.stop):
+        return None
+    return arange(minimum(sl.stop, dim_length))
+
+
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Subtensor])
+def local_slice_read_of_write(fgraph, node):
+    """Simplify ``x[write_idx].set/inc(v)[slices]`` when we slice the written axes.
+
+    Converts slice indices to ``arange`` on axes where the write uses advanced
+    indexing, then delegates to ``local_advanced_read_of_write_constant_indices``.
+    """
+    read_node = node
+
+    write_node = node.inputs[0].owner
+    if not (write_node is not None and isinstance(write_node.op, AdvancedIncSubtensor)):
+        return None
+
+    read_idx_list = read_node.op.idx_list
+    write_idx_list = write_node.op.idx_list
+
+    if len(read_idx_list) > len(write_idx_list) or read_idx_list == write_idx_list:
+        return None
+
+    read_indices = unflatten_index_variables(read_node.inputs[1:], read_idx_list)
+    write_indices = unflatten_index_variables(write_node.inputs[2:], write_idx_list)
+
+    buffer_shape = tuple(write_node.inputs[0].shape)
+    new_indices: list = []
+    for axis, (read_idx, write_idx) in enumerate(
+        zip_longest(read_indices, write_indices, fillvalue=slice(None))
+    ):
+        read_is_slice = isinstance(read_idx, slice)
+        write_is_slice = isinstance(write_idx, slice)
+        if read_is_slice and not write_is_slice:
+            arange_index = _slice_to_arange(read_idx, buffer_shape[axis])
+            if arange_index is None:
+                return None
+            else:
+                new_indices.append(arange_index)
+                continue
+        elif read_is_slice != write_is_slice:
+            return None
+        else:
+            new_indices.append(read_idx)
+
+    new_read = write_node.out[tuple(new_indices)].owner
+    return local_advanced_read_of_write_constant_indices.fn(fgraph, new_read)
+
+
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([AdvancedSubtensor])
@@ -1728,7 +1814,10 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
     - ``local_write_of_write_same_indices`` collapses nested write chains.
     """
     inner = node.inputs[0]
-    if not (inner.owner and isinstance(inner.owner.op, AdvancedIncSubtensor)):
+    if not (
+        inner.owner
+        and isinstance(inner.owner.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
+    ):
         return None
 
     inner_op = inner.owner.op
@@ -2111,9 +2200,7 @@ def local_join_subtensors(fgraph, node):
     except NotScalarConstantError:
         return
 
-    for subtensor1_idx, (subtensor1, subtensor2) in enumerate(
-        itertools.pairwise(tensors)
-    ):
+    for subtensor1_idx, (subtensor1, subtensor2) in enumerate(pairwise(tensors)):
         # Check that two consecutive Subtensors are operating on the same base tensor
         if not (
             (

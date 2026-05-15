@@ -50,6 +50,7 @@ from pytensor.tensor.rewriting.subtensor import (
     local_adv_idx_to_diagonal,
     local_adv_idx_to_slice,
     local_advanced_read_of_write_constant_indices,
+    local_slice_read_of_write,
     local_useless_slice,
     register_useless,
 )
@@ -924,6 +925,7 @@ extract_diag_lift_pass = SequentialGraphRewriter(
         local_extract_diag_lift,
         local_subtensor_of_alloc,
         local_subtensor_of_batch_dims,
+        local_slice_read_of_write,
         local_advanced_read_of_write_constant_indices,
         name="extract_diag_lift_walker",
     ),
