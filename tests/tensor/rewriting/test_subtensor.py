@@ -19,6 +19,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
+    _slice_to_arange,
     local_add_of_sparse_write,
     local_adv_idx_to_slice,
     local_replace_AdvancedSubtensor,
@@ -1399,6 +1400,58 @@ class TestReadOfWriteSameIndices:
         out = inc_subtensor(x[:stop], v)[:stop]
         rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
         utt.assert_equal_computations([rewritten], [x[:stop] + v])
+
+
+@pytest.mark.parametrize("sl", [slice(None), slice(None, 5), slice(2, 8, 2)])
+def test_slice_to_arange_roundtrip(sl):
+    x = pt.vector("x", shape=(10,))
+
+    ar = _slice_to_arange(sl, x.shape[0])
+    assert ar is not None
+    arange_form = x[ar]
+    utt.assert_equal_computations([arange_form], [x[ar]])
+
+    useless_slice = out2in(local_adv_idx_to_slice, local_useless_slice)
+    folded = rewrite_graph(arange_form, include=(), custom_rewrite=useless_slice)
+    expected = x if sl == slice(None) else x[sl]
+    utt.assert_equal_computations([folded], [expected])
+
+
+def test_slice_read_of_write():
+    rw_kw = dict(
+        include=("canonicalize", "specialize"),
+        exclude=("local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",),
+    )
+    buf = pt.vector("buf", shape=(5,))
+
+    # Full overlap: write [0,1,2], read [:3] -> val
+    val = pt.vector("val", shape=(3,), dtype=buf.dtype)
+    write_idx = pt.constant(np.array([0, 1, 2], dtype="int64"))
+    out = buf[write_idx].set(val)[:3]
+    rewritten = rewrite_graph(out, **rw_kw)
+    utt.assert_equal_computations([rewritten], [val])
+
+    # Partial overlap: write [0,2,4], read [:3] -> buf[:3][[0,2]].set(val[:2])
+    write_idx = pt.constant(np.array([0, 2, 4], dtype="int64"))
+    out = buf[write_idx].set(val)[:3]
+    rewritten = rewrite_graph(out, **rw_kw)
+    expected = buf[:3][np.array([0, 2])].set(val[:2])
+    utt.assert_equal_computations([rewritten], [expected])
+
+    # No overlap: write [3,4], read [:2] -> buf[:2]
+    val2 = pt.vector("val2", shape=(2,), dtype=buf.dtype)
+    write_idx = pt.constant(np.array([3, 4], dtype="int64"))
+    out = buf[write_idx].set(val2)[:2]
+    rewritten = rewrite_graph(out, **rw_kw)
+    utt.assert_equal_computations([rewritten], [buf[:2]])
+
+    # No match: slice on non-write axis
+    buf2 = pt.matrix("buf2", shape=(5, 5))
+    val3 = pt.vector("val3", shape=(5,), dtype=buf2.dtype)
+    write_idx = pt.constant(np.array([0, 2, 4], dtype="int64"))
+    out = buf2[write_idx].set(val3)[:, :3]
+    rewritten = rewrite_graph(out, **rw_kw)
+    utt.assert_equal_computations([rewritten], [out])
 
 
 class TestReadOfWriteConstantIndices:
