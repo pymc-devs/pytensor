@@ -12,13 +12,20 @@ from pytensor.graph import (
     node_rewriter,
     vectorize_graph,
 )
-from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
+from pytensor.graph.rewriting.basic import (
+    NodeRewriter,
+    SequentialGraphRewriter,
+    copy_stack_trace,
+    out2in,
+)
 from pytensor.tensor.basic import (
     Alloc,
     ARange,
+    ExtractDiag,
     Join,
     MakeVector,
     alloc,
+    arange,
     as_tensor,
     expand_dims,
     get_underlying_scalar_constant_value,
@@ -29,7 +36,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.math import Dot, dot
+from pytensor.tensor.math import Dot, dot, minimum
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -38,6 +45,10 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.subtensor import (
     _constant_has_unique_indices,
+    local_adv_idx_to_diagonal,
+    local_adv_idx_to_slice,
+    local_advanced_read_of_write_constant_indices,
+    local_useless_slice,
     register_useless,
 )
 from pytensor.tensor.shape import (
@@ -48,6 +59,7 @@ from pytensor.tensor.shape import (
 )
 from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
@@ -771,6 +783,100 @@ def local_basic_subtensor_of_alloc(fgraph, node):
 @node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
 def local_subtensor_of_alloc(fgraph, node):
     return lift_subtensor_through_alloc(fgraph, node)
+
+
+def _diag_indices(ndim, a1, a2, d, row_off, col_off):
+    """``[slice(None)] * ndim`` with axes ``(a1, a2)`` set to paired aranges
+    sharing one ``arange(d)`` node so ``indexed_result_shape``'s same-node
+    fast path skips ``broadcast_shape``.
+    """
+    ar = arange(d, dtype="int64")
+    rows = ar + row_off if row_off else ar
+    cols = ar + col_off if col_off else ar
+    idxs: list = [slice(None)] * ndim
+    idxs[a1] = rows
+    idxs[a2] = cols
+    return idxs
+
+
+@node_rewriter([ExtractDiag])
+def local_extract_diag_lift(fgraph, node):
+    """Lower ``ExtractDiag(X)`` to ``X[..., arange(d)+r, arange(d)+c, ...]``
+    and commit only when the immediate next-step lift would consume it.
+
+    Each branch builds the hypothetical ``AdvancedSubtensor`` off-fgraph and
+    tests via the gating rewriter's ``.fn`` — no commit if the gate misses,
+    so we never leave an unhelpful paired-arange gather behind.
+
+    - ``Alloc`` parent — gated on ``local_subtensor_of_alloc``; rebuilds the
+      outer Alloc shape with the diag length ``d`` so ``Shape(arange(d))[0]``
+      doesn't survive.
+    - ``Elemwise`` / ``Blockwise`` parent — gated on
+      ``local_subtensor_of_batch_dims``. Blockwise core dims bail (the lift
+      can't push past core ndim).
+    - ``AdvancedIncSubtensor`` write-chain parent — gated on
+      ``local_advanced_read_of_write_constant_indices``.
+    """
+    inner = node.inputs[0]
+    op = node.op
+    a1, a2 = op.axis1, op.axis2
+    parent_op = inner.owner_op
+
+    if isinstance(parent_op, Alloc):
+        shape_inputs = inner.owner.inputs[1:]
+    elif isinstance(parent_op, Elemwise | Blockwise):
+        if isinstance(parent_op, Blockwise):
+            batch_ndim = inner.owner.op.batch_ndim(inner.owner)
+            if a1 >= batch_ndim or a2 >= batch_ndim:
+                return None
+        shape_inputs = inner.shape
+    elif isinstance(parent_op, AdvancedIncSubtensor):
+        shape_inputs = inner.shape
+    else:
+        return None
+
+    row_off, col_off = max(0, -op.offset), max(0, op.offset)
+
+    def _diag_dim(ax, off):
+        s = inner.type.shape[ax]
+        if s is not None:
+            return s - off
+        return shape_inputs[ax] - off if off else shape_inputs[ax]
+
+    a_term, b_term = _diag_dim(a1, row_off), _diag_dim(a2, col_off)
+    if isinstance(a_term, int) and isinstance(b_term, int):
+        diag_len = min(a_term, b_term)
+    else:
+        diag_len = a_term if a_term is b_term else minimum(a_term, b_term)
+    idxs = _diag_indices(inner.type.ndim, a1, a2, diag_len, row_off, col_off)
+    hypothetical = inner[tuple(idxs)].owner
+
+    if isinstance(parent_op, Alloc):
+        return local_subtensor_of_alloc.fn(fgraph, hypothetical)
+    elif isinstance(parent_op, Elemwise | Blockwise):
+        return local_subtensor_of_batch_dims.fn(fgraph, hypothetical)
+    else:
+        # AdvancedIncSubtensor write chain
+        return local_advanced_read_of_write_constant_indices.fn(fgraph, hypothetical)
+
+
+extract_diag_lift_pass = SequentialGraphRewriter(
+    out2in(
+        local_extract_diag_lift,
+        local_subtensor_of_alloc,
+        local_subtensor_of_batch_dims,
+        local_advanced_read_of_write_constant_indices,
+        name="extract_diag_lift_walker",
+    ),
+    out2in(
+        local_adv_idx_to_diagonal,
+        local_adv_idx_to_slice,
+        local_useless_slice,
+        name="extract_diag_cleanup",
+    ),
+)
+extract_diag_lift_pass.__name__ = "extract_diag_lift_pass"  # type: ignore[attr-defined]
+register_specialize(extract_diag_lift_pass, "shape_unsafe")  # type: ignore[arg-type]
 
 
 @register_canonicalize

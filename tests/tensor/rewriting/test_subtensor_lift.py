@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import pytest
 
@@ -50,6 +52,8 @@ from pytensor.tensor.rewriting.subtensor_lift import (
 from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedIncSubtensor1,
     AdvancedSubtensor,
     Subtensor,
 )
@@ -1032,3 +1036,52 @@ def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
         opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
         out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
     )
+
+
+class TestExtractDiagLiftPass:
+    """Coverage for ``extract_diag_lift_pass`` and its constituent rewrites."""
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
+    )
+    def test_extract_diag_of_write(self):
+        """Diagonal reads collapse fully-covered diagonal writes and keep partial-coverage writes."""
+        A = pt.full((2, 6, 6), np.nan)
+        rows = pt.arange(A.shape[-2])
+        cols = pt.arange(A.shape[-1])
+        write_offsets = [-2, -1, 0, 1, 2]
+        random.shuffle(write_offsets)
+        for offset in write_offsets:
+            value = offset + 0.1 * offset
+            if offset == 0:
+                A = A[..., rows, cols].set(value)
+            elif offset > 0:
+                A = A[..., rows[:-offset], cols[offset:]].set(value)
+            else:
+                offset = -offset
+                A = A[..., rows[offset:], cols[:-offset]].set(value)
+        # Partial write along offset 3
+        A = A[..., rows[1:-3], cols[4:]].set(np.pi)
+
+        read_offsets = [-2, -1, 0, 1, 2, 3]
+        outs = [
+            A.diagonal(offset=offset, axis1=-2, axis2=-1) for offset in read_offsets
+        ]
+
+        f_on = function([], outs)
+        f_off = function(
+            [],
+            outs,
+            mode=get_default_mode().excluding("extract_diag_lift_pass"),
+        )
+
+        # The partial-coverage read at offset=3 keeps exactly one scatter write of pi.
+        on_topo = f_on.maker.fgraph.toposort()
+        n_writes = sum(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
+            for n in on_topo
+        )
+        assert n_writes == 1
+
+        for got, ref in zip(f_on(), f_off(), strict=True):
+            np.testing.assert_allclose(got, ref, equal_nan=True)
