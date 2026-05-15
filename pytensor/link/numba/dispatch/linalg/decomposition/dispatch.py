@@ -43,6 +43,10 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
     schur_complex,
     schur_real,
 )
+from pytensor.link.numba.dispatch.linalg.decomposition.svd import (
+    _svd_gesdd_full,
+    _svd_gesdd_no_uv,
+)
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
@@ -61,14 +65,14 @@ def numba_funcify_SVD(op, node, **kwargs):
     if discrete_input and config.compiler_verbose:
         print("SVD requires casting discrete input to float")  # noqa: T201
 
-    # np.linalg.svd always returns real-valued singular values, even for complex input.
-    # The Op may declare s as complex (matching input dtype), but numba returns the real
-    # component dtype, so we must match that to avoid type unification errors.
+    # Casting discrete input to float allocates a new buffer, so in-place is moot.
+    effective_overwrite_a = op.overwrite_a and not discrete_input
+
     matrix_dtype = out_dtype
-    if out_dtype.kind == "c":
-        s_dtype = np.dtype(f"f{out_dtype.itemsize // 2}")
-    else:
-        s_dtype = out_dtype
+    # SVD declares S with the real component dtype via linalg_real_output_dtype,
+    # so the s output's own dtype is the right answer for both real and complex
+    # input.
+    s_dtype = np.dtype(node.outputs[1 if compute_uv else 0].dtype)
 
     if not compute_uv:
 
@@ -80,8 +84,7 @@ def numba_funcify_SVD(op, node, **kwargs):
                 return np.zeros((k,), dtype=s_dtype)
             if discrete_input:
                 x = x.astype(out_dtype)
-            _, ret, _ = np.linalg.svd(x, full_matrices)
-            return ret
+            return _svd_gesdd_no_uv(x, overwrite_a=effective_overwrite_a)
 
     else:
 
@@ -90,8 +93,8 @@ def numba_funcify_SVD(op, node, **kwargs):
             if x.size == 0:
                 m, n = x.shape
                 k = min(m, n)
-                # The LAPACK dispatch returns matrices in fortran order. To match this for the empty cases,
-                # build flip the shape inputs to np.zeros and transpose.
+                # LAPACK returns matrices in fortran order; build the empty
+                # returns with reversed shape + transpose to match.
                 if full_matrices:
                     return (
                         np.zeros((m, m), dtype=matrix_dtype).T,
@@ -106,9 +109,13 @@ def numba_funcify_SVD(op, node, **kwargs):
                     )
             if discrete_input:
                 x = x.astype(out_dtype)
-            return np.linalg.svd(x, full_matrices)
+            return _svd_gesdd_full(
+                x,
+                full_matrices=full_matrices,
+                overwrite_a=effective_overwrite_a,
+            )
 
-    cache_version = 1
+    cache_version = 2
     return svd, cache_version
 
 
