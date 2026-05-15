@@ -1,5 +1,3 @@
-import random
-
 import numpy as np
 import pytest
 
@@ -1410,8 +1408,8 @@ class TestReadOfWriteConstantIndices:
         # slice rewrite): otherwise it rewrites reads like ``[2, 4]`` into a basic
         # ``Subtensor`` *before* the collapse rewrite gets a chance, hiding
         # the AdvancedIncSubtensor parent the test is exercising. In
-        # FAST_RUN the diag_lift_pass's ``local_subtensor_of_write_to_advanced``
-        # gate would undo it in specialize, but FAST_COMPILE skips that.
+        # FAST_RUN ``local_slice_read_of_write`` would convert the basic
+        # Subtensor back in specialize, but FAST_COMPILE skips that.
         self.mode = mode.including(
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
@@ -2570,53 +2568,6 @@ class TestArangeRewrites:
         out = x[idx, idx]
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         utt.assert_equal_computations([rewritten], [pt.diagonal(x)])
-
-
-@pytest.mark.skipif(
-    config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
-)
-def test_extract_diag_of_write():
-    """``extract_diag`` of a chain of diagonal writes should simplify away
-    the writes when the read overlaps a (fully or partially) written diagonal,
-    and otherwise reduce to ``extract_diag`` of the original base.
-    """
-    A = pt.full((2, 6, 6), np.nan)
-    rows = pt.arange(A.shape[-2])
-    cols = pt.arange(A.shape[-1])
-    write_offsets = [-2, -1, 0, 1, 2]
-    # Randomize write order to make sure the rewrite is not sensitive to it
-    random.shuffle(write_offsets)
-    for offset in write_offsets:
-        value = offset + 0.1 * offset
-        if offset == 0:
-            A = A[..., rows, cols].set(value)
-        elif offset > 0:
-            A = A[..., rows[:-offset], cols[offset:]].set(value)
-        else:
-            offset = -offset
-            A = A[..., rows[offset:], cols[:-offset]].set(value)
-    # Partial write along offset 3
-    A = A[..., rows[1:-3], cols[4:]].set(np.pi)
-
-    read_offsets = [-2, -1, 0, 1, 2, 3]
-    outs = [A.diagonal(offset=offset, axis1=-2, axis2=-1) for offset in read_offsets]
-
-    f_on = function([], outs)
-    f_off = function(
-        [],
-        outs,
-        mode=get_default_mode().excluding("local_extract_diag_of_write"),
-    )
-
-    # All AdvancedIncSubtensor writes should be eliminated by the rewrite.
-    on_topo = f_on.maker.fgraph.toposort()
-    assert not any(
-        isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in on_topo
-    )
-
-    # Numerical equivalence with the unrewritten reference.
-    for got, ref in zip(f_on(), f_off(), strict=True):
-        np.testing.assert_allclose(got, ref, equal_nan=True)
 
 
 @pytest.mark.skipif(

@@ -21,7 +21,6 @@ from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
     ARange,
-    ExtractDiag,
     Join,
     ScalarFromTensor,
     TensorFromScalar,
@@ -2522,75 +2521,3 @@ optdb["specialize"].register(
     "shape_unsafe",  # It can mask invalid mask sizes
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
-
-
-@register_stabilize("shape_unsafe")
-@register_specialize("shape_unsafe")
-@node_rewriter([ExtractDiag])
-def local_extract_diag_of_write(fgraph, node):
-    """Delegate ``extract_diag(advanced_inc_subtensor(...))`` to the constant-indices rewrite.
-
-    Rewrites ``extract_diag(x, offset=k)`` as the equivalent
-    ``x[..., arange(d) + max(0, -k), arange(d) + max(0, k), ...]`` and
-    calls ``local_advanced_read_of_write_constant_indices`` to do the
-    work.  Since ``extract_diag`` is a zero-copy view, we only commit the
-    replacement when the downstream rewrite eliminates the gather.
-
-    Requires statically-known sizes on the two diagonal axes.
-    """
-    op = node.op
-
-    inner = node.inputs[0]
-    # AdvancedIncSubtensor1 is intentionally not accepted: it writes whole
-    # rows/slices on a single axis, not specific (i, j) positions, so it
-    # can't express "write the diagonal" the way two paired index arrays can.
-    if not (inner.owner and isinstance(inner.owner.op, AdvancedIncSubtensor)):
-        return None
-
-    # Need static sizes on the two diagonal axes to build constant indices.
-    dim_a = inner.type.shape[op.axis1]
-    dim_b = inner.type.shape[op.axis2]
-    if dim_a is None or dim_b is None:
-        return None
-
-    k = op.offset
-    row_offset = max(0, -k)
-    col_offset = max(0, k)
-    d = min(dim_a - row_offset, dim_b - col_offset)
-    if d <= 0:
-        return None
-
-    # Build equivalent AdvancedSubtensor: inner[..., arange(d) + row_offset, ..., arange(d) + col_offset, ...]
-    base_arange = np.arange(d, dtype=np.int64)
-    rows = pytensor.tensor.as_tensor_variable(base_arange + row_offset)
-    cols = pytensor.tensor.as_tensor_variable(base_arange + col_offset)
-    idxs = [slice(None)] * inner.type.ndim
-    idxs[op.axis1] = rows
-    idxs[op.axis2] = cols
-    equiv = inner[tuple(idxs)]
-
-    if not (equiv.owner and isinstance(equiv.owner.op, AdvancedSubtensor)):
-        return None
-
-    # Delegate to the general read-after-write rewrite.
-    result = local_advanced_read_of_write_constant_indices.fn(fgraph, equiv.owner)
-    if not result:
-        return None
-
-    # Stay zero-copy where possible: when the simplification reduced to a
-    # gather of the inner write's base at our diagonal-arange pattern (i.e.
-    # the no-coverage case where the write is irrelevant for this read),
-    # re-emit as ExtractDiag so we keep the view semantics of the original.
-    base = inner.owner.inputs[0]
-    [result_var] = result
-    if (
-        result_var.owner
-        and isinstance(result_var.owner.op, AdvancedSubtensor)
-        and result_var.owner.inputs[0] is base
-    ):
-        out = base.diagonal(offset=k, axis1=op.axis1, axis2=op.axis2)
-        copy_stack_trace(node.outputs[0], out)
-        return [out]
-
-    copy_stack_trace(node.outputs[0], result)
-    return result
