@@ -21,7 +21,7 @@ from pytensor.graph import (
     rewrite_graph,
 )
 from pytensor.graph.basic import equal_computations
-from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.printing import debugprint
 from pytensor.tensor import (
     add,
@@ -44,7 +44,11 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.rewriting.subtensor import (
+    local_adv_idx_to_diagonal,
+)
 from pytensor.tensor.rewriting.subtensor_lift import (
+    _diag_indices,
     local_subtensor_make_vector,
     local_subtensor_of_batch_dims,
     local_subtensor_shape_constant,
@@ -1039,7 +1043,242 @@ def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
 
 
 class TestExtractDiagLiftPass:
-    """Coverage for ``extract_diag_lift_pass`` and its constituent rewrites."""
+    """Coverage for ``extract_diag_lift_pass`` and its constituent rewrites:
+    ``local_extract_diag_of_alloc_diag``, ``local_extract_diag_of_eye``,
+    ``local_extract_diag_lift``.
+    """
+
+    rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    @pytest.mark.parametrize(
+        "v_len, k_alloc, offset",
+        [(5, 0, 0), (4, 1, 1)],
+    )
+    def test_extract_diag_of_alloc_diag_match(self, v_len, k_alloc, offset):
+        v = pt.vector("v", shape=(v_len,))
+        out = pt.diagonal(pt.diag(v, k=k_alloc), offset=offset)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [v])
+
+    def test_extract_diag_of_alloc_diag_offset_mismatch(self):
+        """When offsets differ, the diagonals don't overlap, so the result is zeros."""
+        v = pt.vector("v", shape=(4,))
+        out = pt.diagonal(pt.diag(v, k=1), offset=0)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.asarray(0.0, dtype=out.dtype), np.int64(5))
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    @pytest.mark.parametrize(
+        "n, m, k_eye, diag_offset, expected_val, expected_len",
+        [
+            (5, 5, 0, 0, 1, 5),
+            (3, 5, 0, 0, 1, 3),
+            (5, 5, 0, 1, 0, 4),
+        ],
+    )
+    def test_extract_diag_of_eye_static(
+        self, n, m, k_eye, diag_offset, expected_val, expected_len
+    ):
+        out = pt.diagonal(pt.eye(n, m, k_eye), offset=diag_offset)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.as_tensor_variable(
+            np.full(expected_len, expected_val, dtype=out.dtype)
+        )
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_symbolic(self):
+        n = pt.iscalar("n")
+        out = pt.diagonal(pt.eye(n, n, 0))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.asarray(1.0, dtype=out.dtype), n)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_partial_static_n(self):
+        """Diagonal of ``eye(n, 5, 0)`` with symbolic ``n`` is ``alloc(1, min(n, 5))``."""
+        n = pt.iscalar("n")
+        out = pt.diagonal(pt.eye(n, 5, 0))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(
+            np.asarray(1.0, dtype=out.dtype), pt.minimum(n, np.int64(5))
+        )
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_eye_partial_static_m(self):
+        """Diagonal of ``eye(5, m, 0)`` with symbolic ``m`` is ``alloc(1, min(5, m))``."""
+        m = pt.iscalar("m")
+        out = pt.diagonal(pt.eye(5, m, 0))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(
+            np.asarray(1.0, dtype=out.dtype), pt.minimum(np.int64(5), m)
+        )
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_alloc_zeros(self):
+        n = pt.lscalar("n")
+        out = pt.diagonal(pt.alloc(np.float64(0.0), n, n))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.float64(0.0), n)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_alloc_ones(self):
+        n = pt.lscalar("n")
+        m = pt.lscalar("m")
+        out = pt.diagonal(pt.alloc(np.float64(1.0), n, m))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.float64(1.0), pt.minimum(n, m))
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_alloc_symbolic_scalar(self):
+        v = pt.scalar("v")
+        out = pt.diagonal(pt.alloc(v, 5, 5))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(v, 5)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_alloc_row_broadcast(self):
+        """Diagonal of a row-broadcast alloc reduces to a slice of the row."""
+        v = pt.vector("v", shape=(None,))
+        out = pt.diagonal(pt.alloc(v, 5, v.shape[0]))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = v[:5]
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_alloc_matrix(self):
+        """Diagonal lifts through Alloc onto the underlying matrix input."""
+        x = pt.matrix("x", shape=(None, None))
+        out = pt.diagonal(pt.alloc(x, 3, x.shape[0], x.shape[1]), axis1=-2, axis2=-1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        d = pt.minimum(Shape_i(0)(x), Shape_i(1)(x))
+        expected = pt.alloc(pt.diagonal(x), 3, d)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_eye_mul_matrix(self):
+        x = pt.matrix("x", shape=(5, 5))
+        out = pt.diagonal(pt.eye(5) * x)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_scalar(self):
+        """Diagonal of ``eye(5) * s`` reduces to a length-5 broadcast of ``s``."""
+        s = pt.scalar("s")
+        out = pt.diagonal(pt.eye(5) * s)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(s[None], 5)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_eye_mul_row(self):
+        v = pt.row("v", shape=(1, 5))
+        out = pt.diagonal(pt.eye(5) * v)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = v.squeeze(axis=0)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_col(self):
+        v = pt.col("v", shape=(5, 1))
+        out = pt.diagonal(pt.eye(5) * v)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = v.squeeze(axis=1)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_nonzero_offset(self):
+        """Off-diagonal of ``eye(5) * x`` is zero everywhere."""
+        x = pt.matrix("x", shape=(5, 5))
+        out = pt.diagonal(pt.eye(5) * x, offset=1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.asarray(0.0, dtype=out.dtype), 4)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_elemwise_unary(self):
+        x = pt.matrix("x", shape=(5, 4))
+        out = pt.diagonal(pt.exp(x))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.exp(pt.diagonal(x))
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_elemwise_binary(self):
+        x = pt.matrix("x", shape=(5, 5))
+        y = pt.matrix("y", shape=(5, 5))
+        out = pt.diagonal(x + y)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x) + pt.diagonal(y)
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "bcast_shape, squeeze_axis",
+        [
+            ((), None),
+            ((1, 5), 0),
+            ((5, 1), 1),
+        ],
+        ids=["scalar", "row", "col"],
+    )
+    def test_extract_diag_of_elemwise_broadcast(self, bcast_shape, squeeze_axis):
+        x = pt.matrix("x", shape=(5, 5))
+        b = pt.tensor("b", shape=bcast_shape)
+        out = pt.diagonal(x + b) if bcast_shape else pt.diagonal(x * b)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        b_diag = b.squeeze(axis=squeeze_axis) if squeeze_axis is not None else b
+        expected = (pt.diagonal(x) + b_diag) if bcast_shape else (pt.diagonal(x) * b)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_elemwise_row_broadcast_offset(self):
+        """Row-broadcast input with positive offset contributes ``r[:, offset:]``."""
+        x = pt.matrix("x", shape=(5, 5))
+        r = pt.row("r", shape=(1, 5))
+        out = pt.diagonal(x + r, offset=1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x, offset=1) + r[:, 1:].squeeze(axis=0)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    def test_extract_diag_of_elemwise_unary_full_broadcast(self):
+        """Diagonal of a unary Elemwise on a fully-broadcast (1, 1) matrix is length-1."""
+        s = pt.scalar("s")
+        m = s.dimshuffle("x", "x")
+        out = pt.diagonal(-m)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        rng = np.random.default_rng(0)
+        s_test = float(rng.normal())
+        np.testing.assert_allclose(rewritten.eval({s: s_test}), [-s_test])
+
+    def test_extract_diag_of_elemwise_binary_with_full_broadcast(self):
+        """Diagonal of a binary Elemwise mixing a matrix and a (1, 1) input."""
+        x = pt.matrix("x", shape=(4, 4))
+        s = pt.scalar("s")
+        m = s.dimshuffle("x", "x")
+        out = pt.diagonal(x + m)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        rng = np.random.default_rng(0)
+        x_test = rng.normal(size=(4, 4))
+        s_test = float(rng.normal())
+        np.testing.assert_allclose(
+            rewritten.eval({x: x_test, s: s_test}),
+            np.diagonal(x_test + s_test),
+        )
+
+    @pytest.mark.parametrize("offset", [0, 2, -2])
+    def test_diag_indices_roundtrip(self, offset):
+        """``diagonal(x, k)`` -> ``_diag_indices`` -> rewrite back -> ``diagonal(x, k)``."""
+        x = pt.matrix("x", shape=(5, 5))
+        diag_form = pt.diagonal(x, offset=offset)
+
+        row_off, col_off = max(0, -offset), max(0, offset)
+        d = min(5 - row_off, 5 - col_off)
+        idxs = _diag_indices(2, 0, 1, d, row_off, col_off)
+        arange_form = x[tuple(idxs)]
+
+        ar = pt.arange(d, dtype="int64")
+        rows = ar + row_off if row_off else ar
+        cols = ar + col_off if col_off else ar
+        expected_lowered = x[rows, cols]
+        assert_equal_computations([arange_form], [expected_lowered])
+
+        folded = rewrite_graph(
+            arange_form,
+            include=(),
+            custom_rewrite=out2in(local_adv_idx_to_diagonal),
+        )
+        assert_equal_computations([folded], [diag_form])
 
     @pytest.mark.skipif(
         config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"

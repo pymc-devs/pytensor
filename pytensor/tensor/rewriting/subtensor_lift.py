@@ -20,8 +20,10 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.tensor.basic import (
     Alloc,
+    AllocDiag,
     ARange,
     ExtractDiag,
+    Eye,
     Join,
     MakeVector,
     alloc,
@@ -71,7 +73,7 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 def _canonical_indexing(var, indices):
@@ -800,6 +802,61 @@ def _diag_indices(ndim, a1, a2, d, row_off, col_off):
 
 
 @node_rewriter([ExtractDiag])
+def local_extract_diag_of_alloc_diag(fgraph, node):
+    """Short-circuit ``extract_diag(alloc_diag(v, ..., k_alloc), offset)``.
+
+    Diagonals at different offsets never cross:
+
+    - ``offset == k_alloc``: full match ``->`` ``v``
+    - ``offset != k_alloc``: no overlap ``->`` ``alloc(0, ..., d)`` along the
+      read diagonal of the synthesized ``(L+|k_alloc|, L+|k_alloc|)`` matrix
+      where ``d = L + |k_alloc| - |offset|``
+    """
+    inner = node.inputs[0]
+    if not isinstance(inner.owner_op, AllocDiag):
+        return None
+    op = node.op
+    diag_op = inner.owner.op
+    if (op.axis1, op.axis2) != (diag_op.axis1, diag_op.axis2):
+        return None  # cross-axis case is rare; bail
+    [v] = inner.owner.inputs
+    if op.offset == diag_op.offset:
+        copy_stack_trace(node.outputs[0], v)
+        return [v]
+    v_shape = tuple(
+        s if s is not None else v.shape[i] for i, s in enumerate(v.type.shape)
+    )
+    d = v_shape[-1] + abs(diag_op.offset) - abs(op.offset)
+    out = alloc(np.asarray(0, dtype=v.dtype), *v_shape[:-1], d)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
+@node_rewriter([ExtractDiag])
+def local_extract_diag_of_eye(fgraph, node):
+    """Short-circuit ``extract_diag(eye(n, m, k_eye), offset)``.
+
+    The result is an ``alloc`` of ``1`` (matching offset) or ``0`` (mismatched
+    offset) along the diagonal length ``min(n - row_off, m - col_off)``.
+    """
+    inner = node.inputs[0]
+    if not isinstance(inner.owner_op, Eye):
+        return None
+    op = node.op
+    n, m, k_inp = inner.owner.inputs
+    if not isinstance(k_inp, TensorConstant):
+        return None
+    val = np.asarray(1 if op.offset == int(k_inp.data) else 0, dtype=inner.dtype)
+    row_off, col_off = max(0, -op.offset), max(0, op.offset)
+    a = n if row_off == 0 else n - row_off
+    b = m if col_off == 0 else m - col_off
+    d = a if a is b else minimum(a, b)
+    out = alloc(val, d)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
+@node_rewriter([ExtractDiag])
 def local_extract_diag_lift(fgraph, node):
     """Lower ``ExtractDiag(X)`` to ``X[..., arange(d)+r, arange(d)+c, ...]``
     and commit only when the immediate next-step lift would consume it.
@@ -862,6 +919,8 @@ def local_extract_diag_lift(fgraph, node):
 
 extract_diag_lift_pass = SequentialGraphRewriter(
     out2in(
+        local_extract_diag_of_alloc_diag,
+        local_extract_diag_of_eye,
         local_extract_diag_lift,
         local_subtensor_of_alloc,
         local_subtensor_of_batch_dims,
