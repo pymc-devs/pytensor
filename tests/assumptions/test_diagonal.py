@@ -5,6 +5,8 @@ import pytensor.tensor as pt
 from pytensor.assumptions import DIAGONAL, FactState
 from pytensor.assumptions.specify import assume
 from pytensor.graph import rewrite_graph
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor.math import Dot
 from tests.assumptions.conftest import make_fgraph
 
 
@@ -54,6 +56,18 @@ def test_constant_sub_matrix_ndim_is_false(data):
     c = pt.constant(data)
     _, af = make_fgraph(c)
     assert af.get(c, DIAGONAL) == FactState.FALSE
+
+
+def test_dot_of_constant_eye_reduces():
+    """End-to-end: ``Dot(Constant(eye), x)`` reduces via ``dot_diag_to_elemwise``
+    once the Constant-DIAGONAL inference recovers the structural property that
+    constant-folding stripped from the original ``Eye`` Op."""
+    x = pt.matrix("x", shape=(5, 1))
+    y = pt.constant(np.eye(5)) @ x
+    fg = FunctionGraph([x], [y], clone=True)
+    rewrite_graph(fg, include=("canonicalize",))
+    # Reduces to leaf -- no Dot remains.
+    assert not any(isinstance(n.op, Dot) for n in fg.toposort())
 
 
 def test_cholesky_of_diagonal_is_diagonal():

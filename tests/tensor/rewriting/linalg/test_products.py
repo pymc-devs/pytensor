@@ -1,14 +1,18 @@
 import numpy as np
+import pytest
 import scipy.linalg
 from numpy.testing import assert_allclose
 
 from pytensor import function
 from pytensor import tensor as pt
+from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import KroneckerProduct
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_nested_blockdiag_fusion():
@@ -236,3 +240,66 @@ def test_slogdet_kronecker_rewrite():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_expm_of_diag(make_diag):
+    d = pt.dvector("d", shape=(5,))
+    D = make_diag(d)
+    out = pt.linalg.expm(D)
+
+    passes = ("canonicalize", "stabilize", "specialize")
+    rewritten = rewrite_graph(out, include=passes)
+    expected = rewrite_graph(alloc_diag(pt.exp(d), axis1=-2, axis2=-1), include=passes)
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_kron_of_diagonal_to_diagonal():
+    da = pt.tensor("da", shape=(3, 3))
+    db = pt.tensor("db", shape=(4, 4))
+    A = assume(da, diagonal=True)
+    B = assume(db, diagonal=True)
+
+    out = pt.linalg.kron(A, B)
+    f = function([da, db], out, mode="FAST_RUN")
+
+    nodes_batch = f.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes_batch)
+
+    rng = np.random.default_rng()
+
+    da_test = np.diag(rng.normal(size=(3,)))
+    db_test = np.diag(rng.normal(size=(4,)))
+    expected = np.kron(da_test, db_test)
+    assert_allclose(f(da_test, db_test), expected)
+
+    # Batched case
+    da_batch = pt.tensor("da_batch", shape=(2, 3, 3))
+    db_batch = pt.tensor("db_batch", shape=(2, 4, 4))
+    A_batch = assume(da_batch, diagonal=True)
+    B_batch = assume(db_batch, diagonal=True)
+
+    signature = "(m,m),(n,n)->(mn,mn)"
+    kron_batched = pt.vectorize(lambda a, b: pt.linalg.kron(a, b), signature=signature)
+    out_batch = kron_batched(A_batch, B_batch)
+    f_batch = function([da_batch, db_batch], out_batch)
+
+    nodes_batch = f_batch.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes_batch)
+
+    a_diags = np.random.normal(size=(2, 3))
+    b_diags = np.random.normal(size=(2, 4))
+    vec_diag = np.vectorize(np.diag, signature="(n)->(n,n)")
+    da_batch_val = vec_diag(a_diags)
+    db_batch_val = vec_diag(b_diags)
+
+    expected_batch = np.vectorize(np.kron, signature=signature)(
+        da_batch_val, db_batch_val
+    )
+    assert_allclose(f_batch(da_batch_val, db_batch_val), expected_batch)
