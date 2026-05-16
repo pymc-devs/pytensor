@@ -649,3 +649,16 @@ def test_solve_sylvester_both_diag(make_diag):
     expected = rewrite_graph(C / (a[:, None] + b[None, :]), include=passes)
 
     assert_equal_computations([rewritten], [expected])
+
+
+def test_orthogonal_solve_to_transpose_matmul():
+    n = 5
+    rewrites = ("canonicalize", "stabilize", "ShapeOpt")
+
+    Q = pt.dmatrix("Q", shape=(n, n))
+    Q_orth = assume(Q, orthogonal=True)
+    b = pt.dmatrix("b", shape=(n, 3))
+    out = solve(Q_orth, b)
+    rewritten = rewrite_graph(out, include=rewrites)
+    expected = rewrite_graph(Q_orth.mT @ b, include=rewrites)
+    assert_equal_computations([rewritten], [expected])

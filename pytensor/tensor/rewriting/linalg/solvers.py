@@ -2,7 +2,7 @@ from collections.abc import Container
 from copy import copy
 
 from pytensor import tensor as pt
-from pytensor.assumptions import DIAGONAL, check_assumption
+from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
 from pytensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
@@ -371,6 +371,27 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
 
     new_out = pt.concatenate(per_block_solutions, axis=split_axis)
     copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def orthogonal_solve_to_transpose_matmul(fgraph, node):
+    """Replace solve(Q, b) with Q.T @ b when Q is orthogonal."""
+    A, b = node.inputs
+
+    if not check_assumption(fgraph, A, ORTHOGONAL):
+        return None
+
+    b_ndim = node.op.core_op.b_ndim
+    if b_ndim == 1:
+        new_out = (A.mT @ b[..., :, None])[..., 0]
+    else:
+        new_out = A.mT @ b
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
     return [new_out]
 
 
