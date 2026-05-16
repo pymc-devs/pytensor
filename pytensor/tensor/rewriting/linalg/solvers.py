@@ -22,7 +22,7 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.core import SolveBase
-from pytensor.tensor.linalg.solvers.general import Solve, lu_solve
+from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
     SolveSylvester,
@@ -40,6 +40,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.linalg.utils import get_assume_a
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -170,6 +171,28 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     new_out = cho_solve((L, True), b, b_ndim=b_ndim)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+@register_stabilize
+@register_canonicalize
+@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="gen"))])
+def generic_solve_to_structured_form(fgraph, node):
+    """Upgrade solve(A, b, assume_a='gen') based on known structure of A.
+
+    Priority order (most specialized first):
+    - LOWER_TRIANGULAR -> solve_triangular(lower=True)
+    - UPPER_TRIANGULAR -> solve_triangular(lower=False)
+    - POSITIVE_DEFINITE -> solve(assume_a='pos')
+    - SYMMETRIC → solve(assume_a='sym')
+    """
+    b_ndim = node.op.core_op.b_ndim
+    A, b = node.inputs
+
+    assume_a = get_assume_a(fgraph, A)
+    if assume_a == "gen":
+        return None
+
+    return [solve(A, b, assume_a=assume_a, b_ndim=b_ndim)]
 
 
 @register_stabilize

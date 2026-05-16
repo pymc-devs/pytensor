@@ -1,7 +1,11 @@
 import numpy as np
 
 from pytensor import tensor as pt
-from pytensor.assumptions import DIAGONAL, check_assumption
+from pytensor.assumptions import (
+    LOWER_TRIANGULAR,
+    UPPER_TRIANGULAR,
+    check_assumption,
+)
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
@@ -174,15 +178,17 @@ def det_of_factorized_matrix(fgraph, node):
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @node_rewriter([det])
-def det_of_diag(fgraph, node):
-    """det(D) -> prod(diagonal(D)) for diagonal D."""
+def det_of_triangular(fgraph, node):
+    """det(T) -> prod(diagonal(T)) when T is triangular (incl. diagonal)."""
     inp = node.inputs[0]
 
-    if not check_assumption(fgraph, inp, DIAGONAL):
+    if not (
+        check_assumption(fgraph, inp, LOWER_TRIANGULAR)
+        or check_assumption(fgraph, inp, UPPER_TRIANGULAR)
+    ):
         return None
 
-    det_val = pt.diagonal(inp, axis1=-2, axis2=-1).prod(axis=-1)
-    det_val = det_val.astype(node.outputs[0].type.dtype)
+    det_val = matrix_diagonal_product(inp).astype(node.outputs[0].type.dtype)
     return [det_val]
 
 

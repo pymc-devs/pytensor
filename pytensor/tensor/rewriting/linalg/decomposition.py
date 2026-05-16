@@ -2,6 +2,7 @@ from pytensor import tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
+    SYMMETRIC,
     UPPER_TRIANGULAR,
     check_assumption,
 )
@@ -10,7 +11,7 @@ from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh, eigh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
@@ -171,6 +172,31 @@ def svd_of_diag(fgraph, node):
     copy_stack_trace(vh, new_Vh)
 
     return [new_U, new_s, new_Vh]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Eig)])
+def eig_to_eigh(fgraph, node):
+    """Replace eig(X) with eigh(X) when X is symmetric.
+
+    eigh is faster (~2x), returns real outputs, and supports gradients.
+    """
+    [X] = node.inputs
+    # Eigh is a subclass of Eig, so this tracker also matches Eigh — skip it
+    if isinstance(node.op.core_op, Eigh):
+        return None
+    if not check_assumption(fgraph, X, SYMMETRIC):
+        return None
+
+    w, v = eigh(X)
+    # Eig returns complex, Eigh returns real — cast to match original types
+    old_w, old_v = node.outputs
+    w = w.astype(old_w.type.dtype)
+    v = v.astype(old_v.type.dtype)
+    copy_stack_trace(old_w, w)
+    copy_stack_trace(old_v, v)
+    return [w, v]
 
 
 @register_canonicalize
