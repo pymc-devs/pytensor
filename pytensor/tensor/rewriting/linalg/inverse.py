@@ -1,5 +1,5 @@
 from pytensor import tensor as pt
-from pytensor.assumptions import DIAGONAL, check_assumption
+from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     node_rewriter,
@@ -85,6 +85,17 @@ def inv_of_inv(fgraph, node):
     match node.inputs[0].owner_op_and_inputs:
         case (Blockwise(MatrixInverse() | MatrixPinv()), X):
             return [X]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
+def inv_of_orthogonal_to_transpose(fgraph, node):
+    """inv(Q) -> Q.T when Q is orthogonal."""
+    [X] = node.inputs
+    if not check_assumption(fgraph, X, ORTHOGONAL):
+        return None
+    return [X.mT]
 
 
 @register_canonicalize
