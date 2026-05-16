@@ -2,6 +2,8 @@ from collections.abc import Container
 from copy import copy
 
 from pytensor import tensor as pt
+from pytensor.assumptions import check_assumption
+from pytensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.rewriting.basic import (
@@ -109,18 +111,64 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 @register_stabilize
 @node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
 def psd_solve_to_chol_solve(fgraph, node):
-    """
-    This utilizes the Solve assume_a flag or a boolean `psd` tag on matrices.
-    """
+    """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
     assume_a = node.op.core_op.assume_a
-    A, b = node.inputs  # result is the solution to Ax=b
-    if assume_a == "pos" or getattr(A.tag, "psd", None) is True:
+    A, b = node.inputs
+    if (
+        assume_a == "pos"
+        or getattr(A.tag, "psd", None) is True
+        or check_assumption(fgraph, A, POSITIVE_DEFINITE)
+    ):
         L = cholesky(A)
-        # N.B. this can be further reduced to cho_solve Op
-        #     if no other Op makes use of the L matrix
         Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
         x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=2)
         return [x]
+
+
+@register_specialize
+@node_rewriter([blockwise_of(SolveTriangular)])
+def paired_triangular_solves_to_cho_solve(fgraph, node):
+    """Fuse paired triangular solves from Cholesky into a single cho_solve.
+
+    solve_triangular(L.T, solve_triangular(L, b), lower=False) -> cho_solve((L, True), b)
+    """
+    core_op = node.op.core_op
+
+    # We're looking for the outer solve: solve_triangular(L.T, ..., lower=False)
+    if core_op.lower:
+        return None
+
+    L_T, inner_result = node.inputs
+
+    # Check L.T is a matrix transpose of a Cholesky factor
+    match L_T.owner_op_and_inputs:
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), L):
+            pass
+        case _:
+            return None
+
+    # L must be output of a Cholesky(lower=True)
+    match L.owner_op:
+        case Blockwise(Cholesky(lower=True)):
+            pass
+        case _:
+            return None
+
+    # inner_result must be solve_triangular(L, b, lower=True)
+    match inner_result.owner_op_and_inputs:
+        case (Blockwise(SolveTriangular(lower=True)), inner_L, b):
+            pass
+        case _:
+            return None
+
+    # inner_L must be the same Cholesky output as L
+    if inner_L is not L:
+        return None
+
+    b_ndim = core_op.b_ndim
+    new_out = cho_solve((L, True), b, b_ndim=b_ndim)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_stabilize
@@ -321,7 +369,7 @@ def _split_decomp_and_solve_steps(
             case (DimShuffle(is_left_expand_dims=True), root_a):  # type: ignore[misc]
                 transposed = False
             case (DimShuffle(is_left_expanded_matrix_transpose=True), root_a):  # type: ignore[misc]
-                transposed = True
+                transposed = True  # type: ignore[unreachable, unused-ignore]
 
         return root_a, transposed
 
