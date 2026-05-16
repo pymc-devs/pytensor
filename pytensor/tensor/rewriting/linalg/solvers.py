@@ -2,7 +2,7 @@ from collections.abc import Container
 from copy import copy
 
 from pytensor import tensor as pt
-from pytensor.assumptions import check_assumption
+from pytensor.assumptions import DIAGONAL, check_assumption
 from pytensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
@@ -25,6 +25,7 @@ from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
+    SolveSylvester,
     solve_discrete_lyapunov,
 )
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -232,6 +233,47 @@ def solve_of_inv_to_matmul(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(SolveBase)])
+def diagonal_solve_to_division(fgraph, node):
+    """Replace solve(D, b) with b / diagonal(D) when D is known diagonal."""
+    a, b = node.inputs
+
+    # Scalar case already handled by scalar_solve_to_division
+    if all(a.type.broadcastable[-2:]):
+        return None
+
+    if not check_assumption(fgraph, a, DIAGONAL):
+        return None
+
+    core_op = node.op.core_op
+    b_ndim = core_op.b_ndim
+    a_diag = pt.diagonal(a, axis1=-2, axis2=-1)
+
+    match core_op:
+        case SolveTriangular(unit_diagonal=True):
+            # Unit diagonal means diag is all ones; solve is identity
+            return [b]
+        case Solve() | SolveTriangular():
+            if b_ndim == 1:
+                new_out = b / a_diag
+            else:
+                new_out = b / a_diag[..., :, None]
+        case CholeskySolve():
+            # D is the Cholesky factor; D @ D.T = diag(d^2) for diagonal D
+            if b_ndim == 1:
+                new_out = b / a_diag**2
+            else:
+                new_out = b / (a_diag**2)[..., :, None]
+        case _:
+            return None
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
 def block_diag_solve_to_block_diag_solves(fgraph, node):
     """Push ``solve(block_diag(A_1, ..., A_n), b)`` into per-block solves.
 
@@ -306,6 +348,32 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
 
     new_out = pt.concatenate(per_block_solutions, axis=split_axis)
     copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveSylvester)])
+def solve_sylvester_of_diag(fgraph, node):
+    """Replace solve_sylvester(A, B, C) with C / (a[:, None] + b[None, :]) when both A, B are diagonal.
+
+    The Sylvester equation A @ X + X @ B = C, when A = diag(a) and B = diag(b),
+    reduces to X_ij = C_ij / (a_i + b_j).
+    """
+    A, B, C = node.inputs
+
+    if not check_assumption(fgraph, A, DIAGONAL):
+        return None
+    if not check_assumption(fgraph, B, DIAGONAL):
+        return None
+
+    a = pt.diagonal(A, axis1=-2, axis2=-1)
+    b = pt.diagonal(B, axis1=-2, axis2=-1)
+
+    new_out = C / (a[..., :, None] + b[..., None, :])
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
     return [new_out]
 
 
