@@ -1,3 +1,4 @@
+import pytensor.tensor.rewriting.assumptions
 import pytensor.tensor.rewriting.basic
 import pytensor.tensor.rewriting.blas
 import pytensor.tensor.rewriting.blas_c
