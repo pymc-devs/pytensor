@@ -19,6 +19,9 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
+from pytensor.tensor.linalg.solvers.linear_control import (
+    solve_sylvester,
+)
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
 from pytensor.tensor.linalg.solvers.tridiagonal import (
@@ -558,3 +561,91 @@ def test_block_diag_solve_pushdown_both_sides_block_diag():
         scipy.linalg.block_diag(B1_v, B2_v),
     )
     assert_allclose(f(A1_v, A2_v, B1_v, B2_v), expected, atol=1e-10)
+
+
+class TestDiagonalSolveToDivision:
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_solve_diag(self, b_ndim, make_diag):
+        d = pt.dvector("d", shape=(5,))
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        D = make_diag(d)
+        out = solve(D, b, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = b / d if b_ndim == 1 else b / d[..., :, None]
+
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_solve_triangular_diag(self, b_ndim):
+        d = pt.dvector("d")
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        D = pt.diag(d)
+        out = solve_triangular(D, b, lower=True, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = b / d if b_ndim == 1 else b / d[..., :, None]
+
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_solve_triangular_unit_diag(self, b_ndim):
+        d = pt.dvector("d")
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        D = pt.diag(d)
+        out = solve_triangular(D, b, lower=True, unit_diagonal=True, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+
+        assert_equal_computations([rewritten], [b])
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_cho_solve_diag(self, b_ndim):
+        d = pt.dvector("d", shape=(5,))
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        L = pt.diag(d)
+        out = cho_solve((L, True), b, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = b / pt.square(d) if b_ndim == 1 else b / pt.square(d[..., :, None])
+
+        assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_solve_sylvester_both_diag(make_diag):
+    n = 5
+    a = pt.dvector("a", shape=(n,))
+    b = pt.dvector("b", shape=(n,))
+    C = pt.dmatrix("C", shape=(n, n))
+
+    A = make_diag(a)
+    B = make_diag(b)
+    X = solve_sylvester(A, B, C)
+
+    passes = ("canonicalize", "stabilize", "specialize")
+    rewritten = rewrite_graph(X, include=passes)
+    expected = rewrite_graph(C / (a[:, None] + b[None, :]), include=passes)
+
+    assert_equal_computations([rewritten], [expected])
