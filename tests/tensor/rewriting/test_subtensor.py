@@ -2732,7 +2732,13 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         ExtractDiag,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
-    assert n_idx == 6
+    # The ``BlasOpt`` rewrites lower ``L @ L.T`` to ``Gemm``; the gradient then
+    # fuses the diagonal-gradient term into a ``Gemm`` operand, materializing one
+    # extra set-subtensor. A linker that cannot use them lists ``BlasOpt`` in
+    # ``incompatible_rewrites`` (e.g. the numba linker), keeping the plain ``Dot``
+    # lowering with that term as a vector. Both lowerings are correct.
+    blas_rewrites_run = "BlasOpt" not in f.maker.mode.linker.incompatible_rewrites
+    assert n_idx == (7 if blas_rewrites_run else 6)
 
     x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
     # Expected values were computed once by running ``f(x)``.

@@ -1,6 +1,13 @@
 import logging
 
 from pytensor import tensor as pt
+from pytensor.assumptions import (
+    LOWER_TRIANGULAR,
+    POSITIVE_DEFINITE,
+    SYMMETRIC,
+    UPPER_TRIANGULAR,
+    check_assumption,
+)
 from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
@@ -25,9 +32,38 @@ logger = logging.getLogger(__name__)
 
 MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 
+# Mapping of ``solve``'s ``assume_a`` for ``A`` to the one valid for ``A.mT``: triangular
+# flips direction, sym/pos/gen are preserved (since A.mT == A for sym/pos).
+ASSUME_A_OF_TRANSPOSE = {
+    "lower triangular": "upper triangular",
+    "upper triangular": "lower triangular",
+    "pos": "pos",
+    "sym": "sym",
+    "gen": "gen",
+}
+
 
 def matrix_diagonal_product(x):
     return pt.prod(diagonal(x, axis1=-2, axis2=-1), axis=-1)
+
+
+def get_assume_a(fgraph, A):
+    """Return the most-specific ``solve`` ``assume_a`` for ``A`` from tags and assumptions."""
+    if getattr(A.tag, "lower_triangular", False) or check_assumption(
+        fgraph, A, LOWER_TRIANGULAR
+    ):
+        return "lower triangular"
+    if getattr(A.tag, "upper_triangular", False) or check_assumption(
+        fgraph, A, UPPER_TRIANGULAR
+    ):
+        return "upper triangular"
+    if getattr(A.tag, "psd", None) is True or check_assumption(
+        fgraph, A, POSITIVE_DEFINITE
+    ):
+        return "pos"
+    if getattr(A.tag, "symmetric", False) or check_assumption(fgraph, A, SYMMETRIC):
+        return "sym"
+    return "gen"
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:
@@ -80,5 +116,5 @@ def is_eye_mul(x) -> None | tuple[TensorVariable, TensorVariable]:
 @node_rewriter([OpPattern(DimShuffle, is_left_expanded_matrix_transpose=True)])
 def useless_symmetric_transpose(fgraph, node):
     x = node.inputs[0]
-    if getattr(x.tag, "symmetric", False):
+    if getattr(x.tag, "symmetric", False) or check_assumption(fgraph, x, SYMMETRIC):
         return [atleast_Nd(x, n=node.outputs[0].type.ndim)]

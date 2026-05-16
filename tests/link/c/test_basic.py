@@ -255,8 +255,11 @@ def test_clinker_literal_cache():
     )
 
     orientationi = np.array([59.36276866, 1.06116353, 0.93797339], dtype=config.floatX)
+    shared_literal = np.array(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=config.floatX
+    )
 
-    for out1 in [A - input1[0] * np.identity(3), input1[0] * np.identity(3)]:
+    for out1 in [A - input1[0] * shared_literal, input1[0] * shared_literal]:
         benchmark = function(
             inputs=[A, input1], outputs=[out1], on_unused_input="ignore", mode=mode
         )

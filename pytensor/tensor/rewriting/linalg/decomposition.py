@@ -1,7 +1,12 @@
 from pytensor import tensor as pt
-from pytensor.graph import Constant
+from pytensor.assumptions import (
+    DIAGONAL,
+    LOWER_TRIANGULAR,
+    UPPER_TRIANGULAR,
+    check_assumption,
+)
 from pytensor.graph.rewriting.basic import node_rewriter
-from pytensor.tensor.basic import AllocDiag, Eye
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -13,7 +18,6 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg.utils import is_eye_mul
 
 
 @register_canonicalize
@@ -25,63 +29,50 @@ def cholesky_ldotlt(fgraph, node):
     or cholesky(dot(U.T, U), upper=True) = U where U is upper triangular.
 
     Also works with matmul.
-
-    This utilizes a boolean `lower_triangular` or `upper_triangular` tag on matrices.
     """
     A = node.inputs[0]
     lower = node.op.core_op.lower
 
     match A.owner_op_and_inputs:
         case (Blockwise(Dot()) | Dot(), l, r):
-            lower_triangular = getattr(l.tag, "lower_triangular", False)
-            match (lower_triangular, r.owner_op_and_inputs):
-                # cholesky(dot(L,L.T)) case
-                case (
-                    True,
-                    (DimShuffle(is_left_expanded_matrix_transpose=True), l_T),
-                ) if l_T == l:
-                    return [l] if lower else [r]
+            if getattr(l.tag, "lower_triangular", False) or check_assumption(
+                fgraph, l, LOWER_TRIANGULAR
+            ):
+                match r.owner_op_and_inputs:
+                    # cholesky(dot(L,L.T)) case
+                    case (
+                        DimShuffle(is_left_expanded_matrix_transpose=True),
+                        l_T,
+                    ) if l_T == l:
+                        return [l] if lower else [r]
 
-            upper_triangular = getattr(r.tag, "upper_triangular", False)
-            match (upper_triangular, l.owner_op_and_inputs):
-                # cholesky(dot(U.T,U)) case
-                case (
-                    True,
-                    (DimShuffle(is_left_expanded_matrix_transpose=True), r_T),
-                ) if r_T == r:
-                    return [l] if lower else [r]
+            if getattr(r.tag, "upper_triangular", False) or check_assumption(
+                fgraph, r, UPPER_TRIANGULAR
+            ):
+                match l.owner_op_and_inputs:
+                    # cholesky(dot(U.T,U)) case
+                    case (
+                        DimShuffle(is_left_expanded_matrix_transpose=True),
+                        r_T,
+                    ) if r_T == r:
+                        return [l] if lower else [r]
 
 
 @register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(Cholesky)])
 def cholesky_of_diag(fgraph, node):
+    """cholesky(D) -> diag(sqrt(diagonal(D))) for diagonal D."""
     [X] = node.inputs
 
-    # Check if input is a (1, 1) matrix
     if all(X.type.broadcastable[-2:]):
         return [pt.sqrt(X)]
 
-    match X.owner_op_and_inputs:
-        # Check whether input to Cholesky is Eye and the 1's are on main diagonal
-        case (Eye(), _, _, Constant(0)):
-            return [X]
-        case (AllocDiag(offset=0, axis1=axis1, axis2=axis2), diag_input):
-            ndim = diag_input.ndim
-            if axis1 == ndim - 1 and axis2 == ndim:
-                return [pt.diag(diag_input**0.5)]
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
 
-    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
-    match is_eye_mul(X):
-        case (eye_input, non_eye_input):
-            # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
-            # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
-            if non_eye_input.type.broadcastable[-2:] == (False, False):
-                non_eye_input = non_eye_input.diagonal(axis1=-1, axis2=-2)
-                if eye_input.type.ndim > 2:
-                    non_eye_input = pt.shape_padaxis(non_eye_input, -2)
-
-            return [eye_input * (non_eye_input**0.5)]
+    diag_vals = pt.sqrt(pt.diagonal(X, axis1=-2, axis2=-1))
+    return [alloc_diag(diag_vals, axis1=-2, axis2=-1)]
 
 
 @register_canonicalize
