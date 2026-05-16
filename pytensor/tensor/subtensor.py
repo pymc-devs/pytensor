@@ -239,50 +239,76 @@ def as_index_literal(
     raise NotScalarConstantError()
 
 
-def _is_provably_non_negative(var) -> bool:
-    """``True`` when ``var`` can be statically shown to be non-negative.
+def _is_provably_positive(var, strict: bool = True) -> bool:
+    """``True`` when ``var`` can be statically shown to be positive.
+
+    With ``strict=True`` this proves :math:`var > 0`; with ``strict=False`` it
+    proves :math:`var \\geq 0`.
 
     Recognized cases:
 
-    - Python ``int`` / ``np.integer`` ``>= 0``.
-    - ``TensorConstant`` / ``ScalarConstant`` whose data is all ``>= 0``
-      (cached via ``tag.is_non_negative``).
-    - Unsigned-integer dtype.
-    - ``Shape`` / ``Shape_i`` outputs.
-    - ``MakeVector`` of provably non-negative inputs.
+    - Python ``int`` / ``np.integer``.
+    - ``TensorConstant`` / ``ScalarConstant`` whose data clears the bound
+      (cached via ``tag.is_positive`` or ``tag.is_non_negative``).
+    - ``MakeVector`` of provably positive inputs.
     - View / shape-permutation ops — ``Subtensor``, ``ScalarFromTensor``,
       ``TensorFromScalar``, ``DimShuffle`` — recurse to their input.
-    - ``Cast`` of a provably non-negative input.
-    - ``minimum(a, b)`` when both ``a`` and ``b`` are non-negative.
-    - ``maximum(a, b)`` when at least one of ``a``, ``b`` is non-negative.
+    - ``minimum(a, b)`` when both ``a`` and ``b`` are positive.
+    - ``maximum(a, b)`` when at least one of ``a``, ``b`` is positive.
+
+    Three further cases prove non-negativity but not strict positivity, so they
+    are recognized only when ``strict=False``:
+
+    - Unsigned-integer dtype (a ``uint`` may be 0).
+    - ``Shape`` / ``Shape_i`` outputs (a dimension may be 0).
+    - ``Cast`` of a non-negative input (a float :math:`0 < x < 1` truncates to 0).
+
+    Parameters
+    ----------
+    var : Variable or int
+        The value to test.
+    strict : bool
+        Prove :math:`> 0` when ``True``, :math:`\\geq 0` when ``False``. Default
+        ``True``.
     """
+    tag_name = "is_positive" if strict else "is_non_negative"
+
     if isinstance(var, int | np.integer):
-        return bool(var >= 0)
-    if var.type.dtype.startswith("uint"):
+        return bool(var > 0) if strict else bool(var >= 0)
+    if not strict and var.type.dtype.startswith("uint"):
         return True
     if isinstance(var, Constant):
-        cached: bool | None = getattr(var.tag, "is_non_negative", None)
+        cached: bool | None = getattr(var.tag, tag_name, None)
         if cached is not None:
             return cached
-        result = bool((np.asarray(var.data) >= 0).all())
-        var.tag.is_non_negative = result
+        data = np.asarray(var.data)
+        result = bool((data > 0).all()) if strict else bool((data >= 0).all())
+        setattr(var.tag, tag_name, result)
         return result
     op = var.owner_op
-    if isinstance(op, Shape | Shape_i):
+    if not strict and isinstance(op, Shape | Shape_i):
         return True
     if isinstance(op, MakeVector):
-        return all(_is_provably_non_negative(i) for i in var.owner.inputs)
+        return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
     if isinstance(op, Subtensor | ScalarFromTensor | TensorFromScalar | DimShuffle):
-        return _is_provably_non_negative(var.owner.inputs[0])
+        return _is_provably_positive(var.owner.inputs[0], strict)
     if isinstance(op, Elemwise):
         scalar_op = op.scalar_op
-        if isinstance(scalar_op, Cast):
-            return _is_provably_non_negative(var.owner.inputs[0])
+        if not strict and isinstance(scalar_op, Cast):
+            return _is_provably_positive(var.owner.inputs[0], strict)
         if isinstance(scalar_op, ScalarMinimum):
-            return all(_is_provably_non_negative(i) for i in var.owner.inputs)
+            return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
         if isinstance(scalar_op, ScalarMaximum):
-            return any(_is_provably_non_negative(i) for i in var.owner.inputs)
+            return any(_is_provably_positive(i, strict) for i in var.owner.inputs)
     return False
+
+
+def _is_provably_non_negative(var) -> bool:
+    """``True`` when ``var`` can be statically shown to be non-negative (:math:`\\geq 0`).
+
+    Thin wrapper over :func:`_is_provably_positive` with ``strict=False``.
+    """
+    return _is_provably_positive(var, strict=False)
 
 
 def get_idx_list(inputs, idx_list):

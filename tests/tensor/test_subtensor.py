@@ -25,7 +25,7 @@ from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, constant, get_vector_length, ivector, vectorize
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import exp, isinf, lt, switch
+from pytensor.tensor.math import exp, isinf, lt, maximum, minimum, switch
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
@@ -35,6 +35,8 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    _is_provably_non_negative,
+    _is_provably_positive,
     advanced_inc_subtensor,
     advanced_inc_subtensor1,
     advanced_set_subtensor,
@@ -102,6 +104,67 @@ def test_as_index_literal():
 
     res = as_index_literal(np.newaxis)
     assert res is np.newaxis
+
+
+class TestProvablyPositive:
+    @pytest.mark.parametrize(
+        "data, strict, expected",
+        [
+            ([1.0, 2.0], True, True),
+            ([1.0, 2.0], False, True),
+            ([0.0, 2.0], True, False),
+            ([0.0, 2.0], False, True),
+            ([-1.0, 2.0], True, False),
+            ([-1.0, 2.0], False, False),
+        ],
+        ids=[
+            "all-positive-strict",
+            "all-positive-loose",
+            "zero-fails-strict",
+            "zero-passes-loose",
+            "negative-fails-strict",
+            "negative-fails-loose",
+        ],
+    )
+    def test_constant_data_respects_strictness(self, data, strict, expected):
+        assert (
+            _is_provably_positive(constant(np.array(data)), strict=strict) is expected
+        )
+
+    @pytest.mark.parametrize(
+        "make_var",
+        [
+            pytest.param(lambda: vector("v", dtype="uint8"), id="uint-dtype"),
+            pytest.param(lambda: matrix("m").shape[0], id="shape-dim"),
+            pytest.param(lambda: constant(np.array([0.5])).astype("int64"), id="cast"),
+        ],
+    )
+    def test_proves_non_negative_but_not_strict_positive(self, make_var):
+        """A uint value, a shape dimension, and a cast can each equal zero, so
+        they establish ``>= 0`` but never strict ``> 0``."""
+        var = make_var()
+        assert _is_provably_non_negative(var) is True
+        assert _is_provably_positive(var, strict=True) is False
+
+    @pytest.mark.parametrize(
+        "expr, strict, expected",
+        [
+            (minimum(2, 3), True, True),
+            (minimum(2, 0), True, False),
+            (minimum(2, 0), False, True),
+            (maximum(5, -10), True, True),
+            (maximum(-1, -10), True, False),
+        ],
+        ids=[
+            "min-needs-all-positive",
+            "min-zero-fails-strict",
+            "min-zero-passes-loose",
+            "max-needs-any-positive",
+            "max-none-positive",
+        ],
+    )
+    def test_recurses_through_min_and_max(self, expr, strict, expected):
+        assert _is_provably_positive(expr, strict=strict) is expected
 
 
 class TestGetCanonicalFormSlice:
