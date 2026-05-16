@@ -22,7 +22,7 @@ def mlx_funcify_CumOp(op, **kwargs):
 
 
 @mlx_funcify.register(Repeat)
-def jax_funcify_Repeat(op, **kwargs):
+def mlx_funcify_Repeat(op, **kwargs):
     axis = op.axis
 
     def repeat(x, repeats, axis=axis):
