@@ -13,6 +13,7 @@ import pytest
 
 import pytensor
 from pytensor import config
+from pytensor.assumptions import assume
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.mode import get_mode
@@ -31,6 +32,7 @@ from pytensor.printing import (
     pydotprint,
 )
 from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.linalg import inv
 from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
 
@@ -333,6 +335,75 @@ def test_debugprint():
     assert [l.strip() for l in s.split("\n")] == [
         l.strip() for l in exp_res.split("\n")
     ]
+
+
+def test_debugprint_assumptions():
+    x = matrix("x")
+    out = inv(assume(x, diagonal=True))
+
+    s = StringIO()
+    debugprint(out, file=s, print_assumptions=True)
+    reference = dedent(
+        r"""
+        Blockwise{MatrixInverse, (m,m)->(m,m)} [id A] a={diag}
+         └─ SpecifyAssumptions{diagonal} [id B] a={diag}
+            └─ x [id C]
+        """
+    ).lstrip()
+    assert s.getvalue() == reference
+
+    # The flag is off by default, so no a={...} tag is printed.
+    s = StringIO()
+    debugprint(out, file=s)
+    assert "a={" not in s.getvalue()
+
+
+def test_debugprint_assumptions_prunes_implied_facts():
+    # positive_definite implies symmetric; only the strongest fact is shown.
+    x = matrix("x")
+    s = StringIO()
+    debugprint(assume(x, positive_definite=True), file=s, print_assumptions=True)
+    reference = dedent(
+        r"""
+        SpecifyAssumptions{positive_definite} [id A] a={pd}
+         └─ x [id B]
+        """
+    ).lstrip()
+    assert s.getvalue() == reference
+
+
+def test_debugprint_assumptions_negation_and_multiple():
+    x = matrix("x")
+
+    s = StringIO()
+    debugprint(assume(x, symmetric=False), file=s, print_assumptions=True)
+    assert (
+        s.getvalue()
+        == dedent(
+            r"""
+        SpecifyAssumptions{!symmetric} [id A] a={!sym}
+         └─ x [id B]
+        """
+        ).lstrip()
+    )
+
+    # Two independent facts survive propagation through ``inv``.
+    s = StringIO()
+    debugprint(
+        inv(assume(x, diagonal=True, orthogonal=True)),
+        file=s,
+        print_assumptions=True,
+    )
+    assert (
+        s.getvalue()
+        == dedent(
+            r"""
+        Blockwise{MatrixInverse, (m,m)->(m,m)} [id A] a={diag, orth}
+         └─ SpecifyAssumptions{diagonal, orthogonal} [id B] a={diag, orth}
+            └─ x [id C]
+        """
+        ).lstrip()
+    )
 
 
 def test_debugprint_id_type():

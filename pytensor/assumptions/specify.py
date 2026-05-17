@@ -26,6 +26,13 @@ class SpecifyAssumptions(TypeCastingOp):
             (name, FactState(state)) for name, state in sorted(assumptions.items())
         )
 
+    def __str__(self):
+        facts = ", ".join(
+            name if state is FactState.TRUE else f"!{name}"
+            for name, state in self.assumptions
+        )
+        return f"{type(self).__name__}{{{facts}}}"
+
     def make_node(self, x):
         if not isinstance(x, Variable):
             x = as_tensor_variable(x)
