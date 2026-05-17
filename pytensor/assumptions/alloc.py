@@ -1,5 +1,11 @@
-from pytensor.assumptions.core import FactState, true_if
+from pytensor.assumptions.core import (
+    ALL_KEYS,
+    FactState,
+    register_assumption,
+    true_if,
+)
 from pytensor.tensor.basic import (
+    Alloc,
     NotScalarConstantError,
     get_underlying_scalar_constant_value,
 )
@@ -66,3 +72,19 @@ def alloc_diag_at_offset_zero(
     FALSE when it places them on any other diagonal (off-main entries break diagonal /
     symmetric / PD structure regardless of the diagonal vector's values)."""
     return [FactState.TRUE if op.offset == 0 else FactState.FALSE]
+
+
+def alloc_propagates_matrix_property(
+    key, op, feature, fgraph, node, input_states
+) -> list[FactState]:
+    """``Alloc`` broadcasts a value across new or expanded leading axes. When the
+    value is already matrix-shaped with non-broadcastable core axes, the alloc
+    cannot touch those axes, so the matrix property carries through unchanged."""
+    value = node.inputs[0]
+    if value.type.ndim >= 2 and not any(value.type.broadcastable[-2:]):
+        return [input_states[0]]
+    return [FactState.UNKNOWN]
+
+
+for _key in ALL_KEYS:
+    register_assumption(_key, Alloc)(alloc_propagates_matrix_property)

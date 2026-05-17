@@ -4,6 +4,8 @@ import pytensor.assumptions.diagonal
 import pytensor.assumptions.dimshuffle
 import pytensor.assumptions.orthogonal
 import pytensor.assumptions.positive_definite
+import pytensor.assumptions.reshape
+import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
 import pytensor.assumptions.symmetric
 import pytensor.assumptions.triangular
