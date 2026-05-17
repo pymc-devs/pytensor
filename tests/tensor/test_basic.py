@@ -693,6 +693,48 @@ class TestAsTensorVariable:
         with pytest.raises(NotImplementedError, match="MaskedArrays are not supported"):
             ptb.as_tensor(x)
 
+    def test_range_returns_arange(self) -> None:
+        res = as_tensor_variable(range(10))
+
+        assert isinstance(res.owner.op, ARange)
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [
+            pytest.param(None, "int64", id="int64-default"),
+            pytest.param(config.floatX, config.floatX, id="config-floatX"),
+        ],
+    )
+    def test_range_dtype(self, dtype, expected) -> None:
+        res = as_tensor_variable(range(10), dtype=dtype)
+        assert res.dtype == expected
+
+    @pytest.mark.parametrize(
+        "step, expected",
+        [
+            pytest.param(None, 1, id="1-default"),
+            pytest.param(5, 5, id="specify"),
+        ],
+    )
+    def test_range_step(self, step, expected) -> None:
+        x = range(0, 2) if step is None else range(0, 2, step)
+        res = as_tensor_variable(x)
+        *_, actual = res.owner.inputs
+
+        assert actual.value == expected
+
+    def test_range_name(self) -> None:
+        x = range(10)
+        res = as_tensor_variable(x)
+        assert res.name is None
+
+        res = as_tensor_variable(x, name="something")
+        assert res.name == "something"
+
+    def test_range_ndim_raises(self) -> None:
+        with pytest.raises(ValueError, match="ndim for range must be 1"):
+            as_tensor_variable(range(10), ndim=2)
+
 
 def check_alloc_runtime_broadcast(mode):
     """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
