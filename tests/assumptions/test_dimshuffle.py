@@ -24,7 +24,7 @@ class TestLeftExpandDimsPropagation:
         x = pt.matrix("x", shape=(4, 4))
         x_tagged = assume(x, **{key.name: True})
         y = x_tagged[None, :, :]
-        _, af = make_fgraph(y, inputs=[x])
+        _, af = make_fgraph(y)
         assert af.check(y, key)
 
     @pytest.mark.parametrize(
@@ -35,7 +35,7 @@ class TestLeftExpandDimsPropagation:
         x = pt.matrix("x", shape=(4, 4))
         x_tagged = assume(x, **{key.name: True})
         y = x_tagged[None, None, :, :]
-        _, af = make_fgraph(y, inputs=[x])
+        _, af = make_fgraph(y)
         assert af.check(y, key)
 
     def test_triangular_transpose_does_not_propagate(self):
@@ -44,7 +44,7 @@ class TestLeftExpandDimsPropagation:
         x = pt.matrix("x", shape=(4, 4))
         x_lower = assume(x, lower_triangular=True)
         y = x_lower.T
-        _, af = make_fgraph(y, inputs=[x])
+        _, af = make_fgraph(y)
         assert af.get(y, LOWER_TRIANGULAR) == FactState.UNKNOWN
 
     def test_right_expand_dims_does_not_propagate(self):
@@ -52,5 +52,21 @@ class TestLeftExpandDimsPropagation:
         x = pt.matrix("x", shape=(4, 4))
         x_sym = assume(x, symmetric=True)
         y = x_sym[:, :, None]
-        _, af = make_fgraph(y, inputs=[x])
+        _, af = make_fgraph(y)
         assert af.get(y, SYMMETRIC) == FactState.UNKNOWN
+
+
+def test_permute_batch_axes_forwards_property():
+    x = pt.tensor("x", shape=(2, 3, 4, 4))
+    x_orth = assume(x, orthogonal=True)
+    y = x_orth.dimshuffle(1, 0, 2, 3)
+    _, af = make_fgraph(y)
+    assert af.check(y, ORTHOGONAL)
+
+
+def test_moving_core_axis_does_not_propagate():
+    x = pt.tensor("x", shape=(2, 3, 4, 4))
+    x_sym = assume(x, symmetric=True)
+    y = x_sym.dimshuffle(0, 2, 1, 3)
+    _, af = make_fgraph(y)
+    assert af.get(y, SYMMETRIC) == FactState.UNKNOWN
