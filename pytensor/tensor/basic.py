@@ -195,6 +195,15 @@ def _as_tensor_bool(x, name, ndim, **kwargs):
     )
 
 
+@_as_tensor_variable.register(range)
+def _as_tensor_range(x: range, name, ndim, dtype=None, **kwargs):
+    if ndim is not None and ndim != 1:
+        raise ValueError(f"ndim for range must be 1, got {ndim = }.")
+    res = arange(start=x.start, stop=x.stop, step=x.step, dtype=dtype)
+    res.name = name
+    return res
+
+
 as_tensor = as_tensor_variable
 
 
