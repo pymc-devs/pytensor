@@ -1600,7 +1600,7 @@ class HStack(Stack):
         if _is_sparse_variable(gz):
             gz = dense_from_sparse(gz)
 
-        split = Split(len(inputs))(gz, 1, ptb.stack([x.shape[1] for x in inputs]))
+        split = Split(len(inputs), 1)(gz, ptb.stack([x.shape[1] for x in inputs]))
         if not isinstance(split, list):
             split = [split]
 
@@ -1697,7 +1697,7 @@ class VStack(Stack):
         if _is_sparse_variable(gz):
             gz = dense_from_sparse(gz)
 
-        split = Split(len(inputs))(gz, 0, ptb.stack([x.shape[0] for x in inputs]))
+        split = Split(len(inputs), 0)(gz, ptb.stack([x.shape[0] for x in inputs]))
         if not isinstance(split, list):
             split = [split]
 
