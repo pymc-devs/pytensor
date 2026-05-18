@@ -141,22 +141,12 @@ def pytorch_funcify_arange(op, **kwargs):
 
 @pytorch_funcify.register(Join)
 def pytorch_funcify_Join(op, node, **kwargs):
-    axis = node.inputs[0]
+    axis = op.axis
 
-    if isinstance(axis, Constant):
-        axis = int(axis.data)
+    def join(*tensors):
+        return torch.cat(tensors, dim=axis)
 
-        def join_constant_axis(_, *tensors):
-            return torch.cat(tensors, dim=axis)
-
-        return join_constant_axis
-
-    else:
-
-        def join(axis, *tensors):
-            return torch.cat(tensors, dim=axis)
-
-        return join
+    return join
 
 
 @pytorch_funcify.register(Eye)
@@ -224,19 +214,19 @@ def pytorch_funcify_TensorFromScalar(op, **kwargs):
 
 @pytorch_funcify.register(Split)
 def pytorch_funcify_Split(op, node, **kwargs):
-    _x, dim, split_sizes = node.inputs
-    if isinstance(dim, Constant) and isinstance(split_sizes, Constant):
-        dim = int(dim.data)
+    _x, split_sizes = node.inputs
+    dim = op.axis
+    if isinstance(split_sizes, Constant):
         split_sizes = tuple(int(size) for size in split_sizes.data)
 
-        def split_constant_axis_and_sizes(x, *_):
+        def split_constant_sizes(x, _):
             return x.split(split_sizes, dim=dim)
 
-        return split_constant_axis_and_sizes
+        return split_constant_sizes
 
     else:
 
-        def inner_fn(x, dim, split_amounts):
-            return x.split(split_amounts.tolist(), dim=dim.item())
+        def inner_fn(x, split_amounts):
+            return x.split(split_amounts.tolist(), dim=dim)
 
         return inner_fn
