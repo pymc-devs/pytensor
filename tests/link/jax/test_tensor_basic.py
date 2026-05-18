@@ -12,7 +12,7 @@ from jax.errors import ConcretizationTypeError
 import pytensor
 import pytensor.tensor.basic as ptb
 from pytensor.configdefaults import config
-from pytensor.tensor.type import iscalar, matrix, scalar, vector
+from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_basic import check_alloc_runtime_broadcast
 
@@ -186,13 +186,6 @@ class TestJaxSplit:
             fn = pytensor.function([a], a_splits, mode="JAX")
         with pytest.raises(ConcretizationTypeError):
             fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
-
-        split_axis = iscalar("split_axis")
-        a_splits = ptb.split(a, splits_size=[2, 4], n_splits=2, axis=split_axis)
-        with pytest.warns(UserWarning, match="Split node does not have constant axis."):
-            fn = pytensor.function([a, split_axis], a_splits, mode="JAX")
-        with pytest.raises(ConcretizationTypeError):
-            fn(np.zeros((6, 6), dtype=pytensor.config.floatX), 0)
 
 
 def test_jax_eye():

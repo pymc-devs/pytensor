@@ -1351,12 +1351,6 @@ def test_local_join_empty():
         [new_s], [specify_shape(int_mat, (2, None)).astype(s.dtype)]
     )
 
-    # Dynamic axis, can't apply rewrite
-    axis = scalar("axis", dtype=int)
-    s = join(axis, empty_mat, int_mat, empty_sym_mat)
-    new_s = rewrite_graph(s)
-    assert equal_computations([new_s], [s])
-
     # Stack introduces an expand_dims in the join, that's a nonzero dim!
     s = pt.stack([vec, vec, empty_vec])
     new_s = rewrite_graph(s)
@@ -1374,7 +1368,7 @@ def test_local_join_make_vector():
     e = f.maker.fgraph.toposort()
     assert len([n for n in e if isinstance(n.op, Join)]) == 1
     assert all(
-        not isinstance(n.op, Join) or len(n.inputs) == 4
+        not isinstance(n.op, Join) or len(n.inputs) == 3
         for n in e
         if isinstance(n.op, Join)
     )

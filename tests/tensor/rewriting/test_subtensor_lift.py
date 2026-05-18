@@ -874,9 +874,6 @@ class TestLocalSubtensorMakeVector:
         assert local_subtensor_make_vector.transform(fgraph, node) == [v]
 
 
-shared_axis = shared(1, "axis")
-
-
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
     [
@@ -901,11 +898,6 @@ shared_axis = shared(1, "axis")
         (
             lambda x, y: concatenate([x, y], axis=1)[:, 1:],
             lambda x, y: concatenate([x, y], axis=1)[:, 1:],
-        ),
-        # Not supported, axis of concatenation is dynamically determined
-        (
-            lambda x, y: concatenate([x, y], axis=shared_axis)[1],
-            lambda x, y: concatenate([x, y], axis=shared_axis)[1],
         ),
     ],
 )

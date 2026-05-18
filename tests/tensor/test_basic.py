@@ -1,4 +1,5 @@
 import itertools
+import pickle
 from functools import partial
 from tempfile import mkstemp
 
@@ -10,7 +11,6 @@ import pytensor.scalar as ps
 import pytensor.tensor.basic as ptb
 import pytensor.tensor.math as ptm
 from pytensor import compile, config, function, shared
-from pytensor.compile import SharedVariable
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
@@ -1296,11 +1296,8 @@ def test_get_vector_length():
     assert isinstance(z.owner.op, Join)
     assert get_vector_length(z) == 3
 
-    z = join(
-        lscalar(),
-        as_tensor_variable([1, 2], ndim=1),
-        as_tensor_variable([3, 4], ndim=1),
-    )
+    # A `Join` whose components have undeterminable length cannot be measured
+    z = Join(0)(vector("v"), vector("w"))
     with pytest.raises(ValueError, match=r"^Length of .*"):
         get_vector_length(z)
 
@@ -1334,7 +1331,7 @@ class TestJoinAndSplit:
         Join.debug = False
 
         self.mode = pytensor.compile.get_default_mode().excluding("constant_folding")
-        self.join_op = Join()
+        self.join_op = Join(0)
         self.split_op_class = Split
         self.make_vector_op = MakeVector()
         self.floatX = config.floatX
@@ -1361,14 +1358,19 @@ class TestJoinAndSplit:
         return variables
 
     def test_input_validation(self):
+        # `splits` must be of integer type
         with pytest.raises(TypeError, match=r".*integer.*"):
-            Split(2)(matrix(), dscalar(), [1, 1])
+            Split(2, 0)(matrix(), dvector())
 
-        with pytest.raises(TypeError, match=r".*integer.*"):
-            Split(2)(matrix(), ivector(), [1, 1])
+        # A symbolic (non-constant) axis is no longer supported
+        with pytest.raises(TypeError, match=r".*[Ss]ymbolic.*"):
+            Split(2, lscalar())
 
-        with pytest.raises(TypeError, match=r".*integer.*"):
-            join(dscalar(), matrix(), matrix())
+        with pytest.raises(TypeError, match=r".*[Ss]ymbolic.*"):
+            Join(lscalar())
+
+        with pytest.raises(TypeError, match=r".*constant integer.*"):
+            join(lscalar(), matrix(), matrix())
 
     def test_join_scalar(self):
         a = as_tensor_variable(1)
@@ -1724,60 +1726,16 @@ class TestJoinAndSplit:
 
         utt.verify_grad(lambda a, b: join(1, a, b), [av, bv], mode=self.mode)
 
-    def test_join_matrixV(self):
-        # variable join axis
+    def test_symbolic_axis_rejected(self):
+        # A symbolic (non-constant) axis is no longer supported by Join/Split.
         v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
         a = self.shared(v)
         b = as_tensor_variable(v)
-        ax = lscalar()
-        s = join(ax, a, b)
-
-        f = inplace_func([ax], [s], mode=self.mode)
-        topo = f.maker.fgraph.toposort()
-        assert [True for node in topo if isinstance(node.op, type(self.join_op))]
-
-        want = np.array(
-            [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
-        )
-        got = f(0)
-        assert np.allclose(got, want)
-
-        want = np.array(
-            [[0.1, 0.2, 0.3, 0.1, 0.2, 0.3], [0.4, 0.5, 0.6, 0.4, 0.5, 0.6]]
-        )
-        got = f(1)
-        assert np.allclose(got, want)
-
-        utt.verify_grad(lambda a, b: join(0, a, b), [v, 2 * v], mode=self.mode)
-        utt.verify_grad(lambda a, b: join(1, a, b), [v, 2 * v], mode=self.mode)
-
-    def test_join_matrixV_negative_axis(self):
-        # variable join negative axis
-        v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
-        a = self.shared(v)
-        b = as_tensor_variable(v)
-        ax = lscalar()
-        s = join(ax, a, b)
-
-        f = inplace_func([ax], [s], mode=self.mode)
-        topo = f.maker.fgraph.toposort()
-        assert [True for node in topo if isinstance(node.op, type(self.join_op))]
-
-        want = np.array(
-            [[0.1, 0.2, 0.3, 0.1, 0.2, 0.3], [0.4, 0.5, 0.6, 0.4, 0.5, 0.6]]
-        )
-
-        got = f(-1)
-        assert np.allclose(got, want)
-
-        want = np.array(
-            [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
-        )
-        got = f(-2)
-        assert np.allclose(got, want)
-
-        with pytest.raises((ValueError, IndexError)):
-            f(-3)
+        with pytest.raises(TypeError, match=r".*constant integer.*"):
+            join(lscalar(), a, b)
+        # A constant scalar variable is still accepted and normalized.
+        out = join(constant(-1), a, b)
+        assert out.owner.op == Join(1)
 
     @pytest.mark.parametrize("py_impl", (False, True))
     def test_join_matrixC_negative_axis(self, py_impl):
@@ -1835,15 +1793,15 @@ class TestJoinAndSplit:
 
         a = self.shared(a_val, shape=(None, None, 1))
         b = self.shared(b_val, shape=(1, None, 1))
-        c = self.join_op(1, a, b)
+        c = join(1, a, b)
         assert c.type.shape == (1, None, 1)
 
         # Opt can remplace the int by an PyTensor constant
-        c = self.join_op(constant(1), a, b)
+        c = join(constant(1), a, b)
         assert c.type.shape == (1, None, 1)
 
         # In case futur opt insert other useless stuff
-        c = self.join_op(cast(constant(1), dtype="int32"), a, b)
+        c = join(cast(constant(1), dtype="int32"), a, b)
         assert c.type.shape == (1, None, 1)
 
         f = function([], c, mode=self.mode)
@@ -1870,7 +1828,7 @@ class TestJoinAndSplit:
 
         a = self.shared(a_val, shape=(None, None, 1))
         b = self.shared(b_val, shape=(1, None, 1))
-        c = self.join_op(0, a, b)
+        c = join(0, a, b)
         assert c.type.shape[0] != 1
 
         f = function([], c, mode=self.mode)
@@ -1887,7 +1845,7 @@ class TestJoinAndSplit:
             b.set_value(rng.random((3, 4, 1)).astype(self.floatX))
         a = TensorType(dtype=self.floatX, shape=(None, None, 1))()
         b = TensorType(dtype=self.floatX, shape=(1, None, 1))()
-        c = self.join_op(0, a, b)
+        c = join(0, a, b)
         f = function([a, b], c, mode=self.mode)
         bad_b_val = rng.random((3, 4, 1)).astype(self.floatX)
         with pytest.raises(TypeError):
@@ -1903,7 +1861,7 @@ class TestJoinAndSplit:
 
         a = self.shared(a_val, shape=(1, None, 1))
         b = self.shared(b_val, shape=(1, None, 1))
-        c = self.join_op(0, a, b)
+        c = join(0, a, b)
         assert c.type.shape[0] != 1
 
         f = function([], c, mode=self.mode)
@@ -1921,7 +1879,7 @@ class TestJoinAndSplit:
         rng = np.random.default_rng(seed=utt.fetch_seed())
         a_val = rng.random((1, 4, 1)).astype(self.floatX)
         a = self.shared(a_val, shape=(1, None, 1))
-        b = self.join_op(0, a)
+        b = join(0, a)
         assert b.type.shape[0] == 1
         assert b.type.shape[2] == 1
         assert b.type.shape[1] != 1
@@ -1950,17 +1908,17 @@ class TestJoinAndSplit:
         d = TensorType(dtype=self.floatX, shape=(1, None, 1, 1, None, 1))()
         e = TensorType(dtype=self.floatX, shape=(1, None, 1, None, None, 1))()
 
-        f = self.join_op(0, a, b, c, d, e)
+        f = join(0, a, b, c, d, e)
         fb = tuple(s == 1 for s in f.type.shape)
         assert f.type.shape == (5, 1, 1, 1, None, 1)
         assert fb == (False, True, True, True, False, True)
 
-        g = self.join_op(1, a, b, c, d, e)
+        g = join(1, a, b, c, d, e)
         gb = tuple(s == 1 for s in g.type.shape)
         assert g.type.shape == (1, None, 1, 1, None, 1)
         assert gb == (True, False, True, True, False, True)
 
-        h = self.join_op(4, a, b, c, d, e)
+        h = join(4, a, b, c, d, e)
         hb = tuple(s == 1 for s in h.type.shape)
         assert h.type.shape == (1, 1, 1, 1, None, 1)
         assert hb == (True, True, True, True, False, True)
@@ -2020,7 +1978,7 @@ class TestJoinAndSplit:
         x3 = self.shared(get_mat(1, 4))
 
         # Test dim 0
-        z = self.join_op(0, x1, x2, x3)
+        z = join(0, x1, x2, x3)
         f = pytensor.function([], z.shape, mode=self.mode)
         topo = f.maker.fgraph.toposort()
 
@@ -2035,7 +1993,7 @@ class TestJoinAndSplit:
         x1.set_value(get_mat(3, 4))
         x2.set_value(get_mat(3, 4))
         x3.set_value(get_mat(3, 5))
-        z = self.join_op(1, x1, x2, x3)
+        z = join(1, x1, x2, x3)
         f = pytensor.function([], z.shape, mode=self.mode)
         topo = f.maker.fgraph.toposort()
         out = f()
@@ -2057,7 +2015,7 @@ class TestJoinAndSplit:
         v = self.shared(rng.random(4).astype(self.floatX))
         m = self.shared(rng.random((4, 4)).astype(self.floatX))
         with pytest.raises(TypeError, match="same number of dimensions"):
-            self.join_op(0, v, m)
+            join(0, v, m)
 
     def test_static_shape_inference(self):
         a = ptb.tensor(dtype="int8", shape=(2, 3))
@@ -2084,7 +2042,7 @@ class TestJoinAndSplit:
     def test_split_0elem(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
         m = self.shared(rng.random((4, 6)).astype(self.floatX))
-        o = self.split_op_class(2)(m, 0, [4, 0])
+        o = self.split_op_class(2, 0)(m, [4, 0])
         f = function([], o, mode=self.mode)
         assert any(
             isinstance(node.op, self.split_op_class)
@@ -2097,7 +2055,7 @@ class TestJoinAndSplit:
     def test_split_neg(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
         m = self.shared(rng.random((4, 6)).astype(self.floatX))
-        o = self.split_op_class(2)(m, 0, [5, -1])
+        o = self.split_op_class(2, 0)(m, [5, -1])
         f = function([], o, mode=self.mode)
         assert any(
             isinstance(node.op, self.split_op_class)
@@ -2109,7 +2067,7 @@ class TestJoinAndSplit:
     def test_split_static_shape(self):
         x = TensorType("floatX", shape=(5,))("x")
         s = iscalar("s")
-        y = Split(2)(x, 0, [s, 5 - s])[0]
+        y = Split(2, 0)(x, [s, 5 - s])[0]
         assert y.type.shape == (None,)
 
     def test_join_oneInput(self):
@@ -2131,10 +2089,9 @@ class TestJoinAndSplit:
     @pytest.mark.parametrize("linker", ("py", "c"))
     def test_split_view(self, linker):
         x = vector("x")
-        axis = 0
-        op = Split(len_splits=3)
+        op = Split(len_splits=3, axis=0)
         assert op.view_map == {0: [0], 1: [0], 2: [0]}
-        splits = op(x, axis, [0, 3, 2])
+        splits = op(x, [0, 3, 2])
 
         mode = Mode(linker)
         f = pytensor.function(
@@ -2147,13 +2104,55 @@ class TestJoinAndSplit:
             assert r.base is x_test
 
     def test_join_negative_axis_rewrite(self):
-        """Test that constant negative axis is rewritten to positive axis in make_node."""
+        """Test that a constant negative axis is normalized to a positive axis."""
         v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
         a = self.shared(v)
         b = as_tensor_variable(v)
 
         assert equal_computations([join(-1, a, b)], [join(1, a, b)])
         assert equal_computations([join(-2, a, b)], [join(0, a, b)])
+
+    def test_axis_is_op_property(self):
+        # The axis is an Op property, not an Apply-node input.
+        a = matrix("a")
+        b = matrix("b")
+
+        join_node = join(1, a, b).owner
+        assert join_node.op.axis == 1
+        assert join_node.inputs == [a, b]
+        assert Join(0) == Join(0)
+        assert Join(0) != Join(1)
+        assert hash(Join(0)) == hash(Join(0))
+
+        split_node = Split(2, 1)(a, [1, 2])[0].owner
+        assert split_node.op.axis == 1
+        assert split_node.op.len_splits == 2
+        assert split_node.inputs[0] is a
+        assert Split(2, 0) != Split(2, 1)
+        assert Split(2, 0) != Split(3, 0)
+
+    def test_negative_axis_normalized_in_make_node(self):
+        # `make_node` binds the node to an Op with a canonical non-negative
+        # axis, so a directly-constructed negative-axis Op still yields a node
+        # whose `op.axis` is normalized.
+        a = matrix("a")
+        b = matrix("b")
+        assert Join(-1)(a, b).owner.op == Join(1)
+        assert Split(2, -1)(a, [1, 2])[0].owner.op == Split(2, 1)
+
+    def test_pickle_roundtrip(self):
+        # Compiled functions with Join/Split round-trip through pickle.
+        a = matrix("a")
+        b = matrix("b")
+        joined = join(1, a, b)
+        split_out = Split(2, 0)(a, [1, 1])
+        f = function([a, b], [joined, *split_out], mode=self.mode)
+
+        reloaded = pickle.loads(pickle.dumps(f))
+        a_val = np.ones((2, 3), dtype=config.floatX)
+        b_val = np.zeros((2, 4), dtype=config.floatX)
+        for orig, new in zip(f(a_val, b_val), reloaded(a_val, b_val), strict=True):
+            assert np.array_equal(orig, new)
 
 
 def test_TensorFromScalar():
@@ -3869,43 +3868,41 @@ class TestInferShape(utt.InferShapeTester):
         self._compile_and_check([atens3], [atens3_diag], [atens3_val], ExtractDiag)
 
     def test_Split(self):
-        aiscal = iscalar()
         aivec = ivector()
         adtens = tensor3()
         adtens_val = random(4, 10, 3)
         aivec_val = [2, 5, 3]
-        for aiscal_val in [1, -2]:
+        for axis in [1, -2]:
             self._compile_and_check(
-                [adtens, aiscal, aivec],
-                [Split(3)(adtens, aiscal, aivec)[0]],
-                [adtens_val, aiscal_val, aivec_val],
+                [adtens, aivec],
+                [Split(3, axis)(adtens, aivec)[0]],
+                [adtens_val, aivec_val],
                 (Split),
             )
 
     def test_Join(self):
-        aiscal = iscalar()
         cdmat = dmatrix()
         admat_val = random(1, 3)
         bdmat_val = random(2, 3)
         cdmat_val = random(4, 3)
         admat = dmatrix()
         bdmat = dmatrix()
-        for aiscal_val in [0, -2]:
+        for axis in [0, -2]:
             self._compile_and_check(
-                [aiscal, admat, bdmat, cdmat],
-                [Join()(aiscal, admat, bdmat, cdmat)],
-                [aiscal_val, admat_val, bdmat_val, cdmat_val],
+                [admat, bdmat, cdmat],
+                [Join(axis)(admat, bdmat, cdmat)],
+                [admat_val, bdmat_val, cdmat_val],
                 Join,
             )
 
         admat_val = random(4, 1)
         bdmat_val = random(4, 3)
         cdmat_val = random(4, 2)
-        for aiscal_val in [-1, 1]:
+        for axis in [-1, 1]:
             self._compile_and_check(
-                [aiscal, admat, bdmat, cdmat],
-                [Join()(aiscal, admat, bdmat, cdmat)],
-                [aiscal_val, admat_val, bdmat_val, cdmat_val],
+                [admat, bdmat, cdmat],
+                [Join(axis)(admat, bdmat, cdmat)],
+                [admat_val, bdmat_val, cdmat_val],
                 Join,
             )
 
@@ -4505,7 +4502,7 @@ def test_vectorize_make_vector(batch_shapes):
     )
 
 
-@pytest.mark.parametrize("axis", [constant(1), constant(-2), shared(1)])
+@pytest.mark.parametrize("axis", [1, -2, constant(1)])
 @pytest.mark.parametrize("broadcasting_y", ["none", "implicit", "explicit"])
 @config.change_flags(cxx="")  # C code not needed
 def test_vectorize_join(axis, broadcasting_y):
@@ -4516,7 +4513,7 @@ def test_vectorize_join(axis, broadcasting_y):
         return join(axis, x, y)
 
     def core_np(x, y):
-        return np.concatenate([x, y], axis=axis.eval())
+        return np.concatenate([x, y], axis=int(getattr(axis, "data", axis)))
 
     x = tensor(shape=(4, 2, 3, 5))
     y_shape = {"none": (4, 2, 3, 5), "implicit": (2, 3, 5), "explicit": (1, 2, 3, 5)}
@@ -4524,7 +4521,7 @@ def test_vectorize_join(axis, broadcasting_y):
 
     vectorize_pt = function([x, y], vectorize(core_pt, signature=signature)(x, y))
 
-    blockwise_needed = isinstance(axis, SharedVariable) or broadcasting_y != "none"
+    blockwise_needed = broadcasting_y != "none"
     has_blockwise = any(
         isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
         for node in vectorize_pt.maker.fgraph.apply_nodes
