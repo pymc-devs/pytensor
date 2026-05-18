@@ -2512,12 +2512,8 @@ def local_join_subtensors(fgraph, node):
     """
     # TODO: Generalize to AdvancedSubtensors
 
-    axis, tensors = node.inputs[0], node.inputs[1:]
-
-    try:
-        axis = get_scalar_constant_value(axis)
-    except NotScalarConstantError:
-        return
+    tensors = node.inputs
+    axis = node.op.axis
 
     for subtensor1_idx, (subtensor1, subtensor2) in enumerate(pairwise(tensors)):
         # Check that two consecutive Subtensors are operating on the same base tensor
