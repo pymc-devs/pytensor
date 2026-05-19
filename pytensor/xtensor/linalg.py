@@ -26,6 +26,8 @@ def cholesky(
     dims : Sequence[str]
         The two core dimensions of the input variable, over which the Cholesky decomposition is computed.
     """
+    if isinstance(dims, str):
+        dims = (dims,)
     if len(dims) != 2:
         raise ValueError(f"Cholesky needs two dims, got {len(dims)}")
 
@@ -71,6 +73,8 @@ def solve(
         Unused by PyTensor. PyTensor will return nan if the operation fails.
     """
     a, b = as_xtensor(a), as_xtensor(b)
+    if isinstance(dims, str):
+        dims = (dims,)
     input_core_dims: tuple[tuple[str, str], tuple[str] | tuple[str, str]]
     output_core_dims: tuple[tuple[str] | tuple[str, str]]
     if len(dims) == 2:
