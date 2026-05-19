@@ -6,6 +6,7 @@ from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg._lazy import scipy_linalg
+from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.symbolic import TensorSymbolicOp
 from pytensor.tensor.type import matrix
 
@@ -27,7 +28,8 @@ class Expm(Op):
         A = as_tensor_variable(A)
         assert A.ndim == 2
 
-        expm = matrix(dtype=A.dtype, shape=A.type.shape)
+        dtype = linalg_output_dtype(A.type.dtype)
+        expm = matrix(dtype=dtype, shape=A.type.shape)
 
         return Apply(self, [A], [expm])
 

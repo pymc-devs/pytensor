@@ -75,3 +75,14 @@ class TestExpm:
         A = pt.matrix("A", dtype=floatX)
         y = expm(A)
         compare_numba_and_py([A], [y], [np.zeros((0, 0), dtype=floatX)])
+
+    def test_expm_integer_input(self):
+        A = pt.matrix("A", dtype="int64")
+        y = expm(A)
+        assert y.type.dtype == "float64"
+
+        val = rng.integers(-2, 3, size=(4, 4)).astype("int64")
+        original = val.copy()
+        _, res = compare_numba_and_py([A], [y], [val])
+        np.testing.assert_array_equal(val, original)
+        assert res[0].dtype == np.float64

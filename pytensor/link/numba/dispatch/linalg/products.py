@@ -316,7 +316,7 @@ def numba_funcify_Expm(op, node, **kwargs):
         print("Expm requires casting discrete input to float")  # noqa: T201
 
     out_dtype = node.outputs[0].type.numpy_dtype
-    effective_overwrite_a = overwrite_a and not discrete_input
+    effective_overwrite_a = overwrite_a or discrete_input
 
     @numba_basic.numba_njit
     def expm(a):
