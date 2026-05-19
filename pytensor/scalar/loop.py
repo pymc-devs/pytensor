@@ -124,10 +124,10 @@ class ScalarLoop(ScalarInnerGraphOp):
             return super().make_node(n_steps, *inputs)
         else:
             # Make a new op with the right input types.
-            mutable_fg = self.fgraph.unfreeze()
+            fg = self.fgraph
             res = rebuild_collect_shared(
-                mutable_fg.outputs,
-                replace=dict(zip(mutable_fg.inputs, inputs, strict=True)),
+                fg.outputs,
+                replace=dict(zip(fg.inputs, inputs, strict=True)),
                 rebuild_strict=False,
             )
             if self.is_while:

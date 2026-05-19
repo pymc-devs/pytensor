@@ -4277,12 +4277,11 @@ class Composite(ScalarInnerGraphOp):
             return super().make_node(*inputs)
         else:
             # Make a new op with the right input types.
-            # Unfreeze the frozen inner graph for rebuild_collect_shared.
             assert len(inputs) == self.nin
-            mutable_fg = self.fgraph.unfreeze()
+            fg = self.fgraph
             res = pytensor.compile.rebuild_collect_shared(
-                mutable_fg.outputs,
-                replace=dict(zip(mutable_fg.inputs, inputs, strict=True)),
+                fg.outputs,
+                replace=dict(zip(fg.inputs, inputs, strict=True)),
                 rebuild_strict=False,
             )
             # After rebuild_collect_shared, the Variable in inputs
