@@ -48,7 +48,7 @@ def _filter_numba_warnings():
         "ignore",
         message=(
             "(\x1b\\[1m)*"  # ansi escape code for bold text
-            r"np\.dot\(\) is faster on contiguous arrays"
+            r"(np\.dot\(\)|np\.vdot\(\)|'@') is faster on contiguous arrays"
         ),
         category=NumbaPerformanceWarning,
     )
