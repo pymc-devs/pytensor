@@ -814,29 +814,45 @@ def test_may_share_memory():
         assert SparseTensorType.may_share_memory(a_, b_) == rep
 
 
+@pytest.mark.xfail(
+    reason="pytensor.compile.executor uses copy.copy to decouple aliased mutable "
+    "inputs, but scipy sparse matrices shallow-copy and keep .data shared, so "
+    "destructive ops on one corrupt the other.",
+    strict=True,
+)
 def test_sparse_shared_memory():
-    # Note : There are no inplace ops on sparse matrix yet. If one is
-    # someday implemented, we could test it here.
+    # When two mutable inputs alias the same sparse matrix, pytensor must copy
+    # one so a destructive op on the first doesn't corrupt the second.
+    class InplaceDouble(Op):
+        __props__ = ()
+        destroy_map = {0: [0]}
+
+        def make_node(self, x):
+            x = as_sparse_variable(x)
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, outputs):
+            (x,) = inputs
+            x.data *= 2
+            outputs[0][0] = x
+
+    inplace_double = InplaceDouble()
+
     a = random_lil((3, 4), "float32", 3).tocsr()
-    m1 = random_lil((4, 4), "float32", 3).tocsr()
-    m2 = random_lil((4, 4), "float32", 3).tocsr()
     x = SparseTensorType("csr", dtype="float32")()
     y = SparseTensorType("csr", dtype="float32")()
 
-    sdot = sparse.math.structured_dot
-    z = sdot(x * 3, m1) + sdot(y * 2, m2)
-
+    z = inplace_double(x) + inplace_double(y)
     f = pytensor.function(
-        [In(x, mutable=True), In(y, mutable=True)], z, mode="FAST_RUN"
+        [In(x, mutable=True), In(y, mutable=True)], z, accept_inplace=True
     )
 
-    def f_(x, y, m1=m1, m2=m2):
-        return ((x * 3) * m1) + ((y * 2) * m2)
-
-    assert SparseTensorType.may_share_memory(a, a)  # This is trivial
-    result = f(a, a)
-    result_ = f_(a, a)
-    assert (result_.todense() == result.todense()).all()
+    a_copy = a.copy()
+    result = f(a_copy, a_copy)
+    expected = (a * 2) + (a * 2)
+    np.testing.assert_allclose(
+        np.asarray(result.todense()), np.asarray(expected.todense())
+    )
 
 
 def test_size():
