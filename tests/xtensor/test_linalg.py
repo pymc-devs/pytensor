@@ -76,6 +76,18 @@ def test_solve_matrix_b():
     )
 
 
+def test_cholesky_string_dims():
+    x = xtensor("x", dims=("a", "batch", "b"), shape=(4, 3, 4))
+    with pytest.raises(ValueError, match="Cholesky needs two dims"):
+        cholesky(x, dims="ab")
+
+
+def test_solve_string_dims():
+    a = xtensor("a", dims=("city", "country"), shape=(None, 4))
+    with pytest.raises(ValueError, match="Solve dims must have length 2 or 3"):
+        solve(a, a, dims="abc")
+
+
 def test_linalg_vectorize():
     # Note: We only need to test a couple Ops, since the vectorization logic is not Op specific
     a = xtensor("b", dims=("a",), shape=(3,))
