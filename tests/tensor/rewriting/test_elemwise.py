@@ -1,3 +1,4 @@
+import itertools
 import warnings
 
 import numpy as np
@@ -234,6 +235,13 @@ def test_local_useless_expand_dims_in_reshape():
 
 
 class TestFusion:
+    @pytest.fixture(autouse=True)
+    def _raise_on_opt_error(self):
+        # Surface any rewrite failure (including FusionOptimizer planner errors)
+        # instead of letting SequentialGraphRewriter silently log them.
+        with config.change_flags(on_opt_error="raise"):
+            yield
+
     rewrites = RewriteDatabaseQuery(
         include=[
             "canonicalize",
@@ -1401,6 +1409,38 @@ class TestFusion:
                         frozenset((ps.sub, ps.neg)),
                         frozenset((ps.add, ps.exp)),
                     }
+
+    def test_replacement_order_regression(self):
+        # Regression test for #2145, example breaks old naive linear topological sorting
+        x = pt.vector("x", shape=(5,))
+
+        # Different operation shapes, force separate fused subgraphs
+        neg_x = pt.neg(x)  # shape (5,)
+        sum_x = pt.sum(x)  # shape ()
+        neg_max_x = pt.neg(pt.max(x))  # shape ()
+        neg_sum_x = pt.neg(sum_x[None])  # shape (1,)
+
+        # SG-A: fuses {neg_max_x, first_term} — discovered first (highest sink)
+        first_term = sum_x + neg_max_x
+        first_term.name = "first_term"
+
+        # SG-C: fuses {neg_x, second_term} — discovered second
+        second_term = neg_sum_x + neg_x
+        second_term.name = "second_term"
+
+        # SG-B: fuses {neg_sum_x, third_term} — discovered last
+        # SG-B produces neg_sum_x which SG-C consumes, so SG-C must be
+        # replaced before SG-B. The old insertion heuristic got this wrong
+        # because SG-C was collected before SG-B existed.
+        third_term = neg_sum_x + neg_max_x
+        third_term.name = "third_term"
+
+        terms = [first_term, second_term, third_term]
+        for i, permuted_terms in enumerate(itertools.permutations(terms)):
+            fgraph = FunctionGraph([x], permuted_terms, clone=True)
+            _, nb_fused, nb_replaced, *_ = FusionOptimizer().apply(fgraph)
+            assert nb_fused == 3
+            assert nb_replaced == 6
 
 
 class TimesN(ps.basic.UnaryScalarOp):
