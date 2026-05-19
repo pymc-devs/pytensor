@@ -15,8 +15,13 @@ class Expm(Op):
     Compute the matrix exponential of a square array.
     """
 
-    __props__ = ()
+    __props__ = ("overwrite_a",)
     gufunc_signature = "(m,m)->(m,m)"
+
+    def __init__(self, overwrite_a: bool = False):
+        self.overwrite_a = overwrite_a
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
 
     def make_node(self, A):
         A = as_tensor_variable(A)
@@ -30,6 +35,13 @@ class Expm(Op):
         (A,) = inputs
         (expm,) = outputs
         expm[0] = scipy_linalg.expm(A)
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if not allowed_inplace_inputs:
+            return self
+        new_props = self._props_dict()  # type: ignore
+        new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
     def pullback(self, inputs, outputs, output_grads):
         from pytensor.tensor.linalg.solvers.general import solve
