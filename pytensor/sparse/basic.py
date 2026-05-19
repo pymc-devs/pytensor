@@ -752,7 +752,7 @@ dense_from_sparse = DenseFromSparse()
 class SparseFromDense(Op):
     """Convert a dense matrix to a sparse matrix."""
 
-    __props__ = ()
+    __props__ = ("format",)
 
     def __init__(self, format):
         self.format = format
