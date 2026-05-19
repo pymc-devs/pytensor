@@ -1,7 +1,7 @@
 import numpy as np
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import ensure_lapack
+from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
 from pytensor import config
@@ -15,17 +15,6 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
 )
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 from pytensor.tensor.linalg.products import Expm
-
-
-@numba_basic.numba_njit(inline="always")
-def _copy_to_f(A):
-    # Faster than numba's stdlib _copy_to_fortran_order at moderate sizes.
-    n, m = A.shape
-    out = np.empty((n, m), dtype=A.dtype).T
-    for j in range(m):
-        for i in range(n):
-            out[i, j] = A[i, j]
-    return out
 
 
 @numba_basic.numba_njit(inline="always")
@@ -164,7 +153,7 @@ def _expm_impl(A, overwrite_a):
         elif overwrite_a and A.flags.f_contiguous:
             A_s = A
         else:
-            A_s = _copy_to_f(A)
+            A_s = _copy_to_fortran_order(A)
 
         A_s = np.asfortranarray(A_s)
 
