@@ -1074,17 +1074,19 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             self._clients = clients
         return self._clients
 
-    def unfreeze(self) -> "FunctionGraph":
-        """Return a mutable FunctionGraph with fresh mutable Apply nodes."""
-        memo: dict[Variable, Variable] = {inp: inp.type() for inp in self.inputs}
+    def bind(self, replace: dict[Variable, Variable]) -> list[Variable]:
+        """Return fresh outputs with root inputs substituted per *replace*.
 
+        Constants are reused; any non-Constant input not in *replace* raises KeyError.
+        """
+        memo = replace.copy()
         for node in self.toposort():
             for i in node.inputs:
                 if i not in memo:
-                    if isinstance(i, AtomicVariable):
+                    if isinstance(i, Constant):
                         memo[i] = i
                     else:
-                        memo[i] = i.clone()
+                        raise KeyError(f"Missing replacement for input {i}")
 
             new_node = Apply(
                 node.op,
@@ -1092,9 +1094,13 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 [o.type() for o in node.outputs],
             )
             memo.update(zip(node.outputs, new_node.outputs))
+        return [memo[out] for out in self.outputs]
 
+    def unfreeze(self) -> "FunctionGraph":
+        """Return a mutable FunctionGraph with fresh mutable Apply nodes."""
+        fresh_inputs = [inp.type() for inp in self.inputs]
         return FunctionGraph(
-            [memo[i] for i in self.inputs],
-            [memo[o] for o in self.outputs],
+            fresh_inputs,
+            self.bind(dict(zip(self.inputs, fresh_inputs))),
             clone=False,
         )
