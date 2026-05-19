@@ -84,18 +84,6 @@ class TestComposite:
         fn = make_function(DualLinker().accept(g))
         assert fn(1.0, 2.0) == 1.5
 
-    def test_flatten(self):
-        # Test that we flatten multiple Composite.
-        x, y, z = floats("xyz")
-        C = Composite([x, y], [x + y])
-        CC = Composite([x, y], [C(x * y, y)])
-        assert not isinstance(CC.outputs[0].owner.op, Composite)
-
-        # Test with multiple outputs
-        CC = Composite([x, y, z], [C(x * y, y), C(x * z, y)])
-        # We don't flatten that case.
-        assert isinstance(CC.outputs[0].owner.op, Composite)
-
     def test_shared_identity(self):
         x, y = floats("xy")
         c1 = Composite([x, y], [x + y])

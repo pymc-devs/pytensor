@@ -4239,25 +4239,6 @@ class Composite(ScalarInnerGraphOp):
         for i in inputs:
             assert i not in outputs  # This isn't supported, use identity
 
-        # Flatten nested Composites in single-output case
-        if len(outputs) == 1 and any(
-            var.owner is not None and isinstance(var.owner.op, Composite)
-            for var in outputs
-        ):
-            inner_op = outputs[0].owner.op
-            inner_fgraph = inner_op.fgraph.unfreeze()
-            res = pytensor.compile.rebuild_collect_shared(
-                inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
-            )
-            res2 = pytensor.compile.rebuild_collect_shared(
-                inputs=inner_fgraph.inputs,
-                outputs=inner_fgraph.outputs,
-                replace=dict(zip(inner_fgraph.inputs, res[1], strict=True)),
-            )
-            assert len(res2[1]) == len(outputs)
-            assert len(res[0]) == len(inputs)
-            inputs, outputs = res[0], res2[1]
-
         self.fgraph = FrozenFunctionGraph(inputs, outputs)
         self._validate_inner_graph(self.fgraph)
 
