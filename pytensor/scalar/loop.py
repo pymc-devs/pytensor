@@ -104,23 +104,7 @@ class ScalarLoop(ScalarInnerGraphOp):
             )
 
     def clone(self, name=None, **kwargs):
-        mutable_fg = self.fgraph.unfreeze()
-        inputs = mutable_fg.inputs
-        outputs = mutable_fg.outputs
-        if self.is_while:
-            *update, until = outputs
-        else:
-            update, until = outputs, None
-        init = inputs[: len(update)]
-        constant = inputs[len(update) :]
-        return self.__class__(
-            init=init,
-            update=update,
-            constant=constant,
-            until=until,
-            name=self.name if name is None else name,
-            **kwargs,
-        )
+        return self  # Op is immutable
 
     @property
     def fn(self):

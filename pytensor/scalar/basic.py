@@ -4263,8 +4263,7 @@ class Composite(ScalarInnerGraphOp):
         return self._name
 
     def clone(self):
-        mutable_fg = self.fgraph.unfreeze()
-        return self.__class__(mutable_fg.inputs, mutable_fg.outputs)
+        return self  # Op is immutable
 
     def output_types(self, input_types):
         if tuple(input_types) != self.inputs_type:
