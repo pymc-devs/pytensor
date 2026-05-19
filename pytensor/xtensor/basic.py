@@ -73,6 +73,9 @@ class XTensorFromTensor(XTypeCastOp):
 
     def __init__(self, dims: Sequence[str]):
         super().__init__()
+
+        if isinstance(dims, str):
+            dims = (dims,)
         self.dims = tuple(dims)
 
     def make_node(self, x):
