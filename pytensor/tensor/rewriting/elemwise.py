@@ -16,7 +16,6 @@ from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
-from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
@@ -1069,13 +1068,13 @@ def local_inline_composite_constants(fgraph, node):
     if not inlineable:
         return None
 
-    mutable_fg = composite_op.fgraph.unfreeze()
+    composite_fg = composite_op.fgraph
     inlineable_indices = {i for i, _ in inlineable}
     new_outer_inputs = []
     new_inner_inputs = []
-    inner_replacements = {}
+    inner_replacements = {i: i for i in composite_fg.inputs}
     for i, (outer_inp, inner_inp) in enumerate(
-        zip(node.inputs, mutable_fg.inputs, strict=True)
+        zip(node.inputs, composite_fg.inputs, strict=True)
     ):
         if i in inlineable_indices:
             inner_replacements[inner_inp] = scalar_constant(
@@ -1085,7 +1084,7 @@ def local_inline_composite_constants(fgraph, node):
             new_outer_inputs.append(outer_inp)
             new_inner_inputs.append(inner_inp)
 
-    new_inner_outs = clone_replace(mutable_fg.outputs, replace=inner_replacements)
+    new_inner_outs = composite_fg.bind(inner_replacements)
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
 
