@@ -978,8 +978,7 @@ def clone_node_and_cache(
 
     clone_d[node] = new_node
 
-    if new_node.op is not node.op:
-        clone_d.setdefault(node.op, new_node.op)
+    clone_d.setdefault(node.op, new_node.op)
 
     for old_o, new_o in zip(node.outputs, new_node.outputs, strict=True):
         clone_d.setdefault(old_o, new_o)
