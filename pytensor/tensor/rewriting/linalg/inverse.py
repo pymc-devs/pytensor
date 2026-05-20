@@ -38,7 +38,7 @@ def transpose_of_inv(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([Dot])
+@node_rewriter([Dot, blockwise_of(Dot)])
 def inv_to_solve(fgraph, node):
     """Replace inv(X) @ b with solve(X, b) and b @ inv(X) with solve(X.T, b.T).T."""
     l, r = node.inputs
