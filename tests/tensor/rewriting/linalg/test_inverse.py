@@ -10,15 +10,13 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv, inv, pinv
 from pytensor.tensor.linalg.inverse import inv as matrix_inverse
 from pytensor.tensor.linalg.products import KroneckerProduct
-from pytensor.tensor.linalg.solvers.general import Solve
-from pytensor.tensor.rewriting.linalg.inverse import inv_to_solve
+from pytensor.tensor.linalg.solvers.general import solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
@@ -86,14 +84,17 @@ def test_transpose_of_inv():
                 assert node.inputs[0].name == "X"
 
 
-def test_inv_to_solve():
-    A = dmatrix("A")
-    b = dmatrix("b")
-    node = matrix_inverse(A).dot(b).owner
-    [out] = inv_to_solve.transform(None, node)
-    assert isinstance(out.owner.op, Blockwise) and isinstance(
-        out.owner.op.core_op, Solve
-    )
+@pytest.mark.parametrize("batched", [False, True], ids=["unbatched", "batched"])
+def test_inv_to_solve(batched):
+    if batched:
+        A = pt.tensor("A", shape=(None, None, None), dtype="float64")
+        b = pt.tensor("b", shape=(None, None, None), dtype="float64")
+    else:
+        A = dmatrix("A")
+        b = dmatrix("b")
+    out = matrix_inverse(A) @ b
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    assert_equal_computations([rewritten], [solve(A, b)])
 
 
 @pytest.mark.parametrize("inv_op_1", [inv, pinv])
