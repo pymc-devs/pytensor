@@ -35,10 +35,11 @@ def numba_funcify_Solve(op, node, **kwargs):
     if must_cast_B and config.compiler_verbose:
         print("Solve requires casting second input `b`")  # noqa: T201
 
-    overwrite_a = op.overwrite_a
     lower = op.lower
-    overwrite_a = op.overwrite_a
-    overwrite_b = op.overwrite_b
+    # When we cast, we astype() to a fresh buffer we own, so the kernel may
+    # safely mutate it regardless of the user's overwrite_a/b setting.
+    overwrite_a = op.overwrite_a or must_cast_A
+    overwrite_b = op.overwrite_b or must_cast_B
     is_complex = out_dtype.kind == "c"
     transposed = False  # TODO: Solve doesnt currently allow the transposed argument
 
@@ -81,7 +82,6 @@ def numba_funcify_Solve(op, node, **kwargs):
 def numba_funcify_SolveTriangular(op, node, **kwargs):
     lower = op.lower
     unit_diagonal = op.unit_diagonal
-    overwrite_b = op.overwrite_b
 
     A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -92,6 +92,9 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     must_cast_B = b_dtype != out_dtype
     if must_cast_B and config.compiler_verbose:
         print("SolveTriangular requires casting second input `b`")  # noqa: T201
+
+    # When we cast b, we own a fresh buffer the kernel may safely mutate.
+    overwrite_b = op.overwrite_b or must_cast_B
 
     @numba_basic.numba_njit
     def solve_triangular(a, b):
@@ -118,7 +121,6 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 @register_funcify_default_op_cache_key(CholeskySolve)
 def numba_funcify_CholeskySolve(op, node, **kwargs):
     lower = op.lower
-    overwrite_b = op.overwrite_b
 
     c_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -129,6 +131,9 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     must_cast_b = b_dtype != out_dtype
     if must_cast_b and config.compiler_verbose:
         print("CholeskySolve requires casting second input `b`")  # noqa: T201
+
+    # When we cast b, we own a fresh buffer the kernel may safely mutate.
+    overwrite_b = op.overwrite_b or must_cast_b
 
     @numba_basic.numba_njit
     def cho_solve(c, b):
