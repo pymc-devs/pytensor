@@ -97,6 +97,41 @@ def test_sparse_spmv(sp_format):
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
 
 
+@pytest.mark.parametrize(
+    "x_dtype, y_dtype",
+    [
+        ("int64", "complex64"),
+        ("int64", "float32"),
+    ],
+)
+def test_structured_dot_upcast(x_dtype, y_dtype):
+    """Numba scalar-array mul keeps the array dtype; numpy upcasts to a wider type."""
+    x = ps.matrix(format="csc", name="x", dtype=x_dtype, shape=(4, 3))
+    y = pt.matrix("y", dtype=y_dtype, shape=(3, 5))
+    z = ps.structured_dot(x, y)
+
+    x_test = scipy.sparse.csc_matrix(
+        np.array([[97, 0, 0], [0, 83, 0], [0, 0, 71], [42, 0, 0]], dtype=x_dtype)
+    )
+    y_test = np.array(
+        [
+            [9.12345, -3.98765, 7.55555, 1.23456, -5.67890],
+            [2.34567, 8.76543, -4.32109, 6.54321, 0.98765],
+            [-1.11111, 3.33333, 9.99999, -7.77777, 2.22222],
+        ],
+        dtype=y_dtype,
+    )
+
+    def strict_assert(a, b):
+        if scipy.sparse.issparse(a):
+            a = a.toarray()
+        if scipy.sparse.issparse(b):
+            b = b.toarray()
+        np.testing.assert_allclose(a, b, rtol=1e-14, atol=0, strict=True)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test], assert_fn=strict_assert)
+
+
 @pytest.mark.parametrize("x_format", ["csr", "csc"])
 @pytest.mark.parametrize("y_format", ["csr", "csc", "dense"])
 @pytest.mark.parametrize("x_shape, y_shape", DOT_SHAPES)
