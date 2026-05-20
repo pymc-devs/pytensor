@@ -65,8 +65,9 @@ def numba_funcify_SVD(op, node, **kwargs):
     if discrete_input and config.compiler_verbose:
         print("SVD requires casting discrete input to float")  # noqa: T201
 
-    # Casting discrete input to float allocates a new buffer, so in-place is moot.
-    effective_overwrite_a = op.overwrite_a and not discrete_input
+    # When discrete_input, we astype() to a fresh float buffer we own, so the
+    # kernel may safely mutate it regardless of the user's overwrite_a setting.
+    effective_overwrite_a = op.overwrite_a or discrete_input
 
     matrix_dtype = out_dtype
     # SVD declares S with the real component dtype via linalg_real_output_dtype,
