@@ -4,12 +4,15 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import function, scan, shared
-from pytensor.compile.mode import get_default_mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.link.basic import JITLinker
 from pytensor.scan.op import Scan
+from pytensor.scan.rewriting.trace import scan_reduce_trace_prealloc
 from pytensor.scan.utils import until
 from pytensor.tensor.math import dot
 from pytensor.tensor.shape import reshape
@@ -597,6 +600,51 @@ class TestReduceTrace:
         np.testing.assert_allclose(fn(0, 5), ws_ref[3:5])
         np.testing.assert_allclose(fn(0, 8), ws_ref[3:8])
         np.testing.assert_allclose(fn(0, 10), ws_ref[3:10])
+
+    def test_idempotent(self):
+        """Applying scan_reduce_trace twice must produce the same result as once.
+
+        The pre-refactor monolithic ``scan_save_mem`` trimmed the buffer
+        correctly on the first apply *and* rewrote the user's ``Subtensor`` so
+        its indices addressed the new shorter buffer. A second apply then
+        re-canonicalized those already-trimmed indices against the new length
+        and trimmed again, returning values from the early (about-to-be-
+        overwritten) part of the circular buffer instead of the tail.
+        """
+        x0 = scalar("x0")
+        acc = scan(
+            fn=lambda prev: prev + 1,
+            outputs_info=[x0],
+            n_steps=10,
+            return_updates=False,
+            mode=Mode(optimizer=None),
+        )
+        # Slice the raw scan output directly. The pre-refactor rewrite only
+        # inspected the direct ``Subtensor`` client of ``Scan``, so going
+        # through ``acc`` (= ``raw[init_l:]``, the wrapper scan inserts to
+        # hide the initial state) would have masked the original bug.
+        raw_scan_out = acc.owner.inputs[0]
+        out = raw_scan_out[-3:]
+
+        rewrite = dfs_rewriter(scan_reduce_trace_prealloc, ignore_newtrees=True)
+        fgraph = FunctionGraph([x0], [out])
+
+        rewrite.apply(fgraph)
+        # Sanity check: the first apply actually trimmed the buffer 11 -> 3.
+        # Without this the second-apply check below would be vacuous if a
+        # future change silently disabled the rewrite for this pattern.
+        [scan_node] = (n for n in fgraph.apply_nodes if isinstance(n.op, Scan))
+        assert scan_node.inputs[1].type.shape == (3,)
+
+        rewrite.apply(fgraph)
+
+        f = function(
+            fgraph.inputs,
+            fgraph.outputs[0],
+            accept_inplace=True,
+            mode=Mode(linker="py", optimizer=None),
+        )
+        np.testing.assert_allclose(f(0.0), [8, 9, 10])
 
 
 def test_scan_sit_sot_to_untraced():
