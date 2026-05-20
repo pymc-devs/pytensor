@@ -526,6 +526,8 @@ def numba_funcify_Schur(op, node, **kwargs):
 
     if integer_input and config.compiler_verbose:
         print("Schur requires casting discrete input to float")  # noqa: T201
+    if needs_complex_cast and config.compiler_verbose:
+        print("Schur requires casting real input to complex")  # noqa: T201
 
     # Complex input always produces complex output, and output == "complex" forces complex output
     if complex_input or output == "complex":
@@ -585,6 +587,8 @@ def numba_funcify_QZ(op, node, **kwargs):
 
     if (integer_input_a or integer_input_b) and config.compiler_verbose:
         print("QZ requires casting discrete input to float")  # noqa: T201
+    if needs_complex_cast and config.compiler_verbose:
+        print("QZ requires casting real input to complex")  # noqa: T201
 
     alpha_dtype = node.outputs[2].type.numpy_dtype if return_eigenvalues else out_dtype
 
