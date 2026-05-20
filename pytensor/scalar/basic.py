@@ -15,7 +15,7 @@ import math
 from collections.abc import Callable
 from itertools import chain
 from textwrap import dedent
-from typing import Any, TypeAlias
+from typing import Any
 
 import numpy as np
 
@@ -790,7 +790,7 @@ float64: ScalarType = get_scalar_type("float64")
 complex64: ScalarType = get_scalar_type("complex64")
 complex128: ScalarType = get_scalar_type("complex128")
 
-_ScalarTypes: TypeAlias = tuple[ScalarType, ...]
+type _ScalarTypes = tuple[ScalarType, ...]
 int_types: _ScalarTypes = (int8, int16, int32, int64)
 uint_types: _ScalarTypes = (uint8, uint16, uint32, uint64)
 float_types: _ScalarTypes = (float16, float32, float64)
