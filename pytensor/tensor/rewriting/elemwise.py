@@ -26,7 +26,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.graph.traversal import toposort
+from pytensor.graph.traversal import toposort, walk_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar import (
     Add,
@@ -666,11 +666,9 @@ class FusionOptimizer(GraphRewriter):
                 if isinstance(client.op, Output)
             )
 
-            # Start main loop to find collection of fuseable subgraphs
-            # We store the collection in `sorted_subgraphs`, in reverse topological order
-            sorted_subgraphs: list[
-                tuple[int, tuple[tuple[Variable], tuple[Variable]]]
-            ] = []
+            # Start main loop to find collection of fuseable subgraphs. We collect them in
+            # discovery order; the final yield order is topologically sorted at the end.
+            discovered_subgraphs: list[tuple[tuple[Variable], tuple[Variable]]] = []
             # Keep a bitset of nodes that have been claimed by subgraphs
             all_subgraphs_bitset = 0
             # Start exploring in reverse topological order from candidate sink nodes
@@ -832,44 +830,38 @@ class FusionOptimizer(GraphRewriter):
                         if node_ancestors_bitset & subgraph_bitset
                     )
 
-                # Add new subgraph to sorted_subgraphs
-                # Because we start from sink nodes in reverse topological order, most times new subgraphs
-                # don't depend on previous subgraphs, so we can just append them at the end.
-                if not (unfuseable_ancestors_bitset & all_subgraphs_bitset):
-                    # That's the case here
-                    # None of the unfuseable_ancestors (i.e, the ancestors) are present in the previous collected subgraphs
-                    sorted_subgraphs.append(
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
-                    )
-                else:
-                    # But not here, so we need to find the right position for insertion.
-                    # We iterate through the previous subgraphs in topological order (reverse of the stored order).
-                    # We cumulatively exclude each subgraph_bitset and perform the same dependency check again, until it passes.
-                    remaining_subgraphs_bitset = all_subgraphs_bitset
-                    for index, (other_subgraph_bitset, _) in enumerate(
-                        reversed(sorted_subgraphs)
-                    ):
-                        # Exclude subgraph bitset
-                        remaining_subgraphs_bitset &= ~other_subgraph_bitset
-                        if not (
-                            unfuseable_ancestors_bitset & remaining_subgraphs_bitset
-                        ):
-                            break  # bingo
-                    else:  # no-break
-                        raise RuntimeError(
-                            "Failed to find insertion point for fused subgraph"
-                        )
-                    sorted_subgraphs.insert(
-                        -(index + 1),
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs)),
-                    )
-
-                # Add subgraph to all_subgraphs_bitset
+                # Collect the subgraph
+                discovered_subgraphs.append((subgraph_inputs, subgraph_outputs))
                 all_subgraphs_bitset |= subgraph_bitset
 
-            # Finished exploring the whole graph
-            # Yield from sorted_subgraphs, discarding the subgraph_bitset
-            yield from (io for _, io in sorted_subgraphs)
+            # Yield sorted subgraphs
+            # A client must be fused before its direct ancestors,
+            # otherwise it would reintroduce the old nodes back into the graph.
+            # Indirect ancestry through non-fused variables is order-independent.
+
+            # Map each subgraph output variable to the respective subgraph index
+            subgraph_indices = range(len(discovered_subgraphs))
+            sg_idx_of_out = {
+                out: idx
+                for idx, (_, sg_outputs) in zip(subgraph_indices, discovered_subgraphs)
+                for out in sg_outputs
+            }
+
+            def direct_ancestors(
+                i, sg_idx_of_out=sg_idx_of_out, sgs=discovered_subgraphs
+            ):
+                # Return edges: inputs of this subgraph that are outputs of another subgraph
+                sg_inputs, _ = sgs[i]
+                return [
+                    ancestor_sg_idx
+                    for inp in sg_inputs
+                    if (ancestor_sg_idx := sg_idx_of_out.get(inp)) is not None
+                ]
+
+            for i in reversed(
+                tuple(walk_toposort(subgraph_indices, deps=direct_ancestors))  # type: ignore[type-var]
+            ):
+                yield discovered_subgraphs[i]
 
         max_operands = elemwise_max_operands_fct(None)
         reason = self.__class__.__name__
