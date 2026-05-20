@@ -48,7 +48,7 @@ grad_time: float = 0.0
 
 
 # TODO: Add `overload` variants
-def as_list_or_tuple(
+def as_list_or_tuple[V: Variable | None](
     use_list: bool, use_tuple: bool, outputs: V | Sequence[V]
 ) -> V | list[V] | tuple[V, ...]:
     """Return either a single object or a list/tuple of objects.

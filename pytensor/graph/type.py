@@ -9,7 +9,7 @@ from pytensor.graph.utils import MetaObject
 D = TypeVar("D")
 
 
-class Type(MetaObject, Generic[D]):
+class Type(MetaObject, Generic[D]):  # noqa: UP046
     """
     Interface specification for variable type instances.
 
@@ -23,12 +23,12 @@ class Type(MetaObject, Generic[D]):
 
     """
 
-    variable_type: TypeAlias = Variable
+    variable_type: TypeAlias = Variable  # noqa: UP040
     """
     The `Type` that will be created by a call to `Type.make_variable`.
     """
 
-    constant_type: TypeAlias = Constant
+    constant_type: TypeAlias = Constant  # noqa: UP040
     """
     The `Type` that will be created by a call to `Type.make_constant`.
     """
