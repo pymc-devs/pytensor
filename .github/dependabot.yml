@@ -8,3 +8,7 @@ updates:
     labels:
       - "GitHub CI/CD"
       - "no releasenotes"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
