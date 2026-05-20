@@ -29,7 +29,7 @@ from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
-from pytensor.graph.type import HasDataType, HasShape
+from pytensor.graph.type import HasDataType, HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
@@ -302,7 +302,7 @@ def _get_underlying_scalar_constant_value(
         The maximum number of recursion.
 
     """
-    from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
+    from pytensor.compile.ops import DeepCopyOp, OutputGuard, TypeCastingOp
     from pytensor.sparse import CSM
     from pytensor.tensor.subtensor import Subtensor
 
@@ -344,7 +344,9 @@ def _get_underlying_scalar_constant_value(
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
             op = v.owner.op
             max_recur -= 1
-            if isinstance(op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp):
+            if isinstance(
+                op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp | OutputGuard
+            ):
                 v = v.owner.inputs[0]
                 continue
             elif isinstance(op, Shape_i):
