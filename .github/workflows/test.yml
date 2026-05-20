@@ -244,7 +244,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ./cache
-          key: ${{ runner.os }}-benchmark
+          key: ${{ runner.os }}-benchmark-v2
       - name: Run benchmarks
         shell: micromamba-shell {0}
         run: |
@@ -262,6 +262,7 @@ jobs:
           comment-on-alert: false
           fail-on-alert: false
           auto-push: false
+          max-items-in-chart: 50
 
   all-checks:
     if: ${{ always() }}
