@@ -203,9 +203,9 @@ class TestScanInplaceOptimizer:
         next_rng, x0 = pt.random.normal(rng=rng).owner.outputs
 
         final_rng, xs = scan(
-            fn=lambda rng_tm1, x_tm1: pt.random.normal(
-                x_tm1, rng=rng_tm1
-            ).owner.outputs,
+            fn=lambda rng_tm1, x_tm1: (
+                pt.random.normal(x_tm1, rng=rng_tm1).owner.outputs
+            ),
             outputs_info=[next_rng, x0],
             n_steps=5,
             return_updates=False,

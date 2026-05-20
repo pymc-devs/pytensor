@@ -188,7 +188,7 @@ def _test_sit_sot_buffer_benchmark(
 ):
     x0 = vector(shape=(op_size,), dtype="float64")
     xs = scan(
-        fn=lambda xtm1: (xtm1 + 1),
+        fn=lambda xtm1: xtm1 + 1,
         outputs_info=[x0],
         n_steps=n_steps - 1,
         return_updates=False,
