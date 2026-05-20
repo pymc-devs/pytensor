@@ -5,7 +5,7 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.tensor.linalg.decomposition import svd
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eigh, eig
 from pytensor.tensor.linalg.decomposition.lu import (
@@ -17,6 +17,7 @@ from pytensor.tensor.linalg.decomposition.lu import (
 )
 from pytensor.tensor.linalg.decomposition.qr import QR, qr
 from pytensor.tensor.linalg.decomposition.schur import qz, schur
+from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
@@ -134,7 +135,7 @@ def test_Eigh_integer_input():
 def test_SVD(x, full_matrices, compute_uv):
     x, test_x = x
     test_x = test_x.T @ test_x
-    g = svd.SVD(full_matrices, compute_uv)(x)
+    g = svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
 
     compare_numba_and_py([x], g, [test_x])
 
@@ -153,15 +154,12 @@ def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
     dtype = complex_dtype if is_complex else floatX
 
     x = pt.matrix("x", dtype=dtype)
-    op = svd.SVD(
+    outs = svd(
+        x,
         full_matrices=full_matrices,
         compute_uv=compute_uv,
-        overwrite_a=overwrite_a,
     )
-    outs = op(x)
     out_list = list(outs) if compute_uv else [outs]
-
-    assert op.destroy_map == ({0: [0]} if overwrite_a else {})
 
     fn = pytensor.function(
         [In(x, mutable=overwrite_a)],
@@ -169,10 +167,13 @@ def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
         mode=numba_inplace_mode,
         accept_inplace=True,
     )
-
     fn_op = fn.maker.fgraph.outputs[0].owner.op
-    core_op = fn_op.core_op if isinstance(fn_op, pt.blockwise.Blockwise) else fn_op
-    assert isinstance(core_op, svd.SVD)
+    core_op = (
+        fn_op.core_op
+        if isinstance(fn_op, Blockwise | BlockwiseWithCoreShape)
+        else fn_op
+    )
+    assert isinstance(core_op, SVD)
     assert core_op.destroy_map == ({0: [0]} if overwrite_a else {})
 
     local_rng = np.random.default_rng(0)
