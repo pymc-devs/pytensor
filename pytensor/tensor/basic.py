@@ -2180,11 +2180,13 @@ def _validate_axis_argument(axis: int, op_name: str):
 
 
 def split(x, splits_size, *, n_splits=None, axis=0):
+    x = as_tensor_variable(x)
     if n_splits is None:
         if isinstance(splits_size, Variable):
             n_splits = get_vector_length(splits_size)
         else:
             n_splits = len(splits_size)
+    axis = normalize_axis_index(_validate_axis_argument(axis, "split"), x.type.ndim)
     return Split(n_splits, axis)(x, splits_size)
 
 
@@ -2218,7 +2220,10 @@ class Split(COp):
 
     def __init__(self, len_splits, axis):
         self.len_splits = int(len_splits)
-        self.axis = _validate_axis_argument(axis, "Split")
+        axis = _validate_axis_argument(axis, "Split")
+        if axis < 0:
+            raise ValueError(f"Split axis must be non-negative, got {axis}.")
+        self.axis = axis
         self.view_map = {i: [0] for i in range(self.len_splits)}
 
     def __str__(self):
@@ -2231,10 +2236,9 @@ class Split(COp):
         if splits.type.ndim == 1 and splits.type.dtype not in integer_dtypes:
             raise TypeError("`splits` parameter must be tensors of integer type")
 
-        axis = normalize_axis_index(self.axis, x.type.ndim)
-        # Bind the node to an Op with a canonical (non-negative) axis so that
-        # rewrites and the Op's own methods can read `axis` without normalizing.
-        op = self if axis == self.axis else Split(self.len_splits, axis)
+        if self.axis >= x.type.ndim:
+            raise np.exceptions.AxisError(self.axis, x.type.ndim)
+
         x_dtype = x.type.dtype
         outputs = []
         x_static_shape = list(x.type.shape)
@@ -2246,10 +2250,10 @@ class Split(COp):
             except IndexError:
                 raise ValueError("Number of splits is larger than splits size")
             static_out_shape = x_static_shape.copy()
-            static_out_shape[axis] = static_split_size
+            static_out_shape[self.axis] = static_split_size
             outputs.append(tensor(shape=tuple(static_out_shape), dtype=x_dtype))
 
-        return Apply(op, [x, splits], outputs)
+        return Apply(self, [x, splits], outputs)
 
     def perform(self, node, inputs, outputs_storage):
         x, splits = inputs
@@ -2426,7 +2430,10 @@ class Join(COp):
     __props__ = ("axis",)
 
     def __init__(self, axis):
-        self.axis = _validate_axis_argument(axis, "Join")
+        axis = _validate_axis_argument(axis, "Join")
+        if axis < 0:
+            raise ValueError(f"Join axis must be non-negative, got {axis}.")
+        self.axis = axis
 
     def __str__(self):
         return f"{self.__class__.__name__}{{axis={self.axis}}}"
@@ -2458,10 +2465,8 @@ class Join(COp):
                 "Only tensors with the same number of dimensions can be joined. "
                 f"Input ndims were: {[x.ndim for x in tensors]}"
             )
-        axis = normalize_axis_index(self.axis, ndim)
-        # Bind the node to an Op with a canonical (non-negative) axis so that
-        # rewrites and the Op's own methods can read `axis` without normalizing.
-        op = self if axis == self.axis else Join(axis)
+        if self.axis >= ndim:
+            raise np.exceptions.AxisError(self.axis, ndim)
 
         if len(tensors) == 1:
             out_shape = tensors[0].type.shape
@@ -2471,7 +2476,7 @@ class Join(COp):
             out_shape = [None] * ndim
             for d in range(ndim):
                 ins = static_shapes[:, d]
-                if d == axis:
+                if d == self.axis:
                     # Any unknown size along the axis means we can't infer it
                     if None in ins:
                         out_shape[d] = None
@@ -2488,13 +2493,13 @@ class Join(COp):
                         (out_shape[d],) = inset - {None}
                     else:
                         raise ValueError(
-                            f"all input array dimensions other than the specified `axis` ({axis})"
+                            f"all input array dimensions other than the specified `axis` ({self.axis})"
                             " must match exactly, or be unknown (None),"
                             f" but along dimension {d}, the inputs shapes are incompatible: {ins}"
                         )
 
         out_dtype = ps.upcast(*[x.type.dtype for x in tensors])
-        return Apply(op, list(tensors), [tensor(dtype=out_dtype, shape=out_shape)])
+        return Apply(self, list(tensors), [tensor(dtype=out_dtype, shape=out_shape)])
 
     def perform(self, node, inputs, output_storage):
         output_storage[0][0] = np.concatenate(
@@ -2694,6 +2699,12 @@ def join(axis, *tensors_list):
         return tensors_list[0]
     if len(tensors_list) == 0:
         raise ValueError("Cannot join an empty list of tensors")
+    ndim = as_tensor_variable(tensors_list[0]).type.ndim
+    axis = _validate_axis_argument(axis, "join")
+    if ndim:
+        # Leave the axis untouched for 0-d inputs so `Join.make_node` can raise
+        # its clearer error about joining scalars.
+        axis = normalize_axis_index(axis, ndim)
     return Join(axis)(*tensors_list)
 
 

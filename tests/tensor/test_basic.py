@@ -70,6 +70,7 @@ from pytensor.tensor.basic import (
     roll,
     scalar_from_tensor,
     second,
+    split,
     stack,
     stacklists,
     swapaxes,
@@ -2131,14 +2132,17 @@ class TestJoinAndSplit:
         assert Split(2, 0) != Split(2, 1)
         assert Split(2, 0) != Split(3, 0)
 
-    def test_negative_axis_normalized_in_make_node(self):
-        # `make_node` binds the node to an Op with a canonical non-negative
-        # axis, so a directly-constructed negative-axis Op still yields a node
-        # whose `op.axis` is normalized.
+    def test_negative_axis(self):
+        # The Op rejects negative axes; the join/split helpers normalize them
+        # against the input rank before constructing the Op.
         a = matrix("a")
         b = matrix("b")
-        assert Join(-1)(a, b).owner.op == Join(1)
-        assert Split(2, -1)(a, [1, 2])[0].owner.op == Split(2, 1)
+        with pytest.raises(ValueError, match="non-negative"):
+            Join(-1)
+        with pytest.raises(ValueError, match="non-negative"):
+            Split(2, -1)
+        assert join(-1, a, b).owner.op == Join(1)
+        assert split(a, [1, 1], n_splits=2, axis=-1)[0].owner.op == Split(2, 1)
 
     def test_pickle_roundtrip(self):
         # Compiled functions with Join/Split round-trip through pickle.
@@ -3875,7 +3879,7 @@ class TestInferShape(utt.InferShapeTester):
         for axis in [1, -2]:
             self._compile_and_check(
                 [adtens, aivec],
-                [Split(3, axis)(adtens, aivec)[0]],
+                [split(adtens, aivec, n_splits=3, axis=axis)[0]],
                 [adtens_val, aivec_val],
                 (Split),
             )
@@ -3890,7 +3894,7 @@ class TestInferShape(utt.InferShapeTester):
         for axis in [0, -2]:
             self._compile_and_check(
                 [admat, bdmat, cdmat],
-                [Join(axis)(admat, bdmat, cdmat)],
+                [join(axis, admat, bdmat, cdmat)],
                 [admat_val, bdmat_val, cdmat_val],
                 Join,
             )
@@ -3901,7 +3905,7 @@ class TestInferShape(utt.InferShapeTester):
         for axis in [-1, 1]:
             self._compile_and_check(
                 [admat, bdmat, cdmat],
-                [Join(axis)(admat, bdmat, cdmat)],
+                [join(axis, admat, bdmat, cdmat)],
                 [admat_val, bdmat_val, cdmat_val],
                 Join,
             )
