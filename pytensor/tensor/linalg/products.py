@@ -45,23 +45,28 @@ class Expm(Op):
         return type(self)(**new_props)
 
     def pullback(self, inputs, outputs, output_grads):
-        # Najfeld and Havel (1995) / Mathias (1996) augmented-matrix
-        # Fréchet derivative:
-        #
-        #     expm([[A, E], [0, A]]) = [[expm(A), L_A(E)], [0, expm(A)]]
-        #
-        # where L_A is the Fréchet derivative of expm at A. The pullback
-        # is the adjoint of this linear map under the Frobenius inner
-        # product, which equals L_{A.T}(A_bar). So building the augmented
-        # matrix with A.T on the diagonal and A_bar in the upper-right
-        # block yields dL/dA in the upper-right block of its expm.
+        r"""Reverse-mode gradient via the augmented-matrix Fréchet derivative.
+
+        The Fréchet derivative :math:`L_A(E)` of :math:`\exp(A)` is the
+        upper-right block of one :math:`2n \times 2n` exponential [1]_:
+
+            .. math:: \exp \begin{pmatrix} A & E \\ 0 & A \end{pmatrix}
+                      = \begin{pmatrix} \exp(A) & L_A(E) \\ 0 & \exp(A) \end{pmatrix}.
+
+        The Frobenius adjoint of :math:`E \mapsto L_A(E)` is
+        :math:`Y \mapsto L_{A^T}(Y)`, so the pullback is recovered by placing
+        :math:`A^T` on the diagonal and the cotangent :math:`\bar{A}` in place
+        of :math:`E`.
+
+        References
+        ----------
+        .. [1] Mathias, R. (1996). A chain rule for matrix functions and
+               applications. *SIAM J. Matrix Anal. Appl.* 17(3), 610-620.
+        """
         (A,) = inputs
-        (_,) = outputs
         (A_bar,) = output_grads
 
-        # Prefer the static dim when available — JAX traces slice bounds at
-        # compile time and rejects symbolic ones.
-        n = A.type.shape[-1] if A.type.shape[-1] is not None else A.shape[-1]
+        n = A.type.shape[-1]
         zero = ptb.zeros_like(A)
         top = ptb.join(-1, A.mT, A_bar)
         bot = ptb.join(-1, zero, A.mT)
