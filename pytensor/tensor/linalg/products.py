@@ -1,4 +1,3 @@
-from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
@@ -46,37 +45,29 @@ class Expm(Op):
         return type(self)(**new_props)
 
     def pullback(self, inputs, outputs, output_grads):
-        from pytensor.tensor.linalg.solvers.general import solve
-
-        # Kalbfleisch and Lawless, J. Am. Stat. Assoc. 80 (1985) Equation 3.4
-        # Kind of... You need to do some algebra from there to arrive at
-        # this expression.
+        # Najfeld and Havel (1995) / Mathias (1996) augmented-matrix
+        # Fréchet derivative:
+        #
+        #     expm([[A, E], [0, A]]) = [[expm(A), L_A(E)], [0, expm(A)]]
+        #
+        # where L_A is the Fréchet derivative of expm at A. The pullback
+        # is the adjoint of this linear map under the Frobenius inner
+        # product, which equals L_{A.T}(A_bar). So building the augmented
+        # matrix with A.T on the diagonal and A_bar in the upper-right
+        # block yields dL/dA in the upper-right block of its expm.
         (A,) = inputs
-        (_,) = outputs  # Outputs not used; included for signature consistency only
+        (_,) = outputs
         (A_bar,) = output_grads
 
-        w, V = pt.linalg.eig(A)
+        # Prefer the static dim when available — JAX traces slice bounds at
+        # compile time and rejects symbolic ones.
+        n = A.type.shape[-1] if A.type.shape[-1] is not None else A.shape[-1]
+        zero = ptb.zeros_like(A)
+        top = ptb.join(-1, A.mT, A_bar)
+        bot = ptb.join(-1, zero, A.mT)
+        aug = ptb.join(-2, top, bot)
 
-        exp_w = pt.exp(w)
-        numer = pt.sub.outer(exp_w, exp_w)
-        denom = pt.sub.outer(w, w)
-
-        # When w_i ≈ w_j, we have a removable singularity in the expression for X, because
-        # lim b->a (e^a - e^b) / (a - b) = e^a (derivation left for the motivated reader)
-        X = pt.where(pt.abs(denom) < 1e-8, exp_w, numer / denom)
-
-        diag_idx = pt.arange(w.shape[0])
-        X = X[..., diag_idx, diag_idx].set(exp_w)
-
-        inner = solve(V, A_bar.T @ V).T
-        result = solve(V.T, inner * X) @ V.T
-
-        # At this point, result is always a complex dtype. If the input was real, the output should be
-        # real as well (and all the imaginary parts are numerical noise)
-        if A.dtype not in ("complex64", "complex128"):
-            return [result.real]
-
-        return [result]
+        return [expm(aug)[..., :n, n:]]
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
