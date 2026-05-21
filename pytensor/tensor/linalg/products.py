@@ -66,7 +66,7 @@ class Expm(Op):
         (A,) = inputs
         (A_bar,) = output_grads
 
-        n = A.type.shape[-1]
+        n = A.shape[-1]
         zero = ptb.zeros_like(A)
         top = ptb.join(-1, A.mT, A_bar)
         bot = ptb.join(-1, zero, A.mT)
