@@ -363,10 +363,15 @@ def test_dot_errors():
     fn = xr_function([x, y], z)
     x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
     y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
-    # Doesn't fail until the rewrite
+    # Doesn't fail until the rewrite. The exact message depends on which op
+    # raises (np.einsum vs np.dot vs the inlined Dot's runtime shape check).
     with pytest.raises(
         ValueError,
-        match=r"(Input operand 1 has a mismatch in its core dimension 0|incompatible array sizes for np.dot)",
+        match=(
+            r"Input operand 1 has a mismatch in its core dimension 0"
+            r"|incompatible array sizes for np.dot"
+            r"|Shape mismatch: x has"
+        ),
     ):
         fn(x_test, y_test)
 
