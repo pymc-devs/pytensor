@@ -333,9 +333,7 @@ def test_dot_lowering_inlines_einsum_ofg():
     z = x.dot(y)
 
     lowered = rewrite_graph(z.values, include=("lower_xtensor",))
-    ofg_nodes = [
-        n for n in io_toposort([], [lowered]) if isinstance(n.op, OpFromGraph)
-    ]
+    ofg_nodes = [n for n in io_toposort([], [lowered]) if isinstance(n.op, OpFromGraph)]
     assert ofg_nodes == [], (
         "lower_dot should inline the Einsum OpFromGraph eagerly; got: "
         f"{[type(n.op).__name__ for n in ofg_nodes]}"
