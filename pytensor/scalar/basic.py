@@ -3929,8 +3929,7 @@ class Real(UnaryScalarOp):
 
     """
 
-    # numpy.real(float32) return a view on the inputs.
-    # nfunc_spec = ('real', 1, 1)
+    nfunc_spec = ("real", 1, 1)
 
     def impl(self, x):
         return np.real(x)

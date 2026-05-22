@@ -1174,3 +1174,22 @@ def test_inplace_dtype_changed():
                 mode="fast_run",
             )
         assert fn64.maker.fgraph.outputs[0].owner.op.destroy_map == {}
+
+
+@pytest.mark.parametrize("linker", ["py", "cvm", "numba"])
+def test_nfunc_view_workaround(linker):
+    # np.real on a buffer returns a view, Elemwise python perform method works around it by making a copy
+    # Other backends shouldn't worry
+    a = pt.zvector("a")
+    b = pt.real(a)
+    c = Elemwise(ps.mul, inplace_pattern={0: 0})(b, 2.0)
+    out = c + a
+
+    mode = Mode(linker=linker, optimizer=None)
+    f = function([a], out, mode=mode, accept_inplace=True)
+
+    a_test = np.array([1 + 2j, 3 + 4j, 5 + 6j])
+    out_expected = np.real(a_test) * 2 + a_test
+
+    out_eval = f(a_test)
+    np.testing.assert_allclose(out_eval, out_expected)
