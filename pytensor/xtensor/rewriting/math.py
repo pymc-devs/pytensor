@@ -2,6 +2,8 @@ from string import ascii_lowercase
 
 from pytensor.graph import node_rewriter
 from pytensor.tensor import einsum
+from pytensor.tensor.einsum import Einsum
+from pytensor.tensor.rewriting.ofg import inline_ofg_node
 from pytensor.tensor.shape import specify_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.math import Dot
@@ -40,6 +42,14 @@ def lower_dot(fgraph, node):
 
     # Perform the einsum operation
     out_tensor = einsum(einsum_str, x_tensor, y_tensor)
+
+    # Inline the Einsum OFG eagerly. `inline_optimized_einsum` only fires
+    # during `specialize`, but while the OFG is alive `ShapeFeature` calls
+    # `OpFromGraph.infer_shape` on every import, re-walking the inner graph
+    # each time. With many composed xtensor dots that dominates compile
+    # time. The 2-operand case has no path optimisation to defer.
+    if out_tensor.owner is not None and isinstance(out_tensor.owner.op, Einsum):
+        [out_tensor] = inline_ofg_node(out_tensor.owner)
 
     # Reshape to match the output shape
     out_tensor = specify_shape(out_tensor, out.type.shape)

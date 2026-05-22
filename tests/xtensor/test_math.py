@@ -316,6 +316,32 @@ def test_dot():
     xr_assert_allclose(z_test, expected)
 
 
+def test_dot_lowering_inlines_einsum_ofg():
+    """``lower_dot`` must inline the ``Einsum`` OFG that ``pt.einsum`` wraps.
+
+    Leaving the OFG in place lets ``ShapeFeature.on_import`` call
+    ``OpFromGraph.infer_shape`` on every node import during canonicalize,
+    which re-walks the inner graph and dominates compile time once several
+    xtensor dots are composed (e.g. multi-layer attention).
+    """
+    from pytensor.compile.builders import OpFromGraph
+    from pytensor.graph.rewriting.utils import rewrite_graph
+    from pytensor.graph.traversal import io_toposort
+
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    z = x.dot(y)
+
+    lowered = rewrite_graph(z.values, include=("lower_xtensor",))
+    ofg_nodes = [
+        n for n in io_toposort([], [lowered]) if isinstance(n.op, OpFromGraph)
+    ]
+    assert ofg_nodes == [], (
+        "lower_dot should inline the Einsum OpFromGraph eagerly; got: "
+        f"{[type(n.op).__name__ for n in ofg_nodes]}"
+    )
+
+
 def test_dot_errors():
     # No matching dimensions
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
