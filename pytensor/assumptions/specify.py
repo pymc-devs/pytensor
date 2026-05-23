@@ -68,6 +68,7 @@ def assume(
     positive_definite: bool | None = None,
     orthogonal: bool | None = None,
     selection: bool | None = None,
+    permutation: bool | None = None,
 ):
     """Attach structural assumptions to a symbolic tensor.
 
@@ -92,8 +93,9 @@ def assume(
     orthogonal : bool, optional
         Assert that *x* is (or is not) orthogonal.
     selection : bool, optional
-        Assert that *x* is (or is not) a selection matrix -- one whose every column is a
-        column of the identity (a one-hot unit vector), i.e. :math:`x = I_n[:, idx]`.
+        Assert that *x* is (or is not) a selection matrix
+    permutation : bool, optional
+        Assert that *x* is (or is not) a permutation matrix
 
     Returns
     -------
@@ -118,6 +120,7 @@ def assume(
         "positive_definite": positive_definite,
         "orthogonal": orthogonal,
         "selection": selection,
+        "permutation": permutation,
     }
     assumptions = {
         name: FactState.TRUE if value else FactState.FALSE

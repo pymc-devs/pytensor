@@ -430,3 +430,55 @@ def test_gather_matches_upcast_matmul_dtype():
     xv = np.random.default_rng(0).normal(size=(3, 5)).astype("float32")
     iv = np.array([0, 2, 4, 1])
     assert_allclose(f(xv, iv), xv @ np.eye(5)[:, iv])
+
+
+def test_permutation_rides_selection_rewrite():
+    n = 5
+    pv = np.eye(n)[:, [2, 0, 4, 1, 3]]
+    rng = np.random.default_rng(0)
+    p = pt.matrix("p", shape=(n, n))
+    P = assume(p, permutation=True)
+    x = pt.matrix("x")
+
+    def has_matmul(f):
+        return any(
+            isinstance(node.op, Dot)
+            or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot))
+            for node in f.maker.fgraph.apply_nodes
+        )
+
+    f_left = function([p, x], P @ x, mode="FAST_RUN")
+    assert not has_matmul(f_left)
+    xv = rng.normal(size=(n, 3))
+    assert_allclose(f_left(pv, xv), pv @ xv)
+
+    f_right = function([p, x], x @ P, mode="FAST_RUN")
+    assert not has_matmul(f_right)
+    yv = rng.normal(size=(3, n))
+    assert_allclose(f_right(pv, yv), yv @ pv)
+
+
+@pytest.mark.parametrize(
+    "perm", [[0, 1, 2, 3], [1, 0, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1]], ids=str
+)
+def test_det_of_permutation(perm):
+    from pytensor.tensor.linalg.summary import Det
+
+    pv = np.eye(4)[:, perm]
+    p = pt.matrix("p", shape=(4, 4))
+    P = assume(p, permutation=True)
+    f = function([p], pt.linalg.det(P), mode="FAST_RUN")
+    assert not any(isinstance(node.op, Det) for node in f.maker.fgraph.apply_nodes)
+    got = f(pv)
+    assert abs(got) == 1.0  # exact, not a floating-point approximation
+    assert_allclose(got, np.linalg.det(pv))
+
+
+def test_det_of_non_permutation_selection_is_not_rewritten():
+    from pytensor.tensor.linalg.summary import Det
+
+    idx = pt.lvector("idx")
+    S = pt.eye(4)[:, idx]
+    f = function([idx], pt.linalg.det(S), mode="FAST_RUN")
+    assert any(isinstance(node.op, Det) for node in f.maker.fgraph.apply_nodes)
+    assert_allclose(f(np.array([0, 1, 1, 3])), 0.0)  # duplicate column -> singular

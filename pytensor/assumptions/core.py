@@ -102,6 +102,7 @@ SYMMETRIC = AssumptionKey("symmetric", short_name="sym")
 POSITIVE_DEFINITE = AssumptionKey("positive_definite", short_name="pd")
 ORTHOGONAL = AssumptionKey("orthogonal", short_name="orth")
 SELECTION = AssumptionKey("selection", short_name="sel")
+PERMUTATION = AssumptionKey("permutation", short_name="perm")
 
 ALL_KEYS = (
     DIAGONAL,
@@ -111,11 +112,13 @@ ALL_KEYS = (
     POSITIVE_DEFINITE,
     ORTHOGONAL,
     SELECTION,
+    PERMUTATION,
 )
 
 # Implications about structural properties derivably from other structural properties
 register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC)
 register_implies(POSITIVE_DEFINITE, SYMMETRIC)
+register_implies(PERMUTATION, SELECTION, ORTHOGONAL)
 
 
 def register_assumption(
