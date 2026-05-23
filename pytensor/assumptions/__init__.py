@@ -8,6 +8,7 @@ import pytensor.assumptions.dimshuffle
 import pytensor.assumptions.orthogonal
 import pytensor.assumptions.positive_definite
 import pytensor.assumptions.reshape
+import pytensor.assumptions.selection
 import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
 import pytensor.assumptions.symmetric
@@ -19,6 +20,7 @@ from pytensor.assumptions.core import (
     LOWER_TRIANGULAR,
     ORTHOGONAL,
     POSITIVE_DEFINITE,
+    SELECTION,
     SYMMETRIC,
     UPPER_TRIANGULAR,
     AssumptionFeature,
