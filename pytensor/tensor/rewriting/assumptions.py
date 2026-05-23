@@ -37,8 +37,8 @@ class DrainSpecifyAssumptions(GraphRewriter):
         replacements = {}
         for node in nodes:
             [out] = node.outputs
+            # Resolve the asserted facts into the cache.
             for name, _ in node.op.assumptions:
-                # Register the assumption by calling .get()
                 assumption_feature.get(out, _KEY_BY_NAME[name])
             # Drain the marker: redirect its consumers to the raw input,
             # peeling nested SpecifyAssumptions so a single replace_all
