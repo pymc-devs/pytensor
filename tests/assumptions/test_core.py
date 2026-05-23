@@ -18,6 +18,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import Eye
+from pytensor.tensor.rewriting.assumptions import DrainSpecifyAssumptions
 from pytensor.tensor.type import TensorType
 from tests.assumptions.conftest import make_fgraph
 
@@ -155,6 +156,13 @@ def test_replace_propagates_true_fact_to_new_var():
     fg.replace(d_old, d_new, reason="replace")
     assert af.get(d_new, DIAGONAL) is FactState.TRUE
     assert af.get(y, DIAGONAL) is FactState.TRUE
+
+
+def test_drain_preserves_implied_facts():
+    x = pt.matrix("x", shape=(4, 4))
+    fg, af = make_fgraph(assume(x, diagonal=True) + 1, inputs=[x])
+    DrainSpecifyAssumptions().apply(fg)
+    assert af.check(x, SYMMETRIC)
 
 
 def test_replace_reprobes_downstream_unknown():

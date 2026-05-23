@@ -211,6 +211,9 @@ class AssumptionFeature(Feature):
             else:
                 self.cache[(new_var, key)] = FactState.join(old_state, new_state)
             self._var_to_keys.setdefault(new_var, set()).add(key)
+            # new_var gained a fact whose implications were cached UNKNOWN before it was
+            # known; flag it so the next get() sweep re-derives those stale entries.
+            self._stale_vars.add(new_var)
 
         self._stale_vars.update(node.outputs)
 
