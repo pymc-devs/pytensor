@@ -1,7 +1,13 @@
 import numpy as np
 
 from pytensor import tensor as pt
-from pytensor.assumptions import DIAGONAL, ORTHOGONAL, SELECTION, check_assumption
+from pytensor.assumptions import (
+    DIAGONAL,
+    ORTHOGONAL,
+    PERMUTATION,
+    SELECTION,
+    check_assumption,
+)
 from pytensor.assumptions.selection import column_selection_index
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
@@ -241,12 +247,11 @@ def _selection_operand(fgraph, var):
     """
 
     def recover_index(S):
-        if (owner := S.owner) is not None and isinstance(owner.op, AdvancedSubtensor):
-            match owner.inputs[0].owner_op_and_inputs:
-                case (Eye(), _, _, k) if (
-                    isinstance(k, TensorConstant) and k.data.item() == 0
-                ):
-                    return column_selection_index(owner.op, owner)
+        match S.owner_op_and_inputs:
+            case (AdvancedSubtensor() as op, base, *_):
+                match base.owner_op_and_inputs:
+                    case (Eye(), _, _, TensorConstant(0)):
+                        return column_selection_index(op, S.owner)
         if isinstance(S, TensorConstant):
             return pt.constant(np.argmax(S.data, axis=-2))
         return pt.argmax(S, axis=-2)
@@ -330,3 +335,27 @@ def selection_dot_to_indexing(fgraph, node):
         return [out]
 
     return None
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([det])
+def det_of_permutation(fgraph, node):
+    """Replace ``det(P)`` by the sign of the permutation for a permutation matrix ``P``.
+
+    The determinant of a permutation is its sign: :math:`(-1)^k` where :math:`k` counts the
+    out-of-order pairs (``i < j`` with ``idx[i] > idx[j]``) of the index that orders its
+    columns, ``P = eye(n)[:, idx]``.
+    """
+    [x] = node.inputs
+    if x.type.ndim != 2 or not check_assumption(fgraph, x, PERMUTATION):
+        return None
+    operand = _selection_operand(fgraph, x)
+    if operand is None:
+        return None
+
+    idx = operand[0]
+    inversions = pt.triu((idx[:, None] > idx[None, :]).astype("int64"), k=1).sum()
+    sign = (1 - 2 * (inversions % 2)).astype(node.outputs[0].type.dtype)
+    copy_stack_trace(node.outputs[0], sign)
+    return [sign]
