@@ -10,8 +10,10 @@ from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.basic import alloc_diag
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.math import Dot
 from tests.unittest_tools import assert_equal_computations
 
 
@@ -328,3 +330,103 @@ def test_orthogonal_dot_transpose_to_eye():
     expected_batch = pt.alloc(np.eye(n, dtype=config.floatX), b64, n64, n64)
 
     assert_equal_computations([rewritten_batch], [expected_batch])
+
+
+class TestSelectionDotToIndexing:
+    n = 6
+    idx_val = np.array([0, 2, 5, 1])
+
+    PATTERNS = [
+        ("col_gather", lambda S, d: d @ S, lambda n, k: (3, n)),
+        ("row_gather", lambda S, d: S.T @ d, lambda n, k: (n, 4)),
+        ("row_scatter", lambda S, d: S @ d, lambda n, k: (k, 4)),
+        ("col_scatter", lambda S, d: d @ S.T, lambda n, k: (3, k)),
+    ]
+    SETUPS = [
+        ("symbolic", False),
+        ("symbolic", True),
+        ("constant", False),
+        ("opaque", False),
+    ]
+
+    @pytest.mark.parametrize(
+        "source, batched", SETUPS, ids=["sym", "sym_batched", "const", "opaque"]
+    )
+    @pytest.mark.parametrize(
+        "build, core_shape",
+        [(b, c) for _, b, c in PATTERNS],
+        ids=[name for name, *_ in PATTERNS],
+    )
+    def test_rewrites_to_indexing(self, build, core_shape, source, batched):
+        n, idx = self.n, self.idx_val
+        k = len(idx)
+        S_np = np.eye(n)[:, idx]
+
+        if source == "constant":
+            S, extra_in, extra_val = pt.eye(n)[:, idx], [], []
+        elif source == "opaque":
+            s = pt.matrix("s", shape=(n, k))
+            S, extra_in, extra_val = assume(s, selection=True), [s], [S_np]
+        else:
+            iv = pt.lvector("idx")
+            S, extra_in, extra_val = pt.eye(n)[:, iv], [iv], [idx]
+
+        shape = (2, *core_shape(n, k)) if batched else core_shape(n, k)
+        d = pt.tensor("d", shape=shape)
+
+        f = function([d, *extra_in], build(S, d), mode="FAST_RUN")
+        assert not any(
+            isinstance(node.op, Dot)
+            or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot))
+            for node in f.maker.fgraph.apply_nodes
+        )
+
+        dv = np.random.default_rng(0).normal(size=shape)
+        assert_allclose(f(dv, *extra_val), build(S_np, dv))
+
+    @pytest.mark.parametrize(
+        "idx", [idx_val, np.array([1, 1, 3])], ids=["distinct", "duplicate"]
+    )
+    @pytest.mark.parametrize("middle", ["diag_q", "general_a"])
+    def test_congruence(self, middle, idx):
+        # R @ M @ R.T collapses to a pure scatter. The duplicate-index case guards
+        # that inc_subtensor's accumulate reproduces the matmul for repeated columns.
+        n, k = self.n, len(idx)
+        iv = pt.lvector("idx")
+        R = pt.eye(n)[:, iv]
+        rng = np.random.default_rng(0)
+        if middle == "diag_q":
+            m = pt.vector("m")
+            mv = rng.normal(size=k) ** 2
+            M, M_np = pt.diag(m), np.diag(mv)
+        else:
+            m = pt.matrix("m")
+            mv = rng.normal(size=(k, k))
+            M, M_np = m, mv
+
+        f = function([m, iv], R @ M @ R.T, mode="FAST_RUN")
+        assert not any(
+            isinstance(node.op, Dot)
+            or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot))
+            for node in f.maker.fgraph.apply_nodes
+        )
+        R_np = np.eye(n)[:, idx]
+        assert_allclose(f(mv, idx), R_np @ M_np @ R_np.T)
+
+
+def test_gather_matches_upcast_matmul_dtype():
+    x = pt.matrix("x", dtype="float32")
+    idx = pt.lvector("idx")
+    out = x @ pt.eye(5)[:, idx]
+    assert out.type.dtype == "float64"
+
+    f = function([x, idx], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Dot)
+        or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot))
+        for node in f.maker.fgraph.apply_nodes
+    )
+    assert f.maker.fgraph.outputs[0].type.dtype == "float64"
+    xv = np.random.default_rng(0).normal(size=(3, 5)).astype("float32")
+    iv = np.array([0, 2, 4, 1])
+    assert_allclose(f(xv, iv), xv @ np.eye(5)[:, iv])

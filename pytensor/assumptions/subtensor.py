@@ -1,6 +1,10 @@
 from pytensor.assumptions.core import (
     ALL_KEYS,
-    ORTHOGONAL,
+    DIAGONAL,
+    LOWER_TRIANGULAR,
+    POSITIVE_DEFINITE,
+    SYMMETRIC,
+    UPPER_TRIANGULAR,
     FactState,
     register_assumption,
     true_if,
@@ -46,7 +50,7 @@ def incsubtensor_propagates_matrix_property(
     - ``set`` over a partial batch region: every output slice comes from ``base``
       or ``value``, so both must carry the property.
     - ``inc``: the written region becomes ``base + value``; the property must be
-      closed under addition -- true for every key except ``orthogonal``.
+      closed under addition (diagonal, triangular, symmetric, positive-definite).
 
     An index that reaches into the core axes is left to the per-key rules (e.g.
     the diagonal-position write handled by ``indexes_diagonal``).
@@ -66,7 +70,14 @@ def incsubtensor_propagates_matrix_property(
             return [value_state]
         return true_if(base_state is FactState.TRUE and value_state is FactState.TRUE)
 
-    if key is ORTHOGONAL:
+    # Closed under addition
+    if key not in (
+        DIAGONAL,
+        LOWER_TRIANGULAR,
+        UPPER_TRIANGULAR,
+        SYMMETRIC,
+        POSITIVE_DEFINITE,
+    ):
         return [FactState.UNKNOWN]
     return true_if(base_state is FactState.TRUE and value_state is FactState.TRUE)
 

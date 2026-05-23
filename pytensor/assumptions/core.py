@@ -101,6 +101,7 @@ UPPER_TRIANGULAR = AssumptionKey("upper_triangular", short_name="triu")
 SYMMETRIC = AssumptionKey("symmetric", short_name="sym")
 POSITIVE_DEFINITE = AssumptionKey("positive_definite", short_name="pd")
 ORTHOGONAL = AssumptionKey("orthogonal", short_name="orth")
+SELECTION = AssumptionKey("selection", short_name="sel")
 
 ALL_KEYS = (
     DIAGONAL,
@@ -109,6 +110,7 @@ ALL_KEYS = (
     SYMMETRIC,
     POSITIVE_DEFINITE,
     ORTHOGONAL,
+    SELECTION,
 )
 
 # Implications about structural properties derivably from other structural properties
