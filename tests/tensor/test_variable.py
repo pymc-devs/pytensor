@@ -427,11 +427,13 @@ class TestTensorInstanceMethods:
             X.take(indices, -1, mode="clip").eval({X: x}),
             x.take(indices, -1, mode="clip"),
         )
-        # Test error handling
+        # Test error handling (exclude indexed-elemwise fusion which
+        # loses bounds checking in the Numba codegen path)
+        no_fusion = get_default_mode().excluding("fuse_indexed_into_elemwise")
         with pytest.raises(IndexError):
-            X.take(indices).eval({X: x})
+            pytensor.function([X], X.take(indices), mode=no_fusion)(x)
         with pytest.raises(IndexError):
-            (2 * X.take(indices)).eval({X: x})
+            pytensor.function([X], 2 * X.take(indices), mode=no_fusion)(x)
         with pytest.raises(TypeError):
             X.take([0.0])
         indices = [[1, 0, 1], [0, 1, 1]]
