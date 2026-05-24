@@ -42,7 +42,6 @@ from pytensor.scalar.basic import (
     Mul,
     Sub,
     TrueDiv,
-    get_scalar_type,
 )
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -632,8 +631,7 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
 @register_funcify_and_cache_key(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
-    scalar_inputs = [get_scalar_type(dtype=input.dtype)() for input in node.inputs]
-    scalar_node = op.scalar_op.make_node(*scalar_inputs)
+    scalar_node = op.make_scalar_node(*node.inputs)
     scalar_op_fn, scalar_cache_key = numba_funcify_and_cache_key(
         op.scalar_op,
         node=scalar_node,
