@@ -488,9 +488,13 @@ class TestLocalUselessSubtensor:
             assert len(prog) == 2
         else:
             # Arange-with-offset indices get rewritten to a Subtensor slice;
-            # other advanced indices stay as AdvancedSubtensor1.
+            # other advanced indices stay as AdvancedSubtensor1 (or get
+            # absorbed into IndexedElemwise by FuseIndexedElemwise).
+            from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
+
             assert any(
-                isinstance(node.op, AdvancedSubtensor1 | Subtensor) for node in prog
+                isinstance(node.op, AdvancedSubtensor1 | Subtensor | IndexedElemwise)
+                for node in prog
             )
 
         x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
@@ -1301,7 +1305,7 @@ class TestReadOfWriteSameIndices:
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_read_of_write_same_indices",
-        ).excluding("fusion")
+        ).excluding("fusion", "fuse_indexed_into_elemwise")
 
     @pytest.mark.parametrize(
         "dtype1, dtype2",
@@ -2019,9 +2023,13 @@ def test_local_set_to_inc_subtensor():
     g = s + 3
     r = set_subtensor(s, g)
 
-    mode = get_default_mode().including(
-        "local_replace_AdvancedSubtensor",
-        "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
+    mode = (
+        get_default_mode()
+        .including(
+            "local_replace_AdvancedSubtensor",
+            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
+        )
+        .excluding("fuse_indexed_into_elemwise")
     )
     moder = mode.excluding("local_set_to_inc_subtensor")
     modet = mode.including("local_set_to_inc_subtensor")
@@ -2719,7 +2727,8 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
     loss = pt.sum(pt.log(pt.diagonal(L))) + pt.sum(Sigma)
     grad = pt.grad(loss, packed)
 
-    f = function([packed], [loss, grad])
+    mode = get_default_mode().excluding("fuse_indexed_into_elemwise")
+    f = function([packed], [loss, grad], mode=mode)
     f.dprint(print_shape=True)
 
     idx_types = (

@@ -425,7 +425,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_useless_subtensor",
-        ).excluding("bool_idx_to_nonzero")
+        ).excluding("bool_idx_to_nonzero", "fuse_indexed_into_elemwise")
         self.fast_compile = config.mode == "FAST_COMPILE"
 
     def function(

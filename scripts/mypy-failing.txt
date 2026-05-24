@@ -1,6 +1,5 @@
 pytensor/compile/builders.py
 pytensor/compile/debug/debugmode.py
-pytensor/compile/debug/profiling.py
 pytensor/compile/executor.py
 pytensor/compile/maker.py
 pytensor/compile/rebuild.py
@@ -10,7 +9,6 @@ pytensor/ifelse.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/printing.py
 pytensor/raise_op.py
-pytensor/scan/op.py
 pytensor/tensor/basic.py
 pytensor/tensor/blas_c.py
 pytensor/tensor/blas_headers.py
