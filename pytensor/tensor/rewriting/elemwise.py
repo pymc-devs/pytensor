@@ -721,6 +721,14 @@ class FusionOptimizer(GraphRewriter):
                         # Already part of the subgraph
                         continue
 
+                    if node_bitflag & all_subgraphs_bitset:
+                        # Already part of another subgraph
+                        if is_ancestor:
+                            unfuseable_ancestors_bitset |= node_ancestors_bitset
+                        else:
+                            unfuseable_clients_bitset |= node_bitflag
+                        continue
+
                     if is_ancestor:
                         if node_bitflag & unfuseable_ancestors_bitset:
                             # An unfuseable ancestor of the subgraph depends on this node, can't fuse
@@ -827,7 +835,8 @@ class FusionOptimizer(GraphRewriter):
                     ancestors_bitsets |= (
                         (node, node_ancestors_bitset | subgraph_and_ancestors)
                         for node, node_ancestors_bitset in ancestors_bitsets.items()
-                        if node_ancestors_bitset & subgraph_bitset
+                        if (node_ancestors_bitset & subgraph_bitset)
+                        and not (nodes_bitflags[node] & subgraph_bitset)
                     )
 
                 # Collect the subgraph
