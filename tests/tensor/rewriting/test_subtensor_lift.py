@@ -253,16 +253,17 @@ class TestLocalSubtensorOfBatchDims:
     )
     def test_bails_on_stale_elemwise_output_type(self, idx):
         """Bail when every input is broadcast on an indexed dim but the output is not."""
-        a = pt.tensor("a", shape=(1, 3, 3), dtype="float64")
-        b = pt.tensor("b", shape=(1, 3, 3), dtype="float64")
-        out = a * b
+        x_input = pt.tensor("x_input", shape=(None, 3, 3), dtype="float64")
+        x_new_input = pt.tensor("x_new", shape=(1, 3, 3), dtype="float64")
+        x = pt.identity(x_input)
+        out = x * x
+        indexed = out[idx]
+        fgraph = FunctionGraph([x_input, x_new_input], [indexed], clone=False)
 
         # Forge a stale state: inputs are broadcastable on dim 0, but output is NOT.
-        stale_out_type = pt.TensorType(dtype="float64", shape=(20, 3, 3))
-        out.type = stale_out_type
+        # This happens naturally when upstream rewrites call fgraph.replace(x, x_new_input)
+        fgraph.replace(x, x_new_input)
 
-        indexed = out[idx]
-        fgraph = FunctionGraph([a, b], [indexed], clone=False)
         assert local_subtensor_of_batch_dims.transform(fgraph, indexed.owner) is None
 
 

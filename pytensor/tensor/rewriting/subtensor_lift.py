@@ -392,10 +392,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
 
             if not dim_bcast_out and all(dim_bcast_inputs):
                 # No valid lift: every input is length-1 on this dim but
-                # the Elemwise output type is non-broadcast there. The
-                # zeros-replacement below would collapse the lifted result
-                # to length 1, which fgraph's type check rejects against
-                # the original advanced-indexed shape.
+                # the Elemwise output type is non-broadcast there.
                 return None
 
             if all(
