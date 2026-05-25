@@ -248,6 +248,23 @@ class TestLocalSubtensorOfBatchDims:
         expected_out_sliced = block_test_op(x[2:, 0], y[2:])[:, 4:]
         assert equal_computations([rewritten_out_sliced], [expected_out_sliced])
 
+    @pytest.mark.parametrize(
+        "idx", [np.zeros(20, dtype="int64"), slice(0, 5)], ids=["advanced", "slice"]
+    )
+    def test_bails_on_stale_elemwise_output_type(self, idx):
+        """Bail when every input is broadcast on an indexed dim but the output is not."""
+        a = pt.tensor("a", shape=(1, 3, 3), dtype="float64")
+        b = pt.tensor("b", shape=(1, 3, 3), dtype="float64")
+        out = a * b
+
+        # Forge a stale state: inputs are broadcastable on dim 0, but output is NOT.
+        stale_out_type = pt.TensorType(dtype="float64", shape=(20, 3, 3))
+        out.type = stale_out_type
+
+        indexed = out[idx]
+        fgraph = FunctionGraph([a, b], [indexed], clone=False)
+        assert local_subtensor_of_batch_dims.transform(fgraph, indexed.owner) is None
+
 
 def test_local_subtensor_of_dot():
     m1 = matrix()

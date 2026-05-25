@@ -390,8 +390,19 @@ def local_subtensor_of_batch_dims(fgraph, node):
                 # Full slice can be safely applied to all inputs
                 continue
 
-            if all(dim_bcast_inp == elem_bcast for dim_bcast_inp in dim_bcast_inputs):
-                # This dim is not broadcasted for any of the inputs, original index can be applied to all inputs
+            if not dim_bcast_out and all(dim_bcast_inputs):
+                # No valid lift: every input is length-1 on this dim but
+                # the Elemwise output type is non-broadcast there. The
+                # zeros-replacement below would collapse the lifted result
+                # to length 1, which fgraph's type check rejects against
+                # the original advanced-indexed shape.
+                return None
+
+            if all(
+                dim_bcast_inp == dim_bcast_out for dim_bcast_inp in dim_bcast_inputs
+            ):
+                # This dim matches the output bcast for every input, so
+                # the original index can be applied to all inputs.
                 continue
 
             # Slices stay; advanced indices become length-1 zeros
