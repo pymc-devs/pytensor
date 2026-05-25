@@ -26,6 +26,9 @@ def encode_literals(literals: Sequence) -> str:
 def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
+    If ``core_op_fn`` has a ``handles_out=True`` attribute, it is assumed to
+    already accept ``(inputs..., outputs...) -> None`` and is returned as-is.
+
     @njit
     def store_core_outputs(i0, i1, ..., in, o0, o1, ..., on):
         to0, to1, ..., ton = core_op_fn(i0, i1, ..., in)
@@ -35,6 +38,9 @@ def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
         on[...] = ton
 
     """
+    if getattr(core_op_fn, "handles_out", False):
+        return core_op_fn
+
     inputs = [f"i{i}" for i in range(nin)]
     outputs = [f"o{i}" for i in range(nout)]
     inner_outputs = [f"t{output}" for output in outputs]
