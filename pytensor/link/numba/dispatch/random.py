@@ -212,7 +212,6 @@ def core_MvNormalRV(op, node):
         out += mean
         return out
 
-    random_fn.handles_out = True
     return random_fn
 
 
