@@ -143,3 +143,22 @@ def test_outer_assumption_lifts_into_scan_inner_graph():
     inner_ops = {type(n.op).__name__ for n in scan_node.op.fgraph.toposort()}
     assert "MatrixInverse" not in inner_ops
     assert "CholeskySolve" in inner_ops
+
+
+def test_non_sequence_assumption_lifts_into_scan_inner_graph():
+    """Mirror of the sequence test but for a non-sequence: a positive-definite
+    ``X`` passed via ``non_sequences`` lifts into the inner graph too, so the
+    per-step ``inv(X) @ y_t`` still specializes to a Cholesky solve."""
+    X = pt.matrix("X", shape=(3, 3))
+    ys = pt.tensor("ys", shape=(4, 3, 3))
+    out = scan(
+        lambda yt, X: pt.linalg.inv(X) @ yt,
+        sequences=[ys],
+        non_sequences=[assume(X, positive_definite=True)],
+        return_updates=False,
+    )
+    fn = function([X, ys], out)
+    [scan_node] = [n for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    inner_ops = {type(n.op).__name__ for n in scan_node.op.fgraph.toposort()}
+    assert "MatrixInverse" not in inner_ops
+    assert "CholeskySolve" in inner_ops
