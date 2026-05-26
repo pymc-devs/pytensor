@@ -328,9 +328,10 @@ def local_dot_of_join(fgraph, node):
 @register_stabilize
 @node_rewriter([DimShuffle])
 def local_transpose_of_join(fgraph, node):
-    r"""Rewrite Join(axis, *inputs).mT to Join(axis, *[inp.mT for inp in inputs])
+    r"""Rewrite ``Join(axis, *xs).mT`` to ``Join(swapped_axis, *[x.mT for x in xs])``.
 
-    Swap axis=-1 <-> axis=-2 when axis is one of the matrix axes and leave batch axes unchanged.
+    Swap ``axis=-1`` and ``axis=-2`` when axis is one of the matrix axes; leave batch
+    axes unchanged.
     """
     if not node.op.is_matrix_transpose:
         return None
@@ -357,10 +358,9 @@ def local_transpose_of_join(fgraph, node):
     elif join_axis == src_ndim - 2:
         new_axis = src_ndim - 1
     else:
-        new_axis = join_axis  # batch axis, mT doesn't touch it
+        new_axis = join_axis  # batch axis -- mT doesn't touch it
 
-    transposed_inputs = [inp.mT for inp in src.owner.inputs[1:]]
-    new_out = join(new_axis, *transposed_inputs)
+    new_out = join(new_axis, *[inp.mT for inp in src.owner.inputs[1:]])
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 
@@ -369,14 +369,10 @@ def local_transpose_of_join(fgraph, node):
 @register_stabilize
 @node_rewriter([Join])
 def local_nested_join_to_block_diagonal(fgraph, node):
-    r"""Recognize a square 2-D block-matrix-shaped concatenation whose
-    off-diagonal entries are statically zero, and rewrite to :func:`block_diag`.
+    r"""Rewrite a square ``n x n`` nested ``Join`` with zero off-diagonals to :func:`block_diag`.
 
-    Detects ``Join(axis=-2, *Join(axis=-1, ...))`` -- an outer row-concat whose
-    every input is itself a column-concat -- with uniform structure (n x n
-    square grid) and statically-zero off-diagonal leaves. Replaces with
-    ``BlockDiagonal`` to unlock its targeted rewrites (det, diag, trace, dot,
-    solve pushdowns).
+    Matches ``Join(-2, *Join(-1, ...))`` -- an outer row-concat whose every input is a
+    column-concat -- forming a square grid with statically-zero off-diagonal leaves.
     """
     out_ndim = node.outputs[0].type.ndim
     if out_ndim < 2:
@@ -451,10 +447,7 @@ def local_nested_join_to_block_diagonal(fgraph, node):
 
 
 def _const_int_vector(var):
-    """Extract a Python ``list[int]`` from a vector :class:`Variable` if its
-    contents are statically known. Handles ``Constant`` and ``MakeVector`` of
-    scalar constants. Returns ``None`` otherwise.
-    """
+    """Return a ``list`` of ints from a 1-D ``var`` whose entries are statically known, else ``None``."""
     if isinstance(var, Constant):
         try:
             arr = np.asarray(var.data)
@@ -480,21 +473,10 @@ def _const_int_vector(var):
 def local_split_of_join(fgraph, node):
     r"""Push :class:`Split` through :class:`Join`.
 
-    Two cases are handled:
-
-    - **Same axis, matching sizes.** ``Split(Join(a, X_0, ..., X_k),
-      [s_0, ..., s_k], axis=a)`` with ``s_i == X_i.shape[a]`` returns the
-      ``Join``'s inputs directly. The split exactly undoes the concat.
-
-    - **Different axis.** ``Split(Join(a, X_0, ..., X_k), [s_0, ...], axis=b)``
-      with ``a != b`` distributes the split through the join: each cut output
-      becomes ``Join(a, *[Split(X_i, axis=b)[k] for i])``. Slicing along an
-      orthogonal axis commutes with concatenation.
-
-    Together these unblock the cascades that show up after dot-of-Join
-    decomposition (e.g. ``Block @ Block``, ``X @ S @ X.T``): the resulting
-    ``Split(Join(...))`` patterns collapse to per-leaf operations instead of
-    materializing the assembled intermediate.
+    Same axis with matching sizes: ``Split(Join(a, *X), [|X_i|_a], axis=a)`` returns the
+    join's inputs directly. Different axis: ``Split(Join(a, *X), s, axis=b)`` distributes
+    to ``Join(a, *[Split(X_i, s, b)[k]])`` per cut -- slicing an orthogonal axis commutes
+    with concatenation.
     """
     x, axis_var, splits_size_var = node.inputs
     if x.owner is None or not isinstance(x.owner.op, Join):

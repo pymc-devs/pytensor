@@ -47,18 +47,11 @@ ASSUME_A_OF_TRANSPOSE = {
 
 
 def match_2x2_nested_join(var):
-    """Match ``Join(-2, Join(-1, A_11, A_12), Join(-1, A_21, A_22))`` — a 2x2
-    block-matrix-shaped concat.
+    """Return ``[[A_11, A_12], [A_21, A_22]]`` if ``var`` is a 2x2 nested ``Join``, else ``None``.
 
-    Returns ``[[A_11, A_12], [A_21, A_22]]`` when:
-
-      - The outer ``Join`` concatenates along the row axis (``ndim - 2``).
-      - Both inner ``Join`` ops concatenate along the column axis (``ndim - 1``).
-      - The grid is uniform 2x2.
-      - All four leaves' relevant dims are statically known and the diagonal
-        blocks are square; row heights and column widths line up.
-
-    Else returns ``None``.
+    Requires the outer ``Join`` along ``ndim - 2``, both inner ``Join`` ops along
+    ``ndim - 1``, statically-known row heights and column widths that line up, and
+    square diagonal blocks.
     """
     if var.owner is None or not isinstance(var.owner.op, Join):
         return None
