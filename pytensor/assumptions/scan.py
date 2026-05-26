@@ -1,5 +1,3 @@
-from copy import copy
-
 from pytensor.assumptions.core import (
     ALL_KEYS,
     AssumptionFeature,
@@ -8,7 +6,6 @@ from pytensor.assumptions.core import (
     register_assumption,
 )
 from pytensor.assumptions.specify import SpecifyAssumptions
-from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter, node_rewriter
 from pytensor.scan.op import Scan
@@ -152,16 +149,24 @@ def lift_assumptions_into_scan(fgraph, node):
 
     # Rebuild the inner graph over fresh leaves, splicing the assertions on.
     replace = {}
-    input_clones = []
+    new_inner_inputs = []
     for inner_inp in inner_inputs:
-        clone = inner_inp.clone()
-        input_clones.append(clone)
+        dummy = inner_inp.type()
+        new_inner_inputs.append(dummy)
         facts = new_facts.get(inner_inp)
-        replace[inner_inp] = SpecifyAssumptions(facts)(clone) if facts else clone
+        replace[inner_inp] = SpecifyAssumptions(facts)(dummy) if facts else dummy
     new_inner_outputs = clone_replace(scan_op.inner_outputs, replace=replace)
 
-    new_scan_op = copy(scan_op)
-    new_scan_op.fgraph = FunctionGraph(input_clones, new_inner_outputs, clone=False)
+    new_scan_op = Scan(
+        new_inner_inputs,
+        new_inner_outputs,
+        scan_op.info,
+        mode=scan_op.mode,
+        profile=scan_op.profile,
+        truncate_gradient=scan_op.truncate_gradient,
+        name=scan_op.name,
+        allow_gc=scan_op.allow_gc,
+    )
     new_outs = new_scan_op.make_node(*node.inputs).outputs
     copy_stack_trace(node.outputs, new_outs)
     return new_outs
