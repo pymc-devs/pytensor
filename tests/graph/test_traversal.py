@@ -15,6 +15,7 @@ from pytensor.graph.traversal import (
     variable_depends_on,
     vars_between,
     walk,
+    walk_toposort,
 )
 from tests.graph.test_basic import MyOp, MyVariable
 from tests.graph.utils import MyInnerGraphOp, op_multiple_outputs
@@ -165,6 +166,18 @@ def test_walk():
         (r1, None),
         (r2, None),
     ]
+
+
+# Regression test for #2170. CPython caches int singletons in [-5, 256], so
+# an `is` comparison on ints from distinct sources holds for max id 256 and
+# breaks at 257. 1026 guards against a future bump of the cache ceiling.
+@pytest.mark.parametrize("n", [10, 257, 258, 1026])
+def test_walk_toposort_acyclic_int_chain(n):
+    def deps(i):
+        return [i + 1] if i < n - 1 else []
+
+    out = tuple(walk_toposort(range(n), deps=deps))
+    assert len(out) == n
 
 
 def test_ancestors():

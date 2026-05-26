@@ -567,7 +567,7 @@ def walk_toposort(
                 for client in clients.get(node, []):
                     # Remove itself from the dependent (ancestor) list of each client
                     d = deps_cache[client] = [
-                        a for a in deps_cache[client] if a is not node
+                        a for a in deps_cache[client] if a != node
                     ]
                     if not d:
                         # If there are no dependencies left to visit for this node, add it to the stack
