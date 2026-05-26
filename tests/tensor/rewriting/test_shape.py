@@ -689,6 +689,21 @@ def test_local_lift_specify_shape_inc_subtensor():
     )
 
 
+def test_local_specify_shape_alloc():
+    x = scalar("x")
+    s1 = iscalar("s1")
+    s2 = iscalar("s2")
+
+    out = pt.specify_shape(alloc(x, s1), s2)
+
+    new_out = rewrite_graph(out, clone=True)
+    utt.assert_equal_computations([new_out], [alloc(x, s2)])
+
+    # Rewrite is excluded when shape_unsafe is excluded
+    new_out = rewrite_graph(out, clone=True, exclude=("shape_unsafe",))
+    utt.assert_equal_computations([out], [new_out])
+
+
 def test_local_Shape_i_ground():
     x = tensor(dtype=np.float64, shape=(None, 2))
     s = Shape_i(1)(x)

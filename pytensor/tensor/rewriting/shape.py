@@ -18,7 +18,9 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
 from pytensor.tensor.basic import (
+    Alloc,
     MakeVector,
+    alloc,
     as_tensor_variable,
     cast,
     constant,
@@ -1249,6 +1251,36 @@ def local_lift_specify_shape_inc_subtensor(fgraph, node):
         new_out = inc_op(new_x, y, *idx_vars)
         copy_stack_trace(node.outputs[0], new_out)
         return [new_out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([SpecifyShape])
+def local_specify_shape_alloc(fgraph, node):
+    """Replace specify_shape(alloc(x, *shape), *specified) -> alloc(x, *new_shape).
+
+    Each new_shape dim is the specified dim if given, otherwise the original alloc dim.
+    """
+    alloc_out, *specified = node.inputs
+    if not isinstance(alloc_out.owner_op, Alloc):
+        return None
+
+    value, *alloc_shape = alloc_out.owner.inputs
+
+    new_shape = list(alloc_shape)
+    changed = False
+    for i, s in enumerate(specified):
+        if isinstance(s.type, NoneTypeT):
+            continue
+        new_shape[i] = s
+        changed = True
+
+    if not changed:
+        return None
+
+    new_out = alloc(value, *new_shape)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_infer_shape
