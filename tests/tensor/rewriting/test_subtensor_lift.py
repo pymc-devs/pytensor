@@ -251,8 +251,9 @@ class TestLocalSubtensorOfBatchDims:
     @pytest.mark.parametrize(
         "idx", [np.zeros(20, dtype="int64"), slice(0, 5)], ids=["advanced", "slice"]
     )
-    def test_bails_on_stale_elemwise_output_type(self, idx):
-        """Bail when every input is broadcast on an indexed dim but the output is not."""
+    def test_lifts_through_stale_elemwise_output_type(self, idx):
+        """When every input is length 1 on an indexed dim but elem's output type
+        stale-claims non-bcast, the lift should still succeed by wrapping with alloc."""
         x_input = pt.tensor("x_input", shape=(None, 3, 3), dtype="float64")
         x_new_input = pt.tensor("x_new", shape=(1, 3, 3), dtype="float64")
         x = pt.identity(x_input)
@@ -260,11 +261,54 @@ class TestLocalSubtensorOfBatchDims:
         indexed = out[idx]
         fgraph = FunctionGraph([x_input, x_new_input], [indexed], clone=False)
 
-        # Forge a stale state: inputs are broadcastable on dim 0, but output is NOT.
-        # This happens naturally when upstream rewrites call fgraph.replace(x, x_new_input)
+        # Forge a stale state: inputs are broadcastable on dim 0, but elem
+        # output type is NOT. This happens naturally when upstream rewrites
+        # call fgraph.replace(x, x_new_input).
         fgraph.replace(x, x_new_input)
 
-        assert local_subtensor_of_batch_dims.transform(fgraph, indexed.owner) is None
+        [new_out] = local_subtensor_of_batch_dims.transform(fgraph, indexed.owner)
+        # The lifted graph must be type-compatible with the (stale) original.
+        fgraph.replace(indexed, new_out)
+
+        rng = np.random.default_rng(0)
+        x_val = rng.standard_normal((1, 3, 3))
+        f = function(
+            [x_new_input], new_out, on_unused_input="ignore", mode=NO_OPTIMIZATION_MODE
+        )
+        expected = (x_val * x_val)[idx]
+        np.testing.assert_allclose(f(x_val), expected)
+
+    def test_advanced_index_on_all_bcast_dim_does_not_expand(self):
+        """When all inputs are length 1 on an advanced-indexed dim, the lifted
+        Elemwise should keep them length 1 (and alloc once) rather than
+        repeating the computation K times."""
+        x = pt.tensor("x", shape=(1, 3), dtype="float64")
+        y = pt.tensor("y", shape=(1, 3), dtype="float64")
+        idx = np.zeros(5, dtype="int64")
+        out = (x + y)[idx]
+
+        [new_out] = local_subtensor_of_batch_dims.transform(
+            FunctionGraph([x, y], [out], clone=False), out.owner
+        )
+
+        # Final shape matches the original.
+        assert new_out.type.shape == (5, 3)
+
+        # The lifted Elemwise must operate on length 1 inputs (no K-fold
+        # expansion), and the K-sized dim must come from an Alloc wrapper.
+        from pytensor.tensor.basic import Alloc
+
+        assert isinstance(new_out.owner.op, Alloc)
+        [inner_elem, *_] = new_out.owner.inputs
+        assert isinstance(inner_elem.owner.op, Elemwise)
+        for inner_inp in inner_elem.owner.inputs:
+            assert inner_inp.type.shape[0] == 1
+
+        rng = np.random.default_rng(1)
+        x_val = rng.standard_normal((1, 3))
+        y_val = rng.standard_normal((1, 3))
+        f = function([x, y], new_out, mode=NO_OPTIMIZATION_MODE)
+        np.testing.assert_allclose(f(x_val, y_val), (x_val + y_val)[idx])
 
 
 def test_local_subtensor_of_dot():
