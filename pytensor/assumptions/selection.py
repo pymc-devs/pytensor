@@ -33,7 +33,12 @@ def _selection_from_constant(var: TensorConstant) -> FactState:
         elif data.dtype.kind in "uib":
             is_selection = data.max(initial=1) <= 1 and data.min(initial=0) >= 0
         else:
-            is_selection = bool(((data == 0) | (data == 1)).all())
+            # Column sums all == 1 plus ``count_nonzero == k`` (per slice) force one
+            # nonzero per column equal to 1
+            n_rows = data.shape[-2]
+            is_selection = np.count_nonzero(data) == (
+                data.size // n_rows if n_rows else 0
+            )
         result = FactState.TRUE if is_selection else FactState.FALSE
 
     var.tag.is_selection = result
