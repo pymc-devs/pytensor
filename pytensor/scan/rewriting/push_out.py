@@ -18,7 +18,7 @@ import numpy as np
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.replace import clone_replace
@@ -91,10 +91,9 @@ def scan_push_out_non_seq(fgraph, node):
                 )
                 for x in nd.inputs
             )
-            # We can (supposedly) do this because the assumption is that a
-            # `ViewOp` or `DeepCopyOp` will be just at the end of the
-            # function and not somewhere in the middle
-            and not isinstance(nd.op, ViewOp)
+            # Marker ops carry no computation; hoisting them may strip an
+            # inner-graph hint a later rewrite needs.
+            and not isinstance(nd.op, TypeCastingOp)
             and not isinstance(nd.op, DeepCopyOp)
         ):
             # We have a candidate node to remove from the inner-graph
