@@ -50,7 +50,9 @@ def _diagonal_from_constant(var: TensorConstant) -> FactState:
             result = FactState.FALSE
         else:
             eye_mask = np.eye(n, dtype=bool)
-            result = FactState.FALSE if np.any(data[..., ~eye_mask]) else FactState.TRUE
+            result = (
+                FactState.FALSE if np.any(data, where=~eye_mask) else FactState.TRUE
+            )
 
     var.tag.is_diagonal = result
     return result
