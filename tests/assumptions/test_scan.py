@@ -162,3 +162,22 @@ def test_non_sequence_assumption_lifts_into_scan_inner_graph():
     inner_ops = {type(n.op).__name__ for n in scan_node.op.fgraph.toposort()}
     assert "MatrixInverse" not in inner_ops
     assert "CholeskySolve" in inner_ops
+
+
+def test_scan_grad_compiles_with_recurrence_assumption():
+    """Backward AD flips a sit-sot forward output into a sequence input of the
+    backward scan. With ``diagonal=True`` on the recurrence's init the
+    gradient must still compile and stay numerically correct."""
+    import numpy as np
+
+    init_raw = pt.matrix("init", shape=(3, 3))
+    init = assume(init_raw, diagonal=True)
+    out = scan(
+        lambda prev: 2.0 * prev,
+        outputs_info=[init],
+        n_steps=4,
+        return_updates=False,
+    )
+    g = pt.grad(out[-1].sum(), init_raw)
+    fn = function([init_raw], g)
+    np.testing.assert_allclose(fn(np.eye(3)), 16.0 * np.ones((3, 3)))
