@@ -136,21 +136,34 @@ def _lu_upper(key, op, feature, fgraph, node, input_states):
     return states
 
 
-def _dimshuffle_left_expand_dims(key, op, feature, fgraph, node, input_states):
-    """Triangularity survives left-expand-dims (batch broadcast).
-
-    Matrix transpose swaps lower<->upper, so it is *not* propagated under
-    the same key.
+@register_assumption(LOWER_TRIANGULAR, DimShuffle)
+def _lower_dimshuffle(key, op, feature, fgraph, node, input_states):
+    """Lower-triangularity survives left-expand-dims and arises from the matrix
+    transpose of an upper-triangular operand (since transposing swaps the two
+    triangles).
     """
-    if input_states[0] is not FactState.TRUE:
-        return [FactState.UNKNOWN]
-    if left_expand_dims_propagates_matrix_property(op):
+    if op.is_matrix_transpose:
+        return true_if(feature.check(node.inputs[0], UPPER_TRIANGULAR))
+    if input_states[
+        0
+    ] is FactState.TRUE and left_expand_dims_propagates_matrix_property(op):
         return [FactState.TRUE]
     return [FactState.UNKNOWN]
 
 
-register_assumption(LOWER_TRIANGULAR, DimShuffle)(_dimshuffle_left_expand_dims)
-register_assumption(UPPER_TRIANGULAR, DimShuffle)(_dimshuffle_left_expand_dims)
+@register_assumption(UPPER_TRIANGULAR, DimShuffle)
+def _upper_dimshuffle(key, op, feature, fgraph, node, input_states):
+    """Upper-triangularity survives left-expand-dims and arises from the matrix
+    transpose of a lower-triangular operand (since transposing swaps the two
+    triangles).
+    """
+    if op.is_matrix_transpose:
+        return true_if(feature.check(node.inputs[0], LOWER_TRIANGULAR))
+    if input_states[
+        0
+    ] is FactState.TRUE and left_expand_dims_propagates_matrix_property(op):
+        return [FactState.TRUE]
+    return [FactState.UNKNOWN]
 
 
 @register_assumption(LOWER_TRIANGULAR, Elemwise)

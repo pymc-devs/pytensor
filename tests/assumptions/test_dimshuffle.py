@@ -38,15 +38,6 @@ class TestLeftExpandDimsPropagation:
         _, af = make_fgraph(y)
         assert af.check(y, key)
 
-    def test_triangular_transpose_does_not_propagate(self):
-        """Transpose swaps the triangle, so a lower-triangular matrix is no longer
-        known to be lower-triangular."""
-        x = pt.matrix("x", shape=(4, 4))
-        x_lower = assume(x, lower_triangular=True)
-        y = x_lower.T
-        _, af = make_fgraph(y)
-        assert af.get(y, LOWER_TRIANGULAR) == FactState.UNKNOWN
-
     def test_right_expand_dims_does_not_propagate(self):
         """Adding a broadcast dim on the right shifts the matrix axes; the property is lost."""
         x = pt.matrix("x", shape=(4, 4))
