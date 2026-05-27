@@ -526,8 +526,10 @@ def walk_toposort(
 
     Notes
     -----
-
     ``deps(i)`` should behave like a pure function (no funny business with internal state).
+
+    The implementation uses identity (``is``), so items returned by ``deps``
+    must be the *same objects* as those yielded by ``graphs``.
 
     The order of the return value list is determined by the order of nodes
     returned by the `deps` function.
