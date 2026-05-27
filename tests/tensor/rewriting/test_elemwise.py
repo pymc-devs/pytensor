@@ -1442,6 +1442,22 @@ class TestFusion:
             assert nb_fused == 3
             assert nb_replaced == 6
 
+    def test_many_fused_subgraphs(self):
+        # Regression test for #2170: walk_toposort uses identity comparison,
+        # which broke when the fusion optimizer passed >256 int-keyed subgraphs
+        # (CPython only caches int singletons in [-5, 256]).
+        # Alternating row/matrix broadcasts create separate fuseable subgraphs
+        # with direct inter-subgraph dependencies
+        x_row = pt.tensor("x_row", shape=(1, 5))
+        x_mat = pt.matrix("x_mat", shape=(3, 5))
+        r, m = x_row, x_mat
+        for _ in range(150):
+            r = pt.exp(pt.neg(r))
+            m = pt.exp(r + m)
+            r = m.sum(axis=0, keepdims=True)
+        fgraph = FunctionGraph([x_row, x_mat], [m])
+        FusionOptimizer().apply(fgraph)
+
 
 class TimesN(ps.basic.UnaryScalarOp):
     """

@@ -840,7 +840,9 @@ class FusionOptimizer(GraphRewriter):
             # Indirect ancestry through non-fused variables is order-independent.
 
             # Map each subgraph output variable to the respective subgraph index
-            subgraph_indices = range(len(discovered_subgraphs))
+            # Materialized list ensures the same int objects are reused everywhere,
+            # which is required by walk_toposort's identity-based dependency removal.
+            subgraph_indices = list(range(len(discovered_subgraphs)))
             sg_idx_of_out = {
                 out: idx
                 for idx, (_, sg_outputs) in zip(subgraph_indices, discovered_subgraphs)
