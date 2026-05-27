@@ -1,10 +1,38 @@
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import dfs_rewriter
-from pytensor.graph.traversal import applys_between
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.tensor.basic import as_tensor, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature
+from pytensor.tensor.shape import Shape, Shape_i
+
+
+def simplify_core_shape_graphs(core_shapes):
+    """Simplify core shape expressions by canonicalizing shape arithmetic.
+
+    Temporarily detaches Shape/Shape_i outputs from their owners so that
+    rewrite_graph operates only on the arithmetic above them (e.g.
+    constant-folding static shapes, eliminating dead Switch branches).
+    """
+    shape_boundary = [
+        var
+        for var in ancestors(core_shapes)
+        if var.owner is not None and isinstance(var.owner.op, (Shape, Shape_i))
+    ]
+    saved_owners = [(v, v.owner, v.index) for v in shape_boundary]
+    for v, _, _ in saved_owners:
+        v.owner = None
+    try:
+        core_shapes = list(
+            rewrite_graph(core_shapes, include=("canonicalize",), clone=False)
+        )
+    finally:
+        for v, owner, idx in saved_owners:
+            v.owner = owner
+            v.index = idx
+    return core_shapes
 
 
 @node_rewriter([Blockwise])
@@ -92,6 +120,8 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
     ):
         # If Blockwise shows up in the shape graph we can't introduce the core shape
         return None
+
+    core_shapes = simplify_core_shape_graphs(core_shapes)
 
     return BlockwiseWithCoreShape(
         [*node.inputs, *core_shapes],
