@@ -156,6 +156,9 @@ if rewrite_mode == "FAST_COMPILE":
     rewrite_mode = "FAST_RUN"
 rewrite_mode = get_mode(rewrite_mode)
 
+# Paired with ``rewrite_mode`` in rewrite tests as the un-rewritten reference.
+no_opt_mode = Mode(linker="py", optimizer=None)
+
 dimshuffle_lift = out2in(local_dimshuffle_lift)
 
 _stabilize_rewrites = RewriteDatabaseQuery(include=["fast_run"])
@@ -5122,47 +5125,44 @@ class TestNestedJoinToBlockDiagonal:
     @staticmethod
     def _has_block_diagonal(fn):
         return any(
-            isinstance(n.op, Blockwise) and isinstance(n.op.core_op, BlockDiagonal)
+            isinstance(n.op, BlockDiagonal)
+            or (isinstance(n.op, Blockwise) and isinstance(n.op.core_op, BlockDiagonal))
             for n in fn.maker.fgraph.toposort()
         )
 
     def test_zeros_off_diagonal_canonicalizes(self):
-        # Square nested-Join with statically-zero off-diagonals -> BlockDiagonal.
         a = pt.tensor("a", shape=(3, 3))
         d = pt.tensor("d", shape=(4, 4))
         M = pt.block([[a, pt.zeros((3, 4))], [pt.zeros((4, 3)), d]])
 
+        ref_fn = pytensor.function([a, d], M, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, d], M, mode=rewrite_mode)
+        assert self._has_block_diagonal(rewr_fn)
+
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 3))
-        d_v = rng.standard_normal((4, 4))
-        fn = pytensor.function([a, d], M, mode=rewrite_mode)
+        values = [rng.standard_normal(s) for s in ((3, 3), (4, 4))]
         np.testing.assert_allclose(
-            fn(a_v, d_v),
-            np.block([[a_v, np.zeros((3, 4))], [np.zeros((4, 3)), d_v]]),
-            atol=1e-12,
-            rtol=1e-12,
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
         )
 
     def test_nonzero_off_diagonal_skips(self):
-        # Off-diagonal isn't statically zero -> don't canonicalize.
         a = pt.tensor("a", shape=(3, 3))
         b = pt.tensor("b", shape=(3, 4))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
-        M = pt.block([[a, b], [c, d]])
-
-        fn = pytensor.function([a, b, c, d], M, mode=rewrite_mode)
+        fn = pytensor.function(
+            [a, b, c, d], pt.block([[a, b], [c, d]]), mode=rewrite_mode
+        )
         assert not self._has_block_diagonal(fn)
 
     def test_non_square_skips(self):
-        # 2x3 grid (non-square) -> not a candidate.
         a = pt.tensor("a", shape=(3, 4))
         b = pt.tensor("b", shape=(3, 4))
         c = pt.tensor("c", shape=(3, 4))
         z = pt.zeros((3, 4))
-        M = pt.block([[a, z, z], [b, z, c]])
-
-        fn = pytensor.function([a, b, c], M, mode=rewrite_mode)
+        fn = pytensor.function(
+            [a, b, c], pt.block([[a, z, z], [b, z, c]]), mode=rewrite_mode
+        )
         assert not self._has_block_diagonal(fn)
 
 
