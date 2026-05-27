@@ -657,3 +657,23 @@ def test_minimize_grad_duplicate_input_connected_and_disconnected(op_cls, op_kwa
     ]
 
     np.testing.assert_allclose(pt.grad(solution, a).eval({x: np.pi, a: 0}), 2.0)
+
+
+@pytensor.config.change_flags(on_opt_error="raise")
+def test_minimize_grad_matrix_arg():
+    """Regression test: a matrix-shaped arg caused compute_implicit_gradients
+    to produce a 3D Jacobian, which made solve pick the wrong b_ndim and
+    return incorrect gradients.
+    """
+
+    def f(x_val, theta_val):
+        A = pt.as_tensor_variable(
+            np.array([[2.0, 0.5, 0.0], [0.5, 2.0, 0.5], [0.0, 0.5, 2.0]])
+        )
+        objective = 0.5 * (x_val @ A @ x_val) + (theta_val @ x_val).sum()
+        x_star, _ = minimize(objective, x_val, method="BFGS", use_vectorized_jac=True)
+        return x_star.sum()
+
+    x_val = np.zeros(3)
+    theta_val = np.eye(3)
+    utt.verify_grad(f, [x_val, theta_val], eps=1e-6)
