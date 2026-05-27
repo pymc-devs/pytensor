@@ -31,7 +31,7 @@ from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
-from pytensor.tensor.basic import Alloc, constant, join, second, switch
+from pytensor.tensor.basic import Alloc, Join, Split, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
@@ -5448,68 +5448,53 @@ class TestSplitOfJoin:
         np.testing.assert_array_equal(rb, b_v)
 
     def test_matching_axis_mismatched_sizes_skips(self):
-        # Split sizes don't match Join input sizes: don't fire.
+        # Split sizes [2, 5] don't align with the Join's [3, 4] boundaries.
         a = pt.tensor("a", shape=(3, 5))
         b = pt.tensor("b", shape=(4, 5))
-        joined = pt.concatenate([a, b], axis=-2)
-        # 3+4=7 total, but split as [2, 5] -- boundaries don't align with [3, 4].
-        out_a, out_b = pt.split(joined, splits_size=[2, 5], n_splits=2, axis=-2)
+        out_a, out_b = pt.split(
+            pt.concatenate([a, b], axis=-2), splits_size=[2, 5], n_splits=2, axis=-2
+        )
 
         fn = pytensor.function([a, b], [out_a, out_b], mode=rewrite_mode)
         assert self._has_split(fn)
 
     def test_different_axis_distributes(self):
-        # Split(Join(axis=-2, A, B), [2, 3], axis=-1) distributes as
-        # Join(-2, Split(A, [2,3], -1)[k], Split(B, [2,3], -1)[k]) per k.
         a = pt.tensor("a", shape=(3, 5))
         b = pt.tensor("b", shape=(4, 5))
-        joined = pt.concatenate([a, b], axis=-2)  # shape (7, 5)
-        c0, c1 = pt.split(joined, splits_size=[2, 3], n_splits=2, axis=-1)
+        c0, c1 = pt.split(
+            pt.concatenate([a, b], axis=-2), splits_size=[2, 3], n_splits=2, axis=-1
+        )
+
+        ref_fn = pytensor.function([a, b], [c0, c1], mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, b], [c0, c1], mode=rewrite_mode)
 
         rng = np.random.default_rng(0)
         a_v = rng.standard_normal((3, 5))
         b_v = rng.standard_normal((4, 5))
-        joined_v = np.concatenate([a_v, b_v], axis=-2)
-        ref0 = joined_v[:, :2]
-        ref1 = joined_v[:, 2:]
-
-        fn = pytensor.function([a, b], [c0, c1], mode=rewrite_mode)
-        r0, r1 = fn(a_v, b_v)
-        np.testing.assert_allclose(r0, ref0)
-        np.testing.assert_allclose(r1, ref1)
+        for r, e in zip(rewr_fn(a_v, b_v), ref_fn(a_v, b_v), strict=True):
+            np.testing.assert_allclose(r, e)
 
     def test_x_at_s_at_xT_no_intermediate_materialization(self):
-        # X @ S @ X.T with X = Block. The (M, N) intermediate of X @ S no
-        # longer materializes -- no Split feeds from a Join (which would mean
-        # we just rebuilt and re-split a Block-shaped tensor).
+        # Block-triangular X gives ``local_dot_of_join`` something to fire on, producing
+        # Splits of S. Invariant: none of them feed from a Join (otherwise
+        # ``local_split_of_join`` failed to collapse a rebuilt intermediate).
         a = pt.tensor("a", shape=(3, 3))
-        b = pt.tensor("b", shape=(3, 4))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
         S = pt.tensor("S", shape=(7, 7))
-        X = pt.block([[a, b], [c, d]])
-        fn = pytensor.function([a, b, c, d, S], X @ S @ X.mT, mode=rewrite_mode)
+        X = pt.block([[a, pt.zeros((3, 4))], [c, d]])
 
-        from pytensor.tensor.basic import Join, Split
+        ref_fn = pytensor.function([a, c, d, S], X @ S @ X.mT, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, c, d, S], X @ S @ X.mT, mode=rewrite_mode)
 
-        for n in fn.maker.fgraph.toposort():
-            if isinstance(n.op, Split):
-                src = n.inputs[0]
-                assert src.owner is None or not isinstance(src.owner.op, Join), (
-                    f"Split feeds from a Join -- intermediate concat not "
-                    f"decomposed: {n}"
-                )
+        splits = [n for n in rewr_fn.maker.fgraph.toposort() if isinstance(n.op, Split)]
+        assert splits, "expected the rewrite chain to introduce at least one Split"
+        for n in splits:
+            src = n.inputs[0]
+            assert src.owner is None or not isinstance(src.owner.op, Join)
 
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 3))
-        b_v = rng.standard_normal((3, 4))
-        c_v = rng.standard_normal((4, 3))
-        d_v = rng.standard_normal((4, 4))
-        S_v = rng.standard_normal((7, 7))
-        X_v = np.block([[a_v, b_v], [c_v, d_v]])
+        values = [rng.standard_normal(s) for s in ((3, 3), (4, 3), (4, 4), (7, 7))]
         np.testing.assert_allclose(
-            fn(a_v, b_v, c_v, d_v, S_v),
-            X_v @ S_v @ X_v.T,
-            atol=1e-12,
-            rtol=1e-12,
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
         )
