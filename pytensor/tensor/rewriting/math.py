@@ -112,7 +112,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -687,6 +687,95 @@ def local_exp_log_nan_switch(fgraph, node):
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), x, np.asarray(np.nan, old_out.dtype))
         return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_reciprocal(fgraph, node):
+    """Rewrite log(reciprocal(x)) -> -log(x)."""
+    (inp,) = node.inputs
+    if (
+        inp.owner
+        and isinstance(inp.owner.op, Elemwise)
+        and isinstance(inp.owner.op.scalar_op, ps.Reciprocal)
+    ):
+        return [neg(log(inp.owner.inputs[0]))]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_div(fgraph, node):
+    """Rewrite log(a / b) -> log(a) - log(b) when a or b is provably positive.
+
+    The provably-positive side is typically a constant or a shape, which the
+    surrounding pipeline constant-folds.
+    """
+    (inp,) = node.inputs
+    if not (
+        inp.owner
+        and isinstance(inp.owner.op, Elemwise)
+        and isinstance(inp.owner.op.scalar_op, ps.TrueDiv)
+    ):
+        return None
+
+    num, den = inp.owner.inputs
+    if _is_provably_positive(num, strict=True) or _is_provably_positive(
+        den, strict=True
+    ):
+        return [log(num) - log(den)]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_reciprocal(fgraph, node):
+    """Rewrite sign(reciprocal(x)) -> sign(x)."""
+    (inp,) = node.inputs
+    if (
+        inp.owner
+        and isinstance(inp.owner.op, Elemwise)
+        and isinstance(inp.owner.op.scalar_op, ps.Reciprocal)
+    ):
+        return [sign(inp.owner.inputs[0])]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_div(fgraph, node):
+    """Rewrite sign(a / b) using a known-sign numerator or denominator.
+
+    Provably positive side -> ``sign(other)``; negative constant side ->
+    ``-sign(other)``. Bails out otherwise.
+    """
+    (inp,) = node.inputs
+    if not (
+        inp.owner
+        and isinstance(inp.owner.op, Elemwise)
+        and isinstance(inp.owner.op.scalar_op, ps.TrueDiv)
+    ):
+        return None
+
+    num, den = inp.owner.inputs
+
+    if _is_provably_positive(num, strict=True):
+        return [sign(den)]
+    if _is_provably_positive(den, strict=True):
+        return [sign(num)]
+
+    for side, other in ((num, den), (den, num)):
+        try:
+            val = get_underlying_scalar_constant_value(side)
+        except NotScalarConstantError:
+            continue
+        if np.all(val < 0):
+            return [neg(sign(other))]
 
 
 @register_canonicalize
