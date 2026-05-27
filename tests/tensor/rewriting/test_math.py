@@ -32,7 +32,7 @@ from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor.basic import Alloc, Join, Split, constant, join, second, switch
-from pytensor.tensor.blas import Dot22, Gemv
+from pytensor.tensor.blas import BatchedDot, Dot22, Dot22Scalar, Gemm, Gemv, Ger
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -117,6 +117,7 @@ from pytensor.tensor.rewriting.math import (
     simplify_mul,
 )
 from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
+from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1
 from pytensor.tensor.type import (
     TensorType,
     cmatrix,
@@ -5166,276 +5167,287 @@ class TestNestedJoinToBlockDiagonal:
         assert not self._has_block_diagonal(fn)
 
 
+_DOT_OPS = (Dot, Dot22, Dot22Scalar, Gemm, Gemv, Ger, CGemv, BatchedDot)
+
+
 class TestDotOfJoin:
     @staticmethod
     def _n_dots(fn):
+        # CVM mode fuses ``dot + add`` into Gemm and lowers Dot22 to Dot22Scalar /
+        # Gemv / Ger; count every matmul-like Op (and its Blockwise wrappings) so the
+        # assertion holds across linkers.
         return sum(
-            isinstance(n.op, Dot | Dot22)
-            or (isinstance(n.op, Blockwise) and isinstance(n.op.core_op, Dot | Dot22))
+            isinstance(n.op, _DOT_OPS)
+            or (isinstance(n.op, Blockwise) and isinstance(n.op.core_op, _DOT_OPS))
             for n in fn.maker.fgraph.toposort()
         )
 
     @staticmethod
-    def _join_consumes_originals(fn, originals):
-        """Whether any Join in the graph still has any of ``originals`` as inputs.
+    def _has_op(fn, op_type):
+        return any(isinstance(n.op, op_type) for n in fn.maker.fgraph.toposort())
 
-        Used to confirm the original Join was decomposed (not just shuffled)."""
-        original_set = set(originals)
-        for n in fn.maker.fgraph.toposort():
-            from pytensor.tensor.basic import Join
+    @pytest.mark.parametrize(
+        "side, axis, a_shape, b_shape, y_shape",
+        [
+            ("lhs", -1, (3, 4), (3, 5), (9, 6)),
+            ("lhs", -2, (3, 4), (2, 4), (4, 6)),
+            ("rhs", -1, (4, 3), (4, 5), (7, 4)),
+            ("rhs", -2, (3, 5), (2, 5), (7, 5)),
+        ],
+        ids=["lhs_axis-1", "lhs_axis-2", "rhs_axis-1", "rhs_axis-2"],
+    )
+    def test_all_dense_preserved(self, side, axis, a_shape, b_shape, y_shape):
+        a = pt.tensor("a", shape=a_shape)
+        b = pt.tensor("b", shape=b_shape)
+        y = pt.tensor("y", shape=y_shape)
+        M = pt.concatenate([a, b], axis=axis)
+        out = M @ y if side == "lhs" else y @ M
 
-            if isinstance(n.op, Join) and any(
-                inp in original_set for inp in n.inputs[1:]
-            ):
-                return True
-        return False
+        ref_fn = pytensor.function([a, b, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, b, y], out, mode=rewrite_mode)
 
-    def test_join_lhs_axis_neg1(self):
-        # [A | B] @ y -> A @ y[:n_a] + B @ y[n_a:]
-        a = pt.tensor("a", shape=(3, 4))
-        b = pt.tensor("b", shape=(3, 5))
-        y = pt.tensor("y", shape=(9, 6))
-        M = pt.concatenate([a, b], axis=-1)
-        fn = pytensor.function([a, b, y], M @ y, mode=rewrite_mode)
-        assert self._n_dots(fn) == 2
-        assert not self._join_consumes_originals(fn, [a, b])
-
-        rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 4))
-        b_v = rng.standard_normal((3, 5))
-        y_v = rng.standard_normal((9, 6))
-        np.testing.assert_allclose(
-            fn(a_v, b_v, y_v),
-            np.concatenate([a_v, b_v], axis=-1) @ y_v,
-            atol=1e-12,
-        )
-
-    def test_join_lhs_axis_neg2(self):
-        # [[A], [B]] @ y -> concat([A @ y, B @ y], -2)
-        a = pt.tensor("a", shape=(3, 4))
-        b = pt.tensor("b", shape=(2, 4))
-        y = pt.tensor("y", shape=(4, 6))
-        M = pt.concatenate([a, b], axis=-2)
-        fn = pytensor.function([a, b, y], M @ y, mode=rewrite_mode)
-        assert self._n_dots(fn) == 2
-        assert not self._join_consumes_originals(fn, [a, b])
+        # Join survival is the proof the rewrite chose not to fire.
+        assert self._n_dots(rewr_fn) == 1
+        assert self._has_op(rewr_fn, Join)
 
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 4))
-        b_v = rng.standard_normal((2, 4))
-        y_v = rng.standard_normal((4, 6))
-        np.testing.assert_allclose(
-            fn(a_v, b_v, y_v),
-            np.concatenate([a_v, b_v], axis=-2) @ y_v,
-            atol=1e-12,
-        )
+        values = [rng.standard_normal(s) for s in (a_shape, b_shape, y_shape)]
+        np.testing.assert_allclose(rewr_fn(*values), ref_fn(*values), atol=1e-12)
 
-    def test_join_rhs_axis_neg1(self):
-        # y @ [A | B] -> concat([y @ A, y @ B], -1)
-        a = pt.tensor("a", shape=(4, 3))
-        b = pt.tensor("b", shape=(4, 5))
-        y = pt.tensor("y", shape=(7, 4))
-        M = pt.concatenate([a, b], axis=-1)
-        fn = pytensor.function([a, b, y], y @ M, mode=rewrite_mode)
-        assert self._n_dots(fn) == 2
-        assert not self._join_consumes_originals(fn, [a, b])
-
-        rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((4, 3))
-        b_v = rng.standard_normal((4, 5))
-        y_v = rng.standard_normal((7, 4))
-        np.testing.assert_allclose(
-            fn(a_v, b_v, y_v),
-            y_v @ np.concatenate([a_v, b_v], axis=-1),
-            atol=1e-12,
-        )
-
-    def test_join_rhs_axis_neg2(self):
-        # y @ [[A], [B]] -> y[..., :n_a] @ A + y[..., n_a:] @ B
-        a = pt.tensor("a", shape=(3, 5))
-        b = pt.tensor("b", shape=(2, 5))
-        y = pt.tensor("y", shape=(7, 5))
-        M = pt.concatenate([a, b], axis=-2)
-        fn = pytensor.function([a, b, y], y @ M, mode=rewrite_mode)
-        assert self._n_dots(fn) == 2
-        assert not self._join_consumes_originals(fn, [a, b])
-
-        rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 5))
-        b_v = rng.standard_normal((2, 5))
-        y_v = rng.standard_normal((7, 5))
-        np.testing.assert_allclose(
-            fn(a_v, b_v, y_v),
-            y_v @ np.concatenate([a_v, b_v], axis=-2),
-            atol=1e-12,
-        )
-
-    def test_unknown_widths_lhs_decomposes(self):
-        # LHS axis=-1 splits y by symbolic leaf widths; fires on dynamic shapes.
+    def test_unknown_shapes_still_preserved(self):
         a = pt.matrix("a")
         b = pt.matrix("b")
         y = pt.matrix("y")
-        M = pt.concatenate([a, b], axis=-1)
-        fn = pytensor.function([a, b, y], M @ y, mode=rewrite_mode)
-        assert self._n_dots(fn) == 2
-        assert not self._join_consumes_originals(fn, [a, b])
+        out = pt.concatenate([a, b], axis=-1) @ y
+
+        ref_fn = pytensor.function([a, b, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, b, y], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 1
+        assert self._has_op(rewr_fn, Join)
 
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 4))
-        b_v = rng.standard_normal((3, 5))
-        y_v = rng.standard_normal((9, 6))
-        np.testing.assert_allclose(
-            fn(a_v, b_v, y_v),
-            np.concatenate([a_v, b_v], axis=-1) @ y_v,
-            atol=1e-12,
-        )
-
-    def test_unknown_heights_rhs_decomposes(self):
-        # RHS axis=-2 splits y by symbolic leaf heights; fires on dynamic shapes.
-        a = pt.matrix("a")
-        b = pt.matrix("b")
-        y = pt.matrix("y")
-        M = pt.concatenate([a, b], axis=-2)
-        fn = pytensor.function([a, b, y], y @ M, mode=rewrite_mode)
-        assert self._n_dots(fn) == 2
-        assert not self._join_consumes_originals(fn, [a, b])
-
-        rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 5))
-        b_v = rng.standard_normal((2, 5))
-        y_v = rng.standard_normal((7, 5))
-        np.testing.assert_allclose(
-            fn(a_v, b_v, y_v),
-            y_v @ np.concatenate([a_v, b_v], axis=-2),
-            atol=1e-12,
-        )
+        values = [rng.standard_normal(s) for s in ((3, 4), (3, 5), (9, 6))]
+        np.testing.assert_allclose(rewr_fn(*values), ref_fn(*values), atol=1e-12)
 
     def test_single_input_join_skipped(self):
-        # A "Join" with one input is a no-op; skip.
         a = pt.tensor("a", shape=(3, 4))
         y = pt.tensor("y", shape=(4, 5))
-        M = pt.join(-1, a)  # single-input join
-        fn = pytensor.function([a, y], M @ y, mode=rewrite_mode)
-        assert self._n_dots(fn) == 1
+        out = pt.join(-1, a) @ y
 
-    @pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
-    def test_depth_2_block_at_x(self, left_multiply):
-        # ``pt.block([[a, b], [c, d]])`` produces nested Joins. Iterated
-        # ``local_dot_of_join`` decomposes both levels into leaf-level dots.
+        ref_fn = pytensor.function([a, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, y], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 1
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal((3, 4))
+        y_v = rng.standard_normal((4, 5))
+        np.testing.assert_allclose(rewr_fn(a_v, y_v), ref_fn(a_v, y_v), atol=1e-12)
+
+    @pytest.mark.parametrize(
+        "side, axis, a_shape, zero_shape, y_shape",
+        [
+            ("lhs", -1, (3, 4), (3, 5), (9, 6)),
+            ("rhs", -2, (3, 5), (2, 5), (7, 5)),
+        ],
+        ids=["lhs_axis-1", "rhs_axis-2"],
+    )
+    def test_zero_leaf_contracted_drops_dot(
+        self, side, axis, a_shape, zero_shape, y_shape
+    ):
+        a = pt.tensor("a", shape=a_shape)
+        y = pt.tensor("y", shape=y_shape)
+        M = pt.concatenate([a, pt.zeros(zero_shape)], axis=axis)
+        out = M @ y if side == "lhs" else y @ M
+
+        ref_fn = pytensor.function([a, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, y], out, mode=rewrite_mode)
+
+        # Split + no Join is the signature of contracted-axis decomposition.
+        assert self._n_dots(rewr_fn) == 1
+        assert self._has_op(rewr_fn, Split)
+        assert not self._has_op(rewr_fn, Join)
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal(a_shape)
+        y_v = rng.standard_normal(y_shape)
+        np.testing.assert_allclose(
+            rewr_fn(a_v, y_v), ref_fn(a_v, y_v), atol=1e-12, rtol=1e-12
+        )
+
+    @pytest.mark.parametrize(
+        "side, axis, a_shape, zero_shape, y_shape",
+        [
+            ("lhs", -2, (3, 4), (2, 4), (4, 6)),
+            ("rhs", -1, (4, 3), (4, 5), (7, 4)),
+        ],
+        ids=["lhs_axis-2", "rhs_axis-1"],
+    )
+    def test_zero_leaf_output_emits_zero_block(
+        self, side, axis, a_shape, zero_shape, y_shape
+    ):
+        # Output-axis case: rewrite emits ``Join(Dot(a, other), zero_block)``. A Join
+        # still appears, so only numerical equivalence pins the rewrite's effect.
+        a = pt.tensor("a", shape=a_shape)
+        y = pt.tensor("y", shape=y_shape)
+        M = pt.concatenate([a, pt.zeros(zero_shape)], axis=axis)
+        out = M @ y if side == "lhs" else y @ M
+
+        ref_fn = pytensor.function([a, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, y], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 1
+
+        rng = np.random.default_rng(0)
+        a_v = rng.standard_normal(a_shape)
+        y_v = rng.standard_normal(y_shape)
+        np.testing.assert_allclose(
+            rewr_fn(a_v, y_v), ref_fn(a_v, y_v), atol=1e-12, rtol=1e-12
+        )
+
+    def test_identity_leaf_contracted_folds_to_chunk(self):
+        a = pt.tensor("a", shape=(4, 3))
+        y = pt.tensor("y", shape=(3 + 4, 6))
+        out = pt.join(-1, a, pt.eye(4)) @ y
+
+        ref_fn = pytensor.function([a, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, y], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 1
+        assert not self._has_op(rewr_fn, Join)
+
+        rng = np.random.default_rng(0)
+        values = [rng.standard_normal(s) for s in ((4, 3), (7, 6))]
+        np.testing.assert_allclose(
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
+        )
+
+    def test_identity_leaf_output_replaces_with_operand(self):
+        a = pt.tensor("a", shape=(3, 5))
+        y = pt.tensor("y", shape=(5, 6))
+        out = pt.concatenate([a, pt.eye(5)], axis=-2) @ y
+
+        ref_fn = pytensor.function([a, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, y], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 1
+
+        rng = np.random.default_rng(0)
+        values = [rng.standard_normal(s) for s in ((3, 5), (5, 6))]
+        np.testing.assert_allclose(
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
+        )
+
+    def test_selection_leaf_collapses_to_indexing(self):
+        # SELECTION leaf becomes its own Dot, then ``selection_dot_to_indexing`` turns
+        # it into an advanced index. ``y @ S`` hits the gather path.
+        b = pt.tensor("b", shape=(4, 5))
+        perm = pt.constant(np.array([2, 0, 3, 1], dtype=np.int64))
+        S = pt.eye(4)[:, perm]
+        y = pt.tensor("y", shape=(7, 4))
+        out = y @ pt.concatenate([b, S], axis=-1)
+
+        ref_fn = pytensor.function([b, y], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([b, y], out, mode=rewrite_mode)
+
+        assert self._n_dots(rewr_fn) == 1
+        assert self._has_op(rewr_fn, AdvancedSubtensor | AdvancedSubtensor1)
+
+        rng = np.random.default_rng(0)
+        values = [rng.standard_normal(s) for s in ((4, 5), (7, 4))]
+        np.testing.assert_allclose(
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
+        )
+
+    def test_all_dense_block_preserved(self):
         a = pt.tensor("a", shape=(2, 3))
         b = pt.tensor("b", shape=(2, 4))
         c = pt.tensor("c", shape=(5, 3))
         d = pt.tensor("d", shape=(5, 4))
-        M = pt.block([[a, b], [c, d]])
+        other = pt.tensor("other", shape=(7, 6))
+        out = pt.block([[a, b], [c, d]]) @ other
 
-        if left_multiply:
-            other = pt.tensor("other", shape=(7, 6))
-            out = M @ other
-        else:
-            other = pt.tensor("other", shape=(8, 7))
-            out = other @ M
+        ref_fn = pytensor.function([a, b, c, d, other], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, b, c, d, other], out, mode=rewrite_mode)
 
-        fn = pytensor.function([a, b, c, d, other], out, mode=rewrite_mode)
-        # 4 leaf-level dots, regardless of side.
-        assert self._n_dots(fn) == 4
+        assert self._n_dots(rewr_fn) == 1
+        assert self._has_op(rewr_fn, Join)
 
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal(a.type.shape)
-        b_v = rng.standard_normal(b.type.shape)
-        c_v = rng.standard_normal(c.type.shape)
-        d_v = rng.standard_normal(d.type.shape)
-        other_v = rng.standard_normal(other.type.shape)
-        ref_M = np.block([[a_v, b_v], [c_v, d_v]])
-        expected = ref_M @ other_v if left_multiply else other_v @ ref_M
+        values = [rng.standard_normal(t.type.shape) for t in (a, b, c, d, other)]
         np.testing.assert_allclose(
-            fn(a_v, b_v, c_v, d_v, other_v),
-            expected,
-            atol=1e-12,
-            rtol=1e-12,
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
         )
 
-    def test_depth_2_unknown_shapes_decomposes(self):
-        # Symbolic split sizes: even with fully dynamic shapes, both Join
-        # levels decompose down to leaf-level dots.
-        a = pt.matrix("a")
-        b = pt.matrix("b")
-        c = pt.matrix("c")
-        d = pt.matrix("d")
-        x = pt.matrix("x")
-        out = pt.block([[a, b], [c, d]]) @ x
-        fn = pytensor.function([a, b, c, d, x], out, mode=rewrite_mode)
-        assert self._n_dots(fn) == 4
-
-    def test_depth_2_block_at_block(self):
-        # ``pt.block(X) @ pt.block(Y)`` cascades through the rewrite. With
-        # split-of-join lifting, every leaf product is exposed: 4 result
-        # entries x 2 inner products = 8 leaf-level dots.
+    def test_block_triangular_decomposes(self):
+        # Top row's zero drops its product; bottom row stays as one GEMM. 2 Dots.
         a = pt.tensor("a", shape=(3, 3))
+        c = pt.tensor("c", shape=(4, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        other = pt.tensor("other", shape=(7, 6))
+        out = pt.block([[a, pt.zeros((3, 4))], [c, d]]) @ other
+
+        ref_fn = pytensor.function([a, c, d, other], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, c, d, other], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 2
+
+        rng = np.random.default_rng(0)
+        values = [rng.standard_normal(t.type.shape) for t in (a, c, d, other)]
+        np.testing.assert_allclose(
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
+        )
+
+    def test_block_with_identity_decomposes(self):
+        # Top row's identity folds to operand chunk; bottom row stays as one GEMM.
         b = pt.tensor("b", shape=(3, 4))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
-        X = pt.block([[a, b], [c, d]])
-        fn = pytensor.function([a, b, c, d], X @ X, mode=rewrite_mode)
-        assert self._n_dots(fn) == 8
+        other = pt.tensor("other", shape=(7, 6))
+        out = pt.block([[pt.eye(3), b], [c, d]]) @ other
+
+        ref_fn = pytensor.function([b, c, d, other], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([b, c, d, other], out, mode=rewrite_mode)
+        assert self._n_dots(rewr_fn) == 2
 
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 3))
-        b_v = rng.standard_normal((3, 4))
-        c_v = rng.standard_normal((4, 3))
-        d_v = rng.standard_normal((4, 4))
-        X_v = np.block([[a_v, b_v], [c_v, d_v]])
+        values = [rng.standard_normal(t.type.shape) for t in (b, c, d, other)]
         np.testing.assert_allclose(
-            fn(a_v, b_v, c_v, d_v), X_v @ X_v, atol=1e-12, rtol=1e-12
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
         )
 
     @pytest.mark.parametrize(
         "lhs_t, rhs_t",
-        [(False, True), (True, False), (True, True)],
-        ids=["X@X.T", "X.T@X", "X.T@X.T"],
+        [(False, False), (False, True), (True, False), (True, True)],
+        ids=["X@X", "X@X.T", "X.T@X", "X.T@X.T"],
     )
-    def test_depth_2_block_at_block_with_transpose(self, lhs_t, rhs_t):
-        # Matrix-transposed nested-Joins get canonicalized via
-        # ``local_transpose_of_join`` (transpose pushes to leaves). Then the
-        # ``Block @ Block`` cascade applies.
+    def test_dense_block_at_dense_block_preserved(self, lhs_t, rhs_t):
         a = pt.tensor("a", shape=(3, 3))
         b = pt.tensor("b", shape=(3, 4))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
         X = pt.block([[a, b], [c, d]])
-        lhs = X.mT if lhs_t else X
-        rhs = X.mT if rhs_t else X
-        fn = pytensor.function([a, b, c, d], lhs @ rhs, mode=rewrite_mode)
-        assert self._n_dots(fn) == 8
+        out = (X.mT if lhs_t else X) @ (X.mT if rhs_t else X)
+
+        ref_fn = pytensor.function([a, b, c, d], out, mode=no_opt_mode)
+        rewr_fn = pytensor.function([a, b, c, d], out, mode=rewrite_mode)
+
+        assert self._n_dots(rewr_fn) == 1
+        assert self._has_op(rewr_fn, Join)
 
         rng = np.random.default_rng(0)
-        a_v = rng.standard_normal((3, 3))
-        b_v = rng.standard_normal((3, 4))
-        c_v = rng.standard_normal((4, 3))
-        d_v = rng.standard_normal((4, 4))
-        X_v = np.block([[a_v, b_v], [c_v, d_v]])
-        ref_lhs = X_v.T if lhs_t else X_v
-        ref_rhs = X_v.T if rhs_t else X_v
+        values = [rng.standard_normal(s) for s in ((3, 3), (3, 4), (4, 3), (4, 4))]
         np.testing.assert_allclose(
-            fn(a_v, b_v, c_v, d_v),
-            ref_lhs @ ref_rhs,
-            atol=1e-12,
-            rtol=1e-12,
+            rewr_fn(*values), ref_fn(*values), atol=1e-12, rtol=1e-12
         )
 
 
 class TestSplitOfJoin:
     @staticmethod
     def _has_split(fn):
-        from pytensor.tensor.basic import Split
-
         return any(isinstance(n.op, Split) for n in fn.maker.fgraph.toposort())
 
     def test_matching_axis_matching_sizes_returns_inputs(self):
-        # Split(Join(axis=-2, A, B), [3, 4], axis=-2) -> A, B directly.
         a = pt.tensor("a", shape=(3, 5))
         b = pt.tensor("b", shape=(4, 5))
-        joined = pt.concatenate([a, b], axis=-2)
-        out_a, out_b = pt.split(joined, splits_size=[3, 4], n_splits=2, axis=-2)
+        out_a, out_b = pt.split(
+            pt.concatenate([a, b], axis=-2), splits_size=[3, 4], n_splits=2, axis=-2
+        )
 
         fn = pytensor.function([a, b], [out_a, out_b], mode=rewrite_mode)
         assert not self._has_split(fn)
