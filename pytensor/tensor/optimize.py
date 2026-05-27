@@ -723,8 +723,9 @@ def pack_inputs_of_objective(
     packed_shapes = None
 
     if not isinstance(x, Sequence):
-        packed_input = x
-    elif len(x) == 1:
+        x = [x]
+
+    if len(x) == 1 and x[0].ndim <= 1:
         packed_input = x[0]
     else:
         packed_input, packed_shapes = pack(*x)
