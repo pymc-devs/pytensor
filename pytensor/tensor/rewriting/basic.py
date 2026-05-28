@@ -124,8 +124,8 @@ def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
 def get_simplified_shape(x: TensorVariable, *, fgraph) -> tuple:
     """Return a simplified shape tuple for ``x``: shape_feature → static → ``x.shape``."""
     try:
-        return fgraph.shape_feature.shape_of[x]
-    except (AttributeError, KeyError):
+        return fgraph.shape_feature.shape_tuple(x)
+    except AttributeError:
         pass
 
     static_shape = x.type.shape
