@@ -262,6 +262,55 @@ def test_expm_of_diag(make_diag):
     assert_equal_computations([rewritten], [expected])
 
 
+@pytest.mark.parametrize("transposed", [False, True], ids=["plain", "transposed"])
+@pytest.mark.parametrize(
+    "rhs_kind",
+    ["vector", "matrix", "batched_matrix"],
+)
+def test_dot_of_kron(rhs_kind, transposed):
+    """``kron(A, B) @ X`` decomposes into two matmuls via the vec identity."""
+    rng = np.random.default_rng(0)
+    m, p, k, batch = 4, 3, 5, 2
+
+    A = pt.matrix("A", shape=(m, m))
+    B = pt.matrix("B", shape=(p, p))
+    A_v = rng.normal(size=(m, m))
+    B_v = rng.normal(size=(p, p))
+
+    if rhs_kind == "vector":
+        X = pt.vector("X", shape=(m * p,))
+        X_v = rng.normal(size=(m * p,))
+    elif rhs_kind == "matrix":
+        X = pt.matrix("X", shape=(m * p, k))
+        X_v = rng.normal(size=(m * p, k))
+    else:  # batched_matrix
+        X = pt.tensor("X", shape=(batch, m * p, k))
+        X_v = rng.normal(size=(batch, m * p, k))
+
+    K = pt.linalg.kron(A, B)
+    K_v = np.kron(A_v, B_v)
+    if transposed:
+        K = K.T
+        K_v = K_v.T
+    out = K @ X
+    if rhs_kind == "batched_matrix":
+        expected = np.stack([K_v @ X_v[i] for i in range(batch)])
+    else:
+        expected = K_v @ X_v
+
+    f = function([A, B, X], out, mode="FAST_RUN")
+
+    ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+    assert not any(isinstance(op, KroneckerProduct) for op in ops)
+
+    assert_allclose(
+        f(A_v, B_v, X_v),
+        expected,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
 def test_kron_of_diagonal_to_diagonal():
     da = pt.tensor("da", shape=(3, 3))
     db = pt.tensor("db", shape=(4, 4))
