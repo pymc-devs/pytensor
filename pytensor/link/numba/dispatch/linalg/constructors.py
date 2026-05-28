@@ -18,10 +18,13 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
 
     The generated code looks something like:
 
-    def block_diagonal(arr0, arr1, arr2):
+    def block_diagonal(arr0, arr1, arr2, out=None):
         out_r = arr0.shape[0] + arr1.shape[0] + arr2.shape[0]
         out_c = arr0.shape[1] + arr1.shape[1] + arr2.shape[1]
-        out = np.zeros((out_r, out_c), dtype=np.float64)
+        if out is None:
+            out = np.zeros((out_r, out_c), dtype=np.float64)
+        else:
+            out[:] = 0
 
         r, c = 0, 0
         rr, cc = arr0.shape
@@ -46,11 +49,18 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
 
     arg_names = [f"arr{i}" for i in range(n_inp)]
     code = [
-        f"def block_diagonal({', '.join(arg_names)}):",
+        f"def block_diagonal({', '.join(arg_names)}, out=None):",
         CODE_TOKEN.INDENT,
         f"out_r = {' + '.join(f'{a}.shape[0]' for a in arg_names)}",
         f"out_c = {' + '.join(f'{a}.shape[1]' for a in arg_names)}",
+        "if out is None:",
+        CODE_TOKEN.INDENT,
         f"out = np.zeros((out_r, out_c), dtype=np.{dtype})",
+        CODE_TOKEN.DEDENT,
+        "else:",
+        CODE_TOKEN.INDENT,
+        "out[:] = 0",
+        CODE_TOKEN.DEDENT,
         CODE_TOKEN.EMPTY_LINE,
         "r, c = 0, 0",
     ]
@@ -73,5 +83,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
         globals() | {"np": np},
     )
 
-    cache_version = 1
-    return numba_basic.numba_njit(block_diag), cache_version
+    block_diag = numba_basic.numba_njit(block_diag)
+    block_diag.handles_out = True
+    cache_version = 2
+    return block_diag, cache_version
