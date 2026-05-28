@@ -101,8 +101,8 @@ for _key in ALL_KEYS:
 
 
 @node_rewriter([Scan])
-def lift_assumptions_into_scan(fgraph, node):
-    """Lift structural assumptions from a Scan's sequence and non-sequence inputs
+def push_assumptions_into_scan(fgraph, node):
+    """Push structural assumptions from a Scan's sequence and non-sequence inputs
     onto the matching inner inputs.
 
     An inner input is a bare leaf, so an ``assume`` on the outer variable is
@@ -173,8 +173,8 @@ def lift_assumptions_into_scan(fgraph, node):
 
 
 scan_seqopt1.register(
-    lift_assumptions_into_scan.__name__,
-    dfs_rewriter(lift_assumptions_into_scan, ignore_newtrees=True),
+    push_assumptions_into_scan.__name__,
+    dfs_rewriter(push_assumptions_into_scan, ignore_newtrees=True),
     "fast_run",
     "scan",
     position=1,

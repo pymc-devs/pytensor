@@ -127,8 +127,8 @@ def test_nested_scan_forwards_property():
     assert af.check(out, DIAGONAL)
 
 
-def test_outer_assumption_lifts_into_scan_inner_graph():
-    """`lift_assumptions_into_scan` re-asserts a sequence's assumption on the
+def test_outer_assumption_pushed_into_scan_inner_graph():
+    """`push_assumptions_into_scan` re-asserts a sequence's assumption on the
     inner input, so a rewrite of the inner graph sees it: ``inv(X) @ y`` of a
     positive-definite ``X`` specializes to a Cholesky solve in the loop body."""
     Xs = pt.tensor("Xs", shape=(4, 3, 3))
@@ -145,9 +145,9 @@ def test_outer_assumption_lifts_into_scan_inner_graph():
     assert "CholeskySolve" in inner_ops
 
 
-def test_non_sequence_assumption_lifts_into_scan_inner_graph():
+def test_non_sequence_assumption_pushed_into_scan_inner_graph():
     """Mirror of the sequence test but for a non-sequence: a positive-definite
-    ``X`` passed via ``non_sequences`` lifts into the inner graph too, so the
+    ``X`` passed via ``non_sequences`` is pushed into the inner graph too, so the
     per-step ``inv(X) @ y_t`` still specializes to a Cholesky solve."""
     X = pt.matrix("X", shape=(3, 3))
     ys = pt.tensor("ys", shape=(4, 3, 3))
