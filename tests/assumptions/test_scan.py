@@ -1,7 +1,10 @@
+import pytest
+
 import pytensor.tensor as pt
 from pytensor import function
 from pytensor.assumptions import DIAGONAL, FactState
 from pytensor.assumptions.specify import assume
+from pytensor.configdefaults import config
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from tests.assumptions.conftest import make_fgraph
@@ -127,6 +130,10 @@ def test_nested_scan_forwards_property():
     assert af.check(out, DIAGONAL)
 
 
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="assumption push-in and the inner-graph solve specialization are fast_run rewrites",
+)
 def test_outer_assumption_pushed_into_scan_inner_graph():
     """`push_assumptions_into_scan` re-asserts a sequence's assumption on the
     inner input, so a rewrite of the inner graph sees it: ``inv(X) @ y`` of a
@@ -145,6 +152,10 @@ def test_outer_assumption_pushed_into_scan_inner_graph():
     assert "CholeskySolve" in inner_ops
 
 
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="assumption push-in and the inner-graph solve specialization are fast_run rewrites",
+)
 def test_non_sequence_assumption_pushed_into_scan_inner_graph():
     """Mirror of the sequence test but for a non-sequence: a positive-definite
     ``X`` passed via ``non_sequences`` is pushed into the inner graph too, so the
