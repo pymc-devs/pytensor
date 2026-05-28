@@ -1,6 +1,4 @@
-import traceback
-from io import StringIO
-from typing import cast as type_cast
+from collections import deque
 from warnings import warn
 
 import numpy as np
@@ -15,8 +13,6 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.graph.traversal import ancestors
-from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
 from pytensor.tensor.basic import (
     Alloc,
     MakeVector,
@@ -30,13 +26,12 @@ from pytensor.tensor.basic import (
     stack,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.exceptions import NotScalarConstantError, ShapeError
+from pytensor.tensor.exceptions import ShapeError
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
     register_useless,
-    topo_constant_folding,
 )
 from pytensor.tensor.shape import (
     Reshape,
@@ -50,614 +45,289 @@ from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
     IncSubtensor,
     Subtensor,
-    get_idx_list,
 )
-from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
+from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorVariable
 
 
+class _ShapeOfProxy:
+    """Dict-like proxy so ``shape_feature.shape_of[var]`` keeps working."""
+
+    def __init__(self, feature):
+        self._feature = feature
+
+    def __getitem__(self, var):
+        result = self._feature.shape_tuple(var)
+        if result is None:
+            raise KeyError(var)
+        return result
+
+    def __contains__(self, var):
+        return hasattr(var.type, "ndim")
+
+
 class ShapeFeature(Feature):
-    r"""A `Feature` that tracks shape information in a graph.
+    r"""Lazy `Feature` that provides shape information for the graph it tracks.
 
-    This `Feature` aids in the replacement of all `Shape`\s and `Subtensor`\s of `Shape`\s with
-    `Shape_i` and `MakeVector` `Op`\s.
+    Shapes are derived on demand by calling each ``Op.infer_shape`` on the
+    current (live) node inputs, recursing toward the graph inputs. Use:
 
-    This `Feature` and its associated rewrites have several goals:
+    - ``get_shape(var, i)`` / ``shape_tuple(var)`` for the shape expressed in
+      terms of the graph inputs (recursing through the ancestors of ``var``);
+    - ``same_shape(x, y)`` to statically compare two shapes.
 
-    1. to "lift" `Shape`\s to as close to the inputs as possible,
-    2. to infer the shape of every node in the graph in terms of the
-       input shapes, and
-    3. remove fill `Op`\s (e.g. `Second`) from the graph.
-
-    Lifting shapes as close to the inputs as possible is important for
-    canonicalization because it is very bad form to have to compute
-    something just to know how big it will be.  Firstly, it is a waste
-    of time to compute such outputs.  But it is important to get rid
-    of these outputs as early as possible in the compilation process
-    because the extra computations make it appear as if many internal
-    graph nodes have multiple clients.  Many rewrites refuse to
-    work on nodes with multiple clients.
-
-    Lifting is done by using an `<Op>.infer_shape` function if one is
-    present, or else using a conservative default.  An Op that
-    supports shape-lifting should define a infer_shape(self, fgraph, node,
-    input_shapes) function.  The argument input_shapes is a tuple of
-    tuples... there is an interior tuple for each input to the node.
-    The tuple has as many elements as dimensions.  The element in
-    position i of tuple j represents the i'th shape component of the
-    j'th input.  The function should return a tuple of tuples.  One
-    output tuple for each node.output.  Again, the i'th element of the
-    j'th output tuple represents the output[j].shape[i] of the
-    function.  If an output is not a TensorType, then None should be
-    returned instead of a tuple for that output.
-
-    For example the infer_shape for a matrix-matrix product would accept
-    input_shapes=((x0,x1), (y0,y1)) and return ((x0, y1),).
-
-    Inferring the shape of internal nodes in the graph is important
-    for doing size-driven rewrites.  If we know how big various
-    intermediate results will be, we can estimate the cost of many Ops
-    accurately, and generate c-code that is specific [e.g. unrolled]
-    to particular sizes.
-
-    In cases where you cannot figure out the shape, raise a ShapeError.
-
-    Notes
-    -----
-    To use this shape information in rewrites, use the
-    ``shape_of`` dictionary.
-
-    For example:
-
-    .. code-block:: python
-
-        try:
-            shape_of = fgraph.shape_feature.shape_of
-        except AttributeError:
-            # This can happen when the mode doesn't include the ShapeFeature.
-            return
-
-        shape_of_output_zero = shape_of[node.output[0]]
-
-    The ``shape_of_output_zero`` symbol will contain a tuple, whose
-    elements are either integers or symbolic integers.
-
-    TODO: check to see if the symbols are necessarily
-    non-constant... or are integer literals sometimes PyTensor
-    constants?? That would be confusing.
-
+    Inferred shapes are cached per node, but the cache is invalidated whenever
+    an ancestor input changes (``on_change_input``), so the expressions handed
+    out always reference live graph variables.
     """
 
-    def get_node_infer_shape(self, node):
-        try:
-            shape_infer = node.op.infer_shape
-        except AttributeError:
-            shape_infer = self.default_infer_shape
+    def __init__(self):
+        self.fgraph: FunctionGraph | None = None
+        # node -> tuple of (tuple of shape vars) per output, lazily populated.
+        # The cached shape of a node embeds the shapes of its whole ancestor cone,
+        # so a change anywhere above a cached node invalidates it.
+        self._cache: dict = {}
+        # Nodes whose input changed since the last query. Invalidation is deferred
+        # to the next query, which walks ``fgraph.clients`` downstream from these
+        # nodes; the live graph already encodes the dependencies, so no reverse map
+        # is kept.
+        self._stale: set = set()
+        # var -> {i: Shape_i(i)(v)}, ensures Apply identity for leaves
+        self._shape_i_cache: dict = {}
+        self.lscalar_one = constant(1, dtype="int64")
+        # Compat: scheduled replacements for local_track_shape_i
+        self.scheduled: dict = {}
 
-        try:
-            o_shapes = shape_infer(node, [self.shape_of[r] for r in node.inputs])
-        except ShapeError:
-            o_shapes = self.default_infer_shape(
-                node, [self.shape_of[r] for r in node.inputs]
-            )
-        except NotImplementedError as e:
-            raise NotImplementedError(
-                "Code called by infer_shape failed raising a "
-                "NotImplementedError. Raising NotImplementedError to "
-                "indicate that a shape cannot be computed is no longer "
-                "supported, and one should now use ShapeError "
-                f"instead. The original exception message is: {e}"
-            ).with_traceback(e.__traceback__)
-        except Exception as e:
-            msg = (
-                f"Failed to infer_shape from Op {node.op}.\nInput shapes: "
-                f"{[self.shape_of[r] for r in node.inputs]}\nException encountered during infer_shape: "
-                f"{type(e)}\nException message: {e!s}\nTraceback: {traceback.format_exc()}"
-            )
-            if config.on_shape_error == "raise":
-                raise Exception(msg).with_traceback(e.__traceback__)
+    def _shape_i_var(self, v, i):
+        per_dim = self._shape_i_cache.get(v)
+        if per_dim is not None:
+            cached = per_dim.get(i)
+            if cached is not None:
+                return cached
+        else:
+            per_dim = {}
+            self._shape_i_cache[v] = per_dim
+        if hasattr(v.type, "shape") and v.type.shape[i] is not None:
+            res = constant(v.type.shape[i], dtype="int64")
+        else:
+            res = Shape_i(i)(v)
+        per_dim[i] = res
+        return res
+
+    def _coerce_shape_element(self, element, node):
+        """Validate and normalize a single shape element from infer_shape."""
+        if isinstance(element, np.ndarray):
+            if element.ndim != 0:
+                raise TypeError(
+                    f"infer_shape for {node.op} returned a non-scalar "
+                    f"ndarray for shape element: {element!r}"
+                )
+            element = element.item()
+        if isinstance(element, Variable):
+            if element.type.dtype not in integer_dtypes:
+                raise TypeError(
+                    f"infer_shape for {node.op} returned a non-integer "
+                    f"Variable for shape element: {element!r}"
+                )
+            if getattr(element.type, "ndim", 0):
+                raise TypeError(
+                    f"infer_shape for {node.op} returned a non-scalar "
+                    f"Variable for shape element: {element!r}"
+                )
+            if element.type.dtype != "int64":
+                if isinstance(element, Constant):
+                    return constant(int(element.data), dtype="int64")
+                return cast(element, "int64")
+            return element
+        if isinstance(element, int | np.integer):
+            if int(element) < 0:
+                raise ValueError(
+                    f"infer_shape for {node.op} returned a negative shape: {int(element)}"
+                )
+            return constant(int(element), dtype="int64")
+        raise TypeError(
+            f"infer_shape for {node.op} returned an unsupported "
+            f"shape element of type {type(element).__name__}: {element!r}"
+        )
+
+    def _get_node_shapes(self, node):
+        """Return validated per-output shape tuples for ``node``."""
+        if self._stale:
+            self._flush_stale()
+
+        cache = self._cache
+        cached = cache.get(node)
+        if cached is not None:
+            return cached
+
+        # Fill the cache for ``node`` and its ancestor cone bottom-up with an
+        # explicit stack. Recursing through ``get_shape`` would overflow the
+        # Python stack on deep graphs; here a node is computed only once every
+        # input-producing node it needs is cached, so ``_compute_node_shapes``
+        # reads its input shapes straight from the cache instead of recursing.
+        stack = [node]
+        while stack:
+            top = stack[-1]
+            if top in cache:
+                stack.pop()
+                continue
+            ready = True
+            for inp in top.inputs:
+                inp_node = inp.owner
+                if (
+                    inp_node is not None
+                    and inp_node not in cache
+                    and hasattr(inp.type, "ndim")
+                    # A fully-static input shape is read without touching its
+                    # owner (see ``get_shape``), so don't bother caching it.
+                    and any(s is None for s in inp.type.shape)
+                ):
+                    stack.append(inp_node)
+                    ready = False
+            if ready:
+                stack.pop()
+                cache[top] = self._compute_node_shapes(top)
+
+        return cache[node]
+
+    def _compute_node_shapes(self, node):
+        """Call ``infer_shape`` for ``node`` and validate the result.
+
+        The caller must have cached the input-producing nodes already, so
+        ``get_shape`` resolves them from the cache without recursing.
+        """
+        input_shapes = []
+        for inp in node.inputs:
+            if hasattr(inp.type, "ndim"):
+                input_shapes.append(
+                    tuple(self.get_shape(inp, j) for j in range(inp.type.ndim))
+                )
             else:
-                warn(msg)
-            o_shapes = self.default_infer_shape(
-                node, [self.shape_of[r] for r in node.inputs]
-            )
+                input_shapes.append(None)
 
-        return o_shapes
+        output_shapes = None
+        shape_infer = getattr(node.op, "infer_shape", None)
+        if shape_infer is not None:
+            try:
+                output_shapes = shape_infer(node, input_shapes)
+            except ShapeError:
+                pass
+            except NotImplementedError:
+                pass
+            except Exception as exc:
+                if config.on_shape_error == "raise":
+                    raise
+                warn(
+                    f"Failed to infer_shape from Op {node.op}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        result = []
+        for k, out in enumerate(node.outputs):
+            if not hasattr(out.type, "ndim"):
+                result.append(None)
+                continue
+            sh = None
+            if output_shapes is not None and k < len(output_shapes):
+                sh = output_shapes[k]
+            if sh is None or not isinstance(sh, list | tuple):
+                result.append(
+                    tuple(self._shape_i_var(out, j) for j in range(out.type.ndim))
+                )
+                continue
+            coerced = []
+            for j, s in enumerate(sh):
+                coerced.append(self._coerce_shape_element(s, node))
+            result.append(tuple(coerced))
+
+        return tuple(result)
 
     def get_shape(self, var, idx):
-        """Rewrites can call this to get a `Shape_i`.
+        """Return a symbolic expression for ``var.shape[idx]``."""
+        if hasattr(var.type, "shape") and var.type.shape[idx] is not None:
+            return constant(var.type.shape[idx], dtype="int64")
 
-        It is better to call this then use directly ``shape_of[var][idx]``
-        as this method should update `shape_of` if needed.
+        node = var.owner
+        if node is None:
+            return self._shape_i_var(var, idx)
 
-        TODO: Up to now, we don't update it in all cases. Update in all cases.
-        """
-        r = self.shape_of[var][idx]
-        if (
-            r.owner
-            and isinstance(r.owner.op, Shape_i)
-            and r.owner.inputs[0] not in self.fgraph.variables
-        ):
-            assert var.owner
-            node = var.owner
-            # recur on inputs
-            for i in node.inputs:
-                if getattr(i.type, "ndim", None) > 0:
-                    self.get_shape(i, 0)
-            o_shapes = self.get_node_infer_shape(node)
-            assert len(o_shapes) == len(node.outputs)
+        node_shapes = self._get_node_shapes(node)
+        out_idx = node.outputs.index(var)
+        sh = node_shapes[out_idx]
+        if sh is not None:
+            return sh[idx]
+        return self._shape_i_var(var, idx)
 
-            # Only change the variables and dimensions that would introduce
-            # extra computation
-            for new_shps, out in zip(o_shapes, node.outputs, strict=True):
-                if not hasattr(out.type, "ndim"):
-                    continue
-
-                merged_shps = list(self.shape_of[out])
-                changed = False
-                for i in range(out.type.ndim):
-                    n_r = merged_shps[i]
-                    if (
-                        n_r.owner
-                        and isinstance(n_r.owner.op, Shape_i)
-                        and n_r.owner.inputs[0] not in self.fgraph.variables
-                    ):
-                        changed = True
-                        merged_shps[i] = new_shps[i]
-                if changed:
-                    self.set_shape(out, merged_shps, override=True)
-            r = self.shape_of[var][idx]
-        return r
-
-    def shape_ir(self, i, r):
-        """Return symbolic r.shape[i] for tensor variable r, int i."""
-        if hasattr(r.type, "shape") and r.type.shape[i] is not None:
-            return constant(r.type.shape[i], dtype="int64")
-        else:
-            s = Shape_i(i)(r)
-            try:
-                s = get_scalar_constant_value(s)
-            except NotScalarConstantError:
-                pass
-            return s
-
-    def shape_tuple(self, r):
-        """Return a tuple of symbolic shape vars for tensor variable r."""
-        if not hasattr(r.type, "ndim"):
-            # This happen for NoneConst.
+    def shape_tuple(self, var):
+        if not hasattr(var.type, "ndim"):
             return None
-        return tuple(self.shape_ir(i, r) for i in range(r.type.ndim))
+        return tuple(self.get_shape(var, i) for i in range(var.type.ndim))
 
-    def default_infer_shape(self, node, i_shapes):
-        """Return a list of shape tuple or None for the outputs of node.
-
-        This function is used for Ops that don't implement infer_shape.
-        Ops that do implement infer_shape should use the i_shapes parameter,
-        but this default implementation ignores it.
-
-        """
-        rval = []
-        for r in node.outputs:
-            try:
-                rval.append(self.shape_tuple(r))
-            except AttributeError:
-                rval.append(None)
-        return rval
-
-    def unpack(self, s_i, var):
-        """Return a symbolic integer scalar for the shape element s_i.
-
-        The s_i argument was produced by the infer_shape() of an Op subclass.
-
-        var: the variable that correspond to s_i. This is just for
-        error reporting.
-
-        """
-        assert s_i is not None
-
-        if s_i == 1:
-            return self.lscalar_one
-        if isinstance(s_i, float) and int(s_i) == s_i:
-            s_i = int(s_i)
-        if isinstance(s_i, np.integer | int) or (
-            isinstance(s_i, np.ndarray) and s_i.ndim == 0
-        ):
-            # this shape is a constant
-            if s_i < 0:
-                msg = "There is a negative shape in the graph!"
-                msg += get_variable_trace_string(var)
-                # The rest of the pipeline don't handle correctly this
-                # case.  So we have 2 choices, stop compilation or
-                # consider the shape as unknown.  As we have more
-                # chance to give the stack trace here then later, I
-                # choose that options as it would give better error
-                # message.
-                raise AssertionError(msg)
-            return constant(s_i, dtype="int64")
-        if isinstance(s_i, tuple | list):
-            # this dimension is the same as many of the inputs
-            # which tells us that if one of the inputs is known,
-            # the others all become known.
-            # TODO: should be implemented in Elemwise, and Dot
-            #
-            # worst case, we loop over shape_of and replace things
-            raise NotImplementedError(s_i)
-
-        # s_i is x.shape[i] for some x, we change it to shape_of[x][i]
-        if (
-            s_i.owner
-            and isinstance(s_i.owner.op, Subtensor)
-            and s_i.owner.inputs[0].owner
-            and isinstance(s_i.owner.inputs[0].owner.op, Shape)
-        ):
-            assert s_i.type.ndim == 0
-            assert len(s_i.owner.op.idx_list) == 1
-
-            # The current Subtensor always put constant index in the graph.
-            # This was not True in the past. So call the Subtensor function
-            # that will return the right index.
-            idx = get_idx_list(s_i.owner.inputs, s_i.owner.op.idx_list)
-            assert len(idx) == 1
-            idx = idx[0]
-            try:
-                i = get_scalar_constant_value(idx)
-            except NotScalarConstantError:
-                pass
-            else:
-                # Executed only if no exception was raised
-                x = s_i.owner.inputs[0].owner.inputs[0]
-                # x should already have been imported, and should be in shape_of.
-                s_i = self.shape_of[x][i]
-
-        if s_i.type.dtype in integer_dtypes:
-            if getattr(s_i.type, "ndim", 0):
-                raise TypeError("Shape element must be scalar", s_i)
-            return s_i
-        else:
-            raise TypeError(
-                "Unsupported shape element", s_i, type(s_i), getattr(s_i, "type", None)
-            )
-
-    def set_shape(self, r, s, override=False):
-        """Assign the shape `s` to previously un-shaped variable `r`.
-
-        Parameters
-        ----------
-        r : a variable
-        s : None or a tuple of symbolic integers
-        override : If False, it mean r is a new object in the fgraph.
-            If True, it mean r is already in the fgraph and we want to
-            override its shape.
-
-        """
-        if not override:
-            assert r not in self.shape_of, "r already in shape_of"
-        if s is None:
-            self.shape_of[r] = s
-        else:
-            if not isinstance(s, tuple | list):
-                raise TypeError("shapes must be tuple/list", (r, s))
-
-            if r.type.ndim != len(s):
-                sio = StringIO()
-                pytensor.printing.debugprint(r, file=sio, print_type=True)
-                raise AssertionError(
-                    f"Something inferred a shape with {len(s)} dimensions "
-                    f"for a variable with {int(r.type.ndim)} dimensions"
-                    f" for the variable:\n{sio.getvalue()}"
-                )
-
-            shape_vars = []
-            for i in range(r.type.ndim):
-                if hasattr(r.type, "shape") and r.type.shape[i] is not None:
-                    shape_vars.append(constant(r.type.shape[i], dtype="int64"))
-                else:
-                    shape_vars.append(self.unpack(s[i], r))
-            assert all(
-                not hasattr(r.type, "shape")
-                or r.type.shape[i] != 1
-                or self.lscalar_one.equals(shape_vars[i])
-                or self.lscalar_one.equals(
-                    get_scalar_constant_value(shape_vars[i], raise_not_constant=False)
-                )
-                for i in range(r.type.ndim)
-            )
-            self.shape_of[r] = tuple(shape_vars)
-            for sv in shape_vars:
-                self.shape_of_reverse_index.setdefault(sv, set()).add(r)
-
-    def update_shape(self, r, other_r):
-        """Replace shape of r by shape of other_r.
-
-        If, on some dimensions, the shape of other_r is not informative,
-        keep the shape of r on those dimensions.
-
-        """
-        # other_r should already have a shape
-        assert other_r in self.shape_of, ("other_r not in shape_of", other_r)
-        other_shape = self.shape_of[other_r]
-
-        # If other_shape has no information, call is pointless.
-        if other_shape is None:
-            return
-
-        if r in self.shape_of:
-            r_shape = self.shape_of[r]
-        else:
-            # If no info is known on r's shape, use other_shape
-            self.set_shape(r, other_shape)
-            return
-        if (
-            other_r.owner
-            and r.owner
-            and other_r.owner.inputs == r.owner.inputs
-            and other_r.owner.op == r.owner.op
-        ):
-            # We are doing a merge, so the two shape graphs will be the
-            # same.  This is only done so that we call `ancestors` less
-            # frequently.
-            return
-
-        # Merge other_shape with r_shape, giving the priority to other_shape
-        merged_shape = []
-        for i, ps in enumerate(other_shape):
-            if r_shape is None and other_shape:
-                merged_shape.append(other_shape[i])
-            elif (
-                ps.owner
-                and isinstance(ps.owner.op, Shape_i)
-                and ps.owner.op.i == i
-                and ps.owner.inputs[0] in (r, other_r)
-            ):
-                # If other_shape[i] is uninformative, use r_shape[i].
-                # For now, we consider 2 cases of uninformative other_shape[i]:
-                #  - Shape_i(i)(other_r);
-                #  - Shape_i(i)(r).
-                merged_shape.append(r_shape[i])
-            elif isinstance(r_shape[i], Constant | int):
-                # We do this to call less often ancestors and make
-                # sure we have the simplest shape possible.
-                merged_shape.append(r_shape[i])
-            elif isinstance(other_shape[i], Constant | int):
-                # We do this to call less often ancestors and make
-                # sure we have the simplest shape possible.
-                merged_shape.append(other_shape[i])
-            elif other_shape[i] == r_shape[i]:
-                # This mean the shape is equivalent
-                # We do not want to do the ancestor check in those cases
-                merged_shape.append(r_shape[i])
-            elif any(
-                (
-                    r_shape[i] == anc
-                    or (
-                        anc.owner
-                        and isinstance(anc.owner.op, Shape)
-                        and anc.owner.inputs[0] == r
-                    )
-                )
-                for anc in ancestors([other_shape[i]])
-            ):
-                # Another case where we want to use r_shape[i] is when
-                # other_shape[i] actually depends on r_shape[i]. In that case,
-                # we do not want to substitute an expression with another that
-                # is strictly more complex. Such a substitution could also lead
-                # to cycles: if (in the future) r_shape[i] gets replaced by an
-                # expression of other_shape[i], other_shape[i] may end up
-                # depending on itself.
-                merged_shape.append(r_shape[i])
-            else:
-                merged_shape.append(other_shape[i])
-        assert all(
-            (
-                not hasattr(r.type, "shape")
-                or (r.type.shape[i] != 1 and other_r.type.shape[i] != 1)
-            )
-            or self.lscalar_one.equals(merged_shape[i])
-            or self.lscalar_one.equals(
-                get_scalar_constant_value(
-                    merged_shape[i],
-                    only_process_constants=True,
-                    raise_not_constant=False,
-                )
-            )
-            for i in range(r.type.ndim)
+    @property
+    def shape_of(self):
+        """Deprecated back-compat shim. Use ``shape_tuple(var)`` instead."""
+        warn(
+            "ShapeFeature.shape_of is deprecated; use shape_tuple(var) instead.",
+            DeprecationWarning,
+            stacklevel=2,
         )
-        self.shape_of[r] = tuple(merged_shape)
-        for sv in self.shape_of[r]:
-            self.shape_of_reverse_index.setdefault(sv, set()).add(r)
-
-    def set_shape_i(self, r, i, s_i):
-        """Replace element i of shape_of[r] by s_i"""
-        assert r in self.shape_of
-        prev_shape = self.shape_of[r]
-        # prev_shape is a tuple, so we cannot change it inplace,
-        # so we build another one.
-        new_shape = []
-        for j, s_j in enumerate(prev_shape):
-            if j == i:
-                new_shape.append(self.unpack(s_i, r))
-            else:
-                new_shape.append(s_j)
-        assert all(
-            not hasattr(r.type, "shape")
-            or r.type.shape[idx] != 1
-            or self.lscalar_one.equals(new_shape[idx])
-            or self.lscalar_one.equals(
-                get_scalar_constant_value(new_shape[idx], raise_not_constant=False)
-            )
-            for idx in range(r.type.ndim)
-        )
-        self.shape_of[r] = tuple(new_shape)
-        for sv in self.shape_of[r]:
-            self.shape_of_reverse_index.setdefault(sv, set()).add(r)
-
-    def init_r(self, r):
-        """Register r's shape in the shape_of dictionary."""
-        if r not in self.shape_of:
-            self.set_shape(r, self.shape_tuple(r))
-
-    def make_vector_shape(self, r):
-        return as_tensor_variable(self.shape_of[r], ndim=1, dtype="int64")
+        return _ShapeOfProxy(self)
 
     def on_attach(self, fgraph):
         if hasattr(fgraph, "shape_feature"):
             raise AlreadyThere("This FunctionGraph already has a ShapeFeature")
-
-        if hasattr(self, "fgraph") and self.fgraph != fgraph:
+        if self.fgraph is not None and self.fgraph is not fgraph:
             raise Exception("This ShapeFeature is already attached to a graph")
-
         self.fgraph = fgraph
-
         fgraph.shape_feature = self
-        # Must be local to the object as otherwise we reuse the same
-        # variable for multiple fgraph!
-        self.lscalar_one = constant(1, dtype="int64")
-        assert self.lscalar_one.type.dtype == "int64"
-
-        self.fgraph = fgraph
-        # Variable -> tuple(scalars) or None  (All tensor vars map to tuple)
-        self.shape_of = {}
-        # Variable ->
-        self.scheduled = {}
-        # shape var -> graph v
-        self.shape_of_reverse_index = {}
-
-        for node in fgraph.toposort():
-            self.on_import(fgraph, node, reason="on_attach")
 
     def on_detach(self, fgraph):
-        self.shape_of = {}
-        self.scheduled = {}
-        self.shape_of_reverse_index = {}
+        self._cache.clear()
+        self._stale.clear()
+        self._shape_i_cache.clear()
+        self.scheduled.clear()
         self.fgraph = None
-        del fgraph.shape_feature
+        if hasattr(fgraph, "shape_feature"):
+            del fgraph.shape_feature
 
-    def on_import(self, fgraph, node, reason):
-        if node.outputs[0] in self.shape_of:
-            # this is a revert, not really an import
-            for r in node.outputs + node.inputs:
-                assert r in self.shape_of
-            return
+    def _flush_stale(self):
+        """Drop cached shapes for the changed nodes and everything downstream of them.
 
-        for i, r in enumerate(node.inputs):
-            # make sure we have shapes for the inputs
-            self.init_r(r)
+        Walks ``fgraph.clients`` from each stale node, so a change above a cached node
+        evicts it no matter how many levels down it sits.
+        """
+        cache = self._cache
+        clients = self.fgraph.clients
+        queue = deque(self._stale)
+        seen = set(self._stale)
+        self._stale = set()
+        while queue:
+            node = queue.popleft()
+            cache.pop(node, None)
+            for out in node.outputs:
+                for client_node, _ in clients.get(out, ()):
+                    if client_node not in seen:
+                        seen.add(client_node)
+                        queue.append(client_node)
 
-        o_shapes = self.get_node_infer_shape(node)
-
-        # this is packed information
-        # an element of o_shapes is either None or a tuple
-        #   elements of the tuple can be either strings, or ints
-        if len(o_shapes) != len(node.outputs):
-            raise Exception(
-                f'The infer_shape method for the Op "{node.op}" returned a list '
-                f"with the wrong number of element: len(o_shapes) = {len(o_shapes)} "
-                f" != len(node.outputs) = {len(node.outputs)}"
-            )
-
-        # Ensure shapes are in 'int64'. This is to make sure the assert
-        # found in the `local_useless_subtensor` rewrite does not fail.
-        for sh_idx, sh in enumerate(o_shapes):
-            if sh is None:
-                continue
-            if not isinstance(sh, list | tuple):
-                raise ValueError(
-                    f"infer_shape of {node} didn't return a list of"
-                    f" list. It returned '{o_shapes}'"
-                )
-            new_shape = []
-            for i, d in enumerate(sh):
-                # Note: we ignore any shape element that is not typed (i.e.,
-                # does not have a 'dtype' attribute). This means there may
-                # still remain int elements that are int32 on 32-bit platforms,
-                # but this works with `local_useless_subtensor`, so for now we
-                # keep it this way. See #266 for a better long-term fix.
-                if getattr(d, "dtype", "int64") != "int64":
-                    assert d.dtype in discrete_dtypes, (node, d.dtype)
-                    assert str(d.dtype) != "uint64", node
-                    new_shape += sh[len(new_shape) : i + 1]
-                    if isinstance(d, Constant):
-                        casted_d = constant(d.data, dtype="int64")
-                    else:
-                        casted_d = cast(d, "int64")
-                    new_shape[i] = casted_d
-            if new_shape:
-                # We replace the shape with wrong dtype by the one with
-                # 'int64'.
-                new_shape += sh[len(new_shape) :]
-                o_shapes[sh_idx] = tuple(new_shape)
-
-        for r, s in zip(node.outputs, o_shapes, strict=True):
-            self.set_shape(r, s)
+    def on_prune(self, fgraph, node, reason):
+        self._cache.pop(node, None)
+        self._stale.discard(node)
+        for out in node.outputs:
+            self._shape_i_cache.pop(out, None)
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason):
-        if new_r not in self.shape_of:
-            # It happen that the fgraph didn't called on_import for some
-            # new_r.  This happen when new_r don't have an
-            # owner(i.e. it is a constant or an input of the graph)
-            # update_shape suppose that r and new_r are in shape_of.
-            self.init_r(new_r)
+        if r is new_r:
+            return
+        # Defer invalidation: the next query flushes this node and its downstream cone.
+        self._stale.add(node)
 
-        # This tells us that r and new_r must have the same shape if
-        # we didn't know that the shapes are related, now we do.
-        self.update_shape(new_r, r)
-
-        # change_input happens in two cases:
-        # 1) we are trying to get rid of r, or
-        # 2) we are putting things back after a failed transaction.
-
-        # In case 1, if r has a shape_i client, we will want to
-        # replace the shape_i of r with the shape of new_r.  Say that r is *scheduled*.
-        # At that point, node is no longer a client of r, but of new_r
-        # This schedule is processed by `local_track_shape_i`.
-        for shpnode, idx in fgraph.clients[r] + [(node, i)]:
-            if isinstance(shpnode.op, Shape_i):
-                idx = shpnode.op.i
-                repl = self.shape_of[new_r][idx]
-                if repl.owner is shpnode:
-                    # This mean the replacement shape object is
-                    # exactly the same as the current shape object. So
-                    # no need for replacement.
-                    continue
-                if (
-                    repl.owner
-                    and repl.owner.inputs[0] is shpnode.inputs[0]
-                    and isinstance(repl.owner.op, Shape_i)
-                    and repl.owner.op.i == shpnode.op.i
-                ):
-                    # The replacement is a shape_i of the same
-                    # input. So no need to do this equivalent
-                    # replacement.
-                    continue
-
-                if shpnode.outputs[0] in ancestors([repl]):
-                    raise InconsistencyError(
-                        "This substitution would insert a cycle in the graph:"
-                        f"node: {node}, i: {i}, r: {r}, new_r: {new_r}"
-                    )
-
-                self.scheduled[shpnode] = new_r
-        # In case 2, if r is a variable that we've scheduled for shape update,
-        # then we should cancel it.
-        unscheduled = [k for k, v in self.scheduled.items() if v == r]
-        for k in unscheduled:
-            del self.scheduled[k]
-
-        # In either case, r could be in shape_of.values(), that is, r itself
-        # is the shape of  something. In that case, we want to update
-        # the value in shape_of, to keep it up-to-date.
-        for v in self.shape_of_reverse_index.get(r, []):
-            # The reverse index is only approximate. It is not updated on
-            # deletion of variables, or on change_input so it might be the
-            # case that there are a few extra `v`'s in it that no longer have
-            # a shape of r or possibly have been deleted from shape_of
-            # entirely. The important thing is that it permits to recall
-            # all variables with r in their shape.
-            for ii, svi in enumerate(self.shape_of.get(v, [])):
-                if svi == r:
-                    self.set_shape_i(v, ii, new_r)
-        self.shape_of_reverse_index[r] = set()
+        # Schedule Shape_i(r) replacements for local_track_shape_i
+        if hasattr(r.type, "ndim"):
+            for shpnode, _idx in fgraph.clients.get(r, []):
+                if isinstance(getattr(shpnode, "op", None), Shape_i):
+                    self.scheduled[shpnode] = new_r
 
     def same_shape(
         self,
@@ -666,63 +336,27 @@ class ShapeFeature(Feature):
         dim_x: int | None = None,
         dim_y: int | None = None,
     ) -> bool:
-        """Return ``True`` if `x` and `y` have the same shape.
-
-        Parameters
-        ==========
-        x
-            The `Variable` for which its shape is to be compared with `y`'s shape.
-        y
-            The `Variable` for which its shape is to be compared with `x`'s shape.
-        dim_x
-            If non ``None``, compare only the dimension of `x` equal to
-            `dim_x`.
-        dim_y
-            If non ``None``, compare only the dimension of `y` equal to
-            `dim_y`.
-
-        """
-        sx = self.shape_of[x]
-        sy = self.shape_of[y]
-
+        """Return True if we can statically prove x and y have the same shape."""
+        sx = self.shape_tuple(x)
+        sy = self.shape_tuple(y)
         if sx is None or sy is None:
             return False
-
         if dim_x is not None:
-            sx = [sx[dim_x]]
-
+            sx = (sx[dim_x],)
         if dim_y is not None:
-            sy = [sy[dim_y]]
-
+            sy = (sy[dim_y],)
         if len(sx) != len(sy):
             return False
-
-        # Canonicalize the graphs so that comparisons are reasonable
-        # TODO FIXME: This should *not* need to be performed manually here.
-        # Instead, the shape information in `self.shape_of` should be operated
-        # upon alongside all the other elements in a `FunctionGraph` (e.g. as
-        # if `self.shape_of.values()` were additional outputs).
-        shapes_fg = FunctionGraph(
-            outputs=sx + sy,
-            # features=[self],
-            clone=True,
-            # copy_inputs=False,
-        )
-        from pytensor.graph.rewriting.utils import rewrite_graph
-
-        canon_shapes_fg = type_cast(
-            FunctionGraph,
-            rewrite_graph(shapes_fg, custom_rewrite=topo_constant_folding),
-        )
-        canon_shapes = canon_shapes_fg.outputs
-
-        sx = canon_shapes[: len(sx)]
-        sy = canon_shapes[len(sx) :]
-
         for dx, dy in zip(sx, sy, strict=True):
-            if not equal_computations([dx], [dy]):
+            if dx is dy:
+                continue
+            if isinstance(dx, Constant) and isinstance(dy, Constant):
+                if dx.data == dy.data:
+                    continue
                 return False
-
+            if equal_computations([dx], [dy]):
+                continue
+            return False
         return True
 
     def clone(self):
@@ -1300,7 +934,7 @@ def local_shape_to_shape_i(fgraph, node):
     if not hasattr(fgraph, "shape_feature"):
         return
     shape_feature = fgraph.shape_feature
-    ret = shape_feature.make_vector_shape(node.inputs[0])
+    ret = as_tensor_variable(shape_feature.shape_tuple(node.inputs[0]), dtype="int64")
 
     # We need to copy over stack trace from input to output
     copy_stack_trace(node.outputs[0], ret)
@@ -1312,44 +946,40 @@ def local_shape_to_shape_i(fgraph, node):
 @register_canonicalize
 @node_rewriter([Shape_i])
 def local_track_shape_i(fgraph, node):
+    """Replace ``Shape_i(v, i)`` with the inferred shape expression.
+
+    When ``v.owner.op`` has ``infer_shape``, ``get_shape(v, i)`` returns
+    a non-``Shape_i`` expression. Rewriting the literal ``Shape_i(v, i)``
+    with that expression lets downstream rewrites see the inferred form
+    and typically lets the original producer of ``v`` be pruned when only
+    its shape is consumed.
     """
-    Update `Shape_i` nodes to match `ShapeFeature`'s internal state.
-
-    This rewrite is essential for propagating shape information during graph
-    transformations (like lowering). When a node is replaced or updated,
-    `ShapeFeature` calculates the shape of the new node and "schedules"
-    dependent `Shape_i` nodes for update, so they use the latest inferred graph.
-
-    If we start with an fgraph containing the two nodes below:
-    >> out = OpWithoutInferShape(a, b)
-    >> out_shape_i = Shape_i(out)
-
-    And then rewrite
-    >> new_out = OpWithInferShape(a, b)
-    >> fgraph.replace(out, new_out)
-
-    We end up with
-    >> out_shape_i == Shape_i(new_out)
-
-    If installed, ShapeFeature will do this work in the background
-    >> new_out_shape = infer_shape(new_out)  # Usually some f(a, b)
-    >> fgraph.shape_feature.scheduled[out_shape_i.owner] = new_out_shape
-
-    And this rewrite will ultimately propagate the inference back to the fgraph
-    >> new_out_shape_i = fgraph.shape_feature.scheduled[out_shape_i.owner][i]
-    >> fgraph.replace(out_shape_i, new_out_shape_i)
-
-    """
-    try:
-        shape_feature = fgraph.shape_feature
-    except AttributeError:
+    shape_feature = getattr(fgraph, "shape_feature", None)
+    if shape_feature is None:
         return False
 
-    if node not in shape_feature.scheduled:
+    # Handle scheduled replacements from on_change_input
+    replacement = shape_feature.scheduled.pop(node, None)
+    if replacement is not None:
+        return [shape_feature.get_shape(replacement, node.op.i)]
+
+    [v] = node.inputs
+    if v.owner is None:
         return False
 
-    # Don't unschedule node as it could be reinserted in the
-    # fgraph as we don't change it in the shapefeature internal
-    # structure.
-    replacement = shape_feature.scheduled[node]
-    return [shape_feature.shape_of[replacement][node.op.i]]
+    i = node.op.i
+    new_shape = shape_feature.get_shape(v, i)
+    if new_shape is None:
+        return False
+
+    # Avoid replacing Shape_i(v, i) with itself
+    if new_shape.owner is node or (
+        isinstance(new_shape, Variable)
+        and new_shape.owner is not None
+        and isinstance(new_shape.owner.op, Shape_i)
+        and new_shape.owner.op.i == i
+        and new_shape.owner.inputs[0] is v
+    ):
+        return False
+
+    return [new_shape]

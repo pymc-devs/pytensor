@@ -284,7 +284,7 @@ def test_normal_ShapeFeature():
         clone=False,
         features=[ShapeFeature()],
     )
-    s1, s2 = fg.shape_feature.shape_of[d_rv]
+    s1, s2 = fg.shape_feature.shape_tuple(d_rv)
 
     f = function([M_pt, sd_pt], [s1, s2, d_rv], mode=py_mode, on_unused_input="ignore")
     s1_val, s2_val, d_rv_val = f(3, np.array(1.0, dtype=config.floatX))
@@ -657,7 +657,7 @@ def test_mvnormal_ShapeFeature():
         features=[ShapeFeature()],
     )
 
-    s1, s2 = fg.shape_feature.shape_of[d_rv]
+    s1, s2 = fg.shape_feature.shape_tuple(d_rv)
 
     f = function([M_pt], [s1, s2], mode=py_mode)
     s1_val, s2_val = f(2)
@@ -679,7 +679,7 @@ def test_mvnormal_ShapeFeature():
         features=[ShapeFeature()],
     )
 
-    s1, s2, s3, s4 = fg.shape_feature.shape_of[d_rv]
+    s1, s2, s3, s4 = fg.shape_feature.shape_tuple(d_rv)
 
     mean_val = np.array([[0, 1, 2]], dtype=config.floatX)
     f = function([mean, cov], [s1, s2, s3, s4], mode=py_mode, on_unused_input="ignore")
@@ -810,7 +810,7 @@ def test_dirichlet_ShapeFeature():
         features=[ShapeFeature()],
     )
 
-    s1, s2 = fg.shape_feature.shape_of[d_rv]
+    s1, s2 = fg.shape_feature.shape_tuple(d_rv)
 
     assert M_pt in graph_inputs([s1])
     assert N_pt in graph_inputs([s2])
