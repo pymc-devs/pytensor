@@ -1,5 +1,6 @@
 from collections.abc import Container
 from copy import copy
+from functools import reduce
 
 from pytensor import tensor as pt
 from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
@@ -12,13 +13,15 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.unify import OpPattern
+from pytensor.scalar.basic import Add
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.basic import atleast_Nd, split
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.products import KroneckerProduct
@@ -41,7 +44,10 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg.utils import get_assume_a
+from pytensor.tensor.rewriting.linalg.utils import (
+    get_assume_a,
+    is_eye_mul,
+)
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -458,6 +464,104 @@ def solve_of_kron(fgraph, node):
 
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+def _kron_plus_diag_noise_eigh_form(Ks, sigma_sq):
+    r"""Eigendecompose :math:`\bigotimes K_i + \sigma^2 I`.
+
+    Returns ``(Q, d)`` where :math:`Q = \bigotimes Q_i` is orthogonal,
+    :math:`d = (\bigotimes d_i) + \sigma^2` is the vector of eigenvalues,
+    and :math:`(Q_i, d_i)` is the eigendecomposition of :math:`K_i`.
+    """
+    eigs = [eigh(K) for K in Ks]
+    ds = [w for (w, _) in eigs]
+    Qs = [v for (_, v) in eigs]
+
+    Q = reduce(pt.linalg.kron, Qs)
+    d = reduce(lambda a, b: pt.outer(a, b).ravel(), ds) + sigma_sq
+    return Q, d
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([KroneckerProduct])
+def solve_of_kron_plus_diag_noise(fgraph, node):
+    r"""Decompose ``solve(kron(*Ks) + sigma**2 * I, b)`` via per-component ``eigh``.
+
+    With :math:`K_i = Q_i \mathrm{diag}(d_i) Q_i^\top`,
+
+    .. math::
+        \bigl(\bigotimes K_i + \sigma^2 I\bigr)^{-1} b
+            = Q\, \mathrm{diag}(d)^{-1}\, Q^\top b,
+        \quad Q = \bigotimes Q_i,\;
+              d = \bigotimes d_i + \sigma^2.
+    """
+    kron_out = node.outputs[0]
+
+    def collect_leaves(y):
+        if y.owner is not None and isinstance(y.owner.op, KroneckerProduct):
+            return collect_leaves(y.owner.inputs[0]) + collect_leaves(y.owner.inputs[1])
+        return [y]
+
+    Ks = collect_leaves(kron_out)
+    if any(K.type.ndim != 2 for K in Ks):
+        return None
+
+    # Find Add(kron, scalar*eye); either operand order.
+    K_var = sigma_sq = None
+    for client, kron_idx in fgraph.clients[kron_out]:
+        if not (
+            isinstance(client.op, Elemwise)
+            and isinstance(client.op.scalar_op, Add)
+            and len(client.inputs) == 2
+        ):
+            continue
+        eye_match = is_eye_mul(client.inputs[1 - kron_idx])
+        if eye_match is None:
+            continue
+        _, raw_sigma_sq = eye_match
+        # Eigh form needs ``sigma_sq`` to broadcast against the 1-D ``d`` vector.
+        if not all(raw_sigma_sq.type.broadcastable):
+            continue
+        sigma_sq = raw_sigma_sq.squeeze()
+        K_var = client.outputs[0]
+        break
+    if K_var is None:
+        return None
+
+    # kron + sigma**2*I is symmetric, so left-expand and matrix-transpose wrappers
+    # both reach Solve consumers that are equivalent to consumers of K_var.
+    candidates = [K_var]
+    for c, idx in fgraph.clients[K_var]:
+        if (
+            idx == 0
+            and isinstance(c.op, DimShuffle)
+            and (c.op.is_left_expand_dims or c.op.is_left_expanded_matrix_transpose)
+        ):
+            candidates.append(c.outputs[0])
+
+    Q = d = None  # shared across all Solve consumers of the same noisy K
+    replacements = {}
+    for cand in candidates:
+        for client, idx in fgraph.clients[cand]:
+            if idx != 0:
+                continue
+            if not (
+                isinstance(client.op, Blockwise)
+                and isinstance(client.op.core_op, SolveBase)
+            ):
+                continue
+            if Q is None:
+                Q, d = _kron_plus_diag_noise_eigh_form(Ks, sigma_sq)
+            _, b = client.inputs
+            b_ndim = client.op.core_op.b_ndim
+            b_proj = Q.mT @ b
+            rescaled = b_proj / d if b_ndim == 1 else b_proj / d[..., :, None]
+            new_out = Q @ rescaled
+            copy_stack_trace(client.outputs[0], new_out)
+            replacements[client.outputs[0]] = new_out
+
+    return replacements or None
 
 
 @register_canonicalize

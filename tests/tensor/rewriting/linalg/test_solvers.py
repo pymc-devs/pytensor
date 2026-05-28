@@ -706,6 +706,148 @@ class TestSolveOfKron:
                 assert core.assume_a != "pos"
 
 
+class TestSolveOfKronPlusDiagNoise:
+    """Tests for the noisy-Kron eigh-decomposition solve rewrite."""
+
+    @staticmethod
+    def _assert_no_kron_no_full_solve(f):
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert not any(isinstance(op, KroneckerProduct) for op in ops), (
+            f"KroneckerProduct still in graph: {[type(op).__name__ for op in ops]}"
+        )
+        # Full Solve / CholeskySolve on the N x N matrix would defeat the point.
+        assert not any(isinstance(op, Solve | CholeskySolve) for op in ops), (
+            f"Full-N solve survived: {[type(op).__name__ for op in ops]}"
+        )
+
+    @staticmethod
+    def _random_pd(rng, n):
+        a = rng.normal(size=(n, n))
+        return a @ a.T + np.eye(n)
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_solve(self, b_ndim):
+        rng = np.random.default_rng(0)
+        m, p, k = 4, 3, 5
+
+        # Symbolically enforce PD on each component so verify_grad's FD
+        # perturbations stay inside the rewrite's contract.
+        def build_out(K1_raw, K2_raw, sigma, b):
+            K1 = K1_raw @ K1_raw.mT + pt.eye(m)
+            K2 = K2_raw @ K2_raw.mT + pt.eye(p)
+            K = pt.linalg.kron(K1, K2) + sigma**2 * pt.eye(m * p)
+            return solve(K, b, assume_a="pos", b_ndim=b_ndim)
+
+        K1_pt = pt.matrix("K1", shape=(m, m))
+        K2_pt = pt.matrix("K2", shape=(p, p))
+        sigma_pt = pt.scalar("sigma")
+        if b_ndim == 1:
+            b_pt = pt.vector("b", shape=(m * p,))
+            b_v = rng.normal(size=(m * p,))
+        else:
+            b_pt = pt.matrix("b", shape=(m * p, k))
+            b_v = rng.normal(size=(m * p, k))
+
+        out = build_out(K1_pt, K2_pt, sigma_pt, b_pt)
+        f = function([K1_pt, K2_pt, sigma_pt, b_pt], out, mode="FAST_RUN")
+        self._assert_no_kron_no_full_solve(f)
+
+        K1_v = rng.normal(size=(m, m))
+        K2_v = rng.normal(size=(p, p))
+        sigma_v = 0.7
+        K_v = np.kron(
+            K1_v @ K1_v.T + np.eye(m), K2_v @ K2_v.T + np.eye(p)
+        ) + sigma_v**2 * np.eye(m * p)
+        expected = np.linalg.solve(K_v, b_v)
+        assert_allclose(f(K1_v, K2_v, sigma_v, b_v), expected, atol=1e-9)
+
+        utt.verify_grad(build_out, [K1_v, K2_v, sigma_v, b_v], rng=rng)
+
+    def test_commutative_add(self):
+        """``sigma**2*I + kron`` matches the same as ``kron + sigma**2*I``."""
+        m, p = 4, 3
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        sigma = pt.scalar("sigma")
+        b = pt.vector("b", shape=(m * p,))
+
+        K = sigma**2 * pt.eye(m * p) + pt.linalg.kron(K1, K2)
+        out = solve(K, b, assume_a="pos")
+        f = function([K1, K2, sigma, b], out, mode="FAST_RUN")
+        self._assert_no_kron_no_full_solve(f)
+
+    def test_n_way(self):
+        """``kron(K1, kron(K2, K3)) + sigma**2*I`` flattens recursively."""
+        from pytensor.tensor.linalg.decomposition.eigen import Eigh
+
+        rng = np.random.default_rng(2)
+        m, p, q = 3, 2, 4
+        N = m * p * q
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        K3 = pt.matrix("K3", shape=(q, q))
+        sigma = pt.scalar("sigma")
+        b = pt.vector("b", shape=(N,))
+
+        K = pt.linalg.kron(pt.linalg.kron(K1, K2), K3) + sigma**2 * pt.eye(N)
+        out = solve(K, b, assume_a="pos")
+        f = function([K1, K2, K3, sigma, b], out, mode="FAST_RUN")
+        self._assert_no_kron_no_full_solve(f)
+
+        # One eigh per component.
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert sum(1 for op in ops if isinstance(op, Eigh)) == 3
+
+        K1_v = self._random_pd(rng, m)
+        K2_v = self._random_pd(rng, p)
+        K3_v = self._random_pd(rng, q)
+        sigma_v = 0.5
+        b_v = rng.normal(size=(N,))
+        K_v = np.kron(np.kron(K1_v, K2_v), K3_v) + sigma_v**2 * np.eye(N)
+        expected = np.linalg.solve(K_v, b_v)
+        assert_allclose(f(K1_v, K2_v, K3_v, sigma_v, b_v), expected, atol=1e-9)
+
+    def test_non_uniform_noise_does_not_fire(self):
+        """Non-scalar noise must leave the kron in place."""
+        m, p = 4, 3
+        N = m * p
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        noise = pt.vector("noise", shape=(N,))
+        b = pt.vector("b", shape=(N,))
+
+        K = pt.linalg.kron(K1, K2) + noise[:, None] * pt.eye(N)
+        out = solve(K, b, assume_a="pos")
+        f = function([K1, K2, noise, b], out, mode="FAST_RUN")
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert any(isinstance(op, KroneckerProduct) for op in ops)
+
+    def test_negative_sigma_sq_still_correct(self):
+        """The rewrite is algebraic: a negative coefficient that keeps K PD works."""
+        rng = np.random.default_rng(3)
+        m, p = 4, 3
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        alpha = pt.scalar("alpha")
+        b = pt.vector("b", shape=(m * p,))
+
+        # K = kron + alpha * I, where alpha is negative but small enough to keep K PD.
+        K = pt.linalg.kron(K1, K2) + alpha * pt.eye(m * p)
+        out = solve(K, b, assume_a="pos")
+        f = function([K1, K2, alpha, b], out, mode="FAST_RUN")
+        self._assert_no_kron_no_full_solve(f)
+
+        K1_v = self._random_pd(rng, m) + m * np.eye(m)
+        K2_v = self._random_pd(rng, p) + p * np.eye(p)
+        alpha_v = -0.1
+        b_v = rng.normal(size=(m * p,))
+        K_v = np.kron(K1_v, K2_v) + alpha_v * np.eye(m * p)
+        # Sanity check: K is still PD.
+        assert np.linalg.eigvalsh(K_v).min() > 0
+        expected = np.linalg.solve(K_v, b_v)
+        assert_allclose(f(K1_v, K2_v, alpha_v, b_v), expected, atol=1e-9)
+
+
 class TestDiagonalSolveToDivision:
     @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
     @pytest.mark.parametrize(
