@@ -17,7 +17,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.type import Type
 from pytensor.tensor.basic import alloc, as_tensor_variable
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import add, exp, maximum
+from pytensor.tensor.math import add, cos, exp, maximum
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
@@ -611,6 +611,19 @@ class TestSameShape:
             shape_feature.same_shape(x, o, 1, 0)
         with pytest.raises(IndexError):
             shape_feature.same_shape(x, o, 0, 1)
+
+
+def test_get_shape_resolves_through_chain():
+    """get_shape should resolve to the deepest input, not intermediate ops."""
+    x = matrix("x")
+    y = exp(cos(x).T)
+
+    fg = FunctionGraph([x], [y], clone=False)
+    sf = ShapeFeature()
+    fg.attach_feature(sf)
+
+    s = sf.get_shape(y, 0)
+    utt.assert_equal_computations([s], [Shape_i(1)(x)])
 
 
 def test_useless_specify_shape():
