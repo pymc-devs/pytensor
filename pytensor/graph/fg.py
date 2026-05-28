@@ -1099,7 +1099,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 [o.type() for o in node.outputs],
             )
             memo.update(zip(node.outputs, new_node.outputs))
-        return [memo[out] for out in self.outputs]
+        return [out if isinstance(out, Constant) else memo[out] for out in self.outputs]
 
     def unfreeze(self) -> "FunctionGraph":
         """Return a mutable FunctionGraph with fresh mutable Apply nodes."""
