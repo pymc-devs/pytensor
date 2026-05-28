@@ -9,6 +9,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.linalg.summary import Det, SLogDet, det
 from pytensor.tensor.type import matrix
 from tests.unittest_tools import assert_equal_computations
@@ -459,3 +460,68 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     expected = expected_fn(x)
     rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
     assert_equal_computations([rewritten], [expected])
+
+
+class TestDetOfKronPlusDiagNoise:
+    """Tests for the noisy-Kron eigh-decomposition det rewrite."""
+
+    @staticmethod
+    def _assert_no_kron_no_full_det(f):
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert not any(isinstance(op, KroneckerProduct) for op in ops)
+        assert not any(isinstance(op, Det | SLogDet) for op in ops)
+
+    @staticmethod
+    def _random_pd(rng, n):
+        a = rng.normal(size=(n, n))
+        return a @ a.T + np.eye(n)
+
+    def test_slogdet_logp(self):
+        """``slogdet`` chains through to ``sum(log|d|)`` (the logp use case)."""
+        m, p = 4, 3
+        N = m * p
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        sigma = pt.scalar("sigma")
+        K = pt.linalg.kron(K1, K2) + sigma**2 * pt.eye(N)
+        _, log_det = pt.linalg.slogdet(K)
+        f = function([K1, K2, sigma], log_det, mode="FAST_RUN")
+        self._assert_no_kron_no_full_det(f)
+
+        rng = np.random.default_rng(0)
+        K1_v = self._random_pd(rng, m)
+        K2_v = self._random_pd(rng, p)
+        sigma_v = 0.7
+        K_v = np.kron(K1_v, K2_v) + sigma_v**2 * np.eye(N)
+        expected = np.linalg.slogdet(K_v)[1]
+        got = f(K1_v, K2_v, sigma_v)
+        assert_allclose(
+            got,
+            expected,
+            atol=1e-3 if config.floatX == "float32" else 1e-9,
+            rtol=1e-3 if config.floatX == "float32" else 1e-9,
+        )
+
+    def test_n_way(self):
+        m, p, q = 3, 2, 4
+        N = m * p * q
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        K3 = pt.matrix("K3", shape=(q, q))
+        sigma = pt.scalar("sigma")
+        K = pt.linalg.kron(pt.linalg.kron(K1, K2), K3) + sigma**2 * pt.eye(N)
+        _, log_det = pt.linalg.slogdet(K)
+        f = function([K1, K2, K3, sigma], log_det, mode="FAST_RUN")
+        self._assert_no_kron_no_full_det(f)
+
+    def test_non_uniform_noise_does_not_fire(self):
+        m, p = 4, 3
+        N = m * p
+        K1 = pt.matrix("K1", shape=(m, m))
+        K2 = pt.matrix("K2", shape=(p, p))
+        noise = pt.vector("noise", shape=(N,))
+        K = pt.linalg.kron(K1, K2) + noise[:, None] * pt.eye(N)
+        log_det = pt.linalg.slogdet(K)[1]
+        f = function([K1, K2, noise], log_det, mode="FAST_RUN")
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert any(isinstance(op, KroneckerProduct) for op in ops)
