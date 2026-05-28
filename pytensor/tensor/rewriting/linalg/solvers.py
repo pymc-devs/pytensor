@@ -21,6 +21,7 @@ from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.inverse import MatrixInverse
+from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.linear_control import (
@@ -370,6 +371,91 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
         per_block_solutions.append(sol)
 
     new_out = pt.concatenate(per_block_solutions, axis=split_axis)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def solve_of_kron(fgraph, node):
+    r"""Decompose ``solve(kron(A, B), b)`` into per-component solves.
+
+    Inverts the identity :math:`(A \otimes B)\, \mathrm{vec}_{\mathrm{row}}(X)
+    = \mathrm{vec}_{\mathrm{row}}(A X B^\top)`:
+
+    .. math::
+        \mathrm{solve}(A \otimes B,\, b)
+            = \mathrm{vec}_{\mathrm{row}}\bigl(
+                  \mathrm{solve}(B,\, \mathrm{solve}(A,\, Y)^\top)^\top
+              \bigr),
+        \quad Y = b.\mathrm{reshape}(m, p).
+
+    Applies to ``Solve``, ``SolveTriangular``, and ``CholeskySolve``. For
+    ``Solve``, ``assume_a`` is downgraded to ``"gen"`` on the per-component
+    solves: :math:`A \otimes B` being symmetric / positive-definite does not
+    imply the same of :math:`A` and :math:`B` individually.
+    """
+    A_kron, b = node.inputs
+
+    # Peel Blockwise's batch-broadcast wrapper (plain expand or matrix-transposed).
+    transposed = False
+    match A_kron.owner_op_and_inputs:
+        case (DimShuffle(is_left_expand_dims=True), inner):
+            A_kron = inner
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+            A_kron = inner
+            transposed = True
+
+    match A_kron.owner_op_and_inputs:
+        case (KroneckerProduct(), A, B):
+            pass
+        case _:
+            return None
+
+    # ``kron(A, B).mT == kron(A.mT, B.mT)`` for 2-D ``A, B``.
+    if transposed:
+        A, B = A.mT, B.mT
+
+    # KroneckerProduct broadcasts elementwise across all dims; the vec identity
+    # is 2-D only.
+    if A.type.ndim != 2 or B.type.ndim != 2:
+        return None
+
+    core_op = node.op.core_op
+    b_ndim = core_op.b_ndim
+
+    props = core_op._props_dict()
+    props["b_ndim"] = 2
+    # Fresh destroy_map: the new ops mustn't inherit overwrite flags from the
+    # outer Solve, which would mark unrelated tensors for in-place destruction.
+    props.pop("overwrite_a", None)
+    props.pop("overwrite_b", None)
+    if isinstance(core_op, Solve):
+        props["assume_a"] = "gen"
+    per_component_solve = Blockwise(type(core_op)(**props))
+
+    m = A.shape[-1]
+    p = B.shape[-1]
+
+    if b_ndim == 1:
+        # b: (..., m*p)
+        batch_shape = tuple(b.shape[i] for i in range(b.type.ndim - 1))
+        Y = b.reshape((*batch_shape, m, p))
+        Z = per_component_solve(A, Y)
+        X = per_component_solve(B, Z.mT).mT
+        new_out = X.reshape((*batch_shape, m * p))
+    else:
+        # b: (..., m*p, k)
+        batch_shape = tuple(b.shape[i] for i in range(b.type.ndim - 2))
+        k = b.shape[-1]
+        Y = b.reshape((*batch_shape, m, p, k))
+        # Fold (p, k) into one RHS axis so the A-solve is a single matrix solve.
+        Y_flat = Y.reshape((*batch_shape, m, p * k))
+        Z = per_component_solve(A, Y_flat).reshape((*batch_shape, m, p, k))
+        X = per_component_solve(B, Z)
+        new_out = X.reshape((*batch_shape, m * p, k))
+
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 

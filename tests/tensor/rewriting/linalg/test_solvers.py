@@ -17,6 +17,7 @@ from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
+from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
 from pytensor.tensor.linalg.solvers.linear_control import (
@@ -33,6 +34,7 @@ from pytensor.tensor.rewriting.linalg.solvers import (
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor
+from tests import unittest_tools as utt
 from tests.unittest_tools import assert_equal_computations
 
 
@@ -561,6 +563,147 @@ def test_block_diag_solve_pushdown_both_sides_block_diag():
         scipy.linalg.block_diag(B1_v, B2_v),
     )
     assert_allclose(f(A1_v, A2_v, B1_v, B2_v), expected, atol=1e-10)
+
+
+class TestSolveOfKron:
+    """Tests for the ``solve(kron(A, B), b)`` vec-identity rewrite."""
+
+    @staticmethod
+    def _assert_no_kron(f):
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert not any(isinstance(op, KroneckerProduct) for op in ops), (
+            f"KroneckerProduct still in graph: {[type(op).__name__ for op in ops]}"
+        )
+
+    @pytest.mark.parametrize(
+        "assume_a, expected_op, transposed",
+        [
+            ("gen", Solve, False),
+            ("gen", Solve, True),
+            ("lower triangular", SolveTriangular, False),
+            ("pos", CholeskySolve, False),
+        ],
+        ids=["gen-plain", "gen-transposed", "lower-tri", "pos"],
+    )
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_solve_of_kron(self, b_ndim, assume_a, expected_op, transposed):
+        rng = np.random.default_rng(0)
+        m, p, k = 4, 3, 5
+
+        # Symbolically impose the structure ``assume_a`` requires so finite-difference
+        # perturbations stay within the contract (mirrors test_cholesky's ``r.dot(r.T)``
+        # pattern for verify_grad against assume_a-dependent rewrites).
+        def shape_component(A, B):
+            if assume_a == "lower triangular":
+                return pt.tril(A), pt.tril(B)
+            if assume_a == "pos":
+                A = A @ A.mT + 1e-3 * pt.eye(m, dtype=A.type.dtype)
+                B = B @ B.mT + 1e-3 * pt.eye(p, dtype=B.type.dtype)
+                return assume(A, positive_definite=True), assume(
+                    B, positive_definite=True
+                )
+            return A, B
+
+        def shape_component_np(A_v, B_v):
+            if assume_a == "lower triangular":
+                return np.tril(A_v), np.tril(B_v)
+            if assume_a == "pos":
+                return A_v @ A_v.T + 1e-3 * np.eye(m), B_v @ B_v.T + 1e-3 * np.eye(p)
+            return A_v, B_v
+
+        def build_out(A, B, b):
+            A, B = shape_component(A, B)
+            K = pt.linalg.kron(A, B)
+            if transposed:
+                K = K.T
+            return solve(K, b, assume_a=assume_a, b_ndim=b_ndim)
+
+        A_pt = pt.matrix("A", shape=(m, m))
+        B_pt = pt.matrix("B", shape=(p, p))
+        if b_ndim == 1:
+            b_pt = pt.vector("b", shape=(m * p,))
+            b_v = rng.normal(size=(m * p,))
+        else:
+            b_pt = pt.matrix("b", shape=(m * p, k))
+            b_v = rng.normal(size=(m * p, k))
+
+        out = build_out(A_pt, B_pt, b_pt)
+        f = function([A_pt, B_pt, b_pt], out, mode="FAST_RUN")
+        self._assert_no_kron(f)
+
+        ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
+        assert any(isinstance(op, expected_op) for op in ops)
+        if expected_op is not Solve:
+            # A specialized op must not be lifted back to a general Solve.
+            assert not any(isinstance(op, Solve) for op in ops)
+
+        A_v = rng.normal(size=(m, m))
+        B_v = rng.normal(size=(p, p))
+        A_shaped, B_shaped = shape_component_np(A_v, B_v)
+        K_v = np.kron(A_shaped, B_shaped)
+        if transposed:
+            K_v = K_v.T
+        expected = np.linalg.solve(K_v, b_v)
+        assert_allclose(f(A_v, B_v, b_v), expected, atol=1e-9)
+
+        utt.verify_grad(build_out, [A_v, B_v, b_v], rng=rng)
+
+    def test_n_way_kron(self):
+        """``kron(kron(A, B), C)`` recursively decomposes to three component solves."""
+        rng = np.random.default_rng(3)
+        m, p, q = 3, 2, 4
+        A = pt.matrix("A", shape=(m, m))
+        B = pt.matrix("B", shape=(p, p))
+        C = pt.matrix("C", shape=(q, q))
+        b = pt.vector("b", shape=(m * p * q,))
+
+        K = pt.linalg.kron(pt.linalg.kron(A, B), C)
+        out = solve(K, b)
+        f = function([A, B, C, b], out, mode="FAST_RUN")
+        self._assert_no_kron(f)
+
+        A_v = rng.normal(size=(m, m))
+        B_v = rng.normal(size=(p, p))
+        C_v = rng.normal(size=(q, q))
+        b_v = rng.normal(size=(m * p * q,))
+        expected = np.linalg.solve(np.kron(np.kron(A_v, B_v), C_v), b_v)
+        assert_allclose(f(A_v, B_v, C_v, b_v), expected, atol=1e-9)
+
+    def test_batched_b(self):
+        """``b`` carries a leading batch axis the component solves broadcast over."""
+        rng = np.random.default_rng(4)
+        m, p, batch = 3, 4, 5
+        A = pt.matrix("A", shape=(m, m))
+        B = pt.matrix("B", shape=(p, p))
+        b = pt.tensor("b", shape=(batch, m * p))
+
+        out = solve(pt.linalg.kron(A, B), b, b_ndim=1)
+        f = function([A, B, b], out, mode="FAST_RUN")
+        self._assert_no_kron(f)
+
+        A_v = rng.normal(size=(m, m))
+        B_v = rng.normal(size=(p, p))
+        b_v = rng.normal(size=(batch, m * p))
+        K_v = np.kron(A_v, B_v)
+        expected = np.stack([np.linalg.solve(K_v, b_v[i]) for i in range(batch)])
+        assert_allclose(f(A_v, B_v, b_v), expected, atol=1e-9)
+
+    def test_pos_assume_a_downgrades_to_gen(self):
+        """``Solve(assume_a='pos')`` of a kron must not propagate ``pos`` to components."""
+        m, p = 3, 2
+        A = pt.matrix("A", shape=(m, m))
+        B = pt.matrix("B", shape=(p, p))
+        b = pt.vector("b", shape=(m * p,))
+
+        out = solve(pt.linalg.kron(A, B), b, assume_a="pos")
+        f = function([A, B, b], out, mode="FAST_RUN")
+        self._assert_no_kron(f)
+
+        # No component Solve should carry assume_a='pos' (would be unsound).
+        for n in f.maker.fgraph.toposort():
+            core = getattr(n.op, "core_op", n.op)
+            if isinstance(core, Solve):
+                assert core.assume_a != "pos"
 
 
 class TestDiagonalSolveToDivision:
