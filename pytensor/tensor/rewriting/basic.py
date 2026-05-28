@@ -337,13 +337,12 @@ def elemwise_of(scalar_op: OpPatternOpTypeType | OpPattern) -> OpPattern:
 @node_rewriter([TensorFromScalar])
 def local_tensor_scalar_tensor(fgraph, node):
     """tensor_from_scalar(scalar_from_tensor(x)) -> x"""
-    if isinstance(node.op, TensorFromScalar):
-        s = node.inputs[0]
-        if s.owner and isinstance(s.owner.op, ScalarFromTensor):
-            t = s.owner.inputs[0]
+    s = node.inputs[0]
+    if s.owner and isinstance(s.owner.op, ScalarFromTensor):
+        t = s.owner.inputs[0]
 
-            # We don't need to copy over any stack traces here
-            return [t]
+        # We don't need to copy over any stack traces here
+        return [t]
 
 
 @register_canonicalize
@@ -351,13 +350,12 @@ def local_tensor_scalar_tensor(fgraph, node):
 @node_rewriter([ScalarFromTensor])
 def local_scalar_tensor_scalar(fgraph, node):
     """scalar_from_tensor(tensor_from_scalar(x)) -> x"""
-    if isinstance(node.op, ScalarFromTensor):
-        t = node.inputs[0]
-        if t.owner and isinstance(t.owner.op, TensorFromScalar):
-            s = t.owner.inputs[0]
+    t = node.inputs[0]
+    if t.owner and isinstance(t.owner.op, TensorFromScalar):
+        s = t.owner.inputs[0]
 
-            # We don't need to copy over any stack traces here
-            return [s]
+        # We don't need to copy over any stack traces here
+        return [s]
 
 
 @register_specialize("shape_unsafe")
@@ -507,9 +505,6 @@ def local_useless_alloc(fgraph, node):
     there is no change in the shape of the input. So this is just a simple copy
     of the input. This is not needed.
     """
-    if not isinstance(node.op, Alloc):
-        return False
-
     inp = node.inputs[0]
     output = node.outputs[0]
 
@@ -527,9 +522,6 @@ def local_useless_alloc(fgraph, node):
 def local_alloc_sink_dimshuffle(fgraph, node):
     r"""Convert broadcastable leading dimensions in an `Alloc` to `DimShuffle`\s."""
     op = node.op
-    if not isinstance(op, Alloc):
-        return False
-
     inp = node.inputs[0]
     output = node.outputs[0]
 
@@ -570,8 +562,7 @@ def local_alloc_empty_to_zeros(fgraph, node):
     default. To activate it, use the setting
     ``optimizer_including == alloc_empty_to_zeros``.
     """
-    if isinstance(node.op, AllocEmpty):
-        return [zeros(node.inputs, dtype=node.outputs[0].dtype)]
+    return [zeros(node.inputs, dtype=node.outputs[0].dtype)]
 
 
 compile.optdb.register(
@@ -690,21 +681,22 @@ def local_useless_elemwise(fgraph, node):
 @node_rewriter([Elemwise])
 def local_alloc_unary(fgraph, node):
     """unary(alloc(x, shp)) -> alloc(unary(x), shp)"""
-    if isinstance(node.op, Elemwise) and len(node.inputs) == 1:
-        a = node.inputs[0]
-        if a.owner and isinstance(a.owner.op, Alloc):
-            x = a.owner.inputs[0]
-            shp = a.owner.inputs[1:]
-            v = node.op(x)
-            # at.alloc does not preserve the stacktrace of v,
-            # so we need to copy it over from x.
-            copy_stack_trace(node.outputs[0], v)
-            ret = alloc(cast(v, node.outputs[0].dtype), *shp)
+    if len(node.inputs) != 1:
+        return None
+    a = node.inputs[0]
+    if a.owner and isinstance(a.owner.op, Alloc):
+        x = a.owner.inputs[0]
+        shp = a.owner.inputs[1:]
+        v = node.op(x)
+        # at.alloc does not preserve the stacktrace of v,
+        # so we need to copy it over from x.
+        copy_stack_trace(node.outputs[0], v)
+        ret = alloc(cast(v, node.outputs[0].dtype), *shp)
 
-            # at.cast does not preserve the stacktrace of x,
-            # so we need to copy it over to the output.
-            copy_stack_trace([node.outputs[0], a], ret)
-            return [ret]
+        # at.cast does not preserve the stacktrace of x,
+        # so we need to copy it over to the output.
+        copy_stack_trace([node.outputs[0], a], ret)
+        return [ret]
 
 
 @register_canonicalize
@@ -857,8 +849,6 @@ def local_join_1(fgraph, node):
     Remove Join() when only one element is joined.
 
     """
-    if not isinstance(node.op, Join):
-        return
     tensors = node.inputs[1:]
     if len(tensors) == 1:
         # We don't need to copy over any stacktrace here, because the
@@ -915,7 +905,7 @@ def local_join_make_vector(fgraph, node):
     This, in combination with the `local_join_1` rewrite, can make `Join`\s
     completely disappear.
     """
-    if not isinstance(node.op, Join) or node.outputs[0].ndim != 1:
+    if node.outputs[0].ndim != 1:
         return
     new_inputs = [node.inputs[1]]
     for idx in range(2, len(node.inputs)):
@@ -1172,17 +1162,16 @@ def local_useless_split(fgraph, node):
     Remove Split with only 1 split.
 
     """
-    if isinstance(node.op, Split):
-        if node.op.len_splits == 1:
-            x, axis, splits = node.inputs
-            out = assert_op(x, eq(splits.shape[0], 1))
-            # Copy over stacktrace from previous output node.
-            copy_stack_trace(node.outputs, out)
-            out2 = assert_op(out, eq(x.shape[axis], splits[0]))
-            # Copy over stacktrace from previous output node.
-            copy_stack_trace(out, out2)
+    if node.op.len_splits == 1:
+        x, axis, splits = node.inputs
+        out = assert_op(x, eq(splits.shape[0], 1))
+        # Copy over stacktrace from previous output node.
+        copy_stack_trace(node.outputs, out)
+        out2 = assert_op(out, eq(x.shape[axis], splits[0]))
+        # Copy over stacktrace from previous output node.
+        copy_stack_trace(out, out2)
 
-            return [out2]
+        return [out2]
 
 
 @node_rewriter(None)
@@ -1293,8 +1282,6 @@ def local_merge_alloc(fgraph, node):
         Alloc(Alloc(m, y1, 1, 1), x, y2, z, w) -> Alloc(m, x, assert(y1, y1==y2), z, w)
 
     """
-    if not isinstance(node.op, Alloc):
-        return False
     if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Alloc)):
         return False
     inputs_outer = node.inputs

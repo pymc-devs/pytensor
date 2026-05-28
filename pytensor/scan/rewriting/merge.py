@@ -346,9 +346,6 @@ def scan_merge_inouts(fgraph, node):
     well as result in a simpler graph for both the inner function and the outer
     function.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     # Do a first pass to merge identical external inputs.
     # Equivalent inputs will be stored in inp_equiv, then a new
     # scan node created without duplicates.

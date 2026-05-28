@@ -945,9 +945,6 @@ register_specialize(extract_diag_lift_pass, "shape_unsafe")  # type: ignore[arg-
 def local_subtensor_SpecifyShape_lift(fgraph, node):
     """Lift ``specify_shape(x, s)[i_1, ..., i_n]`` to ``specify_shape(x[i1, ... , i_n], s[n:])``."""
 
-    if not isinstance(node.op, Subtensor):
-        return False
-
     specify_shape_node = node.inputs[0]
 
     if not (
@@ -1125,8 +1122,6 @@ def local_subtensor_shape_constant(fgraph, node):
     `ShapeFeature` is present, and it will also simplify/remove them.
 
     """
-    if not isinstance(node.op, Subtensor):
-        return False
 
     shape = node.inputs[0]
 

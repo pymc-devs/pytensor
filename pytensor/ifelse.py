@@ -423,21 +423,16 @@ def ifelse(
 @node_rewriter([IfElse])
 def cond_make_inplace(fgraph, node):
     op = node.op
-    if (
-        isinstance(op, IfElse)
-        and not op.as_view
-        and
-        # For big graph, do not make inplace scalar to speed up
-        # optimization.
-        (
-            len(fgraph.apply_nodes) < 500
-            or not all(getattr(o.type, "ndim", -1) == 0 for o in node.outputs)
-        )
+    if op.as_view:
+        return False
+    # For big graph, do not make inplace scalar to speed up optimization.
+    if len(fgraph.apply_nodes) >= 500 and all(
+        getattr(o.type, "ndim", -1) == 0 for o in node.outputs
     ):
-        return IfElse(n_outs=op.n_outs, as_view=True, name=op.name)(
-            *node.inputs, return_list=True
-        )
-    return False
+        return False
+    return IfElse(n_outs=op.n_outs, as_view=True, name=op.name)(
+        *node.inputs, return_list=True
+    )
 
 
 optdb.register(
@@ -549,8 +544,6 @@ def ifelse_lift_single_if_through_acceptable_ops(fgraph, main_node):
 @node_rewriter([IfElse])
 def cond_merge_ifs_true(fgraph, node):
     op = node.op
-    if not isinstance(op, IfElse):
-        return False
     t_ins = node.inputs[1:][: op.n_outs]
 
     replace = {}
@@ -576,8 +569,6 @@ def cond_merge_ifs_true(fgraph, node):
 @node_rewriter([IfElse])
 def cond_merge_ifs_false(fgraph, node):
     op = node.op
-    if not isinstance(op, IfElse):
-        return False
     f_ins = node.inputs[1:][op.n_outs :]
 
     replace = {}
@@ -656,8 +647,6 @@ class CondMerge(GraphRewriter):
 def cond_remove_identical(fgraph, node):
     op = node.op
 
-    if not isinstance(op, IfElse):
-        return False
     aes = node.inputs[1:][: op.n_outs]
     fs = node.inputs[1:][op.n_outs :]
 
