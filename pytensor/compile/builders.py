@@ -865,29 +865,53 @@ class OpFromGraph(Op, HasInnerGraph):
         return ret
 
     def infer_shape(self, node, shapes):
-        # TODO: Use `fgraph.shape_feature` to do this instead.
-        out_shapes = infer_shape(self.inner_outputs, self.inner_inputs, shapes)
+        try:
+            template = self._inner_shape_template
+            frozen = self._inner_shape_frozen
+            shape_i_keys = self._inner_shape_i_keys
+        except AttributeError:
+            from pytensor.tensor.rewriting.shape import ShapeFeature
 
-        # Clone the output shape so that shape are computed from outer inputs.
-        # Note:
-        # Here we could do it more simply like:
-        # `ret = [pytensor.clone_replace(shp, replace=repl) for shp in out_shp]`
-        # But doing it multiple time could duplicate common subgraph between
-        # each shape call. PyTensor optimizer will clean this up later, but this
-        # will make extra work for the optimizer.
+            sf = ShapeFeature()
+            inner_inputs = self.inner_inputs
+            template = [sf.shape_tuple(o) for o in self.inner_outputs]
+            flat_shapes = [s for tup in template if tup is not None for s in tup]
 
-        repl = dict(zip(self.inner_inputs, node.inputs, strict=True))
-        clone_out_shapes = [s for s in out_shapes if isinstance(s, tuple)]
-        cloned = clone_replace(sum(clone_out_shapes, ()), replace=repl)
+            # Symbolic dims are Shape_i(inner_input, dim) vars. Expose them as graph
+            # inputs (which act as blockers) so bind can swap them for the caller's
+            # shapes; inner_inputs are exposed too so Ops returning inputs as shape
+            # components get the caller's inputs.
+            shape_i_vars = []
+            shape_i_keys = []
+            for i, inp in enumerate(inner_inputs):
+                per_dim = sf._shape_i_cache.get(inp)
+                if per_dim is None:
+                    continue
+                for dim, var in per_dim.items():
+                    shape_i_vars.append(var)
+                    shape_i_keys.append((i, dim))
+
+            frozen = FrozenFunctionGraph([*inner_inputs, *shape_i_vars], flat_shapes)
+            self._inner_shape_template = template
+            self._inner_shape_frozen = frozen
+            self._inner_shape_i_keys = shape_i_keys
+
+        replacements = list(node.inputs)
+        for i, dim in shape_i_keys:
+            shp = shapes[i]
+            replacements.append(node.inputs[i].shape[dim] if shp is None else shp[dim])
+
+        bound_shapes = frozen.bind(dict(zip(frozen.inputs, replacements, strict=True)))
+
         ret = []
-        used = 0
-        for i, out_shape in enumerate(out_shapes):
-            if out_shape is None:
+        idx = 0
+        for tup in template:
+            if tup is None:
                 ret.append(None)
             else:
-                nb = len(out_shape)
-                ret.append(cloned[used : used + nb])
-                used += nb
+                nb = len(tup)
+                ret.append(bound_shapes[idx : idx + nb])
+                idx += nb
 
         return ret
 
