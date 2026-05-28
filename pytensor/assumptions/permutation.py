@@ -48,7 +48,8 @@ def _permutation_from_constant(var: TensorConstant) -> FactState:
             elif data.dtype.kind == "i":
                 is_permutation = data.min(initial=0) >= 0
             else:
-                is_permutation = bool(((data == 0) | (data == 1)).all())
+                n = data.shape[-1]
+                is_permutation = np.count_nonzero(data) == (data.size // n if n else 0)
         result = FactState.TRUE if is_permutation else FactState.FALSE
 
     var.tag.is_permutation = result
