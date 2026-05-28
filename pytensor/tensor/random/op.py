@@ -1,4 +1,5 @@
 import abc
+import re
 import warnings
 from collections.abc import Sequence
 from typing import Any, cast
@@ -6,6 +7,7 @@ from typing import Any, cast
 import numpy as np
 
 import pytensor
+from pytensor.compile.builders import SymbolicOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
@@ -479,6 +481,166 @@ class RandomVariable(RNGConsumerOp):
         from pytensor.gradient import disconnected_type
 
         return [disconnected_type() for i in eval_points]
+
+
+class SymbolicRVOp(SymbolicOp, RNGConsumerOp):
+    """A random variable whose draws are defined by a symbolic inner graph.
+
+    Unlike `RandomVariable`, which carries an opaque ``rng_fn``, a
+    `SymbolicRVOp` expresses its draws as a graph of regular
+    `Op`\\s (e.g. another `RandomVariable` plus deterministic transforms).
+    Because the inner graph is inlined before backend compilation, every
+    backend gets the decomposed graph for free, and gradients follow through
+    the reparameterization.
+
+    Subclasses implement :meth:`build_inner_graph` returning
+    ``[next_rng, draws]`` and set :attr:`extended_signature`, a gufunc-like
+    signature that uses the special tokens ``[rng]`` and ``[size]`` to mark the
+    rng and size inputs, e.g. ``"[rng],[size],(n),(n,n)->[rng],(n)"``.
+    """
+
+    extended_signature: str | None = None
+    inline = True
+
+    @staticmethod
+    def filter_inputs(rng, size, *params):
+        return (
+            rng,
+            normalize_size_param(size),
+            *(as_tensor_variable(p) for p in params),
+        )
+
+    @property
+    def signature(self) -> str | None:
+        """The signature with the special ``[rng]``/``[size]`` tokens removed."""
+        extended_signature = self.extended_signature
+        if extended_signature is None:
+            return None
+        special_tokens = r"|".join((r"\[rng\],?", r"\[size\],?"))
+        signature = re.sub(special_tokens, "", extended_signature)
+        # Remove dangling commas
+        return re.sub(r",(?=[->])|,$", "", signature)
+
+    @property
+    def ndims_params(self) -> Sequence[int] | None:
+        signature = self.signature
+        if signature is None:
+            return None
+        inputs_sig, _ = _parse_gufunc_signature(signature)
+        return [len(sig) for sig in inputs_sig]
+
+    @property
+    def ndim_supp(self) -> int | None:
+        signature = self.signature
+        if signature is None:
+            return None
+        _, outputs_sig = _parse_gufunc_signature(signature)
+        return max(len(out_sig) for out_sig in outputs_sig)
+
+    @staticmethod
+    def get_input_output_type_idxs(extended_signature):
+        """Parse ``extended_signature`` into rng/size/param and rng/output indices."""
+        if extended_signature is None:
+            raise ValueError("extended_signature must be provided")
+        fake_signature = extended_signature.replace("[rng]", "(rng)").replace(
+            "[size]", "(size)"
+        )
+        inputs_sig, outputs_sig = _parse_gufunc_signature(fake_signature)
+
+        rng_in_idxs, size_idx, param_idxs = [], None, []
+        for i, inp_sig in enumerate(inputs_sig):
+            if inp_sig == ("size",):
+                size_idx = i
+            elif inp_sig == ("rng",):
+                rng_in_idxs.append(i)
+            else:
+                param_idxs.append(i)
+
+        rng_out_idxs, out_idxs = [], []
+        for i, out_sig in enumerate(outputs_sig):
+            if out_sig == ("rng",):
+                rng_out_idxs.append(i)
+            else:
+                out_idxs.append(i)
+
+        return (
+            (tuple(rng_in_idxs), size_idx, tuple(param_idxs)),
+            (tuple(rng_out_idxs), tuple(out_idxs)),
+        )
+
+    def rng_params(self, node) -> tuple[Variable, ...]:
+        (rng_in_idxs, _, _), _ = self.get_input_output_type_idxs(
+            self.extended_signature
+        )
+        return tuple(node.inputs[i] for i in rng_in_idxs)
+
+    def size_param(self, node) -> Variable | None:
+        (_, size_idx, _), _ = self.get_input_output_type_idxs(self.extended_signature)
+        return node.inputs[size_idx] if size_idx is not None else None
+
+    def dist_params(self, node) -> tuple[Variable, ...]:
+        (_, _, param_idxs), _ = self.get_input_output_type_idxs(self.extended_signature)
+        return tuple(node.inputs[i] for i in param_idxs)
+
+    def build_static_params(self, inputs):
+        """Return the statically-known dimensions of the ``size`` vector.
+
+        ``size`` is the one input whose *value* (not type) determines the
+        outputs' static batch shape, so we fold it into the build. Returns a tuple
+        of ``int | None`` (``None`` per dimension that is not statically known), or
+        ``None`` when there is no size input or ``size`` itself is ``None``.
+        """
+        (_, size_idx, _), _ = self.get_input_output_type_idxs(self.extended_signature)
+        if size_idx is None:
+            return None
+        size = inputs[size_idx]
+        if isinstance(size.type, NoneTypeT):
+            return None
+        size_len = get_vector_length(size)
+        _, static_shape = infer_static_shape([size[i] for i in range(size_len)])
+        return tuple(static_shape)
+
+    def build_inner_graph(self, rng, size, *dist_params) -> list[Variable]:
+        raise NotImplementedError
+
+    def __init__(self, input_types=None, **kwargs):
+        # The size (and sometimes rng) input may be unused by the inner graph
+        kwargs.setdefault("on_unused_input", "ignore")
+        super().__init__(input_types=input_types, **kwargs)
+        if input_types is not None:
+            (_, out_idxs) = self.get_input_output_type_idxs(self.extended_signature)[1]
+            # Return the (single) non-rng output by default
+            if len(out_idxs) == 1:
+                self.default_output = out_idxs[0]
+
+    def __call__(
+        self, *dist_params, size=None, rng=None, return_next_rng=False, **kwargs
+    ):
+        if rng is None:
+            from pytensor.tensor.random.variable import shared_rng
+
+            rng = shared_rng(seed=None)
+        draws = super().__call__(rng, size, *dist_params, **kwargs)
+        if not return_next_rng:
+            return draws
+        (_, _, _), (rng_out_idxs, _) = self.get_input_output_type_idxs(
+            self.extended_signature
+        )
+        [rng_out_idx] = rng_out_idxs
+        return draws.owner.outputs[rng_out_idx], draws
+
+    def update(self, node: Apply) -> dict[Variable, Variable]:
+        (rng_in_idxs, _, _), (rng_out_idxs, _) = self.get_input_output_type_idxs(
+            self.extended_signature
+        )
+        return {
+            node.inputs[i]: node.outputs[o]
+            for i, o in zip(rng_in_idxs, rng_out_idxs, strict=True)
+        }
+
+    def batch_ndim(self, node: Apply) -> int:
+        out_ndim = max(getattr(out.type, "ndim", 0) for out in node.outputs)
+        return cast(int, out_ndim - self.ndim_supp)
 
 
 class AbstractRNGConstructor(Op):

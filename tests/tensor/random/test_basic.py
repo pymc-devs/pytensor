@@ -637,13 +637,12 @@ def test_mvnormal_no_default_args():
 
 
 def test_mvnormal_impl_catches_incompatible_size():
-    with pytest.raises(ValueError, match="operands could not be broadcast together "):
-        multivariate_normal.rng_fn(
-            np.random.default_rng(),
+    with pytest.raises((ValueError, AssertionError)):
+        multivariate_normal(
             np.zeros((3, 2)),
             np.broadcast_to(np.eye(2), (3, 2, 2)),
             size=(4,),
-        )
+        ).eval()
 
 
 def test_mvnormal_ShapeFeature():
@@ -711,14 +710,11 @@ def create_mvnormal_cov_decomposition_method_test(mode):
         draws = multivariate_normal(mean, cov, method=method, size=(10_000,), rng=rng)
         assert draws.owner.op.method == method
 
-        # JAX doesn't raise errors at runtime
         if not psd and method == "cholesky":
-            if mode == "JAX":
-                # JAX doesn't raise errors at runtime, instead it returns nan
-                np.isnan(draws.eval(mode=mode)).all()
-            else:
-                with pytest.raises(np.linalg.LinAlgError):
-                    draws.eval(mode=mode)
+            # The decomposed MvNormal uses the Cholesky Op, which returns nan
+            # (rather than raising) for non-positive-definite inputs across all
+            # backends, so the draws propagate nan.
+            assert np.isnan(draws.eval(mode=mode)).all()
 
         else:
             draws_eval = draws.eval(mode=mode)

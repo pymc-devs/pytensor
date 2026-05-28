@@ -150,6 +150,31 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
 )
 
 
+@pytest.mark.parametrize("cov_dtype", ["float64", "float32", "int16"])
+@pytest.mark.parametrize("mu_dtype", ["float64", "float32", "int16"])
+def test_mvnormal_mixed_dtype_inputs(mu_dtype, cov_dtype):
+    """mean and cov dtypes are not enforced and can be integer or any float precision.
+
+    The numba MvNormal must handle every combination (it previously crashed for any
+    non-float64 input: mixed-dtype ``np.dot`` and ``np.linalg.cholesky`` on integers).
+    """
+    mean = np.array([1, 2, 3], dtype=mu_dtype)
+    cov = np.array(
+        [
+            [4, 1, 0],
+            [1, 4, 0],
+            [0, 0, 4],
+        ],
+        dtype=cov_dtype,
+    )
+    rng = shared(np.random.default_rng(675))
+    draws = pt.random.multivariate_normal(mean, cov, size=(10_000,), rng=rng)
+
+    draws_eval = draws.eval(mode="NUMBA")
+    np.testing.assert_allclose(np.mean(draws_eval, axis=0), mean, atol=0.1)
+    np.testing.assert_allclose(np.cov(draws_eval, rowvar=False), cov, atol=0.2)
+
+
 @pytest.mark.parametrize(
     "rv_op, dist_args, size",
     [
