@@ -893,36 +893,51 @@ def numba_funcify_Dot(op, node, **kwargs):
     if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
-        def dot(x, y):
-            return np.asarray(np.dot(x, y))
+        def dot(x, y, out=None):
+            if out is None:
+                return np.asarray(np.dot(x, y))
+            np.dot(x, y, out)
+            return out
 
     elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
 
         @numba_basic.numba_njit
-        def dot(x, y):
-            return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
+        def dot(x, y, out=None):
+            if out is None:
+                return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
+            np.dot(x, y.astype(numba_dot_dtype), out)
+            return out
 
     elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
-        def dot(x, y):
-            return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
+        def dot(x, y, out=None):
+            if out is None:
+                return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
+            np.dot(x.astype(numba_dot_dtype), y, out)
+            return out
 
     else:
 
         @numba_basic.numba_njit
-        def dot(x, y):
-            return np.asarray(
-                np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
-            )
+        def dot(x, y, out=None):
+            if out is None:
+                return np.asarray(
+                    np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
+                )
+            np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype), out)
+            return out
 
-    cache_version = 1
+    cache_version = 2
 
     if out_dtype == numba_dot_dtype:
+        # np.dot can write straight into the pre-allocated batch output slice.
+        dot.handles_out = True
         return dot, cache_version
 
     else:
-
+        # Output needs a dtype cast np.dot can't do in place, so fall back to
+        # the copying store_core_outputs wrapper.
         @numba_basic.numba_njit
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)
@@ -935,14 +950,16 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
 
     @numba_basic.numba_njit
-    def batched_dot(x, y):
+    def batched_dot(x, y, out=None):
         # Numba does not support 3D matmul
         # https://github.com/numba/numba/issues/3804
-        shape = x.shape[:-1] + y.shape[2:]
-        z0 = np.empty(shape, dtype=dtype)
-        for i in range(z0.shape[0]):
-            z0[i] = np.dot(x[i], y[i])
+        if out is None:
+            shape = x.shape[:-1] + y.shape[2:]
+            out = np.empty(shape, dtype=dtype)
+        for i in range(out.shape[0]):
+            out[i] = np.dot(x[i], y[i])
 
-        return z0
+        return out
 
-    return batched_dot
+    batched_dot.handles_out = True
+    return batched_dot, 1
