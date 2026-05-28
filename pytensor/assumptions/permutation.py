@@ -37,19 +37,18 @@ def _permutation_from_constant(var: TensorConstant) -> FactState:
     data = np.asarray(var.data)
     if data.ndim < 2 or data.shape[-1] != data.shape[-2]:
         result = FactState.FALSE
-    elif not bool(np.all(data.sum(axis=-2) == 1)):
-        result = FactState.FALSE
-    elif not bool(np.all(data.sum(axis=-1) == 1)):
-        result = FactState.FALSE
     else:
-        if data.dtype.kind in "uib":
-            # Fast check, only valid for integer/bool
-            is_permutation = data.max(initial=1) <= 1 and data.min(initial=0) >= 0
-        else:
-            # Otherwise a matrix is permutation iff there is exactly 1 nonzero entry per row
-            # and column. That non-zero value can only be 1 due to previous checks.
-            n = data.shape[-1]
-            is_permutation = np.count_nonzero(data) == (data.size // n if n else 0)
+        with np.errstate(invalid="ignore"):
+            if not (data.sum(axis=-2) == 1).all():
+                is_permutation = False
+            elif not (data.sum(axis=-1) == 1).all():
+                is_permutation = False
+            elif data.dtype.kind in "ub":
+                is_permutation = True
+            elif data.dtype.kind == "i":
+                is_permutation = data.min(initial=0) >= 0
+            else:
+                is_permutation = bool(((data == 0) | (data == 1)).all())
         result = FactState.TRUE if is_permutation else FactState.FALSE
 
     var.tag.is_permutation = result
