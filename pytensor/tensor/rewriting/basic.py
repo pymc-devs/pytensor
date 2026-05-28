@@ -26,7 +26,6 @@ import logging
 from collections.abc import Sequence
 
 import numpy as np
-from numpy.lib.array_utils import normalize_axis_index
 
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
@@ -859,7 +858,7 @@ def local_join_1(fgraph, node):
     """
     if not isinstance(node.op, Join):
         return
-    tensors = node.inputs[1:]
+    tensors = node.inputs
     if len(tensors) == 1:
         # We don't need to copy over any stacktrace here, because the
         # input variable should already have its own stacktrace.
@@ -875,16 +874,10 @@ def local_join_empty(fgraph, node):
 
     Remove empty inputs to joins. The empty inputs can be anywhere.
     """
-    axis, *tensors = node.inputs
+    tensors = node.inputs
+    axis = node.op.axis
 
-    try:
-        static_axis = get_scalar_constant_value(
-            node.inputs[0], only_process_constants=True
-        )
-    except NotScalarConstantError:
-        return
-
-    new_tensors = [tensor for tensor in tensors if tensor.type.shape[static_axis] != 0]
+    new_tensors = [tensor for tensor in tensors if tensor.type.shape[axis] != 0]
 
     # If there are zero tensors, the join is useless but so is any other operation
     # Another rewrite will (one day) handle all those cases
@@ -917,8 +910,8 @@ def local_join_make_vector(fgraph, node):
     """
     if not isinstance(node.op, Join) or node.outputs[0].ndim != 1:
         return
-    new_inputs = [node.inputs[1]]
-    for idx in range(2, len(node.inputs)):
+    new_inputs = [node.inputs[0]]
+    for idx in range(1, len(node.inputs)):
         inp = node.inputs[idx]
         if (
             inp.owner
@@ -938,8 +931,8 @@ def local_join_make_vector(fgraph, node):
             copy_stack_trace(node.outputs, new_inputs[-1])
         else:
             new_inputs.append(inp)
-    if len(new_inputs) < len(node.inputs) - 1:
-        ret = join(node.inputs[0], *new_inputs)
+    if len(new_inputs) < len(node.inputs):
+        ret = join(node.op.axis, *new_inputs)
 
         # Copy over stacktrace from previous output (after join op)
         # to new output, because an error in the new op must be caused
@@ -961,15 +954,9 @@ def local_join_to_repeat(fgraph, node):
     join(0, x, x, x) -> tile(x, (3, 1, 1, ...))
     join(1, x, x) -> tile(x, (1, 2, 1, ...))
     """
-    # Extract axis and the tensors being joined
-    axis, *tensors = node.inputs
-
-    # Optimization only applies when axis is constant
-    if not isinstance(axis, Constant):
-        return None
-
-    # Extract the Python integer from the constant
-    axis_val = axis.data
+    # Extract the tensors being joined
+    tensors = node.inputs
+    axis_val = node.op.axis
 
     # Need at least 2 tensors to consider optimization
     if len(tensors) <= 1:
@@ -1174,11 +1161,11 @@ def local_useless_split(fgraph, node):
     """
     if isinstance(node.op, Split):
         if node.op.len_splits == 1:
-            x, axis, splits = node.inputs
+            x, splits = node.inputs
             out = assert_op(x, eq(splits.shape[0], 1))
             # Copy over stacktrace from previous output node.
             copy_stack_trace(node.outputs, out)
-            out2 = assert_op(out, eq(x.shape[axis], splits[0]))
+            out2 = assert_op(out, eq(x.shape[node.op.axis], splits[0]))
             # Copy over stacktrace from previous output node.
             copy_stack_trace(out, out2)
 
@@ -1359,13 +1346,10 @@ def local_dimshuffle_alloc(fgraph, node):
 @node_rewriter([Join])
 def local_join_of_alloc(fgraph, node):
     """Rewrite a Join of Alloc nodes to an Alloc of the Join nodes."""
-    axis, *tensors = node.inputs
+    tensors = node.inputs
 
     if len(tensors) < 2:
         # Let other rewrite handle the useless Join
-        return
-
-    if not isinstance(axis, Constant):
         return
 
     core_tensors = []
@@ -1388,7 +1372,7 @@ def local_join_of_alloc(fgraph, node):
     # Axis can never be lifted
     # Non-axis allocated dimensions can be lifted if they are all broadcastable
     [out] = node.outputs
-    static_axis = normalize_axis_index(axis.data, tensors[0].type.ndim)
+    axis = node.op.axis
 
     broadcasted_dims = list(
         zip(
@@ -1410,7 +1394,7 @@ def local_join_of_alloc(fgraph, node):
     lifteable_alloc_dims = {
         dim
         for dim in range(out.type.ndim)
-        if dim != static_axis and all(broadcasted_dims[dim])
+        if dim != axis and all(broadcasted_dims[dim])
     }
 
     if not lifteable_alloc_dims:
@@ -1427,13 +1411,13 @@ def local_join_of_alloc(fgraph, node):
         copy_stack_trace(tensor, new_tensor)
         new_tensors.append(new_tensor)
 
-    new_join = node.op(static_axis, *new_tensors)
+    new_join = join(axis, *new_tensors)
     copy_stack_trace(node.outputs[0], new_join)
 
     # Reintroduce the lifted dims
     post_join_shape = []
     for i, alloc_dims in enumerate(zip(*alloc_shapes, strict=True)):
-        if i == static_axis:
+        if i == axis:
             # The alloc dim along the axis is the sum of all the pre-join alloc dims
             post_join_shape.append(add(*alloc_dims))
         else:

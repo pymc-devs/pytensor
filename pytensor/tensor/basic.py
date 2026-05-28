@@ -24,7 +24,7 @@ from pytensor import scalar as ps
 from pytensor.compile.builders import SymbolicOp
 from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
-from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -434,11 +434,13 @@ def _get_underlying_scalar_constant_value(
                     and isinstance(v.owner.inputs[0].owner.op, Join)
                     and len(v.owner.op.idx_list) == 1
                 ):
-                    # Ensure the Join is joining only (effectively) scalar
-                    # variables (so that the constant value can be found at the
-                    # same index as the one used in the sub-tensor).
-                    if builtins.all(
-                        var.ndim == 1 for var in v.owner.inputs[0].owner.inputs[1:]
+                    # Ensure the Join is along axis 0 and joins only
+                    # (effectively) scalar variables (so that the constant
+                    # value can be found at the same index as the one used in
+                    # the sub-tensor).
+                    join_node = v.owner.inputs[0].owner
+                    if join_node.op.axis == 0 and builtins.all(
+                        var.ndim == 1 for var in join_node.inputs
                     ):
                         idx = v.owner.op.idx_list[0]
                         if isinstance(idx, int):
@@ -446,10 +448,9 @@ def _get_underlying_scalar_constant_value(
                                 v.owner.inputs[1], max_recur=max_recur
                             )
                         try:
-                            # TODO: assert joined axis is 0.
                             length = 0
                             loop = False
-                            for joined in v.owner.inputs[0].owner.inputs[1:]:
+                            for joined in join_node.inputs:
                                 ll = get_vector_length(joined)
                                 if idx < length + ll:
                                     v = joined[idx - length]
@@ -2156,13 +2157,37 @@ def matrix_transpose(x: "TensorLike") -> TensorVariable:
     return swapaxes(x, -1, -2)
 
 
+def _validate_axis_argument(axis: int, op_name: str):
+    """Resolve a `Join`/`Split` axis to a Python integer.
+
+    Accept a Python integer or a constant scalar variable; reject symbolic
+    (non-constant) variables.
+    """
+    if isinstance(axis, Variable):
+        try:
+            return int(get_scalar_constant_value(axis))
+        except NotScalarConstantError:
+            raise TypeError(
+                f"The axis of {op_name} must be a constant integer. Symbolic "
+                "axes are no longer supported; implement a custom Op if you "
+                "need a runtime-varying axis."
+            )
+    if not isinstance(axis, int | np.integer):
+        raise TypeError(
+            f"The axis of {op_name} must be an integer, got {type(axis).__name__}."
+        )
+    return int(axis)
+
+
 def split(x, splits_size, *, n_splits=None, axis=0):
+    x = as_tensor_variable(x)
     if n_splits is None:
         if isinstance(splits_size, Variable):
             n_splits = get_vector_length(splits_size)
         else:
             n_splits = len(splits_size)
-    return Split(n_splits)(x, axis, splits_size)
+    axis = normalize_axis_index(_validate_axis_argument(axis, "split"), x.type.ndim)
+    return Split(n_splits, axis)(x, splits_size)
 
 
 class Split(COp):
@@ -2191,55 +2216,48 @@ class Split(COp):
     """A Split instance will have this many outputs, and require that
     the splits argument to `perform` have exactly this many elements.
     """
-    __props__ = ("len_splits",)
+    __props__ = ("len_splits", "axis")
 
-    def __init__(self, len_splits):
+    def __init__(self, len_splits, axis):
         self.len_splits = int(len_splits)
+        axis = _validate_axis_argument(axis, "Split")
+        if axis < 0:
+            raise ValueError(f"Split axis must be non-negative, got {axis}.")
+        self.axis = axis
         self.view_map = {i: [0] for i in range(self.len_splits)}
 
     def __str__(self):
-        return f"{self.__class__.__name__}{{{self.len_splits}}}"
+        return f"{self.__class__.__name__}{{len_splits={self.len_splits}, axis={self.axis}}}"
 
-    def make_node(self, x, axis, splits):
-        """WRITEME"""
+    def make_node(self, x, splits):
         x = as_tensor_variable(x)
-        axis = as_tensor_variable(axis)
         splits = as_tensor_variable(splits)
 
         if splits.type.ndim == 1 and splits.type.dtype not in integer_dtypes:
             raise TypeError("`splits` parameter must be tensors of integer type")
 
-        if axis.type.dtype not in integer_dtypes or axis.ndim != 0:
-            raise TypeError("`axis` parameter must be an integer scalar")
-
-        inputs = [x, axis, splits]
+        if self.axis >= x.type.ndim:
+            raise np.exceptions.AxisError(self.axis, x.type.ndim)
 
         x_dtype = x.type.dtype
-        if isinstance(axis, Constant):
-            # In this case we can preserve more static shape info
-            static_axis = axis.data.item()
-            outputs = []
-            x_static_shape = list(x.type.shape)
-            for i in range(self.len_splits):
-                try:
-                    static_split_size = int(get_scalar_constant_value(splits[i]))
-                except NotScalarConstantError:
-                    static_split_size = None
-                except IndexError:
-                    raise ValueError("Number of splits is larger than splits size")
-                static_out_shape = x_static_shape.copy()
-                static_out_shape[static_axis] = static_split_size
-                outputs.append(tensor(shape=tuple(static_out_shape), dtype=x_dtype))
-        else:
-            outputs = [
-                tensor(shape=(None,) * x.type.ndim, dtype=x_dtype)
-                for i in range(self.len_splits)
-            ]
+        outputs = []
+        x_static_shape = list(x.type.shape)
+        for i in range(self.len_splits):
+            try:
+                static_split_size = int(get_scalar_constant_value(splits[i]))
+            except NotScalarConstantError:
+                static_split_size = None
+            except IndexError:
+                raise ValueError("Number of splits is larger than splits size")
+            static_out_shape = x_static_shape.copy()
+            static_out_shape[self.axis] = static_split_size
+            outputs.append(tensor(shape=tuple(static_out_shape), dtype=x_dtype))
 
-        return Apply(self, inputs, outputs)
+        return Apply(self, [x, splits], outputs)
 
     def perform(self, node, inputs, outputs_storage):
-        x, axis, splits = inputs
+        x, splits = inputs
+        axis = self.axis
 
         if len(splits) != self.len_splits:
             raise ValueError("Length of splits is not equal to n_splits")
@@ -2255,14 +2273,14 @@ class Split(COp):
             out_storage[0] = out
 
     def infer_shape(self, fgraph, node, in_shapes):
-        axis = node.inputs[1]
-        splits = node.inputs[2]
-        shp_x, _shp_axis, _shp_splits = in_shapes
+        splits = node.inputs[1]
+        shp_x, _shp_splits = in_shapes
+        axis = self.axis
         out_shapes = []
         for i in range(self.len_splits):
             temp = as_tensor_variable(shp_x)
             temp = pytensor.tensor.subtensor.set_subtensor(temp[axis], splits[i])
-            temp = [temp[i] for i in range(len(shp_x))]
+            temp = [temp[j] for j in range(len(shp_x))]
             out_shapes.append(temp)
         return out_shapes
 
@@ -2270,35 +2288,28 @@ class Split(COp):
         n_out = len(node.outputs)
         return [
             [True] * n_out,
-            [True] * n_out,
             [False] * n_out,
         ]
 
     def pullback(self, inputs, outputs, g_outputs):
         """Join the gradients along the axis that was used to split x."""
-        _x, axis, _n = inputs
-
         # We have to convert disconnected outputs to zeros before joining them
-        new_g_outputs = []
-        for o, g in zip(outputs, g_outputs, strict=True):
-            if isinstance(g.type, DisconnectedType):
-                new_g_outputs.append(o.zeros_like())
-            else:
-                new_g_outputs.append(g)
-
+        new_g_outputs = [
+            o.zeros_like() if isinstance(g.type, DisconnectedType) else g
+            for o, g in zip(outputs, g_outputs, strict=True)
+        ]
         return [
-            join(axis, *new_g_outputs),
-            grad_undefined(self, 1, axis),
+            join(self.axis, *new_g_outputs),
             disconnected_type(),
         ]
 
     def pushforward(self, inputs, outputs, eval_points):
         if isinstance(eval_points[0].type, DisconnectedType):
-            return [disconnected_type() for i in self.len_splits]
-        return self.make_node(eval_points[0], *inputs[1:]).outputs
+            return [disconnected_type() for _ in range(self.len_splits)]
+        return self.make_node(eval_points[0], inputs[1]).outputs
 
     def c_code_cache_version(self):
-        return (3,)
+        return (4,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         if self.len_splits == 0:
@@ -2307,35 +2318,16 @@ class Split(COp):
 
         # outputs_pointers lists the addresses of the pointers to the outputs.
         outputs_pointers = "&" + (", &".join(outputs))
-        x, axis, splits = inputs
+        x, splits = inputs
         fail = sub["fail"]
-        splits_dtype = node.inputs[2].type.dtype_specs()[1]
+        splits_dtype = node.inputs[1].type.dtype_specs()[1]
         len_splits = self.len_splits
         ndim = node.inputs[0].type.ndim
-
-        # Most times axis is constant, inline it
-        # This is safe to do because the hash of the c_code includes the constant signature
-        if isinstance(node.inputs[1], Constant):
-            static_axis = int(node.inputs[1].data)
-            static_axis = normalize_axis_index(static_axis, ndim)
-            axis_def = f"{static_axis};"
-            axis_check = ""
-        else:
-            axis_dtype = node.inputs[1].type.dtype_specs()[1]
-            axis_def = f"(({axis_dtype} *)PyArray_DATA({axis}))[0];"
-            axis_check = f"""
-                        if (axis < 0){{
-                            axis = ndim + axis;
-                        }}
-                        if (axis >= ndim || axis < 0) {{
-                            PyErr_SetString(PyExc_ValueError, "Split axis is out of bounds");
-                            {fail}
-                        }}
-                    """
+        axis = self.axis
 
         return f"""
         int ndim = {ndim};
-        int axis = {axis_def}
+        int axis = {axis};
         int splits_count = PyArray_DIM({splits}, 0);
         npy_intp sum_of_splits = 0, current_split_start = 0;
         PyArrayObject** outputs[] = {{{outputs_pointers}}};
@@ -2350,8 +2342,6 @@ class Split(COp):
             PyErr_Format(PyExc_ValueError, "Split: splits count (%d) != expected count (%d).", splits_count, {len_splits});
             {fail}
         }}
-
-        {axis_check};
 
         for (int i = 0; i < splits_count; ++i) {{
             int current_split_length = (npy_intp)(*({splits_dtype}*)PyArray_GETPTR1({splits}, i));
@@ -2404,12 +2394,12 @@ class Split(COp):
 
 class Join(COp):
     r"""
-    Concatenate multiple `TensorVariable`\s along some axis.
+    Concatenate multiple `TensorVariable`\s along an axis.
 
-    The axis must be given as first argument. All tensors must have the same
-    shape along all dimensions other than this axis.
-    Of course, TensorVariable instances do not have a shape, so this error
-    cannot be caught until runtime.  See `perform()`.
+    The ``axis`` is a Python integer fixed at construction time and stored as
+    an Op property. All tensors must have the same shape along all dimensions
+    other than this axis. Of course, TensorVariable instances do not have a
+    shape, so this error cannot be caught until runtime. See `perform()`.
 
     See Also
     --------
@@ -2437,40 +2427,29 @@ class Join(COp):
     """
 
     check_input = False
-    __props__ = ()
+    __props__ = ("axis",)
 
-    def make_node(self, axis, *tensors):
+    def __init__(self, axis):
+        axis = _validate_axis_argument(axis, "Join")
+        if axis < 0:
+            raise ValueError(f"Join axis must be non-negative, got {axis}.")
+        self.axis = axis
+
+    def __str__(self):
+        return f"{self.__class__.__name__}{{axis={self.axis}}}"
+
+    def make_node(self, *tensors):
         """
         Parameters
         ----------
-        axis
-            The axis upon which to join `tensors`.
         tensors
-            A variable number of tensors to join along the specified axis.
-            These tensors must have the same shape along all dimensions other
-            than `axis`.
+            A variable number of tensors to join along the axis stored on the
+            Op. These tensors must have the same shape along all dimensions
+            other than `axis`.
 
         """
         if not tensors:
             raise ValueError("Cannot join an empty list of tensors")
-
-        axis = as_tensor_variable(axis)
-        if axis.type.dtype not in int_dtypes:
-            raise TypeError(f"Axis {axis} must be an integer type.")
-        if axis.type.ndim > 0:
-            raise TypeError(f"Axis {axis} must be 0-d.")
-
-        # Convert negative constant axis to positive during canonicalization
-        if isinstance(axis, Constant) and tensors:
-            # Get the axis value directly from the constant's data
-            axis_val = axis.data.item()
-            # Check if it's negative and needs normalization
-            if axis_val < 0:
-                ndim = tensors[0].ndim
-                # Convert negative axis to positive
-                axis_val = normalize_axis_index(axis_val, ndim)
-                # Replace the original axis with the normalized one
-                axis = constant(axis_val, dtype=axis.type.dtype)
 
         tensors = [as_tensor_variable(x) for x in tensors]
 
@@ -2480,100 +2459,63 @@ class Join(COp):
                 " Use `stack` to join scalar values or promote the scalars to vectors."
             )
 
+        ndim = tensors[0].type.ndim
+        if not builtins.all(x.ndim == ndim for x in tensors):
+            raise TypeError(
+                "Only tensors with the same number of dimensions can be joined. "
+                f"Input ndims were: {[x.ndim for x in tensors]}"
+            )
+        if self.axis >= ndim:
+            raise np.exceptions.AxisError(self.axis, ndim)
+
         if len(tensors) == 1:
             out_shape = tensors[0].type.shape
         else:
-            ndim = tensors[0].type.ndim
-
-            if not builtins.all(x.ndim == ndim for x in tensors):
-                raise TypeError(
-                    "Only tensors with the same number of dimensions can be joined. "
-                    f"Input ndims were: {[x.ndim for x in tensors]}"
-                )
-
-            try:
-                static_axis = int(get_scalar_constant_value(axis))
-            except NotScalarConstantError:
-                static_axis = None
-
-            if static_axis is None:
-                # When axis isn't static, we can't conclude anything about output dimension
-                # (unless we had some degenerate zero arrays) that can be removed during rewrites.
-                # We could also raise errors if any dimensions are pairwise inconsistent across all the axes
-                # As no matter the join it would be invalid.
-                # However, dynamic axis is so rare that is not worth the trouble
-                out_shape = [None] * ndim
-
-            else:  # We know the axis statically
-                static_axis = normalize_axis_index(static_axis, ndim)
-                static_shapes = [x.type.shape for x in tensors]
-
-                # Determine output shapes from a matrix of input shapes
-                static_shapes = np.array(static_shapes)
-                out_shape = [None] * ndim
-                for d in range(ndim):
-                    ins = static_shapes[:, d]
-                    if d == static_axis:
-                        # Any unknown size along the axis means we can't infer it
-                        if None in ins:
-                            out_shape[d] = None
-                        else:
-                            out_shape[d] = sum(ins)
+            # Determine output shapes from a matrix of input shapes
+            static_shapes = np.array([x.type.shape for x in tensors])
+            out_shape = [None] * ndim
+            for d in range(ndim):
+                ins = static_shapes[:, d]
+                if d == self.axis:
+                    # Any unknown size along the axis means we can't infer it
+                    if None in ins:
+                        out_shape[d] = None
                     else:
-                        inset = set(static_shapes[:, d])
-                        # Other dims must match exactly,
-                        # or if a mix of None and ? the output will be ?
-                        # otherwise the input shapes are incompatible.
-                        if len(inset) == 1:
-                            (out_shape[d],) = inset
-                        elif len(inset - {None}) == 1:
-                            (out_shape[d],) = inset - {None}
-                        else:
-                            raise ValueError(
-                                f"all input array dimensions other than the specified `axis` ({static_axis})"
-                                " must match exactly, or be unknown (None),"
-                                f" but along dimension {d}, the inputs shapes are incompatible: {ins}"
-                            )
+                        out_shape[d] = sum(ins)
+                else:
+                    inset = set(ins)
+                    # Other dims must match exactly,
+                    # or if a mix of None and ? the output will be ?
+                    # otherwise the input shapes are incompatible.
+                    if len(inset) == 1:
+                        (out_shape[d],) = inset
+                    elif len(inset - {None}) == 1:
+                        (out_shape[d],) = inset - {None}
+                    else:
+                        raise ValueError(
+                            f"all input array dimensions other than the specified `axis` ({self.axis})"
+                            " must match exactly, or be unknown (None),"
+                            f" but along dimension {d}, the inputs shapes are incompatible: {ins}"
+                        )
 
-        inputs = [axis, *tensors]
         out_dtype = ps.upcast(*[x.type.dtype for x in tensors])
-        return Apply(self, inputs, [tensor(dtype=out_dtype, shape=out_shape)])
+        return Apply(self, list(tensors), [tensor(dtype=out_dtype, shape=out_shape)])
 
     def perform(self, node, inputs, output_storage):
-        axis, *arrays = inputs
         output_storage[0][0] = np.concatenate(
-            arrays, axis=axis, dtype=node.outputs[0].type.dtype
+            inputs, axis=self.axis, dtype=node.outputs[0].type.dtype
         )
 
     def c_code_cache_version(self):
-        return (7,)
+        return (8,)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        axis, *arrays = inputs
+        arrays = inputs
         [out] = outputs
         n = len(arrays)
         ndim = node.outputs[0].type.ndim
         fail = sub["fail"]
-
-        # Most times axis is constant, inline it
-        # This is safe to do because the hash of the c_code includes the constant signature
-        if isinstance(node.inputs[0], Constant):
-            static_axis = int(node.inputs[0].data)
-            static_axis = normalize_axis_index(static_axis, ndim)
-            axis_def = f"{static_axis};"
-            axis_check = ""
-        else:
-            axis_ctype = node.inputs[0].type.dtype_specs()[1]
-            axis_def = f"(({axis_ctype} *)PyArray_DATA({axis}))[0];"
-            axis_check = f"""
-                if (axis < 0){{
-                    axis = {ndim} + axis;
-                }}
-                if (axis >= {ndim} || axis < 0) {{
-                    PyErr_SetString(PyExc_ValueError, "Join axis is out of bounds");
-                    {fail}
-                }}
-            """
+        axis = self.axis
 
         copy_arrays_to_tuple = "\n".join(
             (
@@ -2583,11 +2525,9 @@ class Join(COp):
         )
 
         code = f"""
-        int axis = {axis_def}
+        int axis = {axis};
         PyArrayObject* arrays[{n}] = {{{",".join(arrays)}}};
         int out_is_valid = {out} != NULL;
-
-        {axis_check}
 
         if (out_is_valid) {{
             // Check if we can reuse output
@@ -2670,9 +2610,9 @@ class Join(COp):
         return code
 
     def pushforward(self, inputs, outputs, eval_points):
-        if any(isinstance(t.type, DisconnectedType) for t in eval_points[1:]):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points):
             return [disconnected_type()]
-        return self.make_node(inputs[0], *eval_points[1:]).outputs
+        return self.make_node(*eval_points).outputs
 
     def pullback(self, inputs, outputs, grads):
         """The gradient wrt a join op is a `Split`, used to partition
@@ -2680,9 +2620,8 @@ class Join(COp):
         """
         [gz] = grads
         [out] = outputs
-        axis, *tensors = inputs
-
-        rval = [grad_undefined(self, 0, axis)]
+        tensors = inputs
+        axis = self.axis
         out_dtype = out.type.dtype
 
         if "float" in out_dtype or "complex" in out_dtype:
@@ -2695,7 +2634,7 @@ class Join(COp):
             # Split.make_node isn't always able to infer the right
             # broadcast. As the grad need to keep the information,
             # read it if needed.
-            split_gz = [
+            return [
                 g
                 if g.type.shape == t.type.shape == 1
                 else specify_broadcastable(
@@ -2703,66 +2642,36 @@ class Join(COp):
                 )
                 for t, g in zip(tensors, split_gz, strict=True)
             ]
-            rval = rval + split_gz
         else:
             # the output has integer type, so the gradient through it is 0
-            rval = rval + [t.zeros_like(dtype=config.floatX) for t in tensors]
-
-        return rval
+            return [t.zeros_like(dtype=config.floatX) for t in tensors]
 
     def infer_shape(self, fgraph, node, ishapes):
-        from pytensor.tensor.math import eq, ge
-
-        # ishapes[0] contains the size of the axis on which we join
         # Join op should get at least one input to join
-        assert len(ishapes) > 1
-        n_dim = len(ishapes[1])
-        for shp in ishapes[1:]:
+        assert len(ishapes) > 0
+        n_dim = len(ishapes[0])
+        for shp in ishapes:
             assert shp is not None
             assert len(shp) == n_dim
 
-        # The joining dimension could be negative, but we need it to be
-        # in [0, n_dim) in the loop below.
-        # An axis < -n_dim or >= ndim would be invalid, but this is
-        # not checked here. A `CheckAndRaise` `Op` would be a way of
-        # addressing that, but it may disrupt optimizations.
-        axis = node.inputs[0]
-        join_dim = switch(ge(axis, 0), axis, axis + n_dim)
-        out_shapes = []
-        for dim in range(n_dim):
-            # we have to deal with 2 possible cases in here :
-            #   a) we are dealing with the dimension for which we join
-            #     (called t_side from true side of the if, where the if
-            #     compares current dimension with the joining dimension)
-            #   b) a non joining dimension ( in which maybe a symbolic
-            #      assertion can be used to make sure all tensors have
-            #      the same number of elements on this non-joined dimension
-            #      this is f_side
-            # initialize
-            t_side = ishapes[1][dim]
-            f_side = ishapes[1][dim]
-            # loop over tensors and sum for the joining dimension
-            for shp in ishapes[2:]:
-                t_side = t_side + shp[dim]
-            # return the dimensions found
-            out_shapes.append(switch(eq(dim, join_dim), t_side, f_side))
-
-        return [tuple(out_shapes)]
+        axis = self.axis
+        out_shape = list(ishapes[0])
+        join_size = out_shape[axis]
+        for shp in ishapes[1:]:
+            join_size = join_size + shp[axis]
+        out_shape[axis] = join_size
+        return [tuple(out_shape)]
 
 
-_join = Join()
 pprint.assign(Join, printing.FunctionPrinter(["join"]))
 
 
 @_get_vector_length.register(Join)
 def _get_vector_length_Join(op, var):
-    axis, *arrays = var.owner.inputs
-    try:
-        axis = get_scalar_constant_value(axis)
-        assert axis == 0 and builtins.all(a.ndim == 1 for a in arrays)
+    arrays = var.owner.inputs
+    if op.axis == 0 and builtins.all(a.ndim == 1 for a in arrays):
         return builtins.sum(get_vector_length(a) for a in arrays)
-    except NotScalarConstantError:
-        raise ValueError(f"Length of {var} cannot be determined")
+    raise ValueError(f"Length of {var} cannot be determined")
 
 
 def join(axis, *tensors_list):
@@ -2775,15 +2684,11 @@ def join(axis, *tensors_list):
 
     Parameters
     ----------
-    axis : int (symbolic or literal)
-        On which dimension should the tensors be joined?  The `axis`
-        must be a valid index into the shape of the tensors to be
-        concatenated.
-        The `axis` parameter may either be an integer or an object that
-        can be converted to a scalar using `as_scalar`(`axis`). In the
-        former case, the axis is fixed at construction, while in the
-        latter it may vary over time depending on the value of the
-        `axis` variable.
+    axis : int
+        On which dimension should the tensors be joined? The `axis` must be an
+        integer (or a constant scalar variable) and a valid index into the
+        shape of the tensors to be concatenated. Symbolic axes are not
+        supported.
     tensors_list : list of TensorVariable (or list-like)
         A list of tensors to be concatenated along the given axis.
         The shapes of the tensors to be concatenated must be all
@@ -2792,42 +2697,40 @@ def join(axis, *tensors_list):
     """
     if len(tensors_list) == 1:
         return tensors_list[0]
-    else:
-        return _join(axis, *tensors_list)
+    if len(tensors_list) == 0:
+        raise ValueError("Cannot join an empty list of tensors")
+    ndim = as_tensor_variable(tensors_list[0]).type.ndim
+    axis = _validate_axis_argument(axis, "join")
+    if ndim:
+        # Leave the axis untouched for 0-d inputs so `Join.make_node` can raise
+        # its clearer error about joining scalars.
+        axis = normalize_axis_index(axis, ndim)
+    return Join(axis)(*tensors_list)
 
 
 @_vectorize_node.register(Join)
-def vectorize_join(op: Join, node, batch_axis, *batch_inputs):
-    original_axis, *old_inputs = node.inputs
-    # We can vectorize join as a shifted axis on the batch inputs if:
-    # 1. The batch axis is a constant and has not changed
-    # 2. All inputs are batched with the same broadcastable pattern
+def vectorize_join(op: Join, node, *batch_inputs):
+    old_inputs = node.inputs
+    # We can vectorize join as a shifted axis on the batch inputs if all inputs
+    # are batched with the same broadcastable pattern.
 
-    # TODO: We can relax the second condition by broadcasting the batch dimensions
+    # TODO: We can relax this condition by broadcasting the batch dimensions
     #  This can be done with `broadcast_arrays` if the tensors shape match at the axis or reduction
     #  Or otherwise by calling `broadcast_to` for each tensor that needs it
-    if (
-        original_axis.type.ndim == 0
-        and isinstance(original_axis, Constant)
-        and equal_computations([original_axis], [batch_axis])
-    ):
-        batch_ndims = {
-            batch_input.type.ndim - old_input.type.ndim
-            for batch_input, old_input in zip(batch_inputs, old_inputs, strict=True)
-        }
-        if len(batch_ndims) == 1:
-            [batch_ndim] = batch_ndims
-            batch_bcast = batch_inputs[0].type.broadcastable[:batch_ndim]
-            if all(
-                batch_input.type.broadcastable[:batch_ndim] == batch_bcast
-                for batch_input in batch_inputs[1:]
-            ):
-                original_ndim = node.outputs[0].type.ndim
-                original_axis = normalize_axis_index(original_axis.data, original_ndim)
-                batch_axis = original_axis + batch_ndim
-                return op.make_node(batch_axis, *batch_inputs)
+    batch_ndims = {
+        batch_input.type.ndim - old_input.type.ndim
+        for batch_input, old_input in zip(batch_inputs, old_inputs, strict=True)
+    }
+    if len(batch_ndims) == 1:
+        [batch_ndim] = batch_ndims
+        batch_bcast = batch_inputs[0].type.broadcastable[:batch_ndim]
+        if all(
+            batch_input.type.broadcastable[:batch_ndim] == batch_bcast
+            for batch_input in batch_inputs[1:]
+        ):
+            return Join(op.axis + batch_ndim)(*batch_inputs).owner
 
-    return vectorize_node_fallback(op, node, batch_axis, *batch_inputs)
+    return vectorize_node_fallback(op, node, *batch_inputs)
 
 
 def roll(x, shift, axis=None):
@@ -2842,7 +2745,7 @@ def roll(x, shift, axis=None):
         Input tensor.
     shift : int (symbolic or literal)
         The number of places by which elements are shifted.
-    axis : int (symbolic or literal), optional
+    axis : int, optional
         The axis along which elements are shifted. By default, the array
         is flattened before shifting, after which the original
         shape is restored.

@@ -1481,7 +1481,7 @@ class PatternNodeRewriter(NodeRewriter):
         PatternNodeRewriter(
             (
                 OpPattern(CAReduce, scalar_op="scalar_op", axis=None),
-                (Join(), "join_axis", "a", "b"),
+                (Join(0), "a", "b"),
             ),
             output_fn,
         )

@@ -1856,9 +1856,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         elif isinstance(node.op, Subtensor) and node.inputs[0].owner:
             return investigate_if_shape(node.inputs[0].owner)
         elif isinstance(node.op, Join):
-            return all(
-                v.owner and investigate_if_shape(v.owner) for v in node.inputs[1:]
-            )
+            return all(v.owner and investigate_if_shape(v.owner) for v in node.inputs)
         elif isinstance(node.op, MakeVector):
             return all(v.owner and investigate_if_shape(v.owner) for v in node.inputs)
         return False
@@ -1962,7 +1960,7 @@ def local_reduce_join(fgraph, node):
 
     [joined_out] = node.inputs
     joined_node = joined_out.owner
-    join_axis_tensor, *joined_inputs = joined_node.inputs
+    joined_inputs = joined_node.inputs
 
     n_joined_inputs = len(joined_inputs)
     if n_joined_inputs < 2:
@@ -1972,9 +1970,7 @@ def local_reduce_join(fgraph, node):
         # We don't rewrite if a single Elemwise cannot take all inputs at once
         return None
 
-    if not isinstance(join_axis_tensor, Constant):
-        return None
-    join_axis = join_axis_tensor.data
+    join_axis = joined_node.op.axis
 
     # Check whether reduction happens on joined axis
     reduce_op = node.op
