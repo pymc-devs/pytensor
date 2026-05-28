@@ -22,6 +22,7 @@ from pytensor.tensor.linalg.summary import det
 from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
+    register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
@@ -171,6 +172,7 @@ def det_of_kronecker(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@register_specialize
 @node_rewriter([Dot, blockwise_of(Dot)])
 def dot_of_kron(fgraph, node):
     r"""Decompose ``kron(A, B) @ X`` into two matmuls.
