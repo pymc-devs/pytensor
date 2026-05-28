@@ -988,3 +988,14 @@ class TestFrozenFunctionGraph:
         # ``bind`` reproduces each graph's own output type, not a collided one
         assert ffg1.bind([x, s1])[0].type.shape == (2, 3)
         assert ffg2.bind([x, s2])[0].type.shape == (3, 2)
+
+    def test_bind_constant_output(self):
+        """bind must handle constants that appear directly as outputs."""
+        x = float64("x")
+        c = ScalarConstant(float64, 42.0)
+        ffg = FunctionGraph([x], [add(x, c), c]).freeze()
+
+        y = float64("y")
+        bound = ffg.bind({ffg.inputs[0]: y})
+        assert len(bound) == 2
+        assert bound[1] is c
