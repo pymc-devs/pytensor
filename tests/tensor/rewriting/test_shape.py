@@ -613,6 +613,70 @@ class TestSameShape:
             shape_feature.same_shape(x, o, 0, 1)
 
 
+def test_get_shape_resolves_through_chain():
+    """get_shape should resolve to the deepest input, not intermediate ops."""
+    from pytensor.tensor.math import cos
+
+    x = matrix("x")
+    y = exp(cos(x).T)
+
+    fg = FunctionGraph([x], [y], clone=False)
+    sf = ShapeFeature()
+    fg.attach_feature(sf)
+
+    s = sf.get_shape(y, 0)
+    utt.assert_equal_computations([s], [Shape_i(1)(x)])
+
+
+def test_shape_materialization_does_not_create_destroy_cycle():
+    """Lazy shape materialization can create a destroy-handler cycle.
+
+    When an inplace op destroys a Shape_i scalar and the shape of a
+    downstream op (e.g. Convolve1d) depends on both the destroyed
+    scalar and the destroyer's output, a single Apply ends up reading
+    both — the dual-reference pattern that breaks scheduling.
+
+    ``break_aliasing_cycles`` re-routes the destroyed scalar through
+    ``deep_copy_op`` on the offending Apply, lifting the conflict.
+    """
+    import pytensor.scalar as ps
+    from pytensor.graph.destroyhandler import DestroyHandler, _contains_cycle
+    from pytensor.graph.replace import break_aliasing_cycles
+    from pytensor.tensor.signal import convolve1d
+
+    larger = pt.matrix("larger", shape=(8, None))
+    smaller = pt.matrix("smaller", shape=(8, None))
+
+    sf = ShapeFeature()
+    larger_s1 = sf._shape_i_var(larger, 1)
+    smaller_s1 = sf._shape_i_var(smaller, 1)
+
+    sx, sy = ps.int64(), ps.int64()
+    inplace_comp = Elemwise(
+        ps.Composite([sx, sy], [ps.sub(ps.add(sx, sy), ps.constant(1, dtype="int64"))]),
+        inplace_pattern={0: 0},
+    )
+    new_dim = inplace_comp(larger_s1, smaller_s1)
+    a = alloc(pt.zeros((1, 1)), 1, new_dim)
+    out = convolve1d(a, larger[:, ::-1], mode="full")
+
+    fg = FunctionGraph([larger, smaller], [out], clone=False)
+    fg.attach_feature(sf)
+    fg.attach_feature(DestroyHandler())
+
+    naive_shape = list(sf.shape_tuple(out))
+    safe_shape = break_aliasing_cycles(naive_shape, fg.destroyers)
+
+    def imports_with_cycle(shape_vars):
+        check_fg = FunctionGraph([larger, smaller], [out, *shape_vars], clone=False)
+        check_fg.attach_feature(DestroyHandler())
+        dh = check_fg.destroy_handler
+        return _contains_cycle(check_fg, dh.orderings(check_fg, ordered=False))
+
+    assert imports_with_cycle(naive_shape)
+    assert not imports_with_cycle(safe_shape)
+
+
 def test_useless_specify_shape():
     x = tensor("x", shape=(None, 5, 3))
 
