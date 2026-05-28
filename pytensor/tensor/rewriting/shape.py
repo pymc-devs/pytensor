@@ -1067,22 +1067,22 @@ def local_reshape_lift(fgraph, node):
     when there is a reshape.
 
     """
-    if (
-        isinstance(node.op, Reshape)
-        and node.inputs[0].owner
+    if not (
+        node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Elemwise)
         and len(node.inputs[0].owner.inputs) == 1
     ):
-        r = node.op(node.inputs[0].owner.inputs[0], node.inputs[1])
-        # Copy stacktrace from previous Reshape op, as an error in new
-        # Reshape op could only have been caused by old one.
-        copy_stack_trace(node.outputs, r)
+        return None
+    r = node.op(node.inputs[0].owner.inputs[0], node.inputs[1])
+    # Copy stacktrace from previous Reshape op, as an error in new
+    # Reshape op could only have been caused by old one.
+    copy_stack_trace(node.outputs, r)
 
-        e = node.inputs[0].owner.op(r)
-        # Copy stacktrace from both previous Reshape and UnaryElemwise op
-        # because an error in new cg could have been caused by either ops.
-        copy_stack_trace(node.outputs + node.inputs, e)
-        return [e]
+    e = node.inputs[0].owner.op(r)
+    # Copy stacktrace from both previous Reshape and UnaryElemwise op
+    # because an error in new cg could have been caused by either ops.
+    copy_stack_trace(node.outputs + node.inputs, e)
+    return [e]
 
 
 @register_useless
@@ -1123,9 +1123,6 @@ def local_merge_consecutive_specify_shape(fgraph, node):
     where s3 is the union of specified dimensions in s1 and s2, with preference given to s2.
     """
 
-    if not isinstance(node.op, SpecifyShape):
-        return False
-
     obj = node.inputs[0]
     if not (obj.owner and isinstance(obj.owner.op, SpecifyShape)):
         return False
@@ -1162,9 +1159,6 @@ def local_shape_ground(fgraph, node):
 @node_rewriter([Shape])
 def local_Shape_of_SpecifyShape(fgraph, node):
     """Replace ``specify_shape(x, s).shape`` with ``s``."""
-
-    if not isinstance(node.op, Shape):
-        return False
 
     specified_shape = node.inputs[0]
 
@@ -1290,9 +1284,6 @@ def local_specify_shape_alloc(fgraph, node):
 def local_Shape_i_ground(fgraph, node):
     """Replace ``shape_i(x, i)`` with ``s`` when ``x.type.shape[i] == s``."""
 
-    if not isinstance(node.op, Shape_i):
-        return False
-
     shape_arg = node.inputs[0]
 
     if not isinstance(shape_arg.type, TensorType):
@@ -1308,15 +1299,14 @@ def local_Shape_i_ground(fgraph, node):
 @register_canonicalize
 @node_rewriter([Shape])
 def local_shape_to_shape_i(fgraph, node):
-    if isinstance(node.op, Shape):
-        if not hasattr(fgraph, "shape_feature"):
-            return
-        shape_feature = fgraph.shape_feature
-        ret = shape_feature.make_vector_shape(node.inputs[0])
+    if not hasattr(fgraph, "shape_feature"):
+        return
+    shape_feature = fgraph.shape_feature
+    ret = shape_feature.make_vector_shape(node.inputs[0])
 
-        # We need to copy over stack trace from input to output
-        copy_stack_trace(node.outputs[0], ret)
-        return [ret]
+    # We need to copy over stack trace from input to output
+    copy_stack_trace(node.outputs[0], ret)
+    return [ret]
 
 
 @register_infer_shape

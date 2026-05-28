@@ -367,9 +367,6 @@ def local_replace_AdvancedSubtensor(fgraph, node):
     `AdvancedSubtensor1` and `Subtensor` `Op`\s.
     """
 
-    if not isinstance(node.op, AdvancedSubtensor):
-        return
-
     indexed_var, *index_variables = node.inputs
     indices = indices_from_subtensor(index_variables, node.op.idx_list)
     axis = get_advsubtensor_axis(indices)
@@ -995,10 +992,7 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         a.broadcastable = (True, False, True, False)
 
     """
-    if isinstance(node.op, Subtensor):
-        idx = node.op.idx_list
-    else:
-        return
+    idx = node.op.idx_list
 
     remove_dim = []
     node_inputs_idx = 1
@@ -1106,36 +1100,34 @@ def local_set_to_inc_subtensor(fgraph, node):
     did this wouldn't need to also be included in the "specialize" pass.
 
     """
-    if (
-        isinstance(node.op, AdvancedIncSubtensor1)
-        and node.op.set_instead_of_inc
+    if not (
+        node.op.set_instead_of_inc
         and node.inputs[1].owner
         and isinstance(node.inputs[1].owner.op, Elemwise)
         and isinstance(node.inputs[1].owner.op.scalar_op, Add)
     ):
-        addn = node.inputs[1].owner
-        subn = None
-        other = None
+        return
+    addn = node.inputs[1].owner
+    subn = None
+    other = None
 
-        if addn.inputs[0].owner and isinstance(
-            addn.inputs[0].owner.op, AdvancedSubtensor1
-        ):
-            subn = addn.inputs[0].owner
-            other = addn.inputs[1]
-        elif addn.inputs[1].owner and isinstance(
-            addn.inputs[1].owner.op, AdvancedSubtensor1
-        ):
-            subn = addn.inputs[1].owner
-            other = addn.inputs[0]
-        else:
-            return
-        if subn.inputs[1] != node.inputs[2] or subn.inputs[0] != node.inputs[0]:
-            return
-        ret = advanced_inc_subtensor1(node.inputs[0], other, node.inputs[2])
+    if addn.inputs[0].owner and isinstance(addn.inputs[0].owner.op, AdvancedSubtensor1):
+        subn = addn.inputs[0].owner
+        other = addn.inputs[1]
+    elif addn.inputs[1].owner and isinstance(
+        addn.inputs[1].owner.op, AdvancedSubtensor1
+    ):
+        subn = addn.inputs[1].owner
+        other = addn.inputs[0]
+    else:
+        return
+    if subn.inputs[1] != node.inputs[2] or subn.inputs[0] != node.inputs[0]:
+        return
+    ret = advanced_inc_subtensor1(node.inputs[0], other, node.inputs[2])
 
-        copy_stack_trace(node.outputs, ret)
+    copy_stack_trace(node.outputs, ret)
 
-        return [ret]
+    return [ret]
 
 
 @register_canonicalize
@@ -1774,24 +1766,24 @@ compile.optdb.register(
 
 @node_rewriter([IncSubtensor], inplace=True)
 def local_inplace_setsubtensor(fgraph, node):
-    if isinstance(node.op, IncSubtensor) and not node.op.inplace:
-        dta = node.op.destroyhandler_tolerate_aliased
-        new_op = node.op.__class__(
-            node.op.idx_list,
-            inplace=True,
-            set_instead_of_inc=node.op.set_instead_of_inc,
-            destroyhandler_tolerate_aliased=dta,
-        )
-        new_node = new_op(*node.inputs)
-        val = getattr(node.outputs[0].tag, "nan_guard_mode_check", True)
-        new_node.tag.nan_guard_mode_check = val
+    if node.op.inplace:
+        return False
+    dta = node.op.destroyhandler_tolerate_aliased
+    new_op = node.op.__class__(
+        node.op.idx_list,
+        inplace=True,
+        set_instead_of_inc=node.op.set_instead_of_inc,
+        destroyhandler_tolerate_aliased=dta,
+    )
+    new_node = new_op(*node.inputs)
+    val = getattr(node.outputs[0].tag, "nan_guard_mode_check", True)
+    new_node.tag.nan_guard_mode_check = val
 
-        # Copy stacktrace from original outputs to new outputs.
-        # This is sensible, because the new operation is the
-        # same as the old one, but now with different attributes.
-        copy_stack_trace(node.outputs, new_node)
-        return [new_node]
-    return False
+    # Copy stacktrace from original outputs to new outputs.
+    # This is sensible, because the new operation is the
+    # same as the old one, but now with different attributes.
+    copy_stack_trace(node.outputs, new_node)
+    return [new_node]
 
 
 compile.optdb.register(
@@ -1843,17 +1835,17 @@ compile.optdb.register(
 
 @node_rewriter([AdvancedIncSubtensor], inplace=True)
 def local_inplace_AdvancedIncSubtensor(fgraph, node):
-    if isinstance(node.op, AdvancedIncSubtensor) and not node.op.inplace:
-        new_op = type(node.op)(
-            node.op.idx_list,
-            inplace=True,
-            set_instead_of_inc=node.op.set_instead_of_inc,
-            ignore_duplicates=node.op.ignore_duplicates,
-        )
-        new_node = new_op(*node.inputs)
-        copy_stack_trace(node.outputs, new_node)
-        return [new_node]
-    return False
+    if node.op.inplace:
+        return False
+    new_op = type(node.op)(
+        node.op.idx_list,
+        inplace=True,
+        set_instead_of_inc=node.op.set_instead_of_inc,
+        ignore_duplicates=node.op.ignore_duplicates,
+    )
+    new_node = new_op(*node.inputs)
+    copy_stack_trace(node.outputs, new_node)
+    return [new_node]
 
 
 compile.optdb.register(
@@ -1901,18 +1893,19 @@ def local_incsubtensor_of_zeros_to_setsubtensor(fgraph, node):
     """
     IncSubtensor(zeros, x, ...) -> SetSubtensor(zeros, x, ...)
     """
-    if isinstance(node.op, (IncSubtensor)) and not node.op.set_instead_of_inc:
-        x = node.inputs[0]
+    if node.op.set_instead_of_inc:
+        return
+    x = node.inputs[0]
 
-        if isinstance(x, Constant) and not np.any(x.data):
-            return [
-                IncSubtensor(
-                    node.op.idx_list,
-                    node.op.inplace,
-                    set_instead_of_inc=True,
-                    destroyhandler_tolerate_aliased=node.op.destroyhandler_tolerate_aliased,
-                )(*node.inputs)
-            ]
+    if isinstance(x, Constant) and not np.any(x.data):
+        return [
+            IncSubtensor(
+                node.op.idx_list,
+                node.op.inplace,
+                set_instead_of_inc=True,
+                destroyhandler_tolerate_aliased=node.op.destroyhandler_tolerate_aliased,
+            )(*node.inputs)
+        ]
 
 
 @register_canonicalize("local_setsubtensor_of_allocs")
@@ -1925,28 +1918,29 @@ def local_setsubtensor_of_constants(fgraph, node):
     when x is constant or alloc.
 
     """
-    if isinstance(node.op, IncSubtensor) and node.op.set_instead_of_inc:
-        x = node.inputs[0]
-        y = node.inputs[1]
+    if not node.op.set_instead_of_inc:
+        return
+    x = node.inputs[0]
+    y = node.inputs[1]
 
-        # Don't use only_process_constants=True. We need to
-        # investigate Alloc of 0s but with non constant shape.
-        try:
-            replace_x = get_underlying_scalar_constant_value(x, elemwise=False)
-        except NotScalarConstantError:
-            return
+    # Don't use only_process_constants=True. We need to
+    # investigate Alloc of 0s but with non constant shape.
+    try:
+        replace_x = get_underlying_scalar_constant_value(x, elemwise=False)
+    except NotScalarConstantError:
+        return
 
-        try:
-            replace_y = get_underlying_scalar_constant_value(y, elemwise=False)
-        except NotScalarConstantError:
-            return
+    try:
+        replace_y = get_underlying_scalar_constant_value(y, elemwise=False)
+    except NotScalarConstantError:
+        return
 
-        if replace_x == replace_y:
-            # No need to copy over the stacktrace,
-            # because x should already have a stacktrace
-            return [x]
-        else:
-            return False
+    if replace_x == replace_y:
+        # No need to copy over the stacktrace,
+        # because x should already have a stacktrace
+        return [x]
+    else:
+        return False
 
 
 @register_canonicalize("shape_unsafe")

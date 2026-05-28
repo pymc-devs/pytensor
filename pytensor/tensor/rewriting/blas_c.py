@@ -25,8 +25,7 @@ def use_c_ger(fgraph, node):
 
 @node_rewriter([CGer(False)])
 def make_c_ger_destructive(fgraph, node):
-    if isinstance(node.op, CGer) and not node.op.destructive:
-        return [cger_inplace(*node.inputs)]
+    return [cger_inplace(*node.inputs)]
 
 
 @node_rewriter([gemv_inplace, gemv_no_inplace])
@@ -42,17 +41,16 @@ def use_c_gemv(fgraph, node):
 
 @node_rewriter([CGemv(inplace=False)])
 def make_c_gemv_destructive(fgraph, node):
-    if isinstance(node.op, CGemv) and not node.op.inplace:
-        inputs = list(node.inputs)
-        dest = inputs[0]
-        if (
-            dest.owner
-            and isinstance(dest.owner.op, ptb.AllocEmpty)
-            and len(fgraph.clients[dest]) > 1
-        ):
-            inputs[0] = ptb.AllocEmpty(dest.dtype)(*dest.owner.inputs)
+    inputs = list(node.inputs)
+    dest = inputs[0]
+    if (
+        dest.owner
+        and isinstance(dest.owner.op, ptb.AllocEmpty)
+        and len(fgraph.clients[dest]) > 1
+    ):
+        inputs[0] = ptb.AllocEmpty(dest.dtype)(*dest.owner.inputs)
 
-        return [cgemv_inplace(*inputs)]
+    return [cgemv_inplace(*inputs)]
 
 
 blas_optdb.register(

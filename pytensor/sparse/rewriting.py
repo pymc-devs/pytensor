@@ -48,11 +48,11 @@ def local_inplace_remove0(fgraph, node):
     """Rewrite to insert inplace versions of `Remove0`."""
     # If inplace is not enabled, enable it and replace that op with a
     # new op which has inplace enabled
-    if isinstance(node.op, sparse.Remove0) and not node.op.inplace:
-        new_op = node.op.__class__(inplace=True)
-        new_node = new_op(*node.inputs)
-        return [new_node]
-    return False
+    if node.op.inplace:
+        return False
+    new_op = node.op.__class__(inplace=True)
+    new_node = new_op(*node.inputs)
+    return [new_node]
 
 
 pytensor.compile.optdb.register(
@@ -186,15 +186,13 @@ class AddSD_ccode(_NoPythonCOp):
 @node_rewriter([spm.AddSD])
 def local_inplace_addsd_ccode(fgraph, node):
     """Rewrite to insert inplace versions of `AddSD`."""
-    if isinstance(node.op, spm.AddSD):
-        out_dtype = ps.upcast(*[inp.type.dtype for inp in node.inputs])
-        if out_dtype != node.inputs[1].dtype:
-            return
-        new_node = AddSD_ccode(format=node.inputs[0].type.format, inplace=True)(
-            *node.inputs
-        )
-        return [new_node]
-    return False
+    out_dtype = ps.upcast(*[inp.type.dtype for inp in node.inputs])
+    if out_dtype != node.inputs[1].dtype:
+        return
+    new_node = AddSD_ccode(format=node.inputs[0].type.format, inplace=True)(
+        *node.inputs
+    )
+    return [new_node]
 
 
 pytensor.compile.optdb.register(
@@ -213,10 +211,9 @@ pytensor.compile.optdb.register(
 @register_specialize
 @node_rewriter([sparse.DenseFromSparse])
 def local_dense_from_sparse_sparse_from_dense(fgraph, node):
-    if isinstance(node.op, sparse.DenseFromSparse):
-        inp = node.inputs[0]
-        if inp.owner and isinstance(inp.owner.op, sparse.SparseFromDense):
-            return inp.owner.inputs
+    inp = node.inputs[0]
+    if inp.owner and isinstance(inp.owner.op, sparse.SparseFromDense):
+        return inp.owner.inputs
 
 
 @node_rewriter([spm.AddSD])
@@ -225,10 +222,8 @@ def local_addsd_ccode(fgraph, node):
     Convert AddSD to faster AddSD_ccode.
 
     """
-    if isinstance(node.op, spm.AddSD):
-        new_node = AddSD_ccode(format=node.inputs[0].type.format)(*node.inputs)
-        return [new_node]
-    return False
+    new_node = AddSD_ccode(format=node.inputs[0].type.format)(*node.inputs)
+    return [new_node]
 
 
 pytensor.compile.optdb.register(

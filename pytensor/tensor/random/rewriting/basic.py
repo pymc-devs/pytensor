@@ -50,16 +50,15 @@ def is_rv_used_in_graph(base_rv, node, fgraph):
 def random_make_inplace(fgraph, node):
     op = node.op
 
-    if isinstance(op, RandomVariable) and not op.inplace:
-        props = op._props_dict()
-        props["inplace"] = True
-        new_op = type(op)(**props)
-        new_outputs = new_op.make_node(*node.inputs).outputs
-        for old_out, new_out in zip(node.outputs, new_outputs, strict=True):
-            copy_stack_trace(old_out, new_out)
-        return new_outputs
-
-    return False
+    if op.inplace:
+        return False
+    props = op._props_dict()
+    props["inplace"] = True
+    new_op = type(op)(**props)
+    new_outputs = new_op.make_node(*node.inputs).outputs
+    for old_out, new_out in zip(node.outputs, new_outputs, strict=True):
+        copy_stack_trace(old_out, new_out)
+    return new_outputs
 
 
 optdb.register(

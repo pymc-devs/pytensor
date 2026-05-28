@@ -777,9 +777,6 @@ def scan_push_out_dot1(fgraph, node):
     computation in a `Scan` `Op`'s inner function and move this computation to the
     outer graph.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     # Replace pattern of the form
     # x[t] = x[t-1] + dot(seq[t], value)
     # with Sequence.reshape((-1, seq.shape[2])) \dot Value
