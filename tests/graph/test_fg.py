@@ -4,7 +4,7 @@ import pickle
 import pytest
 
 from pytensor.configdefaults import config
-from pytensor.graph.basic import NominalVariable
+from pytensor.graph.basic import NominalVariable, equal_computations
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph, Output
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
@@ -999,3 +999,66 @@ class TestFrozenFunctionGraph:
         bound = ffg.bind({ffg.inputs[0]: y})
         assert len(bound) == 2
         assert bound[1] is c
+
+    def test_from_structural_inputs_only_root_inputs(self):
+        """All inputs are roots: behaves like the plain constructor."""
+        x, y = float64("x"), float64("y")
+        out = add(x, y)
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([x, y], [out])
+        assert len(ffg.inputs) == 2
+
+        a, b = float64("a"), float64("b")
+        [res] = ffg.bind(dict(zip(ffg.inputs, [a, b], strict=True)))
+        assert equal_computations([res], [add(a, b)])
+
+    def test_from_structural_inputs_only_intermediate_inputs(self):
+        """Inputs may be only intermediate expressions; roots are found automatically."""
+        x, y = float64("x"), float64("y")
+        # out depends on x, y only through the product.
+        out = add(mul(x, y), mul(x, y))
+
+        # The passed expression is matched by structure, not identity.
+        prod = mul(x, y)
+        assert prod is not out.owner.inputs[0]
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([prod], [out])
+        assert len(ffg.inputs) == 1
+
+        p = float64("p")
+        [res] = ffg.bind({ffg.inputs[0]: p})
+        # Both occurrences rewire to the single input.
+        assert equal_computations([res], [add(p, p)])
+
+    def test_from_structural_inputs_mixed_inputs(self):
+        """A root input and an intermediate input, both live."""
+        x, y = float64("x"), float64("y")
+        out = add(mul(x, y), x)
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([x, mul(x, y)], [out])
+        assert len(ffg.inputs) == 2
+
+        a, p = float64("a"), float64("p")
+        # x is used directly; root y is dropped (it feeds only the lifted product).
+        [res] = ffg.bind(dict(zip(ffg.inputs, [a, p], strict=True)))
+        assert equal_computations([res], [add(p, a)])
+
+    def test_from_structural_inputs_dead_inputs(self):
+        """A dead root input and a dead intermediate input are retained but ignored."""
+        x, y = float64("x"), float64("y")
+        out = add(x, x)  # uses neither y nor the product
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([x, y, mul(x, y)], [out])
+        assert len(ffg.inputs) == 3
+
+        a, b, p = float64("a"), float64("b"), float64("p")
+        [res] = ffg.bind(dict(zip(ffg.inputs, [a, b, p], strict=True)))
+        assert equal_computations([res], [add(a, a)])
+
+    def test_from_structural_inputs_unreachable_output_raises(self):
+        """Outputs needing a root absent from the inputs cannot be expressed."""
+        x, y = float64("x"), float64("y")
+        out = add(mul(x, y), x)  # needs x directly, not only via the product
+
+        with pytest.raises(ValueError):
+            FrozenFunctionGraph.from_structural_inputs([mul(x, y)], [out])
