@@ -26,6 +26,7 @@ from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace, graph_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
+from pytensor.tensor.shape import Shape_i
 
 
 def infer_shape(outs, inputs, input_shapes):
@@ -868,7 +869,6 @@ class OpFromGraph(Op, HasInnerGraph):
         try:
             template = self._inner_shape_template
             frozen = self._inner_shape_frozen
-            shape_i_keys = self._inner_shape_i_keys
         except AttributeError:
             from pytensor.tensor.rewriting.shape import ShapeFeature
 
@@ -877,29 +877,27 @@ class OpFromGraph(Op, HasInnerGraph):
             template = [sf.shape_tuple(o) for o in self.inner_outputs]
             flat_shapes = [s for tup in template if tup is not None for s in tup]
 
-            # Symbolic dims are Shape_i(inner_input, dim) vars. Expose them as graph
-            # inputs (which act as blockers) so bind can swap them for the caller's
-            # shapes; inner_inputs are exposed too so Ops returning inputs as shape
-            # components get the caller's inputs.
-            shape_i_vars = []
-            shape_i_keys = []
-            for i, inp in enumerate(inner_inputs):
-                per_dim = sf._shape_i_cache.get(inp)
-                if per_dim is None:
-                    continue
-                for dim, var in per_dim.items():
-                    shape_i_vars.append(var)
-                    shape_i_keys.append((i, dim))
-
-            frozen = FrozenFunctionGraph([*inner_inputs, *shape_i_vars], flat_shapes)
+            # Express the inner-output shapes as a frozen function of the inner
+            # inputs plus each input's per-dim size. from_structural_inputs rewires
+            # every Shape_i(inner_input, dim) occurrence to the matching input, so
+            # bind can later swap in the caller's shapes. One slot per input dim:
+            # static or unused dims become dead inputs, keeping the layout positional.
+            shape_inputs = [
+                Shape_i(dim)(inp)
+                for inp in inner_inputs
+                for dim in range(getattr(inp.type, "ndim", 0))
+            ]
+            frozen = FrozenFunctionGraph.from_structural_inputs(
+                [*inner_inputs, *shape_inputs], flat_shapes
+            )
             self._inner_shape_template = template
             self._inner_shape_frozen = frozen
-            self._inner_shape_i_keys = shape_i_keys
 
+        # frozen.inputs is [*inner_inputs, *per-dim sizes]; mirror that layout.
         repl = list(node.inputs)
-        for i, dim in shape_i_keys:
-            shp = shapes[i]
-            repl.append(node.inputs[i].shape[dim] if shp is None else shp[dim])
+        for shp in shapes:
+            if shp is not None:
+                repl.extend(shp)
 
         bound_shapes = frozen.bind(dict(zip(frozen.inputs, repl, strict=True)))
 
