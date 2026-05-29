@@ -11,6 +11,7 @@ import pytensor.tensor.math as ptm
 from pytensor import config
 from pytensor.gradient import grad_not_implemented
 from pytensor.graph import Apply, Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.sparse.type import SparseTensorType
 from pytensor.tensor.shape import specify_broadcastable
@@ -2076,9 +2077,6 @@ usmm = Usmm()
 # the op in Blockwise and rebuilds its make_node with dense dummy core inputs.
 # That contradicts the sparse-input contract enforced by as_sparse_variable,
 # so every sparse op needs a custom dispatcher (or a clear NotImplementedError).
-from pytensor.graph.replace import _vectorize_node
-
-
 @_vectorize_node.register(StructuredDot)
 def _vectorize_structured_dot(op, node, batch_a, batch_b):
     """Batch StructuredDot(sparse_const, dense): (m,k)@(B...,k,n) -> (B...,m,n).
@@ -2119,31 +2117,27 @@ def _vectorize_structured_dot(op, node, batch_a, batch_b):
 
     # Reshape back to (m, B1,...,BN, n).
     m = flat_out.shape[0]
-    target_shape = ptb.concatenate(
-        [ptb.stack([m]), ptb.stack(list(trailing))]
-    )
+    target_shape = ptb.concatenate([ptb.stack([m]), ptb.stack(list(trailing))])
     unflat = flat_out.reshape(target_shape, ndim=batch_b.type.ndim)
     # Move m back into the (-2) slot: (B1,...,BN, m, n).
     out = ptb.moveaxis(unflat, 0, -2)
     return out.owner
 
 
-def _vectorize_sparse_output_unsupported(op, node, *batched_inputs):
+def _vectorize_sparse_unsupported(op, node, *batched_inputs):
     raise NotImplementedError(
-        f"Cannot vectorize {type(op).__name__}: its output is a SparseTensorType, "
-        "but scipy has no batched-sparse representation. Rewrite the model to keep "
-        "any batched dimension on the dense side."
+        f"Cannot vectorize {type(op).__name__}: scipy has no batched-sparse "
+        "representation, so the sparse operand cannot be broadcast against a "
+        "batched dense input. Rewrite the model to keep the sparse matrix "
+        "constant across the batch."
     )
 
 
-# Register clear errors for sparse-output ops so callers don't hit the cryptic
-# `as_sparse_variable` TypeError from the dense-dummy Blockwise fallback.
-for _op_cls in (
-    TrueDot,
-    AddSS,
-    AddSSData,
-    AddSD,
-    SparseSparseMultiply,
-    SparseDenseMultiply,
-):
-    _vectorize_node.register(_op_cls)(_vectorize_sparse_output_unsupported)
+# Register clear errors for the sparse ops that take a dense input which can be
+# batched, so callers hit a descriptive message instead of the cryptic
+# `as_sparse_variable` TypeError from the dense-dummy Blockwise fallback. Ops
+# with only sparse inputs (TrueDot, AddSS, AddSSData, SparseSparseMultiply) are
+# unreachable here: a sparse input can never become batched, so vectorize_graph
+# never dispatches to them.
+for _op_cls in (AddSD, SparseDenseMultiply):
+    _vectorize_node.register(_op_cls)(_vectorize_sparse_unsupported)
