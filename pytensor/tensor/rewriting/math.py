@@ -693,55 +693,26 @@ def local_exp_log_nan_switch(fgraph, node):
 @register_stabilize
 @register_specialize
 @node_rewriter([log])
-def local_log_reciprocal(fgraph, node):
-    """Rewrite log(reciprocal(x)) -> -log(x)."""
-    (inp,) = node.inputs
-    if (
-        inp.owner
-        and isinstance(inp.owner.op, Elemwise)
-        and isinstance(inp.owner.op.scalar_op, ps.Reciprocal)
-    ):
-        return [neg(log(inp.owner.inputs[0]))]
-
-
-@register_canonicalize
-@register_stabilize
-@register_specialize
-@node_rewriter([log])
 def local_log_div(fgraph, node):
-    """Rewrite log(a / b) -> log(a) - log(b) when a or b is provably positive.
+    """Rewrite log(reciprocal(x)) -> -log(x) and log(a / b) -> log(a) - log(b).
 
-    The provably-positive side is typically a constant or a shape, which the
-    surrounding pipeline constant-folds.
+    A reciprocal is just ``1 / x``; log(a / b) only splits when a positive
+    constant operand is involved, so its log folds and the op count stays flat.
     """
     (inp,) = node.inputs
-    if not (
-        inp.owner
-        and isinstance(inp.owner.op, Elemwise)
-        and isinstance(inp.owner.op.scalar_op, ps.TrueDiv)
-    ):
+    if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
+    scalar_op = inp.owner.op.scalar_op
 
-    num, den = inp.owner.inputs
-    if _is_provably_positive(num, strict=True) or _is_provably_positive(
-        den, strict=True
-    ):
-        return [log(num) - log(den)]
+    if isinstance(scalar_op, ps.Reciprocal):
+        return [neg(log(inp.owner.inputs[0]))]
 
-
-@register_canonicalize
-@register_stabilize
-@register_specialize
-@node_rewriter([sign])
-def local_sign_reciprocal(fgraph, node):
-    """Rewrite sign(reciprocal(x)) -> sign(x)."""
-    (inp,) = node.inputs
-    if (
-        inp.owner
-        and isinstance(inp.owner.op, Elemwise)
-        and isinstance(inp.owner.op.scalar_op, ps.Reciprocal)
-    ):
-        return [sign(inp.owner.inputs[0])]
+    if isinstance(scalar_op, ps.TrueDiv):
+        num, den = inp.owner.inputs
+        if (isinstance(num, Constant) and _is_provably_positive(num, strict=True)) or (
+            isinstance(den, Constant) and _is_provably_positive(den, strict=True)
+        ):
+            return [log(num) - log(den)]
 
 
 @register_canonicalize
@@ -749,17 +720,21 @@ def local_sign_reciprocal(fgraph, node):
 @register_specialize
 @node_rewriter([sign])
 def local_sign_div(fgraph, node):
-    """Rewrite sign(a / b) using a known-sign numerator or denominator.
+    """Rewrite sign of a reciprocal or division from a known-sign operand.
 
-    Provably positive side -> ``sign(other)``; negative constant side ->
-    ``-sign(other)``. Bails out otherwise.
+    sign(reciprocal(x)) -> sign(x). For sign(a / b): a provably positive side ->
+    ``sign(other)``; a negative constant side -> ``-sign(other)``. Bails out
+    otherwise.
     """
     (inp,) = node.inputs
-    if not (
-        inp.owner
-        and isinstance(inp.owner.op, Elemwise)
-        and isinstance(inp.owner.op.scalar_op, ps.TrueDiv)
-    ):
+    if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
+        return None
+    scalar_op = inp.owner.op.scalar_op
+
+    if isinstance(scalar_op, ps.Reciprocal):
+        return [sign(inp.owner.inputs[0])]
+
+    if not isinstance(scalar_op, ps.TrueDiv):
         return None
 
     num, den = inp.owner.inputs
@@ -770,11 +745,7 @@ def local_sign_div(fgraph, node):
         return [sign(num)]
 
     for side, other in ((num, den), (den, num)):
-        try:
-            val = get_underlying_scalar_constant_value(side)
-        except NotScalarConstantError:
-            continue
-        if np.all(val < 0):
+        if isinstance(side, Constant) and np.all(np.asarray(side.data) < 0):
             return [neg(sign(other))]
 
 
