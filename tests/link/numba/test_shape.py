@@ -1,4 +1,5 @@
 import contextlib
+import pickle
 
 import numpy as np
 import pytest
@@ -99,3 +100,15 @@ def test_SpecifyShape(v, shape, fails):
             [g],
             [v_test_value],
         )
+
+
+def test_SpecifyShape_none_dim_survives_pickle():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2188
+    x = pt.tensor("x", shape=(None, None))
+    g = SpecifyShape()(x, None, 5)
+
+    # Pickle the graph before compiling, as a worker process would when handed a
+    # shipped model; this is what breaks NoneConst's identity.
+    x, g = pickle.loads(pickle.dumps([x, g]))
+
+    compare_numba_and_py([x], [g], [np.zeros((4, 5), dtype=config.floatX)])
