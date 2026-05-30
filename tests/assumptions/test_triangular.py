@@ -166,3 +166,62 @@ def test_lu_permute_l_pl_is_not_lower_triangular():
     _, af = make_fgraph(PL, U)
     assert af.get(PL, LOWER_TRIANGULAR) == FactState.UNKNOWN
     assert af.check(U, UPPER_TRIANGULAR)
+
+
+class TestMatrixTransposeFlipsTriangle:
+    """Matrix transpose maps lower-triangular to upper-triangular and vice versa."""
+
+    @pytest.mark.parametrize(
+        "asserted_value, expected",
+        [(True, FactState.TRUE), (False, FactState.FALSE)],
+        ids=["true", "false"],
+    )
+    @pytest.mark.parametrize(
+        "asserted, flipped",
+        [
+            (LOWER_TRIANGULAR, UPPER_TRIANGULAR),
+            (UPPER_TRIANGULAR, LOWER_TRIANGULAR),
+        ],
+    )
+    def test_transpose_flips_triangle(
+        self, asserted, flipped, asserted_value, expected
+    ):
+        x = pt.matrix("x", shape=(4, 4))
+        x_tagged = assume(x, **{asserted.name: asserted_value})
+        y = x_tagged.T
+        _, af = make_fgraph(y)
+        assert af.get(y, flipped) == expected
+        assert af.get(y, asserted) == FactState.UNKNOWN
+
+    @pytest.mark.parametrize(
+        "asserted_value, expected",
+        [(True, FactState.TRUE), (False, FactState.FALSE)],
+        ids=["true", "false"],
+    )
+    @pytest.mark.parametrize(
+        "asserted, flipped",
+        [
+            (LOWER_TRIANGULAR, UPPER_TRIANGULAR),
+            (UPPER_TRIANGULAR, LOWER_TRIANGULAR),
+        ],
+    )
+    def test_batched_transpose_flips_triangle(
+        self, asserted, flipped, asserted_value, expected
+    ):
+        x = pt.tensor("x", shape=(2, 3, 4, 4))
+        x_tagged = assume(x, **{asserted.name: asserted_value})
+        y = x_tagged.mT
+        _, af = make_fgraph(y)
+        assert af.get(y, flipped) == expected
+        assert af.get(y, asserted) == FactState.UNKNOWN
+
+    @pytest.mark.parametrize("key", [LOWER_TRIANGULAR, UPPER_TRIANGULAR])
+    def test_double_transpose_recovers_triangle(self, key):
+        # Exercises the cross-key inference chain: the first transpose flips
+        # via a feature.check on the input, and the second transpose flips
+        # back via a feature.check on the freshly-inferred intermediate.
+        x = pt.matrix("x", shape=(4, 4))
+        x_tagged = assume(x, **{key.name: True})
+        y = x_tagged.T.T
+        _, af = make_fgraph(y)
+        assert af.check(y, key)

@@ -136,21 +136,32 @@ def _lu_upper(key, op, feature, fgraph, node, input_states):
     return states
 
 
-def _dimshuffle_left_expand_dims(key, op, feature, fgraph, node, input_states):
-    """Triangularity survives left-expand-dims (batch broadcast).
+@register_assumption(LOWER_TRIANGULAR, DimShuffle)
+def _lower_dimshuffle(key, op, feature, fgraph, node, input_states):
+    """Mirror lower-triangularity through left-expand-dims and matrix transpose.
 
-    Matrix transpose swaps lower<->upper, so it is *not* propagated under
-    the same key.
+    Left-expand-dims preserves the matrix exactly and transpose swaps the two
+    triangles, swapping their fact states.
     """
-    if input_states[0] is not FactState.TRUE:
-        return [FactState.UNKNOWN]
+    if op.is_matrix_transpose:
+        return [feature.get(node.inputs[0], UPPER_TRIANGULAR)]
     if left_expand_dims_propagates_matrix_property(op):
-        return [FactState.TRUE]
+        return [input_states[0]]
     return [FactState.UNKNOWN]
 
 
-register_assumption(LOWER_TRIANGULAR, DimShuffle)(_dimshuffle_left_expand_dims)
-register_assumption(UPPER_TRIANGULAR, DimShuffle)(_dimshuffle_left_expand_dims)
+@register_assumption(UPPER_TRIANGULAR, DimShuffle)
+def _upper_dimshuffle(key, op, feature, fgraph, node, input_states):
+    """Mirror upper-triangularity through left-expand-dims and matrix transpose.
+
+    Left-expand-dims preserves the matrix exactly and transpose swaps the two
+    triangles, swapping their fact states.
+    """
+    if op.is_matrix_transpose:
+        return [feature.get(node.inputs[0], LOWER_TRIANGULAR)]
+    if left_expand_dims_propagates_matrix_property(op):
+        return [input_states[0]]
+    return [FactState.UNKNOWN]
 
 
 @register_assumption(LOWER_TRIANGULAR, Elemwise)
