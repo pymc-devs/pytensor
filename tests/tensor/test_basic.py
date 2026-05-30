@@ -41,6 +41,7 @@ from pytensor.tensor.basic import (
     arange,
     as_tensor_variable,
     atleast_Nd,
+    block,
     cast,
     choose,
     constant,
@@ -3630,6 +3631,90 @@ class TestExtractDiag:
         rng = np.random.default_rng(utt.fetch_seed())
         x = rng.random((5, 4, 3))
         utt.verify_grad(diag_fn, [x], rng=rng)
+
+
+class TestBlock:
+    """Tests that ``pt.block`` matches ``np.block``."""
+
+    def _check(self, arrays_pt, arrays_np, *, expected_ndim=None):
+        out = block(arrays_pt)
+        if expected_ndim is not None:
+            assert out.ndim == expected_ndim
+        np.testing.assert_allclose(out.eval(), np.block(arrays_np))
+
+    def test_depth_1(self):
+        a = np.arange(3.0)
+        b = np.arange(4.0)
+        self._check([a, b], [a, b], expected_ndim=1)
+
+    def test_depth_2_block_matrix(self):
+        rng = np.random.default_rng(0)
+        A = rng.standard_normal((2, 3))
+        B = rng.standard_normal((2, 4))
+        C = rng.standard_normal((5, 3))
+        D = rng.standard_normal((5, 4))
+        self._check([[A, B], [C, D]], [[A, B], [C, D]], expected_ndim=2)
+
+    def test_depth_3(self):
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal((2, 3, 4))
+        self._check([[[x, x], [x, x]]], [[[x, x], [x, x]]], expected_ndim=3)
+
+    def test_scalar_promotion(self):
+        # Depth-2 list of scalars → 2-D output, like np.block.
+        self._check([[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]], expected_ndim=2)
+
+    def test_mixed_rank_promotion(self):
+        # 1-D leaf in a depth-2 list gets atleast_2d-promoted on the left.
+        rng = np.random.default_rng(0)
+        v = rng.standard_normal(3)
+        A = rng.standard_normal((2, 3))
+        self._check([[v], [A]], [[v], [A]], expected_ndim=2)
+
+    def test_ragged_widths(self):
+        # Same depth, different number of children per row — np.block allows it.
+        rng = np.random.default_rng(0)
+        A = rng.standard_normal((2, 1))
+        B = rng.standard_normal((2, 2))
+        C = rng.standard_normal((2, 3))
+        D = rng.standard_normal((3, 6))
+        self._check([[A, B, C], [D]], [[A, B, C], [D]], expected_ndim=2)
+
+    def test_single_leaf_passthrough(self):
+        # np.block(arr) returns atleast_1d(arr).
+        out = block(5.0)
+        assert out.ndim == 1
+        np.testing.assert_array_equal(out.eval(), np.block(5.0))
+
+    def test_depth_mismatch_raises(self):
+        A = pytensor.tensor.matrix("A")
+        with pytest.raises(ValueError, match="same nesting depth"):
+            block([[A, A], A])
+
+    def test_tuple_rejected(self):
+        A = pytensor.tensor.matrix("A")
+        with pytest.raises(TypeError, match="tuples are not allowed"):
+            block((A, A))
+
+    def test_empty_list_raises(self):
+        with pytest.raises(ValueError, match="empty list"):
+            block([])
+
+    def test_returns_nested_join(self):
+        # `block` is a pure helper: the output is the result of a Join of Joins,
+        # not a wrapping Op.
+        A = pytensor.tensor.matrix("A")
+        B = pytensor.tensor.matrix("B")
+        out = block([[A, B], [B, A]])
+        # Outer concat along axis -2 (rows).
+        assert isinstance(out.owner.op, ptb.Join)
+        outer_axis = int(out.owner.inputs[0].data)
+        assert outer_axis == out.ndim - 2
+        # Each row is itself a Join along axis -1 (columns).
+        for inner in out.owner.inputs[1:]:
+            assert isinstance(inner.owner.op, ptb.Join)
+            inner_axis = int(inner.owner.inputs[0].data)
+            assert inner_axis == inner.ndim - 1
 
 
 class TestAllocDiag:
