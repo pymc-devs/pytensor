@@ -172,20 +172,10 @@ class TestMatrixTransposeFlipsTriangle:
     """Matrix transpose maps lower-triangular to upper-triangular and vice versa."""
 
     @pytest.mark.parametrize(
-        "asserted, flipped",
-        [
-            (LOWER_TRIANGULAR, UPPER_TRIANGULAR),
-            (UPPER_TRIANGULAR, LOWER_TRIANGULAR),
-        ],
+        "asserted_value, expected",
+        [(True, FactState.TRUE), (False, FactState.FALSE)],
+        ids=["true", "false"],
     )
-    def test_transpose_flips_triangle(self, asserted, flipped):
-        x = pt.matrix("x", shape=(4, 4))
-        x_tagged = assume(x, **{asserted.name: True})
-        y = x_tagged.T
-        _, af = make_fgraph(y)
-        assert af.check(y, flipped)
-        assert af.get(y, asserted) == FactState.UNKNOWN
-
     @pytest.mark.parametrize(
         "asserted, flipped",
         [
@@ -193,12 +183,36 @@ class TestMatrixTransposeFlipsTriangle:
             (UPPER_TRIANGULAR, LOWER_TRIANGULAR),
         ],
     )
-    def test_batched_transpose_flips_triangle(self, asserted, flipped):
+    def test_transpose_flips_triangle(
+        self, asserted, flipped, asserted_value, expected
+    ):
+        x = pt.matrix("x", shape=(4, 4))
+        x_tagged = assume(x, **{asserted.name: asserted_value})
+        y = x_tagged.T
+        _, af = make_fgraph(y)
+        assert af.get(y, flipped) == expected
+        assert af.get(y, asserted) == FactState.UNKNOWN
+
+    @pytest.mark.parametrize(
+        "asserted_value, expected",
+        [(True, FactState.TRUE), (False, FactState.FALSE)],
+        ids=["true", "false"],
+    )
+    @pytest.mark.parametrize(
+        "asserted, flipped",
+        [
+            (LOWER_TRIANGULAR, UPPER_TRIANGULAR),
+            (UPPER_TRIANGULAR, LOWER_TRIANGULAR),
+        ],
+    )
+    def test_batched_transpose_flips_triangle(
+        self, asserted, flipped, asserted_value, expected
+    ):
         x = pt.tensor("x", shape=(2, 3, 4, 4))
-        x_tagged = assume(x, **{asserted.name: True})
+        x_tagged = assume(x, **{asserted.name: asserted_value})
         y = x_tagged.mT
         _, af = make_fgraph(y)
-        assert af.check(y, flipped)
+        assert af.get(y, flipped) == expected
         assert af.get(y, asserted) == FactState.UNKNOWN
 
     @pytest.mark.parametrize("key", [LOWER_TRIANGULAR, UPPER_TRIANGULAR])
