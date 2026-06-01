@@ -320,8 +320,9 @@ def local_subtensor_of_batch_dims(fgraph, node):
 
     Bail on boolean masks and non-consecutive advanced indexing — numpy hoists
     those advanced groups to position 0, which would misalign the lifted
-    indices. On a broadcast (length-1) axis of an input, replace the advanced
-    index with length-1 zeros so the lifted input still broadcasts correctly.
+    indices. On a broadcast (length-1) axis of an input the index is dropped
+    (only zero is in bounds there), and an Alloc restores the full output shape
+    when a dropped index was what determined it.
     """
     elem, *idx = node.inputs
 
@@ -733,37 +734,27 @@ def lift_subtensor_through_alloc(fgraph, node):
     if _non_consecutive_adv_indexing(indices):
         return None
 
-    val_indexer: list = []
-    dangerous_index_reaches_val = False
-    for axis, idx in enumerate(indices):
-        if axis < n_added_dims:
-            # Axis was added by Alloc; index doesn't reach val.
-            continue
-        val_static_dim = val.type.shape[axis - n_added_dims]
-        if val_static_dim == 1:
-            # Broadcast val dim: slices stay (Alloc broadcasts on top);
-            # advanced indices become length-1 zeros for squeeze.
-            if isinstance(idx, slice):
-                val_indexer.append(slice(None))
-            else:
-                val_indexer.append(np.zeros((1,) * idx.type.ndim, dtype=np.int64))
-            continue
-        val_indexer.append(idx)
-        if not _index_provably_smaller(idx, val_static_dim):
-            # Per-axis check; doesn't account for net effect across all axes.
-            dangerous_index_reaches_val = True
+    # Indices on Alloc-added dims don't reach val; the rest line up with val's dims.
+    val_indexer = indices[n_added_dims:]
+    dangerous_index_reaches_val = any(
+        not val.type.broadcastable[axis]
+        # Per-axis check; doesn't account for net effect across all axes.
+        and not _index_provably_smaller(idx, val.type.shape[axis])
+        for axis, idx in enumerate(val_indexer)
+    )
 
-    nw_val = _canonical_indexing(val, val_indexer)
-    new_shape = indexed_result_shape(alloc_dims, indices)
-    drops_alloc = nw_val.type.broadcastable == node.outputs[0].type.broadcastable
+    # On broadcast val dims the index is neutralized (advanced indices dropped,
+    # shrinking slices made full); the trailing Alloc broadcasts val back up.
+    nw_val = _canonical_indexing(val, val_indexer, drop_broadcasted_index=True)
+    needs_alloc = broadcasted_by(nw_val, node.outputs[0])
 
-    if dangerous_index_reaches_val and not drops_alloc:
+    if dangerous_index_reaches_val and needs_alloc:
         return None
 
-    if drops_alloc:
-        result = nw_val
+    if needs_alloc:
+        result = alloc(nw_val, *indexed_result_shape(alloc_dims, indices))
     else:
-        result = alloc(nw_val, *new_shape)
+        result = nw_val
 
     copy_stack_trace(node.outputs[0], result)
     return [result]
