@@ -135,7 +135,7 @@ def get_simplified_shape(x: TensorVariable, *, fgraph) -> tuple:
     return tuple(x.shape)
 
 
-def get_simplified_broadcast_shape(first, *others, fgraph) -> list:
+def get_simplified_broadcast_shape(first, *others, fgraph, batch_ndim=None) -> list:
     """Per-axis fold of ``first`` with ``others``, prioritizing non-broadcastable lengths.
 
     The shape entry from ``first`` wins on every axis where ``first`` is not
@@ -145,23 +145,26 @@ def get_simplified_broadcast_shape(first, *others, fgraph) -> list:
     commutative, but the resulting symbolic shape is not — we want the
     simplest/most-static expression).
 
-    Assumes all inputs have the same ndim (the Elemwise contract).
+    With ``batch_ndim`` only the leading ``batch_ndim`` dimensions are folded and
+    returned, so inputs may differ on their trailing (core) dimensions, as with
+    ``Blockwise``. Otherwise all inputs must share ndim (the Elemwise contract).
     """
-    first_broadcastable = first.type.broadcastable
+    if batch_ndim is None:
+        batch_ndim = first.type.ndim
+
+    first_broadcastable = first.type.broadcastable[:batch_ndim]
     if not (any(first_broadcastable) and others):
-        return list(get_simplified_shape(first, fgraph=fgraph))
+        return list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
 
     broadcastable_dims = list(first_broadcastable)
-    broadcast_shape = list(get_simplified_shape(first, fgraph=fgraph))
+    broadcast_shape = list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
     for other in others:
         other_shape = get_simplified_shape(other, fgraph=fgraph)
-        for i, (other_broadcastable, other_dim_length) in enumerate(
-            zip(other.type.broadcastable, other_shape, strict=True)
-        ):
-            if other_broadcastable or not broadcastable_dims[i]:
+        for i in range(batch_ndim):
+            if other.type.broadcastable[i] or not broadcastable_dims[i]:
                 # Doesn't provide any new info
                 continue
-            broadcast_shape[i] = other_dim_length
+            broadcast_shape[i] = other_shape[i]
             broadcastable_dims[i] = False  # Don't override again
     return broadcast_shape
 
