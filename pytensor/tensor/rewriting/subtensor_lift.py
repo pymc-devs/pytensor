@@ -40,6 +40,8 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, dot, minimum
 from pytensor.tensor.rewriting.basic import (
+    broadcasted_by,
+    get_simplified_broadcast_shape,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -77,13 +79,19 @@ from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
-def _canonical_indexing(var, indices):
+def _canonical_indexing(var, indices, drop_broadcasted_index=False):
     """Index ``var``, squeezing indexed broadcast dims whose index has size 1.
 
     On a length-1 dim only zero is a valid index, so the index is
     redundant — squeezing is equivalent and simpler.  If squeezed
     indices contributed unique output dimensions, those are reinserted
     via ``expand_dims`` after indexing.
+
+    When ``drop_broadcasted_index`` is set, the index is neutralized on *every*
+    broadcast dim: a size>1 advanced index that would otherwise expand the dim is
+    dropped, and a slice that would otherwise shrink it (e.g. ``[1:]`` -> size 0)
+    is replaced by a full slice. This keeps ``var`` small at the cost of an
+    under-broadcast result; the caller must broadcast it back to the full shape.
     """
     squeeze_axes = []
     kept_indices = []
@@ -94,7 +102,12 @@ def _canonical_indexing(var, indices):
         zip(var.type.broadcastable, indices, strict=False)
     ):
         if isinstance(idx, slice):
-            kept_indices.append(idx)
+            if bcast and drop_broadcasted_index:
+                # Slicing a length-1 dim can shrink it (e.g. [1:] -> size 0);
+                # leave it untouched and let the caller broadcast it back.
+                kept_indices.append(slice(None))
+            else:
+                kept_indices.append(idx)
         else:
             if first_adv_axis is None:
                 first_adv_axis = axis
@@ -102,19 +115,22 @@ def _canonical_indexing(var, indices):
             # np.ndim works for all supported cases: int, numpy arrays, pytensor variables
             idx_ndim = np.ndim(idx)
             if bcast:
-                match idx:
-                    case Variable():
-                        idx_size1 = all(idx.type.broadcastable)
-                    case np.ndarray():
-                        idx_size1 = idx.size == 1
-                    case int() | np.integer():
-                        idx_size1 = True
-                    case _:
-                        raise AssertionError
+                if drop_broadcasted_index:
+                    drop_idx = True
+                else:
+                    match idx:
+                        case Variable():
+                            drop_idx = all(idx.type.broadcastable)
+                        case np.ndarray():
+                            drop_idx = idx.size == 1
+                        case int() | np.integer():
+                            drop_idx = True
+                        case _:
+                            raise AssertionError
 
                 # idx only contributes dummy dimensions (if any), not actual shape
                 # It doesn't really matter what the index was, only valid values are zeros.
-                if idx_size1:
+                if drop_idx:
                     max_drop_ndim = max(max_drop_ndim, idx_ndim)
                     squeeze_axes.append(axis)
                     continue
@@ -370,58 +386,13 @@ def local_subtensor_of_batch_dims(fgraph, node):
 
     elem_inputs = elem.owner.inputs
 
-    # Per-input copy of idx_tuple we may adjust on dims where some input is
-    # broadcast (length 1).
-    new_idxs = [list(idx_tuple) for _ in elem_inputs]
-    needs_per_input_adjustment = False
-
-    for dim, (dim_idx, *dim_bcast_inputs) in enumerate(
-        zip(
-            idx_tuple,
-            *(inp.type.broadcastable[:batch_ndim] for inp in elem_inputs),
-            # Indices can be shorter than input ndims
-            strict=False,
-        )
-    ):
-        if isinstance(dim_idx, slice) and dim_idx == slice(None):
-            # Full slice can be safely applied to all inputs.
-            continue
-
-        if not any(dim_bcast_inputs):
-            # No input is length 1 on this dim, original index applies to all.
-            continue
-
-        # An advanced (non-scalar) index can wastefully expand a size 1 dim.
-        # Basic indices (slices, ints, scalar variables) cannot.
-        is_advanced_idx = (
-            isinstance(dim_idx, TensorVariable) and dim_idx.type.ndim > 0
-        ) or (isinstance(dim_idx, np.ndarray) and dim_idx.ndim > 0)
-
-        if all(dim_bcast_inputs) and not is_advanced_idx:
-            # Every input is length 1 and the index is basic — it can't
-            # expand a size 1 dim, so apply as-is.
-            continue
-
-        # At least one input is length 1 on this dim — don't apply an index
-        # that could expand size 1. Slices stay; advanced indices become
-        # length 1 zeros that _canonical_indexing will squeeze (and reinsert
-        # as needed).
-        if isinstance(dim_idx, slice):
-            safe_bcast_dim_idx = slice(None)
-        else:
-            safe_bcast_dim_idx = np.zeros((1,) * dim_idx.type.ndim, dtype="int64")
-        for inp_idx, dim_bcast_inp in zip(new_idxs, dim_bcast_inputs, strict=True):
-            if dim_bcast_inp:
-                inp_idx[dim] = safe_bcast_dim_idx
-                needs_per_input_adjustment = True
-
-    if needs_per_input_adjustment:
-        indexed_inputs = [
-            _canonical_indexing(inp, tuple(new_idx))
-            for inp, new_idx in zip(elem_inputs, new_idxs, strict=True)
-        ]
-    else:
-        indexed_inputs = [inp[idx_tuple] for inp in elem_inputs]
+    # Drop indices on broadcast input dims instead of applying them: an advanced
+    # index can't validly index a length-1 dim (only zero is in bounds) and would
+    # wastefully expand it. The Elemwise broadcasts the small inputs back together.
+    indexed_inputs = [
+        _canonical_indexing(inp, idx_tuple, drop_broadcasted_index=True)
+        for inp in elem_inputs
+    ]
 
     [old_out] = node.outputs
 
@@ -431,13 +402,15 @@ def local_subtensor_of_batch_dims(fgraph, node):
     # Define elemwise operation on indexed inputs
     new_out = elem.owner.op(*indexed_inputs)
 
-    # The lifted Elemwise may produce a more-broadcast type than the original
-    # subtensor output — either because we collapsed all-bcast advanced-index
-    # dims to length 1, or because elem.type was stale and claimed non-bcast
-    # on a dim whose inputs are all length 1. Broadcast back to old_out's
-    # shape so the replacement is type-compatible (and the result correct).
-    if new_out.type.broadcastable != old_out.type.broadcastable:
-        new_out = alloc(new_out, *old_out.shape)
+    # The indices dropped on broadcast dims may have been needed to determine the output shape
+    # We use an alloc to enforce the output shape.
+    if broadcasted_by(new_out, old_out):
+        batch_shape = get_simplified_broadcast_shape(
+            *elem_inputs, fgraph=fgraph, batch_ndim=batch_ndim
+        )
+        new_batch_shape = indexed_result_shape(batch_shape, idx_tuple)
+        core_shape = tuple(new_out.shape)[len(new_batch_shape) :]
+        new_out = alloc(new_out, *new_batch_shape, *core_shape)
 
     # Copy stack trace to new output
     copy_stack_trace([old_out, *node.inputs], new_out)

@@ -74,6 +74,12 @@ NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 
 
 class TestLocalSubtensorOfBatchDims:
+    rewrite_kw = dict(
+        include=("ShapeOpt", "canonicalize", "specialize"),
+        exclude=("local_replace_AdvancedSubtensor",),
+        clone=True,
+    )
+
     def test_unary_multiple_clients(self):
         # as test0, but we reuse the output of the elemwise
         # So we should not lift the subtensor
@@ -151,7 +157,7 @@ class TestLocalSubtensorOfBatchDims:
             # Slice indexing on broadcastable dimension
             (
                 lambda x, y: add(x[None], y[None])[1:],
-                lambda x, y: add(x[None][1:], y[None][1:]),
+                lambda x, y: pt.alloc(pt.add(x[None], y[None]), 0, *x.type.shape),
             ),
             (
                 lambda x, y: add(x[None, :], y[:, None])[1:],
@@ -169,9 +175,7 @@ class TestLocalSubtensorOfBatchDims:
         out = original_fn(x, y)
         expected_opt_out = expected_fn(x, y)
         opt_out = rewrite_graph(out)
-        assert equal_computations([opt_out], [expected_opt_out]), debugprint(
-            [expected_opt_out, opt_out], print_type=True
-        )
+        assert_equal_computations([opt_out], [expected_opt_out], strict_dtype=False)
         eval_kwargs = dict(mode=NO_OPTIMIZATION_MODE, on_unused_input="ignore")
         np.testing.assert_allclose(
             opt_out.eval({x: x_test, y: y_test}, **eval_kwargs),
@@ -251,9 +255,10 @@ class TestLocalSubtensorOfBatchDims:
     @pytest.mark.parametrize(
         "idx", [np.zeros(20, dtype="int64"), slice(0, 5)], ids=["advanced", "slice"]
     )
-    def test_lifts_through_stale_elemwise_output_type(self, idx):
+    def test_stale_elemwise_output_type(self, idx):
         """When every input is length 1 on an indexed dim but elem's output type
-        stale-claims non-bcast, the lift should still succeed by wrapping with alloc."""
+        stale-claims non-bcast, the lift still succeeds: the broadcast-back shape
+        is derived from the inputs (which are never stale), not from elem.type."""
         x_input = pt.tensor("x_input", shape=(None, 3, 3), dtype="float64")
         x_new_input = pt.tensor("x_new", shape=(1, 3, 3), dtype="float64")
         x = pt.identity(x_input)
@@ -266,49 +271,48 @@ class TestLocalSubtensorOfBatchDims:
         # call fgraph.replace(x, x_new_input).
         fgraph.replace(x, x_new_input)
 
+        # Confirm the state is genuinely stale: the Elemwise output type still
+        # claims dim 0 is non-broadcastable, while its (replaced) inputs are now
+        # length 1 there.
+        elem = indexed.owner.inputs[0]
+        assert not elem.type.broadcastable[0]
+        assert all(inp.type.broadcastable[0] for inp in elem.owner.inputs)
+
         [new_out] = local_subtensor_of_batch_dims.transform(fgraph, indexed.owner)
         # The lifted graph must be type-compatible with the (stale) original.
         fgraph.replace(indexed, new_out)
 
-        rng = np.random.default_rng(0)
-        x_val = rng.standard_normal((1, 3, 3))
-        f = function(
-            [x_new_input], new_out, on_unused_input="ignore", mode=NO_OPTIMIZATION_MODE
-        )
-        expected = (x_val * x_val)[idx]
-        np.testing.assert_allclose(f(x_val), expected)
+        rewritten = rewrite_graph(new_out, **self.rewrite_kw)
+        if isinstance(idx, slice):
+            # slice(0, 5) on a length-1 dim stays length 1, so no Alloc is needed.
+            expected = pt.sqr(x_new_input)
+        else:
+            expected = pt.alloc(pt.sqr(x_new_input), idx.shape[0], 3, 3)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
-    def test_advanced_index_on_all_bcast_dim_does_not_expand(self):
-        """When all inputs are length 1 on an advanced-indexed dim, the lifted
-        Elemwise should keep them length 1 (and alloc once) rather than
-        repeating the computation K times."""
+    def test_advanced_index_on_broadcast_dim_does_not_expand_inputs(self):
+        """An advanced index on a dim that is length 1 in every input must not be
+        applied to those inputs (it would expand them 1->K and duplicate the
+        computation). They stay length 1 and the K-sized dim comes from one Alloc."""
         x = pt.tensor("x", shape=(1, 3), dtype="float64")
         y = pt.tensor("y", shape=(1, 3), dtype="float64")
-        idx = np.zeros(5, dtype="int64")
-        out = (x + y)[idx]
+        out = (x + y)[np.zeros(5, dtype="int64")]
 
-        [new_out] = local_subtensor_of_batch_dims.transform(
-            FunctionGraph([x, y], [out], clone=False), out.owner
-        )
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(x + y, 5, 3)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
-        # Final shape matches the original.
-        assert new_out.type.shape == (5, 3)
+    def test_broadcast_dim_does_not_block_lift(self):
+        """An advanced index on a broadcast dim (which needs an Alloc back) must
+        not stop the lift: the shrinking index on the other, non-broadcast dim
+        still pushes the Elemwise inside. Here ``exp`` runs on a single row
+        instead of a million."""
+        x = pt.matrix("x", shape=(1_000_000, 1))
+        out = pt.exp(x)[0, np.array([0, 0, 0])]
 
-        # The lifted Elemwise must operate on length 1 inputs (no K-fold
-        # expansion), and the K-sized dim must come from an Alloc wrapper.
-        from pytensor.tensor.basic import Alloc
-
-        assert isinstance(new_out.owner.op, Alloc)
-        [inner_elem, *_] = new_out.owner.inputs
-        assert isinstance(inner_elem.owner.op, Elemwise)
-        for inner_inp in inner_elem.owner.inputs:
-            assert inner_inp.type.shape[0] == 1
-
-        rng = np.random.default_rng(1)
-        x_val = rng.standard_normal((1, 3))
-        y_val = rng.standard_normal((1, 3))
-        f = function([x, y], new_out, mode=NO_OPTIMIZATION_MODE)
-        np.testing.assert_allclose(f(x_val, y_val), (x_val + y_val)[idx])
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(pt.exp(x[0]), 3)
+        assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
 
 def test_local_subtensor_of_dot():
