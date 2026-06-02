@@ -2070,13 +2070,6 @@ class Usmm(Op):
 usmm = Usmm()
 
 
-# ---------------------------------------------------------------------------
-# vectorize_node dispatchers for sparse ops
-# ---------------------------------------------------------------------------
-# The default Blockwise-based fallback at pytensor/tensor/blockwise.py wraps
-# the op in Blockwise and rebuilds its make_node with dense dummy core inputs.
-# That contradicts the sparse-input contract enforced by as_sparse_variable,
-# so every sparse op needs a custom dispatcher (or a clear NotImplementedError).
 @_vectorize_node.register(StructuredDot)
 def _vectorize_structured_dot(op, node, batch_a, batch_b):
     """Batch StructuredDot(sparse_const, dense): (m,k)@(B...,k,n) -> (B...,m,n).
@@ -2133,11 +2126,5 @@ def _vectorize_sparse_unsupported(op, node, *batched_inputs):
     )
 
 
-# Register clear errors for the sparse ops that take a dense input which can be
-# batched, so callers hit a descriptive message instead of the cryptic
-# `as_sparse_variable` TypeError from the dense-dummy Blockwise fallback. Ops
-# with only sparse inputs (TrueDot, AddSS, AddSSData, SparseSparseMultiply) are
-# unreachable here: a sparse input can never become batched, so vectorize_graph
-# never dispatches to them.
 for _op_cls in (AddSD, SparseDenseMultiply):
     _vectorize_node.register(_op_cls)(_vectorize_sparse_unsupported)
