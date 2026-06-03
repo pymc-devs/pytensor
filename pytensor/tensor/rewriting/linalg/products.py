@@ -22,6 +22,7 @@ from pytensor.tensor.linalg.summary import det
 from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
+    register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
@@ -167,6 +168,69 @@ def det_of_kronecker(fgraph, node):
                 [dets[i] ** (prod_sizes / sizes[i]) for i in range(2)], axis=-1
             )
             return [det_final]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Dot, blockwise_of(Dot)])
+def dot_of_kron(fgraph, node):
+    r"""Decompose ``kron(A, B) @ X`` into two matmuls.
+
+    Applies the identity :math:`(A \otimes B)\, \mathrm{vec}_{\mathrm{row}}(X)
+    = \mathrm{vec}_{\mathrm{row}}(A X B^\top)` column-wise across the RHS:
+
+    .. math::
+        (A \otimes B)\, Y
+            = \mathrm{reshape}\bigl(
+                  A\, \mathrm{reshape}(Y,\, (m, p, k))\, B^\top,\,
+                  (m p,\, k)
+              \bigr).
+
+    Cost drops from :math:`O(k\, (m p)^2)` to :math:`O(k\, m p\, (m + p))`,
+    and the :math:`(m p) \times (m p)` Kronecker matrix is never formed.
+    """
+    K, X = node.inputs
+
+    # Peel Blockwise(Dot)'s batch-broadcast wrapper (plain expand or matrix-transposed).
+    transposed = False
+    match K.owner_op_and_inputs:
+        case (DimShuffle(is_left_expand_dims=True), inner):
+            K = inner
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+            K = inner
+            transposed = True
+
+    match K.owner_op_and_inputs:
+        case (KroneckerProduct(), A, B):
+            pass
+        case _:
+            return None
+
+    # ``kron(A, B).mT == kron(A.mT, B.mT)`` for 2-D ``A, B``.
+    if transposed:
+        A, B = A.mT, B.mT
+
+    if A.type.ndim != 2 or B.type.ndim != 2:
+        return None
+
+    m = A.shape[-1]
+    p = B.shape[-1]
+
+    # Bring k to the front so each (m, p) slice is a batched matmul argument.
+    batch_shape = tuple(X.shape[i] for i in range(X.type.ndim - 2))
+    k = X.shape[-1]
+    X_3d = X.reshape((*batch_shape, m, p, k))
+    X_3d = pt.moveaxis(X_3d, -1, -3)
+
+    Z = A @ X_3d
+    Z = Z @ B.mT
+
+    Z = pt.moveaxis(Z, -3, -1)
+    new_out = Z.reshape((*batch_shape, m * p, k))
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize

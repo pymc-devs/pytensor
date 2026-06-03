@@ -1,3 +1,5 @@
+from functools import reduce
+
 import numpy as np
 
 from pytensor import tensor as pt
@@ -10,22 +12,27 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.scalar.basic import Abs, Exp, Log, Sign, Sqr
+from pytensor.scalar.basic import Abs, Add, Exp, Log, Sign, Sqr
 from pytensor.tensor.basic import ones
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
-from pytensor.tensor.linalg.summary import SLogDet, det
+from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.summary import Det, SLogDet, det
 from pytensor.tensor.math import Prod, log, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
+from pytensor.tensor.rewriting.linalg.utils import (
+    is_eye_mul,
+    matrix_diagonal_product,
+)
 
 
 @register_stabilize
@@ -190,6 +197,80 @@ def det_of_triangular(fgraph, node):
 
     det_val = matrix_diagonal_product(inp).astype(node.outputs[0].type.dtype)
     return [det_val]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([KroneckerProduct])
+def det_of_kron_plus_diag_noise(fgraph, node):
+    r"""Rewrite ``det(kron(*Ks) + sigma**2 * I)`` as ``prod(d)`` via per-component ``eigh``.
+
+    The eigenvalues of the noisy Kron are :math:`d = (\bigotimes d_i) +
+    \sigma^2` where :math:`d_i` are the eigenvalues of :math:`K_i`, so
+    :math:`\det K = \prod_j d_j`.
+    """
+    kron_out = node.outputs[0]
+
+    def collect_leaves(y):
+        if y.owner is not None and isinstance(y.owner.op, KroneckerProduct):
+            return collect_leaves(y.owner.inputs[0]) + collect_leaves(y.owner.inputs[1])
+        return [y]
+
+    Ks = collect_leaves(kron_out)
+    if any(K.type.ndim != 2 for K in Ks):
+        return None
+
+    # Find Add(kron, scalar*eye); either operand order.
+    K_var = sigma_sq = None
+    for client, kron_idx in fgraph.clients[kron_out]:
+        if not (
+            isinstance(client.op, Elemwise)
+            and isinstance(client.op.scalar_op, Add)
+            and len(client.inputs) == 2
+        ):
+            continue
+        eye_match = is_eye_mul(client.inputs[1 - kron_idx])
+        if eye_match is None:
+            continue
+        _, raw_sigma_sq = eye_match
+        # Eigh form needs ``sigma_sq`` to broadcast against the 1-D ``d`` vector.
+        if not all(raw_sigma_sq.type.broadcastable):
+            continue
+        sigma_sq = raw_sigma_sq.squeeze()
+        K_var = client.outputs[0]
+        break
+    if K_var is None:
+        return None
+
+    # kron + sigma**2*I is symmetric, so left-expand and matrix-transpose wrappers
+    # both reach Det consumers that are equivalent to consumers of K_var.
+    candidates = [K_var]
+    for c, idx in fgraph.clients[K_var]:
+        if (
+            idx == 0
+            and isinstance(c.op, DimShuffle)
+            and (c.op.is_left_expand_dims or c.op.is_left_expanded_matrix_transpose)
+        ):
+            candidates.append(c.outputs[0])
+
+    d = None  # shared across all Det consumers of the same noisy K
+    replacements = {}
+    for cand in candidates:
+        for client, idx in fgraph.clients[cand]:
+            if idx != 0:
+                continue
+            if not (
+                isinstance(client.op, Blockwise) and isinstance(client.op.core_op, Det)
+            ):
+                continue
+            if d is None:
+                ds = [eigh(K)[0] for K in Ks]
+                d = reduce(lambda a, b: pt.outer(a, b).ravel(), ds) + sigma_sq
+            out = d.prod().astype(client.outputs[0].type.dtype)
+            copy_stack_trace(client.outputs[0], out)
+            replacements[client.outputs[0]] = out
+
+    return replacements or None
 
 
 @register_specialize
