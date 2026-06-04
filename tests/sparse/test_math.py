@@ -10,6 +10,7 @@ import pytensor.sparse.math as psm
 import pytensor.tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph.replace import vectorize_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.scalar import upcast
 from pytensor.sparse.basic import (
@@ -1471,3 +1472,62 @@ SqrtTester = elemwise_checker(psm.sqrt, np.sqrt, gap=(0, 10))
 ConjTester = elemwise_checker(psm.conjugate, np.conj, grad_test=False)
 
 NegTester = elemwise_checker(psm.neg, np.negative, name="TestNeg")
+
+
+class TestVectorizeSparse:
+    def _const_csr(self, n=3):
+        return as_sparse_variable(scipy_sparse.csr_matrix(np.eye(n, dtype="float64")))
+
+    @pytest.mark.parametrize("n_batch_dims", [0, 1, 2])
+    def test_structured_dot_batches_dense_input(self, n_batch_dims):
+        # StructuredDot(sparse_const, dense): batch only the dense (right) input.
+        # n_batch_dims == 0 exercises the no-batch path: a plain StructuredDot.
+        S = self._const_csr(3)
+        x = pt.matrix("x")  # core (3, n)
+        y = structured_dot(S, x)
+
+        batch_shape = (2, 4)[:n_batch_dims]
+        xb = pt.tensor("xb", shape=(None,) * (n_batch_dims + 2))
+        yb = vectorize_graph(y, {x: xb})
+
+        assert yb.type.ndim == n_batch_dims + 2
+        if n_batch_dims == 0:
+            assert isinstance(yb.owner.op, StructuredDot)
+
+        rng = np.random.default_rng(123)
+        xb_val = rng.normal(size=(*batch_shape, 3, 5)).astype("float64")
+        out = pytensor.function([xb], yb)(xb_val)
+
+        expected = np.eye(3) @ xb_val
+        np.testing.assert_allclose(out, expected)
+
+    def test_structured_dot_batched_sparse_raises(self):
+        # Batching the sparse (left) input is structurally unsupported.
+        x = pt.matrix("x")
+        S_sparse = self._const_csr(3)
+        y = structured_dot(S_sparse, x)
+
+        S_batched = pt.tensor3("S_batched")
+        with pytest.raises(
+            NotImplementedError, match="sparse \\(left\\) input is batched"
+        ):
+            vectorize_graph(y, {S_sparse: S_batched, x: pt.tensor3("xb")})
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            pytest.param(lambda a, d: add(a, d), id="AddSD"),
+            pytest.param(lambda a, d: multiply(a, d), id="SparseDenseMultiply"),
+        ],
+    )
+    def test_sparse_dense_ops_batched_dense_raises(self, build):
+        # These ops take a dense input that *can* be batched. Batching it must
+        # raise a descriptive NotImplementedError rather than the cryptic
+        # as_sparse_variable TypeError from the Blockwise fallback.
+        a = self._const_csr(3)
+        d = pt.matrix("d")
+        out = build(a, d)
+
+        new_d = pt.tensor3("new_d")
+        with pytest.raises(NotImplementedError, match="no batched-sparse"):
+            vectorize_graph(out, {d: new_d})
