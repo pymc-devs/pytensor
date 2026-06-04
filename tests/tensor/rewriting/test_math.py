@@ -5118,3 +5118,83 @@ class TestBlockDiagDotToDotBlockDiag:
             original, include=("canonicalize", "stabilize", "specialize")
         )
         assert_equal_computations([rewritten], [original])
+
+
+def test_log_reciprocal():
+    x = pt.dscalar("x")
+    out = pt.log(pt.reciprocal(x))
+    expected = -pt.log(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_sign_reciprocal():
+    x = pt.dscalar("x")
+    out = pt.sign(pt.reciprocal(x))
+    expected = pt.sign(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "build, expected_fn",
+    [
+        (lambda x: pt.log(3.0 / x), lambda x: pt.log(3.0) - pt.log(x)),
+        (lambda x: pt.log(x / 3.0), lambda x: pt.log(x) - pt.log(3.0)),
+        (lambda x: pt.log(1.0 / x), lambda x: -pt.log(x)),
+    ],
+    ids=["pos_const_num", "pos_const_den", "one_over_x"],
+)
+def test_log_div_positive_constant(build, expected_fn):
+    x = pt.dscalar("x")
+    rewritten = rewrite_graph(
+        build(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = rewrite_graph(
+        expected_fn(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_log_div_non_constant_not_rewritten():
+    x = pt.dscalar("x")
+    y = pt.dscalar("y")
+    out = pt.log(x / y)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
+    # No constant to peel off — graph should still contain a true_div.
+    nodes = [v.owner for v in ancestors([rewritten]) if v.owner]
+    assert any(
+        isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
+    )
+
+
+@pytest.mark.parametrize(
+    "build, expected_fn",
+    [
+        (lambda x: pt.sign(3.0 / x), lambda x: pt.sign(x)),
+        (lambda x: pt.sign(-3.0 / x), lambda x: -pt.sign(x)),
+        (lambda x: pt.sign(x / 3.0), lambda x: pt.sign(x)),
+        (lambda x: pt.sign(x / -3.0), lambda x: -pt.sign(x)),
+    ],
+    ids=["pos_num", "neg_num", "pos_den", "neg_den"],
+)
+def test_sign_div_constant(build, expected_fn):
+    x = pt.dscalar("x")
+    rewritten = rewrite_graph(
+        build(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = rewrite_graph(
+        expected_fn(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_sign_div_non_constant_not_rewritten():
+    x = pt.dscalar("x")
+    y = pt.dscalar("y")
+    out = pt.sign(x / y)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
+    nodes = [v.owner for v in ancestors([rewritten]) if v.owner]
+    assert any(
+        isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
+    )

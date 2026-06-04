@@ -18,6 +18,7 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet, det
 from pytensor.tensor.math import Prod, log, prod
 from pytensor.tensor.rewriting.basic import (
@@ -190,6 +191,16 @@ def det_of_triangular(fgraph, node):
 
     det_val = matrix_diagonal_product(inp).astype(node.outputs[0].type.dtype)
     return [det_val]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([det])
+def det_of_inv(fgraph, node):
+    """Replace det(matrix_inverse(X)) with reciprocal(det(X))."""
+    match node.inputs[0].owner_op_and_inputs:
+        case (Blockwise(MatrixInverse()), X):
+            return [1 / det(X)]
 
 
 @register_specialize

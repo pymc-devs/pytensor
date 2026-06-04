@@ -459,3 +459,38 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     expected = expected_fn(x)
     rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
     assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_inv():
+    x = pt.tensor("x", shape=(3, 3))
+    out = det(pt.linalg.inv(x))
+    expected = pt.as_tensor(1.0, dtype="float64") / det(x)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_slogdet_of_inv():
+    x = pt.dmatrix("x")
+    # slogdet(inv(x)) -> (sign, logabsdet)
+    sign_inv, logabsdet_inv = pt.linalg.slogdet(pt.linalg.inv(x))
+
+    # expected: (sign(det(x)), -logabsdet(det(x)))
+    # det(inv(x)) = 1/det(x), so sign is same.
+    # logabsdet(inv(x)) = log(abs(1/det(x))) = -log(abs(det(x)))
+    sign_x, logabsdet_x = pt.linalg.slogdet(x)
+    expected_sign = sign_x
+    expected_logabsdet = -logabsdet_x
+
+    # We need stabilize for det_of_inv and log_reciprocal
+    # and specialize for slogdet_specialization
+    rewritten_sign, rewritten_logabsdet = rewrite_graph(
+        [sign_inv, logabsdet_inv], include=["canonicalize", "stabilize", "specialize"]
+    )
+
+    expected_sign_opt, expected_logabsdet_opt = rewrite_graph(
+        [expected_sign, expected_logabsdet],
+        include=["canonicalize", "stabilize", "specialize"],
+    )
+
+    assert_equal_computations([rewritten_sign], [expected_sign_opt])
+    assert_equal_computations([rewritten_logabsdet], [expected_logabsdet_opt])

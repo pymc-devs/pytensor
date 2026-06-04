@@ -112,7 +112,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -687,6 +687,66 @@ def local_exp_log_nan_switch(fgraph, node):
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), x, np.asarray(np.nan, old_out.dtype))
         return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_div(fgraph, node):
+    """Rewrite log(reciprocal(x)) -> -log(x) and log(a / b) -> log(a) - log(b).
+
+    A reciprocal is just ``1 / x``; log(a / b) only splits when a positive
+    constant operand is involved, so its log folds and the op count stays flat.
+    """
+    (inp,) = node.inputs
+    if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
+        return None
+    scalar_op = inp.owner.op.scalar_op
+
+    if isinstance(scalar_op, ps.Reciprocal):
+        return [neg(log(inp.owner.inputs[0]))]
+
+    if isinstance(scalar_op, ps.TrueDiv):
+        num, den = inp.owner.inputs
+        if (isinstance(num, Constant) and _is_provably_positive(num, strict=True)) or (
+            isinstance(den, Constant) and _is_provably_positive(den, strict=True)
+        ):
+            return [log(num) - log(den)]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_div(fgraph, node):
+    """Rewrite sign of a reciprocal or division from a known-sign operand.
+
+    sign(reciprocal(x)) -> sign(x). For sign(a / b): a provably positive side ->
+    ``sign(other)``; a negative constant side -> ``-sign(other)``. Bails out
+    otherwise.
+    """
+    (inp,) = node.inputs
+    if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
+        return None
+    scalar_op = inp.owner.op.scalar_op
+
+    if isinstance(scalar_op, ps.Reciprocal):
+        return [sign(inp.owner.inputs[0])]
+
+    if not isinstance(scalar_op, ps.TrueDiv):
+        return None
+
+    num, den = inp.owner.inputs
+
+    if _is_provably_positive(num, strict=True):
+        return [sign(den)]
+    if _is_provably_positive(den, strict=True):
+        return [sign(num)]
+
+    for side, other in ((num, den), (den, num)):
+        if isinstance(side, Constant) and np.all(np.asarray(side.data) < 0):
+            return [neg(sign(other))]
 
 
 @register_canonicalize
