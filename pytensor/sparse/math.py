@@ -14,6 +14,7 @@ from pytensor.graph import Apply, Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.sparse.type import SparseTensorType
+from pytensor.tensor.reshape import join_dims, split_dims
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import TensorType, Variable, complex_dtypes, tensor
 
@@ -2074,55 +2075,41 @@ usmm = Usmm()
 def _vectorize_structured_dot(op, node, batch_a, batch_b):
     """Batch StructuredDot(sparse_const, dense): (m,k)@(B...,k,n) -> (B...,m,n).
 
-    The sparse left input is required to stay unbatched (no batched-sparse
-    type in scipy). The dense right input may gain any number of leading
-    batch dims; we use a moveaxis+reshape trick to fold them through the
-    existing StructuredDot 2D matmul.
+    The sparse left input must stay unbatched (scipy has no batched-sparse
+    type). The dense right input may gain any number of leading batch dims;
+    we fold them through the existing 2D StructuredDot with a moveaxis +
+    join_dims / split_dims round trip.
     """
     a, b = node.inputs
-    if batch_a is not a:
-        # Caller batched the sparse input — structurally unsupported.
+    if batch_a.type.ndim != a.type.ndim:
         raise NotImplementedError(
-            "Cannot vectorize StructuredDot when the sparse (left) input is batched; "
-            "scipy has no batched-sparse type. Rewrite the model to keep the sparse "
-            "matrix constant across the batch."
+            "Cannot vectorize StructuredDot when the sparse (left) input is "
+            "batched; scipy has no batched-sparse type."
         )
 
-    extra = batch_b.type.ndim - b.type.ndim  # number of batch dims added to b
-    if extra == 0:
-        # nothing to vectorize — just rebuild the op
-        return op.make_node(batch_a, batch_b)
+    if batch_b.type.ndim == b.type.ndim:
+        # No batch dims added to the dense input — rebuild the op as-is.
+        return op.make_node(batch_a, batch_b).outputs
 
-    # b is (B1,...,BN, k, n). Move k to front: (k, B1,...,BN, n).
-    # Use moveaxis on the second-to-last axis (-2 = k after the batch dims).
-    k_axis = -2
-    moved = ptb.moveaxis(batch_b, k_axis, 0)  # (k, B1,...,BN, n)
+    # batch_b is (B1,...,BN, k, n). Move k to the front and fold the batch
+    # dims and n into a single column axis: (k, B1*...*BN*n).
+    moved = ptb.moveaxis(batch_b, -2, 0)  # (k, B1,...,BN, n)
+    trailing = moved.shape[1:]
+    flat_b = join_dims(moved, start_axis=1)  # (k, B*n)
 
-    # Compose the trailing shape (B1*...*BN*n) symbolically.
-    shape = moved.shape
-    k = shape[0]
-    trailing = shape[1:]
-    flat_trailing = ptm.prod(trailing)
-    flat_b = moved.reshape((k, flat_trailing))  # (k, B*n)
-
-    # StructuredDot returns (m, B*n)
     flat_out = op.make_node(batch_a, flat_b).outputs[0]  # (m, B*n)
 
-    # Reshape back to (m, B1,...,BN, n).
-    m = flat_out.shape[0]
-    target_shape = ptb.concatenate([ptb.stack([m]), ptb.stack(list(trailing))])
-    unflat = flat_out.reshape(target_shape, ndim=batch_b.type.ndim)
-    # Move m back into the (-2) slot: (B1,...,BN, m, n).
-    out = ptb.moveaxis(unflat, 0, -2)
-    return out.owner
+    # Unfold the column axis and move m back into the (-2) slot.
+    unflat = split_dims(flat_out, shape=trailing, axis=1)  # (m, B1,...,BN, n)
+    out = ptb.moveaxis(unflat, 0, -2)  # (B1,...,BN, m, n)
+    return [out]
 
 
 def _vectorize_sparse_unsupported(op, node, *batched_inputs):
     raise NotImplementedError(
         f"Cannot vectorize {type(op).__name__}: scipy has no batched-sparse "
         "representation, so the sparse operand cannot be broadcast against a "
-        "batched dense input. Rewrite the model to keep the sparse matrix "
-        "constant across the batch."
+        "batched dense input."
     )
 
 

@@ -1478,9 +1478,10 @@ class TestVectorizeSparse:
     def _const_csr(self, n=3):
         return as_sparse_variable(scipy_sparse.csr_matrix(np.eye(n, dtype="float64")))
 
-    @pytest.mark.parametrize("n_batch_dims", [1, 2])
+    @pytest.mark.parametrize("n_batch_dims", [0, 1, 2])
     def test_structured_dot_batches_dense_input(self, n_batch_dims):
         # StructuredDot(sparse_const, dense): batch only the dense (right) input.
+        # n_batch_dims == 0 exercises the no-batch path: a plain StructuredDot.
         S = self._const_csr(3)
         x = pt.matrix("x")  # core (3, n)
         y = structured_dot(S, x)
@@ -1490,27 +1491,15 @@ class TestVectorizeSparse:
         yb = vectorize_graph(y, {x: xb})
 
         assert yb.type.ndim == n_batch_dims + 2
+        if n_batch_dims == 0:
+            assert isinstance(yb.owner.op, StructuredDot)
 
         rng = np.random.default_rng(123)
         xb_val = rng.normal(size=(*batch_shape, 3, 5)).astype("float64")
         out = pytensor.function([xb], yb)(xb_val)
 
-        S_dense = np.eye(3)
-        expected = np.empty((*batch_shape, 3, 5))
-        for idx in np.ndindex(*batch_shape):
-            expected[idx] = S_dense @ xb_val[idx]
+        expected = np.eye(3) @ xb_val
         np.testing.assert_allclose(out, expected)
-
-    def test_structured_dot_no_batch_is_noop(self):
-        # Replacing the dense input with another un-batched dense input must not
-        # wrap anything: the result is a plain StructuredDot again.
-        S = self._const_csr(3)
-        x = pt.matrix("x")
-        y = structured_dot(S, x)
-        new_x = pt.matrix("new_x")
-
-        new_y = vectorize_graph(y, {x: new_x})
-        assert isinstance(new_y.owner.op, StructuredDot)
 
     def test_structured_dot_batched_sparse_raises(self):
         # Batching the sparse (left) input is structurally unsupported.
@@ -1518,7 +1507,7 @@ class TestVectorizeSparse:
         S_sparse = self._const_csr(3)
         y = structured_dot(S_sparse, x)
 
-        S_batched = csr_matrix(name="S_batched")
+        S_batched = pt.tensor3("S_batched")
         with pytest.raises(
             NotImplementedError, match="sparse \\(left\\) input is batched"
         ):
