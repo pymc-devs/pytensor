@@ -49,8 +49,13 @@ def _diagonal_from_constant(var: TensorConstant) -> FactState:
         if m != n:
             result = FactState.FALSE
         else:
-            eye_mask = np.eye(n, dtype=bool)
-            result = FactState.FALSE if np.any(data * ~eye_mask) else FactState.TRUE
+            # Off-diagonal has a nonzero iff there are more nonzeros in ``data``
+            # than on its diagonal.
+            diag = np.diagonal(data, axis1=-2, axis2=-1)
+            if np.count_nonzero(data) == np.count_nonzero(diag):
+                result = FactState.TRUE
+            else:
+                result = FactState.FALSE
 
     var.tag.is_diagonal = result
     return result

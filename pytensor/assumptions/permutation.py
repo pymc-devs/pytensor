@@ -38,13 +38,18 @@ def _permutation_from_constant(var: TensorConstant) -> FactState:
     if data.ndim < 2 or data.shape[-1] != data.shape[-2]:
         result = FactState.FALSE
     else:
-        # The row/column-sum reductions are cheaper and short-circuit the full-size binary
-        # scan; a doubly-stochastic matrix shows the binary check is still required.
-        is_permutation = (
-            bool(np.all(data.sum(axis=-2) == 1))
-            and bool(np.all(data.sum(axis=-1) == 1))
-            and bool(np.all((data == 0) | (data == 1)))
-        )
+        with np.errstate(invalid="ignore"):
+            if not (data.sum(axis=-2) == 1).all():
+                is_permutation = False
+            elif not (data.sum(axis=-1) == 1).all():
+                is_permutation = False
+            elif data.dtype.kind in "ub":
+                is_permutation = True
+            elif data.dtype.kind == "i":
+                is_permutation = data.min(initial=0) >= 0
+            else:
+                n = data.shape[-1]
+                is_permutation = np.count_nonzero(data) == (data.size // n if n else 0)
         result = FactState.TRUE if is_permutation else FactState.FALSE
 
     var.tag.is_permutation = result

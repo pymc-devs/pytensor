@@ -28,12 +28,18 @@ def _selection_from_constant(var: TensorConstant) -> FactState:
     if data.ndim < 2:
         result = FactState.FALSE
     else:
-        if not (data.sum(axis=-2) == 1).all():
-            is_selection = False
-        elif data.dtype.kind in "uib":
-            is_selection = data.max(initial=1) <= 1 and data.min(initial=0) >= 0
-        else:
-            is_selection = bool(((data == 0) | (data == 1)).all())
+        with np.errstate(invalid="ignore"):
+            if not (data.sum(axis=-2) == 1).all():
+                is_selection = False
+            elif data.dtype.kind in "ub":
+                is_selection = True
+            elif data.dtype.kind == "i":
+                is_selection = data.min(initial=0) >= 0
+            else:
+                n_rows = data.shape[-2]
+                is_selection = np.count_nonzero(data) == (
+                    data.size // n_rows if n_rows else 0
+                )
         result = FactState.TRUE if is_selection else FactState.FALSE
 
     var.tag.is_selection = result
