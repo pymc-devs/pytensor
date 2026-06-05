@@ -299,10 +299,7 @@ class TestLocalCanonicalizeAlloc:
         if shape_unsafe:
             assert not has_alloc
             # Error raised by SpecifyShape that is introduced due to static shape inference
-            with pytest.raises(
-                AssertionError,
-                match="SpecifyShape: dim 0 of input has shape 3, expected 6\\.",
-            ):
+            with pytest.raises(AssertionError, match="SpecifyShape"):
                 f()
         else:
             assert has_alloc

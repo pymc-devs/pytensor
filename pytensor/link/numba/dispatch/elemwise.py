@@ -869,7 +869,7 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
     if new_order == ():
         # Special case needed because of https://github.com/numba/numba/issues/9933
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def squeeze_to_0d(x):
             if not x.size == 1:
                 raise ValueError(
@@ -886,13 +886,13 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
         new_shape = shape_template
         new_strides = strides_template
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def dimshuffle(x):
             return as_strided(np.asarray(x), shape=new_shape, strides=new_strides)
 
     else:
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def dimshuffle(x):
             old_shape = x.shape
             old_strides = x.strides

@@ -50,7 +50,7 @@ def allocempty({", ".join(shape_var_names)}):
         alloc_def_src, "allocempty", globals() | {"np": np, "dtype": np.dtype(op.dtype)}
     )
 
-    return numba_basic.numba_njit(alloc_fn)
+    return numba_basic.numba_njit(alloc_fn, inline="always")
 
 
 @register_funcify_and_cache_key(Alloc)
@@ -221,12 +221,14 @@ def makevector({", ".join(input_names)}):
         globals() | {"np": np, "dtype": dtype},
     )
 
-    return numba_basic.numba_njit(makevector_fn)
+    # Numba can't inline closures with more than 30 arguments
+    inline = "always" if len(input_names) <= 30 else None
+    return numba_basic.numba_njit(makevector_fn, inline=inline)
 
 
 @register_funcify_default_op_cache_key(TensorFromScalar)
 def numba_funcify_TensorFromScalar(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def tensor_from_scalar(x):
         return np.array(x)
 
@@ -235,7 +237,7 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
 
 @register_funcify_default_op_cache_key(ScalarFromTensor)
 def numba_funcify_ScalarFromTensor(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def scalar_from_tensor(x):
         return x.item()
 

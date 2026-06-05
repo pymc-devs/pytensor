@@ -12,7 +12,7 @@ from pytensor.tensor.type_other import NoneTypeT
 
 @register_funcify_default_op_cache_key(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def shape(x):
         return np.asarray(np.shape(x))
 
@@ -23,7 +23,7 @@ def numba_funcify_Shape(op, **kwargs):
 def numba_funcify_Shape_i(op, **kwargs):
     i = op.i
 
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def shape_i(x):
         return np.asarray(np.shape(x)[i])
 
@@ -36,7 +36,7 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
 
     func_conditions = [
-        f"assert x.shape[{i}] == {eval_dim_name}, f'SpecifyShape: dim {{{i}}} of input has shape {{x.shape[{i}]}}, expected {{{eval_dim_name}.item()}}.'"
+        f"assert x.shape[{i}] == {eval_dim_name}, 'SpecifyShape: shape mismatch in dim {i}'"
         for i, (node_dim_input, eval_dim_name) in enumerate(
             zip(shape_inputs, shape_input_names, strict=True)
         )
@@ -52,7 +52,7 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     )
 
     specify_shape = compile_function_src(func, "specify_shape", globals())
-    return numba_basic.numba_njit(specify_shape)
+    return numba_basic.numba_njit(specify_shape, inline="always")
 
 
 @register_funcify_default_op_cache_key(Reshape)
@@ -61,13 +61,13 @@ def numba_funcify_Reshape(op, **kwargs):
 
     if ndim == 0:
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def reshape(x, shape):
             return np.asarray(x.item())
 
     else:
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def reshape(x, shape):
             # TODO: Use this until https://github.com/numba/numba/issues/7353 is closed.
             return np.reshape(

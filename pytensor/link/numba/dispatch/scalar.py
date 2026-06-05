@@ -136,12 +136,12 @@ def {scalar_op_fn_name}({input_signature}):
 
     # Functions that call a function pointer can't be cached
     cache_key = None if cython_func else scalar_op_cache_key(op)
-    return numba_basic.numba_njit(scalar_op_fn), cache_key
+    return numba_basic.numba_njit(scalar_op_fn, inline="always"), cache_key
 
 
 @register_funcify_and_cache_key(Switch)
 def numba_funcify_Switch(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def switch(condition, x, y):
         if condition:
             return x
@@ -174,34 +174,34 @@ def numba_funcify_Pow(op, node, **kwargs):
     def pow(x, y):
         return x**y
 
-    # Numba power fails when exponents are discrete integers and fasthmath=True
-    # https://github.com/numba/numba/issues/9554
-    fastmath = False if np.dtype(pow_dtype).kind in "ibu" else None
-
-    return numba_basic.numba_njit(pow, fastmath=fastmath), scalar_op_cache_key(
-        op, cache_version=1
-    )
+    # Integer exponents break fastmath and inline (numba#9554)
+    integer_exp = np.dtype(pow_dtype).kind in "ibu"
+    return numba_basic.numba_njit(
+        pow,
+        fastmath=False if integer_exp else None,
+        inline=None if integer_exp else "always",
+    ), scalar_op_cache_key(op, cache_version=1)
 
 
 @register_funcify_and_cache_key(Add)
 def numba_funcify_Add(op, node, **kwargs):
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
-    return numba_basic.numba_njit(nary_add_fn), scalar_op_cache_key(op)
+    return numba_basic.numba_njit(nary_add_fn, inline="always"), scalar_op_cache_key(op)
 
 
 @register_funcify_and_cache_key(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
     nary_mul_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
-    return numba_basic.numba_njit(nary_mul_fn), scalar_op_cache_key(op)
+    return numba_basic.numba_njit(nary_mul_fn, inline="always"), scalar_op_cache_key(op)
 
 
 @register_funcify_and_cache_key(Cast)
 def numba_funcify_Cast(op, node, **kwargs):
     dtype = np.dtype(op.o_type.dtype)
 
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def cast(x):
         return numba_basic.direct_cast(x, dtype)
 
@@ -210,7 +210,7 @@ def numba_funcify_Cast(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Identity)
 def numba_funcify_type_casting(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def identity(x):
         return x
 
@@ -219,7 +219,7 @@ def numba_funcify_type_casting(op, **kwargs):
 
 @register_funcify_and_cache_key(Clip)
 def numba_funcify_Clip(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def clip(x, min_val, max_val):
         if x < min_val:
             return min_val
@@ -247,7 +247,7 @@ def numba_funcify_Composite(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Second)
 def numba_funcify_Second(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def second(x, y):
         return y
 
@@ -256,7 +256,7 @@ def numba_funcify_Second(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Reciprocal)
 def numba_funcify_Reciprocal(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def reciprocal(x):
         # This is how the C-backend implementation works
         return np.divide(np.float32(1.0), x)
@@ -275,7 +275,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
             "uint64": np.float64,
         }[inp_dtype]
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def sigmoid(x):
             # Can't negate uint
             float_x = numba_basic.direct_cast(x, upcast_uint_dtype)
@@ -283,7 +283,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def sigmoid(x):
             return 1 / (1 + np.exp(-x))
 
@@ -292,7 +292,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
 
 @register_funcify_and_cache_key(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def gammaln(x):
         return math.lgamma(x)
 
@@ -301,7 +301,7 @@ def numba_funcify_GammaLn(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Log1mexp)
 def numba_funcify_Log1mexp(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def logp1mexp(x):
         if x < np.log(0.5):
             return np.log1p(-np.exp(x))
@@ -317,7 +317,7 @@ def numba_funcify_Erf(op, node, **kwargs):
         # Complex not supported by numba
         return numba_funcify_ScalarOp(op, node=node, **kwargs)
 
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def erf(x):
         return math.erf(x)
 
@@ -326,7 +326,7 @@ def numba_funcify_Erf(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Erfc)
 def numba_funcify_Erfc(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def erfc(x):
         return math.erfc(x)
 
@@ -347,7 +347,7 @@ def numba_funcify_Softplus(op, node, **kwargs):
         upcast_uint_dtype = None
     out_dtype = np.dtype(node.outputs[0].type.dtype)
 
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(inline="always")
     def softplus(x):
         if x < -37.0:
             value = np.exp(x)

@@ -70,7 +70,9 @@ def store_core_outputs({inp_signature}, {out_signature}):
         "store_core_outputs",
         {**globals(), **global_env},
     )
-    return numba_basic.numba_njit(func)
+    # Numba can't inline closures with more than 30 arguments
+    inline = "always" if nin + nout <= 30 else None
+    return numba_basic.numba_njit(func, inline=inline)
 
 
 _jit_options = {
