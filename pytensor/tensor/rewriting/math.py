@@ -41,6 +41,7 @@ from pytensor.tensor.basic import (
     zeros,
     zeros_like,
 )
+from pytensor.tensor.constant_props import constant_is_all_negative
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
@@ -112,7 +113,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
+from pytensor.tensor.subtensor import Subtensor, is_provably_positive
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -709,8 +710,8 @@ def local_log_div(fgraph, node):
 
     if isinstance(scalar_op, ps.TrueDiv):
         num, den = inp.owner.inputs
-        if (isinstance(num, Constant) and _is_provably_positive(num, strict=True)) or (
-            isinstance(den, Constant) and _is_provably_positive(den, strict=True)
+        if (isinstance(num, Constant) and is_provably_positive(num, strict=True)) or (
+            isinstance(den, Constant) and is_provably_positive(den, strict=True)
         ):
             return [log(num) - log(den)]
 
@@ -739,13 +740,13 @@ def local_sign_div(fgraph, node):
 
     num, den = inp.owner.inputs
 
-    if _is_provably_positive(num, strict=True):
+    if is_provably_positive(num, strict=True):
         return [sign(den)]
-    if _is_provably_positive(den, strict=True):
+    if is_provably_positive(den, strict=True):
         return [sign(num)]
 
     for side, other in ((num, den), (den, num)):
-        if isinstance(side, Constant) and np.all(np.asarray(side.data) < 0):
+        if constant_is_all_negative(side):
             return [neg(sign(other))]
 
 
