@@ -3846,6 +3846,60 @@ def test_local_div_exp_to_mul_exp():
     assert_equal_computations([rewritten], [expected])
 
 
+def test_local_div_reciprocal_to_mul():
+    x = scalar("x")
+    y = scalar("y")
+    p = scalar("p")
+
+    # A / reciprocal(B) -> A * B
+    out = x / reciprocal(y)
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [x * y])
+
+    # local_pow_specialize turns y**-2 into reciprocal(sqr(y)); the outer division
+    # must then cancel against the reciprocal: x / y**-2 -> x * sqr(y)
+    out = x / y ** (-2)
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [x * sqr(y)])
+
+    # symbolic neg exponent: x / y**(-p) -> x * y**p (the neg is dropped too)
+    out = x / y ** (-p)
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [x * y**p])
+
+    # negative constant exponent (here non-integer, so no nested-squaring path):
+    # x / y**(-2.5) -> x * y**2.5
+    out = x / y ** (-2.5)
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [x * y**2.5])
+
+    # guard: a positive exponent must never be flipped into a negative one
+    out = x / y**p
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [out])
+
+
+def test_local_reciprocal_neg_pow_to_pow():
+    y = scalar("y")
+    p = scalar("p")
+
+    # reciprocal(y**(-p)) -> y**p
+    out = reciprocal(y ** (-p))
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [y**p])
+
+    # 1 / y**(-p) is canonicalised to reciprocal(y**(-p)) before reaching a
+    # true_div, so it is handled here: -> y**p
+    out = true_div(np.float64(1.0), y ** (-p))
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [y**p])
+
+    # guard: positive exponent untouched
+    out = reciprocal(y**p)
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [out])
+
+
 def test_local_mul_pow_to_pow_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,

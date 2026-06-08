@@ -867,6 +867,57 @@ def local_div_exp_to_mul_exp(fgraph, node):
 
 
 @register_specialize
+@node_rewriter([true_div])
+def local_div_reciprocal_to_mul(fgraph, node):
+    """Replace ``A / reciprocal(B)`` with ``A * B`` and ``A / y ** (-p)`` with ``A * y ** p``."""
+    num, denom = node.inputs
+
+    match denom.owner_op_and_inputs:
+        case (Elemwise(scalar_op=ps.Reciprocal()), b):
+            inverted = b
+        case (Elemwise(scalar_op=ps.Pow()), base, exponent):
+            match exponent.owner_op_and_inputs:
+                case (Elemwise(scalar_op=ps.Neg()), pos_exponent):
+                    inverted = base**pos_exponent
+                case _ if constant_is_all_negative(exponent):
+                    inverted = base**-exponent.data
+                case _:
+                    return None
+        case _:
+            return None
+
+    new_out = num * inverted
+    if new_out.dtype != node.outputs[0].dtype:
+        new_out = cast(new_out, dtype=node.outputs[0].dtype)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_specialize
+@node_rewriter([reciprocal])
+def local_reciprocal_neg_pow_to_pow(fgraph, node):
+    """Replace ``reciprocal(y ** (-p))`` with ``y ** p`` (the ``1 / y ** (-p)`` form)."""
+    [arg] = node.inputs
+
+    match arg.owner_op_and_inputs:
+        case (Elemwise(scalar_op=ps.Pow()), base, exponent):
+            match exponent.owner_op_and_inputs:
+                case (Elemwise(scalar_op=ps.Neg()), pos_exponent):
+                    new_out = base**pos_exponent
+                case _ if constant_is_all_negative(exponent):
+                    new_out = base**-exponent.data
+                case _:
+                    return None
+        case _:
+            return None
+
+    if new_out.dtype != node.outputs[0].dtype:
+        new_out = cast(new_out, dtype=node.outputs[0].dtype)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_specialize
 @node_rewriter([mul, true_div])
 def local_mul_pow_to_pow_add(fgraph, node):
     """
