@@ -18,7 +18,7 @@ import numpy as np
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.replace import clone_replace
@@ -80,22 +80,71 @@ def scan_push_out_non_seq(fgraph, node):
     assert len(inner_non_seqs) == len(outer_non_seqs)
     assert len(inner_seqs) == len(outer_seqs)
 
+    inner_seqs_set = set(inner_seqs)
+    inner_clients = op.fgraph.clients
+
+    def _is_base_pushable(x):
+        # Pullable without seeing through any marker: a non-sequence placeholder, an
+        # already-hoisted node's output, or a constant.
+        return (
+            x in inner_non_seqs_set
+            or x.owner in to_remove_set
+            or isinstance(x, Constant)
+        )
+
+    def _is_pushable_input(x):
+        # ``_is_base_pushable``, or -- seen through -- a marker op (``TypeCastingOp``,
+        # e.g. an ``assume()``) wrapping pullable inputs. Seeing through the marker
+        # lets loop-invariant work that flows through a declared fact (``R @ Q @ R.T``
+        # with R a selection) hoist out instead of being recomputed every step because
+        # it is anchored to the never-hoisted marker.
+        return _is_base_pushable(x) or (
+            x.owner is not None
+            and isinstance(x.owner.op, TypeCastingOp)
+            and all(_is_pushable_input(i) for i in x.owner.inputs)
+        )
+
+    def _feeds_inner_seq(nd):
+        # Does an in-loop consumer of ``nd`` read a sequence? If so that consumer may
+        # still specialize against the sequence using a fact carried by a marker among
+        # ``nd``'s inputs (e.g. ``inv(pd) @ y_t`` -> a Cholesky solve). Hoisting ``nd``
+        # out -- which only seeing through the marker enables -- would split it from
+        # the sequence and preempt that specialization, so keep it inside.
+        for out in nd.outputs:
+            for client, _ in inner_clients.get(out, ()):
+                if isinstance(client, Apply) and any(
+                    i in inner_seqs_set for i in client.inputs
+                ):
+                    return True
+        return False
+
+    def _outer_input_for(x):
+        # The outer-graph stand-in for a pushable inner input.
+        if x in inner_non_seqs_set:
+            return outer_non_seqs[inner_non_seqs_map[x]]
+        if x in to_replace_set:
+            return replace_with_out[to_replace_map[x]]
+        if isinstance(x, Constant):
+            return x
+        # Marker seen through: rebuild it over its argument's outer stand-in so the
+        # declared fact is reproduced outside the loop.
+        return x.owner.op(*[_outer_input_for(i) for i in x.owner.inputs])
+
     for nd in local_fgraph_topo:
         if (  # we haven't already looked at this node
             nd not in to_remove_set
-            and all(
-                (
-                    (x in inner_non_seqs_set)
-                    or (x.owner in to_remove_set)
-                    or isinstance(x, Constant)
-                )
-                for x in nd.inputs
-            )
-            # We can (supposedly) do this because the assumption is that a
-            # `ViewOp` or `DeepCopyOp` will be just at the end of the
-            # function and not somewhere in the middle
-            and not isinstance(nd.op, ViewOp)
+            and all(_is_pushable_input(x) for x in nd.inputs)
+            # Marker ops carry no computation; hoisting them may strip an inner-graph
+            # hint a later rewrite needs -- and is zero compute saving anyway.
+            and not isinstance(nd.op, TypeCastingOp)
             and not isinstance(nd.op, DeepCopyOp)
+            # A node pullable only by seeing through a marker, whose result still feeds
+            # a sequence-dependent op, stays in: that op may yet specialize against the
+            # sequence using the marked fact.
+            and not (
+                any(not _is_base_pushable(x) for x in nd.inputs)
+                and _feeds_inner_seq(nd)
+            )
         ):
             # We have a candidate node to remove from the inner-graph
 
@@ -108,20 +157,11 @@ def scan_push_out_non_seq(fgraph, node):
             to_remove_set.add(nd)
             new_inputs = []
             for old_input in nd.inputs:
-                if old_input in inner_non_seqs_set:
-                    # This is case a), so we want to use the corresponding
-                    # outer-graph input as the input to our new pushed-out node
-                    _idx = inner_non_seqs_map[old_input]
-                    new_input = outer_non_seqs[_idx]
-                elif old_input in to_replace_set:
-                    # This is case b), so we want to use the new pushed-out node
-                    # as the input to this new pushed-out node
-                    new_input = replace_with_out[to_replace_map[old_input]]
-                else:
-                    assert isinstance(old_input, Constant)
-                    new_input = old_input
-
-                new_input = old_input.type.filter_variable(new_input)
+                # Map each inner input to its outer stand-in: a non-sequence's outer
+                # value (case a), an already-pushed-out node's output (case b), a
+                # constant, or a marker rebuilt over the outer stand-in of its
+                # argument (an ``assume()`` seen through).
+                new_input = old_input.type.filter_variable(_outer_input_for(old_input))
                 new_inputs.append(new_input)
 
             pushed_out_node = nd.op.make_node(*new_inputs)
