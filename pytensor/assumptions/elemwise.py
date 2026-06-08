@@ -11,7 +11,7 @@ from pytensor.tensor.basic import (
     NotScalarConstantError,
     get_underlying_scalar_constant_value,
 )
-from pytensor.tensor.subtensor import _is_provably_positive
+from pytensor.tensor.subtensor import is_provably_positive
 
 
 def elemwise_preserves_zero_pattern(
@@ -76,7 +76,7 @@ def elemwise_preserves_zero_pattern(
             return [FactState.UNKNOWN]
         # 0 ** p == 0 for p > 0, so a provably-positive exponent (scalar or
         # elementwise matrix) preserves the base's zero pattern.
-        return true_if(_is_provably_positive(node.inputs[1]))
+        return true_if(is_provably_positive(node.inputs[1]))
 
     if isinstance(scalar_op, UnaryScalarOp) and scalar_op.preserves_zero:
         return true_if(input_states[0] is FactState.TRUE)

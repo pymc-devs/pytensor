@@ -35,8 +35,6 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
-    _is_provably_non_negative,
-    _is_provably_positive,
     advanced_inc_subtensor,
     advanced_inc_subtensor1,
     advanced_set_subtensor,
@@ -49,6 +47,8 @@ from pytensor.tensor.subtensor import (
     get_canonical_form_slice,
     inc_subtensor,
     indexed_result_shape,
+    is_provably_non_negative,
+    is_provably_positive,
     set_subtensor,
     slice_at_axis,
     take,
@@ -127,9 +127,7 @@ class TestProvablyPositive:
         ],
     )
     def test_constant_data_respects_strictness(self, data, strict, expected):
-        assert (
-            _is_provably_positive(constant(np.array(data)), strict=strict) is expected
-        )
+        assert is_provably_positive(constant(np.array(data)), strict=strict) is expected
 
     @pytest.mark.parametrize(
         "make_var",
@@ -143,8 +141,8 @@ class TestProvablyPositive:
         """A uint value, a shape dimension, and a cast can each equal zero, so
         they establish ``>= 0`` but never strict ``> 0``."""
         var = make_var()
-        assert _is_provably_non_negative(var) is True
-        assert _is_provably_positive(var, strict=True) is False
+        assert is_provably_non_negative(var) is True
+        assert is_provably_positive(var, strict=True) is False
 
     @pytest.mark.parametrize(
         "expr, strict, expected",
@@ -164,7 +162,7 @@ class TestProvablyPositive:
         ],
     )
     def test_recurses_through_min_and_max(self, expr, strict, expected):
-        assert _is_provably_positive(expr, strict=strict) is expected
+        assert is_provably_positive(expr, strict=strict) is expected
 
 
 class TestGetCanonicalFormSlice:
