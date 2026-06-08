@@ -2,6 +2,7 @@
 Tests of printing functionality
 """
 
+import importlib.util
 import io
 import logging
 import re
@@ -573,6 +574,9 @@ def test_summary_with_profile_optimizer():
     assert "Rewriter Profile" in s.getvalue()
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("rich") is None, reason="rich is not installed"
+)
 class TestDebugprintRich:
     """Tests for debugprint(..., file="rich").
 
@@ -581,12 +585,12 @@ class TestDebugprintRich:
     construct the right tree structure and don't crash on various graph shapes.
     """
 
-    rich = pytest.importorskip("rich")
-
     def test_return_type(self):
+        from rich.tree import Tree
+
         x = dvector("x")
         tree = debugprint(x.sum(), file="rich")
-        assert isinstance(tree, self.rich.tree.Tree)
+        assert isinstance(tree, Tree)
 
     def test_single_output_has_one_child(self):
         # One output variable → the hidden root should have exactly one child.
@@ -794,8 +798,10 @@ class TestDebugprintRich:
         mul_node = tree.children[0].children[0]
         assert "result" in str(mul_node.label)
         # Verify Rich can render the tree without raising a markup error.
+        from rich.console import Console
+
         buf = io.StringIO()
-        console = self.rich.console.Console(file=buf, highlight=False)
+        console = Console(file=buf, highlight=False)
         console.print(tree)  # raises MarkupError if escaping is broken
 
     def test_deep_shared_node_sentinel_depth(self):
