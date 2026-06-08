@@ -37,6 +37,10 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.blockwise import _squeeze_left
+from pytensor.tensor.constant_props import (
+    constant_indices_are_unique,
+    constant_is_arange,
+)
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_to, squeeze
@@ -74,7 +78,6 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
-    _is_provably_non_negative,
     _non_consecutive_adv_indexing,
     advanced_inc_subtensor1,
     advanced_subtensor1,
@@ -85,6 +88,7 @@ from pytensor.tensor.subtensor import (
     get_slice_elements,
     inc_subtensor,
     indices_from_subtensor,
+    is_provably_non_negative,
     unflatten_index_variables,
 )
 from pytensor.tensor.type import TensorType
@@ -203,60 +207,6 @@ def get_advsubtensor_axis(indices):
         indices[axis], TensorConstant | TensorVariable | TensorSharedVariable
     ):
         return axis
-
-
-def _constant_has_unique_indices(idx) -> bool:
-    """Check whether a constant index has no duplicate entries.
-
-    Boolean indices, scalars, and single-element arrays are trivially unique.
-    For larger integer arrays, indices that mix positive and negative values
-    may alias, so those are treated as potentially duplicated.  The result
-    is cached on ``idx.tag``.
-    """
-    if not isinstance(idx, Constant):
-        return False
-    cached = getattr(idx.tag, "unique_indices", None)
-    if cached is not None:
-        return bool(cached)
-    idx_val = np.asarray(idx.data)
-    if idx_val.dtype == bool:
-        result = True
-    elif idx_val.size <= 1:
-        result = True
-    else:
-        has_pos = (idx_val >= 0).any()
-        has_neg = (idx_val < 0).any()
-        result = not (has_pos and has_neg) and np.unique(idx_val).size == idx_val.size
-    idx.tag.unique_indices = result
-    return result
-
-
-def _constant_is_arange(idx) -> tuple[int, int, int] | None:
-    """Match ``idx`` to ``np.arange(offset, offset + d * step, step)``
-    and return ``(d, offset, step)``, else ``None``.
-
-    Single-element constants return ``(1, value, 1)``.  The result is cached
-    on ``idx.tag.is_arange`` (``False`` sentinels a no-match).
-    """
-    if not isinstance(idx, Constant):
-        return None
-    cached = getattr(idx.tag, "is_arange", None)
-    if cached is not None:
-        return cached if cached is not False else None
-    idx_val = np.asarray(idx.data)
-    if idx_val.ndim != 1 or idx_val.size == 0 or idx_val.dtype.kind not in "iu":
-        result: tuple[int, int, int] | None = None
-    elif idx_val.size == 1:
-        result = (1, int(idx_val[0]), 1)
-    else:
-        diffs = np.diff(idx_val)
-        step = int(diffs[0])
-        if step != 0 and np.all(diffs == step):
-            result = (int(idx_val.size), int(idx_val[0]), step)
-        else:
-            result = None
-    idx.tag.is_arange = result if result is not None else False
-    return result
 
 
 def _match_arange_0_to_d_plus_offset(idx):
@@ -774,7 +724,7 @@ def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
     def _eager_lt_0(x):
         """Return ``True``/``False`` (Python bool) when the sign of *x* is
         known, otherwise return the ``lt(x, 0)`` graph node."""
-        if _is_provably_non_negative(x):
+        if is_provably_non_negative(x):
             return False
         if isinstance(x, Constant):
             return int(x.data) < 0
@@ -792,9 +742,9 @@ def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
     def _eager_minimum(a, b):
         if a is b:
             return a
-        if _eager_lt_0(a) is True and _is_provably_non_negative(b):
+        if _eager_lt_0(a) is True and is_provably_non_negative(b):
             return a
-        if _eager_lt_0(b) is True and _is_provably_non_negative(a):
+        if _eager_lt_0(b) is True and is_provably_non_negative(a):
             return b
         return minimum(a, b)
 
@@ -1169,7 +1119,7 @@ def local_add_of_sparse_write(fgraph, node):
         # duplicate-free. Basic (slice/scalar) indexing is always unique;
         # advanced integer-array indices must be checked.
         if not inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
-            if not all(_constant_has_unique_indices(idx) for idx in idx_vars):
+            if not all(constant_indices_are_unique(idx) for idx in idx_vars):
                 continue
 
         others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
@@ -1368,7 +1318,7 @@ def _arange_index_to_slice(idx):
     if not isinstance(idx, TensorVariable) or idx.type.ndim != 1:
         return None
 
-    const_match = _constant_is_arange(idx)
+    const_match = constant_is_arange(idx)
     if const_match is not None:
         d, offset, step = const_match
         if offset < 0 or offset + (d - 1) * step < 0:
@@ -1391,9 +1341,9 @@ def _arange_index_to_slice(idx):
     if isinstance(arange_stop, TensorVariable) and arange_stop.type.dtype != "int64":
         arange_stop = arange_stop.astype("int64")
     offset = _eager_scalar(offset)
-    if not _is_provably_non_negative(offset):
+    if not is_provably_non_negative(offset):
         return None
-    if not _is_provably_non_negative(arange_stop):
+    if not is_provably_non_negative(arange_stop):
         return None
     stop = eager_add_zero(arange_stop, offset)
     return slice(offset, stop)
@@ -1426,7 +1376,7 @@ def local_adv_idx_to_diagonal(fgraph, node):
     # Match both indices as arange(d) + offset (const or symbolic).
     # Both must be the same kind (both const or both symbolic).
     def _match_arange(idx):
-        const = _constant_is_arange(idx)
+        const = constant_is_arange(idx)
         if const is not None and const[2] == 1:
             return "const", const[0], const[1]
         sym = _match_arange_0_to_d_plus_offset(idx)
@@ -2001,7 +1951,7 @@ def local_read_of_write_same_indices(fgraph, node):
         indices = indices_from_subtensor(outer_idx_vars, node.op.idx_list)
         for idx in indices:
             if isinstance(idx, TensorVariable) and idx.type.ndim > 0:
-                if not _constant_has_unique_indices(idx):
+                if not constant_indices_are_unique(idx):
                     return None
 
         x_at_idx = x[tuple(indices)]
@@ -2043,7 +1993,7 @@ def _slice_to_arange(sl, dim_length):
             return None
     if sl.stop is None:
         return arange(dim_length)
-    if not _is_provably_non_negative(sl.stop):
+    if not is_provably_non_negative(sl.stop):
         return None
     return arange(minimum(sl.stop, dim_length))
 
@@ -2363,7 +2313,7 @@ def local_write_of_write_same_indices(fgraph, node):
         # sufficient: it guarantees no duplicates in the joint cross-product
         # after broadcasting.
         if not isinstance(node.op, IncSubtensor):
-            if not all(_constant_has_unique_indices(v) for v in outer_idx_vars):
+            if not all(constant_indices_are_unique(v) for v in outer_idx_vars):
                 return
         new_val = a + b
         if (
