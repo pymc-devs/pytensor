@@ -9,6 +9,7 @@ from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph, Output
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
 from pytensor.scalar.basic import ScalarConstant, add, float64, mul
+from pytensor.tensor import reshape, stack, vector
 from tests.graph.utils import (
     MyConstant,
     MyOp,
@@ -946,3 +947,44 @@ class TestFrozenFunctionGraph:
 
         assert ffg == refrozen
         assert hash(ffg) == hash(refrozen)
+
+    def test_value_dependent_output_type_collision(self):
+        """Output types are part of the interning key.
+
+        Freezing roots an inner graph on ``NominalVariable`` inputs (index + type
+        only), discarding each input's value and defining subgraph. For an Op
+        whose output type is derived from that information -- here ``Reshape``,
+        which sets ``_output_type_depends_on_input_value`` -- ``(op, inputs)``
+        alone no longer determines the output type after nominalization. Two such
+        graphs differing only in those erased details must stay distinct rather
+        than collapse onto whichever was interned first.
+
+        Regression for the ``FrozenApply`` collision behind issue #2202.
+        """
+
+        x = vector("x", shape=(6,))
+        s1 = stack([2, 3])
+        s2 = stack([3, 2])
+
+        rs1 = reshape(x, s1)
+        rs2 = reshape(x, s2)
+        assert rs1.type.shape == (2, 3)
+        assert rs2.type.shape == (3, 2)
+
+        # s1/s2 are MakeVector variables used as inputs, so freezing nominalizes them and
+        # discards the [2,3]/[3,2] values that informed each reshape's output shape.
+        ffg1 = FrozenFunctionGraph([x, s1], [rs1])
+        ffg2 = FrozenFunctionGraph([x, s2], [rs2])
+
+        # The original output types are part of the FrozenApply key, so the fgraphs aren't identical.
+        # Alternative design: the two ffg get merged with a general output type (None, None)
+        # Similar to what `clone_replace(rs1, {s1: s1.type()}, rebuild_strict=False)` would do.
+        # That would require calling make_node on every interned node (or only on Ops with
+        # `_output_type_depends_on_input_value=True`, but then that flag becomes a mandatory Op contract).
+        assert ffg1 != ffg2
+        assert ffg1.outputs[0].type.shape == (2, 3)
+        assert ffg2.outputs[0].type.shape == (3, 2)
+
+        # ``bind`` reproduces each graph's own output type, not a collided one
+        assert ffg1.bind([x, s1])[0].type.shape == (2, 3)
+        assert ffg2.bind([x, s2])[0].type.shape == (3, 2)
