@@ -73,13 +73,16 @@ class JoinDims(Op):
         (x,) = inputs
         (out,) = outputs
 
-        output_shape = (
-            *x.shape[: self.start_axis],
-            -1,
-            *x.shape[self.start_axis + self.n_axes :],
-        )
-
-        out[0] = x.reshape(output_shape)
+        if self.n_axes == 0:
+            # Insert a dimension of size 1
+            out[0] = np.expand_dims(x, axis=self.start_axis)
+        else:
+            output_shape = (
+                *x.shape[: self.start_axis],
+                -1,
+                *x.shape[self.start_axis + self.n_axes :],
+            )
+            out[0] = x.reshape(output_shape)
 
     def pullback(self, inputs, outputs, output_grads):
         (x,) = inputs
