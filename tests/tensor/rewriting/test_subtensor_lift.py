@@ -51,6 +51,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
     local_subtensor_make_vector,
     local_subtensor_of_batch_dims,
+    local_subtensor_of_expand_dims,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
@@ -484,6 +485,41 @@ def test_local_subtensor_of_expand_dims(original_fn, expected_fn):
     )
     np.testing.assert_allclose(
         opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
+
+
+def test_local_subtensor_of_expand_dims_stale_output_type():
+    """The re-expansion axes must be derived from the indices, not from the
+    Subtensor's (possibly stale) output broadcastable pattern.
+
+    When an upstream rewrite turns an indexed dim from non-broadcastable to
+    length 1, the cached Subtensor output type still claims non-broadcastable.
+    Comparing the freshly indexed result against that stale type would misplace
+    the expand_dims and yield a mis-shaped (here: wrong-ndim) graph.
+    """
+    x = pt.tensor("x", shape=(None, None, None), dtype="float64")
+    x_new = pt.tensor("x_new", shape=(None, 1, None), dtype="float64")
+    out = expand_dims(x, 3)[7]
+
+    fgraph = FunctionGraph([x], [out], clone=True)
+    [cloned_out] = fgraph.outputs
+    [cloned_x] = fgraph.inputs
+    node = cloned_out.owner
+
+    # Forge a stale state: dim 1 becomes length 1, but the Subtensor's cached
+    # output type still claims dim 1 is non-broadcastable.
+    fgraph.replace(cloned_x, x_new, import_missing=True)
+    assert not cloned_out.type.broadcastable[1]
+    assert node.inputs[0].owner.inputs[0].type.broadcastable[1]
+
+    [new_out] = local_subtensor_of_expand_dims.transform(fgraph, node)
+    # `new_out` (on x_new) must match the untouched `out` (on x) for the same data,
+    # in particular keep the same ndim (the bug produced ndim 4).
+    assert new_out.type.ndim == out.type.ndim
+    x_test = np.random.default_rng(232).normal(size=(10, 1, 3))
+    np.testing.assert_allclose(
+        new_out.eval({x_new: x_test}, mode=NO_OPTIMIZATION_MODE),
         out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
     )
 
