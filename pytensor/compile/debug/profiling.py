@@ -15,6 +15,7 @@ import operator
 import sys
 import time
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -172,7 +173,7 @@ def print_global_stats():
         print("=" * 50, file=f)
 
 
-_profiler_printers = []
+_profiler_printers: list[Callable] = []
 
 
 def register_profiler_printer(fct):
