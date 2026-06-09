@@ -1074,12 +1074,17 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             self._clients = clients
         return self._clients
 
-    def bind(self, replace: dict[Variable, Variable]) -> list[Variable]:
+    def bind(
+        self, replace: Sequence[Variable] | dict[Variable, Variable]
+    ) -> list[Variable]:
         """Return fresh outputs with root inputs substituted per *replace*.
 
         Constants are reused; any non-Constant input not in *replace* raises KeyError.
         """
-        memo = replace.copy()
+        if isinstance(replace, dict):
+            memo = replace.copy()
+        else:
+            memo = dict(zip(self.inputs, replace))
         for node in self.toposort():
             for i in node.inputs:
                 if i not in memo:
