@@ -3,9 +3,8 @@
 import numpy as np
 import pytest
 
-import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import Mode, get_mode
+from pytensor import Mode, function, get_mode
 from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
@@ -21,8 +20,8 @@ NUMBA_NO_FUSION = NUMBA_MODE.excluding("fuse_indexed_into_elemwise")
 
 def fused_and_unfused(inputs, output):
     """Compile fused and unfused versions of a graph."""
-    fn = pytensor.function(inputs, output, mode=NUMBA_MODE, trust_input=True)
-    fn_u = pytensor.function(inputs, output, mode=NUMBA_NO_FUSION, trust_input=True)
+    fn = function(inputs, output, mode=NUMBA_MODE, trust_input=True)
+    fn_u = function(inputs, output, mode=NUMBA_NO_FUSION, trust_input=True)
     return fn, fn_u
 
 
@@ -336,8 +335,8 @@ class TestIndexedWriteFusion:
         mode_u = NUMBA_NO_FUSION.excluding(
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
         )
-        fn = pytensor.function([val, target], out, mode=mode, trust_input=True)
-        fn_u = pytensor.function([val, target], out, mode=mode_u, trust_input=True)
+        fn = function([val, target], out, mode=mode, trust_input=True)
+        fn_u = function([val, target], out, mode=mode_u, trust_input=True)
         assert_fused(fn)
         valv = rng.normal(size=val_shape)
         tv = rng.normal(size=target_shape)
@@ -403,7 +402,7 @@ class TestIndexedWriteFusion:
         y = pt.vector("y", shape=(919,))
         t = pt.vector("t", shape=(85,))
         out = t[idx].inc(x[idx] + y)
-        fn = pytensor.function([x, y, t], out, mode=NUMBA_MODE, trust_input=True)
+        fn = function([x, y, t], out, mode=NUMBA_MODE, trust_input=True)
         xv, yv = rng.normal(size=(85,)), rng.normal(size=(919,))
         tv = rng.normal(size=(85,))
         tv_copy = tv.copy()
@@ -491,7 +490,7 @@ class TestIndexedWriteFusion:
         t = pt.vector("t", shape=(None,))
         idx = np.array([0, 2, 5], dtype=np.int64)
         out = t[idx].set(t[idx] * 2.0)
-        fn = pytensor.function([t], out, mode=NUMBA_MODE, trust_input=True)
+        fn = function([t], out, mode=NUMBA_MODE, trust_input=True)
 
         # The non-inplace write fuses fully -- no external AdvancedIncSubtensor1.
         assert_fused(fn)
@@ -511,7 +510,7 @@ class TestIndexedWriteFusion:
 
         # Run the inner graph via perform; the input buffer must be left untouched.
         perform_outs = node.op(*node.inputs, return_list=True)
-        f_perform = pytensor.function(
+        f_perform = function(
             [t],
             perform_outs,
             mode=Mode(linker="py", optimizer=None),
@@ -581,7 +580,7 @@ class TestShapeValidation:
         y = pt.vector("y", shape=(None,))
         idx = pt.vector("idx", dtype="int64", shape=(None,))
         out = x[idx] + y
-        fn = pytensor.function([x, idx, y], out, mode=NUMBA_MODE, trust_input=True)
+        fn = function([x, idx, y], out, mode=NUMBA_MODE, trust_input=True)
         assert_fused(fn)
         # Matching: idx=50, y=50 — should work
         fn(np.zeros(100), np.zeros(50, dtype=np.int64), np.zeros(50))
@@ -595,7 +594,7 @@ class TestShapeValidation:
         y = pt.vector("y", shape=(None,))
         idx = pt.vector("idx", dtype="int64", shape=(None,))
         out = x[idx] + y
-        fn = pytensor.function([x, idx, y], out, mode=NUMBA_MODE, trust_input=True)
+        fn = function([x, idx, y], out, mode=NUMBA_MODE, trust_input=True)
         assert_fused(fn)
         # Both idx and y have length 1 — should work (both agree on dim 0)
         result = fn(np.zeros(100), np.zeros(1, dtype=np.int64), np.zeros(1))
@@ -603,3 +602,31 @@ class TestShapeValidation:
         # idx=1, y=5 — should error (shape mismatch, no static broadcast info)
         with pytest.raises(Exception):
             fn(np.zeros(100), np.zeros(1, dtype=np.int64), np.zeros(5))
+
+    def test_loop_shape_regression(self):
+        """
+        Regression test for https://github.com/pymc-devs/pytensor/issues/2201
+
+        Stale loop shape branch would only look at the first dimension of indices.
+        In this test example it would think we are iterating over a [24, 24] loop instead of a [24, 3]
+        """
+        rng = np.random.default_rng(2201)
+
+        resp_idx = rng.integers(0, 6, size=24).astype("int32")
+        item_idx = rng.integers(0, 5, size=(24, 3)).astype("int32")
+        mask = pt.dmatrix("mask", shape=(24, 3))
+        beta = pt.dmatrix("beta", shape=(6, 5))
+
+        u = beta[resp_idx[:, None], item_idx]
+        u_masked = pt.where(mask, u, -1e10)
+        out = u_masked.sum()
+
+        f = function([beta, mask], out, mode=NUMBA_MODE)
+        assert_fused(f)
+
+        ref_f = function([beta, mask], out, mode=Mode(linker="py", optimizer=None))
+        test_beta = np.zeros((6, 5))
+        test_mask = np.ones((24, 3), dtype="bool")
+        res = f(beta=test_beta, mask=test_mask)
+        ref_res = ref_f(beta=test_beta, mask=test_mask)
+        np.testing.assert_allclose(res, ref_res, strict=True)
