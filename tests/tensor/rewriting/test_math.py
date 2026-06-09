@@ -1993,7 +1993,8 @@ class TestExpLog:
 
     def test_log1mexp_log(self):
         # log1mexp(log(x)) -> log1p(-x)
-        data_valid = np.random.random((4, 3)).astype("float32")
+        rng = np.random.default_rng(1996)
+        data_valid = rng.random((4, 3)).astype("float32")
         data_valid[0, 0] = 0  # edge case
         data_valid[0, 1] = 1  # another edge case
         data_invalid = np.concatenate([data_valid + 1.1, data_valid - 1.1])
