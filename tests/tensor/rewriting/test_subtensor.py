@@ -9,7 +9,7 @@ from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
-from pytensor.graph import rewrite_graph, vectorize_graph
+from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
 from pytensor.graph.traversal import ancestors
@@ -22,6 +22,7 @@ from pytensor.tensor.rewriting.subtensor import (
     _slice_to_arange,
     local_add_of_sparse_write,
     local_adv_idx_to_slice,
+    local_blockwise_inc_subtensor,
     local_replace_AdvancedSubtensor,
     local_useless_slice,
 )
@@ -2507,6 +2508,47 @@ class TestBlockwiseIncSubtensor:
             vec_a.type.shape
         )
         np.testing.assert_allclose(fn(test_vec_a), ref_fn(test_vec_a))
+
+    def test_stale_output_type(self):
+        """The rewrite must not depend on the Blockwise output type, which can be
+        stale after an upstream rewrite swaps an input for a more broadcastable one.
+
+        Here the batched buffer dim becomes length 1; the (stale) Blockwise output
+        type still claims it is non-broadcastable. The batch shape / broadcast
+        decision is derived from the inputs, so the lift still succeeds.
+        """
+        core_x = tensor("core_x", shape=(6, 6))
+        core_y = tensor("core_y", shape=(3,), dtype=int)
+        core_graph = core_x[-1, :3].set(core_y)
+
+        x = tensor("x", shape=(None, 6, 6))
+        x_new = tensor("x_new", shape=(1, 6, 6))
+        out = vectorize_graph(core_graph, replace={core_x: x})
+        assert isinstance(out.owner.op, Blockwise)
+
+        fgraph = FunctionGraph([x, core_y], [out], clone=True)
+        [cloned_out] = fgraph.outputs
+        cloned_x, cloned_y = fgraph.inputs
+        node = cloned_out.owner
+
+        # Forge a stale state: the batched buffer dim becomes length 1, but the
+        # Blockwise output type still claims it is non-broadcastable.
+        fgraph.replace(cloned_x, x_new, import_missing=True)
+        assert not cloned_out.type.broadcastable[0]
+        assert node.inputs[0].type.broadcastable[0]
+
+        # Before the fix this raised an AssertionError (asserting against the
+        # stale output type); now it succeeds and matches the untouched `out`.
+        [new_out] = local_blockwise_inc_subtensor.transform(fgraph, node)
+
+        rng = np.random.default_rng(2167)
+        test_x = rng.normal(size=(1, 6, 6))
+        test_y = rng.integers(1, 10, size=(3,))
+        ref_mode = Mode(linker="py", optimizer=None)
+        np.testing.assert_allclose(
+            new_out.eval({x_new: test_x, cloned_y: test_y}, mode=ref_mode),
+            out.eval({x: test_x, core_y: test_y}, mode=ref_mode),
+        )
 
 
 class TestUselessSlice:

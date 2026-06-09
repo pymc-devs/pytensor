@@ -567,8 +567,13 @@ def local_subtensor_of_expand_dims(fgraph, node):
 
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
 
-    # Keep indexes for the original dimensions, and drop indexes for the expanded dimensions when safe
+    # Keep indexes for the original dimensions, and drop indexes for the expanded
+    # dimensions when safe. We also track where each kept expanded dimension lands
+    # in the output (`out_pos`), so it can be re-introduced with expand_dims below.
+    # These axes are derived from the indices, not the (possibly stale) output type.
     new_idxs = []
+    expand_axes = []
+    out_pos = 0
     for i, idx_item in enumerate(idx_tuple):
         if i in expanded_axes:
             if isinstance(idx_item, slice):
@@ -576,6 +581,8 @@ def local_subtensor_of_expand_dims(fgraph, node):
                 if idx_item == slice(None):
                     # A None slice, always keeps the dimension.
                     # We skip the index, and later introduce the needed expand_dim
+                    expand_axes.append(out_pos)
+                    out_pos += 1
                     continue
                 else:
                     # Other slices could keep or drop the dimension.
@@ -589,26 +596,22 @@ def local_subtensor_of_expand_dims(fgraph, node):
         else:
             # Keep indexes for non-expanded dimensions
             new_idxs.append(idx_item)
+            # An integer index drops the dimension; any slice keeps one.
+            if isinstance(idx_item, slice):
+                out_pos += 1
+
+    # Trailing dimensions beyond the explicit indices are implicit full slices;
+    # the expanded ones among them must also be re-introduced.
+    for axis in range(len(idx_tuple), ds.type.ndim):
+        if axis in expanded_axes:
+            expand_axes.append(out_pos)
+        out_pos += 1
 
     [old_out] = node.outputs
     out = x[tuple(new_idxs)]
+    if expand_axes:
+        out = expand_dims(out, axis=expand_axes)
     copy_stack_trace(old_out, out)
-
-    if out.type.broadcastable != old_out.type.broadcastable:
-        # Re-introduce needed new dimensions (corresponding to full slices on the original expanded dimensions)
-        # If out.type.broadcastable == (False) and old_out.type.broadcastable == (True, False, True)
-        # then axis = (0, 2)
-        old_bcast = list(old_out.type.broadcastable)
-        expanded_bcast = list(out.type.broadcastable)
-        axis = []
-        i = 0
-        while i < len(old_bcast):
-            if i == len(expanded_bcast) or expanded_bcast[i] != old_bcast[i]:
-                expanded_bcast.insert(i, True)
-                axis.append(i)
-            i += 1
-        out = expand_dims(out, axis=axis)
-        copy_stack_trace(old_out, out)
 
     return [out]
 
