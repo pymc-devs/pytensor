@@ -964,32 +964,30 @@ def _vectorized(
             if spec is None:
                 continue
             indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
-            n_indexed = len(indexed_axes)
             n_index_loop_dims = max(idx_types[idx_k].ndim for idx_k, _ in spec)
-            if n_indexed == n_index_loop_dims:
-                iter_shapes[p] = list(iter_shapes[p])
-                for idx_k, axis in spec:
-                    iter_shapes[p][axis] = idx_shapes[idx_k][0]
-            else:
-                batch_ndim = len(input_bc_patterns[p])
-                max_axis = max(a for _, a in spec)
-                new_shape = []
-                new_bc = []
-                src_d = 0
-                idx_d = 0
-                for loop_d in range(batch_ndim):
-                    if src_d in indexed_axes and idx_d < n_index_loop_dims:
-                        new_shape.append(one)
-                        new_bc.append(True)
-                        idx_d += 1
-                        if idx_d >= n_index_loop_dims:
-                            src_d = max_axis + 1
-                    else:
-                        new_shape.append(in_shapes[p][src_d])
-                        new_bc.append(iter_bc[p][loop_d])
-                        src_d += 1
-                iter_shapes[p] = new_shape
-                iter_bc[p] = tuple(new_bc)
+            # An indexed input imposes no constraint on the loop dims produced by
+            # its indices: those are pinned by the index arrays' own iter_shape
+            # entries below.  Mark each such loop dim broadcastable and copy the
+            # source shape for the non-indexed dims.
+            batch_ndim = len(input_bc_patterns[p])
+            max_axis = max(a for _, a in spec)
+            new_shape = []
+            new_bc = []
+            src_d = 0
+            idx_d = 0
+            for loop_d in range(batch_ndim):
+                if src_d in indexed_axes and idx_d < n_index_loop_dims:
+                    new_shape.append(one)
+                    new_bc.append(True)
+                    idx_d += 1
+                    if idx_d >= n_index_loop_dims:
+                        src_d = max_axis + 1
+                else:
+                    new_shape.append(in_shapes[p][src_d])
+                    new_bc.append(iter_bc[p][loop_d])
+                    src_d += 1
+            iter_shapes[p] = new_shape
+            iter_bc[p] = tuple(new_bc)
 
         # Each index array participates in iter_shape validation.
         # Write indices can broadcast against each other, but if ALL write
