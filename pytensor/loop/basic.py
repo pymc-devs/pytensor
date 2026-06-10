@@ -5,6 +5,7 @@ import numpy as np
 from pytensor.basic import as_symbolic
 from pytensor.graph import FunctionGraph, Variable, clone_replace
 from pytensor.graph.basic import Constant
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.traversal import truncated_graph_inputs
 from pytensor.loop.op import Scan
 from pytensor.scan.utils import until
@@ -118,8 +119,21 @@ def scan(
         for inp in all_fgraph_inputs
         if (not isinstance(inp, Constant) and inp not in fgraph_inputs)
     ]
-    fgraph_inputs = fgraph_inputs + extra_fgraph_inputs
-    update_fg = FunctionGraph(inputs=fgraph_inputs, outputs=fgraph_outputs)
+
+    # The outer constants (which may include shared variables) cannot be used
+    # directly as inputs of the inner function graph. Replace them by dummies.
+    outer_constants = [*sequences, *non_sequences, *extra_fgraph_inputs]
+    inner_constants = [c.type() for c in outer_constants]
+    if outer_constants:
+        fgraph_outputs = graph_replace(
+            fgraph_outputs,
+            dict(zip(outer_constants, inner_constants)),
+            strict=False,
+        )
+    update_fg = FunctionGraph(
+        inputs=[symbolic_idx, *prev_inner_states, *inner_constants],
+        outputs=fgraph_outputs,
+    )
 
     scan_op = Scan(update_fg=update_fg)
     scan_outs = scan_op(

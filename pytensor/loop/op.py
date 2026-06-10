@@ -1,8 +1,9 @@
 import numpy as np
 
-from pytensor import In, Out
+from pytensor import In, Out, config
 from pytensor.compile import function, optdb
-from pytensor.gradient import DisconnectedType, NullType, pullback
+from pytensor.compile.ops import view_op
+from pytensor.gradient import DisconnectedType, NullType, grad_undefined, pullback
 from pytensor.graph import Apply, FunctionGraph, Op, Type, node_rewriter
 from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import in2out
@@ -45,6 +46,31 @@ def validate_loop_update_types(update):
             )
 
 
+def compile_update_fn(fgraph):
+    """Compile the inner update function graph of a Loop or Scan Op."""
+    wrapped_inputs = [In(x, borrow=True) for x in fgraph.inputs]
+    wrapped_outputs = [Out(x, borrow=False) for x in fgraph.outputs]
+
+    # TODO: Figure this out
+    # The numba linker cannot pass non-tensor types (TypedList, RandomGenerator)
+    # as arguments of the compiled update function
+    if all(
+        isinstance(var.type, DenseTensorType)
+        for var in (*fgraph.inputs, *fgraph.outputs[1:])
+    ):
+        mode = "FAST_RUN"
+    else:
+        mode = "CVM"
+
+    return function(
+        wrapped_inputs,
+        wrapped_outputs,
+        mode=mode,
+        accept_inplace=False,
+        on_unused_input="ignore",
+    )
+
+
 class Loop(Op):
     """Represent a do-while loop.
 
@@ -79,31 +105,8 @@ class Loop(Op):
     @property
     def fn(self):
         """Lazily compile the inner update function graph."""
-        if self._fn is not None:
-            return self._fn
-
-        fgraph = self.update_fg
-        wrapped_inputs = [In(x, borrow=True) for x in fgraph.inputs]
-        wrapped_outputs = [Out(x, borrow=False) for x in fgraph.outputs]
-
-        # TODO: Figure this out
-        # The numba linker cannot pass non-tensor types (TypedList, RandomGenerator)
-        # as arguments of the compiled update function
-        if all(
-            isinstance(var.type, DenseTensorType)
-            for var in (*fgraph.inputs, *fgraph.outputs[1:])
-        ):
-            mode = "FAST_RUN"
-        else:
-            mode = "CVM"
-
-        self._fn = function(
-            wrapped_inputs,
-            wrapped_outputs,
-            mode=mode,
-            accept_inplace=False,
-            on_unused_input="ignore",
-        )
+        if self._fn is None:
+            self._fn = compile_update_fn(self.update_fg)
         return self._fn
 
     def make_node(self, *inputs):
@@ -167,10 +170,11 @@ class Scan(Op):
                 break
         return states, traces
     ```
-    Not all types of states can be collected, for instance RandomGenerator. For these
-    `None` is returned in place of the respective traces
+    Tensor state traces are collected as tensors with a new leading dimension,
+    other types (e.g. RandomGenerator) are collected in TypedLists.
 
-    This Op must always be converted to a Loop during compilation.
+    During compilation this Op is lowered to the legacy Scan Op
+    (or to a Loop Op, when non-tensor traces are needed).
     """
 
     def __init__(
@@ -281,17 +285,66 @@ class Scan(Op):
     def do_constant_folding(self, fgraph, node):
         return False
 
+    @property
+    def fn(self):
+        """Lazily compile the inner update function graph.
+
+        Only used when the Op was not lowered away during compilation
+        (e.g. in unoptimized modes).
+        """
+        if getattr(self, "_fn", None) is None:
+            self._fn = compile_update_fn(self.update_fg)
+        return self._fn
+
     def perform(self, node, inputs, output_storage):
-        raise RuntimeError("Scan Op should not be present in compiled graph")
+        update_fn = self.fn
+
+        max_iters = inputs[0]
+        states = list(inputs[1 : 1 + self.n_states])
+        constants = inputs[1 + self.n_states :]
+        traces = [[] for _ in range(self.n_states)]
+        for _ in range(max_iters):
+            resume, *states = update_fn(*states, *constants)
+            for trace, state in zip(traces, states):
+                trace.append(state)
+            if not resume:
+                break
+
+        for i, state in enumerate(states):
+            output_storage[i][0] = state
+        for i, (trace, trace_type) in enumerate(zip(traces, self.trace_types)):
+            if isinstance(trace_type, DenseTensorType):
+                if trace:
+                    trace = np.stack(trace)
+                else:
+                    trace = np.empty(
+                        (0, *np.shape(inputs[1 + i])), dtype=trace_type.dtype
+                    )
+            output_storage[self.n_states + i][0] = trace
+
+    @staticmethod
+    def _input_grad_kind(var) -> str:
+        """Classify the gradient an input is entitled to.
+
+        "grad": continuous tensors, a proper gradient is computed.
+        "zeros": discrete tensors, which are structurally connected to the
+        outputs, and by convention receive zero gradients.
+        "undefined": non-tensor continuous inputs, for which gradients are not
+        implemented.
+        "disconnected": other types (RandomGenerator, TypedList, ...) through
+        which gradients cannot flow.
+        """
+        if isinstance(var.type, DenseTensorType):
+            return "grad" if var.type.dtype in continuous_dtypes else "zeros"
+        if getattr(var.type, "dtype", None) in continuous_dtypes:
+            return "undefined"
+        return "disconnected"
 
     def connection_pattern(self, node):
-        # Gradients can only flow through continuous tensor states and constants
         n_outputs = len(node.outputs)
         connected_inputs = [False]  # max_iters
         connected_inputs += [
-            isinstance(inp.type, DenseTensorType)
-            and inp.type.dtype in continuous_dtypes
-            for inp in node.inputs[1:]
+            self._input_grad_kind(inp) != "disconnected" for inp in node.inputs[1:]
         ]
         return [[connected] * n_outputs for connected in connected_inputs]
 
@@ -318,27 +371,51 @@ class Scan(Op):
         final_state_grads = cotangents[: self.n_states]
         trace_grads = cotangents[self.n_states :]
 
-        def is_continuous(var) -> bool:
-            return (
-                isinstance(var.type, DenseTensorType)
-                and var.type.dtype in continuous_dtypes
-            )
-
         def is_connected(g) -> bool:
             return not isinstance(g.type, DisconnectedType)
 
-        if any(isinstance(g.type, NullType) for g in cotangents if is_connected(g)):
-            return [NullType("Gradient of Scan output is undefined")() for _ in inputs]
+        disconnected = DisconnectedType()
 
-        diff_state_idxs = [i for i, s in enumerate(init_states) if is_continuous(s)]
-        diff_const_idxs = [j for j, c in enumerate(constants) if is_continuous(c)]
+        def default_grad(input_pos, var):
+            """Gradient for inputs the backward Scan does not compute, consistent with connection_pattern."""
+            kind = self._input_grad_kind(var)
+            if kind == "grad":
+                return var.zeros_like()
+            if kind == "zeros":
+                return var.zeros_like(dtype=config.floatX)
+            if kind == "undefined":
+                return grad_undefined(
+                    self,
+                    input_pos,
+                    var,
+                    f"Gradient of Scan not implemented for inputs of type {var.type}",
+                )
+            return disconnected()
+
+        if any(isinstance(g.type, NullType) for g in cotangents if is_connected(g)):
+            null = NullType("Gradient of Scan output is undefined")
+            return [disconnected()] + [
+                null()
+                if self._input_grad_kind(var) != "disconnected"
+                else disconnected()
+                for var in (*init_states, *constants)
+            ]
+
+        diff_state_idxs = [
+            i for i, s in enumerate(init_states) if self._input_grad_kind(s) == "grad"
+        ]
+        diff_const_idxs = [
+            j for j, c in enumerate(constants) if self._input_grad_kind(c) == "grad"
+        ]
         dense_state_idxs = [
             i for i, s in enumerate(init_states) if isinstance(s.type, DenseTensorType)
         ]
 
-        disconnected = DisconnectedType()
         if not diff_state_idxs or not any(is_connected(g) for g in cotangents):
-            return [disconnected() for _ in inputs]
+            return [disconnected()] + [
+                default_grad(pos, var)
+                for pos, var in enumerate((*init_states, *constants), start=1)
+            ]
 
         # If there is a while condition, the trace length tells how many iterations were actually run
         if self.has_while_condition:
@@ -354,8 +431,11 @@ class Scan(Op):
         inner_next_states = update_fg.outputs[1:]
 
         state_cotangents = [inner_next_states[i].type() for i in diff_state_idxs]
+        # The next states are wrapped in ViewOps so that no entry of `f` is an
+        # ancestor of (or the same variable as) another. Otherwise the cotangents
+        # seeded at the nested entry would override the gradient flowing into it.
         vjps = pullback(
-            f=[inner_next_states[i] for i in diff_state_idxs],
+            f=[view_op(inner_next_states[i]) for i in diff_state_idxs],
             wrt=(
                 [inner_prev_states[i] for i in diff_state_idxs]
                 + [inner_constants[j] for j in diff_const_idxs]
@@ -443,16 +523,16 @@ class Scan(Op):
         final_accs = [trace[-1] for trace in backward_outs[n_lambdas:]]
 
         input_grads = [disconnected()]  # max_iters
-        for i in range(self.n_states):
+        for i, init_state in enumerate(init_states):
             if i in diff_state_idxs:
                 input_grads.append(final_lambdas[diff_state_idxs.index(i)])
             else:
-                input_grads.append(disconnected())
-        for j in range(self.n_constants):
+                input_grads.append(default_grad(1 + i, init_state))
+        for j, constant_inp in enumerate(constants):
             if j in diff_const_idxs:
                 input_grads.append(final_accs[diff_const_idxs.index(j)])
             else:
-                input_grads.append(disconnected())
+                input_grads.append(default_grad(1 + self.n_states + j, constant_inp))
         return input_grads
 
 

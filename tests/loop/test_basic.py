@@ -174,6 +174,15 @@ def test_scan_grad():
     np.testing.assert_allclose(gws.eval(test_point), [7.0, 3.0, 1.0])
     np.testing.assert_allclose(gc.eval(test_point), 15.5)
 
+    # Inner outputs that are ancestors of other inner outputs must still
+    # accumulate the gradients flowing through their consumers
+    ys1, ys2 = scan(
+        fn=lambda xtm1: (xtm1 + 1, (xtm1 + 1) * 2),
+        init_states=[x0, None],
+        n_steps=10,
+    )
+    np.testing.assert_allclose(grad(ys1.sum() + ys2.sum(), x0).eval({x0: 0.0}), 30.0)
+
 
 def test_while_scan_grad():
     # The number of iterations depends on the value of the initial state
@@ -196,5 +205,9 @@ def test_scan_grad_of_grad():
     xs = scan(fn=lambda x: x * x, init_states=[x0], n_steps=2)
     g1 = grad(xs[-1], x0)  # 4 * x0**3
     g2 = grad(g1, x0)  # 12 * x0**2
+    g3 = grad(g2, x0)  # 24 * x0
     fn = function([x0], [g1, g2])
     np.testing.assert_allclose(fn(2.0), [32.0, 48.0])
+    # The third order graph is too big to compile with the default backend
+    fn3 = function([x0], g3, mode="FAST_COMPILE")
+    np.testing.assert_allclose(fn3(2.0), 48.0)
