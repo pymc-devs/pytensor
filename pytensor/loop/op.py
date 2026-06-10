@@ -23,7 +23,13 @@ from pytensor.tensor import (
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
-from pytensor.tensor.subtensor import Subtensor, get_idx_list
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedIncSubtensor1,
+    IncSubtensor,
+    Subtensor,
+    get_idx_list,
+)
 from pytensor.tensor.type import (
     DenseTensorType,
     TensorType,
@@ -44,6 +50,42 @@ def validate_loop_update_types(update):
                 f"The {i}-th input and output states of the inner loop function have different types: "
                 f"{input_state.type} vs {output_state.type}."
             )
+
+
+def accumulate_grad(acc, contribution):
+    """Accumulate a per-step gradient contribution into the running accumulator.
+
+    The pullback computes constant contributions as IncSubtensor chains rooted
+    in a zeros array. Grafting the accumulator as the root of the chain avoids
+    adding two arrays (one of which has the size of the whole gradient) in
+    every iteration of the backward Scan.
+    """
+    from pytensor.gradient import _is_zero
+
+    chain = []
+    root = contribution
+    while (
+        root.owner is not None
+        and isinstance(
+            root.owner.op,
+            IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1,
+        )
+        and not root.owner.op.set_instead_of_inc
+    ):
+        chain.append(root.owner)
+        root = root.owner.inputs[0]
+
+    if root is contribution:
+        if _is_zero(contribution) == "yes":
+            return acc
+        return acc + contribution
+
+    # The graft is only valid if the zeros root is not also used in the
+    # increment values or indices of the chain
+    other_chain_inputs = [inp for node in chain for inp in node.inputs[1:]]
+    if _is_zero(root) == "yes" and root not in ancestors(other_chain_inputs):
+        return graph_replace([contribution], {root: acc})[0]
+    return acc + contribution
 
 
 def compile_update_fn(fgraph):
@@ -505,7 +547,7 @@ class Scan(Op):
                 for i, r in zip(diff_state_idxs, results[:n_lambdas])
             ]
             new_accs = [
-                self.constant_types[j].filter_variable(acc + r)
+                self.constant_types[j].filter_variable(accumulate_grad(acc, r))
                 for j, acc, r in zip(diff_const_idxs, accs, results[n_lambdas:])
             ]
             return [*new_lambdas, *new_accs]
@@ -712,9 +754,11 @@ optdb.register(
 def scan_to_legacy_scan(fgraph, node):
     """Lower a Scan Op into the legacy Scan Op.
 
-    Tensor states are mapped to sit-sots, other states to untraced sit-sots,
-    and constants to non-sequences. This gives access to the legacy rewrites
-    (buffer shortening, pushouts, merging, inplace) and backend dispatches.
+    Tensor states whose traces are used are mapped to sit-sots, all other
+    states to untraced sit-sots, and constants to non-sequences. This gives
+    access to the legacy rewrites (pushouts, merging, inplace) and backend
+    dispatches. Untraced states need no buffers at all, and their inner
+    updates are allowed to operate inplace.
 
     Traces of non-tensor states (TypedList) cannot be represented in the legacy
     Scan. Nodes that need them are left to be lowered to a Loop Op instead.
@@ -731,19 +775,16 @@ def scan_to_legacy_scan(fgraph, node):
     old_finals = node.outputs[: op.n_states]
     old_traces = node.outputs[op.n_states :]
 
-    dense_idxs = [
-        i
-        for i, state_type in enumerate(op.state_types)
-        if isinstance(state_type, DenseTensorType)
-    ]
-    other_idxs = [
-        i
-        for i, state_type in enumerate(op.state_types)
-        if not isinstance(state_type, DenseTensorType)
-    ]
-
-    if any(fgraph.clients[old_traces[i]] for i in other_idxs):
-        return None
+    traced_idxs = []
+    untraced_idxs = []
+    for i, state_type in enumerate(op.state_types):
+        if fgraph.clients[old_traces[i]]:
+            if not isinstance(state_type, DenseTensorType):
+                # Non-tensor traces cannot be represented in the legacy Scan
+                return None
+            traced_idxs.append(i)
+        else:
+            untraced_idxs.append(i)
 
     update_fg = op.update_fg.clone(check_integrity=False)
     inner_states = update_fg.inputs[: op.n_states]
@@ -751,13 +792,13 @@ def scan_to_legacy_scan(fgraph, node):
     inner_cond, *inner_next_states = update_fg.outputs
 
     inner_inputs = [
-        *(inner_states[i] for i in dense_idxs),
-        *(inner_states[i] for i in other_idxs),
+        *(inner_states[i] for i in traced_idxs),
+        *(inner_states[i] for i in untraced_idxs),
         *inner_constants,
     ]
     inner_outputs = [
-        *(inner_next_states[i] for i in dense_idxs),
-        *(inner_next_states[i] for i in other_idxs),
+        *(inner_next_states[i] for i in traced_idxs),
+        *(inner_next_states[i] for i in untraced_idxs),
     ]
     if op.has_while_condition:
         # The legacy Scan stops when the condition output is True
@@ -768,9 +809,9 @@ def scan_to_legacy_scan(fgraph, node):
         mit_mot_in_slices=(),
         mit_mot_out_slices=(),
         mit_sot_in_slices=(),
-        sit_sot_in_slices=((-1,),) * len(dense_idxs),
+        sit_sot_in_slices=((-1,),) * len(traced_idxs),
         n_nit_sot=0,
-        n_untraced_sit_sot=len(other_idxs),
+        n_untraced_sit_sot=len(untraced_idxs),
         n_non_seqs=op.n_constants,
         as_while=op.has_while_condition,
     )
@@ -778,21 +819,21 @@ def scan_to_legacy_scan(fgraph, node):
 
     outer_inputs = [
         max_iters,
-        *(expand_empty(shape_padleft(init_states[i]), max_iters) for i in dense_idxs),
-        *(init_states[i] for i in other_idxs),
+        *(expand_empty(shape_padleft(init_states[i]), max_iters) for i in traced_idxs),
+        *(init_states[i] for i in untraced_idxs),
         *constants,
     ]
     new_outs = legacy_op(*outer_inputs, return_list=True)
-    buffers = new_outs[: len(dense_idxs)]
-    untraced_outs = new_outs[len(dense_idxs) :]
+    buffers = new_outs[: len(traced_idxs)]
+    untraced_outs = new_outs[len(traced_idxs) :]
 
     # The legacy outputs lose the static length information of the trace types,
     # so the replacements must be filtered back into the original types
     replacements = {}
-    for i, buffer in zip(dense_idxs, buffers):
+    for i, buffer in zip(traced_idxs, buffers):
         replacements[old_finals[i]] = old_finals[i].type.filter_variable(buffer[-1])
         replacements[old_traces[i]] = old_traces[i].type.filter_variable(buffer[1:])
-    for i, untraced_out in zip(other_idxs, untraced_outs):
+    for i, untraced_out in zip(untraced_idxs, untraced_outs):
         replacements[old_finals[i]] = untraced_out
     return replacements
 
