@@ -847,12 +847,12 @@ N.B.:
         new_prefix_child = prefix + "   "
         print("Inner graphs:", file=_file)
 
-        printed_inner_graphs_nodes = set()
+        printed_inner_graph_ops = set()
         for ig_var in inner_graph_vars:
-            if ig_var.owner in printed_inner_graphs_nodes:
+            if ig_var.owner.op in printed_inner_graph_ops:
                 continue
             else:
-                printed_inner_graphs_nodes.add(ig_var.owner)
+                printed_inner_graph_ops.add(ig_var.owner.op)
             # This is a work-around to maintain backward compatibility
             # (e.g. to only print inner graphs that have been compiled through
             # a call to `Op.prepare_node`)
@@ -889,27 +889,31 @@ N.B.:
 
             print("", file=_file)
 
-            _debugprint(
-                ig_var,
-                prefix=prefix,
-                depth=depth,
-                done=done,
-                print_type=print_type,
-                print_shape=print_shape,
-                file=_file,
-                id_type=id_type,
-                inner_graph_ops=inner_graph_vars,
-                stop_on_name=stop_on_name,
-                inner_to_outer_inputs=inner_to_outer_inputs,
-                used_ids=used_ids,
-                op_information=op_information,
-                assumption_tags=assumption_tags,
-                parent_node=ig_var.owner,
-                print_op_info=print_op_info,
-                print_destroy_map=print_destroy_map,
-                print_view_map=print_view_map,
-                is_inner_graph_header=True,
+            # Header line: the Op, then a single "[id A, B, ...]" listing every
+            # node whose inner graph is this one (printed once below), then its
+            # destroy/view maps. Equal Ops have identical inner graphs, so
+            # membership is grouped by Op equality. It must be computed here,
+            # not before the loop: nodes nested inside other inner graphs are
+            # only discovered while printing the bodies above. Output is
+            # streamed, so a node of an equal Op discovered after this header
+            # has printed cannot be added to it retroactively.
+            op = ig_var.owner.op
+            id_strs = [
+                _assign_id(node, used_ids, done, id_type, node.outputs[0])
+                # A multi-output node appears once per output var; dedup nodes.
+                for node in dict.fromkeys(
+                    v.owner for v in inner_graph_vars if v.owner.op == op
+                )
+            ]
+            tokens = [
+                s[4:-1] for s in id_strs if s.startswith("[id ") and s.endswith("]")
+            ]
+            ids_str = f" [id {', '.join(tokens)}]" if tokens else ""
+            destroy_map_str = (
+                f" d={op.destroy_map}" if print_destroy_map and op.destroy_map else ""
             )
+            view_map_str = f" v={op.view_map}" if print_view_map and op.view_map else ""
+            print(f"{op}{ids_str}{destroy_map_str}{view_map_str}", file=_file)
 
             if print_fgraph_inputs:
                 for inp in inner_inputs:

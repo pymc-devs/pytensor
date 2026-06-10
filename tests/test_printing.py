@@ -32,8 +32,11 @@ from pytensor.printing import (
     pp,
     pydotprint,
 )
+from pytensor.scalar import Composite, float64
 from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg import inv
+from pytensor.tensor.math import maximum
 from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
 
@@ -493,6 +496,114 @@ MyInnerGraphOp [id C]
  ← op2 [id F] 'igo1'
     ├─ i0 [id D]
     └─ i1 [id E]
+    """
+
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
+        assert exp_line.strip() == res_line.strip()
+
+
+def test_debugprint_inner_graph_shared():
+    """Inner-graph `Op`s that compare equal share a single printed body, whose
+    header lists every node id it applies to (deduped, instead of one body per
+    occurrence)."""
+    x = dvector("x")
+
+    def relu_ofg():
+        i = dvector("i")
+        return OpFromGraph([i], [maximum(i, 0)], inline=False, name="Relu")
+
+    # `a` and `b` use distinct-but-equal OFG instances (identical inner graph);
+    # `c` uses a structurally different OFG.
+    a = relu_ofg()(x)
+    b = relu_ofg()(a)
+    out = OpFromGraph([x], [x + 1], inline=False, name="AddOne")(b)
+
+    lines = debugprint(out, file="str").split("\n")
+
+    exp_res = """AddOne{inline=False} [id A]
+ └─ Relu{inline=False} [id B]
+    └─ Relu{inline=False} [id C]
+       └─ x [id D]
+
+Inner graphs:
+
+AddOne{inline=False} [id A]
+ ← Add [id E]
+    ├─ i0 [id F]
+    └─ ExpandDims{axis=0} [id G]
+       └─ 1 [id H]
+
+Relu{inline=False} [id B, C]
+ ← Maximum [id I]
+    ├─ i0 [id F]
+    └─ ExpandDims{axis=0} [id J]
+       └─ 0 [id K]
+    """
+
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
+        assert exp_line.strip() == res_line.strip()
+
+    def add_one_composite():
+        xs = float64("xs")
+        return Composite([xs], [xs + 1.0])
+
+    d = Elemwise(add_one_composite())(x)
+    e = Elemwise(add_one_composite())(d)
+
+    lines = debugprint(e, file="str").split("\n")
+
+    exp_res = """Composite{(i0 + 1.0)} [id A]
+ └─ Composite{(i0 + 1.0)} [id B]
+    └─ x [id C]
+
+Inner graphs:
+
+Composite{(i0 + 1.0)} [id A, B]
+ ← add [id D]
+    ├─ i0 [id E]
+    └─ 1.0 [id F]
+    """
+
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
+        assert exp_line.strip() == res_line.strip()
+
+    # An Op that only appears nested inside other inner graphs: its nodes are
+    # only discovered while the parent bodies are printed, and the shared
+    # header must still list every node id
+    i1 = dvector("i")
+    a_op = OpFromGraph([i1], [relu_ofg()(i1) + 1], inline=False, name="A")
+    i2 = dvector("i")
+    b_op = OpFromGraph([i2], [relu_ofg()(i2) * 2], inline=False, name="B")
+
+    lines = debugprint(a_op(x) + b_op(x), file="str").split("\n")
+
+    exp_res = """Add [id A]
+ ├─ A{inline=False} [id B]
+ │  └─ x [id C]
+ └─ B{inline=False} [id D]
+    └─ x [id C]
+
+Inner graphs:
+
+A{inline=False} [id B]
+ ← Add [id E]
+    ├─ Relu{inline=False} [id F]
+    │  └─ i0 [id G]
+    └─ ExpandDims{axis=0} [id H]
+       └─ 1 [id I]
+
+B{inline=False} [id D]
+ ← Mul [id J]
+    ├─ Relu{inline=False} [id K]
+    │  └─ i0 [id G]
+    └─ ExpandDims{axis=0} [id L]
+       └─ 2 [id M]
+
+Relu{inline=False} [id F, K]
+ ← Maximum [id N]
+    ├─ i0 [id G]
+    └─ ExpandDims{axis=0} [id O]
+       └─ 0 [id P]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
