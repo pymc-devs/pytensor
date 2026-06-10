@@ -2,10 +2,12 @@ import numpy as np
 
 import pytensor
 from pytensor import config, function, grad, shared
+from pytensor.graph.traversal import ancestors
 from pytensor.loop.basic import filter, map, reduce, scan
 from pytensor.scan import until
 from pytensor.tensor import arange, eq, scalar, vector, zeros
 from pytensor.tensor.random import normal
+from pytensor.tensor.subtensor import IncSubtensor
 
 
 def test_scan_with_sequences():
@@ -151,7 +153,16 @@ def test_scan_grad():
     x0 = scalar("x0")
     xs = scan(fn=lambda xtm1: xtm1 * 2, init_states=[x0], n_steps=5)
     np.testing.assert_allclose(grad(xs.sum(), x0).eval({x0: 1.0}), 62.0)
-    np.testing.assert_allclose(grad(xs[-1], x0).eval({x0: 1.0}), 32.0)
+
+    g_last = grad(xs[-1], x0)
+    np.testing.assert_allclose(g_last.eval({x0: 1.0}), 32.0)
+    # The one-hot cotangent of xs[-1] is folded into the initial state cotangent
+    # of the backward scan, instead of being streamed as a sequence
+    assert not any(
+        isinstance(var.owner.op, IncSubtensor)
+        for var in ancestors([g_last])
+        if var.owner is not None
+    )
 
     # Gradients wrt initial state, sequence and non-sequence
     # in a linear recurrence: y_t = y_{t-1} * c + x_t

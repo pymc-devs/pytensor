@@ -54,6 +54,33 @@ def validate_loop_update_types(update):
             )
 
 
+def peel_last_step_cotangent(trace_cotangent):
+    """Extract g from trace cotangents of the form `inc_subtensor(zeros, g, -1)`.
+
+    This is the cotangent produced when the cost is only connected to the last
+    step of a trace (e.g. `cost = fn(trace[-1])`). Instead of streaming a one-hot
+    sequence of cotangents through the backward Scan, g can seed its initial
+    state cotangent directly.
+    """
+    from pytensor.gradient import _is_zero
+
+    node = trace_cotangent.owner
+    if node is None or not isinstance(node.op, IncSubtensor):
+        return None
+    if len(node.op.idx_list) != 1:
+        return None
+    zeros, g, *index_inputs = node.inputs
+    if _is_zero(zeros) != "yes":
+        return None
+    [index] = get_idx_list([zeros, *index_inputs], node.op.idx_list)
+    try:
+        if get_scalar_constant_value(index) != -1:
+            return None
+    except NotScalarConstantError:
+        return None
+    return g
+
+
 def accumulate_grad(acc, contribution):
     """Accumulate a per-step gradient contribution into the running accumulator.
 
@@ -460,6 +487,22 @@ class Scan(Op):
                 default_grad(pos, var)
                 for pos, var in enumerate((*init_states, *constants), start=1)
             ]
+
+        # When the cost is only connected to the last step of a trace, fold the
+        # cotangent into the initial state cotangent of the backward Scan,
+        # instead of streaming a one-hot sequence of cotangents through it
+        final_state_grads = list(final_state_grads)
+        trace_grads = list(trace_grads)
+        for i in diff_state_idxs:
+            if not is_connected(trace_grads[i]):
+                continue
+            last_step_cotangent = peel_last_step_cotangent(trace_grads[i])
+            if last_step_cotangent is not None:
+                if is_connected(final_state_grads[i]):
+                    final_state_grads[i] = final_state_grads[i] + last_step_cotangent
+                else:
+                    final_state_grads[i] = last_step_cotangent
+                trace_grads[i] = disconnected()
 
         # If there is a while condition, the trace length tells how many iterations were actually run
         if self.has_while_condition:
