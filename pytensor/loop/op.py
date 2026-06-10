@@ -14,7 +14,9 @@ from pytensor.tensor import (
     concatenate,
     empty,
     get_scalar_constant_value,
+    invert,
     set_subtensor,
+    shape_padleft,
     zeros_like,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -602,16 +604,115 @@ def scan_to_loop(fgraph, node):
     return replacements
 
 
-# TODO: Create new Loop dataset
-# Needs to be executed after `local_shape_to_shape_i`, otherwise shape graphs
-# cannot be properly replaced
+# Fallback lowering for Scan nodes that `scan_to_legacy_scan` cannot handle
+# (those whose non-tensor traces are used). Must come after that rewrite.
 optdb.register(
     "scan_to_loop",
     in2out(scan_to_loop),
     "fast_compile",
     "fast_run",
-    "not_jax",
     position=1.0,
+)
+
+
+@node_rewriter([Scan])
+def scan_to_legacy_scan(fgraph, node):
+    """Lower a Scan Op into the legacy Scan Op.
+
+    Tensor states are mapped to sit-sots, other states to untraced sit-sots,
+    and constants to non-sequences. This gives access to the legacy rewrites
+    (buffer shortening, pushouts, merging, inplace) and backend dispatches.
+
+    Traces of non-tensor states (TypedList) cannot be represented in the legacy
+    Scan. Nodes that need them are left to be lowered to a Loop Op instead.
+    """
+    from pytensor.scan.op import Scan as LegacyScan
+    from pytensor.scan.op import ScanInfo
+    from pytensor.scan.utils import expand_empty
+
+    op: Scan = node.op  # type: ignore
+
+    max_iters = node.inputs[0]
+    init_states = node.inputs[1 : 1 + op.n_states]
+    constants = node.inputs[1 + op.n_states :]
+    old_finals = node.outputs[: op.n_states]
+    old_traces = node.outputs[op.n_states :]
+
+    dense_idxs = [
+        i
+        for i, state_type in enumerate(op.state_types)
+        if isinstance(state_type, DenseTensorType)
+    ]
+    other_idxs = [
+        i
+        for i, state_type in enumerate(op.state_types)
+        if not isinstance(state_type, DenseTensorType)
+    ]
+
+    if any(fgraph.clients[old_traces[i]] for i in other_idxs):
+        return None
+
+    update_fg = op.update_fg.clone(check_integrity=False)
+    inner_states = update_fg.inputs[: op.n_states]
+    inner_constants = update_fg.inputs[op.n_states :]
+    inner_cond, *inner_next_states = update_fg.outputs
+
+    inner_inputs = [
+        *(inner_states[i] for i in dense_idxs),
+        *(inner_states[i] for i in other_idxs),
+        *inner_constants,
+    ]
+    inner_outputs = [
+        *(inner_next_states[i] for i in dense_idxs),
+        *(inner_next_states[i] for i in other_idxs),
+    ]
+    if op.has_while_condition:
+        # The legacy Scan stops when the condition output is True
+        inner_outputs.append(invert(inner_cond))
+
+    info = ScanInfo(
+        n_seqs=0,
+        mit_mot_in_slices=(),
+        mit_mot_out_slices=(),
+        mit_sot_in_slices=(),
+        sit_sot_in_slices=((-1,),) * len(dense_idxs),
+        n_nit_sot=0,
+        n_untraced_sit_sot=len(other_idxs),
+        n_non_seqs=op.n_constants,
+        as_while=op.has_while_condition,
+    )
+    legacy_op = LegacyScan(inner_inputs, inner_outputs, info, strict=True)
+
+    outer_inputs = [
+        max_iters,
+        *(expand_empty(shape_padleft(init_states[i]), max_iters) for i in dense_idxs),
+        *(init_states[i] for i in other_idxs),
+        *constants,
+    ]
+    new_outs = legacy_op(*outer_inputs, return_list=True)
+    buffers = new_outs[: len(dense_idxs)]
+    untraced_outs = new_outs[len(dense_idxs) :]
+
+    # The legacy outputs lose the static length information of the trace types,
+    # so the replacements must be filtered back into the original types
+    replacements = {}
+    for i, buffer in zip(dense_idxs, buffers):
+        replacements[old_finals[i]] = old_finals[i].type.filter_variable(buffer[-1])
+        replacements[old_traces[i]] = old_traces[i].type.filter_variable(buffer[1:])
+    for i, untraced_out in zip(other_idxs, untraced_outs):
+        replacements[old_finals[i]] = untraced_out
+    return replacements
+
+
+# Must run before the legacy scan rewrites (scan_eqopt1 at 0.05),
+# so that pushouts, buffer shortening and merging can be applied
+optdb.register(
+    "scan_to_legacy_scan",
+    in2out(scan_to_legacy_scan),
+    "fast_compile",
+    "fast_run",
+    "scan",
+    position=0.02,
 )
 
 
@@ -642,10 +743,11 @@ def scan_view_last_state(fgraph, node):
     return replacements
 
 
+# Must run before the lowering rewrites
 optdb.register(
     "scan_view_last_state",
     in2out(scan_view_last_state),
     "fast_compile",
     "fast_run",
-    position=0.999,
+    position=0.01,
 )

@@ -6,10 +6,10 @@ from pytensor.compile import DeepCopyOp
 from pytensor.graph import FunctionGraph
 from pytensor.graph.rewriting.basic import in2out
 from pytensor.loop.op import Loop, Scan, scan_view_last_state
+from pytensor.scan.op import Scan as LegacyScan
 from pytensor.tensor import constant, empty, lscalar, scalar, vector
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.type import RandomGeneratorType
-from pytensor.tensor.subtensor import Subtensor
 from pytensor.typed_list import TypedListType
 
 
@@ -47,19 +47,11 @@ def test_fori_scan():
 
     fn = function([x], [y, ys])
 
-    subtensor_nodes = tuple(
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Subtensor)
+    [scan_node] = (
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, LegacyScan)
     )
-    assert len(subtensor_nodes) == 0
-    loop_nodes = tuple(
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Loop)
-    )
-    assert len(loop_nodes) == 1
-    (loop_node,) = loop_nodes
-    assert len(loop_node.outputs) == 3
-    assert loop_node.outputs[0].type.shape == ()
-    assert loop_node.outputs[1].type.shape == ()
-    assert loop_node.outputs[2].type.shape == (10,)
+    assert not scan_node.op.info.as_while
+    assert fn.maker.fgraph.outputs[1].type.shape == (10,)
 
     y_eval, ys_eval = fn(0)
     np.testing.assert_array_equal(ys_eval, np.arange(2, 22, 2))
@@ -90,19 +82,10 @@ def test_while_scan():
 
     fn = function([x], [y, ys])
 
-    subtensor_nodes = tuple(
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Subtensor)
+    [scan_node] = (
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, LegacyScan)
     )
-    assert len(subtensor_nodes) == 1
-    loop_nodes = tuple(
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Loop)
-    )
-    assert len(loop_nodes) == 1
-    (loop_node,) = loop_nodes
-    assert len(loop_node.outputs) == 3
-    assert loop_node.outputs[0].type.shape == ()
-    assert loop_node.outputs[1].type.shape == ()
-    assert loop_node.outputs[2].type.shape == (1000,)
+    assert scan_node.op.info.as_while
 
     y_eval, ys_eval = fn(0)
     np.testing.assert_array_equal(ys_eval, np.arange(2, 22, 2))
@@ -118,10 +101,10 @@ def test_while_scan_shape():
     _, _, _, ys = Scan(update_fg=update_fg)(max_iters, np.array(0, dtype="int64"), x)
 
     fn = function([x], ys.shape)
-    loop_nodes = tuple(
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Loop)
+    [scan_node] = (
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, LegacyScan)
     )
-    assert len(loop_nodes) == 1
+    assert scan_node.op.info.as_while
     assert fn(0) == 10
 
 
