@@ -352,3 +352,21 @@ def test_sequence_reads_recorded():
     op = final.owner.op
     assert op.sequence_reads == {}
     assert op.idx_state is None
+
+
+def test_loop_shifted_xs_grad():
+    # final = x0 + sum_t seq[t] * seq[t+1], so
+    # d final / d seq[j] = seq[j-1] + seq[j+1] (at the boundaries only one term)
+    x0 = pt.scalar("x0")
+    seq = pt.vector("seq", shape=(5,))
+
+    def f(carry, x):
+        xt, xtp1 = x
+        return carry + xt * xtp1, None
+
+    final, _ = loop(f, init=x0, xs=shift(seq, by=[0, 1]))
+    g = grad(final, seq)
+    np.testing.assert_allclose(
+        g.eval({x0: 0.0, seq: np.array([1.0, 2.0, 3.0, 4.0, 5.0])}),
+        [2.0, 1.0 + 3.0, 2.0 + 4.0, 3.0 + 5.0, 4.0],
+    )
