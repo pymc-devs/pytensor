@@ -121,6 +121,37 @@ def test_OpFromGraph():
     compare_numba_and_py([x, y, z], [out], [xv, yv, zv])
 
 
+def test_ofg_inner_compilation_reused(monkeypatch):
+    from pytensor.link.numba.dispatch import compile_ops
+
+    n_inner_compiles = 0
+    inner_funcify = compile_ops.numba_funcify_and_cache_key
+
+    def counting_funcify(*args, **kwargs):
+        nonlocal n_inner_compiles
+        n_inner_compiles += 1
+        return inner_funcify(*args, **kwargs)
+
+    monkeypatch.setattr(compile_ops, "numba_funcify_and_cache_key", counting_funcify)
+
+    x = pt.vector("x")
+    inner = OpFromGraph([x], [pt.exp(x) + 1])
+    inner_equiv = OpFromGraph([x], [pt.exp(x) + 1])
+    outer = OpFromGraph([x], [inner(x) * 2])
+
+    y = pt.vector("y")
+    out = outer(inner(y)) + inner_equiv(y)
+    fn = function([y], out, mode="NUMBA")
+    # Only two distinct OpFromGraphs: `inner` (used directly, nested inside
+    # `outer`, and via the equivalent `inner_equiv`) and `outer`
+    assert n_inner_compiles == 2
+
+    y_test = np.array([0.0, 1.0], dtype=config.floatX)
+    inner_res = np.exp(y_test) + 1
+    expected = (np.exp(inner_res) + 1) * 2 + inner_res
+    np.testing.assert_allclose(fn(y_test), expected, rtol=1e-6)
+
+
 @pytest.mark.filterwarnings("error")
 def test_ofg_inner_inplace():
     x = pt.vector("x")
