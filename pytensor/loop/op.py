@@ -11,6 +11,7 @@ from pytensor.scalar import constant
 from pytensor.tensor import (
     add,
     and_,
+    as_tensor,
     concatenate,
     empty,
     get_scalar_constant_value,
@@ -22,7 +23,12 @@ from pytensor.tensor import (
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import Subtensor, get_idx_list
-from pytensor.tensor.type import DenseTensorType, TensorType, continuous_dtypes
+from pytensor.tensor.type import (
+    DenseTensorType,
+    TensorType,
+    continuous_dtypes,
+    integer_dtypes,
+)
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.typed_list import GetItem, TypedListType, append, make_empty_list
 
@@ -204,6 +210,13 @@ class Scan(Op):
     def make_node(self, max_iters, *inputs):
         assert len(inputs) == self.n_states + self.n_constants
 
+        max_iters = as_tensor(max_iters)
+        if max_iters.type.dtype != "int64":
+            if max_iters.type.dtype not in integer_dtypes:
+                raise TypeError(
+                    f"max_iters must be an integer scalar, got {max_iters.type}"
+                )
+            max_iters = max_iters.astype("int64")
         max_iters = TensorType(dtype="int64", shape=()).filter_variable(max_iters)
 
         states = inputs[: self.n_states]
