@@ -122,7 +122,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_destroyed_untraced_out_idxs.add(untraced_start + j)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
-        op.fgraph, fgraph_name="numba_scan"
+        op.fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
     )
 
     outer_in_names_to_vars = {
