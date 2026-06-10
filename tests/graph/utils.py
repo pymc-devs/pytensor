@@ -131,7 +131,9 @@ op_multiple_outputs = MyOpMultipleOutputs("OpMultipleOutputs")
 
 
 class MyInnerGraphOp(Op, HasInnerGraph):
-    __props__ = ()
+    # No __props__: an inner-graph Op's identity is its inner graph, which a
+    # props-based __eq__/__hash__ would ignore (collapsing distinct instances).
+    # Falling back to object identity is the correct default for this mock.
 
     def __init__(self, inner_inputs, inner_outputs):
         input_replacements = [
