@@ -144,7 +144,7 @@ def scan(
         outputs=fgraph_outputs,
     )
 
-    scan_op = Scan(update_fg=update_fg)
+    scan_op = Scan(update_fg=update_fg, sequences=range(len(sequences)))
     scan_outs = scan_op(
         n_steps, idx, *prev_states, *sequences, *non_sequences, *extra_fgraph_inputs
     )

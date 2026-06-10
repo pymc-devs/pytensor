@@ -1,10 +1,12 @@
+from collections.abc import Sequence
+
 import numpy as np
 
 from pytensor import In, Out, config
 from pytensor.compile import function, optdb
 from pytensor.compile.ops import view_op
 from pytensor.gradient import DisconnectedType, NullType, grad_undefined, pullback
-from pytensor.graph import Apply, FunctionGraph, Op, Type, node_rewriter
+from pytensor.graph import Apply, FunctionGraph, Op, Type, Variable, node_rewriter
 from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import in2out
 from pytensor.graph.traversal import ancestors
@@ -21,6 +23,7 @@ from pytensor.tensor import (
     shape_padleft,
     zeros_like,
 )
+from pytensor.tensor.basic import ScalarFromTensor
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import (
@@ -52,6 +55,96 @@ def validate_loop_update_types(update):
                 f"The {i}-th input and output states of the inner loop function have incompatible types: "
                 f"{input_state.type} vs {output_state.type}."
             )
+
+
+def verify_sequence_reads(update_fg, n_states, sequences):
+    """Verify which of the declared constants are only read along an index state.
+
+    A constant `c` behaves as a sequence when its only uses are `c[idx + k]`
+    reads, for constant offsets `k`, where `idx` is a state that advances by
+    one in every iteration. Candidates that don't conform are simply not
+    recorded: they behave as plain constants, which is always valid. The
+    recorded reads only enable optimizations in the gradient and the lowering.
+
+    Returns the verified read offsets per constant, and the position of the
+    index state.
+    """
+    if not sequences:
+        return {}, None
+
+    state_inputs = set(update_fg.inputs[:n_states])
+
+    def scalar_constant(var):
+        try:
+            return int(get_scalar_constant_value(var, only_process_constants=True))
+        except NotScalarConstantError:
+            return None
+
+    def read_tap(client, position):
+        """Return (idx_state, tap) when the client is a `c[idx + tap]` read."""
+        if client == "output" or not isinstance(client.op, Subtensor) or position != 0:
+            return None
+        indices = get_idx_list(client.inputs, client.op.idx_list)
+        if len(indices) != 1:
+            return None
+        [index] = indices
+        if (
+            isinstance(index, Variable)
+            and index.owner is not None
+            and isinstance(index.owner.op, ScalarFromTensor)
+        ):
+            index = index.owner.inputs[0]
+        if index in state_inputs:
+            return index, 0
+        if (
+            isinstance(index, Variable)
+            and index.owner is not None
+            and index.owner.op == add
+            and len(index.owner.inputs) == 2
+        ):
+            left, right = index.owner.inputs
+            if left in state_inputs and (tap := scalar_constant(right)) is not None:
+                return left, tap
+            if right in state_inputs and (tap := scalar_constant(left)) is not None:
+                return right, tap
+        return None
+
+    def advances_by_one(some_state):
+        next_state = update_fg.outputs[1 + update_fg.inputs.index(some_state)]
+        return (
+            next_state.owner is not None
+            and next_state.owner.op == add
+            and len(next_state.owner.inputs) == 2
+            and any(inp is some_state for inp in next_state.owner.inputs)
+            and any(
+                inp is not some_state and scalar_constant(inp) == 1
+                for inp in next_state.owner.inputs
+            )
+        )
+
+    idx_state = None
+    sequence_reads = {}
+    for j in sequences:
+        const = update_fg.inputs[n_states + j]
+        taps = set()
+        for client, position in update_fg.clients[const]:
+            read = read_tap(client, position)
+            if read is None:
+                taps = None
+                break
+            read_idx, tap = read
+            if read_idx is not idx_state and (
+                idx_state is not None or not advances_by_one(read_idx)
+            ):
+                taps = None
+                break
+            idx_state = read_idx
+            taps.add(tap)
+        if taps:
+            sequence_reads[j] = tuple(sorted(taps))
+
+    idx_state_pos = update_fg.inputs.index(idx_state) if sequence_reads else None
+    return sequence_reads, idx_state_pos
 
 
 def peel_last_step_cotangent(trace_cotangent):
@@ -251,11 +344,26 @@ class Scan(Op):
     def __init__(
         self,
         update_fg: FunctionGraph,  # (*state,  *consts) -> (bool, *state)
+        sequences: Sequence[int] = (),
     ):
+        """
+        Parameters
+        ----------
+        update_fg
+            Inner function graph mapping (*states, *constants) to
+            (continue_flag, *next_states).
+        sequences
+            Indices of constants that are only read elementwise along an index
+            state (`const[idx + k]`). This is validated, and recorded in
+            `sequence_reads`/`idx_state` for the gradient and lowering to exploit.
+        """
         validate_loop_update_types(update_fg)
 
         self.state_types = [out.type for out in update_fg.outputs[1:]]
         self.n_states = len(self.state_types)
+        self.sequence_reads, self.idx_state = verify_sequence_reads(
+            update_fg, self.n_states, tuple(sequences)
+        )
         self.trace_types: list[Type] = []
         for state_type in self.state_types:
             # TODO: Accommodate SparseTensors and Scalars

@@ -346,7 +346,7 @@ def loop(f, init, xs=None, length=None):
         outputs=[while_cond_out, next_idx, *next_states],
     )
 
-    scan_op = Scan(update_fg=update_fg)
+    scan_op = Scan(update_fg=update_fg, sequences=range(len(xs_flat)))
     scan_outs = scan_op(n_steps, idx0, *init_values, *outer_constants)
     n_states = scan_op.n_states
     finals = scan_outs[1:n_states]  # The idx final state is dropped

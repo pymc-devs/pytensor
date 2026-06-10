@@ -333,3 +333,22 @@ def test_loop_shifted_carry_grad():
     g = grad(final, y0)
     # d/da = 2ab**3, d/db = 3 a**2 b**2 at a=1, b=2
     np.testing.assert_allclose(g.eval({y0: [1.0, 2.0]}), [16.0, 12.0])
+
+
+def test_sequence_reads_recorded():
+    x0 = pt.scalar("x0")
+    seq = pt.vector("seq", shape=(6,))
+
+    final, _ = loop(
+        lambda c, x: (c + x[0] * x[1], None), init=x0, xs=shift(seq, by=[0, 2])
+    )
+    op = final.owner.op
+    assert op.sequence_reads == {0: (0, 2)}
+    assert op.idx_state == 0
+
+    # A sequence that is also used whole (through the closure) is kept as a
+    # plain constant
+    final, _ = loop(lambda c, x: (c + x + seq.sum(), None), init=x0, xs=seq)
+    op = final.owner.op
+    assert op.sequence_reads == {}
+    assert op.idx_state is None
