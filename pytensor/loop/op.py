@@ -57,12 +57,61 @@ def validate_loop_update_types(update):
             )
 
 
+def _scalar_constant(var):
+    try:
+        return int(get_scalar_constant_value(var, only_process_constants=True))
+    except NotScalarConstantError:
+        return None
+
+
+def match_sequence_read(client, position, state_inputs):
+    """Return (idx_state, tap) when the client is a `c[idx + tap]` read.
+
+    Negative taps don't match: they would wrap around the sequence,
+    which legacy Scan sequences cannot represent.
+    """
+    if client == "output" or not isinstance(client.op, Subtensor) or position != 0:
+        return None
+    indices = get_idx_list(client.inputs, client.op.idx_list)
+    if len(indices) != 1:
+        return None
+    [index] = indices
+    if (
+        isinstance(index, Variable)
+        and index.owner is not None
+        and isinstance(index.owner.op, ScalarFromTensor)
+    ):
+        index = index.owner.inputs[0]
+    if index in state_inputs:
+        return index, 0
+    if (
+        isinstance(index, Variable)
+        and index.owner is not None
+        and index.owner.op == add
+        and len(index.owner.inputs) == 2
+    ):
+        left, right = index.owner.inputs
+        if (
+            left in state_inputs
+            and (tap := _scalar_constant(right)) is not None
+            and tap >= 0
+        ):
+            return left, tap
+        if (
+            right in state_inputs
+            and (tap := _scalar_constant(left)) is not None
+            and tap >= 0
+        ):
+            return right, tap
+    return None
+
+
 def verify_sequence_reads(update_fg, n_states, sequences):
     """Verify which of the declared constants are only read along an index state.
 
     A constant `c` behaves as a sequence when its only uses are `c[idx + k]`
-    reads, for constant offsets `k`, where `idx` is a state that advances by
-    one in every iteration. Candidates that don't conform are simply not
+    reads, for constant offsets `k >= 0`, where `idx` is a state that advances
+    by one in every iteration. Candidates that don't conform are simply not
     recorded: they behave as plain constants, which is always valid. The
     recorded reads only enable optimizations in the gradient and the lowering.
 
@@ -74,41 +123,6 @@ def verify_sequence_reads(update_fg, n_states, sequences):
 
     state_inputs = set(update_fg.inputs[:n_states])
 
-    def scalar_constant(var):
-        try:
-            return int(get_scalar_constant_value(var, only_process_constants=True))
-        except NotScalarConstantError:
-            return None
-
-    def read_tap(client, position):
-        """Return (idx_state, tap) when the client is a `c[idx + tap]` read."""
-        if client == "output" or not isinstance(client.op, Subtensor) or position != 0:
-            return None
-        indices = get_idx_list(client.inputs, client.op.idx_list)
-        if len(indices) != 1:
-            return None
-        [index] = indices
-        if (
-            isinstance(index, Variable)
-            and index.owner is not None
-            and isinstance(index.owner.op, ScalarFromTensor)
-        ):
-            index = index.owner.inputs[0]
-        if index in state_inputs:
-            return index, 0
-        if (
-            isinstance(index, Variable)
-            and index.owner is not None
-            and index.owner.op == add
-            and len(index.owner.inputs) == 2
-        ):
-            left, right = index.owner.inputs
-            if left in state_inputs and (tap := scalar_constant(right)) is not None:
-                return left, tap
-            if right in state_inputs and (tap := scalar_constant(left)) is not None:
-                return right, tap
-        return None
-
     def advances_by_one(some_state):
         next_state = update_fg.outputs[1 + update_fg.inputs.index(some_state)]
         return (
@@ -117,7 +131,7 @@ def verify_sequence_reads(update_fg, n_states, sequences):
             and len(next_state.owner.inputs) == 2
             and any(inp is some_state for inp in next_state.owner.inputs)
             and any(
-                inp is not some_state and scalar_constant(inp) == 1
+                inp is not some_state and _scalar_constant(inp) == 1
                 for inp in next_state.owner.inputs
             )
         )
@@ -128,7 +142,7 @@ def verify_sequence_reads(update_fg, n_states, sequences):
         const = update_fg.inputs[n_states + j]
         taps = set()
         for client, position in update_fg.clients[const]:
-            read = read_tap(client, position)
+            read = match_sequence_read(client, position, state_inputs)
             if read is None:
                 taps = None
                 break
@@ -907,11 +921,13 @@ optdb.register(
 def scan_to_legacy_scan(fgraph, node):
     """Lower a Scan Op into the legacy Scan Op.
 
-    Tensor states whose traces are used are mapped to sit-sots, all other
-    states to untraced sit-sots, and constants to non-sequences. This gives
-    access to the legacy rewrites (pushouts, merging, inplace) and backend
-    dispatches. Untraced states need no buffers at all, and their inner
-    updates are allowed to operate inplace.
+    Verified sequence constants are mapped to legacy sequences (one per read
+    offset), and the index state is elided when feeding those reads was its
+    only job. Tensor states whose traces are used are mapped to sit-sots, all
+    other states to untraced sit-sots, and the remaining constants to
+    non-sequences. This gives access to the legacy rewrites (pushouts, merging,
+    inplace) and backend dispatches. Untraced states need no buffers at all,
+    and their inner updates are allowed to operate inplace.
 
     Traces of non-tensor states (TypedList) cannot be represented in the legacy
     Scan. Nodes that need them are left to be lowered to a Loop Op instead.
@@ -944,10 +960,70 @@ def scan_to_legacy_scan(fgraph, node):
     inner_constants = update_fg.inputs[op.n_states :]
     inner_cond, *inner_next_states = update_fg.outputs
 
+    # The sequence reads align with the legacy sequence slices only when the
+    # index starts at zero
+    sequence_reads = op.sequence_reads
+    idx_pos = op.idx_state
+    if sequence_reads and (
+        _scalar_constant(node.inputs[1 + idx_pos]) != 0
+        or not isinstance(init_states[idx_pos].type, DenseTensorType)
+    ):
+        sequence_reads = {}
+
+    # Replace the sequence reads by legacy sequence inputs (one per read offset),
+    # with the outer sequences sliced so that all offsets align at each step
+    inner_seqs = []
+    outer_seqs = []
+    read_replacements = {}
+    state_input_set = set(inner_states)
+    for j, taps in sequence_reads.items():
+        inner_const = inner_constants[j]
+        outer_const = constants[j]
+        max_tap = max(taps)
+        elem_by_tap = {}
+        for tap in taps:
+            elem = inner_const.type.clone(shape=inner_const.type.shape[1:])()
+            elem_by_tap[tap] = elem
+            inner_seqs.append(elem)
+            if tap == max_tap == 0:
+                outer_seqs.append(outer_const)
+            elif tap == max_tap:
+                outer_seqs.append(outer_const[tap:])
+            else:
+                outer_seqs.append(outer_const[tap : tap - max_tap])
+        for client, position in update_fg.clients[inner_const]:
+            read = match_sequence_read(client, position, state_input_set)
+            assert read is not None  # Verified at op construction
+            read_replacements[client.outputs[0]] = elem_by_tap[read[1]]
+    if read_replacements:
+        inner_cond, *inner_next_states = graph_replace(
+            [inner_cond, *inner_next_states], read_replacements, strict=False
+        )
+
+    # Drop the index state when its only remaining job was feeding the reads
+    if (
+        sequence_reads
+        and not fgraph.clients[old_finals[idx_pos]]
+        and not fgraph.clients[old_traces[idx_pos]]
+        and inner_states[idx_pos]
+        not in set(
+            ancestors(
+                [
+                    inner_cond,
+                    *(s for i, s in enumerate(inner_next_states) if i != idx_pos),
+                ]
+            )
+        )
+    ):
+        untraced_idxs = [i for i in untraced_idxs if i != idx_pos]
+
+    remaining_const_idxs = [j for j in range(op.n_constants) if j not in sequence_reads]
+
     inner_inputs = [
+        *inner_seqs,
         *(inner_states[i] for i in traced_idxs),
         *(inner_states[i] for i in untraced_idxs),
-        *inner_constants,
+        *(inner_constants[j] for j in remaining_const_idxs),
     ]
     inner_outputs = [
         *(inner_next_states[i] for i in traced_idxs),
@@ -958,23 +1034,24 @@ def scan_to_legacy_scan(fgraph, node):
         inner_outputs.append(invert(inner_cond))
 
     info = ScanInfo(
-        n_seqs=0,
+        n_seqs=len(inner_seqs),
         mit_mot_in_slices=(),
         mit_mot_out_slices=(),
         mit_sot_in_slices=(),
         sit_sot_in_slices=((-1,),) * len(traced_idxs),
         n_nit_sot=0,
         n_untraced_sit_sot=len(untraced_idxs),
-        n_non_seqs=op.n_constants,
+        n_non_seqs=len(remaining_const_idxs),
         as_while=op.has_while_condition,
     )
     legacy_op = LegacyScan(inner_inputs, inner_outputs, info, strict=True)
 
     outer_inputs = [
         max_iters,
+        *outer_seqs,
         *(expand_empty(shape_padleft(init_states[i]), max_iters) for i in traced_idxs),
         *(init_states[i] for i in untraced_idxs),
-        *constants,
+        *(constants[j] for j in remaining_const_idxs),
     ]
     new_outs = legacy_op(*outer_inputs, return_list=True)
     buffers = new_outs[: len(traced_idxs)]

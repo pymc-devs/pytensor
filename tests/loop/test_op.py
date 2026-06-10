@@ -168,3 +168,36 @@ def test_scan_view_last_state():
     in2out(scan_view_last_state).apply(fgraph)
     assert fgraph.outputs[0] is y1
     assert fgraph.outputs[1] is ys
+
+
+def test_sequence_lowering():
+    from pytensor.loop import loop, shift
+    from pytensor.tensor import vector
+
+    xs = vector("xs")
+    x0 = scalar("x0")
+
+    # Same structure the legacy constructor produces: a native sequence,
+    # no index state, and no non-sequences
+    final, _ = loop(lambda c, x: (c * 0.9 + x, None), init=x0, xs=xs)
+    fn = function([x0, xs], final)
+    [scan_node] = (
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, LegacyScan)
+    )
+    info = scan_node.op.info
+    assert info.n_seqs == 1
+    assert info.n_non_seqs == 0
+    assert info.n_sit_sot + info.n_untraced_sit_sot == 1
+
+    # Multi-tap sequence reads become one sequence per offset
+    # (taps interacting with the carry, so that pushout cannot fuse them)
+    final, _ = loop(
+        lambda c, x: (c * x[0] + x[1], None), init=x0, xs=shift(xs, by=[0, 1])
+    )
+    fn = function([x0, xs], final)
+    [scan_node] = (
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, LegacyScan)
+    )
+    info = scan_node.op.info
+    assert info.n_seqs == 2
+    assert info.n_non_seqs == 0
