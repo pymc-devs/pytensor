@@ -17,6 +17,11 @@ class _typed_list_py_operators:
             "Cannot call len(TypedList). Use `.length()` method instead for the symbolic equivalent."
         )
 
+    def __bool__(self):
+        # Truthiness of TypedLists cannot depend on length,
+        # just like truthiness of TensorVariables does not depend on size or contents
+        return True
+
     def __getitem__(self, index):
         return getitem(self, index)
 
@@ -655,3 +660,18 @@ Notes
 All PyTensor variables must have the same type.
 
 """
+
+
+class MakeEmptyList(Op):
+    __props__ = ()
+
+    def make_node(self, ttype):
+        tl = TypedListType(ttype)()
+        return Apply(self, [], [tl])
+
+    def perform(self, node, inputs, outputs):
+        (out,) = outputs
+        out[0] = []
+
+
+make_empty_list = MakeEmptyList()
