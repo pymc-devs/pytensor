@@ -144,3 +144,57 @@ def test_filter():
     np.testing.assert_array_equal(
         ys.eval({xs: np.arange(0, 20, dtype=config.floatX)}), np.arange(0, 20, 2)
     )
+
+
+def test_scan_grad():
+    # Gradient wrt the initial state: xs = [x0*2, x0*4, ..., x0*32]
+    x0 = scalar("x0")
+    xs = scan(fn=lambda xtm1: xtm1 * 2, init_states=[x0], n_steps=5)
+    np.testing.assert_allclose(grad(xs.sum(), x0).eval({x0: 1.0}), 62.0)
+    np.testing.assert_allclose(grad(xs[-1], x0).eval({x0: 1.0}), 32.0)
+
+    # Gradients wrt initial state, sequence and non-sequence
+    # in a linear recurrence: y_t = y_{t-1} * c + x_t
+    ws = vector("ws")
+    c = scalar("c")
+    ys = scan(
+        fn=lambda w, ytm1, c: ytm1 * c + w,
+        init_states=[x0],
+        sequences=[ws],
+        non_sequences=[c],
+    )
+    cost = ys.sum()
+    test_point = {
+        x0: 0.5,
+        ws: np.array([1.0, 2.0, 3.0], dtype=config.floatX),
+        c: 2.0,
+    }
+    gx0, gws, gc = grad(cost, [x0, ws, c])
+    np.testing.assert_allclose(gx0.eval(test_point), 14.0)
+    np.testing.assert_allclose(gws.eval(test_point), [7.0, 3.0, 1.0])
+    np.testing.assert_allclose(gc.eval(test_point), 15.5)
+
+
+def test_while_scan_grad():
+    # The number of iterations depends on the value of the initial state
+    x0 = scalar("x0")
+    xs = scan(
+        fn=lambda x: (x * 2, until((x * 2) >= 16)),
+        init_states=[x0],
+        n_steps=100,
+    )
+    # Starting at 1.0 the loop runs 4 times, so xs[-1] = x0 * 16
+    fn = function([x0], grad(xs[-1], x0))
+    np.testing.assert_allclose(fn(1.0), 16.0)
+    # Starting at 4.0 it runs only 2 times
+    np.testing.assert_allclose(fn(4.0), 4.0)
+
+
+def test_scan_grad_of_grad():
+    # xs[-1] = x0 ** 4, by repeated squaring
+    x0 = scalar("x0")
+    xs = scan(fn=lambda x: x * x, init_states=[x0], n_steps=2)
+    g1 = grad(xs[-1], x0)  # 4 * x0**3
+    g2 = grad(g1, x0)  # 12 * x0**2
+    fn = function([x0], [g1, g2])
+    np.testing.assert_allclose(fn(2.0), [32.0, 48.0])

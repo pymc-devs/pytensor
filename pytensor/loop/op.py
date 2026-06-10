@@ -2,14 +2,25 @@ import numpy as np
 
 from pytensor import In, Out
 from pytensor.compile import function, optdb
+from pytensor.gradient import DisconnectedType, NullType, pullback
 from pytensor.graph import Apply, FunctionGraph, Op, Type, node_rewriter
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import in2out
+from pytensor.graph.traversal import ancestors
 from pytensor.scalar import constant
-from pytensor.tensor import add, and_, empty, get_scalar_constant_value, set_subtensor
+from pytensor.tensor import (
+    add,
+    and_,
+    concatenate,
+    empty,
+    get_scalar_constant_value,
+    set_subtensor,
+    zeros_like,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import Subtensor, get_idx_list
-from pytensor.tensor.type import DenseTensorType, TensorType
+from pytensor.tensor.type import DenseTensorType, TensorType, continuous_dtypes
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.typed_list import GetItem, TypedListType, append, make_empty_list
 
@@ -48,7 +59,6 @@ class Loop(Op):
     def __init__(
         self,
         update_fg: FunctionGraph,  # (*state,  *consts) -> (bool, *state)
-        reverse_fg: FunctionGraph | None = None,
     ):
         validate_loop_update_types(update_fg)
         self.state_types = [out.type for out in update_fg.outputs[1:]]
@@ -56,7 +66,6 @@ class Loop(Op):
             inp.type for inp in update_fg.inputs[len(self.state_types) :]
         ]
         self.update_fg = update_fg
-        self.reverse_fg = reverse_fg
         self._fn = None
 
     @property
@@ -125,15 +134,11 @@ class Loop(Op):
         for i, state in enumerate(states):
             output_storage[i][0] = state
 
-    def L_Op(self, *args):
-        if not self.reverse_fg:
-            raise NotImplementedError()
-        # Use L_Op of self.reverse_fg
-        ...
-
-    def R_Op(self, *args):
-        # Use R_op of self.update_fg
-        ...
+    def pullback(self, inputs, outputs, cotangents):
+        raise NotImplementedError(
+            "Gradients are implemented by the Scan Op. "
+            "The Loop Op should only be introduced during compilation, after gradients are computed."
+        )
 
 
 class Scan(Op):
@@ -163,7 +168,6 @@ class Scan(Op):
     def __init__(
         self,
         update_fg: FunctionGraph,  # (*state,  *consts) -> (bool, *state)
-        reverse_fg: FunctionGraph | None = None,
     ):
         validate_loop_update_types(update_fg)
 
@@ -185,9 +189,6 @@ class Scan(Op):
         self.n_constants = len(self.constant_types)
 
         self.update_fg = update_fg.clone(check_integrity=False)
-        self.reverse_fg = (
-            reverse_fg.clone(check_integrity=False) if reverse_fg is not None else None
-        )
 
         # It's more conservative to assume the Op has a while condition
         self.has_while_condition = True
@@ -268,13 +269,176 @@ class Scan(Op):
     def perform(self, node, inputs, output_storage):
         raise RuntimeError("Scan Op should not be present in compiled graph")
 
-    def L_op(self, *args):
-        # Use trace outputs
-        ...
+    def connection_pattern(self, node):
+        # Gradients can only flow through continuous tensor states and constants
+        n_outputs = len(node.outputs)
+        connected_inputs = [False]  # max_iters
+        connected_inputs += [
+            isinstance(inp.type, DenseTensorType)
+            and inp.type.dtype in continuous_dtypes
+            for inp in node.inputs[1:]
+        ]
+        return [[connected] * n_outputs for connected in connected_inputs]
 
-    def R_op(self, *args):
-        # Use R_op of self.update
-        ...
+    def pullback(self, inputs, outputs, cotangents):
+        """Compute the gradient of a Scan as another Scan that iterates backwards over the traces.
+
+        At the backward step corresponding to forward step t, the cotangent of the t-th
+        states (the running cotangent plus the contribution of the respective trace entries)
+        is pulled back through the update function evaluated at the inputs of forward step t.
+        This yields the cotangents of the (t-1)-th states, and the contributions of the
+        constants, which are accumulated across iterations.
+
+        After the backward Scan, the running state cotangents correspond to the gradients
+        with respect to the initial states, and the accumulated contributions to the
+        gradients with respect to the constants.
+        """
+        # Avoid circular import
+        from pytensor.loop.basic import scan
+
+        max_iters = inputs[0]
+        init_states = inputs[1 : 1 + self.n_states]
+        constants = inputs[1 + self.n_states :]
+        traces = outputs[self.n_states :]
+        final_state_grads = cotangents[: self.n_states]
+        trace_grads = cotangents[self.n_states :]
+
+        def is_continuous(var) -> bool:
+            return (
+                isinstance(var.type, DenseTensorType)
+                and var.type.dtype in continuous_dtypes
+            )
+
+        def is_connected(g) -> bool:
+            return not isinstance(g.type, DisconnectedType)
+
+        if any(isinstance(g.type, NullType) for g in cotangents if is_connected(g)):
+            return [NullType("Gradient of Scan output is undefined")() for _ in inputs]
+
+        diff_state_idxs = [i for i, s in enumerate(init_states) if is_continuous(s)]
+        diff_const_idxs = [j for j, c in enumerate(constants) if is_continuous(c)]
+        dense_state_idxs = [
+            i for i, s in enumerate(init_states) if isinstance(s.type, DenseTensorType)
+        ]
+
+        disconnected = DisconnectedType()
+        if not diff_state_idxs or not any(is_connected(g) for g in cotangents):
+            return [disconnected() for _ in inputs]
+
+        # If there is a while condition, the trace length tells how many iterations were actually run
+        if self.has_while_condition:
+            n_iters = traces[dense_state_idxs[0]].shape[0]
+        else:
+            n_iters = max_iters
+
+        # Create the pullback (vector-Jacobian product) graph of the update function,
+        # with dummy variables for the state cotangents
+        update_fg = self.update_fg.clone(check_integrity=False)
+        inner_prev_states = update_fg.inputs[: self.n_states]
+        inner_constants = update_fg.inputs[self.n_states :]
+        inner_next_states = update_fg.outputs[1:]
+
+        state_cotangents = [inner_next_states[i].type() for i in diff_state_idxs]
+        vjps = pullback(
+            f=[inner_next_states[i] for i in diff_state_idxs],
+            wrt=(
+                [inner_prev_states[i] for i in diff_state_idxs]
+                + [inner_constants[j] for j in diff_const_idxs]
+            ),
+            cotangents=state_cotangents,
+            disconnected_inputs="ignore",
+            return_disconnected="zero",
+        )
+        non_dense_inner_states = [
+            s for i, s in enumerate(inner_prev_states) if i not in dense_state_idxs
+        ]
+
+        # The inputs of forward step t are the states of step t-1: the initial states
+        # followed by all trace entries but the last, reversed for the backward iteration
+        prev_state_seqs = [
+            concatenate([init_states[i][None], traces[i][:-1]])[::-1]
+            for i in dense_state_idxs
+        ]
+        traced_grad_idxs = [i for i in diff_state_idxs if is_connected(trace_grads[i])]
+        trace_grad_seqs = [trace_grads[i][::-1] for i in traced_grad_idxs]
+
+        init_lambdas = [
+            self.state_types[i].filter_variable(
+                final_state_grads[i]
+                if is_connected(final_state_grads[i])
+                else zeros_like(init_states[i])
+            )
+            for i in diff_state_idxs
+        ]
+        init_accs = [zeros_like(constants[j]) for j in diff_const_idxs]
+
+        n_prev = len(dense_state_idxs)
+        n_traced = len(traced_grad_idxs)
+        n_lambdas = len(diff_state_idxs)
+
+        def backward_step(*args):
+            prev_state_elems = args[:n_prev]
+            trace_grad_elems = args[n_prev : n_prev + n_traced]
+            lambdas = args[n_prev + n_traced : n_prev + n_traced + n_lambdas]
+            accs = args[n_prev + n_traced + n_lambdas : -len(constants) or None]
+            outer_constants = args[len(args) - len(constants) :]
+
+            total_lambdas = list(lambdas)
+            for k, i in enumerate(diff_state_idxs):
+                if i in traced_grad_idxs:
+                    total_lambdas[k] = (
+                        total_lambdas[k] + trace_grad_elems[traced_grad_idxs.index(i)]
+                    )
+
+            replace = dict(
+                zip(
+                    (inner_prev_states[i] for i in dense_state_idxs),
+                    prev_state_elems,
+                )
+            )
+            replace.update(zip(inner_constants, outer_constants))
+            replace.update(zip(state_cotangents, total_lambdas))
+            results = graph_replace(vjps, replace, strict=False)
+
+            if set(non_dense_inner_states) & set(ancestors(results)):
+                raise NotImplementedError(
+                    "Gradient of Scan requires the values of non-tensor states, which are not traced"
+                )
+
+            new_lambdas = [
+                self.state_types[i].filter_variable(r)
+                for i, r in zip(diff_state_idxs, results[:n_lambdas])
+            ]
+            new_accs = [
+                self.constant_types[j].filter_variable(acc + r)
+                for j, acc, r in zip(diff_const_idxs, accs, results[n_lambdas:])
+            ]
+            return [*new_lambdas, *new_accs]
+
+        backward_outs = scan(
+            backward_step,
+            init_states=[*init_lambdas, *init_accs],
+            sequences=[*prev_state_seqs, *trace_grad_seqs],
+            non_sequences=list(constants),
+            n_steps=n_iters,
+        )
+        if not isinstance(backward_outs, list):
+            backward_outs = [backward_outs]
+        final_lambdas = [trace[-1] for trace in backward_outs[:n_lambdas]]
+        final_accs = [trace[-1] for trace in backward_outs[n_lambdas:]]
+
+        input_grads = [disconnected()]  # max_iters
+        for i in range(self.n_states):
+            if i in diff_state_idxs:
+                input_grads.append(final_lambdas[diff_state_idxs.index(i)])
+            else:
+                input_grads.append(disconnected())
+        for j in range(self.n_constants):
+            if j in diff_const_idxs:
+                input_grads.append(final_accs[diff_const_idxs.index(j)])
+            else:
+                input_grads.append(disconnected())
+        return input_grads
 
 
 @node_rewriter([Scan])
