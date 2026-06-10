@@ -101,6 +101,15 @@ def scan(
         prev_states.append(init_state)
         prev_inner_states.append(inner_state)
 
+    # State shapes are loop-invariant, but shape inference may type the updated
+    # states more weakly than the initial states. Coerce them back when needed.
+    next_states = [
+        next_state
+        if inner_state.type.is_super(next_state.type)
+        else inner_state.type.filter_variable(next_state)
+        for inner_state, next_state in zip(prev_inner_states, next_states)
+    ]
+
     # Flip until to while condition
     while_condition = [~out.condition for out in fn_outputs if isinstance(out, until)]
     if not while_condition:

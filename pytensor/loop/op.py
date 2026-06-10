@@ -45,9 +45,11 @@ def validate_loop_update_types(update):
     for i, (input_state, output_state) in enumerate(
         zip(update.inputs, update.outputs[1:])
     ):
-        if input_state.type != output_state.type:
+        # Outputs may be more specific than the inputs (e.g. have static shapes
+        # the inputs lack), since they are fed back into them across iterations
+        if not input_state.type.is_super(output_state.type):
             raise TypeError(
-                f"The {i}-th input and output states of the inner loop function have different types: "
+                f"The {i}-th input and output states of the inner loop function have incompatible types: "
                 f"{input_state.type} vs {output_state.type}."
             )
 
