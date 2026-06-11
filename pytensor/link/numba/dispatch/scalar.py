@@ -4,6 +4,7 @@ from hashlib import sha256
 import numba
 import numpy as np
 from numba.core import types
+from numba.core.extending import get_cython_function_address
 
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
@@ -13,10 +14,7 @@ from pytensor.link.numba.dispatch.basic import (
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
 )
-from pytensor.link.numba.dispatch.cython_support import (
-    get_cython_special_ptr,
-    wrap_cython_function,
-)
+from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 from pytensor.link.utils import (
     get_name_for_object,
 )
@@ -84,8 +82,8 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
                 pass
             else:
                 has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch()
-                input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
-                output_inner_dtype = scalar_func_numba.numpy_output_dtype()
+                input_inner_dtypes = scalar_func_numba.input_dtypes
+                output_inner_dtype = scalar_func_numba.output_dtype
 
     if scalar_func_numba is None:
         return generate_fallback_impl(op, node, **kwargs), None
@@ -106,7 +104,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
         @numba_basic.numba_njit
         def get_ptr_func():
             with numba.objmode(ptr=types.intp):
-                ptr = get_cython_special_ptr(module_name, capi_name)
+                ptr = get_cython_function_address(module_name, capi_name)
             return ptr
 
         global_env = {

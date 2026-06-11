@@ -6,7 +6,6 @@ from typing import Any, cast
 
 import numba
 import numpy as np
-from numba.extending import get_cython_function_address
 from numpy.typing import DTypeLike
 from scipy import LowLevelCallable
 
@@ -146,28 +145,20 @@ def _available_impls(func: Callable) -> list[tuple[Signature, Any, str]]:
     return impls
 
 
-def get_cython_special_ptr(module_name: str, capi_name: str) -> int:
-    """Return the address of a cython ``__pyx_capi__`` function as an integer.
-
-    Resolving the pointer by name at call time — rather than capturing it when the kernel is
-    built — lets Numba cache kernels that call into ``scipy.special.cython_special``, since the
-    process-specific address is no longer baked into the compiled object.
-    """
-    return get_cython_function_address(module_name, capi_name)
-
-
 class _CythonFunctionSpec:
     """The cython implementation selected for a requested ``(restype, arg_types)`` signature.
 
     Holds the resolved C signature together with the module and ``__pyx_capi__`` name needed to
-    resolve the function's address at call time via ``get_cython_special_ptr``. The address itself
-    is deliberately not captured here, so kernels calling the function stay disk-cacheable.
+    resolve the function's address at call time via ``get_cython_function_address``. The address
+    itself is deliberately not captured here, so kernels calling the function stay disk-cacheable.
     """
 
     def __init__(self, signature, capi_name, module_name):
         self._signature = signature
         self.capi_name = capi_name
         self.module_name = module_name
+        self.input_dtypes = signature.arg_dtypes
+        self.output_dtype = signature.res_dtype
 
     def signature(self):
         return numba.from_dtype(self._signature.res_dtype)(
@@ -182,12 +173,6 @@ class _CythonFunctionSpec:
         ):
             raise ValueError("skip_dispatch parameter must be last")
         return self._signature.arg_names[-1] == "__pyx_skip_dispatch"
-
-    def numpy_arg_dtypes(self):
-        return self._signature.arg_dtypes
-
-    def numpy_output_dtype(self):
-        return self._signature.res_dtype
 
 
 def wrap_cython_function(func, restype, arg_types):
