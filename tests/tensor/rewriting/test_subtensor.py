@@ -204,11 +204,12 @@ def test_local_useless_inc_subtensor_no_opt():
     result.assert_eval([[1, 2], [3, 4]], [[10, 20], [30, 40]])
 
     # Increment with a non-zero constant target array, same collapse to x + y.
+    # ``ones`` has a static shape, so ``ones.shape`` folds to the constants (2, 2).
     ones = pt.ones((2, 2))
     s = ones[:, :]
     o_shape = inc_subtensor(s, specify_shape(y, s.shape))
     result = utt.RewriteTester([y], [o_shape])
-    result.assert_graph(ones + specify_shape(y, ones.shape))
+    result.assert_graph(ones + specify_shape(y, (2, 2)))
     result.assert_eval([[10, 20], [30, 40]])
 
 
