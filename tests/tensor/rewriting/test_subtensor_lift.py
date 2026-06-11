@@ -1060,6 +1060,17 @@ def test_local_subtensor_shape_constant():
     assert isinstance(res, Constant)
     assert np.array_equal(res.data, [1, 1])
 
+    # Any static dim folds, not just broadcastable ones
+    x = tensor(dtype=np.float64, shape=(7, None)).shape[0]
+    (res,) = local_subtensor_shape_constant.transform(None, x.owner)
+    assert isinstance(res, Constant)
+    assert res.data == 7
+
+    x = _shape(tensor(dtype=np.float64, shape=(None, 3, 7)))[1:]
+    (res,) = local_subtensor_shape_constant.transform(None, x.owner)
+    assert isinstance(res, Constant)
+    assert np.array_equal(res.data, [3, 7])
+
 
 @pytest.mark.parametrize(
     "original_fn, supported",
