@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Number
 from types import UnionType
-from typing import Any
+from typing import Any, TypeAlias
 
 import numpy as np
 from cons.core import ConsError, _car, _cdr
@@ -262,7 +262,7 @@ class LiteralString:
     value: str
 
 
-type OpPatternOpTypeType = type[Op] | tuple[type[Op], ...] | UnionType
+OpPatternOpTypeType: TypeAlias = type[Op] | tuple[type[Op], ...] | UnionType
 
 
 @dataclass(unsafe_hash=True)

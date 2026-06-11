@@ -1,4 +1,5 @@
 import copy
+from typing import TypeAlias
 
 import numpy as np
 
@@ -16,7 +17,7 @@ from pytensor.xtensor.random.type import (
 from pytensor.xtensor.type import XTensorVariable
 
 
-type XRNG_AND_DRAW = tuple["XRandomGeneratorVariable", XTensorVariable]
+XRNG_AND_DRAW: TypeAlias = tuple["XRandomGeneratorVariable", XTensorVariable]
 
 __all__ = [
     "XRandomGeneratorSharedVariable",
