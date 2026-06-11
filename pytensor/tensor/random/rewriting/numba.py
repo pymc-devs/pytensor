@@ -70,7 +70,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     else:
         core_shape = as_tensor(core_shape)
 
-    [core_shape] = simplify_core_shape_graphs([core_shape])
+    [core_shape] = simplify_core_shape_graphs([core_shape], fgraph)
 
     new_outs = (
         RandomVariableWithCoreShape(
