@@ -20,7 +20,6 @@ dependencies:
   # Apple BLAS
   - libblas=*=*accelerate
   - numba>=0.57
-  - mlx
   # For testing
   - coveralls
   - diff-cover
