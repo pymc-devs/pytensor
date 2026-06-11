@@ -7,22 +7,18 @@ from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.tensor.basic import as_tensor, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature
-from pytensor.tensor.shape import Shape, Shape_i
 
 
-def simplify_core_shape_graphs(core_shapes):
-    """Simplify core shape expressions by canonicalizing shape arithmetic.
+def simplify_core_shape_graphs(core_shapes, fgraph):
+    """Canonicalize the fresh shape arithmetic built by infer_shape.
 
-    Temporarily detaches Shape/Shape_i outputs from their owners so that
-    rewrite_graph operates only on the arithmetic above them (e.g.
-    constant-folding static shapes, eliminating dead Switch branches).
+    The rewrite is in place, so ``fgraph`` variables are detached to avoid
+    mutating it behind its features' backs.
     """
-    shape_boundary = [
-        var
-        for var in ancestors(core_shapes)
-        if var.owner is not None and isinstance(var.owner.op, (Shape, Shape_i))
-    ]
-    saved_owners = [(v, v.owner, v.index) for v in shape_boundary]
+    graph_boundary = fgraph.variables.intersection(
+        ancestors(core_shapes, blockers=fgraph.variables)
+    )
+    saved_owners = [(v, v.owner, v.index) for v in graph_boundary]
     for v, _, _ in saved_owners:
         v.owner = None
     try:
@@ -121,7 +117,7 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
         # If Blockwise shows up in the shape graph we can't introduce the core shape
         return None
 
-    core_shapes = simplify_core_shape_graphs(core_shapes)
+    core_shapes = simplify_core_shape_graphs(core_shapes, fgraph)
 
     return BlockwiseWithCoreShape(
         [*node.inputs, *core_shapes],
