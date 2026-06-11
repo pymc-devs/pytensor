@@ -62,6 +62,46 @@ def test_mlx_Gemv_symbolic_scales():
     )
 
 
+def test_mlx_Ger_static_scale():
+    A = pt.matrix("A", dtype=config.floatX)
+    x = pt.vector("x", dtype=config.floatX)
+    y = pt.vector("y", dtype=config.floatX)
+
+    out = pt_blas.ger(A, np.asarray(0.5, dtype=config.floatX), x, y)
+
+    rng = np.random.default_rng(sum(map(ord, "test_mlx_Ger_static_scale")))
+    A_test = rng.normal(size=(3, 2)).astype(config.floatX)
+    x_test = rng.normal(size=(3,)).astype(config.floatX)
+    y_test = rng.normal(size=(2,)).astype(config.floatX)
+
+    compare_mlx_and_py(
+        [A, x, y],
+        [out],
+        [A_test, x_test, y_test],
+    )
+
+
+def test_mlx_Ger_symbolic_scale():
+    A = pt.matrix("A", dtype=config.floatX)
+    x = pt.vector("x", dtype=config.floatX)
+    y = pt.vector("y", dtype=config.floatX)
+    alpha = pt.scalar("alpha", dtype=config.floatX)
+
+    out = pt_blas.ger(A, alpha, x, y)
+
+    rng = np.random.default_rng(sum(map(ord, "test_mlx_Ger_symbolic_scale")))
+    A_test = rng.normal(size=(3, 2)).astype(config.floatX)
+    x_test = rng.normal(size=(3,)).astype(config.floatX)
+    y_test = rng.normal(size=(2,)).astype(config.floatX)
+    alpha_test = np.asarray(0.5, dtype=config.floatX)
+
+    compare_mlx_and_py(
+        [A, alpha, x, y],
+        [out],
+        [A_test, alpha_test, x_test, y_test],
+    )
+
+
 def test_mlx_BatchedDot():
     # tensor3 . tensor3
     a = tensor3("a")
