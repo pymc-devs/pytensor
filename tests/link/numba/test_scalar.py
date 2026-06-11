@@ -243,6 +243,73 @@ def test_erf_complex():
     )
 
 
+CYTHON_SPECIAL_CASES = [
+    (pt.erfcx, [np.array([-1.0, 0.0, 1.0, 3.0])]),
+    (pt.erfinv, [np.array([-0.5, 0.0, 0.3, 0.9])]),
+    (pt.erfcinv, [np.array([0.2, 0.7, 1.0, 1.5])]),
+    (pt.psi, [np.array([0.5, 1.0, 3.7, 12.3])]),
+    (pt.gamma, [np.array([0.5, 1.0, 3.7, 5.2])]),
+    (pt.j0, [np.array([0.1, 1.0, 5.0, 9.0])]),
+    (pt.j1, [np.array([0.1, 1.0, 5.0, 9.0])]),
+    (pt.i0, [np.array([0.1, 1.0, 3.0, 5.0])]),
+    (pt.i1, [np.array([0.1, 1.0, 3.0, 5.0])]),
+    (pt.owens_t, [np.array([0.5, 1.0, 2.0]), np.array([0.3, 0.7, 1.2])]),
+    (pt.gammainc, [np.array([1.0, 2.0, 3.0]), np.array([0.5, 2.0, 4.0])]),
+    (pt.gammaincc, [np.array([1.0, 2.0, 3.0]), np.array([0.5, 2.0, 4.0])]),
+    (pt.gammaincinv, [np.array([1.0, 2.0, 3.0]), np.array([0.2, 0.5, 0.8])]),
+    (pt.gammainccinv, [np.array([1.0, 2.0, 3.0]), np.array([0.2, 0.5, 0.8])]),
+    (pt.jv, [np.array([0.0, 1.0, 2.0]), np.array([1.0, 3.0, 5.0])]),
+    (pt.ive, [np.array([0.0, 1.0, 2.0]), np.array([1.0, 3.0, 5.0])]),
+    (pt.kve, [np.array([0.0, 1.0, 2.0]), np.array([1.0, 3.0, 5.0])]),
+    (pt.betainc, [np.array([1.0, 2.0]), np.array([2.0, 3.0]), np.array([0.3, 0.6])]),
+    (pt.betaincinv, [np.array([1.0, 2.0]), np.array([2.0, 3.0]), np.array([0.3, 0.6])]),
+    (
+        pt.hyp2f1,
+        [
+            np.array([0.5, 1.0]),
+            np.array([0.5, 1.0]),
+            np.array([1.5, 2.0]),
+            np.array([0.2, 0.4]),
+        ],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "op_fn, test_values",
+    CYTHON_SPECIAL_CASES,
+    ids=[
+        "erfcx",
+        "erfinv",
+        "erfcinv",
+        "psi",
+        "gamma",
+        "j0",
+        "j1",
+        "i0",
+        "i1",
+        "owens_t",
+        "gammainc",
+        "gammaincc",
+        "gammaincinv",
+        "gammainccinv",
+        "jv",
+        "ive",
+        "kve",
+        "betainc",
+        "betaincinv",
+        "hyp2f1",
+    ],
+)
+def test_cython_special_funcs(op_fn, test_values):
+    """Scalar ops backed by ``scipy.special.cython_special`` resolve their C function pointer at
+    runtime (see ``numba_funcify_ScalarOp``), so the funcified kernel is njit-only. Skip the
+    object-mode eval path, as is done for the LAPACK wrappers."""
+    inputs = [pt.vector(f"x{i}", dtype="float64") for i in range(len(test_values))]
+    out = op_fn(*inputs)
+    compare_numba_and_py(inputs, [out], test_values, eval_obj_mode=False)
+
+
 class TestScalarLoop:
     def test_scalar_for_loop_single_out(self):
         n_steps = ps.int64("n_steps")

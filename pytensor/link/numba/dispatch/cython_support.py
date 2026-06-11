@@ -1,4 +1,3 @@
-import ctypes
 import importlib
 import re
 from collections.abc import Callable, Mapping
@@ -7,6 +6,7 @@ from typing import Any, cast
 
 import numba
 import numpy as np
+from numba.extending import get_cython_function_address
 from numpy.typing import DTypeLike
 from scipy import LowLevelCallable
 
@@ -116,8 +116,13 @@ class Signature:
         return Signature(res_dtype, res_c_type, arg_dtypes, arg_c_types, arg_names)
 
 
-def _available_impls(func: Callable) -> list[tuple[Signature, Any]]:
-    """Find all available implementations for a fused cython function."""
+def _available_impls(func: Callable) -> list[tuple[Signature, Any, str]]:
+    """Find all available implementations for a fused cython function.
+
+    Each entry is ``(signature, capsule, capi_name)``, where ``capi_name`` is the key under
+    which the implementation is exported in the module's ``__pyx_capi__`` table. That name is a
+    stable, picklable handle for the C function, used to re-resolve its address at runtime.
+    """
     impls = []
     mod = importlib.import_module(func.__module__)
 
@@ -137,44 +142,37 @@ def _available_impls(func: Callable) -> list[tuple[Signature, Any]]:
             signature = Signature.from_c_types(llc.signature.encode())
         except KeyError:
             continue
-        impls.append((signature, capsule))
+        impls.append((signature, capsule, name))
     return impls
 
 
-class _CythonWrapper(numba.types.WrapperAddressProtocol):
-    def __init__(self, pyfunc, signature, capsule):
-        self._keep_alive = capsule
-        get_name = ctypes.pythonapi.PyCapsule_GetName
-        get_name.restype = ctypes.c_char_p
-        get_name.argtypes = (ctypes.py_object,)
+def get_cython_special_ptr(module_name: str, capi_name: str) -> int:
+    """Return the address of a cython ``__pyx_capi__`` function as an integer.
 
-        raw_signature = get_name(capsule)
+    Resolving the pointer by name at call time — rather than capturing it when the kernel is
+    built — lets Numba cache kernels that call into ``scipy.special.cython_special``, since the
+    process-specific address is no longer baked into the compiled object.
+    """
+    return get_cython_function_address(module_name, capi_name)
 
-        get_pointer = ctypes.pythonapi.PyCapsule_GetPointer
-        get_pointer.restype = ctypes.c_void_p
-        get_pointer.argtypes = (ctypes.py_object, ctypes.c_char_p)
-        self._func_ptr = get_pointer(capsule, raw_signature)
 
+class _CythonFunctionSpec:
+    """The cython implementation selected for a requested ``(restype, arg_types)`` signature.
+
+    Holds the resolved C signature together with the module and ``__pyx_capi__`` name needed to
+    resolve the function's address at call time via ``get_cython_special_ptr``. The address itself
+    is deliberately not captured here, so kernels calling the function stay disk-cacheable.
+    """
+
+    def __init__(self, signature, capi_name, module_name):
         self._signature = signature
-        self._pyfunc = pyfunc
+        self.capi_name = capi_name
+        self.module_name = module_name
 
     def signature(self):
         return numba.from_dtype(self._signature.res_dtype)(
             *self._signature.arg_numba_types
         )
-
-    def __wrapper_address__(self):
-        return self._func_ptr
-
-    def __call__(self, *args, **kwargs):
-        # no strict argument because of the JIT
-        # TODO: check
-        args = [dtype(arg) for arg, dtype in zip(args, self._signature.arg_dtypes)]
-        if self.has_pyx_skip_dispatch():
-            output = self._pyfunc(*args[:-1], **kwargs)
-        else:
-            output = self._pyfunc(*args, **kwargs)
-        return self._signature.res_dtype(output)
 
     def has_pyx_skip_dispatch(self):
         if not self._signature.arg_names:
@@ -195,9 +193,9 @@ class _CythonWrapper(numba.types.WrapperAddressProtocol):
 def wrap_cython_function(func, restype, arg_types):
     impls = _available_impls(func)
     compatible = []
-    for sig, capsule in impls:
+    for sig, _capsule, capi_name in impls:
         if sig.provides(restype, arg_types):
-            compatible.append((sig, capsule))
+            compatible.append((sig, capi_name))
 
     def sort_key(args):
         sig, _ = args
@@ -213,5 +211,5 @@ def wrap_cython_function(func, restype, arg_types):
 
     if not compatible:
         raise NotImplementedError(f"Could not find a compatible impl of {func}")
-    sig, capsule = compatible[0]
-    return _CythonWrapper(func, sig, capsule)
+    sig, capi_name = compatible[0]
+    return _CythonFunctionSpec(sig, capi_name, func.__module__)

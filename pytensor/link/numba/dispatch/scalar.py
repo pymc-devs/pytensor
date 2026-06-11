@@ -1,17 +1,22 @@
 import math
 from hashlib import sha256
 
+import numba
 import numpy as np
+from numba.core import types
 
 from pytensor.graph.basic import Variable
-from pytensor.link.numba.cache import compile_numba_function_src
+from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
 )
-from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
+from pytensor.link.numba.dispatch.cython_support import (
+    get_cython_special_ptr,
+    wrap_cython_function,
+)
 from pytensor.link.utils import (
     get_name_for_object,
 )
@@ -89,18 +94,45 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
     prefix = "x" if scalar_func_name != "x" else "y"
     input_names = [f"{prefix}{i}" for i in range(len(node.inputs))]
     input_signature = ", ".join(input_names)
-    global_env = {"scalar_func_numba": scalar_func_numba}
+
+    if cython_func is not None:
+        # Resolve the cython function pointer at call time, caching it in a module global keyed
+        # by `unique_func_name` to make ops backed by `scipy.special.cython_special` cacheable.
+        module_name = scalar_func_numba.module_name
+        capi_name = scalar_func_numba.capi_name
+        unique_func_name = f"{module_name}.{capi_name}"
+        func_type_ref = types.FunctionType(scalar_func_numba.signature())
+
+        @numba_basic.numba_njit
+        def get_ptr_func():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_cython_special_ptr(module_name, capi_name)
+            return ptr
+
+        global_env = {
+            "_call_cached_ptr": _call_cached_ptr,
+            "get_ptr_func": get_ptr_func,
+            "func_type_ref": func_type_ref,
+            "unique_func_name": unique_func_name,
+        }
+        scalar_func_setup = (
+            "    scalar_func_numba = "
+            "_call_cached_ptr(get_ptr_func, func_type_ref, unique_func_name)\n"
+        )
+    else:
+        global_env = {"scalar_func_numba": scalar_func_numba}
+        scalar_func_setup = ""
 
     if input_inner_dtypes is None and output_inner_dtype is None:
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""
 def {scalar_op_fn_name}({input_signature}):
-    return scalar_func_numba({input_signature})
+{scalar_func_setup}    return scalar_func_numba({input_signature})
             """
         else:
             scalar_op_src = f"""
 def {scalar_op_fn_name}({input_signature}):
-    return scalar_func_numba({input_signature}, np.intc(1))
+{scalar_func_setup}    return scalar_func_numba({input_signature}, np.intc(1))
             """
 
     else:
@@ -120,12 +152,12 @@ def {scalar_op_fn_name}({input_signature}):
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""
 def {scalar_op_fn_name}({input_signature}):
-    return direct_cast(scalar_func_numba({converted_call_args}), output_dtype)
+{scalar_func_setup}    return direct_cast(scalar_func_numba({converted_call_args}), output_dtype)
             """
         else:
             scalar_op_src = f"""
 def {scalar_op_fn_name}({input_signature}):
-    return direct_cast(scalar_func_numba({converted_call_args}, np.intc(1)), output_dtype)
+{scalar_func_setup}    return direct_cast(scalar_func_numba({converted_call_args}, np.intc(1)), output_dtype)
             """
 
     scalar_op_fn = compile_numba_function_src(
@@ -134,8 +166,16 @@ def {scalar_op_fn_name}({input_signature}):
         globals() | global_env,
     )
 
-    # Functions that call a function pointer can't be cached
-    cache_key = None if cython_func else scalar_op_cache_key(op)
+    if cython_func is not None:
+        cache_key = scalar_op_cache_key(
+            op,
+            cython_capi=unique_func_name,
+            input_inner_dtypes=tuple(str(d) for d in input_inner_dtypes),
+            output_inner_dtype=str(output_inner_dtype),
+            has_pyx_skip_dispatch=has_pyx_skip_dispatch,
+        )
+    else:
+        cache_key = scalar_op_cache_key(op)
     return numba_basic.numba_njit(scalar_op_fn), cache_key
 
 
