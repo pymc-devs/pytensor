@@ -71,7 +71,7 @@ _logger = logging.getLogger("pytensor.tensor.subtensor")
 T = TypeVar("T")
 
 
-def flatten_index_variables(
+def flatten_index_variables[T](
     idx_vars: Sequence[T | None | slice],
 ) -> tuple[list[int | slice], list[T]]:
     counter = 0
@@ -99,7 +99,7 @@ def flatten_index_variables(
     return idx_list, flat_vars
 
 
-def unflatten_index_variables(
+def unflatten_index_variables[T](
     flat_indices: Sequence[T],
     idx_list: Sequence[slice | int],
 ) -> tuple[slice | T, ...]:

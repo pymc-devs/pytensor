@@ -1,6 +1,5 @@
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
-from typing import TypeAlias
 
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
@@ -16,9 +15,7 @@ from pytensor.tensor.type import tensor
 from pytensor.tensor.variable import TensorVariable
 
 
-ShapeValueType: TypeAlias = (
-    int | np.integer | ScalarVariable | TensorVariable | np.ndarray
-)
+type ShapeValueType = int | np.integer | ScalarVariable | TensorVariable | np.ndarray
 
 
 class JoinDims(Op):

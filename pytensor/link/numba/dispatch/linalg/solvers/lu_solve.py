@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Literal
 
 import numpy as np
 from numba.core.extending import overload
@@ -21,7 +21,7 @@ from pytensor.link.numba.dispatch.linalg.utils import (
 )
 
 
-_Trans: TypeAlias = Literal[0, 1, 2]
+type _Trans = Literal[0, 1, 2]
 
 
 def _getrs(
