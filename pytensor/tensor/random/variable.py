@@ -1,6 +1,7 @@
 import copy
 import warnings
 from functools import wraps
+from typing import TypeAlias
 
 import numpy as np
 
@@ -11,7 +12,7 @@ from pytensor.tensor.random.type import RandomGeneratorType, random_generator_ty
 from pytensor.tensor.variable import TensorVariable
 
 
-type RNG_AND_DRAW = tuple["RandomGeneratorVariable", TensorVariable]
+RNG_AND_DRAW: TypeAlias = tuple["RandomGeneratorVariable", TensorVariable]
 
 
 def warn_reuse(func):

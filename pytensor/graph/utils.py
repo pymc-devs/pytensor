@@ -73,7 +73,7 @@ def simple_extract_stack(
     return trace
 
 
-def add_tag_trace[T: "Apply" | "Variable"](thing: T, user_line: int | None = None) -> T:
+def add_tag_trace(thing: T, user_line: int | None = None) -> T:
     """Add tag.trace to a node or variable.
 
     The argument is returned after being affected (inplace).

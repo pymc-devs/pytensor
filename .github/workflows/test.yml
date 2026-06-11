@@ -56,7 +56,7 @@ jobs:
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -78,7 +78,7 @@ jobs:
       matrix:
         # default-mode: "NUMBA" is actually a no-op, to make sure we're testing default config settings
         default-mode: ["CVM", "NUMBA", "FAST_COMPILE"]
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.11", "3.14"]
         os: ["ubuntu-latest"]
         install-jax: [0]
         install-torch: [0]
@@ -94,7 +94,7 @@ jobs:
           - [ "tensor rewriting", "tests/tensor/rewriting" ]
           - [ "tensor linalg", "tests/tensor/linalg" ]
         exclude:
-          - python-version: "3.12"
+          - python-version: "3.11"
             default-mode: "FAST_COMPILE"
         include:
           - part: ["doctests", "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"]
@@ -117,7 +117,7 @@ jobs:
           - part: ["pytorch link", "tests/link/pytorch"]
             install-torch: 1
             default-mode: "CVM"
-            python-version: "3.12"
+            python-version: "3.11"
             os: "ubuntu-latest"
           - part: ["xtensor", "tests/xtensor"]
             install-xarray: 1
@@ -127,7 +127,7 @@ jobs:
           - part: ["mlx link", "tests/link/mlx"]
             install-mlx: 1
             default-mode: "CVM"
-            python-version: "3.12"
+            python-version: "3.11"
             os: "macos-15"
           - part: ["macos smoke test", "tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py tests/tensor/test_blas.py"]
             default-mode: "CVM"
@@ -223,7 +223,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Set up Python 3.12
+      - name: Set up Python 3.11
         uses: mamba-org/setup-micromamba@d7c9bd84e824b79d2af72a2d4196c7f4300d3476 # v3.0.0
         with:
           environment-name: pytensor-test
@@ -239,7 +239,7 @@ jobs:
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
           python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
         env:
-          PYTHON_VERSION: 3.12
+          PYTHON_VERSION: 3.11
       - name: Download previous benchmark data
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:

@@ -20,7 +20,7 @@ NodeAndChildren = tuple[T, Iterable[T] | None]
 
 
 @overload
-def walk[T: Node](
+def walk(
     nodes: Iterable[T],
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
@@ -29,7 +29,7 @@ def walk[T: Node](
 
 
 @overload
-def walk[T: Node](
+def walk(
     nodes: Iterable[T],
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool,
@@ -37,7 +37,7 @@ def walk[T: Node](
 ) -> Generator[NodeAndChildren, None, None]: ...
 
 
-def walk[T: Node](
+def walk(
     nodes: Iterable[T],
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
@@ -511,7 +511,7 @@ def truncated_graph_inputs(
     return truncated_inputs
 
 
-def walk_toposort[T: Node](
+def walk_toposort(
     graphs: Iterable[T],
     deps: Callable[[T], Iterable[T] | None],
 ) -> Generator[T, None, None]:
@@ -581,7 +581,7 @@ def walk_toposort[T: Node](
         raise ValueError("graph contains cycles")
 
 
-def general_toposort[T: Node](
+def general_toposort(
     outputs: Iterable[T],
     deps: Callable[[T], Iterable[T] | None],
     compute_deps_cache: Callable[[T], Iterable[T] | None] | None = None,

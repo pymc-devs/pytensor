@@ -108,7 +108,7 @@ class Node(MetaObject):
         return debugprint(self, **kwargs)
 
 
-class Apply(Node, Generic[OpType]):  # noqa: UP046
+class Apply(Node, Generic[OpType]):
     """A `Node` representing the application of an operation to inputs.
 
     Basically, an `Apply` instance is an object that represents the
@@ -345,7 +345,7 @@ class Apply(Node, Generic[OpType]):  # noqa: UP046
         return self.op.params_type
 
 
-class Variable(Node, Generic[_TypeType, OptionalApplyType]):  # noqa: UP046
+class Variable(Node, Generic[_TypeType, OptionalApplyType]):
     r"""
     A :term:`Variable` is a node in an expression graph that represents a
     variable.
@@ -677,7 +677,7 @@ class AtomicVariable(Variable[_TypeType, None]):
         return cp
 
 
-class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):  # noqa: UP046
+class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):
     """A variable that enables alpha-equivalent comparisons."""
 
     __instances__: dict[tuple["Type", Hashable], "NominalVariable"] = {}
