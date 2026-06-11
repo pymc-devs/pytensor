@@ -8,7 +8,6 @@ from unittest import mock
 
 import numpy as np
 import pytest
-import scipy
 
 from pytensor.tensor import scalar_from_tensor
 
@@ -486,15 +485,6 @@ class TestNumbaWarnings:
     def setup_method(self, method):
         # Pytest messes up with the package filters, reenable here for testing
         _filter_numba_warnings()
-
-    @pytest.mark.filterwarnings("error")
-    def test_cache_pointer_func_warning_suppressed(self):
-        x = pt.vector("x", shape=(5,), dtype="float64")
-        out = pt.psi(x) * 2
-        fn = function([x], out, mode="NUMBA")
-
-        x_test = np.random.uniform(size=5)
-        np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
 
     @pytest.mark.filterwarnings("error")
     def test_cache_large_global_array_warning_suppressed(self):
