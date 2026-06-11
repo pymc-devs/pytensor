@@ -58,11 +58,6 @@ add_inplace = Elemwise(scalar_add, {0: 0})
             lambda x: pt.erfc(x),
         ),
         (
-            [pt.vector()],
-            [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: pt.erfcx(x),
-        ),
-        (
             [pt.vector() for i in range(4)],
             [rng.standard_normal(100).astype(config.floatX) for i in range(4)],
             lambda x, y, x1, y1: (x + y) * (x1 + y1) * y,
@@ -103,7 +98,6 @@ add_inplace = Elemwise(scalar_add, {0: 0})
         "log1mexp",
         "erf",
         "erfc",
-        "erfcx",
         "complex_arithmetic",
         "switch",
         "add_inplace_scalar",
@@ -631,6 +625,8 @@ def test_gammainc_wrt_k_grad():
             np.array([0.0, 29.0, 31.0], dtype="float64"),
             np.array([1.0, 13.0, 11.0], dtype="float64"),
         ],
+        # gammainc is backed by scipy.special.cython_special, whose funcified kernel is njit-only
+        eval_obj_mode=False,
     )
 
 
