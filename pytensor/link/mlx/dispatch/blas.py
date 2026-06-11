@@ -21,10 +21,12 @@ def mlx_funcify_Gemv(op, node=None, **kwargs):
     static_beta = _as_float_constant(node.inputs[4]) if node is not None else None
 
     if static_alpha is not None and static_beta is not None:
+
         def gemv(y, alpha, A, x, beta):
             return mx.addmm(y, A, x, alpha=static_alpha, beta=static_beta)
 
     else:
+
         def gemv(y, alpha, A, x, beta):
             return beta * y + alpha * mx.matmul(A, x)
 
