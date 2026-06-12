@@ -18,6 +18,7 @@ from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
+from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.rewriting.subtensor import (
     _slice_to_arange,
     local_add_of_sparse_write,
@@ -490,11 +491,9 @@ class TestLocalUselessSubtensor:
         else:
             # Arange-with-offset indices get rewritten to a Subtensor slice;
             # other advanced indices stay as AdvancedSubtensor1 (or get
-            # absorbed into IndexedElemwise by FuseIndexedElemwise).
-            from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
-
+            # absorbed into FusedElemwise by FuseElemwise).
             assert any(
-                isinstance(node.op, AdvancedSubtensor1 | Subtensor | IndexedElemwise)
+                isinstance(node.op, AdvancedSubtensor1 | Subtensor | FusedElemwise)
                 for node in prog
             )
 

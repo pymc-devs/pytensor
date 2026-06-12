@@ -1,9 +1,9 @@
-"""Fuse indexed reads and updates into Elemwise iteration loops.
+"""Fuse indexed reads/writes and reductions into Elemwise iteration loops.
 
-Introduces ``IndexedElemwise``, an ``OpFromGraph`` that wraps
-``AdvancedSubtensor1`` + ``Elemwise`` + ``AdvancedIncSubtensor1`` subgraphs
-so the Numba backend can generate a single loop with indirect indexing,
-eliminating materialised intermediate arrays.
+Introduces ``FusedElemwise``, an ``OpFromGraph`` that wraps
+``AdvancedSubtensor1`` + ``Elemwise`` + ``AdvancedIncSubtensor1`` / ``CAReduce``
+subgraphs so the Numba backend can generate a single loop with indirect
+indexing and inline accumulation, eliminating materialised intermediate arrays.
 """
 
 from pytensor.compile import optdb
@@ -14,8 +14,20 @@ from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
-from pytensor.scalar.basic import Composite
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.scalar.basic import (
+    AND,
+    OR,
+    XOR,
+    Add,
+    Composite,
+    Maximum,
+    Minimum,
+    Mul,
+)
+from pytensor.scalar.basic import (
+    identity as scalar_identity,
+)
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
 from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import (
@@ -25,6 +37,12 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
 )
 from pytensor.tensor.variable import TensorVariable
+
+
+# CAReduce scalar ops whose reduction the Numba backend can fuse into the loop
+# (those for which the codegen has an in-place accumulation: see
+# ``accumulate_into_slice`` in the numba elemwise dispatch).
+_REDUCE_SCALAR_OPS = (Add, Mul, Maximum, Minimum, AND, OR, XOR)
 
 
 def _view_root(view_i, var):
@@ -102,7 +120,7 @@ def undo_take_dimshuffle_for_fusion(fgraph, node):
     The ``local_replace_AdvancedSubtensor`` specialize rewrite converts
     ``x[:, idx]`` into ``x.T[idx].T`` (axis-swap + AdvancedSubtensor1 +
     axis-swap).  This rewrite undoes that when the result feeds a single
-    Elemwise, so ``FuseIndexedElemwise`` can absorb the indexing directly
+    Elemwise, so ``FuseElemwise`` can absorb the indexing directly
     on the correct axis.
 
     See also ``undo_take_reshape_for_fusion`` which handles the analogous
@@ -135,7 +153,7 @@ def undo_take_reshape_for_fusion(fgraph, node):
     ``transform_take`` rewrites ``x[mat_idx]`` (ND integer index) into
     ``AdvancedSubtensor1(x, mat_idx.ravel()).reshape(mat_idx.shape + ...)``,
     possibly with DimShuffle axis-swaps for non-zero axes.  This rewrite
-    undoes that so ``FuseIndexedElemwise`` can absorb the ND index directly.
+    undoes that so ``FuseElemwise`` can absorb the ND index directly.
     """
     [reshape_out] = node.outputs
 
@@ -169,10 +187,46 @@ def undo_take_reshape_for_fusion(fgraph, node):
     return [new_out]
 
 
-indexed_elemwise_optdb = SequenceDB()
+@node_rewriter([CAReduce])
+def wrap_reduced_gather_in_elemwise(fgraph, node):
+    """Wrap a reduction of a bare indexed read in an identity Elemwise.
+
+    ``FuseElemwise`` anchors on Elemwise nodes, so ``sum(x[idx])`` — with no
+    elementwise computation between the gather and the reduction — would leave
+    the gather materialized. ``Elemwise(identity)`` gives the fusion an anchor:
+    gather, identity and reduction collapse into one fused loop (the identity is
+    a no-op inside the loop body). Runs before the ``undo_take`` rewrites, which
+    require the indexed read to feed an Elemwise.
+    """
+    if not isinstance(node.op.scalar_op, _REDUCE_SCALAR_OPS):
+        return None
+    [inp] = node.inputs
+    if inp.owner is None or len(fgraph.clients[inp]) != 1:
+        return None
+
+    owner_op = inp.owner.op
+    if isinstance(owner_op, AdvancedSubtensor):
+        is_gather = True
+    elif isinstance(owner_op, Reshape):
+        # The flattened-ND-index form undo_take_reshape_for_fusion normalizes
+        is_gather = (
+            _unwrap_axis_swapped_subtensor1(fgraph, inp.owner.inputs[0]) is not None
+        )
+    else:
+        # Bare AdvancedSubtensor1 or the axis-swap DimShuffle-wrapped form
+        is_gather = _unwrap_axis_swapped_subtensor1(fgraph, inp) is not None
+    if not is_gather:
+        return None
+
+    return [node.op(Elemwise(scalar_identity)(inp))]
+
+
+fused_elemwise_optdb = SequenceDB()
 optdb.register(
+    # Predates the FusedElemwise rename; kept so existing .including/.excluding
+    # calls targeting this name keep working.
     "fuse_indexed_into_elemwise",
-    indexed_elemwise_optdb,
+    fused_elemwise_optdb,
     "numba",
     # symbolic_op_recognition is excluded from OpFromGraph inner-graph
     # compilation, preventing recursive fusion.
@@ -182,14 +236,21 @@ optdb.register(
     position=100,
 )
 
-indexed_elemwise_optdb.register(
+fused_elemwise_optdb.register(
+    "wrap_reduced_gather_in_elemwise",
+    dfs_rewriter(wrap_reduced_gather_in_elemwise),
+    "numba",
+    position=-0.5,
+)
+
+fused_elemwise_optdb.register(
     "undo_take_dimshuffle_for_fusion",
     dfs_rewriter(undo_take_dimshuffle_for_fusion),
     "numba",
     position=0,
 )
 
-indexed_elemwise_optdb.register(
+fused_elemwise_optdb.register(
     "undo_take_reshape_for_fusion",
     dfs_rewriter(undo_take_reshape_for_fusion),
     "numba",
@@ -197,7 +258,7 @@ indexed_elemwise_optdb.register(
 )
 
 
-class IndexedElemwise(OpFromGraph):
+class FusedElemwise(OpFromGraph):
     """Fuse indexed reads and updates into a single Elemwise iteration loop.
 
     Absorbs ``AdvancedSubtensor1`` (indexed reads on inputs) and
@@ -250,28 +311,66 @@ class IndexedElemwise(OpFromGraph):
         Examples::
 
             tgt[idx] += exp(x)   → indexed_outputs=[((0,), 0, "inc")]
+
+    reduced_outputs : tuple of ((scalar_op, axes, identity, acc_dtype) | None)
+        One entry per (inner Elemwise / outer op) output position.
+        ``None`` if the output is not a reduction.
+        Otherwise the output is the result of reducing the inner Elemwise output
+        with ``CAReduce(scalar_op)`` over ``axes``:
+
+        - ``scalar_op``: the commutative/associative binary scalar op of the
+          reduction (e.g. ``add`` for sum, ``mul`` for prod, ``maximum`` for max).
+        - ``axes``: tuple of reduced batch axes (in the inner Elemwise's dim space).
+        - ``identity``: the reduction identity, used to seed the accumulator buffer.
+        - ``acc_dtype``: dtype the accumulation is carried out in (the Numba loop
+          accumulates in this dtype, then casts to the output dtype).
+
+        The inner fgraph still holds a faithful ``CAReduce(Elemwise(...))`` so
+        non-Numba backends evaluate correctly via ``OpFromGraph.perform``; only
+        the Numba backend reads this spec to fuse the reduction into the loop.
+
+        Examples::
+
+            sum(exp(x))          → reduced_outputs=[(add, (0,), 0.0, "float64")]
     """
 
-    def __init__(self, *args, indexed_inputs=(), indexed_outputs=(), **kwargs):
+    def __init__(
+        self,
+        *args,
+        indexed_inputs=(),
+        indexed_outputs=(),
+        reduced_outputs=(),
+        **kwargs,
+    ):
         self.indexed_inputs = indexed_inputs
         self.indexed_outputs = indexed_outputs
+        self.reduced_outputs = reduced_outputs
         # A read buffer can occupy multiple input slots (e.g. read through
         # several indices); construct_nominal_fgraph dedupes those to one
         # nominal, leaving the extra slots as unused NominalVariables, which is
         # safe because reads don't destroy. Write targets always get their own
-        # fresh inner input (see FuseIndexedElemwise) so a destroyed buffer is
+        # fresh inner input (see FuseElemwise) so a destroyed buffer is
         # never deduped onto a read source.
         super().__init__(*args, on_unused_input="ignore", accept_inplace=True, **kwargs)
 
     def __str__(self):
+        elemwise_str = "Elemwise"
         for node in self.fgraph.apply_nodes:
             if isinstance(node.op, Elemwise):
-                return f"IndexedElemwise{{{node.op!s}}}"
-        return "IndexedElemwise"
+                elemwise_str = str(node.op)
+                break
+        reductions = [
+            f"{type(spec[0]).__name__.lower()}@{spec[1]}"
+            for spec in self.reduced_outputs
+            if spec is not None
+        ]
+        if reductions:
+            return f"FusedElemwise{{{elemwise_str}, reduce[{', '.join(reductions)}]}}"
+        return f"FusedElemwise{{{elemwise_str}}}"
 
 
-@op_debug_information.register(IndexedElemwise)
-def _op_debug_information_IndexedElemwise(op, node):
+@op_debug_information.register(FusedElemwise)
+def _op_debug_information_FusedElemwise(op, node):
     info = {}
 
     n_idx = len(op.indexed_inputs)
@@ -317,10 +416,20 @@ def _op_debug_information_IndexedElemwise(op, node):
                     f"indexed {mode} ({buf_label}, {idx_label})"
                 )
 
+    # Annotate reduced outputs
+    for out_idx, spec in enumerate(op.reduced_outputs):
+        if spec is None or out_idx >= len(node.outputs):
+            continue
+        scalar_op, axes, _identity, acc_dtype = spec
+        info[node.outputs[out_idx]] = (
+            f"reduced[{type(scalar_op).__name__.lower()}] "
+            f"over axes {axes} acc={acc_dtype}"
+        )
+
     return {node: info}
 
 
-class FuseIndexedElemwise(GraphRewriter):
+class FuseElemwise(GraphRewriter):
     """Fuse indexed reads and indexed updates into Elemwise loops.
 
     Absorbs single-client ``AdvancedSubtensor1`` on inputs (indexed reads)
@@ -377,10 +486,11 @@ class FuseIndexedElemwise(GraphRewriter):
 
     @staticmethod
     def _duplicate_multi_client_outputs(node, multi_client_outs):
-        """Add duplicate outputs for Elemwise results that have both write and non-write consumers.
+        """Add duplicate outputs for Elemwise results whose consumers must be split.
 
-        Returns ``(new_node, dup_map)`` where *dup_map* maps each original
-        output index to its duplicate position.
+        Used when an output is both written/reduced and consumed directly, or is
+        consumed by several reductions. Returns ``(new_node, dup_map)`` where
+        *dup_map* maps each original output index to its duplicate position.
         """
         scalar_op = node.op.scalar_op
         if isinstance(scalar_op, Composite):
@@ -399,7 +509,11 @@ class FuseIndexedElemwise(GraphRewriter):
             s_outputs.append(s_outputs[out_idx])
 
         new_scalar_op = Composite(s_inputs, s_outputs)
-        new_node = Elemwise(new_scalar_op).make_node(*node.inputs)
+        # Duplicates are appended after the original outputs, so the node's
+        # inplace pattern carries over unchanged (duplicates get no entries).
+        new_node = Elemwise(new_scalar_op, dict(node.op.inplace_pattern)).make_node(
+            *node.inputs
+        )
         return new_node, dup_map
 
     @staticmethod
@@ -574,7 +688,49 @@ class FuseIndexedElemwise(GraphRewriter):
                     idx_groups[idx_axis_pair][1].append(out_idx)
                 write_targets[out_idx] = client_node
 
-            if not idx_groups:
+            # Find reductions to fuse: an Elemwise output whose sole client is an
+            # eligible CAReduce.  Outputs that are write targets are excluded (an
+            # output can't be both an indexed write and a reduction).  Outputs
+            # with extra (non-reduce) clients are handled by duplication below.
+            reduced_outputs = {}  # out_idx -> car_node
+            extra_reduction = (
+                None  # (out_idx, car_node) when reductions share an output
+            )
+            for out_idx, out in enumerate(node.outputs):
+                if out_idx in write_targets:
+                    continue
+                car_clients = [
+                    c
+                    for c, _ in fgraph.clients[out]
+                    if isinstance(c.op, CAReduce)
+                    and isinstance(c.op.scalar_op, _REDUCE_SCALAR_OPS)
+                ]
+                if not car_clients:
+                    continue
+                if len(car_clients) > 1:
+                    extra_reduction = (out_idx, car_clients[1])
+                    break
+                reduced_outputs[out_idx] = car_clients[0]
+
+            # An output consumed by several eligible reductions: peel one reduction
+            # per pass onto a duplicate output, until each reduction has its own copy
+            if extra_reduction is not None:
+                out_idx, car_node = extra_reduction
+                new_node, dup_map = self._duplicate_multi_client_outputs(
+                    node, {out_idx}
+                )
+                replacements = list(
+                    zip(node.outputs, new_node.outputs[: len(node.outputs)])
+                )
+                new_reduced = car_node.op(new_node.outputs[dup_map[out_idx]])
+                replacements.append((car_node.outputs[0], new_reduced))
+                fgraph.replace_all(
+                    replacements, reason="fuse_elemwise_split_multi_reductions"
+                )
+                worklist.append(new_node)
+                continue
+
+            if not idx_groups and not reduced_outputs:
                 continue
 
             if must_transpose_write_axes:
@@ -584,40 +740,53 @@ class FuseIndexedElemwise(GraphRewriter):
                 assert replacements
                 fgraph.replace_all(
                     replacements,
-                    reason="fuse_indexed_elemwise_move_write_axes",
+                    reason="fuse_elemwise_move_write_axes",
                 )
                 worklist.append(node)
                 continue
 
-            indexed_reads = {i for reads, _ in idx_groups.values() for i in reads}
+            # If a reduced output also feeds non-reduce consumers, duplicate it via
+            # Composite so the reduction consumes the duplicate while the original
+            # stays materialised for the other consumers. We still fuse the
+            # reduction loop, even if the full output must also be produced.
+            # This runs before the strip-inplace pass below, so any reduced output
+            # reaching it is sole-client (truly de-materialized) and an inplace on a
+            # materialized original survives the fusion.
+            def _has_non_reduce_clients(out_idx):
+                car_node = reduced_outputs[out_idx]
+                return any(
+                    c is not car_node for c, _ in fgraph.clients[node.outputs[out_idx]]
+                )
 
-            # If any inplace targets an indexed-read input,
-            # strip and re-run inplace with those inputs protected
-            if any(
-                inp_idx in indexed_reads for inp_idx in node.op.inplace_pattern.values()
-            ):
-                stripped_node = Elemwise(node.op.scalar_op).make_node(*node.inputs)
+            if reduce_and_direct_use_outs := {
+                out_idx
+                for out_idx in reduced_outputs
+                if _has_non_reduce_clients(out_idx)
+            }:
+                new_node, dup_map = self._duplicate_multi_client_outputs(
+                    node, reduce_and_direct_use_outs
+                )
+                replacements = list(
+                    zip(node.outputs, new_node.outputs[: len(node.outputs)])
+                )
+                for out_idx, dup_idx in dup_map.items():
+                    car_node = reduced_outputs[out_idx]
+                    new_reduced = car_node.op(new_node.outputs[dup_idx])
+                    replacements.append((car_node.outputs[0], new_reduced))
                 fgraph.replace_all(
-                    zip(node.outputs, stripped_node.outputs),
-                    reason="fuse_indexed_elemwise_strip_inplace",
+                    replacements,
+                    reason="fuse_reduce_and_direct_outputs",
                 )
-                protected = frozenset(stripped_node.inputs[i] for i in indexed_reads)
-                # try_inplace_on_node does its own fgraph.replace_all internally,
-                # so the returned node is already in the fgraph
-                new_inplace_node = InplaceElemwiseOptimizer().try_inplace_on_node(
-                    fgraph,
-                    stripped_node,
-                    reason="fuse_indexed_elemwise_inplace_read_buffers",
-                    extra_protected_inputs=protected,
-                )
-                worklist.append(new_inplace_node)
+                worklist.append(new_node)
                 continue
 
             # If any indexed-write output also has other consumers,
             # duplicate it via Composite so the write replaces the duplicate
             # while the original stays available for non-write consumers.
             # We still avoid one extra write loop,
-            # even if we can't skip the output materialization altogether
+            # even if we can't skip the output materialization altogether.
+            # Like the reduce duplication above, this runs before the strip-inplace
+            # pass, so an inplace on the materialized original survives the fusion.
             def _has_non_write_clients(out_idx):
                 update = write_targets[out_idx]
                 for c, _ in fgraph.clients[node.outputs[out_idx]]:
@@ -653,17 +822,67 @@ class FuseIndexedElemwise(GraphRewriter):
                     replacements.append((update_node.outputs[0], new_update_out))
                 fgraph.replace_all(
                     replacements,
-                    reason="fuse_indexed_elemwise_write_and_direct_outputs",
+                    reason="fuse_elemwise_write_and_direct_outputs",
                 )
                 worklist.append(new_node)
                 continue
 
+            indexed_reads = {i for reads, _ in idx_groups.values() for i in reads}
+
+            # If any inplace targets an indexed-read input, or claims an output that is
+            # not materialized as a plain output — a fused reduction (reusing the input
+            # buffer as the reduce accumulator would skip the identity init and
+            # accumulate on top of stale input values) or an indexed write (the loop
+            # writes to the write buffer instead, so the input destruction would happen
+            # only in the Python-mode fallback, undeclared by the outer destroy map) —
+            # strip and re-run inplace with those inputs protected and outputs excluded.
+            # The duplications above ran first, so such outputs here are sole-client.
+            if any(
+                inp_idx in indexed_reads for inp_idx in node.op.inplace_pattern.values()
+            ) or any(
+                out_idx in reduced_outputs or out_idx in write_targets
+                for out_idx in node.op.inplace_pattern
+            ):
+                stripped_node = Elemwise(node.op.scalar_op).make_node(*node.inputs)
+                fgraph.replace_all(
+                    zip(node.outputs, stripped_node.outputs),
+                    reason="fuse_elemwise_strip_inplace",
+                )
+                optimizer = InplaceElemwiseOptimizer()
+                protected = optimizer._get_protected_inputs(fgraph)
+                protected.update(stripped_node.inputs[i] for i in indexed_reads)
+                # Candidates are plain-Elemwise (output, input) pairs; exclude
+                # outputs the fusion is about to consume as indexed writes
+                candidate_pairs = [
+                    pair
+                    for pair in optimizer.filter_candidate_pairs(
+                        fgraph, stripped_node, protected
+                    )
+                    if pair[0][0] not in reduced_outputs
+                    and pair[0][0] not in write_targets
+                ]
+                # try_inplace_on_node does its own fgraph.replace_all internally,
+                # so the returned node is already in the fgraph
+                new_inplace_node = optimizer.try_inplace_on_node(
+                    fgraph,
+                    stripped_node,
+                    candidate_pairs=candidate_pairs,
+                    reason="fuse_elemwise_inplace_read_buffers",
+                )
+                worklist.append(new_inplace_node)
+                continue
+
             idx_vars = [idx for idx, _axis in idx_groups]
 
+            # The strip-inplace pass above guarantees that reduced and indexed-write
+            # outputs carry no inplace
+            assert not any(
+                out_idx in reduced_outputs or out_idx in write_targets
+                for out_idx in node.op.inplace_pattern
+            )
             fgraph_destroy_map = {
                 out_idx: [inp_idx]
                 for out_idx, inp_idx in node.op.inplace_pattern.items()
-                if out_idx not in write_targets
             }
 
             # Fgraph inputs: substitute indexed sources back to their
@@ -715,6 +934,41 @@ class FuseIndexedElemwise(GraphRewriter):
                 fgraph_outputs[out_idx] = write_out
                 fgraph_destroy_map[out_idx] = [target_pos]
 
+            # Inner fgraph reduced outputs: wrap the Elemwise output in the real
+            # CAReduce so non-Numba backends compute it faithfully via perform.
+            # reduced_spec carries the (scalar_op, axes, identity, acc_dtype) the
+            # Numba backend reads to fuse the reduction into the loop instead.
+            reduced_spec_by_idx = {}
+            for out_idx, car_node in sorted(reduced_outputs.items()):
+                car_op = car_node.op
+                ndim = node.outputs[out_idx].type.ndim
+                axes = (
+                    tuple(range(ndim))
+                    if car_op.axis is None
+                    else tuple(sorted(car_op.axis))
+                )
+                acc_dtype = (
+                    car_op.acc_dtype
+                    if car_op.acc_dtype is not None
+                    else car_node.outputs[0].type.dtype
+                )
+                reduced_spec_by_idx[out_idx] = (
+                    car_op.scalar_op,
+                    axes,
+                    car_op.scalar_op.identity,
+                    acc_dtype,
+                )
+                fgraph_outputs[out_idx] = car_op(node.outputs[out_idx])
+
+            reduced_spec = (
+                tuple(
+                    reduced_spec_by_idx.get(out_idx)
+                    for out_idx in range(len(node.outputs))
+                )
+                if reduced_outputs
+                else ()
+            )
+
             # indexed_inputs_spec: ((read_positions, axis) | None, ...)
             # indexed_outputs_spec: ((write_positions, axis, "inc"|"set") | None, ...)
             indexed_inputs_spec = tuple(
@@ -737,12 +991,13 @@ class FuseIndexedElemwise(GraphRewriter):
                 val = outer_write_targets.get(i, inp)
                 outer_inputs.append(val.copy() if i in copy_positions else val)
 
-            new_outs = IndexedElemwise(
+            new_outs = FusedElemwise(
                 fgraph_inputs,
                 fgraph_outputs,
                 destroy_map=fgraph_destroy_map,
                 indexed_inputs=indexed_inputs_spec,
                 indexed_outputs=indexed_outputs_spec,
+                reduced_outputs=reduced_spec,
             )(*outer_inputs, return_list=True)
 
             replacements = []
@@ -750,6 +1005,10 @@ class FuseIndexedElemwise(GraphRewriter):
                 if out_idx in write_targets:
                     replacements.append(
                         (write_targets[out_idx].outputs[0], new_outs[out_idx])
+                    )
+                elif out_idx in reduced_outputs:
+                    replacements.append(
+                        (reduced_outputs[out_idx].outputs[0], new_outs[out_idx])
                     )
                 else:
                     replacements.append((node.outputs[out_idx], new_outs[out_idx]))
@@ -766,9 +1025,9 @@ class FuseIndexedElemwise(GraphRewriter):
                 continue
 
 
-indexed_elemwise_optdb.register(
-    "fuse_indexed_elemwise",
-    FuseIndexedElemwise(),
+fused_elemwise_optdb.register(
+    "fuse_elemwise",
+    FuseElemwise(),
     "numba",
     position=1,
 )

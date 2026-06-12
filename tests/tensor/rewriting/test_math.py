@@ -2827,7 +2827,13 @@ class TestLocalSumProd:
     """Test sum/prod rewrites."""
 
     def setup_method(self):
-        self.mode = get_default_mode().including("canonicalize", "specialize")
+        # Exclude the Numba reduction fusion so CAReduce nodes stay visible in
+        # the toposort for the structural assertions below.
+        self.mode = (
+            get_default_mode()
+            .including("canonicalize", "specialize")
+            .excluding("fuse_indexed_into_elemwise")
+        )
 
     def test_local_sum_prod_of_scalar_mul(self):
         # Test the rewrite `local_sum_prod_mul_by_scalar` for both Sum and
@@ -3336,7 +3342,9 @@ class TestLocalSumProd:
         c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
         d_val = np.asarray(rng.standard_normal(), config.floatX)
 
-        default_mode = get_default_mode()
+        # Exclude the Numba reduction fusion so the outer reduction op stays
+        # visible in the toposort for the structural assertions below.
+        default_mode = get_default_mode().excluding("fuse_indexed_into_elemwise")
         # `FusionOptimizer` is included to make sure that `expected_outer_operator`
         # remains the same for all rewrite modes.
         mode_with_rewrite = default_mode.including(
@@ -3393,8 +3401,12 @@ class TestLocalSumProd:
 
 class TestLocalReduce:
     def setup_method(self):
-        self.mode = get_default_mode().including(
-            "canonicalize", "specialize", "uncanonicalize"
+        # Exclude the Numba reduction fusion so CAReduce nodes stay visible in
+        # the toposort for the structural assertions below.
+        self.mode = (
+            get_default_mode()
+            .including("canonicalize", "specialize", "uncanonicalize")
+            .excluding("fuse_indexed_into_elemwise")
         )
 
     def test_local_reduce_broadcast_all_0(self):

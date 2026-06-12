@@ -23,6 +23,7 @@ from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
+    NO_REDUCE_OUTPUTS,
     NO_SIZE,
     _jit_options,
     _vectorized,
@@ -490,6 +491,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
                 else numba_ndarray.to_fixed_tuple(size, size_len),
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
+                NO_REDUCE_OUTPUTS,
             )
             return rng, draws
 
