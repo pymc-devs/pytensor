@@ -2473,7 +2473,12 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         else:
             grad_steps = inputs[0]
         if info.as_while:
-            n_steps = outs[0].shape[0]
+            # Number of steps the while-loop actually executed. grad_steps already
+            # accounts for the initial-state rows included in recurrent output
+            # buffers; outs[0].shape[0] would overcount by the initial state when
+            # the first output is a recurrent one, shifting every sequence
+            # gradient by one position.
+            n_steps = grad_steps
 
         # Restrict the number of grad steps according to self.truncate_gradient
         if self.truncate_gradient != -1:
