@@ -14,7 +14,19 @@ from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
-from pytensor.scalar.basic import AND, OR, XOR, Add, Composite, Maximum, Minimum, Mul
+from pytensor.scalar.basic import (
+    AND,
+    OR,
+    XOR,
+    Add,
+    Composite,
+    Maximum,
+    Minimum,
+    Mul,
+)
+from pytensor.scalar.basic import (
+    identity as scalar_identity,
+)
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
 from pytensor.tensor.shape import Reshape, shape_padright
@@ -175,6 +187,40 @@ def undo_take_reshape_for_fusion(fgraph, node):
     return [new_out]
 
 
+@node_rewriter([CAReduce])
+def wrap_reduced_gather_in_elemwise(fgraph, node):
+    """Wrap a reduction of a bare indexed read in an identity Elemwise.
+
+    ``FuseElemwise`` anchors on Elemwise nodes, so ``sum(x[idx])`` — with no
+    elementwise computation between the gather and the reduction — would leave
+    the gather materialized. ``Elemwise(identity)`` gives the fusion an anchor:
+    gather, identity and reduction collapse into one fused loop (the identity is
+    a no-op inside the loop body). Runs before the ``undo_take`` rewrites, which
+    require the indexed read to feed an Elemwise.
+    """
+    if not isinstance(node.op.scalar_op, _REDUCE_SCALAR_OPS):
+        return None
+    [inp] = node.inputs
+    if inp.owner is None or len(fgraph.clients[inp]) != 1:
+        return None
+
+    owner_op = inp.owner.op
+    if isinstance(owner_op, AdvancedSubtensor):
+        is_gather = True
+    elif isinstance(owner_op, Reshape):
+        # The flattened-ND-index form undo_take_reshape_for_fusion normalizes
+        is_gather = (
+            _unwrap_axis_swapped_subtensor1(fgraph, inp.owner.inputs[0]) is not None
+        )
+    else:
+        # Bare AdvancedSubtensor1 or the axis-swap DimShuffle-wrapped form
+        is_gather = _unwrap_axis_swapped_subtensor1(fgraph, inp) is not None
+    if not is_gather:
+        return None
+
+    return [node.op(Elemwise(scalar_identity)(inp))]
+
+
 fused_elemwise_optdb = SequenceDB()
 optdb.register(
     # Predates the FusedElemwise rename; kept so existing .including/.excluding
@@ -188,6 +234,13 @@ optdb.register(
     # After inplace_elemwise (position=50.5) so we see final inplace patterns,
     # same position as other numba-specific rewrites (BlockwiseWithCoreShape).
     position=100,
+)
+
+fused_elemwise_optdb.register(
+    "wrap_reduced_gather_in_elemwise",
+    dfs_rewriter(wrap_reduced_gather_in_elemwise),
+    "numba",
+    position=-0.5,
 )
 
 fused_elemwise_optdb.register(
