@@ -2762,6 +2762,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
         None means all axes (like numpy).
     """
     from pytensor.ifelse import ifelse
+    from pytensor.tensor.reshape import join_dims
 
     x = as_tensor_variable(x)
     x_ndim = x.type.ndim
@@ -2776,7 +2777,9 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
     # Put axis at the end and unravel them
     x_raveled = x.transpose(*non_axis, *axis)
     if len(axis) > 1:
-        x_raveled = x_raveled.reshape((*non_axis_shape, -1))
+        x_raveled = join_dims(
+            x_raveled, start_axis=len(non_axis_shape), n_axes=len(axis)
+        )
     raveled_size = x_raveled.shape[-1]
     k = raveled_size // 2
 

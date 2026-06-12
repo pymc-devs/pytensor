@@ -1017,3 +1017,14 @@ def specify_broadcastable(x, *axes):
     axes = normalize_axis_tuple(axes, x.type.ndim)
     shape_info = [1 if i in axes else s for i, s in enumerate(x.type.shape)]
     return specify_shape(x, shape_info)
+
+
+Class JoinDims(COp):
+    
+    def __init__
+    
+    def c_code_cache_version(self):
+        return (10,)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+
