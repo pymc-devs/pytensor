@@ -399,7 +399,11 @@ class FuseIndexedElemwise(GraphRewriter):
             s_outputs.append(s_outputs[out_idx])
 
         new_scalar_op = Composite(s_inputs, s_outputs)
-        new_node = Elemwise(new_scalar_op).make_node(*node.inputs)
+        # Duplicates are appended after the original outputs, so the node's
+        # inplace pattern carries over unchanged (duplicates get no entries).
+        new_node = Elemwise(new_scalar_op, dict(node.op.inplace_pattern)).make_node(
+            *node.inputs
+        )
         return new_node, dup_map
 
     @staticmethod
@@ -589,35 +593,13 @@ class FuseIndexedElemwise(GraphRewriter):
                 worklist.append(node)
                 continue
 
-            indexed_reads = {i for reads, _ in idx_groups.values() for i in reads}
-
-            # If any inplace targets an indexed-read input,
-            # strip and re-run inplace with those inputs protected
-            if any(
-                inp_idx in indexed_reads for inp_idx in node.op.inplace_pattern.values()
-            ):
-                stripped_node = Elemwise(node.op.scalar_op).make_node(*node.inputs)
-                fgraph.replace_all(
-                    zip(node.outputs, stripped_node.outputs),
-                    reason="fuse_indexed_elemwise_strip_inplace",
-                )
-                protected = frozenset(stripped_node.inputs[i] for i in indexed_reads)
-                # try_inplace_on_node does its own fgraph.replace_all internally,
-                # so the returned node is already in the fgraph
-                new_inplace_node = InplaceElemwiseOptimizer().try_inplace_on_node(
-                    fgraph,
-                    stripped_node,
-                    reason="fuse_indexed_elemwise_inplace_read_buffers",
-                    extra_protected_inputs=protected,
-                )
-                worklist.append(new_inplace_node)
-                continue
-
             # If any indexed-write output also has other consumers,
             # duplicate it via Composite so the write replaces the duplicate
             # while the original stays available for non-write consumers.
             # We still avoid one extra write loop,
-            # even if we can't skip the output materialization altogether
+            # even if we can't skip the output materialization altogether.
+            # This runs before the strip-inplace pass below, so an inplace on the
+            # materialized original survives the fusion.
             def _has_non_write_clients(out_idx):
                 update = write_targets[out_idx]
                 for c, _ in fgraph.clients[node.outputs[out_idx]]:
@@ -658,12 +640,55 @@ class FuseIndexedElemwise(GraphRewriter):
                 worklist.append(new_node)
                 continue
 
+            indexed_reads = {i for reads, _ in idx_groups.values() for i in reads}
+
+            # If any inplace targets an indexed-read input, or claims an indexed-write
+            # output (the loop writes the result to the write buffer instead, so the
+            # input destruction would happen only in the Python-mode fallback,
+            # undeclared by the outer destroy map), strip and re-run inplace with
+            # those inputs protected and outputs excluded. The duplication above ran
+            # first, so write-target outputs here are sole-client.
+            if any(
+                inp_idx in indexed_reads for inp_idx in node.op.inplace_pattern.values()
+            ) or any(out_idx in write_targets for out_idx in node.op.inplace_pattern):
+                stripped_node = Elemwise(node.op.scalar_op).make_node(*node.inputs)
+                fgraph.replace_all(
+                    zip(node.outputs, stripped_node.outputs),
+                    reason="fuse_indexed_elemwise_strip_inplace",
+                )
+                optimizer = InplaceElemwiseOptimizer()
+                protected = optimizer._get_protected_inputs(fgraph)
+                protected.update(stripped_node.inputs[i] for i in indexed_reads)
+                # Candidates are plain-Elemwise (output, input) pairs; exclude
+                # outputs the fusion is about to consume as indexed writes
+                candidate_pairs = [
+                    pair
+                    for pair in optimizer.filter_candidate_pairs(
+                        fgraph, stripped_node, protected
+                    )
+                    if pair[0][0] not in write_targets
+                ]
+                # try_inplace_on_node does its own fgraph.replace_all internally,
+                # so the returned node is already in the fgraph
+                new_inplace_node = optimizer.try_inplace_on_node(
+                    fgraph,
+                    stripped_node,
+                    candidate_pairs=candidate_pairs,
+                    reason="fuse_indexed_elemwise_inplace_read_buffers",
+                )
+                worklist.append(new_inplace_node)
+                continue
+
             idx_vars = [idx for idx, _axis in idx_groups]
 
+            # The strip-inplace pass above guarantees that indexed-write outputs
+            # carry no inplace
+            assert not any(
+                out_idx in write_targets for out_idx in node.op.inplace_pattern
+            )
             fgraph_destroy_map = {
                 out_idx: [inp_idx]
                 for out_idx, inp_idx in node.op.inplace_pattern.items()
-                if out_idx not in write_targets
             }
 
             # Fgraph inputs: substitute indexed sources back to their
