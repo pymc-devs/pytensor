@@ -5,7 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import CAReduce, Elemwise
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
@@ -922,10 +922,32 @@ class TestReductionMultiOutput:
         f = pt.exp(x)
         out = [pt.sum(f, axis=0), pt.max(f, axis=0)]
         fn, fn_u = fused_and_unfused([x], out)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        ]
+        assert sum(r is not None for r in node.op.reduced_outputs) == 2
+        assert not any(isinstance(n.op, CAReduce) for n in fn.maker.fgraph.toposort())
         xv = rng.normal(size=(4, 5))
         r, ru = fn(xv), fn_u(xv)
         np.testing.assert_allclose(r[0], ru[0], rtol=1e-10)
         np.testing.assert_allclose(r[1], ru[1], rtol=1e-10)
+
+    def test_three_reductions_and_direct_use(self):
+        """Three reductions plus a direct consumer of one shared output."""
+        rng = np.random.default_rng(22)
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        f = x * y
+        out = [pt.sum(f), pt.max(f, axis=0), pt.prod(f, axis=1), f]
+        fn, fn_u = fused_and_unfused([x, y], out)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        ]
+        assert sum(r is not None for r in node.op.reduced_outputs) == 3
+        assert not any(isinstance(n.op, CAReduce) for n in fn.maker.fgraph.toposort())
+        xv, yv = rng.normal(size=(4, 5)), rng.normal(size=(4, 5))
+        for res, res_u in zip(fn(xv, yv), fn_u(xv, yv)):
+            np.testing.assert_allclose(res, res_u, rtol=1e-10)
 
 
 class TestReductionPythonMode:
