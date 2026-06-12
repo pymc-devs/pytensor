@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import pickle
 from collections.abc import Callable, Sequence
-from textwrap import indent
 from typing import Any
 
 import numba
@@ -17,6 +16,7 @@ from numba.np import arrayobj
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.string_codegen import CODE_TOKEN, build_source_code
 
 
 def encode_literals(literals: Sequence) -> str:
@@ -24,7 +24,11 @@ def encode_literals(literals: Sequence) -> str:
 
 
 def store_core_outputs(
-    core_op_fn: Callable, nin: int, nout: int, inc_outputs: frozenset = frozenset()
+    core_op_fn: Callable,
+    nin: int,
+    nout: int,
+    accum_fns: dict[int, Callable[[str, str], Sequence[str | CODE_TOKEN]]]
+    | None = None,
 ) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
@@ -35,13 +39,19 @@ def store_core_outputs(
     def store_core_outputs(i0, i1, ..., in, o0, o1, ..., on):
         to0, to1, ..., ton = core_op_fn(i0, i1, ..., in)
         o0[...] = to0      # direct outputs
-        o1 += to1          # inc outputs (in-place add works for 0d and Nd)
+        o1[...] += to1     # accumulating outputs (reduce / indexed-inc)
         ...
 
-    ``inc_outputs`` lists output indices that use ``+=`` instead of ``=``.
+    ``accum_fns`` maps an output index to a callable ``(out_sym, inner_sym) ->
+    lines`` producing the in-place accumulation code for that output (e.g.
+    ``["o1[...] += t1"]`` for a sum reduction, or the multi-line conditional for
+    a max reduction).  Outputs absent from ``accum_fns`` are stored with ``=``.
+    Both reductions and indexed ``inc`` writes go through this mechanism.
     """
     if getattr(core_op_fn, "handles_out", False):
         return core_op_fn
+
+    accum_fns = accum_fns or {}
 
     inputs = [f"i{i}" for i in range(nin)]
     outputs = [f"o{i}" for i in range(nout)]
@@ -50,19 +60,22 @@ def store_core_outputs(
     inp_signature = ", ".join(inputs)
     out_signature = ", ".join(outputs)
     inner_out_signature = ", ".join(inner_outputs)
-    store_outputs = "\n".join(
-        f"{output} += {inner_output}"
-        if i in inc_outputs
-        else f"{output}[...] = {inner_output}"
-        for i, (output, inner_output) in enumerate(
-            zip(outputs, inner_outputs, strict=True)
-        )
-    )
-    func_src = f"""
-def store_core_outputs({inp_signature}, {out_signature}):
-    {inner_out_signature} = core_op_fn({inp_signature})
-{indent(store_outputs, " " * 4)}
-"""
+
+    code: list[str | CODE_TOKEN] = [
+        f"def store_core_outputs({inp_signature}, {out_signature}):",
+        CODE_TOKEN.INDENT,
+        f"{inner_out_signature} = core_op_fn({inp_signature})",
+    ]
+    for i, (output, inner_output) in enumerate(
+        zip(outputs, inner_outputs, strict=True)
+    ):
+        if i in accum_fns:
+            code.extend(accum_fns[i](output, inner_output))
+        else:
+            code.append(f"{output}[...] = {inner_output}")
+    code.append(CODE_TOKEN.DEDENT)
+
+    func_src = build_source_code(code)
     global_env = {"core_op_fn": core_op_fn}
 
     func = compile_numba_function_src(
@@ -249,6 +262,7 @@ def _codegen_return_outputs(
 
 NO_INDEXED_INPUTS = encode_literals(((), ()))
 NO_INDEXED_OUTPUTS = encode_literals(())
+NO_REDUCE_OUTPUTS = encode_literals(())
 NO_SIZE = None
 
 
@@ -355,11 +369,17 @@ def make_outputs(
     input_types: tuple[Any, ...],
     output_core_shapes: tuple,
     update_outputs: dict | None = None,
+    reduce_identities: dict | None = None,
 ) -> tuple[list[ir.Value], list[types.Array]]:
     """Allocate output arrays for vectorized loop.
 
     ``update_outputs`` maps ``{output_idx: (array, array_type)}`` for outputs
     that reuse an indexed-write target buffer instead of being freshly allocated.
+
+    ``reduce_identities`` maps ``{output_idx: identity_value}`` for reduction
+    outputs.  Such outputs are freshly allocated (size 1 on the reduced axes, via
+    their ``bc=True`` pattern) and pre-filled with the reduction identity so the
+    accumulating store in the loop reduces into them correctly.
     """
     output_arrays = []
     output_arry_types = []
@@ -389,6 +409,22 @@ def make_outputs(
         ]
         shape = batch_shape + core_shape
         array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
+        if reduce_identities is not None and i in reduce_identities:
+            # Pre-fill the freshly allocated (C-contiguous) buffer with the
+            # reduction identity.  A flat scan over every element is valid
+            # regardless of which axes are reduced, and seeds each kept-axis
+            # accumulator cell (size-1 reduced axes included).
+            nitems = ir.IntType(64)(1)
+            for dim_len in shape:
+                nitems = builder.mul(nitems, dim_len)
+            ident = ctx.get_constant(dtype, reduce_identities[i])
+            # bool is an i1 value but stored as i8 in arrays; widen to the
+            # buffer's element type so the store types match.
+            elem_ty = array.data.type.pointee
+            if ident.type != elem_ty:
+                ident = builder.zext(ident, elem_ty)
+            with cgutils.for_range(builder, nitems) as loop:
+                builder.store(ident, builder.gep(array.data, [loop.index]))
         output_arrays.append(array)
 
     # If there is no inplace operation, we know that all output arrays
@@ -423,8 +459,6 @@ def make_loop_call(
 ):
     safe = (False, False)
 
-    n_outputs = len(outputs)
-
     # TODO I think this is better than the noalias attribute
     # for the input, but self_ref isn't supported in a released
     # llvmlite version yet
@@ -449,21 +483,13 @@ def make_loop_call(
         wrapped = builder.add(idx_val, dim_size)
         return builder.select(is_neg, wrapped, idx_val)
 
-    # Setup loops and initialize accumulators for outputs
-    # This part corresponds to opening the loops
+    # Open one loop per iteration dimension.  Reduction outputs need no special
+    # setup here: they carry ``bc=True`` on the reduced axes, so the write_idx
+    # logic below points every iteration over a reduced axis at memory index 0
+    # (the same cell), and the accumulating store reduces into it.
     loop_stack = []
     loops = []
-    output_accumulator: list[tuple[Any | None, int | None]] = [(None, None)] * n_outputs
-    for dim, length in enumerate(iter_shape):
-        # Find outputs that only have accumulations left
-        for out in range(n_outputs):
-            if output_accumulator[out][0] is not None:
-                continue
-            if all(output_bc[out][dim:]):
-                value = outputs[out][0].type.pointee(0)
-                accu = cgutils.alloca_once_value(builder, value)
-                output_accumulator[out] = (accu, dim)
-
+    for length in iter_shape:
         loop = cgutils.for_range(builder, length)
         loop_stack.append(loop)
         loops.append(loop.__enter__())
@@ -736,6 +762,7 @@ def _vectorized(
     size_type,
     indexed_inputs,
     indexed_outputs,
+    reduce_outputs,
 ):
     """Vectorized intrinsic with optional indirect indexing for reads and writes.
 
@@ -751,7 +778,12 @@ def _vectorized(
     ``((out_0, out_1), mode)`` means that index updates outputs out_0 and
     out_1 with *mode* ``"set"`` or ``"inc"``.
 
-    For non-indexed calls, both are ``()``.
+    ``reduce_outputs`` lists ``(output_idx, identity)`` pairs for reduction
+    outputs.  Such an output carries ``bc=True`` on its reduced axes; the buffer
+    is allocated size 1 there, pre-filled with ``identity``, and the per-iteration
+    store (baked into ``core_func`` via ``store_core_outputs``) accumulates into it.
+
+    For non-indexed/non-reducing calls, these are ``()``.
     """
     arg_types = [
         core_func,
@@ -766,12 +798,14 @@ def _vectorized(
         size_type,
         indexed_inputs,
         indexed_outputs,
+        reduce_outputs,
     ]
 
     input_bc_patterns = _decode_literal(input_bc_patterns, "input_bc_patterns")
     output_bc_patterns = _decode_literal(output_bc_patterns, "output_bc_patterns")
     output_dtypes = _decode_literal(output_dtypes, "output_dtypes")
     inplace_pattern = _decode_literal(inplace_pattern, "inplace_pattern")
+    reduce_identities = dict(_decode_literal(reduce_outputs, "reduce_outputs"))
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -919,6 +953,7 @@ def _vectorized(
             size,
             _,
             _,
+            _,
         ] = args
 
         constant_inputs = cgutils.unpack_tuple(builder, constant_inputs)
@@ -1053,6 +1088,7 @@ def _vectorized(
             source_input_types,
             output_core_shapes,
             update_outputs=update_outputs_dict,
+            reduce_identities=reduce_identities,
         )
 
         core_signature = typingctx.resolve_function_type(
