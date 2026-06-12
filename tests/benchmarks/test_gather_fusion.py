@@ -12,7 +12,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor import config
 from pytensor.compile.mode import get_mode
-from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
+from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.subtensor import AdvancedIncSubtensor1, advanced_subtensor1
 
 
@@ -50,11 +50,11 @@ def read_benchmark_setup(request):
     )
 
     assert any(
-        isinstance(n.op, IndexedElemwise) for n in fn_fused.maker.fgraph.toposort()
-    ), "IndexedElemwise not found in fused graph"
+        isinstance(n.op, FusedElemwise) for n in fn_fused.maker.fgraph.toposort()
+    ), "FusedElemwise not found in fused graph"
     assert not any(
-        isinstance(n.op, IndexedElemwise) for n in fn_unfused.maker.fgraph.toposort()
-    ), "IndexedElemwise found in unfused graph"
+        isinstance(n.op, FusedElemwise) for n in fn_unfused.maker.fgraph.toposort()
+    ), "FusedElemwise found in unfused graph"
 
     rng = np.random.default_rng(1)
     vals = [rng.normal(size=inp.type.shape).astype(config.floatX) for inp in inputs]
@@ -117,15 +117,15 @@ def write_benchmark_setup(request):
     )
 
     assert any(
-        isinstance(n.op, IndexedElemwise) for n in fn_fused.maker.fgraph.toposort()
-    ), "IndexedElemwise not found in fused graph"
+        isinstance(n.op, FusedElemwise) for n in fn_fused.maker.fgraph.toposort()
+    ), "FusedElemwise not found in fused graph"
     assert not any(
         isinstance(n.op, AdvancedIncSubtensor1)
         for n in fn_fused.maker.fgraph.toposort()
     ), "AdvancedIncSubtensor1 still present in fused graph"
     assert not any(
-        isinstance(n.op, IndexedElemwise) for n in fn_unfused.maker.fgraph.toposort()
-    ), "IndexedElemwise found in unfused graph"
+        isinstance(n.op, FusedElemwise) for n in fn_unfused.maker.fgraph.toposort()
+    ), "FusedElemwise found in unfused graph"
 
     rng = np.random.default_rng(1)
     vals = [rng.normal(size=inp.type.shape).astype(config.floatX) for inp in inputs]
