@@ -866,6 +866,49 @@ class TestReductionWithIndexing:
         idxv = rng.integers(0, 8, size=4)
         np.testing.assert_allclose(fn(xv, idxv), fn_u(xv, idxv), rtol=1e-10)
 
+    @pytest.mark.parametrize(
+        "make_out",
+        [
+            lambda x, idx: pt.sum(x[idx]),
+            lambda x, idx: pt.max(x[idx], axis=0),
+            lambda x, idx: pt.sum(x[:, idx]),
+        ],
+        ids=["sum_all", "max_axis0", "sum_axis1_gather"],
+    )
+    def test_reduce_of_bare_gather(self, make_out):
+        """Reduction of an indexed read with no elemwise in between.
+
+        wrap_reduced_gather_in_elemwise inserts an identity Elemwise so the
+        gather and the reduction still collapse into one fused loop.
+        """
+        rng = np.random.default_rng(13)
+        x = pt.matrix("x")
+        idx = pt.lvector("idx")
+        fn, fn_u = fused_and_unfused([x, idx], make_out(x, idx))
+        assert_reduce_fused(fn)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        ]
+        assert any(spec is not None for spec in node.op.indexed_inputs)
+        xv = rng.normal(size=(8, 5))
+        idxv = rng.integers(0, 5, size=4)
+        np.testing.assert_allclose(fn(xv, idxv), fn_u(xv, idxv), rtol=1e-10)
+
+    def test_reduce_of_bare_nd_gather(self):
+        """Reduction of an ND-index read (Reshape-flattened form)."""
+        rng = np.random.default_rng(14)
+        x = pt.matrix("x")
+        mat_idx = pt.lmatrix("mat_idx")
+        fn, fn_u = fused_and_unfused([x, mat_idx], pt.sum(x[mat_idx]))
+        assert_reduce_fused(fn)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        ]
+        assert any(spec is not None for spec in node.op.indexed_inputs)
+        xv = rng.normal(size=(8, 5))
+        mv = rng.integers(0, 8, size=(3, 2))
+        np.testing.assert_allclose(fn(xv, mv), fn_u(xv, mv), rtol=1e-10)
+
     def test_gather_scatter_and_reduce_mix(self):
         """Gather + elemwise + scatter + reduce all fuse into one loop.
 
