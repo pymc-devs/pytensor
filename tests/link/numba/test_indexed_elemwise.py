@@ -5,6 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
@@ -359,6 +360,71 @@ class TestIndexedWriteFusion:
         np.testing.assert_allclose(
             fn(xv, yv, tv.copy()), fn_u(xv, yv, tv.copy()), rtol=1e-10
         )
+
+    def test_write_of_inplace_elemwise(self):
+        """Inplace must not survive on a write-target output.
+
+        The loop writes the elementwise result to the write buffer, never to the
+        inplaced input, so a surviving inner inplace entry would destroy the dot
+        intermediate undeclared in the Python-mode fallback.
+        """
+        rng = np.random.default_rng(9)
+        idx = rng.integers(8, size=30).astype(np.int64)
+        x = pt.matrix("x", shape=(30, 4))
+        y = pt.matrix("y", shape=(4, 4))
+        z = pt.matrix("z", shape=(30, 4))
+        t = pt.matrix("t", shape=(8, 4))
+        out = t[idx].inc((x @ y) * z)
+        fn, fn_u = fused_and_unfused([x, y, z, t], out)
+        assert_fused(fn)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, IndexedElemwise)
+        ]
+        assert not any(
+            n.op.inplace_pattern
+            for n in node.op.fgraph.toposort()
+            if isinstance(n.op, Elemwise)
+        )
+        xv, yv, zv, tv = (
+            rng.normal(size=(30, 4)),
+            rng.normal(size=(4, 4)),
+            rng.normal(size=(30, 4)),
+            rng.normal(size=(8, 4)),
+        )
+        np.testing.assert_allclose(
+            fn(xv, yv, zv, tv.copy()), fn_u(xv, yv, zv, tv.copy()), rtol=1e-10
+        )
+
+    def test_write_with_direct_use_keeps_inplace(self):
+        """Inplace survives on an output that is both written and used directly.
+
+        The write-and-direct duplication keeps the original output materialized
+        (the write consumes a duplicate), so the inplace claimed on the dot
+        intermediate stays valid and must not be stripped.
+        """
+        rng = np.random.default_rng(10)
+        idx = rng.integers(8, size=30).astype(np.int64)
+        x = pt.matrix("x", shape=(30, 4))
+        y = pt.matrix("y", shape=(4, 4))
+        z = pt.matrix("z", shape=(30, 4))
+        t = pt.matrix("t", shape=(8, 4))
+        w = (x @ y) * z
+        fn, fn_u = fused_and_unfused([x, y, z, t], [t[idx].inc(w), w])
+        assert_fused(fn)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, IndexedElemwise)
+        ]
+        # Two destroy entries: the write buffer, and the dot intermediate kept
+        # inplace by the materialized output
+        assert len(node.op.destroy_map) == 2
+        xv, yv, zv, tv = (
+            rng.normal(size=(30, 4)),
+            rng.normal(size=(4, 4)),
+            rng.normal(size=(30, 4)),
+            rng.normal(size=(8, 4)),
+        )
+        for res, res_u in zip(fn(xv, yv, zv, tv.copy()), fn_u(xv, yv, zv, tv.copy())):
+            np.testing.assert_allclose(res, res_u, rtol=1e-10)
 
     def test_set_subtensor(self):
         rng = np.random.default_rng(42)
