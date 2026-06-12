@@ -1,4 +1,4 @@
-"""Tests for IndexedElemwise fusion (indexed reads and updates in Elemwise loops)."""
+"""Tests for FusedElemwise (indexed reads/writes and reductions fused into Elemwise loops)."""
 
 import numpy as np
 import pytest
@@ -6,7 +6,7 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
+from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
@@ -27,9 +27,9 @@ def fused_and_unfused(inputs, output):
 
 
 def assert_fused(fn):
-    """Assert that the compiled graph contains an IndexedElemwise node."""
-    assert any(isinstance(n.op, IndexedElemwise) for n in fn.maker.fgraph.toposort()), (
-        "IndexedElemwise not found in fused graph"
+    """Assert that the compiled graph contains a FusedElemwise node."""
+    assert any(isinstance(n.op, FusedElemwise) for n in fn.maker.fgraph.toposort()), (
+        "FusedElemwise not found in fused graph"
     )
 
 
@@ -274,7 +274,7 @@ class TestIndexedWriteFusion:
         fn, fn_u = fused_and_unfused([x, y, target], out)
         # Write not fused — the Elemwise loop dim is the non-indexed axis,
         # not the indexed axis. Read fusion may still create an
-        # IndexedElemwise, but the AdvancedIncSubtensor1 must remain outside.
+        # FusedElemwise, but the AdvancedIncSubtensor1 must remain outside.
         assert any(
             isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
         )
@@ -400,7 +400,7 @@ class TestIndexedWriteFusion:
         fn, fn_u = fused_and_unfused([x, y, z, t], out)
         assert_fused(fn)
         [node] = [
-            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, IndexedElemwise)
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
         ]
         assert not any(
             n.op.inplace_pattern
@@ -434,7 +434,7 @@ class TestIndexedWriteFusion:
         fn, fn_u = fused_and_unfused([x, y, z, t], [t[idx].inc(w), w])
         assert_fused(fn)
         [node] = [
-            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, IndexedElemwise)
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
         ]
         # Two destroy entries: the write buffer, and the dot intermediate kept
         # inplace by the materialized output
@@ -554,7 +554,7 @@ class TestIndexedWriteFusion:
         write_idx = np.array(write_idx, dtype=np.int64)
         out = b[write_idx].set(b[read_idx] * 2.0)
         fn, fn_u = fused_and_unfused([x], out)
-        # The read fuses into an IndexedElemwise; the aliasing write stays external.
+        # The read fuses into a FusedElemwise; the aliasing write stays external.
         assert_fused(fn)
         assert any(
             isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
@@ -588,7 +588,7 @@ class TestIndexedWriteFusion:
 
         # The inner write must destroy exactly the input the op's destroy_map names.
         [node] = [
-            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, IndexedElemwise)
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
         ]
         [(_out_idx, [destroyed_pos])] = node.op.destroy_map.items()
         [inner_write] = [
@@ -705,7 +705,7 @@ class TestShapeValidation:
         out = x[1:4, idx] + y
         fn = function([x, y], out, mode=NUMBA_MODE, trust_input=True)
         assert not any(
-            isinstance(n.op, IndexedElemwise) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, FusedElemwise) for n in fn.maker.fgraph.toposort()
         )
 
         ref = function([x, y], out, mode=NUMBA_NO_FUSION, trust_input=True)
@@ -723,7 +723,7 @@ class TestShapeValidation:
         out = t[1:4, idx].set(pt.exp(y))
         fn = function([t, y], out, mode=NUMBA_MODE, trust_input=True)
         assert not any(
-            isinstance(n.op, IndexedElemwise) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, FusedElemwise) for n in fn.maker.fgraph.toposort()
         )
 
         ref = function([t, y], out, mode=NUMBA_NO_FUSION, trust_input=True)
@@ -757,3 +757,260 @@ class TestShapeValidation:
         res = f(beta=test_beta, mask=test_mask)
         ref_res = ref_f(beta=test_beta, mask=test_mask)
         np.testing.assert_allclose(res, ref_res, strict=True)
+
+
+def assert_reduce_fused(fn):
+    """Assert the graph contains a FusedElemwise with a fused reduction."""
+    nodes = [n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)]
+    assert nodes, "FusedElemwise not found in fused graph"
+    assert any(any(r is not None for r in n.op.reduced_outputs) for n in nodes), (
+        "No fused reduction (reduced_outputs) found"
+    )
+
+
+class TestReductionFusion:
+    """Reductions (CAReduce) fused into the Elemwise loop, no indexing."""
+
+    @pytest.mark.parametrize("axis", [None, 0, 1, 2, (0, 2), (0, 1), (1, 2)], ids=str)
+    def test_sum_axes(self, axis):
+        rng = np.random.default_rng(0)
+        x = pt.tensor3("x")
+        y = pt.tensor3("y")
+        out = pt.sum(pt.exp(x) + y, axis=axis)
+        fn, fn_u = fused_and_unfused([x, y], out)
+        assert_reduce_fused(fn)
+        xv, yv = rng.normal(size=(3, 4, 5)), rng.normal(size=(3, 4, 5))
+        np.testing.assert_allclose(fn(xv, yv), fn_u(xv, yv), rtol=1e-10)
+
+    @pytest.mark.parametrize("axis", [None, 0, 1], ids=str)
+    def test_prod(self, axis):
+        rng = np.random.default_rng(1)
+        x = pt.matrix("x")
+        out = pt.prod(pt.exp(x * 0.1), axis=axis)
+        fn, fn_u = fused_and_unfused([x], out)
+        assert_reduce_fused(fn)
+        xv = rng.normal(size=(4, 5))
+        np.testing.assert_allclose(fn(xv), fn_u(xv), rtol=1e-8)
+
+    @pytest.mark.parametrize("reduce_fn", [pt.max, pt.min], ids=["max", "min"])
+    @pytest.mark.parametrize("axis", [None, 0, 1], ids=str)
+    def test_max_min(self, reduce_fn, axis):
+        rng = np.random.default_rng(2)
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        out = reduce_fn(x + y, axis=axis)
+        fn, fn_u = fused_and_unfused([x, y], out)
+        assert_reduce_fused(fn)
+        xv, yv = rng.normal(size=(6, 7)), rng.normal(size=(6, 7))
+        np.testing.assert_allclose(fn(xv, yv), fn_u(xv, yv), rtol=1e-10)
+
+    @pytest.mark.parametrize("reduce_fn", [pt.all, pt.any], ids=["all", "any"])
+    @pytest.mark.parametrize("axis", [None, 0, 1], ids=str)
+    def test_all_any(self, reduce_fn, axis):
+        rng = np.random.default_rng(3)
+        x = pt.matrix("x", dtype="bool")
+        y = pt.matrix("y", dtype="bool")
+        out = reduce_fn(x & y, axis=axis)
+        fn, fn_u = fused_and_unfused([x, y], out)
+        assert_reduce_fused(fn)
+        xv = rng.integers(0, 2, size=(4, 5)).astype(bool)
+        yv = rng.integers(0, 2, size=(4, 5)).astype(bool)
+        np.testing.assert_array_equal(fn(xv, yv), fn_u(xv, yv))
+
+    @pytest.mark.parametrize("dtype", ["int8", "int32", "uint8"])
+    @pytest.mark.parametrize("axis", [None, 0, 1], ids=str)
+    def test_sum_acc_dtype_widening(self, dtype, axis):
+        """Sum of small int dtype accumulates in a wider acc_dtype."""
+        rng = np.random.default_rng(4)
+        x = pt.matrix("x", dtype=dtype)
+        out = pt.sum(x + x, axis=axis)
+        fn, fn_u = fused_and_unfused([x], out)
+        assert_reduce_fused(fn)
+        info = np.iinfo(dtype)
+        xv = rng.integers(0, min(info.max // 2, 50), size=(40, 40)).astype(dtype)
+        np.testing.assert_array_equal(fn(xv), fn_u(xv))
+        # Result must be the wide acc dtype, not overflow the input dtype
+        assert fn(xv).dtype == fn_u(xv).dtype
+
+    def test_scalar_and_1d(self):
+        rng = np.random.default_rng(5)
+        x = pt.vector("x")
+        out = pt.sum(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x], out)
+        assert_reduce_fused(fn)
+        xv = rng.normal(size=(17,))
+        np.testing.assert_allclose(fn(xv), fn_u(xv), rtol=1e-10)
+
+    def test_non_c_contiguous_input(self):
+        """Reduction over a transposed (non-C-contiguous) intermediate."""
+        rng = np.random.default_rng(6)
+        x = pt.matrix("x")
+        out = pt.sum((x + 1.0).T, axis=0)
+        fn, fn_u = fused_and_unfused([x], out)
+        xv = rng.normal(size=(8, 5))
+        np.testing.assert_allclose(fn(xv), fn_u(xv), rtol=1e-10)
+
+    def test_reduce_of_inplace_elemwise(self):
+        """Inplace must not survive on an output fused as a reduction.
+
+        The dot output is a destroyable intermediate the inplace pass claims for the
+        Mul before fusion. If the fused op kept that destroy entry, the reduce
+        accumulator would alias the input buffer and skip the identity init,
+        folding stale input values into the result.
+        """
+        rng = np.random.default_rng(7)
+        x, y, z = pt.matrix("x"), pt.matrix("y"), pt.matrix("z")
+        out = ((x @ y) * z).sum()
+        fn, fn_u = fused_and_unfused([x, y, z], out)
+        assert_reduce_fused(fn)
+        for node in fn.maker.fgraph.toposort():
+            if isinstance(node.op, FusedElemwise):
+                assert not any(
+                    out_idx in node.op.destroy_map
+                    for out_idx, r in enumerate(node.op.reduced_outputs)
+                    if r is not None
+                )
+        xv, yv, zv = (rng.normal(size=(4, 4)) for _ in range(3))
+        np.testing.assert_allclose(fn(xv, yv, zv), fn_u(xv, yv, zv), rtol=1e-10)
+
+    def test_reduce_with_direct_use_keeps_inplace(self):
+        """Inplace survives on an output that is both reduced and used directly.
+
+        The reduce-and-direct duplication keeps the original output materialized
+        (the CAReduce consumes a duplicate), so the inplace claimed on the dot
+        intermediate stays valid and must not be stripped.
+        """
+        rng = np.random.default_rng(8)
+        x, y, z = pt.matrix("x"), pt.matrix("y"), pt.matrix("z")
+        w = (x @ y) * z
+        fn, fn_u = fused_and_unfused([x, y, z], [w.sum(), w])
+        assert_reduce_fused(fn)
+        [node] = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        ]
+        reduced_idxs = {
+            i for i, r in enumerate(node.op.reduced_outputs) if r is not None
+        }
+        # The materialized output keeps its destroy entry; the reduced one has none
+        assert node.op.destroy_map
+        assert not set(node.op.destroy_map) & reduced_idxs
+        xv, yv, zv = (rng.normal(size=(4, 4)) for _ in range(3))
+        for res, res_u in zip(fn(xv, yv, zv), fn_u(xv, yv, zv)):
+            np.testing.assert_allclose(res, res_u, rtol=1e-10)
+
+
+class TestReductionWithIndexing:
+    """Reductions composed with indexed reads in a single fused loop."""
+
+    @pytest.mark.parametrize("axis", [None, 0, 1], ids=str)
+    def test_sum_gather(self, axis):
+        rng = np.random.default_rng(10)
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        idx = pt.lvector("idx")
+        out = pt.sum(x[idx] + y, axis=axis)
+        fn, fn_u = fused_and_unfused([x, y, idx], out)
+        assert_reduce_fused(fn)
+        xv = rng.normal(size=(8, 5))
+        yv = rng.normal(size=(4, 5))
+        idxv = rng.integers(0, 8, size=4)
+        np.testing.assert_allclose(fn(xv, yv, idxv), fn_u(xv, yv, idxv), rtol=1e-10)
+
+    def test_max_gather(self):
+        rng = np.random.default_rng(11)
+        x = pt.matrix("x")
+        idx = pt.lvector("idx")
+        out = pt.max(pt.exp(x[idx]), axis=0)
+        fn, fn_u = fused_and_unfused([x, idx], out)
+        assert_reduce_fused(fn)
+        xv = rng.normal(size=(8, 5))
+        idxv = rng.integers(0, 8, size=4)
+        np.testing.assert_allclose(fn(xv, idxv), fn_u(xv, idxv), rtol=1e-10)
+
+    def test_gather_scatter_and_reduce_mix(self):
+        """Gather + elemwise + scatter + reduce all fuse into one loop.
+
+        Sibling fusion merges the two elemwise expressions into one multi-output
+        Composite; FuseElemwise then absorbs the indexed read, the indexed
+        write, and the reduction into a single FusedElemwise.
+        """
+        rng = np.random.default_rng(12)
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        t = pt.matrix("t")
+        idx = pt.lvector("idx")
+        scattered = t[idx].inc(x[idx] * y)
+        reduced = pt.sum(x[idx] + y)
+        fn, fn_u = fused_and_unfused([x, y, t, idx], [scattered, reduced])
+        nodes = [
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        ]
+        assert len(nodes) == 1
+        [node] = nodes
+        assert any(spec is not None for spec in node.op.indexed_inputs)
+        assert any(spec is not None for spec in node.op.indexed_outputs)
+        assert any(r is not None for r in node.op.reduced_outputs)
+        xv = rng.normal(size=(8, 5))
+        yv = rng.normal(size=(4, 5))
+        tv = rng.normal(size=(8, 5))
+        idxv = rng.integers(0, 8, size=4)
+        for res, res_u in zip(
+            fn(xv, yv, tv.copy(), idxv), fn_u(xv, yv, tv.copy(), idxv)
+        ):
+            np.testing.assert_allclose(res, res_u, rtol=1e-10)
+
+
+class TestReductionMultiOutput:
+    """Reduction plus direct use of the same Elemwise output (duplication)."""
+
+    def test_sum_and_direct(self):
+        rng = np.random.default_rng(20)
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        f = pt.exp(x) + y
+        out = [pt.sum(f, axis=0), f]
+        fn, fn_u = fused_and_unfused([x, y], out)
+        assert_reduce_fused(fn)
+        xv, yv = rng.normal(size=(4, 5)), rng.normal(size=(4, 5))
+        r, ru = fn(xv, yv), fn_u(xv, yv)
+        np.testing.assert_allclose(r[0], ru[0], rtol=1e-10)
+        np.testing.assert_allclose(r[1], ru[1], rtol=1e-10)
+
+    def test_two_reductions_same_source(self):
+        """sum and max of the same elemwise output (two CAReduce clients)."""
+        rng = np.random.default_rng(21)
+        x = pt.matrix("x")
+        f = pt.exp(x)
+        out = [pt.sum(f, axis=0), pt.max(f, axis=0)]
+        fn, fn_u = fused_and_unfused([x], out)
+        xv = rng.normal(size=(4, 5))
+        r, ru = fn(xv), fn_u(xv)
+        np.testing.assert_allclose(r[0], ru[0], rtol=1e-10)
+        np.testing.assert_allclose(r[1], ru[1], rtol=1e-10)
+
+
+class TestReductionPythonMode:
+    """The fused op evaluates correctly outside JIT (OpFromGraph.perform)."""
+
+    def test_perform_matches(self):
+        rng = np.random.default_rng(30)
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        idx = pt.lvector("idx")
+        fn = function(
+            [x, y, idx], pt.sum(x[idx] + y, axis=1), mode=NUMBA_MODE, trust_input=True
+        )
+        node = next(
+            n for n in fn.maker.fgraph.toposort() if isinstance(n.op, FusedElemwise)
+        )
+        # Re-apply the exact fused op and evaluate it via OpFromGraph.perform
+        fresh = [inp.type() for inp in node.inputs]
+        perform_fn = function(
+            fresh, node.op(*fresh, return_list=True), mode="FAST_COMPILE"
+        )
+        xv = rng.normal(size=(8, 5))
+        yv = rng.normal(size=(4, 5))
+        idxv = rng.integers(0, 8, size=4)
+        np.testing.assert_allclose(
+            perform_fn(xv, yv, idxv)[0], np.sum(xv[idxv] + yv, axis=1), rtol=1e-10
+        )
