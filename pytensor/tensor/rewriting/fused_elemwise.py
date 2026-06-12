@@ -480,10 +480,11 @@ class FuseElemwise(GraphRewriter):
 
     @staticmethod
     def _duplicate_multi_client_outputs(node, multi_client_outs):
-        """Add duplicate outputs for Elemwise results that have both write and non-write consumers.
+        """Add duplicate outputs for Elemwise results whose consumers must be split.
 
-        Returns ``(new_node, dup_map)`` where *dup_map* maps each original
-        output index to its duplicate position.
+        Used when an output is both written/reduced and consumed directly, or is
+        consumed by several reductions. Returns ``(new_node, dup_map)`` where
+        *dup_map* maps each original output index to its duplicate position.
         """
         scalar_op = node.op.scalar_op
         if isinstance(scalar_op, Composite):
@@ -686,6 +687,9 @@ class FuseElemwise(GraphRewriter):
             # output can't be both an indexed write and a reduction).  Outputs
             # with extra (non-reduce) clients are handled by duplication below.
             reduced_outputs = {}  # out_idx -> car_node
+            extra_reduction = (
+                None  # (out_idx, car_node) when reductions share an output
+            )
             for out_idx, out in enumerate(node.outputs):
                 if out_idx in write_targets:
                     continue
@@ -695,9 +699,30 @@ class FuseElemwise(GraphRewriter):
                     if isinstance(c.op, CAReduce)
                     and isinstance(c.op.scalar_op, _REDUCE_SCALAR_OPS)
                 ]
-                if len(car_clients) != 1:
+                if not car_clients:
                     continue
+                if len(car_clients) > 1:
+                    extra_reduction = (out_idx, car_clients[1])
+                    break
                 reduced_outputs[out_idx] = car_clients[0]
+
+            # An output consumed by several eligible reductions: peel one reduction
+            # per pass onto a duplicate output, until each reduction has its own copy
+            if extra_reduction is not None:
+                out_idx, car_node = extra_reduction
+                new_node, dup_map = self._duplicate_multi_client_outputs(
+                    node, {out_idx}
+                )
+                replacements = list(
+                    zip(node.outputs, new_node.outputs[: len(node.outputs)])
+                )
+                new_reduced = car_node.op(new_node.outputs[dup_map[out_idx]])
+                replacements.append((car_node.outputs[0], new_reduced))
+                fgraph.replace_all(
+                    replacements, reason="fuse_elemwise_split_multi_reductions"
+                )
+                worklist.append(new_node)
+                continue
 
             if not idx_groups and not reduced_outputs:
                 continue
