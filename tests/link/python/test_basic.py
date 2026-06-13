@@ -6,13 +6,13 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import Mode, get_mode, predefined_linkers
+from pytensor.compile.mode import get_mode, predefined_linkers
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
-from pytensor.link.basic import PerformLinker
 from pytensor.link.python.dispatch.basic import python_funcify
 from pytensor.link.python.linker import PythonLinker
+from pytensor.link.vm import VMLinker
 from pytensor.raise_op import Assert
 from pytensor.scalar.basic import Composite
 from pytensor.tensor.blas import Gemv
@@ -25,17 +25,12 @@ def python_function(inputs, outputs, **kwargs):
     return pytensor.function(inputs, outputs, mode="PYTHON", **kwargs)
 
 
-perform_mode = Mode(linker="perform", optimizer="fast_run")
+def compare_py_and_pyjit(graph_inputs, graph_outputs, test_inputs, assert_fn=None):
+    """Compare the per-node ``py`` (VM) backend against the whole-graph ``pyjit``.
 
-
-def compare_python_and_perform(
-    graph_inputs, graph_outputs, test_inputs, assert_fn=None
-):
-    """Compare a PYTHON-backend dispatch against the ``perform`` reference.
-
-    Compiles ``graph_outputs`` under the Python backend (which exercises any
-    registered ``python_funcify`` dispatch) and under the ``perform`` linker (the
-    reference that runs every Op's ``perform``), then asserts they agree.
+    Both run the same ``python_funcify`` dispatches, so this checks that the VM
+    per-node wiring and the JIT whole-graph composition agree. Only valid for
+    graphs without lazy ops, which the JIT cannot compose.
     """
     if assert_fn is None:
 
@@ -43,23 +38,24 @@ def compare_python_and_perform(
             np.testing.assert_allclose(a, b, rtol=1e-7, atol=1e-10)
 
     py_fn = pytensor.function(graph_inputs, graph_outputs, mode="PYTHON")
-    perform_fn = pytensor.function(graph_inputs, graph_outputs, mode=perform_mode)
+    pyjit_fn = pytensor.function(graph_inputs, graph_outputs, mode="PYJIT")
 
     py_res = py_fn(*test_inputs)
-    perform_res = perform_fn(*test_inputs)
-    for py_out, perform_out in zip(
+    pyjit_res = pyjit_fn(*test_inputs)
+    for py_out, pyjit_out in zip(
         py_res if isinstance(py_res, list) else [py_res],
-        perform_res if isinstance(perform_res, list) else [perform_res],
+        pyjit_res if isinstance(pyjit_res, list) else [pyjit_res],
     ):
-        assert_fn(py_out, perform_out)
+        assert_fn(py_out, pyjit_out)
     return py_fn, py_res
 
 
 def test_mode_and_linker_registered():
-    # "py" is the pure-Python backend; "perform" is the per-node reference.
-    assert isinstance(predefined_linkers["py"], PythonLinker)
-    assert isinstance(predefined_linkers["perform"], PerformLinker)
-    assert isinstance(get_mode("PYTHON").linker, PythonLinker)
+    # "py" is the robust per-node VM backend; "pyjit" the whole-graph JIT.
+    assert isinstance(predefined_linkers["py"], VMLinker)
+    assert isinstance(predefined_linkers["pyjit"], PythonLinker)
+    assert isinstance(get_mode("PYTHON").linker, VMLinker)
+    assert isinstance(get_mode("PYJIT").linker, PythonLinker)
 
 
 @pytest.mark.parametrize(
@@ -119,7 +115,7 @@ def test_constant_in_graph():
 
 
 def test_constant_only_output():
-    # Exercises fgraph_to_python's dedicated branch for outputs with no owner.
+    # An output with no owner (a bare constant) must still be returned.
     fn = python_function([], pt.constant(5.0))
     np.testing.assert_allclose(fn(), 5.0)
 
@@ -169,9 +165,9 @@ def test_cxx_only_excluded():
 
 
 def test_ifelse_lazy():
-    # IfElse has no perform (only a lazy make_thunk). The VM backend runs it via
-    # the fallback AND short-circuits it: the unused branch (which raises if
-    # evaluated) must not run.
+    # IfElse has no perform (only a lazy make_thunk). The py (VM) backend runs it
+    # via the fallback AND short-circuits it: the unused branch (which raises if
+    # evaluated) must not run. The whole-graph pyjit backend cannot do this.
     c = pt.scalar("c")
     x = vector("x")
     boom = Assert("unused branch must not run")(x, pt.eq(x.sum(), -999.0))

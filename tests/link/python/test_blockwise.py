@@ -4,7 +4,7 @@ import pytest
 import pytensor.tensor as pt
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from tests.link.python.test_basic import compare_python_and_perform
+from tests.link.python.test_basic import compare_py_and_pyjit
 
 
 def _has_cholesky(fgraph):
@@ -30,7 +30,7 @@ def _pd_matrices(shape, seed=0):
 def test_cholesky_dispatch(shape, lower):
     A = pt.tensor("A", shape=(None,) * len(shape))
     out = pt.linalg.cholesky(A, lower=lower)
-    fn, _ = compare_python_and_perform([A], out, [_pd_matrices(shape)])
+    fn, _ = compare_py_and_pyjit([A], out, [_pd_matrices(shape)])
     assert _has_cholesky(fn.maker.fgraph)
 
 
@@ -46,9 +46,7 @@ def test_solve_triangular_dispatch(batch, b_shape, lower):
     A = pt.tensor("A", shape=(None,) * Av.ndim)
     b = pt.tensor("b", shape=(None,) * bv.ndim)
     out = pt.linalg.solve_triangular(A, b, lower=lower, b_ndim=len(b_shape))
-    compare_python_and_perform(
-        [A, b], out, [Av.astype("float64"), bv.astype("float64")]
-    )
+    compare_py_and_pyjit([A, b], out, [Av.astype("float64"), bv.astype("float64")])
 
 
 @pytest.mark.parametrize("pivoting", [False, True])
@@ -58,7 +56,7 @@ def test_qr_dispatch(shape, mode, pivoting):
     rng = np.random.default_rng(0)
     A = pt.tensor("A", shape=(None,) * len(shape))
     out = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
-    compare_python_and_perform([A], out, [rng.standard_normal(shape)])
+    compare_py_and_pyjit([A], out, [rng.standard_normal(shape)])
 
 
 def test_blockwise_falls_back_without_core_dispatch():
@@ -70,4 +68,4 @@ def test_blockwise_falls_back_without_core_dispatch():
     rng = np.random.default_rng(2)
     Av = rng.standard_normal((4, 4)) + 4 * np.eye(4)
     bv = rng.standard_normal(4)
-    compare_python_and_perform([A, b], out, [Av, bv])
+    compare_py_and_pyjit([A, b], out, [Av, bv])

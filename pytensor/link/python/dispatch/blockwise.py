@@ -13,5 +13,5 @@ def python_funcify_Blockwise(op, node=None, **kwargs):
     # whole Blockwise fall back to its (vectorized) perform.
     core_fn = python_funcify(op.core_op, node=core_node)
 
-    out_dtypes = [out.type.dtype for out in node.outputs]
-    return np.vectorize(core_fn, signature=op.signature, otypes=out_dtypes)
+    output_dtypes = [output.type.dtype for output in node.outputs]
+    return np.vectorize(core_fn, signature=op.signature, otypes=output_dtypes)

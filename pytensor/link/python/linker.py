@@ -1,52 +1,25 @@
-from pytensor.link.vm import VMLinker
+from pytensor.link.basic import JITLinker
 
 
-class PythonLinker(VMLinker):
-    """A pure-Python `VMLinker` that runs each node through the `python_funcify` registry.
+class PythonLinker(JITLinker):
+    """Compose a `FunctionGraph` into a single pure-Python function.
 
-    Per node, a registered `python_funcify` implementation (a fast numpy/scipy
-    callable) is wrapped into a thunk; unregistered ops fall back to their
-    ``perform`` method via ``Op.make_thunk(impl="py")``. Lazy ops such as
-    ``IfElse`` fall through to their own thunks, so the VM still short-circuits
-    them. Fusion is excluded because fused ``Composite`` loops run slower than
-    vectorized numpy on this backend.
+    The whole graph is turned into one straight-line Python function by
+    `fgraph_to_python`, dispatching each `Op` through the `python_funcify`
+    registry (falling back to ``perform`` for unregistered ops). There is no
+    compilation step, so `jit_compile` is the identity.
     """
 
-    def __init__(
-        self,
-        allow_gc=None,
-        use_cloop=False,
-        callback=None,
-        callback_input=None,
-        lazy=None,
-        schedule=None,
-        c_thunks=None,
-        allow_partial_eval=None,
-    ):
-        # The Python backend never emits C: per-node Python thunks, Python VM.
-        super().__init__(
-            allow_gc=allow_gc,
-            use_cloop=False,
-            callback=callback,
-            callback_input=callback_input,
-            lazy=lazy,
-            schedule=schedule,
-            c_thunks=False,
-            allow_partial_eval=allow_partial_eval,
-        )
-        # ``c_thunks=False`` already gives ("minimum_compile", "py_only") /
-        # ("cxx_only",); add fusion for the numpy backend.
-        self.incompatible_rewrites = ("cxx_only", "fusion")
+    required_rewrites = ("minimum_compile", "py_only")
+    incompatible_rewrites = ("cxx_only",)
 
-    def _make_node_thunk(self, node, storage_map, compute_map, impl):
-        from pytensor.link.python.dispatch.basic import (
-            make_node_thunk_with_python_dispatch,
-        )
+    def fgraph_convert(self, fgraph, **kwargs):
+        from pytensor.link.python.dispatch.basic import python_funcify
 
-        return make_node_thunk_with_python_dispatch(
-            node,
-            storage_map,
-            compute_map,
-            fallback=super()._make_node_thunk,
-            impl=impl,
-        )
+        return python_funcify(fgraph, **kwargs)
+
+    def jit_compile(self, fn):
+        return fn
+
+    def create_thunk_inputs(self, storage_map):
+        return [storage_map[n] for n in self.fgraph.inputs]

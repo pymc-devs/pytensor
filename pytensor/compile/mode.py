@@ -24,7 +24,7 @@ from pytensor.graph.rewriting.db import (
     SequenceDB,
     TopoDB,
 )
-from pytensor.link.basic import Linker, PerformLinker
+from pytensor.link.basic import Linker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
 from pytensor.link.mlx.linker import MLXLinker
@@ -41,8 +41,10 @@ _logger = logging.getLogger("pytensor.compile.mode")
 # Mode, it will be used as the key to retrieve the real linker in this
 # dictionary
 predefined_linkers = {
-    "py": PythonLinker(),  # Pure-Python backend with the python_funcify dispatch
-    "perform": PerformLinker(),  # Per-node reference: runs every Op's perform method
+    "py": VMLinker(  # Robust per-node Python VM over python_funcify; handles lazy ops
+        use_cloop=False, c_thunks=False
+    ),
+    "pyjit": PythonLinker(),  # Whole-graph python_funcify composition; no lazy ops
     "c": CLinker(),  # Don't support gc. so don't check allow_gc
     "c|py": OpWiseCLinker(),  # Use allow_gc PyTensor flag
     "c|py_nogc": OpWiseCLinker(allow_gc=False),
@@ -479,8 +481,13 @@ MLX = Mode(
 )
 
 PYTHON = Mode(
+    VMLinker(use_cloop=False, c_thunks=False),
+    RewriteDatabaseQuery(include=["fast_run"]).excluding("fusion"),
+)
+
+PYJIT = Mode(
     PythonLinker(),
-    RewriteDatabaseQuery(include=["fast_run"]),
+    RewriteDatabaseQuery(include=["fast_run"]).excluding("fusion"),
 )
 
 FAST_COMPILE = Mode(
@@ -503,6 +510,7 @@ predefined_modes = {
     "PYTORCH": PYTORCH,
     "MLX": MLX,
     "PYTHON": PYTHON,
+    "PYJIT": PYJIT,
 }
 
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}
