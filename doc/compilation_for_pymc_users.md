@@ -137,54 +137,97 @@ PyMC hands PyTensor a symbolic graph — a recipe of mathematical operations, no
 
 ### Stage 1 — rewriting (the "optimizer")
 
-PyTensor rewrites the graph to be faster and more numerically stable. This is where, for example, a naive `log(1 + x)` becomes a stable `log1p(x)`, duplicate sub-expressions get merged, and element-wise operations get fused together. Two things are worth internalising up front: **this stage is pure Python**, and its cost scales with the size of your graph (large hierarchical models have large graphs, so this can be a real chunk of "time before sampling"); and **this stage is backend-agnostic** — whether you end up on Numba, C, JAX, PyTorch, or MLX, almost all of the same rewriting happens first.
+Think of the graph PyMC hands over as a **rough draft** of your model's math. Before running anything, PyTensor behaves like a careful editor working through that draft: it rewrites the math to run faster, to use less memory, and — especially important for probabilistic models — to be numerically safe. The key thing is that none of these edits change *what* the math computes. They only change *how* it's written down. The answer is identical; the path to it is better.
 
-The subsections below walk through the boxes in the diagram's "Stage 1" lane, in order. Each names the module or function that implements it, so you can jump into the source.
+Two things are worth holding onto before we look at the individual edits:
 
-#### The optimizer pipeline (`optdb`)
+- **It all happens in plain Python**, and the bigger your model, the longer it takes. This editing pass is a large part of the "why does sampling take a while to *start*?" pause. A big hierarchical model is a big draft, and a big draft takes longer to edit.
+- **It happens the same way regardless of backend.** Whether you'll eventually run on Numba, C, JAX, PyTorch, or MLX, almost all of this rewriting happens first, in exactly the same way.
 
-Every rewrite lives in one big, ordered registry: `pytensor.compile.mode.optdb`, an instance of `pytensor.graph.rewriting.db.SequenceDB`. Entries are registered at a numeric `position` (merge at `0`, `canonicalize` at `1`, `stabilize` at `1.5`, `specialize` at `2`, fusion at `49`, inplace at `49.5`+), and the pipeline runs them in that order. Each entry also carries *tags* such as `"fast_run"`, `"fast_compile"`, `"numba"`, or `"inplace"`.
+The subsections below walk through each editing pass, in the order they run — matching the "Stage 1" lane in the diagram. Each one ends with a foldable **"Under the hood"** note that points at the exact PyTensor code, in case you ever want to go spelunking. You can safely skip those folds and still understand the whole pipeline.
 
-Which entries actually run is decided by the {class}`pytensor.compile.mode.Mode` you compile with. A `Mode` pairs a *linker* (Stage 2) with an *optimizer query* (`pytensor.graph.rewriting.db.RewriteDatabaseQuery`) that selects rewrites by tag. For instance the default Numba mode queries `include=["fast_run", "numba"]`, while `FAST_COMPILE` queries `include=["fast_compile", "py_only"]` and so skips most of the pipeline. This is exactly the knob `FAST_COMPILE` and friends are turning.
+#### The to-do list of edits
 
-#### `merge` / `useless`
+All the possible edits live in one long, **ordered to-do list**. Each edit has a number that fixes where it sits in the queue, and a few labels attached to it. When you compile, PyTensor does *not* run every edit on the list — it runs only the ones whose labels match the mode you picked. That is the real difference between `FAST_COMPILE` (run just a handful of quick edits, so you can start sampling sooner) and the default (run the full set, so sampling itself is fast). Choosing a compilation mode is really choosing *which edits are allowed to run*.
 
-The first passes are cheap clean-ups. **Merge** (`pytensor.graph.rewriting.basic.MergeOptimizer`, registered as `merge1`, `merge1.1`, `merge2`, `merge3` at several positions) collapses identical sub-graphs so a repeated expression is computed once. **Useless** (the `"useless"` entry at position `0.6`, a `pytensor.graph.rewriting.db.TopoDB` over a `LocalGroupDB` of small `local_useless_*` node rewriters) strips nodes that don't affect the output, e.g. an identity reshape or a fill that broadcasts to a shape already in hand.
+:::{dropdown} Under the hood
+Every rewrite lives in `pytensor.compile.mode.optdb`, a `pytensor.graph.rewriting.db.SequenceDB`. Entries register at a numeric `position` (merge at `0`, canonicalize at `1`, stabilize at `1.5`, specialize at `2`, fusion at `49`, inplace at `49.5`+) and run in that order. Each carries *tags* like `"fast_run"`, `"fast_compile"`, `"numba"`, `"inplace"`. The {class}`pytensor.compile.mode.Mode` pairs a linker (Stage 2) with an *optimizer query* (`pytensor.graph.rewriting.db.RewriteDatabaseQuery`) that selects rewrites by tag: the default Numba mode queries `include=["fast_run", "numba"]`, while `FAST_COMPILE` queries `include=["fast_compile", "py_only"]`.
+:::
 
-#### `canonicalize` (fixed-point loop)
+#### Tidying up: `merge` and `useless`
 
-**Canonicalize** (position `1`) rewrites the graph into a single normal form so that later passes only have to recognise one shape of each pattern. It is an `pytensor.graph.rewriting.db.EquilibriumDB`: it applies all of its member rewrites repeatedly until the graph stops changing (reaches *equilibrium* / a fixed point). Developers add a local rewrite here with the `@register_canonicalize` decorator from `pytensor.tensor.rewriting.basic`. Typical work: reordering and flattening `add`/`mul` chains, folding constants, and pushing operations into a canonical position.
+The first edits are easy wins. **Merge** spots when the same calculation appears more than once and makes the model compute it a single time, then reuse the result — like noticing you've added up the same column of numbers twice and deciding to do it once. **Useless** deletes steps that can't possibly change the answer: adding `0`, multiplying by `1`, or reshaping an array into the shape it already has. Small savings each, but they also leave a cleaner draft for the heavier edits that follow.
 
-#### `stabilize` (numerically-stable forms)
+:::{dropdown} Under the hood
+Merge is `pytensor.graph.rewriting.basic.MergeOptimizer` (registered as `merge1`, `merge1.1`, `merge2`, `merge3` at several positions). "Useless" is the `"useless"` entry at position `0.6`, a `pytensor.graph.rewriting.db.TopoDB` wrapping a `LocalGroupDB` of small `local_useless_*` node rewriters.
+:::
 
-**Stabilize** (position `1.5`, also an `EquilibriumDB`, populated via `@register_stabilize`) swaps numerically fragile expressions for equivalent stable ones — the step PyMC users feel most, because log-probabilities are full of logs and exps. Concrete examples from `pytensor.tensor.rewriting.math`: `local_log1p` turns `log(1 + x)` into `log1p(x)`, `local_expm1` turns `exp(x) - 1` into `expm1(x)`, and `local_log1p_plusminus_exp` turns `log1p(exp(x))` into `log1pexp(x)` (the softplus). These avoid catastrophic cancellation and overflow that the naive forms suffer near the extremes.
+#### Speaking with one voice: `canonicalize`
 
-#### `specialize` + `fusion`
+There are usually many equally-valid ways to write the same expression. Left alone, that variety would force every later edit to recognise dozens of slightly different spellings of the same thing. **Canonicalize** prevents that by rewriting everything into one agreed-upon *standard form* — a house style for the math. Once the whole draft is written consistently, the later passes only have to look for one version of each pattern. This pass runs in a loop, applying its edits over and over until the draft stops changing (mathematicians call that reaching a *fixed point*); it keeps tidying until there's nothing left to tidy.
 
-**Specialize** (position `2`, `EquilibriumDB`, `@register_specialize`) replaces general operations with faster special-cased ones (for example rewriting `x ** 2` or `sum(x**2)` into cheaper equivalents). **Fusion** then merges many element-wise operations into a single `Composite` op so the runtime walks the data once instead of allocating a temporary per operation: see the `"elemwise_fusion"` sequence (the `FusionOptimizer`) and `"add_mul_fusion"` in `pytensor.tensor.rewriting.elemwise`. Fusion is tagged `"fusion"`, which is why `FAST_COMPILE` (and JAX, which does its own fusion) leave it out.
+:::{dropdown} Under the hood
+Canonicalize is an `pytensor.graph.rewriting.db.EquilibriumDB` at position `1` — "equilibrium" being the run-until-nothing-changes loop. Developers add a rewrite to it with the `@register_canonicalize` decorator from `pytensor.tensor.rewriting.basic`. Typical work: flattening `add`/`mul` chains, folding constants, and moving operations into a canonical position.
+:::
 
-#### Backend-specific rewrites + inplace / destroy handler
+#### Keeping the numbers safe: `stabilize`
 
-Two kinds of rewrites run near the end. **Backend-specific** rewrites are pulled in by the mode's tag query — the Numba mode adds `"numba"`-tagged rewrites (`pytensor.tensor.rewriting.numba`), the JAX mode adds `"jax"`-tagged ones (`pytensor.tensor.rewriting.jax`), and so on; conversely C-only ops and BLAS rewrites are *excluded* for the array-library backends. **Inplace** rewrites (tagged `"inplace"`) let ops write into their inputs' memory to avoid allocations: `AddDestroyHandler` (position `49.5`) first attaches a `pytensor.graph.destroyhandler.DestroyHandler` that tracks which buffers may be clobbered, then rewrites like `InplaceElemwiseOptimizer` (`pytensor.tensor.rewriting.elemwise`, position `50.5`) switch ops to their in-place variants. JAX excludes inplace entirely, since it manages memory itself.
+This is the pass PyMC users benefit from the most, even though they almost never see it work. Here is the problem it solves. Computers store numbers with only so many digits of precision, and some formulas that are perfectly correct on paper fall apart on a real computer.
 
-#### Rewritten FunctionGraph
+Take `log(1 + x)` when `x` is tiny — say `0.000000001`. The computer first works out `1 + x`, but it can't keep all those digits, so it rounds the result to exactly `1`. Then `log(1) = 0`, and your small-but-real value has simply vanished. The mathematically-identical function `log1p(x)` computes the same thing *without ever forming `1 + x`*, so the precision survives. **Stabilize** automatically swaps these fragile formulas for safe equivalents like that one.
 
-The output of Stage 1 is a new {class}`pytensor.graph.fg.FunctionGraph` — the same inputs and outputs, but a leaner, more stable, backend-tailored computation. Nothing has been compiled yet; that is Stage 2's job. (To inspect this graph without compiling a full function, apply the rewrites directly with `pytensor.graph.rewriting.utils.rewrite_graph(y, include=("canonicalize", "specialize"))` and print the result with `pytensor.dprint`.)
+:::{tip}
+If you've ever wondered why PyMC so rarely spits out `NaN` or `inf` from ordinary-looking expressions full of logs and exponentials, this pass is a big part of the answer. It is quietly rewriting the danger out of your log-probability.
+:::
+
+:::{dropdown} Under the hood
+Stabilize is an `EquilibriumDB` at position `1.5`, populated via `@register_stabilize`. Concrete examples from `pytensor.tensor.rewriting.math`: `local_log1p` (`log(1 + x)` → `log1p(x)`), `local_expm1` (`exp(x) - 1` → `expm1(x)`), and `local_log1p_plusminus_exp` (`log1p(exp(x))` → `log1pexp(x)`, the softplus). These avoid the cancellation and overflow the naive forms suffer at the extremes.
+:::
+
+#### Shortcuts and fewer passes over the data: `specialize` and `fusion`
+
+Two more speed-ups, both about doing less work. **Specialize** swaps a general-purpose operation for a faster special-case version whenever one exists — the way you'd compute `x²` as `x * x` instead of starting up a general "raise to any power" routine.
+
+**Fusion** fixes a subtler waste. Imagine your model computes `a * b + c` element by element across big arrays. Done naively, the computer builds one whole temporary array to hold `a * b`, then another to hold `+ c` — a lot of memory shuffled around for nothing. Fusion merges these element-wise steps so each element gets *all* of its operations in a single pass, with no temporaries in between. Picture an assembly line where each item is fully finished at one station, instead of the entire batch being carried back and forth between stations.
+
+:::{dropdown} Under the hood
+Specialize is an `EquilibriumDB` at position `2` (`@register_specialize`). Fusion is the `"elemwise_fusion"` sequence — the `FusionOptimizer`, which builds a single `Composite` op — plus `"add_mul_fusion"`, both in `pytensor.tensor.rewriting.elemwise`. Fusion is tagged `"fusion"`, which is why `FAST_COMPILE` (and JAX, which fuses on its own) leave it out.
+:::
+
+#### Last-minute, backend-aware edits: backend-specific rewrites and in-place ops
+
+The final edits depend on *where* your model is headed and on squeezing out memory. **Backend-specific** edits are small tweaks tailored to the backend you chose — a few extra tricks that only make sense for Numba, or only for JAX, and so on. Tricks that only help the C backend are dropped when you're not using it.
+
+**In-place** edits save memory by letting an operation write its result directly over its input's memory, instead of allocating a brand-new array — like reusing the same sheet of scratch paper rather than grabbing a fresh one every time. Overwriting is risky, though: what if some other part of the graph still needs that data? So before any in-place edit runs, a "destroy handler" acts as a safety inspector, tracking exactly which chunks of memory are safe to reuse. (JAX skips in-place edits altogether — it manages memory in its own way.)
+
+:::{dropdown} Under the hood
+Backend-specific rewrites are pulled in by the mode's tag query (`pytensor.tensor.rewriting.numba`, `pytensor.tensor.rewriting.jax`, …); C-only and BLAS rewrites are excluded for the array-library backends. In-place rewrites are tagged `"inplace"`: `AddDestroyHandler` (position `49.5`) attaches a `pytensor.graph.destroyhandler.DestroyHandler` that tracks clobberable buffers, then rewrites like `InplaceElemwiseOptimizer` (`pytensor.tensor.rewriting.elemwise`, position `50.5`) switch ops to their in-place variants.
+:::
+
+#### The finished draft
+
+The result of all this editing is a new graph: the same inputs and outputs as before, but leaner, numerically safer, and tailored to your backend. Nothing has actually *run* yet — we've only improved the recipe. Turning that recipe into a program the computer can execute is Stage 2's job.
+
+:::{dropdown} Under the hood
+The output is a rewritten {class}`pytensor.graph.fg.FunctionGraph`. To see it without compiling a full function, apply the rewrites directly with `pytensor.graph.rewriting.utils.rewrite_graph(y, include=("canonicalize", "specialize"))` and print the result with `pytensor.dprint`.
+:::
 
 ### Stage 2 — linking (choosing a backend)
 
-The rewritten graph is turned into an executable. *How* depends on the linker/backend:
+After Stage 1 you have a polished recipe — but a recipe is just instructions, not a meal. **Linking** is the step that turns those instructions into a real program the computer can run quickly. The recipe is still written in PyTensor's own internal language; linking translates it into a language that actually executes, and (for most backends) compiles it. *How* that translation happens, and how fast the result runs, depends on the **backend** you chose.
 
-| Backend | How it compiles | Needs a system compiler? | Notes |
+Here's the lay of the land before we dig in:
+
+| Backend | How it turns the recipe into a program | Needs a system compiler? | Good to know |
 |---|---|---|---|
-| **Numba** *(default)* | Converts the graph to Python, then JIT-compiles via LLVM | No (ships as wheels) | This is why `pip install pymc` "just works" without conda. First compile is slow; results are cached on disk. |
-| **C / CVM** | Generates C++ source and compiles `.so` files with `g++`/`clang++` | Yes | Historically the default. Strong on-disk module cache. Now opt-in. |
-| **JAX** | Converts to JAX, compiles via `jax.jit` → XLA | No | Great for GPU/TPU and `vmap`-style workflows. |
-| **PyTorch** | Converts to PyTorch, compiles via `torch.compile` (TorchDynamo/Inductor) | No | Runs on PyTorch's CPU/GPU devices. |
-| **MLX** | Converts to MLX, compiles via `mx.compile` | No | Targets Apple Silicon GPUs. |
-| **Python VM** | Runs each operation's pure-Python implementation | No | Slowest at runtime, fastest to "compile". Handy for debugging. |
+| **Numba** *(default)* | Converts the recipe to Python, then compiles it to fast machine code the first time you run it (via LLVM) | No (ships ready-to-use) | Why `pip install pymc` "just works" without conda. First run is slow; results are cached on disk. |
+| **C / CVM** | Writes out C++ source and compiles it with `g++`/`clang++` | Yes | Historically the default; very strong on-disk cache. Now opt-in. |
+| **JAX** | Converts to JAX, compiles via `jax.jit` → XLA | No | The path to GPU/TPU. |
+| **PyTorch** | Converts to PyTorch, compiles via `torch.compile` | No | Runs on PyTorch's CPU/GPU devices. |
+| **MLX** | Converts to MLX, compiles via `mx.compile` | No | Targets the GPU in Apple Silicon Macs. |
+| **Python VM** | Just runs each operation in plain Python — no compiling | No | Slowest to run, instant to "build". Great for debugging. |
 
-The default backend resolves from `config.linker = "auto"`, which currently maps to **Numba**.
+The default backend is **Numba** (it's what `config.linker = "auto"` resolves to).
 
 #### How the backend gets chosen
 
@@ -220,33 +263,65 @@ f = pytensor.function([x], y, mode="NUMBA")
 
 The two choices — backend and sampler — are made at different points in the pipeline (see the two blue decision diamonds in the diagram), and as noted below they're mostly independent. The exception is that JAX-based samplers force the JAX backend.
 
-#### How linking works (the shared mechanism)
+#### The one idea behind (almost) every backend
 
-Every backend is implemented as a *linker*, a subclass of `pytensor.link.basic.Linker`; the {class}`pytensor.compile.mode.Mode`'s linker is what Stage 2 runs. Most linkers share one trick: a single-dispatch registry that translates each PyTensor `Op` into the target language. Numba uses `pytensor.link.numba.dispatch.numba_funcify`, JAX uses `pytensor.link.jax.dispatch.jax_funcify`, PyTorch uses `pytensor.link.pytorch.dispatch.pytorch_funcify`, and MLX uses `pytensor.link.mlx.dispatch.mlx_funcify`. To add backend support for a new `Op`, you register a function with the matching dispatcher. The C and Python backends are the exception: rather than a `*_funcify` registry, they ask each `Op` directly for code through `Op.c_code` or run its `Op.perform` method. The subsections below cover each branch of the diagram's "Stage 2" lane.
+Most backends work the same way under the hood, and once you see it the rest is just details. PyTensor keeps a kind of **phrasebook**: for every operation in your graph, it knows how to say that operation in the target language. To link a whole graph, it translates each operation in turn, stitches the translations together into one program, and then lets the backend compile that program. Adding support for a new operation in a backend is just adding one new phrase to that backend's phrasebook.
 
-#### Numba (default)
+The C and Python backends are the two exceptions — instead of a phrasebook they ask each operation directly for its hand-written C code, or simply run the operation's plain-Python implementation. The rest of this section takes the backends one at a time (the branches of the diagram's "Stage 2" lane).
 
-`pytensor.link.numba.linker.NumbaLinker`. `numba_funcify` walks the rewritten `FunctionGraph` and emits one Python function that wires together each op's Numba implementation; `pytensor.link.numba.dispatch.numba_njit` then JIT-compiles it with [`numba.njit`](https://numba.readthedocs.io/en/stable/user/jit.html) via LLVM. The first call pays the compilation cost; afterwards it runs as native machine code. With `config.numba__cache = True` (the default) the compiled result is written to an on-disk cache (keyed per op, see `numba_funcify_and_cache_key`), so a later session can skip recompiling. Numba ships as wheels, which is why `pip install pymc` "just works" without a system compiler.
+:::{dropdown} Under the hood
+Each backend is a *linker* (a `pytensor.link.basic.Linker` subclass); the {class}`pytensor.compile.mode.Mode`'s linker is what Stage 2 runs. The "phrasebook" is a single-dispatch registry: `pytensor.link.numba.dispatch.numba_funcify`, `pytensor.link.jax.dispatch.jax_funcify`, `pytensor.link.pytorch.dispatch.pytorch_funcify`, `pytensor.link.mlx.dispatch.mlx_funcify`. The C and Python backends instead use `Op.c_code` and `Op.perform`.
+:::
+
+#### Numba (the default)
+
+Numba turns your recipe into Python code, then hands it to a **just-in-time (JIT) compiler** that converts it into fast machine code the very first time you run it. That's why the first call is slow — it includes the compiling — while every call afterwards is quick. Better still, the compiled result is saved to disk, so even a brand-new Python session can usually skip the wait.
+
+Here's the intuition: the first time you cook an unfamiliar dish you're slow, reading each line and hunting for ingredients. By the tenth time it's second nature. Numba writes down that "second nature" version so it never has to relearn it. And because Numba comes ready-to-use when you `pip install`, there's no compiler for you to set up — which is exactly why `pip install pymc` "just works".
+
+:::{dropdown} Under the hood
+`pytensor.link.numba.linker.NumbaLinker`. `numba_funcify` emits one Python function wiring together each op's Numba implementation; `pytensor.link.numba.dispatch.numba_njit` JIT-compiles it with [`numba.njit`](https://numba.readthedocs.io/en/stable/user/jit.html) via LLVM. With `config.numba__cache = True` (default) the result is cached on disk (see `numba_funcify_and_cache_key`).
+:::
 
 #### C / CVM
 
-`pytensor.link.c.basic.CLinker` generates C++ for each op from its `Op.c_code`, compiles a `.so` with the system `g++`/`clang++`, and caches the module in your compile directory. The default `"cvm"` linker is `pytensor.link.vm.VMLinker` with `use_cloop=True`: a hybrid where a fast C "virtual machine" loop steps through op *thunks*, each of which may be C-compiled or fall back to Python. Pure `"c"` (`CLinker` / `OpWiseCLinker`) compiles as much of the graph into C as possible. This family was historically the default and has a strong on-disk module cache, but it needs a working C++ toolchain — hence the move to Numba for the pip story.
+The C backend writes out C++ source code and compiles it using a real C++ compiler (`g++` or `clang++`) installed on your machine. It runs fast and keeps an excellent on-disk cache — but it only works if those build tools are present. That requirement is the whole reason it's no longer the default: plenty of people who `pip install pymc` don't have a C++ compiler set up. The everyday `"cvm"` variant is a practical hybrid — a small, fast loop written in C marches through your operations, each of which is either compiled C or falls back to Python.
+
+:::{dropdown} Under the hood
+`pytensor.link.c.basic.CLinker` generates C++ from each op's `Op.c_code`, compiles a `.so`, and caches it in your compile directory. `"cvm"` is `pytensor.link.vm.VMLinker` with `use_cloop=True` (the C loop steps through op *thunks*); pure `"c"` is `CLinker` / `OpWiseCLinker`.
+:::
 
 #### JAX
 
-`pytensor.link.jax.linker.JAXLinker`. `jax_funcify` translates the graph into a JAX-traceable Python function, which the linker hands to {func}`jax.jit` → XLA. This is the GPU/TPU-friendly path, and it's also the backend the JAX samplers (`numpyro`, `blackjax`, and `nutpie` in JAX mode) consume directly.
+JAX translates the recipe into JAX code and lets JAX's own compiler (XLA) take over. This is the route to **GPUs and TPUs**, and it's the backend the JAX-based samplers (`numpyro`, `blackjax`, and `nutpie` in its JAX mode) plug straight into.
+
+:::{dropdown} Under the hood
+`pytensor.link.jax.linker.JAXLinker`. `jax_funcify` builds a JAX-traceable function that the linker hands to {func}`jax.jit` → XLA.
+:::
 
 #### PyTorch
 
-`pytensor.link.pytorch.linker.PytorchLinker`. `pytorch_funcify` builds a PyTorch function, compiled with {func}`torch.compile` (TorchDynamo + Inductor), running on PyTorch's CPU/GPU devices.
+Same idea, using PyTorch instead. The recipe is translated into PyTorch and compiled with {func}`torch.compile`, running on whatever CPU or GPU device PyTorch is set up to use. Handy when the rest of your stack already lives in PyTorch.
+
+:::{dropdown} Under the hood
+`pytensor.link.pytorch.linker.PytorchLinker`; `pytorch_funcify` builds the function, compiled via {func}`torch.compile` (TorchDynamo + Inductor).
+:::
 
 #### MLX
 
-`pytensor.link.mlx.linker.MLXLinker`. `mlx_funcify` builds an MLX function compiled lazily with `mx.compile`, targeting Apple Silicon GPUs.
+The same idea once more, this time aimed at the GPU built into Apple Silicon Macs.
+
+:::{dropdown} Under the hood
+`pytensor.link.mlx.linker.MLXLinker`; `mlx_funcify` builds an MLX function compiled lazily with `mx.compile`.
+:::
 
 #### Python VM
 
-The reference backend: `pytensor.link.basic.PerformLinker` (or `pytensor.link.vm.VMLinker` with `use_cloop=False`) steps through the graph calling each op's `Op.perform` in pure Python. There is essentially no compilation step, so it is the fastest to "build" and the slowest to run — ideal for debugging, and what `FAST_COMPILE` uses.
+The simplest backend of all: **no compiling whatsoever**. PyTensor just runs each operation one at a time in plain Python. That makes it the slowest to actually run, but instant to "build" and by far the easiest to debug (you can drop into any step with ordinary Python tools). It's what `FAST_COMPILE` uses, and it's a great companion while you're still iterating on a model's structure.
+
+:::{dropdown} Under the hood
+`pytensor.link.basic.PerformLinker` (or `pytensor.link.vm.VMLinker` with `use_cloop=False`) steps through the graph calling each op's `Op.perform`.
+:::
 
 ### Runtime
 
