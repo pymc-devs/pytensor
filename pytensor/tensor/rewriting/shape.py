@@ -12,6 +12,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
+from pytensor.graph.type import HasShape
 from pytensor.tensor.basic import (
     Alloc,
     MakeVector,
@@ -63,7 +64,7 @@ class _ShapeOfProxy:
         return result
 
     def __contains__(self, var):
-        return hasattr(var.type, "ndim")
+        return isinstance(var.type, HasShape)
 
 
 class ShapeFeature(Feature):
@@ -94,7 +95,7 @@ class ShapeFeature(Feature):
         else:
             per_dim = {}
             self._shape_i_cache[v] = per_dim
-        if hasattr(v.type, "shape") and v.type.shape[i] is not None:
+        if isinstance(v.type, HasShape) and v.type.shape[i] is not None:
             res = constant(v.type.shape[i], dtype="int64")
         else:
             res = Shape_i(i)(v)
@@ -109,7 +110,7 @@ class ShapeFeature(Feature):
         (e.g. its buffer destroyed by an inplace Op); a fresh read carries no
         constraints beyond reading ``v``, which non-recursive consumers rely on.
         """
-        if hasattr(v.type, "shape") and v.type.shape[i] is not None:
+        if isinstance(v.type, HasShape) and v.type.shape[i] is not None:
             return constant(v.type.shape[i], dtype="int64")
         return Shape_i(i)(v)
 
@@ -164,7 +165,7 @@ class ShapeFeature(Feature):
 
         input_shapes = []
         for inp in node.inputs:
-            if hasattr(inp.type, "ndim"):
+            if isinstance(inp.type, HasShape):
                 if recursive:
                     input_shapes.append(
                         tuple(self.get_shape(inp, j) for j in range(inp.type.ndim))
@@ -195,7 +196,7 @@ class ShapeFeature(Feature):
 
         result = []
         for k, out in enumerate(node.outputs):
-            if not hasattr(out.type, "ndim"):
+            if not isinstance(out.type, HasShape):
                 result.append(None)
                 continue
             sh = None
@@ -215,7 +216,7 @@ class ShapeFeature(Feature):
 
     def get_shape(self, var, idx):
         """Return a symbolic expression for ``var.shape[idx]``."""
-        if hasattr(var.type, "shape") and var.type.shape[idx] is not None:
+        if isinstance(var.type, HasShape) and var.type.shape[idx] is not None:
             return constant(var.type.shape[idx], dtype="int64")
 
         node = var.owner
@@ -242,7 +243,7 @@ class ShapeFeature(Feature):
 
         Works on an unattached feature.
         """
-        if hasattr(var.type, "shape") and var.type.shape[idx] is not None:
+        if isinstance(var.type, HasShape) and var.type.shape[idx] is not None:
             return constant(var.type.shape[idx], dtype="int64")
 
         node = var.owner
@@ -257,7 +258,7 @@ class ShapeFeature(Feature):
         return self._fresh_shape_i(var, idx)
 
     def shape_tuple(self, var):
-        if not hasattr(var.type, "ndim"):
+        if not isinstance(var.type, HasShape):
             return None
         return tuple(self.get_shape(var, i) for i in range(var.type.ndim))
 
@@ -301,7 +302,7 @@ class ShapeFeature(Feature):
         self._cache.pop((node, False), None)
 
         # Schedule Shape_i(r) replacements for local_track_shape_i
-        if hasattr(r.type, "ndim"):
+        if isinstance(r.type, HasShape):
             for shpnode, _idx in fgraph.clients.get(r, []):
                 if isinstance(getattr(shpnode, "op", None), Shape_i):
                     self.scheduled[shpnode] = new_r
