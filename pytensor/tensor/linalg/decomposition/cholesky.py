@@ -10,7 +10,6 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import tensor
 
@@ -44,16 +43,6 @@ class Cholesky(Op):
             )
         dtype = linalg_output_dtype(x.type.dtype)
         return Apply(self, [x], [tensor(shape=x.type.shape, dtype=dtype)])
-
-    def perform(self, node, inputs, outputs):
-        [x] = inputs
-        [out] = outputs
-        try:
-            out[0] = scipy_linalg.cholesky(
-                x, lower=self.lower, overwrite_a=self.overwrite_a, check_finite=False
-            )
-        except scipy_linalg.LinAlgError:
-            out[0] = np.full(x.shape, np.nan, dtype=node.outputs[0].type.dtype)
 
     def pullback(self, inputs, outputs, gradients):
         """
