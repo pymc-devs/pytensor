@@ -1206,9 +1206,26 @@ class VMLinker(LocalLinker):
     def _make_node_thunk(self, node, storage_map, compute_map, impl):
         """Create the thunk for a single node.
 
-        Subclasses override this to intercept thunk creation (e.g. to consult a
-        dispatch registry) before falling back to ``Op.make_thunk``.
+        On the pure-Python path (``impl == "py"``) a registered
+        ``python_funcify`` implementation is wrapped into a thunk; otherwise the
+        node's ``Op.make_thunk`` is used (which also covers lazy ops like
+        ``IfElse``).
         """
+        if impl == "py":
+            from pytensor.link.python.dispatch.basic import (
+                make_node_thunk_with_python_dispatch,
+            )
+
+            return make_node_thunk_with_python_dispatch(
+                node,
+                storage_map,
+                compute_map,
+                fallback=self._make_perform_thunk,
+                impl=impl,
+            )
+        return self._make_perform_thunk(node, storage_map, compute_map, impl)
+
+    def _make_perform_thunk(self, node, storage_map, compute_map, impl):
         # no-recycling is done at each VM.__call__, so there is no need to cause
         # duplicate C code by passing no_recycling here.
         return node.op.make_thunk(node, storage_map, compute_map, [], impl=impl)
