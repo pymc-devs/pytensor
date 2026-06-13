@@ -1863,6 +1863,8 @@ class OpWiseCLinker(LocalLinker):
     def make_all(
         self, profiler=None, input_storage=None, output_storage=None, storage_map=None
     ):
+        from pytensor.link.c.dispatch.basic import make_node_thunk_with_c_dispatch
+
         fgraph = self.fgraph
         order = self.schedule(fgraph)
         no_recycling = self.no_recycling
@@ -1882,9 +1884,16 @@ class OpWiseCLinker(LocalLinker):
 
         thunks = []
         for node in order:
-            # make_thunk will try by default C code, otherwise
-            # it fall back to python.
-            thunks += [node.op.make_thunk(node, storage_map, compute_map, no_recycling)]
+            # Try the C dispatch first, otherwise fall back to Python.
+            thunks += [
+                make_node_thunk_with_c_dispatch(
+                    node,
+                    storage_map,
+                    compute_map,
+                    no_recycling,
+                    try_c=bool(config.cxx),
+                )
+            ]
             thunks[-1].inputs = [storage_map[v] for v in node.inputs]
             thunks[-1].outputs = [storage_map[v] for v in node.outputs]
 

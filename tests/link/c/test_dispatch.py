@@ -4,6 +4,7 @@ import pytest
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
+from pytensor.compile.debug.debugmode import BadThunkOutput, DebugMode
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
@@ -273,6 +274,13 @@ def test_c_impl_from_files_rejects_relative_paths():
         c_impl_from_files(op=IncTwoFromFile(), c_files=["c_code/inc.c"])
 
 
+@pytest.mark.parametrize("linker", ["c", "c|py"])
+def test_whole_graph_linkers_use_dispatch(linker):
+    x = ps.float64("x")
+    f = pytensor.function([x], IncOne()(x), mode=Mode(linker=linker, optimizer=None))
+    assert f(2.0) == 3.0
+
+
 def test_whole_graph_c_linker_unregistered_raises():
     x = ps.float64("x")
     with pytest.raises(NotImplementedError, match="cannot produce C code"):
@@ -313,6 +321,25 @@ def test_params_constants_deduplicated_across_nodes():
     assert f(np.ones((3, 2)), np.ones((5, 2))) == 8
 
 
+class IncOneWrongImpl(ScalarOpBase):
+    pass
+
+
+class WrongImpl(CImpl):
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
+        return f"{z} = {x} + 2;"  # disagrees with perform on purpose
+
+    def c_code_cache_version(self):
+        return (1,)
+
+
+@c_funcify.register(IncOneWrongImpl)
+def c_funcify_wrong(op, node=None, **kwargs):
+    return WrongImpl(op)
+
+
 def test_cop_graph_resolves_to_identity():
     # The parity guarantee: every COp node resolves to itself, so CLinker calls
     # the op's own c_code/cache-version methods and produces byte-identical
@@ -329,3 +356,17 @@ def test_cop_graph_resolves_to_identity():
     assert isinstance(cl.get_src_code(), str)
     version, _sig = cl.cmodule_key()
     assert version != ()
+
+
+def test_debugmode_cross_checks_dispatch_impl():
+    x = ps.float64("x")
+    f = pytensor.function(
+        [x], IncOne()(x), mode=DebugMode(optimizer=None, check_py_code=True)
+    )
+    assert f(2.0) == 3.0
+
+    f_wrong = pytensor.function(
+        [x], IncOneWrongImpl()(x), mode=DebugMode(optimizer=None, check_py_code=True)
+    )
+    with pytest.raises(BadThunkOutput):
+        f_wrong(2.0)
