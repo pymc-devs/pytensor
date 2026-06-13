@@ -25,6 +25,7 @@ extensions = [
     "myst_nb",
     "generate_gallery",
     "sphinx_sitemap",
+    "sphinxcontrib.mermaid",
 ]
 
 # Don't auto-generate summary for class members.
@@ -328,6 +329,10 @@ myst_enable_extensions = [
     "substitution",
 ]
 myst_dmath_double_inline = True
+
+# Render plain ```mermaid fences as the mermaid directive, so the same source
+# renders in the Sphinx build, on GitHub, and in editor markdown previews.
+myst_fence_as_directive = ["mermaid"]
 
 citation_code = f"""
 ```bibtex

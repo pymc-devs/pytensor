@@ -8,6 +8,7 @@ User Guide
 .. toctree::
    :maxdepth: 1
 
+   compilation_for_pymc_users
    extending/index
    optimizations
    troubleshooting

@@ -16,6 +16,7 @@ dependencies:
   - sphinx-copybutton
   - sphinx-design
   - sphinx-sitemap
+  - sphinxcontrib-mermaid
   - pygments
   - pydot
   - ipython
