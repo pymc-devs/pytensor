@@ -51,6 +51,16 @@ def test_solve_triangular_dispatch(batch, b_shape, lower):
     )
 
 
+@pytest.mark.parametrize("pivoting", [False, True])
+@pytest.mark.parametrize("mode", ["full", "economic", "r", "raw"])
+@pytest.mark.parametrize("shape", [(4, 3), (3, 4), (5, 3, 4)])
+def test_qr_dispatch(shape, mode, pivoting):
+    rng = np.random.default_rng(0)
+    A = pt.tensor("A", shape=(None,) * len(shape))
+    out = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
+    compare_python_and_perform([A], out, [rng.standard_normal(shape)])
+
+
 def test_blockwise_falls_back_without_core_dispatch():
     # The general Solve has no python_funcify dispatch, so Blockwise must fall
     # back to its (vectorized) perform and still match the reference.
