@@ -1,3 +1,4 @@
+import inspect
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -119,6 +120,24 @@ class Op(MetaObject):
     This information is needed when rebuilding a graph with new inputs,
     as nodes with these Ops must be rebuilt even if the input types haven't changed.
     """
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        method = cls.__dict__.get("infer_shape")
+        if method is None:
+            return
+        params = inspect.signature(method).parameters
+        if len(params) == 4:
+            warnings.warn(
+                f"{cls.__module__}.{cls.__qualname__}.infer_shape takes a "
+                "deprecated `fgraph` parameter; drop it from the signature. "
+                "The parameter will be passed as None.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            cls.infer_shape = lambda self, node, input_shapes, _old=method: _old(
+                self, None, node, input_shapes
+            )
 
     def make_node(self, *inputs: Variable) -> Apply:
         """Construct an `Apply` node that represent the application of this operation to the given inputs.

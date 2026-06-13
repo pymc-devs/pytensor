@@ -1031,6 +1031,37 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         self._variables: frozenset[Variable] | None = None
         self._clients: dict[Variable, list[ClientType]] | None = None
 
+    @classmethod
+    def from_structural_inputs(
+        cls,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+    ) -> "FrozenFunctionGraph":
+        """Freeze ``outputs``, allowing ``inputs`` to be *interior* expressions.
+
+        Structural-matching dual of `bind`: where `bind` maps inputs to values,
+        this lifts chosen sub-expressions up to inputs. An ``input`` produced by
+        an `Apply` is matched against ``outputs`` by structure (not identity) and
+        every occurrence is rewired to it; root inputs behave as in the
+        constructor. Intermediate inputs absent from ``outputs`` become dead
+        inputs. The signature preserves the order of ``inputs``. ``outputs`` must
+        be computable from ``inputs`` alone — any root they still depend on
+        directly must itself appear in ``inputs``, else the rewired graph is
+        orphaned.
+        """
+        # Discover the true graph roots (as FunctionGraph(inputs=None) does) to
+        # seed the staged freeze; the caller's `inputs` may be intermediate.
+        # Freezing inputs and outputs together interns each intermediate input
+        # onto the same object as its occurrences in the outputs, so the
+        # re-freeze can rewire them — which requires intermediate inputs to be
+        # *built*, not blocked, hence only roots seed the freeze.
+        roots = [
+            v for v in graph_inputs([*inputs, *outputs]) if not isinstance(v, Constant)
+        ]
+        interned = cls(roots, [*inputs, *outputs])
+        n_inputs = len(inputs)
+        return cls(interned.outputs[:n_inputs], interned.outputs[n_inputs:])
+
     def __reduce__(self):
         return FrozenFunctionGraph, (self.inputs, self.outputs)
 
@@ -1099,7 +1130,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 [o.type() for o in node.outputs],
             )
             memo.update(zip(node.outputs, new_node.outputs))
-        return [memo[out] for out in self.outputs]
+        return [out if isinstance(out, Constant) else memo[out] for out in self.outputs]
 
     def unfreeze(self) -> "FunctionGraph":
         """Return a mutable FunctionGraph with fresh mutable Apply nodes."""

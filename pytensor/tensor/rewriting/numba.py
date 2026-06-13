@@ -2,38 +2,19 @@ import pytensor.tensor.rewriting.indexed_elemwise  # noqa: F401
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import dfs_rewriter
-from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.rewriting.utils import rewrite_subgraph
 from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.tensor.basic import as_tensor, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature
-from pytensor.tensor.shape import Shape, Shape_i
 
 
-def simplify_core_shape_graphs(core_shapes):
-    """Simplify core shape expressions by canonicalizing shape arithmetic.
-
-    Temporarily detaches Shape/Shape_i outputs from their owners so that
-    rewrite_graph operates only on the arithmetic above them (e.g.
-    constant-folding static shapes, eliminating dead Switch branches).
-    """
-    shape_boundary = [
-        var
-        for var in ancestors(core_shapes)
-        if var.owner is not None and isinstance(var.owner.op, (Shape, Shape_i))
-    ]
-    saved_owners = [(v, v.owner, v.index) for v in shape_boundary]
-    for v, _, _ in saved_owners:
-        v.owner = None
-    try:
-        core_shapes = list(
-            rewrite_graph(core_shapes, include=("canonicalize",), clone=False)
-        )
-    finally:
-        for v, owner, idx in saved_owners:
-            v.owner = owner
-            v.index = idx
-    return core_shapes
+def simplify_core_shape_graphs(core_shapes, fgraph):
+    """Canonicalize the fresh shape arithmetic built by ``get_non_recursive_shape``."""
+    graph_frontier = fgraph.variables.intersection(
+        ancestors(core_shapes, blockers=fgraph.variables)
+    )
+    return rewrite_subgraph(core_shapes, graph_frontier, include=("canonicalize",))
 
 
 @node_rewriter([Blockwise])
@@ -44,9 +25,10 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
     that has an extra "non-functional" input that represents the core shape of the Blockwise variable.
     This core_shape is used by the numba backend to pre-allocate the output array.
 
-    If available, the core shape is extracted from the shape feature of the graph,
-    which has a higher change of having been simplified, optimized, constant-folded.
-    If missing, we fall back to the op._supp_shape_from_params method.
+    The core shape is built from ``ShapeFeature.get_non_recursive_shape``, whose
+    expressions read only the node's own inputs and can therefore be introduced
+    after inplacing without conflicting with the destroyers in the surrounding
+    graph.
 
     This rewrite is required for the numba backend implementation of Blockwise.
 
@@ -98,17 +80,16 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
     batch_ndim = op.batch_ndim(node)
 
     shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
-    if shape_feature:
-        core_shapes = [
-            [shape_feature.get_shape(out, i) for i in range(batch_ndim, out.type.ndim)]
-            for out in node.outputs
+    if shape_feature is None:
+        shape_feature = ShapeFeature()
+
+    core_shapes = [
+        [
+            shape_feature.get_non_recursive_shape(out, i)
+            for i in range(batch_ndim, out.type.ndim)
         ]
-    else:
-        input_shapes = [tuple(inp.shape) for inp in node.inputs]
-        core_shapes = [
-            out_shape[batch_ndim:]
-            for out_shape in op.infer_shape(None, node, input_shapes)
-        ]
+        for out in node.outputs
+    ]
 
     core_shapes = [
         as_tensor(core_shape) if len(core_shape) else constant([], dtype="int64")
@@ -122,7 +103,7 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
         # If Blockwise shows up in the shape graph we can't introduce the core shape
         return None
 
-    core_shapes = simplify_core_shape_graphs(core_shapes)
+    core_shapes = simplify_core_shape_graphs(core_shapes, fgraph)
 
     return BlockwiseWithCoreShape(
         [*node.inputs, *core_shapes],

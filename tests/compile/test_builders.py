@@ -460,8 +460,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         fg = FunctionGraph(outputs=[op_var[1]], clone=False)
         opt_res = rewrite_graph(fg, custom_rewrite=ShapeOptimizer())
 
-        assert opt_res.shape_feature.shape_of[x] is None
-        assert opt_res.shape_feature.shape_of[z][0].data == 2
+        assert opt_res.shape_feature.shape_tuple(x) is None
+        assert opt_res.shape_feature.shape_tuple(z)[0].data == 2
 
     def test_make_node_shared(self):
         """Make sure we can provide `OpFromGraph.make_node` new shared inputs and get a valid `OpFromGraph`."""

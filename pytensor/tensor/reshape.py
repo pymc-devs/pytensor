@@ -64,7 +64,7 @@ class JoinDims(Op):
 
         return Apply(self, [x], [output_type])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         [input_shape] = shapes
         joined_shape = prod([input_shape[i] for i in self.axis_range], dtype=int)
         return [self.output_shapes(input_shape, joined_shape)]
@@ -185,7 +185,7 @@ class SplitDims(Op):
         )
         return Apply(self, [x, shape], [output])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         [input_shape, _] = shapes
         _, shape = node.inputs
         output_shapes = list(input_shape)

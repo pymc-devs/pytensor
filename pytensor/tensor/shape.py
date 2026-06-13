@@ -81,7 +81,7 @@ class Shape(COp):
         (out,) = out_
         out[0] = np.asarray(np.shape(x), dtype="int64")
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [[len(in_shapes[0])]]
 
     def connection_pattern(self, node):
@@ -297,7 +297,7 @@ class Shape_i(COp):
         # Else, no C code
         raise NotImplementedError()
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [()]
 
     def connection_pattern(self, node):
@@ -339,21 +339,7 @@ def shape_i(var, i, fgraph=None):
 
     """
     if fgraph and hasattr(fgraph, "shape_feature"):
-        shape_feature = fgraph.shape_feature
-        shape_of = shape_feature.shape_of
-
-        def recur(node):
-            if node.outputs[0] not in shape_of:
-                for inp in node.inputs:
-                    if inp.owner:
-                        recur(inp.owner)
-                # If the output var isn't marked as being in the graph,
-                # we need to add it in the ShapeFeature.
-                shape_feature.on_import(fgraph, node, "graph.ops.shape_i")
-
-        if var not in shape_of:
-            recur(var.owner)
-        return shape_of[var][i]
+        return fgraph.shape_feature.get_shape(var, i)
 
     # If we are not able to use the shape feature, we should not put
     # Shape_i in the graph. Otherwise, the shape feature optimization
@@ -452,7 +438,7 @@ class SpecifyShape(COp):
             )
         out[0] = x
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         xshape, *_ = shapes
         shape = node.inputs[1:]
         # Use x shape if specified dim is None, otherwise the specified shape
@@ -727,7 +713,7 @@ class Reshape(COp):
             return [disconnected_type()]
         return self(eval_points[0], *inputs[1:], return_list=True)
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         from pytensor.tensor.math import eq, maximum, mul
 
         # inputs[1] can contain at most one value of '-1', meaning the actual

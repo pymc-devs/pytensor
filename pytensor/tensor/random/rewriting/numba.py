@@ -1,6 +1,7 @@
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
+from pytensor.graph.traversal import applys_between
 from pytensor.tensor import as_tensor, constant
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
 from pytensor.tensor.rewriting.numba import simplify_core_shape_graphs
@@ -15,9 +16,10 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     that has an extra "non-functional" input that represents the core shape of the random variable.
     This core_shape is used by the numba backend to pre-allocate the output array.
 
-    If available, the core shape is extracted from the shape feature of the graph,
-    which has a higher chance of having been simplified, optimized, constant-folded.
-    If missing, we fall back to the op._supp_shape_from_params method.
+    The core shape is built from ``ShapeFeature.get_non_recursive_shape``, whose
+    expressions read only the node's own inputs and can therefore be introduced
+    after inplacing without conflicting with the destroyers in the surrounding
+    graph.
 
     This rewrite is required for the numba backend implementation of RandomVariable.
 
@@ -58,19 +60,27 @@ def introduce_explicit_core_shape_rv(fgraph, node):
 
     _next_rng, rv = node.outputs
     shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
-    if shape_feature:
-        core_shape = [
-            shape_feature.get_shape(rv, -i - 1) for i in reversed(range(op.ndim_supp))
-        ]
-    else:
-        core_shape = op._supp_shape_from_params(op.dist_params(node))
+    if shape_feature is None:
+        shape_feature = ShapeFeature()
+
+    core_shape = [
+        shape_feature.get_non_recursive_shape(rv, i)
+        for i in range(rv.type.ndim - op.ndim_supp, rv.type.ndim)
+    ]
 
     if len(core_shape) == 0:
         core_shape = constant([], dtype="int64")
     else:
         core_shape = as_tensor(core_shape)
 
-    [core_shape] = simplify_core_shape_graphs([core_shape])
+    if any(
+        isinstance(node.op, RandomVariable)
+        for node in applys_between(node.inputs, [core_shape])
+    ):
+        # If the RandomVariable shows up in the shape graph we can't introduce the core shape
+        return None
+
+    [core_shape] = simplify_core_shape_graphs([core_shape], fgraph)
 
     new_outs = (
         RandomVariableWithCoreShape(

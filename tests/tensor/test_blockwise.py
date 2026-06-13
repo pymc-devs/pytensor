@@ -310,7 +310,7 @@ def test_blockwise_infer_core_shape():
             c[0] = np.arange(a.size + b.size, dtype=config.floatX)
             d[0] = np.arange(a.sum() + b.sum(), dtype=config.floatX)
 
-        def infer_shape(self, fgraph, node, input_shapes):
+        def infer_shape(self, node, input_shapes):
             # First output shape depends only on input_shapes
             # Second output shape depends on input values
             a_identity, b_identity = node.inputs
@@ -362,7 +362,7 @@ def test_infer_shape_literals():
         def perform(self, node, inputs, outputs):
             raise NotImplementedError()
 
-        def infer_shape(self, fgraph, node, input_shapes):
+        def infer_shape(self, node, input_shapes):
             y = node.outputs[0]
             # Apparently it's valid to return integers in infer_shape.
             # DimShuffle does this. Modify test if that is no longer allowed.
