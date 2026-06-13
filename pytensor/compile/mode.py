@@ -41,7 +41,8 @@ _logger = logging.getLogger("pytensor.compile.mode")
 # Mode, it will be used as the key to retrieve the real linker in this
 # dictionary
 predefined_linkers = {
-    "py": PerformLinker(),  # Use allow_gc PyTensor flag
+    "py": PythonLinker(),  # Pure-Python backend with the python_funcify dispatch
+    "perform": PerformLinker(),  # Per-node reference: runs every Op's perform method
     "c": CLinker(),  # Don't support gc. so don't check allow_gc
     "c|py": OpWiseCLinker(),  # Use allow_gc PyTensor flag
     "c|py_nogc": OpWiseCLinker(allow_gc=False),
@@ -53,7 +54,6 @@ predefined_linkers = {
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
-    "python": PythonLinker(),
 }
 
 

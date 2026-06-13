@@ -10,6 +10,7 @@ from pytensor.compile.mode import get_mode, predefined_linkers
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
+from pytensor.link.basic import PerformLinker
 from pytensor.link.python.dispatch.basic import python_funcify
 from pytensor.link.python.linker import PythonLinker
 from pytensor.raise_op import Assert
@@ -25,7 +26,9 @@ def python_function(inputs, outputs, **kwargs):
 
 
 def test_mode_and_linker_registered():
-    assert isinstance(predefined_linkers["python"], PythonLinker)
+    # "py" is the pure-Python backend; "perform" is the per-node reference.
+    assert isinstance(predefined_linkers["py"], PythonLinker)
+    assert isinstance(predefined_linkers["perform"], PerformLinker)
     assert isinstance(get_mode("PYTHON").linker, PythonLinker)
 
 
