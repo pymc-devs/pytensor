@@ -48,39 +48,12 @@ class Cholesky(Op):
     def perform(self, node, inputs, outputs):
         [x] = inputs
         [out] = outputs
-
-        (potrf,) = scipy_linalg.get_lapack_funcs(("potrf",), (x,))
-
-        # Quick return for square empty array
-        if x.size == 0:
-            out[0] = np.empty_like(x, dtype=potrf.dtype)
-            return
-
-        # Squareness check
-        if x.shape[0] != x.shape[1]:
-            raise ValueError(
-                f"Input array is expected to be square but has the shape: {x.shape}."
+        try:
+            out[0] = scipy_linalg.cholesky(
+                x, lower=self.lower, overwrite_a=self.overwrite_a, check_finite=False
             )
-
-        # Scipy cholesky only makes use of overwrite_a when it is F_CONTIGUOUS
-        # If we have a `C_CONTIGUOUS` array we transpose to benefit from it
-        c_contiguous_input = self.overwrite_a and x.flags["C_CONTIGUOUS"]
-        if c_contiguous_input:
-            x = x.T
-            lower = not self.lower
-            overwrite_a = True
-        else:
-            lower = self.lower
-            overwrite_a = self.overwrite_a
-
-        c, info = potrf(x, lower=lower, overwrite_a=overwrite_a, clean=True)
-
-        if info != 0:
-            c[...] = np.nan
-            out[0] = c
-        else:
-            # Transpose result if input was transposed
-            out[0] = c.T if c_contiguous_input else c
+        except scipy_linalg.LinAlgError:
+            out[0] = np.full(x.shape, np.nan, dtype=node.outputs[0].type.dtype)
 
     def pullback(self, inputs, outputs, gradients):
         """

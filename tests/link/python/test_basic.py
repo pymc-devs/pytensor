@@ -6,7 +6,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import get_mode, predefined_linkers
+from pytensor.compile.mode import Mode, get_mode, predefined_linkers
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
@@ -23,6 +23,36 @@ from pytensor.tensor.type import matrix, vector
 
 def python_function(inputs, outputs, **kwargs):
     return pytensor.function(inputs, outputs, mode="PYTHON", **kwargs)
+
+
+perform_mode = Mode(linker="perform", optimizer="fast_run")
+
+
+def compare_python_and_perform(
+    graph_inputs, graph_outputs, test_inputs, assert_fn=None
+):
+    """Compare a PYTHON-backend dispatch against the ``perform`` reference.
+
+    Compiles ``graph_outputs`` under the Python backend (which exercises any
+    registered ``python_funcify`` dispatch) and under the ``perform`` linker (the
+    reference that runs every Op's ``perform``), then asserts they agree.
+    """
+    if assert_fn is None:
+
+        def assert_fn(a, b):
+            np.testing.assert_allclose(a, b, rtol=1e-7, atol=1e-10)
+
+    py_fn = pytensor.function(graph_inputs, graph_outputs, mode="PYTHON")
+    perform_fn = pytensor.function(graph_inputs, graph_outputs, mode=perform_mode)
+
+    py_res = py_fn(*test_inputs)
+    perform_res = perform_fn(*test_inputs)
+    for py_out, perform_out in zip(
+        py_res if isinstance(py_res, list) else [py_res],
+        perform_res if isinstance(perform_res, list) else [perform_res],
+    ):
+        assert_fn(py_out, perform_out)
+    return py_fn, py_res
 
 
 def test_mode_and_linker_registered():
