@@ -103,7 +103,7 @@ class QR(Op):
 
         return Apply(self, [x], outputs)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (x_shape,) = shapes
 
         M, N = x_shape

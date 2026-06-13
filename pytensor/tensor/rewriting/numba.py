@@ -100,14 +100,16 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
     shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
         core_shapes = [
-            [shape_feature.get_shape(out, i) for i in range(batch_ndim, out.type.ndim)]
+            [
+                shape_feature.get_shape_no_cycle(out, i)
+                for i in range(batch_ndim, out.type.ndim)
+            ]
             for out in node.outputs
         ]
     else:
         input_shapes = [tuple(inp.shape) for inp in node.inputs]
         core_shapes = [
-            out_shape[batch_ndim:]
-            for out_shape in op.infer_shape(None, node, input_shapes)
+            out_shape[batch_ndim:] for out_shape in op.infer_shape(node, input_shapes)
         ]
 
     core_shapes = [

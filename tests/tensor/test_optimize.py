@@ -356,6 +356,21 @@ def test_root_simple():
     utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
 
 
+def test_root_distinct_equations_not_merged():
+    # Regression test: RootOp __props__ ignored the inner graph, so RootOps of
+    # different equations compared equal and MergeOptimizer collapsed them
+    x = pt.scalar("x")
+    a = pt.scalar("a")
+
+    sq_root, _ = root(x**2 - a, x)
+    cube_root, _ = root(x**3 - a, x)
+
+    func = pytensor.function([x, a], [sq_root, cube_root])
+    sq_res, cube_res = func(1.5, 8.0)
+    np.testing.assert_allclose(sq_res, np.sqrt(8.0), rtol=1e-6)
+    np.testing.assert_allclose(cube_res, np.cbrt(8.0), rtol=1e-6)
+
+
 def test_root_system_of_equations():
     x = pt.tensor("x", shape=(None,))
     a = pt.tensor("a", shape=(None,))

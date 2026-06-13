@@ -39,7 +39,7 @@ class SpecifyAssumptions(TypeCastingOp):
         out = x.type()
         return Apply(self, [x], [out])
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return input_shapes
 
     def pullback(

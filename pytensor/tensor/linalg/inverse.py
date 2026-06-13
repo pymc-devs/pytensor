@@ -61,7 +61,7 @@ class MatrixPinv(Op):
         ).T
         return [grad]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [list(reversed(shapes[0]))]
 
 
@@ -159,7 +159,7 @@ class MatrixInverse(Op):
 
         return [-matrix_dot(xi, ev, xi)]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return shapes
 
 
@@ -187,7 +187,7 @@ class TensorInv(Op):
         (x,) = outputs
         x[0] = np.linalg.tensorinv(a, self.ind)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         sp = shapes[0][self.ind :] + shapes[0][: self.ind]
         return [sp]
 

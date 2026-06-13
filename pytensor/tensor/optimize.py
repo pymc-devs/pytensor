@@ -965,7 +965,9 @@ def root_scalar(
 
 
 class RootOp(ScipyVectorWrapperOp):
-    __props__ = ("method", "jac")
+    # These __props__ were wrong: they ignore the inner graph,
+    # making RootOps of different equations compare equal (and get merged)
+    # __props__ = ("method", "jac")
 
     def __init__(
         self,

@@ -144,7 +144,7 @@ class PdbBreakpoint(Op):
     def pullback(self, inputs, outputs, output_gradients):
         return [disconnected_type(), *output_gradients]
 
-    def infer_shape(self, fgraph, inputs, input_shapes):
+    def infer_shape(self, inputs, input_shapes):
         # Return the shape of every input but the condition (first input)
         return input_shapes[1:]
 

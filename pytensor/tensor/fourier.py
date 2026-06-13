@@ -100,7 +100,7 @@ class Fourier(Op):
             ],
         )
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         shape_a = in_shapes[0]
         n = node.inputs[1]
         axis = node.inputs[2]
