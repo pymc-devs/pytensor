@@ -34,6 +34,23 @@ def test_cholesky_dispatch(shape, lower):
     assert _has_cholesky(fn.maker.fgraph)
 
 
+@pytest.mark.parametrize("lower", [True, False])
+@pytest.mark.parametrize("b_shape", [(4,), (4, 2)])
+@pytest.mark.parametrize("batch", [(), (3,)])
+def test_solve_triangular_dispatch(batch, b_shape, lower):
+    rng = np.random.default_rng(1)
+    Av = np.tril(rng.standard_normal((*batch, 4, 4))) + 4 * np.eye(4)
+    if not lower:
+        Av = np.swapaxes(Av, -1, -2)
+    bv = rng.standard_normal((*batch, *b_shape))
+    A = pt.tensor("A", shape=(None,) * Av.ndim)
+    b = pt.tensor("b", shape=(None,) * bv.ndim)
+    out = pt.linalg.solve_triangular(A, b, lower=lower, b_ndim=len(b_shape))
+    compare_python_and_perform(
+        [A, b], out, [Av.astype("float64"), bv.astype("float64")]
+    )
+
+
 def test_blockwise_falls_back_without_core_dispatch():
     # The general Solve has no python_funcify dispatch, so Blockwise must fall
     # back to its (vectorized) perform and still match the reference.
