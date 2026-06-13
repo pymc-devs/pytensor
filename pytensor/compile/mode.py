@@ -29,6 +29,7 @@ from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
 from pytensor.link.mlx.linker import MLXLinker
 from pytensor.link.numba.linker import NumbaLinker
+from pytensor.link.python.linker import PythonLinker
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.link.vm import VMLinker
 
@@ -52,6 +53,7 @@ predefined_linkers = {
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
+    "python": PythonLinker(),
 }
 
 
@@ -476,6 +478,11 @@ MLX = Mode(
     RewriteDatabaseQuery(include=["fast_run", "mlx"]),
 )
 
+PYTHON = Mode(
+    PythonLinker(),
+    RewriteDatabaseQuery(include=["fast_run"]),
+)
+
 FAST_COMPILE = Mode(
     VMLinker(use_cloop=False, c_thunks=False),
     RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
@@ -495,6 +502,7 @@ predefined_modes = {
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
     "MLX": MLX,
+    "PYTHON": PYTHON,
 }
 
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}
