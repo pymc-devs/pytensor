@@ -1203,6 +1203,16 @@ class VMLinker(LocalLinker):
                 )
         return vm
 
+    def _make_node_thunk(self, node, storage_map, compute_map, impl):
+        """Create the thunk for a single node.
+
+        Subclasses override this to intercept thunk creation (e.g. to consult a
+        dispatch registry) before falling back to ``Op.make_thunk``.
+        """
+        # no-recycling is done at each VM.__call__, so there is no need to cause
+        # duplicate C code by passing no_recycling here.
+        return node.op.make_thunk(node, storage_map, compute_map, [], impl=impl)
+
     def make_all(
         self,
         profiler=None,
@@ -1230,11 +1240,8 @@ class VMLinker(LocalLinker):
         for node in order:
             try:
                 thunk_start = time.perf_counter()
-                # no-recycling is done at each VM.__call__ So there is
-                # no need to cause duplicate c code by passing
-                # no_recycling here.
                 thunks.append(
-                    node.op.make_thunk(node, storage_map, compute_map, [], impl=impl)
+                    self._make_node_thunk(node, storage_map, compute_map, impl)
                 )
                 linker_make_thunk_time[node] = time.perf_counter() - thunk_start
                 if not hasattr(thunks[-1], "lazy"):
