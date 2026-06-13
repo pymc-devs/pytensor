@@ -2063,6 +2063,53 @@ def local_reduce_join(fgraph, node):
     return [ret]
 
 
+@register_specialize
+@register_canonicalize
+@register_uncanonicalize  # Needed for Min which is formed from Neg(Max(Neg))
+@node_rewriter([CAReduce])
+def local_careduce_join(fgraph, node):
+    r"""CAReduce(Join(axis, \*tensors), axis=ax) -> CAReduce(..t1), .. combined via scalar.op
+
+    When the reduction axis includes the join axis (or reduces all elements),
+    this avoids creating the concatenated intermediate array by reducing each
+    join input separately and combining results with the scalar op.
+
+    For >2 joined inputs with binary-only ops (e.g. Maximum, Minimum), the
+    combine step uses nested applications since Elemwise{nin > 2} is not
+    currently supported for those ops.
+
+    """
+    [joined_out] = node.inputs
+    if not isinstance(joined_out.owner_op, Join):
+        return None
+
+    join_axis_tensor, *joined_inputs = joined_out.owner.inputs
+
+    if len(joined_inputs) < 2:
+        return None
+
+    if not isinstance(join_axis_tensor, Constant):
+        return None
+
+    join_axis = int(join_axis_tensor.data)
+    if join_axis < 0:
+        join_axis += joined_out.type.ndim
+
+    reduce_op = node.op
+    if reduce_op.axis is not None and join_axis not in reduce_op.axis:
+        return None
+
+    reduced = [reduce_op(inp) for inp in joined_inputs]
+    scalar_op = reduce_op.scalar_op
+    ret = reduce(lambda a, b: Elemwise(scalar_op)(a, b), reduced)
+
+    if ret.dtype != node.outputs[0].dtype:
+        return None
+
+    copy_stack_trace(node.outputs[0], ret)
+    return [ret]
+
+
 @register_infer_shape
 @register_canonicalize("fast_compile", "local_cut_useless_reduce")
 @register_useless("local_cut_useless_reduce")
