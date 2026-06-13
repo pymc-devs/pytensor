@@ -19,8 +19,20 @@ When PyMC samples your model, it asks PyTensor to turn the model's math (the log
 ## The pipeline at a glance
 
 <style>
-div.mermaid { text-align: center; }
-div.mermaid svg { width: 100% !important; max-width: 100% !important; height: auto !important; }
+/* Force the Mermaid diagram to use the full available page width.
+   Mermaid inlines a `max-width` on the generated <svg>, so we override it. */
+div.mermaid,
+.mermaid {
+    text-align: center;
+    width: 100%;
+    max-width: 100% !important;
+}
+div.mermaid svg,
+.mermaid svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+}
 </style>
 
 ```mermaid
@@ -50,13 +62,13 @@ flowchart TD
     end
 
     %% ============ Backend selection ============
-    L --> M{"Which linker?<br/>(from mode / config.linker)"}
-    M -->|"'auto' = DEFAULT"| NUMBA
-    M -->|"c / cvm (opt-in)"| CBACK
-    M -->|"jax"| JAXB
-    M -->|"pytorch"| PTB
-    M -->|"mlx (Apple GPU)"| MLXB
-    M -->|"py / vm"| PYB
+    L --> M{"Which backend (linker)?<br/>pm.sample(backend=...)<br/>or compile_kwargs mode=... / config.linker"}
+    M -->|"'numba' (default)"| NUMBA
+    M -->|"'c' (→ cvm)"| CBACK
+    M -->|"'jax'"| JAXB
+    M -->|"'pytorch'"| PTB
+    M -->|"'mlx' (Apple GPU)"| MLXB
+    M -->|"'py' / 'vm'"| PYB
 
     %% ============ Stage 2: linking ============
     subgraph LINK["STAGE 2 — Linking (backend-specific)"]
@@ -87,20 +99,34 @@ flowchart TD
         end
     end
 
-    %% ============ Compiled artifact (bridges linking and runtime) ============
-    N3 --> Z["Compiled callable<br/>params θ (point in parameter space) → logp(θ), ∇logp(θ)<br/>(observed data baked in as constants)"]
+    %% ============ Compiled artifact = PyTensor's final output (the boundary) ============
+    N3 --> Z["Compiled callable — PyTensor's output<br/>θ (a point in parameter space) → logp(θ), ∇logp(θ)<br/>(observed data baked in as constants)"]
     C3 --> Z
     J2 --> Z
     T2 --> Z
     X2 --> Z
     P1 --> Z
 
-    %% ============ Runtime ============
-    Z --> R
-    subgraph RUN["Runtime — MCMC sampling (function called many times)"]
-        R["Sampler loop:<br/>propose new θ → evaluate logp + gradient → repeat"]
-        R --> S["Sampler engine, e.g.<br/>PyMC NUTS (Python)<br/>or nutpie / nuts-rs (Rust)"]
+    %% ============ Runtime: the sampler engine (NOT PyTensor) ============
+    subgraph RUN["Runtime — MCMC sampling (the sampler engine, NOT PyTensor)"]
+        direction TB
+        LOOP["Sampler loop:<br/>propose θ → call the compiled logp/∇logp → accept/reject → repeat (many times)"]
+        LOOP --> ENG{"Which sampler engine?<br/>pm.sample(nuts_sampler=...)"}
+        ENG -->|"'pymc'"| SP1["PyMC NUTS<br/>pure-Python loop<br/>(calls a callable from any CPU backend, e.g. C / Numba)"]
+        ENG -->|"'nutpie' (default if installed)"| SP2["nutpie / nuts-rs<br/>Rust loop<br/>(needs a Numba or JAX callable)"]
+        ENG -->|"'numpyro'"| SP3["NumPyro NUTS<br/>JAX loop<br/>(needs a JAX callable)"]
+        ENG -->|"'blackjax'"| SP4["BlackJAX NUTS<br/>JAX loop<br/>(needs a JAX callable)"]
     end
+
+    %% Connect the boundary artifact into the runtime AFTER the subgraph is declared,
+    %% targeting the already-declared LOOP node so Mermaid links into the cluster.
+    Z --> LOOP
+
+    classDef sampler fill:#fff3e0,stroke:#e65100,color:#000;
+    class LOOP,SP1,SP2,SP3,SP4 sampler;
+
+    classDef choice fill:#e3f2fd,stroke:#1565c0,color:#000;
+    class M,ENG choice;
 ```
 
 ## Walking through the stages
@@ -133,13 +159,58 @@ The rewritten graph is turned into an executable. *How* depends on the linker/ba
 
 The default backend resolves from `config.linker = "auto"`, which currently maps to **Numba**.
 
+#### How the backend gets chosen
+
+Just as `nuts_sampler=` picks the sampler engine, a different knob picks the PyTensor backend. From PyMC, the simplest way is the `backend=` argument to `pm.sample`:
+
+```python
+import pymc as pm
+
+with model:
+    # Default-ish: Numba. Other common choices: "c", "jax".
+    idata = pm.sample(backend="numba")
+```
+
+Under the hood, PyMC turns `backend=` into a PyTensor *compilation mode* (note that `backend="c"` maps to PyTensor's combined C+VM mode, `"cvm"`). If you need finer control you can pass a mode directly via `compile_kwargs` instead — but you can only set one of the two:
+
+```python
+with model:
+    # Equivalent to backend="jax"; do NOT also pass backend=...
+    idata = pm.sample(compile_kwargs={"mode": "JAX"})
+```
+
+If you're calling PyTensor directly (no PyMC), the same choice is made with `config.linker` for the whole session, or per call via the `mode` argument to `pytensor.function`:
+
+```python
+import pytensor
+
+# Session-wide default for every compiled function
+pytensor.config.linker = "jax"
+
+# Or per function, overriding the session default
+f = pytensor.function([x], y, mode="NUMBA")
+```
+
+The two choices — backend and sampler — are made at different points in the pipeline (see the two blue decision diamonds in the diagram), and as noted below they're mostly independent. The exception is that JAX-based samplers force the JAX backend.
+
 ### Runtime
 
 Functionally, the compiled callable is a map from a **point in parameter space** to the model's **log-probability and its gradient**: `θ → (logp(θ), ∇logp(θ))`. The observed data isn't an argument — it's baked into the function as constants when the function is built. (PyMC actually compiles a few such functions: the log-density and its gradient for sampling, plus functions for drawing from priors/posterior predictive.)
 
-An MCMC sampler calls this function thousands of times, proposing new parameter points and reading back `logp` and its gradient to decide where to go next. Time spent *here* is sampling time, which is separate from the compilation time described above — speeding up compilation does not speed up sampling, and vice versa.
+An MCMC sampler calls this function many times, proposing new parameter points and reading back `logp` and its gradient to decide where to go next. Time spent *here* is sampling time, which is separate from the compilation time described above — speeding up compilation does not speed up sampling, and vice versa.
 
-The sampler engine that drives those calls is a separate choice from the PyTensor backend. It can be PyMC's built-in NUTS (Python), or an external sampler such as [nutpie](https://github.com/pymc-devs/nutpie), which runs the NUTS loop in Rust (via `nuts-rs`) while still calling a PyTensor-compiled logp/gradient under the hood. The Rust there is the *sampler*, not a PyTensor compilation backend — a useful distinction, since it's easy to assume "the fast Rust thing" is doing the compilation when in fact PyTensor still builds the function it evaluates.
+**This is the key boundary.** Everything above the compiled callable in the diagram is *PyTensor* turning your model's math into a function. Everything below it is a *sampler engine* repeatedly calling that function. The sampler is a separate piece of software with its own loop; PyTensor's job is finished once the callable exists.
+
+You pick the engine with `pm.sample(nuts_sampler=...)`. The options are:
+
+- **`"pymc"`** — PyMC's built-in NUTS. The loop is pure Python and calls a PyTensor callable from any CPU backend (typically C or Numba).
+- **`"nutpie"`** — runs the NUTS loop in Rust (via [`nuts-rs`](https://github.com/pymc-devs/nutpie)). It calls a PyTensor callable compiled to either the **Numba** or the **JAX** backend. This is the default when nutpie is installed.
+- **`"numpyro"`** — NumPyro's NUTS, whose loop runs in **JAX**. It requires the **JAX** backend.
+- **`"blackjax"`** — BlackJAX's NUTS, also a **JAX** loop requiring the **JAX** backend.
+
+So the engine and the PyTensor backend are *mostly* an independent choice, with one important coupling: the JAX-based engines (`numpyro`, `blackjax`, and `nutpie` in JAX mode) need PyTensor to have compiled the callable to JAX. PyMC handles wiring this up for you.
+
+A common misconception is worth heading off: with nutpie it's easy to assume "the fast Rust thing" is doing the compilation. It isn't — the Rust is the *sampler loop*, not a PyTensor compilation backend. PyTensor still builds the logp/gradient function that the Rust loop evaluates.
 
 ## Caching: why the second run is faster
 
