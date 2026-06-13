@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from pytensor.compile.compilelock import lock_ctx
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
+    Apply,
     AtomicVariable,
     Constant,
 )
@@ -553,6 +554,7 @@ class CLinker(Linker):
 
     def __init__(self, schedule=None):
         self.fgraph = None
+        self._node_impls: dict[Apply, CLinkerOp] = {}
         super().__init__(scheduler=schedule)
 
     def accept(
@@ -573,6 +575,23 @@ class CLinker(Linker):
         self.no_recycling = no_recycling
         return self
 
+    def _impl_for(self, node) -> CLinkerOp:
+        """Return `node`'s C implementation, resolved and memoized via `c_funcify`."""
+        try:
+            return self._node_impls[node]
+        except KeyError:
+            pass
+        # Imported lazily so `import pytensor` does not load the dispatch
+        # registrations; the import triggers them on first compilation.
+        from pytensor.link.c.dispatch.basic import c_funcify
+
+        try:
+            impl = c_funcify(node.op, node=node)
+        except NotImplementedError as exc:
+            raise NotImplementedError(f"{node.op} cannot produce C code") from exc
+        self._node_impls[node] = impl
+        return impl
+
     def fetch_variables(self):
         """Fills the inputs, outputs, variables, orphans, temps and node_order fields."""
         fgraph = self.fgraph
@@ -591,10 +610,14 @@ class CLinker(Linker):
         # that needs it
         self.node_params = dict()
         for node in self.node_order:
-            if not isinstance(node.op, CLinkerOp):
+            try:
+                impl = self._impl_for(node)
+            except NotImplementedError:
+                # No C implementation; code_gen will raise if this node is
+                # actually compiled.
                 continue
             try:
-                params = node.op.get_params(node)
+                params = impl.get_params(node)
             except MethodNotDefined:
                 params = NoParams
             if params is not NoParams:
@@ -602,10 +625,10 @@ class CLinker(Linker):
                 # same params.
                 if params in self.node_params:
                     var = self.node_params[params]
-                    assert var.type == node.params_type
+                    assert var.type == impl.params_type
                     fgraph.clients[var].append((node, "params"))
                 else:
-                    var = Constant(node.params_type, params)
+                    var = Constant(impl.params_type, params)
                     fgraph.clients[var] = [(node, "params")]
                     self.node_params[params] = var
                     self.variables.append(var)
@@ -775,10 +798,7 @@ class CLinker(Linker):
             id += 2
 
         for node_num, node in enumerate(self.node_order):
-            op = node.op
-
-            if not isinstance(op, CLinkerOp):
-                raise NotImplementedError(f"{op} cannot produce C code")
+            op = self._impl_for(node)
 
             sub = dict(failure_var=failure_var)
 
@@ -905,7 +925,9 @@ class CLinker(Linker):
             """
             )
         # generic support code
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             support_code = x.c_support_code()
             if isinstance(support_code, list):
                 ret.extend(support_code)
@@ -941,7 +963,9 @@ class CLinker(Linker):
 
         c_compiler = self.c_compiler()
 
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 ret += x.c_compile_args(c_compiler=c_compiler)
 
@@ -949,7 +973,9 @@ class CLinker(Linker):
         # The args set by the compiler include the user flags. We do not want
         # to reorder them
         ret += c_compiler.compile_args()
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 no_comp = x.c_no_compile_args(c_compiler=c_compiler)
 
@@ -970,7 +996,9 @@ class CLinker(Linker):
         """
         ret = []
         c_compiler = self.c_compiler()
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 ret += x.c_headers(c_compiler=c_compiler)
         return uniq(ret)
@@ -984,14 +1012,18 @@ class CLinker(Linker):
 
         """
         ret = []
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 ret += x.c_init_code()
         return uniq(ret)
 
     def c_compiler(self):
         c_compiler = None
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             # FIXME: Why would a `Type` have a `c_compiler` field?!
             if hasattr(x, "c_compiler"):
                 x_compiler = x.c_compiler()
@@ -1021,7 +1053,9 @@ class CLinker(Linker):
         """
         ret = []
         c_compiler = self.c_compiler()
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 ret += x.c_header_dirs(c_compiler=c_compiler)
         # filter out empty strings/None
@@ -1037,7 +1071,9 @@ class CLinker(Linker):
         """
         ret = []
         c_compiler = self.c_compiler()
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 ret += x.c_libraries(c_compiler=c_compiler)
         return uniq(ret)
@@ -1052,7 +1088,9 @@ class CLinker(Linker):
         """
         ret = []
         c_compiler = self.c_compiler()
-        for x in [y.type for y in self.variables] + [y.op for y in self.node_order]:
+        for x in [y.type for y in self.variables] + [
+            self._impl_for(y) for y in self.node_order
+        ]:
             if isinstance(x, CLinkerObject):
                 ret += x.c_lib_dirs(c_compiler=c_compiler)
         # filter out empty strings/None
@@ -1433,8 +1471,14 @@ class CLinker(Linker):
 
         version = []
         for node_pos, node in enumerate(order):
-            if hasattr(node.op, "c_code_cache_version_apply"):
-                version.append(node.op.c_code_cache_version_apply(node))
+            try:
+                impl = self._impl_for(node)
+            except NotImplementedError:
+                # No C implementation: contributes no version entry (code_gen
+                # raises later if this graph is compiled).
+                pass
+            else:
+                version.append(impl.c_code_cache_version_apply(node))
 
             props = getattr(node.op, "__props__", None)
 
