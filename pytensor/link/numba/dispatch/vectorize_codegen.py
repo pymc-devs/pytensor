@@ -16,7 +16,13 @@ from numba.np import arrayobj
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch._llvmlite_self_ref import (
+    ensure_self_ref_metadata_support,
+)
 from pytensor.link.numba.dispatch.string_codegen import CODE_TOKEN, build_source_code
+
+
+ensure_self_ref_metadata_support()
 
 
 def encode_literals(literals: Sequence) -> str:
@@ -473,18 +479,37 @@ def make_loop_call(
     idx_load_axes: tuple[tuple[int, ...], ...] | None = None,
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
     output_write_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
+    inplace: tuple[tuple[int, int], ...] = (),
 ):
     safe = (False, False)
 
-    # TODO I think this is better than the noalias attribute
-    # for the input, but self_ref isn't supported in a released
-    # llvmlite version yet
-    # mod = builder.module
-    # domain = mod.add_metadata([], self_ref=True)
-    # input_scope = mod.add_metadata([domain], self_ref=True)
-    # output_scope = mod.add_metadata([domain], self_ref=True)
-    # input_scope_set = mod.add_metadata([input_scope, output_scope])
-    # output_scope_set = mod.add_metadata([input_scope, output_scope])
+    n_outputs = len(outputs)
+
+    # Scoped noalias metadata: input loads and output stores are tagged with
+    # alias scopes so LLVM can disambiguate them without runtime overlap checks
+    # (and without loop versioning). Inputs share one scope (their loads never
+    # conflict with each other) while each output gets its own, so that every
+    # access can claim noalias against all buffers it is guaranteed not to
+    # overlap: PyTensor guarantees distinct output buffers, and that inputs
+    # don't alias outputs *except* for an input destroyed by an inplace output.
+    # Loads of a destroyed input are tagged with its output's scope instead:
+    # they stay MayAlias with that output's stores (LLVM resolves the exact
+    # overlap through pointer identity, since the output reuses the input's
+    # array struct) yet are still disambiguated from every other buffer.
+    mod = builder.module
+    domain = mod.add_metadata([], self_ref=True)
+    input_scope = mod.add_metadata([domain], self_ref=True)
+    output_scopes = [
+        mod.add_metadata([domain], self_ref=True) for _ in range(n_outputs)
+    ]
+    input_scope_set = mod.add_metadata([input_scope])
+    output_scope_set = mod.add_metadata(output_scopes)
+    out_alias_sets = [mod.add_metadata([scope]) for scope in output_scopes]
+    out_noalias_sets = [
+        mod.add_metadata([input_scope, *(s for s in output_scopes if s is not scope)])
+        for scope in output_scopes
+    ]
+    destroyed_inputs = {in_idx: out_idx for out_idx, in_idx in inplace}
 
     zero = ir.Constant(ir.IntType(64), 0)
 
@@ -542,6 +567,8 @@ def make_loop_call(
                 False,
             )
             val = builder.load(ptr)
+            val.set_metadata("alias.scope", input_scope_set)
+            val.set_metadata("noalias", output_scope_set)
             i64 = ir.IntType(64)
             if val.type != i64:
                 if idx_arr_type.dtype.signed:
@@ -640,8 +667,13 @@ def make_loop_call(
         if core_scalar and core_ndim == 0:
             # Retrive scalar item at index
             read_val = builder.load(read_ptr)
-            # read_val.set_metadata("alias.scope", input_scope_set)
-            # read_val.set_metadata("noalias", output_scope_set)
+            destination = destroyed_inputs.get(input_i)
+            if destination is None:
+                read_val.set_metadata("alias.scope", input_scope_set)
+                read_val.set_metadata("noalias", output_scope_set)
+            else:
+                read_val.set_metadata("alias.scope", out_alias_sets[destination])
+                read_val.set_metadata("noalias", out_noalias_sets[destination])
         else:
             # Retrieve array item at index
             # This is a streamlined version of Numba's `GUArrayArg.load`.
@@ -677,6 +709,7 @@ def make_loop_call(
 
     # Create output slices to pass to inner func
     output_slices = []
+    scratch_outputs = []
     for output_i, (out, out_type, out_bc) in enumerate(
         zip(outputs, output_types, output_bc, strict=True)
     ):
@@ -736,6 +769,20 @@ def make_loop_call(
             dtype=out_type.dtype, ndim=effective_core_ndim, layout=out_type.layout
         )
         write_array = context.make_array(write_array_type)(context, builder)
+        if effective_core_ndim == 0:
+            # Redirect the 0-d output slice through a stack slot so the store
+            # into the real output buffer happens below, after the core call,
+            # where it can carry the alias scope metadata. The slot is
+            # initialized from the output buffer to preserve read-modify-write
+            # semantics (`o += t` in `store_core_outputs`); SROA collapses the
+            # slot after inlining.
+            scratch = cgutils.alloca_once(builder, write_ptr.type.pointee)
+            init_val = builder.load(write_ptr)
+            init_val.set_metadata("alias.scope", out_alias_sets[output_i])
+            init_val.set_metadata("noalias", out_noalias_sets[output_i])
+            builder.store(init_val, scratch)
+            scratch_outputs.append((scratch, write_ptr, output_i))
+            write_ptr = scratch
         core_shape = (
             output_shape[-effective_core_ndim:] if effective_core_ndim > 0 else []
         )
@@ -762,6 +809,12 @@ def make_loop_call(
         input_vals = [context.make_tuple(builder, core_signature.args[0], input_vals)]
 
     inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
+
+    for scratch, write_ptr, output_i in scratch_outputs:
+        out_val = builder.load(scratch)
+        store = builder.store(out_val, write_ptr)
+        store.set_metadata("alias.scope", out_alias_sets[output_i])
+        store.set_metadata("noalias", out_noalias_sets[output_i])
 
     # Close the loops
     for loop in loop_stack[::-1]:
@@ -1143,6 +1196,7 @@ def _vectorized(
             idx_load_axes=idx_load_axes,
             idx_bc=idx_broadcastable,
             output_write_spec=output_write_spec,
+            inplace=inplace_pattern,
         )
 
         return _codegen_return_outputs(
