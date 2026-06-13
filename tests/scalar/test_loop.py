@@ -149,6 +149,30 @@ def test_rebuild_dtype():
     assert y.dtype == "float32"
 
 
+def test_until_zero_steps():
+    """Until loop should return done=True when n_steps <= 0."""
+    from pytensor import Mode, function
+    from pytensor.scalar import float64, int64
+    from pytensor.scalar.loop import ScalarLoop
+
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+
+    x = x0 + 1
+    until = x > 10
+
+    op = ScalarLoop(init=[x0], update=[x], until=until)
+
+    x_out, done = op(n_steps, x0)
+
+    fn = function([n_steps, x0], [x_out, done], mode=Mode(linker="py"))
+
+    done_val = fn(0, 0.0)[1]
+
+    # According to docstring logic
+    assert done_val is True
+
+
 def test_non_scalar_error():
     x0 = float64("x0")
     x = as_scalar(tensor_exp(x0))
