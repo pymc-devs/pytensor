@@ -1,5 +1,4 @@
 import inspect
-import re
 import warnings
 from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
@@ -15,6 +14,13 @@ from pytensor.graph.type import HasDataType
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.interface import CLinkerOp
 from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.section_loader import (
+    BACKWARD_RE,
+    C_CODE_SECTIONS,
+    SECTION_RE,
+    read_c_code_files,
+    split_c_code_sections,
+)
 from pytensor.utils import hash_from_code
 
 
@@ -263,24 +269,10 @@ class ExternalCOp(COp):
 
     """
 
-    section_re: ClassVar[Pattern] = re.compile(
-        r"^#section ([a-zA-Z0-9_]+)$", re.MULTILINE
-    )
-    backward_re: ClassVar[Pattern] = re.compile(
-        r"^PYTENSOR_(APPLY|SUPPORT)_CODE_SECTION$", re.MULTILINE
-    )
+    section_re: ClassVar[Pattern] = SECTION_RE
+    backward_re: ClassVar[Pattern] = BACKWARD_RE
     # This is the set of allowed markers
-    SECTIONS: ClassVar[set[str]] = {
-        "init_code",
-        "init_code_apply",
-        "init_code_struct",
-        "support_code",
-        "support_code_apply",
-        "support_code_struct",
-        "cleanup_code_struct",
-        "code",
-        "code_cleanup",
-    }
+    SECTIONS: ClassVar[frozenset[str]] = C_CODE_SECTIONS
     _cop_num_inputs: int | None = None
     _cop_num_outputs: int | None = None
 
@@ -337,67 +329,11 @@ class ExternalCOp(COp):
 
     def load_c_code(self, func_files: Iterable[Path]) -> None:
         """Loads the C code to perform the `Op`."""
-        for func_file in func_files:
-            func_file = self.get_path(func_file)
-            self.func_codes.append(func_file.read_text(encoding="utf-8"))
-
-        # If both the old section markers and the new section markers are
-        # present, raise an error because we don't know which ones to follow.
-        old_markers_present = any(
-            self.backward_re.search(code) for code in self.func_codes
-        )
-        new_markers_present = any(
-            self.section_re.search(code) for code in self.func_codes
-        )
-
-        if old_markers_present and new_markers_present:
-            raise ValueError(
-                "Both the new and the old syntax for "
-                "identifying code sections are present in the "
-                "provided C code. These two syntaxes should not "
-                "be used at the same time."
-            )
-
-        for func_file, code in zip(func_files, self.func_codes, strict=True):
-            if self.backward_re.search(code):
-                # This is backward compat code that will go away in a while
-
-                # Separate the code into the proper sections
-                split = self.backward_re.split(code)
-                n = 1
-                while n < len(split):
-                    if split[n] == "APPLY":
-                        self.code_sections["support_code_apply"] = split[n + 1]
-                    elif split[n] == "SUPPORT":
-                        self.code_sections["support_code"] = split[n + 1]
-                    n += 2
-                continue
-
-            elif self.section_re.search(code):
-                # Check for code outside of the supported sections
-                split = self.section_re.split(code)
-                if split[0].strip() != "":
-                    raise ValueError(
-                        "Stray code before first #section "
-                        f"statement (in file {func_file}): {split[0]}"
-                    )
-
-                # Separate the code into the proper sections
-                n = 1
-                while n < len(split):
-                    if split[n] not in self.SECTIONS:
-                        raise ValueError(
-                            f"Unknown section type (in file {func_file}): {split[n]}"
-                        )
-                    if split[n] not in self.code_sections:
-                        self.code_sections[split[n]] = ""
-                    self.code_sections[split[n]] += split[n + 1]
-                    n += 2
-
-            else:
-                raise ValueError(
-                    f"No valid section marker was found in file {func_file}"
-                )
+        func_files = list(func_files)
+        # Reading resolves paths relative to the class's defining file, but error
+        # messages report the paths as given.
+        self.func_codes = read_c_code_files(self.get_path(f) for f in func_files)
+        self.code_sections = split_c_code_sections(self.func_codes, func_files)
 
     def __get_op_params(self) -> list[tuple[str, Any]]:
         """Construct name, value pairs that will be turned into macros for use within the `Op`'s code.
