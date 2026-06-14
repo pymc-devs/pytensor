@@ -1,8 +1,11 @@
 from collections.abc import Hashable
 
+from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.link.c.dispatch.basic import CImpl, c_funcify
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.link.c.op import openmp_supported
+from pytensor.scalar import get_scalar_type
+from pytensor.tensor.elemwise import DimShuffle, Elemwise, _elemwise_c_all
 
 
 class DimShuffleImpl(CImpl):
@@ -112,3 +115,79 @@ class DimShuffleImpl(CImpl):
 @c_funcify.register(DimShuffle)
 def c_funcify_dimshuffle(op, node=None, **kwargs) -> DimShuffleImpl:
     return DimShuffleImpl(op)
+
+
+class ElemwiseImpl(CImpl):
+    """C implementation of `Elemwise`.
+
+    Emits the broadcasting loop over the per-element scalar code via
+    `_elemwise_c_all`, delegating support code and headers to the scalar op.
+    """
+
+    op: Elemwise
+
+    def _use_openmp(self) -> bool:
+        """Return whether to emit OpenMP: requested by the op and compiler-supported."""
+        return self.op.openmp and openmp_supported()
+
+    def c_support_code(self, **kwargs) -> str:
+        return self.op.scalar_op.c_support_code(**kwargs)
+
+    def c_support_code_apply(self, node: Apply, name: str) -> str:
+        return self.op.scalar_op.c_support_code_apply(node, name + "_scalar_")
+
+    def c_headers(self, **kwargs) -> list[str]:
+        return ["<vector>", "<algorithm>"]
+
+    def c_header_dirs(self, **kwargs) -> list[str]:
+        return self.op.scalar_op.c_header_dirs(**kwargs)
+
+    def c_compile_args(self, **kwargs) -> list[str]:
+        return ["-fopenmp"] if self._use_openmp() else []
+
+    def c_code(
+        self,
+        node: Apply,
+        name: str,
+        inputs: list[str],
+        outputs: list[str],
+        sub: dict[str, str],
+    ) -> str:
+        scalar_op = self.op.scalar_op
+        if (
+            any(i.dtype == "float16" for i in node.inputs)
+            or any(o.dtype == "float16" for o in node.outputs)
+            # This is for Composite
+            or getattr(scalar_op, "inner_float16", False)
+        ):
+            # No float16 C support; fall back to perform.
+            raise NotImplementedError()
+        return "\n".join(
+            _elemwise_c_all(
+                self.op, node, name, inputs, outputs, sub, self._use_openmp()
+            )
+        )
+
+    def c_code_cache_version_apply(self, node: Apply) -> tuple[Hashable, ...]:
+        scalar_op = self.op.scalar_op
+        version = [17]  # bump when the emitted C changes
+        scalar_node = Apply(
+            scalar_op,
+            [get_scalar_type(dtype=i.type.dtype).make_variable() for i in node.inputs],
+            [get_scalar_type(dtype=o.type.dtype).make_variable() for o in node.outputs],
+        )
+        version.append(scalar_op.c_code_cache_version_apply(scalar_node))
+        version.extend(
+            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
+            for i in node.inputs + node.outputs
+        )
+        version.append(("openmp", self._use_openmp()))
+        version.append(("openmp_elemwise_minsize", config.openmp_elemwise_minsize))
+        if all(version):
+            return tuple(version)
+        return ()
+
+
+@c_funcify.register(Elemwise)
+def c_funcify_elemwise(op, node=None, **kwargs) -> ElemwiseImpl:
+    return ElemwiseImpl(op)
