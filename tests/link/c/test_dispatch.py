@@ -235,12 +235,10 @@ def c_funcify_wrong(op, node=None, **kwargs):
 
 
 def test_cop_graph_resolves_to_identity():
-    # The parity guarantee: every COp node resolves to itself, so CLinker calls
-    # the op's own c_code/cache-version methods and produces byte-identical
-    # source and cache keys. A registered op (DimShuffle) resolves to its
-    # detached impl instead.
-    from pytensor.link.c.dispatch.elemwise import DimShuffleImpl
-    from pytensor.tensor.elemwise import DimShuffle
+    # An unregistered COp node resolves to itself, so CLinker calls the op's own
+    # c_code/cache-version methods. A registered op resolves to its detached impl.
+    from pytensor.link.c.dispatch.elemwise import DimShuffleImpl, ElemwiseImpl
+    from pytensor.tensor.elemwise import DimShuffle, Elemwise
 
     x = pt.matrix("x")
     out = (x.T + 1.0).sum(axis=0)
@@ -251,7 +249,10 @@ def test_cop_graph_resolves_to_identity():
         impl = cl._impl_for(node)
         if isinstance(node.op, DimShuffle):
             assert isinstance(impl, DimShuffleImpl)
+        elif isinstance(node.op, Elemwise):
+            assert isinstance(impl, ElemwiseImpl)
         else:
+            # A genuine COp (e.g. the CAReduce sum) resolves to itself.
             assert impl is node.op
 
     # Source generation works and the module is versioned (cacheable).

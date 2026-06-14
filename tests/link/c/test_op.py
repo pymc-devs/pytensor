@@ -9,6 +9,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.cmodule import GCC_compiler
+from pytensor.link.c.dispatch.basic import c_funcify
 from pytensor.link.c.op import COp, openmp_supported
 from pytensor.tensor.elemwise import Elemwise
 
@@ -167,9 +168,10 @@ def test_openmp_resolution_does_not_mutate_global_config(
     )
 
     op = Elemwise(ps.add, openmp=True)
+    impl = c_funcify(op)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        compile_args = op.c_compile_args()
+        compile_args = impl.c_compile_args()
 
     assert compile_args == (["-fopenmp"] if compiler_supports_openmp else [])
     assert op.openmp is True  # the op's request survives the compiler's capability
