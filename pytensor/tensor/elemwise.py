@@ -11,16 +11,16 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
+from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
-from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
-from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.op import COp, OpenMPOp
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import int64, upcast
+from pytensor.scalar.basic import upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -29,7 +29,6 @@ from pytensor.tensor.type import (
     continuous_dtypes,
     discrete_dtypes,
     float_dtypes,
-    lvector,
 )
 from pytensor.tensor.utils import (
     broadcast_static_dim_lengths,
@@ -40,7 +39,7 @@ from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq, unzip
 
 
-class DimShuffle(ExternalCOp):
+class DimShuffle(Op):
     """
     Allows to reorder the dimensions of a tensor or insert or remove
     broadcastable dimensions.
@@ -114,20 +113,9 @@ class DimShuffle(ExternalCOp):
     _f16_ok = True
     check_input = False
     __props__ = ("input_ndim", "new_order")
-    c_func_file = "c_code/dimshuffle.c"
-    c_func_name = "APPLY_SPECIFIC(cpu_dimshuffle)"
     view_map = {0: [0]}
 
-    @property
-    def params_type(self):
-        return ParamsType(
-            _new_order=lvector,
-            input_ndim=int64,
-        )
-
     def __init__(self, *, input_ndim: int, new_order: Sequence[int | Literal["x"]]):
-        super().__init__([self.c_func_file], self.c_func_name)
-
         if not isinstance(input_ndim, int):
             raise TypeError(f"input_ndim must be an integer, got {type(int)}")
 
@@ -187,11 +175,11 @@ class DimShuffle(ExternalCOp):
         self.is_matrix_transpose = not augment and is_left_expanded_matrix_transpose
 
     def __setstate__(self, state):
+        # Old pickles carry ExternalCOp attributes (func_files, ...); drop them,
+        # the C implementation now comes from the dispatch registry.
+        for key in ("func_files", "func_codes", "func_name", "code_sections"):
+            state.pop(key, None)
         self.__dict__.update(state)
-        if not hasattr(self, "func_files"):
-            # Perhaps we are loading an old `Op` version of DimShuffle.
-            # Let's just build the ExternalCOp.
-            super().__init__([self.c_func_file], self.c_func_name)
 
     def make_node(self, inp):
         input = as_tensor_variable(inp)
