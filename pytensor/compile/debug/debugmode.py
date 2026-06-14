@@ -1306,7 +1306,10 @@ class _VariableEquivalenceTracker(Feature):
 
 # List of default version of make thunk.
 # This is needed to know if the user overrode it.
-default_make_thunk = [get_unbound_function(COp.make_thunk)]
+default_make_thunk = [
+    get_unbound_function(Op.make_thunk),
+    get_unbound_function(COp.make_thunk),
+]
 
 
 # Debug mode cheats and initializes the linker in a different way in
@@ -1352,6 +1355,7 @@ class _Linker(LocalLinker):
         # can't import at toplevel because of circular import TODO:
         # don't do this ugly hacky way of setting the
         # filter_checks_isfinite
+        from pytensor.link.c.dispatch.basic import c_thunk_from_dispatch
 
         fgraph = self.fgraph
         input_storage_ = input_storage
@@ -1404,15 +1408,10 @@ class _Linker(LocalLinker):
             debug = hasattr(node.op, "debug_perform")
 
             try:
-                if (
-                    not self.maker.mode.check_c_code
-                    or debug
-                    or not isinstance(node.op, COp)
-                ):
+                if not self.maker.mode.check_c_code or debug:
                     raise MethodNotDefined()
 
-                node.op.prepare_node(node, storage_map, compute_map, "c")
-                thunk = node.op.make_c_thunk(
+                thunk = c_thunk_from_dispatch(
                     node, storage_map, compute_map, no_recycling
                 )
                 thunks_c.append(thunk)
@@ -1434,19 +1433,18 @@ class _Linker(LocalLinker):
             else:
                 thunks_py.append(None)
 
-            if (
-                not self.maker.mode.check_c_code
-                and thunks_py[-1] is None
-                and isinstance(node.op, COp)
-            ):
-                _logger.warning(
-                    f"Op {node.op} doesn't have a perform, forcing check of the C code"
-                )
-                node.op.prepare_node(node, storage_map, compute_map, "c")
-                thunk = node.op.make_c_thunk(
-                    node, storage_map, compute_map, no_recycling
-                )
-                thunks_c[-1] = thunk
+            if not self.maker.mode.check_c_code and thunks_py[-1] is None:
+                try:
+                    thunk = c_thunk_from_dispatch(
+                        node, storage_map, compute_map, no_recycling
+                    )
+                except (NotImplementedError, MethodNotDefined):
+                    pass
+                else:
+                    _logger.warning(
+                        f"Op {node.op} doesn't have a perform, forcing check of the C code"
+                    )
+                    thunks_c[-1] = thunk
 
             # If the op defined its own make_thunk, use the generated thunk
             if thunk_other is not None:

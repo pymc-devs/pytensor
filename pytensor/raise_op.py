@@ -1,34 +1,17 @@
 """Symbolic Op for raising an exception."""
 
-from textwrap import indent
-
 from pytensor.gradient import disconnected_type
 from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
-from pytensor.link.c.op import COp
-from pytensor.link.c.params_type import ParamsType
-from pytensor.link.c.type import Generic
-from pytensor.scalar.basic import ScalarType, as_scalar
-from pytensor.tensor.type import DenseTensorType
+from pytensor.scalar.basic import as_scalar
 
 
-class ExceptionType(Generic):
-    def __eq__(self, other):
-        return type(self) is type(other)
-
-    def __hash__(self):
-        return hash(type(self))
-
-
-exception_type = ExceptionType()
-
-
-class CheckAndRaise(COp):
+class CheckAndRaise(Op):
     """An `Op` that checks conditions and raises an exception if they fail.
 
     This `Op` returns its "value" argument if its condition arguments are all
     ``True``; otherwise, it raises a user-specified exception.
-
     """
 
     _f16_ok = True
@@ -36,7 +19,6 @@ class CheckAndRaise(COp):
     view_map = {0: [0]}
 
     check_input = False
-    params_type = ParamsType(exc_type=exception_type)
 
     def __init__(self, exc_type, msg=""):
         if not issubclass(exc_type, Exception):
@@ -96,46 +78,6 @@ class CheckAndRaise(COp):
 
     def connection_pattern(self, node):
         return [[1]] + [[0]] * (len(node.inputs) - 1)
-
-    def c_code(self, node, name, inames, onames, props):
-        if not isinstance(node.inputs[0].type, DenseTensorType | ScalarType):
-            raise NotImplementedError(
-                f"CheckAndRaise c_code not implemented for input type {node.inputs[0].type}"
-            )
-        value_name, *cond_names = inames
-        out_name = onames[0]
-        fail_code = props["fail"]
-        param_struct_name = props["params"]
-        msg = self.msg.replace('"', '\\"').replace("\n", "\\n")
-
-        all_conds = " && ".join(cond_names)
-        check = f"""
-         if(!({all_conds})) {{
-            PyObject * exc_type = {param_struct_name}->exc_type;
-            Py_INCREF(exc_type);
-            PyErr_SetString(exc_type, "{msg}");
-            Py_XDECREF(exc_type);
-            {indent(fail_code, " " * 4)}
-        }}
-        """
-
-        if isinstance(node.inputs[0].type, DenseTensorType):
-            res = f"""
-            {check}
-            Py_XDECREF({out_name});
-            {out_name} = {value_name};
-            Py_INCREF({value_name});
-            """
-        else:
-            res = f"""
-            {check}
-            {out_name} = {value_name};
-            """
-
-        return "\n".join((check, res))
-
-    def c_code_cache_version(self):
-        return (2,)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]

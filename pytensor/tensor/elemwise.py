@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from copy import copy
-from textwrap import dedent
 from typing import Literal
 
 import numpy as np
@@ -11,17 +10,12 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
+from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
-from pytensor.graph.utils import MethodNotDefined
-from pytensor.link.c.basic import failure_code
-from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
-from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
-from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import int64, upcast
-from pytensor.tensor import elemwise_cgen as cgen
+from pytensor.scalar.basic import upcast
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
 from pytensor.tensor.type import (
@@ -29,7 +23,6 @@ from pytensor.tensor.type import (
     continuous_dtypes,
     discrete_dtypes,
     float_dtypes,
-    lvector,
 )
 from pytensor.tensor.utils import (
     broadcast_static_dim_lengths,
@@ -37,10 +30,9 @@ from pytensor.tensor.utils import (
     normalize_reduce_axis,
 )
 from pytensor.tensor.variable import TensorVariable
-from pytensor.utils import uniq, unzip
 
 
-class DimShuffle(ExternalCOp):
+class DimShuffle(Op):
     """
     Allows to reorder the dimensions of a tensor or insert or remove
     broadcastable dimensions.
@@ -114,20 +106,9 @@ class DimShuffle(ExternalCOp):
     _f16_ok = True
     check_input = False
     __props__ = ("input_ndim", "new_order")
-    c_func_file = "c_code/dimshuffle.c"
-    c_func_name = "APPLY_SPECIFIC(cpu_dimshuffle)"
     view_map = {0: [0]}
 
-    @property
-    def params_type(self):
-        return ParamsType(
-            _new_order=lvector,
-            input_ndim=int64,
-        )
-
     def __init__(self, *, input_ndim: int, new_order: Sequence[int | Literal["x"]]):
-        super().__init__([self.c_func_file], self.c_func_name)
-
         if not isinstance(input_ndim, int):
             raise TypeError(f"input_ndim must be an integer, got {type(int)}")
 
@@ -187,11 +168,11 @@ class DimShuffle(ExternalCOp):
         self.is_matrix_transpose = not augment and is_left_expanded_matrix_transpose
 
     def __setstate__(self, state):
+        # Old pickles carry ExternalCOp attributes (func_files, ...); drop them,
+        # the C implementation now comes from the dispatch registry.
+        for key in ("func_files", "func_codes", "func_name", "code_sections"):
+            state.pop(key, None)
         self.__dict__.update(state)
-        if not hasattr(self, "func_files"):
-            # Perhaps we are loading an old `Op` version of DimShuffle.
-            # Let's just build the ExternalCOp.
-            super().__init__([self.c_func_file], self.c_func_name)
 
     def make_node(self, inp):
         input = as_tensor_variable(inp)
@@ -310,7 +291,7 @@ class DimShufflePrinter(Printer):
 pprint.assign(DimShuffle, DimShufflePrinter())
 
 
-class Elemwise(OpenMPOp):
+class Elemwise(Op):
     """Generalizes a scalar `Op` to tensors.
 
     All the inputs must have the same number of dimensions. When the
@@ -380,7 +361,7 @@ class Elemwise(OpenMPOp):
             nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
         self.nfunc_spec = nfunc_spec
         self.__setstate__(self.__dict__)
-        super().__init__(openmp=openmp)
+        self.openmp = config.openmp if openmp is None else openmp
 
     def __getstate__(self):
         d = copy(self.__dict__)
@@ -390,7 +371,9 @@ class Elemwise(OpenMPOp):
         return d
 
     def __setstate__(self, d):
-        super().__setstate__(d)
+        self.__dict__.update(d)
+        if not hasattr(self, "openmp"):
+            self.openmp = False
         self.ufunc = None
         self.nfunc = None
         self.inplace_pattern = frozendict(self.inplace_pattern)
@@ -769,380 +752,6 @@ class Elemwise(OpenMPOp):
         out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
         return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
 
-    def _c_all(self, node, nodename, inames, onames, sub):
-        # Some `Op`s directly call `Elemwise._c_all` or `Elemwise.c_code`
-        # To not request all of them to call prepare_node(), do it here.
-        # There is no harm if it get called multiple times.
-        if not hasattr(node.tag, "fake_node"):
-            self.prepare_node(node, None, None, "c")
-        _inames = inames
-        _onames = onames
-
-        inames = uniq(inames)
-        inputs = uniq(node.inputs)
-        # assert that inames and inputs order stay consistent.
-        # This is to protect again futur change of uniq.
-        assert len(inames) == len(inputs)
-        ii, iii = unzip(
-            uniq(list(zip(_inames, node.inputs, strict=True))), n=2, strict=True
-        )
-        assert all(x == y for x, y in zip(ii, inames, strict=True))
-        assert all(x == y for x, y in zip(iii, inputs, strict=True))
-
-        defines = ""
-        undefs = ""
-
-        # The destroy map is a map of output indices to input indices
-        # that overwrite them.  We just convert them to the actual
-        # Variables.
-        dmap = {
-            node.outputs[o]: [node.inputs[i]] for o, i in self.inplace_pattern.items()
-        }
-
-        # dtypes of the inputs
-        idtypes = [input.type.dtype_specs()[1] for input in inputs]
-
-        # These are the outputs that we will need to allocate
-        # (output, name, name of the c type), transposed
-        real = list(
-            zip(
-                *[
-                    (r, s, r.type.dtype_specs()[1])
-                    for r, s in zip(node.outputs, onames, strict=True)
-                    if r not in dmap
-                ],
-                strict=True,
-            )
-        )
-        if real:
-            real_outputs, real_onames, real_odtypes = real
-        else:
-            real_outputs, real_onames, real_odtypes = [], [], []
-
-        # Outputs that are aliased with an input (inplace)
-        # (output, name), transposed (c type name not needed since we don't
-        # need to allocate.
-        aliased = list(
-            zip(
-                *[
-                    (r, s)
-                    for (r, s) in zip(node.outputs, onames, strict=True)
-                    if r in dmap
-                ],
-                strict=True,
-            )
-        )
-        if aliased:
-            aliased_outputs, aliased_onames = aliased
-        else:
-            aliased_outputs, aliased_onames = [], []
-
-        # for each input:
-        # same as range(ndim), but with 'x' at all broadcastable positions
-        orders = [
-            [(s == 1 and "x") or i for i, s in enumerate(input.type.shape)]
-            for input in inputs
-        ]
-
-        # number of nested loops we will need (all inputs have same
-        # dimensionality)
-        nnested = len(orders[0])
-        sub = dict(sub)
-        for i, (input, iname) in enumerate(zip(inputs, inames, strict=True)):
-            # the c generators will substitute the input names for
-            # references to loop variables lv0, lv1, ...
-            sub[f"lv{i}"] = iname
-
-        decl = cgen.make_declare(orders, idtypes, sub)
-        checks = cgen.make_checks(orders, idtypes, sub)
-
-        # Check if all inputs (except broadcasted scalar) are fortran.
-        # In that case, create a fortran output ndarray.
-        z = list(zip(inames, inputs, strict=True))
-        alloc_fortran = " && ".join(
-            f"PyArray_ISFORTRAN({arr})"
-            for arr, var in z
-            if not all(s == 1 for s in var.type.shape)
-        )
-        # If it is a scalar, make it c contig to prevent problem with
-        # NumPy C and F contig not always set as both of them.
-        if len(alloc_fortran) == 0:
-            alloc_fortran = "0"
-
-        alloc = ""
-        # We loop over the "real" outputs, i.e., those that are not
-        # inplace (must be allocated) and we declare/allocate/check
-        # them
-        for output, oname, odtype in zip(
-            real_outputs, real_onames, real_odtypes, strict=True
-        ):
-            i += 1  # before this loop, i = number of inputs
-            sub[f"lv{i}"] = oname
-            sub["olv"] = oname
-            alloc += cgen.make_declare(
-                [list(range(nnested))], [odtype], dict(sub, lv0=oname)
-            )
-            alloc += cgen.make_alloc(orders, odtype, sub, fortran=alloc_fortran)
-            alloc += cgen.make_checks(
-                [list(range(nnested))], [odtype], dict(sub, lv0=oname)
-            )
-        olv_index = i  # index of the last output
-
-        # We loop over the "aliased" outputs, i.e., those that are
-        # inplace (overwrite the contents of one of the inputs) and
-        # make the output pointers point to their corresponding input
-        # pointers.
-        for output, oname in zip(aliased_outputs, aliased_onames, strict=True):
-            olv_index = inputs.index(dmap[output][0])
-            iname = inames[olv_index]
-            # We make the output point to the corresponding input and
-            # decrease the reference of whatever the output contained
-            # prior to this
-            alloc += f"""
-            if ({oname}) {{
-                Py_XDECREF({oname});
-            }}
-            {oname} = {iname};
-            Py_XINCREF({oname});
-            """
-            # We alias the scalar variables
-            defines += f"#define {oname}_i {iname}_i\n"
-            undefs += f"#undef {oname}_i\n"
-
-        # Note: here, olv_index is either the index of the last output
-        # which is allocated, OR, if there are any aliased outputs,
-        # the index of the last of these aliased outputs.
-
-        # We generate the C code of the inner loop using the scalar op
-        if self.openmp:
-            # If we are using openmp, we need to get rid of the "goto"
-            # statement in sub['fail']. For now we recreate it here.
-            fail = failure_code(sub, use_goto=False)
-        else:
-            fail = sub["fail"]
-        task_code = self.scalar_op.c_code(
-            node.tag.fake_node,
-            nodename + "_scalar_",
-            [f"{s}_i" for s in _inames],
-            [f"{s}_i" for s in onames],
-            dict(sub, fail=fail),
-        )
-        code = f"""
-        {{
-            {defines}
-            {task_code}
-            {undefs}
-        }}
-        """
-
-        loop_orders = orders + [list(range(nnested))] * len(real_onames)
-        dtypes = idtypes + list(real_odtypes)
-        if all(
-            [o.ndim <= 1 for o in node.outputs]
-            or
-            # Use simpler code when output ndim == 0 or 1
-            # or for broadcated scalar.
-            all(s == 1 for s in node.outputs[0].type.shape)
-        ):
-            if nnested:
-                all_code = [("", "")] * (nnested - 1) + [("", code)] + [""]
-            else:
-                all_code = [code]
-            if len(all_code) == 1:
-                # No loops
-                task_decl = "".join(
-                    f"{dtype}& {name}_i = *{name}_iter;\n"
-                    for name, dtype in zip(
-                        inames + list(real_onames),
-                        idtypes + list(real_odtypes),
-                        strict=True,
-                    )
-                )
-
-                preloops = {}
-                for i, (loop_order, dtype) in enumerate(
-                    zip(loop_orders, dtypes, strict=True)
-                ):
-                    for j, index in enumerate(loop_order):
-                        if index != "x":
-                            preloops.setdefault(j, "")
-                            preloops[j] += (
-                                f"%(lv{i})s_iter = ({dtype}*)(PyArray_DATA(%(lv{i})s));\n"
-                            ) % sub
-                            break
-                    else:  # all broadcastable
-                        preloops.setdefault(0, "")
-                        preloops[0] += (
-                            f"%(lv{i})s_iter = ({dtype}*)(PyArray_DATA(%(lv{i})s));\n"
-                        ) % sub
-
-                init_array = preloops.get(0, " ")
-                loop = f"""
-                {{
-                  {defines}
-                  {init_array}
-                  {task_decl}
-                  {task_code}
-                  {undefs}
-                }}
-                """
-            else:
-                loop = cgen.make_loop(
-                    loop_orders=loop_orders,
-                    dtypes=dtypes,
-                    loop_tasks=all_code,
-                    sub=sub,
-                    openmp=self.openmp,
-                )
-        else:
-            loop = cgen.make_reordered_loop(
-                init_loop_orders=loop_orders,
-                olv_index=olv_index,
-                dtypes=dtypes,
-                inner_task=code,
-                sub=sub,
-                openmp=self.openmp,
-            )
-
-        # If all inputs and outputs are contiguous
-        # and the scalar op define optimized code for that case
-        # use it! The scalar_op needs to check the type-level shapes itself.
-        if (
-            all(o.ndim >= 1 for o in node.outputs)
-            and
-            # Don't use the contig code for broadcasted scalar.
-            not all(s == 1 for s in node.outputs[0].type.shape)
-        ):
-            contig = None
-            try:
-                contig = self.scalar_op.c_code_contiguous(
-                    node, nodename + "_scalar_contig_", _inames, onames, sub
-                )
-            except MethodNotDefined:
-                # Try to make one generic version, this will help the
-                # compiler to vectorize the code as their won't be as
-                # many ptr and the stride will be hard coded.
-                if all(
-                    # io.type.shape == node.outputs[1].type.shape
-                    # Elemwise does not specify non-broadcastable static/type-levelshape
-                    # information for its outputs yet
-                    node.outputs[0].type.is_super(io.type)
-                    for io in node.inputs + node.outputs
-                ) and (
-                    len(node.inputs) <= 1
-                    # If either one of the inputs has a `None` shape, we cannot
-                    # assume they will have the same size
-                    or all(
-                        len(set(inp_shape)) == 1 and None not in inp_shape
-                        for inp_shape in zip(
-                            *(inp.type.shape for inp in node.inputs), strict=True
-                        )
-                    )
-                ):
-                    z = onames[0]
-                    contig = f"""
-                    // All output have the same size
-                    npy_intp n = PyArray_SIZE({z});
-                    """
-                    index = ""
-                    for x, var in zip(
-                        inames + onames, inputs + node.outputs, strict=True
-                    ):
-                        if not all(s == 1 for s in var.type.shape):
-                            contig += f"""
-            dtype_{x} * {x}_ptr = (dtype_{x}*) PyArray_DATA({x});
-                            """
-                            index += f"""
-            dtype_{x}& {x}_i = {x}_ptr[i];
-                            """
-                        else:
-                            contig += f"""
-            dtype_{x}& {x}_i = ((dtype_{x}*) PyArray_DATA({x}))[0];
-                            """
-                    if self.openmp:
-                        contig += f"""#pragma omp parallel for if(n>={int(config.openmp_elemwise_minsize)})
-                        """
-                    contig += f"""
-                    for(int i=0; i<n; i++){{
-                        {index}
-                        {task_code};
-                    }}
-                    """
-            if contig is not None:
-                z = list(zip(inames + onames, inputs + node.outputs, strict=True))
-                all_broadcastable = all(s == 1 for s in var.type.shape)
-                cond1 = " && ".join(
-                    f"PyArray_ISCONTIGUOUS({arr})"
-                    for arr, var in z
-                    if not all_broadcastable
-                )
-                cond2 = " && ".join(
-                    f"PyArray_ISFORTRAN({arr})"
-                    for arr, var in z
-                    if not all_broadcastable
-                )
-                loop = f"""
-            if(({cond1}) || ({cond2})){{
-                {contig}
-            }}else{{
-                {loop}
-            }}
-            """
-        return decl, checks, alloc, loop, ""
-
-    def c_code(self, node, nodename, inames, onames, sub):
-        if (
-            any(i.dtype == "float16" for i in node.inputs)
-            or any(o.dtype == "float16" for o in node.outputs)
-            or
-            # This is for Composite
-            getattr(self.scalar_op, "inner_float16", False)
-        ):
-            # Disable C code for float16 vars
-            raise NotImplementedError()
-        code = "\n".join(self._c_all(node, nodename, inames, onames, sub))
-        return code
-
-    def c_headers(self, **kwargs):
-        return ["<vector>", "<algorithm>"]
-
-    def c_header_dirs(self, **kwargs):
-        return self.scalar_op.c_header_dirs(**kwargs)
-
-    def c_support_code(self, **kwargs):
-        return self.scalar_op.c_support_code(**kwargs)
-
-    def c_support_code_apply(self, node, nodename):
-        support_code = self.scalar_op.c_support_code_apply(node, nodename + "_scalar_")
-        return support_code
-
-    def c_code_cache_version_apply(self, node):
-        version = [17]  # the version corresponding to the c code in this Op
-
-        # now we insert versions for the ops on which we depend...
-        scalar_node = Apply(
-            self.scalar_op,
-            [
-                get_scalar_type(dtype=input.type.dtype).make_variable()
-                for input in node.inputs
-            ],
-            [
-                get_scalar_type(dtype=output.type.dtype).make_variable()
-                for output in node.outputs
-            ],
-        )
-        version.append(self.scalar_op.c_code_cache_version_apply(scalar_node))
-        version.extend(
-            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
-            for i in node.inputs + node.outputs
-        )
-        version.append(("openmp", self.openmp))
-        version.append(("openmp_elemwise_minsize", config.openmp_elemwise_minsize))
-        if all(version):
-            return tuple(version)
-        else:
-            return ()
-
     def outer(self, x, y):
         from pytensor.tensor.basic import expand_dims
 
@@ -1154,7 +763,7 @@ class Elemwise(OpenMPOp):
         return self(x_, y_)
 
 
-class CAReduce(COp):
+class CAReduce(Op):
     """Reduces a scalar operation along specified axes.
 
     The scalar op should be both commutative and associative.
@@ -1190,6 +799,10 @@ class CAReduce(COp):
     """
 
     __props__ = ("scalar_op", "axis", "dtype", "acc_dtype", "upcast_discrete_output")
+
+    # When True, reducing a zero-sized axis is an error (set by reductions with
+    # no identity element, e.g. Max/Min).
+    error_on_empty_reduce_axis = False
 
     def __init__(
         self,
@@ -1440,200 +1053,6 @@ class CAReduce(COp):
         if axis is None:
             return ((),)
         return ([ishape[i] for i in range(node.inputs[0].type.ndim) if i not in axis],)
-
-    def _c_all(self, node, name, input_names, output_names, sub):
-        [inp] = node.inputs
-        [out] = node.outputs
-        ndim = inp.type.ndim
-
-        [inp_name] = input_names
-        [out_name] = output_names
-
-        inp_dtype = inp.type.dtype_specs()[1]
-        out_dtype = out.type.dtype_specs()[1]
-
-        acc_dtype = getattr(self, "acc_dtype", None)
-
-        if acc_dtype is not None:
-            if acc_dtype == "float16":
-                raise MethodNotDefined("no c_code for float16")
-            acc_type = TensorType(shape=node.outputs[0].type.shape, dtype=acc_dtype)
-            acc_dtype = acc_type.dtype_specs()[1]
-        else:
-            acc_dtype = out_dtype
-
-        axis = self.axis
-        if axis is None:
-            axis = list(range(inp.type.ndim))
-
-        if len(axis) == 0:
-            # This is just an Elemwise cast operation
-            # The acc_dtype is never a downcast compared to the input dtype
-            # So we just need a cast to the output dtype.
-            var = pytensor.tensor.basic.cast(inp, node.outputs[0].dtype)
-            if var is inp:
-                var = Elemwise(scalar_identity)(inp)
-            assert var.dtype == node.outputs[0].dtype
-            return var.owner.op._c_all(var.owner, name, input_names, output_names, sub)
-
-        inp_dims = list(range(ndim))
-        non_reduced_dims = [i for i in inp_dims if i not in axis]
-        counter = iter(range(ndim))
-        acc_dims = ["x" if i in axis else next(counter) for i in range(ndim)]
-
-        sub = sub.copy()
-        sub["lv0"] = inp_name
-        sub["lv1"] = out_name
-        sub["olv"] = out_name
-
-        if acc_dtype != out_dtype:
-            # Create an accumulator variable different from the output
-            acc_name = "acc"
-            setup = acc_type.c_declare(acc_name, sub) + acc_type.c_init(acc_name, sub)
-        else:
-            # the output is the accumulator variable
-            acc_name = out_name
-            setup = ""
-
-        # Define strides of input array
-        setup += cgen.make_declare(
-            [inp_dims], [inp_dtype], sub, compute_stride_jump=False
-        ) + cgen.make_checks([inp_dims], [inp_dtype], sub, compute_stride_jump=False)
-
-        # Define strides of output array and allocate it
-        out_sub = sub | {"lv0": out_name}
-        alloc = (
-            cgen.make_declare(
-                [acc_dims], [out_dtype], out_sub, compute_stride_jump=False
-            )
-            + cgen.make_alloc([non_reduced_dims], out_dtype, sub)
-            + cgen.make_checks(
-                [acc_dims], [out_dtype], out_sub, compute_stride_jump=False
-            )
-        )
-
-        if acc_dtype != out_dtype:
-            # Define strides of accumulation buffer and allocate it
-            sub["lv1"] = acc_name
-            sub["olv"] = acc_name
-
-            acc_sub = sub | {"lv0": acc_name}
-            alloc += (
-                cgen.make_declare(
-                    [acc_dims], [acc_dtype], acc_sub, compute_stride_jump=False
-                )
-                + cgen.make_alloc([non_reduced_dims], acc_dtype, sub)
-                + cgen.make_checks(
-                    [acc_dims], [acc_dtype], acc_sub, compute_stride_jump=False
-                )
-            )
-
-        identity = self.scalar_op.identity
-        if np.isposinf(identity):
-            if inp.type.dtype in ("float32", "float64"):
-                identity = "__builtin_inf()"
-            elif inp.type.dtype.startswith("uint") or inp.type.dtype == "bool":
-                identity = "1"
-            else:
-                identity = "NPY_MAX_" + str(inp.type.dtype).upper()
-        elif np.isneginf(identity):
-            if inp.type.dtype in ("float32", "float64"):
-                identity = "-__builtin_inf()"
-            elif inp.type.dtype.startswith("uint") or inp.type.dtype == "bool":
-                identity = "0"
-            else:
-                identity = "NPY_MIN_" + str(inp.type.dtype).upper()
-        elif identity is None:
-            raise TypeError(f"The {self.scalar_op} does not define an identity.")
-
-        initial_value = f"{acc_name}_i = {identity};"
-
-        inner_task = self.scalar_op.c_code(
-            Apply(
-                self.scalar_op,
-                [
-                    get_scalar_type(dtype=iv.type.dtype).make_variable()
-                    for iv in (node.inputs * 2)
-                ],
-                [
-                    get_scalar_type(dtype=ov.type.dtype).make_variable()
-                    for ov in node.outputs
-                ],
-            ),
-            None,
-            [f"{acc_name}_i", f"{inp_name}_i"],
-            [f"{acc_name}_i"],
-            sub,
-        )
-
-        if out.type.ndim == 0:
-            # Simple case where everything is reduced, no need for loop ordering
-            loop = cgen.make_complete_loop_careduce(
-                inp_var=inp_name,
-                acc_var=acc_name,
-                inp_dtype=inp_dtype,
-                acc_dtype=acc_dtype,
-                initial_value=initial_value,
-                inner_task=inner_task,
-                fail_code=sub["fail"],
-            )
-        else:
-            loop = cgen.make_reordered_loop_careduce(
-                inp_var=inp_name,
-                acc_var=acc_name,
-                inp_dtype=inp_dtype,
-                acc_dtype=acc_dtype,
-                inp_ndim=ndim,
-                reduction_axes=axis,
-                initial_value=initial_value,
-                inner_task=inner_task,
-            )
-
-        if acc_dtype != out_dtype:
-            cast = dedent(
-                f"""
-                PyArray_CopyInto({out_name}, {acc_name});
-                {acc_type.c_cleanup(acc_name, sub)}
-                """
-            )
-        else:
-            cast = ""
-
-        return setup, alloc, loop, cast
-
-    def c_code(self, node, name, inames, onames, sub):
-        code = "\n".join(self._c_all(node, name, inames, onames, sub))
-        return code
-
-    def c_headers(self, **kwargs):
-        # Sometimes, Elemwise's c_code is returned, so we need its headers
-        return ["<vector>", "<algorithm>"]
-
-    def c_code_cache_version_apply(self, node):
-        # the version corresponding to the c code in this Op
-        version = [11]
-
-        # now we insert versions for the ops on which we depend...
-        scalar_node = Apply(
-            self.scalar_op,
-            [
-                get_scalar_type(dtype=input.type.dtype).make_variable()
-                for input in node.inputs
-            ],
-            [
-                get_scalar_type(dtype=output.type.dtype).make_variable()
-                for output in node.outputs
-            ],
-        )
-        version.append(self.scalar_op.c_code_cache_version_apply(scalar_node))
-        version.extend(
-            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
-            for i in node.inputs + node.outputs
-        )
-        if all(version):
-            return tuple(version)
-        else:
-            return ()
 
 
 def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
