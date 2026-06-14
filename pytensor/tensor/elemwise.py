@@ -15,7 +15,7 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
-from pytensor.link.c.op import COp, OpenMPOp
+from pytensor.link.c.op import COp, openmp_supported
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
@@ -298,7 +298,7 @@ class DimShufflePrinter(Printer):
 pprint.assign(DimShuffle, DimShufflePrinter())
 
 
-class Elemwise(OpenMPOp):
+class Elemwise(COp):
     """Generalizes a scalar `Op` to tensors.
 
     All the inputs must have the same number of dimensions. When the
@@ -368,7 +368,7 @@ class Elemwise(OpenMPOp):
             nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
         self.nfunc_spec = nfunc_spec
         self.__setstate__(self.__dict__)
-        super().__init__(openmp=openmp)
+        self.openmp = config.openmp if openmp is None else openmp
 
     def __getstate__(self):
         d = copy(self.__dict__)
@@ -378,10 +378,22 @@ class Elemwise(OpenMPOp):
         return d
 
     def __setstate__(self, d):
-        super().__setstate__(d)
+        self.__dict__.update(d)
+        if not hasattr(self, "openmp"):
+            self.openmp = False
         self.ufunc = None
         self.nfunc = None
         self.inplace_pattern = frozendict(self.inplace_pattern)
+
+    def _use_openmp(self) -> bool:
+        """Return whether to emit OpenMP code.
+
+        True when this op requests OpenMP and the compiler supports it.
+        """
+        return self.openmp and openmp_supported()
+
+    def c_compile_args(self, **kwargs):
+        return ["-fopenmp"] if self._use_openmp() else []
 
     def make_scalar_node(self, *inputs):
         """Create a scalar Apply node matching the dtypes of tensor inputs.
