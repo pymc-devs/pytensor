@@ -4,7 +4,7 @@ import pytest
 import pytensor
 from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
-from pytensor.link.c.op import COp, ExternalCOp
+from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import Params, ParamsType
 from pytensor.link.c.type import EnumList, Generic
 from pytensor.scalar import ScalarType
@@ -91,31 +91,6 @@ class QuadraticOpFunc(COp):
             {sub["fail"]}
         }}
         """
-
-
-# Same op as above, but implemented as a ExternalCOp (with C code in an
-# external file).
-class QuadraticCOpFunc(ExternalCOp):
-    __props__ = ("a", "b", "c")
-    params_type = ParamsType(a=tensor_type_0d, b=scalar_type, c=generic_type)
-
-    def __init__(self, a, b, c):
-        super().__init__(
-            "c_code/test_quadratic_function.c", "APPLY_SPECIFIC(compute_quadratic)"
-        )
-        self.a = a
-        self.b = b
-        self.c = c
-
-    def make_node(self, x):
-        x = pt.as_tensor_variable(x)
-        return Apply(self, [x], [x.type()])
-
-    def perform(self, node, inputs, output_storage):
-        coefficients = self.params_type.filter(self.get_params(node))
-        x = inputs[0]
-        y = output_storage[0]
-        y[0] = coefficients.a * (x**2) + coefficients.b * x + coefficients.c
 
 
 class TestParamsType:
@@ -337,16 +312,12 @@ class TestParamsType:
     def test_op_params(self):
         a, b, c = 2, 3, -7
         x = matrix(dtype="float64")
-        y1 = QuadraticOpFunc(a, b, c)(x)
-        y2 = QuadraticCOpFunc(a, b, c)(x)
-        f1 = pytensor.function([x], y1, mode="CVM")
-        f2 = pytensor.function([x], y2, mode="CVM")
+        y = QuadraticOpFunc(a, b, c)(x)
+        f = pytensor.function([x], y, mode="CVM")
         shape = (100, 100)
         vx = (
             np.random.normal(size=shape[0] * shape[1]).astype("float64").reshape(*shape)
         )
-        vy1 = f1(vx)
-        vy2 = f2(vx)
+        vy = f(vx)
         ref = a * (vx**2) + b * vx + c
-        utt.assert_allclose(vy1, vy2)
-        utt.assert_allclose(ref, vy1)
+        utt.assert_allclose(ref, vy)

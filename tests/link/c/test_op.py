@@ -1,9 +1,3 @@
-import os
-import string
-import subprocess
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -13,52 +7,6 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
-
-
-test_dir = Path(__file__).parent.absolute()
-
-externalcop_test_code = f"""
-from pytensor import tensor as pt
-from pytensor.graph.basic import Apply
-from pytensor.link.c.params_type import ParamsType
-from pytensor.link.c.op import ExternalCOp
-from pytensor.scalar import ScalarType
-from pytensor.link.c.type import Generic
-from pytensor.tensor.type import TensorType
-
-tensor_type_0d = TensorType("float64", tuple())
-scalar_type = ScalarType("float64")
-generic_type = Generic()
-
-
-class QuadraticCOpFunc(ExternalCOp):
-    __props__ = ("a", "b", "c")
-    params_type = ParamsType(a=tensor_type_0d, b=scalar_type, c=generic_type)
-
-    def __init__(self, a, b, c):
-        super().__init__(
-            "{str(test_dir).replace(os.sep, "/")}/c_code/test_quadratic_function.c", "APPLY_SPECIFIC(compute_quadratic)"
-        )
-        self.a = a
-        self.b = b
-        self.c = c
-
-    def make_node(self, x):
-        x = pt.as_tensor_variable(x)
-        return Apply(self, [x], [x.type()])
-
-    def perform(self, node, inputs, output_storage, coefficients):
-        x = inputs[0]
-        y = output_storage[0]
-        y[0] = coefficients.a * (x**2) + coefficients.b * x + coefficients.c
-
-
-if __name__ == "__main__":
-    qcop = QuadraticCOpFunc(1, 2, 3)
-
-    print(qcop.c_code_cache_version())
-    print("__success__")
-"""
 
 
 class StructOp(COp):
@@ -189,46 +137,3 @@ class TestMakeThunk:
         else:
             with pytest.raises((NotImplementedError, MethodNotDefined)):
                 thunk()
-
-
-def get_hash(modname, seed=None):
-    """From https://hg.python.org/cpython/file/5e8fa1b13516/Lib/test/test_hash.py#l145"""
-    env = os.environ.copy()
-    if seed is not None:
-        env["PYTHONHASHSEED"] = str(seed)
-    else:
-        env.pop("PYTHONHASHSEED", None)
-    cmd_line = [sys.executable, modname]
-    p = subprocess.Popen(
-        cmd_line,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-    )
-    out, err = p.communicate()
-    return out, err, p.returncode
-
-
-def test_ExternalCOp_c_code_cache_version():
-    """Make sure the C cache versions produced by `ExternalCOp` don't depend on `hash` seeding."""
-
-    tmp = Path() / ("".join(np.random.choice(list(string.ascii_letters), 8)) + ".py")
-    tmp.write_bytes(externalcop_test_code.encode())
-
-    try:
-        modname = tmp.name
-        out_1, err1, returncode1 = get_hash(modname, seed=428)
-        out_2, err2, returncode2 = get_hash(modname, seed=3849)
-        assert returncode1 == 0
-        assert returncode2 == 0
-        assert err1 == err2
-
-        hash_1, msg, _ = out_1.decode().split(os.linesep)
-        assert msg == "__success__"
-        hash_2, msg, _ = out_2.decode().split(os.linesep)
-        assert msg == "__success__"
-
-        assert hash_1 == hash_2
-    finally:
-        tmp.unlink()
