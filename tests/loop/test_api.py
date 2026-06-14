@@ -401,3 +401,23 @@ def test_sequence_lowering():
     info = scan_node.op.info
     assert info.n_seqs == 2
     assert info.n_non_seqs == 0
+
+
+def test_sequence_grad_is_traced():
+    # The gradient wrt a sequence is built from one nit-sot trace per tap of the
+    # backward Scan, not a per-step inc_subtensor accumulator. Differentiating a
+    # carry final (no forward nit-sot) leaves the per-tap cotangents as the only
+    # nit-sots in the graph.
+    x = pt.vector("x")
+    x0 = pt.scalar("x0")
+    final, _ = loop(
+        lambda c, xt: (c + xt[0] * xt[1], None), init=x0, xs=shift(x, by=[0, 1])
+    )
+    fn = pytensor.function([x, x0], pytensor.grad(final, x))
+
+    scans = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, LegacyScan)]
+    assert sum(n.op.info.n_nit_sot for n in scans) == 2  # one cotangent trace per tap
+
+    # final = x0 + sum_t x[t]*x[t+1]; d/dx[k] = x[k-1] + x[k+1]
+    xv = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_allclose(fn(xv, 0.0), [2.0, 4.0, 6.0, 8.0, 4.0])

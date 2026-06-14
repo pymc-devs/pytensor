@@ -24,6 +24,7 @@ from pytensor.tensor import (
     as_tensor,
     concatenate,
     get_scalar_constant_value,
+    inc_subtensor,
     invert,
     shape_padleft,
     zeros_like,
@@ -593,6 +594,23 @@ class Scan(Op):
             and is_connected(trace_grads[self.n_states + k])
         ]
 
+        # Sequence constants (verified const[idx + k] reads) build their gradient
+        # from per-tap backward traces placed once after the Scan, instead of a
+        # per-step inc_subtensor accumulator. Only valid when the index starts at
+        # 0 (so forward step t reads position t + k); otherwise the constant falls
+        # back to the accumulator path.
+        idx_pos = self.idx_state
+        seq_eligible = (
+            bool(self.sequence_reads)
+            and idx_pos is not None
+            and isinstance(init_states[idx_pos].type, DenseTensorType)
+            and _scalar_constant(init_states[idx_pos]) == 0
+        )
+        diff_seq_idxs = [
+            j for j in diff_const_idxs if seq_eligible and j in self.sequence_reads
+        ]
+        diff_acc_idxs = [j for j in diff_const_idxs if j not in diff_seq_idxs]
+
         # A gradient is only computable if there is something differentiable to
         # pull a connected cotangent through (a carry or an output) and something
         # to seed the backward Scan with (a carry or a constant).
@@ -642,6 +660,16 @@ class Scan(Op):
         inner_constants = update_fg.inputs[self.n_states :]
         inner_next_states = update_fg.outputs[1:]
 
+        # Locate the inner read variables const[idx + k] of the sequence constants;
+        # the backward Scan traces their cotangents (one trace per read).
+        seq_state_inputs = set(inner_prev_states)
+        seq_reads_info = []  # (const_idx, tap, inner_read_var)
+        for j in diff_seq_idxs:
+            for client, position in update_fg.clients[inner_constants[j]]:
+                read = match_sequence_read(client, position, seq_state_inputs)
+                assert read is not None  # Verified at op construction
+                seq_reads_info.append((j, read[1], client.outputs[0]))
+
         state_cotangents = [inner_next_states[i].type() for i in diff_state_idxs]
         output_cotangents = [
             inner_next_states[self.n_states + k].type() for k in diff_output_idxs
@@ -659,7 +687,8 @@ class Scan(Op):
             ),
             wrt=(
                 [inner_prev_states[i] for i in diff_state_idxs]
-                + [inner_constants[j] for j in diff_const_idxs]
+                + [inner_constants[j] for j in diff_acc_idxs]
+                + [read_var for (_j, _tap, read_var) in seq_reads_info]
             ),
             cotangents=state_cotangents + output_cotangents,
             disconnected_inputs="ignore",
@@ -689,12 +718,14 @@ class Scan(Op):
             )
             for i in diff_state_idxs
         ]
-        init_accs = [zeros_like(constants[j]) for j in diff_const_idxs]
+        init_accs = [zeros_like(constants[j]) for j in diff_acc_idxs]
 
         n_prev = len(dense_state_idxs)
         n_traced = len(traced_grad_idxs)
         n_outs = len(diff_output_idxs)
         n_lambdas = len(diff_state_idxs)
+        n_acc = len(diff_acc_idxs)
+        n_reads = len(seq_reads_info)
 
         def backward_step(*args):
             prev_state_elems = args[:n_prev]
@@ -702,7 +733,7 @@ class Scan(Op):
             output_grad_elems = args[n_prev + n_traced : n_prev + n_traced + n_outs]
             base = n_prev + n_traced + n_outs
             lambdas = args[base : base + n_lambdas]
-            accs = args[base + n_lambdas : -len(constants) or None]
+            accs = args[base + n_lambdas : base + n_lambdas + n_acc]
             outer_constants = args[len(args) - len(constants) :]
 
             total_lambdas = list(lambdas)
@@ -734,13 +765,23 @@ class Scan(Op):
             ]
             new_accs = [
                 self.constant_types[j].filter_variable(accumulate_grad(acc, r))
-                for j, acc, r in zip(diff_const_idxs, accs, results[n_lambdas:])
+                for j, acc, r in zip(
+                    diff_acc_idxs, accs, results[n_lambdas : n_lambdas + n_acc]
+                )
             ]
-            return [*new_lambdas, *new_accs]
+            # Per-step cotangents of the sequence reads, traced (not accumulated)
+            read_cotangents = [
+                read_var.type.filter_variable(r)
+                for (_j, _tap, read_var), r in zip(
+                    seq_reads_info, results[n_lambdas + n_acc :]
+                )
+            ]
+            return [*new_lambdas, *new_accs, *read_cotangents]
 
         backward_outs = scan(
             backward_step,
-            init_states=[*init_lambdas, *init_accs],
+            # `None` inits make the read cotangents nit-sot outputs (traced, not fed back)
+            init_states=[*init_lambdas, *init_accs, *([None] * n_reads)],
             sequences=[*prev_state_seqs, *trace_grad_seqs, *output_grad_seqs],
             non_sequences=list(constants),
             n_steps=n_iters,
@@ -748,7 +789,16 @@ class Scan(Op):
         if not isinstance(backward_outs, list):
             backward_outs = [backward_outs]
         final_lambdas = [trace[-1] for trace in backward_outs[:n_lambdas]]
-        final_accs = [trace[-1] for trace in backward_outs[n_lambdas:]]
+        final_accs = [
+            trace[-1] for trace in backward_outs[n_lambdas : n_lambdas + n_acc]
+        ]
+        read_traces = backward_outs[n_lambdas + n_acc :]
+
+        # A sequence gradient is its per-tap cotangent traces (reversed back to
+        # forward order) placed at the slice each tap read, summed over taps.
+        seq_grads = {j: zeros_like(constants[j]) for j in diff_seq_idxs}
+        for (j, tap, _read_var), trace in zip(seq_reads_info, read_traces):
+            seq_grads[j] = inc_subtensor(seq_grads[j][tap : tap + n_iters], trace[::-1])
 
         input_grads = [disconnected()]  # max_iters
         for i, init_state in enumerate(init_states):
@@ -757,8 +807,10 @@ class Scan(Op):
             else:
                 input_grads.append(default_grad(1 + i, init_state))
         for j, constant_inp in enumerate(constants):
-            if j in diff_const_idxs:
-                input_grads.append(final_accs[diff_const_idxs.index(j)])
+            if j in diff_seq_idxs:
+                input_grads.append(self.constant_types[j].filter_variable(seq_grads[j]))
+            elif j in diff_acc_idxs:
+                input_grads.append(final_accs[diff_acc_idxs.index(j)])
             else:
                 input_grads.append(default_grad(1 + self.n_states + j, constant_inp))
         return input_grads
