@@ -5,9 +5,14 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from pytensor.compile.aliasing import add_supervisor_to_fgraph, insert_deepcopy
+from pytensor.compile.aliasing import (
+    add_supervisor_to_fgraph,
+    alias_root,
+    insert_deepcopy,
+)
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA, get_mode
+from pytensor.graph.basic import Constant
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -104,7 +109,14 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         accept_inplace=True,
     )
     rewriter(fgraph)
-    untraced_sit_sot_inner_outputs = set(op.inner_untraced_sit_sot_outs(fgraph.outputs))
+    # Constant-rooted outputs must not be borrowed, so that `insert_deepcopy`
+    # protects them. Otherwise the generated while loop would rebind the state
+    # storage to a numba-frozen (readonly) global array, which segfaults.
+    untraced_sit_sot_inner_outputs = {
+        out
+        for out in op.inner_untraced_sit_sot_outs(fgraph.outputs)
+        if not isinstance(alias_root(out), Constant)
+    }
     output_specs = [
         Out(x, borrow=x in untraced_sit_sot_inner_outputs) for x in fgraph.outputs
     ]
