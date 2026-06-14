@@ -237,23 +237,33 @@ def c_funcify_wrong(op, node=None, **kwargs):
 def test_cop_graph_resolves_to_identity():
     # An unregistered COp node resolves to itself, so CLinker calls the op's own
     # c_code/cache-version methods. A registered op resolves to its detached impl.
-    from pytensor.link.c.dispatch.elemwise import DimShuffleImpl, ElemwiseImpl
-    from pytensor.tensor.elemwise import DimShuffle, Elemwise
+    from pytensor.link.c.dispatch.elemwise import (
+        CAReduceImpl,
+        DimShuffleImpl,
+        ElemwiseImpl,
+    )
+    from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 
     x = pt.matrix("x")
-    out = (x.T + 1.0).sum(axis=0)
+    # Mix registered ops (DimShuffle/Elemwise/CAReduce) with a plain COp (Shape_i).
+    out = (x.T + 1.0).sum(axis=0) + x.shape[1]
     fgraph = FunctionGraph([x], [out])
     cl = CLinker().accept(fgraph)
 
+    saw_plain_cop = False
     for node in cl.node_order:
         impl = cl._impl_for(node)
         if isinstance(node.op, DimShuffle):
             assert isinstance(impl, DimShuffleImpl)
         elif isinstance(node.op, Elemwise):
             assert isinstance(impl, ElemwiseImpl)
+        elif isinstance(node.op, CAReduce):
+            assert isinstance(impl, CAReduceImpl)
         else:
-            # A genuine COp (e.g. the CAReduce sum) resolves to itself.
+            # A genuine COp (e.g. Shape_i) resolves to itself.
             assert impl is node.op
+            saw_plain_cop = True
+    assert saw_plain_cop
 
     # Source generation works and the module is versioned (cacheable).
     assert isinstance(cl.get_src_code(), str)
