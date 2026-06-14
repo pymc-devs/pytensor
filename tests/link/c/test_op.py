@@ -9,7 +9,8 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.cmodule import GCC_compiler
-from pytensor.link.c.op import COp, OpenMPOp, openmp_supported
+from pytensor.link.c.op import COp, openmp_supported
+from pytensor.tensor.elemwise import Elemwise
 
 
 class StructOp(COp):
@@ -142,17 +143,6 @@ class TestMakeThunk:
                 thunk()
 
 
-class _OpenMPProbeOp(OpenMPOp):
-    __props__ = ()
-
-    def make_node(self, x):
-        x = ps.as_scalar(x)
-        return Apply(self, [x], [x.type()])
-
-    def perform(self, node, inputs, outputs):
-        raise NotImplementedError
-
-
 @pytest.fixture
 def fresh_openmp_probe():
     openmp_supported.cache_clear()
@@ -176,7 +166,7 @@ def test_openmp_resolution_does_not_mutate_global_config(
         lambda *args, **kwargs: compiler_supports_openmp,
     )
 
-    op = _OpenMPProbeOp(openmp=True)
+    op = Elemwise(ps.add, openmp=True)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         compile_args = op.c_compile_args()

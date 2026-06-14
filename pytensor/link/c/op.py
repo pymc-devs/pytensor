@@ -163,37 +163,6 @@ int main( int argc, const char* argv[] )
     return supported
 
 
-class OpenMPOp(COp):
-    r"""Base class for `Op`\s using OpenMP.
-
-    A subclass requests OpenMP through the ``openmp`` constructor flag (defaulting
-    to ``config.openmp``). The request is honored only when `openmp_supported`
-    confirms the compiler can build it, checked lazily at C-code generation time.
-    """
-
-    def __init__(self, openmp: bool | None = None):
-        self.openmp = config.openmp if openmp is None else openmp
-
-    def __setstate__(self, d: dict):
-        self.__dict__.update(d)
-        # If we unpickle an old op missing the attribute.
-        if not hasattr(self, "openmp"):
-            self.openmp = False
-
-    def _use_openmp(self) -> bool:
-        """Return whether to emit OpenMP code.
-
-        True when this op requests OpenMP and the compiler supports it.
-        """
-        return self.openmp and openmp_supported()
-
-    def c_compile_args(self, **kwargs):
-        return ["-fopenmp"] if self._use_openmp() else []
-
-    def c_headers(self, **kwargs):
-        return ["omp.h"] if self._use_openmp() else []
-
-
 class _NoPythonCOp(COp):
     """A class used to indicate that a `COp` does not provide a Python implementation.
 
