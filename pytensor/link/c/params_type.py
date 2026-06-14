@@ -62,8 +62,7 @@ In ``c_code()`` implementation (with ``param = sub['params']``):
     /* You won't need to free them or whatever else. */
 
 
-See :class:`QuadraticOpFunc` and :class:`QuadraticCOpFunc` in ``pytensor/graph/tests/test_params_type.py``
-for complete working examples.
+See :class:`QuadraticOpFunc` in ``tests/link/c/test_params_type.py`` for a complete working example.
 
 Combining ParamsType with PyTensor enumeration types
 --------------------------------------------------
