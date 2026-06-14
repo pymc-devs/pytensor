@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -6,7 +8,8 @@ from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.utils import MethodNotDefined
-from pytensor.link.c.op import COp
+from pytensor.link.c.cmodule import GCC_compiler
+from pytensor.link.c.op import COp, OpenMPOp, openmp_supported
 
 
 class StructOp(COp):
@@ -137,3 +140,47 @@ class TestMakeThunk:
         else:
             with pytest.raises((NotImplementedError, MethodNotDefined)):
                 thunk()
+
+
+class _OpenMPProbeOp(OpenMPOp):
+    __props__ = ()
+
+    def make_node(self, x):
+        x = ps.as_scalar(x)
+        return Apply(self, [x], [x.type()])
+
+    def perform(self, node, inputs, outputs):
+        raise NotImplementedError
+
+
+@pytest.fixture
+def fresh_openmp_probe():
+    openmp_supported.cache_clear()
+    yield
+    openmp_supported.cache_clear()
+
+
+@pytest.mark.skipif(
+    not config.cxx, reason="Requires a C compiler to probe OpenMP support."
+)
+@pytest.mark.parametrize(
+    "compiler_supports_openmp", [True, False], ids=["supported", "unsupported"]
+)
+def test_openmp_resolution_does_not_mutate_global_config(
+    fresh_openmp_probe, monkeypatch, compiler_supports_openmp
+):
+    monkeypatch.setattr(config, "openmp", True)
+    monkeypatch.setattr(
+        GCC_compiler,
+        "try_compile_tmp",
+        lambda *args, **kwargs: compiler_supports_openmp,
+    )
+
+    op = _OpenMPProbeOp(openmp=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        compile_args = op.c_compile_args()
+
+    assert compile_args == (["-fopenmp"] if compiler_supports_openmp else [])
+    assert op.openmp is True  # the op's request survives the compiler's capability
+    assert config.openmp is True  # resolving OpenMP must not flip the global flag

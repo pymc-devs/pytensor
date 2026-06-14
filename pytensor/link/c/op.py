@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Callable, Collection
+from functools import cache
 from typing import TYPE_CHECKING, cast
 
 from pytensor.configdefaults import config
@@ -124,95 +125,73 @@ class COp(Op, CLinkerOp):
         )
 
 
+@cache
+def openmp_supported() -> bool:
+    """Return whether the active C compiler can build OpenMP code.
+
+    Memoized; the probe runs at most once per process. It is pure — it never
+    mutates ``config`` or op state, so the result reflects only the compiler,
+    not call order. Return ``False`` when there is no C compiler.
+    """
+    if not config.cxx:
+        return False
+
+    from pytensor.link.c.cmodule import GCC_compiler
+
+    code = """
+    #include <omp.h>
+int main( int argc, const char* argv[] )
+{
+    int res[10];
+    for(int i=0; i < 10; i++){
+        res[i] = i;
+    }
+}
+    """
+    supported = bool(
+        GCC_compiler.try_compile_tmp(
+            src_code=code, tmp_prefix="test_omp_", flags=["-fopenmp"], try_run=False
+        )
+    )
+    if not supported:
+        warnings.warn(
+            "Your C compiler fails to compile OpenMP code; PyTensor will run "
+            "Elemwise operations single-threaded. Set the `openmp` flag to False "
+            "to silence this warning.",
+            stacklevel=2,
+        )
+    return supported
+
+
 class OpenMPOp(COp):
     r"""Base class for `Op`\s using OpenMP.
 
-    This `Op` will check that the compiler support correctly OpenMP code.
-    If not, it will print a warning and disable OpenMP for this `Op`, then it
-    will generate the not OpenMP code.
-
-    This is needed, as EPD on the Windows version of ``g++`` says it supports
-    OpenMP, but does not include the OpenMP files.
-
-    We also add the correct compiler flags in ``c_compile_args``.
-
-    """
-
-    gxx_support_openmp: bool | None = None
-    """
-    ``True``/``False`` after we tested this.
-
+    A subclass requests OpenMP through the ``openmp`` constructor flag (defaulting
+    to ``config.openmp``). The request is honored only when `openmp_supported`
+    confirms the compiler can build it, checked lazily at C-code generation time.
     """
 
     def __init__(self, openmp: bool | None = None):
-        if openmp is None:
-            openmp = config.openmp
-        self.openmp = openmp
+        self.openmp = config.openmp if openmp is None else openmp
 
     def __setstate__(self, d: dict):
         self.__dict__.update(d)
-        # If we unpickle old op
+        # If we unpickle an old op missing the attribute.
         if not hasattr(self, "openmp"):
             self.openmp = False
 
+    def _use_openmp(self) -> bool:
+        """Return whether to emit OpenMP code.
+
+        True when this op requests OpenMP and the compiler supports it.
+        """
+        return self.openmp and openmp_supported()
+
     def c_compile_args(self, **kwargs):
-        """Return the compilation argument ``"-fopenmp"`` if OpenMP is supported."""
-        self.update_self_openmp()
-        if self.openmp:
-            return ["-fopenmp"]
-        return []
+        return ["-fopenmp"] if self._use_openmp() else []
 
     def c_headers(self, **kwargs):
-        """Return the header file name ``"omp.h"`` if OpenMP is supported."""
-        self.update_self_openmp()
-        if self.openmp:
-            return ["omp.h"]
-        return []
-
-    @staticmethod
-    def test_gxx_support():
-        """Check if OpenMP is supported."""
-        from pytensor.link.c.cmodule import GCC_compiler
-
-        code = """
-        #include <omp.h>
-int main( int argc, const char* argv[] )
-{
-        int res[10];
-
-        for(int i=0; i < 10; i++){
-            res[i] = i;
-        }
-}
-        """
-        default_openmp = GCC_compiler.try_compile_tmp(
-            src_code=code, tmp_prefix="test_omp_", flags=["-fopenmp"], try_run=False
-        )
-        return default_openmp
-
-    def update_self_openmp(self) -> None:
-        """Make sure ``self.openmp`` is not ``True`` if there is no OpenMP support in ``gxx``."""
-        if self.openmp:
-            if OpenMPOp.gxx_support_openmp is None:
-                OpenMPOp.gxx_support_openmp = OpenMPOp.test_gxx_support()
-                if not OpenMPOp.gxx_support_openmp:
-                    # We want to warn only once.
-                    warnings.warn(
-                        "Your g++ compiler fails to compile OpenMP code. We"
-                        " know this happen with some version of the EPD mingw"
-                        " compiler and LLVM compiler on Mac OS X."
-                        " We disable openmp everywhere in PyTensor."
-                        " To remove this warning set the pytensor flags `openmp`"
-                        " to False.",
-                        stacklevel=3,
-                    )
-            if OpenMPOp.gxx_support_openmp is False:
-                self.openmp = False
-                config.openmp = False
-
-    def prepare_node(self, node, storage_map, compute_map, impl):
-        if impl == "c":
-            self.update_self_openmp()
+        return ["omp.h"] if self._use_openmp() else []
 
 
 class _NoPythonCOp(COp):

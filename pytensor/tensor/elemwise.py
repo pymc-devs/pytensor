@@ -763,6 +763,7 @@ class Elemwise(OpenMPOp):
         # There is no harm if it get called multiple times.
         if not hasattr(node.tag, "fake_node"):
             self.prepare_node(node, None, None, "c")
+        use_openmp = self._use_openmp()
         _inames = inames
         _onames = onames
 
@@ -902,7 +903,7 @@ class Elemwise(OpenMPOp):
         # the index of the last of these aliased outputs.
 
         # We generate the C code of the inner loop using the scalar op
-        if self.openmp:
+        if use_openmp:
             # If we are using openmp, we need to get rid of the "goto"
             # statement in sub['fail']. For now we recreate it here.
             fail = failure_code(sub, use_goto=False)
@@ -980,7 +981,7 @@ class Elemwise(OpenMPOp):
                     dtypes=dtypes,
                     loop_tasks=all_code,
                     sub=sub,
-                    openmp=self.openmp,
+                    openmp=use_openmp,
                 )
         else:
             loop = cgen.make_reordered_loop(
@@ -989,7 +990,7 @@ class Elemwise(OpenMPOp):
                 dtypes=dtypes,
                 inner_task=code,
                 sub=sub,
-                openmp=self.openmp,
+                openmp=use_openmp,
             )
 
         # If all inputs and outputs are contiguous
@@ -1047,7 +1048,7 @@ class Elemwise(OpenMPOp):
                             contig += f"""
             dtype_{x}& {x}_i = ((dtype_{x}*) PyArray_DATA({x}))[0];
                             """
-                    if self.openmp:
+                    if use_openmp:
                         contig += f"""#pragma omp parallel for if(n>={int(config.openmp_elemwise_minsize)})
                         """
                     contig += f"""
@@ -1124,7 +1125,7 @@ class Elemwise(OpenMPOp):
             get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
             for i in node.inputs + node.outputs
         )
-        version.append(("openmp", self.openmp))
+        version.append(("openmp", self._use_openmp()))
         version.append(("openmp_elemwise_minsize", config.openmp_elemwise_minsize))
         if all(version):
             return tuple(version)
