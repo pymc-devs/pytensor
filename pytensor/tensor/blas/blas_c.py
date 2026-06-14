@@ -1,13 +1,10 @@
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.scalar import bool as bool_t
-from pytensor.tensor.blas import (
-    Gemv,
-    Ger,
-    blas_header_text,
-    blas_header_version,
-    ldflags,
-)
+from pytensor.tensor.blas._core import ldflags
+from pytensor.tensor.blas.blas_headers import blas_header_text, blas_header_version
+from pytensor.tensor.blas.gemv import Gemv
+from pytensor.tensor.blas.ger import Ger
 
 
 class BaseBLAS(COp):

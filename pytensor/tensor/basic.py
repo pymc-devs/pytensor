@@ -1762,8 +1762,7 @@ class Alloc(COp):
         if not clients:
             return False
 
-        from pytensor.tensor.blas import Gemv, Ger
-        from pytensor.tensor.blas_c import CGemv, CGer
+        from pytensor.tensor.blas import CGemv, CGer, Gemv, Ger
         from pytensor.tensor.subtensor import (
             AdvancedIncSubtensor,
             AdvancedIncSubtensor1,
