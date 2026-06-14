@@ -237,14 +237,22 @@ def c_funcify_wrong(op, node=None, **kwargs):
 def test_cop_graph_resolves_to_identity():
     # The parity guarantee: every COp node resolves to itself, so CLinker calls
     # the op's own c_code/cache-version methods and produces byte-identical
-    # source and cache keys.
+    # source and cache keys. A registered op (DimShuffle) resolves to its
+    # detached impl instead.
+    from pytensor.link.c.dispatch.elemwise import DimShuffleImpl
+    from pytensor.tensor.elemwise import DimShuffle
+
     x = pt.matrix("x")
     out = (x.T + 1.0).sum(axis=0)
     fgraph = FunctionGraph([x], [out])
     cl = CLinker().accept(fgraph)
 
     for node in cl.node_order:
-        assert cl._impl_for(node) is node.op
+        impl = cl._impl_for(node)
+        if isinstance(node.op, DimShuffle):
+            assert isinstance(impl, DimShuffleImpl)
+        else:
+            assert impl is node.op
 
     # Source generation works and the module is versioned (cacheable).
     assert isinstance(cl.get_src_code(), str)

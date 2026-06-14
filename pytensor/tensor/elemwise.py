@@ -11,6 +11,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
+from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
@@ -38,7 +39,7 @@ from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq, unzip
 
 
-class DimShuffle(COp):
+class DimShuffle(Op):
     """
     Allows to reorder the dimensions of a tensor or insert or remove
     broadcastable dimensions.
@@ -175,85 +176,10 @@ class DimShuffle(COp):
 
     def __setstate__(self, state):
         # Old pickles carry ExternalCOp attributes (func_files, ...); drop them,
-        # the C code is now emitted inline by `c_code`.
+        # the C implementation now comes from the dispatch registry.
         for key in ("func_files", "func_codes", "func_name", "code_sections"):
             state.pop(key, None)
         self.__dict__.update(state)
-
-    def c_code_cache_version(self):
-        return (2,)
-
-    def c_code(self, node, name, inputs, outputs, sub):
-        """Emit a straight-line view construction specialized on the static
-        permutation; dropped axes are guarded by runtime squeeze checks."""
-        (inp,) = inputs
-        (out,) = outputs
-        fail = sub["fail"]
-        new_order = self._new_order
-        nd_out = len(new_order)
-
-        guards = "\n".join(
-            f"""
-            if (PyArray_DIMS({inp})[{d}] != 1) {{
-                PyErr_SetString(PyExc_ValueError,
-                    "DimShuffle: cannot drop axis {d} with length not equal to one.");
-                {fail}
-            }}"""
-            for d in self.drop
-        )
-
-        assigns = []
-        for i, j in enumerate(new_order):
-            if j == -1:
-                # An augmented (broadcast) axis. The length-1 stride is set to the
-                # itemsize rather than zero: the value is never dereferenced, but
-                # some BLAS implementations mishandle a zero stride.
-                assigns.append(f"dimensions[{i}] = 1;")
-                assigns.append(f"strides[{i}] = itemsize;")
-            else:
-                assigns.append(f"dimensions[{i}] = PyArray_DIMS({inp})[{j}];")
-                # Normalize length-1 strides to the itemsize for the same reason.
-                assigns.append(
-                    f"strides[{i}] = PyArray_DIMS({inp})[{j}] == 1 ? "
-                    f"itemsize : PyArray_STRIDES({inp})[{j}];"
-                )
-
-        if nd_out:
-            shape_block = (
-                f"npy_intp dimensions[{nd_out}];\n"
-                f"npy_intp strides[{nd_out}];\n" + "\n".join(assigns)
-            )
-            dims_ptr = "dimensions"
-            strides_ptr = "strides"
-        else:
-            shape_block = ""
-            dims_ptr = "NULL"
-            strides_ptr = "NULL"
-
-        return f"""
-        {{
-            npy_intp itemsize = PyArray_ITEMSIZE({inp});
-            {guards}
-            {shape_block}
-
-            Py_XDECREF({out});
-            // Borrow only the writable flag from the input; NPY_OWNDATA stays 0.
-            {out} = (PyArrayObject*)PyArray_New(
-                &PyArray_Type, {nd_out}, {dims_ptr},
-                PyArray_TYPE({inp}), {strides_ptr},
-                PyArray_DATA({inp}), itemsize,
-                (NPY_ARRAY_WRITEABLE * PyArray_ISWRITEABLE({inp})),
-                NULL);
-            if ({out} == NULL) {{
-                {fail}
-            }}
-
-            // Declare the result a view of the input and recompute its flags.
-            Py_INCREF((PyObject*){inp});
-            PyArray_SetBaseObject({out}, (PyObject*){inp});
-            PyArray_UpdateFlags({out}, NPY_ARRAY_UPDATE_ALL);
-        }}
-        """
 
     def make_node(self, inp):
         input = as_tensor_variable(inp)
