@@ -1,7 +1,6 @@
 import builtins
 import warnings
 from collections.abc import Sequence
-from textwrap import dedent
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -366,38 +365,7 @@ class FixedOpCAReduce(CAReduce):
 
 
 class NonZeroDimsCAReduce(FixedOpCAReduce):
-    def _c_all(self, node, name, input_names, output_names, sub):
-        setup, alloc, loop, cast = super()._c_all(
-            node, name, input_names, output_names, sub
-        )
-
-        # We add an additional check for zero-sized dimensions (This seems like
-        # something that could enabled in `elemwise_cgen.make_checks`.)
-        [iname] = input_names
-
-        axis = self.axis
-        if axis is None:
-            axis = list(range(len(node.inputs[0].type.broadcastable)))
-
-        pattern = [0] * len(node.inputs[0].broadcastable)
-        for i in axis:
-            pattern[i] = 1
-
-        pattern_ = str(pattern)[1:-1]
-
-        setup = f"int tosum[]={{{pattern_}}};" + setup
-        alloc += dedent(
-            f"""
-            for(int i=0;i<PyArray_NDIM({iname});i++){{
-                if(PyArray_DIMS({iname})[i]==0 && tosum[i]){{
-                    PyErr_Format(PyExc_ValueError,
-                        "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %%d",i);
-                    {sub["fail"]};
-                }}
-            }}
-            """
-        )
-        return setup, alloc, loop, cast
+    error_on_empty_reduce_axis = True
 
 
 class Max(NonZeroDimsCAReduce):
