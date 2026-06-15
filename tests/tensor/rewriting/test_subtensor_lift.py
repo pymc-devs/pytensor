@@ -11,6 +11,7 @@ from pytensor import (
 )
 from pytensor import scalar as ps
 from pytensor import tensor as pt
+from pytensor.assumptions import assume
 from pytensor.compile import get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph import (
@@ -44,6 +45,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.rewriting.assumptions import DrainSpecifyAssumptions
 from pytensor.tensor.rewriting.subtensor import (
     local_adv_idx_to_diagonal,
 )
@@ -62,7 +64,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     Subtensor,
 )
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 mode_opt = config.mode
@@ -215,6 +217,22 @@ class TestLocalSubtensorOfBatchDims:
         out = pt.add(x, y)[idx]
         rewritten = rewrite_graph(out)
         assert equal_computations([rewritten], [out])
+
+    def test_elemwise_adv_index_assumed_unique_lifts(self):
+        """An unbounded adv index asserted unique_indices can never enlarge, so it lifts."""
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        idx = pt.lvector("idx")
+        idx_unique = assume(idx, unique_indices=True)
+        out = (x + y)[idx_unique]
+        # Drain resolves the asserted fact onto idx, then canonicalize lifts the index.
+        result = RewriteTester(
+            [x, y, idx],
+            [out],
+            include="canonicalize",
+            custom_rewrite=DrainSpecifyAssumptions(),
+        )
+        result.assert_graph(x[idx] + y[idx])
 
     def test_blockwise(self):
         class CoreTestOp(Op):

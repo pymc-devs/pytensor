@@ -7,6 +7,7 @@ from pytensor.assumptions import (
     ORTHOGONAL,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    UNIQUE_INDICES,
     UPPER_TRIANGULAR,
     ConflictingAssumptionsError,
     FactState,
@@ -32,6 +33,13 @@ def test_assume_records_false_assertions(key):
     x_not = assume(x, **{key.name: False})
     _, af = make_fgraph(x_not)
     assert af.get(x_not, key) is FactState.FALSE
+
+
+def test_assume_unique_indices_on_vector():
+    idx = pt.vector("idx", dtype="int64")
+    idx_uniq = assume(idx, unique_indices=True)
+    _, af = make_fgraph(idx_uniq)
+    assert af.check(idx_uniq, UNIQUE_INDICES)
 
 
 def test_assume_multiple_true_kwargs():

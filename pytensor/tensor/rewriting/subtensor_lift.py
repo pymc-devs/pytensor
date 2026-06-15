@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
+from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -214,8 +215,8 @@ def _lift_subtensor_non_axis(
         return None
 
 
-def _index_provably_smaller(idx, val_static_dim) -> bool:
-    # Per-axis check: non-repeating indices can't expand a single axis.
+def _index_provably_not_larger(idx, val_static_dim, fgraph=None) -> bool:
+    # Per-axis check: an index that can't repeat a position can't enlarge that axis.
     # Does not account for cross-axis broadcast expansion from outer indexing.
     if isinstance(idx, slice) or idx.ndim == 0:
         return True
@@ -225,11 +226,13 @@ def _index_provably_smaller(idx, val_static_dim) -> bool:
         return True
     if _constant_has_unique_indices(idx):
         return True
+    if check_assumption(fgraph, idx, UNIQUE_INDICES):
+        return True
     if isinstance(idx.owner_op, ARange):
         return True
     if isinstance(idx.owner_op, Reshape | DimShuffle):
         # Views that don't add dimensions
-        if _index_provably_smaller(idx.owner.inputs[0], val_static_dim):
+        if _index_provably_not_larger(idx.owner.inputs[0], val_static_dim, fgraph):
             return True
 
     # Fallback to static shape analysis
@@ -351,7 +354,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
                 continue
             if inp.type.broadcastable[axis]:
                 continue
-            if not _index_provably_smaller(idx, inp.type.shape[axis]):
+            if not _index_provably_not_larger(idx, inp.type.shape[axis], fgraph):
                 return None
 
     batch_ndim = (
@@ -742,7 +745,7 @@ def lift_subtensor_through_alloc(fgraph, node):
     dangerous_index_reaches_val = any(
         not val.type.broadcastable[axis]
         # Per-axis check; doesn't account for net effect across all axes.
-        and not _index_provably_smaller(idx, val.type.shape[axis])
+        and not _index_provably_not_larger(idx, val.type.shape[axis], fgraph)
         for axis, idx in enumerate(val_indexer)
     )
 
