@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 import pytensor.tensor as pt
@@ -5,6 +6,8 @@ from pytensor.assumptions import (
     ALL_KEYS,
     DIAGONAL,
     LOWER_TRIANGULAR,
+    ORTHOGONAL,
+    PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
     UPPER_TRIANGULAR,
@@ -32,6 +35,37 @@ def test_eye_non_identity_is_false(eye_args):
     e = pt.eye(**eye_args)
     _, af = make_fgraph(e)
     assert af.get(e, DIAGONAL) == FactState.FALSE
+
+
+@pytest.mark.parametrize(
+    "key, expected",
+    [
+        (SYMMETRIC, FactState.TRUE),
+        (DIAGONAL, FactState.TRUE),
+        (POSITIVE_DEFINITE, FactState.FALSE),
+        (PERMUTATION, FactState.FALSE),
+        (ORTHOGONAL, FactState.FALSE),
+    ],
+)
+def test_square_eye_with_empty_band_is_zero_matrix(key, expected):
+    """``eye(1, 1, k=1)`` has an empty band, so it is the all-zero matrix ``[[0.]]``."""
+    e = pt.eye(1, 1, 1)
+    _, af = make_fgraph(e)
+    assert af.get(e, key) == expected
+
+
+def test_empty_band_eye_merges_with_zero_constant_without_conflict():
+    """An all-zero ``Eye``, constant-folded and merged onto an equal zero
+    ``Constant``, must not produce conflicting SYMMETRIC evidence."""
+    e = pt.eye(1, 1, 1)
+    z = pt.constant(np.zeros((1, 1)))
+    out = pt.add(e, z)
+    fg, af = make_fgraph(out)
+    af.get(e, SYMMETRIC)
+    af.get(z, SYMMETRIC)
+    fg.replace(e, z, reason="constant_fold+merge")
+    # A conflict would raise ConflictingAssumptionsError here.
+    assert af.get(z, SYMMETRIC) == FactState.TRUE
 
 
 def test_eye_symbolic_same_shape_is_identity():

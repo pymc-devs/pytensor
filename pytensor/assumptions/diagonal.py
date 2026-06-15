@@ -3,7 +3,7 @@ import numpy as np
 from pytensor.assumptions.alloc import (
     alloc_diag_at_offset_zero,
     alloc_of_zero,
-    eye_identity_rule,
+    eye_zero_or_identity_rule,
 )
 from pytensor.assumptions.core import (
     DIAGONAL,
@@ -81,7 +81,7 @@ def indexes_diagonal(node) -> bool:
     return all(first is op_indices[p] for p in idx_list[1:])
 
 
-register_assumption(DIAGONAL, Eye)(eye_identity_rule)
+register_assumption(DIAGONAL, Eye)(eye_zero_or_identity_rule)
 register_assumption(DIAGONAL, AllocDiag)(alloc_diag_at_offset_zero)
 register_assumption(DIAGONAL, Alloc)(alloc_of_zero)
 register_assumption(DIAGONAL, Cholesky)(propagate_first)
