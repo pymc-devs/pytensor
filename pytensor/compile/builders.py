@@ -24,7 +24,7 @@ from pytensor.graph.basic import (
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
-from pytensor.graph.replace import clone_replace, graph_replace
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
 
@@ -899,7 +899,7 @@ class OpFromGraph(Op, HasInnerGraph):
 
         repl = dict(zip(self.inner_inputs, node.inputs, strict=True))
         clone_out_shapes = [s for s in out_shapes if isinstance(s, tuple)]
-        cloned = graph_replace(sum(clone_out_shapes, ()), replace=repl, strict=False)
+        cloned = clone_replace(sum(clone_out_shapes, ()), replace=repl)
         ret = []
         used = 0
         for i, out_shape in enumerate(out_shapes):
