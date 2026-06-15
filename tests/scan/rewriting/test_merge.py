@@ -5,6 +5,8 @@ from pytensor import function, scan
 from pytensor.compile.executor import Function
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config
+from pytensor.graph.destroyhandler import _contains_cycle
+from pytensor.graph.fg import FunctionGraph
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanMerge
 from pytensor.scan.utils import until
@@ -97,6 +99,66 @@ class TestScanMerge:
         y_val = rng.uniform(size=(4,)).astype(config.floatX)
         # Run it so DebugMode can detect optimization problems.
         f(x_val, y_val)
+
+    def test_no_cyclic_merge(self):
+        r"""Merging must not contract `Scan`\s into a cyclic graph.
+
+        Regression test for #2221. `ScanMerge` groups `Scan`\s that share
+        ``n_steps`` into mutually-independent sets, but contracting two sets that
+        depend on each other in both directions creates a cycle that later hangs
+        ``toposort``. Here set A = ``{a_out, a_in}`` (n_steps=15) and set
+        B = ``{b_fwd, b_sm}`` (n_steps=14), with ``a_in`` consuming ``b_fwd`` and
+        ``b_sm`` consuming ``a_out`` — so merging both bundles would deadlock.
+        """
+        K = 3
+        x = vector("x")
+
+        a_out = scan(
+            lambda p: 0.9 * p + 1.0,
+            outputs_info=[x],
+            n_steps=15,
+            return_updates=False,
+        )
+        b_fwd = scan(
+            lambda p: 0.8 * p + 0.5,
+            outputs_info=[x],
+            n_steps=14,
+            return_updates=False,
+        )
+        b_glue = stack([x, *[b_fwd[i] for i in range(14)]])
+        a_in = scan(
+            lambda s, p: 0.5 * p + s,
+            sequences=[b_glue],
+            outputs_info=[pytensor.tensor.zeros(K)],
+            n_steps=15,
+            return_updates=False,
+        )
+        b_sm = scan(
+            lambda s, p: 0.5 * p + s,
+            sequences=[a_out[:-1]],
+            outputs_info=[pytensor.tensor.zeros(K)],
+            n_steps=14,
+            return_updates=False,
+        )
+        out = a_in[-1] + b_sm[-1]
+
+        # Run `ScanMerge` directly: it must not commit a cyclic graph. This
+        # asserts at the graph level so a regression fails fast instead of
+        # hanging the later compilation `toposort`.
+        fgraph = FunctionGraph([x], [out], clone=True)
+        n_before = sum(isinstance(n.op, Scan) for n in fgraph.apply_nodes)
+        ScanMerge().apply(fgraph)
+        n_after = sum(isinstance(n.op, Scan) for n in fgraph.apply_nodes)
+        assert not _contains_cycle(fgraph, {})
+        # The safe bundle is still merged; only the cycle-forming one is skipped.
+        assert n_before == 4
+        assert n_after == 3
+
+        # End-to-end the function compiles and matches a scan_merge-free build.
+        f = function([x], out, mode=self.mode)
+        f_ref = function([x], out, mode=self.mode.excluding("scan_merge"))
+        x_val = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
+        np.testing.assert_allclose(f(x_val), f_ref(x_val))
 
     def test_belongs_to_set(self):
         """

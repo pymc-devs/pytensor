@@ -15,7 +15,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
@@ -26,6 +26,10 @@ from pytensor.graph.rewriting.basic import (
     out2in,
 )
 from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.rewriting.reachability import (
+    ancestor_bitsets,
+    update_ancestors_after_contraction_bits,
+)
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.traversal import toposort, walk_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
@@ -667,42 +671,9 @@ class FusionOptimizer(GraphRewriter):
             if not candidate_starting_nodes:
                 return None
 
-            # To enable fast dependency queries, we create a bitset of ancestors for each node.
-            # Each node is first represented by a bit flag of it's position in the toposort
-            # This can be achieved with python integers, via 1 << toposort_idx (equivalent to slower 2 ** toposort_idx)
-            # The ancestors bitsets of each node are obtained by bitwise OR of the ancestor bitsets
-            # of each of the nodes' inputs, and the bit flag of the node itself.
-            #
-            # Example: With three variables {a, b, c} owned by nodes {A, B, C}, where a is an input of b, and b an input of c,
-            # the nodes bit flags would be {A: 0b001, B: 0b010, C: 0b100} (integers {A: 1, B: 2, C: 4})
-            # and the ancestors bitset would be {A: 0b001, B: 0b011, C: 0b111} (integers {A: 1, B: 3, C: 7})
-            #
-            # This allows us to quickly ask if one or more variables are ancestors of a node by a simple bitwise AND
-            # For example, to ask if A is an ancestor of C we can do `ancestors_bitset[C] & node_bitset[A] != 0`
-            # We can also easily handle multiple nodes at once, for example to ask if A or B are ancestors of C we can do
-            # `ancestors_bitset[C] & (node_bitset[A] | node_bitset[B]) != 0`
-            nodes_bitflags = {node: 1 << i for i, node in enumerate(fgraph.toposort())}
-            # Root variables have `None` as owner, which we can handle with a bitset of 0
-            ancestors_bitsets: dict[Apply | None, int] = {None: 0}
-            for node, node_bitflag in nodes_bitflags.items():
-                # The bitset of each node is the union of the bitsets of its inputs, plus its own bit flag
-                ancestors_bitsets[node] = reduce(
-                    or_,
-                    (ancestors_bitsets[inp.owner] for inp in node.inputs),
-                    node_bitflag,
-                )
-            # Handle root and leaf nodes gracefully
-            # We do it after the ancestors_bitset are built to simplify the previous loop.
-            # Root variables have `None` as owner, which we can handle with a bitflag of 0
-            nodes_bitflags[None] = 0
-            # Nothing ever depends on the special Output nodes, so just use a new bit for all of them
-            out_bitflag = 1 << len(nodes_bitflags)
-            nodes_bitflags |= (
-                (client, out_bitflag)
-                for out in fg.outputs
-                for client, _ in fg_clients[out]
-                if isinstance(client.op, Output)
-            )
+            # Ancestor-reachability bitsets (data-dependency edges only); the
+            # inner loop reads and updates them directly.
+            ancestors_bitsets, nodes_bitflags = ancestor_bitsets(fg)
 
             # Start main loop to find collection of fuseable subgraphs. We collect them in
             # discovery order; the final yield order is topologically sorted at the end.
@@ -778,7 +749,7 @@ class FusionOptimizer(GraphRewriter):
                     #  - already part of the subgraph (skip)
                     #  - fuseable (add to queue)
                     #  - unfuseable (add to respective unfuseable bitset)
-                    for inp in node.inputs:
+                    for inp in node.inputs:  # type: ignore[union-attr]
                         ancestor_node = inp.owner
                         ancestor_bitflag = nodes_bitflags[ancestor_node]
                         if (not is_ancestor) and (ancestor_bitflag & subgraph_bitset):
@@ -799,8 +770,8 @@ class FusionOptimizer(GraphRewriter):
                                 ancestor_node
                             ]
 
-                    next_fuseable_clients = fuseable_clients.get(node, ())
-                    for client, _ in fg_clients[node.outputs[0]]:
+                    next_fuseable_clients = fuseable_clients.get(node, ())  # type: ignore[arg-type]
+                    for client, _ in fg_clients[node.outputs[0]]:  # type: ignore[union-attr]
                         client_bitflag = nodes_bitflags[client]
                         if is_ancestor and (client_bitflag & subgraph_bitset):
                             continue
@@ -828,7 +799,7 @@ class FusionOptimizer(GraphRewriter):
                     dict.fromkeys(
                         inp
                         for node in subgraph_nodes
-                        for inp in node.inputs
+                        for inp in node.inputs  # type: ignore[union-attr]
                         if (inp_node := inp.owner) is None
                         or nodes_bitflags[inp_node] & not_subgraph_bitset
                     )
@@ -836,11 +807,11 @@ class FusionOptimizer(GraphRewriter):
                 # Outputs are variables with client nodes that are not part of the subgraph (including special fgraph output nodes)
                 # Outputs are unique, no need to deduplicate
                 subgraph_outputs = tuple(
-                    node.outputs[0]
+                    node.outputs[0]  # type: ignore[union-attr]
                     for node in subgraph_nodes
                     if any(
                         nodes_bitflags[client] & not_subgraph_bitset
-                        for client, _ in fg_clients[node.outputs[0]]
+                        for client, _ in fg_clients[node.outputs[0]]  # type: ignore[union-attr]
                     )
                 )
 
@@ -861,18 +832,17 @@ class FusionOptimizer(GraphRewriter):
                 # When we fuse multi-output subgraphs, we also need to fuse the dependencies of successor nodes.
                 # Nodes that previously depended on a subset of the fused outputs, now depend on all of them.
                 if len(subgraph_outputs) > 1:
-                    subgraph_and_ancestors = (
-                        subgraph_bitset | unfuseable_ancestors_bitset
-                    )
-                    ancestors_bitsets |= (
-                        (node, node_ancestors_bitset | subgraph_and_ancestors)
-                        for node, node_ancestors_bitset in ancestors_bitsets.items()
-                        if node_ancestors_bitset & subgraph_bitset
+                    update_ancestors_after_contraction_bits(
+                        ancestors_bitsets,
+                        subgraph_bitset,
+                        # the subgraph's ancestor closure: itself plus its external,
+                        # unfuseable ancestors (fuseable ones are already inside it)
+                        subgraph_bitset | unfuseable_ancestors_bitset,
                     )
 
                 # Collect the subgraph
                 discovered_subgraphs.append(
-                    (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
+                    (subgraph_bitset, (subgraph_inputs, subgraph_outputs))  # type: ignore[arg-type]
                 )
                 all_subgraphs_bitset |= subgraph_bitset
 
@@ -888,7 +858,7 @@ class FusionOptimizer(GraphRewriter):
                     continue
                 if not (bf & all_subgraphs_bitset):
                     sibling_candidates.append(
-                        (bf, (tuple(dict.fromkeys(node.inputs)), node.outputs))
+                        (bf, (tuple(dict.fromkeys(node.inputs)), node.outputs))  # type: ignore[union-attr]
                     )
             # Create a mapping from inputs to sibling groups that consume them.
             # Skip scalar constants as they get inlined later and don't
@@ -960,13 +930,10 @@ class FusionOptimizer(GraphRewriter):
                         # depending on part of the merged group now
                         # depends on all of it (mirrors the main loop).
                         merged_ancestors = reduce(
-                            or_,
-                            (ancestors_bitsets[o.owner] for o in merged_outputs),
+                            or_, (ancestors_bitsets[o.owner] for o in merged_outputs)
                         )
-                        ancestors_bitsets |= (
-                            (n, n_anc | merged_ancestors)
-                            for n, n_anc in ancestors_bitsets.items()
-                            if n_anc & merged_bitset
+                        update_ancestors_after_contraction_bits(
+                            ancestors_bitsets, merged_bitset, merged_ancestors
                         )
 
                         # Update locals for next iteration
