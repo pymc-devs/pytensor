@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor.compile.maker import function
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
 from pytensor.tensor.shape import Shape, Shape_i, reshape
@@ -18,6 +19,22 @@ def test_mlx_shape_ops():
     x = Shape_i(1)(pt.as_tensor_variable(x_np))
 
     compare_mlx_and_py([], [x], [], must_be_device_array=False)
+
+
+def test_mlx_shape_i_cast():
+    # ``Shape_i`` must yield an MLX array rather than a bare Python ``int`` so
+    # that a downstream ``Cast`` does not crash with
+    # ``AttributeError: 'int' object has no attribute 'astype'`` (#2096). The
+    # full "MLX" mode is used here on purpose: the crash only appears once the
+    # fusion / constant-folding rewrites fold the shape-derived value into a
+    # ``Composite`` whose inner ``Cast`` receives the bare ``Shape_i`` output.
+    a = vector("a", dtype="float32")
+    out = pt.cast(a.shape[0], "float32") + pt.cast(2, "float32")
+
+    fn = function([a], out, mode="MLX")
+    result = fn(np.arange(6, dtype="float32"))
+
+    np.testing.assert_allclose(np.asarray(result), 8.0)
 
 
 def test_mlx_specify_shape():
