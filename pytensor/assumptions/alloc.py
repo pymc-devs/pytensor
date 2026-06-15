@@ -50,19 +50,57 @@ def alloc_is_symmetric(key, op, feature, fgraph, node, input_states) -> list[Fac
     return true_if(node.inputs[0].type.ndim == 0)
 
 
+def _eye_is_square(n, m) -> FactState:
+    """Static squareness of an :class:`Eye` from its row/column size inputs:
+    TRUE when the two sizes are provably equal, FALSE when provably unequal,
+    UNKNOWN while either remains symbolic."""
+    if n is m:
+        return FactState.TRUE
+    if isinstance(n, TensorConstant) and isinstance(m, TensorConstant):
+        return FactState.TRUE if n.data.item() == m.data.item() else FactState.FALSE
+    return FactState.UNKNOWN
+
+
 def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[FactState]:
-    """Rule body: TRUE when an :class:`Eye` node produces the identity matrix (square, k == 0)."""
+    """Rule for ORTHOGONAL / PERMUTATION / POSITIVE_DEFINITE: TRUE only when an
+    :class:`Eye` is the identity matrix (square, ``k == 0``). Every other Eye --
+    rectangular, off-main, or the all-zero matrix of an off-shape band -- lacks
+    all three properties, so it is FALSE once the shape is known and UNKNOWN
+    while it is still symbolic.
+    """
     n, m, k = node.inputs
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
     if k.data.item() != 0:
-        # Ones sit on an off-main diagonal, so this is not the identity.
+        # Identity requires the main diagonal; any off-main band rules it out.
         return [FactState.FALSE]
-    if n is m:
-        return [FactState.TRUE]
-    if isinstance(n, TensorConstant) and isinstance(m, TensorConstant):
-        return true_if(n.data.item() == m.data.item(), else_false=True)
-    return [FactState.UNKNOWN]
+    return [_eye_is_square(n, m)]
+
+
+def eye_zero_or_identity_rule(
+    key, op, feature, fgraph, node, input_states
+) -> list[FactState]:
+    """Rule for SYMMETRIC / DIAGONAL: a square :class:`Eye` has both properties
+    when it is the identity (``k == 0``) *or* when the requested off-main band
+    ``k`` falls entirely outside the shape, leaving an all-zero matrix. A
+    non-square Eye, or a square one whose off-main band intersects the shape, is
+    neither symmetric nor diagonal.
+    """
+    n, m, k = node.inputs
+    if not isinstance(k, TensorConstant):
+        return [FactState.UNKNOWN]
+    square = _eye_is_square(n, m)
+    if square is FactState.FALSE:
+        return [FactState.FALSE]
+    if k.data.item() == 0:
+        return [square]
+    # Off-main band: symmetric/diagonal only if the band misses the shape
+    # entirely, which needs the static sizes to decide.
+    if not (isinstance(n, TensorConstant) and isinstance(m, TensorConstant)):
+        return [FactState.UNKNOWN]
+    kval, nval, mval = k.data.item(), n.data.item(), m.data.item()
+    band_is_empty = kval <= -nval or kval >= mval
+    return true_if(band_is_empty, else_false=True)
 
 
 def alloc_diag_at_offset_zero(
