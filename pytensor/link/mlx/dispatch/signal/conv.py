@@ -21,6 +21,13 @@ def mlx_funcify_Convolve1d(op, node, **kwargs):
         data = mlx_typify(raw_data, dtype=None)
         kernel = mlx_typify(raw_kernel, dtype=None)
 
+        # Inside a Blockwise, a kernel that is broadcast across the batch is
+        # promoted to a leading-1 dim (e.g. ``(1, K)``) instead of being
+        # vmapped away. ``mx.convolve`` needs 1-D inputs, so flatten the kernel
+        # back to its core ``(K,)`` shape.
+        if kernel.ndim > 1:
+            kernel = kernel.reshape(-1)
+
         if runtime_mode_static:
             runtime_mode = full_mode
         else:
