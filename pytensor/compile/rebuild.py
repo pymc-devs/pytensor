@@ -174,7 +174,7 @@ def rebuild_collect_shared(
     shared_inputs = []
 
     def clone_v_get_shared_updates(v, copy_inputs_over):
-        r"""Clones a variable and its inputs recursively until all are in `clone_d`.
+        r"""Clones a variable and its inputs until all are in `clone_d`.
 
         Also, it appends all `SharedVariable`\s met along the way to
         `shared_inputs` and their corresponding
@@ -182,48 +182,57 @@ def rebuild_collect_shared(
         `update_expr`.
 
         """
-        # this co-recurses with clone_a
         assert v is not None
-        if v in clone_d:
-            return clone_d[v]
-        if v.owner:
-            owner = v.owner
-            if owner not in clone_d:
-                for i in owner.inputs:
-                    clone_v_get_shared_updates(i, copy_inputs_over)
-                clone_node_and_cache(
-                    owner,
-                    clone_d,
-                    strict=rebuild_strict,
-                    clone_inner_graphs=clone_inner_graphs,
-                )
-            return clone_d.setdefault(v, v)
-        elif isinstance(v, SharedVariable):
-            if v not in shared_inputs:
-                shared_inputs.append(v)
-            if v.default_update is not None:
-                # Check that v should not be excluded from the default
-                # updates list
-                if no_default_updates is False or (
-                    isinstance(no_default_updates, list) and v not in no_default_updates
-                ):
-                    # Do not use default_update if a "real" update was
-                    # provided
-                    if v not in update_d:
-                        v_update = v.type.filter_variable(
-                            v.default_update, allow_convert=False
-                        )
-                        if not v.type.is_super(v_update.type):
-                            raise TypeError(
-                                "An update must have a type compatible with "
-                                "the original shared variable"
+        # Iterative depth-first traversal; recursion exceeds Python's stack on deep graphs
+        stack = [v]
+        while stack:
+            var = stack.pop()
+            if var in clone_d:
+                continue
+            owner = var.owner
+            if owner is not None:
+                if owner not in clone_d:
+                    pending = [i for i in owner.inputs if i not in clone_d]
+                    if pending:
+                        stack.append(var)
+                        stack.extend(reversed(pending))
+                        continue
+                    clone_node_and_cache(
+                        owner,
+                        clone_d,
+                        strict=rebuild_strict,
+                        clone_inner_graphs=clone_inner_graphs,
+                    )
+                clone_d.setdefault(var, var)
+                continue
+            if isinstance(var, SharedVariable):
+                if var not in shared_inputs:
+                    shared_inputs.append(var)
+                if var.default_update is not None:
+                    # Check that var should not be excluded from the default
+                    # updates list
+                    if no_default_updates is False or (
+                        isinstance(no_default_updates, list)
+                        and var not in no_default_updates
+                    ):
+                        # Do not use default_update if a "real" update was
+                        # provided
+                        if var not in update_d:
+                            var_update = var.type.filter_variable(
+                                var.default_update, allow_convert=False
                             )
-                        update_d[v] = v_update
-                        update_expr.append((v, v_update))
-        if not copy_inputs_over:
-            return clone_d.setdefault(v, v.clone())
-        else:
-            return clone_d.setdefault(v, v)
+                            if not var.type.is_super(var_update.type):
+                                raise TypeError(
+                                    "An update must have a type compatible with "
+                                    "the original shared variable"
+                                )
+                            update_d[var] = var_update
+                            update_expr.append((var, var_update))
+            if not copy_inputs_over:
+                clone_d.setdefault(var, var.clone())
+            else:
+                clone_d.setdefault(var, var)
+        return clone_d[v]
 
     # initialize the clone_d mapping with the replace dictionary
     if replace is None:
