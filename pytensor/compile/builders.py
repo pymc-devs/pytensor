@@ -964,24 +964,66 @@ class SymbolicOp(OpFromGraph):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if "__props__" in cls.__dict__:
-            # MetaType installs props-only __hash__ and __eq__ which ignores the inner graph
-            # override with fgraph-aware version
-            cls.__hash__ = OpFromGraph.__hash__
-            cls.__eq__ = OpFromGraph.__eq__
+            # MetaType installs props-only __hash__/__eq__ that ignore the inner graph.
+            # Restore the SymbolicOp versions (fgraph-aware, and deferred-op-aware).
+            cls.__hash__ = SymbolicOp.__hash__
+            cls.__eq__ = SymbolicOp.__eq__
+
+    def __hash__(self):
+        # A deferred SymbolicOp has no inner graph yet, so identify it by its type,
+        # props and static params rather than the (absent) frozen fgraph.
+        if getattr(self, "fgraph", None) is None:
+            props = tuple(
+                getattr(self, p) for p in getattr(type(self), "__props__", ())
+            )
+            return hash((type(self), props, self.static_params))
+        return OpFromGraph.__hash__(self)
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if type(self) is not type(other):
+            return False
+        self_built = getattr(self, "fgraph", None) is not None
+        other_built = getattr(other, "fgraph", None) is not None
+        if self_built and other_built:
+            return OpFromGraph.__eq__(self, other)
+        if self_built != other_built:
+            return False
+        props = getattr(type(self), "__props__", ())
+        return self.static_params == other.static_params and all(
+            getattr(self, p) == getattr(other, p) for p in props
+        )
 
     @staticmethod
     def filter_inputs(*inputs):
         return inputs
 
+    def build_static_params(self, inputs):
+        """Hashable static information extracted from the actual input *values*.
+
+        Some inner graphs depend on input information that is not captured by the
+        input *types* — most notably the concrete dimensions encoded by a ``size``
+        vector, which determine the static (broadcastable) shape of the outputs.
+        Subclasses may override this to return such information from the actual
+        ``inputs``. The returned value is stored as ``self.static_params`` (so it is
+        available to :meth:`build_inner_graph`) and participates in the decision of
+        whether the Op must be rebuilt for a new set of inputs.
+
+        The default returns ``None`` (the inner graph depends only on input types).
+        """
+        return None
+
     def build_inner_graph(self, *inputs) -> list[Variable]:
         raise NotImplementedError
 
-    def __init__(self, input_types=None, **kwargs):
+    def __init__(self, input_types=None, static_params=None, **kwargs):
         """Construct op for the given input Types.
 
         When input_types is None, construction is deferred until the first
         __call__, which inspects the actual input types and builds the graph.
         """
+        self.static_params = static_params
         for prop in getattr(type(self), "__props__", ()):
             if prop in kwargs:
                 setattr(self, prop, kwargs.pop(prop))
@@ -993,15 +1035,28 @@ class SymbolicOp(OpFromGraph):
             outputs = self.build_inner_graph(*dummy_inputs)
             super().__init__(dummy_inputs, outputs, **kwargs)
 
-    def __call__(self, *inputs, **kwargs):
-        inputs = self.filter_inputs(*inputs)
+    def _resolve_op(self, inputs) -> SymbolicOp:
+        """Return the concrete (built) Op matching the given inputs.
+
+        Reuses ``self`` when its inner graph already matches the inputs' types and
+        static params; otherwise builds a new Op for them.
+        """
         input_types = tuple(inp.type for inp in inputs)
-
-        if hasattr(self, "fgraph") and input_types == tuple(self.input_types):
-            return super().__call__(*inputs, **kwargs)
-
+        static_params = self.build_static_params(inputs)
+        if (
+            hasattr(self, "fgraph")
+            and input_types == tuple(self.input_types)
+            and static_params == self.static_params
+        ):
+            return self
         init_kwargs = dict(self._init_kwargs)
         for prop in getattr(type(self), "__props__", ()):
             init_kwargs[prop] = getattr(self, prop)
-        op = type(self)(input_types=list(input_types), **init_kwargs)
+        return type(self)(
+            input_types=list(input_types), static_params=static_params, **init_kwargs
+        )
+
+    def __call__(self, *inputs, **kwargs):
+        inputs = self.filter_inputs(*inputs)
+        op = self._resolve_op(inputs)
         return super(SymbolicOp, op).__call__(*inputs, **kwargs)
