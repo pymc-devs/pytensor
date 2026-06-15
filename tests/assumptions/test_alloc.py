@@ -3,9 +3,9 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor.assumptions import (
-    ALL_KEYS,
     DIAGONAL,
     LOWER_TRIANGULAR,
+    MATRIX_KEYS,
     ORTHOGONAL,
     PERMUTATION,
     POSITIVE_DEFINITE,
@@ -20,7 +20,7 @@ from tests.assumptions.conftest import make_fgraph
 def test_eye_identity_has_all_properties():
     e = pt.eye(5)
     _, af = make_fgraph(e)
-    for key in ALL_KEYS:
+    for key in MATRIX_KEYS:
         assert af.check(e, key), f"Eye should be {key}"
 
 

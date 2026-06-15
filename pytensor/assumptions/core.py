@@ -103,8 +103,9 @@ POSITIVE_DEFINITE = AssumptionKey("positive_definite", short_name="pd")
 ORTHOGONAL = AssumptionKey("orthogonal", short_name="orth")
 SELECTION = AssumptionKey("selection", short_name="sel")
 PERMUTATION = AssumptionKey("permutation", short_name="perm")
+UNIQUE_INDICES = AssumptionKey("unique_indices", short_name="uniq")
 
-ALL_KEYS = (
+MATRIX_KEYS = (
     DIAGONAL,
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
@@ -114,6 +115,8 @@ ALL_KEYS = (
     SELECTION,
     PERMUTATION,
 )
+
+ALL_KEYS = (*MATRIX_KEYS, UNIQUE_INDICES)
 
 # Implications about structural properties derivably from other structural properties
 register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC)

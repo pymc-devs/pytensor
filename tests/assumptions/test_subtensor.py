@@ -2,9 +2,9 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor.assumptions import (
-    ALL_KEYS,
     DIAGONAL,
     LOWER_TRIANGULAR,
+    MATRIX_KEYS,
     ORTHOGONAL,
     POSITIVE_DEFINITE,
     SYMMETRIC,
@@ -17,7 +17,7 @@ from tests.assumptions.conftest import make_fgraph
 class TestSubtensorMatrixPropertyPropagation:
     """A ``Subtensor`` that leaves the trailing two axes alone preserves matrix properties."""
 
-    @pytest.mark.parametrize("key", ALL_KEYS)
+    @pytest.mark.parametrize("key", MATRIX_KEYS)
     def test_scalar_index_strips_leading_axis(self, key):
         x = pt.tensor3("x", shape=(5, 4, 4))
         x_tagged = assume(x, **{key.name: True})
@@ -25,7 +25,7 @@ class TestSubtensorMatrixPropertyPropagation:
         _, af = make_fgraph(y)
         assert af.check(y, key)
 
-    @pytest.mark.parametrize("key", ALL_KEYS)
+    @pytest.mark.parametrize("key", MATRIX_KEYS)
     def test_explicit_full_slices(self, key):
         x = pt.tensor3("x", shape=(5, 4, 4))
         x_tagged = assume(x, **{key.name: True})
@@ -33,7 +33,7 @@ class TestSubtensorMatrixPropertyPropagation:
         _, af = make_fgraph(y)
         assert af.check(y, key)
 
-    @pytest.mark.parametrize("key", ALL_KEYS)
+    @pytest.mark.parametrize("key", MATRIX_KEYS)
     def test_partial_slice_on_batch_axis(self, key):
         x = pt.tensor3("x", shape=(5, 4, 4))
         x_tagged = assume(x, **{key.name: True})

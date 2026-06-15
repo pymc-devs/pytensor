@@ -5,6 +5,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import shared
+from pytensor.assumptions import assume
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
@@ -1394,6 +1395,28 @@ class TestReadOfWriteSameIndices:
         assert any(
             isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
         )
+
+    def test_inc_asserted_unique_idx_rewritten(self):
+        """A symbolic index asserted unique_indices is duplicate-free, so inc is rewritten."""
+        x = matrix("x")
+        y = matrix("y")
+        idx = ivector("idx")
+        idx_unique = assume(idx, unique_indices=True)
+
+        o = x[idx_unique].inc(y)[idx_unique]
+
+        result = utt.RewriteTester(
+            [x, y, idx],
+            [o],
+            include="fast_run",
+            exclude=(
+                "fusion",
+                "fuse_indexed_into_elemwise",
+                "inplace",
+                "local_replace_AdvancedSubtensor",
+            ),
+        )
+        result.assert_graph(x[idx] + y)
 
     def test_shape_unsafe_excluded(self):
         """When shape_unsafe is excluded the rewrite must not fire, so

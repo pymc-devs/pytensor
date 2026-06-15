@@ -6,6 +6,7 @@ import numpy as np
 
 import pytensor
 from pytensor import compile
+from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
@@ -229,6 +230,14 @@ def _constant_has_unique_indices(idx) -> bool:
         result = not (has_pos and has_neg) and np.unique(idx_val).size == idx_val.size
     idx.tag.unique_indices = result
     return result
+
+
+def _has_unique_indices(fgraph, idx) -> bool:
+    """Whether ``idx``'s entries are provably duplicate-free: a constant with
+    unique entries, or a variable asserted ``unique_indices`` by the user."""
+    return _constant_has_unique_indices(idx) or check_assumption(
+        fgraph, idx, UNIQUE_INDICES
+    )
 
 
 def _constant_is_arange(idx) -> tuple[int, int, int] | None:
@@ -1169,7 +1178,7 @@ def local_add_of_sparse_write(fgraph, node):
         # duplicate-free. Basic (slice/scalar) indexing is always unique;
         # advanced integer-array indices must be checked.
         if not inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
-            if not all(_constant_has_unique_indices(idx) for idx in idx_vars):
+            if not all(_has_unique_indices(fgraph, idx) for idx in idx_vars):
                 continue
 
         others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
@@ -2001,7 +2010,7 @@ def local_read_of_write_same_indices(fgraph, node):
         indices = indices_from_subtensor(outer_idx_vars, node.op.idx_list)
         for idx in indices:
             if isinstance(idx, TensorVariable) and idx.type.ndim > 0:
-                if not _constant_has_unique_indices(idx):
+                if not _has_unique_indices(fgraph, idx):
                     return None
 
         x_at_idx = x[tuple(indices)]
@@ -2363,7 +2372,7 @@ def local_write_of_write_same_indices(fgraph, node):
         # sufficient: it guarantees no duplicates in the joint cross-product
         # after broadcasting.
         if not isinstance(node.op, IncSubtensor):
-            if not all(_constant_has_unique_indices(v) for v in outer_idx_vars):
+            if not all(_has_unique_indices(fgraph, v) for v in outer_idx_vars):
                 return
         new_val = a + b
         if (
