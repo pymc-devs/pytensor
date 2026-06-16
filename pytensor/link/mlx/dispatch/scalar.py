@@ -1,3 +1,5 @@
+from functools import reduce
+
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
@@ -45,19 +47,11 @@ def mlx_funcify_ScalarOp(op, node=None, **kwargs):
             f"No MLX conversion for scalar op {op} (mx.{func_name} not found)"
         )
 
-    # Variadic Add/Mul (3+ inputs) fold the binary op left-to-right, matching the
-    # C and Numba backends (which lower as ``a + b + c``). We avoid
-    # mx.stack(args) + mx.sum/prod: stacking requires identical input shapes and so
-    # breaks elementwise broadcasting (e.g. a (1, H) bias added to (B, H)), and
-    # reducing a stacked array changes dtype (bool/int -> int). The native binary
-    # mx.add/mx.multiply broadcast and preserve dtype, and fuse under mx.compile.
+    # Handle variadic ops (e.g. Add with 3+ inputs) by folding the binary op
     if node is not None and len(node.inputs) > nfunc_spec[1]:
 
         def variadic_fold(*args):
-            result = args[0]
-            for arg in args[1:]:
-                result = mlx_func(result, arg)
-            return result
+            return reduce(mlx_func, args)
 
         return variadic_fold
 
