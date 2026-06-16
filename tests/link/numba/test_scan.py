@@ -7,6 +7,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function, grad
 from pytensor.compile.mode import Mode, get_mode
+from pytensor.link.numba.dispatch.scan import numba_optimize_inner_fgraph
 from pytensor.scalar import Log1p
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
@@ -315,9 +316,10 @@ def test_inner_graph_optimized():
     (scan_node,) = (
         node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
     )
-    inner_scan_nodes = scan_node.op.fgraph.apply_nodes
-    assert len(inner_scan_nodes) == 1
-    (inner_scan_node,) = scan_node.op.fgraph.apply_nodes
+    # The numba backend optimizes a clone of the inner graph; the canonical
+    # ``op.fgraph`` is left untouched (see ``numba_optimize_inner_fgraph``).
+    opt_fgraph = numba_optimize_inner_fgraph(scan_node.op, scan_node)
+    (inner_scan_node,) = opt_fgraph.apply_nodes
     assert isinstance(inner_scan_node.op, Elemwise) and isinstance(
         inner_scan_node.op.scalar_op, Log1p
     )
@@ -357,15 +359,18 @@ def test_inplace_taps(n_steps_constant):
         numba_mode="NUMBA",
         eval_obj_mode=False,
     )
-    [scan_op] = [
-        node.op
-        for node in numba_fn.maker.fgraph.toposort()
-        if isinstance(node.op, Scan)
+    [scan_node] = [
+        node for node in numba_fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
     ]
+    scan_op = scan_node.op
+
+    # The numba backend optimizes a clone of the inner graph; the canonical
+    # ``op.fgraph`` is left untouched (see ``numba_optimize_inner_fgraph``).
+    opt_fgraph = numba_optimize_inner_fgraph(scan_op, scan_node)
 
     # Collect inner inputs we expect to be destroyed by the step function
     # Scan reorders inputs internally, so we need to check its ordering
-    inner_inps = scan_op.fgraph.inputs
+    inner_inps = opt_fgraph.inputs
     mit_sot_inps = scan_op.inner_mitsot(inner_inps)
     oldest_mit_sot_inps = [
         # Implicitly assume that the first mit-sot input is the one with 3 taps
@@ -377,7 +382,7 @@ def test_inplace_taps(n_steps_constant):
     untraced_sit_sot_inps = scan_op.inner_untraced_sit_sot(inner_inps)
 
     destroyed_inputs = []
-    for inner_out in scan_op.fgraph.outputs:
+    for inner_out in opt_fgraph.outputs:
         node = inner_out.owner
         dm = node.op.destroy_map
         if dm:
@@ -392,6 +397,36 @@ def test_inplace_taps(n_steps_constant):
     assert len(sit_sot_inps) == 0
     assert len(untraced_sit_sot_inps) == 1
     assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
+
+
+def test_inner_graph_not_mutated_by_numba():
+    """Compiling a Scan with numba must not mutate the shared inner graph.
+
+    The numba backend applies destructive/inplace rewrites to the Scan inner
+    graph. These must run on a clone, otherwise a subsequent compilation of the
+    same graph by the C backend (which rejects inplace ops in the inner graph)
+    fails with ``TypeError: Graph must not contain inplace operations``.
+    """
+
+    def core_fn(A):
+        x0 = pt.zeros((A.shape[0],))
+        seq = scan(
+            lambda x, A: pt.exp(A @ x) + x,
+            outputs_info=x0,
+            non_sequences=[A],
+            n_steps=10,
+            return_updates=False,
+        )
+        return seq[-1]
+
+    A = pt.tensor3("A")
+    out = pt.vectorize(core_fn, signature="(k,k)->(k)")(A)
+    val = np.broadcast_to(np.eye(3), (4, 3, 3)).astype(config.floatX)
+
+    res_numba = function([A], out, mode="NUMBA")(val)
+    # The C backend must still accept the same (un-mutated) graph
+    res_c = function([A], out, mode=Mode("cvm", "fast_run"))(val)
+    np.testing.assert_allclose(res_numba, res_c)
 
 
 @pytest.mark.parametrize(

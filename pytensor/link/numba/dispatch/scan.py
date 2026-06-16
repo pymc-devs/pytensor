@@ -54,19 +54,26 @@ def array0d_range(x):
         return range_arr
 
 
-@register_funcify_and_cache_key(Scan)
-def numba_funcify_Scan(op: Scan, node, **kwargs):
-    # Apply inner rewrites
+def numba_optimize_inner_fgraph(op: Scan, node):
+    """Clone and optimize the inner graph of a ``Scan`` for the numba backend.
+
+    The returned ``FunctionGraph`` is a clone of ``op.fgraph`` with numba's inner
+    rewrites (including destructive/inplace rewrites) and the necessary deepcopies
+    applied. ``op.fgraph`` itself is left untouched, so the same ``Scan`` can still
+    be compiled by another backend afterwards (e.g. the C backend, which rejects
+    inplace operations in the inner graph).
+
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of Scan?
     #  The C-code defers it to the make_thunk phase
+    """
     rewriter = (
         get_mode(op.mode)
         .including("numba")
         .excluding(*NUMBA._optimizer.exclude)
         .optimizer
     )
-    fgraph = op.fgraph
+    fgraph = op.fgraph.clone()
     # When the buffer can only hold one SITSOT or as as many MITSOT as there are taps,
     # We must always discard the oldest tap, so it's safe to destroy it in the inner function.
     # TODO: Allow inplace for MITMOT
@@ -109,6 +116,14 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         Out(x, borrow=x in untraced_sit_sot_inner_outputs) for x in fgraph.outputs
     ]
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
+    return fgraph
+
+
+@register_funcify_and_cache_key(Scan)
+def numba_funcify_Scan(op: Scan, node, **kwargs):
+    # Optimize a clone of the inner graph, leaving ``op.fgraph`` untouched so the
+    # same Scan can still be compiled by other backends.
+    fgraph = numba_optimize_inner_fgraph(op, node)
 
     # Track which untraced_sit_sot outputs have their inner input destroyed
     # by the optimized inner function (transitively, via DestroyHandler).
@@ -122,7 +137,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_destroyed_untraced_out_idxs.add(untraced_start + j)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
-        op.fgraph, fgraph_name="numba_scan"
+        fgraph, fgraph_name="numba_scan"
     )
 
     outer_in_names_to_vars = {

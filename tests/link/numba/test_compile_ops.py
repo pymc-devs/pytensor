@@ -6,6 +6,7 @@ from pytensor import tensor as pt
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import vectorize_graph
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.dispatch.scan import numba_optimize_inner_fgraph
 from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.scan.op import Scan
@@ -215,12 +216,16 @@ def test_ofg_with_inner_scan_rewrite():
     xs_ofg = OpFromGraph([ys], [xs])(ys)
     fn = function([ys], xs_ofg, mode="NUMBA")
 
-    # Check that we have a BlockwiseWithCoreShape in the inner Scan
+    # Check that we have a BlockwiseWithCoreShape in the inner Scan.
+    # The numba backend optimizes a clone of the Scan inner graph leaving ``op.fgraph`` untouched, so we
+    # inspect that optimized clone to observe the rewrite.
     fn_ofg_op = fn.maker.fgraph.outputs[0].owner.op
     assert isinstance(fn_ofg_op, OpFromGraph)
-    fn_scan_op = fn_ofg_op.fgraph.outputs[0].owner.op
+    fn_scan_node = fn_ofg_op.fgraph.outputs[0].owner
+    fn_scan_op = fn_scan_node.op
     assert isinstance(fn_scan_op, Scan)
-    fn_cholesky_op = fn_scan_op.fgraph.outputs[0].owner.op
+    opt_fgraph = numba_optimize_inner_fgraph(fn_scan_op, fn_scan_node)
+    fn_cholesky_op = opt_fgraph.outputs[0].owner.op
     assert isinstance(fn_cholesky_op, BlockwiseWithCoreShape)
     assert isinstance(fn_cholesky_op.core_op, Cholesky)
 
