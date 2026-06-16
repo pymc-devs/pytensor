@@ -464,7 +464,9 @@ NUMBA = Mode(
 
 JAX = Mode(
     JAXLinker(),
-    RewriteDatabaseQuery(include=["fast_run", "jax"]),
+    # `fusion` is not incompatible with JAX (it can run `Composite`), just not desired:
+    # XLA does its own fusion, so building `Composite` only adds graph-translation overhead.
+    RewriteDatabaseQuery(include=["fast_run", "jax"], exclude=["fusion"]),
 )
 PYTORCH = Mode(
     PytorchLinker(),
@@ -473,7 +475,7 @@ PYTORCH = Mode(
 
 MLX = Mode(
     MLXLinker(),
-    RewriteDatabaseQuery(include=["fast_run", "mlx"]),
+    RewriteDatabaseQuery(include=["fast_run", "mlx"], exclude=["fusion"]),
 )
 
 FAST_COMPILE = Mode(
