@@ -104,7 +104,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         # If the core op cannot be cached, the Blockwise wrapper cannot be cached either
         blockwise_key = None
     else:
-        blockwise_cache_version = 1
+        blockwise_cache_version = 2
         blockwise_key = "_".join(
             map(
                 str,
