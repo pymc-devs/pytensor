@@ -97,13 +97,7 @@ class Container:
             if self.allow_downcast is not None:
                 kwargs["allow_downcast"] = self.allow_downcast
 
-            try:
-                # Use in-place filtering when/if possible
-                self.storage[0] = self.type.filter_inplace(
-                    value, self.storage[0], **kwargs
-                )
-            except NotImplementedError:
-                self.storage[0] = self.type.filter(value, **kwargs)
+            self.storage[0] = self.type.filter(value, **kwargs)
 
         except Exception as e:
             e.args = (*e.args, f'Container name "{self.name}"')
