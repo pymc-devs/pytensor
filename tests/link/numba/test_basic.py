@@ -28,10 +28,12 @@ from pytensor.graph.type import Type
 from pytensor.link.numba import cache as numba_cache
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    NUMBA_CONSTANT_SIZE_LIMIT,
     _filter_numba_warnings,
     cache_key_for_constant,
     numba_funcify_and_cache_key,
     numba_njit,
+    numba_typify,
 )
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.scalar.basic import Composite, ScalarOp, as_scalar
@@ -512,6 +514,38 @@ class TestNumbaWarnings:
         # But either way we don't want this warning for users as they have little control over strides
         b_test = np.ones((10,))[::2]
         np.testing.assert_allclose(fn(A_test, b_test), np.dot(A_test, b_test[:, None]))
+
+
+def _large_non_contiguous():
+    # Column slice over the size limit: non-contiguous and too big to cache.
+    n = NUMBA_CONSTANT_SIZE_LIMIT // 8 + 1  # float64 itemsize
+    return np.ones((n, 2))[:, 0]
+
+
+@pytest.mark.parametrize(
+    "array, copied",
+    [
+        (np.eye(4)[:, 1], True),  # 1d non-contiguous column slice
+        (np.eye(4)[::2], True),  # 2d row-strided view
+        (np.asfortranarray(np.eye(4)), False),  # F-contiguous: cacheable, keep as-is
+        (np.eye(4), False),  # C-contiguous: keep as-is
+        (_large_non_contiguous(), False),  # over size limit: dynamic global regardless
+    ],
+    ids=["col_slice", "row_strided", "fortran", "c_contiguous", "large_non_contiguous"],
+)
+def test_numba_typify_constant_contiguity(array, copied):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2063
+    # numba can only embed C/F-contiguous arrays as cacheable static constants; a
+    # non-contiguous ("A" layout) constant forces an uncacheable dynamic global, so
+    # numba_typify materializes it contiguous (preserving values). Already-contiguous
+    # arrays -- F-contiguous ones included, which numba caches -- are left untouched,
+    # as are arrays over the size limit (uncacheable regardless of layout, so we skip
+    # duplicating a large buffer).
+    out = numba_typify(array)
+    np.testing.assert_array_equal(out, array)
+    assert (out is not array) == copied
+    if copied:
+        assert out.flags["C_CONTIGUOUS"] or out.flags["F_CONTIGUOUS"]
 
 
 class ComplexType:

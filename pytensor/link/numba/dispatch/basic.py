@@ -200,8 +200,28 @@ def direct_cast(typingctx, val, typ):
     return sig, codegen
 
 
+# numba embeds an array constant as a static (cacheable) global only when it is
+# C/F-contiguous and no larger than this; otherwise it becomes a dynamic global and
+# makes the whole compiled fgraph uncacheable. Mirrors `size_limit` in numba's
+# `BaseContext.make_constant_array`.
+NUMBA_CONSTANT_SIZE_LIMIT = 10**6
+
+
 @singledispatch
 def numba_typify(data, dtype=None, **kwargs):
+    if (
+        isinstance(data, np.ndarray)
+        and not data.flags["C_CONTIGUOUS"]
+        and not data.flags["F_CONTIGUOUS"]
+        and data.nbytes <= NUMBA_CONSTANT_SIZE_LIMIT
+    ):
+        # A non-contiguous constant is typed `array(..., A)`, which numba cannot embed
+        # statically, so it falls back to a dynamic global and the compiled fgraph
+        # becomes uncacheable (see issue #2063). The constant data is owned and
+        # immutable here, so materialize a contiguous copy to recover a C/F layout
+        # (and the cache). Arrays over the size limit are dynamic globals regardless
+        # of layout, so skip the copy and avoid duplicating a large buffer.
+        data = np.ascontiguousarray(data)
     return data
 
 
