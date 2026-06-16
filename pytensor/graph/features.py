@@ -1,4 +1,3 @@
-import inspect
 import sys
 import time
 import warnings
@@ -693,32 +692,8 @@ class Validator(Feature):
             )
 
     def validate(self, fgraph):
-        """
-        If the caller is replace_all_validate, just raise the
-        exception. replace_all_validate will print out the
-        verbose output. Or it has to be done here before raise.
-        """
         t0 = time.perf_counter()
-        try:
-            ret = fgraph.execute_callbacks("on_validate")
-        except Exception as e:
-            cf = inspect.currentframe()
-            uf = cf.f_back
-            uf_info = inspect.getframeinfo(uf)
-
-            # If the caller is replace_all_validate, just raise the
-            # exception. replace_all_validate will print out the
-            # verbose output.
-            # Or it has to be done here before raise.
-            if uf_info.function == "replace_all_validate":
-                raise
-            else:
-                verbose = uf.f_locals.get("verbose", False)
-                if verbose:
-                    r = uf.f_locals.get("r", "")
-                    reason = uf_info.function
-                    print(f"validate failed on node {r}.\n Reason: {reason}, {e}")  # noqa: T201
-                raise
+        ret = fgraph.execute_callbacks("on_validate")
         t1 = time.perf_counter()
         if fgraph.profile:
             fgraph.profile.validate_time += t1 - t0
