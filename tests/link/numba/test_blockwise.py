@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from pytensor import function
+from pytensor.compile.mode import Mode
 from pytensor.graph import Apply
 from pytensor.scalar import ScalarOp
 from pytensor.tensor import TensorVariable, lvector, tensor, tensor3, vector
@@ -11,6 +12,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.svd import SVD
 from pytensor.tensor.linalg.summary import Det
+from pytensor.tensor.signal import convolve1d
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 
@@ -82,6 +84,40 @@ def test_blockwise_scalar_dimshuffle():
     )
     out = blockwise_scalar_ds(x)
     compare_numba_and_py([x], [out], [np.arange(9)], eval_obj_mode=False)
+
+
+@pytest.mark.parametrize("signal_layout", ["C", "F", "strided"])
+@pytest.mark.parametrize("kernel_layout", ["C", "F", "strided"])
+def test_blockwise_non_c_contiguous_inputs(signal_layout, kernel_layout):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2228
+    # When a batched input is non-C-contiguous (F-order, or strided batch/core dims)
+    # its per-batch core slice is strided. The core type must not claim a contiguous
+    # layout, or numba reads contiguous memory off a strided buffer (wrong values).
+    signal = tensor("signal", shape=(3, 16))
+    kernel = tensor("kernel", shape=(3, 5))
+    out = convolve1d(signal, kernel, mode="valid")
+    assert isinstance(out.owner.op, Blockwise)
+
+    rng = np.random.default_rng(2228)
+
+    def array_with_layout(core, layout):
+        """A (3, core) test array in the requested memory layout."""
+        if layout == "C":
+            return rng.normal(size=(3, core))
+        if layout == "F":
+            # Transpose of a C array -> the per-batch core slice is strided.
+            return np.asfortranarray(rng.normal(size=(3, core)))
+        # "strided": [::2, ::2] view -> both the batch and core dims are strided.
+        return rng.normal(size=(6, core * 2))[::2, ::2]
+
+    signal_test = array_with_layout(16, signal_layout)
+    kernel_test = array_with_layout(5, kernel_layout)
+
+    fn = function([signal, kernel], out, mode="NUMBA")
+    ref_fn = function([signal, kernel], out, mode=Mode(linker="py", optimizer=None))
+    np.testing.assert_allclose(
+        fn(signal_test, kernel_test), ref_fn(signal_test, kernel_test)
+    )
 
 
 def test_blockwise_vs_elemwise_scalar_op():

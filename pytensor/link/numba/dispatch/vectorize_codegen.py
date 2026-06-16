@@ -153,6 +153,23 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
     )
 
 
+def _core_slice_layout(full_layout, batch_bc_pattern):
+    """Layout of a core slice (the trailing core dims at a fixed batch index).
+
+    The core slice keeps the full array's layout when the array is C-contiguous (its
+    trailing dims are contiguous) or when every batch dim is broadcastable: a size-1
+    dim contributes a stride multiplier of 1, so it cannot make the core slice
+    strided (``all(())`` is True, so the no-batch-dims case is covered too). A real
+    (size > 1) batch dim in front of an F-/non-contiguous array's core dims makes the
+    slice strided, so we fall back to the "any" layout — declaring it contiguous
+    makes numba emit a contiguous load over a strided buffer and silently read the
+    wrong elements.
+    """
+    if full_layout == "C" or all(batch_bc_pattern):
+        return full_layout
+    return "A"
+
+
 def _compute_vectorized_types(
     input_types,
     input_bc_patterns,
@@ -178,11 +195,11 @@ def _compute_vectorized_types(
         if allow_core_scalar and core_ndim == 0:
             core_input_types.append(input_type.dtype)
         else:
-            # FIXME: inheriting layout from the full array is wrong for F-order
-            # inputs with batch dims — the core slice won't be F-contiguous.
             core_input_types.append(
                 types.Array(
-                    dtype=input_type.dtype, ndim=core_ndim, layout=input_type.layout
+                    dtype=input_type.dtype,
+                    ndim=core_ndim,
+                    layout=_core_slice_layout(input_type.layout, bc_pattern),
                 )
             )
 
@@ -601,10 +618,14 @@ def make_loop_call(
             # read_val.set_metadata("noalias", output_scope_set)
         else:
             # Retrieve array item at index
-            # This is a streamlined version of Numba's `GUArrayArg.load`
-            # TODO check layout arg!
+            # This is a streamlined version of Numba's `GUArrayArg.load`.
+            # Layout must match the core type resolved in `_compute_vectorized_types`
+            # (see `_core_slice_layout`): the core slice of an F/non-contiguous array
+            # is strided, so it cannot claim a contiguous layout.
             read_array_type = types.Array(
-                dtype=inp_type.dtype, ndim=core_ndim, layout=inp_type.layout
+                dtype=inp_type.dtype,
+                ndim=core_ndim,
+                layout=_core_slice_layout(inp_type.layout, inp_bc),
             )
             read_array = context.make_array(read_array_type)(context, builder)
             core_shape = cgutils.unpack_tuple(builder, inp.shape)[
