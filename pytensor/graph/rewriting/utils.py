@@ -1,6 +1,6 @@
 import copy
-from collections.abc import Generator, Sequence
-from typing import TYPE_CHECKING, Optional
+from collections.abc import Generator, Iterable, Sequence
+from typing import TYPE_CHECKING, Optional, cast
 
 import pytensor
 from pytensor.graph.basic import (
@@ -47,7 +47,7 @@ def rewrite_graph(
         fgraph = graph
     else:
         outputs = [graph] if isinstance(graph, Variable) else graph
-        fgraph = FunctionGraph(outputs=outputs, clone=clone)
+        fgraph = FunctionGraph(outputs=outputs, clone=clone, copy_inputs=False)
 
     query_rewrites = optdb.query(RewriteDatabaseQuery(include=include, **kwargs))
     query_rewrites.rewrite(fgraph)
@@ -60,6 +60,49 @@ def rewrite_graph(
     if isinstance(graph, Variable):
         return fgraph.outputs[0]
     return fgraph.outputs
+
+
+def rewrite_subgraph(
+    outputs: Sequence[Variable],
+    frontier: Iterable[Variable],
+    include: Sequence[str] = ("canonicalize",),
+    **kwargs,
+) -> list[Variable]:
+    """Rewrite the subgraph between ``frontier`` and ``outputs`` in isolation.
+
+    The ``frontier`` variables are temporarily detached from their owners, so
+    they act as inputs of the subgraph: rewrites can neither reach past them
+    nor modify the graph they belong to. This allows simplifying fresh
+    expressions that hang off the variables of an existing `FunctionGraph`
+    without mutating it behind its (and its features') back.
+
+    The rewrite is in place: ``outputs`` must not belong to a `FunctionGraph`.
+
+    Parameters
+    ----------
+    outputs
+        The outputs of the subgraph to rewrite.
+    frontier
+        Variables at which the subgraph stops; every path from ``outputs``
+        into the surrounding graph must go through one of them.
+    include
+        Rewrite query names, as in `rewrite_graph`.
+    **kwargs
+        Keyword arguments passed to `rewrite_graph`.
+    """
+    saved_owners = [(v, v.owner, v.index) for v in frontier]
+    for v, _, _ in saved_owners:
+        v.owner = None
+    try:
+        rewritten = cast(
+            Sequence[Variable],
+            rewrite_graph(list(outputs), include=include, clone=False, **kwargs),
+        )
+        return list(rewritten)
+    finally:
+        for v, owner, idx in saved_owners:
+            v.owner = owner
+            v.index = idx
 
 
 def is_same_graph_with_merge(

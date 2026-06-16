@@ -548,6 +548,14 @@ high-level overview of miniKanren's use as a tool for symbolic computation see
 `"miniKanren as a Tool for Symbolic Computation in Python" <https://arxiv.org/abs/2005.11644>`_.
 
 
+.. _testing_rewrites:
+
+Testing Rewrites
+================
+
+.. autoclass:: tests.unittest_tools.RewriteTester
+
+
 .. _optdb:
 
 The Optimization Database (:obj:`optdb`)

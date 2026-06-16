@@ -7,7 +7,6 @@ import warnings
 from collections.abc import Callable, Sequence
 from copy import copy
 from functools import partial
-from itertools import chain
 from typing import cast
 
 from pytensor.compile.maker import function
@@ -24,26 +23,14 @@ from pytensor.graph.basic import (
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import clone_replace, graph_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
+from pytensor.tensor.shape import Shape_i
 
 
 def infer_shape(outs, inputs, input_shapes):
-    """
-    Compute the shape of the outputs given the shape of the inputs of an PyTensor
-    graph.
-
-    We do it this way to avoid compiling the inner function just to get
-    the shape. Changes to ShapeFeature could require changes in this function.
-
-    """
-    # We use a ShapeFeature because it has all the necessary logic
-    # inside.  We don't use the full ShapeFeature interface, but we
-    # let it initialize itself with an empty fgraph, otherwise we will
-    # need to do it manually
-
-    # TODO: ShapeFeature should live elsewhere
+    """Compute the shape of the outputs given the shape of the inputs of a PyTensor graph."""
     from pytensor.tensor.rewriting.shape import ShapeFeature
 
     for inp, inp_shp in zip(inputs, input_shapes, strict=True):
@@ -51,43 +38,36 @@ def infer_shape(outs, inputs, input_shapes):
             assert len(inp_shp) == inp.type.ndim
 
     shape_feature = ShapeFeature()
-    fgraph = FunctionGraph([], [], features=[shape_feature])
-    for v in chain.from_iterable(s for s in input_shapes if s is not None):
-        # Import input_shape nodes, as for some graphs ShapeFeature assumes these were seen before
-        if (node := v.owner) is not None:
-            fgraph.import_node(node, import_missing=True)
+    output_shapes = [shape_feature.shape_tuple(o) for o in outs]
 
-    # Initialize shape_of with the input shapes
-    for inp, inp_shp in zip(inputs, input_shapes, strict=True):
-        shape_feature.set_shape(inp, inp_shp, override=True)
+    # Shape expressions for root inputs are Shape_i(inp, i).
+    # Replace those with the caller-provided input_shapes.
+    replacements = {}
+    for inp, shp in zip(inputs, input_shapes, strict=True):
+        if shp is None:
+            continue
+        per_dim = shape_feature._shape_i_cache.get(inp)
+        if per_dim is None:
+            continue
+        for i, s in enumerate(shp):
+            cached = per_dim.get(i)
+            if cached is not None:
+                replacements[cached] = s
 
-    def local_traverse(out):
-        """
-        Go back in the graph, from out, adding computable shapes to shape_of.
+    if replacements:
+        flat = [s for tup in output_shapes if tup is not None for s in tup]
+        flat_replaced = graph_replace(flat, replacements, strict=False)
+        result = []
+        idx = 0
+        for tup in output_shapes:
+            if tup is None:
+                result.append(None)
+            else:
+                result.append(tuple(flat_replaced[idx : idx + len(tup)]))
+                idx += len(tup)
+        return result
 
-        """
-        if out in shape_feature.shape_of:
-            # Its shape is already known
-            return
-        elif out.owner is None:
-            # This is an input of the graph
-            shape_feature.init_r(out)
-        else:
-            # Recurse over inputs
-            for inp in out.owner.inputs:
-                if inp not in shape_feature.shape_of:
-                    local_traverse(inp)
-
-            # shape_feature.on_import does not actually use an fgraph
-            # It will call infer_shape and set_shape appropriately
-            dummy_fgraph = None
-            shape_feature.on_import(dummy_fgraph, out.owner, reason="dummy")
-
-    ret = []
-    for o in outs:
-        local_traverse(o)
-        ret.append(shape_feature.shape_of[o])
-    return ret
+    return output_shapes
 
 
 def construct_nominal_fgraph(
@@ -885,30 +865,51 @@ class OpFromGraph(Op, HasInnerGraph):
         self._connection_pattern = ret
         return ret
 
-    def infer_shape(self, fgraph, node, shapes):
-        # TODO: Use `fgraph.shape_feature` to do this instead.
-        out_shapes = infer_shape(self.inner_outputs, self.inner_inputs, shapes)
+    def infer_shape(self, node, shapes):
+        try:
+            template = self._inner_shape_template
+            frozen = self._inner_shape_frozen
+        except AttributeError:
+            from pytensor.tensor.rewriting.shape import ShapeFeature
 
-        # Clone the output shape so that shape are computed from outer inputs.
-        # Note:
-        # Here we could do it more simply like:
-        # `ret = [pytensor.clone_replace(shp, replace=repl) for shp in out_shp]`
-        # But doing it multiple time could duplicate common subgraph between
-        # each shape call. PyTensor optimizer will clean this up later, but this
-        # will make extra work for the optimizer.
+            sf = ShapeFeature()
+            inner_inputs = self.inner_inputs
+            template = [sf.shape_tuple(o) for o in self.inner_outputs]
+            flat_shapes = [s for tup in template if tup is not None for s in tup]
 
-        repl = dict(zip(self.inner_inputs, node.inputs, strict=True))
-        clone_out_shapes = [s for s in out_shapes if isinstance(s, tuple)]
-        cloned = clone_replace(sum(clone_out_shapes, ()), replace=repl)
+            # Express the inner-output shapes as a frozen function of the inner
+            # inputs plus each input's per-dim size. from_structural_inputs rewires
+            # every Shape_i(inner_input, dim) occurrence to the matching input, so
+            # bind can later swap in the caller's shapes. One slot per input dim:
+            # static or unused dims become dead inputs, keeping the layout positional.
+            shape_inputs = [
+                Shape_i(dim)(inp)
+                for inp in inner_inputs
+                for dim in range(getattr(inp.type, "ndim", 0))
+            ]
+            frozen = FrozenFunctionGraph.from_structural_inputs(
+                [*inner_inputs, *shape_inputs], flat_shapes
+            )
+            self._inner_shape_template = template
+            self._inner_shape_frozen = frozen
+
+        # frozen.inputs is [*inner_inputs, *per-dim sizes]; mirror that layout.
+        replacements = list(node.inputs)
+        for shp in shapes:
+            if shp is not None:
+                replacements.extend(shp)
+
+        bound_shapes = frozen.bind(replacements)
+
         ret = []
-        used = 0
-        for i, out_shape in enumerate(out_shapes):
-            if out_shape is None:
+        idx = 0
+        for tup in template:
+            if tup is None:
                 ret.append(None)
             else:
-                nb = len(out_shape)
-                ret.append(cloned[used : used + nb])
-                used += nb
+                nb = len(tup)
+                ret.append(bound_shapes[idx : idx + nb])
+                idx += nb
 
         return ret
 

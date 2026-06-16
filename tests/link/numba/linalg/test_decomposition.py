@@ -5,7 +5,7 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.tensor.linalg.decomposition import svd
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eigh, eig
 from pytensor.tensor.linalg.decomposition.lu import (
@@ -17,6 +17,7 @@ from pytensor.tensor.linalg.decomposition.lu import (
 )
 from pytensor.tensor.linalg.decomposition.qr import QR, qr
 from pytensor.tensor.linalg.decomposition.schur import qz, schur
+from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
@@ -134,9 +135,83 @@ def test_Eigh_integer_input():
 def test_SVD(x, full_matrices, compute_uv):
     x, test_x = x
     test_x = test_x.T @ test_x
-    g = svd.SVD(full_matrices, compute_uv)(x)
+    g = svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
 
     compare_numba_and_py([x], g, [test_x])
+
+
+@pytest.mark.parametrize(
+    "full_matrices, compute_uv",
+    [(True, True), (False, True), (True, False)],
+    ids=["full_uv", "econ_uv", "no_uv"],
+)
+@pytest.mark.parametrize(
+    "overwrite_a", [False, True], ids=["no_overwrite", "overwrite_a"]
+)
+@pytest.mark.parametrize("is_complex", [False, True], ids=["real", "complex"])
+def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
+    complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
+    dtype = complex_dtype if is_complex else floatX
+
+    x = pt.matrix("x", dtype=dtype)
+    outs = svd(
+        x,
+        full_matrices=full_matrices,
+        compute_uv=compute_uv,
+    )
+    out_list = list(outs) if compute_uv else [outs]
+
+    fn = pytensor.function(
+        [In(x, mutable=overwrite_a)],
+        out_list,
+        mode=numba_inplace_mode,
+        accept_inplace=True,
+    )
+    fn_op = fn.maker.fgraph.outputs[0].owner.op
+    core_op = (
+        fn_op.core_op
+        if isinstance(fn_op, Blockwise | BlockwiseWithCoreShape)
+        else fn_op
+    )
+    assert isinstance(core_op, SVD)
+    assert core_op.destroy_map == ({0: [0]} if overwrite_a else {})
+
+    local_rng = np.random.default_rng(0)
+    val = local_rng.normal(size=(4, 4)).astype(floatX)
+    if is_complex:
+        val = (val + 1j * local_rng.normal(size=(4, 4)).astype(floatX)).astype(dtype)
+
+    ref_s = np.linalg.svd(val, full_matrices=full_matrices, compute_uv=False)
+
+    # gesdd reuses the buffer when the donated array is f-contig (always) or
+    # c-contig (real-typed only — complex would need a conjugation pass).
+    can_reuse_c = overwrite_a and not is_complex
+
+    def check(layout_val, expect_mutation):
+        snapshot = np.array(layout_val)
+        out = fn(layout_val)
+        s = out[1] if compute_uv else out[0]
+        np.testing.assert_allclose(s, ref_s, atol=1e-4, rtol=1e-4)
+        if compute_uv:
+            U, _, Vt = out
+            if full_matrices:
+                # Pad s into the rectangular shape so we can reconstruct.
+                k = s.shape[0]
+                m, n = val.shape
+                S_mat = np.zeros((m, n), dtype=U.dtype)
+                S_mat[:k, :k] = np.diag(s.astype(U.dtype))
+                recon = U @ S_mat @ Vt
+            else:
+                recon = (U * s.astype(U.dtype)) @ Vt
+            np.testing.assert_allclose(recon, val, atol=5e-4, rtol=5e-4)
+        if expect_mutation:
+            assert not np.allclose(layout_val, snapshot)
+        else:
+            np.testing.assert_allclose(layout_val, snapshot)
+
+    check(np.copy(val, order="F"), expect_mutation=overwrite_a)
+    check(np.copy(val, order="C"), expect_mutation=can_reuse_c)
+    check(np.repeat(val, 2, axis=0)[::2], expect_mutation=False)
 
 
 class TestDecompositions:

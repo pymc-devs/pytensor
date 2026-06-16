@@ -356,6 +356,21 @@ def test_root_simple():
     utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
 
 
+def test_root_distinct_equations_not_merged():
+    # Regression test: RootOp __props__ ignored the inner graph, so RootOps of
+    # different equations compared equal and MergeOptimizer collapsed them
+    x = pt.scalar("x")
+    a = pt.scalar("a")
+
+    sq_root, _ = root(x**2 - a, x)
+    cube_root, _ = root(x**3 - a, x)
+
+    func = pytensor.function([x, a], [sq_root, cube_root])
+    sq_res, cube_res = func(1.5, 8.0)
+    np.testing.assert_allclose(sq_res, np.sqrt(8.0), rtol=1e-6)
+    np.testing.assert_allclose(cube_res, np.cbrt(8.0), rtol=1e-6)
+
+
 def test_root_system_of_equations():
     x = pt.tensor("x", shape=(None,))
     a = pt.tensor("a", shape=(None,))
@@ -657,3 +672,23 @@ def test_minimize_grad_duplicate_input_connected_and_disconnected(op_cls, op_kwa
     ]
 
     np.testing.assert_allclose(pt.grad(solution, a).eval({x: np.pi, a: 0}), 2.0)
+
+
+@pytensor.config.change_flags(on_opt_error="raise")
+def test_minimize_grad_matrix_arg():
+    """Regression test: a matrix-shaped arg caused compute_implicit_gradients
+    to produce a 3D Jacobian, which made solve pick the wrong b_ndim and
+    return incorrect gradients.
+    """
+
+    def f(x_val, theta_val):
+        A = pt.as_tensor_variable(
+            np.array([[2.0, 0.5, 0.0], [0.5, 2.0, 0.5], [0.0, 0.5, 2.0]])
+        )
+        objective = 0.5 * (x_val @ A @ x_val) + (theta_val @ x_val).sum()
+        x_star, _ = minimize(objective, x_val, method="BFGS", use_vectorized_jac=True)
+        return x_star.sum()
+
+    x_val = np.zeros(3)
+    theta_val = np.eye(3)
+    utt.verify_grad(f, [x_val, theta_val], eps=1e-6)

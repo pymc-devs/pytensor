@@ -195,6 +195,15 @@ def _as_tensor_bool(x, name, ndim, **kwargs):
     )
 
 
+@_as_tensor_variable.register(range)
+def _as_tensor_range(x: range, name, ndim, dtype=None, **kwargs):
+    if ndim is not None and ndim != 1:
+        raise ValueError(f"ndim for range must be 1, got {ndim = }.")
+    res = arange(start=x.start, stop=x.stop, step=x.step, dtype=dtype)
+    res.name = name
+    return res
+
+
 as_tensor = as_tensor_variable
 
 
@@ -377,7 +386,7 @@ def _get_underlying_scalar_constant_value(
                     ret = [[None]]
                     v.owner.op.perform(v.owner, const, ret)
                     return np.asarray(ret[0][0].copy())
-            # In fast_compile, we don't enable local_fill_to_alloc, so
+            # In fast_compile, we don't enable local_second_to_alloc, so
             # we need to investigate Second as Alloc. So elemwise
             # don't disable the check for Second.
             elif isinstance(op, Elemwise):
@@ -628,7 +637,7 @@ class TensorFromScalar(COp):
         (out,) = out_
         out[0] = np.asarray(s)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [()]
 
     def pullback(self, inp, outputs, grads):
@@ -689,7 +698,7 @@ class ScalarFromTensor(COp):
         # not using .item() because that returns a Python scalar, not a numpy scalar
         output_storage[0][0] = inputs[0][()]
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         return [()]
 
     def pullback(self, inp, outputs, grads):
@@ -1370,7 +1379,7 @@ class Eye(Op):
         (out,) = out_
         out[0] = np.eye(n, m, k, dtype=self.dtype)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
@@ -1699,7 +1708,7 @@ class Alloc(COp):
     def c_code_cache_version(self):
         return (5,)
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [node.inputs[1:]]
 
     def connection_pattern(self, node):
@@ -1753,14 +1762,32 @@ class Alloc(COp):
         if not clients:
             return False
 
+        from pytensor.tensor.blas import Gemv, Ger
+        from pytensor.tensor.blas_c import CGemv, CGer
+        from pytensor.tensor.subtensor import (
+            AdvancedIncSubtensor,
+            AdvancedIncSubtensor1,
+            IncSubtensor,
+            Subtensor,
+        )
+
         for client, idx in clients:
             client_op = client.op
             if isinstance(client_op, Output):
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False
-            # Op's through which Alloc can be lifted
-            elif isinstance(client_op, Elemwise | DimShuffle | Alloc | Join):
+            # Op's through which Alloc can be lifted. ``Subtensor`` is
+            # included because ``local_subtensor_of_alloc`` rewrites
+            # ``alloc(val, *shape)[idx]`` into ``alloc(val[...], *new_shape)``,
+            # preserving the Alloc structure that downstream rewrites
+            # (e.g. ``local_blockwise_alloc_inputs``) rely on. Folding the
+            # Alloc here would short-circuit that lift and produce a
+            # broadcast-equivalent constant whose batch dim is no longer
+            # type-broadcastable.
+            elif isinstance(
+                client_op, Elemwise | DimShuffle | Alloc | Join | Subtensor
+            ):
                 return False
             # Same for Blockwise, unless it has no batch_dims
             elif isinstance(client_op, Blockwise) and client.op.batch_ndim(client):
@@ -1770,13 +1797,13 @@ class Alloc(COp):
                 idx == 0
                 and isinstance(
                     client_op,
-                    pytensor.tensor.subtensor.IncSubtensor
-                    | pytensor.tensor.subtensor.AdvancedIncSubtensor1
-                    | pytensor.tensor.subtensor.AdvancedIncSubtensor
-                    | pytensor.tensor.blas.Gemv
-                    | pytensor.tensor.blas_c.CGemv
-                    | pytensor.tensor.blas.Ger
-                    | pytensor.tensor.blas_c.CGer,
+                    IncSubtensor
+                    | AdvancedIncSubtensor1
+                    | AdvancedIncSubtensor
+                    | Gemv
+                    | CGemv
+                    | Ger
+                    | CGer,
                 )
             ):
                 # Ops that will work inplace on the Alloc. So if they
@@ -1957,7 +1984,7 @@ class MakeVector(COp):
             """
         return ret
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         return [(len(ishapes),)]
 
     def pullback(self, inputs, outputs, output_gradients):
@@ -2245,7 +2272,7 @@ class Split(COp):
         for out_storage, out in zip(outputs_storage, split_outs, strict=False):
             out_storage[0] = out
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         axis = node.inputs[1]
         splits = node.inputs[2]
         shp_x, _shp_axis, _shp_splits = in_shapes
@@ -2701,7 +2728,7 @@ class Join(COp):
 
         return rval
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         from pytensor.tensor.math import eq, ge
 
         # ishapes[0] contains the size of the axis on which we join
@@ -3255,7 +3282,7 @@ class ARange(COp):
         return Apply(self, inputs, outputs)
 
     @config.change_flags(warn_float64="ignore")
-    def infer_shape(self, fgraph, node, i_shapes):
+    def infer_shape(self, node, i_shapes):
         from pytensor.tensor.math import ceil, maximum
 
         # Note start, stop and step can be float numbers.
@@ -3632,7 +3659,7 @@ class PermuteRowElements(Op):
 
         self._rec_perform(node, x, y, self.inverse, outs[0], curdim=0)
 
-    def infer_shape(self, fgraph, node, in_shapes):
+    def infer_shape(self, node, in_shapes):
         from pytensor.tensor.math import maximum
 
         shp_x = in_shapes[0]
@@ -3884,7 +3911,7 @@ class ExtractDiag(COp):
         x_grad = moveaxis(x_grad, (0, 1), (axis1, axis2))
         return [x_grad]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         from pytensor.tensor.math import clip, minimum
 
         (in_shape,) = shapes
@@ -4216,7 +4243,7 @@ class Choose(Op):
         assert mode in ("raise", "wrap", "clip")
         self.mode = mode
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         a_shape, choices_shape = shapes
         if choices_shape is None:
             # choices is a TypedList, not a tensor; no shape to broadcast
@@ -4247,9 +4274,7 @@ class Choose(Op):
             choice = as_tensor_variable(choices)
             choice_dtype = choice.dtype
 
-        (out_shape,) = self.infer_shape(
-            None, None, [shape_tuple(a), shape_tuple(choice)]
-        )
+        (out_shape,) = self.infer_shape(None, [shape_tuple(a), shape_tuple(choice)])
 
         static_out_shape = ()
         for s in out_shape:
@@ -4352,7 +4377,7 @@ class AllocEmpty(COp):
         """
         return str
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [node.inputs]
 
     def c_code_cache_version(self):

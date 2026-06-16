@@ -25,7 +25,7 @@ from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, constant, get_vector_length, ivector, vectorize
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import exp, isinf, lt, switch
+from pytensor.tensor.math import exp, isinf, lt, maximum, minimum, switch
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
@@ -35,6 +35,8 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    _is_provably_non_negative,
+    _is_provably_positive,
     advanced_inc_subtensor,
     advanced_inc_subtensor1,
     advanced_set_subtensor,
@@ -102,6 +104,67 @@ def test_as_index_literal():
 
     res = as_index_literal(np.newaxis)
     assert res is np.newaxis
+
+
+class TestProvablyPositive:
+    @pytest.mark.parametrize(
+        "data, strict, expected",
+        [
+            ([1.0, 2.0], True, True),
+            ([1.0, 2.0], False, True),
+            ([0.0, 2.0], True, False),
+            ([0.0, 2.0], False, True),
+            ([-1.0, 2.0], True, False),
+            ([-1.0, 2.0], False, False),
+        ],
+        ids=[
+            "all-positive-strict",
+            "all-positive-loose",
+            "zero-fails-strict",
+            "zero-passes-loose",
+            "negative-fails-strict",
+            "negative-fails-loose",
+        ],
+    )
+    def test_constant_data_respects_strictness(self, data, strict, expected):
+        assert (
+            _is_provably_positive(constant(np.array(data)), strict=strict) is expected
+        )
+
+    @pytest.mark.parametrize(
+        "make_var",
+        [
+            pytest.param(lambda: vector("v", dtype="uint8"), id="uint-dtype"),
+            pytest.param(lambda: matrix("m").shape[0], id="shape-dim"),
+            pytest.param(lambda: constant(np.array([0.5])).astype("int64"), id="cast"),
+        ],
+    )
+    def test_proves_non_negative_but_not_strict_positive(self, make_var):
+        """A uint value, a shape dimension, and a cast can each equal zero, so
+        they establish ``>= 0`` but never strict ``> 0``."""
+        var = make_var()
+        assert _is_provably_non_negative(var) is True
+        assert _is_provably_positive(var, strict=True) is False
+
+    @pytest.mark.parametrize(
+        "expr, strict, expected",
+        [
+            (minimum(2, 3), True, True),
+            (minimum(2, 0), True, False),
+            (minimum(2, 0), False, True),
+            (maximum(5, -10), True, True),
+            (maximum(-1, -10), True, False),
+        ],
+        ids=[
+            "min-needs-all-positive",
+            "min-zero-fails-strict",
+            "min-zero-passes-loose",
+            "max-needs-any-positive",
+            "max-none-positive",
+        ],
+    )
+    def test_recurses_through_min_and_max(self, expr, strict, expected):
+        assert _is_provably_positive(expr, strict=strict) is expected
 
 
 class TestGetCanonicalFormSlice:
@@ -362,7 +425,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_useless_subtensor",
-        ).excluding("bool_idx_to_nonzero")
+        ).excluding("bool_idx_to_nonzero", "fuse_indexed_into_elemwise")
         self.fast_compile = config.mode == "FAST_COMPILE"
 
     def function(
@@ -456,7 +519,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert isinstance(t.owner.op, Subtensor)
         self.eval_output_and_check(
             t,
-            mode=self.mode.excluding("local_useless_subtensor", "local_useless_slice"),
+            mode=self.mode.excluding(
+                "local_useless_subtensor",
+                "local_useless_slice",
+                "extract_diag_lift_pass",
+            ),
         )
 
     def test_err_invalid_2(self):
@@ -613,7 +680,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
             (3, DimShuffle, np.index_exp[..., [0, 2, 3]]),
             (1, DimShuffle, np.index_exp[np.newaxis, ...]),
             (
-                4 if config.mode == "FAST_COMPILE" else 3,
+                # ``[1, 2]`` is folded to a basic slice by
+                # ``local_adv_idx_to_slice`` in canonicalize, so the
+                # AdvancedSubtensor never reaches the linker — toposort is the
+                # same shape regardless of FAST_RUN vs FAST_COMPILE.
+                3,
                 AdvancedSubtensor,
                 np.index_exp[..., np.newaxis, [1, 2]],
             ),
@@ -732,10 +803,15 @@ class TestSubtensor(utt.OptimizationTestMixin):
         # the boolean mask should have the correct shape
         # - too large, padded with True
         mask = np.array([True, False, True])
+        # Single-axis bool reads rewrite ``[T, F, T]`` -> ``[0, 2]`` ->
+        # ``[0:4:2]`` via ``local_adv_idx_to_slice`` (shape_unsafe),
+        # silently truncating the gather. Exclude it so the IndexError from
+        # the out-of-bounds gather still surfaces.
+        shape_safe_read_mode = get_default_mode().excluding("shape_unsafe")
         with pytest.raises(IndexError):
-            test_array[mask].eval()
+            test_array[mask].eval(mode=shape_safe_read_mode)
         with pytest.raises(IndexError):
-            test_array[mask, ...].eval()
+            test_array[mask, ...].eval(mode=shape_safe_read_mode)
         with pytest.raises(IndexError):
             inc_subtensor(test_array[mask], 1).eval()
         with pytest.raises(IndexError):
@@ -864,6 +940,10 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert np.allclose(gval, good), (gval, good)
 
     def test_ok_list(self):
+        # ``local_adv_idx_to_slice`` (shape_unsafe) rewrites
+        # constant-step gathers like ``[1, 0]`` to a basic slice — exclude it
+        # here so the AdvancedSubtensor1 op survives for inspection.
+        shape_safe_mode = self.mode.excluding("shape_unsafe")
         for data, idx in [
             (random(4), [1, 0]),
             (random(4, 5), [2, 3, -1]),
@@ -881,7 +961,9 @@ class TestSubtensor(utt.OptimizationTestMixin):
             n = self.shared(data)
             t = n[idx]
 
-            val = self.eval_output_and_check(t, op_type=AdvancedSubtensor1)
+            val = self.eval_output_and_check(
+                t, op_type=AdvancedSubtensor1, mode=shape_safe_mode
+            )
             if isinstance(idx, list):
                 good = data[idx]
             else:

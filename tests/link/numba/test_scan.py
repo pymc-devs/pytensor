@@ -385,14 +385,13 @@ def test_inplace_taps(n_steps_constant):
                 node.inputs[idx] for idx in chain.from_iterable(dm.values())
             )
 
-    if n_steps_constant:
-        assert len(sit_sot_inps) == 0
-        assert len(untraced_sit_sot_inps) == 1
-        assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
-    else:
-        # This is not a feature, but a current limitation
-        # https://github.com/pymc-devs/pytensor/issues/1283
-        assert not destroyed_inputs
+    # ``local_subtensor_merge_integer`` + ``scan_reduce_buffer`` reduce the buffers
+    # the same way for both constant and symbolic ``n_steps`` (xs collapses
+    # to an untraced sit_sot, the mit_sot buffers reduce to ``taps + 1``),
+    # so inplace fires identically in both cases.
+    assert len(sit_sot_inps) == 0
+    assert len(untraced_sit_sot_inps) == 1
+    assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
 
 
 @pytest.mark.parametrize(
@@ -403,7 +402,7 @@ class TestScanSITSOTBuffer:
     def buffer_tester(self, n_steps, op_size, buffer_size, benchmark=None):
         x0 = pt.vector(shape=(op_size,), dtype="float64")
         xs = pytensor.scan(
-            fn=lambda xtm1: (xtm1 + 1),
+            fn=lambda xtm1: xtm1 + 1,
             outputs_info=[x0],
             n_steps=n_steps - 1,  # 1- makes it easier to align/misalign
             return_updates=False,
@@ -457,7 +456,7 @@ class TestScanSITSOTBuffer:
 @pytest.mark.parametrize("n_steps_val", [1, 1000])
 class TestScanMITSOTBuffer:
     def buffer_tester(self, constant_n_steps, n_steps_val, benchmark=None):
-        """Make sure we can handle storage changes caused by the `scan_save_mem` rewrite."""
+        """Make sure we can handle storage changes caused by the `scan_reduce_trace` rewrite."""
 
         def f_pow2(x_tm2, x_tm1):
             return 2 * x_tm1 + x_tm2

@@ -2,6 +2,7 @@
 Tests of printing functionality
 """
 
+import importlib.util
 import io
 import logging
 import re
@@ -13,6 +14,7 @@ import pytest
 
 import pytensor
 from pytensor import config
+from pytensor.assumptions import assume
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.mode import get_mode
@@ -30,7 +32,11 @@ from pytensor.printing import (
     pp,
     pydotprint,
 )
+from pytensor.scalar import Composite, float64
 from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.linalg import inv
+from pytensor.tensor.math import maximum
 from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
 
@@ -335,6 +341,75 @@ def test_debugprint():
     ]
 
 
+def test_debugprint_assumptions():
+    x = matrix("x")
+    out = inv(assume(x, diagonal=True))
+
+    s = StringIO()
+    debugprint(out, file=s, print_assumptions=True)
+    reference = dedent(
+        r"""
+        Blockwise{MatrixInverse, (m,m)->(m,m)} [id A] a={diag}
+         └─ SpecifyAssumptions{diagonal} [id B] a={diag}
+            └─ x [id C]
+        """
+    ).lstrip()
+    assert s.getvalue() == reference
+
+    # The flag is off by default, so no a={...} tag is printed.
+    s = StringIO()
+    debugprint(out, file=s)
+    assert "a={" not in s.getvalue()
+
+
+def test_debugprint_assumptions_prunes_implied_facts():
+    # positive_definite implies symmetric; only the strongest fact is shown.
+    x = matrix("x")
+    s = StringIO()
+    debugprint(assume(x, positive_definite=True), file=s, print_assumptions=True)
+    reference = dedent(
+        r"""
+        SpecifyAssumptions{positive_definite} [id A] a={pd}
+         └─ x [id B]
+        """
+    ).lstrip()
+    assert s.getvalue() == reference
+
+
+def test_debugprint_assumptions_negation_and_multiple():
+    x = matrix("x")
+
+    s = StringIO()
+    debugprint(assume(x, symmetric=False), file=s, print_assumptions=True)
+    assert (
+        s.getvalue()
+        == dedent(
+            r"""
+        SpecifyAssumptions{!symmetric} [id A] a={!sym}
+         └─ x [id B]
+        """
+        ).lstrip()
+    )
+
+    # Two independent facts survive propagation through ``inv``.
+    s = StringIO()
+    debugprint(
+        inv(assume(x, diagonal=True, orthogonal=True)),
+        file=s,
+        print_assumptions=True,
+    )
+    assert (
+        s.getvalue()
+        == dedent(
+            r"""
+        Blockwise{MatrixInverse, (m,m)->(m,m)} [id A] a={diag, orth}
+         └─ SpecifyAssumptions{diagonal, orthogonal} [id B] a={diag, orth}
+            └─ x [id C]
+        """
+        ).lstrip()
+    )
+
+
 def test_debugprint_id_type():
     a_at = dmatrix()
     b_at = dmatrix()
@@ -427,6 +502,114 @@ MyInnerGraphOp [id C]
         assert exp_line.strip() == res_line.strip()
 
 
+def test_debugprint_inner_graph_shared():
+    """Inner-graph `Op`s that compare equal share a single printed body, whose
+    header lists every node id it applies to (deduped, instead of one body per
+    occurrence)."""
+    x = dvector("x")
+
+    def relu_ofg():
+        i = dvector("i")
+        return OpFromGraph([i], [maximum(i, 0)], inline=False, name="Relu")
+
+    # `a` and `b` use distinct-but-equal OFG instances (identical inner graph);
+    # `c` uses a structurally different OFG.
+    a = relu_ofg()(x)
+    b = relu_ofg()(a)
+    out = OpFromGraph([x], [x + 1], inline=False, name="AddOne")(b)
+
+    lines = debugprint(out, file="str").split("\n")
+
+    exp_res = """AddOne{inline=False} [id A]
+ └─ Relu{inline=False} [id B]
+    └─ Relu{inline=False} [id C]
+       └─ x [id D]
+
+Inner graphs:
+
+AddOne{inline=False} [id A]
+ ← Add [id E]
+    ├─ i0 [id F]
+    └─ ExpandDims{axis=0} [id G]
+       └─ 1 [id H]
+
+Relu{inline=False} [id B, C]
+ ← Maximum [id I]
+    ├─ i0 [id F]
+    └─ ExpandDims{axis=0} [id J]
+       └─ 0 [id K]
+    """
+
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
+        assert exp_line.strip() == res_line.strip()
+
+    def add_one_composite():
+        xs = float64("xs")
+        return Composite([xs], [xs + 1.0])
+
+    d = Elemwise(add_one_composite())(x)
+    e = Elemwise(add_one_composite())(d)
+
+    lines = debugprint(e, file="str").split("\n")
+
+    exp_res = """Composite{(i0 + 1.0)} [id A]
+ └─ Composite{(i0 + 1.0)} [id B]
+    └─ x [id C]
+
+Inner graphs:
+
+Composite{(i0 + 1.0)} [id A, B]
+ ← add [id D]
+    ├─ i0 [id E]
+    └─ 1.0 [id F]
+    """
+
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
+        assert exp_line.strip() == res_line.strip()
+
+    # An Op that only appears nested inside other inner graphs: its nodes are
+    # only discovered while the parent bodies are printed, and the shared
+    # header must still list every node id
+    i1 = dvector("i")
+    a_op = OpFromGraph([i1], [relu_ofg()(i1) + 1], inline=False, name="A")
+    i2 = dvector("i")
+    b_op = OpFromGraph([i2], [relu_ofg()(i2) * 2], inline=False, name="B")
+
+    lines = debugprint(a_op(x) + b_op(x), file="str").split("\n")
+
+    exp_res = """Add [id A]
+ ├─ A{inline=False} [id B]
+ │  └─ x [id C]
+ └─ B{inline=False} [id D]
+    └─ x [id C]
+
+Inner graphs:
+
+A{inline=False} [id B]
+ ← Add [id E]
+    ├─ Relu{inline=False} [id F]
+    │  └─ i0 [id G]
+    └─ ExpandDims{axis=0} [id H]
+       └─ 1 [id I]
+
+B{inline=False} [id D]
+ ← Mul [id J]
+    ├─ Relu{inline=False} [id K]
+    │  └─ i0 [id G]
+    └─ ExpandDims{axis=0} [id L]
+       └─ 2 [id M]
+
+Relu{inline=False} [id F, K]
+ ← Maximum [id N]
+    ├─ i0 [id G]
+    └─ ExpandDims{axis=0} [id O]
+       └─ 0 [id P]
+    """
+
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
+        assert exp_line.strip() == res_line.strip()
+
+
 def test_get_var_by_id():
     r1, r2 = MyVariable("v1"), MyVariable("v2")
     o1 = MyOp("op1")(r1, r2)
@@ -502,6 +685,9 @@ def test_summary_with_profile_optimizer():
     assert "Rewriter Profile" in s.getvalue()
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("rich") is None, reason="rich is not installed"
+)
 class TestDebugprintRich:
     """Tests for debugprint(..., file="rich").
 
@@ -510,12 +696,12 @@ class TestDebugprintRich:
     construct the right tree structure and don't crash on various graph shapes.
     """
 
-    rich = pytest.importorskip("rich")
-
     def test_return_type(self):
+        from rich.tree import Tree
+
         x = dvector("x")
         tree = debugprint(x.sum(), file="rich")
-        assert isinstance(tree, self.rich.tree.Tree)
+        assert isinstance(tree, Tree)
 
     def test_single_output_has_one_child(self):
         # One output variable → the hidden root should have exactly one child.
@@ -723,8 +909,10 @@ class TestDebugprintRich:
         mul_node = tree.children[0].children[0]
         assert "result" in str(mul_node.label)
         # Verify Rich can render the tree without raising a markup error.
+        from rich.console import Console
+
         buf = io.StringIO()
-        console = self.rich.console.Console(file=buf, highlight=False)
+        console = Console(file=buf, highlight=False)
         console.print(tree)  # raises MarkupError if escaping is broken
 
     def test_deep_shared_node_sentinel_depth(self):

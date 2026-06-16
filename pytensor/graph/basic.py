@@ -108,7 +108,7 @@ class Node(MetaObject):
         return debugprint(self, **kwargs)
 
 
-class Apply(Node, Generic[OpType]):
+class Apply(Node, Generic[OpType]):  # noqa: UP046
     """A `Node` representing the application of an operation to inputs.
 
     Basically, an `Apply` instance is an object that represents the
@@ -345,7 +345,7 @@ class Apply(Node, Generic[OpType]):
         return self.op.params_type
 
 
-class Variable(Node, Generic[_TypeType, OptionalApplyType]):
+class Variable(Node, Generic[_TypeType, OptionalApplyType]):  # noqa: UP046
     r"""
     A :term:`Variable` is a node in an expression graph that represents a
     variable.
@@ -677,7 +677,7 @@ class AtomicVariable(Variable[_TypeType, None]):
         return cp
 
 
-class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):
+class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):  # noqa: UP046
     """A variable that enables alpha-equivalent comparisons."""
 
     __instances__: dict[tuple["Type", Hashable], "NominalVariable"] = {}
@@ -820,32 +820,23 @@ def _make_frozen_output_reduce(out: Variable):
 class FrozenApply(Apply):
     """An immutable, globally-interned Apply node for frozen graphs.
 
-    Uses tuples for ``inputs`` and ``outputs`` so mutation raises ``TypeError``
-    at the language level.  Interned by ``(op, cache_key(inputs))`` —
-    constructing a ``FrozenApply`` with the same op and input variables returns
-    the cached instance.
+    ``inputs`` and ``outputs`` are tuples, so mutating them raises ``TypeError``.
 
-    Constants are keyed by their ``signature()`` so that two independently
-    created Constants with the same value resolve to the same cached node.
+    Instances are interned on ``(op, inputs, output_types)``: constructing one
+    with a matching key returns the cached instance.  Constant inputs are keyed
+    by ``signature()`` (so equal-valued Constants share a node).  Other inputs
+    are already globally interned, so identity is enough; the key stores their
+    ``id()`` rather than the variables themselves, keeping strong references out
+    of the cache so chains of ``FrozenApply`` nodes collect in a single GC pass.
+
+    ``output_types`` is in the key because frozen graphs root on
+    ``NominalVariable`` inputs (index and type only).  Nominalizing truncates the
+    root inputs, discarding the values and subgraphs an Op may have read to
+    derive its output type (e.g. via ``infer_shape``), so ``(op, inputs)`` alone
+    no longer pins it down.
     """
 
     _cache: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
-
-    @staticmethod
-    def _input_to_key(inp: Variable):
-        """Convert an input Variable to a hashable, value-based cache key element.
-
-        Non-Constants (NominalVariables, FrozenApply outputs) are already
-        globally interned, so ``id()`` is a correct identity key.  Using
-        ``id()`` instead of the object itself avoids strong references in
-        cache keys that would prevent GC from collecting chains of
-        FrozenApply nodes in a single pass.
-
-        Constants use their ``signature()`` for value-based deduplication.
-        """
-        if isinstance(inp, Constant):
-            return inp.signature()
-        return id(inp)
 
     def __new__(
         cls,
@@ -853,7 +844,11 @@ class FrozenApply(Apply):
         inputs: tuple[Variable, ...],
         output_types: tuple["Type", ...],
     ):
-        cache_key = (op, tuple(cls._input_to_key(i) for i in inputs))
+        cache_key = (
+            op,
+            tuple(i.signature() if isinstance(i, Constant) else id(i) for i in inputs),
+            output_types,
+        )
         cached = cls._cache.get(cache_key)
         if cached is not None:
             return cached
@@ -978,8 +973,7 @@ def clone_node_and_cache(
 
     clone_d[node] = new_node
 
-    if new_node.op is not node.op:
-        clone_d.setdefault(node.op, new_node.op)
+    clone_d.setdefault(node.op, new_node.op)
 
     for old_o, new_o in zip(node.outputs, new_node.outputs, strict=True):
         clone_d.setdefault(old_o, new_o)

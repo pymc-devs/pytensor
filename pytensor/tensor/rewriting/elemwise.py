@@ -2,6 +2,7 @@ import abc
 import itertools
 import operator
 import sys
+from collections import defaultdict
 from collections.abc import Generator, Sequence
 from functools import cache, reduce
 from heapq import heapify, heappop, heappush
@@ -16,7 +17,6 @@ from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
-from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
@@ -27,7 +27,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.graph.traversal import toposort
+from pytensor.graph.traversal import toposort, walk_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar import (
     Add,
@@ -46,7 +46,7 @@ from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
-    alloc_like,
+    broadcast_like_elemwise,
     broadcasted_by,
     elemwise_of,
     register_canonicalize,
@@ -73,6 +73,91 @@ class InplaceGraphOptimizer(GraphRewriter):
         self, node: Apply, inplace_pattern: dict[int, Sequence[int]]
     ) -> Apply:
         pass
+
+    def _get_protected_inputs(self, fgraph):
+        """Collect inputs protected from in-place destruction."""
+        protected = set(
+            itertools.chain.from_iterable(
+                f.protected for f in fgraph._features if isinstance(f, Supervisor)
+            )
+        )
+        protected.update(fgraph.outputs)
+        return protected
+
+    def try_inplace_on_node(
+        self,
+        fgraph,
+        node,
+        candidate_pairs=None,
+        reason="inplace_optimizer",
+        extra_protected_inputs=frozenset(),
+    ):
+        """Try to make a single node operate in-place.
+
+        First attempts all candidate pairs at once, then falls back to
+        one-at-a-time. Returns the (possibly replaced) node.
+
+        Parameters
+        ----------
+        candidate_pairs
+            Pre-filtered and sorted list of ``((out_idx, out), (in_idx, inp))``
+            pairs. If None, computed from ``filter_candidate_pairs`` using
+            the standard protections plus ``extra_protected_inputs``.
+        extra_protected_inputs
+            Additional variables that must not be used as in-place targets,
+            only used when ``candidate_pairs`` is None.
+        """
+        if candidate_pairs is None:
+            protected_inputs = self._get_protected_inputs(fgraph)
+            protected_inputs.update(extra_protected_inputs)
+            candidate_pairs = self.filter_candidate_pairs(
+                fgraph, node, protected_inputs
+            )
+        if not candidate_pairs:
+            return node
+
+        # Try in-placing all outputs at once
+        tried_inputs = set()
+        inplace_pattern = {}
+        for (o, _), (i, _) in candidate_pairs:
+            if o not in inplace_pattern and i not in tried_inputs:
+                inplace_pattern[o] = [i]
+                tried_inputs.add(i)
+
+        inplace_node = self.create_inplace_node(node, inplace_pattern)
+        if inplace_node.op.destroy_map == inplace_pattern:
+            replacements = tuple(zip(node.outputs, inplace_node.outputs))
+            try:
+                fgraph.replace_all_validate(replacements, reason=reason)
+            except InconsistencyError:
+                pass
+            else:
+                copy_stack_trace(node.outputs, inplace_node.outputs)
+                return inplace_node
+
+        # Fall back to one output/input at a time
+        tried_inputs = set()
+        inplace_pattern = {}
+        original_node = node
+        for (o, _), (i, _) in candidate_pairs:
+            if o not in inplace_pattern and i not in tried_inputs:
+                inplace_pattern[o] = [i]
+                tried_inputs.add(i)
+
+                inplace_node = self.create_inplace_node(node, inplace_pattern)
+                if inplace_node.op.destroy_map != inplace_pattern:
+                    # This Op can't respect this partial inplace pattern,
+                    # We assume it can't support any other cases
+                    break
+                replacements = tuple(zip(node.outputs, inplace_node.outputs))
+                try:
+                    fgraph.replace_all_validate(replacements, reason=reason)
+                    node = inplace_node
+                except InconsistencyError:
+                    inplace_pattern.pop(o)
+        if node is not original_node:
+            copy_stack_trace(original_node.outputs, node.outputs)
+        return node
 
     def apply(self, fgraph):
         r"""
@@ -127,12 +212,7 @@ class InplaceGraphOptimizer(GraphRewriter):
         }
         large_graph = len(fgraph.apply_nodes) > 500
 
-        protected_inputs = set(
-            itertools.chain.from_iterable(
-                f.protected for f in fgraph._features if isinstance(f, Supervisor)
-            )
-        )
-        protected_inputs.update(fgraph.outputs)
+        protected_inputs = self._get_protected_inputs(fgraph)
         root_destroyer = fgraph.destroy_handler.root_destroyer
 
         self_op = self.op
@@ -170,7 +250,7 @@ class InplaceGraphOptimizer(GraphRewriter):
                 indirect_update_pairs = []
                 other_update_pairs = []
                 for pair in candidate_pairs:
-                    ((o, out), (i, inp)) = pair
+                    ((_o, out), (_i, inp)) = pair
                     if out in node_updates:
                         direct_update_inp = op_updates[out]
                         if direct_update_inp is inp:
@@ -190,54 +270,11 @@ class InplaceGraphOptimizer(GraphRewriter):
                     direct_update_pairs + indirect_update_pairs + other_update_pairs
                 )
 
-            # Try in-placing all outputs at once
-            tried_inputs = set()
-            inplace_pattern = {}
-            for (o, _), (i, _) in sorted_candidate_pairs:
-                if o not in inplace_pattern and i not in tried_inputs:
-                    inplace_pattern[o] = [i]
-                    tried_inputs.add(i)
-
-            inplace_node = self.create_inplace_node(node, inplace_pattern)
-            if inplace_node.op.destroy_map == inplace_pattern:
-                replacements = tuple(zip(node.outputs, inplace_node.outputs))
-                try:
-                    fgraph.replace_all_validate(replacements, reason=reason)
-                except InconsistencyError:
-                    prof["nb_eager_inconsistent"] += 1
-                else:
-                    prof["nb_replaced"] += 1
-                    copy_stack_trace(node.outputs, inplace_node.outputs)
-                    continue
-
-            # If it fails or doesn't match the desired inplace pattern, try one output/input at a time
-            tried_inputs = set()
-            inplace_pattern = {}
-            replaced = False
-            original_node = node
-            for (o, _), (i, _) in sorted_candidate_pairs:
-                if o not in inplace_pattern and i not in tried_inputs:
-                    inplace_pattern[o] = [i]
-                    tried_inputs.add(i)
-
-                    inplace_node = self.create_inplace_node(node, inplace_pattern)
-                    if inplace_node.op.destroy_map != inplace_pattern:
-                        # This Op can't respect this partial inplace pattern,
-                        # We assume it can't support any other cases
-                        break
-                    else:
-                        replacements = tuple(zip(node.outputs, inplace_node.outputs))
-                        try:
-                            fgraph.replace_all_validate(replacements, reason=reason)
-                            node = inplace_node
-                            replaced = True
-                        except InconsistencyError:
-                            prof["nb_inconsistent"] += 1
-                            # The input, not the output caused inconsistencies
-                            inplace_pattern.pop(o)
-            if replaced:
-                copy_stack_trace(original_node.outputs, node.outputs)
-                prof["nb_replaced"] += replaced
+            result = self.try_inplace_on_node(
+                fgraph, node, sorted_candidate_pairs, reason=reason
+            )
+            if result is not node:
+                prof["nb_replaced"] += 1
 
         return prof
 
@@ -558,7 +595,7 @@ class FusionOptimizer(GraphRewriter):
 
         def find_fuseable_subgraphs(
             fg: FunctionGraph,
-        ) -> Generator[tuple[tuple[Variable], tuple[Variable]], None, None]:
+        ) -> Generator[tuple[tuple[Variable, ...], tuple[Variable, ...]], None, None]:
             """Find subgraphs of Elemwise nodes that can be fused together.
 
             In general, there is no single solution. We try to find large subgraphs eagerly
@@ -667,9 +704,9 @@ class FusionOptimizer(GraphRewriter):
                 if isinstance(client.op, Output)
             )
 
-            # Start main loop to find collection of fuseable subgraphs
-            # We store the collection in `sorted_subgraphs`, in reverse topological order
-            sorted_subgraphs: list[
+            # Start main loop to find collection of fuseable subgraphs. We collect them in
+            # discovery order; the final yield order is topologically sorted at the end.
+            discovered_subgraphs: list[
                 tuple[int, tuple[tuple[Variable], tuple[Variable]]]
             ] = []
             # Keep a bitset of nodes that have been claimed by subgraphs
@@ -833,44 +870,160 @@ class FusionOptimizer(GraphRewriter):
                         if node_ancestors_bitset & subgraph_bitset
                     )
 
-                # Add new subgraph to sorted_subgraphs
-                # Because we start from sink nodes in reverse topological order, most times new subgraphs
-                # don't depend on previous subgraphs, so we can just append them at the end.
-                if not (unfuseable_ancestors_bitset & all_subgraphs_bitset):
-                    # That's the case here
-                    # None of the unfuseable_ancestors (i.e, the ancestors) are present in the previous collected subgraphs
-                    sorted_subgraphs.append(
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
-                    )
-                else:
-                    # But not here, so we need to find the right position for insertion.
-                    # We iterate through the previous subgraphs in topological order (reverse of the stored order).
-                    # We cumulatively exclude each subgraph_bitset and perform the same dependency check again, until it passes.
-                    remaining_subgraphs_bitset = all_subgraphs_bitset
-                    for index, (other_subgraph_bitset, _) in enumerate(
-                        reversed(sorted_subgraphs)
-                    ):
-                        # Exclude subgraph bitset
-                        remaining_subgraphs_bitset &= ~other_subgraph_bitset
-                        if not (
-                            unfuseable_ancestors_bitset & remaining_subgraphs_bitset
-                        ):
-                            break  # bingo
-                    else:  # no-break
-                        raise RuntimeError(
-                            "Failed to find insertion point for fused subgraph"
-                        )
-                    sorted_subgraphs.insert(
-                        -(index + 1),
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs)),
-                    )
-
-                # Add subgraph to all_subgraphs_bitset
+                # Collect the subgraph
+                discovered_subgraphs.append(
+                    (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
+                )
                 all_subgraphs_bitset |= subgraph_bitset
 
-            # Finished exploring the whole graph
-            # Yield from sorted_subgraphs, discarding the subgraph_bitset
-            yield from (io for _, io in sorted_subgraphs)
+            # Merge sibling groups: independent subgraphs or remaining
+            # candidate nodes that share inputs but have no producer-consumer
+            # edge between them. The eager expansion above only walks
+            # producer-consumer edges, so it misses siblings like f(x) and
+            # g(x) that share an input without one feeding into the other.
+            sibling_candidates: list = list(discovered_subgraphs)
+            n_discovered = len(sibling_candidates)
+            for node, bf in nodes_bitflags.items():
+                if node not in candidate_starting_nodes:
+                    continue
+                if not (bf & all_subgraphs_bitset):
+                    sibling_candidates.append(
+                        (bf, (tuple(dict.fromkeys(node.inputs)), node.outputs))
+                    )
+            # Create a mapping from inputs to sibling groups that consume them.
+            # Skip scalar constants as they get inlined later and don't
+            # represent meaningful shared computation between siblings.
+            input_to_sibling_idxs: dict[Variable, list[int]] = defaultdict(list)
+            for sibling_idx, (_, (inputs, outputs)) in enumerate(sibling_candidates):
+                out_bcast = outputs[0].type.broadcastable
+                for inp in inputs:
+                    if isinstance(inp, TensorConstant) and inp.unique_value is not None:
+                        continue
+                    # Only group siblings through inputs that aren't broadcasted
+                    # As we may be dealing with sibiling of different shapes.
+                    # This is conservative, we could check if other shared inputs
+                    # jointly imply equal shapes (or look at static shapes if available)
+                    if inp.type.broadcastable != out_bcast:
+                        continue
+                    input_to_sibling_idxs[inp].append(sibling_idx)
+
+            # Track which candidate each index was merged into (union-find)
+            merged_into: dict[int, int] = {}
+            merge_targets: set[int] = set()
+
+            def find_canonical(idx):
+                """Follow merge chain to find the live candidate."""
+                try:
+                    while True:
+                        idx = merged_into[idx]
+                except KeyError:
+                    return idx
+
+            for sibling_idxs in input_to_sibling_idxs.values():
+                if len(sibling_idxs) < 2:
+                    continue
+
+                for i in range(len(sibling_idxs) - 1):
+                    sibling_i = find_canonical(sibling_idxs[i])
+
+                    bitset_i, (inputs_i, outputs_i) = sibling_candidates[sibling_i]
+                    bcast_i = outputs_i[0].type.broadcastable
+                    merged = False
+                    for sibling_j in sibling_idxs[i + 1 :]:
+                        sibling_j = find_canonical(sibling_j)
+                        if sibling_j == sibling_i:
+                            continue
+                        bitset_j, (inputs_j, outputs_j) = sibling_candidates[sibling_j]
+                        if bcast_i != outputs_j[0].type.broadcastable:
+                            continue
+
+                        # Independence: neither is ancestor of the other
+                        if (
+                            bitset_i & ancestors_bitsets[outputs_j[0].owner]
+                            or bitset_j & ancestors_bitsets[outputs_i[0].owner]
+                        ):
+                            continue
+
+                        # Merge sibling_j into sibling_i
+                        merged_bitset = bitset_i | bitset_j
+                        merged_outputs = (*outputs_i, *outputs_j)
+                        merged_inputs = list(inputs_i)
+                        merged_inputs_set = set(inputs_i)
+                        for input_j in inputs_j:
+                            if input_j not in merged_inputs_set:
+                                merged_inputs.append(input_j)
+                                merged_inputs_set.add(input_j)
+                        merged_into[sibling_j] = sibling_i
+                        merge_targets.add(sibling_i)
+
+                        # Update ancestor bitsets so that any node
+                        # depending on part of the merged group now
+                        # depends on all of it (mirrors the main loop).
+                        merged_ancestors = reduce(
+                            or_,
+                            (ancestors_bitsets[o.owner] for o in merged_outputs),
+                        )
+                        ancestors_bitsets |= (
+                            (n, n_anc | merged_ancestors)
+                            for n, n_anc in ancestors_bitsets.items()
+                            if n_anc & merged_bitset
+                        )
+
+                        # Update locals for next iteration
+                        bitset_i = merged_bitset
+                        inputs_i = tuple(merged_inputs)
+                        outputs_i = merged_outputs
+                        merged = True
+
+                    if merged:
+                        sibling_candidates[sibling_i] = (
+                            bitset_i,
+                            (inputs_i, outputs_i),
+                        )
+                        all_subgraphs_bitset |= bitset_i
+
+            # Build final list from canonical entries only.
+            # Singleton nodes added as sibling candidates are only included
+            # if they were actually merged with another subgraph.
+            discovered_subgraphs_io: list[
+                tuple[tuple[Variable, ...], tuple[Variable, ...]]
+            ] = [
+                io
+                for idx, (_, io) in enumerate(sibling_candidates)
+                if find_canonical(idx) == idx
+                and (idx < n_discovered or idx in merge_targets)
+            ]
+
+            # Yield sorted subgraphs
+            # A client must be fused before its direct ancestors,
+            # otherwise it would reintroduce the old nodes back into the graph.
+            # Indirect ancestry through non-fused variables is order-independent.
+            # Map each subgraph output variable to the respective subgraph index
+            # Materialized list ensures the same int objects are reused everywhere,
+            # which is required by walk_toposort's identity-based dependency removal.
+            subgraph_indices = list(range(len(discovered_subgraphs_io)))
+            sg_idx_of_out = {
+                out: idx
+                for idx, (_, sg_outputs) in zip(
+                    subgraph_indices, discovered_subgraphs_io
+                )
+                for out in sg_outputs
+            }
+
+            def direct_ancestors(
+                i, sg_idx_of_out=sg_idx_of_out, sgs=discovered_subgraphs_io
+            ):
+                sg_inputs, _ = sgs[i]
+                return [
+                    ancestor_sg_idx
+                    for inp in sg_inputs
+                    if (ancestor_sg_idx := sg_idx_of_out.get(inp)) is not None
+                ]
+
+            for i in reversed(
+                tuple(walk_toposort(subgraph_indices, deps=direct_ancestors))  # type: ignore[type-var]
+            ):
+                yield discovered_subgraphs_io[i]
 
         max_operands = elemwise_max_operands_fct(None)
         reason = self.__class__.__name__
@@ -1069,13 +1222,13 @@ def local_inline_composite_constants(fgraph, node):
     if not inlineable:
         return None
 
-    mutable_fg = composite_op.fgraph.unfreeze()
+    composite_fg = composite_op.fgraph
     inlineable_indices = {i for i, _ in inlineable}
     new_outer_inputs = []
     new_inner_inputs = []
-    inner_replacements = {}
+    inner_replacements = {i: i for i in composite_fg.inputs}
     for i, (outer_inp, inner_inp) in enumerate(
-        zip(node.inputs, mutable_fg.inputs, strict=True)
+        zip(node.inputs, composite_fg.inputs, strict=True)
     ):
         if i in inlineable_indices:
             inner_replacements[inner_inp] = scalar_constant(
@@ -1085,19 +1238,13 @@ def local_inline_composite_constants(fgraph, node):
             new_outer_inputs.append(outer_inp)
             new_inner_inputs.append(inner_inp)
 
-    new_inner_outs = clone_replace(mutable_fg.outputs, replace=inner_replacements)
+    new_inner_outs = composite_fg.bind(inner_replacements)
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
 
-    # Some of the inlined constants were broadcasting the output shape
-    if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
-        new_outputs = [
-            alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
-            for new_out in new_outputs
-        ]
-
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    return broadcast_like_elemwise(
+        list(new_outputs), node, fgraph=fgraph, stack_trace=True
+    )
 
 
 @node_rewriter(tracks=[add, mul])

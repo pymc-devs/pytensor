@@ -20,7 +20,7 @@ NodeAndChildren = tuple[T, Iterable[T] | None]
 
 
 @overload
-def walk(
+def walk[T: Node](
     nodes: Iterable[T],
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
@@ -29,7 +29,7 @@ def walk(
 
 
 @overload
-def walk(
+def walk[T: Node](
     nodes: Iterable[T],
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool,
@@ -37,7 +37,7 @@ def walk(
 ) -> Generator[NodeAndChildren, None, None]: ...
 
 
-def walk(
+def walk[T: Node](
     nodes: Iterable[T],
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
@@ -511,7 +511,7 @@ def truncated_graph_inputs(
     return truncated_inputs
 
 
-def walk_toposort(
+def walk_toposort[T: Node](
     graphs: Iterable[T],
     deps: Callable[[T], Iterable[T] | None],
 ) -> Generator[T, None, None]:
@@ -526,8 +526,10 @@ def walk_toposort(
 
     Notes
     -----
-
     ``deps(i)`` should behave like a pure function (no funny business with internal state).
+
+    The implementation uses identity (``is``), so items returned by ``deps``
+    must be the *same objects* as those yielded by ``graphs``.
 
     The order of the return value list is determined by the order of nodes
     returned by the `deps` function.
@@ -579,7 +581,7 @@ def walk_toposort(
         raise ValueError("graph contains cycles")
 
 
-def general_toposort(
+def general_toposort[T: Node](
     outputs: Iterable[T],
     deps: Callable[[T], Iterable[T] | None],
     compute_deps_cache: Callable[[T], Iterable[T] | None] | None = None,

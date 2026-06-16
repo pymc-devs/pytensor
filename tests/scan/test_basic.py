@@ -2496,6 +2496,36 @@ class TestGradUntil:
     def test_grad_until_and_truncate_sequence_taps(self):
         ScanCompatibilityTests.check_grad_until_and_truncate_sequence_taps(mode=None)
 
+    def test_grad_until_with_recurrent_state(self):
+        # With a sit-sot state, the first output buffer includes the initial state.
+        # Deriving the executed-step count from that buffer's length shifts every
+        # sequence gradient one position to the right. The nitsot-only cases above
+        # never see this because their first output has no initial-state row.
+        x0 = scalar(name="x0")
+        a = np.asarray(1.3, dtype=config.floatX)
+        xs = scan(
+            lambda y, x: (a * x + y, until(a * x + y > 5.0)),
+            sequences=self.x,
+            outputs_info=[x0],
+            return_updates=False,
+        )
+        g_seq, g_x0 = grad(xs.sum(), [self.x, x0])
+        f = function([self.x, x0], [xs, g_seq, g_x0])
+
+        seq_v = np.linspace(0.4, 0.9, 12).astype(config.floatX)
+        x0_v = np.asarray(0.2, dtype=config.floatX)
+        out, g_seq_v, g_x0_v = f(seq_v, x0_v)
+        k = out.shape[0]
+        assert 1 < k < seq_v.shape[0], "until must fire mid-sequence"
+
+        # x_t = a^(t+1) x0 + sum_{j<=t} a^(t-j) y_j for t < k, so for the loss
+        # sum_t x_t: d/dy_j = (a^(k-j) - 1) / (a - 1) for j < k, 0 after; and
+        # d/dx0 = a (a^k - 1) / (a - 1).
+        j = np.arange(seq_v.shape[0])
+        g_seq_ref = np.where(j < k, (a ** (k - j) - 1) / (a - 1), 0.0)
+        utt.assert_allclose(g_seq_v, g_seq_ref)
+        utt.assert_allclose(g_x0_v, a * (a**k - 1) / (a - 1))
+
 
 def test_mintap_onestep():
     seq = ivector("seq")
@@ -4210,14 +4240,18 @@ def test_zero_steps_untraced_sit_sot(mode):
         return_updates=False,
         mode=mode,
     )
-    x = xs[-1]
+    # Index the raw scan output (which always includes the initial state) so
+    # ``[-1]`` is well-defined even when ``n_steps == 0``.  ``xs`` itself is
+    # ``raw[1:]`` (stripped of the initial), and ``xs[-1]`` would be
+    # out-of-bounds in that case.
+    x = xs.owner.inputs[0][-1]
 
     f = function([n_steps], x, updates={rng: final_rng}, mode=mode)
 
     assert f(n_steps=0) == np.pi
 
     # This is a regression test, scan would return None for the final_rng
-    # and cause a failure in the second coll
+    # and cause a failure in the second call
     assert f(n_steps=0) == np.pi
 
     # Non-zero steps should still work

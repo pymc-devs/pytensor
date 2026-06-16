@@ -2251,7 +2251,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         self.t_call = t_call
         self.t_fn = t_fn
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         # input_shapes correspond to the shapes of node.inputs
         for inp, inp_shp in zip(node.inputs, input_shapes, strict=True):
             assert inp_shp is None or len(inp_shp) == inp.type.ndim
@@ -2374,17 +2374,18 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         shp.append(v_shp_i[0])
                 scan_outs.append(tuple(shp))
 
-        scan_outs += list(input_shapes[offset : offset + info.n_untraced_sit_sot])
-        # if we are dealing with a repeat-until, then we do not know the
-        # leading dimension so we replace it for every entry with Shape_i
+        # Untraced sit_sot outputs hold only the last value, so their shape
+        # equals the input shape (no leading time dimension). Skip the
+        # as_while leading-dim override for them.
         if info.as_while:
-            scan_outs_init = scan_outs
-            scan_outs = []
-            for o, x in zip(node.outputs, scan_outs_init, strict=True):
-                if x is None:
-                    scan_outs.append(None)
-                else:
-                    scan_outs.append((Shape_i(0)(o), *x[1:]))
+            # Repeat-until: we don't know the leading dimension of the
+            # traced outputs, so override it with Shape_i.
+            traced_outs = node.outputs[: len(scan_outs)]
+            scan_outs = [
+                None if x is None else (Shape_i(0)(o), *x[1:])
+                for o, x in zip(traced_outs, scan_outs, strict=True)
+            ]
+        scan_outs += list(input_shapes[offset : offset + info.n_untraced_sit_sot])
         return scan_outs
 
     def connection_pattern(self, node):
@@ -2472,7 +2473,12 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         else:
             grad_steps = inputs[0]
         if info.as_while:
-            n_steps = outs[0].shape[0]
+            # Number of steps the while-loop actually executed. grad_steps already
+            # accounts for the initial-state rows included in recurrent output
+            # buffers; outs[0].shape[0] would overcount by the initial state when
+            # the first output is a recurrent one, shifting every sequence
+            # gradient by one position.
+            n_steps = grad_steps
 
         # Restrict the number of grad steps according to self.truncate_gradient
         if self.truncate_gradient != -1:

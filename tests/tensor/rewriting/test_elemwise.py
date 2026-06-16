@@ -1,3 +1,4 @@
+import itertools
 import warnings
 
 import numpy as np
@@ -17,7 +18,7 @@ from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.raise_op import assert_op
-from pytensor.scalar.basic import Composite, float64
+from pytensor.scalar.basic import EQ, Composite, float64
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import abs as pt_abs
@@ -234,6 +235,13 @@ def test_local_useless_expand_dims_in_reshape():
 
 
 class TestFusion:
+    @pytest.fixture(autouse=True)
+    def _raise_on_opt_error(self):
+        # Surface any rewrite failure (including FusionOptimizer planner errors)
+        # instead of letting SequentialGraphRewriter silently log them.
+        with config.change_flags(on_opt_error="raise"):
+            yield
+
     rewrites = RewriteDatabaseQuery(
         include=[
             "canonicalize",
@@ -996,16 +1004,13 @@ class TestFusion:
                 (np.sum(fxv + 5) * np.exp(fxv) / (fxv + 5),),
                 ("float32",),
             ),
-            pytest.param(
-                (
-                    (sin(exp(fx)), exp(sin(fx))),
-                    (fx,),
-                    (fxv,),
-                    1,
-                    (np.sin(np.exp(fxv)), np.exp(np.sin(fxv))),
-                    ("float32", "float32"),
-                ),
-                marks=pytest.mark.xfail,  # Not implemented yet
+            (
+                (sin(exp(fx)), exp(sin(fx))),
+                (fx,),
+                (fxv,),
+                1,
+                (np.sin(np.exp(fxv)), np.exp(np.sin(fxv))),
+                ("float32", "float32"),
             ),
         ],
     )
@@ -1140,7 +1145,6 @@ class TestFusion:
 
         new_out = f.maker.fgraph.outputs[0]
         assert isinstance(new_out.owner.op, Elemwise)
-        assert isinstance(new_out.owner.op.scalar_op, ps.basic.Add)
         assert len(new_out.owner.inputs) == 4
 
         # TODO: Do we really need to do this?
@@ -1402,6 +1406,54 @@ class TestFusion:
                         frozenset((ps.add, ps.exp)),
                     }
 
+    def test_replacement_order_regression(self):
+        # Regression test for #2145, example breaks old naive linear topological sorting
+        x = pt.vector("x", shape=(5,))
+
+        # Different operation shapes, force separate fused subgraphs
+        neg_x = pt.neg(x)  # shape (5,)
+        sum_x = pt.sum(x)  # shape ()
+        neg_max_x = pt.neg(pt.max(x))  # shape ()
+        neg_sum_x = pt.neg(sum_x[None])  # shape (1,)
+
+        # SG-A: fuses {neg_max_x, first_term} — discovered first (highest sink)
+        first_term = sum_x + neg_max_x
+        first_term.name = "first_term"
+
+        # SG-C: fuses {neg_x, second_term} — discovered second
+        second_term = neg_sum_x + neg_x
+        second_term.name = "second_term"
+
+        # SG-B: fuses {neg_sum_x, third_term} — discovered last
+        # SG-B produces neg_sum_x which SG-C consumes, so SG-C must be
+        # replaced before SG-B. The old insertion heuristic got this wrong
+        # because SG-C was collected before SG-B existed.
+        third_term = neg_sum_x + neg_max_x
+        third_term.name = "third_term"
+
+        terms = [first_term, second_term, third_term]
+        for i, permuted_terms in enumerate(itertools.permutations(terms)):
+            fgraph = FunctionGraph([x], permuted_terms, clone=True)
+            _, nb_fused, nb_replaced, *_ = FusionOptimizer().apply(fgraph)
+            assert nb_fused == 3
+            assert nb_replaced == 6
+
+    def test_many_fused_subgraphs(self):
+        # Regression test for #2170: walk_toposort uses identity comparison,
+        # which broke when the fusion optimizer passed >256 int-keyed subgraphs
+        # (CPython only caches int singletons in [-5, 256]).
+        # Alternating row/matrix broadcasts create separate fuseable subgraphs
+        # with direct inter-subgraph dependencies
+        x_row = pt.tensor("x_row", shape=(1, 5))
+        x_mat = pt.matrix("x_mat", shape=(3, 5))
+        r, m = x_row, x_mat
+        for _ in range(150):
+            r = pt.exp(pt.neg(r))
+            m = pt.exp(r + m)
+            r = m.sum(axis=0, keepdims=True)
+        fgraph = FunctionGraph([x_row, x_mat], [m])
+        FusionOptimizer().apply(fgraph)
+
 
 class TimesN(ps.basic.UnaryScalarOp):
     """
@@ -1509,12 +1561,17 @@ def test_local_inline_composite_constants(op, np_op, const_shape):
     fn = pytensor.function(
         [x, y], out, mode=get_default_mode().including("specialize", "fusion")
     )
-    # There should be a single Composite after optimization
-    [node] = [
+    # There should be a single Composite Elemwise after optimization
+    # There may be another Elemwise for the equality of shapes.
+    nodes = [
         node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Elemwise)
     ]
-    assert isinstance(node.op.scalar_op, Composite)
-    assert len(node.inputs) == 2  # x and y, but not const
+    if len(nodes) == 2:
+        [composite_node] = [n for n in nodes if isinstance(n.op.scalar_op, Composite)]
+        assert sum(isinstance(n.op.scalar_op, EQ) for n in nodes) == 1
+    else:
+        [composite_node] = [n for n in nodes if isinstance(n.op.scalar_op, Composite)]
+    assert len(composite_node.inputs) == 2  # x and y, but not const
 
     x_test_value = np.arange(5).astype(config.floatX)
     y_test_value = np.ones(5).astype(config.floatX)

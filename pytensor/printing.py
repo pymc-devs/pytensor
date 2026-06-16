@@ -192,6 +192,7 @@ def _build_label(
     print_view_map: bool,
     print_op_info: bool,
     op_information: dict,
+    assumption_tags: dict | None = None,
 ) -> str:
     """Return the formatted label string for a single `GraphNode`.
 
@@ -229,6 +230,11 @@ def _build_label(
     else:
         shape_str = ""
 
+    if assumption_tags and var in assumption_tags:
+        assumption_str = f" a={assumption_tags[var]}"
+    else:
+        assumption_str = ""
+
     if gnode.is_leaf:
         id_str = _assign_id(var, used_ids, done, id_type, var)
         if id_str:
@@ -239,7 +245,7 @@ def _build_label(
         else:
             data = ""
 
-        label = f"{var}{id_str}{type_str}{shape_str}{data}"
+        label = f"{var}{id_str}{type_str}{shape_str}{assumption_str}{data}"
 
         if print_op_info and var.owner and var.owner not in op_information:
             op_information.update(op_debug_information(var.owner.op, var.owner))
@@ -295,7 +301,10 @@ def _build_label(
     if gnode.is_inner_graph_header:
         return f"{node.op}{id_str}{destroy_map_str}{view_map_str}{topo_str}"
 
-    label = f"{node.op}{gnode.output_idx}{id_str}{type_str}{shape_str}{var_name}{destroy_map_str}{view_map_str}{topo_str}{data}"
+    label = (
+        f"{node.op}{gnode.output_idx}{id_str}{type_str}{shape_str}{assumption_str}"
+        f"{var_name}{destroy_map_str}{view_map_str}{topo_str}{data}"
+    )
 
     if print_op_info and node not in op_information:
         op_information.update(op_debug_information(node.op, node))
@@ -542,6 +551,7 @@ def debugprint(
     print_memory_map: bool = False,
     print_inner_graphs: bool | Literal["auto"] = "auto",
     print_fgraph_inputs: bool = False,
+    print_assumptions: bool = False,
 ) -> "str | TextIO | Any":  # rich.tree.Tree when file="rich"
     r"""Print a graph as text.
 
@@ -605,6 +615,11 @@ def debugprint(
         Whether to print inner graphs. Default "auto" leaves it to PyTensor discretion, or a per Op basis.
     print_fgraph_inputs
         Print the inputs of `FunctionGraph`\s.
+    print_assumptions
+        If ``True``, annotate each `Variable` that has known structural
+        assumptions with an ``a={...}`` tag, e.g. ``a={diag}`` or ``a={!sym}``.
+        Implied facts are pruned, so a diagonal matrix shows ``{diag}`` rather
+        than every property it entails.
 
     Returns
     -------
@@ -704,6 +719,15 @@ def debugprint(
         else:
             raise TypeError(f"debugprint cannot print an object type {type(obj)}")
 
+    if print_assumptions:
+        # Imported lazily: the assumptions package pulls in ``pytensor.tensor``,
+        # which imports this module.
+        from pytensor.assumptions import assumption_tags as _build_assumption_tags
+
+        assumption_tags = _build_assumption_tags(outputs_to_print)
+    else:
+        assumption_tags = None
+
     if file == "rich":
         return _build_rich_tree(
             outputs_to_print,
@@ -718,6 +742,7 @@ def debugprint(
             topo_orders=topo_orders,
             profiles=profile_list,
             storage_maps=storage_maps,
+            assumption_tags=assumption_tags,
         )
 
     inner_graph_vars: list[Variable] = []
@@ -760,6 +785,7 @@ N.B.:
             stop_on_name=stop_on_name,
             used_ids=used_ids,
             op_information=op_information,
+            assumption_tags=assumption_tags,
             parent_node=var.owner,
             print_op_info=print_op_info,
             print_destroy_map=print_destroy_map,
@@ -796,6 +822,7 @@ N.B.:
             storage_map=storage_map,
             used_ids=used_ids,
             op_information=op_information,
+            assumption_tags=assumption_tags,
             parent_node=var.owner,
             print_op_info=print_op_info,
             print_destroy_map=print_destroy_map,
@@ -820,12 +847,12 @@ N.B.:
         new_prefix_child = prefix + "   "
         print("Inner graphs:", file=_file)
 
-        printed_inner_graphs_nodes = set()
+        printed_inner_graph_ops = set()
         for ig_var in inner_graph_vars:
-            if ig_var.owner in printed_inner_graphs_nodes:
+            if ig_var.owner.op in printed_inner_graph_ops:
                 continue
             else:
-                printed_inner_graphs_nodes.add(ig_var.owner)
+                printed_inner_graph_ops.add(ig_var.owner.op)
             # This is a work-around to maintain backward compatibility
             # (e.g. to only print inner graphs that have been compiled through
             # a call to `Op.prepare_node`)
@@ -862,26 +889,31 @@ N.B.:
 
             print("", file=_file)
 
-            _debugprint(
-                ig_var,
-                prefix=prefix,
-                depth=depth,
-                done=done,
-                print_type=print_type,
-                print_shape=print_shape,
-                file=_file,
-                id_type=id_type,
-                inner_graph_ops=inner_graph_vars,
-                stop_on_name=stop_on_name,
-                inner_to_outer_inputs=inner_to_outer_inputs,
-                used_ids=used_ids,
-                op_information=op_information,
-                parent_node=ig_var.owner,
-                print_op_info=print_op_info,
-                print_destroy_map=print_destroy_map,
-                print_view_map=print_view_map,
-                is_inner_graph_header=True,
+            # Header line: the Op, then a single "[id A, B, ...]" listing every
+            # node whose inner graph is this one (printed once below), then its
+            # destroy/view maps. Equal Ops have identical inner graphs, so
+            # membership is grouped by Op equality. It must be computed here,
+            # not before the loop: nodes nested inside other inner graphs are
+            # only discovered while printing the bodies above. Output is
+            # streamed, so a node of an equal Op discovered after this header
+            # has printed cannot be added to it retroactively.
+            op = ig_var.owner.op
+            id_strs = [
+                _assign_id(node, used_ids, done, id_type, node.outputs[0])
+                # A multi-output node appears once per output var; dedup nodes.
+                for node in dict.fromkeys(
+                    v.owner for v in inner_graph_vars if v.owner.op == op
+                )
+            ]
+            tokens = [
+                s[4:-1] for s in id_strs if s.startswith("[id ") and s.endswith("]")
+            ]
+            ids_str = f" [id {', '.join(tokens)}]" if tokens else ""
+            destroy_map_str = (
+                f" d={op.destroy_map}" if print_destroy_map and op.destroy_map else ""
             )
+            view_map_str = f" v={op.view_map}" if print_view_map and op.view_map else ""
+            print(f"{op}{ids_str}{destroy_map_str}{view_map_str}", file=_file)
 
             if print_fgraph_inputs:
                 for inp in inner_inputs:
@@ -899,6 +931,7 @@ N.B.:
                         inner_to_outer_inputs=inner_to_outer_inputs,
                         used_ids=used_ids,
                         op_information=op_information,
+                        assumption_tags=assumption_tags,
                         parent_node=ig_var.owner,
                         print_op_info=print_op_info,
                         print_destroy_map=print_destroy_map,
@@ -935,6 +968,7 @@ N.B.:
                     inner_to_outer_inputs=inner_to_outer_inputs,
                     used_ids=used_ids,
                     op_information=op_information,
+                    assumption_tags=assumption_tags,
                     parent_node=ig_var.owner,
                     print_op_info=print_op_info,
                     print_destroy_map=print_destroy_map,
@@ -976,6 +1010,7 @@ def _debugprint(
     print_op_info: bool = False,
     inner_graph_node: Apply | None = None,
     is_inner_graph_header: bool = False,
+    assumption_tags: dict | None = None,
 ) -> TextIO:
     r"""Print the graph represented by `var`.
 
@@ -1092,6 +1127,7 @@ def _debugprint(
             print_view_map=print_view_map,
             print_op_info=print_op_info,
             op_information=op_information,
+            assumption_tags=assumption_tags,
         )
 
         if gnode.is_repeat and not gnode.is_inner_graph_header:
@@ -1134,6 +1170,7 @@ def _build_rich_tree(
     topo_orders: list[Sequence[Apply] | None] | None = None,
     profiles: list | None = None,
     storage_maps: list | None = None,
+    assumption_tags: dict | None = None,
 ) -> Any:  # rich.tree.Tree when rich is installed
     """Build a ``rich.Tree`` for one or more output `Variable`s.
 
@@ -1234,6 +1271,7 @@ def _build_rich_tree(
                         print_view_map=print_view_map,
                         print_op_info=print_op_info,
                         op_information=op_information,
+                        assumption_tags=assumption_tags,
                     )
                 )
                 parent_tree = depth_stack[current_depth]
@@ -1258,6 +1296,7 @@ def _build_rich_tree(
                 print_view_map=print_view_map,
                 print_op_info=print_op_info,
                 op_information=op_information,
+                assumption_tags=assumption_tags,
             )
 
             label = rich.markup.escape(label)
@@ -1342,6 +1381,7 @@ def _build_rich_tree(
                             print_view_map=print_view_map,
                             print_op_info=print_op_info,
                             op_information=op_information,
+                            assumption_tags=assumption_tags,
                         )
                     )
                     parent_tree = ig_depth_stack[current_depth]
@@ -1362,6 +1402,7 @@ def _build_rich_tree(
                     print_view_map=print_view_map,
                     print_op_info=print_op_info,
                     op_information=op_information,
+                    assumption_tags=assumption_tags,
                 )
                 label = rich.markup.escape(label)
                 node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
@@ -1419,6 +1460,7 @@ def _build_rich_tree(
                                 print_view_map=print_view_map,
                                 print_op_info=print_op_info,
                                 op_information=op_information,
+                                assumption_tags=assumption_tags,
                             )
                         )
                         parent_tree = out_stack[current_depth]
@@ -1439,6 +1481,7 @@ def _build_rich_tree(
                         print_view_map=print_view_map,
                         print_op_info=print_op_info,
                         op_information=op_information,
+                        assumption_tags=assumption_tags,
                     )
                     label = rich.markup.escape(label)
                     node_key = (

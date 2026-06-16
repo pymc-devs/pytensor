@@ -43,6 +43,10 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
     schur_complex,
     schur_real,
 )
+from pytensor.link.numba.dispatch.linalg.decomposition.svd import (
+    _svd_gesdd_full,
+    _svd_gesdd_no_uv,
+)
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
@@ -61,14 +65,15 @@ def numba_funcify_SVD(op, node, **kwargs):
     if discrete_input and config.compiler_verbose:
         print("SVD requires casting discrete input to float")  # noqa: T201
 
-    # np.linalg.svd always returns real-valued singular values, even for complex input.
-    # The Op may declare s as complex (matching input dtype), but numba returns the real
-    # component dtype, so we must match that to avoid type unification errors.
+    # When discrete_input, we astype() to a fresh float buffer we own, so the
+    # kernel may safely mutate it regardless of the user's overwrite_a setting.
+    effective_overwrite_a = op.overwrite_a or discrete_input
+
     matrix_dtype = out_dtype
-    if out_dtype.kind == "c":
-        s_dtype = np.dtype(f"f{out_dtype.itemsize // 2}")
-    else:
-        s_dtype = out_dtype
+    # SVD declares S with the real component dtype via linalg_real_output_dtype,
+    # so the s output's own dtype is the right answer for both real and complex
+    # input.
+    s_dtype = np.dtype(node.outputs[1 if compute_uv else 0].dtype)
 
     if not compute_uv:
 
@@ -80,8 +85,7 @@ def numba_funcify_SVD(op, node, **kwargs):
                 return np.zeros((k,), dtype=s_dtype)
             if discrete_input:
                 x = x.astype(out_dtype)
-            _, ret, _ = np.linalg.svd(x, full_matrices)
-            return ret
+            return _svd_gesdd_no_uv(x, overwrite_a=effective_overwrite_a)
 
     else:
 
@@ -90,8 +94,8 @@ def numba_funcify_SVD(op, node, **kwargs):
             if x.size == 0:
                 m, n = x.shape
                 k = min(m, n)
-                # The LAPACK dispatch returns matrices in fortran order. To match this for the empty cases,
-                # build flip the shape inputs to np.zeros and transpose.
+                # LAPACK returns matrices in fortran order; build the empty
+                # returns with reversed shape + transpose to match.
                 if full_matrices:
                     return (
                         np.zeros((m, m), dtype=matrix_dtype).T,
@@ -106,9 +110,13 @@ def numba_funcify_SVD(op, node, **kwargs):
                     )
             if discrete_input:
                 x = x.astype(out_dtype)
-            return np.linalg.svd(x, full_matrices)
+            return _svd_gesdd_full(
+                x,
+                full_matrices=full_matrices,
+                overwrite_a=effective_overwrite_a,
+            )
 
-    cache_version = 1
+    cache_version = 2
     return svd, cache_version
 
 
@@ -142,9 +150,10 @@ def numba_funcify_Eigh(op, node, **kwargs):
     discrete_inp = inp_dtype.kind in "ibu"
     out_dtype = node.outputs[0].type.numpy_dtype
 
-    # Casting discrete input to float allocates a new buffer, so in-place is moot.
-    effective_overwrite_a = op.overwrite_a and not discrete_inp
-    effective_overwrite_b = op.overwrite_b and not discrete_inp
+    # When discrete_inp, we astype() to a fresh buffer we own, so the kernel
+    # may safely mutate it regardless of the user's overwrite_a/b setting.
+    effective_overwrite_a = op.overwrite_a or discrete_inp
+    effective_overwrite_b = op.overwrite_b or discrete_inp
 
     if generalized:
 
@@ -200,9 +209,10 @@ def numba_funcify_Eigvalsh(op, node, **kwargs):
     discrete_inp = inp_dtype.kind in "ibu"
     out_dtype = node.outputs[0].type.numpy_dtype
 
-    # Casting discrete input to float allocates a new buffer, so in-place is moot.
-    effective_overwrite_a = overwrite_a and not discrete_inp
-    effective_overwrite_b = overwrite_b and not discrete_inp
+    # When discrete_inp, we astype() to a fresh buffer we own, so the kernel
+    # may safely mutate it regardless of the user's overwrite_a/b setting.
+    effective_overwrite_a = overwrite_a or discrete_inp
+    effective_overwrite_b = overwrite_b or discrete_inp
 
     if generalized:
 
@@ -244,7 +254,6 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     In particular, the `inplace` argument is not supported, which is why we choose to implement our own version.
     """
     lower = op.lower
-    overwrite_a = op.overwrite_a
 
     inp_dtype = node.inputs[0].type.numpy_dtype
     discrete_inp = inp_dtype.kind in "ibu"
@@ -252,6 +261,9 @@ def numba_funcify_Cholesky(op, node, **kwargs):
         print("Cholesky requires casting discrete input to float")  # noqa: T201
 
     out_dtype = node.outputs[0].type.numpy_dtype
+    # When discrete_inp, we astype() to a fresh buffer we own, so the kernel
+    # may safely mutate it regardless of the user's overwrite_a setting.
+    effective_overwrite_a = op.overwrite_a or discrete_inp
 
     @numba_basic.numba_njit
     def cholesky(a):
@@ -261,7 +273,7 @@ def numba_funcify_Cholesky(op, node, **kwargs):
         if discrete_inp:
             a = a.astype(out_dtype)
 
-        return _cholesky(a, lower, overwrite_a)
+        return _cholesky(a, lower, effective_overwrite_a)
 
     cache_version = 2
     return cholesky, cache_version
@@ -294,7 +306,9 @@ def numba_funcify_LU(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     permute_l = op.permute_l
     p_indices = op.p_indices
-    overwrite_a = op.overwrite_a
+    # When discrete_inp, we astype() to a fresh buffer we own, so the kernel
+    # may safely mutate it regardless of the user's overwrite_a setting.
+    effective_overwrite_a = op.overwrite_a or discrete_inp
     # For the (P, L, U) case, P is real even when input is complex
     p_dtype = (
         node.outputs[0].type.numpy_dtype if not (permute_l or p_indices) else inp_dtype
@@ -322,21 +336,21 @@ def numba_funcify_LU(op, node, **kwargs):
                 a,
                 permute_l=permute_l,
                 p_indices=p_indices,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
         elif permute_l:
             res = _lu_2(
                 a,
                 permute_l=permute_l,
                 p_indices=p_indices,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
         else:
             res = _lu_3(
                 a,
                 permute_l=permute_l,
                 p_indices=p_indices,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
 
         return res
@@ -353,7 +367,9 @@ def numba_funcify_LUFactor(op, node, **kwargs):
         print("LUFactor requires casting discrete input to float")  # noqa: T201
 
     out_dtype = node.outputs[0].type.numpy_dtype
-    overwrite_a = op.overwrite_a
+    # When discrete_inp, we astype() to a fresh buffer we own, so the kernel
+    # may safely mutate it regardless of the user's overwrite_a setting.
+    effective_overwrite_a = op.overwrite_a or discrete_inp
 
     @numba_basic.numba_njit
     def lu_factor(a):
@@ -366,7 +382,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
         if discrete_inp:
             a = a.astype(out_dtype)
 
-        LU, piv = _lu_factor(a, overwrite_a)
+        LU, piv = _lu_factor(a, effective_overwrite_a)
 
         return LU, piv
 
@@ -378,7 +394,6 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 def numba_funcify_QR(op, node, **kwargs):
     mode = op.mode
     pivoting = op.pivoting
-    overwrite_a = op.overwrite_a
 
     in_dtype = node.inputs[0].type.numpy_dtype
     integer_input = in_dtype.kind in "ibu"
@@ -386,6 +401,9 @@ def numba_funcify_QR(op, node, **kwargs):
         print("QR requires casting discrete input to float")  # noqa: T201
 
     out_dtype = node.outputs[0].type.numpy_dtype
+    # When integer_input, we astype() to a fresh buffer we own, so the kernel
+    # may safely mutate it regardless of the user's overwrite_a setting.
+    effective_overwrite_a = op.overwrite_a or integer_input
 
     @numba_basic.numba_njit
     def qr(a):
@@ -432,7 +450,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 a,
                 mode=mode,
                 pivoting=pivoting,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
             return Q, R, P
 
@@ -441,7 +459,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 a,
                 mode=mode,
                 pivoting=pivoting,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
             return Q, R
 
@@ -450,7 +468,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 a,
                 mode=mode,
                 pivoting=pivoting,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
             return R, P
 
@@ -459,7 +477,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 a,
                 mode=mode,
                 pivoting=pivoting,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
             return R
 
@@ -468,7 +486,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 a,
                 mode=mode,
                 pivoting=pivoting,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
             return H, tau, R, P
 
@@ -477,7 +495,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 a,
                 mode=mode,
                 pivoting=pivoting,
-                overwrite_a=overwrite_a,
+                overwrite_a=effective_overwrite_a,
             )
             return H, tau, R
 
@@ -510,16 +528,14 @@ def numba_funcify_Schur(op, node, **kwargs):
     complex_input = in_dtype.kind in "cz"
     needs_complex_cast = in_dtype.kind in "fd" and output == "complex"
 
-    # Disable overwrite_a for dtype conversion (real->complex upcast)
-    if needs_complex_cast:
-        overwrite_a = False
-        if config.compiler_verbose:
-            print(  # noqa: T201
-                "Schur: disabling overwrite_a due to dtype conversion (casting prevents in-place operation)"
-            )
+    # When we astype() (integer or real->complex), we own a fresh buffer,
+    # so the kernel may safely mutate it regardless of overwrite_a.
+    effective_overwrite_a = overwrite_a or integer_input or needs_complex_cast
 
     if integer_input and config.compiler_verbose:
         print("Schur requires casting discrete input to float")  # noqa: T201
+    if needs_complex_cast and config.compiler_verbose:
+        print("Schur requires casting real input to complex")  # noqa: T201
 
     # Complex input always produces complex output, and output == "complex" forces complex output
     if complex_input or output == "complex":
@@ -535,7 +551,7 @@ def numba_funcify_Schur(op, node, **kwargs):
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
                 a = a.astype(out_dtype)
-            T, Z = schur_complex(a, lwork=None, overwrite_a=overwrite_a)
+            T, Z = schur_complex(a, lwork=None, overwrite_a=effective_overwrite_a)
             return T, Z
     else:
         # Real input with real output
@@ -548,7 +564,7 @@ def numba_funcify_Schur(op, node, **kwargs):
                 )
             if integer_input:
                 a = a.astype(out_dtype)
-            T, Z = schur_real(a, lwork=None, overwrite_a=overwrite_a)
+            T, Z = schur_real(a, lwork=None, overwrite_a=effective_overwrite_a)
             return T, Z
 
     cache_version = 1
@@ -560,8 +576,6 @@ def numba_funcify_QZ(op, node, **kwargs):
     complex_output = op.complex_output
     sort = op.sort
     return_eigenvalues = op.return_eigenvalues
-    overwrite_a = op.overwrite_a
-    overwrite_b = op.overwrite_b
 
     in_dtype_a = node.inputs[0].type.numpy_dtype
     in_dtype_b = node.inputs[1].type.numpy_dtype
@@ -574,17 +588,15 @@ def numba_funcify_QZ(op, node, **kwargs):
         in_dtype_a.kind in "fd" or in_dtype_b.kind in "fd"
     ) and complex_output
 
-    # Disable overwrite for dtype conversion (real->complex upcast)
-    if needs_complex_cast:
-        overwrite_a = False
-        overwrite_b = False
-        if config.compiler_verbose:
-            print(  # noqa: T201
-                "QZ: disabling overwrite_a/b due to dtype conversion (casting prevents in-place operation)"
-            )
+    # When we astype() (integer or real->complex), we own a fresh buffer,
+    # so the kernel may safely mutate it regardless of overwrite_a/b.
+    effective_overwrite_a = op.overwrite_a or integer_input_a or needs_complex_cast
+    effective_overwrite_b = op.overwrite_b or integer_input_b or needs_complex_cast
 
     if (integer_input_a or integer_input_b) and config.compiler_verbose:
         print("QZ requires casting discrete input to float")  # noqa: T201
+    if needs_complex_cast and config.compiler_verbose:
+        print("QZ requires casting real input to complex")  # noqa: T201
 
     alpha_dtype = node.outputs[2].type.numpy_dtype if return_eigenvalues else out_dtype
 
@@ -643,7 +655,7 @@ def numba_funcify_QZ(op, node, **kwargs):
                 b = b.astype(out_dtype)
             elif needs_complex_cast:
                 b = b.astype(out_dtype)
-            return qz_fn(a, b, sort, overwrite_a, overwrite_b)
+            return qz_fn(a, b, sort, effective_overwrite_a, effective_overwrite_b)
     else:
 
         @numba_basic.numba_njit
@@ -673,7 +685,7 @@ def numba_funcify_QZ(op, node, **kwargs):
                 b = b.astype(out_dtype)
             elif needs_complex_cast:
                 b = b.astype(out_dtype)
-            return qz_fn(a, b, overwrite_a, overwrite_b)
+            return qz_fn(a, b, effective_overwrite_a, effective_overwrite_b)
 
     cache_version = 1
     return qz, cache_version

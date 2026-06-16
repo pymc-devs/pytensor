@@ -4,11 +4,12 @@ import pickle
 import pytest
 
 from pytensor.configdefaults import config
-from pytensor.graph.basic import NominalVariable
+from pytensor.graph.basic import NominalVariable, equal_computations
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph, Output
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
 from pytensor.scalar.basic import ScalarConstant, add, float64, mul
+from pytensor.tensor import reshape, stack, vector
 from tests.graph.utils import (
     MyConstant,
     MyOp,
@@ -946,3 +947,118 @@ class TestFrozenFunctionGraph:
 
         assert ffg == refrozen
         assert hash(ffg) == hash(refrozen)
+
+    def test_value_dependent_output_type_collision(self):
+        """Output types are part of the interning key.
+
+        Freezing roots an inner graph on ``NominalVariable`` inputs (index + type
+        only), discarding each input's value and defining subgraph. For an Op
+        whose output type is derived from that information -- here ``Reshape``,
+        which sets ``_output_type_depends_on_input_value`` -- ``(op, inputs)``
+        alone no longer determines the output type after nominalization. Two such
+        graphs differing only in those erased details must stay distinct rather
+        than collapse onto whichever was interned first.
+
+        Regression for the ``FrozenApply`` collision behind issue #2202.
+        """
+
+        x = vector("x", shape=(6,))
+        s1 = stack([2, 3])
+        s2 = stack([3, 2])
+
+        rs1 = reshape(x, s1)
+        rs2 = reshape(x, s2)
+        assert rs1.type.shape == (2, 3)
+        assert rs2.type.shape == (3, 2)
+
+        # s1/s2 are MakeVector variables used as inputs, so freezing nominalizes them and
+        # discards the [2,3]/[3,2] values that informed each reshape's output shape.
+        ffg1 = FrozenFunctionGraph([x, s1], [rs1])
+        ffg2 = FrozenFunctionGraph([x, s2], [rs2])
+
+        # The original output types are part of the FrozenApply key, so the fgraphs aren't identical.
+        # Alternative design: the two ffg get merged with a general output type (None, None)
+        # Similar to what `clone_replace(rs1, {s1: s1.type()}, rebuild_strict=False)` would do.
+        # That would require calling make_node on every interned node (or only on Ops with
+        # `_output_type_depends_on_input_value=True`, but then that flag becomes a mandatory Op contract).
+        assert ffg1 != ffg2
+        assert ffg1.outputs[0].type.shape == (2, 3)
+        assert ffg2.outputs[0].type.shape == (3, 2)
+
+        # ``bind`` reproduces each graph's own output type, not a collided one
+        assert ffg1.bind([x, s1])[0].type.shape == (2, 3)
+        assert ffg2.bind([x, s2])[0].type.shape == (3, 2)
+
+    def test_bind_constant_output(self):
+        """bind must handle constants that appear directly as outputs."""
+        x = float64("x")
+        c = ScalarConstant(float64, 42.0)
+        ffg = FunctionGraph([x], [add(x, c), c]).freeze()
+
+        y = float64("y")
+        bound = ffg.bind({ffg.inputs[0]: y})
+        assert len(bound) == 2
+        assert bound[1] is c
+
+    def test_from_structural_inputs_only_root_inputs(self):
+        """All inputs are roots: behaves like the plain constructor."""
+        x, y = float64("x"), float64("y")
+        out = add(x, y)
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([x, y], [out])
+        assert len(ffg.inputs) == 2
+
+        a, b = float64("a"), float64("b")
+        [res] = ffg.bind(dict(zip(ffg.inputs, [a, b], strict=True)))
+        assert equal_computations([res], [add(a, b)])
+
+    def test_from_structural_inputs_only_intermediate_inputs(self):
+        """Inputs may be only intermediate expressions; roots are found automatically."""
+        x, y = float64("x"), float64("y")
+        # out depends on x, y only through the product.
+        out = add(mul(x, y), mul(x, y))
+
+        # The passed expression is matched by structure, not identity.
+        prod = mul(x, y)
+        assert prod is not out.owner.inputs[0]
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([prod], [out])
+        assert len(ffg.inputs) == 1
+
+        p = float64("p")
+        [res] = ffg.bind({ffg.inputs[0]: p})
+        # Both occurrences rewire to the single input.
+        assert equal_computations([res], [add(p, p)])
+
+    def test_from_structural_inputs_mixed_inputs(self):
+        """A root input and an intermediate input, both live."""
+        x, y = float64("x"), float64("y")
+        out = add(mul(x, y), x)
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([x, mul(x, y)], [out])
+        assert len(ffg.inputs) == 2
+
+        a, p = float64("a"), float64("p")
+        # x is used directly; root y is dropped (it feeds only the lifted product).
+        [res] = ffg.bind(dict(zip(ffg.inputs, [a, p], strict=True)))
+        assert equal_computations([res], [add(p, a)])
+
+    def test_from_structural_inputs_dead_inputs(self):
+        """A dead root input and a dead intermediate input are retained but ignored."""
+        x, y = float64("x"), float64("y")
+        out = add(x, x)  # uses neither y nor the product
+
+        ffg = FrozenFunctionGraph.from_structural_inputs([x, y, mul(x, y)], [out])
+        assert len(ffg.inputs) == 3
+
+        a, b, p = float64("a"), float64("b"), float64("p")
+        [res] = ffg.bind(dict(zip(ffg.inputs, [a, b, p], strict=True)))
+        assert equal_computations([res], [add(a, a)])
+
+    def test_from_structural_inputs_unreachable_output_raises(self):
+        """Outputs needing a root absent from the inputs cannot be expressed."""
+        x, y = float64("x"), float64("y")
+        out = add(mul(x, y), x)  # needs x directly, not only via the product
+
+        with pytest.raises(ValueError):
+            FrozenFunctionGraph.from_structural_inputs([mul(x, y)], [out])

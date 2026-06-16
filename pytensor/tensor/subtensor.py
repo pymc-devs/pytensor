@@ -19,7 +19,13 @@ from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, pprint, set_precedence
-from pytensor.scalar.basic import ScalarConstant, ScalarVariable
+from pytensor.scalar.basic import (
+    Cast,
+    ScalarConstant,
+    ScalarMaximum,
+    ScalarMinimum,
+    ScalarVariable,
+)
 from pytensor.tensor import (
     TensorLike,
     _get_vector_length,
@@ -27,7 +33,9 @@ from pytensor.tensor import (
     get_vector_length,
 )
 from pytensor.tensor.basic import (
+    MakeVector,
     ScalarFromTensor,
+    TensorFromScalar,
     alloc,
     get_scalar_constant_value,
     nonzero,
@@ -36,11 +44,12 @@ from pytensor.tensor.basic import (
     constant as tensor_constant,
 )
 from pytensor.tensor.blockwise import vectorize_node_fallback
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.math import add, clip
+from pytensor.tensor.math import add, clip, minimum
 from pytensor.tensor.shape import (
     Reshape,
+    Shape,
     Shape_i,
     specify_broadcastable,
 )
@@ -62,7 +71,7 @@ _logger = logging.getLogger("pytensor.tensor.subtensor")
 T = TypeVar("T")
 
 
-def flatten_index_variables(
+def flatten_index_variables[T](
     idx_vars: Sequence[T | None | slice],
 ) -> tuple[list[int | slice], list[T]]:
     counter = 0
@@ -90,7 +99,7 @@ def flatten_index_variables(
     return idx_list, flat_vars
 
 
-def unflatten_index_variables(
+def unflatten_index_variables[T](
     flat_indices: Sequence[T],
     idx_list: Sequence[slice | int],
 ) -> tuple[slice | T, ...]:
@@ -230,6 +239,78 @@ def as_index_literal(
     raise NotScalarConstantError()
 
 
+def _is_provably_positive(var, strict: bool = True) -> bool:
+    """``True`` when ``var`` can be statically shown to be positive.
+
+    With ``strict=True`` this proves :math:`var > 0`; with ``strict=False`` it
+    proves :math:`var \\geq 0`.
+
+    Recognized cases:
+
+    - Python ``int`` / ``np.integer``.
+    - ``TensorConstant`` / ``ScalarConstant`` whose data clears the bound
+      (cached via ``tag.is_positive`` or ``tag.is_non_negative``).
+    - ``MakeVector`` of provably positive inputs.
+    - View / shape-permutation ops — ``Subtensor``, ``ScalarFromTensor``,
+      ``TensorFromScalar``, ``DimShuffle`` — recurse to their input.
+    - ``minimum(a, b)`` when both ``a`` and ``b`` are positive.
+    - ``maximum(a, b)`` when at least one of ``a``, ``b`` is positive.
+
+    Three further cases prove non-negativity but not strict positivity, so they
+    are recognized only when ``strict=False``:
+
+    - Unsigned-integer dtype (a ``uint`` may be 0).
+    - ``Shape`` / ``Shape_i`` outputs (a dimension may be 0).
+    - ``Cast`` of a non-negative input (a float :math:`0 < x < 1` truncates to 0).
+
+    Parameters
+    ----------
+    var : Variable or int
+        The value to test.
+    strict : bool
+        Prove :math:`> 0` when ``True``, :math:`\\geq 0` when ``False``. Default
+        ``True``.
+    """
+    tag_name = "is_positive" if strict else "is_non_negative"
+
+    if isinstance(var, int | np.integer):
+        return bool(var > 0) if strict else bool(var >= 0)
+    if not strict and var.type.dtype.startswith("uint"):
+        return True
+    if isinstance(var, Constant):
+        cached: bool | None = getattr(var.tag, tag_name, None)
+        if cached is not None:
+            return cached
+        data = np.asarray(var.data)
+        result = bool((data > 0).all()) if strict else bool((data >= 0).all())
+        setattr(var.tag, tag_name, result)
+        return result
+    op = var.owner_op
+    if not strict and isinstance(op, Shape | Shape_i):
+        return True
+    if isinstance(op, MakeVector):
+        return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
+    if isinstance(op, Subtensor | ScalarFromTensor | TensorFromScalar | DimShuffle):
+        return _is_provably_positive(var.owner.inputs[0], strict)
+    if isinstance(op, Elemwise):
+        scalar_op = op.scalar_op
+        if not strict and isinstance(scalar_op, Cast):
+            return _is_provably_positive(var.owner.inputs[0], strict)
+        if isinstance(scalar_op, ScalarMinimum):
+            return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
+        if isinstance(scalar_op, ScalarMaximum):
+            return any(_is_provably_positive(i, strict) for i in var.owner.inputs)
+    return False
+
+
+def _is_provably_non_negative(var) -> bool:
+    """``True`` when ``var`` can be statically shown to be non-negative (:math:`\\geq 0`).
+
+    Thin wrapper over :func:`_is_provably_positive` with ``strict=False``.
+    """
+    return _is_provably_positive(var, strict=False)
+
+
 def get_idx_list(inputs, idx_list):
     return indices_from_subtensor(inputs[1:], idx_list)
 
@@ -367,8 +448,8 @@ def get_canonical_form_slice(
             if is_stop_length:
                 # Full slice.
                 return slice(0, length, 1), 1
-            if is_stop_constant and stop >= 0:
-                return (slice(0, switch(lt(stop, length), stop, length), 1), 1)
+            if _is_provably_non_negative(stop):
+                return (slice(0, minimum(stop, length), 1), 1)
             stop_plus_len = stop + length
             stop = switch(
                 lt(stop, 0),
@@ -484,6 +565,15 @@ def slice_len(slc, n):
     start, stop, step = tuple(
         as_index_constant(a) for a in [canon_slc.start, canon_slc.stop, canon_slc.step]
     )
+    # 0:stop:1 with non-negative stop: length is just ``stop``.
+    if (
+        isinstance(canon_slc.step, int)
+        and canon_slc.step == 1
+        and isinstance(canon_slc.start, int)
+        and canon_slc.start == 0
+        and _is_provably_non_negative(stop)
+    ):
+        return stop
     return switch(
         and_(gt(step, 0), lt(start, stop)),
         1 + (stop - 1 - start) // step,
@@ -594,6 +684,16 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
         if basic:
             grp_shapes = tuple(array_shape[dim] for dim in dim_nums)
             res_shape += basic_shape(grp_shapes, grp_indices)
+        elif (
+            not indices_are_shapes
+            and len(grp_indices) > 1
+            and all(idx is grp_indices[0] for idx in grp_indices[1:])
+        ):
+            # All advanced indices in this group are the same Variable, so
+            # they share the same shape by construction — skip
+            # ``broadcast_shape``, which would emit a runtime broadcast
+            # assertion even though the shapes are already known to match.
+            res_shape += tuple(grp_indices[0].shape)
         else:
             from pytensor.tensor.extra_ops import broadcast_shape
 
@@ -732,7 +832,7 @@ def slice_static_length(slc, dim_length):
 
 
 class BaseSubtensor:
-    """Base class for Subtensor operations that handles idx_list and hash/equality."""
+    """Base class for Subtensor operations that handles idx_list."""
 
     def __init__(self, idx_list: Sequence[int | slice]):
         index_counter = -1
@@ -767,26 +867,6 @@ class BaseSubtensor:
         self.n_index_vars = index_counter + 1
         self.idx_list = tuple(idx_list)
 
-    def _hashable_idx_list(self):
-        """Return a hashable version of idx_list (slices converted to tuples).
-
-        Slices are not hashable in Python < 3.12, so we convert them to tuples.
-        """
-        return tuple(
-            (slice, entry.start, entry.stop, entry.step)
-            if isinstance(entry, slice)
-            else entry
-            for entry in self.idx_list
-        )
-
-    def __hash__(self):
-        # Temporary workaround: slices are hashable in Python 3.12+
-        props_values = tuple(
-            self._hashable_idx_list() if prop == "idx_list" else getattr(self, prop)
-            for prop in self.__props__
-        )
-        return hash((type(self), props_values))
-
 
 class Subtensor(BaseSubtensor, COp):
     """Basic NumPy indexing operator."""
@@ -795,7 +875,6 @@ class Subtensor(BaseSubtensor, COp):
     view_map = {0: [0]}
     _f16_ok = True
     __props__ = ("idx_list",)
-    __hash__ = BaseSubtensor.__hash__
 
     def make_node(self, x, *inputs):
         """
@@ -843,7 +922,7 @@ class Subtensor(BaseSubtensor, COp):
         cdata = unflatten_index_variables(index_variables, self.idx_list)
         out[0] = np.asarray(x.__getitem__(tuple(cdata)))
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         def _is_constant(const, x):
             return isinstance(const, Constant) and const.data.item() == x
 
@@ -1387,7 +1466,6 @@ class IncSubtensor(BaseSubtensor, COp):
         "set_instead_of_inc",
         "destroyhandler_tolerate_aliased",
     )
-    __hash__ = BaseSubtensor.__hash__
 
     def __init__(
         self,
@@ -1689,7 +1767,7 @@ class IncSubtensor(BaseSubtensor, COp):
                 {fail};
             }}"""
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
     def pushforward(self, inputs, outputs, eval_points):
@@ -1867,7 +1945,7 @@ class AdvancedSubtensor1(COp):
         _x, *index_variables = inputs
         return self.make_node(eval_points[0], *index_variables).outputs
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         x, ilist = ishapes
         return [ilist + x[1:]]
 
@@ -2217,7 +2295,7 @@ class AdvancedIncSubtensor1(BaseSubtensor, COp):
 
         output_storage[0][0] = x
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         x, _y, _ilist = ishapes
         return [x]
 
@@ -2275,7 +2353,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
     """Implements NumPy's advanced indexing."""
 
     __props__ = ("idx_list",)
-    __hash__ = BaseSubtensor.__hash__
 
     def c_code_cache_version(self):
         hv = Subtensor.helper_c_code_cache_version()
@@ -2392,7 +2469,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         _x, *index_variables = inputs
         return self.make_node(eval_points[0], *index_variables).outputs
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         def is_bool_index(idx):
             return (
                 isinstance(idx, np.bool_ | bool)
@@ -2561,7 +2638,6 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         "set_instead_of_inc",
         "ignore_duplicates",
     )
-    __hash__ = BaseSubtensor.__hash__
 
     def __init__(
         self,
@@ -2619,7 +2695,7 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         else:
             np.add.at(out[0], tuple(full_indices), y)
 
-    def infer_shape(self, fgraph, node, ishapes):
+    def infer_shape(self, node, ishapes):
         return [ishapes[0]]
 
     def connection_pattern(self, node):

@@ -122,7 +122,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_destroyed_untraced_out_idxs.add(untraced_start + j)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
-        op.fgraph, fgraph_name="numba_scan"
+        op.fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
     )
 
     outer_in_names_to_vars = {
@@ -243,7 +243,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     # rotation for initially truncated storage.
     output_storage_post_proc_stmts: list[str] = []
 
-    # In truncated storage situations (e.g. created by `scan_save_mem`),
+    # In truncated storage situations (e.g. created by `scan_reduce_trace`),
     # the taps and output storage overlap, instead of the standard situation in
     # which the output storage is large enough to contain both the initial taps
     # values and the output storage.  In this truncated case, we use the

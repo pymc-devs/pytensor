@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
+from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -12,12 +13,22 @@ from pytensor.graph import (
     node_rewriter,
     vectorize_graph,
 )
-from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
+from pytensor.graph.rewriting.basic import (
+    NodeRewriter,
+    SequentialGraphRewriter,
+    copy_stack_trace,
+    out2in,
+)
 from pytensor.tensor.basic import (
     Alloc,
+    AllocDiag,
+    ARange,
+    ExtractDiag,
+    Eye,
     Join,
     MakeVector,
     alloc,
+    arange,
     as_tensor,
     expand_dims,
     get_underlying_scalar_constant_value,
@@ -28,33 +39,125 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.math import Dot, ceil_intdiv, dot
+from pytensor.tensor.math import Dot, dot, minimum
 from pytensor.tensor.rewriting.basic import (
+    broadcasted_by,
+    get_simplified_broadcast_shape,
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
-from pytensor.tensor.rewriting.subtensor import register_useless
+from pytensor.tensor.rewriting.subtensor import (
+    _constant_has_unique_indices,
+    local_adv_idx_to_diagonal,
+    local_adv_idx_to_slice,
+    local_advanced_read_of_write_constant_indices,
+    local_slice_read_of_write,
+    local_useless_slice,
+    register_useless,
+)
 from pytensor.tensor.shape import (
+    Reshape,
     Shape,
     SpecifyShape,
     specify_shape,
 )
 from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
     _non_consecutive_adv_indexing,
     as_index_literal,
-    get_canonical_form_slice,
     get_constant_idx,
     get_idx_list,
+    indexed_result_shape,
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
+
+
+def _canonical_indexing(var, indices, drop_broadcasted_index=False):
+    """Index ``var``, squeezing indexed broadcast dims whose index has size 1.
+
+    On a length-1 dim only zero is a valid index, so the index is
+    redundant — squeezing is equivalent and simpler.  If squeezed
+    indices contributed unique output dimensions, those are reinserted
+    via ``expand_dims`` after indexing.
+
+    When ``drop_broadcasted_index`` is set, the index is neutralized on *every*
+    broadcast dim: a size>1 advanced index that would otherwise expand the dim is
+    dropped, and a slice that would otherwise shrink it (e.g. ``[1:]`` -> size 0)
+    is replaced by a full slice. This keeps ``var`` small at the cost of an
+    under-broadcast result; the caller must broadcast it back to the full shape.
+    """
+    squeeze_axes = []
+    kept_indices = []
+    max_drop_ndim = 0
+    max_kept_ndim = 0
+    first_adv_axis = None
+    for axis, (bcast, idx) in enumerate(
+        zip(var.type.broadcastable, indices, strict=False)
+    ):
+        if isinstance(idx, slice):
+            if bcast and drop_broadcasted_index:
+                # Slicing a length-1 dim can shrink it (e.g. [1:] -> size 0);
+                # leave it untouched and let the caller broadcast it back.
+                kept_indices.append(slice(None))
+            else:
+                kept_indices.append(idx)
+        else:
+            if first_adv_axis is None:
+                first_adv_axis = axis
+
+            # np.ndim works for all supported cases: int, numpy arrays, pytensor variables
+            idx_ndim = np.ndim(idx)
+            if bcast:
+                if drop_broadcasted_index:
+                    drop_idx = True
+                else:
+                    match idx:
+                        case Variable():
+                            drop_idx = all(idx.type.broadcastable)
+                        case np.ndarray():
+                            drop_idx = idx.size == 1
+                        case int() | np.integer():
+                            drop_idx = True
+                        case _:
+                            raise AssertionError
+
+                # idx only contributes dummy dimensions (if any), not actual shape
+                # It doesn't really matter what the index was, only valid values are zeros.
+                if drop_idx:
+                    max_drop_ndim = max(max_drop_ndim, idx_ndim)
+                    squeeze_axes.append(axis)
+                    continue
+
+            max_kept_ndim = max(max_kept_ndim, idx_ndim)
+            kept_indices.append(idx)
+
+    # Remove useless trailing slice(None) indices
+    while kept_indices and kept_indices[-1] == slice(None):
+        kept_indices.pop()
+
+    result = var
+
+    if squeeze_axes:
+        result = result.squeeze(axis=tuple(squeeze_axes))
+
+    if kept_indices:
+        result = result[tuple(kept_indices)]
+
+    if (lost := max_drop_ndim - max_kept_ndim) > 0:
+        assert first_adv_axis is not None
+        result = expand_dims(
+            result, tuple(range(first_adv_axis, first_adv_axis + lost))
+        )
+
+    return result
 
 
 def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]:
@@ -110,6 +213,35 @@ def _lift_subtensor_non_axis(
 
     else:
         return None
+
+
+def _index_provably_not_larger(idx, val_static_dim, fgraph=None) -> bool:
+    # Per-axis check: an index that can't repeat a position can't enlarge that axis.
+    # Does not account for cross-axis broadcast expansion from outer indexing.
+    if isinstance(idx, slice) or idx.ndim == 0:
+        return True
+    if all(idx.type.broadcastable):
+        return True
+    if idx.type.dtype == "bool":
+        return True
+    if _constant_has_unique_indices(idx):
+        return True
+    if check_assumption(fgraph, idx, UNIQUE_INDICES):
+        return True
+    if isinstance(idx.owner_op, ARange):
+        return True
+    if isinstance(idx.owner_op, Reshape | DimShuffle):
+        # Views that don't add dimensions
+        if _index_provably_not_larger(idx.owner.inputs[0], val_static_dim, fgraph):
+            return True
+
+    # Fallback to static shape analysis
+    if val_static_dim is None:
+        return False
+    idx_static_shape = idx.type.shape
+    if any(d is None for d in idx_static_shape):
+        return False
+    return bool(np.prod(idx_static_shape) < val_static_dim)
 
 
 @register_canonicalize
@@ -180,13 +312,20 @@ def local_subtensor_of_dot(fgraph, node):
 
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
-@node_rewriter([Subtensor])
+@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
 def local_subtensor_of_batch_dims(fgraph, node):
-    """Lift a Subtensor through the batch dims of an (Elemwise or Blockwise) operation and its implicit broadcasting behavior.
+    """Lift a (basic or advanced) Subtensor through the batch dims of an Elemwise or Blockwise.
 
     exp(x)[:, 0] -> exp(x[:, 0])
     add(x, y)[0] -> add(x[0], y[0])
     add(x[None], y)[2] -> add(x, y[2])
+    add(x, y)[arange(d), arange(d)] -> add(x[arange(d), arange(d)], y[arange(d), arange(d)])
+
+    Bail on boolean masks and non-consecutive advanced indexing — numpy hoists
+    those advanced groups to position 0, which would misalign the lifted
+    indices. On a broadcast (length-1) axis of an input the index is dropped
+    (only zero is in bounds there), and an Alloc restores the full output shape
+    when a dropped index was what determined it.
     """
     elem, *idx = node.inputs
 
@@ -200,6 +339,24 @@ def local_subtensor_of_batch_dims(fgraph, node):
 
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
 
+    if any(isinstance(i, TensorVariable) and i.type.dtype == "bool" for i in idx_tuple):
+        # Boolean masks have data-dependent shape.
+        return None
+    if _non_consecutive_adv_indexing(idx_tuple):
+        return None
+
+    # Skip when lifting would expand a gather past a non-broadcast input's size.
+    for inp in elem.owner.inputs:
+        for axis, idx in enumerate(idx_tuple):
+            if axis >= inp.type.ndim:
+                break
+            if not isinstance(idx, TensorVariable) or idx.type.ndim == 0:
+                continue
+            if inp.type.broadcastable[axis]:
+                continue
+            if not _index_provably_not_larger(idx, inp.type.shape[axis], fgraph):
+                return None
+
     batch_ndim = (
         elem.owner.op.batch_ndim(elem.owner)
         if isinstance(elem.owner.op, Blockwise)
@@ -211,6 +368,12 @@ def local_subtensor_of_batch_dims(fgraph, node):
         batch_indices, core_indices = idx_tuple[:batch_ndim], idx_tuple[batch_ndim:]
         if all(idx == slice(None) for idx in batch_indices):
             # No batch indices, nothing to do
+            return None
+        if any(not isinstance(i, slice) for i in batch_indices) and any(
+            isinstance(i, TensorVariable) for i in core_indices
+        ):
+            # Splitting advanced batch from advanced core indices would hoist
+            # the lifted batch indices to position 0.
             return None
         elem_with_batch_indices = elem[batch_indices]
         [elem_with_batch_indices_lifted] = local_subtensor_of_batch_dims.transform(
@@ -226,43 +389,14 @@ def local_subtensor_of_batch_dims(fgraph, node):
         return [new_elem]
 
     elem_inputs = elem.owner.inputs
-    elem_bcast = elem.type.broadcastable[:batch_ndim]
-    if all(inp.type.broadcastable[:batch_ndim] == elem_bcast for inp in elem_inputs):
-        # No need to worry about implicit broadcasting.
-        indexed_inputs = [inp[idx_tuple] for inp in elem_inputs]
 
-    else:
-        # The original indices may not make sense on some of the broadcasted dimensions
-        new_idxs = [list(idx_tuple) for _ in elem_inputs]
-        for dim, (dim_idx, dim_bcast_out, *dim_bcast_inputs) in enumerate(
-            zip(
-                idx_tuple,
-                elem_bcast,
-                *(inp.type.broadcastable[:batch_ndim] for inp in elem_inputs),
-                # Indices can be shorter than input ndims
-                strict=False,
-            )
-        ):
-            if dim_idx == slice(None):
-                # Full slice can be safely applied to all inputs
-                continue
-
-            if all(dim_bcast_inp == elem_bcast for dim_bcast_inp in dim_bcast_inputs):
-                # This dim is not broadcasted for any of the inputs, original index can be applied to all inputs
-                continue
-
-            # Some dims are broadcasted, so we need to adapt their indices
-            # Slice indexing keeps the dimension, so we use a full slice for broadcasted inputs
-            # Integer indexing drops the dimension, so we index by zero for the broadcsated inputs
-            safe_bcast_dim_idx = slice(None) if isinstance(dim_idx, slice) else 0
-            for inp_idx, dim_bcast_inp in zip(new_idxs, dim_bcast_inputs, strict=True):
-                if dim_bcast_inp:
-                    inp_idx[dim] = safe_bcast_dim_idx
-
-        indexed_inputs = [
-            inp[tuple(new_idx)]
-            for inp, new_idx in zip(elem_inputs, new_idxs, strict=True)
-        ]
+    # Drop indices on broadcast input dims instead of applying them: an advanced
+    # index can't validly index a length-1 dim (only zero is in bounds) and would
+    # wastefully expand it. The Elemwise broadcasts the small inputs back together.
+    indexed_inputs = [
+        _canonical_indexing(inp, idx_tuple, drop_broadcasted_index=True)
+        for inp in elem_inputs
+    ]
 
     [old_out] = node.outputs
 
@@ -271,6 +405,16 @@ def local_subtensor_of_batch_dims(fgraph, node):
 
     # Define elemwise operation on indexed inputs
     new_out = elem.owner.op(*indexed_inputs)
+
+    # The indices dropped on broadcast dims may have been needed to determine the output shape
+    # We use an alloc to enforce the output shape.
+    if broadcasted_by(new_out, old_out):
+        batch_shape = get_simplified_broadcast_shape(
+            *elem_inputs, fgraph=fgraph, batch_ndim=batch_ndim
+        )
+        new_batch_shape = indexed_result_shape(batch_shape, idx_tuple)
+        core_shape = tuple(new_out.shape)[len(new_batch_shape) :]
+        new_out = alloc(new_out, *new_batch_shape, *core_shape)
 
     # Copy stack trace to new output
     copy_stack_trace([old_out, *node.inputs], new_out)
@@ -426,8 +570,13 @@ def local_subtensor_of_expand_dims(fgraph, node):
 
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
 
-    # Keep indexes for the original dimensions, and drop indexes for the expanded dimensions when safe
+    # Keep indexes for the original dimensions, and drop indexes for the expanded
+    # dimensions when safe. We also track where each kept expanded dimension lands
+    # in the output (`out_pos`), so it can be re-introduced with expand_dims below.
+    # These axes are derived from the indices, not the (possibly stale) output type.
     new_idxs = []
+    expand_axes = []
+    out_pos = 0
     for i, idx_item in enumerate(idx_tuple):
         if i in expanded_axes:
             if isinstance(idx_item, slice):
@@ -435,6 +584,8 @@ def local_subtensor_of_expand_dims(fgraph, node):
                 if idx_item == slice(None):
                     # A None slice, always keeps the dimension.
                     # We skip the index, and later introduce the needed expand_dim
+                    expand_axes.append(out_pos)
+                    out_pos += 1
                     continue
                 else:
                     # Other slices could keep or drop the dimension.
@@ -448,26 +599,22 @@ def local_subtensor_of_expand_dims(fgraph, node):
         else:
             # Keep indexes for non-expanded dimensions
             new_idxs.append(idx_item)
+            # An integer index drops the dimension; any slice keeps one.
+            if isinstance(idx_item, slice):
+                out_pos += 1
+
+    # Trailing dimensions beyond the explicit indices are implicit full slices;
+    # the expanded ones among them must also be re-introduced.
+    for axis in range(len(idx_tuple), ds.type.ndim):
+        if axis in expanded_axes:
+            expand_axes.append(out_pos)
+        out_pos += 1
 
     [old_out] = node.outputs
     out = x[tuple(new_idxs)]
+    if expand_axes:
+        out = expand_dims(out, axis=expand_axes)
     copy_stack_trace(old_out, out)
-
-    if out.type.broadcastable != old_out.type.broadcastable:
-        # Re-introduce needed new dimensions (corresponding to full slices on the original expanded dimensions)
-        # If out.type.broadcastable == (False) and old_out.type.broadcastable == (True, False, True)
-        # then axis = (0, 2)
-        old_bcast = list(old_out.type.broadcastable)
-        expanded_bcast = list(out.type.broadcastable)
-        axis = []
-        i = 0
-        while i < len(old_bcast):
-            if i == len(expanded_bcast) or expanded_bcast[i] != old_bcast[i]:
-                expanded_bcast.insert(i, True)
-                axis.append(i)
-            i += 1
-        out = expand_dims(out, axis=axis)
-        copy_stack_trace(old_out, out)
 
     return [out]
 
@@ -560,83 +707,235 @@ def local_subtensor_of_transpose(fgraph, node):
     return [new_out]
 
 
+def lift_subtensor_through_alloc(fgraph, node):
+    """``alloc(val, *shape)[idx]`` -> ``alloc(val[idx_on_kept_dims], *out_shape)``.
+
+    Push the read past Alloc so the broadcast happens at most once and
+    indexing operates on ``val`` (smaller) where possible. Covers basic
+    ``Subtensor``, ``AdvancedSubtensor``, and ``AdvancedSubtensor1`` reads.
+
+    On non-broadcast ``val`` dims an advanced index could expand ``val[idx]``
+    past ``val.size``; only fire when the index is provably smaller or when
+    the resulting Alloc is dropped.
+
+    Bail on boolean masks and non-consecutive advanced indexing.
+    """
+    src = node.inputs[0]
+    match src.owner_op_and_inputs:
+        case (Alloc(), val, *alloc_dims):
+            pass
+        case _:
+            return None
+    n_added_dims = src.type.ndim - val.type.ndim
+
+    indices = list(get_idx_list(node.inputs, node.op.idx_list))
+    indices += [slice(None)] * (src.type.ndim - len(indices))
+
+    if any(
+        isinstance(idx, TensorVariable) and idx.type.dtype == "bool" for idx in indices
+    ):
+        return None
+    # Non-consecutive advanced indices get hoisted to position 0 in the result
+    # but stay in place inside ``val[val_indexer]``, misaligning the Alloc shape.
+    if _non_consecutive_adv_indexing(indices):
+        return None
+
+    # Indices on Alloc-added dims don't reach val; the rest line up with val's dims.
+    val_indexer = indices[n_added_dims:]
+    dangerous_index_reaches_val = any(
+        not val.type.broadcastable[axis]
+        # Per-axis check; doesn't account for net effect across all axes.
+        and not _index_provably_not_larger(idx, val.type.shape[axis], fgraph)
+        for axis, idx in enumerate(val_indexer)
+    )
+
+    # On broadcast val dims the index is neutralized (advanced indices dropped,
+    # shrinking slices made full); the trailing Alloc broadcasts val back up.
+    nw_val = _canonical_indexing(val, val_indexer, drop_broadcasted_index=True)
+    needs_alloc = broadcasted_by(nw_val, node.outputs[0])
+
+    if dangerous_index_reaches_val and needs_alloc:
+        return None
+
+    if needs_alloc:
+        result = alloc(nw_val, *indexed_result_shape(alloc_dims, indices))
+    else:
+        result = nw_val
+
+    copy_stack_trace(node.outputs[0], result)
+    return [result]
+
+
 @register_infer_shape
+@node_rewriter([Subtensor])
+def local_basic_subtensor_of_alloc(fgraph, node):
+    return lift_subtensor_through_alloc(fgraph, node)
+
+
 @register_useless
 @register_canonicalize
 @register_specialize
-@node_rewriter([Subtensor])
+@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
 def local_subtensor_of_alloc(fgraph, node):
+    return lift_subtensor_through_alloc(fgraph, node)
+
+
+def _diag_indices(ndim, a1, a2, d, row_off, col_off):
+    """``[slice(None)] * ndim`` with axes ``(a1, a2)`` set to paired aranges
+    sharing one ``arange(d)`` node so ``indexed_result_shape``'s same-node
+    fast path skips ``broadcast_shape``.
     """
+    ar = arange(d, dtype="int64")
+    rows = ar + row_off if row_off else ar
+    cols = ar + col_off if col_off else ar
+    idxs: list = [slice(None)] * ndim
+    idxs[a1] = rows
+    idxs[a2] = cols
+    return idxs
 
-    alloc(val)[x:y] -> alloc(val[...])
-    alloc(val)[x:y] -> alloc(val)
-    This can be seen as a lift, but it also reduce the number of computation/memory.
 
+@node_rewriter([ExtractDiag])
+def local_extract_diag_of_alloc_diag(fgraph, node):
+    """Short-circuit ``extract_diag(alloc_diag(v, ..., k_alloc), offset)``.
+
+    Diagonals at different offsets never cross:
+
+    - ``offset == k_alloc``: full match ``->`` ``v``
+    - ``offset != k_alloc``: no overlap ``->`` ``alloc(0, ..., d)`` along the
+      read diagonal of the synthesized ``(L+|k_alloc|, L+|k_alloc|)`` matrix
+      where ``d = L + |k_alloc| - |offset|``
     """
-    if not isinstance(node.op, Subtensor):
-        return False
-    u = node.inputs[0]
-    if u.owner is None:
-        return False
-    if not isinstance(u.owner.op, Alloc):
-        return False
-    slices = get_idx_list(node.inputs, node.op.idx_list)
-    val = u.owner.inputs[0]
-    dims = u.owner.inputs[1:]
-    assert len(slices) <= len(dims)
+    inner = node.inputs[0]
+    if not isinstance(inner.owner_op, AllocDiag):
+        return None
+    op = node.op
+    diag_op = inner.owner.op
+    if (op.axis1, op.axis2) != (diag_op.axis1, diag_op.axis2):
+        return None  # cross-axis case is rare; bail
+    [v] = inner.owner.inputs
+    if op.offset == diag_op.offset:
+        copy_stack_trace(node.outputs[0], v)
+        return [v]
+    v_shape = tuple(
+        s if s is not None else v.shape[i] for i, s in enumerate(v.type.shape)
+    )
+    d = v_shape[-1] + abs(diag_op.offset) - abs(op.offset)
+    out = alloc(np.asarray(0, dtype=v.dtype), *v_shape[:-1], d)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
 
-    # Number of dimensions added to val
-    n_added_dims = u.ndim - val.ndim
-    # Dimensions of the returned alloc
-    nw_dims = []
-    # Slices to take from val
-    val_slices = []
 
-    for i, (sl, dim) in enumerate(zip(slices, dims, strict=False)):
-        # If val was not copied over that dim,
-        # we need to take the appropriate subtensor on it.
-        if i >= n_added_dims:
-            # We check that the corresponding val dimensions was
-            # not a broadcasted dimensions.
-            if (
-                val.type.ndim > (i - n_added_dims)
-                and val.type.broadcastable[i - n_added_dims]
-            ):
-                val_slices.append(slice(None))
-            else:
-                val_slices.append(sl)
+@node_rewriter([ExtractDiag])
+def local_extract_diag_of_eye(fgraph, node):
+    """Short-circuit ``extract_diag(eye(n, m, k_eye), offset)``.
 
-        csl, _ = get_canonical_form_slice(sl, dim)
-        if type(csl) is not slice:
-            # That dimension is removed.
-            pass
-        else:
-            nw_dim = csl.stop - csl.start
+    The result is an ``alloc`` of ``1`` (matching offset) or ``0`` (mismatched
+    offset) along the diagonal length ``min(n - row_off, m - col_off)``.
+    """
+    inner = node.inputs[0]
+    if not isinstance(inner.owner_op, Eye):
+        return None
+    op = node.op
+    n, m, k_inp = inner.owner.inputs
+    if not isinstance(k_inp, TensorConstant):
+        return None
+    val = np.asarray(1 if op.offset == int(k_inp.data) else 0, dtype=inner.dtype)
+    row_off, col_off = max(0, -op.offset), max(0, op.offset)
+    a = n if row_off == 0 else n - row_off
+    b = m if col_off == 0 else m - col_off
+    d = a if a is b else minimum(a, b)
+    out = alloc(val, d)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
 
-            if csl.step != 1:
-                # Do not add the ceil_intdiv() graphs in the graphs
-                # when this is not needed as it prevent detecting the
-                # correct broadcast pattern.
-                nw_dim = ceil_intdiv(nw_dim, csl.step)
-            nw_dims += [nw_dim]
 
-    nw_val = val[tuple(val_slices)]
-    nw_dims += dims[len(slices) :]
-    if nw_val.ndim > len(nw_dims):
-        return False
-    rval = alloc(nw_val, *nw_dims)
-    if not isinstance(rval, list | tuple):
-        rval = [rval]
-    return rval
+@node_rewriter([ExtractDiag])
+def local_extract_diag_lift(fgraph, node):
+    """Lower ``ExtractDiag(X)`` to ``X[..., arange(d)+r, arange(d)+c, ...]``
+    and commit only when the immediate next-step lift would consume it.
+
+    Each branch builds the hypothetical ``AdvancedSubtensor`` off-fgraph and
+    tests via the gating rewriter's ``.fn`` — no commit if the gate misses,
+    so we never leave an unhelpful paired-arange gather behind.
+
+    - ``Alloc`` parent — gated on ``local_subtensor_of_alloc``; rebuilds the
+      outer Alloc shape with the diag length ``d`` so ``Shape(arange(d))[0]``
+      doesn't survive.
+    - ``Elemwise`` / ``Blockwise`` parent — gated on
+      ``local_subtensor_of_batch_dims``. Blockwise core dims bail (the lift
+      can't push past core ndim).
+    - ``AdvancedIncSubtensor`` write-chain parent — gated on
+      ``local_advanced_read_of_write_constant_indices``.
+    """
+    inner = node.inputs[0]
+    op = node.op
+    a1, a2 = op.axis1, op.axis2
+    parent_op = inner.owner_op
+
+    if isinstance(parent_op, Alloc):
+        shape_inputs = inner.owner.inputs[1:]
+    elif isinstance(parent_op, Elemwise | Blockwise):
+        if isinstance(parent_op, Blockwise):
+            batch_ndim = inner.owner.op.batch_ndim(inner.owner)
+            if a1 >= batch_ndim or a2 >= batch_ndim:
+                return None
+        shape_inputs = inner.shape
+    elif isinstance(parent_op, AdvancedIncSubtensor):
+        shape_inputs = inner.shape
+    else:
+        return None
+
+    row_off, col_off = max(0, -op.offset), max(0, op.offset)
+
+    def _diag_dim(ax, off):
+        s = inner.type.shape[ax]
+        if s is not None:
+            return s - off
+        return shape_inputs[ax] - off if off else shape_inputs[ax]
+
+    a_term, b_term = _diag_dim(a1, row_off), _diag_dim(a2, col_off)
+    if isinstance(a_term, int) and isinstance(b_term, int):
+        diag_len = min(a_term, b_term)
+    else:
+        diag_len = a_term if a_term is b_term else minimum(a_term, b_term)
+    idxs = _diag_indices(inner.type.ndim, a1, a2, diag_len, row_off, col_off)
+    hypothetical = inner[tuple(idxs)].owner
+
+    if isinstance(parent_op, Alloc):
+        return local_subtensor_of_alloc.fn(fgraph, hypothetical)
+    elif isinstance(parent_op, Elemwise | Blockwise):
+        return local_subtensor_of_batch_dims.fn(fgraph, hypothetical)
+    else:
+        # AdvancedIncSubtensor write chain
+        return local_advanced_read_of_write_constant_indices.fn(fgraph, hypothetical)
+
+
+extract_diag_lift_pass = SequentialGraphRewriter(
+    out2in(
+        local_extract_diag_of_alloc_diag,
+        local_extract_diag_of_eye,
+        local_extract_diag_lift,
+        local_subtensor_of_alloc,
+        local_subtensor_of_batch_dims,
+        local_slice_read_of_write,
+        local_advanced_read_of_write_constant_indices,
+        name="extract_diag_lift_walker",
+    ),
+    out2in(
+        local_adv_idx_to_diagonal,
+        local_adv_idx_to_slice,
+        local_useless_slice,
+        name="extract_diag_cleanup",
+    ),
+)
+extract_diag_lift_pass.__name__ = "extract_diag_lift_pass"  # type: ignore[attr-defined]
+register_specialize(extract_diag_lift_pass, "shape_unsafe")  # type: ignore[arg-type]
 
 
 @register_canonicalize
 @node_rewriter([Subtensor])
 def local_subtensor_SpecifyShape_lift(fgraph, node):
     """Lift ``specify_shape(x, s)[i_1, ..., i_n]`` to ``specify_shape(x[i1, ... , i_n], s[n:])``."""
-
-    if not isinstance(node.op, Subtensor):
-        return False
 
     specify_shape_node = node.inputs[0]
 
@@ -733,6 +1032,8 @@ def local_subtensor_make_vector(fgraph, node):
                 node.op.idx_list, node.inputs, allow_partial=False
             )[0]
             sliced_inputs = x.owner.inputs[const_slice]
+            if not sliced_inputs:
+                return False
             if len(sliced_inputs) == 1:
                 ret = expand_dims(sliced_inputs[0], axis=0)
             else:
@@ -806,15 +1107,7 @@ def local_subtensor_shape_constant(fgraph, node):
 
         TensorConstant{1}
 
-    TODO: Something like `local_shape_to_shape_i` should be a general
-    canonicalization, and not a `ShapeFeature`-dependent rewrite.  If that were
-    the case, we could change this to only operate on `Shape_i`\s.
-    Currently, we're not handling them because they should only appear when
-    `ShapeFeature` is present, and it will also simplify/remove them.
-
     """
-    if not isinstance(node.op, Subtensor):
-        return False
 
     shape = node.inputs[0]
 
@@ -833,13 +1126,19 @@ def local_subtensor_shape_constant(fgraph, node):
     if not isinstance(shape_arg.type, TensorType):
         return False
 
-    shape_parts = shape_arg.type.broadcastable[idx_val]
+    try:
+        shape_parts = shape_arg.type.shape[idx_val]
+    except IndexError:
+        # An out-of-bounds index here is an error in the source graph
+        # (e.g. ``scalar.shape[0]``), but it should fail at runtime rather
+        # than abort the rewrite pass.
+        return False
 
     if isinstance(shape_parts, Iterable):
-        if all(shape_parts):
-            return [as_tensor([1] * len(shape_parts), dtype=np.int64, ndim=1)]
-    elif shape_parts:
-        return [as_tensor(1, dtype=np.int64)]
+        if all(s is not None for s in shape_parts):
+            return [as_tensor(list(shape_parts), dtype=np.int64, ndim=1)]
+    elif shape_parts is not None:
+        return [as_tensor(shape_parts, dtype=np.int64)]
 
 
 @node_rewriter([Subtensor])

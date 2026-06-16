@@ -15,7 +15,7 @@ import math
 from collections.abc import Callable
 from itertools import chain
 from textwrap import dedent
-from typing import Any, TypeAlias
+from typing import Any
 
 import numpy as np
 
@@ -790,7 +790,7 @@ float64: ScalarType = get_scalar_type("float64")
 complex64: ScalarType = get_scalar_type("complex64")
 complex128: ScalarType = get_scalar_type("complex128")
 
-_ScalarTypes: TypeAlias = tuple[ScalarType, ...]
+type _ScalarTypes = tuple[ScalarType, ...]
 int_types: _ScalarTypes = (int8, int16, int32, int64)
 uint_types: _ScalarTypes = (uint8, uint16, uint32, uint64)
 float_types: _ScalarTypes = (float16, float32, float64)
@@ -3929,8 +3929,7 @@ class Real(UnaryScalarOp):
 
     """
 
-    # numpy.real(float32) return a view on the inputs.
-    # nfunc_spec = ('real', 1, 1)
+    nfunc_spec = ("real", 1, 1)
 
     def impl(self, x):
         return np.real(x)
@@ -4239,25 +4238,6 @@ class Composite(ScalarInnerGraphOp):
         for i in inputs:
             assert i not in outputs  # This isn't supported, use identity
 
-        # Flatten nested Composites in single-output case
-        if len(outputs) == 1 and any(
-            var.owner is not None and isinstance(var.owner.op, Composite)
-            for var in outputs
-        ):
-            inner_op = outputs[0].owner.op
-            inner_fgraph = inner_op.fgraph.unfreeze()
-            res = pytensor.compile.rebuild_collect_shared(
-                inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
-            )
-            res2 = pytensor.compile.rebuild_collect_shared(
-                inputs=inner_fgraph.inputs,
-                outputs=inner_fgraph.outputs,
-                replace=dict(zip(inner_fgraph.inputs, res[1], strict=True)),
-            )
-            assert len(res2[1]) == len(outputs)
-            assert len(res[0]) == len(inputs)
-            inputs, outputs = res[0], res2[1]
-
         self.fgraph = FrozenFunctionGraph(inputs, outputs)
         self._validate_inner_graph(self.fgraph)
 
@@ -4282,8 +4262,7 @@ class Composite(ScalarInnerGraphOp):
         return self._name
 
     def clone(self):
-        mutable_fg = self.fgraph.unfreeze()
-        return self.__class__(mutable_fg.inputs, mutable_fg.outputs)
+        return self  # Op is immutable
 
     def output_types(self, input_types):
         if tuple(input_types) != self.inputs_type:
@@ -4297,12 +4276,11 @@ class Composite(ScalarInnerGraphOp):
             return super().make_node(*inputs)
         else:
             # Make a new op with the right input types.
-            # Unfreeze the frozen inner graph for rebuild_collect_shared.
             assert len(inputs) == self.nin
-            mutable_fg = self.fgraph.unfreeze()
+            fg = self.fgraph
             res = pytensor.compile.rebuild_collect_shared(
-                mutable_fg.outputs,
-                replace=dict(zip(mutable_fg.inputs, inputs, strict=True)),
+                fg.outputs,
+                replace=dict(zip(fg.inputs, inputs, strict=True)),
                 rebuild_strict=False,
             )
             # After rebuild_collect_shared, the Variable in inputs

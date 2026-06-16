@@ -4,6 +4,7 @@ from numpy.testing import assert_allclose
 
 from pytensor import function
 from pytensor import tensor as pt
+from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
@@ -115,6 +116,38 @@ def test_dont_apply_det_of_diag_from_scalar_eye():
     assert_allclose(
         det_val,
         rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+@pytest.mark.parametrize(
+    "side, shape",
+    [
+        pytest.param("lower_triangular", (5, 5), id="lower"),
+        pytest.param("upper_triangular", (5, 5), id="upper"),
+        pytest.param("lower_triangular", (3, 5, 5), id="batched_lower"),
+    ],
+)
+def test_det_of_triangular(side, shape):
+    x = pt.tensor("x", shape=shape)
+    y = pt.linalg.det(assume(x, **{side: True}))
+
+    f = function([x], y, mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Det) or isinstance(getattr(node.op, "core_op", None), Det)
+        for node in nodes
+    )
+
+    rng = np.random.default_rng(0)
+    tri = np.tril if side == "lower_triangular" else np.triu
+    x_test = tri(rng.normal(size=shape)).astype(config.floatX)
+    expected = np.linalg.det(x_test)
+
+    assert_allclose(
+        expected,
+        f(x_test),
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
@@ -426,3 +459,38 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     expected = expected_fn(x)
     rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
     assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_inv():
+    x = pt.tensor("x", shape=(3, 3))
+    out = det(pt.linalg.inv(x))
+    expected = pt.as_tensor(1.0, dtype="float64") / det(x)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_slogdet_of_inv():
+    x = pt.dmatrix("x")
+    # slogdet(inv(x)) -> (sign, logabsdet)
+    sign_inv, logabsdet_inv = pt.linalg.slogdet(pt.linalg.inv(x))
+
+    # expected: (sign(det(x)), -logabsdet(det(x)))
+    # det(inv(x)) = 1/det(x), so sign is same.
+    # logabsdet(inv(x)) = log(abs(1/det(x))) = -log(abs(det(x)))
+    sign_x, logabsdet_x = pt.linalg.slogdet(x)
+    expected_sign = sign_x
+    expected_logabsdet = -logabsdet_x
+
+    # We need stabilize for det_of_inv and log_reciprocal
+    # and specialize for slogdet_specialization
+    rewritten_sign, rewritten_logabsdet = rewrite_graph(
+        [sign_inv, logabsdet_inv], include=["canonicalize", "stabilize", "specialize"]
+    )
+
+    expected_sign_opt, expected_logabsdet_opt = rewrite_graph(
+        [expected_sign, expected_logabsdet],
+        include=["canonicalize", "stabilize", "specialize"],
+    )
+
+    assert_equal_computations([rewritten_sign], [expected_sign_opt])
+    assert_equal_computations([rewritten_logabsdet], [expected_logabsdet_opt])

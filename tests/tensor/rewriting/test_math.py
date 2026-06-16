@@ -574,7 +574,7 @@ class TestAlgebraicCanonizer:
         mode = get_default_mode()
 
         rewrite_query = RewriteDatabaseQuery(["canonicalize"])
-        rewrite_query = rewrite_query.including("ShapeOpt", "local_fill_to_alloc")
+        rewrite_query = rewrite_query.including("ShapeOpt", "local_second_to_alloc")
         rewrite_query = rewrite_query.excluding("local_elemwise_fusion")
         mode = mode.__class__(linker=mode.linker, optimizer=rewrite_query)
         # test x / x -> 1
@@ -630,10 +630,8 @@ class TestAlgebraicCanonizer:
                 ((dv / dy) / dv, [dv, dy], [dvv, dyv], 1, "float64"),
                 ((fv / fy) / fv, [fv, fy], [fvv, fyv], 1, "float32"),
                 # must broadcast as there is a dimshuffle in the computation
-                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 2, "float64"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float64, row)>), Alloc]
-                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 2, "float32"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float32, row)>), Alloc]
+                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 1, "float64"),
+                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 1, "float32"),
             ]
         ):
             f = function(list(sym_inputs), g, mode=mode)
@@ -1225,7 +1223,7 @@ def test_local_elemwise_sub_zeros():
             "canonicalize",
             "uncanonicalize",
             "ShapeOpt",
-            "local_fill_to_alloc",
+            "local_second_to_alloc",
             "local_elemwise_alloc",
         )
         .including("local_elemwise_sub_zeros")
@@ -1995,7 +1993,8 @@ class TestExpLog:
 
     def test_log1mexp_log(self):
         # log1mexp(log(x)) -> log1p(-x)
-        data_valid = np.random.random((4, 3)).astype("float32")
+        rng = np.random.default_rng(1996)
+        data_valid = rng.random((4, 3)).astype("float32")
         data_valid[0, 0] = 0  # edge case
         data_valid[0, 1] = 1  # another edge case
         data_invalid = np.concatenate([data_valid + 1.1, data_valid - 1.1])
@@ -2082,29 +2081,43 @@ class TestSqrSqrt:
         self.rng = np.random.default_rng()
 
     def test_sqr_sqrt(self):
-        # sqrt(x) ** 2 -> x
+        # sqr(sqrt(x)) -> switch(x >= 0, x, nan)
         x = pt.tensor("x", shape=(None, None))
         out = sqr(sqrt(x))
-        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
-
-        assert equal_computations([out], [pt_abs(x)])
-
-    def test_sqrt_sqr(self):
-        x = pt.tensor("x", shape=(None, None))
-        out = sqrt(sqr(x))
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
             ge(x, np.zeros((1, 1), dtype="int8")),
             x,
-            np.full((1, 1), np.nan, dtype=x.type.dtype),
+            np.full((1, 1), np.nan, dtype=out.type.dtype),
         )
 
         assert equal_computations([out], [expected])
 
+    def test_sqrt_sqr(self):
+        # sqrt(sqr(x)) -> abs(x)
+        x = pt.tensor("x", shape=(None, None))
+        out = sqrt(sqr(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        assert equal_computations([out], [pt_abs(x)])
+
     def test_sqr_sqrt_integer_upcast(self):
         x = ivector("x")
         out = sqr(sqrt(x))
+        dtype = out.type.dtype
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        expected = switch(
+            ge(x, np.zeros((1,), dtype="int8")),
+            x,
+            np.full((1,), np.nan, dtype=dtype),
+        )
+        assert equal_computations([out], [expected])
+
+    def test_sqrt_sqr_integer_upcast(self):
+        x = ivector("x")
+        out = sqrt(sqr(x))
         dtype = out.type.dtype
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
@@ -3623,10 +3636,10 @@ def test_local_div_to_reciprocal():
 class TestIntDivByOne:
     def setup_method(self):
         self.mode = get_default_mode()
-        self.mode = self.mode.including("local_intdiv_by_one")
+        self.mode = self.mode.including("local_div_by_one")
 
     def test_remove_floor(self):
-        """Tests removing the extra floor_div by 1 introduced by `local_subtensor_merge` rewrite."""
+        """Tests removing the extra floor_div by 1 introduced by `local_subtensor_merge_slice` rewrite."""
 
         y = tensor4("y")
         self.mode = self.mode.excluding("fusion")
@@ -4651,7 +4664,9 @@ def test_polygamma_specialization():
     y3 = polygamma(2, x)
 
     fn = pytensor.function(
-        [x], [y1, y2, y3], mode=get_default_mode().including("specialize")
+        [x],
+        [y1, y2, y3],
+        mode=get_default_mode().including("specialize").excluding("fusion"),
     )
     fn_outs = fn.maker.fgraph.outputs
     assert isinstance(fn_outs[0].owner.op.scalar_op, Psi)
@@ -4915,6 +4930,86 @@ def test_local_dot_to_mul_unspecified_length_1():
     )
 
 
+class TestDotDiagToElemwise:
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_left_diag_matrix(self, make_diag):
+        d = dvector("d", shape=(5,))
+        X = dmatrix("X", shape=(5, 3))
+        D = make_diag(d)
+        out = D @ X
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = d[:, None] * X
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_left_diag_vector(self, make_diag):
+        d = dvector("d", shape=(5,))
+        x = dvector("x", shape=(5,))
+        D = make_diag(d)
+        out = D @ x
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = d * x
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_right_diag_matrix(self, make_diag):
+        d = dvector("d", shape=(5,))
+        X = dmatrix("X", shape=(3, 5))
+        D = make_diag(d)
+        out = X @ D
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = X * d[None, :]
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_both_diag(self, make_diag):
+        d1 = dvector("d1", shape=(5,))
+        d2 = dvector("d2", shape=(5,))
+        D1 = make_diag(d1)
+        D2 = make_diag(d2)
+        out = D1 @ D2
+
+        passes = ("canonicalize", "stabilize", "specialize")
+        rewritten = rewrite_graph(out, include=passes)
+        expected = rewrite_graph(
+            pt.basic.alloc_diag(d1 * d2, axis1=-2, axis2=-1), include=passes
+        )
+        assert_equal_computations([rewritten], [expected])
+
+
 class TestBlockDiagDotToDotBlockDiag:
     @pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
     @pytest.mark.parametrize(
@@ -5024,3 +5119,83 @@ class TestBlockDiagDotToDotBlockDiag:
             original, include=("canonicalize", "stabilize", "specialize")
         )
         assert_equal_computations([rewritten], [original])
+
+
+def test_log_reciprocal():
+    x = pt.dscalar("x")
+    out = pt.log(pt.reciprocal(x))
+    expected = -pt.log(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_sign_reciprocal():
+    x = pt.dscalar("x")
+    out = pt.sign(pt.reciprocal(x))
+    expected = pt.sign(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "build, expected_fn",
+    [
+        (lambda x: pt.log(3.0 / x), lambda x: pt.log(3.0) - pt.log(x)),
+        (lambda x: pt.log(x / 3.0), lambda x: pt.log(x) - pt.log(3.0)),
+        (lambda x: pt.log(1.0 / x), lambda x: -pt.log(x)),
+    ],
+    ids=["pos_const_num", "pos_const_den", "one_over_x"],
+)
+def test_log_div_positive_constant(build, expected_fn):
+    x = pt.dscalar("x")
+    rewritten = rewrite_graph(
+        build(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = rewrite_graph(
+        expected_fn(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_log_div_non_constant_not_rewritten():
+    x = pt.dscalar("x")
+    y = pt.dscalar("y")
+    out = pt.log(x / y)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
+    # No constant to peel off — graph should still contain a true_div.
+    nodes = [v.owner for v in ancestors([rewritten]) if v.owner]
+    assert any(
+        isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
+    )
+
+
+@pytest.mark.parametrize(
+    "build, expected_fn",
+    [
+        (lambda x: pt.sign(3.0 / x), lambda x: pt.sign(x)),
+        (lambda x: pt.sign(-3.0 / x), lambda x: -pt.sign(x)),
+        (lambda x: pt.sign(x / 3.0), lambda x: pt.sign(x)),
+        (lambda x: pt.sign(x / -3.0), lambda x: -pt.sign(x)),
+    ],
+    ids=["pos_num", "neg_num", "pos_den", "neg_den"],
+)
+def test_sign_div_constant(build, expected_fn):
+    x = pt.dscalar("x")
+    rewritten = rewrite_graph(
+        build(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = rewrite_graph(
+        expected_fn(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_sign_div_non_constant_not_rewritten():
+    x = pt.dscalar("x")
+    y = pt.dscalar("y")
+    out = pt.sign(x / y)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
+    nodes = [v.owner for v in ancestors([rewritten]) if v.owner]
+    assert any(
+        isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
+    )

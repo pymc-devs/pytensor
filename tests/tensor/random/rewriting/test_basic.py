@@ -1016,9 +1016,12 @@ def test_sidestep_unused_rng_consumer_with_duplicate_node():
 
 def test_unused_rng():
     rng = random_generator_type("rng")
-    next_rng, x = rng.normal([0], [1], size=3)
-    next_rng, _y = next_rng.normal(x.ones_like(), [1])
-    final_rng, z = next_rng.normal(1, 2)
+    # float64 parameters throughout, so the NUMBA float64-cast rewrite is a no-op and
+    # the strict graph comparison below need not account for inserted casts. Scalar
+    # Python floats autocast to float32, so use np.float64 for the scalar loc/scale.
+    next_rng, x = rng.normal([0.0], [1.0], size=3)
+    next_rng, _y = next_rng.normal(x.ones_like(), [1.0])
+    final_rng, z = next_rng.normal(np.float64(1.0), np.float64(2.0))
 
     fn = function([rng], [final_rng, z], mode=get_default_mode().excluding("inplace"))
 
@@ -1050,9 +1053,9 @@ def test_unused_rng():
     if config.mode != "FAST_COMPILE":
         # Strict graph comparison (ones_like gets constant-folded outside FAST_COMPILE)
         rng.tag.used = False  # Avoid reuse warnings
-        next_rng, _x = rng.normal([0], [1], size=3)
-        next_rng, _y = next_rng.normal([1.0, 1.0, 1.0], [1])
-        final_rng, z = next_rng.normal(1, 2)
+        next_rng, _x = rng.normal([0.0], [1.0], size=3)
+        next_rng, _y = next_rng.normal([1.0, 1.0, 1.0], [1.0])
+        final_rng, z = next_rng.normal(np.float64(1.0), np.float64(2.0))
 
         expected = [final_rng, z]
 

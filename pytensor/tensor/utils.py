@@ -83,11 +83,16 @@ def shape_of_variables(
     shape_feature = fgraph.shape_feature
 
     input_dims = [
-        dimension for inp in fgraph.inputs for dimension in shape_feature.shape_of[inp]
+        dimension
+        for inp in fgraph.inputs
+        for dimension in shape_feature.shape_tuple(inp)
     ]
 
     output_dims = [
-        dimension for shape in shape_feature.shape_of.values() for dimension in shape
+        dimension
+        for var in fgraph.variables
+        if hasattr(var.type, "ndim")
+        for dimension in shape_feature.shape_tuple(var)
     ]
 
     compute_shapes = pytensor.function(input_dims, output_dims)
@@ -105,8 +110,10 @@ def shape_of_variables(
     sym_to_num_dict = dict(zip(output_dims, numeric_output_dims, strict=True))
 
     l = {}
-    for var in shape_feature.shape_of:
-        l[var] = tuple(sym_to_num_dict[sym] for sym in shape_feature.shape_of[var])
+    for var in fgraph.variables:
+        shape = shape_feature.shape_tuple(var)
+        if shape is not None:
+            l[var] = tuple(sym_to_num_dict[sym] for sym in shape)
     return l
 
 

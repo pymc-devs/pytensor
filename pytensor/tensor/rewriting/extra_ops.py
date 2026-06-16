@@ -11,9 +11,6 @@ from pytensor.tensor.rewriting.basic import register_canonicalize, register_usel
 @node_rewriter([Unique])
 def local_Unique_scalar(fgraph, node):
     """Convert ``unique(x)`` to ``x`` when ``x`` is a scalar."""
-    if not isinstance(node.op, Unique):
-        return False
-
     if node.op.return_index or node.op.return_inverse or node.op.return_counts:
         return False
 
@@ -35,9 +32,6 @@ def local_Unique_Alloc_lift(fgraph, node):
 
     This isn't really so much a lift as a "reduction/consumption".
     """
-    if not isinstance(node.op, Unique):
-        return False
-
     if (
         node.op.return_index
         or node.op.return_inverse
@@ -68,9 +62,6 @@ def local_Unique_Repeat_lift(fgraph, node):
 
     This isn't really so much a lift as a "reduction/consumption".
     """
-    if not isinstance(node.op, Unique):
-        return False
-
     if (
         node.op.return_index
         or node.op.return_inverse
@@ -101,9 +92,6 @@ def local_Unique_second(fgraph, node):
 
     This isn't really so much a lift as a "reduction/consumption".
     """
-    if not isinstance(node.op, Unique):
-        return False
-
     if (
         node.op.return_index
         or node.op.return_inverse

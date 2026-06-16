@@ -61,6 +61,8 @@ class XTensorType(Type, HasDataType, HasShape):
         else:
             self.dtype = np.dtype(dtype).name
 
+        if isinstance(dims, str):
+            dims = (dims,)
         self.dims = tuple(dims)
         if len(set(dims)) < len(dims):
             raise ValueError(f"Dimensions must be unique. Found duplicates in {dims}: ")
@@ -931,6 +933,12 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         """Generalized dot product with another XTensorVariable."""
         return px.math.dot(self, other, dim=dim)
 
+    def __matmul__(self, other):
+        return px.math.dot(self, other)
+
+    def __rmatmul__(self, other):
+        return px.math.dot(other, self)
+
     def broadcast_like(self, other, exclude=None):
         """Broadcast against another XTensorVariable."""
         _, self_bcast = px.shape.broadcast(other, self, exclude=exclude)
@@ -989,6 +997,8 @@ def _extract_data_and_dims(
     else:
         x_data = tensor_constant(x).data
         if dims is not None:
+            if isinstance(dims, str):
+                dims = (dims,)
             x_dims = tuple(dims)
         else:
             if x_data.ndim == 0:

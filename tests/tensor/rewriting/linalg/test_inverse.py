@@ -5,22 +5,22 @@ from numpy.testing import assert_allclose
 import pytensor
 from pytensor import function
 from pytensor import tensor as pt
+from pytensor.assumptions.specify import assume
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv, inv, pinv
 from pytensor.tensor.linalg.inverse import inv as matrix_inverse
 from pytensor.tensor.linalg.products import KroneckerProduct
-from pytensor.tensor.linalg.solvers.general import Solve
-from pytensor.tensor.rewriting.linalg.inverse import inv_to_solve
+from pytensor.tensor.linalg.solvers.general import solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_matrix_inverse_pushforward_pullback():
@@ -84,14 +84,17 @@ def test_transpose_of_inv():
                 assert node.inputs[0].name == "X"
 
 
-def test_inv_to_solve():
-    A = dmatrix("A")
-    b = dmatrix("b")
-    node = matrix_inverse(A).dot(b).owner
-    [out] = inv_to_solve.transform(None, node)
-    assert isinstance(out.owner.op, Blockwise) and isinstance(
-        out.owner.op.core_op, Solve
-    )
+@pytest.mark.parametrize("batched", [False, True], ids=["unbatched", "batched"])
+def test_inv_to_solve(batched):
+    if batched:
+        A = pt.tensor("A", shape=(None, None, None), dtype="float64")
+        b = pt.tensor("b", shape=(None, None, None), dtype="float64")
+    else:
+        A = dmatrix("A")
+        b = dmatrix("b")
+    out = matrix_inverse(A) @ b
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    assert_equal_computations([rewritten], [solve(A, b)])
 
 
 @pytest.mark.parametrize("inv_op_1", [inv, pinv])
@@ -245,3 +248,15 @@ def test_lift_linalg_of_expanded_matrices(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+def test_inv_of_orthogonal_to_transpose():
+    n = 5
+    rewrites = ("canonicalize", "stabilize", "ShapeOpt")
+
+    x = pt.dmatrix("x", shape=(n, n))
+    x_orth = assume(x, orthogonal=True)
+    out = pt.linalg.inv(x_orth)
+    rewritten = rewrite_graph(out, include=rewrites)
+    expected = rewrite_graph(x_orth.mT, include=rewrites)
+    assert_equal_computations([rewritten], [expected])

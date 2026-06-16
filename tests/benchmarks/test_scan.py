@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from pytensor import Mode, config, function, ifelse, scan, shared
+from pytensor.compile.mode import get_default_mode
 from pytensor.gradient import hessian
 from pytensor.scan.op import Scan
 from pytensor.tensor import (
@@ -20,6 +21,7 @@ from pytensor.tensor import (
     vertical_stack,
     zeros,
 )
+from pytensor.tensor.subtensor import Subtensor
 
 
 def SEIR_model_logp():
@@ -186,13 +188,21 @@ def _test_sit_sot_buffer_benchmark(
 ):
     x0 = vector(shape=(op_size,), dtype="float64")
     xs = scan(
-        fn=lambda xtm1: (xtm1 + 1),
+        fn=lambda xtm1: xtm1 + 1,
         outputs_info=[x0],
         n_steps=n_steps - 1,
         return_updates=False,
     )
     if buffer_size == "unit":
         xs_kept = xs[-1]
+        expected_buffer_size = 1 + mode_preallocs_output
+        expected_untraced_sit_sot = not mode_preallocs_output
+    elif buffer_size == "unit_slice":
+        # ``xs[-1:]`` (keepdim) should reach the same untraced sit_sot
+        # outcome as the scalar ``xs[-1]`` -- save_mem's strip-chain
+        # collapse gives the symbolic-``n_steps`` chain parity with the
+        # constant case.
+        xs_kept = xs[-1:]
         expected_buffer_size = 1 + mode_preallocs_output
         expected_untraced_sit_sot = not mode_preallocs_output
     elif buffer_size == "aligned":
@@ -218,7 +228,7 @@ def _test_sit_sot_buffer_benchmark(
     [scan_node] = [
         node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
     ]
-    if buffer_size == "unit" and expected_untraced_sit_sot:
+    if buffer_size in ("unit", "unit_slice") and expected_untraced_sit_sot:
         # sit_sot was converted to untraced_sit_sot (no buffer dimension)
         assert scan_node.op.info.n_sit_sot == 0
         assert scan_node.op.info.n_untraced_sit_sot == 1
@@ -229,7 +239,8 @@ def _test_sit_sot_buffer_benchmark(
 
 
 @pytest.mark.parametrize(
-    "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
+    "buffer_size",
+    ("unit", "unit_slice", "aligned", "misaligned", "whole", "whole+init"),
 )
 @pytest.mark.parametrize("n_steps, op_size", [(10, 2), (512, 2), (512, 256)])
 def test_sit_sot_buffer_benchmark_c(n_steps, op_size, buffer_size, benchmark):
@@ -239,7 +250,8 @@ def test_sit_sot_buffer_benchmark_c(n_steps, op_size, buffer_size, benchmark):
 
 
 @pytest.mark.parametrize(
-    "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
+    "buffer_size",
+    ("unit", "unit_slice", "aligned", "misaligned", "whole", "whole+init"),
 )
 @pytest.mark.parametrize("n_steps, op_size", [(10, 2), (512, 2), (512, 256)])
 def test_sit_sot_buffer_benchmark_numba(n_steps, op_size, buffer_size, benchmark):
@@ -573,6 +585,44 @@ def test_scan_reordering_benchmark(benchmark):
 
     np.testing.assert_allclose(pytensor_x, v_x)
     np.testing.assert_allclose(pytensor_y, v_y)
+
+
+def test_scan_grad_subtensor_compile_benchmark(benchmark):
+    """Compile time for ``grad(xs[-1], x0)`` over a symbolic-``n_steps`` Scan.
+
+    The most extreme pathology in issue #112: the gradient produces nested
+    Subtensor chains on Scan outputs, and the unguarded ``local_subtensor_merge_slice``
+    used to expand each into a deep ``switch / min / max`` tree.
+    """
+    no_fusion = get_default_mode().excluding("fusion")
+
+    def build():
+        x0 = scalar("x0")
+        n = scalar("n", dtype="int64")
+        xs = scan(
+            fn=lambda xtm1: xtm1**2,
+            outputs_info=[x0],
+            n_steps=n,
+            return_updates=False,
+        )
+        g = grad(xs[-1], x0)
+        return [n, x0], g
+
+    function(*build(), mode=no_fusion)  # warm
+    fn = benchmark(lambda: function(*build(), mode=no_fusion))
+
+    n_apply = len(fn.maker.fgraph.apply_nodes)
+    assert n_apply <= 20, f"Graph has {n_apply} nodes, expected <= 20"
+
+    subtensor_nodes = [
+        n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Subtensor)
+    ]
+    assert len(subtensor_nodes) <= 4, (
+        f"Expected <= 4 Subtensor, got {len(subtensor_nodes)}"
+    )
+
+    scan_nodes = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+    assert len(scan_nodes) == 2  # forward Scan + backward grad-of-Scan
 
 
 def _jax_cyclical_reduction():

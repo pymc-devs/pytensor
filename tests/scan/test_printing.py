@@ -133,8 +133,9 @@ def test_debugprint_nitsot():
 
     # Generate the components of the polynomial
     components, _updates = pytensor.scan(
-        fn=lambda coefficient, power, free_variable: coefficient
-        * (free_variable**power),
+        fn=lambda coefficient, power, free_variable: (
+            coefficient * (free_variable**power)
+        ),
         outputs_info=None,
         sequences=[coefficients, pt.arange(max_coefficients_supported)],
         non_sequences=x,

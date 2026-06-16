@@ -30,15 +30,25 @@ class SVD(Op):
     compute_uv : bool, optional
         Whether or not to compute u and v in addition to s.
         True by default.
+    overwrite_a : bool, optional
+        Permit the input matrix to be destroyed during the computation,
+        saving an allocation. The rewriter promotes this when the input
+        buffer is otherwise unused. Default False.
 
     """
 
     # See doc in the docstring of the function just after this class.
-    __props__ = ("full_matrices", "compute_uv")
+    __props__ = ("full_matrices", "compute_uv", "overwrite_a")
 
-    def __init__(self, full_matrices: bool = True, compute_uv: bool = True):
+    def __init__(
+        self,
+        full_matrices: bool = True,
+        compute_uv: bool = True,
+        overwrite_a: bool = False,
+    ):
         self.full_matrices = bool(full_matrices)
         self.compute_uv = bool(compute_uv)
+        self.overwrite_a = bool(overwrite_a)
         if self.compute_uv:
             if self.full_matrices:
                 self.gufunc_signature = "(m,n)->(m,m),(k),(n,n)"
@@ -46,6 +56,15 @@ class SVD(Op):
                 self.gufunc_signature = "(m,n)->(m,k),(k),(k,n)"
         else:
             self.gufunc_signature = "(m,n)->(k)"
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if not allowed_inplace_inputs:
+            return self
+        new_props = self._props_dict()  # type: ignore
+        new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -74,7 +93,7 @@ class SVD(Op):
             (s,) = outputs
             s[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (x_shape,) = shapes
         M, N = x_shape
         K = ptm.minimum(M, N)

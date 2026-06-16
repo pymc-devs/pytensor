@@ -1832,3 +1832,206 @@ class _LAPACK:
             )
 
         return hegvd
+
+    @classmethod
+    def numba_xgesvd(cls, dtype) -> CPUDispatcher:
+        """
+        Compute the singular value decomposition of a general M-by-N matrix using the
+        QR-based algorithm (LAPACK xGESVD).
+
+        Called by scipy.linalg.svd with lapack_driver='gesvd' and numpy.linalg.svd for
+        the non-divide-and-conquer path.
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        is_complex = isinstance(dtype, Complex)
+        real_ptr = nb_f64p if dtype is nb_c128 else nb_f32p
+        unique_func_name = f"scipy.lapack.{kind}gesvd"
+
+        @numba_basic.numba_njit
+        def get_gesvd_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gesvd")
+            return ptr
+
+        if is_complex:
+            gesvd_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBU
+                    nb_i32p,  # JOBVT
+                    nb_i32p,  # M
+                    nb_i32p,  # N
+                    float_ptr,  # A
+                    nb_i32p,  # LDA
+                    real_ptr,  # S
+                    float_ptr,  # U
+                    nb_i32p,  # LDU
+                    float_ptr,  # VT
+                    nb_i32p,  # LDVT
+                    float_ptr,  # WORK
+                    nb_i32p,  # LWORK
+                    real_ptr,  # RWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gesvd(
+                JOBU, JOBVT, M, N, A, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, RWORK, INFO
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gesvd_pointer,
+                    func_type_ref=gesvd_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    JOBU,
+                    JOBVT,
+                    M,
+                    N,
+                    A,
+                    LDA,
+                    S,
+                    U,
+                    LDU,
+                    VT,
+                    LDVT,
+                    WORK,
+                    LWORK,
+                    RWORK,
+                    INFO,
+                )
+
+        else:
+            gesvd_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBU
+                    nb_i32p,  # JOBVT
+                    nb_i32p,  # M
+                    nb_i32p,  # N
+                    float_ptr,  # A
+                    nb_i32p,  # LDA
+                    float_ptr,  # S
+                    float_ptr,  # U
+                    nb_i32p,  # LDU
+                    float_ptr,  # VT
+                    nb_i32p,  # LDVT
+                    float_ptr,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gesvd(
+                JOBU, JOBVT, M, N, A, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, INFO
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gesvd_pointer,
+                    func_type_ref=gesvd_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(JOBU, JOBVT, M, N, A, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, INFO)
+
+        return gesvd
+
+    @classmethod
+    def numba_xgesdd(cls, dtype) -> CPUDispatcher:
+        """
+        Compute the singular value decomposition of a general M-by-N matrix using the
+        divide-and-conquer algorithm (LAPACK xGESDD).
+
+        Called by scipy.linalg.svd (default driver) and numpy.linalg.svd.
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        is_complex = isinstance(dtype, Complex)
+        real_ptr = nb_f64p if dtype is nb_c128 else nb_f32p
+        unique_func_name = f"scipy.lapack.{kind}gesdd"
+
+        @numba_basic.numba_njit
+        def get_gesdd_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gesdd")
+            return ptr
+
+        if is_complex:
+            gesdd_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBZ
+                    nb_i32p,  # M
+                    nb_i32p,  # N
+                    float_ptr,  # A
+                    nb_i32p,  # LDA
+                    real_ptr,  # S
+                    float_ptr,  # U
+                    nb_i32p,  # LDU
+                    float_ptr,  # VT
+                    nb_i32p,  # LDVT
+                    float_ptr,  # WORK
+                    nb_i32p,  # LWORK
+                    real_ptr,  # RWORK
+                    nb_i32p,  # IWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gesdd(
+                JOBZ, M, N, A, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, RWORK, IWORK, INFO
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gesdd_pointer,
+                    func_type_ref=gesdd_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    JOBZ,
+                    M,
+                    N,
+                    A,
+                    LDA,
+                    S,
+                    U,
+                    LDU,
+                    VT,
+                    LDVT,
+                    WORK,
+                    LWORK,
+                    RWORK,
+                    IWORK,
+                    INFO,
+                )
+
+        else:
+            gesdd_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBZ
+                    nb_i32p,  # M
+                    nb_i32p,  # N
+                    float_ptr,  # A
+                    nb_i32p,  # LDA
+                    float_ptr,  # S
+                    float_ptr,  # U
+                    nb_i32p,  # LDU
+                    float_ptr,  # VT
+                    nb_i32p,  # LDVT
+                    float_ptr,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # IWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gesdd(
+                JOBZ, M, N, A, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gesdd_pointer,
+                    func_type_ref=gesdd_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(JOBZ, M, N, A, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO)
+
+        return gesdd

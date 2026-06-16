@@ -6,8 +6,8 @@ from numba.np.unsafe import ndarray as numba_ndarray
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
 from pytensor.link.utils import compile_function_src
-from pytensor.tensor import NoneConst
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.type_other import NoneTypeT
 
 
 @register_funcify_default_op_cache_key(Shape)
@@ -40,7 +40,7 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
         for i, (node_dim_input, eval_dim_name) in enumerate(
             zip(shape_inputs, shape_input_names, strict=True)
         )
-        if node_dim_input is not NoneConst
+        if not isinstance(node_dim_input.type, NoneTypeT)
     ]
 
     func = dedent(

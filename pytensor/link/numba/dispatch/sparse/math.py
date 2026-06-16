@@ -136,7 +136,9 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     x_format = x.type.format if x_is_sparse else None
     y_format = y.type.format if y_is_sparse else None
 
-    cache_version = 2
+    out_type = np.dtype(out_dtype).type
+
+    cache_version = 3
     cache_key = sha256(
         str(
             (
@@ -371,7 +373,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
         for row_idx in range(n):
             for idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
                 col_idx = x_ind[idx]
-                value = x_data[idx]
+                value = out_type(x_data[idx])
                 z[row_idx] += value * y[col_idx]
         return z
 
@@ -390,7 +392,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
         for col_idx in range(p):
             for idx in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
                 row_idx = x_ind[idx]
-                value = x_data[idx]
+                value = out_type(x_data[idx])
                 z[row_idx] += value * y[col_idx]
         return z
 

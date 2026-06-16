@@ -9,7 +9,7 @@ class MLXLinker(JITLinker):
         "BlasOpt",
         "local_careduce_fusion",
         "inplace",
-        "scan_save_mem_prealloc",
+        "scan_reduce_trace_prealloc",
         "inline_einsum",
     )
 

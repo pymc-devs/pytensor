@@ -1,9 +1,13 @@
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
+import pytensor.xtensor as px
 from pytensor import config
 from pytensor.graph import FunctionGraph
+from pytensor.graph.rewriting import rewrite_graph
+from pytensor.xtensor.shape import stack as xstack
 
 
 def _large_fuseable_graph(n):
@@ -45,7 +49,7 @@ def _deep_small_kernels(n):
     "graph_fn, n, expected_n_repl",
     [
         ("deep_small_kernels", 20, (20, 60)),
-        ("large_fuseable_graph", 25, (128, 876)),
+        ("large_fuseable_graph", 25, (55, 901)),
     ],
 )
 def test_fusion_rewrite_benchmark(graph_fn, n, expected_n_repl, benchmark):
@@ -66,3 +70,50 @@ def test_fusion_rewrite_benchmark(graph_fn, n, expected_n_repl, benchmark):
 
     assert rewrite_func() == expected_n_repl
     benchmark.pedantic(rewrite_func, rounds=7, iterations=5)
+
+
+def _xtensor_attention_graph(n_layers):
+    B, T, E, H, HD = 4, 32, 64, 4, 16
+    rng = np.random.default_rng(0)
+
+    def attn(x):
+        Wqkv = px.as_xtensor(
+            pytensor.shared(rng.normal(size=(E, 3, H, HD))),
+            dims=("embd", "qkv", "head", "hd"),
+        )
+        Wproj = px.as_xtensor(
+            pytensor.shared(rng.normal(size=(E, E))),
+            dims=("embd", "embd_out"),
+        )
+        qkv = px.dot(x, Wqkv, dim="embd")
+        q = qkv.isel(qkv=0).rename(time="time_q")
+        k = qkv.isel(qkv=1).rename(time="time_k")
+        v = qkv.isel(qkv=2).rename(time="time_k")
+        s = px.dot(q, k, dim="hd") / np.sqrt(HD)
+        mask = px.as_xtensor(
+            pt.tril(pt.ones((T, T), dtype="bool")),
+            dims=("time_q", "time_k"),
+        )
+        a = px.math.softmax(px.where(mask, s, np.float64(-1e9)), dim="time_k")
+        o = xstack(px.dot(a, v, dim="time_k"), embd=("head", "hd"))
+        return px.dot(o, Wproj, dim="embd").rename(time_q="time", embd_out="embd")
+
+    x_t = pt.tensor("x", shape=(B, T, E))
+    x = px.as_xtensor(x_t, dims=("batch", "time", "embd"))
+    for _ in range(n_layers):
+        x = attn(x)
+    return x_t, x.values.sum()
+
+
+@pytest.mark.parametrize("n_layers", [2, 3, 4])
+def test_xtensor_attention_rewrite_benchmark(n_layers, benchmark):
+    x_t, loss = _xtensor_attention_graph(n_layers)
+
+    def rewrite_once():
+        lowered = rewrite_graph(loss, include=("lower_xtensor",), clone=True)
+        grad = pt.grad(lowered, x_t)
+        return rewrite_graph(
+            [lowered, grad], include=("fast_run",), exclude=("inplace",), clone=True
+        )
+
+    benchmark(rewrite_once)

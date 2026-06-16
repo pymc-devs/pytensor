@@ -21,6 +21,9 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.vectorize_codegen import (
+    NO_INDEXED_INPUTS,
+    NO_INDEXED_OUTPUTS,
+    NO_SIZE,
     _jit_options,
     _vectorized,
     encode_literals,
@@ -173,22 +176,25 @@ def core_MultinomialRV(op, node):
     dtype = op.dtype
 
     @numba_basic.numba_njit
-    def random_fn(rng, n, p):
+    def random_fn(rng, n, p, out=None):
         n_cat = p.shape[0]
-        draws = np.zeros(n_cat, dtype=dtype)
+        if out is None:
+            out = np.empty(n_cat, dtype=dtype)
+        out[:] = 0
         remaining_p = np.float64(1.0)
         remaining_n = n
         for i in range(n_cat - 1):
-            draws[i] = rng.binomial(remaining_n, p[i] / remaining_p)
-            remaining_n -= draws[i]
+            out[i] = rng.binomial(remaining_n, p[i] / remaining_p)
+            remaining_n -= out[i]
             if remaining_n <= 0:
                 break
             remaining_p -= p[i]
         if remaining_n > 0:
-            draws[n_cat - 1] = remaining_n
-        return draws
+            out[n_cat - 1] = remaining_n
+        return out
 
-    return random_fn
+    random_fn.handles_out = True
+    return random_fn, 1
 
 
 @numba_core_rv_funcify.register(ptr.MvNormalRV)
@@ -212,7 +218,6 @@ def core_MvNormalRV(op, node):
         out += mean
         return out
 
-    random_fn.handles_out = True
     return random_fn
 
 
@@ -221,13 +226,16 @@ def core_DirichletRV(op, node):
     dtype = op.dtype
 
     @numba_basic.numba_njit
-    def random_fn(rng, alpha):
-        y = np.empty_like(alpha, dtype=dtype)
+    def random_fn(rng, alpha, out=None):
+        if out is None:
+            out = np.empty_like(alpha, dtype=dtype)
         for i in range(len(alpha)):
-            y[i] = rng.gamma(alpha[i], 1.0)
-        return y / y.sum()
+            out[i] = rng.gamma(alpha[i], 1.0)
+        out /= out.sum()
+        return out
 
-    return random_fn, 1
+    random_fn.handles_out = True
+    return random_fn, 2
 
 
 @numba_core_rv_funcify.register(ptr.GumbelRV)
@@ -477,9 +485,11 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
                 (rng,),
                 dist_params,
                 (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
-                None
+                NO_SIZE
                 if size_len is None
                 else numba_ndarray.to_fixed_tuple(size, size_len),
+                NO_INDEXED_INPUTS,
+                NO_INDEXED_OUTPUTS,
             )
             return rng, draws
 

@@ -17,7 +17,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.type import Type
 from pytensor.tensor.basic import alloc, as_tensor_variable
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import add, exp, maximum
+from pytensor.tensor.math import add, cos, exp, maximum, sin
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
@@ -162,7 +162,7 @@ class TestShapeRewriter:
                 (out,) = out_
                 out[0] = x.copy()
 
-            # def infer_shape(self, fgraph, node, (xshp,)):
+            # def infer_shape(self, node, (xshp,)):
             # return [tuple([self.shape_i(i)(r) for i in range(r.ndim)])]
 
         identity_noshape = IdentityNoShape()
@@ -179,7 +179,7 @@ class TestShapeRewriter:
                 (out,) = out_
                 out[0] = x.copy()
 
-            def infer_shape(self, fgraph, node, xshp_):
+            def infer_shape(self, node, xshp_):
                 # Could also just return.
                 (xshp,) = xshp_
                 return (xshp,)
@@ -613,6 +613,30 @@ class TestSameShape:
             shape_feature.same_shape(x, o, 0, 1)
 
 
+def test_get_shape_resolves_through_chain():
+    """get_shape should resolve to the deepest input, not intermediate ops."""
+    x = matrix("x")
+    w = matrix("w")
+    inner = cos(x)
+    y = sin(exp(inner.T))
+
+    fg = FunctionGraph([x, w], [y], clone=False)
+    sf = ShapeFeature()
+    fg.attach_feature(sf)
+
+    s = sf.get_shape(y, 0)
+    utt.assert_equal_computations([s], [Shape_i(1)(x)])
+
+    # Changing an input invalidates the cached shape of the changed node and of
+    # every node downstream of it, not just the node whose input changed. Here
+    # ``inner`` feeds the transpose, with ``exp`` and ``sin`` further downstream,
+    # so the re-query must resolve through ``w`` rather than returning the stale
+    # ``x``-based shape held by the downstream nodes' caches.
+    fg.replace(inner, cos(w))
+    s = sf.get_shape(y, 0)
+    utt.assert_equal_computations([s], [Shape_i(1)(w)])
+
+
 def test_useless_specify_shape():
     x = tensor("x", shape=(None, 5, 3))
 
@@ -687,6 +711,21 @@ def test_local_lift_specify_shape_inc_subtensor():
     assert equal_computations(
         [new_out], [set_subtensor(specify_shape(x, shape=(5, None))[1:4], y)]
     )
+
+
+def test_local_specify_shape_alloc():
+    x = scalar("x")
+    s1 = iscalar("s1")
+    s2 = iscalar("s2")
+
+    out = pt.specify_shape(alloc(x, s1), s2)
+
+    new_out = rewrite_graph(out, clone=True)
+    utt.assert_equal_computations([new_out], [alloc(x, s2)])
+
+    # Rewrite is excluded when shape_unsafe is excluded
+    new_out = rewrite_graph(out, clone=True, exclude=("shape_unsafe",))
+    utt.assert_equal_computations([out], [new_out])
 
 
 def test_local_Shape_i_ground():

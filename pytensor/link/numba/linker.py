@@ -10,7 +10,7 @@ class NumbaLinker(JITLinker):
         "cxx_only",
         "BlasOpt",
         "local_careduce_fusion",
-        "scan_save_mem_prealloc",
+        "scan_reduce_trace_prealloc",
     )
 
     """A `Linker` that JIT-compiles NumPy-based operations using Numba."""

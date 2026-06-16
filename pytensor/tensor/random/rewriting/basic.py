@@ -50,16 +50,15 @@ def is_rv_used_in_graph(base_rv, node, fgraph):
 def random_make_inplace(fgraph, node):
     op = node.op
 
-    if isinstance(op, RandomVariable) and not op.inplace:
-        props = op._props_dict()
-        props["inplace"] = True
-        new_op = type(op)(**props)
-        new_outputs = new_op.make_node(*node.inputs).outputs
-        for old_out, new_out in zip(node.outputs, new_outputs, strict=True):
-            copy_stack_trace(old_out, new_out)
-        return new_outputs
-
-    return False
+    if op.inplace:
+        return False
+    props = op._props_dict()
+    props["inplace"] = True
+    new_op = type(op)(**props)
+    new_outputs = new_op.make_node(*node.inputs).outputs
+    for old_out, new_out in zip(node.outputs, new_outputs, strict=True):
+        copy_stack_trace(old_out, new_out)
+    return new_outputs
 
 
 optdb.register(
@@ -275,7 +274,7 @@ def local_subtensor_rv_lift(fgraph, node):
 
         # Use shape_feature to facilitate inferring final shape.
         # Check that neither the RV nor the old Subtensor are in the shape graph.
-        output_shape = fgraph.shape_feature.shape_of.get(indexed_rv, None)
+        output_shape = shape_feature.shape_tuple(indexed_rv)
         if output_shape is None or {indexed_rv, rv} & set(ancestors(output_shape)):
             return None
 

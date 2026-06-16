@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import scipy.stats as stats
 
+import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
 from pytensor import shared
@@ -771,3 +772,62 @@ def test_rv_fallback():
     assert large_sample.shape == (1000,)
     np.testing.assert_allclose(large_sample.mean(), np.pi, rtol=1e-2)
     np.testing.assert_allclose(large_sample.std(), 1, rtol=1e-2)
+
+
+def _compiled_rv_dist_param_dtypes(out):
+    """Dtypes of the distribution parameters of the single RV in the compiled graph.
+
+    The numba backend wraps RVs in a ``RandomVariableWithCoreShape`` whose inputs are
+    ``(core_shape, rng, size, *dist_params)``, so the parameters are ``inputs[3:]``.
+    """
+    fn = function([], out, mode=numba_mode)
+    [node] = [
+        n
+        for n in fn.maker.fgraph.toposort()
+        if isinstance(n.op, RandomVariableWithCoreShape)
+    ]
+    return [inp.type.dtype for inp in node.inputs[3:]]
+
+
+@pytest.mark.parametrize("floatX", ["float64", "float32"])
+def test_rv_float_params_cast_to_float64(floatX):
+    # cast_rv_float_params_to_float64 upcasts the float params of opt-in RVs to float64
+    # (always float64, not the output dtype -- float32 would stay mismatched) and leaves
+    # every other RV untouched.
+    with pytensor.config.change_flags(floatX=floatX):
+        rng = shared(np.random.default_rng(123))
+
+        # Opt-in: the int8 literals 0, 1 become float64 regardless of floatX.
+        assert _compiled_rv_dist_param_dtypes(
+            pt.random.normal(0, 1, size=(5,), rng=rng)
+        ) == ["float64", "float64"]
+
+        # Opt-in, and required: numba's np.dot rejects a float32 covariance, so MvNormal
+        # only compiles once mean/cov are float64.
+        assert _compiled_rv_dist_param_dtypes(
+            pt.random.multivariate_normal(
+                np.zeros(3, dtype="float32"), np.eye(3, dtype="float32"), rng=rng
+            )
+        ) == ["float64", "float64"]
+
+        # Not opt-in (no measurable numba speedup): the float32 probability is left as-is,
+        # as is the integer count ``n``.
+        assert _compiled_rv_dist_param_dtypes(
+            pt.random.binomial(n=np.int64(10), p=np.float32(0.3), size=(5,), rng=rng)
+        ) == ["int64", "float32"]
+
+        # Not opt-in and data-following: upcasting Permutation's array would change the
+        # output dtype and pointlessly widen the sampled data.
+        assert _compiled_rv_dist_param_dtypes(
+            pt.random.permutation(np.arange(5, dtype="float32"), rng=rng)
+        ) == ["float32"]
+
+
+def test_rv_float_params_cast_respects_warn_float64():
+    # When the user asked to be warned/raised on float64, the rewrite must not silently
+    # introduce it; the int8 params are left as-is.
+    with pytensor.config.change_flags(floatX="float32", warn_float64="raise"):
+        rng = shared(np.random.default_rng(123))
+        assert _compiled_rv_dist_param_dtypes(
+            pt.random.normal(0, 1, size=(5,), rng=rng)
+        ) == ["int8", "int8"]

@@ -11,8 +11,10 @@ import pytensor.tensor.math as ptm
 from pytensor import config
 from pytensor.gradient import grad_not_implemented
 from pytensor.graph import Apply, Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.sparse.type import SparseTensorType
+from pytensor.tensor.reshape import join_dims, split_dims
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import TensorType, Variable, complex_dtypes, tensor
 
@@ -325,7 +327,7 @@ class SpSum(Op):
             r = psb.SparseFromDense(o_format)(r)
         return [r]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         r = None
         if self.axis is None:
             r = [()]
@@ -404,7 +406,7 @@ class AddSS(Op):
         assert psb._is_sparse_variable(gz)
         return gz, gz
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -465,7 +467,7 @@ class AddSSData(Op):
         derivative = {True: gz, False: None}
         return [derivative[b] for b in is_continuous]
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -507,7 +509,7 @@ class AddSD(Op):
         assert psb._is_dense_variable(gz)
         return psb.sp_ones_like(x) * gz, gz
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[1]]
 
 
@@ -567,7 +569,7 @@ class StructuredAddSV(Op):
         assert psb._is_sparse_variable(gz)
         return gz, sp_sum(gz, axis=0, sparse_grad=True)
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -697,7 +699,7 @@ class SparseSparseMultiply(Op):
         (gz,) = gout
         return y * gz, x * gz
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -786,7 +788,7 @@ class SparseDenseMultiply(Op):
         assert psb._is_sparse_variable(gz)
         return y * gz, psb.dense_from_sparse(x * gz)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -869,7 +871,7 @@ class SparseDenseVectorMultiply(Op):
 
         return mul_s_v(gz, y), sp_sum(x * gz, axis=0, sparse_grad=True)
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -987,7 +989,7 @@ class __ComparisonOpSS(Op):
             self.comparison(x, y).astype("uint8").asformat(node.outputs[0].type.format)
         )
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -1032,7 +1034,7 @@ class __ComparisonOpSD(Op):
         o = np.asarray(o)
         out[0] = o
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[0]]
 
 
@@ -1282,7 +1284,7 @@ class TrueDot(Op):
                 rval[1] = psb.dense_from_sparse(rval[1])
         return rval
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[0][0], shapes[1][1])]
 
 
@@ -1410,7 +1412,7 @@ class StructuredDot(Op):
         (g_out,) = gout
         return [structured_dot_grad(a, b, g_out), structured_dot(a.T, g_out)]
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [(shapes[0][0], shapes[1][1])]
 
 
@@ -1594,7 +1596,7 @@ class StructuredDotGradCSC(COp):
 
         """
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -1729,7 +1731,7 @@ class StructuredDotGradCSR(COp):
 
         """
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 
@@ -1827,7 +1829,7 @@ class SamplingDot(Op):
 
         return rval
 
-    def infer_shape(self, fgraph, node, ins_shapes):
+    def infer_shape(self, node, ins_shapes):
         return [ins_shapes[2]]
 
 
@@ -1840,7 +1842,7 @@ class Dot(Op):
     def __str__(self):
         return "Sparse" + self.__class__.__name__
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         xshp, yshp = shapes
         x, y = node.inputs
         if x.ndim == 2 and y.ndim == 2:
@@ -2067,3 +2069,49 @@ class Usmm(Op):
 
 
 usmm = Usmm()
+
+
+@_vectorize_node.register(StructuredDot)
+def _vectorize_structured_dot(op, node, batch_a, batch_b):
+    """Batch StructuredDot(sparse_const, dense): (m,k)@(B...,k,n) -> (B...,m,n).
+
+    The sparse left input must stay unbatched (scipy has no batched-sparse
+    type). The dense right input may gain any number of leading batch dims;
+    we fold them through the existing 2D StructuredDot with a moveaxis +
+    join_dims / split_dims round trip.
+    """
+    a, b = node.inputs
+    if batch_a.type.ndim != a.type.ndim:
+        raise NotImplementedError(
+            "Cannot vectorize StructuredDot when the sparse (left) input is "
+            "batched; scipy has no batched-sparse type."
+        )
+
+    if batch_b.type.ndim == b.type.ndim:
+        # No batch dims added to the dense input — rebuild the op as-is.
+        return op.make_node(batch_a, batch_b).outputs
+
+    # batch_b is (B1,...,BN, k, n). Move k to the front and fold the batch
+    # dims and n into a single column axis: (k, B1*...*BN*n).
+    moved = ptb.moveaxis(batch_b, -2, 0)  # (k, B1,...,BN, n)
+    trailing = moved.shape[1:]
+    flat_b = join_dims(moved, start_axis=1)  # (k, B*n)
+
+    flat_out = op.make_node(batch_a, flat_b).outputs[0]  # (m, B*n)
+
+    # Unfold the column axis and move m back into the (-2) slot.
+    unflat = split_dims(flat_out, shape=trailing, axis=1)  # (m, B1,...,BN, n)
+    out = ptb.moveaxis(unflat, 0, -2)  # (B1,...,BN, m, n)
+    return [out]
+
+
+def _vectorize_sparse_unsupported(op, node, *batched_inputs):
+    raise NotImplementedError(
+        f"Cannot vectorize {type(op).__name__}: scipy has no batched-sparse "
+        "representation, so the sparse operand cannot be broadcast against a "
+        "batched dense input."
+    )
+
+
+for _op_cls in (AddSD, SparseDenseMultiply):
+    _vectorize_node.register(_op_cls)(_vectorize_sparse_unsupported)

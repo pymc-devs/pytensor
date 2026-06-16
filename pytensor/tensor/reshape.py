@@ -1,6 +1,5 @@
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
-from typing import TypeAlias
 
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
@@ -16,9 +15,7 @@ from pytensor.tensor.type import tensor
 from pytensor.tensor.variable import TensorVariable
 
 
-ShapeValueType: TypeAlias = (
-    int | np.integer | ScalarVariable | TensorVariable | np.ndarray
-)
+type ShapeValueType = int | np.integer | ScalarVariable | TensorVariable | np.ndarray
 
 
 class JoinDims(Op):
@@ -67,7 +64,7 @@ class JoinDims(Op):
 
         return Apply(self, [x], [output_type])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         [input_shape] = shapes
         joined_shape = prod([input_shape[i] for i in self.axis_range], dtype=int)
         return [self.output_shapes(input_shape, joined_shape)]
@@ -188,7 +185,7 @@ class SplitDims(Op):
         )
         return Apply(self, [x, shape], [output])
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         [input_shape, _] = shapes
         _, shape = node.inputs
         output_shapes = list(input_shape)

@@ -235,6 +235,24 @@ def test_isel_missing_dims():
     x.isel(c=0, missing_dims="ignore").dims == ("a", "b")
 
 
+def test_as_xtensor_string_dims():
+    x = as_xtensor(np.array([1, 2]), dims="repo")
+    assert x.type.dims == ("repo",)
+
+    t = tensor("t", shape=(2,))
+    x2 = as_xtensor(t, dims="repo")
+    assert x2.type.dims == ("repo",)
+
+    z = xtensor(dims="features")
+    assert z.type.dims == ("features",)
+
+    w = xtensor_constant(np.array([1, 2, 3]), dims="samples")
+    assert w.type.dims == ("samples",)
+
+    v = xtensor_shared(np.array([1, 2]), dims="channel")
+    assert v.type.dims == ("channel",)
+
+
 def test_where():
     a = xtensor(dims=("a", "b"))
     a_test = DataArray(np.arange(6).reshape(2, 3), dims=a.dims)

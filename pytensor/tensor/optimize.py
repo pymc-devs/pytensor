@@ -723,8 +723,9 @@ def pack_inputs_of_objective(
     packed_shapes = None
 
     if not isinstance(x, Sequence):
-        packed_input = x
-    elif len(x) == 1:
+        x = [x]
+
+    if len(x) == 1 and x[0].ndim <= 1:
         packed_input = x[0]
     else:
         packed_input, packed_shapes = pack(*x)
@@ -964,7 +965,9 @@ def root_scalar(
 
 
 class RootOp(ScipyVectorWrapperOp):
-    __props__ = ("method", "jac")
+    # These __props__ were wrong: they ignore the inner graph,
+    # making RootOps of different equations compare equal (and get merged)
+    # __props__ = ("method", "jac")
 
     def __init__(
         self,

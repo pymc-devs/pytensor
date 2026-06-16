@@ -30,7 +30,7 @@ class XTypeCastOp(TypeCastingOp):
     This is like a `ViewOp` but without the expectation the input and output have identical types.
     """
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return input_shapes
 
     def vectorize_node(
@@ -73,6 +73,9 @@ class XTensorFromTensor(XTypeCastOp):
 
     def __init__(self, dims: Sequence[str]):
         super().__init__()
+
+        if isinstance(dims, str):
+            dims = (dims,)
         self.dims = tuple(dims)
 
     def make_node(self, x):

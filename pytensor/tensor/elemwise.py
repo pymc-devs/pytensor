@@ -257,7 +257,7 @@ class DimShuffle(ExternalCOp):
             new_shape.insert(augm, 1)
         out[0][0] = res.reshape(new_shape)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (ishp,) = shapes
         # transpose
         rval = [ishp[i] for i in self.shuffle]
@@ -395,14 +395,22 @@ class Elemwise(OpenMPOp):
         self.nfunc = None
         self.inplace_pattern = frozendict(self.inplace_pattern)
 
+    def make_scalar_node(self, *inputs):
+        """Create a scalar Apply node matching the dtypes of tensor inputs.
+
+        Used by get_output_info, grad, and backend dispatchers to obtain
+        the scalar-level graph corresponding to this Elemwise operation.
+        """
+        return self.scalar_op.make_node(
+            *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
+        )
+
     def get_output_info(self, *inputs):
         """Return the outputs dtype and broadcastable pattern and the
         dimshuffled inputs.
 
         """
-        shadow = self.scalar_op.make_node(
-            *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
-        )
+        shadow = self.make_scalar_node(*inputs)
 
         target_length = max(input.type.ndim for input in inputs)
 
@@ -755,7 +763,7 @@ class Elemwise(OpenMPOp):
                     "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
                 )
 
-    def infer_shape(self, fgraph, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
+    def infer_shape(self, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
         from pytensor.tensor.extra_ops import broadcast_shape
 
         out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
@@ -1426,7 +1434,7 @@ class CAReduce(COp):
 
         output[0] = np.asarray(out, dtype=out_dtype)
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         (ishape,) = shapes
         axis = self.axis
         if axis is None:

@@ -10,7 +10,7 @@ class PytorchLinker(JITLinker):
         "BlasOpt",
         "fusion",
         "inplace",
-        "scan_save_mem_prealloc",
+        "scan_reduce_trace_prealloc",
         "reuse_lu_decomposition_multiple_solves",
         "scan_split_non_sequence_lu_decomposition_solve",
     )

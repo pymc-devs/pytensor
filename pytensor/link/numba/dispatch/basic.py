@@ -48,7 +48,7 @@ def _filter_numba_warnings():
         "ignore",
         message=(
             "(\x1b\\[1m)*"  # ansi escape code for bold text
-            r"np\.dot\(\) is faster on contiguous arrays"
+            r"(np\.dot\(\)|np\.vdot\(\)|'@') is faster on contiguous arrays"
         ),
         category=NumbaPerformanceWarning,
     )
@@ -480,8 +480,15 @@ def numba_funcify_FunctionGraph(
     fgraph: AbstractFunctionGraph,
     node=None,
     fgraph_name="numba_funcified_fgraph",
+    ofg_memo=None,
     **kwargs,
 ):
+    # Memoize compiled OpFromGraph inner functions by Op, so repeated uses of
+    # equal OpFromGraphs (anywhere in the same compilation, including nested
+    # inner graphs) reuse a single compiled function
+    if ofg_memo is None:
+        ofg_memo = {}
+    kwargs["ofg_memo"] = ofg_memo
     # Collect cache keys of every Op/Constant in the FunctionGraph
     # so we can create a global cache key for the whole FunctionGraph
     fgraph_can_be_cached = [True]

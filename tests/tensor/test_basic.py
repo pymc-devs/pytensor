@@ -203,7 +203,7 @@ TestSecondBroadcast = makeTester(
     ),
 )
 
-# We exclude local_fill_to_alloc because it optimizes the "second" node away from the graph.
+# We exclude local_second_to_alloc because it optimizes the "second" node away from the graph.
 TestSecondSameRank = makeTester(
     name="SecondSameRankTester",
     op=second,
@@ -213,7 +213,7 @@ TestSecondSameRank = makeTester(
         fail1=(random(4, 5), random(5, 4)),
         fail2=(integers(1, 5), integers(5, 4)),
     ),
-    mode=get_default_mode().excluding("local_fill_to_alloc", "local_useless_fill"),
+    mode=get_default_mode().excluding("local_second_to_alloc", "local_useless_fill"),
 )
 
 # Alloc
@@ -692,6 +692,48 @@ class TestAsTensorVariable:
         x = np.ma.masked_greater(np.array([1, 2, 3, 4]), 3)
         with pytest.raises(NotImplementedError, match="MaskedArrays are not supported"):
             ptb.as_tensor(x)
+
+    def test_range_returns_arange(self) -> None:
+        res = as_tensor_variable(range(10))
+
+        assert isinstance(res.owner.op, ARange)
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [
+            pytest.param(None, "int64", id="int64-default"),
+            pytest.param(config.floatX, config.floatX, id="config-floatX"),
+        ],
+    )
+    def test_range_dtype(self, dtype, expected) -> None:
+        res = as_tensor_variable(range(10), dtype=dtype)
+        assert res.dtype == expected
+
+    @pytest.mark.parametrize(
+        "step, expected",
+        [
+            pytest.param(None, 1, id="1-default"),
+            pytest.param(5, 5, id="specify"),
+        ],
+    )
+    def test_range_step(self, step, expected) -> None:
+        x = range(0, 2) if step is None else range(0, 2, step)
+        res = as_tensor_variable(x)
+        *_, actual = res.owner.inputs
+
+        assert actual.value == expected
+
+    def test_range_name(self) -> None:
+        x = range(10)
+        res = as_tensor_variable(x)
+        assert res.name is None
+
+        res = as_tensor_variable(x, name="something")
+        assert res.name == "something"
+
+    def test_range_ndim_raises(self) -> None:
+        with pytest.raises(ValueError, match="ndim for range must be 1"):
+            as_tensor_variable(range(10), ndim=2)
 
 
 def check_alloc_runtime_broadcast(mode):

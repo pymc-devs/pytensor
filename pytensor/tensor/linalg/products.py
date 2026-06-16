@@ -1,4 +1,3 @@
-from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
@@ -6,6 +5,7 @@ from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg._lazy import scipy_linalg
+from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.symbolic import TensorSymbolicOp
 from pytensor.tensor.type import matrix
 
@@ -15,14 +15,20 @@ class Expm(Op):
     Compute the matrix exponential of a square array.
     """
 
-    __props__ = ()
+    __props__ = ("overwrite_a",)
     gufunc_signature = "(m,m)->(m,m)"
+
+    def __init__(self, overwrite_a: bool = False):
+        self.overwrite_a = overwrite_a
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
 
     def make_node(self, A):
         A = as_tensor_variable(A)
         assert A.ndim == 2
 
-        expm = matrix(dtype=A.dtype, shape=A.type.shape)
+        dtype = linalg_output_dtype(A.type.dtype)
+        expm = matrix(dtype=dtype, shape=A.type.shape)
 
         return Apply(self, [A], [expm])
 
@@ -31,40 +37,44 @@ class Expm(Op):
         (expm,) = outputs
         expm[0] = scipy_linalg.expm(A)
 
-    def pullback(self, inputs, outputs, output_grads):
-        from pytensor.tensor.linalg.solvers.general import solve
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if not allowed_inplace_inputs:
+            return self
+        new_props = self._props_dict()  # type: ignore
+        new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
-        # Kalbfleisch and Lawless, J. Am. Stat. Assoc. 80 (1985) Equation 3.4
-        # Kind of... You need to do some algebra from there to arrive at
-        # this expression.
+    def pullback(self, inputs, outputs, output_grads):
+        r"""Reverse-mode gradient via the augmented-matrix Fréchet derivative.
+
+        The Fréchet derivative :math:`L_A(E)` of :math:`\exp(A)` is the
+        upper-right block of one :math:`2n \times 2n` exponential [1]_:
+
+            .. math:: \exp \begin{pmatrix} A & E \\ 0 & A \end{pmatrix}
+                      = \begin{pmatrix} \exp(A) & L_A(E) \\ 0 & \exp(A) \end{pmatrix}.
+
+        The Frobenius adjoint of :math:`E \mapsto L_A(E)` is
+        :math:`Y \mapsto L_{A^T}(Y)`, so the pullback is recovered by placing
+        :math:`A^T` on the diagonal and the cotangent :math:`\bar{A}` in place
+        of :math:`E`.
+
+        References
+        ----------
+        .. [1] Mathias, R. (1996). A chain rule for matrix functions and
+               applications. *SIAM J. Matrix Anal. Appl.* 17(3), 610-620.
+        """
         (A,) = inputs
-        (_,) = outputs  # Outputs not used; included for signature consistency only
         (A_bar,) = output_grads
 
-        w, V = pt.linalg.eig(A)
+        n = A.shape[-1]
+        zero = ptb.zeros_like(A)
+        top = ptb.join(-1, A.mT, A_bar)
+        bot = ptb.join(-1, zero, A.mT)
+        aug = ptb.join(-2, top, bot)
 
-        exp_w = pt.exp(w)
-        numer = pt.sub.outer(exp_w, exp_w)
-        denom = pt.sub.outer(w, w)
+        return [expm(aug)[..., :n, n:]]
 
-        # When w_i ≈ w_j, we have a removable singularity in the expression for X, because
-        # lim b->a (e^a - e^b) / (a - b) = e^a (derivation left for the motivated reader)
-        X = pt.where(pt.abs(denom) < 1e-8, exp_w, numer / denom)
-
-        diag_idx = pt.arange(w.shape[0])
-        X = X[..., diag_idx, diag_idx].set(exp_w)
-
-        inner = solve(V, A_bar.T @ V).T
-        result = solve(V.T, inner * X) @ V.T
-
-        # At this point, result is always a complex dtype. If the input was real, the output should be
-        # real as well (and all the imaginary parts are numerical noise)
-        if A.dtype not in ("complex64", "complex128"):
-            return [result.real]
-
-        return [result]
-
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
 

@@ -1,8 +1,7 @@
-from typing import cast
-
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
-from pytensor.graph import Apply, Variable, clone_replace, node_rewriter
+from pytensor.graph import Apply, Variable, node_rewriter
+from pytensor.graph.fg import FrozenFunctionGraph
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
@@ -10,13 +9,11 @@ from pytensor.tensor.special import XLog1PY, XLogY
 
 
 def inline_ofg_node(node: Apply) -> list[Variable]:
-    op = node.op
-    assert isinstance(op, OpFromGraph)
-    inlined_outs = clone_replace(
-        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs, strict=True))
-    )
-    copy_stack_trace(op.inner_outputs, inlined_outs)
-    return cast(list[Variable], inlined_outs)
+    frozen_fg: FrozenFunctionGraph = node.op._frozen_fgraph
+    replacements = dict(zip(frozen_fg.inputs, node.inputs))
+    inlined_outs = frozen_fg.bind(replacements)
+    copy_stack_trace(frozen_fg.outputs, inlined_outs)
+    return inlined_outs
 
 
 @node_rewriter([OpFromGraph])
