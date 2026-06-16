@@ -107,8 +107,6 @@ from pytensor.tensor.blas.blas_c import (
 from pytensor.tensor.blas.blas_headers import (
     blas_header_text,
     blas_header_version,
-    cblas_header_text,
-    detect_macos_sdot_bug,
     mkl_threads_text,
     openblas_threads_text,
 )
@@ -147,12 +145,10 @@ __all__ = [
     "batched_tensordot",
     "blas_header_text",
     "blas_header_version",
-    "cblas_header_text",
     "cgemv_inplace",
     "cgemv_no_inplace",
     "cger_inplace",
     "cger_no_inplace",
-    "detect_macos_sdot_bug",
     "gemm",
     "gemm_inplace",
     "gemm_no_inplace",
