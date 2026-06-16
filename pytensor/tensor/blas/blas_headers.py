@@ -18,141 +18,145 @@ from pytensor.link.c.cmodule import GCC_compiler
 _logger = logging.getLogger("pytensor.tensor.blas")
 
 
-def detect_macos_sdot_bug():
-    """
-    Try to detect a bug in the default BLAS in MacOS.
+class DetectMacosSdotBug:
+    """Detect (and try to work around) a bug in the default macOS BLAS ``sdot_``.
 
-    The problem in PyTensor has been reported in gh-1240,
-    the underlying bug has been confirmed in
+    Reported in PyTensor as gh-1240; the underlying bug is confirmed in
     http://www.macresearch.org/lapackblas-fortran-106#comment-17227.
 
-    This function tries to compile code triggering that bug,
-    and, if necessary, an attempted fix.
+    Calling the instance compiles code that triggers the bug and, if it is
+    present, an attempted fix, caching the outcome across the attributes below.
+    The result is computed once and reused on subsequent calls.
 
-    Three attributes of this function will be set:
-        - detect_macos_sdot_bug.tested will be set to True
-          when this function is called.
-        - detect_macos_sdot_bug.present will be set to True if the bug is
-          detected. Its value is returned by the function
-        - detect_macos_sdot_bug.fix_works will be set to True if the fix was
-          attempted, and succeeded.
-
+    Attributes
+    ----------
+    tested : bool
+        True once the detection has run.
+    present : bool
+        True if the bug is detected. Also the return value of the call.
+    fix_works : bool
+        True if the workaround was attempted and succeeded.
     """
-    _logger.debug("Starting detection of bug in Mac OS BLAS sdot_ routine")
-    if detect_macos_sdot_bug.tested:
-        return detect_macos_sdot_bug.present
 
-    if sys.platform != "darwin" or not config.blas__ldflags:
-        _logger.info("Not Mac OS, no sdot_ bug")
-        detect_macos_sdot_bug.tested = True
-        return False
+    def __init__(self):
+        self.tested = False
+        self.present = False
+        self.fix_works = False
 
-    # This code will return -1 if the dot product did not return
-    # the right value (30.).
-    flags = config.blas__ldflags.split()
-    for f in flags:
-        # Library directories should also be added as rpath,
-        # so that they can be loaded even if the environment
-        # variable LD_LIBRARY_PATH does not contain them
-        lib_path = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "").split(":")
-        if f.startswith("-L"):
-            flags.append("-Wl,-rpath," + f[2:])
-            # also append those paths to DYLD_FALLBACK_LIBRARY_PATH to
-            # support libraries that have the wrong install_name
-            # (such as MKL on canopy installs)
-            if f[2:] not in lib_path:
-                lib_path.append(f[2:])
-        # this goes into the python process environment that is
-        # inherited by subprocesses/used by dyld when loading new objects
-        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join(lib_path)
+    def __call__(self):
+        _logger.debug("Starting detection of bug in Mac OS BLAS sdot_ routine")
+        if self.tested:
+            return self.present
 
-    test_code = textwrap.dedent(
-        """\
-        extern "C" float sdot_(int*, float*, int*, float*, int*);
-        int main(int argc, char** argv)
-        {
-            int Nx = 5;
-            int Sx = 1;
-            float x[5] = {0, 1, 2, 3, 4};
-            float r = sdot_(&Nx, x, &Sx, x, &Sx);
+        if sys.platform != "darwin" or not config.blas__ldflags:
+            _logger.info("Not Mac OS, no sdot_ bug")
+            self.tested = True
+            return False
 
-            if ((r - 30.f) > 1e-6 || (r - 30.f) < -1e-6)
+        # This code will return -1 if the dot product did not return
+        # the right value (30.).
+        flags = config.blas__ldflags.split()
+        for f in flags:
+            # Library directories should also be added as rpath,
+            # so that they can be loaded even if the environment
+            # variable LD_LIBRARY_PATH does not contain them
+            lib_path = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "").split(":")
+            if f.startswith("-L"):
+                flags.append("-Wl,-rpath," + f[2:])
+                # also append those paths to DYLD_FALLBACK_LIBRARY_PATH to
+                # support libraries that have the wrong install_name
+                # (such as MKL on canopy installs)
+                if f[2:] not in lib_path:
+                    lib_path.append(f[2:])
+            # this goes into the python process environment that is
+            # inherited by subprocesses/used by dyld when loading new objects
+            os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join(lib_path)
+
+        test_code = textwrap.dedent(
+            """\
+            extern "C" float sdot_(int*, float*, int*, float*, int*);
+            int main(int argc, char** argv)
             {
-                return -1;
+                int Nx = 5;
+                int Sx = 1;
+                float x[5] = {0, 1, 2, 3, 4};
+                float r = sdot_(&Nx, x, &Sx, x, &Sx);
+
+                if ((r - 30.f) > 1e-6 || (r - 30.f) < -1e-6)
+                {
+                    return -1;
+                }
+                return 0;
             }
-            return 0;
-        }
-        """
-    )
+            """
+        )
 
-    _logger.debug("Trying to compile and run test case.")
-    compilation_ok, run_ok = GCC_compiler.try_compile_tmp(
-        test_code, tmp_prefix="detect_macos_sdot_bug_", flags=flags, try_run=True
-    )
-    detect_macos_sdot_bug.tested = True
+        _logger.debug("Trying to compile and run test case.")
+        compilation_ok, run_ok = GCC_compiler.try_compile_tmp(
+            test_code, tmp_prefix="detect_macos_sdot_bug_", flags=flags, try_run=True
+        )
+        self.tested = True
 
-    # If compilation failed, we consider there is a bug,
-    # and the fix does not work
-    if not compilation_ok:
-        _logger.info("Could not compile test case for sdot_.")
-        detect_macos_sdot_bug.present = True
-        return True
+        # If compilation failed, we consider there is a bug,
+        # and the fix does not work
+        if not compilation_ok:
+            _logger.info("Could not compile test case for sdot_.")
+            self.present = True
+            return True
 
-    if run_ok:
-        _logger.info("The sdot_ bug is not present on this system.")
-        detect_macos_sdot_bug.present = False
-        return False
+        if run_ok:
+            _logger.info("The sdot_ bug is not present on this system.")
+            self.present = False
+            return False
 
-    # Else, the bug is detected.
-    _logger.info("The sdot_ bug is present on this system.")
-    detect_macos_sdot_bug.present = True
+        # Else, the bug is detected.
+        _logger.info("The sdot_ bug is present on this system.")
+        self.present = True
 
-    # Then, try a simple fix
-    test_fix_code = textwrap.dedent(
-        """\
-        extern "C" float cblas_sdot(int, float*, int, float*, int);
-        static float sdot_(int* Nx, float* x, int* Sx, float* y, int* Sy)
-        {
-            return cblas_sdot(*Nx, x, *Sx, y, *Sy);
-        }
-
-        int main(int argc, char** argv)
-        {
-            int Nx = 5;
-            int Sx = 1;
-            float x[5] = {0, 1, 2, 3, 4};
-            float r = sdot_(&Nx, x, &Sx, x, &Sx);
-
-            if ((r - 30.f) > 1e-6 || (r - 30.f) < -1e-6)
+        # Then, try a simple fix
+        test_fix_code = textwrap.dedent(
+            """\
+            extern "C" float cblas_sdot(int, float*, int, float*, int);
+            static float sdot_(int* Nx, float* x, int* Sx, float* y, int* Sy)
             {
-                return -1;
+                return cblas_sdot(*Nx, x, *Sx, y, *Sy);
             }
-            return 0;
-        }
-        """
-    )
 
-    _logger.debug("Trying to compile and run tentative workaround.")
-    compilation_fix_ok, run_fix_ok = GCC_compiler.try_compile_tmp(
-        test_fix_code,
-        tmp_prefix="detect_macos_sdot_bug_testfix_",
-        flags=flags,
-        try_run=True,
-    )
+            int main(int argc, char** argv)
+            {
+                int Nx = 5;
+                int Sx = 1;
+                float x[5] = {0, 1, 2, 3, 4};
+                float r = sdot_(&Nx, x, &Sx, x, &Sx);
 
-    _logger.info(
-        "Status of tentative fix -- compilation OK: %s, works: %s",
-        compilation_fix_ok,
-        run_fix_ok,
-    )
-    detect_macos_sdot_bug.fix_works = run_fix_ok
+                if ((r - 30.f) > 1e-6 || (r - 30.f) < -1e-6)
+                {
+                    return -1;
+                }
+                return 0;
+            }
+            """
+        )
 
-    return detect_macos_sdot_bug.present
+        _logger.debug("Trying to compile and run tentative workaround.")
+        compilation_fix_ok, run_fix_ok = GCC_compiler.try_compile_tmp(
+            test_fix_code,
+            tmp_prefix="detect_macos_sdot_bug_testfix_",
+            flags=flags,
+            try_run=True,
+        )
+
+        _logger.info(
+            "Status of tentative fix -- compilation OK: %s, works: %s",
+            compilation_fix_ok,
+            run_fix_ok,
+        )
+        self.fix_works = run_fix_ok
+
+        return self.present
 
 
-detect_macos_sdot_bug.tested = False
-detect_macos_sdot_bug.present = False
-detect_macos_sdot_bug.fix_works = False
+detect_macos_sdot_bug = DetectMacosSdotBug()
 
 
 def cblas_header_text():
