@@ -217,7 +217,6 @@ int main( int argc, const char* argv[] )
                     )
             if OpenMPOp.gxx_support_openmp is False:
                 self.openmp = False
-                config.openmp = False
 
     def prepare_node(self, node, storage_map, compute_map, impl):
         if impl == "c":
