@@ -45,26 +45,21 @@ def mlx_funcify_ScalarOp(op, node=None, **kwargs):
             f"No MLX conversion for scalar op {op} (mx.{func_name} not found)"
         )
 
-    # Handle variadic ops (e.g. Add with 3+ inputs)
+    # Variadic Add/Mul (3+ inputs) fold the binary op left-to-right, matching the
+    # C and Numba backends (which lower as ``a + b + c``). We avoid
+    # mx.stack(args) + mx.sum/prod: stacking requires identical input shapes and so
+    # breaks elementwise broadcasting (e.g. a (1, H) bias added to (B, H)), and
+    # reducing a stacked array changes dtype (bool/int -> int). The native binary
+    # mx.add/mx.multiply broadcast and preserve dtype, and fuse under mx.compile.
     if node is not None and len(node.inputs) > nfunc_spec[1]:
-        variadic_name = getattr(op, "nfunc_variadic", None)
-        if variadic_name:
-            mlx_variadic_func = getattr(mx, variadic_name, None)
-            if mlx_variadic_func:
 
-                def variadic_fn(*args):
-                    return mlx_variadic_func(mx.stack(list(args), axis=0), axis=0)
-
-                return variadic_fn
-
-        # Fallback: fold binary op
-        def fold_fn(*args):
+        def variadic_fold(*args):
             result = args[0]
             for arg in args[1:]:
                 result = mlx_func(result, arg)
             return result
 
-        return fold_fn
+        return variadic_fold
 
     return mlx_func
 
