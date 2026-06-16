@@ -170,38 +170,6 @@ class ScanProfileStats(ProfileStats):
         print("", file=file)
 
 
-def traverse(out, x, x_copy, d, visited=None):
-    """
-    Function used by scan to parse the tree and figure out which nodes
-    it needs to replace.
-
-    There are two options :
-        1) x and x_copy or on host, then you would replace x with x_copy
-
-    """
-    # ``visited`` is a set of nodes that are already known and don't need to be
-    # checked again, speeding up the traversal of multiply-connected graphs.
-    # if a ``visited`` set is given, it will be updated in-place so the callee
-    # knows which nodes we have seen.
-    if visited is None:
-        visited = set()
-    if out in visited:
-        return d
-    visited.add(out)
-
-    if out == x:
-        # assert isinstance(x.type, GpuArrayType)
-        # d[out] = GpuFromHost(x.type.context_name)(x_copy)
-        # return d
-        raise RuntimeError("Not supported")
-    elif out.owner is None:
-        return d
-    else:
-        for inp in out.owner.inputs:
-            d = traverse(inp, x, x_copy, d, visited)
-        return d
-
-
 def expand_empty(tensor_var, size):
     """
     Transforms the shape of a tensor from (d1, d2 ... ) to ( d1+size, d2, ..)
