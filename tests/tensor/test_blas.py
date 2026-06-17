@@ -28,8 +28,6 @@ from pytensor.tensor.blas import (
     _batched_dot,
     _dot22,
     _dot22scalar,
-    batched_dot,
-    batched_tensordot,
     gemm,
     gemm_inplace,
     gemm_no_inplace,
@@ -60,7 +58,6 @@ from pytensor.tensor.type import (
     scalars,
     tensor,
     tensor3,
-    tensor4,
     vector,
     vectors,
     zmatrix,
@@ -2475,32 +2472,6 @@ TestBatchedDot = makeTester(
 )
 
 
-def test_batched_dot():
-    rng = np.random.default_rng(unittest_tools.fetch_seed())
-    first = tensor3("first")
-    second = tensor3("second")
-    with pytest.warns(FutureWarning):
-        output = batched_dot(first, second)
-    first_val = rng.random((10, 10, 20)).astype(config.floatX)
-    second_val = rng.random((10, 20, 5)).astype(config.floatX)
-    result_fn = function([first, second], output)
-    result = result_fn(first_val, second_val)
-    assert result.shape[0] == first_val.shape[0]
-    assert result.shape[1] == first_val.shape[1]
-    assert result.shape[2] == second_val.shape[2]
-
-    first_mat = dmatrix("first")
-    second_mat = dmatrix("second")
-    with pytest.warns(FutureWarning):
-        output = batched_dot(first_mat, second_mat)
-    first_mat_val = rng.random((10, 10)).astype(config.floatX)
-    second_mat_val = rng.random((10, 10)).astype(config.floatX)
-    result_fn = function([first_mat, second_mat], output)
-    result = result_fn(first_mat_val, second_mat_val)
-
-    assert result.shape[0] == first_mat_val.shape[0]
-
-
 def test_batched_dot_not_contiguous():
     def np_genarray(*_shape):
         size = 1
@@ -2553,31 +2524,3 @@ def test_batched_dot_blas_flags():
     [batched_dot_thunk] = fn.vm.thunks
     assert not hasattr(batched_dot_thunk, "cthunk")
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
-
-
-def test_batched_tensordot():
-    rng = np.random.default_rng(unittest_tools.fetch_seed())
-    first = tensor4("first")
-    second = tensor4("second")
-    axes = [[1, 2], [3, 1]]
-    with pytest.warns(FutureWarning):
-        output = batched_tensordot(first, second, axes)
-    first_val = rng.random((8, 10, 20, 3)).astype(config.floatX)
-    second_val = rng.random((8, 20, 5, 10)).astype(config.floatX)
-    result_fn = function([first, second], output)
-    result = result_fn(first_val, second_val)
-    assert result.shape[0] == first_val.shape[0]
-    assert result.shape[1] == first_val.shape[3]
-    assert result.shape[2] == second_val.shape[2]
-
-    first_mat = dmatrix("first")
-    second_mat = dmatrix("second")
-    axes = 1
-    with pytest.warns(FutureWarning):
-        output = batched_tensordot(first_mat, second_mat, axes)
-    first_mat_val = rng.random((10, 4)).astype(config.floatX)
-    second_mat_val = rng.random((10, 4)).astype(config.floatX)
-    result_fn = function([first_mat, second_mat], output)
-    result = result_fn(first_mat_val, second_mat_val)
-    assert result.shape[0] == first_mat_val.shape[0]
-    assert len(result.shape) == 1
