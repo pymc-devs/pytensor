@@ -24,9 +24,8 @@ class DetectMacosSdotBug:
     Reported in PyTensor as gh-1240; the underlying bug is confirmed in
     http://www.macresearch.org/lapackblas-fortran-106#comment-17227.
 
-    Calling the instance compiles code that triggers the bug and, if it is
-    present, an attempted fix, caching the outcome across the attributes below.
-    The result is computed once and reused on subsequent calls.
+    Calling the instance compiles a probe for the bug (and a workaround if it is
+    present) on the first call, caching the outcome in the attributes below.
 
     Attributes
     ----------

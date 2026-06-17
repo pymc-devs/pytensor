@@ -489,7 +489,7 @@ def _assemble_gemm_call(
 
 
 def gemm_c_code(node, name, inputs, outputs, sub):
-    """C code for ``Gemm``: ``z <- b * z + a * dot(x, y)`` (in/out-of-place)."""
+    r"""C code for ``Gemm``: :math:`z \leftarrow b\,z + a\,xy` (in/out-of-place)."""
     _z, _a, _x, _y, _b = inputs
     (_zout,) = outputs
     setup_z = (
@@ -507,7 +507,7 @@ def gemm_c_code(node, name, inputs, outputs, sub):
 
 
 def dot22_c_code(node, name, inputs, outputs, sub):
-    """C code for ``Dot22``: ``z <- dot(x, y)`` into a freshly allocated z."""
+    r"""C code for ``Dot22``: :math:`z \leftarrow xy`, allocating a fresh output."""
     _x, _y = inputs
     (_zout,) = outputs
     code = _assemble_gemm_call(
@@ -521,7 +521,7 @@ def dot22_c_code(node, name, inputs, outputs, sub):
 
 
 def dot22scalar_c_code(node, name, inputs, outputs, sub):
-    """C code for ``Dot22Scalar``: ``z <- a * dot(x, y)`` into a fresh z."""
+    r"""C code for ``Dot22Scalar``: :math:`z \leftarrow a\,xy`, allocating a fresh output."""
     _x, _y, _a = inputs
     (_zout,) = outputs
     code = _assemble_gemm_call(
@@ -540,9 +540,10 @@ def dot22scalar_c_code(node, name, inputs, outputs, sub):
 
 
 def gemv_c_code(node, name, inputs, outputs, sub):
-    """C code for ``CGemv``: ``z <- beta * y + alpha * dot(A, x)``.
+    r"""C code for ``CGemv``: :math:`z \leftarrow \beta\,y + \alpha\,Ax`.
 
-    ``z = y`` if inplace else ``z = y.copy()``; A is a matrix, x and y vectors.
+    ``z`` aliases ``y`` when inplace, otherwise a fresh copy; :math:`A` is a
+    matrix and :math:`x`, :math:`y` are vectors.
     """
     # Imported lazily to avoid an import cycle (blas_c imports this module).
     from pytensor.tensor.blas.blas_c import must_initialize_y_gemv
@@ -804,7 +805,7 @@ def gemv_c_code(node, name, inputs, outputs, sub):
 
 
 def ger_c_code(node, name, inputs, outputs, sub):
-    """C code for ``CGer``: rank-1 update ``Z = A + alpha * outer(x, y)``."""
+    r"""C code for ``CGer``: rank-1 update :math:`Z = A + \alpha\,x y^{\top}`."""
     A, a, x, y = inputs
     (Z,) = outputs
     fail = sub["fail"]
