@@ -182,3 +182,38 @@ def test_vmap_elemwise():
     vals = torch.zeros(2, 3).normal_()
     np.testing.assert_allclose(f(vals), torch.relu(vals))
     assert op.call_shapes == [torch.Size([])], op.call_shapes
+
+
+@pytest.mark.parametrize("op", [pt.add, pt.mul], ids=["add", "mul"])
+def test_pytorch_variadic_broadcast(op):
+    x = tensor("x", shape=(3, 4))
+    y = tensor("y", shape=(1, 4))
+    z = tensor("z", shape=(3, 1))
+    out = op(x, y, z)
+    assert len(out.owner.inputs) == 3
+
+    rng = np.random.default_rng(0)
+    test_inputs = [
+        rng.normal(size=s).astype(config.floatX) for s in [(3, 4), (1, 4), (3, 1)]
+    ]
+    compare_pytorch_and_py([x, y, z], [out], test_inputs)
+
+
+@pytest.mark.parametrize("dtype", ["bool", "int8"], ids=["bool", "int8"])
+def test_pytorch_variadic_add_dtype(dtype):
+    # Folding the binary op preserves dtype; stack + torch.sum upcast bool/int.
+    x = tensor("x", shape=(3,), dtype=dtype)
+    y = tensor("y", shape=(3,), dtype=dtype)
+    z = tensor("z", shape=(3,), dtype=dtype)
+    out = pt.add(x, y, z)
+
+    def assert_fn(torch_res, py_res):
+        np.testing.assert_allclose(torch_res, py_res)
+        assert np.asarray(torch_res).dtype == np.asarray(py_res).dtype
+
+    vals = (
+        np.array([True, False, True])
+        if dtype == "bool"
+        else np.array([1, 2, 3], dtype=dtype)
+    )
+    compare_pytorch_and_py([x, y, z], [out], [vals, vals, vals], assert_fn=assert_fn)
