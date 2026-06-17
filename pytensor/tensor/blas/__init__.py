@@ -89,8 +89,6 @@ from pytensor.tensor.blas._core import (
 from pytensor.tensor.blas.batched import (
     BatchedDot,
     _batched_dot,
-    batched_dot,
-    batched_tensordot,
 )
 from pytensor.tensor.blas.blas_c import (
     BaseBLAS,
@@ -141,8 +139,6 @@ __all__ = [
     "_dot22scalar",
     "_ldflags",
     "_logger",
-    "batched_dot",
-    "batched_tensordot",
     "blas_header_text",
     "blas_header_version",
     "cgemv_inplace",

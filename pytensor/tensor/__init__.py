@@ -121,7 +121,6 @@ from pytensor.tensor import optimize
 from numpy import e, euler_gamma, inf, nan, newaxis, pi
 
 from pytensor.tensor.basic import *
-from pytensor.tensor.blas import batched_dot, batched_tensordot
 from pytensor.tensor.extra_ops import *
 from pytensor.tensor.interpolate import interp, interpolate1d
 from pytensor.tensor.math import *
