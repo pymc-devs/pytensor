@@ -14,6 +14,7 @@ from pytensor.graph import vectorize_graph
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable, cast
+from pytensor.tensor.blas._codegen import BATCH_GEMM
 from pytensor.tensor.blas._core import ldflags
 from pytensor.tensor.blas.blas_headers import blas_header_text, blas_header_version
 from pytensor.tensor.math import dot, tensordot
@@ -84,88 +85,7 @@ class BatchedDot(COp):
         z[0] = np.matmul(x, y)
 
     def c_support_code(self, **kwargs):
-        batch_gemm_defn = """
-        template<typename dtype>
-        bool batch_gemm(void (*gemm)(char*, char*, const int*, const int*, const int*, const dtype*, const dtype*, const int*, const dtype*, const int*, const dtype*, dtype*, const int*),
-                        int type_size, PyArrayObject* xs, PyArrayObject* ys,
-                        PyArrayObject* zs) {
-            npy_intp *Nx = PyArray_DIMS(xs), *Sx = PyArray_STRIDES(xs);
-            npy_intp *Ny = PyArray_DIMS(ys), *Sy = PyArray_STRIDES(ys);
-            npy_intp *Nz = PyArray_DIMS(zs), *Sz = PyArray_STRIDES(zs);
-
-            if (Nx[0] != Ny[0]) {
-                PyErr_Format(PyExc_ValueError,
-                             "Shape mismatch: batch sizes unequal."
-                             " x.shape is (%d, %d, %d),"
-                             " y.shape is (%d, %d, %d).",
-                             Nx[0], Nx[1], Nx[2],
-                             Ny[0], Ny[1], Ny[2]);
-                return 1;
-            }
-
-            if (Nx[2] != Ny[1]) {
-                PyErr_Format(PyExc_ValueError,
-                             "Shape mismatch: summation axis sizes unequal."
-                             " x.shape is (%d, %d, %d),"
-                             " y.shape is (%d, %d, %d).",
-                             Nx[0], Nx[1], Nx[2],
-                             Ny[0], Ny[1], Ny[2]);
-                return 1;
-            }
-
-            /* encode the stride structure of _x,_y,_z into a single integer. */
-            int unit = 0;
-            unit |= ((Sx[2] == type_size || Nx[2] == 1) ? 0x0 : (Sx[1] == type_size || Nx[1]==1) ? 0x1 : 0x2) << 8;
-            unit |= ((Sy[2] == type_size || Ny[2] == 1) ? 0x0 : (Sy[1] == type_size || Ny[1]==1) ? 0x1 : 0x2) << 4;
-            unit |= ((Sz[2] == type_size || Nz[2] == 1) ? 0x0 : (Sz[1] == type_size || Nz[1]==1) ? 0x1 : 0x2) << 0;
-
-            /* create appropriate strides for malformed matrices that are row or column
-             * vectors, or empty matrices.
-             * In that case, the value of the stride does not really matter, but
-             * some versions of BLAS insist that:
-             *  - they are not smaller than the number of elements in the array,
-             *  - they are not 0.
-             */
-            int sx_1 = (Nx[1] > 1) ? Sx[1]/type_size : (Nx[2] + 1);
-            int sx_2 = (Nx[2] > 1) ? Sx[2]/type_size : (Nx[1] + 1);
-            int sy_1 = (Ny[1] > 1) ? Sy[1]/type_size : (Ny[2] + 1);
-            int sy_2 = (Ny[2] > 1) ? Sy[2]/type_size : (Ny[1] + 1);
-            int sz_1 = (Nz[1] > 1) ? Sz[1]/type_size : (Nz[2] + 1);
-            int sz_2 = (Nz[2] > 1) ? Sz[2]/type_size : (Nz[1] + 1);
-
-            dtype* x = (dtype*)PyArray_DATA(xs);
-            dtype* y = (dtype*)PyArray_DATA(ys);
-            dtype* z = (dtype*)PyArray_DATA(zs);
-
-            dtype a = 1.0;
-            dtype b = 0.0;
-            char N = 'N';
-            char T = 'T';
-            int Nz1 = Nz[1], Nz2 = Nz[2], Nx2 = Nx[2];
-
-            // loop over batch axis
-            for (int i = 0; i < Nz[0]; i++) {
-                switch(unit)
-                {
-                    case 0x000: gemm(&N, &N, &Nz2, &Nz1, &Nx2, &a, y, &sy_1, x, &sx_1, &b, z, &sz_1); break;
-                    case 0x100: gemm(&N, &T, &Nz2, &Nz1, &Nx2, &a, y, &sy_1, x, &sx_2, &b, z, &sz_1); break;
-                    case 0x010: gemm(&T, &N, &Nz2, &Nz1, &Nx2, &a, y, &sy_2, x, &sx_1, &b, z, &sz_1); break;
-                    case 0x110: gemm(&T, &T, &Nz2, &Nz1, &Nx2, &a, y, &sy_2, x, &sx_2, &b, z, &sz_1); break;
-                    case 0x001: gemm(&T, &T, &Nz1, &Nz2, &Nx2, &a, x, &sx_1, y, &sy_1, &b, z, &sz_2); break;
-                    case 0x101: gemm(&N, &T, &Nz1, &Nz2, &Nx2, &a, x, &sx_2, y, &sy_1, &b, z, &sz_2); break;
-                    case 0x011: gemm(&T, &N, &Nz1, &Nz2, &Nx2, &a, x, &sx_1, y, &sy_2, &b, z, &sz_2); break;
-                    case 0x111: gemm(&N, &N, &Nz1, &Nz2, &Nx2, &a, x, &sx_2, y, &sy_2, &b, z, &sz_2); break;
-                    default: PyErr_SetString(PyExc_ValueError, "some matrix has no unit stride"); return 1;
-                };
-                x += Sx[0] / type_size;
-                y += Sy[0] / type_size;
-                z += Sz[0] / type_size;
-            }
-
-            return 0;
-        }
-        """
-        return blas_header_text() + batch_gemm_defn
+        return blas_header_text() + BATCH_GEMM
 
     def c_libraries(self, **kwargs):
         return ldflags()
