@@ -29,11 +29,8 @@ def mlx_funcify_SpecifyShape(op, node, **kwargs):
 @mlx_funcify.register(Shape_i)
 def mlx_funcify_Shape_i(op, node, **kwargs):
     def shape_i(x):
-        # Return a typed MLX array rather than a bare Python ``int`` (which is
-        # what ``mx.array.shape[i]`` yields). Downstream ops such as ``Cast``
-        # rely on receiving an array; a Python scalar makes them crash with
-        # ``AttributeError: 'int' object has no attribute 'astype'`` (#2096).
-        # This mirrors ``Shape``, which already wraps its result in ``mx.array``.
+        # Wrap in an MLX array, like Shape, so downstream ops (e.g. Cast) get
+        # an array rather than a bare Python int (#2096).
         return mx.array(x.shape[op.i], dtype=mx.int64)
 
     return shape_i
