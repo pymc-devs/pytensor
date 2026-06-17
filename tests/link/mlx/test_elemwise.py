@@ -33,7 +33,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.special import log_softmax, softmax
-from pytensor.tensor.type import matrix, vector, vectors
+from pytensor.tensor.type import matrix, tensor, vector, vectors
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
@@ -278,3 +278,40 @@ def test_softplus_extreme_values() -> None:
     relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-4, atol=1e-8)
 
     compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
+
+
+@pytest.mark.parametrize("op", [add, mul], ids=["add", "mul"])
+def test_variadic_broadcast(op):
+    # Regression #2086: a 3-input Elemwise with broadcasting operands used to crash
+    # because the variadic path stacked the operands, which requires equal shapes.
+    x = tensor("x", shape=(3, 4))
+    y = tensor("y", shape=(1, 4))
+    z = tensor("z", shape=(3, 1))
+    out = op(x, y, z)
+    assert len(out.owner.inputs) == 3  # single 3-input Elemwise, no fusion needed
+
+    x_test = np.arange(12, dtype=config.floatX).reshape(3, 4) + 1
+    y_test = np.arange(4, dtype=config.floatX).reshape(1, 4) + 1
+    z_test = np.arange(3, dtype=config.floatX).reshape(3, 1) + 1
+    compare_mlx_and_py([x, y, z], [out], [x_test, y_test, z_test])
+
+
+@pytest.mark.parametrize("dtype", ["bool", "int8"], ids=["bool", "int8"])
+def test_variadic_add_dtype(dtype):
+    # Regression #2086: the variadic add upcast bool/int operands (e.g. int8 ->
+    # int32) and broke bool OR-semantics. Folding the binary op preserves dtype.
+    x = tensor("x", shape=(3,), dtype=dtype)
+    y = tensor("y", shape=(3,), dtype=dtype)
+    z = tensor("z", shape=(3,), dtype=dtype)
+    out = add(x, y, z)
+
+    def assert_fn(mlx_res, py_res):
+        np.testing.assert_allclose(mlx_res, py_res)
+        assert np.asarray(mlx_res).dtype == np.asarray(py_res).dtype
+
+    vals = (
+        np.array([True, False, True])
+        if dtype == "bool"
+        else np.array([1, 2, 3], dtype=dtype)
+    )
+    compare_mlx_and_py([x, y, z], [out], [vals, vals, vals], assert_fn=assert_fn)

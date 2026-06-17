@@ -1,3 +1,5 @@
+from functools import reduce
+
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
@@ -45,26 +47,13 @@ def mlx_funcify_ScalarOp(op, node=None, **kwargs):
             f"No MLX conversion for scalar op {op} (mx.{func_name} not found)"
         )
 
-    # Handle variadic ops (e.g. Add with 3+ inputs)
+    # Handle variadic ops (e.g. Add with 3+ inputs) by folding the binary op
     if node is not None and len(node.inputs) > nfunc_spec[1]:
-        variadic_name = getattr(op, "nfunc_variadic", None)
-        if variadic_name:
-            mlx_variadic_func = getattr(mx, variadic_name, None)
-            if mlx_variadic_func:
 
-                def variadic_fn(*args):
-                    return mlx_variadic_func(mx.stack(list(args), axis=0), axis=0)
+        def variadic_fold(*args):
+            return reduce(mlx_func, args)
 
-                return variadic_fn
-
-        # Fallback: fold binary op
-        def fold_fn(*args):
-            result = args[0]
-            for arg in args[1:]:
-                result = mlx_func(result, arg)
-            return result
-
-        return fold_fn
+        return variadic_fold
 
     return mlx_func
 
