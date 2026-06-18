@@ -239,9 +239,9 @@ def test_mlx_IncSubtensor_slice_grad():
 
 
 @pytest.mark.xfail(
-    reason="Upstream mx.compile bug: a negative-strided in-place scatter whose "
-    "update derives from a negative-strided view returns wrong values "
-    "(correct when eager / use_compile=False).",
+    reason="Upstream mx.compile bug (ml-explore/mlx#3716): assigning an "
+    "elementwise expression to a negative-strided slice returns wrong values "
+    "under mx.compile (correct when eager / use_compile=False).",
     strict=True,
 )
 def test_mlx_IncSubtensor_negative_step_slice_grad():
