@@ -277,3 +277,69 @@ def test_mlx_IncSubtensor_negative_step_slice_grad():
     g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
     assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
     compare_mlx_and_py([x_pt], [g], [x_np])
+
+
+@pytest.mark.parametrize(
+    "func",
+    (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1),
+    ids=("inc", "set"),
+)
+def test_mlx_AdvancedIncSubtensor1_duplicate_indices(func):
+    """Duplicate indices must accumulate for inc (``np.add.at`` semantics).
+
+    Gradients of advanced indexing (e.g. embedding lookups with repeated token
+    ids) produce inc with duplicate indices; MLX must sum all contributions
+    rather than writing each destination once.
+    """
+    x = pt.vector("x", dtype="float32")
+    y = pt.vector("y", dtype="float32")
+    idxs = np.array([0, 0, 0, 1], dtype=np.int64)
+    out = func(x, y, idxs)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+
+    x_np = np.zeros(3, dtype=np.float32)
+    y_np = np.ones(4, dtype=np.float32)
+    compare_mlx_and_py([x, y], [out], [x_np, y_np])
+
+
+def test_mlx_AdvancedIncSubtensor1_duplicate_indices_edge_cases():
+    """Duplicate accumulation with negative indices and a scalar (broadcast) ``y``."""
+    x = pt.vector("x", dtype="int32")
+    y = pt.scalar("y", dtype="int32")
+    idxs = np.array([-1, -1, 0, -1], dtype=np.int64)
+    out = pt_subtensor.advanced_inc_subtensor1(x, y, idxs)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+
+    compare_mlx_and_py([x, y], [out], [np.zeros(3, dtype=np.int32), np.int32(2)])
+
+
+def test_mlx_AdvancedIncSubtensor_duplicate_indices():
+    """``AdvancedIncSubtensor`` with duplicate indices accumulates like ``np.add.at``."""
+    x = pt.matrix("x", dtype="float32")
+    y = pt.vector("y", dtype="float32")
+    rows = np.array([0, 0, 1], dtype=np.int64)
+    cols = np.array([1, 1, 2], dtype=np.int64)
+    out = pt_subtensor.inc_subtensor(x[rows, cols], y)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    assert not out.owner.op.set_instead_of_inc
+    assert not out.owner.op.ignore_duplicates
+
+    x_np = np.zeros((3, 3), dtype=np.float32)
+    y_np = np.ones(3, dtype=np.float32)
+    compare_mlx_and_py([x, y], [out], [x_np, y_np])
+
+
+def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
+    """``ignore_duplicates=True`` requests write-once (numpy ``x[idx] += y``).
+
+    Duplicate indices must NOT be accumulated in this mode, matching the
+    reference ``perform`` and the PyTorch/Numba backends.
+    """
+    x = pt.vector("x", dtype="float32")
+    out = pt_subtensor.inc_subtensor(
+        x[[0, 1, 0]], np.float32(5.0), ignore_duplicates=True
+    )
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    assert out.owner.op.ignore_duplicates
+
+    compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])
