@@ -211,7 +211,6 @@ def test_mlx_subtensor_edge_cases():
     compare_mlx_and_py([], [out_pt], [])
 
 
-@pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_subtensor_with_variables():
     """Test subtensor operations with PyTensor variables as inputs."""
     # Test with variable arrays (not constants)
@@ -224,3 +223,30 @@ def test_mlx_subtensor_with_variables():
     # Set operation with variables
     out_pt = pt_subtensor.set_subtensor(x_pt[0, :2], y_pt)
     compare_mlx_and_py([x_pt, y_pt], [out_pt], [x_np, y_np])
+
+
+def test_mlx_IncSubtensor_slice_grad():
+    """Gradient of a basic slice lowers to an ``IncSubtensor`` with slice bounds
+    passed as (array) inputs; these must be coerced to Python ints for MLX."""
+    x_pt = pt.vector("x", dtype="float32")
+    x_np = np.arange(6, dtype=np.float32)
+
+    # Contiguous and strided (RoPE-style) slices both exercise the slice path.
+    for sl in (x_pt[0:3], x_pt[0::2]):
+        g = pt.grad((sl**2).sum(), x_pt)
+        assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
+        compare_mlx_and_py([x_pt], [g], [x_np])
+
+
+@pytest.mark.xfail(
+    reason="Upstream mx.compile bug: a negative-strided in-place scatter whose "
+    "update derives from a negative-strided view returns wrong values "
+    "(correct when eager / use_compile=False).",
+    strict=True,
+)
+def test_mlx_IncSubtensor_negative_step_slice_grad():
+    x_pt = pt.vector("x", dtype="float32")
+    x_np = np.arange(6, dtype=np.float32)
+    g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
+    assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
+    compare_mlx_and_py([x_pt], [g], [x_np])
