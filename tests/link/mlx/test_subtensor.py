@@ -224,3 +224,30 @@ def test_mlx_subtensor_with_variables():
     # Set operation with variables
     out_pt = pt_subtensor.set_subtensor(x_pt[0, :2], y_pt)
     compare_mlx_and_py([x_pt, y_pt], [out_pt], [x_np, y_np])
+
+
+@pytest.mark.parametrize(
+    "func", (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1)
+)
+def test_mlx_AdvancedIncSubtensor1_runtime_broadcast(func):
+    """MLX must reject runtime broadcasting of ``y``, matching C/Numba/JAX/PyTorch.
+
+    ``AdvancedIncSubtensor1`` requires ``y`` to already match the indexed shape;
+    a statically non-broadcastable dimension that is length 1 at runtime is an
+    error, not a silent broadcast.
+    """
+    from pytensor import function
+
+    y = pt.matrix("y", dtype="float32", shape=(None, None))
+    x = pt.zeros((10, 5))
+    idxs = np.repeat(np.arange(10), 2)  # 20 indices
+    out = func(x, y, idxs)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+
+    f = function([y], out, mode="MLX")
+    f(np.ones((20, 5), dtype=np.float32))  # correctly sized y works
+
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(np.ones((1, 5), dtype=np.float32))  # broadcast along index
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(np.ones((20, 1), dtype=np.float32))  # broadcast along buffer
