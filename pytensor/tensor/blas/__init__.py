@@ -102,7 +102,7 @@ from pytensor.tensor.blas.blas_c import (
 from pytensor.tensor.blas.blas_c import (
     must_initialize_y_gemv as must_initialize_y_gemv_c,
 )
-from pytensor.tensor.blas.blas_headers import (
+from pytensor.tensor.blas.c_code.blas_headers import (
     blas_header_text,
     blas_header_version,
     mkl_threads_text,

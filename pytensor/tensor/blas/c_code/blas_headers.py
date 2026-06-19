@@ -752,8 +752,8 @@ def blas_header_text():
 
         # Include the Numpy version implementation of [sd]gemm_.
         current_filedir = Path(__file__).parent
-        blas_common_filepath = current_filedir / "c_code/alt_blas_common.h"
-        blas_template_filepath = current_filedir / "c_code/alt_blas_template.c"
+        blas_common_filepath = current_filedir / "alt_blas_common.h"
+        blas_template_filepath = current_filedir / "alt_blas_template.c"
         try:
             common_code = blas_common_filepath.read_text(encoding="utf-8")
             template_code = blas_template_filepath.read_text(encoding="utf-8")

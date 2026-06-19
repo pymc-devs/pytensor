@@ -1,12 +1,12 @@
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.scalar import bool as bool_t
-from pytensor.tensor.blas._codegen import gemv_c_code, ger_c_code
 from pytensor.tensor.blas._core import ldflags
-from pytensor.tensor.blas.blas_headers import (
+from pytensor.tensor.blas.c_code.blas_headers import (
     blas_header_text,
     blas_header_version,
 )
+from pytensor.tensor.blas.c_code.codegen import gemv_c_code, ger_c_code
 from pytensor.tensor.blas.gemv import Gemv
 from pytensor.tensor.blas.ger import Ger
 

@@ -8,18 +8,18 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import FunctionPrinter, pprint
 from pytensor.scalar import bool as bool_t
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.blas._codegen import (
-    dot22_c_code,
-    dot22scalar_c_code,
-    gemm_c_code,
-)
 from pytensor.tensor.blas._core import (
     ldflags,
     view_roots,
 )
-from pytensor.tensor.blas.blas_headers import (
+from pytensor.tensor.blas.c_code.blas_headers import (
     blas_header_text,
     blas_header_version,
+)
+from pytensor.tensor.blas.c_code.codegen import (
+    dot22_c_code,
+    dot22scalar_c_code,
+    gemm_c_code,
 )
 from pytensor.tensor.type import DenseTensorType, tensor
 
@@ -28,14 +28,14 @@ class GemmRelated(COp):
     """Base class for Gemm and Dot22.
 
     This class provides a kind of templated gemm Op. The C code itself is
-    emitted by the generators in :mod:`pytensor.tensor.blas._codegen`.
+    emitted by the generators in :mod:`pytensor.tensor.blas.c_code.codegen`.
     """
 
     __props__: tuple[str, ...] = ()
 
     def c_support_code(self, **kwargs):
         # BLAS declarations plus the MOD macro and compute_strides helper used by
-        # the GEMM templates in _codegen.py.
+        # the GEMM templates in codegen.py.
         mod_str = """
         #ifndef MOD
         #define MOD %
