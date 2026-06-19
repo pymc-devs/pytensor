@@ -61,9 +61,8 @@ def mlx_sample_fn_normal(op, node):
         mu = mx.array(mu, dtype=mlx_dtype)
         sigma = mx.array(sigma, dtype=mlx_dtype)
         if size is None:
-            shape = mx.broadcast_arrays(mu, sigma)[0].shape
-        else:
-            shape = mlx_to_list_shape(size)
+            return mx.random.normal(loc=mu, scale=sigma, dtype=mlx_dtype, key=rng_key)
+        shape = mlx_to_list_shape(size)
         s = mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
         return mu + sigma * s
 
