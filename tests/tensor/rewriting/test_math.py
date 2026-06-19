@@ -5140,8 +5140,8 @@ def test_sign_reciprocal():
 @pytest.mark.parametrize(
     "build, expected_fn",
     [
-        (lambda x: pt.log(3.0 / x), lambda x: pt.log(3.0) - pt.log(x)),
-        (lambda x: pt.log(x / 3.0), lambda x: pt.log(x) - pt.log(3.0)),
+        (lambda x: pt.log(3.0 / x), lambda x: pt.log(np.float64(3.0)) - pt.log(x)),
+        (lambda x: pt.log(x / 3.0), lambda x: pt.log(x) - pt.log(np.float64(3.0))),
         (lambda x: pt.log(1.0 / x), lambda x: -pt.log(x)),
     ],
     ids=["pos_const_num", "pos_const_den", "one_over_x"],
@@ -5167,6 +5167,12 @@ def test_log_div_non_constant_not_rewritten():
     assert any(
         isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
     )
+
+
+def test_log_div_constant_keeps_precision():
+    # log(k / 2) must keep full precision, not fold log(2) at float32 (#2244).
+    k = pt.dscalar("k")
+    np.testing.assert_array_equal(function([k], pt.log(k / 2))(np.array(2.0)), 0.0)
 
 
 @pytest.mark.parametrize(
