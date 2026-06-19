@@ -1938,14 +1938,16 @@ class TestExpLog:
         np.testing.assert_almost_equal(f(data_valid), expected)
         assert np.all(np.isnan(f(data_invalid)))
 
+    @pytest.mark.parametrize("cast_policy", ["custom", "numpy+floatX"])
     @pytest.mark.parametrize("exp_op", [exp, expm1])
-    def test_exp_softplus(self, exp_op):
+    def test_exp_softplus(self, exp_op, cast_policy):
         # exp(softplus(x)) -> 1 + exp(x)
         # expm1(softplus(x)) -> exp(x)
         data_valid = np.random.random((4, 3)).astype("float32") * 2 - 1
 
         x = fmatrix()
-        f = function([x], exp_op(softplus(x)), mode=self.mode)
+        with config.change_flags(cast_policy=cast_policy):
+            f = function([x], exp_op(softplus(x)), mode=self.mode)
         graph = f.maker.fgraph.toposort()
         ops_graph = [
             node
