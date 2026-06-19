@@ -5,9 +5,12 @@ from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable, cast
-from pytensor.tensor.blas._codegen import BATCH_GEMM
 from pytensor.tensor.blas._core import ldflags
-from pytensor.tensor.blas.blas_headers import blas_header_text, blas_header_version
+from pytensor.tensor.blas.c_code.blas_headers import (
+    blas_header_text,
+    blas_header_version,
+)
+from pytensor.tensor.blas.c_code.codegen import BATCH_GEMM
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import DenseTensorType, tensor
 
