@@ -712,7 +712,8 @@ def local_log_div(fgraph, node):
         if (isinstance(num, Constant) and _is_provably_positive(num, strict=True)) or (
             isinstance(den, Constant) and _is_provably_positive(den, strict=True)
         ):
-            return [log(num) - log(den)]
+            out_dtype = node.outputs[0].dtype
+            return [log(num.astype(out_dtype)) - log(den.astype(out_dtype))]
 
 
 @register_canonicalize
