@@ -681,7 +681,7 @@ class TestFusion:
                 fxv - ((ixv * 100) // (iyv * 1000)),
                 {
                     "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "numpy+floatX": config.floatX,
                     "numpy": "float64",
                 },
             ),  # 40
@@ -831,7 +831,7 @@ class TestFusion:
                 fxv - (iyv | izv),
                 {
                     "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "numpy+floatX": config.floatX,
                     "numpy": "float64",
                 },
             ),
@@ -843,7 +843,7 @@ class TestFusion:
                 fxv - (iyv ^ izv),
                 {
                     "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "numpy+floatX": config.floatX,
                     "numpy": "float64",
                 },
             ),  # 60
@@ -855,7 +855,7 @@ class TestFusion:
                 fxv - (iyv & izv),
                 {
                     "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "numpy+floatX": config.floatX,
                     "numpy": "float64",
                 },
             ),
@@ -867,7 +867,7 @@ class TestFusion:
                 fxv - (~iyv),
                 {
                     "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "numpy+floatX": config.floatX,
                     "numpy": "float64",
                 },
             ),
