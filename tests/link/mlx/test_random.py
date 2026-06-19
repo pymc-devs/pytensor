@@ -166,6 +166,64 @@ def test_permutation_shape():
     assert sorted(np.array(results[0]).tolist()) == list(range(8))
 
 
+def test_lognormal_shape_dtype():
+    results = check_shape_and_dtype(
+        lambda srng: srng.lognormal(mu=0.0, sigma=1.0, size=(5,)),
+        (5,),
+        "float32",
+    )
+    r = np.array(results[0])
+    assert np.all(r > 0)
+
+
+def test_lognormal_scalar():
+    check_shape_and_dtype(
+        lambda srng: srng.lognormal(mu=0.0, sigma=1.0),
+        (),
+    )
+
+
+def test_halfnormal_shape_dtype():
+    check_shape_and_dtype(
+        lambda srng: srng.halfnormal(loc=0.0, scale=1.0, size=(4,)),
+        (4,),
+        "float32",
+    )
+
+
+def test_halfnormal_scalar():
+    check_shape_and_dtype(
+        lambda srng: srng.halfnormal(loc=0.0, scale=1.0),
+        (),
+    )
+
+
+def test_exponential_shape_dtype():
+    results = check_shape_and_dtype(
+        lambda srng: srng.exponential(scale=1.0, size=(6,)),
+        (6,),
+        "float32",
+    )
+    r = np.array(results[0])
+    assert np.all(r > 0)
+
+
+def test_logistic_shape_dtype():
+    check_shape_and_dtype(
+        lambda srng: srng.logistic(loc=0.0, scale=1.0, size=(7,)),
+        (7,),
+        "float32",
+    )
+
+
+def test_cauchy_shape_dtype():
+    check_shape_and_dtype(
+        lambda srng: srng.cauchy(loc=0.0, scale=1.0, size=(8,)),
+        (8,),
+        "float32",
+    )
+
+
 def test_gamma_not_implemented():
     srng = RandomStream(seed=1)
     rv = srng.gamma(shape=1.0, scale=1.0, size=(3,))

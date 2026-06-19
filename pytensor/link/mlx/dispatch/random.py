@@ -208,3 +208,84 @@ def mlx_sample_fn_integers(op, node):
         )
 
     return sample_fn
+
+
+@mlx_sample_fn.register(ptr.LogNormalRV)
+def mlx_sample_fn_lognormal(op, node):
+    def sample_fn(rng_key, size, dtype, mu, sigma):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        mu = mx.array(mu, dtype=mlx_dtype)
+        sigma = mx.array(sigma, dtype=mlx_dtype)
+        if size is None:
+            return mx.exp(
+                mx.random.normal(loc=mu, scale=sigma, dtype=mlx_dtype, key=rng_key)
+            )
+        shape = mlx_to_list_shape(size)
+        z = mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
+        return mx.exp(mu + sigma * z)
+
+    return sample_fn
+
+
+@mlx_sample_fn.register(ptr.HalfNormalRV)
+def mlx_sample_fn_halfnormal(op, node):
+    def sample_fn(rng_key, size, dtype, loc, scale):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        loc = mx.array(loc, dtype=mlx_dtype)
+        scale = mx.array(scale, dtype=mlx_dtype)
+        if size is None:
+            return mx.abs(
+                mx.random.normal(loc=loc, scale=scale, dtype=mlx_dtype, key=rng_key)
+            )
+        shape = mlx_to_list_shape(size)
+        z = mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
+        return mx.abs(loc + scale * z)
+
+    return sample_fn
+
+
+@mlx_sample_fn.register(ptr.ExponentialRV)
+def mlx_sample_fn_exponential(op, node):
+    def sample_fn(rng_key, size, dtype, scale):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        scale = mx.array(scale, dtype=mlx_dtype)
+        if size is None:
+            shape = scale.shape
+        else:
+            shape = mlx_to_list_shape(size)
+        u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
+        return -scale * mx.log(u)
+
+    return sample_fn
+
+
+@mlx_sample_fn.register(ptr.LogisticRV)
+def mlx_sample_fn_logistic(op, node):
+    def sample_fn(rng_key, size, dtype, loc, scale):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        loc = mx.array(loc, dtype=mlx_dtype)
+        scale = mx.array(scale, dtype=mlx_dtype)
+        if size is None:
+            shape = mx.broadcast_arrays(loc, scale)[0].shape
+        else:
+            shape = mlx_to_list_shape(size)
+        u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
+        return loc + scale * mx.log(u / (1 - u))
+
+    return sample_fn
+
+
+@mlx_sample_fn.register(ptr.CauchyRV)
+def mlx_sample_fn_cauchy(op, node):
+    def sample_fn(rng_key, size, dtype, loc, scale):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        loc = mx.array(loc, dtype=mlx_dtype)
+        scale = mx.array(scale, dtype=mlx_dtype)
+        if size is None:
+            shape = mx.broadcast_arrays(loc, scale)[0].shape
+        else:
+            shape = mlx_to_list_shape(size)
+        u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
+        return loc + scale * mx.tan(mx.pi * (u - 0.5))
+
+    return sample_fn
