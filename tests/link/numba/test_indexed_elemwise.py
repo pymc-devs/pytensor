@@ -5,6 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
+from pytensor.assumptions import assume
 from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
@@ -569,6 +570,83 @@ class TestRepeatedAccumulationIndices:
         sv = rng.normal(size=10)
         tv = rng.normal(size=10)
         np.testing.assert_allclose(fn(sv, tv.copy()), fn_u(sv, tv.copy()), rtol=1e-10)
+
+
+class TestNoDupPromise:
+    """A distinct-index ``inc`` scatter carries a no-dup vectorization promise: the
+    rewriter flags it (4th ``indexed_outputs`` field) so the Numba codegen emits
+    ``llvm.loop.parallel_accesses``, letting the value-compute vectorize despite the
+    indexed RMW. The flag is gated on statically-known-distinct indices (a constant with
+    unique entries, or a ``unique_indices`` assumption) and only for ``inc`` (``set``
+    vectorizes regardless)."""
+
+    @staticmethod
+    def _write_spec(fn):
+        for n in fn.maker.fgraph.toposort():
+            if isinstance(n.op, IndexedElemwise):
+                writes = [e for e in n.op.indexed_outputs if e is not None]
+                assert len(writes) == 1
+                return writes[0]
+        raise AssertionError("no IndexedElemwise found")
+
+    def test_constant_unique_index_flagged(self):
+        target = pt.vector("target", shape=(10,))
+        x = pt.vector("x", shape=(5,))
+        idx = np.array([0, 1, 2, 3, 4], dtype=np.int64)  # unique
+        fn = function([target, x], target[idx].inc(pt.exp(x)), mode=NUMBA_MODE)
+        assert_fused(fn)
+        _sources, _axis, mode, distinct = self._write_spec(fn)
+        assert mode == "inc" and distinct is True
+
+    def test_constant_duplicate_index_not_flagged(self):
+        target = pt.vector("target", shape=(10,))
+        x = pt.vector("x", shape=(5,))
+        idx = np.array([0, 0, 1, 2, 3], dtype=np.int64)  # has a duplicate
+        fn = function([target, x], target[idx].inc(pt.exp(x)), mode=NUMBA_MODE)
+        _sources, _axis, _mode, distinct = self._write_spec(fn)
+        assert distinct is False
+
+    def test_assumed_unique_index_flagged(self):
+        target = pt.vector("target", shape=(10,))
+        x = pt.vector("x")
+        idx0 = pt.vector("idx", dtype="int64")
+        idx = assume(idx0, unique_indices=True)
+        fn = function([target, idx0, x], target[idx].inc(pt.exp(x)), mode=NUMBA_MODE)
+        _sources, _axis, mode, distinct = self._write_spec(fn)
+        assert mode == "inc" and distinct is True
+
+    def test_runtime_index_not_flagged(self):
+        target = pt.vector("target", shape=(10,))
+        x = pt.vector("x")
+        idx0 = pt.vector("idx", dtype="int64")
+        fn = function([target, idx0, x], target[idx0].inc(pt.exp(x)), mode=NUMBA_MODE)
+        _sources, _axis, _mode, distinct = self._write_spec(fn)
+        assert distinct is False
+
+    def test_set_mode_not_flagged(self):
+        # `set` vectorizes without the promise, so it is never flagged even when unique.
+        target = pt.vector("target", shape=(10,))
+        x = pt.vector("x")
+        idx0 = pt.vector("idx", dtype="int64")
+        idx = assume(idx0, unique_indices=True)
+        fn = function([target, idx0, x], target[idx].set(pt.exp(x)), mode=NUMBA_MODE)
+        _sources, _axis, mode, distinct = self._write_spec(fn)
+        assert mode == "set" and distinct is False
+
+    def test_assumed_unique_correctness(self):
+        # The promise must not change results (exercises the metadata-emitting codegen).
+        rng = np.random.default_rng(0)
+        target = pt.vector("target", shape=(64,))
+        x = pt.vector("x", shape=(64,))
+        idx0 = pt.vector("idx", dtype="int64")
+        idx = assume(idx0, unique_indices=True)
+        fn, fn_u = fused_and_unfused([target, idx0, x], target[idx].inc(pt.exp(x)))
+        assert_fused(fn)
+        tv, xv = rng.normal(size=64), rng.normal(size=64)
+        iv = rng.permutation(64).astype(np.int64)  # genuinely unique
+        np.testing.assert_allclose(
+            fn(tv.copy(), iv, xv), fn_u(tv.copy(), iv, xv), rtol=1e-10
+        )
 
 
 class TestShapeValidation:
