@@ -473,6 +473,42 @@ def test_vectorizable_expm1(dtype):
     )  # full domain incl. vector exp's own error
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_vectorizable_sigmoid(dtype):
+    """sigmoid lowered via the division-guard select (1/(1+exp(-x)) with a dead `d == 0`
+    guard that lets the loop vectorize) stays accurate and matches the naive form.
+
+    The guard never fires (1 + exp(-x) >= 1), so the result is identical to 1/(1+exp(-x)); we
+    sweep a wide range including the saturating tails (-> 0 and -> 1). The form is gated solely
+    on numba__veclib (it is ulp-neutral, so it only pays off vectorized), so we enable it to
+    exercise the vectorizable lowering for both dtypes; no library is wired, so this checks
+    accuracy, not the SIMD lowering.
+    """
+    with config.change_flags(numba__veclib="libmvec"):
+        x = pt.vector("x", dtype=dtype)
+        fn = function([x], pt.sigmoid(x), mode=numba_mode)
+
+    # |x| < 88 keeps exp(-x) finite in float32; the 1e3 points saturate to exactly 0 and 1
+    x_test = np.concatenate([np.linspace(-80, 80, 8000), np.array([-1e3, 1e3])]).astype(
+        dtype
+    )
+    got = fn(x_test)
+    with np.errstate(
+        over="ignore"
+    ):  # exp(-x) overflows to inf at the -1e3 point (-> 0)
+        ref = 1.0 / (1.0 + np.exp(-x_test.astype("float64")))
+
+    assert got.dtype == np.dtype(
+        dtype
+    )  # output dtype; does NOT reveal an internal upcast
+    np.testing.assert_array_equal(
+        got[-2:], np.array([0.0, 1.0], dtype=dtype)
+    )  # saturation
+    assert (
+        _max_ulp_err(got, ref, dtype) < 4
+    )  # ~2 ulp; guard is exact, scalar exp is accurate
+
+
 @pytest.mark.parametrize("dtype", ["float64", "float32"])
 @pytest.mark.parametrize(
     "op, lo, hi",
@@ -481,8 +517,9 @@ def test_vectorizable_expm1(dtype):
         (pt.expm1, -5.0, 5.0),
         (pt.log1mexp, -5.0, -0.01),
         (pt.softplus, -30.0, 30.0),
+        (pt.sigmoid, -10.0, 10.0),
     ],
-    ids=["log1p", "expm1", "log1mexp", "softplus"],
+    ids=["log1p", "expm1", "log1mexp", "softplus", "sigmoid"],
 )
 def test_vectorizable_op_benchmark(op, lo, hi, dtype, benchmark):
     """Throughput of the SIMD/cache-friendly log1p / expm1 / log1mexp / softplus lowerings.
