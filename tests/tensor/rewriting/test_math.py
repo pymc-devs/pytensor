@@ -38,9 +38,13 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.math import (
+    All,
+    Any,
     Dot,
     Max,
+    Min,
     Prod,
+    ProdWithoutZeros,
     Sum,
     _conj,
     _matmul,
@@ -148,7 +152,7 @@ from pytensor.tensor.type import (
 )
 from pytensor.tensor.variable import TensorConstant
 from tests import unittest_tools as utt
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -2828,6 +2832,16 @@ class TestReduceChain:
 class TestLocalSumProd:
     """Test sum/prod rewrites."""
 
+    # local_careduce_of_alloc is a specialize rewrite, so the careduce-of-alloc
+    # tests run the production canonicalize+specialize pipeline (where it fires
+    # from its real registration) rather than applying it in isolation. fusion
+    # and the pow->squaring rewrites are excluded so that the resulting Prods
+    # stay readable as Pow instead of collapsing into Composites.
+    careduce_cfg = dict(
+        include=("canonicalize", "specialize"),
+        exclude=("fusion", "local_pow_to_nested_squaring", "local_pow_specialize"),
+    )
+
     def setup_method(self):
         self.mode = get_default_mode().including("canonicalize", "specialize")
 
@@ -3141,14 +3155,19 @@ class TestLocalSumProd:
                 rewritten_out_fn(*test_vals),
             )
 
-    def test_local_sum_prod_alloc(self):
+    def test_local_careduce_of_alloc(self):
         a = dtensor3()
         input = np.asarray(np.arange(2 * 3 * 4).reshape(2, 3, 4), dtype="float64")
         mode = self.mode.including("specialize").excluding("fusion")
 
         for t_like, n_like, nb_nodes in [
-            (pt.zeros_like, np.zeros_like, (1, 3, 3, 2)),
-            (pt.ones_like, np.ones_like, (5, 5, 5, 6)),
+            # node counts for: full reduction, single-axis reduction, two chained
+            # single-axis reductions
+            (pt.zeros_like, np.zeros_like, (1, 3, 2)),
+            # ones_like allocs an all-broadcastable value; partial reductions
+            # leave a redundant ExpandDims (a generic alloc-value concern, not
+            # this rewrite's), hence the extra node vs zeros_like.
+            (pt.ones_like, np.ones_like, (5, 6, 8)),
         ]:
             # test sum
             f = function([a], t_like(a).sum(None), mode=mode)
@@ -3166,34 +3185,17 @@ class TestLocalSumProd:
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
                 assert not any(isinstance(node.op, Sum) for node in topo)
-            for i in range(3):
-                f = function([a], t_like(a).sum(i), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).sum(i))
-                assert len(f.maker.fgraph.apply_nodes) == nb_nodes[2]
-                topo = f.maker.fgraph.toposort()
-                assert topo[-1].op == pt.alloc
-                assert not any(isinstance(node.op, Sum) for node in topo)
 
             # test prod
             f = function([a], t_like(a).prod(None), mode=mode)
             utt.assert_allclose(f(input), n_like(input).prod())
-            # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[0]
 
             f = function([a], t_like(a).prod([0, 1, 2]), mode=mode)
             utt.assert_allclose(f(input), n_like(input).prod())
-            # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[0]
 
             for d in range(3):
                 f = function([a], t_like(a).prod(d), mode=mode)
                 utt.assert_allclose(f(input), n_like(input).prod(d))
-                # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[1]
-                topo = f.maker.fgraph.toposort()
-                assert topo[-1].op == pt.alloc
-                assert not any(isinstance(node.op, Prod) for node in topo)
-            for i in range(3):
-                f = function([a], t_like(a).prod(i), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).prod(i))
-                # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[2]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
                 assert not any(isinstance(node.op, Prod) for node in topo)
@@ -3201,10 +3203,137 @@ class TestLocalSumProd:
             for d, dd in [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)]:
                 f = function([a], t_like(a).sum(d).sum(dd), mode=mode)
                 utt.assert_allclose(f(input), n_like(input).sum(d).sum(dd))
-                assert len(f.maker.fgraph.apply_nodes) == nb_nodes[3]
+                assert len(f.maker.fgraph.apply_nodes) == nb_nodes[2]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
                 assert not any(isinstance(node.op, Sum) for node in topo)
+
+    def test_local_careduce_of_alloc_symbolic_scalar(self):
+        # The alloc'd value may be a symbolic (non-constant) scalar; the alloc
+        # only broadcasts it, so the reduction still factors out as value * size
+        # (Sum) or value ** size (Prod).
+        cfg = self.careduce_cfg
+        x = scalar("x")
+        x_val = np.float64(1.5)
+
+        result = RewriteTester([x], [pt.broadcast_to(x, (3, 4)).sum()], **cfg)
+        result.assert_graph(x * np.int64(12))
+        result.assert_eval(x_val)
+
+        # Partial reduction leaves an Alloc of (x * size) on the kept axis.
+        result = RewriteTester([x], [pt.broadcast_to(x, (3, 4)).sum(axis=0)], **cfg)
+        result.assert_graph(pt.alloc(x * np.int64(3), 4))
+        result.assert_eval(x_val)
+
+        result = RewriteTester([x], [pt.alloc(x, 2, 3).prod()], **cfg)
+        result.assert_graph(x ** np.int64(6))
+        result.assert_eval(x_val)
+
+    def test_local_careduce_of_alloc_broadcast_reduced_axes(self):
+        # The alloc need only broadcast its value along the *reduced* axes; the
+        # value may carry real data on the kept axes (e.g. a batch dimension
+        # introduced by vectorizing ``alloc(x, n).sum()``).
+        cfg = self.careduce_cfg
+        bx = vector("bx")
+        bx_val = np.array([1.0, 2.0, 3.0, 4.0])
+        batched = bx[:, None]  # (B, 1): broadcast along the to-be-reduced axis
+
+        result = RewriteTester(
+            [bx], [pt.alloc(batched, bx.shape[0], 5).sum(axis=1)], **cfg
+        )
+        result.assert_graph(bx * np.array([5]))
+        result.assert_eval(bx_val)
+
+        result = RewriteTester(
+            [bx], [pt.alloc(batched, bx.shape[0], 3).prod(axis=1)], **cfg
+        )
+        result.assert_graph(bx ** np.array([3]))
+        result.assert_eval(bx_val)
+
+        # Reducing only a real-data axis pushes the reduction *through* the alloc:
+        # reduce the value first, then broadcast the (smaller) result.
+        m = matrix("m")
+        m_val = np.arange(6.0).reshape(2, 3)
+        result = RewriteTester(
+            [m], [pt.alloc(m, 2, m.shape[0], m.shape[1]).sum(axis=1)], **cfg
+        )
+        result.assert_graph(pt.alloc(pt.sum(m, axis=0), 2, m.shape[1]))
+        result.assert_eval(m_val)
+
+    def test_local_careduce_of_alloc_mixed_axes(self):
+        # When a reduction spans both broadcast and real-data axes of the alloc,
+        # the broadcast axes are factored out as a multiplier (Sum) or power
+        # (Prod) while the real ones are reduced on the (smaller) value.
+        cfg = self.careduce_cfg
+
+        x = vector("x")
+        x_val = np.array([1.0, 2.0, 3.0])
+        result = RewriteTester([x], [pt.alloc(x, 5, 3).sum()], **cfg)
+        result.assert_graph(pt.sum(x, axis=0) * np.int64(5))
+        result.assert_eval(x_val)
+
+        m = matrix("m")
+        m_val = np.arange(6.0).reshape(2, 3)
+        result = RewriteTester([m], [pt.alloc(m, 4, 2, 3).sum(axis=(0, 1))], **cfg)
+        result.assert_graph(pt.specify_shape(pt.sum(m, axis=0), 3) * np.array([4]))
+        result.assert_eval(m_val)
+
+        result = RewriteTester([m], [pt.alloc(m, 4, 2, 3).prod(axis=(0, 1))], **cfg)
+        result.assert_graph(pt.specify_shape(pt.prod(m, axis=0), 3) ** np.array([4]))
+        result.assert_eval(m_val)
+
+        # A broadcast axis that is *kept* (not in the value, not reduced) must
+        # still be materialized by an alloc on the rewrite's output.
+        v = vector("v")
+        v_val = np.array([1.0, 2.0, 3.0])
+        result = RewriteTester([v], [pt.alloc(v, 4, 6, 3).sum(axis=1)], **cfg)
+        result.assert_graph(pt.alloc(v * np.array([6]), 4, 3))
+        result.assert_eval(v_val)
+
+    @pytest.mark.parametrize("reduce_op", [Max, Min, All, Any])
+    def test_local_careduce_of_alloc_idempotent(self, reduce_op):
+        # Idempotent reductions (max/min/all/any) over the alloc's broadcast axes
+        # just drop those axes, with no size factor: repeating a value doesn't
+        # change its max, min, or truth. A boolean input keeps all/any from
+        # casting their input to bool (``!= 0``), so the rewrite output is exact.
+        cfg = self.careduce_cfg
+        b = matrix("b", dtype="bool")
+        b_val = np.array([[True, False, True], [False, True, True]])
+
+        # Full reduction drops the new broadcast axis and reduces ``b`` directly.
+        result = RewriteTester([b], [reduce_op(axis=None)(pt.alloc(b, 4, 2, 3))], **cfg)
+        result.assert_graph(reduce_op(axis=(0, 1))(b))
+        result.assert_eval(b_val)
+
+        # Mixed reduction over the broadcast axis and ``b``'s first axis, keeping
+        # the last; the kept size is restored with a SpecifyShape.
+        result = RewriteTester(
+            [b], [reduce_op(axis=(0, 1))(pt.alloc(b, 4, 2, 3))], **cfg
+        )
+        result.assert_graph(pt.specify_shape(reduce_op(axis=0)(b), 3))
+        result.assert_eval(b_val)
+
+    def test_local_careduce_of_alloc_prod_without_zeros(self):
+        # ProdWithoutZeros follows Prod's value ** size rule for a broadcast axis
+        # (a repeated zero stays zero). The input has a zero so its zero handling
+        # is exercised too.
+        cfg = self.careduce_cfg
+        m = matrix("m")
+        m_val = np.array([[2.0, 0.0, 4.0], [1.0, 3.0, 5.0]])
+
+        result = RewriteTester(
+            [m], [ProdWithoutZeros(axis=None)(pt.alloc(m, 4, 2, 3))], **cfg
+        )
+        result.assert_graph(ProdWithoutZeros(axis=(0, 1))(m) ** np.int64(4))
+        result.assert_eval(m_val)
+
+        result = RewriteTester(
+            [m], [ProdWithoutZeros(axis=(0, 1))(pt.alloc(m, 4, 2, 3))], **cfg
+        )
+        result.assert_graph(
+            pt.specify_shape(ProdWithoutZeros(axis=0)(m), 3) ** np.array([4])
+        )
+        result.assert_eval(m_val)
 
     def test_local_sum_prod_mul_by_scalar_stack_trace(self):
         """Test that stack trace is copied over correctly for `local_sum_prod_mul_by_scalar`."""
