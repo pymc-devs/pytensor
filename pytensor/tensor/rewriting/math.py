@@ -46,8 +46,13 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.math import (
+    All,
+    Any,
     Dot,
+    Max,
+    Min,
     Prod,
+    ProdWithoutZeros,
     Sum,
     _conj,
     _dot,
@@ -2121,62 +2126,77 @@ def local_reduce_broadcastable(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([Sum, Prod])
-def local_opt_alloc(fgraph, node):
+@node_rewriter([Sum, Prod, ProdWithoutZeros, Max, Min, All, Any])
+def local_careduce_of_alloc(fgraph, node):
     """
-    sum(alloc(constant,shapes...)) => constant*prod(shapes)
-    or
-    prod(alloc(constant,shapes...)) => constant**prod(shapes)
+    Push a reduction through the alloc it reduces, factoring out the broadcast
+    axes::
 
+        sum(alloc(x, shapes))   => sum(x) * prod(broadcast shapes)
+        prod(alloc(x, shapes))  => prod(x) ** prod(broadcast shapes)
+        max(alloc(x, shapes))   => max(x)        # and min/all/any
+
+    A reduced axis that the alloc merely broadcasts (a new dimension, or one
+    where ``x`` is broadcastable) repeats the same value. Reducing such an axis
+    is a multiplication (``Sum``) or power (``Prod``/``ProdWithoutZeros``) by the
+    axis size, and a no-op for idempotent reductions (``Max``/``Min``/``All``/
+    ``Any``). Reduced axes where ``x`` holds real data are reduced on ``x``
+    itself. Kept axes - including broadcast ones that aren't reduced - are
+    re-materialized by an alloc on the output.
     """
-    (node_inps,) = node.inputs
-    if node_inps.owner and isinstance(node_inps.owner.op, Alloc):
-        inp = node_inps.owner.inputs[0]
-        shapes = node_inps.owner.inputs[1:]
-        try:
-            val = get_underlying_scalar_constant_value(inp, only_process_constants=True)
-            assert val.size == 1
-            val = val.reshape(1)[0]
-            # check which type of op
-            size = mul(*shapes)
-            if inp.dtype in ("float16", "float32"):
-                # shapes are ints and normally int64.
-                # We don't want to have a float64 upcast
-                # We don't want to downcast to float16
-                # as we fear it could loose too much precision
-                # that will be amplified by the mul/pow below.
-                size = size.astype("float32")
-            if node.op.axis is None or node.op.axis == tuple(range(inp.ndim)):
-                if isinstance(node.op, Sum):
-                    val = val * size
-                else:
-                    val = val**size
-                # Sum can change the input dtype (upcast or bool
-                # -> float32) by default or by user request.
-                # We can ignore the acc_dtype, as there is only 1
-                # elemwise we will do and not a sequence, so there is no
-                # accumulation of errors.
-                # So mostly, we just need to cast the output to the old
-                # dtype.
-                val = val.astype(node.outputs[0].dtype)
-                return [val]
-            to_prod = [shapes[i] for i in range(len(shapes)) if i in node.op.axis]
-            if to_prod:
-                size = mul(*to_prod)
-                if isinstance(node.op, Sum):
-                    val *= size
-                else:
-                    val = val**size
-            # See comments above.
-            val = val.astype(node.outputs[0].dtype)
-            return [
-                alloc(
-                    val,
-                    *[shapes[i] for i in range(len(shapes)) if i not in node.op.axis],
-                )
-            ]
-        except NotScalarConstantError:
+    match node.inputs[0].owner_op_and_inputs:
+        case (Alloc(), value, *shapes):
             pass
+        case _:
+            return None
+
+    ndim = len(shapes)
+    axis = node.op.axis
+    axis = tuple(range(ndim)) if axis is None else axis
+
+    # ``value`` is right-aligned against the alloc output dimensions.
+    offset = ndim - value.type.ndim
+    value_bcast = value.type.broadcastable
+
+    # Split the value's reduced dimensions: the ones it broadcasts (size-1) are
+    # just squeezed out (their repeat count is folded into ``size`` below), the
+    # rest are genuinely reduced.
+    squeeze_axes, reduce_axes = [], []
+    for a in axis:
+        if (j := a - offset) >= 0:
+            if value_bcast[j]:
+                squeeze_axes.append(j)
+            else:
+                reduce_axes.append(j)
+    if squeeze_axes:
+        value = value.squeeze(squeeze_axes)
+        # squeezing shifts each remaining axis left past the dropped ones
+        reduce_axes = [j - sum(s < j for s in squeeze_axes) for j in reduce_axes]
+    if reduce_axes:
+        value = node.op.clone(axis=tuple(reduce_axes))(value)
+
+    # The remaining reduced axes are pure broadcasts of ``value``. ``Sum`` turns
+    # them into a multiplication by their size, ``Prod``/``ProdWithoutZeros``
+    # into a power; idempotent reductions (max/min/all/any) are unaffected, as
+    # repeating a value doesn't change its maximum, minimum, or truth.
+    if isinstance(node.op, Sum | Prod | ProdWithoutZeros):
+        size_shapes = [shapes[a] for a in axis if a < offset or value_bcast[a - offset]]
+        if size_shapes:
+            size = variadic_mul(*size_shapes)
+            if value.dtype in ("float16", "float32"):
+                # Avoid a float64 upcast from the int64 shapes (or a float16
+                # downcast); either would be amplified by the mul/pow below.
+                size = size.astype("float32")
+            value = value * size if isinstance(node.op, Sum) else value**size
+
+    # The reduction may change the dtype; a single elemwise has no accumulation
+    # error, so ignore acc_dtype and just cast to the reduction's output dtype.
+    value = value.astype(node.outputs[0].dtype)
+
+    kept_shapes = [shapes[a] for a in range(ndim) if a not in axis]
+    out = alloc(value, *kept_shapes) if kept_shapes else value
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
 
 
 @register_specialize
