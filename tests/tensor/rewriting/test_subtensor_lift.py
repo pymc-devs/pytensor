@@ -225,7 +225,8 @@ class TestLocalSubtensorOfBatchDims:
         idx = pt.lvector("idx")
         idx_unique = assume(idx, unique_indices=True)
         out = (x + y)[idx_unique]
-        # Drain resolves the asserted fact onto idx, then canonicalize lifts the index.
+        # Canonicalize lifts the index (reading the unique_indices assumption off
+        # the SpecifyAssumptions wrapper), then Drain strips the now-redundant wrapper.
         result = RewriteTester(
             [x, y, idx],
             [out],
