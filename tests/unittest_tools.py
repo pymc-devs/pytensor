@@ -454,8 +454,11 @@ class RewriteTester:
     minus ``inplace``.  Pass ``include=None`` to disable database rewrites
     entirely.
 
-    **custom_rewrite** applies a specific rewriter before the database
-    passes.  ``NodeRewriter`` instances are automatically wrapped in a DFS
+    **custom_rewrite** applies a specific rewriter after the database
+    passes, mirroring the ``canonicalize``-then-specialize order of a real
+    compilation (and matching ``rewrite_graph``): the database first puts the
+    graph in canonical form, then the rewriter under test runs on it.
+    ``NodeRewriter`` instances are automatically wrapped in a DFS
     ``WalkingGraphRewriter``.  For example, testing ``log(1 + x) → log1p(x)``
     with the ``local_log1p`` node rewriter::
 
@@ -491,7 +494,7 @@ class RewriteTester:
     exclude
         Rewrite database tags to exclude.
     custom_rewrite
-        A ``GraphRewriter`` or ``NodeRewriter`` to apply before the database
+        A ``GraphRewriter`` or ``NodeRewriter`` to apply after the database
         rewrites.  ``NodeRewriter`` instances are automatically wrapped in a
         DFS ``WalkingGraphRewriter``.
     linker
@@ -520,11 +523,6 @@ class RewriteTester:
         self._orig_fn = None
         self._rewr_fn = None
 
-        if custom_rewrite is not None:
-            if isinstance(custom_rewrite, NodeRewriter):
-                custom_rewrite = dfs_rewriter(custom_rewrite)
-            custom_rewrite.rewrite(self.rewr_fg)
-
         if include:
             if (
                 isinstance(include, str)
@@ -538,6 +536,11 @@ class RewriteTester:
             if exclude:
                 query = query.excluding(*exclude)
             optdb.query(query).rewrite(self.rewr_fg)
+
+        if custom_rewrite is not None:
+            if isinstance(custom_rewrite, NodeRewriter):
+                custom_rewrite = dfs_rewriter(custom_rewrite)
+            custom_rewrite.rewrite(self.rewr_fg)
 
     @property
     def orig_fn(self):
