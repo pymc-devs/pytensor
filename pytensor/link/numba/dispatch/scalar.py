@@ -399,22 +399,55 @@ def numba_funcify_Reciprocal(op, node, **kwargs):
     return reciprocal, scalar_op_cache_key(op, cache_version=1)
 
 
+@numba_basic.numba_njit(fastmath=False, inline="always")
+def _sigmoid_via_exp(x):
+    # sigmoid(x) = 1 / (1 + exp(-x)). The `d == 0` guard is DEAD (`1 + exp(-x)` >= 1) but the
+    # division-guard select lets the loop vectorizer pull the division through and replace `exp`
+    # with a vector call; a plain `1 / (1 + exp(-x))` stays scalar (bare division blocks it, like
+    # `_log1p_via_log`'s `um1 == 0` select). `fastmath` off so the select is not proved dead. The
+    # `1`/`0` carry x's dtype via `type(x)(...)` (a bare `1` is int64; `int64 + float32` ->
+    # float64, halving the SIMD width on float32).
+    one = type(x)(1)
+    d = one + np.exp(-x)
+    return type(x)(0) if d == type(x)(0) else one / d
+
+
 @register_funcify_and_cache_key(Sigmoid)
 def numba_funcify_Sigmoid(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.dtype
-    if inp_dtype.startswith("uint"):
-        upcast_uint_dtype = {
-            "uint8": np.float32,  # numpy uses float16, but not Numba
-            "uint16": np.float32,
-            "uint32": np.float64,
-            "uint64": np.float64,
-        }[inp_dtype]
+    upcast_uint_dtype = {
+        "uint8": np.float32,  # numpy uses float16, but not Numba
+        "uint16": np.float32,
+        "uint32": np.float64,
+        "uint64": np.float64,
+    }.get(inp_dtype)
+    # `_sigmoid_via_exp` vectorizes under a vector library (2.7x float64 / 5.8x float32), but its
+    # division-guard select is a no-op (the `d == 0` arm is dead), so it buys nothing scalar.
+    # Unlike Log1p/Expm1/Softplus it is not a precision-for-speed trade, so `numba__fastmath` is
+    # not the right gate -- only a wired library makes it pay. Gate solely on `numba__veclib`;
+    # else emit plain `1 / (1 + exp(-x))`.
+    vectorizable = bool(config.numba__veclib)
 
-        @numba_basic.numba_njit
+    if upcast_uint_dtype is not None:
+        if vectorizable:
+
+            @numba_basic.numba_njit(fastmath=False)
+            def sigmoid(x):
+                return _sigmoid_via_exp(numba_basic.direct_cast(x, upcast_uint_dtype))
+
+        else:
+
+            @numba_basic.numba_njit
+            def sigmoid(x):
+                # Can't negate uint
+                float_x = numba_basic.direct_cast(x, upcast_uint_dtype)
+                return 1 / (1 + np.exp(-float_x))
+
+    elif vectorizable:
+
+        @numba_basic.numba_njit(fastmath=False)
         def sigmoid(x):
-            # Can't negate uint
-            float_x = numba_basic.direct_cast(x, upcast_uint_dtype)
-            return 1 / (1 + np.exp(-float_x))
+            return _sigmoid_via_exp(x)
 
     else:
 
@@ -422,7 +455,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
         def sigmoid(x):
             return 1 / (1 + np.exp(-x))
 
-    return sigmoid, scalar_op_cache_key(op, cache_version=1)
+    return sigmoid, scalar_op_cache_key(op, veclib=vectorizable, cache_version=3)
 
 
 @register_funcify_and_cache_key(GammaLn)
