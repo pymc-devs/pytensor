@@ -3,7 +3,7 @@ import re
 import numpy as np
 import pytest
 
-from pytensor import In, Mode, function
+from pytensor import In, Mode, config, function
 from pytensor.compile import get_default_mode
 from pytensor.scalar import (
     Composite,
@@ -18,6 +18,7 @@ from pytensor.scalar import (
     sin,
 )
 from pytensor.scalar.loop import ScalarLoop
+from pytensor.scalar.math import _make_scalar_loop
 from pytensor.tensor import exp as tensor_exp
 from pytensor.tensor import lvector
 from pytensor.tensor.elemwise import Elemwise
@@ -129,6 +130,24 @@ def test_init_update_type_error():
     assert x.type.dtype == "float64"
     with pytest.raises(TypeError, match="Init and update types must be the same"):
         ScalarLoop(init=[x0], constant=[const], update=[x])
+
+
+@pytest.mark.parametrize("cast_policy", ["custom", "numpy+floatX"])
+def test_make_scalar_loop_promoting_update(cast_policy):
+    # A counter's `+ 1` promotes to int64 under cast_policy="numpy+floatX". The
+    # update is fed back as the next init, so _make_scalar_loop must cast it back
+    # to the init dtype to keep the loop well-typed.
+    n_steps = int64("n_steps")
+
+    def inner(n):
+        return [n + 1], None
+
+    with config.change_flags(cast_policy=cast_policy):
+        out = _make_scalar_loop(
+            n_steps, [np.array(0, dtype="int32")], [], inner, name="count"
+        )
+    assert out.type.dtype == "int32"
+    assert function([n_steps], out)(n_steps=5) == 5
 
 
 def test_rebuild_dtype():

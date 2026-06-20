@@ -744,6 +744,11 @@ def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=Scal
     init = [i for i in init if i is not None]
     init_ = [i for i in init_ if i is not None]
     update_ = [u for u in update_ if u is not None]
+    # Each update is fed back as the next init, so their dtypes must match. A
+    # literal in the inner function can promote an update (e.g. a counter's
+    # `+ 1` becomes int64 under cast_policy="numpy+floatX"); cast it back. No-op
+    # when dtypes already agree.
+    update_ = [u.astype(i.type.dtype) for i, u in zip(init_, update_)]
     op = loop_op(
         init=init_,
         constant=constant_,
