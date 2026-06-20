@@ -379,3 +379,125 @@ class TestScalarLoop:
         res = fn(x_test)
         expected_res = ps.psi(x).eval({x: x_test})
         np.testing.assert_allclose(res, expected_res)
+
+
+def _max_ulp_err(got, ref64, dtype):
+    """Max error in ulps of `dtype`, over finite points, vs a float64 reference.
+
+    Uses the true spacing at each value, not a relative-error proxy. `np.spacing` is
+    signed (negative for negative args), so we take abs -- otherwise a `> 0` mask would
+    silently drop every point on the negative branch, which is the whole reason log1p /
+    expm1 exist. A float64 reference resolves float32 accuracy exactly; for float64 it
+    measures agreement with numpy's own (well-tested) log1p / expm1.
+    """
+    got = np.asarray(got).astype("float64")
+    target = np.asarray(ref64).astype(
+        dtype
+    )  # reference correctly rounded to target dtype
+    sp = np.abs(np.spacing(target)).astype("float64")
+    target = target.astype("float64")
+    finite = np.isfinite(got) & np.isfinite(target) & (sp > 0)
+    return (np.abs(got[finite] - target[finite]) / sp[finite]).max()
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_vectorizable_log1p(dtype):
+    """log1p lowered via a corrected log(1 + x) stays accurate over a wide range.
+
+    The naive log(1 + x) collapses near 0 (the regime log1p exists for), so we sweep
+    densely and deep into the near-zero cancellation region in BOTH signs -- a narrow or
+    positive-only grid never stresses the correction and a broken one slips through. We
+    also check the domain edge: log1p(-1) = -inf, log1p(x < -1) = nan. The corrected form
+    is emitted under a vector library (both dtypes) or on float32 under numba__fastmath, so
+    we wire numba__veclib to exercise the corrected lowering for both dtypes; we do not wire
+    an actual library, since this checks the corrected form's accuracy, not its SIMD lowering.
+    """
+    with config.change_flags(numba__veclib="libmvec"):
+        x = pt.vector("x", dtype=dtype)
+        fn = function([x], pt.log1p(x), mode=numba_mode)
+
+    neg = -np.logspace(-20, np.log10(0.999), 4000)  # (-0.999, 0), deep near-zero
+    pos = np.logspace(-20, 2.5, 4000)  # (0, ~316)
+    edge = np.array([-1.0, -1.5, -10.0])  # -inf, nan, nan
+    x_test = np.concatenate([neg, pos, edge]).astype(dtype)
+
+    got = fn(x_test)
+    with np.errstate(invalid="ignore", divide="ignore"):  # x <= -1 is intentional
+        ref = np.log1p(x_test.astype("float64"))
+
+    assert got.dtype == np.dtype(
+        dtype
+    )  # output dtype; does NOT reveal an internal upcast
+    np.testing.assert_array_equal(np.isnan(got), np.isnan(ref))  # nan for x < -1
+    np.testing.assert_array_equal(np.isinf(got), np.isinf(ref))  # -inf at x == -1
+    assert _max_ulp_err(got, ref, dtype) < 4  # ~2 ulp worst case observed
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_vectorizable_expm1(dtype):
+    """expm1 lowered via a polynomial near 0 / exp(x) - 1 elsewhere stays accurate.
+
+    The naive exp(x) - 1 collapses near 0, so we sweep densely deep near-zero in both
+    signs. The polynomial branch (|x| < ln2) carries no exp, so its accuracy is
+    independent of whatever vector exp is wired in -- we bound it tightly there, the
+    branch the rewrite exists for. Across the full domain (incl. the exp(x) - 1 branch,
+    which only inherits exp's own accuracy) we keep a looser bound, plus the overflow edge
+    where it must go to +inf exactly where numpy does. The polynomial is emitted under a
+    vector library (both dtypes) or on float32 under numba__fastmath, so we wire numba__veclib
+    to exercise the polynomial for both dtypes; we do not actually wire a library in here, since
+    this checks the polynomial's accuracy, not its SIMD lowering.
+    """
+    with config.change_flags(numba__veclib="libmvec"):
+        x = pt.vector("x", dtype=dtype)
+        fn = function([x], pt.expm1(x), mode=numba_mode)
+
+    ln2 = np.log(2.0)
+    small = np.logspace(-20, np.log10(ln2), 4000)  # |x| in (0, ln2): polynomial branch
+    mid = np.logspace(np.log10(ln2), 1, 2000)  # |x| in (ln2, 10): exp(x) - 1 branch
+    overflow = np.array([1e3, 1e5])  # exp overflows -> +inf in both float32 and float64
+    x_test = np.concatenate([-small, small, -mid, mid, overflow]).astype(dtype)
+
+    got = fn(x_test)
+    with np.errstate(over="ignore"):  # the overflow points are intentional
+        ref = np.expm1(x_test.astype("float64"))
+        ref_same_dtype = np.expm1(x_test)
+
+    assert got.dtype == np.dtype(
+        dtype
+    )  # output dtype; does NOT reveal an internal upcast
+    np.testing.assert_array_equal(np.isinf(got), np.isinf(ref_same_dtype))  # +inf
+    poly = np.abs(x_test) < ln2
+    assert _max_ulp_err(got[poly], ref[poly], dtype) < 4  # cancellation region: ~1 ulp
+    assert (
+        _max_ulp_err(got, ref, dtype) < 16
+    )  # full domain incl. vector exp's own error
+
+
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+@pytest.mark.parametrize(
+    "op, lo, hi",
+    [
+        (pt.log1p, -0.5, 5.0),
+        (pt.expm1, -5.0, 5.0),
+        (pt.log1mexp, -5.0, -0.01),
+        (pt.softplus, -30.0, 30.0),
+    ],
+    ids=["log1p", "expm1", "log1mexp", "softplus"],
+)
+def test_vectorizable_op_benchmark(op, lo, hi, dtype, benchmark):
+    """Throughput of the SIMD/cache-friendly log1p / expm1 / log1mexp / softplus lowerings.
+
+    Runs under the default config (numba__fastmath on, no vector library), so it is
+    reproducible anywhere; comparing this branch against main (pytest-benchmark tracks results
+    across runs) shows the PR's speedup. It is largest for float32. The precision-for-speed
+    rewrites active here are the float32 log1p/expm1 polynomials and softplus (both dtypes),
+    gated on fastmath; float64 log1p/expm1 and sigmoid (both dtypes) keep main's form unless a
+    vector library is wired, so they show ~parity here. A wired library widens every win
+    further -- not exercised here.
+    """
+    x = pt.vector("x", dtype=dtype)
+    fn = function([x], op(x), mode=numba_mode)
+    fn.trust_input = True
+    x_test = rng.uniform(lo, hi, 100_000).astype(dtype)
+    fn(x_test)  # compile before timing
+    benchmark(fn, x_test)
