@@ -29,7 +29,9 @@ def mlx_funcify_SpecifyShape(op, node, **kwargs):
 @mlx_funcify.register(Shape_i)
 def mlx_funcify_Shape_i(op, node, **kwargs):
     def shape_i(x):
-        return x.shape[op.i]
+        # Wrap in an MLX array, like Shape, so downstream ops (e.g. Cast) get
+        # an array rather than a bare Python int (#2096).
+        return mx.array(x.shape[op.i], dtype=mx.int64)
 
     return shape_i
 
