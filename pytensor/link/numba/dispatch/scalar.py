@@ -6,6 +6,7 @@ import numpy as np
 from numba.core import types
 from numba.core.extending import get_cython_function_address
 
+from pytensor import config
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
@@ -24,7 +25,9 @@ from pytensor.scalar.basic import (
     Cast,
     Clip,
     Composite,
+    Expm1,
     Identity,
+    Log1p,
     Mul,
     Pow,
     Reciprocal,
@@ -39,6 +42,21 @@ def scalar_op_cache_key(op, **extra_fields):
     # Scalar Ops don't have _props, because of their weird outputs_types_preference function
     # So we create hash differently
     return sha256(str((type(op), tuple(extra_fields.items()))).encode()).hexdigest()
+
+
+@numba_basic.numba_njit(fastmath=False, inline="always")
+def _log1p_via_log(x):
+    # log1p(x) = log(1 + x) * x / ((1 + x) - 1): the factor recovers the bits lost to
+    # cancellation in (1 + x) near 0 while lowering to the vectorizable `log` instead of the
+    # scalar-only `log1p`. Shared by Log1p and Softplus. `inline="always"` keeps the caller's
+    # loop call-free for the vectorizer, so the caller must also be `fastmath=False`: `reassoc`
+    # would simplify `(1+x)-1` back to `x`, collapsing log1p to 0 in the underflow tail.
+    # `type(x)(1)` keeps the literal in x's dtype (a bare `1` is int64; `int64 + float32` ->
+    # float64, doubling the vectorized width on float32).
+    one = type(x)(1)
+    u = one + x
+    um1 = u - one
+    return x if um1 == 0 else np.log(u) * x / um1
 
 
 @register_funcify_and_cache_key(ScalarOp)
@@ -221,6 +239,85 @@ def numba_funcify_Pow(op, node, **kwargs):
     )
 
 
+@register_funcify_and_cache_key(Log1p)
+def numba_funcify_Log1p(op, node, **kwargs):
+    out_dtype = node.outputs[0].dtype
+    # `_log1p_via_log` (corrected `log`) vectorizes under a vector library and, on float32, beats
+    # scalar `log1p` even without one, at ~1 ulp (glibc `log` near 1 is less accurate than
+    # `log1p`'s small-arg path). On float64 with no library it is also ~0.6x SLOWER in the
+    # small-arg regime log1p exists for, so there it only pays off vectorized. Use it under a
+    # vector library (both dtypes) or float32 + `numba__fastmath` (the opt-in to trade the ulp
+    # for a scalar win); else keep scalar `log1p`. The cache key's `corrected` flag keeps the two
+    # from aliasing.
+    corrected = bool(config.numba__veclib) or (
+        out_dtype == "float32" and config.numba__fastmath
+    )
+    if not corrected:
+
+        @numba_basic.numba_njit(fastmath=False)
+        def log1p(x):
+            return np.log1p(x)
+
+        return log1p, scalar_op_cache_key(op, corrected=False, cache_version=5)
+
+    @numba_basic.numba_njit(fastmath=False)
+    def log1p(x):
+        return _log1p_via_log(x)
+
+    return log1p, scalar_op_cache_key(op, corrected=True, cache_version=5)
+
+
+def _expm1_numba_src(output_dtype):
+    # expm1(x) = x + x**2 * p(x), p(x) = sum_j x**j / (j + 2)!  for |x| < ln2, else exp(x) - 1
+    # (no cancellation past ln2). The polynomial removes the near-0 cancellation without the
+    # `log` the exact correction needs, leaving a single vectorizable `exp`; the caller must keep
+    # `fastmath` off so it is evaluated as written. Term count is sized to eps: the tail at
+    # |x| = ln2 rounds away, so 8 terms hold float32 to 1 ulp (7 give 3), float64 needs all 15
+    # (14 give 2).
+    n_terms = 8 if output_dtype == "float32" else 15
+    cast = "np.float32" if output_dtype == "float32" else ""
+
+    def lit(c):
+        # Every literal must carry the output dtype or a float32 input promotes to float64 (a
+        # bare `1` is int64; `int64 + float32` -> float64). Numba unifies both branch return
+        # types, so the `np.exp(x) - 1` branch below must go through `lit` too.
+        return f"{cast}({c!r})" if cast else repr(c)
+
+    coeffs = [1.0 / math.factorial(j + 2) for j in range(n_terms)]
+    poly = lit(coeffs[-1])
+    for c in reversed(coeffs[:-1]):
+        poly = f"({poly} * x + {lit(c)})"
+    return (
+        f"def expm1(x):\n"
+        f"    if abs(x) < {math.log(2.0)!r}:\n"
+        f"        return x + x * x * ({poly})\n"
+        f"    return np.exp(x) - {lit(1.0)}\n"
+    )
+
+
+@register_funcify_and_cache_key(Expm1)
+def numba_funcify_Expm1(op, node, **kwargs):
+    out_dtype = node.outputs[0].dtype
+    # Polynomial-near-0 + single `exp`: removes expm1's cancellation while lowering to a
+    # vectorizable `exp`. On float32 the 8-term FMA poly plus one `exp` beat scalar `expm1` even
+    # with no library; on float64 it is slower in the near-0 regime unless `exp` becomes a SIMD
+    # call. Use the poly under a vector library (both dtypes) or float32 + `numba__fastmath` (the
+    # opt-in to trade ~0.5 ulp for the scalar win); else fall back to scalar `expm1`. The cache
+    # key's `poly` flag keeps the two from aliasing.
+    poly = bool(config.numba__veclib) or (
+        out_dtype == "float32" and config.numba__fastmath
+    )
+    if not poly:
+        fn, _ = numba_funcify_ScalarOp(op, node, **kwargs)
+        return fn, scalar_op_cache_key(op, poly=False, cache_version=4)
+
+    src = _expm1_numba_src(out_dtype)
+    expm1 = compile_numba_function_src(src, "expm1", {"np": np})
+    return numba_basic.numba_njit(expm1, fastmath=False), scalar_op_cache_key(
+        op, poly=True, cache_version=4
+    )
+
+
 @register_funcify_and_cache_key(Add)
 def numba_funcify_Add(op, node, **kwargs):
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
@@ -339,6 +436,13 @@ def numba_funcify_GammaLn(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Log1mexp)
 def numba_funcify_Log1mexp(op, node, **kwargs):
+    # Mächler (2012) two-branch form with scalar `log1p`. `_log1p_via_log` (trades the `log1p`
+    # libcall for `log` + a division) was reverted here: it is fast only when its argument is
+    # away from 0 -- glibc `log(1+a)` is slow for `1+a` near 1, while `log1p` has a fast
+    # small-argument path. This branch always feeds it small `a = -exp(x)`, the slow regime: a
+    # ~30% float64 regression for no accuracy gain. (Verified to be the argument range, not the
+    # `exp` or the branch: the corrected form alone flips from 1.8x faster on x in (-0.5, 5) to
+    # 0.44x slower as x -> 0.)
     @numba_basic.numba_njit
     def logp1mexp(x):
         if x < np.log(0.5):
@@ -385,6 +489,29 @@ def numba_funcify_Softplus(op, node, **kwargs):
         upcast_uint_dtype = None
     out_dtype = np.dtype(node.outputs[0].type.dtype)
 
+    # Branchless `max(x, 0) + log1p(exp(-|x|))` is ~1.1-1.2x faster than the cascade for the
+    # common mixed-sign case and vectorizes under a vector library, but routes log1p through the
+    # corrected `log`, costing ~1 ulp. Use it under a vector library or `numba__fastmath` (the
+    # opt-in to trade that ulp for speed); else use the accurate Mächler cascade. The cache key's
+    # `branchless` flag keeps the two from aliasing.
+    if bool(config.numba__veclib) or config.numba__fastmath:
+        # Branch-free softplus: max(x, 0) + log1p(exp(-|x|)). Equivalent to the Mächler cascade
+        # but feeds exp/log1p an argument in (0, 1] (their cheap regime) without a per-element
+        # branch: ~1.5x faster on the common case, never overflows. log1p goes through
+        # `_log1p_via_log` for the vectorizable `log`/`exp` (plain `np.log1p` has no vector form).
+        # `type(x)(0)` keeps the literal in x's dtype (`max(float32, float64)` would return
+        # float64, doubling the width). fastmath off so the inlined `(1+x)-1` is not reassociated
+        # to `x` (collapsing log1p to 0 in the underflow tail); vectorization does not need it.
+        @numba_basic.numba_njit(fastmath=False)
+        def softplus(x):
+            if upcast_uint_dtype is not None:
+                # Can't negate uint; upcast once so the formula below is uniform.
+                x = numba_basic.direct_cast(x, upcast_uint_dtype)
+            value = max(x, type(x)(0)) + _log1p_via_log(np.exp(-abs(x)))
+            return numba_basic.direct_cast(value, out_dtype)
+
+        return softplus, scalar_op_cache_key(op, branchless=True, cache_version=5)
+
     @numba_basic.numba_njit
     def softplus(x):
         if x < -37.0:
@@ -400,7 +527,7 @@ def numba_funcify_Softplus(op, node, **kwargs):
             value = x
         return numba_basic.direct_cast(value, out_dtype)
 
-    return softplus, scalar_op_cache_key(op, cache_version=1)
+    return softplus, scalar_op_cache_key(op, branchless=False, cache_version=5)
 
 
 @register_funcify_and_cache_key(ScalarLoop)
