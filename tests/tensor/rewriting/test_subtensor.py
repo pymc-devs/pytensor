@@ -2753,8 +2753,11 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
 
     packed = pt.vector("packed")
     if exp_before_materialize:
-        # We test the same optimized result regardless of whether
-        # the diagonals are updated before or after materialization
+        # Two equivalent ways to build the same ``L``: exponentiate the diagonal
+        # in the packed vector before scattering it into the matrix, or scatter
+        # first and exponentiate the matrix diagonal afterwards (the ``else``
+        # branch below). They are the same computation but optimize to slightly
+        # different graphs under ``BlasOpt`` (see the index-count assertion).
         packed_diag_indices = pt.arange(n + 1).cumsum()[1:] - 1
         log_diag = packed[packed_diag_indices]
         packed_update = packed[packed_diag_indices].set(pt.exp(log_diag))
@@ -2778,7 +2781,6 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
 
     mode = get_default_mode().excluding("fuse_indexed_into_elemwise")
     f = function([packed], [loss, grad], mode=mode)
-    f.dprint(print_shape=True)
 
     idx_types = (
         Subtensor,
@@ -2790,13 +2792,22 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         ExtractDiag,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
-    # The ``BlasOpt`` rewrites lower ``L @ L.T`` to ``Gemm``; the gradient then
-    # fuses the diagonal-gradient term into a ``Gemm`` operand, materializing one
-    # extra set-subtensor. A linker that cannot use them lists ``BlasOpt`` in
-    # ``incompatible_rewrites`` (e.g. the numba linker), keeping the plain ``Dot``
-    # lowering with that term as a vector. Both lowerings are correct.
+    # The gradient w.r.t. ``L`` adds the ``sum(L@L.T)`` term ``2*(ones@L)`` to the
+    # log-det term ``diag(1/diag(L))`` (a diagonal matrix, ``1/diag(L) ==
+    # exp(-diag)``). In the post-materialization formulation this addition happens
+    # at the matrix level, so when ``BlasOpt`` runs its ``GemmOptimizer`` fuses
+    # ``add(dot, C)`` into a single ``Gemm`` with the log-det term as the additive
+    # ``C`` operand; materializing that diagonal ``C`` matrix is one extra
+    # set-subtensor, giving 7 indexing ops. The pre-materialization formulation
+    # keeps the log-det term in the packed vector's index space (added after the
+    # tril gather), so there is no matrix-level ``add(dot, C)`` to fuse and it
+    # stays 6. Without ``Gemm`` (a linker that lists ``BlasOpt`` in
+    # ``incompatible_rewrites``, e.g. numba) the additive term is never raised to
+    # a matrix -- it is folded into an Elemwise on the diagonal entries -- so both
+    # formulations collapse to 6. All lowerings are correct.
     blas_rewrites_run = "BlasOpt" not in f.maker.mode.linker.incompatible_rewrites
-    assert n_idx == (7 if blas_rewrites_run else 6)
+    expected_n_idx = 7 if (blas_rewrites_run and not exp_before_materialize) else 6
+    assert n_idx == expected_n_idx
 
     x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
     # Expected values were computed once by running ``f(x)``.

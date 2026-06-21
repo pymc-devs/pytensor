@@ -27,6 +27,7 @@ from pytensor.tensor.basic import (
     Eye,
     Join,
     MakeVector,
+    Nonzero,
     alloc,
     arange,
     as_tensor,
@@ -244,6 +245,77 @@ def _index_provably_not_larger(idx, val_static_dim, fgraph=None) -> bool:
     return bool(np.prod(idx_static_shape) < val_static_dim)
 
 
+def _constants_jointly_unique(consts) -> bool:
+    """Whether stacked constant indices have no duplicate coordinate tuples.
+
+    The stacked ``np.unique`` can be expensive on large indices, so the result
+    is cached on the first constant's tag. Uniqueness is a property of the whole
+    group, and a constant may belong to several groups (constants are shared
+    across the graph), so the cache is keyed by the group's identities rather
+    than a single flag.
+    """
+    key = tuple(id(c) for c in consts)
+    cache = getattr(consts[0].tag, "jointly_unique_indices", None)
+    if cache is None:
+        cache = consts[0].tag.jointly_unique_indices = {}
+    if key not in cache:
+        datas = [np.asarray(c.data) for c in consts]
+        # A coordinate axis that mixes positive and negative values may alias
+        # (``0`` and ``-dim`` are the same position), so distinctness of the raw
+        # values no longer proves distinctness of the coordinates.
+        if any((data >= 0).any() and (data < 0).any() for data in datas):
+            cache[key] = False
+        else:
+            coords = np.broadcast_arrays(*datas)
+            stacked = np.stack([coord.ravel() for coord in coords])
+            cache[key] = bool(np.unique(stacked, axis=1).shape[1] == stacked.shape[1])
+    return bool(cache[key])
+
+
+def _indices_provably_not_larger(idxs_and_dims, fgraph) -> bool:
+    """Whether advanced-indexing some consecutive axes selects no more elements
+    than those axes already hold, so lifting a Subtensor through the indexing
+    can't increase computation.
+
+    ``idxs_and_dims`` pairs each advanced index (``ndim > 0``) with the static
+    size of the axis it indexes.
+    """
+    if not idxs_and_dims:
+        return True
+
+    idxs = [idx for idx, _ in idxs_and_dims]
+    dims = [dim for _, dim in idxs_and_dims]
+    idx_shapes = [idx.type.shape for idx in idxs]
+
+    # With static shapes the result size is known exactly, so just compare it
+    # against the number of elements the indexed axes hold.
+    if all(d is not None for d in dims) and all(
+        None not in shape for shape in idx_shapes
+    ):
+        return bool(np.prod(np.broadcast_shapes(*idx_shapes)) <= np.prod(dims))
+
+    # Otherwise fall back to proving the indices are duplicate-free, which on its
+    # own bounds the result by the axes' size, even when the sizes are unknown:
+    #  - each index repeats no position on its own axis, or
+    if all(_index_provably_not_larger(idx, dim, fgraph) for idx, dim in idxs_and_dims):
+        return True
+    if len(idxs) > 1:
+        #  - the indices are all the coordinates of one Nonzero, distinct by
+        #    construction (e.g. symbolic tril_indices), or
+        owners = {idx.owner for idx in idxs}
+        if (
+            len(owners) == 1
+            and (owner := next(iter(owners))) is not None
+            and isinstance(owner.op, Nonzero)
+            and set(idxs) == set(owner.outputs)
+        ):
+            return True
+        #  - the constant coordinate tuples have no duplicates.
+        if all(isinstance(idx, Constant) for idx in idxs):
+            return _constants_jointly_unique(idxs)
+    return False
+
+
 @register_canonicalize
 @register_stabilize
 @register_specialize
@@ -345,17 +417,19 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if _non_consecutive_adv_indexing(idx_tuple):
         return None
 
-    # Skip when lifting would expand a gather past a non-broadcast input's size.
+    # Skip when indexing each input would select more elements than it holds,
+    # making the lifted Elemwise do more work. The advanced indices are weighed
+    # together, over the consecutive axes they jointly index.
     for inp in elem.owner.inputs:
-        for axis, idx in enumerate(idx_tuple):
-            if axis >= inp.type.ndim:
-                break
-            if not isinstance(idx, TensorVariable) or idx.type.ndim == 0:
-                continue
-            if inp.type.broadcastable[axis]:
-                continue
-            if not _index_provably_not_larger(idx, inp.type.shape[axis], fgraph):
-                return None
+        adv_indices = [
+            (idx, inp.type.shape[axis])
+            for axis, idx in enumerate(idx_tuple[: inp.type.ndim])
+            if isinstance(idx, TensorVariable)
+            and idx.type.ndim > 0
+            and not inp.type.broadcastable[axis]
+        ]
+        if not _indices_provably_not_larger(adv_indices, fgraph):
+            return None
 
     batch_ndim = (
         elem.owner.op.batch_ndim(elem.owner)
@@ -742,11 +816,15 @@ def lift_subtensor_through_alloc(fgraph, node):
 
     # Indices on Alloc-added dims don't reach val; the rest line up with val's dims.
     val_indexer = indices[n_added_dims:]
-    dangerous_index_reaches_val = any(
-        not val.type.broadcastable[axis]
-        # Per-axis check; doesn't account for net effect across all axes.
-        and not _index_provably_not_larger(idx, val.type.shape[axis], fgraph)
+    val_adv_indices = [
+        (idx, val.type.shape[axis])
         for axis, idx in enumerate(val_indexer)
+        if isinstance(idx, TensorVariable)
+        and idx.type.ndim > 0
+        and not val.type.broadcastable[axis]
+    ]
+    dangerous_index_reaches_val = not _indices_provably_not_larger(
+        val_adv_indices, fgraph
     )
 
     # On broadcast val dims the index is neutralized (advanced indices dropped,
