@@ -139,14 +139,15 @@ def mlx_funcify_PivotToPermutations(op, **kwargs):
     inverse = op.inverse
 
     def pivot_to_permutations(pivots):
-        pivots = mx.array(pivots)
-        n = pivots.shape[0]
-        p_inv = mx.arange(n, dtype=mx.int32)
-        for i in range(n):
-            p_inv[i], p_inv[pivots[i]] = p_inv[pivots[i]], p_inv[i]
-        if inverse:
-            return p_inv
-        return mx.argsort(p_inv)
+        with mx.stream(mx.cpu):
+            pivots = mx.array(pivots)
+            n = pivots.shape[0]
+            p_inv = mx.arange(n, dtype=mx.int32)
+            for i in range(n):
+                p_inv[i], p_inv[pivots[i]] = p_inv[pivots[i]], p_inv[i]
+            if inverse:
+                return p_inv
+            return mx.argsort(p_inv)
 
     return pivot_to_permutations
 

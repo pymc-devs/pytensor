@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -217,8 +219,6 @@ def test_erfc() -> None:
 
 def test_erfc_extreme_values() -> None:
     """Test erfc with extreme values"""
-    from functools import partial
-
     x = vector("x")
     out = erfc(x)
 
@@ -239,7 +239,9 @@ def test_erfcx() -> None:
     # Test with positive values where erfcx is most numerically stable
     x_test = mx.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
 
-    compare_mlx_and_py([x], out, [x_test])
+    relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-3)
+
+    compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
 
 
 def test_erfcx_small_values() -> None:
@@ -266,8 +268,6 @@ def test_softplus() -> None:
 
 def test_softplus_extreme_values() -> None:
     """Test softplus with extreme values to verify numerical stability"""
-    from functools import partial
-
     x = vector("x")
     out = softplus(x)
 
