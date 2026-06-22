@@ -1104,7 +1104,7 @@ class OpToRewriterTracker:
                     else:
                         # An OpPattern without parameters behaves like a regular tracked_type
                         self.tracked_types[c.op_type].append(rw)
-                if isinstance(c, type):
+                elif isinstance(c, type):
                     self.tracked_types[c].append(rw)
                 else:
                     self.tracked_instances[c].append(rw)
