@@ -240,28 +240,11 @@ jobs:
           python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
         env:
           PYTHON_VERSION: 3.12
-      - name: Download previous benchmark data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ./cache
-          key: ${{ runner.os }}-benchmark
       - name: Run benchmarks
         shell: micromamba-shell {0}
         run: |
           export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest --runslow --benchmark-only --benchmark-json output.json
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
-        with:
-          name: Python Benchmark with pytest-benchmark
-          tool: "pytest"
-          output-file-path: output.json
-          external-data-json-path: ./cache/benchmark-data.json
-          alert-threshold: "200%"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: false
-          fail-on-alert: false
-          auto-push: false
+          python -m pytest --runslow --benchmark-only
 
   all-checks:
     if: ${{ always() }}
