@@ -468,6 +468,23 @@ class Min(NonZeroDimsCAReduce):
         axis = kwargs.get("axis", self.axis)
         return type(self)(axis=axis)
 
+    def pullback(self, inputs, outputs, output_grads):
+        # The strict sense mathematical gradient of the minimum function is
+        # not calculated here for it is not defined at every point where some
+        # coordinates are identical. However, since the latter set has null
+        # Lebesgue measure, the result may be interpreted as weak gradient.
+        [x] = inputs
+        [out] = outputs
+        [g_out] = output_grads
+
+        axis = tuple(range(x.ndim)) if self.axis is None else self.axis
+        out_pad = expand_dims(out, axis)
+        g_out_pad = expand_dims(g_out, axis)
+
+        # Set the grad to the correct position.
+        g_x = eq(out_pad, x) * g_out_pad
+        return (g_x,)
+
 
 def max(x, axis=None, keepdims=False):
     """
