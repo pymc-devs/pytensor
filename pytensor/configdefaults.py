@@ -65,26 +65,6 @@ def _filter_mode(val):
     )
 
 
-def _split_version(version):
-    """
-    Take version as a dot-separated string, return a tuple of int
-    """
-    return tuple(int(i) for i in version.split("."))
-
-
-def _warn_default(version):
-    """
-    Return True iff we should warn about bugs fixed after a given version.
-    """
-    if config.warn__ignore_bug_before == "None":
-        return True
-    if config.warn__ignore_bug_before == "all":
-        return False
-    if _split_version(config.warn__ignore_bug_before) >= _split_version(version):
-        return False
-    return True
-
-
 def _is_valid_check_preallocated_output_param(param):
     if not isinstance(param, str):
         return False
@@ -591,47 +571,6 @@ def add_traceback_configvars():
 
 
 def add_error_and_warning_configvars():
-    ###
-    # To disable some warning about old bug that are fixed now.
-    ###
-    config.add(
-        "warn__ignore_bug_before",
-        (
-            "If 'None', we warn about all PyTensor bugs found by default. "
-            "If 'all', we don't warn about PyTensor bugs found by default. "
-            "If a version, we print only the warnings relative to PyTensor "
-            "bugs found after that version. "
-            "Warning for specific bugs can be configured with specific "
-            "[warn] flags."
-        ),
-        EnumStr(
-            "0.9",
-            [
-                "None",
-                "all",
-                "0.3",
-                "0.4",
-                "0.4.1",
-                "0.5",
-                "0.6",
-                "0.7",
-                "0.8",
-                "0.8.1",
-                "0.8.2",
-                "0.9",
-                "0.10",
-                "1.0",
-                "1.0.1",
-                "1.0.2",
-                "1.0.3",
-                "1.0.4",
-                "1.0.5",
-            ],
-            mutable=False,
-        ),
-        in_c_key=False,
-    )
-
     # Note to developers:
     # Generally your exceptions should use an apply node's __str__
     # method when exception_verbosity == 'low'. When exception_verbosity
