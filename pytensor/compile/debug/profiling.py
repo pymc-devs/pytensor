@@ -101,7 +101,7 @@ def print_global_stats():
         destination_file = config.profiling__destination
 
     with extended_open(destination_file, mode="w") as f:
-        print("=" * 50, file=destination_file)
+        print("=" * 50, file=f)
         print(
             (
                 "Global stats: ",
