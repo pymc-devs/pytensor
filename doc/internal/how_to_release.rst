@@ -13,10 +13,6 @@ Update the version number
 
 Update the year in the ``PyTensor/LICENSE.txt`` file too, if necessary.
 
-Update the code and the documentation for the pytensor flags
-``warn__ignore_bug_before`` to accept the new version. You must modify the
-file ``pytensor/configdefaults.py`` and ``doc/library/config.txt``.
-
 Tag the release
 ===============
 
