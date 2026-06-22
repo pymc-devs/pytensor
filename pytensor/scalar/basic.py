@@ -131,9 +131,7 @@ class NumpyAutocaster:
             isinstance(x, np.ndarray) and x.ndim == 0
         )
 
-        if config.cast_policy == "numpy":
-            return np.asarray(x)
-        elif config.cast_policy == "numpy+floatX":
+        if config.cast_policy == "numpy+floatX":
             rval = np.asarray(x)
             if (
                 not hasattr(x, "dtype")
