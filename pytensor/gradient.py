@@ -139,7 +139,7 @@ class DisconnectedType(Type):
             " a symbolic placeholder."
         )
 
-    def fiter_variable(self, other):
+    def filter_variable(self, other):
         raise AssertionError(
             "If you're assigning to a DisconnectedType you're"
             " doing something wrong. It should only be used as"
