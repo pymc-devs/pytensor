@@ -1,4 +1,3 @@
-import warnings
 from collections.abc import Collection, Iterable, Sequence
 from textwrap import dedent
 
@@ -1586,23 +1585,6 @@ def broadcast_shape_iter(
     return tuple(result_dims)
 
 
-def _check_deprecated_inputs(stop, end, num, steps):
-    if end is not None:
-        warnings.warn(
-            "The 'end' parameter is deprecated and will be removed in a future version. Use 'stop' instead.",
-            DeprecationWarning,
-        )
-        stop = end
-    if steps is not None:
-        warnings.warn(
-            "The 'steps' parameter is deprecated and will be removed in a future version. Use 'num' instead.",
-            DeprecationWarning,
-        )
-        num = steps
-
-    return stop, num
-
-
 def _linspace_core(
     start: TensorVariable,
     stop: TensorVariable,
@@ -1673,8 +1655,6 @@ def linspace(
     retstep: bool = False,
     dtype: str | None = None,
     axis: int = 0,
-    end: TensorLike | None = None,
-    steps: TensorLike | None = None,
 ) -> TensorVariable | tuple[TensorVariable, TensorVariable]:
     """
     Return evenly spaced numbers over a specified interval.
@@ -1709,19 +1689,6 @@ def linspace(
         Axis along which to generate samples. Ignored if both `start` and `end` have dimension 0. By default, axis=0
         will insert the samples on a new left-most dimension. To insert samples on a right-most dimension, use axis=-1.
 
-    end:  int, float or TensorVariable
-        .. warning::
-            The "end" parameter is deprecated and will be removed in a future version. Use "stop" instead.
-        The end value of the sequence, unless `endpoint` is set to False.
-        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `end` is
-        excluded.
-
-    steps: float, int, or TensorVariable
-        .. warning::
-            The "steps" parameter is deprecated and will be removed in a future version. Use "num" instead.
-
-        Number of samples to generate. Must be non-negative
-
     Returns
     -------
     samples: TensorVariable
@@ -1732,7 +1699,6 @@ def linspace(
     """
     if dtype is None:
         dtype = pytensor.config.floatX
-    end, num = _check_deprecated_inputs(stop, end, num, steps)
     start, stop = broadcast_arrays(start, stop)
 
     ls = _linspace_core(
@@ -1755,8 +1721,6 @@ def geomspace(
     endpoint: bool = True,
     dtype: str | None = None,
     axis: int = 0,
-    end: TensorLike | None = None,
-    steps: TensorLike | None = None,
 ) -> TensorVariable:
     """
     Return numbers spaced evenly on a log scale (a geometric progression).
@@ -1796,19 +1760,6 @@ def geomspace(
         Axis along which to generate samples. Ignored if both `start` and `end` have dimension 0. By default, axis=0
         will insert the samples on a new left-most dimension. To insert samples on a right-most dimension, use axis=-1.
 
-    end:  int, float or TensorVariable
-        .. warning::
-            The "end" parameter is deprecated and will be removed in a future version. Use "stop" instead.
-        The end value of the sequence, unless `endpoint` is set to False.
-        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `end` is
-        excluded.
-
-    steps: float, int, or TensorVariable
-        .. warning::
-            The "steps" parameter is deprecated and will be removed in a future version. Use "num" instead.
-
-        Number of samples to generate. Must be non-negative
-
     Returns
     -------
     samples: TensorVariable
@@ -1817,7 +1768,6 @@ def geomspace(
     """
     if dtype is None:
         dtype = pytensor.config.floatX
-    stop, num = _check_deprecated_inputs(stop, end, num, steps)
     start, stop = broadcast_arrays(start, stop)
     start, stop, base = _broadcast_base_with_inputs(start, stop, base, axis)
 
@@ -1856,8 +1806,6 @@ def logspace(
     endpoint: bool = True,
     dtype: str | None = None,
     axis: int = 0,
-    end: TensorLike | None = None,
-    steps: TensorLike | None = None,
 ) -> TensorVariable:
     """
     Return numbers spaced evenly on a log scale.
@@ -1892,18 +1840,6 @@ def logspace(
         Axis along which to generate samples. Ignored if both `start` and `end` have dimension 0. By default, axis=0
         will insert the samples on a new left-most dimension. To insert samples on a right-most dimension, use axis=-1.
 
-    end:  int float or TensorVariable
-        .. warning::
-            The "end" parameter is deprecated and will be removed in a future version. Use "stop" instead.
-        The end value of the sequence, unless `endpoint` is set to False.
-        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `end` is
-        excluded.
-
-    steps: int or TensorVariable
-        .. warning::
-            The "steps" parameter is deprecated and will be removed in a future version. Use "num" instead.
-        Number of samples to generate. Must be non-negative
-
     Returns
     -------
     samples: TensorVariable
@@ -1912,7 +1848,6 @@ def logspace(
     """
     if dtype is None:
         dtype = pytensor.config.floatX
-    stop, num = _check_deprecated_inputs(stop, end, num, steps)
     start, stop = broadcast_arrays(start, stop)
     start, stop, base = _broadcast_base_with_inputs(start, stop, base, axis)
 
