@@ -1193,3 +1193,20 @@ def test_nfunc_view_workaround(linker):
 
     out_eval = f(a_test)
     np.testing.assert_allclose(out_eval, out_expected)
+
+
+def test_perform_raises_with_too_many_operands():
+    # NumPy ufuncs segfault or raise with more than 32 operands, so the Python
+    # perform must raise cleanly instead of falling through to the ufunc path.
+    ins = [float64() for _ in range(40)]
+    out = ins[0]
+    for v in ins[1:]:
+        out = scalar_add(out, v)
+    op = Elemwise(ps.Composite(ins, [out]))
+
+    xs = [vector(f"x{i}") for i in range(40)]
+    node = op.make_node(*xs)
+    assert len(node.inputs) + len(node.outputs) > 32
+
+    with pytest.raises(NotImplementedError, match="more than 32 operands"):
+        op.perform(node, [np.ones(3) for _ in range(40)], [[None]])
