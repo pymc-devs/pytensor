@@ -679,12 +679,13 @@ class Elemwise(OpenMPOp):
 
     def perform(self, node, inputs, output_storage):
         if (len(node.inputs) + len(node.outputs)) > 32:
-            # Some versions of NumPy will segfault, other will raise a
-            # ValueError, if the number of operands in an ufunc is more than 32.
-            # In that case, the C version should be used, or Elemwise fusion
-            # should be disabled.
-            # FIXME: This no longer calls the C implementation!
-            super().perform(node, inputs, output_storage)
+            # Some versions of NumPy will segfault, others will raise a
+            # ValueError, if the number of operands in a ufunc is more than 32,
+            # so the Python implementation cannot handle this case.
+            raise NotImplementedError(
+                "Elemwise.perform (Python mode) does not support more than 32 "
+                "operands. Use the C backend or disable Elemwise fusion."
+            )
 
         self._check_runtime_broadcast(node, inputs)
 
