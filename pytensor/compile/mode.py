@@ -455,7 +455,7 @@ class Mode:
 
 C = Mode("c", "fast_run")
 CVM = Mode("cvm", "fast_run")
-VM = (Mode("vm", "fast_run"),)
+VM = Mode("vm", "fast_run")
 
 NUMBA = Mode(
     NumbaLinker(),
