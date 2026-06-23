@@ -116,20 +116,23 @@ def numba_funcify_ARange(op, **kwargs):
 
 @register_funcify_default_op_cache_key(Join)
 def numba_funcify_Join(op, **kwargs):
+    axis = op.axis
+
     @numba_basic.numba_njit
-    def join(axis, *tensors):
-        return np.concatenate(tensors, axis.item())
+    def join(*tensors):
+        return np.concatenate(tensors, axis)
 
     return join
 
 
 @register_funcify_default_op_cache_key(Split)
 def numba_funcify_Split(op, **kwargs):
+    axis = op.axis
+
     @numba_basic.numba_njit
-    def split(x, axis, sizes):
+    def split(x, sizes):
         if (sizes < 0).any():
             raise ValueError("Split sizes cannot be negative")
-        axis = axis.item()
         split_indices = np.cumsum(sizes)
         if split_indices[-1] != x.shape[axis]:
             raise ValueError(
@@ -137,7 +140,7 @@ def numba_funcify_Split(op, **kwargs):
             )
         return np.split(x, split_indices[:-1], axis=axis)
 
-    cache_version = 1
+    cache_version = 2
     return split, cache_version
 
 

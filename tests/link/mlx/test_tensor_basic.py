@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import config
 from pytensor import tensor as pt
 from pytensor.tensor.basic import Alloc, arange
 from tests.link.mlx.test_basic import (
@@ -152,18 +151,13 @@ def test_split_const_axis_const_splits_compiled():
     compare_mlx_and_py([x], outs, [np.arange(5, dtype="float32")])
 
 
-def test_split_dynamic_axis_const_splits():
+def test_split_symbolic_axis_rejected():
     x = pt.matrix("x")
     axis = pt.scalar("axis", dtype="int64")
     splits = [1, 2, 3]
-    outs = pt.split(x, splits, n_splits=len(splits), axis=axis)
 
-    test_input = np.arange(12).astype(config.floatX).reshape(2, 6)
-
-    with pytest.raises(
-        ValueError, match="Symbolic axis is not supported in MLX Split implementation"
-    ):
-        compare_mlx_and_py([x, axis], outs, [test_input, np.array(1)])
+    with pytest.raises(TypeError, match="Symbolic axes are no longer supported"):
+        pt.split(x, splits, n_splits=len(splits), axis=axis)
 
 
 def test_arange():

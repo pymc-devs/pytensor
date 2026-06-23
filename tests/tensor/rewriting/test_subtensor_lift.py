@@ -40,7 +40,7 @@ from pytensor.tensor import (
 )
 from pytensor.tensor.basic import MakeVector, concatenate, expand_dims, make_vector
 from pytensor.tensor.blas import Dot22, Gemv
-from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
@@ -225,7 +225,8 @@ class TestLocalSubtensorOfBatchDims:
         idx = pt.lvector("idx")
         idx_unique = assume(idx, unique_indices=True)
         out = (x + y)[idx_unique]
-        # Drain resolves the asserted fact onto idx, then canonicalize lifts the index.
+        # Canonicalize lifts the index (reading the unique_indices assumption off
+        # the SpecifyAssumptions wrapper), then Drain strips the now-redundant wrapper.
         result = RewriteTester(
             [x, y, idx],
             [out],
@@ -994,9 +995,6 @@ class TestLocalSubtensorMakeVector:
         assert local_subtensor_make_vector.transform(fgraph, node) == [v]
 
 
-shared_axis = shared(1, "axis")
-
-
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
     [
@@ -1021,11 +1019,6 @@ shared_axis = shared(1, "axis")
         (
             lambda x, y: concatenate([x, y], axis=1)[:, 1:],
             lambda x, y: concatenate([x, y], axis=1)[:, 1:],
-        ),
-        # Not supported, axis of concatenation is dynamically determined
-        (
-            lambda x, y: concatenate([x, y], axis=shared_axis)[1],
-            lambda x, y: concatenate([x, y], axis=shared_axis)[1],
         ),
     ],
 )

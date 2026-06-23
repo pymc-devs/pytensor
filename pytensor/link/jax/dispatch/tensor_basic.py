@@ -83,7 +83,9 @@ def jax_funcify_ARange(op, node, **kwargs):
 
 @jax_funcify.register(Join)
 def jax_funcify_Join(op, **kwargs):
-    def join(axis, *tensors):
+    axis = op.axis
+
+    def join(*tensors):
         # tensors could also be tuples, and in this case they don't have a ndim
         tensors = [jnp.asarray(tensor) for tensor in tensors]
         return jnp.concatenate(tensors, axis=axis)
@@ -93,14 +95,8 @@ def jax_funcify_Join(op, **kwargs):
 
 @jax_funcify.register(Split)
 def jax_funcify_Split(op: Split, node, **kwargs):
-    _, axis, splits = node.inputs
-    try:
-        constant_axis = get_scalar_constant_value(axis)
-    except NotScalarConstantError:
-        constant_axis = None
-        warnings.warn(
-            "Split node does not have constant axis. Jax implementation will likely fail"
-        )
+    _x, splits = node.inputs
+    axis = op.axis
 
     try:
         constant_splits = np.array(
@@ -115,25 +111,21 @@ def jax_funcify_Split(op: Split, node, **kwargs):
             "Split node does not have constant split positions. Jax implementation will likely fail"
         )
 
-    def split(x, axis, splits):
-        if constant_axis is not None:
-            axis = constant_axis
-            if len(splits) != op.len_splits:
-                raise ValueError("Length of splits is not equal to n_splits")
+    def split(x, splits):
+        if len(splits) != op.len_splits:
+            raise ValueError("Length of splits is not equal to n_splits")
 
         if constant_splits is not None:
             splits = constant_splits
             cumsum_splits = np.cumsum(splits[:-1])
             if (splits < 0).any():
                 raise ValueError("Split sizes cannot be negative")
-        else:
-            cumsum_splits = jnp.cumsum(splits[:-1])
-
-        if constant_axis is not None and constant_splits is not None:
             if splits.sum() != x.shape[axis]:
                 raise ValueError(
                     f"Split sizes do not sum up to input length along axis: {x.shape[axis]}"
                 )
+        else:
+            cumsum_splits = jnp.cumsum(splits[:-1])
 
         return jnp.split(x, cumsum_splits, axis=axis)
 

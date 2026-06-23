@@ -1063,14 +1063,10 @@ def local_subtensor_of_join(fgraph, node):
         # Join involves a full_copy, so we don't want to do it twice
         return None
 
-    join_axis, *join_components = join_var.owner.inputs
-
-    # Rewrite only works when the join axis is a constant along a non-indexed dimension
-    if not isinstance(join_axis, Constant):
-        return None
+    join_components = join_var.owner.inputs
 
     [old_out] = node.outputs
-    axis = normalize_axis_index(join_axis.data, join_components[0].type.ndim)
+    axis = join_var.owner.op.axis
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
     if _axis_is_indexed_by_basic_index(idx_tuple, axis):
         return _lift_subtensor_non_axis(
