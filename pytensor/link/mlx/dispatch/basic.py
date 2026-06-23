@@ -92,17 +92,18 @@ def convert_dtype_to_mlx(dtype_str, auto_cast_unsupported=True):
     return dtype_str
 
 
-def _nan_safe_constant(arr, data):
-    """Materialize a NaN scalar constant through an op.
+def _nan_safe_constant(data, dtype=None):
+    """Convert ``data`` to an ``mx.array``, materializing NaN scalars through an op.
 
     ``mx.compile`` inlines *size-1* constants directly into the generated Metal
     source, but Metal has no ``nan`` literal (it does accept ``inf``), so such a
     constant aborts kernel compilation. Computing it (``0 / 0``) makes MLX emit a
     valid expression instead of the bare ``nan`` token. Larger constants are
-    passed as buffers (never inlined), and runtime inputs are passed as arguments,
-    so neither needs this. This is the class of constant the ``local_sqrt_sqr``
-    rewrite produces on normalization input-gradients.
+    passed as buffers (never inlined), so they are left as-is. This is the class
+    of constant the ``local_sqrt_sqr`` rewrite produces on normalization
+    input-gradients.
     """
+    arr = mx.array(data, dtype=dtype)
     if data.size != 1 or data.dtype.kind != "f" or not np.isnan(data).any():
         return arr
     nan = mx.array(0.0, dtype=arr.dtype) / mx.array(0.0, dtype=arr.dtype)
@@ -115,11 +116,8 @@ def mlx_typify(data, **kwargs):
 
 
 @mlx_typify.register(np.ndarray)
-def mlx_typify_tensor(data, dtype=None, variable=None, **kwargs):
-    arr = mx.array(data, dtype=dtype)
-    if variable is not None:
-        arr = _nan_safe_constant(arr, data)
-    return arr
+def mlx_typify_tensor(data, dtype=None, **kwargs):
+    return _nan_safe_constant(data, dtype=dtype)
 
 
 @mlx_typify.register(slice)
@@ -131,11 +129,8 @@ def mlx_typify_no_conversion_needed(data, **kwargs):
 
 @mlx_typify.register(int)
 @mlx_typify.register(float)
-def mlx_typify_python_scalar(data, variable=None, **kwargs):
-    arr = mx.array(data)
-    if variable is not None:
-        arr = _nan_safe_constant(arr, np.asarray(data))
-    return arr
+def mlx_typify_python_scalar(data, **kwargs):
+    return _nan_safe_constant(np.asarray(data))
 
 
 @mlx_typify.register(bool)
@@ -147,11 +142,8 @@ def mlx_typify_bool(data, **kwargs):
 @mlx_typify.register(np.integer)
 @mlx_typify.register(np.floating)
 @mlx_typify.register(np.complexfloating)
-def mlx_typify_numpy_scalar(data, variable=None, **kwargs):
-    arr = mx.array(data)
-    if variable is not None:
-        arr = _nan_safe_constant(arr, np.asarray(data))
-    return arr
+def mlx_typify_numpy_scalar(data, **kwargs):
+    return _nan_safe_constant(np.asarray(data))
 
 
 @singledispatch
