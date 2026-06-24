@@ -521,3 +521,44 @@ def test_grad_until_and_truncate_sequence_taps():
 
 def test_aliased_inner_outputs():
     ScanCompatibilityTests.check_aliased_inner_outputs(static_shape=True, mode="NUMBA")
+
+
+def test_untraced_sit_sot_constant_update():
+    """Regression test for a segfault when an untraced sit-sot state that is
+    read by the inner function has a constant update. The generated while loop
+    would rebind the state storage to a numba-frozen (readonly) global array."""
+    from pytensor.scan.op import Scan, ScanInfo
+
+    idx = pt.lscalar("idx")
+    lam = pt.dscalar("lam")
+    acc = pt.dvector("acc")
+    gvec = pt.dvector("gvec")
+
+    info = ScanInfo(
+        n_seqs=0,
+        mit_mot_in_slices=(),
+        mit_mot_out_slices=(),
+        mit_sot_in_slices=(),
+        sit_sot_in_slices=(),
+        n_untraced_sit_sot=3,
+        n_nit_sot=0,
+        n_non_seqs=1,
+        as_while=False,
+    )
+    scan_op = Scan(
+        [idx, lam, acc, gvec],
+        [
+            idx + 1,
+            pt.constant(0.0, dtype="float64"),
+            pt.inc_subtensor(acc[idx], gvec[idx] * 2 + lam),
+        ],
+        info,
+    )
+    n_steps = pt.iscalar("n_steps")
+    outs = scan_op(n_steps, pt.lscalar(), pt.dscalar(), pt.dvector(), pt.dvector())
+
+    compare_numba_and_py(
+        outs[0].owner.inputs,
+        outs,
+        [np.int32(3), np.int64(0), np.float64(1.0), np.zeros(5), np.arange(5.0)],
+    )

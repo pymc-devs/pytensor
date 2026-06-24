@@ -1084,6 +1084,10 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
     def __deepcopy__(self, memo):
         return self
 
+    def clone(self, *args, **kwargs) -> "FrozenFunctionGraph":
+        # Immutable: cloning to guard against mutation is a no-op.
+        return self
+
     def toposort(self) -> tuple[Apply, ...]:
         return self._toposort
 

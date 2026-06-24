@@ -8,7 +8,7 @@ from pytensor.graph.basic import NominalVariable, equal_computations
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph, Output
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
-from pytensor.scalar.basic import ScalarConstant, add, float64, mul
+from pytensor.scalar.basic import ScalarConstant, add, constant, float64, mul
 from pytensor.tensor import reshape, stack, vector
 from tests.graph.utils import (
     MyConstant,
@@ -947,6 +947,25 @@ class TestFrozenFunctionGraph:
 
         assert ffg == refrozen
         assert hash(ffg) == hash(refrozen)
+
+    def test_bind_constant_output(self):
+        # An output fed directly as a Constant (e.g. a constant while condition)
+        # is never a node input, so bind/unfreeze must reuse it as-is rather than
+        # fail to find it in the substitution memo.
+        x = float64("x")
+        const = constant(1.0)
+        ffg = FunctionGraph([x], [const, add(x, x)]).freeze()
+
+        bound_const = ffg.bind([float64("z")])[0]
+        assert bound_const is ffg.outputs[0]
+        assert isinstance(bound_const, ScalarConstant) and bound_const.data == 1.0
+        assert ffg == ffg.unfreeze().freeze()
+
+    def test_clone_returns_self(self):
+        x = float64("x")
+        ffg = FunctionGraph([x], [add(x, x)]).freeze()
+        assert ffg.clone() is ffg
+        assert ffg.clone(check_integrity=False) is ffg
 
     def test_value_dependent_output_type_collision(self):
         """Output types are part of the interning key.
