@@ -89,6 +89,9 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
             return x
 
     def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
+        if isinstance(op, AdvancedIncSubtensor1):
+            op._check_runtime_broadcasting(node, x, y, ilist[0])
+
         return mlx_fn(x, ilist, y)
 
     return advancedincsubtensor
