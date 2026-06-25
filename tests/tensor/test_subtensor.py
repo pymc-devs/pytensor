@@ -18,7 +18,6 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.basic import equal_computations
-from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
@@ -1470,7 +1469,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         s1 = m[gv, i]
         s2 = m[g, i]
 
-        assert is_same_graph(s1, s2)
+        assert equal_computations([s1], [s2])
 
     def test_adv1_inc_sub_notlastdim(self):
         # Test that taking 1-dimensional advanced indexing
