@@ -17,6 +17,7 @@ from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
+from pytensor.tensor.rewriting.subtensor import _has_unique_indices
 from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -474,9 +475,12 @@ class FuseIndexedElemwise(GraphRewriter):
 
             idx_groups = {}  # (idx_var, axis) -> (reads: list[int], writes: list[int])
 
-            # Roots of the buffers we read through, used below to skip fusing a
+            # Roots of the buffers we read through, used below to gate fusing a
             # write whose target buffer aliases one of them (see aliasing check).
             read_source_roots = set()
+            # Per fused read: (input position, source variable, source root,
+            # frozenset of index pairs), used by the aliasing check below.
+            read_info = []
 
             # Find indexed reads to fuse: single client AdvancedSubtensor(1)
             for i, inp in enumerate(node.inputs):
@@ -488,7 +492,10 @@ class FuseIndexedElemwise(GraphRewriter):
                 idx_axis_pairs = self._extract_idx_axis_pairs(inp_node)
                 if idx_axis_pairs is None:
                     continue
-                read_source_roots.add(_view_root(view_i, inp_node.inputs[0]))
+                source = inp_node.inputs[0]
+                root = _view_root(view_i, source)
+                read_source_roots.add(root)
+                read_info.append((i, source, root, frozenset(idx_axis_pairs)))
                 for idx_axis_pair in idx_axis_pairs:
                     if idx_axis_pair not in idx_groups:
                         idx_groups[idx_axis_pair] = ([], [])
@@ -500,6 +507,9 @@ class FuseIndexedElemwise(GraphRewriter):
             # Our current vectorize codegen can't produce write only loops that don't force
             # the recomputation of the core function in every step.
             write_targets = {}  # out_idx -> update_node
+            # out_idx -> read input positions whose buffer the write aliases and
+            # which the destroy handler must be told to tolerate.
+            aliased_read_positions = {}
             must_transpose_write_axes = False
             for out_idx, out in enumerate(node.outputs):
                 clients = fgraph.clients[out]
@@ -533,15 +543,37 @@ class FuseIndexedElemwise(GraphRewriter):
 
                 target, _, *idx_vars = client_node.inputs
 
-                # Fusing an in-place write whose target is a buffer we also read
-                # through (same root) makes it two distinct inputs of one node, one
-                # read and one destroyed: the destroy handler rejects that aliasing.
-                # Leave such writes unfused (the reads still fuse, no added copy).
-                # Non-in-place writes are copied below, so their copy breaks the alias.
-                if client_node.op.inplace and _view_root(view_i, target) in (
-                    read_source_roots
+                # An in-place write whose target buffer is also read aliases a
+                # destroyed input with a live read, which the destroy handler
+                # rejects. It is safe only when every aliasing read is through the
+                # *same variable* as the write target (same root is not enough: a
+                # view like ``x[::-1]`` remaps positions), uses the write's index,
+                # and that index is duplicate-free -- then each position is read
+                # once before being overwritten. We then keep the write fused and
+                # tell the destroy handler to tolerate the alias (set below);
+                # otherwise leave it unfused (the reads still fuse, no added copy).
+                if (
+                    client_node.op.inplace
+                    and (target_root := _view_root(view_i, target)) in read_source_roots
                 ):
-                    continue
+                    write_pairs = frozenset(idx_axis_pairs)
+                    root_aliasing = [
+                        (pos, source, pairs)
+                        for pos, source, root, pairs in read_info
+                        if root == target_root
+                    ]
+                    rmw_is_safe = all(
+                        source is target and pairs == write_pairs
+                        for _pos, source, pairs in root_aliasing
+                    ) and all(
+                        _has_unique_indices(fgraph, idx)
+                        for idx, _axis in idx_axis_pairs
+                    )
+                    if not rmw_is_safe:
+                        continue
+                    aliased_read_positions[out_idx] = [
+                        pos for pos, _source, _pairs in root_aliasing
+                    ]
 
                 write_bcast = AdvancedSubtensor(idx_list=client_node.op.idx_list)(
                     target, *idx_vars
@@ -680,6 +712,8 @@ class FuseIndexedElemwise(GraphRewriter):
             # fgraph uses a fresh variable there (see below), so the actual buffer
             # (or its copy) is bound only at the outer call.
             outer_write_targets = {}
+            # (destroyed write-target position, aliased read position) pairs.
+            tolerate_aliased = []
 
             # Inner fgraph outputs: Elemwise outputs, with write targets
             # replaced by their AdvancedIncSubtensor result
@@ -715,6 +749,11 @@ class FuseIndexedElemwise(GraphRewriter):
                 fgraph_outputs[out_idx] = write_out
                 fgraph_destroy_map[out_idx] = [target_pos]
 
+                tolerate_aliased.extend(
+                    (target_pos, read_pos)
+                    for read_pos in aliased_read_positions.get(out_idx, ())
+                )
+
             # indexed_inputs_spec: ((read_positions, axis) | None, ...)
             # indexed_outputs_spec: ((write_positions, axis, "inc"|"set") | None, ...)
             indexed_inputs_spec = tuple(
@@ -737,13 +776,18 @@ class FuseIndexedElemwise(GraphRewriter):
                 val = outer_write_targets.get(i, inp)
                 outer_inputs.append(val.copy() if i in copy_positions else val)
 
-            new_outs = IndexedElemwise(
+            indexed_elemwise_op = IndexedElemwise(
                 fgraph_inputs,
                 fgraph_outputs,
                 destroy_map=fgraph_destroy_map,
                 indexed_inputs=indexed_inputs_spec,
                 indexed_outputs=indexed_outputs_spec,
-            )(*outer_inputs, return_list=True)
+            )
+            if tolerate_aliased:
+                indexed_elemwise_op.destroyhandler_tolerate_aliased = tuple(
+                    tolerate_aliased
+                )
+            new_outs = indexed_elemwise_op(*outer_inputs, return_list=True)
 
             replacements = []
             for out_idx in range(len(node.outputs)):
