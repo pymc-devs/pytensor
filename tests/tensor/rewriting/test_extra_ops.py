@@ -75,7 +75,7 @@ def test_local_Unique_Alloc_lift(
     y_rewritten_fg = rewrite_graph(
         y_fg,
         clone=False,
-        include=["canonicalize", "local_Unique_Alloc_lift"],
+        include=["canonicalize", "local_Unique_lift"],
         exclude=["local_Unique_scalar"],
     )
     y_rewritten = y_rewritten_fg.outputs[0]
@@ -92,7 +92,7 @@ def test_local_Unique_Alloc_lift(
     # The remaining exclusions simply allow us to perform the check below that
     # makes sure the original `Alloc` is present in our reference (sub)graph.
     rewrite_mode = default_mode.excluding(
-        "local_useless_alloc", "local_alloc_sink_dimshuffle", "local_Unique_Alloc_lift"
+        "local_useless_alloc", "local_alloc_sink_dimshuffle", "local_Unique_lift"
     )
     y_fn = function([x], [y, y_rewritten], mode=rewrite_mode)
     # Make sure that the original `Alloc` is used to compute the reference `y`
@@ -138,7 +138,7 @@ def test_local_Unique_Repeat(
     y_rewritten_fg = rewrite_graph(
         y_fg,
         clone=False,
-        include=["canonicalize", "local_Unique_Repeat_lift"],
+        include=["canonicalize", "local_Unique_lift"],
         exclude=["local_Unique_scalar"],
     )
     y_rewritten = y_rewritten_fg.outputs[0]
@@ -152,7 +152,7 @@ def test_local_Unique_Repeat(
     # The rewrite has already been applied to `y_rewritten`, so we can--and
     # should--exclude it from the compilation of both our reference, `y`, and
     # the rewritten result, `y_rewritten`.
-    rewrite_mode = default_mode.excluding("local_Unique_Repeat_lift")
+    rewrite_mode = default_mode.excluding("local_Unique_lift")
     y_fn = function([x], [y, y_rewritten], mode=rewrite_mode)
     # Make sure that the original `BroadcastTo` is used to compute the
     # reference `y` result
@@ -194,7 +194,7 @@ def test_local_Unique_second(
     y_rewritten_fg = rewrite_graph(
         y_fg,
         clone=False,
-        include=["canonicalize", "local_Unique_second_lift"],
+        include=["canonicalize", "local_Unique_lift"],
         exclude=["local_Unique_scalar", "topo_constant_folding"],
     )
     y_rewritten = y_rewritten_fg.outputs[0]
