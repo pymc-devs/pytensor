@@ -9,6 +9,7 @@ eliminating materialised intermediate arrays.
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import node_rewriter
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
@@ -24,6 +25,8 @@ from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
     AdvancedSubtensor1,
+    IncSubtensor,
+    Subtensor,
 )
 from pytensor.tensor.variable import TensorVariable
 
@@ -418,6 +421,9 @@ class FuseIndexedElemwise(GraphRewriter):
         elemwise_batch_ndim = len(node.outputs[0].type.broadcastable)
         for update_node in write_targets.values():
             op = update_node.op
+            if isinstance(op, IncSubtensor):
+                # Basic slice writes preserve dim order; never need transposing.
+                continue
             target, val, *idx_vars = update_node.inputs
 
             idx_axes = [i for i, e in enumerate(op.idx_list) if e != slice(None)]
@@ -506,7 +512,7 @@ class FuseIndexedElemwise(GraphRewriter):
             # All indexed write axes have to overlap and not broadcast the core Elemwise loop
             # Our current vectorize codegen can't produce write only loops that don't force
             # the recomputation of the core function in every step.
-            write_targets = {}  # out_idx -> update_node
+            write_targets = {}  # out_idx -> update_node (advanced or basic IncSubtensor)
             # out_idx -> read input positions whose buffer the write aliases and
             # which the destroy handler must be told to tolerate.
             aliased_read_positions = {}
@@ -531,12 +537,44 @@ class FuseIndexedElemwise(GraphRewriter):
                     (c, ci)
                     for c, ci in clients
                     if ci == 1
-                    and isinstance(c.op, AdvancedIncSubtensor1 | AdvancedIncSubtensor)
+                    and isinstance(
+                        c.op,
+                        AdvancedIncSubtensor1 | AdvancedIncSubtensor | IncSubtensor,
+                    )
                 ]
                 if len(inc_clients) != 1:
                     # TODO: support multiple writes from the same Elemwise output via Composite duplication
                     continue
                 [(client_node, _)] = inc_clients
+
+                # Basic-slice writes (``buffer[slices].set/inc(out)``) target a
+                # contiguous *view* of the buffer, so they need no indirect
+                # indexing: the Numba funcify slices the buffer once and runs the
+                # Elemwise loop into that view. The write is encoded purely by the
+                # inner IncSubtensor node + destroy_map (no indexed_outputs entry),
+                # so it stays out of ``idx_groups``.
+                if isinstance(client_node.op, IncSubtensor):
+                    if right_pad:
+                        # expand_dims between elemwise and a basic write: not yet handled
+                        continue
+                    target, _, *slice_idx_vars = client_node.inputs
+                    # The Elemwise output must exactly fill the written slice region
+                    # (no implicit broadcast, which would force recomputation).
+                    write_region_bcast = Subtensor(idx_list=client_node.op.idx_list)(
+                        target, *slice_idx_vars
+                    ).type.broadcastable
+                    if out.type.ndim != len(write_region_bcast):
+                        continue
+                    if any(
+                        ob and not wb
+                        for ob, wb in zip(
+                            out.type.broadcastable, write_region_bcast, strict=True
+                        )
+                    ):
+                        continue
+                    write_targets[out_idx] = client_node
+                    continue
+
                 idx_axis_pairs = self._extract_idx_axis_pairs(client_node, write=True)
                 if idx_axis_pairs is None:
                     continue
@@ -606,8 +644,26 @@ class FuseIndexedElemwise(GraphRewriter):
                     idx_groups[idx_axis_pair][1].append(out_idx)
                 write_targets[out_idx] = client_node
 
-            if not idx_groups:
+            if not idx_groups and not write_targets:
                 continue
+
+            # Basic slice writes reuse the generic write-target machinery below
+            # (inner IncSubtensor + destroy_map, no indexed_outputs entry). Their
+            # slice-index variables must become inner-fgraph inputs, like the
+            # advanced index arrays. They can coexist with advanced indexing in a
+            # single op; the Numba dispatch marshals both into one vectorized loop.
+            basic_slice_idx_inputs = []
+            _seen_slice_idx = set()
+            for write_node in write_targets.values():
+                if not isinstance(write_node.op, IncSubtensor):
+                    continue
+                for idx_var in write_node.inputs[2:]:
+                    if (
+                        not isinstance(idx_var, Constant)
+                        and idx_var not in _seen_slice_idx
+                    ):
+                        _seen_slice_idx.add(idx_var)
+                        basic_slice_idx_inputs.append(idx_var)
 
             if must_transpose_write_axes:
                 replacements = self.transpose_non_indexed_write_axes(
@@ -700,10 +756,14 @@ class FuseIndexedElemwise(GraphRewriter):
 
             # Fgraph inputs: substitute indexed sources back to their
             # pre-subtensor arrays, append index arrays and update targets.
-            fgraph_inputs = [
-                inp.owner.inputs[0] if i in indexed_reads else inp
-                for i, inp in enumerate(node.inputs)
-            ] + idx_vars
+            fgraph_inputs = (
+                [
+                    inp.owner.inputs[0] if i in indexed_reads else inp
+                    for i, inp in enumerate(node.inputs)
+                ]
+                + idx_vars
+                + basic_slice_idx_inputs
+            )
 
             # Non-inplace write targets need a copy so the original isn't destroyed
             # Elemwise will always destroy the write buffers inplace afterwards.

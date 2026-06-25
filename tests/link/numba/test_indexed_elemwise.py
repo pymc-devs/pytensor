@@ -9,6 +9,7 @@ from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
+    IncSubtensor,
 )
 
 
@@ -550,6 +551,162 @@ class TestIndexedWriteFusion:
         tv_in = tv.copy()
         np.testing.assert_allclose(f_perform(tv_in)[0], expected, rtol=1e-10)
         np.testing.assert_array_equal(tv_in, tv)
+
+
+class TestBasicSliceWriteFusion:
+    """Test basic slice writes (``IncSubtensor``) fused into the Elemwise loop.
+
+    These target a contiguous view of the buffer, so the fused funcify slices
+    the buffer once and writes the Elemwise result straight into the view
+    (no temp, no per-iteration index arithmetic). See gh #2192.
+    """
+
+    def test_set_subtensor_slice(self):
+        """o[1:].set(exp(x)) fuses; result lands directly in the buffer."""
+        x = pt.vector("x")
+        o0 = pt.vector("o0")
+        o = o0 + 1.0
+        out = o[1:].set(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, o0], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(0)
+        xv = rng.normal(size=(4,))
+        ov = rng.normal(size=(5,))
+        np.testing.assert_allclose(fn(xv, ov), fn_u(xv, ov), rtol=1e-10)
+
+    def test_inc_subtensor_slice(self):
+        """o[1:].inc(exp(x)) accumulates onto the existing buffer values."""
+        x = pt.vector("x")
+        o0 = pt.vector("o0")
+        o = o0 + 1.0
+        out = o[1:].inc(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, o0], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(1)
+        xv = rng.normal(size=(4,))
+        ov = rng.normal(size=(5,))
+        np.testing.assert_allclose(fn(xv, ov), fn_u(xv, ov), rtol=1e-10)
+
+    def test_dynamic_slice_bound(self):
+        """A symbolic slice bound becomes an inner input of the fused op."""
+        x = pt.vector("x")
+        o0 = pt.vector("o0")
+        st = pt.lscalar("st")
+        o = o0 + 1.0
+        out = o[st:].set(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, o0, st], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(2)
+        xv = rng.normal(size=(3,))
+        ov = rng.normal(size=(5,))
+        np.testing.assert_allclose(fn(xv, ov, 2), fn_u(xv, ov, 2), rtol=1e-10)
+
+    def test_step_slice(self):
+        """A strided slice writes into a non-contiguous view."""
+        x = pt.vector("x")
+        o0 = pt.vector("o0")
+        o = o0 + 1.0
+        out = o[::2].set(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, o0], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(3)
+        xv = rng.normal(size=(3,))
+        ov = rng.normal(size=(5,))
+        np.testing.assert_allclose(fn(xv, ov), fn_u(xv, ov), rtol=1e-10)
+
+    def test_integer_index_drops_dim(self):
+        """m[2].set(exp(row)) writes a row (the indexed axis drops)."""
+        row = pt.vector("row")
+        m0 = pt.matrix("m0")
+        m = m0 + 1.0
+        out = m[2].set(pt.exp(row))
+        fn, fn_u = fused_and_unfused([row, m0], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(4)
+        rv = rng.normal(size=(3,))
+        mv = rng.normal(size=(4, 3))
+        np.testing.assert_allclose(fn(rv, mv), fn_u(rv, mv), rtol=1e-10)
+
+    def test_multi_axis_slice(self):
+        """A 2-D slice m[1:, 1:] fuses."""
+        sub = pt.matrix("sub")
+        m0 = pt.matrix("m0")
+        m = m0 + 1.0
+        out = m[1:, 1:].set(pt.exp(sub))
+        fn, fn_u = fused_and_unfused([sub, m0], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(5)
+        sv = rng.normal(size=(3, 2))
+        mv = rng.normal(size=(4, 3))
+        np.testing.assert_allclose(fn(sv, mv), fn_u(sv, mv), rtol=1e-10)
+
+    def test_composite_scalar_op(self):
+        """A fused Composite inner Elemwise writes into the slice."""
+        x = pt.vector("x")
+        y = pt.vector("y")
+        o0 = pt.vector("o0")
+        o = o0 + 1.0
+        out = o[1:].set(pt.exp(x) + pt.log(y))
+        fn, fn_u = fused_and_unfused([x, y, o0], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(6)
+        xv = rng.normal(size=(4,))
+        yv = np.abs(rng.normal(size=(4,))) + 0.1
+        ov = rng.normal(size=(5,))
+        np.testing.assert_allclose(fn(xv, yv, ov), fn_u(xv, yv, ov), rtol=1e-10)
+
+    def test_non_inplace_target_preserves_input(self):
+        """Writing into a slice of a non-destroyable input copies first."""
+        x = pt.vector("x")
+        oin = pt.vector("oin")
+        out = oin[1:].set(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, oin], out)
+        assert_fused(fn)
+        rng = np.random.default_rng(7)
+        xv = rng.normal(size=(4,))
+        ov = rng.normal(size=(5,))
+        ov_keep = ov.copy()
+        np.testing.assert_allclose(fn(xv, ov), fn_u(xv, ov), rtol=1e-10)
+        # The input buffer must not be mutated by the fused op.
+        np.testing.assert_array_equal(ov, ov_keep)
+
+    def test_mixed_advanced_read_and_basic_write(self):
+        """An advanced read and a basic slice write fuse into one op.
+
+        ``o[1:].set(exp(x[idx]))`` has an advanced read (``x[idx]``, fused via
+        the index specs) and a basic slice write (``o[1:]``, written into a view)
+        in the same Elemwise loop -- a single IndexedElemwise, no outer write.
+        """
+        x = pt.vector("x")
+        o0 = pt.vector("o0")
+        idx = pt.lvector("idx")
+        o = o0 + 1.0
+        out = o[1:].set(pt.exp(x[idx]))
+        fn, fn_u = fused_and_unfused([x, o0, idx], out)
+        assert_fused(fn)
+        nodes = fn.maker.fgraph.toposort()
+        # Both the read and the write are absorbed: no leftover scatter/slice op.
+        assert sum(isinstance(n.op, IndexedElemwise) for n in nodes) == 1
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor1 | IncSubtensor) for n in nodes
+        )
+        rng = np.random.default_rng(9)
+        xv = rng.normal(size=(6,))
+        ov = rng.normal(size=(5,))
+        iv = np.array([0, 2, 4, 1], dtype=np.int64)
+        np.testing.assert_allclose(fn(xv, ov, iv), fn_u(xv, ov, iv), rtol=1e-10)
+
+    def test_read_modify_write_same_slice_not_fused(self):
+        """o[1:].set(o[1:] * 2) aliases the write target; leave it unfused."""
+        o0 = pt.vector("o0")
+        o = o0 + 1.0
+        out = o[1:].set(o[1:] * 2.0)
+        fn, fn_u = fused_and_unfused([o0], out)
+        # The write target is read through the same view, so fusing would make
+        # the Elemwise destroy a buffer it also reads -> rejected, stays correct.
+        rng = np.random.default_rng(8)
+        ov = rng.normal(size=(5,))
+        np.testing.assert_allclose(fn(ov), fn_u(ov), rtol=1e-10)
 
 
 class TestRepeatedAccumulationIndices:
