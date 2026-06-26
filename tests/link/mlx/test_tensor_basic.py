@@ -203,9 +203,8 @@ def test_arange_dynamic_advanced_index():
 
 def test_arange_data_dependent_raises():
     # A genuinely data-dependent length has a runtime-only output shape, which MLX
-    # cannot compile. This must fail loudly rather than silently misbehave.
+    # cannot compile. This must fail loudly (at compile time) rather than silently.
     x = pt.vector("x")
     out = arange(pt.sum(x > 0).astype("int64"))
-    fn = pytensor.function([x], out, mode=compile_mode)
     with pytest.raises(NotImplementedError, match="data-dependent length"):
-        fn(np.array([1.0, -1.0, 1.0], dtype="float32"))
+        pytensor.function([x], out, mode=compile_mode)

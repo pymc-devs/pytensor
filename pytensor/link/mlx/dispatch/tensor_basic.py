@@ -1,6 +1,8 @@
 import mlx.core as mx
 import numpy as np
 
+from pytensor.graph.basic import Constant
+from pytensor.graph.traversal import walk
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
@@ -17,6 +19,7 @@ from pytensor.tensor.basic import (
     get_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.shape import Shape, Shape_i
 
 
 MLX_DYNAMIC_SHAPE_ERROR = (
@@ -185,22 +188,20 @@ ARANGE_DATA_DEPENDENT_ERROR = (
 )
 
 
-@mlx_funcify.register(ARange)
-def mlx_funcify_ARange(op, node, **kwargs):
-    dtype = convert_dtype_to_mlx(op.dtype)
-    # mx.arange only accepts Python int/float. Bake constant bounds, and resolve
-    # the rest at runtime: shape-derived bounds are concrete under mx.compile even
-    # when the static shape is unknown (mirrors the JAX dispatch).
-    static_args = [_arange_static_bound(arg) for arg in node.inputs]
+def _arange_bound_is_static(var):
+    # A bound is concrete under mx.compile when its value derives only from input
+    # shapes and constants. Shape ops are barriers: only the shape, not the
+    # underlying data, is needed (more general than the JAX dispatch, which only
+    # recognizes a bare Shape_i).
+    def expand(v):
+        owner = v.owner
+        if owner is None or isinstance(owner.op, Shape | Shape_i):
+            return None
+        return owner.inputs
 
-    def arange(*args):
-        resolved = [
-            static if static is not None else _arange_runtime_bound(runtime)
-            for static, runtime in zip(static_args, args, strict=True)
-        ]
-        return mx.arange(*resolved, dtype=dtype)
-
-    return arange
+    return all(
+        v.owner is not None or isinstance(v, Constant) for v in walk([var], expand)
+    )
 
 
 def _arange_static_bound(arg):
@@ -211,14 +212,28 @@ def _arange_static_bound(arg):
 
 
 def _arange_runtime_bound(value):
-    try:
-        return value.item() if hasattr(value, "item") else value
-    except (ValueError, TypeError) as exc:
-        if "[eval] Attempting to eval an array during function transformations" in str(
-            exc
-        ):
-            raise NotImplementedError(ARANGE_DATA_DEPENDENT_ERROR) from exc
-        raise
+    return value.item() if hasattr(value, "item") else value
+
+
+@mlx_funcify.register(ARange)
+def mlx_funcify_ARange(op, node, **kwargs):
+    # mx.arange only accepts Python int/float. Bake constant bounds and resolve
+    # shape-derived ones at runtime (concrete under mx.compile even when the
+    # static shape is unknown); reject genuinely data-dependent bounds up front.
+    if not all(_arange_bound_is_static(arg) for arg in node.inputs):
+        raise NotImplementedError(ARANGE_DATA_DEPENDENT_ERROR)
+
+    dtype = convert_dtype_to_mlx(op.dtype)
+    static_args = [_arange_static_bound(arg) for arg in node.inputs]
+
+    def arange(*args):
+        resolved = [
+            static if static is not None else _arange_runtime_bound(runtime)
+            for static, runtime in zip(static_args, args, strict=True)
+        ]
+        return mx.arange(*resolved, dtype=dtype)
+
+    return arange
 
 
 def _extract_static_dims(shape_inputs):
