@@ -14,10 +14,16 @@ def mlx_funcify_Scan(op: Scan, node, **kwargs):
     # Mirrors the JAX dispatch (`link/jax/dispatch/scan.py`): the loop recreates
     # the concatenated trace from the per-step values and prepends the initial
     # state / truncates as needed, instead of writing into the PyTensor buffers.
-    # MLX has no native general-scan primitive, so JAX's `lax.scan` is replaced
-    # by a Python carry loop that `mx.compile` unrolls. This needs a statically
-    # known number of steps, which is read from the (full-sized) recurring
-    # buffers since `scan_reduce_trace_prealloc` is excluded for MLX.
+    #
+    # Workaround until MLX exposes a native loop primitive (ml-explore/mlx#1441,
+    # an `mx` equivalent of `jax.lax.scan`/`while_loop`): MLX has none today, so
+    # JAX's `lax.scan` is replaced by a plain Python carry loop that is unrolled
+    # into the graph at trace time, which `mx.compile` then compiles. The cost
+    # is structural -- it needs a statically known number of steps and the graph
+    # grows as O(n_steps * inner_ops) (a real primitive would keep it
+    # O(inner_ops)). When the primitive lands, lower to it instead of unrolling.
+    # `n_steps` is read from the (full-sized) recurring buffers since
+    # `scan_reduce_trace_prealloc` is excluded for MLX.
     info = op.info
 
     if info.as_while:
