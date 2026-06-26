@@ -195,16 +195,9 @@ def test_scan_grad_over_sequence():
     compare_mlx_and_py(inputs, outputs, test_inputs)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Under the full `mode='MLX'` (fast_run) the gradient over a sequence "
-        "reverses the trace, and MLX miscompiles an elementwise op fed by a "
-        "negative-stride array (`mx.compile(lambda x: 2.0 * x[::-1])` zeroes the "
-        "tail). Unrelated to the Scan dispatch; fixed by a follow-up that "
-        "materializes negative-stride Subtensor results in the MLX backend."
-    ),
-)
 def test_scan_grad_over_sequence_default_mode():
+    # Under the full `mode="MLX"` the gradient reverses the trace; this used to
+    # trip the MLX negative-stride compile bug now handled in the Subtensor
+    # dispatch (see `test_mlx_negative_step_slice_elemwise`).
     inputs, outputs, test_inputs = _rnn_grad_over_sequence()
     compare_mlx_and_py(inputs, outputs, test_inputs, mlx_mode="MLX")
