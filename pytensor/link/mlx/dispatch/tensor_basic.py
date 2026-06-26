@@ -178,32 +178,47 @@ def mlx_funcify_Alloc(op, node, **kwargs):
     return alloc
 
 
-ARANGE_CONCRETE_VALUE_ERROR = (
-    "MLX's arange requires all arguments (start, stop, step) to be concrete "
-    "Python int/float values, not symbolic variables. Unlike NumPy and JAX, "
-    "MLX does not accept array inputs for arange at all."
-    "\n\nAn example of a valid graph:"
-    "\n>>> import pytensor.tensor as pt"
-    "\n>>> pt.arange(1, 10, 2)"
+ARANGE_DATA_DEPENDENT_ERROR = (
+    "MLX cannot build arange with a data-dependent length: the bounds depend on "
+    "runtime array values, so the output shape is unknown at compile time. "
+    "Constant and shape-derived bounds (e.g. pt.arange(x.shape[0])) are supported."
 )
 
 
 @mlx_funcify.register(ARange)
 def mlx_funcify_ARange(op, node, **kwargs):
-    # MLX's arange only accepts Python int/float, not arrays,
-    # so all arguments must be known at graph-construction time.
-    try:
-        start, stop, step = [
-            get_scalar_constant_value(arg).item() for arg in node.inputs
-        ]
-    except NotScalarConstantError:
-        raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
     dtype = convert_dtype_to_mlx(op.dtype)
+    # mx.arange only accepts Python int/float. Bake constant bounds, and resolve
+    # the rest at runtime: shape-derived bounds are concrete under mx.compile even
+    # when the static shape is unknown (mirrors the JAX dispatch).
+    static_args = [_arange_static_bound(arg) for arg in node.inputs]
 
-    def arange(*_args):
-        return mx.arange(start, stop, step, dtype=dtype)
+    def arange(*args):
+        resolved = [
+            static if static is not None else _arange_runtime_bound(runtime)
+            for static, runtime in zip(static_args, args, strict=True)
+        ]
+        return mx.arange(*resolved, dtype=dtype)
 
     return arange
+
+
+def _arange_static_bound(arg):
+    try:
+        return get_scalar_constant_value(arg).item()
+    except NotScalarConstantError:
+        return None
+
+
+def _arange_runtime_bound(value):
+    try:
+        return value.item() if hasattr(value, "item") else value
+    except (ValueError, TypeError) as exc:
+        if "[eval] Attempting to eval an array during function transformations" in str(
+            exc
+        ):
+            raise NotImplementedError(ARANGE_DATA_DEPENDENT_ERROR) from exc
+        raise
 
 
 def _extract_static_dims(shape_inputs):
