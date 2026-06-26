@@ -3698,7 +3698,6 @@ def perform_sigm_times_exp(
     sigm_minus_x=None,
     parent=None,
     child_idx=None,
-    full_tree=None,
 ):
     """
     Core processing of the `local_sigm_times_exp` rewrite.
@@ -3728,9 +3727,6 @@ def perform_sigm_times_exp(
     child_idx
         Index of `tree` in its parent's inputs (``None`` if `tree` is the global
         root).
-    full_tree
-        The global multiplication tree (should not be set except by recursive
-        calls to this function). Used for debugging only.
 
     Returns
     -------
@@ -3747,16 +3743,6 @@ def perform_sigm_times_exp(
         sigm_x = []
     if sigm_minus_x is None:
         sigm_minus_x = []
-    if full_tree is None:
-        full_tree = tree
-    # if False:  # Debug code.
-    #     print("<perform_sigm_times_exp>")
-    #     print(f"  full_tree   = {full_tree}")
-    #     print(f"  tree        = {tree}")
-    #     print(f"  exp_x       = {exp_x}")
-    #     print(f"  exp_minus_x = {exp_minus_x}")
-    #     print(f"  sigm_x      = {sigm_x}")
-    #     print(f"  sigm_minus_x= {sigm_minus_x}")
     neg, inputs = tree
     if isinstance(inputs, list):
         # Recurse through inputs of the multiplication.
@@ -3770,7 +3756,6 @@ def perform_sigm_times_exp(
                 exp_minus_x=exp_minus_x,
                 sigm_x=sigm_x,
                 sigm_minus_x=sigm_minus_x,
-                full_tree=full_tree,
             )
         return rval
     else:

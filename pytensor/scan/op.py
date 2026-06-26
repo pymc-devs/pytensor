@@ -1960,12 +1960,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
                 if var is None:
                     old_inner_output_data[idx] = None
-                elif isinstance(self.fn.maker.fgraph.outputs[idx], TensorVariable):
-                    old_inner_output_data[idx] = var.data
                 else:
-                    raise RuntimeError(
-                        "FIXME: old_inner_output_data[idx] = var.gpudata"
-                    )
+                    old_inner_output_data[idx] = var.data
 
             # 4.6. Keep a reference to the variables (ndarrays,
             # etc) associated with mitmot inputs currently in the
@@ -2142,14 +2138,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     if old_var is new_var:
                         if old_data is None:
                             output_reused = False
-                        elif isinstance(
-                            self.fn.maker.fgraph.outputs[offset_out + j], TensorVariable
-                        ):
-                            output_reused = new_var.data == old_data
                         else:
-                            raise RuntimeError(
-                                "FIXME: output_reused = new_var.gpudata == old_data"
-                            )
+                            output_reused = new_var.data == old_data
                     else:
                         output_reused = False
 

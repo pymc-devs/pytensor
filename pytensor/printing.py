@@ -1,6 +1,5 @@
 """Functions for printing PyTensor graphs."""
 
-import hashlib
 import logging
 import sys
 from abc import ABC, abstractmethod
@@ -2529,86 +2528,6 @@ def min_informative_str(
 
     rval = indent + prefix + name
 
-    return rval
-
-
-def var_descriptor(obj, _prev_obs: dict | None = None, _tag_generator=None) -> str:
-    """
-    Returns a string, with no endlines, fully specifying
-    how a variable is computed. Does not include any memory
-    location dependent information such as the id of a node.
-    """
-    if _prev_obs is None:
-        _prev_obs = {}
-
-    if id(obj) in _prev_obs:
-        tag = _prev_obs[id(obj)]
-
-        return "<" + tag + ">"
-
-    if _tag_generator is None:
-        _tag_generator = _TagGenerator()
-
-    cur_tag = _tag_generator.get_tag()
-
-    _prev_obs[id(obj)] = cur_tag
-
-    if hasattr(obj, "__array__"):
-        # hashlib hashes only the contents of the buffer, but
-        # it can have different semantics depending on the strides
-        # of the ndarray
-        name = "<ndarray:"
-        name += "strides=[" + ",".join(str(stride) for stride in obj.strides) + "]"
-        name += ",digest=" + hashlib.sha256(obj).hexdigest() + ">"
-    elif hasattr(obj, "owner") and obj.owner is not None:
-        name = str(obj.owner.op) + "("
-        name += ",".join(
-            var_descriptor(ipt, _prev_obs=_prev_obs, _tag_generator=_tag_generator)
-            for ipt in obj.owner.inputs
-        )
-        name += ")"
-    elif hasattr(obj, "name") and obj.name is not None:
-        # Only print the name if there is no owner.
-        # This way adding a name to an intermediate node can't make
-        # a deeper graph get the same descriptor as a shallower one
-        name = obj.name
-    else:
-        name = str(obj)
-        if " at 0x" in name:
-            # The __str__ method is encoding the object's id in its str
-            name = position_independent_str(obj)
-            if " at 0x" in name:
-                raise AssertionError(name)
-
-    prefix = cur_tag + "="
-
-    rval = prefix + name
-
-    return rval
-
-
-def position_independent_str(obj) -> str:
-    if isinstance(obj, Variable):
-        rval = "pytensor_var"
-        rval += "{type=" + str(obj.type) + "}"
-    else:
-        raise NotImplementedError()
-
-    return rval
-
-
-def hex_digest(x: np.ndarray) -> str:
-    """
-    Returns a short, mostly hexadecimal hash of a numpy ndarray
-    """
-    assert isinstance(x, np.ndarray)
-    rval = hashlib.sha256(x.tobytes()).hexdigest()
-    # hex digest must be annotated with strides to avoid collisions
-    # because the buffer interface only exposes the raw data, not
-    # any info about the semantics of how that data should be arranged
-    # into a tensor
-    rval += "|strides=[" + ",".join(str(stride) for stride in x.strides) + "]"
-    rval += "|shape=[" + ",".join(str(s) for s in x.shape) + "]"
     return rval
 
 

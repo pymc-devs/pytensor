@@ -9,7 +9,6 @@ ProfileStats object for runtime and memory profiling.
 #
 
 import atexit
-import copy
 import logging
 import operator
 import sys
@@ -54,8 +53,6 @@ _atexit_registered: bool = False
 def _atexit_print_fn():
     """Print `ProfileStat` objects in `_atexit_print_list` to `_atexit_print_file`."""
     if config.profile:
-        to_sum = []
-
         if config.profiling__destination == "stderr":
             destination_file = "<stderr>"
         elif config.profiling__destination == "stdout":
@@ -78,64 +75,9 @@ def _atexit_print_fn():
                         n_ops_to_print=config.profiling__n_ops,
                         n_apply_to_print=config.profiling__n_apply,
                     )
-
-                    if ps.show_sum:
-                        to_sum.append(ps)
                 else:
                     # TODO print the name if there is one!
                     print("Skipping empty Profile")  # noqa: T201
-            if len(to_sum) > 1:
-                # Make a global profile
-                cum = copy.copy(to_sum[0])
-                msg = f"Sum of all({len(to_sum)}) printed profiles at exit."
-                cum.message = msg
-                for ps in to_sum[1:]:
-                    for attr in [
-                        "compile_time",
-                        "fct_call_time",
-                        "fct_callcount",
-                        "vm_call_time",
-                        "rewriter_time",
-                        "linker_time",
-                        "validate_time",
-                        "import_time",
-                        "linker_node_make_thunks",
-                    ]:
-                        setattr(cum, attr, getattr(cum, attr) + getattr(ps, attr))
-
-                    # merge dictionary
-                    for attr in [
-                        "apply_time",
-                        "apply_callcount",
-                        "apply_cimpl",
-                        "variable_shape",
-                        "variable_strides",
-                        "variable_offset",
-                        "linker_make_thunk_time",
-                    ]:
-                        cum_attr = getattr(cum, attr)
-                        for key, val in getattr(ps, attr.items()):
-                            assert key not in cum_attr, (key, cum_attr)
-                            cum_attr[key] = val
-
-                    if cum.rewriter_profile and ps.rewriter_profile:
-                        try:
-                            merge = cum.rewriter_profile[0].merge_profile(
-                                cum.rewriter_profile[1], ps.rewriter_profile[1]
-                            )
-                            assert len(merge) == len(cum.rewriter_profile[1])
-                            cum.rewriter_profile = (cum.rewriter_profile[0], merge)
-                        except Exception as e:
-                            print(e)  # noqa: T201
-                            cum.rewriter_profile = None
-                    else:
-                        cum.rewriter_profile = None
-
-                cum.summary(
-                    file=f,
-                    n_ops_to_print=config.profiling__n_ops,
-                    n_apply_to_print=config.profiling__n_apply,
-                )
 
     if config.print_global_stats:
         print_global_stats()
@@ -159,7 +101,7 @@ def print_global_stats():
         destination_file = config.profiling__destination
 
     with extended_open(destination_file, mode="w") as f:
-        print("=" * 50, file=destination_file)
+        print("=" * 50, file=f)
         print(
             (
                 "Global stats: ",

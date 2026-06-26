@@ -27,10 +27,13 @@ def local_Unique_scalar(fgraph, node):
 @register_useless
 @register_canonicalize
 @node_rewriter([Unique])
-def local_Unique_Alloc_lift(fgraph, node):
-    """Convert ``unique(alloc(x, ...), axis=None)`` to ``unique(x, axis=None)``.
+def local_Unique_lift(fgraph, node):
+    """Convert ``unique(f(x, ...), axis=None)`` to ``unique(x, axis=None)``.
 
-    This isn't really so much a lift as a "reduction/consumption".
+    ``Alloc``, ``Repeat`` and ``second`` only broadcast/tile their input, so
+    they don't change the set of unique values and can be dropped from the
+    input of an axis-less ``unique`` (a "reduction/consumption" rather than a
+    true lift).
     """
     if (
         node.op.return_index
@@ -40,78 +43,21 @@ def local_Unique_Alloc_lift(fgraph, node):
     ):
         return False
 
-    alloc_var = node.inputs[0]
-
-    if not (alloc_var.owner and isinstance(alloc_var.owner.op, Alloc)):
+    var = node.inputs[0]
+    owner = var.owner
+    if owner is None:
         return False
 
-    alloced_var, *_alloc_shape = alloc_var.owner.inputs
-
-    new_unique, *_ = node.op.make_node(alloced_var).outputs
-
-    old_out = node.outputs[0]
-    new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)
-    return [new_x]
-
-
-@register_useless
-@register_canonicalize
-@node_rewriter([Unique])
-def local_Unique_Repeat_lift(fgraph, node):
-    """Convert ``unique(repeat(x, ...), axis=None)`` to ``unique(x, axis=None)``.
-
-    This isn't really so much a lift as a "reduction/consumption".
-    """
-    if (
-        node.op.return_index
-        or node.op.return_inverse
-        or node.op.return_counts
-        or node.op.axis is not None
-    ):
+    if isinstance(owner.op, Alloc | Repeat):
+        # The value being broadcast/tiled is the first input.
+        inner_var = owner.inputs[0]
+    elif isinstance(owner.op, Elemwise) and isinstance(owner.op.scalar_op, ps.Second):
+        # ``second(shape, x)`` fills the shape with the second input.
+        inner_var = owner.inputs[1]
+    else:
         return False
 
-    repeat_var = node.inputs[0]
-
-    if not (repeat_var.owner and isinstance(repeat_var.owner.op, Repeat)):
-        return False
-
-    repeated_var, *_repeat_shape = repeat_var.owner.inputs
-
-    new_unique, *_ = node.op.make_node(repeated_var).outputs
-
-    old_out = node.outputs[0]
-    new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)
-    return [new_x]
-
-
-@register_useless
-@register_canonicalize
-@node_rewriter([Unique])
-def local_Unique_second(fgraph, node):
-    """Convert ``unique(second(x, ...), axis=None)`` to ``second(x, axis=None)``.
-
-    This isn't really so much a lift as a "reduction/consumption".
-    """
-    if (
-        node.op.return_index
-        or node.op.return_inverse
-        or node.op.return_counts
-        or node.op.axis is not None
-    ):
-        return False
-
-    second_var = node.inputs[0]
-
-    if not (
-        second_var.owner
-        and isinstance(second_var.owner.op, Elemwise)
-        and isinstance(second_var.owner.op.scalar_op, ps.Second)
-    ):
-        return False
-
-    _shape_var, seconded_var = second_var.owner.inputs
-
-    new_unique, *_ = node.op.make_node(seconded_var).outputs
+    new_unique, *_ = node.op.make_node(inner_var).outputs
 
     old_out = node.outputs[0]
     new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)

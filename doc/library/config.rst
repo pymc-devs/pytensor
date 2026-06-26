@@ -405,31 +405,6 @@ import ``pytensor`` and print the config variable, as in:
     raise the exception (i.e. ``'raise'``).
 
 
-.. attribute:: config.warn__ignore_bug_before
-
-    String value: ``'None'``, ``'all'``, ``'0.3'``, ``'0.4'``, ``'0.4.1'``,
-    ``'0.5'``, ``'0.6'``, ``'0.7'``, ``'0.8'``, ``'0.8.1'``, ``'0.8.2'``,
-    ``'0.9'``, ``'0.10'``, ``'1.0'``, ``'1.0.1'``, ``'1.0.2'``, ``'1.0.3'``,
-    ``'1.0.4'``,``'1.0.5'``
-
-    Default: ``'0.9'``
-
-    When we an PyTensor bug that generated a bad result is fixed, we also make
-    PyTensor raise a warning when it encounters the same circumstances again. This
-    helps users determine whether or not said bug has affected past runs, since
-    one only needs to perform the same runs again with the new version, and one
-    does not have to understand the PyTensor internals that triggered the bug.
-
-    This flag lets users ignore warnings about old bugs that were
-    fixed before their first checkout of PyTensor.
-    You can set its value to the first version of PyTensor
-    that you used (probably 0.3 or higher)
-
-    ``'None'`` means that all warnings will be displayed.
-    ``'all'`` means all warnings will be ignored.
-
-    This flag's value cannot be modified during program execution.
-
 .. attribute:: base_compiledir
 
     Default: On Windows: ``$LOCALAPPDATA\\PyTensor`` if ``$LOCALAPPDATA`` is defined,
@@ -734,11 +709,3 @@ import ``pytensor`` and print the config variable, as in:
     The number of traceback stack levels to keep for variables during PyTensor
     compilation. When this value is greater than zero, it will make PyTensor keep
     internal stack traces.
-
-.. attribute:: config.metaopt__verbose
-
-    Int value, default: 0
-
-    The verbosity level of the meta-rewriter: ``0`` for silent, ``1`` to only
-    warn when PyTensor cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
-    timings and the rewrites selected).

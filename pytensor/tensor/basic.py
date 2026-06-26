@@ -1466,7 +1466,7 @@ class CachedEquilibrimDB(EquilibriumDB):
 
     def register(self, *args, **kwargs):
         # If new rewrites are registered, the default cached query is void
-        self.cached_default_query = None
+        self._cached_default_query = None
         super().register(*args, **kwargs)
 
     @property

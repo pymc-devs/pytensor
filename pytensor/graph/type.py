@@ -96,34 +96,6 @@ class Type(MetaObject, Generic[D]):  # noqa: UP046
 
         """
 
-    def filter_inplace(
-        self,
-        value: Any,
-        storage: Any,
-        strict: bool = False,
-        allow_downcast: bool | None = None,
-    ):
-        """Return data or an appropriately wrapped/converted data by converting it in-place.
-
-        This method allows one to reuse old allocated memory.  If this method
-        is implemented, it will be called instead of `Type.filter`.
-
-        As of now, this method is not implemented and was previously used for transferring memory to and from GPU.
-
-        Parameters
-        ----------
-        value: array-like
-        storage: array-like
-            The old value (e.g. the old NumPy array)
-        strict: bool
-        allow_downcast: bool (optional)
-
-        Raises
-        ------
-        NotImplementedError
-        """
-        raise NotImplementedError()
-
     def filter_variable(
         self, other: Variable | D, allow_convert: bool = True
     ) -> variable_type:

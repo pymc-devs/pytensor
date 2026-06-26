@@ -27,7 +27,7 @@ from pytensor.graph.rewriting.basic import (
     out2in,
 )
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
@@ -4417,7 +4417,7 @@ class TestSigmoidRewrites:
             trees = [parse_mul_tree(e) for e in (expr1, expr2)]
             perform_sigm_times_exp(trees[0])
             trees[0] = simplify_mul(trees[0])
-            good = is_same_graph(compute_mul(trees[0]), compute_mul(trees[1]))
+            good = equal_computations([compute_mul(trees[0])], [compute_mul(trees[1])])
             # if not good:
             #     print(trees[0])
             #     print(trees[1])
@@ -4587,7 +4587,7 @@ class TestSigmoidUtils:
         tree = (x * y) * -z
         mul_tree = parse_mul_tree(tree)
         assert parse_mul_tree(compute_mul(mul_tree)) == mul_tree
-        assert is_same_graph(compute_mul(parse_mul_tree(tree)), tree)
+        assert equal_computations([compute_mul(parse_mul_tree(tree))], [tree])
 
     def test_parse_mul_tree(self):
         x, y, z = vectors("x", "y", "z")
@@ -4609,7 +4609,7 @@ class TestSigmoidUtils:
             is_1pexp(x, only_process_constants=False)
             for x in [(1 + exp_op(-x)), (exp_op(-x) + 1)]
         ):
-            assert not neg_ and is_same_graph(exp_arg, -x)
+            assert not neg_ and equal_computations([exp_arg], [-x])
         assert is_1pexp(1 - exp_op(x), False) is None
         assert is_1pexp(2 + exp_op(x), False) is None
         assert is_1pexp(exp_op(x) + 2, False) is None
