@@ -159,6 +159,9 @@ class InplaceGraphOptimizer(GraphRewriter):
                     node = inplace_node
                 except InconsistencyError:
                     inplace_pattern.pop(o)
+                    # The input wasn't consumed, so let another output try to
+                    # reuse it in place.
+                    tried_inputs.discard(i)
         if node is not original_node:
             copy_stack_trace(original_node.outputs, node.outputs)
         return node

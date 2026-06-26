@@ -1377,9 +1377,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # `Function` pipeline.
         update_mapping = {}
         preallocated_mitmot_outs = []
-        untraced_sit_sot_inner_outputs = self.inner_untraced_sit_sot_outs(
-            fgraph.outputs
-        )
 
         if config.scan__allow_output_prealloc:
             # Go through the mitmots. Whenever a mitmot has a tap both as an
@@ -1434,10 +1431,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 for x in fgraph.inputs[input_idx:]
             ]
             wrapped_outputs = [Out(x, borrow=True) for x in fgraph.outputs[:slices]]
-            wrapped_outputs += [
-                Out(x, borrow=x in untraced_sit_sot_inner_outputs)
-                for x in fgraph.outputs[slices:]
-            ]
+            # Untraced sit_sot states are kept by reference across iterations, so
+            # their inner outputs must not alias inputs/other outputs (borrow=False
+            # lets insert_deepcopy break such aliasing). See issue #2252.
+            wrapped_outputs += [Out(x, borrow=False) for x in fgraph.outputs[slices:]]
 
             protected_outs = tuple(
                 i
@@ -1453,14 +1450,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         else:
             wrapped_inputs = [In(x, borrow=True) for x in fgraph.inputs]
-            wrapped_outputs = [Out(x, borrow=False) for x in fgraph.outputs[:slices]]
-            untraced_sit_sot_inner_outputs = self.inner_untraced_sit_sot_outs(
-                fgraph.outputs
-            )
-            wrapped_outputs += [
-                Out(x, borrow=x in untraced_sit_sot_inner_outputs)
-                for x in fgraph.outputs[slices:]
-            ]
+            wrapped_outputs = [Out(x, borrow=False) for x in fgraph.outputs]
 
         fgraph.update_mapping = update_mapping
 
