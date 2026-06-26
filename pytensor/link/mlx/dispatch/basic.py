@@ -5,6 +5,10 @@ from types import NoneType
 
 import mlx.core as mx
 import numpy as np
+from numpy.random import Generator
+from numpy.random.bit_generator import (  # type: ignore[attr-defined]
+    _coerce_to_uint32_array,
+)
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import MLX
@@ -144,6 +148,14 @@ def mlx_typify_bool(data, **kwargs):
 @mlx_typify.register(np.complexfloating)
 def mlx_typify_numpy_scalar(data, **kwargs):
     return _nan_safe_constant(np.asarray(data))
+
+
+@mlx_typify.register(Generator)
+def mlx_typify_Generator(rng, **kwargs):
+    # An ``mx.random`` key is a pair of ``uint32`` (like JAX). We seed it from
+    # the NumPy bit generator state so sampling is reproducible from the seed.
+    key = _coerce_to_uint32_array(rng.bit_generator.state["state"]["state"])[:2]
+    return mx.array(key, dtype=mx.uint32)
 
 
 @singledispatch
