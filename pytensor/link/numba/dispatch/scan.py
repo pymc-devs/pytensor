@@ -5,9 +5,14 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from pytensor.compile.aliasing import add_supervisor_to_fgraph, insert_deepcopy
+from pytensor.compile.aliasing import (
+    add_supervisor_to_fgraph,
+    alias_root,
+    insert_deepcopy,
+)
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA, get_mode
+from pytensor.graph.features import NoOutputInplaceOnInput
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -56,6 +61,99 @@ def array0d_range(x):
 
 @register_funcify_and_cache_key(Scan)
 def numba_funcify_Scan(op: Scan, node, **kwargs):
+    """Generate a Numba implementation of a `Scan` loop.
+
+    Memory-aliasing contract
+    ------------------------
+    Scan defines a loop over an inner function with signature:
+        (*sequences[idx], *traced[idx], *untraced, *non_sequences)
+        -> (*traced_updates[idx], *untraced_updates)
+
+    Traced variables are read from an indexed circular buffer at every iteration,
+    and the updates stored (copied) back to it immediately after. Untraced variables
+    are carried by reference, with each update becoming the next iteration's input.
+
+    Scan is sometimes allowed to destroy/alias the outer traced and untraced variables,
+    but never sequences and non-sequences. Specifically, outer untraced variables can be
+    destroyed (destroy_map, opt in) or aliased (view_map, default). Traced variables can be
+    destroyed (destroy_map, opt in), but otherwise not alias (never in view_map).
+    Note that destroy permission implies alias permission, but not the other way around.
+
+    Scan is not allowed to return outputs that alias each other, unless they were already
+    aliased from the outside, and it was itself allowed to alias/destroy them. This means
+    PyTensor already gauged it was safe to destroy/alias them.
+
+    Scan has some freedom in how this outer contract is respected. If needed, it can
+    deepcopy the outer inputs once at the start, or make sure any aliased output
+    the inner function returns is properly copied before the final return.
+
+    Internally, Scan also has total control over the boundary memory management of the
+    inner function: it grants the permissions to destroy or alias the inner loop inputs,
+    and whether the inner outputs may alias each other. This inner boundary is distinct
+    from the outer contract above, and it is Scan's responsibility to choose an inner
+    strategy that produces correct results while still respecting the outer contract.
+
+    Memory-aliasing strategy
+    ------------------------
+    Traced variables
+    ~~~~~~~~~~~~~~~~
+    Traced variables are deep-copied once at the start if they are not in the destroy_map.
+
+    Because every inner trace update is copied back to the buffer immediately, the inner function
+    is allowed to alias (but not destroy) the sequence reads, non_sequences, as well as the
+    traced and untraced inputs or updates, when producing the traced updates.
+
+    A special case occurs when the indexed reads will be immediately overwritten by the updates
+    in the same loop iteration. For single output taps (mit-sot, sit-sot) this can only
+    happen when the circular buffer is truncated to its minimum legal length.
+    For mit-mot this can also happen without any buffer loop-around.
+    In either case, traced updates are not allowed to alias those traced reads,
+    as they may otherwise be corrupted if the reads are updated before they were copied to their own buffer.
+
+    On the plus side, when this happens, the inner function is granted permission to destroy these
+    immediately-to-be discarded reads, as long as the returned updates do not themselves alias them.
+
+    The alias-restriction and destroy-permission caused by the loop-around behavior are derived from the
+    buffer's static length:
+        * known large enough: no overwrite is possible, neither alias restriction nor destroy permission applies;
+        * length unknown: the loop-around overwrite can't be ruled out, alias restricted but not granted destroy permission;
+        * known minimal: the overwrite is certain, alias restricted but granted destroy permission.
+
+    Untraced variables
+    ~~~~~~~~~~~~~~~~~~
+    Untraced variables are deep-copied once at the start if they are not in destroy_map
+    and the inner function destroys them.
+
+    Untraced updates are allowed to alias their own untraced inputs (which happens when n_steps=0)
+    or when the inner function update naturally alias the input (eg, o = i; o = i.T; o = i[::-1]).
+
+    Because the last untraced updates are returned as is, the inner function is not allowed to
+    alias sequences, non_sequences, or other untraced inputs and outputs (violates the outer alias restriction).
+    Untraced updates are not allowed to alias traced reads (risks corruption by subsequent overwrittes),
+    but can alias traced updates, since the immediate copy to their buffer that follows, will break the alias.
+
+    Because untraced inputs are immediately discarded (and protected from alias with other updates),
+    the inner function is always granted permission to destroy them. It can do so from any computation,
+    not only the one producing the matching untraced update.
+
+    Controlling inner graph alias
+    -----------------------------
+    PyTensor allows initial graphs to contain arbitrary (non-destructive) aliasing.
+    Alias at the boundary (output aliasing an input or another output) is controlled via
+    targeted deepcopies at the end (using the insert_deepcopy helper).
+
+    In contrast, destruction is usually NOT allowed to be present in initial graphs.
+    Destructive alias at the boundary is controlled during rewrites, with the following features:
+        * Supervisor: Checks whether any protected input are destroyed
+        * NoOutputInplaceOnInput: Checks whether an output is destroying a non-protected input
+          (protected inputs are already covered by Supervisor)
+    Inside the boundary:
+        * DestroyHandler: Checks whether a consistent ordering exists for the destruction/view chains,
+          i.e., every read runs before its buffers' destruction and the chain has no cycle.
+    These features can veto (undo) any rewrite that would violate their spec.
+    They CANNOT fix violations that already existed in the initial graph.
+
+    """
     # Apply inner rewrites
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of Scan?
@@ -67,17 +165,17 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         .optimizer
     )
     fgraph = op.fgraph
-    # When the buffer can only hold one SITSOT or as as many MITSOT as there are taps,
-    # We must always discard the oldest tap, so it's safe to destroy it in the inner function.
-    # TODO: Allow inplace for MITMOT
-    destroyable_sitsot = [
+
+    # If we know the static length of the traced buffers, check whether traced input reads
+    # will be immediately discarded in the same loop iteration.
+    discarded_sitsot = [
         inner_sitsot
         for outer_sitsot, inner_sitsot in zip(
             op.outer_sitsot(node.inputs), op.inner_sitsot(fgraph.inputs), strict=True
         )
         if outer_sitsot.type.shape[0] == 1
     ]
-    destroyable_mitsot = [
+    discarded_mitsot = [
         oldest_inner_mitmot
         for outer_mitsot, oldest_inner_mitmot, taps in zip(
             op.outer_mitsot(node.inputs),
@@ -87,39 +185,152 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         )
         if outer_mitsot.type.shape[0] == abs(min(taps))
     ]
-    # Always allow the inner function to destroy untraced_sit_sot inputs.
-    # After the first iteration, these come from the previous output so
-    # destroying is always safe. For the first iteration, the codegen
-    # copies the outer input if the Scan's destroy_map doesn't allow it.
-    destroyable_untraced_sit_sot = list(op.inner_untraced_sit_sot(fgraph.inputs))
-    destroyable = {
-        *destroyable_sitsot,
-        *destroyable_mitsot,
-        *destroyable_untraced_sit_sot,
+    # Untraced inputs are always immediately discarded
+    discarded_untraced_sit_sot = list(op.inner_untraced_sit_sot(fgraph.inputs))
+    discarded = {
+        *discarded_sitsot,
+        *discarded_mitsot,
+        *discarded_untraced_sit_sot,
     }
-    input_specs = [In(x, borrow=True, mutable=x in destroyable) for x in fgraph.inputs]
+    # Grant the inner function the right to alias (borrow=True) all inputs
+    # and to destroy (mutable=True) reads that are known to be immediately discarded
+    # TODO: Allow destroying MITMOT as well (#2252).
+    input_specs = [In(x, borrow=True, mutable=x in discarded) for x in fgraph.inputs]
     add_supervisor_to_fgraph(
         fgraph=fgraph,
         input_specs=input_specs,
         accept_inplace=True,
     )
-    rewriter(fgraph)
-    untraced_sit_sot_inner_outputs = set(op.inner_untraced_sit_sot_outs(fgraph.outputs))
-    output_specs = [
-        Out(x, borrow=x in untraced_sit_sot_inner_outputs) for x in fgraph.outputs
+
+    # Check which traced indexed reads MAY be overwritten immediately.
+    # In this case outputs are not allowed to alias (destructively or not) the reads
+    # so as to not be corrupted before they are themselves safely stored.
+    # With buffer length L, output tap o_out writes input tap
+    # o_in iff (o_out - o_in) % L == 0 (same physical slot). Two ways this happens:
+    # - linear write-back (gap 0): the recurrence writes the very slot it read this step
+    #   (mit_mot accumulators: read g[k], write g[k] + delta back). Holds for any L.
+    # - loop-around (gap == reach): sit_sot/mit_sot write the new state just past the oldest
+    #   read; in a truncated buffer (L == reach, the minimal length that still holds the
+    #   oldest tap) that wraps onto the just-discarded oldest read. A write landing further
+    #   ahead would store onto a slot still to be read -- an invalid recurrence we need not
+    #   consider, just as we don't consider L < reach (reads would alias). So those are the
+    #   only two gaps.
+    # ``reach`` is the minimal admissible buffer length, ``max_lookback`` (= abs of the
+    # oldest tap); a write offset never exceeds it, so for any larger L the new slot is fresh
+    # and no wrap occurs. When L is statically known we test (o_out - o_in) % L == 0 exactly;
+    # otherwise L is only known to be >= reach and the loop-around can bite only at L ==
+    # reach, so we test gap 0 or gap == reach.
+    def find_potentially_overwritten_reads(
+        grouped_inner, outers, in_slices_seq, out_slices_seq
+    ):
+        result = []
+        for inner_vars, outer, in_slices, out_slices in zip(
+            grouped_inner, outers, in_slices_seq, out_slices_seq, strict=True
+        ):
+            max_lookback = -min(0, min(in_slices))
+            in_offsets = [max_lookback + t for t in in_slices]
+            out_offsets = [max_lookback + t for t in out_slices]
+            static_len = outer.type.shape[0]
+            reach = max_lookback  # minimal admissible buffer length
+            for v, o_in in zip(inner_vars, in_offsets, strict=True):
+                if static_len is None:
+                    hit = any(
+                        o_out == o_in or o_out - o_in == reach for o_out in out_offsets
+                    )
+                else:
+                    hit = any((o_out - o_in) % static_len == 0 for o_out in out_offsets)
+                if hit:
+                    result.append(v)
+        return result
+
+    potentially_overwritten_reads = [
+        *find_potentially_overwritten_reads(
+            op.inner_mitmot_grouped(fgraph.inputs),
+            op.outer_mitmot(node.inputs),
+            op.info.mit_mot_in_slices,
+            op.info.mit_mot_out_slices,
+        ),
+        *find_potentially_overwritten_reads(
+            op.inner_mitsot_grouped(fgraph.inputs),
+            op.outer_mitsot(node.inputs),
+            op.info.mit_sot_in_slices,
+            [(0,)] * op.info.n_mit_sot,
+        ),
+        *find_potentially_overwritten_reads(
+            [[v] for v in op.inner_sitsot(fgraph.inputs)],
+            op.outer_sitsot(node.inputs),
+            op.info.sit_sot_in_slices,
+            [(0,)] * op.info.n_sit_sot,
+        ),
     ]
+    if potentially_overwritten_reads:
+        # Forbid the inner function from aliasing by destruction overwritten traced reads.
+        # Note we could have allowed this and patched at the end with a deepcopy (like we do with non-destructive alias)
+        # But this is wasteful. By forbidding it the inner graph will itself allocate a fresh buffer
+        # and write the result there immediately.
+        in_pos = {v: i for i, v in enumerate(fgraph.inputs)}
+        fgraph.attach_feature(
+            NoOutputInplaceOnInput([in_pos[t] for t in potentially_overwritten_reads])
+        )
+
+    # Rewrite graph
+    rewriter(fgraph)
+
+    # Post-patch alias contract via targeted deepcopies
+    # Traced and untraced updates: copy an alias of a tap input the loop (may) overwrite
+    #  this iteration.
+    # Untraced updates: keep as is if it is the FIRST viewer of a freshly produced buffer
+    # (including traced updates which will be copied immediately anyway), OR its own untraced input.
+    # Any other alias is broken with a deepcopy: Sequences reads, traced reads, non-sequences,
+    # other untraced inputs or updates.
+    # Note: We could squeeze some more memory reuse by delaying the breaking of aliasing between untraced variables
+    # by delaying the patched deepcopy until after the loop is over. This requires some care to handle alias transitions
+    # between untraced updates that can happen over multiple iterations, and protect against cross-iteration destruction
+    # that can corrupt such chains.
+    own_untraced_input = dict(
+        zip(
+            op.inner_untraced_sit_sot_outs(fgraph.outputs),
+            op.inner_untraced_sit_sot(fgraph.inputs),
+            strict=True,
+        )
+    )
+    untraced_outs = set(own_untraced_input)
+    seen_untraced_roots = set()
+    output_specs = []
+    for update in fgraph.outputs:
+        root = alias_root(update)
+        if update in untraced_outs:
+            borrow = (
+                (
+                    # freshly produced buffer
+                    root.owner is not None
+                    # or a self alias
+                    or root is own_untraced_input[update]
+                )
+                # and not an alias of another untraced update
+                and root not in seen_untraced_roots
+            )
+            if borrow:
+                seen_untraced_roots.add(root)
+        else:
+            # traced update
+            borrow = root not in potentially_overwritten_reads
+        output_specs.append(Out(update, borrow=borrow))
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
 
-    # Track which untraced_sit_sot outputs have their inner input destroyed
-    # by the optimized inner function (transitively, via DestroyHandler).
-    untraced_start = (
-        op.info.n_mit_mot + op.info.n_mit_sot + op.info.n_sit_sot + op.info.n_nit_sot
-    )
-    inner_destroyed_untraced_out_idxs = set()
+    # Collect a set of untraced slots the inner function destroys in place.
+    # These may demand an initial copy if the Scan is not granted permission to destroy them already.
+    untraced_inputs_destroyed_by_inner_function = set()
     if hasattr(fgraph, "destroyers"):
-        for j, inner_inp in enumerate(op.inner_untraced_sit_sot(fgraph.inputs)):
-            if fgraph.destroyers(inner_inp):
-                inner_destroyed_untraced_out_idxs.add(untraced_start + j)
+        untraced_inputs_destroyed_by_inner_function = {
+            outer_out_idx
+            for inner_in, (outer_out_idx, _) in zip(
+                op.inner_untraced_sit_sot(fgraph.inputs),
+                op.outer_untraced_sit_sot_outs(node.outputs, with_idx=True),
+                strict=True,
+            )
+            if fgraph.destroyers(inner_in)
+        }
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
         op.fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
@@ -357,12 +568,13 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_out_to_outer_in_stmts.append(storage_name)
 
             output_idx = outer_output_names.index(storage_name)
-            # Copy the outer input when it will be mutated during the loop
-            # but the Scan's destroy_map doesn't grant ownership.
-            # Tapped outputs: the loop writes into the buffer via circular indexing.
-            # Untraced sit_sot: the inner function may destroy the input inplace.
+            # Copy the outer inputs when the loop mutates them and the destroy_map doesn't already grant permission
             needs_copy = output_idx not in node.op.destroy_map and (
-                is_tapped or output_idx in inner_destroyed_untraced_out_idxs
+                # Traced buffers are always mutated by the loop write-back procedure
+                is_tapped
+                # Untraced inputs are only mutated by the inner function,
+                # so we make the copy conditional on that actually happening
+                or output_idx in untraced_inputs_destroyed_by_inner_function
             )
             if needs_copy:
                 storage_alloc_stmt = f"{storage_name} = numba_deepcopy({outer_in_name})"
@@ -496,8 +708,9 @@ def scan({", ".join(outer_in_names)}):
         # If we can't cache the inner function, we can't cache the Scan either
         scan_cache_key = None
     else:
+        scan_cache_version = 1
         scan_cache_key = sha256(
-            f"({scan_op_src}, {inner_func_cache_key})".encode()
+            f"({scan_op_src}, {inner_func_cache_key}, {scan_cache_version})".encode()
         ).hexdigest()
 
     return numba_basic.numba_njit(scan_op_fn, boundscheck=False), scan_cache_key
