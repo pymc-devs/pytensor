@@ -4,7 +4,6 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
-from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -22,7 +21,6 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
-    ARange,
     ExtractDiag,
     Eye,
     Join,
@@ -49,7 +47,8 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.subtensor import (
-    _constant_has_unique_indices,
+    _index_provably_unique,
+    _indices_jointly_unique,
     local_adv_idx_to_diagonal,
     local_adv_idx_to_slice,
     local_advanced_read_of_write_constant_indices,
@@ -215,33 +214,69 @@ def _lift_subtensor_non_axis(
         return None
 
 
-def _index_provably_not_larger(idx, val_static_dim, fgraph=None) -> bool:
+def _static_size_not_larger(idx, val_static_dim) -> bool:
+    # A purely static bound: the index selects no more elements than the axis holds.
+    # Reshape/DimShuffle preserve the element count, so follow them to whichever
+    # view in the chain has a fully-known static shape.
+    if val_static_dim is not None:
+        idx_static_shape = idx.type.shape
+        if not any(d is None for d in idx_static_shape) and (
+            np.prod(idx_static_shape) <= val_static_dim
+        ):
+            return True
+    if isinstance(idx.owner_op, Reshape | DimShuffle):
+        return _static_size_not_larger(idx.owner.inputs[0], val_static_dim)
+    return False
+
+
+def _index_provably_not_larger(
+    idx, val_static_dim, fgraph: FunctionGraph | None
+) -> bool:
     # Per-axis check: an index that can't repeat a position can't enlarge that axis.
     # Does not account for cross-axis broadcast expansion from outer indexing.
-    if isinstance(idx, slice) or idx.ndim == 0:
+    # Try the cheap purely-static size bound first; only then the (potentially
+    # graph-walking) uniqueness reasoning. Both follow Reshape/DimShuffle views,
+    # which preserve the element count, so uniqueness is still checked just once.
+    # ``fgraph`` is forwarded to ``_index_provably_unique`` for the user-declared
+    # ``unique_indices`` assumption (None to skip it).
+    if _static_size_not_larger(idx, val_static_dim):
         return True
-    if all(idx.type.broadcastable):
-        return True
-    if idx.type.dtype == "bool":
-        return True
-    if _constant_has_unique_indices(idx):
-        return True
-    if check_assumption(fgraph, idx, UNIQUE_INDICES):
-        return True
-    if isinstance(idx.owner_op, ARange):
-        return True
-    if isinstance(idx.owner_op, Reshape | DimShuffle):
-        # Views that don't add dimensions
-        if _index_provably_not_larger(idx.owner.inputs[0], val_static_dim, fgraph):
-            return True
+    return _index_provably_unique(idx, fgraph)
 
-    # Fallback to static shape analysis
-    if val_static_dim is None:
-        return False
-    idx_static_shape = idx.type.shape
-    if any(d is None for d in idx_static_shape):
-        return False
-    return bool(np.prod(idx_static_shape) < val_static_dim)
+
+def _indices_provably_not_larger(idxs_and_dims, fgraph: FunctionGraph | None) -> bool:
+    """Whether advanced-indexing some consecutive axes selects no more elements
+    than those axes already hold, so lifting a Subtensor through the indexing
+    can't increase computation.
+
+    ``idxs_and_dims`` pairs each advanced index (``ndim > 0``) with the static
+    size of the axis it indexes. ``fgraph`` is forwarded to the uniqueness helpers
+    for the ``unique_indices`` assumption lookup (None to skip it).
+    """
+    if not idxs_and_dims:
+        return True
+
+    idxs = [idx for idx, _ in idxs_and_dims]
+    dims = [dim for _, dim in idxs_and_dims]
+    idx_shapes = [idx.type.shape for idx in idxs]
+
+    # With static shapes the result size is known exactly, so just compare it
+    # against the number of elements the indexed axes hold.
+    if all(d is not None for d in dims) and all(
+        None not in shape for shape in idx_shapes
+    ):
+        return bool(np.prod(np.broadcast_shapes(*idx_shapes)) <= np.prod(dims))
+
+    # Otherwise each index, on its own axis, may select no more than that axis
+    # holds (e.g. an arange or a statically-smaller index)...
+    if all(_index_provably_not_larger(idx, dim, fgraph) for idx, dim in idxs_and_dims):
+        return True
+    # ...or the indices are jointly duplicate-free, which on its own bounds the
+    # result by the axes' size even when the per-axis sizes are unknown. Only the
+    # joint-only conditions (single Nonzero, jointly-unique constants) can add
+    # anything here: the per-axis pass above already failed, so at least one index
+    # is not provably unique and the per-axis leg of the joint check is moot.
+    return _indices_jointly_unique(idxs, fgraph)
 
 
 @register_canonicalize
@@ -345,17 +380,19 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if _non_consecutive_adv_indexing(idx_tuple):
         return None
 
-    # Skip when lifting would expand a gather past a non-broadcast input's size.
+    # Skip when indexing each input would select more elements than it holds,
+    # making the lifted Elemwise do more work. The advanced indices are weighed
+    # together, over the consecutive axes they jointly index.
     for inp in elem.owner.inputs:
-        for axis, idx in enumerate(idx_tuple):
-            if axis >= inp.type.ndim:
-                break
-            if not isinstance(idx, TensorVariable) or idx.type.ndim == 0:
-                continue
-            if inp.type.broadcastable[axis]:
-                continue
-            if not _index_provably_not_larger(idx, inp.type.shape[axis], fgraph):
-                return None
+        adv_indices = [
+            (idx, inp.type.shape[axis])
+            for axis, idx in enumerate(idx_tuple[: inp.type.ndim])
+            if isinstance(idx, TensorVariable)
+            and idx.type.ndim > 0
+            and not inp.type.broadcastable[axis]
+        ]
+        if not _indices_provably_not_larger(adv_indices, fgraph):
+            return None
 
     batch_ndim = (
         elem.owner.op.batch_ndim(elem.owner)
@@ -742,11 +779,15 @@ def lift_subtensor_through_alloc(fgraph, node):
 
     # Indices on Alloc-added dims don't reach val; the rest line up with val's dims.
     val_indexer = indices[n_added_dims:]
-    dangerous_index_reaches_val = any(
-        not val.type.broadcastable[axis]
-        # Per-axis check; doesn't account for net effect across all axes.
-        and not _index_provably_not_larger(idx, val.type.shape[axis], fgraph)
+    val_adv_indices = [
+        (idx, val.type.shape[axis])
         for axis, idx in enumerate(val_indexer)
+        if isinstance(idx, TensorVariable)
+        and idx.type.ndim > 0
+        and not val.type.broadcastable[axis]
+    ]
+    dangerous_index_reaches_val = not _indices_provably_not_larger(
+        val_adv_indices, fgraph
     )
 
     # On broadcast val dims the index is neutralized (advanced indices dropped,
