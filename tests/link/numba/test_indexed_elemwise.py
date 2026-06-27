@@ -603,6 +603,45 @@ class TestShapeValidation:
         with pytest.raises(Exception):
             fn(np.zeros(100), np.zeros(1, dtype=np.int64), np.zeros(5))
 
+    def test_no_fusion_with_bounded_basic_slice_read(self):
+        """Regression: a bounded basic slice on a non-indexed axis can't be
+        carried by the fused loop, which substitutes the full source array and
+        iterates non-indexed axes wholesale. Fusing ``x[1:4, idx]`` dropped the
+        ``1:4`` offset and iterated x's full axis 0 against y's, raising at
+        runtime. The slice must block fusion and results stay correct."""
+        rng = np.random.default_rng(2202)
+        x = pt.matrix("x", shape=(6, 6))
+        y = pt.matrix("y", shape=(3, 3))
+        idx = pt.constant(np.array([0, 2, 4]))
+
+        out = x[1:4, idx] + y
+        fn = function([x, y], out, mode=NUMBA_MODE, trust_input=True)
+        assert not any(
+            isinstance(n.op, IndexedElemwise) for n in fn.maker.fgraph.toposort()
+        )
+
+        ref = function([x, y], out, mode=NUMBA_NO_FUSION, trust_input=True)
+        xv, yv = rng.normal(size=(6, 6)), rng.normal(size=(3, 3))
+        np.testing.assert_allclose(fn(xv, yv), ref(xv, yv), rtol=1e-10)
+
+    def test_no_fusion_with_bounded_basic_slice_write(self):
+        """As above for an indexed write: a bounded basic slice on the write
+        target's non-indexed axis must block fusion."""
+        rng = np.random.default_rng(2203)
+        t = pt.matrix("t", shape=(6, 6))
+        y = pt.matrix("y", shape=(3, 3))
+        idx = pt.constant(np.array([0, 2, 4]))
+
+        out = t[1:4, idx].set(pt.exp(y))
+        fn = function([t, y], out, mode=NUMBA_MODE, trust_input=True)
+        assert not any(
+            isinstance(n.op, IndexedElemwise) for n in fn.maker.fgraph.toposort()
+        )
+
+        ref = function([t, y], out, mode=NUMBA_NO_FUSION, trust_input=True)
+        tv, yv = rng.normal(size=(6, 6)), rng.normal(size=(3, 3))
+        np.testing.assert_allclose(fn(tv.copy(), yv), ref(tv.copy(), yv), rtol=1e-10)
+
     def test_loop_shape_regression(self):
         """
         Regression test for https://github.com/pymc-devs/pytensor/issues/2201
