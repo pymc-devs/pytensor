@@ -1105,6 +1105,9 @@ def local_set_to_inc_subtensor(fgraph, node):
     AdvancedIncSubtensor1(x, x[ilist]+other, ilist, set_instead_of_inc=True) ->
     AdvancedIncSubtensor1(x, other, ilist, set_instead_of_inc=False)
 
+    Only valid when ``ilist`` is duplicate-free: a dense set is last-wins while an
+    inc accumulates, so duplicate indices would over-count.
+
     TODO FIXME: Why doesn't this apply to all `*IncSubtensor*` `Op`\s?  If it
     did this wouldn't need to also be included in the "specialize" pass.
 
@@ -1132,6 +1135,11 @@ def local_set_to_inc_subtensor(fgraph, node):
         return
     if subn.inputs[1] != node.inputs[2] or subn.inputs[0] != node.inputs[0]:
         return
+    # set->inc is only valid when ilist is duplicate-free: ``set(x[ilist] + other)``
+    # is last-wins at repeated positions, while ``inc(other)`` would accumulate the
+    # contributions of every occurrence and over-count them.
+    if not _has_unique_indices(fgraph, node.inputs[2]):
+        return
     ret = advanced_inc_subtensor1(node.inputs[0], other, node.inputs[2])
 
     copy_stack_trace(node.outputs, ret)
@@ -1150,8 +1158,11 @@ def local_add_of_sparse_write(fgraph, node):
     Adding it to another tensor is equivalent to incrementing in place, which
     avoids materialising the dense sparse representation.
 
-    Also handles ``zeros[idx].inc(v)`` when ``idx`` is duplicate-free, since
-    with unique indices inc is semantically equivalent to set.
+    The ``zeros[idx].inc(v)`` form is rewritten unconditionally: inc applies the
+    same per-position delta whether the base is zeros (then added to ``x``) or
+    ``x`` itself, so duplicate indices accumulate identically on both sides. Only
+    the ``zeros[idx].set(v)`` form needs duplicate-free indices, since a dense set
+    is last-wins and collapsing it to an inc would over-count repeats.
     """
     for i, sparse_candidate in enumerate(node.inputs):
         if not (
@@ -1174,11 +1185,21 @@ def local_add_of_sparse_write(fgraph, node):
         ):
             continue
 
-        # An inc into zeros is only equivalent to a set when indices are
-        # duplicate-free. Basic (slice/scalar) indexing is always unique;
-        # advanced integer-array indices must be checked.
-        if not inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
-            if not all(_has_unique_indices(fgraph, idx) for idx in idx_vars):
+        # Only the set->inc conversion needs duplicate-free indices. An inc into
+        # zeros and the resulting inc into ``other`` apply the same per-position
+        # delta (accumulating any duplicates identically), so ``x + zeros[idx].inc(v)
+        # -> x[idx].inc(v)`` holds for any indices. A dense set, by contrast, is
+        # last-wins, so collapsing it to an inc would over-count repeated
+        # positions. Basic (slice/scalar) IncSubtensor is always unique; advanced
+        # integer-array set indices must be checked, weighing only the advanced
+        # indices and not the flattened slice bounds.
+        if inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
+            adv_idxs = [
+                idx
+                for idx in indices_from_subtensor(idx_vars, inner_op.idx_list)
+                if isinstance(idx, TensorVariable) and idx.type.ndim > 0
+            ]
+            if not all(_has_unique_indices(fgraph, idx) for idx in adv_idxs):
                 continue
 
         others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
@@ -2370,9 +2391,15 @@ def local_write_of_write_same_indices(fgraph, node):
         # Basic indexing (slices/scalars) is always duplicate-free.
         # For advanced indexing, per-axis uniqueness is conservative but
         # sufficient: it guarantees no duplicates in the joint cross-product
-        # after broadcasting.
+        # after broadcasting. Weigh only the advanced indices, not the flattened
+        # slice bounds.
         if not isinstance(node.op, IncSubtensor):
-            if not all(_has_unique_indices(fgraph, v) for v in outer_idx_vars):
+            adv_idxs = [
+                idx
+                for idx in indices_from_subtensor(outer_idx_vars, node.op.idx_list)
+                if isinstance(idx, TensorVariable) and idx.type.ndim > 0
+            ]
+            if not all(_has_unique_indices(fgraph, idx) for idx in adv_idxs):
                 return
         new_val = a + b
         if (
