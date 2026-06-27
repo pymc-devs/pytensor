@@ -235,6 +235,36 @@ class TestLocalSubtensorOfBatchDims:
         )
         result.assert_graph(x[idx] + y[idx])
 
+    def test_elemwise_jointly_unique_adv_indices_lift(self):
+        """A group of adv indices that each repeat but pair up to distinct
+        coordinates (tril_indices) can't select more elements than the indexed
+        axes hold, so it lifts."""
+        # Symbolic indices: the outputs of a single Nonzero.
+        n = pt.scalar("n", dtype="int64")
+        x = pt.matrix("x")
+        rows, cols = pt.tril_indices(n)
+        # ``local_add_canonizer`` simplifies the ``n - 0`` inside ``tril_indices``,
+        # which then lets the duplicate ``arange`` merge -- noise for this test.
+        result = RewriteTester(
+            [n, x], [pt.exp(x)[rows, cols]], exclude=("local_add_canonizer",)
+        )
+        result.assert_graph(pt.exp(x[rows, cols]))
+        result.assert_eval(3, np.arange(9.0).reshape(3, 3))
+
+        # Constant indices, static array shape: proved through the exact size.
+        x = pt.matrix("x", shape=(5, 5))
+        rows, cols = (pt.constant(i) for i in np.tril_indices(5))
+        result = RewriteTester([x], [pt.exp(x)[rows, cols]])
+        result.assert_graph(pt.exp(x[rows, cols]))
+        result.assert_eval(np.arange(25.0).reshape(5, 5))
+
+        # Constant indices, unknown array shape: proved through joint uniqueness.
+        x = pt.matrix("x")
+        rows, cols = (pt.constant(i) for i in np.tril_indices(5))
+        result = RewriteTester([x], [pt.exp(x)[rows, cols]])
+        result.assert_graph(pt.exp(x[rows, cols]))
+        result.assert_eval(np.arange(25.0).reshape(5, 5))
+
     def test_blockwise(self):
         class CoreTestOp(Op):
             itypes = [dvector, dvector]
@@ -755,6 +785,21 @@ class TestSubtensorOfAlloc:
         out = pt.alloc(val, 5, 3)[:, idx]
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         assert_equal_computations([rewritten], [out], strict_dtype=False)
+
+    def test_jointly_unique_adv_indices_lift(self):
+        """Indices that each repeat but pair up to distinct coordinates
+        (tril_indices) don't enlarge val, so the read lifts through Alloc."""
+        val = pt.matrix("val", shape=(5, 5))
+        rows, cols = (pt.constant(i) for i in np.tril_indices(5))
+
+        result = RewriteTester(
+            [val],
+            [pt.alloc(val, 5, 5)[rows, cols]],
+            include=("ShapeOpt", "canonicalize", "specialize"),
+            exclude=("local_replace_AdvancedSubtensor",),
+        )
+        result.assert_graph(val[rows, cols], strict_dtype=False)
+        result.assert_eval(np.arange(25.0).reshape(5, 5))
 
     def test_negative_step_idx_to_slice(self):
         """Negative-step constant arange ``[7, 5, 3, 1]`` rewrites to ``x[7::-2]``."""
