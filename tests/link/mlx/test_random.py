@@ -91,17 +91,21 @@ def test_uniform_shape_dtype():
 
 
 def test_bernoulli_shape():
+    # MLX draws bools; the dispatch must cast back to the int dtype PyTensor declares.
     check_shape_and_dtype(
         lambda srng: srng.bernoulli(p=0.7, size=(5, 5)),
         (5, 5),
+        "int64",
     )
 
 
 def test_categorical_shape():
     probs = np.array([0.1, 0.4, 0.5], dtype=np.float32)
+    # MLX draws uint32; the dispatch must cast back to the int dtype PyTensor declares.
     results = check_shape_and_dtype(
         lambda srng: srng.categorical(p=probs, size=(8,)),
         (8,),
+        "int64",
     )
     r = np.array(results[0])
     assert np.all(r < 3)
@@ -131,6 +135,29 @@ def test_mvnormal_decomposition_method(method):
     )
 
 
+def test_mvnormal_batched_params_with_size():
+    # Batched covariances combined with an explicit ``size`` must broadcast
+    # rather than reshape a single matrix (regression for a reshape crash).
+    mean = np.zeros((2, 3), dtype=np.float32)
+    cov = np.stack([np.eye(3) * 0.01, np.eye(3) * 9.0]).astype(np.float32)
+    check_shape_and_dtype(
+        lambda srng: srng.multivariate_normal(mean=mean, cov=cov, size=(2,)),
+        (2, 3),
+        "float32",
+    )
+
+
+def test_mvnormal_empty_batch():
+    # An empty batch dim used to segfault the MLX compiled matmul path; it must
+    # return an empty array of the broadcast output shape instead.
+    mean = np.zeros(3, dtype=np.float32)
+    cov = np.eye(3, dtype=np.float32)
+    result = pt.random.multivariate_normal(mean=mean, cov=cov, size=(0,)).eval(
+        mode="MLX"
+    )
+    assert np.array(result).shape == (0, 3)
+
+
 def test_laplace_shape_dtype():
     check_shape_and_dtype(
         lambda srng: srng.laplace(loc=0.0, scale=1.0, size=(7,)),
@@ -155,6 +182,28 @@ def test_integers_shape():
     r = np.array(results[0])
     assert np.all(r >= 0)
     assert np.all(r < 10)
+
+
+def test_integers_narrow_dtype_wraps():
+    # Bounds must be applied before the dtype cast: sampling [250, 300) and
+    # casting to uint8 wraps (regression for casting the bounds first, which
+    # collapsed the interval to a single value).
+    r = np.array(
+        pt.random.integers(low=250, high=300, size=(20_000,), dtype="uint8").eval(
+            mode="MLX"
+        )
+    )
+    assert r.dtype == np.uint8
+    assert len(np.unique(r)) > 1
+
+
+def test_integers_wide_bounds():
+    # Default int64 draws must sample at full width, not MLX's default int32
+    # (regression for bounds above 2**31 piling up at the int32 max).
+    r = np.array(
+        pt.random.integers(low=0, high=3_000_000_000, size=(20_000,)).eval(mode="MLX")
+    )
+    assert r.max() > 2**31
 
 
 def test_permutation_shape():
@@ -198,6 +247,17 @@ def test_halfnormal_scalar():
     )
 
 
+def test_halfnormal_nonzero_loc():
+    # HalfNormal is ``loc + scale * |z|`` (support ``[loc, inf)``), not
+    # ``|loc + scale * z|``. Draw a large sample and check the support bound.
+    loc, scale = 5.0, 2.0
+    r = np.array(
+        pt.random.halfnormal(loc=loc, scale=scale, size=(100_000,)).eval(mode="MLX")
+    )
+    assert r.min() >= loc - 1e-4
+    assert abs(r.mean() - (loc + scale * np.sqrt(2 / np.pi))) < 0.1
+
+
 def test_exponential_shape_dtype():
     results = check_shape_and_dtype(
         lambda srng: srng.exponential(scale=1.0, size=(6,)),
@@ -222,6 +282,15 @@ def test_cauchy_shape_dtype():
         (8,),
         "float32",
     )
+
+
+def test_non_pcg64_generator_raises():
+    # Only PCG64 state can be folded into an MLX key; other bit generators must
+    # fail loudly rather than with an opaque KeyError.
+    from pytensor.link.mlx.dispatch.random import numpy_generator_to_mlx_key
+
+    with pytest.raises(NotImplementedError, match="PCG64"):
+        numpy_generator_to_mlx_key(np.random.Generator(np.random.MT19937(0)))
 
 
 def test_gamma_not_implemented():
