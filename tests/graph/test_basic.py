@@ -187,13 +187,12 @@ class TestClone(X):
         o2.name = "o1"
 
         o2_node = o2.owner
-        o2_node_clone = o2_node.clone(clone_inner_graph=True)
+        o2_node_clone = o2_node.clone()
 
+        # Inner-graph Ops are immutable, so cloning a node shares the Op (and its
+        # inner graph) rather than deep-cloning it.
         assert o2_node_clone is not o2_node
-        assert o2_node_clone.op.fgraph is not o2_node.op.fgraph
-        assert equal_computations(
-            o2_node_clone.op.fgraph.outputs, o2_node.op.fgraph.outputs
-        )
+        assert o2_node_clone.op is o2_node.op
 
 
 class TestEval:

@@ -107,6 +107,17 @@ class Node(MetaObject):
         return debugprint(self, **kwargs)
 
 
+def _warn_deprecated_clone_inner_graph(value, name="clone_inner_graph"):
+    """Warn if a caller still passes the removed ``clone_inner_graph(s)`` kwarg."""
+    if value is not None:
+        warnings.warn(
+            f"`{name}` is deprecated and ignored: inner-graph `Op`s are immutable, "
+            "so cloning always shares them.",
+            FutureWarning,
+            stacklevel=3,
+        )
+
+
 class AbstractApply(Node):
     r"""Common, immutability-agnostic base for `Apply` and `FrozenApply`.
 
@@ -266,13 +277,8 @@ class Apply(AbstractApply, Generic[OpType]):  # noqa: UP046
             d["tag"] = t
         return d
 
-    def clone(self, clone_inner_graph: bool = False) -> "Apply[OpType]":
+    def clone(self, clone_inner_graph=None) -> "Apply[OpType]":
         r"""Clone this `Apply` instance.
-
-        Parameters
-        ----------
-        clone_inner_graph
-            If ``True``, clone `HasInnerGraph` `Op`\s and their inner-graphs.
 
         Returns
         -------
@@ -280,24 +286,19 @@ class Apply(AbstractApply, Generic[OpType]):  # noqa: UP046
 
         Notes
         -----
-        Tags are copied from `self` to the returned instance.
+        Tags are copied from `self` to the returned instance. Inner-graph `Op`\s
+        are immutable, so the `Op` is shared rather than deep-cloned.
 
         """
-        from pytensor.graph.op import HasInnerGraph
-
-        new_op = self.op
-
-        if isinstance(new_op, HasInnerGraph) and clone_inner_graph:  # type: ignore
-            new_op = new_op.clone()  # type: ignore
-
+        _warn_deprecated_clone_inner_graph(clone_inner_graph)
         cp = self.__class__(
-            new_op, self.inputs, [output.clone() for output in self.outputs]
+            self.op, self.inputs, [output.clone() for output in self.outputs]
         )
         cp.tag = copy(self.tag)
         return cp
 
     def clone_with_new_inputs(
-        self, inputs: Sequence["Variable"], strict=True, clone_inner_graph=False
+        self, inputs: Sequence["Variable"], strict=True, clone_inner_graph=None
     ) -> "Apply[OpType]":
         r"""Duplicate this `Apply` instance in a new graph.
 
@@ -314,8 +315,6 @@ class Apply(AbstractApply, Generic[OpType]):  # noqa: UP046
             ``self.outputs``.  If ``False``, then there's no guarantee that the
             clone's outputs will have the same types as ``self.outputs``,
             and cloning may not even be possible (it depends on the `Op`).
-        clone_inner_graph : bool
-            If ``True``, clone `HasInnerGraph` `Op`\s and their inner-graphs.
 
         Returns
         -------
@@ -323,8 +322,7 @@ class Apply(AbstractApply, Generic[OpType]):  # noqa: UP046
             An `Apply` instance with the same `Op` but different outputs.
 
         """
-        from pytensor.graph.op import HasInnerGraph
-
+        _warn_deprecated_clone_inner_graph(clone_inner_graph)
         assert isinstance(inputs, list | tuple)
         remake_node = False
         new_inputs: list[Variable] = list(inputs)
@@ -350,15 +348,10 @@ class Apply(AbstractApply, Generic[OpType]):  # noqa: UP046
                     remake_node = True
 
         if remake_node:
-            new_op = self.op
-
-            if isinstance(new_op, HasInnerGraph) and clone_inner_graph:  # type: ignore
-                new_op = new_op.clone()  # type: ignore
-
-            new_node = new_op.make_node(*new_inputs)
+            new_node = self.op.make_node(*new_inputs)
             new_node.tag = copy(self.tag).__update__(new_node.tag)
         else:
-            new_node = self.clone(clone_inner_graph=clone_inner_graph)
+            new_node = self.clone()
             new_node.inputs = new_inputs
         return new_node
 
@@ -922,7 +915,7 @@ def clone(
     outputs: Sequence[Variable],
     copy_inputs: bool = True,
     copy_orphans: bool | None = None,
-    clone_inner_graphs: bool = False,
+    clone_inner_graphs=None,
 ) -> tuple[list[Variable], list[Variable]]:
     r"""Copies the sub-graph contained between inputs and outputs.
 
@@ -938,9 +931,6 @@ def clone(
         When ``None``, use the `copy_inputs` value.
         When ``True``, new orphans nodes are created.
         When ``False``, original orphans nodes are reused in the new graph.
-    clone_inner_graphs : bool
-        If ``True``, clone `HasInnerGraph` `Op`\s and their inner-graphs.
-
     Returns
     -------
     The inputs and outputs of that copy.
@@ -953,6 +943,7 @@ def clone(
     conditional on the `copy_orphans` parameter.
 
     """
+    _warn_deprecated_clone_inner_graph(clone_inner_graphs, "clone_inner_graphs")
     if copy_orphans is None:
         copy_orphans = copy_inputs
     equiv = clone_get_equiv(
@@ -960,7 +951,6 @@ def clone(
         outputs,
         copy_inputs=copy_inputs,
         copy_orphans=copy_orphans,
-        clone_inner_graphs=clone_inner_graphs,
     )
     return [cast(Variable, equiv[input]) for input in inputs], [
         cast(Variable, equiv[output]) for output in outputs
@@ -970,13 +960,9 @@ def clone(
 def clone_node_and_cache(
     node: Apply,
     clone_d: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]],
-    clone_inner_graphs=False,
     **kwargs,
 ) -> Apply | None:
     """Clone an `Apply` node and cache the results in `clone_d`.
-
-    This function handles `Op` clones that are generated by inner-graph
-    cloning.
 
     Returns
     -------
@@ -989,28 +975,11 @@ def clone_node_and_cache(
         # `clone_d`, then there's likely no need to clone it
         return None
 
-    # Use a cached `Op` clone when available
-    new_op: Op | None = cast(Optional["Op"], clone_d.get(node.op))
-
     cloned_inputs: list[Variable] = [cast(Variable, clone_d[i]) for i in node.inputs]
 
-    new_node = node.clone_with_new_inputs(
-        cloned_inputs,
-        # Only clone inner-graph `Op`s when there isn't a cached clone (and
-        # when `clone_inner_graphs` is enabled)
-        clone_inner_graph=clone_inner_graphs if new_op is None else False,
-        **kwargs,
-    )
-
-    if new_op:
-        # If we didn't clone the inner-graph `Op` above, because
-        # there was a cached version, set the cloned `Apply` to use
-        # the cached clone `Op`
-        new_node.op = new_op
+    new_node = node.clone_with_new_inputs(cloned_inputs, **kwargs)
 
     clone_d[node] = new_node
-
-    clone_d.setdefault(node.op, new_node.op)
 
     for old_o, new_o in zip(node.outputs, new_node.outputs, strict=True):
         clone_d.setdefault(old_o, new_o)
@@ -1025,7 +994,7 @@ def clone_get_equiv(
     copy_orphans: bool = True,
     memo: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
     | None = None,
-    clone_inner_graphs: bool = False,
+    clone_inner_graphs=None,
     **kwargs,
 ) -> dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]:
     r"""Clone the graph between `inputs` and `outputs` and return a map of the cloned objects.
@@ -1055,14 +1024,13 @@ def clone_get_equiv(
         Optionally start with a partly-filled dictionary for the return value.
         If a dictionary is passed, this function will work in-place on that
         dictionary and return it.
-    clone_inner_graphs
-        If ``True``, clone `HasInnerGraph` `Op`\s and their inner-graphs.
     kwargs
         Keywords passed to `Apply.clone_with_new_inputs`.
 
     """
     from pytensor.graph.traversal import toposort
 
+    _warn_deprecated_clone_inner_graph(clone_inner_graphs, "clone_inner_graphs")
     if memo is None:
         memo = {}
 
@@ -1086,9 +1054,7 @@ def clone_get_equiv(
                 else:
                     memo[input] = input
 
-        clone_node_and_cache(
-            apply, memo, clone_inner_graphs=clone_inner_graphs, **kwargs
-        )
+        clone_node_and_cache(apply, memo, **kwargs)
 
     # finish up by cloning any remaining outputs (it can happen)
     for output in outputs:
