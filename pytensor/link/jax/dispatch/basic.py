@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.mode import JAX
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.configdefaults import config
 from pytensor.graph import Constant
@@ -128,8 +127,6 @@ def jax_funcify_TypeCastingOp(op, **kwargs):
 def jax_funcify_OpFromGraph(ofg: OpFromGraph, node=None, **kwargs) -> Callable:
     _ = kwargs.pop("storage_map", None)
 
-    # Apply inner rewrites
-    JAX.optimizer(ofg.fgraph)
     fgraph_fn = jax_funcify(ofg.fgraph, **kwargs)
 
     if len(ofg.fgraph.outputs) == 1:

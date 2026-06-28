@@ -5,7 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor import function, scan, shared
 from pytensor.compile.io import In
-from pytensor.compile.mode import get_default_mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.fg import FunctionGraph
@@ -13,6 +13,7 @@ from pytensor.graph.replace import clone_replace
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanInplaceOptimizer
 from pytensor.tensor.random.op import RandomVariableWithCoreShape
+from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.type import scalar, vector
 from tests import unittest_tools as utt
 from tests.scan.test_basic import asarrayX
@@ -236,6 +237,36 @@ class TestScanInplaceOptimizer:
 
         # Evaluate and check non equality
         assert f() != f()
+
+    def test_untraced_sit_sot_unowned_not_inplaced(self):
+        # Under the C/VM backend, an untraced sit_sot whose outer buffer the Scan does
+        # not own must not be destroyed in place by the step fn -- otherwise the
+        # destruction would reach back to the caller's input. (An rng state is the only
+        # kind that stays untraced under C/VM; an array gets a length-2 buffer and stays
+        # a plain sit_sot.) Numba covers the same case by always destroying and copying
+        # the first iteration; here we pin the C/VM behavior, so force a cvm mode.
+        cvm = Mode(linker="cvm", optimizer="fast_run")
+        rng = random_generator_type("rng")  # a function input -> not owned by the Scan
+        x0 = pt.scalar("x0")
+        _, xs = scan(
+            fn=lambda r, x: pt.random.normal(x, rng=r).owner.outputs,
+            outputs_info=[rng, x0],
+            n_steps=5,
+            return_updates=False,
+        )
+        f = function([rng, x0], xs[-1], mode=cvm)
+        [op] = [n.op for n in f.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+
+        assert op.info.n_untraced_sit_sot == 1
+        untraced_start = op.n_tap_outs + op.info.n_nit_sot
+        # Not owned by the Scan, so the C/VM inner step does not destroy it in place.
+        assert untraced_start not in op.destroy_map
+
+        # Correct numerics vs a no-inplace reference (fresh, equal rngs).
+        ref = function([rng, x0], xs[-1], mode=cvm.excluding("inplace"))
+        utt.assert_allclose(
+            f(np.random.default_rng(123), 0.5), ref(np.random.default_rng(123), 0.5)
+        )
 
     def test_inplace3(self):
         rng = np.random.default_rng(utt.fetch_seed())

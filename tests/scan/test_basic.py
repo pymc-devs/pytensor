@@ -27,12 +27,12 @@ from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, disconnected_grad, grad, pushforward
-from pytensor.graph.basic import Apply, Variable, equal_computations
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import MergeOptimizer
-from pytensor.graph.traversal import ancestors
+from pytensor.graph.traversal import ancestors, apply_ancestors
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
 from pytensor.raise_op import assert_op
@@ -299,11 +299,9 @@ class TestScan:
         scan_op = output.owner.op
         assert isinstance(scan_op, Scan)
 
-        scan_op_clone = scan_op.clone()
-        assert scan_op_clone is not scan_op
-        assert scan_op_clone.fgraph is not scan_op.fgraph
-        assert scan_op_clone.fgraph.outputs != scan_op.fgraph.outputs
-        assert equal_computations(scan_op_clone.fgraph.outputs, scan_op.fgraph.outputs)
+        # Scan ops are immutable (single frozen inner graph), so cloning returns
+        # self -- mirroring Composite.
+        assert scan_op.clone() is scan_op
 
     @pytest.mark.skipif(
         isinstance(get_default_mode(), DebugMode),
@@ -813,6 +811,30 @@ class TestScan:
         scan2 = scan(lambda _x: _x + 1, y, return_updates=False)
         assert scan1.owner.op == scan2.owner.op
         assert hash(scan1.owner.op) == hash(scan2.owner.op)
+
+    def test_hash_equality_after_inner_optimization(self):
+        """Regression test for #1601: the frozen inner graph keeps a `Scan` `Op`'s
+        equality in sync with its hash even after compilation optimizes it."""
+        x0 = scalar("x0")
+        xs = scan(lambda x: x + 0, outputs_info=[x0], n_steps=5, return_updates=False)
+        ys = scan(lambda x: x * 1, outputs_info=[x0], n_steps=5, return_updates=False)
+
+        # Before compilation the inner graphs differ (``x + 0`` vs ``x * 1``), so the
+        # ops -- and their hashes -- differ.
+        op1, op2 = (
+            node.op for node in apply_ancestors([xs, ys]) if isinstance(node.op, Scan)
+        )
+        assert op1 != op2
+        assert hash(op1) != hash(op2)
+
+        # Compilation optimizes both inner graphs to the identity; the ops must then
+        # be equal *and* hash equal.
+        fn = function([x0], [xs, ys], mode=get_default_mode().excluding("scan"))
+        op1, op2 = (
+            node.op for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+        )
+        assert op1 == op2
+        assert hash(op1) == hash(op2)
 
     def test_can_merge(self):
         """Make sure that equivalent `Scan` nodes can be merged."""

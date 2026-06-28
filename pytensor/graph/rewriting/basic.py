@@ -131,6 +131,21 @@ class GraphRewriter(Rewriter):
             )
 
 
+def get_active_mode(fgraph):
+    """Return the compile `Mode` currently being used to rewrite `fgraph`.
+
+    Set by `FunctionMaker` around the optimization pass. Used by inner-graph
+    rewrites to recover the active linker's required/incompatible rewrites.
+    Falls back to the default mode when called outside a compilation.
+    """
+    from pytensor.compile.mode import get_mode
+    from pytensor.configdefaults import config
+
+    if (active := getattr(fgraph, "_compile_mode", None)) is not None:
+        return get_mode(active)
+    return get_mode(config.mode)
+
+
 class NodeRewriter(Rewriter):
     """A `Rewriter` that is applied to an `Apply` node."""
 

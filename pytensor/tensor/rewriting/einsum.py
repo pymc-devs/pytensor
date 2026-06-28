@@ -1,10 +1,10 @@
 from typing import cast
 
+from pytensor.compile.rewriting import inline_ofg_node
 from pytensor.graph import Apply, FunctionGraph, node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.einsum import Einsum, einsum
 from pytensor.tensor.rewriting.basic import register_specialize
-from pytensor.tensor.rewriting.ofg import inline_ofg_node
 from pytensor.tensor.variable import TensorVariable
 
 
