@@ -261,7 +261,7 @@ class IndexedElemwise(OpFromGraph):
         # safe because reads don't destroy. Write targets always get their own
         # fresh inner input (see FuseIndexedElemwise) so a destroyed buffer is
         # never deduped onto a read source.
-        super().__init__(*args, on_unused_input="ignore", accept_inplace=True, **kwargs)
+        super().__init__(*args, on_unused_input="ignore", **kwargs)
 
     def __str__(self):
         for node in self.fgraph.apply_nodes:
