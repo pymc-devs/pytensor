@@ -850,13 +850,12 @@ class FunctionGraph(AbstractFunctionGraph):
     def __repr__(self):
         return f"FunctionGraph({', '.join(graph_as_string(self.inputs, self.outputs))})"
 
-    def clone(
-        self, check_integrity=True, clone_inner_graphs: bool = False
-    ) -> "FunctionGraph":
+    def clone(self, check_integrity=True, clone_inner_graphs=None) -> "FunctionGraph":
         """Clone the graph."""
-        return self.clone_get_equiv(
-            check_integrity, clone_inner_graphs=clone_inner_graphs
-        )[0]
+        from pytensor.graph.basic import _warn_deprecated_clone_inner_graph
+
+        _warn_deprecated_clone_inner_graph(clone_inner_graphs, "clone_inner_graphs")
+        return self.clone_get_equiv(check_integrity)[0]
 
     def clone_get_equiv(
         self, check_integrity: bool = True, attach_feature: bool = True, **kwargs
