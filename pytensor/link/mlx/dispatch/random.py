@@ -14,10 +14,8 @@ from pytensor.link.mlx.dispatch.tensor_basic import (
 def numpy_generator_to_mlx_key(rng: Generator) -> mx.array:
     """Convert a NumPy Generator to an MLX random key.
 
-    MLX uses a functional RNG model where each random call takes an explicit
-    key rather than mutating shared state. The PCG64 state is 128 bits, which
-    MLX cannot accept directly. We fold both 64-bit halves together via XOR
-    to use all 128 bits of entropy in a single 64-bit seed.
+    MLX keys are 64-bit, so we XOR-fold the two halves of the 128-bit PCG64
+    state to keep all of its entropy.
     """
     state = rng.bit_generator.state
     if state["bit_generator"] not in ("PCG64", "PCG64DXSM"):
@@ -32,14 +30,10 @@ def numpy_generator_to_mlx_key(rng: Generator) -> mx.array:
 
 
 def _shape_from_size(size, *parameters) -> list[int] | tuple[int, ...]:
-    """Resolve the sampling shape for a draw.
-
-    When ``size`` is given PyTensor has already computed the full output shape;
-    otherwise the shape is the broadcast of the distribution parameters.
-    """
+    """Sampling shape: ``size`` if given, else the broadcast of the parameters."""
     if size is not None:
         return mlx_to_list_shape(size)
-    return mx.broadcast_shapes(*(p.shape for p in parameters))
+    return tuple(mx.broadcast_shapes(*(p.shape for p in parameters)))
 
 
 @mlx_typify.register(Generator)
@@ -73,12 +67,8 @@ def mlx_sample_fn(op, node):
 @mlx_sample_fn.register(ptr.LaplaceRV)
 @mlx_sample_fn.register(ptr.GumbelRV)
 def mlx_sample_fn_loc_scale(op, node):
-    """Loc-scale families whose standardized variate MLX exposes directly.
-
-    MLX names the standardized sampler the same as the PyTensor Op, so we can
-    draw it and apply the affine ``loc + scale * z`` shift, mirroring the JAX
-    dispatch.
-    """
+    """Loc-scale families: MLX names the standard sampler like the Op, so draw
+    it and apply ``loc + scale * z`` (mirrors the JAX dispatch)."""
     mlx_op = getattr(mx.random, op.name)
 
     def sample_fn(rng_key, size, dtype, loc, scale):
@@ -111,10 +101,8 @@ def mlx_sample_fn_integers(op, node):
         low = mx.array(low)
         high = mx.array(high)
         shape = _shape_from_size(size, low, high)
-        # Sample within the original bounds at full int64 width, then cast the
-        # result. PyTensor casts the output (not the bounds), so a narrow dtype
-        # wraps rather than collapsing the half-open interval, and wide bounds
-        # are not clipped to MLX's default int32 sampling dtype.
+        # Sample at full int64 width and cast the result: PyTensor casts the
+        # output, not the bounds, so narrow/wide dtypes don't corrupt the range.
         return mx.random.randint(
             low=low, high=high, shape=shape, dtype=mx.int64, key=rng_key
         ).astype(convert_dtype_to_mlx(dtype))
@@ -127,7 +115,7 @@ def mlx_sample_fn_bernoulli(op, node):
     def sample_fn(rng_key, size, dtype, p):
         p = mx.array(p)
         shape = mlx_to_list_shape(size) if size is not None else None
-        # MLX returns a boolean draw; cast to the integer dtype PyTensor declares.
+        # MLX draws bool; PyTensor declares an int dtype.
         return mx.random.bernoulli(p=p, shape=shape, key=rng_key).astype(
             convert_dtype_to_mlx(dtype)
         )
@@ -140,7 +128,7 @@ def mlx_sample_fn_categorical(op, node):
     def sample_fn(rng_key, size, dtype, p):
         logits = mx.log(mx.array(p))
         shape = mlx_to_list_shape(size) if size is not None else None
-        # MLX returns ``uint32``; cast to the integer dtype PyTensor declares.
+        # MLX draws uint32; PyTensor declares an int dtype.
         return mx.random.categorical(
             logits=logits, axis=-1, shape=shape, key=rng_key
         ).astype(convert_dtype_to_mlx(dtype))
@@ -164,8 +152,7 @@ def mlx_sample_fn_mvnormal(op, node):
             batch_shape = mx.broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
 
         if 0 in tuple(batch_shape):
-            # An empty batch dim crashes the MLX compiled matmul path; the draw
-            # is trivially an empty array of the broadcast output shape.
+            # Empty batch dim crashes MLX's compiled matmul; the draw is empty anyway.
             return mx.broadcast_to(mean, [*batch_shape, n])
 
         # Factor ``cov = A @ A.T`` so that ``mean + A @ z`` has covariance ``cov``.
@@ -179,7 +166,6 @@ def mlx_sample_fn_mvnormal(op, node):
             A = vecs * mx.sqrt(w)[..., None, :]
 
         z = mx.random.normal(shape=[*batch_shape, n], dtype=mlx_dtype, key=rng_key)
-        # Broadcasting matmul handles both batched params and leading size dims.
         return mean + (A @ z[..., None])[..., 0]
 
     return sample_fn
