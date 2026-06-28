@@ -1298,7 +1298,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ]
         self.vector_outs += [
             isinstance(t.type, TensorType) and t.ndim == 0
-            for t in self.outer_nitsot_outs(self.inner_outputs)
+            for t in self.inner_nitsot_outs(self.inner_outputs)
         ]
 
         outputs = [t() for t in self.output_types]

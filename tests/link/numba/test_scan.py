@@ -396,6 +396,59 @@ def test_inplace_taps(n_steps_constant):
     assert set(destroyed_inputs) == {untraced_sit_sot_inps[0]}
 
 
+def test_mitmot_inplace():
+    """A mit-mot tap read may be destroyed in place by an intermediate inner node.
+
+    Gradients of scans produce mit-mot taps whose read slot is overwritten by the
+    accumulator write-back the same iteration, so scan grants ``mutable=True`` on the
+    certainly-overwritten reads. The destroy is realized only when a read feeds an
+    *intermediate* (non-output) op that can run in place -- the ``Dot`` here breaks
+    Elemwise fusion, leaving an intermediate that consumes a gradient accumulator. The
+    same-iteration overwrite still forbids an *output* from carrying the read, so the
+    result stays correct.
+    """
+    k = 3
+    W = pt.dmatrix("W")
+    init = pt.dmatrix("init")  # two initial taps, each a length-k state
+    seq = pt.dvector("seq")
+
+    def step(seq_t, x2, x1):
+        return pt.tanh(W @ x1 + x2 + seq_t)
+
+    out = scan(
+        step,
+        sequences=seq,
+        outputs_info={"initial": init, "taps": [-2, -1]},
+        return_updates=False,
+    )
+    g = grad(out.sum(), [init, W])
+
+    rng = np.random.default_rng(0)
+    test_vals = [
+        rng.standard_normal(5),
+        rng.standard_normal((2, k)),
+        rng.standard_normal((k, k)),
+    ]
+    numba_fn, _ = compare_numba_and_py(
+        [seq, init, W], g, test_vals, numba_mode="NUMBA", eval_obj_mode=False
+    )
+
+    mitmot_scan_ops = [
+        node.op
+        for node in numba_fn.maker.fgraph.toposort()
+        if isinstance(node.op, Scan) and node.op.info.n_mit_mot
+    ]
+    assert mitmot_scan_ops, "expected the gradient to produce a mit-mot scan"
+    destroyed_mitmot_reads = [
+        inp
+        for scan_op in mitmot_scan_ops
+        if hasattr(scan_op.fgraph, "destroyers")
+        for inp in scan_op.inner_mitmot(scan_op.fgraph.inputs)
+        if scan_op.fgraph.destroyers(inp)
+    ]
+    assert destroyed_mitmot_reads, "expected a mit-mot read destroyed in place"
+
+
 @pytest.mark.parametrize(
     "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
 )
