@@ -151,6 +151,7 @@ class PyTensorConfigParser:
     # add_numba_configvars
     numba__fastmath: bool
     numba__cache: bool
+    numba__veclib: str
     # add_caching_dir_configvars
     compiledir_format: str
     base_compiledir: Path
