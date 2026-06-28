@@ -166,35 +166,83 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     )
     fgraph = op.fgraph
 
-    # If we know the static length of the traced buffers, check whether traced input reads
-    # will be immediately discarded in the same loop iteration.
-    discarded_sitsot = [
-        inner_sitsot
-        for outer_sitsot, inner_sitsot in zip(
-            op.outer_sitsot(node.inputs), op.inner_sitsot(fgraph.inputs), strict=True
-        )
-        if outer_sitsot.type.shape[0] == 1
+    # A traced read is "overwritten" when a same-iteration write reuses its physical buffer
+    # slot. With buffer length L, output tap o_out writes the slot read by input tap o_in iff
+    # (o_out - o_in) % L == 0. Since L is always >= reach (the minimal admissible length, the
+    # oldest lookback), only two gaps can trigger it:
+    #  - gap 0 (o_out == o_in): the recurrence writes the very slot it just read (mit_mot
+    #    accumulators: read g[k], write g[k] + delta back). Holds for ANY L, so the read is
+    #    *certainly* overwritten this iteration.
+    #  - gap == reach: a write lands just past the oldest read; in a buffer truncated to its
+    #    minimum (L == reach) it wraps onto that just-discarded oldest read. So the read is
+    #    overwritten only at L == reach: certain when the static length says so, merely possible
+    #    when the length is statically unknown, impossible for any larger L. (A write landing
+    #    further ahead would store onto a slot still to be read -- an invalid recurrence we
+    #    need not consider, just as we don't consider L < reach.)
+    # A certainly-overwritten read is dead once consumed this iteration, so the inner function
+    # may destroy it in place. A possibly-overwritten read must not be destroyed (it may still
+    # be live at a larger length), but no output may alias it either, since a same-iteration
+    # overwrite would corrupt the alias before it is stored.
+    def find_overwritten_reads(grouped_inner, outers, in_slices_seq, out_slices_seq):
+        certain, possible = [], []
+        for inner_vars, outer, in_slices, out_slices in zip(
+            grouped_inner, outers, in_slices_seq, out_slices_seq, strict=True
+        ):
+            reach = -min(0, min(in_slices))  # minimal admissible buffer length
+            in_offsets = [reach + t for t in in_slices]
+            out_offsets = [reach + t for t in out_slices]
+            static_len = outer.type.shape[0]
+            for v, o_in in zip(inner_vars, in_offsets, strict=True):
+                gaps = {o_out - o_in for o_out in out_offsets}
+                if 0 in gaps:
+                    certain.append(v)
+                elif reach in gaps:
+                    if static_len == reach:
+                        certain.append(v)
+                    elif static_len is None:
+                        possible.append(v)
+        return certain, possible
+
+    mit_mot_certain, mit_mot_possible = find_overwritten_reads(
+        op.inner_mitmot_grouped(fgraph.inputs),
+        op.outer_mitmot(node.inputs),
+        op.info.mit_mot_in_slices,
+        op.info.mit_mot_out_slices,
+    )
+    mit_sot_certain, mit_sot_possible = find_overwritten_reads(
+        op.inner_mitsot_grouped(fgraph.inputs),
+        op.outer_mitsot(node.inputs),
+        op.info.mit_sot_in_slices,
+        [(0,)] * op.info.n_mit_sot,
+    )
+    sit_sot_certain, sit_sot_possible = find_overwritten_reads(
+        [[v] for v in op.inner_sitsot(fgraph.inputs)],
+        op.outer_sitsot(node.inputs),
+        op.info.sit_sot_in_slices,
+        [(0,)] * op.info.n_sit_sot,
+    )
+
+    # Reads no output may alias (destructively or not): a same-iteration overwrite could corrupt
+    # the alias before it is copied to its own buffer.
+    potentially_overwritten_reads = [
+        *mit_mot_certain,
+        *mit_mot_possible,
+        *mit_sot_certain,
+        *mit_sot_possible,
+        *sit_sot_certain,
+        *sit_sot_possible,
     ]
-    discarded_mitsot = [
-        oldest_inner_mitmot
-        for outer_mitsot, oldest_inner_mitmot, taps in zip(
-            op.outer_mitsot(node.inputs),
-            op.oldest_inner_mitsot(fgraph.inputs),
-            op.info.mit_sot_in_slices,
-            strict=True,
-        )
-        if outer_mitsot.type.shape[0] == abs(min(taps))
-    ]
-    # Untraced inputs are always immediately discarded
-    discarded_untraced_sit_sot = list(op.inner_untraced_sit_sot(fgraph.inputs))
+
+    # Reads the inner function may destroy in place: the certainly-overwritten traced reads
+    # (dead once consumed this iteration) and every untraced input (always immediately discarded).
     discarded = {
-        *discarded_sitsot,
-        *discarded_mitsot,
-        *discarded_untraced_sit_sot,
+        *mit_mot_certain,
+        *mit_sot_certain,
+        *sit_sot_certain,
+        *op.inner_untraced_sit_sot(fgraph.inputs),
     }
-    # Grant the inner function the right to alias (borrow=True) all inputs
-    # and to destroy (mutable=True) reads that are known to be immediately discarded
-    # TODO: Allow destroying MITMOT as well (#2252).
+    # Grant the inner function the right to alias (borrow=True) all inputs and to destroy
+    # (mutable=True) the reads known to be immediately discarded.
     input_specs = [In(x, borrow=True, mutable=x in discarded) for x in fgraph.inputs]
     add_supervisor_to_fgraph(
         fgraph=fgraph,
@@ -202,72 +250,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         accept_inplace=True,
     )
 
-    # Check which traced indexed reads MAY be overwritten immediately.
-    # In this case outputs are not allowed to alias (destructively or not) the reads
-    # so as to not be corrupted before they are themselves safely stored.
-    # With buffer length L, output tap o_out writes input tap
-    # o_in iff (o_out - o_in) % L == 0 (same physical slot). Two ways this happens:
-    # - linear write-back (gap 0): the recurrence writes the very slot it read this step
-    #   (mit_mot accumulators: read g[k], write g[k] + delta back). Holds for any L.
-    # - loop-around (gap == reach): sit_sot/mit_sot write the new state just past the oldest
-    #   read; in a truncated buffer (L == reach, the minimal length that still holds the
-    #   oldest tap) that wraps onto the just-discarded oldest read. A write landing further
-    #   ahead would store onto a slot still to be read -- an invalid recurrence we need not
-    #   consider, just as we don't consider L < reach (reads would alias). So those are the
-    #   only two gaps.
-    # ``reach`` is the minimal admissible buffer length, ``max_lookback`` (= abs of the
-    # oldest tap); a write offset never exceeds it, so for any larger L the new slot is fresh
-    # and no wrap occurs. When L is statically known we test (o_out - o_in) % L == 0 exactly;
-    # otherwise L is only known to be >= reach and the loop-around can bite only at L ==
-    # reach, so we test gap 0 or gap == reach.
-    def find_potentially_overwritten_reads(
-        grouped_inner, outers, in_slices_seq, out_slices_seq
-    ):
-        result = []
-        for inner_vars, outer, in_slices, out_slices in zip(
-            grouped_inner, outers, in_slices_seq, out_slices_seq, strict=True
-        ):
-            max_lookback = -min(0, min(in_slices))
-            in_offsets = [max_lookback + t for t in in_slices]
-            out_offsets = [max_lookback + t for t in out_slices]
-            static_len = outer.type.shape[0]
-            reach = max_lookback  # minimal admissible buffer length
-            for v, o_in in zip(inner_vars, in_offsets, strict=True):
-                if static_len is None:
-                    hit = any(
-                        o_out == o_in or o_out - o_in == reach for o_out in out_offsets
-                    )
-                else:
-                    hit = any((o_out - o_in) % static_len == 0 for o_out in out_offsets)
-                if hit:
-                    result.append(v)
-        return result
-
-    potentially_overwritten_reads = [
-        *find_potentially_overwritten_reads(
-            op.inner_mitmot_grouped(fgraph.inputs),
-            op.outer_mitmot(node.inputs),
-            op.info.mit_mot_in_slices,
-            op.info.mit_mot_out_slices,
-        ),
-        *find_potentially_overwritten_reads(
-            op.inner_mitsot_grouped(fgraph.inputs),
-            op.outer_mitsot(node.inputs),
-            op.info.mit_sot_in_slices,
-            [(0,)] * op.info.n_mit_sot,
-        ),
-        *find_potentially_overwritten_reads(
-            [[v] for v in op.inner_sitsot(fgraph.inputs)],
-            op.outer_sitsot(node.inputs),
-            op.info.sit_sot_in_slices,
-            [(0,)] * op.info.n_sit_sot,
-        ),
-    ]
     if potentially_overwritten_reads:
-        # Forbid the inner function from aliasing by destruction overwritten traced reads.
-        # Note we could have allowed this and patched at the end with a deepcopy (like we do with non-destructive alias)
-        # But this is wasteful. By forbidding it the inner graph will itself allocate a fresh buffer
-        # and write the result there immediately.
+        # Forbid any output from aliasing these reads. We could instead allow it and patch with a
+        # deepcopy at the end (as we do for non-destructive boundary alias), but that is wasteful:
+        # forbidding it makes the inner graph allocate a fresh buffer and write the result there.
         in_pos = {v: i for i, v in enumerate(fgraph.inputs)}
         fgraph.attach_feature(
             NoOutputInplaceOnInput([in_pos[t] for t in potentially_overwritten_reads])
