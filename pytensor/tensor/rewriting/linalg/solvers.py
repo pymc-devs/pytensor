@@ -1,11 +1,11 @@
 from collections.abc import Container
-from copy import copy
 
 from pytensor import tensor as pt
 from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
 from pytensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     dfs_rewriter,
@@ -564,12 +564,14 @@ def _scan_split_non_sequence_decomposition_and_solve(
     The LU decomposition step can then be pushed out of the inner loop by the `scan_pushout_non_sequences` rewrite.
     """
     scan_op: Scan = node.op
-    non_sequences = set(scan_op.inner_non_seqs(scan_op.inner_inputs))
-    new_scan_fgraph = scan_op.fgraph
+    frozen_fgraph = scan_op.fgraph
+    non_sequences = set(scan_op.inner_non_seqs(frozen_fgraph.inputs))
+    new_scan_fgraph: FunctionGraph | None = None
 
-    changed = False
     while True:
-        for inner_node in new_scan_fgraph.toposort():
+        for inner_node in (
+            frozen_fgraph if new_scan_fgraph is None else new_scan_fgraph
+        ).toposort():
             match (inner_node.op, *inner_node.inputs):
                 case (Blockwise(Solve(assume_a=assume_a_var)), A, _b) if (
                     assume_a_var in allowed_assume_a
@@ -578,12 +580,13 @@ def _scan_split_non_sequence_decomposition_and_solve(
                         (isinstance(root_inp, Constant) or (root_inp in non_sequences))
                         for root_inp in graph_inputs([A])
                     ):
-                        if new_scan_fgraph is scan_op.fgraph:
-                            # Clone the first time to avoid mutating the original fgraph
-                            new_scan_fgraph, equiv = new_scan_fgraph.clone_get_equiv()  # type: ignore[attr-defined]
-                            non_sequences = {
-                                equiv[non_seq] for non_seq in non_sequences
-                            }
+                        if new_scan_fgraph is None:
+                            # Thaw the frozen graph into a mutable copy on the
+                            # first match, carrying the tracked state over.
+                            new_scan_fgraph, equiv = frozen_fgraph.unfreeze(
+                                return_memo=True
+                            )
+                            non_sequences = {equiv[v] for v in non_sequences}
                             inner_node = equiv[inner_node]
 
                         replace_dict = _split_decomp_and_solve_steps(
@@ -595,18 +598,15 @@ def _scan_split_non_sequence_decomposition_and_solve(
                         assert (
                             isinstance(replace_dict, dict) and len(replace_dict) > 0
                         ), "Rewrite failed"
-                        new_scan_fgraph.replace_all(replace_dict.items())  # type: ignore[attr-defined]
-                        changed = True
+                        new_scan_fgraph.replace_all(replace_dict.items())
                         break  # Break to start over with a fresh toposort
         else:  # no_break
             break  # Nothing else changed
 
-    if not changed:
+    if new_scan_fgraph is None:
         return
 
-    # Return a new scan to indicate that a rewrite was done
-    new_scan_op = copy(scan_op)
-    new_scan_op.fgraph = new_scan_fgraph
+    new_scan_op = scan_op.clone_with_inner_graph(new_scan_fgraph)
     new_outs = new_scan_op.make_node(*node.inputs).outputs
     copy_stack_trace(node.outputs, new_outs)
     return new_outs

@@ -64,11 +64,9 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         ofg = OpFromGraph([x], [2 * x])
 
-        ofg_clone = ofg.clone()
-
-        assert ofg_clone.fgraph is not ofg.fgraph
-        assert ofg_clone.fgraph.outputs != ofg.fgraph.outputs
-        assert equal_computations(ofg_clone.fgraph.outputs, ofg.fgraph.outputs)
+        # OpFromGraph is immutable (single frozen inner graph), so cloning
+        # returns self -- mirroring Composite.
+        assert ofg.clone() is ofg
 
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
@@ -410,22 +408,35 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             OpFromGraph([], [x])
 
     def test_outputs_consistency(self):
-        """Make sure that `OpFromGraph.fn` doesn't change the value of `OpFromGraph.inner_outputs`."""
+        """Compiling the inner function must not mutate `OpFromGraph.inner_outputs`."""
 
         x = scalar("x")
-        op = OpFromGraph([x], [x**2 / x], mode="FAST_RUN")
+        op = OpFromGraph([x], [x**2 / x])
 
         # Confirm that the inner-graph is as expected
         assert equal_computations(op.inner_outputs, [x**2 / x], op.inner_inputs, [x])
 
-        # These outputs of the compiled `op.fgraph` should differ from the
-        # original, uncompiled `op.fgraph` outputs
-        fn = op.fn
+        # Optimizing a copy of the inner graph (here FAST_RUN, which rewrites
+        # ``x**2 / x`` to ``x``) must not leak back into the canonical, frozen
+        # inner graph. The canonical graph is immutable and is never handed to
+        # ``function`` directly; compile an ``unfreeze()``d mutable copy instead.
+        unfrozen = op.fgraph.unfreeze()
+        fn = function(
+            unfrozen.inputs,
+            unfrozen.outputs,
+            mode="FAST_RUN",
+            on_unused_input="ignore",
+            accept_inplace=True,
+        )
         new_inputs = fn.maker.fgraph.inputs
         new_outputs = fn.maker.fgraph.outputs
         assert not equal_computations(new_outputs, [x**2 / x], new_inputs, [x])
 
         # The original `op.fgraph` outputs should stay the same, though
+        assert equal_computations(op.inner_outputs, [x**2 / x], op.inner_inputs, [x])
+
+        # `op.fn` (compiled under the active mode) must likewise leave it intact.
+        op.fn
         assert equal_computations(op.inner_outputs, [x**2 / x], op.inner_inputs, [x])
 
     def test_explicit_input_from_constant(self):
@@ -733,6 +744,28 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         r1, r2 = fn(2.0, 3.0, 4.0, 5.0)
         np.testing.assert_allclose(r1, 2.0 + 3.0 * 2.0)
         np.testing.assert_allclose(r2, 4.0 + 5.0 * 4.0)
+
+
+@pytest.mark.parametrize("linker", ["cvm", "py"])
+def test_view_output_copied_at_boundary(linker):
+    # Regression test: an OpFromGraph output that aliases an input must be copied
+    # at the op boundary (OpFromGraph declares no view_map, so the outer graph
+    # cannot see the alias). Without the copy, a downstream op destroying the
+    # input in place corrupts the already-computed output.
+    x = pt.dvector("x")
+    op = OpFromGraph([x], [x[::-1]])
+
+    xin = pt.dvector("xin")
+    x2 = xin * 2
+    view_out = op(x2)
+    destroyed = pt.inc_subtensor(x2[0], 100.0)
+
+    fn = function(
+        [xin], [view_out, destroyed], mode=Mode(linker=linker, optimizer="fast_run")
+    )
+    res_view, res_destroyed = fn(np.arange(1.0, 4.0))
+    np.testing.assert_allclose(res_view, [6.0, 4.0, 2.0])
+    np.testing.assert_allclose(res_destroyed, [102.0, 4.0, 6.0])
 
 
 @config.change_flags(floatX="float64")

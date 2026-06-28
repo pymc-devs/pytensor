@@ -23,6 +23,10 @@ from pytensor.compile.executor import Function
 from pytensor.compile.maker import FunctionMaker
 from pytensor.compile.mode import Mode, register_mode
 from pytensor.compile.ops import ViewOp
+from pytensor.compile.rewriting import (
+    destructive_rewrite_ofg_inner_graph,
+    rewrite_ofg_inner_graph,
+)
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
@@ -35,6 +39,10 @@ from pytensor.link.basic import Container, LocalLinker
 from pytensor.link.c.op import COp
 from pytensor.link.utils import map_storage, raise_with_op
 from pytensor.printing import _debugprint
+from pytensor.scan.rewriting.inner_graph import (
+    cvm_rewrite_scan_inner_graph,
+    rewrite_scan_inner_graph,
+)
 from pytensor.tensor import TensorType
 from pytensor.utils import NoDuplicateOptWarningFilter, difference, get_unbound_function
 
@@ -1316,12 +1324,18 @@ default_make_thunk = [get_unbound_function(COp.make_thunk)]
 # 2) it a has a .clone() method
 # 3) it has required_rewrites and incompatible_rewrites class attributes
 class _DummyLinker:
-    required_rewrites = ()
+    required_rewrites = ("minimum_compile",)
     incompatible_rewrites = ()
 
     # This is not a real linker anyway
     def clone(self, allow_gc=None):
         return self
+
+
+# DebugMode links inner functions through the C/VM machinery (``Scan.fn`` /
+# ``OpFromGraph.fn``), so bake inner graphs exactly as those linkers do.
+rewrite_scan_inner_graph.register(_DummyLinker, cvm_rewrite_scan_inner_graph)
+rewrite_ofg_inner_graph.register(_DummyLinker, destructive_rewrite_ofg_inner_graph)
 
 
 class _Linker(LocalLinker):
@@ -2018,7 +2032,12 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
             fgraph.attach_feature(equivalence_tracker)
             fgraph.equivalence_tracker = equivalence_tracker
 
-            optimizer(fgraph)
+            # Expose the compile mode to inner-graph rewrites (mirrors ``FunctionMaker``)
+            fgraph._compile_mode = mode
+            try:
+                optimizer(fgraph)
+            finally:
+                del fgraph._compile_mode
 
             pytensor.compile.aliasing.insert_deepcopy(
                 fgraph, inputs, list(chain(outputs, additional_outputs))

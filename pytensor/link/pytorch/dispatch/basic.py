@@ -4,10 +4,7 @@ from types import NoneType
 import numpy as np
 import torch
 
-from pytensor import In
-from pytensor.compile.aliasing import add_supervisor_to_fgraph
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.mode import PYTORCH
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import AbstractFunctionGraph
@@ -191,15 +188,6 @@ def pytorch_funcify_IfElse(op, **kwargs):
 @pytorch_funcify.register(OpFromGraph)
 def pytorch_funcify_OpFromGraph(op, node, **kwargs):
     kwargs.pop("storage_map", None)
-    # Apply inner rewrites
-    PYTORCH.optimizer(op.fgraph)
-    fgraph = op.fgraph
-    add_supervisor_to_fgraph(
-        fgraph=fgraph,
-        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
-        accept_inplace=True,
-    )
-    PYTORCH.optimizer(fgraph)
     fgraph_fn = pytorch_funcify(op.fgraph, **kwargs, squeeze_output=True)
     return fgraph_fn
 

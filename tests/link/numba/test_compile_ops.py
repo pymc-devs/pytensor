@@ -13,6 +13,7 @@ from pytensor.tensor import dmatrix, dtensor3, matrix
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from tests import unittest_tools as utt
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -235,13 +236,14 @@ def test_check_and_raise():
 
 
 def test_ofg_with_inner_scan_rewrite():
-    # Regression test where inner scan would be mutated when compiling outer OFG
-    ys = pt.tensor("ys", shape=(5, 3, 3))
+    # Regression test where inner scan would be mutated when compiling outer OFG.
+    # The inner cholesky is *batched* (over the size-4 axis) so the Blockwise
+    # survives optimization and is wrapped as BlockwiseWithCoreShape for numba.
+    ys = pt.tensor("ys", shape=(5, 4, 3, 3))
     xs = scan(
         lambda y: cholesky(y),
         sequences=[ys],
         return_updates=False,
-        mode=Mode(optimizer=None),
     )
     xs_ofg = OpFromGraph([ys], [xs])(ys)
     fn = function([ys], xs_ofg, mode="NUMBA")
@@ -263,6 +265,72 @@ def test_ofg_with_inner_scan_rewrite():
     cholesky_op = scan_op.fgraph.outputs[0].owner.op
     assert isinstance(cholesky_op, Blockwise)
     assert isinstance(cholesky_op.core_op, Cholesky)
+
+
+def test_compiling_does_not_mutate_canonical_inner_graph():
+    # Regression test: compiling an op with an inner graph must NOT mutate the
+    # canonical (shared) inner FunctionGraph. Backend specialization (e.g. the
+    # numba ``BlockwiseWithCoreShape`` wrapping) must happen on per-compilation
+    # copies, never on the op the user holds -- otherwise a second use of the
+    # same op (here: deriving something from it after an ``.eval()``) sees a
+    # corrupted inner graph. This is what tripped scan-based pymc CustomDists.
+    ys = pt.tensor("ys", shape=(5, 4, 3, 3))
+    xs = scan(lambda y: cholesky(y), sequences=[ys], return_updates=False)
+    ofg_out = OpFromGraph([ys], [xs])(ys)
+
+    scan_op = ofg_out.owner.op.fgraph.outputs[0].owner.op
+    assert isinstance(scan_op, Scan)
+
+    # Compile (and run) under numba: this used to mutate the inner graph above.
+    fn = function([ys], ofg_out, mode="NUMBA")
+    fn(np.eye(3)[None, None].repeat(5, 0).repeat(4, 1))
+
+    # The compiled function carries a different scan op whose inner cholesky was
+    # wrapped for the backend...
+    fn_scan_op = fn.maker.fgraph.outputs[0].owner.op.fgraph.outputs[0].owner.op
+    assert isinstance(fn_scan_op, Scan)
+    assert fn_scan_op is not scan_op
+    assert isinstance(fn_scan_op.fgraph.outputs[0].owner.op, BlockwiseWithCoreShape)
+    # ...while the canonical op still computes a bare batched cholesky.
+    y_t = pt.tensor("y_t", shape=(4, 3, 3))
+    utt.assert_equal_computations(
+        list(scan_op.fgraph.outputs),
+        [cholesky(y_t)],
+        in_xs=list(scan_op.fgraph.inputs),
+        in_ys=[y_t],
+    )
+
+
+def test_blockwise_inner_graph_optimized_for_backend():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2028.
+    # An OpFromGraph wrapped in a Blockwise must still have its inner graph lowered
+    # for the backend -- otherwise numba falls back to object mode (here the inner
+    # cholesky stays a degenerate Blockwise instead of collapsing to a bare
+    # Cholesky). And, the original #2028 concern, that lowering must happen on a
+    # per-compilation copy and never mutate the canonical (shared) inner graph.
+    yy = pt.matrix("yy")
+    core = OpFromGraph([yy], [cholesky(yy) + 1.0])
+    xs = pt.tensor("xs", shape=(4, 3, 3))
+    out = Blockwise(core, signature="(m,m)->(m,m)")(xs)
+    canonical = out.owner.op.core_op
+
+    val = (np.eye(3)[None] * 2.0).repeat(4, 0).astype(config.floatX)
+    fn = function([xs], out, mode="NUMBA")
+    np.testing.assert_allclose(fn(val), np.linalg.cholesky(val) + 1.0)
+
+    # The compiled op carries its own, backend-lowered inner graph: the degenerate
+    # Blockwise(Cholesky) collapsed to a bare Cholesky (so numba does not object-mode).
+    compiled = fn.maker.fgraph.outputs[0].owner.op.core_op
+    assert compiled is not canonical
+    assert not any(isinstance(n.op, Blockwise) for n in compiled.fgraph.apply_nodes)
+    # The canonical inner graph must be untouched by compilation.
+    yy2 = pt.matrix("yy2")
+    utt.assert_equal_computations(
+        list(canonical.fgraph.outputs),
+        [cholesky(yy2) + 1.0],
+        in_xs=list(canonical.fgraph.inputs),
+        in_ys=[yy2],
+    )
 
 
 @pytest.mark.parametrize("as_view", [True, False])

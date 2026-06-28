@@ -439,13 +439,15 @@ def test_mitmot_inplace():
         if isinstance(node.op, Scan) and node.op.info.n_mit_mot
     ]
     assert mitmot_scan_ops, "expected the gradient to produce a mit-mot scan"
-    destroyed_mitmot_reads = [
-        inp
-        for scan_op in mitmot_scan_ops
-        if hasattr(scan_op.fgraph, "destroyers")
-        for inp in scan_op.inner_mitmot(scan_op.fgraph.inputs)
-        if scan_op.fgraph.destroyers(inp)
-    ]
+    destroyed_mitmot_reads = []
+    for scan_op in mitmot_scan_ops:
+        mitmot_reads = set(scan_op.inner_mitmot(scan_op.fgraph.inputs))
+        for node in scan_op.fgraph.toposort():
+            destroyed_mitmot_reads.extend(
+                node.inputs[idx]
+                for idx in chain.from_iterable(node.op.destroy_map.values())
+                if node.inputs[idx] in mitmot_reads
+            )
     assert destroyed_mitmot_reads, "expected a mit-mot read destroyed in place"
 
 

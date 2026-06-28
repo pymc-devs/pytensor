@@ -20,7 +20,7 @@ from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.executor import Function
 from pytensor.compile.io import In, Out
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import AbstractApply, Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op, StorageMapType
 from pytensor.graph.traversal import graph_inputs, toposort
@@ -681,7 +681,7 @@ def debugprint(
             profile_list.append(None)
             storage_maps.append(None)
             topo_orders.append(None)
-        elif isinstance(obj, Apply):
+        elif isinstance(obj, AbstractApply):
             outputs_to_print.extend(obj.outputs)
             profile_list.extend(None for item in obj.outputs)
             storage_maps.extend(None for item in obj.outputs)
@@ -853,22 +853,14 @@ N.B.:
                 continue
             else:
                 printed_inner_graph_ops.add(ig_var.owner.op)
-            # This is a work-around to maintain backward compatibility
-            # (e.g. to only print inner graphs that have been compiled through
-            # a call to `Op.prepare_node`)
-            inner_fn = getattr(ig_var.owner.op, "_fn", None)
-
-            if inner_fn:
-                # If the op was compiled, print the optimized version.
-                inner_inputs = inner_fn.maker.fgraph.inputs
-                inner_outputs = inner_fn.maker.fgraph.outputs
+            # ``Elemwise``/``Blockwise`` hold their inner graph on ``scalar_op``
+            # (a ``Composite``/``ScalarLoop``); other ops expose it directly.
+            if hasattr(ig_var.owner.op, "scalar_op"):
+                inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
+                inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
             else:
-                if hasattr(ig_var.owner.op, "scalar_op"):
-                    inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
-                    inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
-                else:
-                    inner_inputs = ig_var.owner.op.inner_inputs
-                    inner_outputs = ig_var.owner.op.inner_outputs
+                inner_inputs = ig_var.owner.op.inner_inputs
+                inner_outputs = ig_var.owner.op.inner_outputs
 
             outer_inputs = ig_var.owner.inputs
 
@@ -1319,17 +1311,12 @@ def _build_rich_tree(
                 continue
             printed.add(ig_var.owner)
 
-            inner_fn = getattr(ig_var.owner.op, "_fn", None)
-            if inner_fn:
-                inner_inputs = inner_fn.maker.fgraph.inputs
-                inner_outputs = inner_fn.maker.fgraph.outputs
+            if hasattr(ig_var.owner.op, "scalar_op"):
+                inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
+                inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
             else:
-                if hasattr(ig_var.owner.op, "scalar_op"):
-                    inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
-                    inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
-                else:
-                    inner_inputs = ig_var.owner.op.inner_inputs
-                    inner_outputs = ig_var.owner.op.inner_outputs
+                inner_inputs = ig_var.owner.op.inner_inputs
+                inner_outputs = ig_var.owner.op.inner_outputs
 
             outer_inputs = ig_var.owner.inputs
             inner_to_outer: dict[Variable, Variable] | None
@@ -2076,7 +2063,7 @@ def pydotprint(
     else:
         if isinstance(fct, Variable):
             fct = [fct]
-        elif isinstance(fct, Apply):
+        elif isinstance(fct, AbstractApply):
             fct = fct.outputs
         assert isinstance(fct, list | tuple)
         assert all(isinstance(v, Variable) for v in fct)

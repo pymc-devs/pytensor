@@ -469,7 +469,14 @@ class FunctionMaker:
                 mode=mode,
                 traceback__limit=config.traceback__compile_limit,
             ):
-                rewriter_profile = rewriter(fgraph)
+                # Expose the compile mode so inner-graph rewrites can recover
+                # the active linker's required/incompatible rewrites reliably
+                # (``config.mode`` is unreliable across nested compilations).
+                fgraph._compile_mode = mode
+                try:
+                    rewriter_profile = rewriter(fgraph)
+                finally:
+                    del fgraph._compile_mode
 
                 end_rewriter = time.perf_counter()
                 rewrite_time = end_rewriter - start_rewriter

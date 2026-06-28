@@ -922,9 +922,11 @@ def scan_sit_sot_to_untraced(fgraph, node):
 
     convertible_set = set(convertible)
 
-    # Gather current inner inputs/outputs by category
-    inner_inputs = list(op.inner_inputs)
-    inner_outputs = list(op.inner_outputs)
+    # Thaw the frozen inner graph; the reassembled category slices below are
+    # handed to a new ``Scan`` and must be mutable.
+    unfrozen_fgraph = op.fgraph.unfreeze()
+    inner_inputs = list(unfrozen_fgraph.inputs)
+    inner_outputs = list(unfrozen_fgraph.outputs)
 
     inner_sitsot_ins = op.inner_sitsot(inner_inputs)
     inner_sitsot_outs = op.inner_sitsot_outs(inner_outputs)

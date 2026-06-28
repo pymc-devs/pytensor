@@ -4,6 +4,7 @@ from pytensor.link.basic import JITLinker
 class MLXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using Apple's MLX."""
 
+    required_rewrites = ("minimum_compile",)
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",

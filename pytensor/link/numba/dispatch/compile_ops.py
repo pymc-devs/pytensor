@@ -5,10 +5,7 @@ from textwrap import dedent
 import numba
 import numpy as np
 
-from pytensor.compile.aliasing import add_supervisor_to_fgraph, insert_deepcopy
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.io import In, Out
-from pytensor.compile.mode import NUMBA
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.ifelse import IfElse
 from pytensor.link.numba.cache import compile_numba_function_src
@@ -53,7 +50,6 @@ def numba_deepcopy_tensor(x):
 def numba_funcify_OpFromGraph(
     op,
     node=None,
-    mode=NUMBA.excluding("symbolic_op_recognition"),
     ofg_memo=None,
     **kwargs,
 ):
@@ -62,22 +58,11 @@ def numba_funcify_OpFromGraph(
     if ofg_memo is not None and op in ofg_memo:
         return ofg_memo[op]
 
-    # Apply inner rewrites
-    # TODO: Not sure this is the right place to do this, should we have a rewrite that
-    #  explicitly triggers the optimization of the inner graphs of OpFromGraph?
-    #  The C-code defers it to the make_thunk phase
-    fgraph = op.fgraph
-    input_specs = [In(x, borrow=True, mutable=False) for x in fgraph.inputs]
-    add_supervisor_to_fgraph(
-        fgraph=fgraph,
-        input_specs=input_specs,
-        accept_inplace=True,
-    )
-    mode.optimizer(fgraph)
-    output_specs = [Out(o, borrow=False) for o in fgraph.outputs]
-    insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
+    # The inner graph is already optimized and inplace/deepcopy-baked by the
+    # ``ofg_inner_graph`` rewrite (numba contract in ``pytensor.tensor.rewriting``),
+    # so we funcify ``op.fgraph`` directly.
     fgraph_fn, fgraph_cache_key = numba_funcify_and_cache_key(
-        fgraph,
+        op.fgraph,
         squeeze_output=True,
         fgraph_name="numba_ofg",
         ofg_memo=ofg_memo,

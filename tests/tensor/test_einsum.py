@@ -37,7 +37,7 @@ def assert_no_blockwise_in_graph(fgraph: FunctionGraph, core_op=None) -> None:
 
         if isinstance(node.op, HasInnerGraph):
             # InnerGraph Ops can be rewritten without modifying the original fgraph
-            if hasattr(node.op, "_fn"):
+            if getattr(node.op, "_fn", None) is not None:
                 inner_fgraph = node.op._fn.maker.fgraph
             else:
                 inner_fgraph = node.op.fgraph
