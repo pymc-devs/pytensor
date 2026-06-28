@@ -15,7 +15,6 @@ from typing import (
     Any,
     Generic,
     Optional,
-    Self,
     TypeVar,
     Union,
     cast,
@@ -108,7 +107,78 @@ class Node(MetaObject):
         return debugprint(self, **kwargs)
 
 
-class Apply(Node, Generic[OpType]):  # noqa: UP046
+class AbstractApply(Node):
+    r"""Common, immutability-agnostic base for `Apply` and `FrozenApply`.
+
+    Never instantiated directly. It holds the read-only structural API shared by
+    the mutable `Apply` and the immutable, interned `FrozenApply`: the `op`, the
+    `inputs`/`outputs` sequences, and the queries derived from them. Mutation
+    and cloning live on `Apply` alone, so code that must reject frozen nodes can
+    test ``isinstance(x, Apply)`` while code that only reads structure can
+    accept `AbstractApply`.
+    """
+
+    op: "Op"
+    inputs: Sequence["Variable"]
+    outputs: Sequence["Variable"]
+    tag: Scratchpad
+
+    def default_output(self):
+        """
+        Returns the default output for this node.
+
+        Returns
+        -------
+        Variable instance
+            An element of self.outputs, typically self.outputs[0].
+
+        Notes
+        -----
+        May raise AttributeError self.op.default_output is out of range, or if
+        there are multiple outputs and self.op.default_output does not exist.
+
+        """
+        do = getattr(self.op, "default_output", None)
+        if do is None:
+            if len(self.outputs) == 1:
+                return self.outputs[0]
+            else:
+                raise ValueError(
+                    f"Multi-output Op {self.op} default_output not specified"
+                )
+        return self.outputs[do]
+
+    def __str__(self):
+        # FIXME: The called function is too complicated for this simple use case.
+        return op_as_string(self.inputs, self)
+
+    def __repr__(self):
+        return str(self)
+
+    def get_parents(self):
+        return list(self.inputs)
+
+    @property
+    def out(self):
+        """An alias for `self.default_output`"""
+        return self.default_output()
+
+    @property
+    def nin(self):
+        """The number of inputs."""
+        return len(self.inputs)
+
+    @property
+    def nout(self):
+        """The number of outputs."""
+        return len(self.outputs)
+
+    @property
+    def params_type(self):
+        return self.op.params_type
+
+
+class Apply(AbstractApply, Generic[OpType]):  # noqa: UP046
     """A `Node` representing the application of an operation to inputs.
 
     Basically, an `Apply` instance is an object that represents the
@@ -142,6 +212,8 @@ class Apply(Node, Generic[OpType]):  # noqa: UP046
         The outputs of the expression modeled by the `Apply` node.
 
     """
+
+    op: OpType
 
     def __init__(
         self,
@@ -193,38 +265,6 @@ class Apply(Node, Generic[OpType]):  # noqa: UP046
             del t.ufunc
             d["tag"] = t
         return d
-
-    def default_output(self):
-        """
-        Returns the default output for this node.
-
-        Returns
-        -------
-        Variable instance
-            An element of self.outputs, typically self.outputs[0].
-
-        Notes
-        -----
-        May raise AttributeError self.op.default_output is out of range, or if
-        there are multiple outputs and self.op.default_output does not exist.
-
-        """
-        do = getattr(self.op, "default_output", None)
-        if do is None:
-            if len(self.outputs) == 1:
-                return self.outputs[0]
-            else:
-                raise ValueError(
-                    f"Multi-output Op {self.op} default_output not specified"
-                )
-        return self.outputs[do]
-
-    def __str__(self):
-        # FIXME: The called function is too complicated for this simple use case.
-        return op_as_string(self.inputs, self)
-
-    def __repr__(self):
-        return str(self)
 
     def clone(self, clone_inner_graph: bool = False) -> "Apply[OpType]":
         r"""Clone this `Apply` instance.
@@ -321,28 +361,6 @@ class Apply(Node, Generic[OpType]):  # noqa: UP046
             new_node = self.clone(clone_inner_graph=clone_inner_graph)
             new_node.inputs = new_inputs
         return new_node
-
-    def get_parents(self):
-        return list(self.inputs)
-
-    @property
-    def out(self):
-        """An alias for `self.default_output`"""
-        return self.default_output()
-
-    @property
-    def nin(self):
-        """The number of inputs."""
-        return len(self.inputs)
-
-    @property
-    def nout(self):
-        """The number of outputs."""
-        return len(self.outputs)
-
-    @property
-    def params_type(self):
-        return self.op.params_type
 
 
 class Variable(Node, Generic[_TypeType, OptionalApplyType]):  # noqa: UP046
@@ -464,7 +482,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):  # noqa: UP046
 
         self.owner = owner
 
-        if owner is not None and not isinstance(owner, Apply):
+        if owner is not None and not isinstance(owner, AbstractApply):
             raise TypeError("owner must be an Apply instance")
 
         if index is not None and not isinstance(index, int):
@@ -817,17 +835,28 @@ def _make_frozen_output_reduce(out: Variable):
     return __reduce_ex__
 
 
-class FrozenApply(Apply):
-    """An immutable, globally-interned Apply node for frozen graphs.
+class FrozenApply(AbstractApply):
+    """An immutable, globally-interned application node for frozen graphs.
 
-    ``inputs`` and ``outputs`` are tuples, so mutating them raises ``TypeError``.
+    It deliberately does *not* subclass `Apply`: its `inputs` / `outputs` are
+    tuples and it has no `clone` / `clone_with_new_inputs`, so it cannot be
+    mutated, rebuilt, or walked by the generic clone machinery -- a frozen node
+    leaking into such a path fails loudly. Code that manipulates a frozen graph
+    must thaw it explicitly first (``FrozenFunctionGraph.unfreeze`` / ``bind``).
 
-    Instances are interned on ``(op, inputs, output_types)``: constructing one
-    with a matching key returns the cached instance.  Constant inputs are keyed
-    by ``signature()`` (so equal-valued Constants share a node).  Other inputs
-    are already globally interned, so identity is enough; the key stores their
-    ``id()`` rather than the variables themselves, keeping strong references out
-    of the cache so chains of ``FrozenApply`` nodes collect in a single GC pass.
+    Instances are interned on ``(op, inputs, output_types, topo_idx)``:
+    constructing one with a matching key returns the cached instance.  Constant
+    inputs are keyed by ``signature()`` (so equal-valued Constants share a node).
+    Other inputs are already globally interned, so identity is enough; the key
+    stores their ``id()`` rather than the variables themselves, keeping strong
+    references out of the cache so chains of ``FrozenApply`` nodes collect in a
+    single GC pass.
+
+    ``topo_idx`` is the node's position in a baked custom toposort, or ``-1``
+    when no specific order is imposed (deduplicated graphs).  Keying on it keeps
+    two structurally equal computations at different toposort positions as
+    distinct interned nodes, which is how a `FrozenFunctionGraph` pins a
+    destroy-aware order.
 
     ``output_types`` is in the key because frozen graphs root on
     ``NominalVariable`` inputs (index and type only).  Nominalizing truncates the
@@ -837,17 +866,20 @@ class FrozenApply(Apply):
     """
 
     _cache: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+    topo_idx: int
 
     def __new__(
         cls,
         op: "Op",
         inputs: tuple[Variable, ...],
         output_types: tuple["Type", ...],
+        topo_idx: int = -1,
     ):
         cache_key = (
             op,
             tuple(i.signature() if isinstance(i, Constant) else id(i) for i in inputs),
             output_types,
+            topo_idx,
         )
         cached = cls._cache.get(cache_key)
         if cached is not None:
@@ -855,8 +887,9 @@ class FrozenApply(Apply):
 
         instance = object.__new__(cls)
         instance.op = op
-        instance.inputs = inputs  # type: ignore[assignment]
-        instance.outputs = tuple(  # type: ignore[assignment]
+        instance.topo_idx = topo_idx
+        instance.inputs = inputs
+        instance.outputs = tuple(
             t.variable_type(type=t, owner=instance, index=i)
             for i, t in enumerate(output_types)
         )
@@ -868,16 +901,20 @@ class FrozenApply(Apply):
         cls._cache[cache_key] = instance
         return instance
 
-    def __init__(self, op, inputs, output_types):
+    def __init__(self, op, inputs, output_types, topo_idx=-1):
         # All initialization is done in __new__
         pass
 
-    def clone(self, clone_inner_graph: bool = False) -> Self:
-        """Frozen nodes are immutable — cloning returns self."""
-        return self
-
     def __reduce__(self):
-        return (type(self), (self.op, self.inputs, tuple(o.type for o in self.outputs)))
+        return (
+            type(self),
+            (
+                self.op,
+                self.inputs,
+                tuple(o.type for o in self.outputs),
+                self.topo_idx,
+            ),
+        )
 
 
 def clone(

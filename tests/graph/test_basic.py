@@ -8,6 +8,7 @@ from pytensor import shared
 from pytensor import tensor as pt
 from pytensor.compile.maker import UnusedInputError
 from pytensor.graph.basic import (
+    AbstractApply,
     Apply,
     NominalVariable,
     Variable,
@@ -493,7 +494,9 @@ class TestFrozenApply:
         assert fa1 is not fa_diff_op
         assert fa1 is not fa_diff_order
 
-        assert isinstance(fa1, Apply)
+        # FrozenApply shares the read-only node API but is not a mutable Apply
+        assert isinstance(fa1, AbstractApply)
+        assert not isinstance(fa1, Apply)
 
         assert fa1.outputs[0].owner is fa1
         assert fa1.outputs[0].index == 0
@@ -524,6 +527,6 @@ class TestFrozenApply:
         out1 = add(x, ScalarConstant(float64, 3.14))
         out2 = add(x, ScalarConstant(float64, 3.14))
 
-        ffg1 = FrozenFunctionGraph([x], [out1])
-        ffg2 = FrozenFunctionGraph([x], [out2])
+        ffg1 = FrozenFunctionGraph.from_io([x], [out1])
+        ffg2 = FrozenFunctionGraph.from_io([x], [out2])
         assert ffg1 == ffg2
