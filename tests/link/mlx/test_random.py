@@ -21,18 +21,8 @@ def test_normal_cumsum():
 def check_shape_and_dtype(
     make_rv, expected_shape, expected_dtype=None, n_evals=2, mode="MLX"
 ):
-    """Compile and run an RV under MLX, assert shape and dtype, and verify
-    that two successive draws differ (RNG state is properly threaded).
-
-    Parameters
-    ----------
-    make_rv : callable(srng) -> rv_var
-        Factory that creates the RV using the provided RandomStream.
-    expected_shape : tuple
-    expected_dtype : str or None
-    n_evals : int
-    mode : str or Mode
-    """
+    """Compile and run an RV under MLX; assert shape/dtype and that successive
+    draws differ (RNG state is threaded)."""
     srng = RandomStream(seed=12345)
     rv = make_rv(srng)
     f = pytensor.function([], rv, mode=mode, updates=srng.updates())
@@ -185,9 +175,8 @@ def test_integers_shape():
 
 
 def test_integers_narrow_dtype_wraps():
-    # Bounds must be applied before the dtype cast: sampling [250, 300) and
-    # casting to uint8 wraps (regression for casting the bounds first, which
-    # collapsed the interval to a single value).
+    # Sampling [250, 300) then casting to uint8 must wrap (regression for
+    # casting the bounds first, which collapsed the interval to one value).
     r = np.array(
         pt.random.integers(low=250, high=300, size=(20_000,), dtype="uint8").eval(
             mode="MLX"
