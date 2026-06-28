@@ -23,7 +23,7 @@ from pytensor.graph.basic import (
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
-from pytensor.graph.replace import clone_replace, graph_replace
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
 from pytensor.tensor.shape import Shape_i
@@ -54,20 +54,17 @@ def infer_shape(outs, inputs, input_shapes):
             if cached is not None:
                 replacements[cached] = s
 
-    if replacements:
-        flat = [s for tup in output_shapes if tup is not None for s in tup]
-        flat_replaced = graph_replace(flat, replacements, strict=False)
-        result = []
-        idx = 0
-        for tup in output_shapes:
-            if tup is None:
-                result.append(None)
-            else:
-                result.append(tuple(flat_replaced[idx : idx + len(tup)]))
-                idx += len(tup)
-        return result
-
-    return output_shapes
+    flat = [s for tup in output_shapes if tup is not None for s in tup]
+    flat_replaced = clone_replace(flat, replace=replacements)
+    result = []
+    idx = 0
+    for tup in output_shapes:
+        if tup is None:
+            result.append(None)
+        else:
+            result.append(tuple(flat_replaced[idx : idx + len(tup)]))
+            idx += len(tup)
+    return result
 
 
 def construct_nominal_fgraph(
@@ -398,7 +395,7 @@ class OpFromGraph(Op, HasInnerGraph):
         ]
         if not connected:
             return pattern, None
-        return pattern, FunctionGraph(all_inputs, connected).freeze()
+        return pattern, FrozenFunctionGraph.from_io(all_inputs, connected)
 
     def _freeze_override(self, override, make_dummy_args):
         """Freeze one override (lop/grad/rop) into a FrozenFunctionGraph."""
@@ -786,8 +783,15 @@ class OpFromGraph(Op, HasInnerGraph):
             from pytensor.tensor.rewriting.shape import ShapeFeature
 
             sf = ShapeFeature()
-            inner_inputs = self.inner_inputs
-            template = [sf.shape_tuple(o) for o in self.inner_outputs]
+            # Build the shape graph on a thawed copy: the fresh shape nodes must
+            # not be built on top of the frozen inner variables (freezing such a
+            # mixed graph is not supported).
+            inner_inputs = [inp.type() for inp in self.fgraph.inputs]
+            inner_outputs = clone_replace(
+                self.fgraph.outputs,
+                replace=dict(zip(self.fgraph.inputs, inner_inputs, strict=True)),
+            )
+            template = [sf.shape_tuple(o) for o in inner_outputs]
             flat_shapes = [s for tup in template if tup is not None for s in tup]
 
             # Express the inner-output shapes as a frozen function of the inner
