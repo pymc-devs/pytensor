@@ -44,6 +44,8 @@ from pytensor.scan.rewriting.inner_graph import (
     rewrite_scan_inner_graph,
 )
 from pytensor.tensor import TensorType
+from pytensor.tensor.optimize import rewrite_optimize_inner_graph
+from pytensor.tensor.rewriting.optimize import c_rewrite_optimize_inner_graph
 from pytensor.utils import NoDuplicateOptWarningFilter, difference, get_unbound_function
 
 
@@ -1336,6 +1338,7 @@ class _DummyLinker:
 # ``OpFromGraph.fn``), so bake inner graphs exactly as those linkers do.
 rewrite_scan_inner_graph.register(_DummyLinker, cvm_rewrite_scan_inner_graph)
 rewrite_ofg_inner_graph.register(_DummyLinker, destructive_rewrite_ofg_inner_graph)
+rewrite_optimize_inner_graph.register(_DummyLinker, c_rewrite_optimize_inner_graph)
 
 
 class _Linker(LocalLinker):
