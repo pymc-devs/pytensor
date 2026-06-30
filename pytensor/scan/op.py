@@ -80,7 +80,7 @@ from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasShape
-from pytensor.graph.utils import InconsistencyError, MissingInputError
+from pytensor.graph.utils import InconsistencyError
 from pytensor.link.vm import VMLinker
 from pytensor.printing import op_debug_information
 from pytensor.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
@@ -842,12 +842,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             If ``True``, all the shared variables used in the inner-graph must be provided.
 
         """
-        self.fgraph, shared_inputs, _, _ = construct_nominal_fgraph(inputs, outputs)
-
-        # The shared variables should have been removed, so, if there are
-        # any, it's because the user didn't specify an input.
-        if shared_inputs:
-            raise MissingInputError(f"Scan is missing inputs: {shared_inputs}")
+        self.fgraph, _, _, _ = construct_nominal_fgraph(inputs, outputs)
 
         self.info = info
         self.truncate_gradient = truncate_gradient
