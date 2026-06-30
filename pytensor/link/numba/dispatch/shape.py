@@ -70,6 +70,7 @@ def numba_funcify_Reshape(op, **kwargs):
         @numba_basic.numba_njit
         def reshape(x, shape):
             # TODO: Use this until https://github.com/numba/numba/issues/7353 is closed.
+            # the above issue is closed, what to do instead?
             return np.reshape(
                 np.ascontiguousarray(np.asarray(x)),
                 numba_ndarray.to_fixed_tuple(shape, ndim),
