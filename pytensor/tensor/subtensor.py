@@ -239,7 +239,7 @@ def as_index_literal(
     raise NotScalarConstantError()
 
 
-def _is_provably_positive(var, strict: bool = True) -> bool:
+def is_provably_positive(var, strict: bool = True) -> bool:
     """``True`` when ``var`` can be statically shown to be positive.
 
     With ``strict=True`` this proves :math:`var > 0`; with ``strict=False`` it
@@ -289,26 +289,23 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
     if not strict and isinstance(op, Shape | Shape_i):
         return True
     if isinstance(op, MakeVector):
-        return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
+        return all(is_provably_positive(i, strict) for i in var.owner.inputs)
     if isinstance(op, Subtensor | ScalarFromTensor | TensorFromScalar | DimShuffle):
-        return _is_provably_positive(var.owner.inputs[0], strict)
+        return is_provably_positive(var.owner.inputs[0], strict)
     if isinstance(op, Elemwise):
         scalar_op = op.scalar_op
         if not strict and isinstance(scalar_op, Cast):
-            return _is_provably_positive(var.owner.inputs[0], strict)
+            return is_provably_positive(var.owner.inputs[0], strict)
         if isinstance(scalar_op, ScalarMinimum):
-            return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
+            return all(is_provably_positive(i, strict) for i in var.owner.inputs)
         if isinstance(scalar_op, ScalarMaximum):
-            return any(_is_provably_positive(i, strict) for i in var.owner.inputs)
+            return any(is_provably_positive(i, strict) for i in var.owner.inputs)
     return False
 
 
-def _is_provably_non_negative(var) -> bool:
-    """``True`` when ``var`` can be statically shown to be non-negative (:math:`\\geq 0`).
-
-    Thin wrapper over :func:`_is_provably_positive` with ``strict=False``.
-    """
-    return _is_provably_positive(var, strict=False)
+def is_provably_non_negative(var) -> bool:
+    """Whether ``var`` is provably ``>= 0``; thin wrapper over `is_provably_positive`."""
+    return is_provably_positive(var, strict=False)
 
 
 def get_idx_list(inputs, idx_list):
@@ -448,7 +445,7 @@ def get_canonical_form_slice(
             if is_stop_length:
                 # Full slice.
                 return slice(0, length, 1), 1
-            if _is_provably_non_negative(stop):
+            if is_provably_non_negative(stop):
                 return (slice(0, minimum(stop, length), 1), 1)
             stop_plus_len = stop + length
             stop = switch(
@@ -571,7 +568,7 @@ def slice_len(slc, n):
         and canon_slc.step == 1
         and isinstance(canon_slc.start, int)
         and canon_slc.start == 0
-        and _is_provably_non_negative(stop)
+        and is_provably_non_negative(stop)
     ):
         return stop
     return switch(
