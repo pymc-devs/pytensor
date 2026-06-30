@@ -325,7 +325,13 @@ def test_inner_graph_optimized():
 
 @pytest.mark.parametrize("n_steps_constant", (True, False))
 def test_inplace_taps(n_steps_constant):
-    """Test that numba will inplace in the inner_function of the oldest sit-sot, mit-sot taps."""
+    """No inner output may be computed in place on a sit-sot/mit-sot tap.
+
+    The scan loop overwrites those tap buffers in place each iteration, so an output
+    aliasing one would be corrupted. Only an ``untraced_sit_sot`` input (rebound by
+    reference, never loop-overwritten) may be destroyed in place by its own output.
+    See #2252.
+    """
     n_steps = 10 if n_steps_constant else scalar("n_steps", dtype=int)
     a = scalar("a")
     x0 = scalar("x0")
@@ -363,16 +369,10 @@ def test_inplace_taps(n_steps_constant):
         if isinstance(node.op, Scan)
     ]
 
-    # Collect inner inputs we expect to be destroyed by the step function
-    # Scan reorders inputs internally, so we need to check its ordering
+    # Collect the inner inputs destroyed in place by the output-producing nodes.
+    # Scan reorders inputs internally, so we go through its accessors.
     inner_inps = scan_op.fgraph.inputs
     mit_sot_inps = scan_op.inner_mitsot(inner_inps)
-    oldest_mit_sot_inps = [
-        # Implicitly assume that the first mit-sot input is the one with 3 taps
-        # This is not a required behavior and the test can change if we need to change Scan.
-        mit_sot_inps[:2][scan_op.info.mit_sot_in_slices[0].index(-3)],
-        mit_sot_inps[2:][scan_op.info.mit_sot_in_slices[1].index(-2)],
-    ]
     sit_sot_inps = scan_op.inner_sitsot(inner_inps)
     untraced_sit_sot_inps = scan_op.inner_untraced_sit_sot(inner_inps)
 
@@ -386,12 +386,14 @@ def test_inplace_taps(n_steps_constant):
             )
 
     # ``local_subtensor_merge_integer`` + ``scan_reduce_buffer`` reduce the buffers
-    # the same way for both constant and symbolic ``n_steps`` (xs collapses
-    # to an untraced sit_sot, the mit_sot buffers reduce to ``taps + 1``),
-    # so inplace fires identically in both cases.
+    # the same way for both constant and symbolic ``n_steps`` (xs collapses to an
+    # untraced sit_sot), so the result is identical in both cases. No mit_sot tap may
+    # be destroyed by an output (the loop overwrites those slots in place); only the
+    # untraced_sit_sot input is destroyed in place by its own output.
     assert len(sit_sot_inps) == 0
     assert len(untraced_sit_sot_inps) == 1
-    assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
+    assert not any(tap in destroyed_inputs for tap in mit_sot_inps)
+    assert set(destroyed_inputs) == {untraced_sit_sot_inps[0]}
 
 
 @pytest.mark.parametrize(
@@ -519,5 +521,158 @@ def test_grad_until_and_truncate_sequence_taps():
     ScanCompatibilityTests.check_grad_until_and_truncate_sequence_taps(mode="NUMBA")
 
 
-def test_aliased_inner_outputs():
-    ScanCompatibilityTests.check_aliased_inner_outputs(static_shape=True, mode="NUMBA")
+@pytest.mark.parametrize("static_shape", (True, False))
+def test_aliased_inner_outputs(static_shape):
+    ScanCompatibilityTests.check_aliased_inner_outputs(static_shape, mode="NUMBA")
+
+
+class TestUntracedSitSotAliasedInnerOutput:
+    """Regressions for #2252.
+
+    A sit_sot whose trace is unused is lowered to untraced_sit_sot and carried by reference
+    across iterations. When its recurrence aliases an inner input or output, the numba
+    backend must keep the borrowed view only when sound and copy it otherwise; a wrong
+    choice corrupts the carry or aliases an outer buffer, so matching the reference is the
+    check.
+    """
+
+    @pytest.mark.parametrize(
+        "echo",
+        [
+            "seq",
+            "non_seq",
+            "tap_input",
+            "tap_output",
+            "other_untraced_input",
+            "other_untraced_output",
+        ],
+    )
+    def test_echo(self, echo):
+        # One general scan: traced accumulator `y` and traced sit_sot `s` keep the loop
+        # alive and give `s` a tap buffer; untraced states `u` (independent) and `m` are
+        # carried by reference. `m`'s recurrence echoes whichever inner value `echo`
+        # selects, exercising each borrow/copy decision.
+        x = pt.matrix("x")
+        c = pt.vector("c")
+
+        def step(x_t, y_prev, s_prev, u_prev, m_prev, c):
+            s_next = s_prev + x_t  # traced sit_sot -> provides a tap buffer
+            u_next = x_t * 2.0  # independent untraced value
+            m_next = {
+                "seq": x_t,
+                "non_seq": c,
+                "tap_input": s_prev,
+                "tap_output": s_next,
+                "other_untraced_input": u_prev,
+                "other_untraced_output": u_next,
+            }[echo]
+            # Accumulate the *carried* values u_prev and m_prev. A wrong borrow corrupts
+            # the carry buffer between iterations, so the bug only surfaces if a later step
+            # reads it back: reading m_next/u_next instead would pass even on buggy code.
+            y_next = y_prev + m_prev + u_prev
+            return y_next, s_next, u_next, m_next
+
+        outs = scan(
+            step,
+            sequences=[x],
+            outputs_info=[pt.zeros(3), pt.zeros(3), pt.zeros(3), pt.zeros(3)],
+            non_sequences=[c],
+            return_updates=False,
+        )
+        # Only y and s traces are used, so u and m are lowered to untraced_sit_sot.
+        compare_numba_and_py(
+            [x, c],
+            [outs[0], outs[1]],
+            [np.arange(15.0).reshape(5, 3), np.arange(3.0)],
+            numba_mode="NUMBA",
+        )
+
+    def test_echo_self_in_place(self):
+        # untraced state updates itself in place -> own previous value, kept by reference
+        x = pt.matrix("x")
+
+        def step(x_t, acc_prev):
+            return acc_prev[:1].inc(x_t[:1])
+
+        outs = scan(
+            step,
+            sequences=[x],
+            outputs_info=[pt.zeros(3)],
+            return_updates=False,
+        )
+        compare_numba_and_py(
+            [x], [outs[-1]], [np.arange(15.0).reshape(5, 3)], numba_mode="NUMBA"
+        )
+
+    def test_two_untraced_states_sharing_inner_root(self):
+        # Two untraced states whose recurrences are the *same* fresh inner value must each
+        # get their own carry buffer (invariant B): borrowing both onto the shared root
+        # would carry them in one buffer and alias the two outer outputs. The reversed read
+        # of one carry surfaces the corruption when they alias. Guards the
+        # ``seen_untraced_roots`` borrow check in the numba backend.
+        x = pt.matrix("x")
+
+        def step(x_t, y_prev, a_prev, b_prev):
+            shared = x_t * 2.0  # single fresh root echoed by both untraced states
+            y_next = y_prev + a_prev[::-1] - b_prev
+            return y_next, shared, shared
+
+        outs = scan(
+            step,
+            sequences=[x],
+            outputs_info=[pt.zeros(3), pt.zeros(3), pt.zeros(3)],
+            return_updates=False,
+        )
+        # Only y's trace is used, so a and b are lowered to untraced_sit_sot.
+        compare_numba_and_py(
+            [x], [outs[0]], [np.arange(15.0).reshape(5, 3)], numba_mode="NUMBA"
+        )
+
+
+@pytest.mark.parametrize("case", ["cross_store", "untraced_on_tap"])
+def test_no_foreign_inplace_on_tap(case):
+    """A recurrence may reuse only its own tap buffer in place.
+
+    The numba inner optimizer may compute an output in place on another state's
+    (destroyable) tap. That tap slot is overwritten by its own recurrence, so any
+    foreign output landing there is corrupted: a tapped cross-store (both outputs
+    ``>=1``-d) or an untraced output that keeps a reference to the tap. The
+    ``NoOutputInplaceOnInput`` feature must reject those inplaces.
+    """
+    if case == "cross_store":
+        # Two vector mit_sots each computed in place on the *other*'s oldest tap.
+        n = pt.iscalar("n")
+
+        def step(a_tm2, a_tm1, b_tm2, b_tm1, y):
+            return b_tm2 + 1.0, a_tm2 + 1.0, y + a_tm1.sum() + b_tm1.sum()
+
+        outs = scan(
+            step,
+            n_steps=n,
+            outputs_info=[
+                {"initial": pt.as_tensor(np.ones((2, 3))), "taps": [-2, -1]},
+                {"initial": pt.as_tensor(np.ones((2, 3)) * 5), "taps": [-2, -1]},
+                np.float64(0.0),
+            ],
+            return_updates=False,
+        )
+        graph_inputs, graph_outputs, test_inputs = [n], [outs[2]], [6]
+    else:  # untraced_on_tap: an untraced output computed in place on a mit_sot tap
+        x = pt.dvector("x")
+
+        def step(x_t, z_tm2, z_tm1, y, m):
+            return z_tm1 + z_tm2 + 0.0 * x_t, y + m, z_tm2 + 1.0
+
+        outs = scan(
+            step,
+            sequences=[x],
+            outputs_info=[
+                {"initial": pt.as_tensor([1.0, 2.0]), "taps": [-2, -1]},
+                np.float64(0.0),
+                np.float64(0.0),
+            ],
+            return_updates=False,
+        )
+        graph_inputs, graph_outputs, test_inputs = [x], [outs[1]], [np.arange(1.0, 9.0)]
+
+    compare_numba_and_py(graph_inputs, graph_outputs, test_inputs, numba_mode="NUMBA")
