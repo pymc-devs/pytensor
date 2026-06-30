@@ -36,6 +36,8 @@ def build_cases():
     return [
         ("reduce_sum", (px.math.exp(x).sum("a") * 1.5).sum(), [xt]),
         ("reduce_mean_std", (x.mean("a") + x.std("a")).sum(), [xt]),
+        ("reduce_max", (x.max("a") * 1.5).sum(), [xt]),
+        ("reduce_min", (x.min("a") * 1.5).sum(), [xt]),
         ("cumsum", px.math.exp(x).cumsum("a").sum(), [xt]),
         ("elemwise", (px.math.tanh(x) * px.math.sin(x)).sum(), [xt]),
         ("transpose", (x.transpose("b", "a") ** 2).sum(), [xt]),
