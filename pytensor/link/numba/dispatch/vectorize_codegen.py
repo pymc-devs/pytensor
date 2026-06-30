@@ -24,7 +24,11 @@ def encode_literals(literals: Sequence) -> str:
 
 
 def store_core_outputs(
-    core_op_fn: Callable, nin: int, nout: int, inc_outputs: frozenset = frozenset()
+    core_op_fn: Callable,
+    nin: int,
+    nout: int,
+    inc_outputs: frozenset = frozenset(),
+    n_inplace_buffer_inputs: int = 0,
 ) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
@@ -39,16 +43,22 @@ def store_core_outputs(
         ...
 
     ``inc_outputs`` lists output indices that use ``+=`` instead of ``=``.
+
+    ``n_inplace_buffer_inputs`` trailing inputs are accepted but not passed to
+    ``core_op_fn``. An ``inplace_pattern`` target must be a core input, so
+    ``_vectorized`` feeds such buffers in even when the scalar op doesn't read
+    them (e.g. a basic slice write writes into a buffer view it never reads).
     """
     if getattr(core_op_fn, "handles_out", False):
         return core_op_fn
 
     inputs = [f"i{i}" for i in range(nin)]
+    buffer_inputs = [f"b{i}" for i in range(n_inplace_buffer_inputs)]
     outputs = [f"o{i}" for i in range(nout)]
     inner_outputs = [f"t{output}" for output in outputs]
 
     inp_signature = ", ".join(inputs)
-    out_signature = ", ".join(outputs)
+    full_signature = ", ".join([*inputs, *buffer_inputs, *outputs])
     inner_out_signature = ", ".join(inner_outputs)
     store_outputs = "\n".join(
         f"{output} += {inner_output}"
@@ -59,7 +69,7 @@ def store_core_outputs(
         )
     )
     func_src = f"""
-def store_core_outputs({inp_signature}, {out_signature}):
+def store_core_outputs({full_signature}):
     {inner_out_signature} = core_op_fn({inp_signature})
 {indent(store_outputs, " " * 4)}
 """
