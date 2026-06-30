@@ -213,6 +213,32 @@ def test_mlx_multioutput():
     compare_mlx_and_py([x, y], [w, v], [x_test_value, y_test_value])
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_nan_constant(dtype):
+    # ``mx.compile`` inlines size-1 constants as Metal source literals, but Metal
+    # has no ``nan`` literal (it accepts ``inf``), so a size-1 NaN constant fed to
+    # a fused op must be materialized through an op instead. This is the class of
+    # graph the ``local_sqrt_sqr`` rewrite produces on normalization
+    # input-gradients. The constant is shape ``(1,)`` (matching the operand rank)
+    # so it reaches the ``Switch`` without an intervening broadcast.
+    x = vector("x", shape=(None,), dtype=dtype)
+    nan = pt.constant(np.array([np.nan], dtype=dtype))
+    out = pt.switch(x > 0, x, nan)
+
+    compare_mlx_and_py([x], [out], [np.array([-1.0, 1.0, -2.0, 2.0], dtype=dtype)])
+
+
+def test_nan_array_constant():
+    # A NaN constant with more than one element is passed as a buffer (not
+    # inlined), so it compiles without materialization.
+    x = vector("x", shape=(3,))
+    c = pt.constant(np.array([np.nan, 1.0, np.nan], dtype=config.floatX))
+
+    compare_mlx_and_py(
+        [x], [x + c], [np.array([10.0, 20.0, 30.0], dtype=config.floatX)]
+    )
+
+
 def test_mlx_logp():
     mu = vector("mu")
     mu_test_value = np.r_[0.0, 0.0].astype(config.floatX)

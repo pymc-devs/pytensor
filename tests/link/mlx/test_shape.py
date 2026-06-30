@@ -20,6 +20,17 @@ def test_mlx_shape_ops():
     compare_mlx_and_py([], [x], [], must_be_device_array=False)
 
 
+def test_mlx_shape_i_cast():
+    # A shape-derived value passed through ``Cast`` under the full "MLX" mode,
+    # the configuration reported in #2096: ``Shape_i`` should yield an MLX
+    # array so the downstream ``Cast`` receives an array rather than a bare
+    # Python ``int``.
+    a = vector("a", dtype="float32")
+    out = pt.cast(a.shape[0], "float32") + pt.cast(2, "float32")
+
+    compare_mlx_and_py([a], [out], [np.arange(6, dtype="float32")], mlx_mode="MLX")
+
+
 def test_mlx_specify_shape():
     in_pt = pt.matrix("in")
     x = pt.specify_shape(in_pt, (4, None))

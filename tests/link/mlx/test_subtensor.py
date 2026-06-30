@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor import function
+from pytensor.compile.mode import Mode
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor import tensor
 from tests.link.mlx.test_basic import compare_mlx_and_py
@@ -211,7 +213,6 @@ def test_mlx_subtensor_edge_cases():
     compare_mlx_and_py([], [out_pt], [])
 
 
-@pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_subtensor_with_variables():
     """Test subtensor operations with PyTensor variables as inputs."""
     # Test with variable arrays (not constants)
@@ -224,3 +225,121 @@ def test_mlx_subtensor_with_variables():
     # Set operation with variables
     out_pt = pt_subtensor.set_subtensor(x_pt[0, :2], y_pt)
     compare_mlx_and_py([x_pt, y_pt], [out_pt], [x_np, y_np])
+
+
+@pytest.mark.parametrize(
+    "func", (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1)
+)
+def test_mlx_AdvancedIncSubtensor1_runtime_broadcast(func):
+    """MLX must reject runtime broadcasting of ``y``, matching C/Numba/JAX/PyTorch.
+
+    ``AdvancedIncSubtensor1`` requires ``y`` to already match the indexed shape;
+    a statically non-broadcastable dimension that is length 1 at runtime is an
+    error, not a silent broadcast.
+    """
+    y = pt.matrix("y", dtype="float32", shape=(None, None))
+    x = pt.zeros((10, 5))
+    idxs = np.repeat(np.arange(10), 2)  # 20 indices
+    out = func(x, y, idxs)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+
+    f = function([y], out, mode=Mode(linker="mlx", optimizer=None))
+    f(np.ones((20, 5), dtype=np.float32))  # correctly sized y works
+
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(np.ones((1, 5), dtype=np.float32))  # broadcast along index
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(np.ones((20, 1), dtype=np.float32))  # broadcast along buffer
+
+
+def test_mlx_IncSubtensor_slice_grad():
+    """Gradient of a basic slice lowers to an ``IncSubtensor`` with slice bounds
+    passed as (array) inputs; these must be coerced to Python ints for MLX."""
+    x_pt = pt.vector("x", dtype="float32")
+    x_np = np.arange(6, dtype=np.float32)
+
+    # Contiguous and strided (RoPE-style) slices both exercise the slice path.
+    for sl in (x_pt[0:3], x_pt[0::2]):
+        g = pt.grad((sl**2).sum(), x_pt)
+        assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
+        compare_mlx_and_py([x_pt], [g], [x_np])
+
+
+@pytest.mark.xfail(
+    reason="Upstream mx.compile bug (ml-explore/mlx#3716): assigning an "
+    "elementwise expression to a negative-strided slice returns wrong values "
+    "under mx.compile (correct when eager / use_compile=False).",
+    strict=True,
+)
+def test_mlx_IncSubtensor_negative_step_slice_grad():
+    x_pt = pt.vector("x", dtype="float32")
+    x_np = np.arange(6, dtype=np.float32)
+    g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
+    assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
+    compare_mlx_and_py([x_pt], [g], [x_np])
+
+
+@pytest.mark.parametrize(
+    "func",
+    (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1),
+    ids=("inc", "set"),
+)
+def test_mlx_AdvancedIncSubtensor1_duplicate_indices(func):
+    """Duplicate indices must accumulate for inc (``np.add.at`` semantics).
+
+    Gradients of advanced indexing (e.g. embedding lookups with repeated token
+    ids) produce inc with duplicate indices; MLX must sum all contributions
+    rather than writing each destination once.
+    """
+    x = pt.vector("x", dtype="float32")
+    y = pt.vector("y", dtype="float32")
+    idxs = np.array([0, 0, 0, 1], dtype=np.int64)
+    out = func(x, y, idxs)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+
+    x_np = np.zeros(3, dtype=np.float32)
+    y_np = np.ones(4, dtype=np.float32)
+    compare_mlx_and_py([x, y], [out], [x_np, y_np])
+
+
+def test_mlx_AdvancedIncSubtensor1_duplicate_indices_edge_cases():
+    """Duplicate accumulation with negative indices and a scalar (broadcast) ``y``."""
+    x = pt.vector("x", dtype="int32")
+    y = pt.scalar("y", dtype="int32")
+    idxs = np.array([-1, -1, 0, -1], dtype=np.int64)
+    out = pt_subtensor.advanced_inc_subtensor1(x, y, idxs)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+
+    compare_mlx_and_py([x, y], [out], [np.zeros(3, dtype=np.int32), np.int32(2)])
+
+
+def test_mlx_AdvancedIncSubtensor_duplicate_indices():
+    """``AdvancedIncSubtensor`` with duplicate indices accumulates like ``np.add.at``."""
+    x = pt.matrix("x", dtype="float32")
+    y = pt.vector("y", dtype="float32")
+    rows = np.array([0, 0, 1], dtype=np.int64)
+    cols = np.array([1, 1, 2], dtype=np.int64)
+    out = pt_subtensor.inc_subtensor(x[rows, cols], y)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    assert not out.owner.op.set_instead_of_inc
+    assert not out.owner.op.ignore_duplicates
+
+    x_np = np.zeros((3, 3), dtype=np.float32)
+    y_np = np.ones(3, dtype=np.float32)
+    compare_mlx_and_py([x, y], [out], [x_np, y_np])
+
+
+def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
+    """``ignore_duplicates=True`` requests write-once (numpy ``x[idx] += y``).
+
+    Duplicate indices must NOT be accumulated in this mode, matching the
+    reference ``perform`` and the PyTorch/Numba backends.
+    """
+    x = pt.vector("x", dtype="float32")
+    out = pt_subtensor.inc_subtensor(
+        x[[0, 1, 0]], np.float32(5.0), ignore_duplicates=True
+    )
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    assert out.owner.op.ignore_duplicates
+
+    compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])

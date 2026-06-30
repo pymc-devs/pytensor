@@ -32,7 +32,9 @@ MLX_DYNAMIC_SHAPE_ERROR = (
 
 @mlx_funcify.register(Join)
 def mlx_funcify_Join(op, **kwargs):
-    def join(axis, *tensors):
+    axis = op.axis
+
+    def join(*tensors):
         return mx.concatenate(tensors, axis=axis)
 
     return join
@@ -40,12 +42,8 @@ def mlx_funcify_Join(op, **kwargs):
 
 @mlx_funcify.register(Split)
 def mlx_funcify_Split(op: Split, node, **kwargs):
-    _, axis_sym, splits_sym = node.inputs
-
-    try:
-        constant_axis = get_scalar_constant_value(axis_sym)
-    except NotScalarConstantError:
-        constant_axis = None
+    _x, splits_sym = node.inputs
+    axis = op.axis
 
     try:
         constant_splits = np.array(
@@ -57,15 +55,7 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
     except (ValueError, NotScalarConstantError):
         constant_splits = None
 
-    def split(x, axis, splits):
-        # Resolve constants for significant performance improvement (14x speedup)
-        if constant_axis is not None:
-            axis = int(constant_axis)
-        else:
-            raise ValueError(
-                "Symbolic axis is not supported in MLX Split implementation."
-            )
-
+    def split(x, splits):
         if constant_splits is not None:
             splits_arr = mx.array(constant_splits)
         else:

@@ -1801,7 +1801,6 @@ class Maximum(BinaryScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("maximum", 2, 1)
-    nfunc_variadic = "maximum"
     identity = -np.inf
 
     def impl(self, *inputs):
@@ -1848,7 +1847,6 @@ class Minimum(BinaryScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("minimum", 2, 1)
-    nfunc_variadic = "minimum"
     identity = np.inf
 
     def impl(self, *inputs):
@@ -1895,7 +1893,6 @@ class Add(ScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("add", 2, 1)
-    nfunc_variadic = "sum"
 
     def impl(self, *inputs):
         return sum(inputs)
@@ -1937,7 +1934,6 @@ class Mul(ScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("multiply", 2, 1)
-    nfunc_variadic = "prod"
 
     def impl(self, *inputs):
         return np.prod(inputs)

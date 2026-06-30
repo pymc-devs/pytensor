@@ -100,19 +100,13 @@ def jax_funcify_ScalarOp(op, node, **kwargs):
         jax_func = getattr(jnp, func_name)
 
     if len(node.inputs) > op.nfunc_spec[1]:
-        # Some Scalar Ops accept multiple number of inputs, behaving as a variadic function,
-        # even though the base Op from `func_name` is specified as a binary Op.
-        # This happens with `Add`, which can work as a `Sum` for multiple scalars.
-        jax_variadic_func = getattr(jnp, op.nfunc_variadic, None)
-        if not jax_variadic_func:
-            raise NotImplementedError(
-                f"Dispatch not implemented for Scalar Op {op} with {len(node.inputs)} inputs"
-            )
+        # Some Scalar Ops (e.g. Add/Mul) accept more inputs than the binary base Op,
+        # behaving as variadic. Fold the binary op, which broadcasts and preserves
+        # dtype; stacking + jnp.sum/prod would upcast bool/int.
+        binary_jax_func = jax_func
 
         def jax_func(*args):
-            return jax_variadic_func(
-                jnp.stack(jnp.broadcast_arrays(*args), axis=0), axis=0
-            )
+            return functools.reduce(binary_jax_func, args)
 
     return jax_func
 

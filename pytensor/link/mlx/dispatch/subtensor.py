@@ -40,9 +40,8 @@ def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(IncSubtensor)
-@mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_IncSubtensor(op, node, **kwargs):
-    if getattr(op, "set_instead_of_inc", False):
+    if op.set_instead_of_inc:
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
@@ -59,7 +58,9 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
             return x
 
     def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=op.idx_list):
-        indices = indices_from_subtensor(ilist, idx_list)
+        # Coerce integer index inputs to Python ints (e.g. slice bounds), as
+        # MLX slices reject array-typed bounds. Mirrors mlx_funcify_Subtensor.
+        indices = indices_from_subtensor([int(element) for element in ilist], idx_list)
         if len(indices) == 1:
             indices = indices[0]
 
@@ -69,8 +70,9 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(AdvancedIncSubtensor)
+@mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
-    if getattr(op, "set_instead_of_inc", False):
+    if op.set_instead_of_inc:
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
@@ -78,15 +80,30 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
             x[indices] = y
             return x
 
-    else:
-
+    elif getattr(op, "ignore_duplicates", False):
+        # `ignore_duplicates` requests numpy's write-once `x[idx] += y`
+        # semantics (duplicate indices are not accumulated), matching the
+        # reference `perform` and the PyTorch/Numba backends.
         def mlx_fn(x, indices, y):
             if not op.inplace:
                 x = deepcopy(x)
             x[indices] += y
             return x
 
+    else:
+        # Accumulate duplicate indices (`np.add.at` semantics) via MLX's
+        # functional scatter-add, mirroring JAX's `x.at[indices].add(y)`.
+        # Plain `x[indices] += y` writes each destination once, dropping
+        # repeated-index contributions (e.g. gradients of embedding lookups).
+        # `AdvancedIncSubtensor1` has no `ignore_duplicates` flag and always
+        # accumulates, like its `np.add.at`-based `perform`.
+        def mlx_fn(x, indices, y):
+            return x.at[indices].add(y)
+
     def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
+        if isinstance(op, AdvancedIncSubtensor1):
+            op._check_runtime_broadcasting(node, x, y, ilist[0])
+
         return mlx_fn(x, ilist, y)
 
     return advancedincsubtensor

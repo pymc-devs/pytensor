@@ -1,4 +1,5 @@
 import importlib
+from functools import reduce
 
 import torch
 
@@ -40,19 +41,13 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
         pytorch_func = getattr(torch, func_name)
 
     if len(node.inputs) > op.nfunc_spec[1]:
-        # Some Scalar Ops accept multiple number of inputs, behaving as a variadic function,
-        # even though the base Op from `func_name` is specified as a binary Op.
-        # This happens with `Add`, which can work as a `Sum` for multiple scalars.
-        pytorch_variadic_func = getattr(torch, op.nfunc_variadic, None)
-        if not pytorch_variadic_func:
-            raise NotImplementedError(
-                f"Dispatch not implemented for Scalar Op {op} with {len(node.inputs)} inputs"
-            )
+        # Some Scalar Ops (e.g. Add/Mul) accept more inputs than the binary base Op,
+        # behaving as variadic. Fold the binary op, which broadcasts and preserves
+        # dtype; stacking + torch.sum/prod would upcast bool/int.
+        binary_pytorch_func = pytorch_func
 
         def pytorch_func(*args):
-            return pytorch_variadic_func(
-                torch.stack(torch.broadcast_tensors(*args), axis=0), axis=0
-            )
+            return reduce(binary_pytorch_func, args)
 
     return pytorch_func
 

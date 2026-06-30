@@ -27,7 +27,7 @@ from pytensor.link.c.basic import DualLinker
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
-from pytensor.tensor import blas, blas_c
+from pytensor.tensor import blas
 from pytensor.tensor.basic import (
     as_tensor_variable,
     constant,
@@ -42,6 +42,7 @@ from pytensor.tensor.math import (
     Argmax,
     Dot,
     Max,
+    Min,
     Prod,
     ProdWithoutZeros,
     Sum,
@@ -1421,6 +1422,39 @@ class TestMinMax:
 
         utt.verify_grad(lambda v: min(v.flatten()), [data])
         check_grad_min(data, eval_outputs(grad(min(n.flatten()), n)))
+
+    def test_grad_Min(self):
+        """Test that the Min Op has a working gradient directly, not just via min()."""
+        data = random(2, 3)
+        n = as_tensor_variable(data)
+
+        def check_grad_Min(data, min_grad_data, axis=None):
+            # This work only for axis in [0, None]
+            assert axis in [0, None]
+            z = np.zeros_like(data)
+            z = z.flatten()
+            argmin = np.argmin(data, axis=axis)
+            if argmin.ndim == 0:
+                z[np.argmin(data, axis=axis)] += 1
+            else:
+                for id, v in enumerate(argmin):
+                    z[v * np.prod(data.shape[data.ndim - 1 : axis : -1]) + id] += 1
+
+            z = z.reshape(data.shape)
+            assert np.all(min_grad_data == z)
+
+        # test grad of Min
+        # axis is the last one
+        utt.verify_grad(lambda v: Min(axis=-1)(v).sum(), [data])
+
+        utt.verify_grad(lambda v: Min(axis=[0])(v).sum(), [data])
+        check_grad_Min(data, eval_outputs(grad(Min(axis=0)(n).sum(), n)), axis=0)
+
+        utt.verify_grad(lambda v: Min(axis=[1])(v).sum(), [data])
+        # check_grad_Min(data,eval_outputs(grad(Min(axis=1)(n).sum(), n)),axis=1)
+
+        utt.verify_grad(lambda v: Min(axis=None)(v.flatten()).sum(), [data])
+        check_grad_Min(data, eval_outputs(grad(Min(axis=None)(n.flatten()).sum(), n)))
 
     def _grad_list(self):
         # Test the gradient when we have multiple axis at the same time.
@@ -2810,7 +2844,7 @@ class TestInferShape(utt.InferShapeTester):
             [advec, bdvec],
             [dot(advec, bdvec)],
             [advec_val, bdvec_val],
-            (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
+            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
         )
 
         # mat/mat
@@ -2831,7 +2865,7 @@ class TestInferShape(utt.InferShapeTester):
             [advec, bdmat],
             [dot(advec, bdmat)],
             [advec_val, bdmat_val],
-            (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
+            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
         )
 
         # mat/vec
@@ -2840,7 +2874,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, bdvec],
             [dot(admat, bdvec)],
             [admat_val, bdvec_val],
-            (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
+            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
         )
 
 
