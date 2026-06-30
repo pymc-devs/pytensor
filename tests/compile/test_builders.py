@@ -26,7 +26,6 @@ from pytensor.tensor.basic import constant
 from pytensor.tensor.math import dot, exp, sigmoid
 from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.rewriting.shape import ShapeOptimizer
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import (
@@ -45,7 +44,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     def test_valid_input(self):
         x, _y, _z = matrices("xyz")
 
-        with pytest.raises(ValueError, match=r"Expected at least.*"):
+        with pytest.raises(ValueError, match=r"Expected 1 input\(s\)"):
             OpFromGraph([x], [x])()
 
         with pytest.raises(ValueError, match=r"Expected 1 input\(s\)"):
@@ -145,56 +144,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         yv = np.ones((2, 2), dtype=config.floatX) * 3
         zv = np.ones((2, 2), dtype=config.floatX) * 5
         np.testing.assert_array_almost_equal(6.0, fn(xv, yv, zv), 4)
-
-    @pytest.mark.parametrize(
-        "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
-    )
-    def test_shared(self, cls_ofg):
-        x, y, z = matrices("xyz")
-        s = shared(np.random.random((2, 2)).astype(config.floatX))
-        e = x + y * z + s
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            op = cls_ofg([x, y, z], [e])
-        # (1+3*5=array of 16) - (3+1*5=array of 8)
-        f = op(x, y, z) - op(y, z, x)
-
-        fn = function([x, y, z], f)
-        xv = np.ones((2, 2), dtype=config.floatX)
-        yv = np.ones((2, 2), dtype=config.floatX) * 3
-        zv = np.ones((2, 2), dtype=config.floatX) * 5
-        # print function, function.__module__
-        # print fn.maker.fgraph.toposort()
-        np.testing.assert_array_almost_equal(8.0, fn(xv, yv, zv), 4)
-        np.testing.assert_array_almost_equal(8.0, fn(xv, yv, zv), 4)
-
-    @pytest.mark.parametrize(
-        "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
-    )
-    def test_shared_grad(self, cls_ofg):
-        x, y, z = matrices("xyz")
-        s = shared(np.random.random((2, 2)).astype(config.floatX))
-        e = x + y * z + s
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            op = cls_ofg([x, y, z], [e])
-        f = op(x, y, z)
-        f = f - grad(pt_sum(f), y)
-        fn = function([x, y, z], f)
-        xv = np.ones((2, 2), dtype=config.floatX)
-        yv = np.ones((2, 2), dtype=config.floatX) * 3
-        zv = np.ones((2, 2), dtype=config.floatX) * 5
-        np.testing.assert_array_almost_equal(11.0 + s.get_value(), fn(xv, yv, zv), 4)
-
-        # grad again the shared variable
-        f = op(x, y, z)
-        f = f - grad(pt_sum(f), s)
-        fn = function([x, y, z], f)
-        np.testing.assert_array_almost_equal(15.0 + s.get_value(), fn(xv, yv, zv), 4)
 
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
@@ -417,27 +366,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         expect_result = [[True, False], [True, True], [False, True], [True, True]]
         assert results == expect_result
 
-        # Inner graph where some computation doesn't rely on explicit inputs
-        srng = RandomStream(seed=234)
-        rv_u = srng.uniform((2, 2))
-        x, y = matrices("xy")
-        out1 = x + rv_u
-        out2 = y + 3
-        out3 = 3 + rv_u
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            op3 = cls_ofg([x, y], [out1, out2, out3])
-
-        results = op3.connection_pattern(None)
-        expect_result = [
-            [True, False, False],
-            [False, True, False],
-            [True, False, True],
-        ]
-        assert results == expect_result
-
     def test_infer_shape(self):
         # test infer shape does not need to against inline case
         # since the Op is remove during optimization phase
@@ -475,91 +403,11 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         assert opt_res.shape_feature.shape_tuple(x) is None
         assert opt_res.shape_feature.shape_tuple(z)[0].data == 2
 
-    def test_make_node_shared(self):
-        """Make sure we can provide `OpFromGraph.make_node` new shared inputs and get a valid `OpFromGraph`."""
-
-        x = pt.scalar("x")
-        y = shared(1.0, name="y")
-
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            test_ofg = OpFromGraph([x], [x + y], on_unused_input="ignore")
-        assert test_ofg.shared_inputs == [y]
-
-        out = test_ofg(x)
-
-        y_clone = y.clone()
-        assert y_clone != y
-        y_clone.name = "y_clone"
-
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            out_new = test_ofg.make_node(*([*out.owner.inputs[:1], y_clone])).outputs[0]
-
-        assert "on_unused_input" in out_new.owner.op.kwargs
-        assert out_new.owner.op.shared_inputs == [y_clone]
-
-        out_fn = function([x], out_new)
-        assert np.array_equal(out_fn(1.0), 2.0)
-
-        y_clone.set_value(2.0)
-        assert np.array_equal(out_fn(1.0), 3.0)
-
-        # This should also work, because the containers are the same:
-        # y.set_value(1.0)
-        # assert np.array_equal(out_fn(1.0), 2.0)
-
-    def test_shared_with_constant_input(self):
-        """Make sure that a constant input can be given to an `OpFromGraph` instance."""
-        x = pt.scalar("x")
-        y = shared(1.0, name="y")
-
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            test_ofg = OpFromGraph([x], [x + y])
-        assert test_ofg.shared_inputs == [y]
-
-        out = test_ofg(pt.as_tensor(1.0, dtype=config.floatX))
-
-        out_fn = function([], out)
-        assert np.array_equal(out_fn(), 2.0)
-
     def test_missing_input(self):
         x = pt.lscalar("x")
 
         with pytest.raises(MissingInputError):
             OpFromGraph([], [x])
-
-    def test_shared_to_nonshared_input(self):
-        """Make sure that shared variables can be replaced with non-shared variables."""
-        x = pt.scalar("x")
-        y = shared(1.0, name="y")
-
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            test_ofg = OpFromGraph([], [y])
-        assert test_ofg.shared_inputs == [y]
-
-        out_1_fn = function([], test_ofg())
-        res_1 = out_1_fn()
-
-        assert np.array_equal(res_1, 1.0)
-
-        test_ofg_new = test_ofg.make_node(x)
-        assert test_ofg_new.op.shared_inputs == []
-
-        out_2_fn = function([x], test_ofg_new.outputs[0])
-        res_2 = out_2_fn(np.array(1.0, dtype=config.floatX))
-
-        assert np.array_equal(res_2, 1.0)
 
     def test_outputs_consistency(self):
         """Make sure that `OpFromGraph.fn` doesn't change the value of `OpFromGraph.inner_outputs`."""
@@ -595,13 +443,14 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x = pt.dscalar("x")
         y = shared(1.0, name="y")
 
+        # A shared variable may only be used if passed explicitly as an input.
         with pytest.raises(
-            ValueError,
-            match=r"The inner-graph implicitly depends on the following shared variables \[y\]",
+            MissingInputError,
+            match=r"implicitly depends on shared variable y",
         ):
-            OpFromGraph([x], [x + y], strict=True)
+            OpFromGraph([x], [x + y])
 
-        test_ofg = OpFromGraph([x, y], [x + y], strict=True)
+        test_ofg = OpFromGraph([x, y], [x + y])
 
         out = test_ofg(x, y)
         assert out.eval({x: 5}) == 6
@@ -610,16 +459,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         out = test_ofg(y, y)
         assert out.eval() == 4
-
-    def test_implicit_shared_inputs_deprecated(self):
-        x = pt.dscalar("x")
-        y = shared(1.0, name="y")
-
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            OpFromGraph([x], [x + y])
 
     @pytest.mark.parametrize("use_custom_pullback", [False, True])
     def test_pullback_disconnected_output_grad(self, use_custom_pullback):
@@ -764,31 +603,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         # OFG is hashable, and different OFGs have different hashes
         assert hash(op1) != hash(op_inline)
-
-    def test_equality_shared_variables(self):
-        x = scalar("x")
-        s = shared(np.array(1.0, dtype=config.floatX))
-
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            op1 = OpFromGraph([x], [x + s])
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            op2 = OpFromGraph([x], [x + s])
-        assert op1 == op2
-
-        # Same value, different shared object -> not equal
-        s2 = shared(np.array(1.0, dtype=config.floatX))
-        with pytest.warns(
-            DeprecationWarning,
-            match="Implicit capture of shared variables is deprecated",
-        ):
-            op3 = OpFromGraph([x], [x + s2])
-        assert op1 != op3
 
     def test_equality_callable_overrides(self):
         x, y = dscalars("x", "y")

@@ -78,32 +78,28 @@ def construct_nominal_fgraph(
     dict[Variable, Variable],
     dict[Variable, Variable],
 ]:
-    """Construct an inner-`FunctionGraph` with ordered nominal inputs."""
-    implicit_shared_inputs = []
+    """Construct an inner-`FunctionGraph` with ordered nominal inputs.
 
+    Raises ``MissingInputError`` if ``outputs`` implicitly depend on a variable
+    that is neither a `Constant` nor listed in ``inputs`` (including shared
+    variables, which must be passed explicitly).
+    """
     dummy_inputs = [inp.type() for inp in inputs]
-    dummy_implicit_shared_inputs = []
     for var in graph_inputs(outputs, inputs):
-        if var in inputs:
+        if var in inputs or isinstance(var, Constant):
             continue
         if isinstance(var, SharedVariable):
-            # We allow shared inputs to be added automatically to the graph
-            implicit_shared_inputs.append(var)
-            dummy_implicit_shared_inputs.append(var.type())
-        elif not isinstance(var, Constant):
-            raise MissingInputError(f"NominalGraph is missing an input: {var}")
+            raise MissingInputError(
+                f"Inner graph implicitly depends on shared variable {var}. "
+                "Provide it explicitly in the 'inputs' list."
+            )
+        raise MissingInputError(f"NominalGraph is missing an input: {var}")
 
-    replacements = dict(
-        zip(
-            inputs + implicit_shared_inputs,
-            dummy_inputs + dummy_implicit_shared_inputs,
-            strict=True,
-        )
-    )
+    replacements = dict(zip(inputs, dummy_inputs, strict=True))
 
     new = rebuild_collect_shared(
         cast(Sequence[Variable], outputs),
-        inputs=inputs + implicit_shared_inputs,
+        inputs=inputs,
         replace=replacements,
         copy_inputs_over=False,
     )
@@ -113,7 +109,7 @@ def construct_nominal_fgraph(
         (_clone_d, update_d, update_expr, new_shared_inputs),
     ) = new
 
-    assert len(local_inputs) == len(inputs) + len(implicit_shared_inputs)
+    assert len(local_inputs) == len(inputs)
     assert len(local_outputs) == len(outputs)
     assert not update_d
     assert not update_expr
@@ -135,7 +131,7 @@ def construct_nominal_fgraph(
         fgraph.clients.pop(inp, None)
         fgraph.add_input(nom_inp)
 
-    return fgraph, implicit_shared_inputs, update_d, update_expr
+    return fgraph, [], update_d, update_expr
 
 
 class OpFromGraph(Op, HasInnerGraph):
@@ -153,8 +149,8 @@ class OpFromGraph(Op, HasInnerGraph):
 
     Notes
     -----
-    - Shared variables in the inner graph are supported. They are detected automatically and added
-      as implicit inputs.
+    - Shared variables used in the inner graph must be passed explicitly as inputs; implicit
+      capture raises ``MissingInputError``.
     - Unused inputs are supported (needed for gradient overrides).
     - Nested OpFromGraph is supported.
     - ``inline=True`` causes the Op's inner graph to be inlined during compilation, which gives
@@ -163,7 +159,7 @@ class OpFromGraph(Op, HasInnerGraph):
     - Override callables should be pure functions (no side effects). They are called once at the
       first call to L_op/R_op and converted to OpFromGraph instances. They are also called once at
       construction time with dummy inputs to build a frozen representation for equality comparison.
-    - Two OpFromGraph instances with the same inner graph, overrides, shared variables, and settings
+    - Two OpFromGraph instances with the same inner graph, overrides, and settings
       are considered equal. This allows the MergeOptimizer to deduplicate identical OpFromGraph
       nodes.
 
@@ -183,7 +179,7 @@ class OpFromGraph(Op, HasInnerGraph):
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
-    With a shared variable:
+    With a shared variable (passed explicitly as an input):
 
     .. code-block:: python
 
@@ -195,8 +191,8 @@ class OpFromGraph(Op, HasInnerGraph):
         x, y, z = pt.scalars("xyz")
         s = pytensor.shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
-        op = OpFromGraph([x, y, z], [e])
-        e2 = op(x, y, z) + op(z, y, x)
+        op = OpFromGraph([x, y, z, s], [e])
+        e2 = op(x, y, z, s) + op(z, y, x, s)
         fn = function([x, y, z], [e2])
 
     Per-input L_op override:
@@ -306,9 +302,8 @@ class OpFromGraph(Op, HasInnerGraph):
             If provided, used as the connection pattern for this Op. Each inner list has one bool
             per output, and the outer list has one entry per input.
         strict : bool, optional
-            If True, raises when any variables needed to compute the inner graph are not provided
-            as explicit inputs. Only relevant for graphs with shared variables. Default False.
-            Under ``strict=False``, implicit shared-variable capture is deprecated.
+            Ignored. All variables needed to compute the inner graph must always be
+            provided as explicit inputs; implicitly captured shared variables raise.
         name : str, optional
             A name for debugging purposes.
         **kwargs
@@ -343,19 +338,6 @@ class OpFromGraph(Op, HasInnerGraph):
             inputs, outputs
         )
         self._frozen_fgraph = self.fgraph.freeze()
-
-        if strict and self.shared_inputs:
-            raise ValueError(
-                "All variables needed to compute inner-graph must be provided as inputs under strict=True. "
-                f"The inner-graph implicitly depends on the following shared variables {self.shared_inputs}"
-            )
-        elif self.shared_inputs:
-            warnings.warn(
-                "Implicit capture of shared variables is deprecated. "
-                "Please provide shared variables explicitly in the 'inputs' list.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         self.kwargs = kwargs
         self.input_types = [inp.type for inp in inputs]
@@ -488,11 +470,6 @@ class OpFromGraph(Op, HasInnerGraph):
             self._frozen_fgraph != other._frozen_fgraph
             or self.is_inline != other.is_inline
             or self.destroy_map != other.destroy_map
-            or len(self.shared_inputs) != len(other.shared_inputs)
-            or any(
-                a is not b
-                for a, b in zip(self.shared_inputs, other.shared_inputs, strict=True)
-            )
         ):
             return False
         # When freezing overrides, skip override comparison to break infinite
@@ -777,89 +754,17 @@ class OpFromGraph(Op, HasInnerGraph):
         rop_op = self._build_and_cache_rop_op()
         return rop_op(*inputs, *eval_points, return_list=True)
 
-    def __call__(self, *inputs, **kwargs):
-        # The user interface doesn't expect the shared variable inputs of the
-        # inner-graph, but, since `Op.make_node` does (and `Op.__call__`
-        # dispatches to `Op.make_node`), we need to compensate here
-        num_expected_inps = len(self.inner_inputs) - len(self.shared_inputs)
-
-        if len(inputs) == num_expected_inps:
-            actual_inputs = inputs + tuple(self.shared_inputs)
-            return super().__call__(*actual_inputs, **kwargs)
-        elif len(inputs) == len(self.inner_inputs):
-            return super().__call__(*inputs, **kwargs)
-        else:
-            raise ValueError(f"Expected at least {num_expected_inps} input(s)")
-
     def make_node(self, *inputs):
         # The `inputs` received here should correspond to the inputs in the
         # `Apply` nodes we produce below
         if len(inputs) != len(self.inner_inputs):
             raise ValueError(f"Expected {len(self.inner_inputs)} input(s)")
 
-        num_expected_inps = len(self.inner_inputs) - len(self.shared_inputs)
-        non_shared_inputs = inputs[:num_expected_inps]
-
-        non_shared_inputs = [
+        inputs = [
             inp_t.filter_variable(inp)
-            for inp, inp_t in zip(non_shared_inputs, self.input_types, strict=True)
+            for inp, inp_t in zip(inputs, self.input_types, strict=True)
         ]
-
-        new_shared_inputs = inputs[num_expected_inps:]
-        inner_and_input_shareds = list(
-            zip(self.shared_inputs, new_shared_inputs, strict=True)
-        )
-
-        if not all(inp_s == inn_s for inn_s, inp_s in inner_and_input_shareds):
-            # The shared variables are not equal to the original shared
-            # variables, so we construct a new `Op` that uses the new shared
-            # variables instead.
-            replace = dict(
-                zip(
-                    self.inner_inputs[num_expected_inps:],
-                    new_shared_inputs,
-                    strict=True,
-                )
-            )
-
-            # If the new shared variables are inconsistent with the inner-graph,
-            # such errors should arise in this step
-            new_inner_outputs = clone_replace(
-                self.inner_outputs, replace=replace, copy_inputs_over=True
-            )
-
-            # It's possible that the new shared variable inputs aren't actually
-            # shared variables.  When they aren't we need to add them as new
-            # inputs.
-            unshared_inputs = [
-                inp for inp in new_shared_inputs if not isinstance(inp, SharedVariable)
-            ]
-            new_inner_inputs = self.inner_inputs[:num_expected_inps] + unshared_inputs
-
-            new_op = type(self)(
-                inputs=new_inner_inputs,
-                outputs=new_inner_outputs,
-                inline=self.is_inline,
-                pullback=self.pullback_overrides,
-                pushforward=self.pushforward_overrides,
-                connection_pattern=self._connection_pattern,
-                name=self.name,
-                destroy_map=self.destroy_map,
-                **self.kwargs,
-            )
-            new_inputs = (
-                list(non_shared_inputs) + unshared_inputs + new_op.shared_inputs
-            )
-        else:
-            new_op = self
-            new_inputs = list(non_shared_inputs) + new_op.shared_inputs
-
-        apply_node = Apply(
-            new_op,
-            new_inputs,
-            [type() for type in new_op.output_types],
-        )
-        return apply_node
+        return Apply(self, inputs, [type() for type in self.output_types])
 
     def connection_pattern(self, node):
         """
