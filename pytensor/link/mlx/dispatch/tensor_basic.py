@@ -1,6 +1,8 @@
 import mlx.core as mx
 import numpy as np
 
+from pytensor.graph.basic import Constant
+from pytensor.graph.traversal import walk
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
@@ -17,6 +19,7 @@ from pytensor.tensor.basic import (
     get_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.shape import Shape, Shape_i
 
 
 MLX_DYNAMIC_SHAPE_ERROR = (
@@ -178,30 +181,57 @@ def mlx_funcify_Alloc(op, node, **kwargs):
     return alloc
 
 
-ARANGE_CONCRETE_VALUE_ERROR = (
-    "MLX's arange requires all arguments (start, stop, step) to be concrete "
-    "Python int/float values, not symbolic variables. Unlike NumPy and JAX, "
-    "MLX does not accept array inputs for arange at all."
-    "\n\nAn example of a valid graph:"
-    "\n>>> import pytensor.tensor as pt"
-    "\n>>> pt.arange(1, 10, 2)"
+ARANGE_DATA_DEPENDENT_ERROR = (
+    "MLX cannot build arange with a data-dependent length: the bounds depend on "
+    "runtime array values, so the output shape is unknown at compile time. "
+    "Constant and shape-derived bounds (e.g. pt.arange(x.shape[0])) are supported."
 )
+
+
+def _arange_bound_is_static(var):
+    # A bound is concrete under mx.compile when its value derives only from input
+    # shapes and constants. Shape ops are barriers: only the shape, not the
+    # underlying data, is needed (more general than the JAX dispatch, which only
+    # recognizes a bare Shape_i).
+    def expand(v):
+        owner = v.owner
+        if owner is None or isinstance(owner.op, Shape | Shape_i):
+            return None
+        return owner.inputs
+
+    return all(
+        v.owner is not None or isinstance(v, Constant) for v in walk([var], expand)
+    )
+
+
+def _arange_static_bound(arg):
+    try:
+        return get_scalar_constant_value(arg).item()
+    except NotScalarConstantError:
+        return None
+
+
+def _arange_runtime_bound(value):
+    return value.item() if hasattr(value, "item") else value
 
 
 @mlx_funcify.register(ARange)
 def mlx_funcify_ARange(op, node, **kwargs):
-    # MLX's arange only accepts Python int/float, not arrays,
-    # so all arguments must be known at graph-construction time.
-    try:
-        start, stop, step = [
-            get_scalar_constant_value(arg).item() for arg in node.inputs
-        ]
-    except NotScalarConstantError:
-        raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
-    dtype = convert_dtype_to_mlx(op.dtype)
+    # mx.arange only accepts Python int/float. Bake constant bounds and resolve
+    # shape-derived ones at runtime (concrete under mx.compile even when the
+    # static shape is unknown); reject genuinely data-dependent bounds up front.
+    if not all(_arange_bound_is_static(arg) for arg in node.inputs):
+        raise NotImplementedError(ARANGE_DATA_DEPENDENT_ERROR)
 
-    def arange(*_args):
-        return mx.arange(start, stop, step, dtype=dtype)
+    dtype = convert_dtype_to_mlx(op.dtype)
+    static_args = [_arange_static_bound(arg) for arg in node.inputs]
+
+    def arange(*args):
+        resolved = [
+            static if static is not None else _arange_runtime_bound(runtime)
+            for static, runtime in zip(static_args, args, strict=True)
+        ]
+        return mx.arange(*resolved, dtype=dtype)
 
     return arange
 
