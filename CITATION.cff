@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: PyTensor
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - name: PyMC Developers
+    email: pymc.devs@gmail.com
+repository-code: 'https://github.com/pymc-devs/pytensor'
+abstract: >-
+  Optimizing compiler for evaluating mathematical
+  expressions on CPUs and GPUs.
+keywords:
+  - pytensor
+  - math
+  - numerical
+  - symbolic
+  - numpy
+  - autodiff
+  - differentiation
+license: BSD-3-Clause
