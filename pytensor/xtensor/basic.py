@@ -18,6 +18,44 @@ class XOp(Op):
     def do_constant_folding(self, fgraph, node):
         return False
 
+    def pullback(self, inputs, outputs, cotangents):
+        # XOps have no gradient of their own; differentiate through their tensor lowering.
+        from pytensor.gradient import disconnected_type, pullback
+        from pytensor.graph.replace import graph_replace
+        from pytensor.graph.rewriting.utils import rewrite_graph
+        from pytensor.graph.traversal import ancestors
+
+        # Fresh stand-ins for the array inputs, so a repeated input yields separate
+        # per-slot cotangents. Structural inputs (slices, rngs) have no dtype and are
+        # kept as is.
+        dummy_inputs = [
+            inp.type() if hasattr(inp.type, "dtype") else inp for inp in inputs
+        ]
+        lowered_outputs = rewrite_graph(
+            list(self.make_node(*dummy_inputs).outputs), include=("lower_xtensor",)
+        )
+        # An XOp without a lowering would make the pullback below recurse forever.
+        if any(
+            isinstance(var.owner.op, XOp)
+            for var in ancestors(lowered_outputs)
+            if var.owner
+        ):
+            raise NotImplementedError(f"pullback not implemented for {self}")
+
+        replace = {d: inp for d, inp in zip(dummy_inputs, inputs) if d is not inp}
+        input_grads = pullback(
+            lowered_outputs,
+            list(replace),
+            cotangents,
+            disconnected_inputs="ignore",
+            return_disconnected="disconnected",
+        )
+        grafted = iter(graph_replace(input_grads, replace, strict=False))
+        return [
+            next(grafted) if d is not inp else disconnected_type()
+            for d, inp in zip(dummy_inputs, inputs)
+        ]
+
     def vectorize_node(
         self, node, *new_inputs, new_dim: str | None
     ) -> Sequence[Variable]:
@@ -120,7 +158,7 @@ class Rename(XTypeCastOp):
     def pullback(self, inputs, outs, g_outs):
         [x] = inputs
         [g_out] = g_outs
-        return [rename(g_out, dims=x.type.dims)]
+        return [type(self)(x.type.dims)(g_out)]
 
     def vectorize_node(self, node, new_x, new_dim):
         [old_x] = node.inputs
