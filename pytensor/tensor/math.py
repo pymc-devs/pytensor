@@ -21,7 +21,6 @@ from pytensor.scalar.basic import BinaryScalarOp
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     alloc,
-    arange,
     as_tensor_variable,
     cast,
     concatenate,
@@ -400,90 +399,84 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
         return setup, alloc, loop, cast
 
 
-class Max(NonZeroDimsCAReduce):
+class MaxAndMinCAReduce(NonZeroDimsCAReduce):
+    """Base class for the :class:`Max` and :class:`Min` reduction ``Op``\\s.
+
+    A maximum and a minimum reduction differ only in *which* element along the
+    reduced axes is selected; *how* derivatives propagate through that
+    selection is identical. In both cases the (weak) derivative routes through
+    the position(s) of the input that attain the reduced output. Keeping the
+    differentiation rules in a single place therefore avoids duplication and
+    guarantees that :class:`Max` and :class:`Min` stay consistent.
+
+    Subclasses only need to bind the appropriate scalar ``Op`` (``maximum`` or
+    ``minimum``) in their ``__init__`` and set ``nfunc_spec``.
+    """
+
+    def clone(self, **kwargs):
+        axis = kwargs.get("axis", self.axis)
+        return type(self)(axis=axis)
+
+    def pullback(self, inputs, outputs, output_grads):
+        # The strict-sense mathematical gradient of a maximum/minimum reduction
+        # is not defined at points where the extremum is attained by more than
+        # one coordinate. However, since that set has null Lebesgue measure, the
+        # result below may be interpreted as a weak gradient: the cotangent is
+        # routed to *every* position that attains the extremum (i.e. where the
+        # input equals the reduced output). This rule is identical for `Max` and
+        # `Min`, which is why it lives on the shared base class.
+        #
+        # `out`/`g_out` have one fewer dimension than `x` along each reduced
+        # axis, so we re-insert those axes (`expand_dims`) to let broadcasting
+        # spread the cotangent back over `x`'s shape.
+        [x] = inputs
+        [out] = outputs
+        [g_out] = output_grads
+
+        axis = tuple(range(x.ndim)) if self.axis is None else self.axis
+        out_pad = expand_dims(out, axis)
+        g_out_pad = expand_dims(g_out, axis)
+
+        # Set the grad to the correct position.
+        g_x = eq(out_pad, x) * g_out_pad
+        return (g_x,)
+
+    def pushforward(self, inputs, outputs, tangents):
+        # Forward-mode is the exact transpose of `pullback`: the output tangent
+        # is gathered from the input tangent at the extremum position(s) and
+        # summed over the reduced axes. For a unique extremum (the almost-
+        # everywhere case) this simply selects the tangent of the winning
+        # element; on the zero-measure tie set it sums their tangents, which is
+        # precisely what makes it the transpose of `pullback` (and keeps
+        # forward- and reverse-mode consistent). Working for any number of
+        # reduced axes and input dimensions, this also generalises the previous
+        # matrix-only implementation.
+        [x] = inputs
+        [out] = outputs
+        [x_dot] = tangents
+
+        if isinstance(x_dot.type, DisconnectedType):
+            return [disconnected_type()]
+
+        axis = tuple(range(x.ndim)) if self.axis is None else self.axis
+        out_pad = expand_dims(out, axis)
+
+        out_dot = (eq(out_pad, x) * x_dot).sum(axis=axis)
+        return [out_dot]
+
+
+class Max(MaxAndMinCAReduce):
     nfunc_spec = ("max", 1, 1)
 
     def __init__(self, axis):
         super().__init__(ps.maximum, axis)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        return type(self)(axis=axis)
 
-    def pullback(self, inputs, outputs, output_grads):
-        # The strict sense mathematical gradient of the maximum function is
-        # not calculated here for it is not defined at every point where some
-        # coordinates are identical. However, since the latter set has null
-        # Lebesgue measure, the result may be interpreted as weak gradient.
-
-        # @note: This function should work correctly for L{vector}s.
-        # (x, y), (gz, gw)
-        # gz*dz/dx + gw*dw/dx, gz*dz/dy + gw*dw/dy
-        # gMax * dMax/dx + gArgMax * dArgMax/dx,
-        # gMax * dMax/daxis + gArgMax * dArgMax/daxis
-        # g_max has one less dimension than x, so you need to complete
-        # g_max to x's shape when axis=0 the broadcasting mechanism
-        # does it automatically
-        [x] = inputs
-        [out] = outputs
-        [g_out] = output_grads
-
-        axis = tuple(range(x.ndim)) if self.axis is None else self.axis
-        out_pad = expand_dims(out, axis)
-        g_out_pad = expand_dims(g_out, axis)
-
-        # Set the grad to the correct position.
-        g_x = eq(out_pad, x) * g_out_pad
-        return (g_x,)
-
-    def pushforward(self, inputs, outputs, eval_points):
-        [x] = inputs
-        if isinstance(eval_points[0].type, DisconnectedType):
-            return [disconnected_type()]
-        axis = tuple(range(x.ndim) if self.axis is None else self.axis)
-        if isinstance(axis, int):
-            axis = [axis]
-        if len(axis) != 1:
-            raise NotImplementedError("R_op supported for max only for one axis!")
-        if axis[0] > 1:
-            raise NotImplementedError("R_op supported for max only when axis is 0 or 1")
-        if inputs[0].ndim != 2:
-            raise NotImplementedError(
-                "R_op supported for max only when input is a matrix"
-            )
-        max_pos = Argmax(self.axis)(*inputs)
-        if self.axis[0] == 0:
-            return [eval_points[0][max_pos, arange(eval_points[0].shape[1])]]
-        else:
-            return [eval_points[0][arange(eval_points[0].shape[0]), max_pos]]
-
-
-class Min(NonZeroDimsCAReduce):
+class Min(MaxAndMinCAReduce):
     nfunc_spec = ("min", 1, 1)
 
     def __init__(self, axis):
         super().__init__(ps.minimum, axis)
-
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        return type(self)(axis=axis)
-
-    def pullback(self, inputs, outputs, output_grads):
-        # The strict sense mathematical gradient of the minimum function is
-        # not calculated here for it is not defined at every point where some
-        # coordinates are identical. However, since the latter set has null
-        # Lebesgue measure, the result may be interpreted as weak gradient.
-        [x] = inputs
-        [out] = outputs
-        [g_out] = output_grads
-
-        axis = tuple(range(x.ndim)) if self.axis is None else self.axis
-        out_pad = expand_dims(out, axis)
-        g_out_pad = expand_dims(g_out, axis)
-
-        # Set the grad to the correct position.
-        g_x = eq(out_pad, x) * g_out_pad
-        return (g_x,)
 
 
 def max(x, axis=None, keepdims=False):

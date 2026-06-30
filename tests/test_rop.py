@@ -25,7 +25,7 @@ from pytensor.gradient import (
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.replace import clone_replace
-from pytensor.tensor.math import argmax, dot
+from pytensor.tensor.math import Max, Min, argmax, dot
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.type import matrix, vector
 from tests import unittest_tools as utt
@@ -216,6 +216,59 @@ class TestPushforwardPullback(PushforwardPullbackChecker):
         self.check_mat_pushforward_pullback(
             pt_max(self.mx, axis=1), (self.mat_in_shape[0],)
         )
+
+    def test_min(self):
+        # `Min` is the bare reduction Op. Unlike `pt.min`, which lowers to
+        # ``-max(-x)`` and never instantiates `Min`, this exercises the Op's
+        # own pushforward/pullback. It must behave exactly like `Max`.
+        self.check_mat_pushforward_pullback(
+            Min(axis=[0])(self.mx), (self.mat_in_shape[1],)
+        )
+        self.check_mat_pushforward_pullback(
+            Min(axis=[1])(self.mx), (self.mat_in_shape[0],)
+        )
+
+    def test_max_min_pushforward_on_ties(self):
+        # With tied extrema, reverse-mode (`pullback`) routes the cotangent to
+        # *every* position attaining the extremum. For forward-mode to remain
+        # the exact transpose (adjoint) of reverse-mode, `pushforward` must
+        # *sum* the tied input tangents. The previous matrix-only, `Argmax`-
+        # based implementation instead picked a single winner and was therefore
+        # NOT the adjoint of its own pullback on ties. Random data is tie-free
+        # almost surely (so `test_max`/`test_min` would not catch a regression
+        # to single-winner semantics); this checks the tied case explicitly for
+        # both `Max` and `Min`.
+        mx = matrix("mx")
+        mv = matrix("mv")
+        # Columns 0 and 2 are constant -> 3-way ties along axis 0; column 1 has
+        # a unique max (row 1) and a unique min (row 0).
+        x_val = np.array(
+            [[1.0, 2.0, 1.0], [1.0, 5.0, 1.0], [1.0, 4.0, 1.0]],
+            dtype=config.floatX,
+        )
+        v_val = np.array(
+            [[1.0, 10.0, 100.0], [2.0, 20.0, 200.0], [4.0, 30.0, 300.0]],
+            dtype=config.floatX,
+        )
+
+        for op_cls in (Max, Min):
+            for axis in ([0], [1]):
+                y = op_cls(axis=axis)(mx)
+                # The Op's own `pushforward` must equal the pushforward obtained
+                # by transposing the `pullback` (`use_op_pushforward=False`).
+                yv_op = pushforward(y, mx, mv, use_op_pushforward=True)
+                yv_ref = pushforward(y, mx, mv, use_op_pushforward=False)
+                f_op = function([mx, mv], yv_op, on_unused_input="ignore")
+                f_ref = function([mx, mv], yv_ref, on_unused_input="ignore")
+                np.testing.assert_allclose(f_op(x_val, v_val), f_ref(x_val, v_val))
+
+        # Pin the tie convention explicitly: along axis 0 the tied columns sum
+        # their tangents (1+2+4=7 and 100+200+300=600); the unique-extremum
+        # column selects the winning row (max -> row 1 = 20, min -> row 0 = 10).
+        f_max0 = function([mx, mv], pushforward(Max(axis=[0])(mx), mx, mv))
+        f_min0 = function([mx, mv], pushforward(Min(axis=[0])(mx), mx, mv))
+        np.testing.assert_allclose(f_max0(x_val, v_val), [7.0, 20.0, 600.0])
+        np.testing.assert_allclose(f_min0(x_val, v_val), [7.0, 10.0, 600.0])
 
     def test_argmax(self):
         self.check_nondiff_pushforward(argmax(self.mx, axis=1), self.mx, self.mv)
