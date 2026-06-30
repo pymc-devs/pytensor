@@ -260,11 +260,9 @@ class DynamicModule:
 
 def _get_ext_suffix():
     """Get the suffix for compiled extensions"""
-    from setuptools._distutils.sysconfig import get_config_var
-
-    dist_suffix = get_config_var("EXT_SUFFIX")
+    dist_suffix = sysconfig.get_config_var("EXT_SUFFIX")
     if dist_suffix is None:
-        dist_suffix = get_config_var("SO")
+        dist_suffix = sysconfig.get_config_var("SO")
     return dist_suffix
 
 
@@ -1693,11 +1691,9 @@ def get_gcc_shared_library_arg():
 
 
 def std_include_dirs():
-    from setuptools._distutils.sysconfig import get_python_inc
-
     numpy_inc_dirs = [np.get_include()]
-    py_inc = get_python_inc()
-    py_plat_spec_inc = get_python_inc(plat_specific=True)
+    py_inc = sysconfig.get_path("include")
+    py_plat_spec_inc = sysconfig.get_path("platinclude")
     python_inc_dirs = (
         [py_inc] if py_inc == py_plat_spec_inc else [py_inc, py_plat_spec_inc]
     )
@@ -1707,17 +1703,11 @@ def std_include_dirs():
 
 @is_StdLibDirsAndLibsType
 def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
-    from setuptools._distutils.sysconfig import (
-        get_config_var,
-        get_python_inc,
-        get_python_lib,
-    )
-
     # We cache the results as on Windows, this trigger file access and
     # this method is called many times.
     if std_lib_dirs_and_libs.data is not None:
         return std_lib_dirs_and_libs.data
-    python_inc = get_python_inc()
+    python_inc = sysconfig.get_path("include")
     if sys.platform == "win32":
         # Obtain the library name from the Python version instead of the
         # installation directory, in case the user defined a custom
@@ -1780,7 +1770,7 @@ def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
 
         # get the name of the python library (shared object)
 
-        libname = str(get_config_var("LDLIBRARY"))
+        libname = str(sysconfig.get_config_var("LDLIBRARY"))
 
         if libname.startswith("lib"):
             libname = libname[3:]
@@ -1791,18 +1781,15 @@ def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
         elif libname.endswith(".a"):
             libname = libname[:-2]
 
-        libdir = str(get_config_var("LIBDIR"))
+        libdir = str(sysconfig.get_config_var("LIBDIR"))
 
         std_lib_dirs_and_libs.data = [libname], [libdir]
 
     # sometimes, the linker cannot find -lpython so we need to tell it
-    # explicitly where it is located this returns
-    # somepath/lib/python2.x
-
-    python_lib = str(get_python_lib(plat_specific=True, standard_lib=True))
-    python_lib = os.path.dirname(python_lib)
-    if python_lib not in std_lib_dirs_and_libs.data[1]:
-        std_lib_dirs_and_libs.data[1].append(python_lib)
+    # explicitly where libpython lives.
+    libdir = sysconfig.get_config_var("LIBDIR")
+    if libdir and libdir not in std_lib_dirs_and_libs.data[1]:
+        std_lib_dirs_and_libs.data[1].append(libdir)
     return std_lib_dirs_and_libs.data
 
 
@@ -2567,11 +2554,9 @@ class GCC_compiler(Compiler):
                 cppfile.write("\n")
 
         if platform.python_implementation() == "PyPy":
-            from setuptools._distutils.sysconfig import get_config_var
-
             suffix = "." + get_lib_extension()
 
-            dist_suffix = get_config_var("SO")
+            dist_suffix = sysconfig.get_config_var("SO")
             if dist_suffix is not None and dist_suffix != "":
                 suffix = dist_suffix
 
