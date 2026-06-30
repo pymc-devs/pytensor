@@ -1,8 +1,12 @@
 from collections.abc import Sequence
 
 from pytensor.compile.ops import TypeCastingOp
+from pytensor.gradient import disconnected_type, pullback
 from pytensor.graph import Apply, Op
 from pytensor.graph.basic import Variable
+from pytensor.graph.replace import graph_replace
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.traversal import ancestors
 from pytensor.tensor.type import TensorType
 from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 
@@ -20,11 +24,6 @@ class XOp(Op):
 
     def pullback(self, inputs, outputs, cotangents):
         # XOps have no gradient of their own; differentiate through their tensor lowering.
-        from pytensor.gradient import disconnected_type, pullback
-        from pytensor.graph.replace import graph_replace
-        from pytensor.graph.rewriting.utils import rewrite_graph
-        from pytensor.graph.traversal import ancestors
-
         # Fresh stand-ins for the array inputs, so a repeated input yields separate
         # per-slot cotangents. Structural inputs (slices, rngs) have no dtype and are
         # kept as is.
