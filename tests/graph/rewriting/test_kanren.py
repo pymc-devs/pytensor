@@ -2,19 +2,28 @@ from copy import copy
 
 import numpy as np
 import pytest
+
+
+pytest.importorskip("kanren")
+pytest.importorskip("unification")
+pytest.importorskip("etuples")
+pytest.importorskip("cons")
+
+from cons import car, cdr
 from etuples import etuple
 from kanren import eq, fact, run
 from kanren.assoccomm import associative, commutative, eq_assoccomm
 from kanren.core import lall
-from unification import var, vars
+from unification import unify, var, vars
+from unification.variable import isvar
 
 import pytensor.tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
-from pytensor.graph.rewriting.kanren import KanrenRelationSub
-from pytensor.graph.rewriting.unify import eval_if_etuple
+from pytensor.graph.rewriting.kanren import KanrenRelationSub, eval_if_etuple
+from pytensor.graph.rewriting.unify import ConstrainedVar, PatternVar
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.math import Dot, _dot
 from tests.graph.utils import MyType, MyVariable
@@ -33,6 +42,22 @@ def clear_assoccomm():
         commutative.facts = old_commutative_facts
         associative.index = old_associative_index
         associative.facts = old_associative_facts
+
+
+def test_pytensor_unification_dispatchers():
+    x_pt = pt.vector("x")
+    y_pt = pt.vector("y")
+    z_pt = x_pt + y_pt
+
+    assert car(z_pt) == z_pt.owner.op
+    assert cdr(z_pt) == [x_pt, y_pt]
+
+    op_lv = var("op")
+    s = unify(etuple(op_lv, x_pt, y_pt), z_pt, {})
+    assert s[op_lv] == z_pt.owner.op
+
+    assert isvar(PatternVar("v"))
+    assert isvar(ConstrainedVar(lambda v: True, "c"))
 
 
 def test_kanren_basic():
