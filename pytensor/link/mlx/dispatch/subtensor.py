@@ -1,5 +1,7 @@
 from copy import deepcopy
 
+import mlx.core as mx
+
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -12,6 +14,11 @@ from pytensor.tensor.subtensor import (
 )
 
 
+def _has_negative_step(indices):
+    idxs = indices if isinstance(indices, tuple) else (indices,)
+    return any(isinstance(i, slice) and i.step is not None and i.step < 0 for i in idxs)
+
+
 @mlx_funcify.register(Subtensor)
 def mlx_funcify_Subtensor(op, node, **kwargs):
     def subtensor(x, *ilists):
@@ -21,7 +28,12 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
         if len(indices) == 1:
             indices = indices[0]
 
-        return x.__getitem__(indices)
+        res = x.__getitem__(indices)
+        # MLX miscompiles an elementwise op fed by a negative-stride view under
+        # `mx.compile`, so materialize reversed slices into a contiguous array.
+        if _has_negative_step(indices):
+            res = mx.contiguous(res)
+        return res
 
     return subtensor
 
