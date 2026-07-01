@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import pickle
 from collections.abc import Callable, Sequence
-from textwrap import indent
 from typing import Any
 
 import numba
@@ -17,6 +16,13 @@ from numba.np import arrayobj
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch._llvmlite_self_ref import (
+    ensure_self_ref_metadata_support,
+)
+from pytensor.link.numba.dispatch.string_codegen import CODE_TOKEN, build_source_code
+
+
+ensure_self_ref_metadata_support()
 
 
 def encode_literals(literals: Sequence) -> str:
@@ -24,7 +30,11 @@ def encode_literals(literals: Sequence) -> str:
 
 
 def store_core_outputs(
-    core_op_fn: Callable, nin: int, nout: int, inc_outputs: frozenset = frozenset()
+    core_op_fn: Callable,
+    nin: int,
+    nout: int,
+    accum_fns: dict[int, Callable[[str, str], Sequence[str | CODE_TOKEN]]]
+    | None = None,
 ) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
@@ -35,13 +45,19 @@ def store_core_outputs(
     def store_core_outputs(i0, i1, ..., in, o0, o1, ..., on):
         to0, to1, ..., ton = core_op_fn(i0, i1, ..., in)
         o0[...] = to0      # direct outputs
-        o1 += to1          # inc outputs (in-place add works for 0d and Nd)
+        o1[...] += to1     # accumulating outputs (reduce / indexed-inc)
         ...
 
-    ``inc_outputs`` lists output indices that use ``+=`` instead of ``=``.
+    ``accum_fns`` maps an output index to a callable ``(out_sym, inner_sym) ->
+    lines`` producing the in-place accumulation code for that output (e.g.
+    ``["o1[...] += t1"]`` for a sum reduction, or the multi-line conditional for
+    a max reduction).  Outputs absent from ``accum_fns`` are stored with ``=``.
+    Both reductions and indexed ``inc`` writes go through this mechanism.
     """
     if getattr(core_op_fn, "handles_out", False):
         return core_op_fn
+
+    accum_fns = accum_fns or {}
 
     inputs = [f"i{i}" for i in range(nin)]
     outputs = [f"o{i}" for i in range(nout)]
@@ -50,19 +66,22 @@ def store_core_outputs(
     inp_signature = ", ".join(inputs)
     out_signature = ", ".join(outputs)
     inner_out_signature = ", ".join(inner_outputs)
-    store_outputs = "\n".join(
-        f"{output} += {inner_output}"
-        if i in inc_outputs
-        else f"{output}[...] = {inner_output}"
-        for i, (output, inner_output) in enumerate(
-            zip(outputs, inner_outputs, strict=True)
-        )
-    )
-    func_src = f"""
-def store_core_outputs({inp_signature}, {out_signature}):
-    {inner_out_signature} = core_op_fn({inp_signature})
-{indent(store_outputs, " " * 4)}
-"""
+
+    code: list[str | CODE_TOKEN] = [
+        f"def store_core_outputs({inp_signature}, {out_signature}):",
+        CODE_TOKEN.INDENT,
+        f"{inner_out_signature} = core_op_fn({inp_signature})",
+    ]
+    for i, (output, inner_output) in enumerate(
+        zip(outputs, inner_outputs, strict=True)
+    ):
+        if i in accum_fns:
+            code.extend(accum_fns[i](output, inner_output))
+        else:
+            code.append(f"{output}[...] = {inner_output}")
+    code.append(CODE_TOKEN.DEDENT)
+
+    func_src = build_source_code(code)
     global_env = {"core_op_fn": core_op_fn}
 
     func = compile_numba_function_src(
@@ -266,6 +285,7 @@ def _codegen_return_outputs(
 
 NO_INDEXED_INPUTS = encode_literals(((), ()))
 NO_INDEXED_OUTPUTS = encode_literals(())
+NO_REDUCE_OUTPUTS = encode_literals(())
 NO_SIZE = None
 
 
@@ -372,11 +392,17 @@ def make_outputs(
     input_types: tuple[Any, ...],
     output_core_shapes: tuple,
     update_outputs: dict | None = None,
+    reduce_identities: dict | None = None,
 ) -> tuple[list[ir.Value], list[types.Array]]:
     """Allocate output arrays for vectorized loop.
 
     ``update_outputs`` maps ``{output_idx: (array, array_type)}`` for outputs
     that reuse an indexed-write target buffer instead of being freshly allocated.
+
+    ``reduce_identities`` maps ``{output_idx: identity_value}`` for reduction
+    outputs.  Such outputs are freshly allocated (size 1 on the reduced axes, via
+    their ``bc=True`` pattern) and pre-filled with the reduction identity so the
+    accumulating store in the loop reduces into them correctly.
     """
     output_arrays = []
     output_arry_types = []
@@ -406,6 +432,22 @@ def make_outputs(
         ]
         shape = batch_shape + core_shape
         array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
+        if reduce_identities is not None and i in reduce_identities:
+            # Pre-fill the freshly allocated (C-contiguous) buffer with the
+            # reduction identity.  A flat scan over every element is valid
+            # regardless of which axes are reduced, and seeds each kept-axis
+            # accumulator cell (size-1 reduced axes included).
+            nitems = ir.IntType(64)(1)
+            for dim_len in shape:
+                nitems = builder.mul(nitems, dim_len)
+            ident = ctx.get_constant(dtype, reduce_identities[i])
+            # bool is an i1 value but stored as i8 in arrays; widen to the
+            # buffer's element type so the store types match.
+            elem_ty = array.data.type.pointee
+            if ident.type != elem_ty:
+                ident = builder.zext(ident, elem_ty)
+            with cgutils.for_range(builder, nitems) as loop:
+                builder.store(ident, builder.gep(array.data, [loop.index]))
         output_arrays.append(array)
 
     # If there is no inplace operation, we know that all output arrays
@@ -437,20 +479,37 @@ def make_loop_call(
     idx_load_axes: tuple[tuple[int, ...], ...] | None = None,
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
     output_write_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
+    inplace: tuple[tuple[int, int], ...] = (),
 ):
     safe = (False, False)
 
     n_outputs = len(outputs)
 
-    # TODO I think this is better than the noalias attribute
-    # for the input, but self_ref isn't supported in a released
-    # llvmlite version yet
-    # mod = builder.module
-    # domain = mod.add_metadata([], self_ref=True)
-    # input_scope = mod.add_metadata([domain], self_ref=True)
-    # output_scope = mod.add_metadata([domain], self_ref=True)
-    # input_scope_set = mod.add_metadata([input_scope, output_scope])
-    # output_scope_set = mod.add_metadata([input_scope, output_scope])
+    # Scoped noalias metadata: input loads and output stores are tagged with
+    # alias scopes so LLVM can disambiguate them without runtime overlap checks
+    # (and without loop versioning). Inputs share one scope (their loads never
+    # conflict with each other) while each output gets its own, so that every
+    # access can claim noalias against all buffers it is guaranteed not to
+    # overlap: PyTensor guarantees distinct output buffers, and that inputs
+    # don't alias outputs *except* for an input destroyed by an inplace output.
+    # Loads of a destroyed input are tagged with its output's scope instead:
+    # they stay MayAlias with that output's stores (LLVM resolves the exact
+    # overlap through pointer identity, since the output reuses the input's
+    # array struct) yet are still disambiguated from every other buffer.
+    mod = builder.module
+    domain = mod.add_metadata([], self_ref=True)
+    input_scope = mod.add_metadata([domain], self_ref=True)
+    output_scopes = [
+        mod.add_metadata([domain], self_ref=True) for _ in range(n_outputs)
+    ]
+    input_scope_set = mod.add_metadata([input_scope])
+    output_scope_set = mod.add_metadata(output_scopes)
+    out_alias_sets = [mod.add_metadata([scope]) for scope in output_scopes]
+    out_noalias_sets = [
+        mod.add_metadata([input_scope, *(s for s in output_scopes if s is not scope)])
+        for scope in output_scopes
+    ]
+    destroyed_inputs = {in_idx: out_idx for out_idx, in_idx in inplace}
 
     zero = ir.Constant(ir.IntType(64), 0)
 
@@ -466,21 +525,13 @@ def make_loop_call(
         wrapped = builder.add(idx_val, dim_size)
         return builder.select(is_neg, wrapped, idx_val)
 
-    # Setup loops and initialize accumulators for outputs
-    # This part corresponds to opening the loops
+    # Open one loop per iteration dimension.  Reduction outputs need no special
+    # setup here: they carry ``bc=True`` on the reduced axes, so the write_idx
+    # logic below points every iteration over a reduced axis at memory index 0
+    # (the same cell), and the accumulating store reduces into it.
     loop_stack = []
     loops = []
-    output_accumulator: list[tuple[Any | None, int | None]] = [(None, None)] * n_outputs
-    for dim, length in enumerate(iter_shape):
-        # Find outputs that only have accumulations left
-        for out in range(n_outputs):
-            if output_accumulator[out][0] is not None:
-                continue
-            if all(output_bc[out][dim:]):
-                value = outputs[out][0].type.pointee(0)
-                accu = cgutils.alloca_once_value(builder, value)
-                output_accumulator[out] = (accu, dim)
-
+    for length in iter_shape:
         loop = cgutils.for_range(builder, length)
         loop_stack.append(loop)
         loops.append(loop.__enter__())
@@ -516,6 +567,8 @@ def make_loop_call(
                 False,
             )
             val = builder.load(ptr)
+            val.set_metadata("alias.scope", input_scope_set)
+            val.set_metadata("noalias", output_scope_set)
             i64 = ir.IntType(64)
             if val.type != i64:
                 if idx_arr_type.dtype.signed:
@@ -614,8 +667,13 @@ def make_loop_call(
         if core_scalar and core_ndim == 0:
             # Retrive scalar item at index
             read_val = builder.load(read_ptr)
-            # read_val.set_metadata("alias.scope", input_scope_set)
-            # read_val.set_metadata("noalias", output_scope_set)
+            destination = destroyed_inputs.get(input_i)
+            if destination is None:
+                read_val.set_metadata("alias.scope", input_scope_set)
+                read_val.set_metadata("noalias", output_scope_set)
+            else:
+                read_val.set_metadata("alias.scope", out_alias_sets[destination])
+                read_val.set_metadata("noalias", out_noalias_sets[destination])
         else:
             # Retrieve array item at index
             # This is a streamlined version of Numba's `GUArrayArg.load`.
@@ -651,6 +709,7 @@ def make_loop_call(
 
     # Create output slices to pass to inner func
     output_slices = []
+    scratch_outputs = []
     for output_i, (out, out_type, out_bc) in enumerate(
         zip(outputs, output_types, output_bc, strict=True)
     ):
@@ -710,6 +769,20 @@ def make_loop_call(
             dtype=out_type.dtype, ndim=effective_core_ndim, layout=out_type.layout
         )
         write_array = context.make_array(write_array_type)(context, builder)
+        if effective_core_ndim == 0:
+            # Redirect the 0-d output slice through a stack slot so the store
+            # into the real output buffer happens below, after the core call,
+            # where it can carry the alias scope metadata. The slot is
+            # initialized from the output buffer to preserve read-modify-write
+            # semantics (`o += t` in `store_core_outputs`); SROA collapses the
+            # slot after inlining.
+            scratch = cgutils.alloca_once(builder, write_ptr.type.pointee)
+            init_val = builder.load(write_ptr)
+            init_val.set_metadata("alias.scope", out_alias_sets[output_i])
+            init_val.set_metadata("noalias", out_noalias_sets[output_i])
+            builder.store(init_val, scratch)
+            scratch_outputs.append((scratch, write_ptr, output_i))
+            write_ptr = scratch
         core_shape = (
             output_shape[-effective_core_ndim:] if effective_core_ndim > 0 else []
         )
@@ -737,6 +810,12 @@ def make_loop_call(
 
     inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
 
+    for scratch, write_ptr, output_i in scratch_outputs:
+        out_val = builder.load(scratch)
+        store = builder.store(out_val, write_ptr)
+        store.set_metadata("alias.scope", out_alias_sets[output_i])
+        store.set_metadata("noalias", out_noalias_sets[output_i])
+
     # Close the loops
     for loop in loop_stack[::-1]:
         loop.__exit__(None, None, None)
@@ -757,6 +836,7 @@ def _vectorized(
     size_type,
     indexed_inputs,
     indexed_outputs,
+    reduce_outputs,
 ):
     """Vectorized intrinsic with optional indirect indexing for reads and writes.
 
@@ -772,7 +852,12 @@ def _vectorized(
     ``((out_0, out_1), mode)`` means that index updates outputs out_0 and
     out_1 with *mode* ``"set"`` or ``"inc"``.
 
-    For non-indexed calls, both are ``()``.
+    ``reduce_outputs`` lists ``(output_idx, identity)`` pairs for reduction
+    outputs.  Such an output carries ``bc=True`` on its reduced axes; the buffer
+    is allocated size 1 there, pre-filled with ``identity``, and the per-iteration
+    store (baked into ``core_func`` via ``store_core_outputs``) accumulates into it.
+
+    For non-indexed/non-reducing calls, these are ``()``.
     """
     arg_types = [
         core_func,
@@ -787,12 +872,14 @@ def _vectorized(
         size_type,
         indexed_inputs,
         indexed_outputs,
+        reduce_outputs,
     ]
 
     input_bc_patterns = _decode_literal(input_bc_patterns, "input_bc_patterns")
     output_bc_patterns = _decode_literal(output_bc_patterns, "output_bc_patterns")
     output_dtypes = _decode_literal(output_dtypes, "output_dtypes")
     inplace_pattern = _decode_literal(inplace_pattern, "inplace_pattern")
+    reduce_identities = dict(_decode_literal(reduce_outputs, "reduce_outputs"))
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -940,6 +1027,7 @@ def _vectorized(
             size,
             _,
             _,
+            _,
         ] = args
 
         constant_inputs = cgutils.unpack_tuple(builder, constant_inputs)
@@ -1074,6 +1162,7 @@ def _vectorized(
             source_input_types,
             output_core_shapes,
             update_outputs=update_outputs_dict,
+            reduce_identities=reduce_identities,
         )
 
         core_signature = typingctx.resolve_function_type(
@@ -1107,6 +1196,7 @@ def _vectorized(
             idx_load_axes=idx_load_axes,
             idx_bc=idx_broadcastable,
             output_write_spec=output_write_spec,
+            inplace=inplace_pattern,
         )
 
         return _codegen_return_outputs(

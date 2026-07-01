@@ -13,6 +13,7 @@ from pytensor.link.numba.dispatch.basic import (
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
+    NO_REDUCE_OUTPUTS,
     NO_SIZE,
     _jit_options,
     _vectorized,
@@ -96,6 +97,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
                 NO_SIZE,
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
+                NO_REDUCE_OUTPUTS,
             )
 
         return impl
