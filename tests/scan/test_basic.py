@@ -4039,7 +4039,7 @@ class ScanCompatibilityTests:
     """Collection of test of subtle required behaviors of Scan, that can be reused by different backends."""
 
     @staticmethod
-    def check_higher_order_derivative(mode):
+    def check_higher_order_derivative(mode, rtol=1e-7):
         """This tests different mit-mot taps signs"""
         x = pt.dscalar("x")
 
@@ -4058,9 +4058,9 @@ class ScanCompatibilityTests:
         fn = function([x], [r, g, gg, ggg], mode=mode)
         x_test = np.array(0.95, dtype=x.type.dtype)
         r_res, g_res, gg_res, _ggg_res = fn(x_test)
-        np.testing.assert_allclose(r_res, x_test**16)
-        np.testing.assert_allclose(g_res, 16 * x_test**15)
-        np.testing.assert_allclose(gg_res, (16 * 15) * x_test**14)
+        np.testing.assert_allclose(r_res, x_test**16, rtol=rtol)
+        np.testing.assert_allclose(g_res, 16 * x_test**15, rtol=rtol)
+        np.testing.assert_allclose(gg_res, (16 * 15) * x_test**14, rtol=rtol)
         # FIXME: All implementations of Scan seem to get this one wrong!
         # np.testing.assert_allclose(ggg_res, (16 * 15 * 14) * x_test**13)
 
