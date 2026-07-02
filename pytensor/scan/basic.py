@@ -425,6 +425,15 @@ def scan(
         Pass this to `pytensor.function` when compiling your function.
 
     """
+    if mode is not None:
+        warnings.warn(
+            "The `mode` argument of `scan` is deprecated: the inner graph now "
+            "inherits the outer compilation (see the `optimize_inner_graphs` "
+            "rewrite). It is still honored for now.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
     # General observation : this code is executed only once, at creation
     # of the computational graph, so we don't yet need to be smart about
     # anything (to speed things up)

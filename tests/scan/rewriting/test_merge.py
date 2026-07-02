@@ -10,6 +10,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanMerge
 from pytensor.scan.utils import until
+from pytensor.tensor import constant as pt_constant
 from pytensor.tensor import stack
 from pytensor.tensor.type import scalar, vector
 from tests import unittest_tools as utt
@@ -72,6 +73,29 @@ class TestScanMerge:
 
         f = function([x], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
+
+    def test_constant_inner_output(self):
+        """Scans whose inner graph returns a bare constant output must still merge."""
+        x = vector()
+        y = vector()
+
+        def step(s):
+            return s + 1, pt_constant(np.asarray(3.0, dtype=config.floatX))
+
+        (sx, cx), _upx = scan(step, sequences=[x], n_steps=4)
+        (sy, cy), _upy = scan(step, sequences=[y], n_steps=4)
+
+        with config.change_flags(on_opt_error="raise"):
+            f = function([x, y], [sx, cx, sy, cy], mode=self.mode)
+        assert self.count_scans(f) == 1
+
+        x_val = np.arange(4, dtype=config.floatX)
+        y_val = np.arange(10, 14, dtype=config.floatX)
+        res_sx, res_cx, res_sy, res_cy = f(x_val, y_val)
+        np.testing.assert_allclose(res_sx, x_val + 1)
+        np.testing.assert_allclose(res_sy, y_val + 1)
+        np.testing.assert_allclose(res_cx, np.full(4, 3.0))
+        np.testing.assert_allclose(res_cy, np.full(4, 3.0))
 
     def test_three_scans(self):
         r"""

@@ -7,9 +7,15 @@ which order, and at which optdb position. Importing it triggers the
 """
 
 from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter, dfs_rewriter
+from pytensor.compile.rewriting import rewrite_inner_graph
+from pytensor.graph.rewriting.basic import (
+    EquilibriumGraphRewriter,
+    dfs_rewriter,
+    graph_rewriter,
+)
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.scan.op import Scan
+from pytensor.scan.rewriting.inner_graph import rewrite_scan_inner_graph
 from pytensor.scan.rewriting.inplace import ScanInplaceOptimizer
 from pytensor.scan.rewriting.io import (
     scan_inline_invariant_constants,
@@ -233,4 +239,28 @@ scan_eqopt2.register(
     "scan_merge_duplicate_inputs",
     "fast_run",
     "scan",
+)
+
+
+# Bake each ``Scan`` node's inner graph for the active backend (the per-linker
+# ``rewrite_scan_inner_graph``; impls in ``pytensor.scan.rewriting.inner_graph``),
+# producing new immutable ops. Tagged ``minimum_compile`` because a baked inner graph
+# is required for correct linking (e.g. numba funcifies it as-is).
+#
+# Runs after the inplace passes (notably ``scan_make_inplace`` at 50.5): a tap may
+# only be destroyed in place when the outer Scan owns its buffer, so the inner graph
+# can only be baked correctly once the outer destroy/view permissions are final.
+@graph_rewriter
+def scan_inner_graph(fgraph):
+    rewrite_inner_graph(
+        fgraph, lambda op: isinstance(op, Scan), rewrite_scan_inner_graph
+    )
+
+
+optdb.register(
+    "scan_inner_graph",
+    scan_inner_graph,
+    "minimum_compile",
+    "compile_inner_graph",
+    position=100,
 )

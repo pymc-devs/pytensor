@@ -11,7 +11,7 @@ import numpy as np
 import pytensor
 from pytensor.compile import builders
 from pytensor.compile.executor import Function
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import AbstractApply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.traversal import graph_inputs
 from pytensor.printing import _try_pydot_import
@@ -127,7 +127,7 @@ class PyDotFormatter:
         else:
             if isinstance(fct, Variable):
                 fct = [fct]
-            elif isinstance(fct, Apply):
+            elif isinstance(fct, AbstractApply):
                 fct = fct.outputs
             assert isinstance(fct, list | tuple)
             assert all(isinstance(v, Variable) for v in fct)

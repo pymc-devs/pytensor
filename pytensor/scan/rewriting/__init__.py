@@ -1,3 +1,8 @@
+# Register the per-linker ``rewrite_scan_inner_graph`` implementations consulted by
+# the ``scan_inner_graph`` rewrite. Imported here (the linker classes are lightweight
+# -- they do not pull in their runtimes) so they take effect whenever
+# ``pytensor.scan`` is used.
+import pytensor.scan.rewriting.inner_graph
 from pytensor.scan.rewriting.db import (
     ScanEquilibriumGraphRewriter,
     scan_eqopt1,

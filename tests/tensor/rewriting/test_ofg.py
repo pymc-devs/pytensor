@@ -4,9 +4,9 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor import config
 from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.rewriting import inline_ofg_expansion
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import dfs_rewriter
-from pytensor.tensor.rewriting.ofg import inline_ofg_expansion
 
 
 @pytest.mark.skipif(

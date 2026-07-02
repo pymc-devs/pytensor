@@ -1,9 +1,9 @@
 from collections.abc import Sequence
 from itertools import chain
 
-from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.graph.basic import Constant, Variable, clone
 from pytensor.graph.fg import FrozenFunctionGraph
+from pytensor.graph.replace import clone_replace
 from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar
 
 
@@ -61,7 +61,9 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         self.is_while = until is not None
 
-        self.fgraph = FrozenFunctionGraph(inputs, outputs)
+        # ScalarLoop inner graphs have no inplace ops, so structurally-identical
+        # nodes can be safely deduplicated.
+        self.fgraph = FrozenFunctionGraph.from_io(inputs, outputs, dedup_nodes=True)
         self._validate_inner_graph(self.fgraph)
         self.inputs = self.fgraph.inputs
         self.outputs = self.fgraph.outputs
@@ -123,30 +125,34 @@ class ScalarLoop(ScalarInnerGraphOp):
         if self.inputs_type == tuple(i.type for i in inputs):
             return super().make_node(n_steps, *inputs)
         else:
-            # Make a new op with the right input types.
-            fg = self.fgraph
-            res = rebuild_collect_shared(
-                fg.outputs,
-                replace=dict(zip(fg.inputs, inputs, strict=True)),
+            # Make a new op whose inner graph is rebuilt on fresh inputs of the
+            # new types. The retype needs ``rebuild_strict=False`` (re-infers
+            # each node's output types), which in-place ``FunctionGraph``
+            # replacements cannot do, so thaw first and rebuild the mutable copy.
+            unfrozen_fgraph = self.fgraph.unfreeze()
+            new_inner_inputs = [i.type() for i in inputs]
+            new_outputs = clone_replace(
+                unfrozen_fgraph.outputs,
+                replace=dict(
+                    zip(unfrozen_fgraph.inputs, new_inner_inputs, strict=True)
+                ),
                 rebuild_strict=False,
             )
             if self.is_while:
-                *cloned_update, cloned_until = res[1]
+                *new_update, new_until = new_outputs
             else:
-                cloned_update, cloned_until = res[1], None
-            cloned_inputs = [res[2][0][i] for i in inputs]
-            cloned_init = cloned_inputs[: len(cloned_update)]
-            cloned_constant = cloned_inputs[len(cloned_update) :]
-            # This will fail if the cloned init have a different dtype than the cloned_update
+                new_update, new_until = new_outputs, None
+            new_init = new_inner_inputs[: len(new_update)]
+            new_constant = new_inner_inputs[len(new_update) :]
+            # This will fail if the new init have a different dtype than the new update
             op = ScalarLoop(
-                init=cloned_init,
-                update=cloned_update,
-                constant=cloned_constant,
-                until=cloned_until,
+                init=new_init,
+                update=new_update,
+                constant=new_constant,
+                until=new_until,
                 name=self.name,
             )
-            node = op.make_node(n_steps, *inputs)
-            return node
+            return op.make_node(n_steps, *inputs)
 
     def perform(self, node, inputs, output_storage):
         n_steps, *inputs = inputs

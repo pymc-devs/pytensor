@@ -7,11 +7,9 @@ import warnings
 from collections.abc import Callable, Sequence
 from copy import copy
 from functools import partial
-from typing import cast
 
-from pytensor.compile.maker import function
+from pytensor.compile.io import In, Out
 from pytensor.compile.mode import get_mode
-from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import DisconnectedType, disconnected_type, grad, pushforward
 from pytensor.graph.basic import (
@@ -23,7 +21,7 @@ from pytensor.graph.basic import (
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
-from pytensor.graph.replace import clone_replace, graph_replace
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
 from pytensor.tensor.shape import Shape_i
@@ -54,70 +52,48 @@ def infer_shape(outs, inputs, input_shapes):
             if cached is not None:
                 replacements[cached] = s
 
-    if replacements:
-        flat = [s for tup in output_shapes if tup is not None for s in tup]
-        flat_replaced = graph_replace(flat, replacements, strict=False)
-        result = []
-        idx = 0
-        for tup in output_shapes:
-            if tup is None:
-                result.append(None)
-            else:
-                result.append(tuple(flat_replaced[idx : idx + len(tup)]))
-                idx += len(tup)
-        return result
-
-    return output_shapes
+    flat = [s for tup in output_shapes if tup is not None for s in tup]
+    flat_replaced = clone_replace(flat, replace=replacements)
+    result = []
+    idx = 0
+    for tup in output_shapes:
+        if tup is None:
+            result.append(None)
+        else:
+            result.append(tuple(flat_replaced[idx : idx + len(tup)]))
+            idx += len(tup)
+    return result
 
 
 def construct_nominal_fgraph(
     inputs: Sequence[Variable], outputs: Sequence[Variable]
-) -> tuple[
-    FunctionGraph,
-    Sequence[Variable],
-    dict[Variable, Variable],
-    dict[Variable, Variable],
-]:
-    """Construct an inner-`FunctionGraph` with ordered nominal inputs."""
-    implicit_shared_inputs = []
+) -> FunctionGraph:
+    """Construct an inner-`FunctionGraph` with ordered nominal inputs.
 
+    Raises ``MissingInputError`` if ``outputs`` implicitly depend on a variable
+    that is neither a `Constant` nor listed in ``inputs`` (including shared
+    variables, which must be passed explicitly).
+    """
     dummy_inputs = [inp.type() for inp in inputs]
-    dummy_implicit_shared_inputs = []
     for var in graph_inputs(outputs, inputs):
-        if var in inputs:
+        if var in inputs or isinstance(var, Constant):
             continue
         if isinstance(var, SharedVariable):
-            # We allow shared inputs to be added automatically to the graph
-            implicit_shared_inputs.append(var)
-            dummy_implicit_shared_inputs.append(var.type())
-        elif not isinstance(var, Constant):
-            raise MissingInputError(f"NominalGraph is missing an input: {var}")
+            raise MissingInputError(
+                f"Inner graph implicitly depends on shared variable {var}. "
+                "Provide it explicitly in the 'inputs' list."
+            )
+        raise MissingInputError(f"NominalGraph is missing an input: {var}")
 
-    replacements = dict(
-        zip(
-            inputs + implicit_shared_inputs,
-            dummy_inputs + dummy_implicit_shared_inputs,
-            strict=True,
-        )
-    )
+    replacements = dict(zip(inputs, dummy_inputs, strict=True))
 
-    new = rebuild_collect_shared(
-        cast(Sequence[Variable], outputs),
-        inputs=inputs + implicit_shared_inputs,
-        replace=replacements,
-        copy_inputs_over=False,
-    )
-    (
-        local_inputs,
-        local_outputs,
-        (_clone_d, update_d, update_expr, new_shared_inputs),
-    ) = new
+    # ``outputs`` must be mutable ``Apply`` graphs; a caller holding a frozen
+    # graph thaws it first (``FrozenFunctionGraph.unfreeze``).
+    local_inputs = dummy_inputs
+    local_outputs = clone_replace(outputs, replace=replacements)
 
-    assert len(local_inputs) == len(inputs) + len(implicit_shared_inputs)
+    assert len(local_inputs) == len(inputs)
     assert len(local_outputs) == len(outputs)
-    assert not update_d
-    assert not update_expr
-    assert not new_shared_inputs
 
     fgraph = FunctionGraph(local_inputs, local_outputs, clone=False)
 
@@ -135,7 +111,7 @@ def construct_nominal_fgraph(
         fgraph.clients.pop(inp, None)
         fgraph.add_input(nom_inp)
 
-    return fgraph, implicit_shared_inputs, update_d, update_expr
+    return fgraph
 
 
 class OpFromGraph(Op, HasInnerGraph):
@@ -153,8 +129,8 @@ class OpFromGraph(Op, HasInnerGraph):
 
     Notes
     -----
-    - Shared variables in the inner graph are supported. They are detected automatically and added
-      as implicit inputs.
+    - Shared variables used in the inner graph must be passed explicitly as inputs; implicit
+      capture raises ``MissingInputError``.
     - Unused inputs are supported (needed for gradient overrides).
     - Nested OpFromGraph is supported.
     - ``inline=True`` causes the Op's inner graph to be inlined during compilation, which gives
@@ -163,7 +139,7 @@ class OpFromGraph(Op, HasInnerGraph):
     - Override callables should be pure functions (no side effects). They are called once at the
       first call to L_op/R_op and converted to OpFromGraph instances. They are also called once at
       construction time with dummy inputs to build a frozen representation for equality comparison.
-    - Two OpFromGraph instances with the same inner graph, overrides, shared variables, and settings
+    - Two OpFromGraph instances with the same inner graph, overrides, and settings
       are considered equal. This allows the MergeOptimizer to deduplicate identical OpFromGraph
       nodes.
 
@@ -183,7 +159,7 @@ class OpFromGraph(Op, HasInnerGraph):
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
-    With a shared variable:
+    With a shared variable (passed explicitly as an input):
 
     .. code-block:: python
 
@@ -195,8 +171,8 @@ class OpFromGraph(Op, HasInnerGraph):
         x, y, z = pt.scalars("xyz")
         s = pytensor.shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
-        op = OpFromGraph([x, y, z], [e])
-        e2 = op(x, y, z) + op(z, y, x)
+        op = OpFromGraph([x, y, z, s], [e])
+        e2 = op(x, y, z, s) + op(z, y, x, s)
         fn = function([x, y, z], [e2])
 
     Per-input L_op override:
@@ -306,9 +282,8 @@ class OpFromGraph(Op, HasInnerGraph):
             If provided, used as the connection pattern for this Op. Each inner list has one bool
             per output, and the outer list has one entry per input.
         strict : bool, optional
-            If True, raises when any variables needed to compute the inner graph are not provided
-            as explicit inputs. Only relevant for graphs with shared variables. Default False.
-            Under ``strict=False``, implicit shared-variable capture is deprecated.
+            Ignored. All variables needed to compute the inner graph must always be
+            provided as explicit inputs; implicitly captured shared variables raise.
         name : str, optional
             A name for debugging purposes.
         **kwargs
@@ -339,24 +314,26 @@ class OpFromGraph(Op, HasInnerGraph):
 
         self.is_inline = inline
 
-        self.fgraph, self.shared_inputs, _, _ = construct_nominal_fgraph(
-            inputs, outputs
-        )
-        self._frozen_fgraph = self.fgraph.freeze()
+        inner_fgraph = construct_nominal_fgraph(inputs, outputs)
+        # The inner graph is stored immutable. The default freeze (no dedup)
+        # keeps distinct buffers for inplace ``destroy_map`` ops; structural
+        # folding would alias them. See ``FunctionGraph.freeze``.
+        self.fgraph = inner_fgraph.freeze()
 
-        if strict and self.shared_inputs:
-            raise ValueError(
-                "All variables needed to compute inner-graph must be provided as inputs under strict=True. "
-                f"The inner-graph implicitly depends on the following shared variables {self.shared_inputs}"
-            )
-        elif self.shared_inputs:
+        # `compile_kwargs` used to control how the inner graph was compiled.
+        # That is now the job of the `ofg_inner_graph` rewrite (which
+        # inherits the outer compilation), so they are deprecated AND ignored:
+        # the inner function is compiled with default settings (see `fn`).
+        # `on_unused_input` is exempt: tolerating unused inputs is now the
+        # default behavior, so passing it is a harmless no-op (not warned).
+        deprecated_kwargs = {k for k in kwargs if k != "on_unused_input"}
+        if deprecated_kwargs:
             warnings.warn(
-                "Implicit capture of shared variables is deprecated. "
-                "Please provide shared variables explicitly in the 'inputs' list.",
-                DeprecationWarning,
-                stacklevel=2,
+                "Passing `compile_kwargs` to `OpFromGraph` is deprecated and "
+                "now ignored: the inner graph inherits the outer compilation. "
+                f"Ignored: {sorted(deprecated_kwargs)}.",
+                FutureWarning,
             )
-
         self.kwargs = kwargs
         self.input_types = [inp.type for inp in inputs]
         self.output_types = [out.type for out in outputs]
@@ -416,14 +393,14 @@ class OpFromGraph(Op, HasInnerGraph):
         ]
         if not connected:
             return pattern, None
-        return pattern, FunctionGraph(all_inputs, connected).freeze()
+        return pattern, FrozenFunctionGraph.from_io(all_inputs, connected)
 
     def _freeze_override(self, override, make_dummy_args):
         """Freeze one override (lop/grad/rop) into a FrozenFunctionGraph."""
         if override is None:
             return None
         if isinstance(override, OpFromGraph):
-            return override._frozen_fgraph
+            return override.fgraph
 
         all_inputs, callable_args = make_dummy_args()
 
@@ -485,16 +462,18 @@ class OpFromGraph(Op, HasInnerGraph):
         if type(self) is not type(other):
             return False
         if (
-            self._frozen_fgraph != other._frozen_fgraph
+            self.fgraph != other.fgraph
             or self.is_inline != other.is_inline
             or self.destroy_map != other.destroy_map
-            or len(self.shared_inputs) != len(other.shared_inputs)
-            or any(
-                a is not b
-                for a, b in zip(self.shared_inputs, other.shared_inputs, strict=True)
-            )
         ):
             return False
+        # Identical override objects (e.g. a clone from ``clone_with_inner_graph``)
+        # are equal without freezing, which would invoke callable overrides.
+        if (
+            self.pullback_overrides is other.pullback_overrides
+            and self.pushforward_overrides is other.pushforward_overrides
+        ):
+            return True
         # When freezing overrides, skip override comparison to break infinite
         # recursion for self-referential overrides (e.g. Sylvester L_op).
         # The fgraph comparison above is sufficient for cache correctness
@@ -509,7 +488,7 @@ class OpFromGraph(Op, HasInnerGraph):
         )
 
     def __hash__(self):
-        return hash((type(self), self._frozen_fgraph, self.is_inline))
+        return hash((type(self), self.fgraph, self.is_inline))
 
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name
@@ -568,8 +547,13 @@ class OpFromGraph(Op, HasInnerGraph):
         except KeyError:
             pass
 
-        inner_inputs = self.inner_inputs
-        inner_outputs = self.inner_outputs
+        # Differentiate a thawed copy of the inner graph so ``grad`` walks
+        # mutable ``Apply`` nodes rather than the immutable ``FrozenApply`` nodes
+        # of ``self.fgraph`` (whose tuple inputs/outputs break Ops that
+        # concatenate them, e.g. ``Blockwise.pullback``).
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        inner_inputs = list(unfrozen_fgraph.inputs)
+        inner_outputs = list(unfrozen_fgraph.outputs)
         nin = len(inner_inputs)
         nout = len(inner_outputs)
         pullback_overrides = self.pullback_overrides
@@ -692,8 +676,10 @@ class OpFromGraph(Op, HasInnerGraph):
         if self._rop_op_cache is not None:
             return self._rop_op_cache
 
-        inner_inputs = self.inner_inputs
-        inner_outputs = self.inner_outputs
+        # Thaw the inner graph before differentiating (see ``_build_and_cache_lop_op``).
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        inner_inputs = list(unfrozen_fgraph.inputs)
+        inner_outputs = list(unfrozen_fgraph.outputs)
         nout = len(inner_outputs)
         pushforward_overrides = self.pushforward_overrides
 
@@ -777,89 +763,17 @@ class OpFromGraph(Op, HasInnerGraph):
         rop_op = self._build_and_cache_rop_op()
         return rop_op(*inputs, *eval_points, return_list=True)
 
-    def __call__(self, *inputs, **kwargs):
-        # The user interface doesn't expect the shared variable inputs of the
-        # inner-graph, but, since `Op.make_node` does (and `Op.__call__`
-        # dispatches to `Op.make_node`), we need to compensate here
-        num_expected_inps = len(self.inner_inputs) - len(self.shared_inputs)
-
-        if len(inputs) == num_expected_inps:
-            actual_inputs = inputs + tuple(self.shared_inputs)
-            return super().__call__(*actual_inputs, **kwargs)
-        elif len(inputs) == len(self.inner_inputs):
-            return super().__call__(*inputs, **kwargs)
-        else:
-            raise ValueError(f"Expected at least {num_expected_inps} input(s)")
-
     def make_node(self, *inputs):
         # The `inputs` received here should correspond to the inputs in the
         # `Apply` nodes we produce below
         if len(inputs) != len(self.inner_inputs):
             raise ValueError(f"Expected {len(self.inner_inputs)} input(s)")
 
-        num_expected_inps = len(self.inner_inputs) - len(self.shared_inputs)
-        non_shared_inputs = inputs[:num_expected_inps]
-
-        non_shared_inputs = [
+        inputs = [
             inp_t.filter_variable(inp)
-            for inp, inp_t in zip(non_shared_inputs, self.input_types, strict=True)
+            for inp, inp_t in zip(inputs, self.input_types, strict=True)
         ]
-
-        new_shared_inputs = inputs[num_expected_inps:]
-        inner_and_input_shareds = list(
-            zip(self.shared_inputs, new_shared_inputs, strict=True)
-        )
-
-        if not all(inp_s == inn_s for inn_s, inp_s in inner_and_input_shareds):
-            # The shared variables are not equal to the original shared
-            # variables, so we construct a new `Op` that uses the new shared
-            # variables instead.
-            replace = dict(
-                zip(
-                    self.inner_inputs[num_expected_inps:],
-                    new_shared_inputs,
-                    strict=True,
-                )
-            )
-
-            # If the new shared variables are inconsistent with the inner-graph,
-            # such errors should arise in this step
-            new_inner_outputs = clone_replace(
-                self.inner_outputs, replace=replace, copy_inputs_over=True
-            )
-
-            # It's possible that the new shared variable inputs aren't actually
-            # shared variables.  When they aren't we need to add them as new
-            # inputs.
-            unshared_inputs = [
-                inp for inp in new_shared_inputs if not isinstance(inp, SharedVariable)
-            ]
-            new_inner_inputs = self.inner_inputs[:num_expected_inps] + unshared_inputs
-
-            new_op = type(self)(
-                inputs=new_inner_inputs,
-                outputs=new_inner_outputs,
-                inline=self.is_inline,
-                pullback=self.pullback_overrides,
-                pushforward=self.pushforward_overrides,
-                connection_pattern=self._connection_pattern,
-                name=self.name,
-                destroy_map=self.destroy_map,
-                **self.kwargs,
-            )
-            new_inputs = (
-                list(non_shared_inputs) + unshared_inputs + new_op.shared_inputs
-            )
-        else:
-            new_op = self
-            new_inputs = list(non_shared_inputs) + new_op.shared_inputs
-
-        apply_node = Apply(
-            new_op,
-            new_inputs,
-            [type() for type in new_op.output_types],
-        )
-        return apply_node
+        return Apply(self, inputs, [type() for type in self.output_types])
 
     def connection_pattern(self, node):
         """
@@ -881,8 +795,13 @@ class OpFromGraph(Op, HasInnerGraph):
             from pytensor.tensor.rewriting.shape import ShapeFeature
 
             sf = ShapeFeature()
-            inner_inputs = self.inner_inputs
-            template = [sf.shape_tuple(o) for o in self.inner_outputs]
+            # Build the shape graph on a thawed copy: the fresh shape nodes must
+            # not be built on top of the frozen inner variables (freezing such a
+            # mixed graph is not supported).
+            unfrozen_fgraph = self.fgraph.unfreeze()
+            inner_inputs = list(unfrozen_fgraph.inputs)
+            inner_outputs = list(unfrozen_fgraph.outputs)
+            template = [sf.shape_tuple(o) for o in inner_outputs]
             flat_shapes = [s for tup in template if tup is not None for s in tup]
 
             # Express the inner-output shapes as a frozen function of the inner
@@ -927,25 +846,79 @@ class OpFromGraph(Op, HasInnerGraph):
         if getattr(self, "_fn", None) is not None:
             return self._fn
 
-        kwargs = self.kwargs.copy()
-        mode = get_mode(kwargs.pop("mode", None)).excluding("symbolic_op_recognition")
-        self._fn = function(self.inner_inputs, self.inner_outputs, mode=mode, **kwargs)
+        # ``op.fgraph`` is already backend-optimized (inplace included): the
+        # ``ofg_inner_graph`` rewrite ran the backend optimizer on it during the
+        # outer compile. So we only need to link it. The linker forces
+        # ``minimum_compile`` back in via its ``required_rewrites``, and (for an
+        # inner graph) ``minimum_compile`` *is* that inner-graph rewrite -- so we
+        # exclude ``compile_inner_graph`` to stop it re-baking an already-baked
+        # graph. ``prepare_fgraph`` still inserts the boundary deepcopies; passing
+        # ``fgraph=`` avoids a re-clone. Unused inputs (e.g. rng, size) and
+        # internal-only inplace ops are expected and tolerated.
+        mode = (
+            get_mode(None)
+            .clone(optimizer="minimum_compile")
+            .excluding("compile_inner_graph")
+        )
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        self._fn = mode.function_maker(
+            [In(inp, borrow=True) for inp in unfrozen_fgraph.inputs],
+            [Out(out, borrow=True) for out in unfrozen_fgraph.outputs],
+            mode,
+            fgraph=unfrozen_fgraph,
+            accept_inplace=True,
+            on_unused_input="ignore",
+        ).create()
         self._fn.trust_input = True
 
         return self._fn
 
     @property
     def inner_inputs(self):
-        return self.fgraph.inputs
+        # A list (not the frozen tuple) so callers that concatenate inner
+        # inputs/outputs keep list semantics. Read-only views of the immutable
+        # graph; manipulating them requires a fresh/unfrozen graph.
+        return list(self.fgraph.inputs)
 
     @property
     def inner_outputs(self):
-        return self.fgraph.outputs
+        return list(self.fgraph.outputs)
 
     def clone(self):
-        res = copy(self)
-        res.fgraph = res.fgraph.clone(clone_inner_graphs=True)
-        return res
+        # The inner graph is immutable (a frozen ``FunctionGraph``), so there is
+        # nothing to deep-clone -- mirror ``Composite.clone``.
+        return self
+
+    def clone_with_inner_graph(self, inner_fgraph) -> OpFromGraph:
+        """Return a copy of this op whose inner graph is ``inner_fgraph``.
+
+        Used by the ``ofg_inner_graph`` rewrite to bake an already-optimized inner
+        graph into a NEW op without mutating ``self``.
+
+        ``inner_fgraph`` is the rewrite's optimized graph and already carries the
+        ordering we must keep: when it has baked inplace ops its ``DestroyHandler``
+        defines a destroy-aware toposort (every reader of a destroyed buffer runs
+        before the op that destroys it). We therefore assign it directly --
+        ``freeze`` re-roots it on nominal inputs by position and bakes that order
+        into the frozen graph (and each node's ``topo_idx``). Routing it through
+        ``construct_nominal_fgraph`` instead would rebuild and re-toposort, losing
+        the destroy-aware order. Mirrors ``Scan.clone_with_inner_graph``.
+        """
+        new = copy(self)
+        new._fn = None
+        new.fgraph = (
+            inner_fgraph
+            if isinstance(inner_fgraph, FrozenFunctionGraph)
+            else inner_fgraph.freeze()
+        )
+        new.input_types = [inp.type for inp in new.fgraph.inputs]
+        new.output_types = [out.type for out in new.fgraph.outputs]
+        # Drop caches tied to the previous inner graph.
+        new._lop_op_cache = {}
+        new._rop_op_cache = None
+        new._frozen_lop = None
+        new._frozen_rop = None
+        return new
 
     def perform(self, node, inputs, outputs):
         variables = self.fn(*inputs)

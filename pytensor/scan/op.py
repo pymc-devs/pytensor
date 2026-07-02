@@ -75,12 +75,11 @@ from pytensor.graph.basic import (
     Variable,
 )
 from pytensor.graph.features import NoOutputFromInplace
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasShape
-from pytensor.graph.utils import InconsistencyError, MissingInputError
 from pytensor.link.vm import VMLinker
 from pytensor.printing import op_debug_information
 from pytensor.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
@@ -502,6 +501,112 @@ class ScanMethodsMixin:
         else:
             return res
 
+    def inner_destroyable_inputs(self, outer_inputs, inner_inputs):
+        """Inner inputs the step function may safely destroy in place.
+
+        Destroyability depends on the *outer* node's buffer shapes, so this is a
+        per-node property (two nodes sharing a `Scan` op but with different outer
+        buffers can differ):
+
+        - A sit_sot tap whose outer buffer holds a single state (``shape[0] == 1``):
+          the buffer always discards the oldest state, so destroying it is safe.
+        - The oldest mit_sot tap when the outer buffer holds exactly the taps
+          (``shape[0] == abs(min(taps))``): same reasoning.
+        - Every untraced sit_sot is physically destroyable: after the first
+          iteration the input is the previous output (safe to destroy). On the first
+          iteration it aliases the outer buffer; each backend handles that per its
+          memory model -- numba always destroys and copies the first iteration, while
+          the C/VM rewrite only keeps the destroy when the Scan owns the buffer.
+
+        ``mit_mot`` taps are not included here; the numba inner-graph rewrite grants
+        destroying their certainly-overwritten reads on top of this set, but the C
+        backend cannot.
+        """
+        destroyable_sitsot = [
+            inner_sitsot
+            for outer_sitsot, inner_sitsot in zip(
+                self.outer_sitsot(outer_inputs),
+                self.inner_sitsot(inner_inputs),
+                strict=True,
+            )
+            if outer_sitsot.type.shape[0] == 1
+        ]
+        destroyable_mitsot = [
+            oldest_inner_mitsot
+            for outer_mitsot, oldest_inner_mitsot, taps in zip(
+                self.outer_mitsot(outer_inputs),
+                self.oldest_inner_mitsot(inner_inputs),
+                self.info.mit_sot_in_slices,
+                strict=True,
+            )
+            if outer_mitsot.type.shape[0] == abs(min(taps))
+        ]
+        destroyable_untraced_sit_sot = self.inner_untraced_sit_sot(inner_inputs)
+        return {
+            *destroyable_sitsot,
+            *destroyable_mitsot,
+            *destroyable_untraced_sit_sot,
+        }
+
+    def _preallocated_mitmot_updates(self):
+        """Map inner-output index to inner-input index for mit_mot taps that are both.
+
+        With output preallocation these outputs are wrapped as updates that write
+        back (possibly in place) into the corresponding input buffer, so -- unlike
+        the other tap outputs -- they are *allowed* to be the result of an in-place
+        operation. `prepare_fgraph` uses this as the inner ``update_mapping``.
+        """
+        info = self.info
+        updates = {}
+        input_idx = info.n_seqs
+        output_idx_base = 0
+        for in_slices, out_slices in zip(
+            info.mit_mot_in_slices, info.mit_mot_out_slices, strict=True
+        ):
+            for inp_tap in in_slices:
+                if inp_tap in out_slices:
+                    updates[output_idx_base + out_slices.index(inp_tap)] = input_idx
+                input_idx += 1
+            output_idx_base += len(out_slices)
+        return updates
+
+    def protected_inner_out_idxs(self, preallocated_mitmot_outs=None):
+        """Inner-output indices that must not be the result of an in-place op.
+
+        These are the tap outputs (mit_mot / mit_sot / sit_sot / nit_sot) whose
+        buffers the VM reuses across iterations; a protected output computed by a
+        destroy-map node would alias a value still needed elsewhere. Preallocated
+        mit_mot updates are excluded -- they are *meant* to write back into their
+        input buffer. This is the protection installed as `NoOutputFromInplace`
+        both at link time (`prepare_fgraph`) and when baking inplace into the
+        frozen inner graph (`scan_inner_graph`), so the two agree.
+        """
+        if preallocated_mitmot_outs is None:
+            preallocated_mitmot_outs = (
+                self._preallocated_mitmot_updates()
+                if config.scan__allow_output_prealloc
+                else ()
+            )
+        info = self.info
+        n_taps = info.n_mit_mot_outs + info.n_mit_sot + info.n_sit_sot + info.n_nit_sot
+        prealloc = set(preallocated_mitmot_outs)
+        return tuple(i for i in range(n_taps) if i not in prealloc)
+
+    def inner_owned_untraced_sit_sot(self, inner_inputs):
+        """Inner untraced sit_sot inputs the Scan owns (output index in ``destroy_map``).
+
+        Ownership grants the right to destroy the outer initial buffer, so these may
+        be destroyed in place even on the first iteration.
+        """
+        untraced_start = self.n_tap_outs + self.info.n_nit_sot
+        return {
+            inner_untraced
+            for j, inner_untraced in enumerate(
+                self.inner_untraced_sit_sot(inner_inputs)
+            )
+            if untraced_start + j in self.destroy_map
+        }
+
     def inner_non_seqs(self, list_inputs):
         n_taps_upto_sit_sot = sum(
             len(x)
@@ -761,6 +866,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     """
 
+    fgraph: FrozenFunctionGraph
+
     def __init__(
         self,
         inputs: list[Variable],
@@ -842,12 +949,14 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             If ``True``, all the shared variables used in the inner-graph must be provided.
 
         """
-        self.fgraph, shared_inputs, _, _ = construct_nominal_fgraph(inputs, outputs)
+        # ``construct_nominal_fgraph`` raises ``MissingInputError`` if the inner
+        # graph implicitly depends on any non-input, non-constant variable.
+        inner_fgraph = construct_nominal_fgraph(inputs, outputs)
 
-        # The shared variables should have been removed, so, if there are
-        # any, it's because the user didn't specify an input.
-        if shared_inputs:
-            raise MissingInputError(f"Scan is missing inputs: {shared_inputs}")
+        # The inner graph is stored immutable. The default freeze (no dedup)
+        # keeps distinct buffers for inplace ``destroy_map`` ops; structural
+        # folding would alias them. See ``FunctionGraph.freeze``.
+        self.fgraph = inner_fgraph.freeze()
 
         self.info = info
         self.truncate_gradient = truncate_gradient
@@ -945,17 +1054,13 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         self.n_outer_inputs = info.n_outer_inputs
         self.n_outer_outputs = info.n_outer_outputs
 
-        if any(node.op.destroy_map for node in self.fgraph.apply_nodes):
-            raise InconsistencyError(
-                "Inner-graphs must not contain in-place operations."
-            )
-
-        self._frozen_fgraph = self.fgraph.freeze()
-
     def __setstate__(self, d):
         self.__dict__.update(d)
-        if not hasattr(self, "_frozen_fgraph"):
-            self._frozen_fgraph = self.fgraph.freeze()
+        # Back-compat: older pickles stored a mutable inner ``fgraph`` (plus a
+        # separate ``_frozen_fgraph``). Collapse to the single frozen graph.
+        if not isinstance(self.fgraph, FrozenFunctionGraph):
+            self.fgraph = self.fgraph.freeze()
+        self.__dict__.pop("_frozen_fgraph", None)
         # Ensure that the graph associated with the inner function is valid.
         self.validate_inner_graph()
 
@@ -1334,7 +1439,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if self.allow_gc != other.allow_gc:
             return False
 
-        return self._frozen_fgraph == other._frozen_fgraph
+        return self.fgraph == other.fgraph
 
     def __str__(self):
         inplace = "none"
@@ -1354,7 +1459,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         return hash(
             (
                 type(self),
-                self._frozen_fgraph,
+                self.fgraph,
                 self.info,
                 self.profile,
                 self.truncate_gradient,
@@ -1376,59 +1481,45 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # remove those outputs here just to compensate for an overly rigid
         # `Function` pipeline.
         update_mapping = {}
-        preallocated_mitmot_outs = []
 
         if config.scan__allow_output_prealloc:
-            # Go through the mitmots. Whenever a mitmot has a tap both as an
-            # input and an output, wrap the input such that the corresponding
-            # output variable becomes an update to be performed on it, possibly
-            # inplace at the end of the functions's execution.
+            # Whenever a mitmot has a tap both as an input and an output, wrap the
+            # input such that the corresponding output variable becomes an update to
+            # be performed on it, possibly inplace at the end of the function's
+            # execution.
             wrapped_inputs = [In(x, borrow=False) for x in fgraph.inputs[: info.n_seqs]]
 
-            input_idx = info.n_seqs
-            for mitmot_idx in range(info.n_mit_mot):
-                for inp_tap in info.mit_mot_in_slices[mitmot_idx]:
-                    if inp_tap in info.mit_mot_out_slices[mitmot_idx]:
-                        inp = fgraph.inputs[input_idx]
-
-                        # Figure out the index of the corresponding output
-                        output_idx = sum(
-                            len(m) for m in info.mit_mot_out_slices[:mitmot_idx]
-                        )
-                        output_idx += info.mit_mot_out_slices[mitmot_idx].index(inp_tap)
-
-                        preallocated_mitmot_outs.append(output_idx)
-
-                        wrapped_inp = In(
-                            variable=inp,
-                            update=fgraph.outputs[output_idx],
-                        )
-                        update_mapping[output_idx] = input_idx
-                        wrapped_inputs.append(wrapped_inp)
-                    else:
-                        wrapped_inputs.append(
-                            In(fgraph.inputs[input_idx], borrow=False)
-                        )
-                    input_idx += 1
+            update_mapping = self._preallocated_mitmot_updates()
+            input_updates = {
+                input_idx: output_idx
+                for output_idx, input_idx in update_mapping.items()
+            }
+            mitmot_inps_end = info.n_seqs + sum(len(s) for s in info.mit_mot_in_slices)
+            for input_idx in range(info.n_seqs, mitmot_inps_end):
+                inp = fgraph.inputs[input_idx]
+                output_idx = input_updates.get(input_idx)
+                if output_idx is not None:
+                    wrapped_inputs.append(
+                        In(variable=inp, update=fgraph.outputs[output_idx])
+                    )
+                else:
+                    wrapped_inputs.append(In(inp, borrow=False))
 
             # Wrap the inputs not associated to mitmots and wrap the remaining outputs.
-            # Untraced sit_sot inputs that are in the destroy_map are marked mutable.
+            # Untraced sit_sot inputs the Scan owns (in the destroy_map) are marked mutable.
             untraced_sit_sot_inner_inputs = set(
                 self.inner_untraced_sit_sot(fgraph.inputs)
             )
-            untraced_out_start = self.n_tap_outs + info.n_nit_sot
-            mutable_untraced_inner_inputs = {
-                self.inner_untraced_sit_sot(fgraph.inputs)[j]
-                for j in range(info.n_untraced_sit_sot)
-                if untraced_out_start + j in self.destroy_map
-            }
+            mutable_untraced_inner_inputs = self.inner_owned_untraced_sit_sot(
+                fgraph.inputs
+            )
             wrapped_inputs += [
                 In(
                     x,
                     borrow=x in untraced_sit_sot_inner_inputs,
                     mutable=x in mutable_untraced_inner_inputs,
                 )
-                for x in fgraph.inputs[input_idx:]
+                for x in fgraph.inputs[mitmot_inps_end:]
             ]
             wrapped_outputs = [Out(x, borrow=True) for x in fgraph.outputs[:slices]]
             # Untraced sit_sot states are kept by reference across iterations, so
@@ -1436,16 +1527,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             # lets insert_deepcopy break such aliasing). See issue #2252.
             wrapped_outputs += [Out(x, borrow=False) for x in fgraph.outputs[slices:]]
 
-            protected_outs = tuple(
-                i
-                for i in range(
-                    info.n_mit_mot_outs
-                    + info.n_mit_sot
-                    + info.n_sit_sot
-                    + info.n_nit_sot
-                )
-                if i not in preallocated_mitmot_outs
-            )
+            protected_outs = self.protected_inner_out_idxs(update_mapping)
             fgraph.attach_feature(NoOutputFromInplace(protected_outs))
 
         else:
@@ -1466,7 +1548,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if getattr(self, "_fn", None) is not None:
             return self._fn
 
-        wrapped_inputs, wrapped_outputs = self.prepare_fgraph(self.fgraph)
+        # Compile a throwaway copy of the (already math-optimized) inner graph.
+        # The canonical inner graph is immutable; linking setup (MIT-MOT update
+        # wrapping, supervisor) and any inplace happen on this transient.
+        inner_fgraph = self.fgraph.unfreeze()
+        wrapped_inputs, wrapped_outputs = self.prepare_fgraph(inner_fgraph)
 
         profile = None
         if config.profile or (
@@ -1479,19 +1565,32 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         elif self.profile:
             profile = self.profile
 
-        # Clone mode_instance, altering "allow_gc" for the linker,
-        # and adding a message if we profile
+        # ``inner_fgraph`` is already backend-optimized (inplace included):
+        # ``scan_inner_graph`` ran the backend optimizer on it during the outer
+        # compile. So we only need to link it (``prepare_fgraph`` still inserts the
+        # boundary deepcopies). The linker forces ``minimum_compile`` back in via
+        # its ``required_rewrites``, and (for an inner graph) ``minimum_compile``
+        # *is* that inner-graph rewrite -- so we exclude ``compile_inner_graph`` to
+        # stop it re-baking an already-baked graph. Only the linker choice depends
+        # on ``self.mode``.
         mode = self.mode
         if mode in (None, "FAST_RUN"):
-            mode_instance = Mode("cvm", "fast_run")
+            mode_instance = Mode("cvm", "minimum_compile").excluding(
+                "compile_inner_graph"
+            )
         elif mode == "FAST_COMPILE":
             mode_instance = Mode(
-                VMLinker(use_cloop=False, c_thunks=False), "fast_compile"
-            )
+                VMLinker(use_cloop=False, c_thunks=False), "minimum_compile"
+            ).excluding("compile_inner_graph")
         else:
-            mode_instance = get_mode(mode).clone(
-                link_kwargs=dict(allow_gc=self.allow_gc),
-                message=f"{self.name or 'Scan'} sub profile",
+            mode_instance = (
+                get_mode(mode)
+                .clone(
+                    optimizer="minimum_compile",
+                    link_kwargs=dict(allow_gc=self.allow_gc),
+                    message=f"{self.name or 'Scan'} sub profile",
+                )
+                .excluding("compile_inner_graph")
             )
             # Scan python and cython perform relies on the VM being able to set updates for preallocated MIT-MOT,
             # which only the VMs produced by VMLinker do
@@ -1505,26 +1604,52 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             wrapped_inputs,
             wrapped_outputs,
             mode=mode_instance,
-            accept_inplace=False,
+            # The (already-optimized) inner graph may carry inplace ops baked in
+            # by scan_inner_graph; prepare_fgraph has already attached the
+            # DestroyHandler + Supervisor, so accept them here.
+            accept_inplace=True,
             profile=profile,
             on_unused_input="ignore",
-            fgraph=self.fgraph,
+            fgraph=inner_fgraph,
         ).create()
 
         return self._fn
 
     @property
     def inner_inputs(self):
-        return self.fgraph.inputs
+        # A list (not the frozen tuple) so the many ``inner_*`` slicing helpers
+        # and their callers keep list semantics. These are read-only views of the
+        # immutable graph; rewrites that rebuild a Scan must ``unfreeze`` first.
+        return list(self.fgraph.inputs)
 
     @property
     def inner_outputs(self):
-        return self.fgraph.outputs
+        return list(self.fgraph.outputs)
 
     def clone(self) -> "Scan":
-        res = copy(self)
-        res.fgraph = res.fgraph.clone(clone_inner_graphs=True)  # type: ignore[attr-defined]
-        return res
+        # The inner graph is immutable (a frozen ``FunctionGraph``), so there is
+        # nothing to deep-clone -- mirror ``Composite.clone``.
+        return self
+
+    def clone_with_inner_graph(self, inner_fgraph) -> "Scan":
+        """Return a copy of this `Scan` whose inner graph is ``inner_fgraph``.
+
+        Used by the ``scan_inner_graph`` rewrite to bake an already-optimized inner
+        graph into a NEW immutable op without touching ``self``. All inner-graph-
+        derived state (``output_types``/``mintaps``/``view_map``/``mitmots_preallocated``)
+        comes from ``info`` + the output types, neither of which optimization changes,
+        so ``copy`` preserves it; only the inner graph and the compiled ``_fn`` are
+        swapped. ``inner_fgraph`` is frozen as-is (when it carries a ``DestroyHandler``
+        the frozen toposort is destroy-aware), so no rebuild/re-toposort is needed.
+        """
+        clone = copy(self)
+        clone._fn = None
+        clone.fgraph = (
+            inner_fgraph
+            if isinstance(inner_fgraph, FrozenFunctionGraph)
+            else inner_fgraph.freeze()
+        )
+        return clone
 
     def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):
         """
@@ -2309,26 +2434,32 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         inner_ins_shapes = seqs_shape + outs_shape + input_shapes[offset:]
         assert len(inner_ins_shapes) == len(self.inner_inputs)
 
-        # Non-sequences have a direct equivalent from self.inner_inputs in
+        # Build the shape graph on a thawed copy: the fresh shape nodes must not
+        # be built on top of the frozen inner variables.
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        inner_inputs = list(unfrozen_fgraph.inputs)
+        inner_outputs = list(unfrozen_fgraph.outputs)
+
+        # Non-sequences have a direct equivalent from the inner inputs in
         # node.inputs
-        inner_non_sequences = self.inner_inputs[len(seqs_shape) + len(outs_shape) :]
+        inner_non_sequences = inner_inputs[len(seqs_shape) + len(outs_shape) :]
         out_equivalent.update(
             zip(inner_non_sequences, node.inputs[offset:], strict=True)
         )
 
         if info.as_while:
-            self_outs = self.inner_outputs[:-1]
+            self_outs = inner_outputs[:-1]
         else:
-            self_outs = self.inner_outputs
+            self_outs = inner_outputs
         outs_shape = infer_shape(
-            outs=self_outs, inputs=self.inner_inputs, input_shapes=inner_ins_shapes
+            outs=self_outs, inputs=inner_inputs, input_shapes=inner_ins_shapes
         )
         # Will be used to check if outs_shape can be expressed without using
-        # variables in self.inner_inputs.
+        # variables in the inner inputs.
         # The shapes of node.inputs are valid.
         validator = Validator(
             valid=input_shapes,
-            invalid=self.inner_inputs,
+            invalid=inner_inputs,
             valid_equivalent=out_equivalent,
         )
 
@@ -2474,8 +2605,13 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if self.truncate_gradient != -1:
             grad_steps = minimum(grad_steps, self.truncate_gradient)
 
-        self_inputs = self.inner_inputs
-        self_outputs = self.inner_outputs
+        # Differentiate a thawed copy of the inner graph so ``grad`` walks
+        # mutable ``Apply`` nodes rather than the immutable ``FrozenApply`` nodes
+        # of ``self.fgraph`` (whose tuple inputs/outputs break Ops that
+        # concatenate them).
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        self_inputs = list(unfrozen_fgraph.inputs)
+        self_outputs = list(unfrozen_fgraph.outputs)
         # differentiable inputs
         diff_inputs = (
             self.inner_seqs(self_inputs)
@@ -3231,12 +3367,14 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
     def pushforward(self, inputs, outputs, eval_points):
         # Step 0. Prepare some shortcut variable
         info = self.info
-        self_inputs = self.inner_inputs
+        # Thaw the inner graph before differentiating (see ``L_op``).
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        self_inputs = list(unfrozen_fgraph.inputs)
+        self_outputs = list(unfrozen_fgraph.outputs)
         rop_of_inputs = (
             self_inputs[: info.n_seqs + self.n_tap_outs]
             + self_inputs[info.n_seqs + self.n_tap_outs + info.n_untraced_sit_sot :]
         )
-        self_outputs = self.inner_outputs
 
         # Step 1. Compute the R_op of the inner function
         inner_eval_points = [safe_new(x, "_evalpoint") for x in rop_of_inputs]
@@ -3511,22 +3649,12 @@ def _op_debug_information_Scan(op: Scan, node: Apply):
 
     extra_information = {}
 
-    inner_fn = getattr(op, "_fn", None)
-
-    if inner_fn:
-        inner_inputs = inner_fn.maker.fgraph.inputs
-        inner_outputs = inner_fn.maker.fgraph.outputs
-    else:
-        inner_inputs = op.inner_inputs
-        inner_outputs = op.inner_outputs
-
     scan_args = ScanArgs(
         node.inputs,
         node.outputs,
-        inner_inputs,
-        inner_outputs,
+        op.inner_inputs,
+        op.inner_outputs,
         node.op.info,
-        clone=False,
     )
 
     for field_name in scan_args.field_names:

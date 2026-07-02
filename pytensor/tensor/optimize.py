@@ -1,14 +1,16 @@
 import logging
 from collections.abc import Sequence
 from copy import copy
+from functools import singledispatch
 
 import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.compile.maker import function
+from pytensor.compile.mode import get_mode
 from pytensor.gradient import DisconnectedType, grad, jacobian
 from pytensor.graph.basic import Apply, Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import (
     ComputeMapType,
@@ -163,15 +165,42 @@ def _find_optimization_parameters(
 
 
 class ScipyWrapperOp(Op, HasInnerGraph):
-    """Shared logic for scipy optimization ops"""
+    """Shared logic for scipy optimization ops.
+
+    The inner graph is held frozen (immutable) as ``self.fgraph``, so the
+    canonical op can never be mutated in place. Graph manipulation (``grad`` /
+    ``graph_replace`` / ``function``) runs on a fresh mutable copy obtained via
+    ``self.fgraph.unfreeze()`` -- ``graph_replace`` on frozen nodes would
+    otherwise leak them into the outer graph.
+    """
+
+    # Attribute names (besides the frozen inner graph) that distinguish two ops
+    # of the same type for eq/hash. Subclasses override.
+    _scipy_props: tuple[str, ...] = ()
 
     def build_fn(self):
         """
         This is overloaded because scipy converts scalar inputs to lists, changing the return type. The
         wrapper function logic is there to handle this.
         """
-        outputs = self.inner_outputs
-        self._fn = fn = function(self.inner_inputs, outputs, trust_input=True)
+        fgraph = self.fgraph.unfreeze()
+        # ``optimize_inner_graph`` already baked this graph for the active backend
+        # (inplace included), exactly like ``OpFromGraph``. So we only link it --
+        # ``minimum_compile`` excluding ``compile_inner_graph`` (the rewrite that
+        # already ran); ``prepare_fgraph`` still inserts the boundary deepcopies.
+        # ``accept_inplace`` admits the baked inplace ops; backend optimization can
+        # leave a declared input unused (e.g. a folded core-shape vector), hence
+        # ``on_unused_input="ignore"``.
+        self._fn = fn = function(
+            fgraph.inputs,
+            fgraph.outputs,
+            mode=get_mode(None)
+            .clone(optimizer="minimum_compile")
+            .excluding("compile_inner_graph"),
+            accept_inplace=True,
+            trust_input=True,
+            on_unused_input="ignore",
+        )
 
         # Do this reassignment to see the compiled graph in the dprint
         # self.fgraph = fn.maker.fgraph
@@ -192,22 +221,56 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
     @property
     def inner_inputs(self):
-        return self.fgraph.inputs
+        # A list (not the frozen tuple) so callers that concatenate inner
+        # inputs/outputs keep list semantics.
+        return list(self.fgraph.inputs)
 
     @property
     def inner_outputs(self):
-        return self.fgraph.outputs
+        return list(self.fgraph.outputs)
 
-    def clone_with_new_fgraph(self, fgraph):
+    def _prop_values(self):
+        return tuple(getattr(self, name) for name in self._scipy_props)
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if type(self) is not type(other):
+            return False
+        return (
+            self.fgraph == other.fgraph and self._prop_values() == other._prop_values()
+        )
+
+    def __hash__(self):
+        # ``optimizer_kwargs`` may hold nested dicts, so the props stay out of
+        # the hash; equal ops still hash equal on the type and inner graph.
+        return hash((type(self), self.fgraph))
+
+    def clone_with_inner_graph(self, inner_fgraph):
+        """Return a copy of this op whose inner graph is ``inner_fgraph``.
+
+        Used by the ``optimize_inner_graph`` rewrite to bake an
+        already-optimized inner graph into a NEW immutable op without touching
+        ``self``. ``inner_fgraph`` may be a mutable ``FunctionGraph`` (it is
+        frozen here) or an already-frozen graph.
+        """
         clone_op = copy(self)
         clone_op._fn = None
         clone_op._fn_wrapped = None
-        clone_op.fgraph = fgraph
+        clone_op.fgraph = (
+            inner_fgraph
+            if isinstance(inner_fgraph, FrozenFunctionGraph)
+            else inner_fgraph.freeze()
+        )
         return clone_op
 
+    # Name used by the canonicalization rewrite that rebuilds the inner graph.
+    clone_with_new_fgraph = clone_with_inner_graph
+
     def clone(self):
-        clone_fgraph = self.fgraph.clone(clone_inner_graphs=True)
-        return self.clone_with_new_fgraph(clone_fgraph)
+        # The inner graph is immutable (a frozen ``FunctionGraph``), so there is
+        # nothing to deep-clone -- mirror ``Composite``/``OpFromGraph``.
+        return self
 
     def prepare_node(
         self,
@@ -229,17 +292,41 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         return Apply(self, inputs, [self.inner_inputs[0].type(), ps.bool("success")])
 
 
+@singledispatch
+def rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
+    """Rewrite an ``optimize`` op (Minimize/Root) inner graph for ``linker``.
+
+    Each linker registers its own; see ``pytensor.tensor.rewriting.optimize``.
+    """
+    raise NotImplementedError(
+        f"Linker {type(linker).__name__} has not registered an optimize-op "
+        "inner-graph rewrite"
+    )
+
+
 class ScipyScalarWrapperOp(ScipyWrapperOp):
     def build_fn(self):
         # We need to adjust the graph to work with what scipy will be passing into the inner function --
         # always scalar array of float64 type
-        x, *args = self.inner_inputs
+        fgraph = self.fgraph.unfreeze()
+        x, *args = fgraph.inputs
         new_root_x = ps.float64(name="x_scalar")
         new_x = tensor_from_scalar(new_root_x.astype(x.type.dtype))
 
-        new_outputs = graph_replace(self.inner_outputs, {x: new_x})
+        new_outputs = graph_replace(fgraph.outputs, {x: new_x})
 
-        self._fn = fn = function([new_root_x, *args], new_outputs, trust_input=True)
+        # See ``ScipyWrapperOp.build_fn``: the graph is already baked, so link
+        # it (the scipy boundary wrapping above links alongside the baked body).
+        self._fn = fn = function(
+            [new_root_x, *args],
+            new_outputs,
+            mode=get_mode(None)
+            .clone(optimizer="minimum_compile")
+            .excluding("compile_inner_graph"),
+            accept_inplace=True,
+            trust_input=True,
+            on_unused_input="ignore",
+        )
 
         # Do this reassignment to see the compiled graph in the dprint
         # self.fgraph = fn.maker.fgraph
@@ -270,9 +357,9 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
             Whether the optimization problem is a minimization problem. If False, it is assumed to be a root-finding
             problem.
         """
-        fgraph = self.fgraph
-        inner_x, *inner_args = self.inner_inputs
-        inner_fx = self.inner_outputs[0]
+        fgraph = self.fgraph.unfreeze()
+        inner_x, *inner_args = fgraph.inputs
+        inner_fx = fgraph.outputs[0]
 
         if is_minimization:
             # The implicit function in minimization is grad(x, theta) == 0
@@ -323,14 +410,26 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
     def build_fn(self):
         # We need to adjust the graph to work with what scipy will be passing into the inner function --
         # always a vector array with size of at least 1
-        x, *args = self.inner_inputs
-        if x.type.shape != ():
+        if self.inner_inputs[0].type.shape != ():
             return super().build_fn()
 
+        fgraph = self.fgraph.unfreeze()
+        x, *args = fgraph.inputs
         new_root_x = x[None].type()
         new_x = new_root_x.squeeze()
-        new_outputs = graph_replace(self.inner_outputs, {x: new_x})
-        self._fn = fn = function([new_root_x, *args], new_outputs, trust_input=True)
+        new_outputs = graph_replace(fgraph.outputs, {x: new_x})
+        # See ``ScipyWrapperOp.build_fn``: the graph is already baked, so link
+        # it (the scipy boundary wrapping above links alongside the baked body).
+        self._fn = fn = function(
+            [new_root_x, *args],
+            new_outputs,
+            mode=get_mode(None)
+            .clone(optimizer="minimum_compile")
+            .excluding("compile_inner_graph"),
+            accept_inplace=True,
+            trust_input=True,
+            on_unused_input="ignore",
+        )
 
         # Do this reassignment to see the compiled graph in the dprint
         # self.fgraph = fn.maker.fgraph
@@ -383,9 +482,9 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         problem, where `f` is the objective function. In this case, we instead take `f` to be the gradient of the objective
         function, which *is* indeed zero at the minimum.
         """
-        fgraph = self.fgraph
-        inner_x, *inner_args = self.inner_inputs
-        implicit_f = self.inner_outputs[0]
+        fgraph = self.fgraph.unfreeze()
+        inner_x, *inner_args = fgraph.inputs
+        implicit_f = fgraph.outputs[0]
         if is_minimization:
             # The implicit function in minimization is grad(x, theta) == 0
             implicit_f = grad(implicit_f, inner_x)
@@ -484,6 +583,7 @@ def _optimizer_connection_pattern(fgraph, is_minimization):
     An input may be connected to the objective but disconnected from its gradient (e.g. an
     additive constant), so the connection pattern must reflect the actual implicit function.
     """
+    fgraph = fgraph.unfreeze()
     inner_x = fgraph.inputs[0]
     fx = fgraph.outputs[0]
     if is_minimization:
@@ -494,6 +594,8 @@ def _optimizer_connection_pattern(fgraph, is_minimization):
 
 
 class MinimizeScalarOp(ScipyScalarWrapperOp):
+    _scipy_props = ("method", "optimizer_kwargs")
+
     def __init__(
         self,
         x: TensorVariable,
@@ -514,7 +616,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
             raise ValueError(
                 "The variable `x` must be an input to the computational graph of the objective function."
             )
-        self.fgraph = FunctionGraph([x, *args], [objective])
+        self.fgraph = FrozenFunctionGraph.from_io([x, *args], [objective])
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
@@ -611,6 +713,15 @@ def minimize_scalar(
 
 
 class MinimizeOp(ScipyVectorWrapperOp):
+    _scipy_props = (
+        "method",
+        "jac",
+        "hess",
+        "hessp",
+        "use_vectorized_jac",
+        "optimizer_kwargs",
+    )
+
     def __init__(
         self,
         x: TensorVariable,
@@ -650,6 +761,8 @@ class MinimizeOp(ScipyVectorWrapperOp):
                 vectorize=use_vectorized_jac,
             )
             self.fgraph.add_output(hess_wrt_x)
+
+        self.fgraph = self.fgraph.freeze()
 
         self.jac = jac
         self.hess = hess
@@ -813,6 +926,8 @@ def minimize(
 
 
 class RootScalarOp(ScipyScalarWrapperOp):
+    _scipy_props = ("method", "jac", "hess", "optimizer_kwargs")
+
     def __init__(
         self,
         variables: TensorVariable,
@@ -850,6 +965,8 @@ class RootScalarOp(ScipyScalarWrapperOp):
                 )
             f_double_prime = grad(self.fgraph.outputs[-1], self.fgraph.inputs[0])
             self.fgraph.add_output(f_double_prime)
+
+        self.fgraph = self.fgraph.freeze()
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
@@ -965,9 +1082,10 @@ def root_scalar(
 
 
 class RootOp(ScipyVectorWrapperOp):
-    # These __props__ were wrong: they ignore the inner graph,
-    # making RootOps of different equations compare equal (and get merged)
-    # __props__ = ("method", "jac")
+    # eq/hash key on the (frozen) inner graph plus these props -- keying on the
+    # inner graph is what keeps RootOps of different equations distinct (an
+    # earlier ``__props__ = ("method", "jac")`` ignored it and merged them).
+    _scipy_props = ("method", "jac", "use_vectorized_jac", "optimizer_kwargs")
 
     def __init__(
         self,
@@ -1003,6 +1121,8 @@ class RootOp(ScipyVectorWrapperOp):
             )
             self.fgraph.add_output(atleast_2d(jac_wrt_x))
 
+        self.fgraph = self.fgraph.freeze()
+
         self.jac = jac
 
         self.method = method
@@ -1020,8 +1140,9 @@ class RootOp(ScipyVectorWrapperOp):
         return f"{self.__class__.__name__}({str_args})"
 
     def build_fn(self):
-        outputs = self.inner_outputs
-        variables, *args = self.inner_inputs
+        fgraph = self.fgraph.unfreeze()
+        variables, *args = fgraph.inputs
+        outputs = fgraph.outputs
 
         if variables.ndim > 0:
             new_root_variables = variables
@@ -1036,8 +1157,17 @@ class RootOp(ScipyVectorWrapperOp):
 
             new_outputs = graph_replace(outputs, {variables: new_variables})
 
+        # See ``ScipyWrapperOp.build_fn``: the graph is already baked, so link
+        # it (the scipy boundary wrapping above links alongside the baked body).
         self._fn = fn = function(
-            [new_root_variables, *args], new_outputs, trust_input=True
+            [new_root_variables, *args],
+            new_outputs,
+            mode=get_mode(None)
+            .clone(optimizer="minimum_compile")
+            .excluding("compile_inner_graph"),
+            accept_inplace=True,
+            trust_input=True,
+            on_unused_input="ignore",
         )
 
         # Do this reassignment to see the compiled graph in the dprint
