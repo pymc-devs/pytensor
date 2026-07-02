@@ -9,6 +9,7 @@ from typing import Any
 import numba
 import numpy as np
 from llvmlite import ir
+from llvmlite.ir.values import MDValue
 from numba import TypingError, types
 from numba.core import cgutils
 from numba.core.base import BaseContext
@@ -17,6 +18,37 @@ from numba.np import arrayobj
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch._llvmlite_self_ref import (
+    ensure_self_ref_metadata_support,
+)
+
+
+ensure_self_ref_metadata_support()
+
+
+class _DistinctEmptyMetadata(MDValue):
+    """A ``distinct !{}`` metadata node, usable as an LLVM access group.
+
+    llvmlite's ``MDValue`` only emits *uniqued* ``!{}`` nodes, which LLVM rejects as
+    access groups: an access group must be ``distinct`` so two function-local accesses
+    are never considered identical (a plain uniqued ``!{}`` crashes the verifier). Each
+    instance has its own identity, so every loop that asks for one gets a fresh group.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent, [], name=str(len(parent.metadata)))
+
+    def descr(self, buf):
+        buf += ("distinct !{}", "\n")
+
+    def __eq__(self, other):
+        return self is other
+
+    def __ne__(self, other):
+        return self is not other
+
+    def __hash__(self):
+        return id(self)
 
 
 def encode_literals(literals: Sequence) -> str:
@@ -102,8 +134,8 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
     ----------
     indexed_inputs : tuple of ((tuple[int, ...], int) | None)
         Per-index: (source input positions, source axis) or None.
-    indexed_outputs : tuple of ((tuple[int, ...], int, str) | None)
-        Per-index: (output positions, axis, mode) or None.
+    indexed_outputs : tuple of ((tuple[int, ...], int, str, bool) | None)
+        Per-index: (output positions, axis, mode, distinct) or None.
     idx_ndims : tuple of int
         Number of dimensions of each index array.
     """
@@ -144,7 +176,7 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
     for k, entry in enumerate(indexed_outputs):
         if entry is not None:
             root = find(k)
-            _, out_axis, _ = entry
+            _, out_axis, *_ = entry
             group_min_axis[root] = min(group_min_axis.get(root, out_axis), out_axis)
 
     return tuple(
@@ -437,20 +469,46 @@ def make_loop_call(
     idx_load_axes: tuple[tuple[int, ...], ...] | None = None,
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
     output_write_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
+    inplace: tuple[tuple[int, int], ...] = (),
+    distinct_outputs: frozenset = frozenset(),
 ):
     safe = (False, False)
 
     n_outputs = len(outputs)
 
-    # TODO I think this is better than the noalias attribute
-    # for the input, but self_ref isn't supported in a released
-    # llvmlite version yet
-    # mod = builder.module
-    # domain = mod.add_metadata([], self_ref=True)
-    # input_scope = mod.add_metadata([domain], self_ref=True)
-    # output_scope = mod.add_metadata([domain], self_ref=True)
-    # input_scope_set = mod.add_metadata([input_scope, output_scope])
-    # output_scope_set = mod.add_metadata([input_scope, output_scope])
+    # Scoped noalias metadata: input loads and output stores are tagged with
+    # alias scopes so LLVM can disambiguate them without runtime overlap checks
+    # (and without loop versioning). Inputs share one scope (their loads never
+    # conflict with each other) while each output gets its own, so that every
+    # access can claim noalias against all buffers it is guaranteed not to
+    # overlap: PyTensor guarantees distinct output buffers, and that inputs
+    # don't alias outputs *except* for an input destroyed by an inplace output.
+    # Loads of a destroyed input are tagged with its output's scope instead:
+    # they stay MayAlias with that output's stores (LLVM resolves the exact
+    # overlap through pointer identity, since the output reuses the input's
+    # array struct) yet are still disambiguated from every other buffer.
+    mod = builder.module
+    domain = mod.add_metadata([], self_ref=True)
+    input_scope = mod.add_metadata([domain], self_ref=True)
+    output_scopes = [
+        mod.add_metadata([domain], self_ref=True) for _ in range(n_outputs)
+    ]
+    input_scope_set = mod.add_metadata([input_scope])
+    output_scope_set = mod.add_metadata(output_scopes)
+    out_alias_sets = [mod.add_metadata([scope]) for scope in output_scopes]
+    out_noalias_sets = [
+        mod.add_metadata([input_scope, *(s for s in output_scopes if s is not scope)])
+        for scope in output_scopes
+    ]
+    destroyed_inputs = {in_idx: out_idx for out_idx, in_idx in inplace}
+
+    # When an indexed-update output writes through statically-distinct indices, its
+    # read-modify-write carries no cross-iteration dependency, so the loop can vectorize
+    # the value-compute (LLVM scalarizes only the indexed stores). We promise this with an
+    # access group on those RMW load/stores plus `llvm.loop.parallel_accesses` on the
+    # innermost latch. The group must be a *distinct* node so it is never uniqued with
+    # another loop's.
+    access_group = _DistinctEmptyMetadata(mod) if distinct_outputs else None
 
     zero = ir.Constant(ir.IntType(64), 0)
 
@@ -516,6 +574,10 @@ def make_loop_call(
                 False,
             )
             val = builder.load(ptr)
+            val.set_metadata("alias.scope", input_scope_set)
+            val.set_metadata("noalias", output_scope_set)
+            if access_group is not None:
+                val.set_metadata("llvm.access.group", access_group)
             i64 = ir.IntType(64)
             if val.type != i64:
                 if idx_arr_type.dtype.signed:
@@ -614,8 +676,18 @@ def make_loop_call(
         if core_scalar and core_ndim == 0:
             # Retrive scalar item at index
             read_val = builder.load(read_ptr)
-            # read_val.set_metadata("alias.scope", input_scope_set)
-            # read_val.set_metadata("noalias", output_scope_set)
+            destination = destroyed_inputs.get(input_i)
+            if destination is None:
+                read_val.set_metadata("alias.scope", input_scope_set)
+                read_val.set_metadata("noalias", output_scope_set)
+            else:
+                read_val.set_metadata("alias.scope", out_alias_sets[destination])
+                read_val.set_metadata("noalias", out_noalias_sets[destination])
+            # Every memory access in the loop must join the access group, or LLVM's
+            # `isAnnotatedParallel` rejects the whole loop (one untagged load voids the
+            # `llvm.loop.parallel_accesses` promise).
+            if access_group is not None:
+                read_val.set_metadata("llvm.access.group", access_group)
         else:
             # Retrieve array item at index
             # This is a streamlined version of Numba's `GUArrayArg.load`.
@@ -651,6 +723,7 @@ def make_loop_call(
 
     # Create output slices to pass to inner func
     output_slices = []
+    scratch_outputs = []
     for output_i, (out, out_type, out_bc) in enumerate(
         zip(outputs, output_types, output_bc, strict=True)
     ):
@@ -710,6 +783,22 @@ def make_loop_call(
             dtype=out_type.dtype, ndim=effective_core_ndim, layout=out_type.layout
         )
         write_array = context.make_array(write_array_type)(context, builder)
+        if effective_core_ndim == 0:
+            # Redirect the 0-d output slice through a stack slot so the store
+            # into the real output buffer happens below, after the core call,
+            # where it can carry the alias scope metadata. The slot is
+            # initialized from the output buffer to preserve read-modify-write
+            # semantics (`o += t` in `store_core_outputs`); SROA collapses the
+            # slot after inlining.
+            scratch = cgutils.alloca_once(builder, write_ptr.type.pointee)
+            init_val = builder.load(write_ptr)
+            init_val.set_metadata("alias.scope", out_alias_sets[output_i])
+            init_val.set_metadata("noalias", out_noalias_sets[output_i])
+            if output_i in distinct_outputs:
+                init_val.set_metadata("llvm.access.group", access_group)
+            builder.store(init_val, scratch)
+            scratch_outputs.append((scratch, write_ptr, output_i))
+            write_ptr = scratch
         core_shape = (
             output_shape[-effective_core_ndim:] if effective_core_ndim > 0 else []
         )
@@ -737,9 +826,29 @@ def make_loop_call(
 
     inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
 
-    # Close the loops
-    for loop in loop_stack[::-1]:
-        loop.__exit__(None, None, None)
+    for scratch, write_ptr, output_i in scratch_outputs:
+        out_val = builder.load(scratch)
+        store = builder.store(out_val, write_ptr)
+        store.set_metadata("alias.scope", out_alias_sets[output_i])
+        store.set_metadata("noalias", out_noalias_sets[output_i])
+        if output_i in distinct_outputs:
+            store.set_metadata("llvm.access.group", access_group)
+
+    # Close the loops.  Under a no-dup promise, tag the innermost loop's latch with
+    # `llvm.loop.parallel_accesses` referencing the access group, so the vectorizer
+    # treats the tagged RMW accesses as free of loop-carried dependencies. The latch is
+    # the body block the builder sits in just before `for_range` emits its backedge.
+    for depth, loop in enumerate(loop_stack[::-1]):
+        if depth == 0 and access_group is not None:
+            latch_block = builder.basic_block
+            loop.__exit__(None, None, None)
+            parallel_md = mod.add_metadata(
+                [ir.MetaDataString(mod, "llvm.loop.parallel_accesses"), access_group]
+            )
+            loop_md = mod.add_metadata([parallel_md], self_ref=True)
+            latch_block.terminator.set_metadata("llvm.loop", loop_md)
+        else:
+            loop.__exit__(None, None, None)
 
 
 @numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
@@ -865,7 +974,7 @@ def _vectorized(
     for k, entry in enumerate(indexed_outputs):
         if entry is None:
             continue
-        sources, source_axis, _mode = entry
+        sources, source_axis, _mode, *_ = entry
         for out_idx in sources:
             write_spec_dict.setdefault(out_idx, []).append((k, source_axis))
     # Write target buffers are appended to the outer inputs in ascending output
@@ -924,6 +1033,14 @@ def _vectorized(
     size_is_none = isinstance(size_type, NoneType)
     write_idx_set = frozenset(
         k for k, entry in enumerate(indexed_outputs) if entry is not None
+    )
+    # Output positions whose indexed update was flagged distinct-index by the rewriter
+    # (4th spec field) -> safe to emit the no-dup vectorization promise.
+    distinct_output_idxs = frozenset(
+        out_idx
+        for entry in indexed_outputs
+        if entry is not None and len(entry) > 3 and entry[3]
+        for out_idx in entry[0]
     )
 
     def codegen(ctx, builder, sig, args):
@@ -1107,6 +1224,8 @@ def _vectorized(
             idx_load_axes=idx_load_axes,
             idx_bc=idx_broadcastable,
             output_write_spec=output_write_spec,
+            inplace=inplace_pattern,
+            distinct_outputs=distinct_output_idxs,
         )
 
         return _codegen_return_outputs(

@@ -794,7 +794,7 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
 
         return impl
 
-    cache_version = 2
+    cache_version = 3
     if scalar_cache_key is None:
         key = None
     else:

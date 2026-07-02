@@ -17,6 +17,7 @@ from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
+from pytensor.tensor.rewriting.subtensor import _has_unique_indices
 from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -240,16 +241,20 @@ class IndexedElemwise(OpFromGraph):
     indexed_outputs : tuple of ((tuple[int, ...], int, str) | None)
         One entry per index array k, parallel to ``indexed_inputs``.
         ``None`` if index k has no write role.
-        Otherwise ``(sources, source_axis, mode)``:
+        Otherwise ``(sources, source_axis, mode, distinct)``:
 
         - ``sources``: which Elemwise output positions are written
           through this index into the update target buffer.
         - ``source_axis``: which target-array axis is indexed.
         - ``mode``: ``"inc"`` (accumulate) or ``"set"`` (overwrite).
+        - ``distinct``: whether the index entries are statically known to be
+          duplicate-free (an ``inc`` then has no cross-iteration RMW dependency,
+          so the Numba codegen may emit a loop-vectorization promise). Always
+          ``False`` for ``set`` (it vectorizes regardless).
 
         Examples::
 
-            tgt[idx] += exp(x)   → indexed_outputs=[((0,), 0, "inc")]
+            tgt[idx] += exp(x)   → indexed_outputs=[((0,), 0, "inc", False)]
     """
 
     def __init__(self, *args, indexed_inputs=(), indexed_outputs=(), **kwargs):
@@ -301,7 +306,7 @@ def _op_debug_information_IndexedElemwise(op, node):
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
-        sources, _source_axis, mode = entry
+        sources, _source_axis, mode, *_ = entry
         buf_label = f"buf_{buf_counter}"
         buf_counter += 1
         idx_label = f"idx_{k}"
@@ -721,16 +726,22 @@ class FuseIndexedElemwise(GraphRewriter):
                 (tuple(reads), axis) if reads else None
                 for (_, axis), (reads, _) in idx_groups.items()
             )
-            indexed_outputs_spec = tuple(
-                (
-                    tuple(writes),
-                    key[1],
-                    "set" if write_targets[writes[0]].op.set_instead_of_inc else "inc",
+            indexed_outputs_spec_list = []
+            for key, (_, writes) in idx_groups.items():
+                if not writes:
+                    indexed_outputs_spec_list.append(None)
+                    continue
+                mode = (
+                    "set" if write_targets[writes[0]].op.set_instead_of_inc else "inc"
                 )
-                if writes
-                else None
-                for key, (_, writes) in idx_groups.items()
-            )
+                # A distinct-index `inc` has no cross-iteration read-modify-write
+                # dependency, so the numba codegen can emit a no-dup vectorization
+                # promise. `set` already vectorizes without it, so only flag `inc`.
+                distinct = mode == "inc" and _has_unique_indices(fgraph, key[0])
+                indexed_outputs_spec_list.append(
+                    (tuple(writes), key[1], mode, distinct)
+                )
+            indexed_outputs_spec = tuple(indexed_outputs_spec_list)
 
             outer_inputs = []
             for i, inp in enumerate(fgraph_inputs):
