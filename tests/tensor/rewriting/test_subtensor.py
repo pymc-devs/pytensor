@@ -20,6 +20,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
+    _index_provably_unique,
     _slice_to_arange,
     local_add_of_sparse_write,
     local_adv_idx_to_slice,
@@ -218,8 +219,10 @@ def test_local_add_of_sparse_write():
     """``x + set(zeros, v, idx) -> inc(x, v, idx)``: avoid materialising
     the dense sparse representation when adding a sparse set into a base.
 
-    Also covers ``x + inc(zeros, v, idx)`` when ``idx`` is duplicate-free,
-    since then inc-into-zeros is equivalent to set-into-zeros.
+    The set form needs duplicate-free ``idx`` (a dense set is last-wins). The
+    inc form ``x + inc(zeros, v, idx)`` is rewritten unconditionally: inc applies
+    the same per-position delta on both sides, so duplicates accumulate
+    identically.
     """
     sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
 
@@ -227,18 +230,30 @@ def test_local_add_of_sparse_write():
     v = vector("v")
     idx = ivector("idx")
 
-    # set-into-zeros is always rewritten.
-    out = x + pt.zeros(x.shape)[idx].set(v)
-    expected = x[idx].inc(v)
-    rewritten = rewrite_graph(out)
-    utt.assert_equal_computations([rewritten], [expected], strict_dtype=False)
+    # set-into-zeros with a provably unique index is rewritten: a dense set into
+    # zeros equals a sparse inc only when each position is written exactly once.
+    cst = np.array([1, 3])
+    out = x + pt.zeros(x.shape)[cst].set(v)
+    rewritten = rewrite_graph(out, include=[], custom_rewrite=sparse_rewriter)
+    utt.assert_equal_computations([rewritten], [x[cst].inc(v)], strict_dtype=False)
 
-    f = function([x, v, idx], out)
-    f_ref = function([x, v, idx], out, mode=Mode(linker="py", optimizer=None))
+    f = function([x, v], out)
+    f_ref = function([x, v], out, mode=Mode(linker="py", optimizer=None))
     dx = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=config.floatX)
     dv = np.array([10.0, 20.0], dtype=config.floatX)
-    didx = np.array([1, 3], dtype="int32")
-    np.testing.assert_allclose(f(dx, dv, didx), f_ref(dx, dv, didx))
+    np.testing.assert_allclose(f(dx, dv), f_ref(dx, dv))
+
+    # set-into-zeros with a possibly-duplicated index is left alone: a dense set
+    # is last-wins, while a sparse inc would accumulate at repeated positions.
+    # ``assert_eval`` with a duplicated index pins the soundness independently of
+    # the graph check: a wrongly-collapsed inc would accumulate at the repeated
+    # position (index 1 -> 2 + 10 + 20 instead of 2 + 20).
+    out_set_unsafe = x + pt.zeros(x.shape)[idx].set(v)
+    result = utt.RewriteTester(
+        [x, v, idx], [out_set_unsafe], include=[], custom_rewrite=sparse_rewriter
+    )
+    result.assert_graph(out_set_unsafe)
+    result.assert_eval(dx, dv, np.array([1, 1], dtype="int32"))
 
     # inc-into-zeros with unique constant indices is rewritten.
     out_inc = x + pt.zeros(x.shape)[np.array([1, 3])].inc(v)
@@ -248,13 +263,16 @@ def test_local_add_of_sparse_write():
     )
 
     # inc-into-zeros with a non-constant (potentially duplicated) index is
-    # left alone.  Run the rewrite in isolation so other simplifications
-    # don't obscure what happens.
-    out_unsafe = x + pt.zeros(x.shape)[idx].inc(v)
-    rewritten_unsafe = rewrite_graph(
-        out_unsafe, include=[], custom_rewrite=sparse_rewriter
+    # rewritten unconditionally: inc accumulates the same per-position delta
+    # whether the base is zeros (then added to x) or x itself. ``assert_eval``
+    # with a duplicated index pins the soundness: index 1 -> 2 + 10 + 20 on both
+    # the original and the rewritten graph.
+    out_dup = x + pt.zeros(x.shape)[idx].inc(v)
+    result_dup = utt.RewriteTester(
+        [x, v, idx], [out_dup], include=[], custom_rewrite=sparse_rewriter
     )
-    utt.assert_equal_computations([rewritten_unsafe], [out_unsafe])
+    result_dup.assert_graph(x[idx].inc(v))
+    result_dup.assert_eval(dx, dv, np.array([1, 1], dtype="int32"))
 
     # Basic (scalar) inc-into-zeros is trivially unique and should be rewritten.
     s = iscalar("s")
@@ -265,6 +283,88 @@ def test_local_add_of_sparse_write():
     utt.assert_equal_computations(
         [rewritten_basic], [x[s].inc(v[0])], strict_dtype=False
     )
+
+    # set-into-zeros with jointly-unique advanced indices (neither axis unique on
+    # its own) is rewritten via the joint-uniqueness check on the set path.
+    X = matrix("X")
+    rows = pt.constant(np.array([0, 1, 1], dtype="int32"))
+    cols = pt.constant(np.array([0, 0, 1], dtype="int32"))
+    out_joint = X + pt.zeros(X.shape)[rows, cols].set(v)
+    rewritten_joint = rewrite_graph(
+        out_joint, include=[], custom_rewrite=sparse_rewriter
+    )
+    utt.assert_equal_computations([rewritten_joint], [X[rows, cols].inc(v)])
+
+    # set-into-zeros with a jointly-duplicated advanced index is left alone (the
+    # (1, 1) coordinate repeats), since a dense set there is last-wins.
+    dup_rows = pt.constant(np.array([0, 1, 1], dtype="int32"))
+    dup_cols = pt.constant(np.array([0, 1, 1], dtype="int32"))
+    out_joint_dup = X + pt.zeros(X.shape)[dup_rows, dup_cols].set(v)
+    rewritten_joint_dup = rewrite_graph(
+        out_joint_dup, include=[], custom_rewrite=sparse_rewriter
+    )
+    utt.assert_equal_computations([rewritten_joint_dup], [out_joint_dup])
+
+    # A bounded slice flattens its (symbolic) bounds into the index variables;
+    # those must not be mistaken for advanced indices. With a leading slice and a
+    # unique advanced index the sparse write still collapses.
+    w = matrix("w")
+    u = pt.constant(np.array([0, 2], dtype="int32"))
+    lo, hi = iscalar("lo"), iscalar("hi")
+    out_slice = X + pt.zeros(X.shape)[lo:hi, u].set(w)
+    rewritten_slice = rewrite_graph(
+        out_slice, include=[], custom_rewrite=sparse_rewriter
+    )
+    utt.assert_equal_computations(
+        [rewritten_slice], [X[lo:hi, u].inc(w)], strict_dtype=False
+    )
+
+
+class TestIndexProvablyUniqueArange:
+    """An ``arange`` index is duplicate-free when its entries don't wrap around
+    zero, i.e. they all share a sign. ``_index_provably_unique`` proves this for
+    non-negative ascending ranges (symbolic-friendly) and, with constant bounds,
+    for any single-signed range regardless of step direction."""
+
+    @pytest.mark.parametrize(
+        "make_arange, expected",
+        [
+            # Non-negative, symbolic-friendly (proved without constant bounds).
+            (lambda k, n: pt.arange(k), True),
+            (lambda k, n: pt.arange(n), True),  # n = shape, provably >= 0
+            (lambda k, n: pt.arange(2, k), True),
+            (lambda k, n: pt.arange(n, 0, -1), True),  # reverse range, both bounds >= 0
+            # Descending into a non-negative stop: entries > stop >= 0, any start.
+            (lambda k, n: pt.arange(k, 0, -1), True),
+            (lambda k, n: pt.arange(k, 5, -1), True),
+            # Descending from a negative start: entries <= start < 0, any stop.
+            (lambda k, n: pt.arange(-1, k, -1), True),
+            # Constant single-signed ranges, either step direction.
+            (lambda k, n: pt.arange(2, 6), True),
+            (lambda k, n: pt.arange(-6, -2), True),  # all negative
+            (lambda k, n: pt.arange(5, -1, -1), True),  # descending, [5..0]
+            (
+                lambda k, n: pt.arange(6, -2, -2),
+                True,
+            ),  # descending, [6,4,2,0], overshoots stop
+            (
+                lambda k, n: pt.arange(-5, 1, 3),
+                True,
+            ),  # ascending, [-5,-2], overshoots stop
+            (lambda k, n: pt.arange(-1, -6, -1), True),  # descending, all negative
+            # Straddling zero -> may wrap -> not provably unique.
+            (lambda k, n: pt.arange(-2, 2), False),
+            (lambda k, n: pt.arange(0, -5, -1), False),  # 0 with negatives
+            # Sign not statically known.
+            (lambda k, n: pt.arange(5, k, -1), False),  # unknown stop sign
+            (lambda k, n: pt.arange(k, 5), False),  # unknown start sign
+            (lambda k, n: pt.arange(k, -5, -1), False),  # unknown start, neg stop
+        ],
+    )
+    def test_arange(self, make_arange, expected):
+        k = iscalar("k")
+        n = vector("v").shape[0]
+        assert _index_provably_unique(make_arange(k, n), None) is expected
 
 
 class TestLocalUselessSubtensor:
@@ -1344,6 +1444,115 @@ class TestReadOfWriteSameIndices:
         )
         assert check_stack_trace(f, ops_to_check=(AdvancedSubtensor1, Elemwise))
 
+    def test_inc_jointly_unique_constant_idx(self):
+        """Multiple advanced indices that are jointly (not per-axis) duplicate-free
+        are recognized via the joint check, so inc read-of-write simplifies even
+        though neither ``rows`` nor ``cols`` is unique on its own."""
+        x = matrix(dtype="float64")
+        y = vector(dtype="float64")
+        rows = pt.constant(np.array([0, 1, 1], dtype="int32"))
+        cols = pt.constant(np.array([0, 0, 1], dtype="int32"))
+
+        inc = inc_subtensor(x[rows, cols], y)
+        o = inc[rows, cols]
+        f = function([x, y], o, self.mode)
+
+        dx = np.random.random((2, 2))
+        dy = np.random.random((3,))
+        expected = dx.copy()
+        np.add.at(expected, (np.array([0, 1, 1]), np.array([0, 0, 1])), dy)
+        np.testing.assert_allclose(expected[[0, 1, 1], [0, 0, 1]], f(dx, dy))
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+    def test_inc_tril_indices_nonzero(self):
+        """``tril_indices`` coordinates come from a single ``Nonzero``, distinct by
+        construction, so the inc read-of-write simplifies even though the indices
+        are symbolic and neither axis is unique on its own."""
+        n = iscalar("n")
+        x = matrix(dtype="float64")
+        y = vector(dtype="float64")
+        rows, cols = pt.tril_indices(n)
+
+        inc = inc_subtensor(x[rows, cols], y)
+        o = inc[rows, cols]
+        f = function([x, y, n], o, self.mode)
+
+        dx = np.random.random((4, 4))
+        tri = np.tril_indices(4)
+        dy = np.random.random((tri[0].size,))
+        expected = dx.copy()
+        np.add.at(expected, tri, dy)
+        np.testing.assert_allclose(expected[tri], f(dx, dy, 4))
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+    def test_inc_symbolic_bool_mask(self):
+        """A boolean mask selects each position at most once, so it is duplicate-free
+        even when symbolic; the inc read-of-write simplifies to ``x[mask] + v``."""
+        x = vector(dtype="float64")
+        v = vector(dtype="float64")
+        mask = vector("mask", dtype="bool")
+
+        inc = inc_subtensor(x[mask], v)
+        o = inc[mask]
+        f = function([x, v, mask], o, self.mode)
+
+        dx = np.arange(5.0)
+        dmask = np.array([1, 0, 1, 0, 1], dtype=bool)
+        dv = np.array([10.0, 20.0, 30.0])
+        expected = dx.copy()
+        np.add.at(expected, np.where(dmask)[0], dv)
+        np.testing.assert_allclose(expected[dmask], f(dx, dv, dmask))
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+    def test_inc_symbolic_arange(self):
+        """An ``arange`` is strictly monotonic, so its entries are distinct even
+        when symbolic; the inc read-of-write simplifies to ``x[idx] + v``."""
+        k = iscalar("k")
+        x = vector(dtype="float64")
+        v = vector(dtype="float64")
+        idx = pt.arange(k)
+
+        inc = inc_subtensor(x[idx], v)
+        o = inc[idx]
+        f = function([x, v, k], o, self.mode)
+
+        dx = np.arange(6.0)
+        dv = np.array([10.0, 20.0, 30.0, 40.0])
+        expected = dx.copy()
+        np.add.at(expected, np.arange(4), dv)
+        np.testing.assert_allclose(expected[np.arange(4)], f(dx, dv, 4))
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+    def test_inc_mixed_sign_arange_not_rewritten(self):
+        """A negative-start arange may wrap around (``arange(-2, k)`` aliases
+        positions on a small axis), so it is not duplicate-free and inc must not
+        be rewritten."""
+        k = iscalar("k")
+        x = vector(dtype="float64")
+        v = vector(dtype="float64")
+        idx = pt.arange(-2, k)
+
+        inc = inc_subtensor(x[idx], v)
+        o = inc[idx]
+        f = function([x, v, k], o, self.mode)
+
+        topo = f.maker.fgraph.toposort()
+        assert any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
     @pytest.mark.parametrize(
         "cidx_values, n_rows",
         [
@@ -1744,6 +1953,59 @@ class TestWriteOfWriteSameIndices:
         rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
         utt.assert_equal_computations([rewritten], [inc_subtensor(zeros[:stop], a + b)])
 
+    def test_inc_of_set_advanced_jointly_unique_rewritten(self):
+        """Inc-of-set fires when advanced indices are jointly duplicate-free, even
+        though neither axis is unique on its own. ``tril_indices`` coordinates come
+        from a single ``Nonzero`` and so collapse to ``x[idx].set(a + b)``."""
+        n = iscalar("n")
+        x = matrix("x", dtype="float64")
+        a = vector("a", dtype="float64")
+        b = vector("b", dtype="float64")
+        rows, cols = pt.tril_indices(n)
+
+        out = inc_subtensor(set_subtensor(x[rows, cols], a)[rows, cols], b)
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations(
+            [rewritten], [set_subtensor(x[rows, cols], a + b)]
+        )
+
+    def test_inc_of_set_advanced_with_slice_rewritten(self):
+        """A bounded slice flattens its (symbolic) bounds into the index
+        variables; those must not be mistaken for advanced indices and block the
+        uniqueness check. With a leading slice and a unique advanced index the
+        inc-of-set still collapses to ``x[lo:hi, idx].set(a + b)``."""
+        x = tensor3("x", dtype="float64")
+        a = matrix("a", dtype="float64")
+        b = matrix("b", dtype="float64")
+        lo, hi = iscalar("lo"), iscalar("hi")
+        idx = pt.constant(np.array([0, 2], dtype="int32"))
+
+        out = inc_subtensor(set_subtensor(x[lo:hi, idx], a)[lo:hi, idx], b)
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations(
+            [rewritten], [set_subtensor(x[lo:hi, idx], a + b)]
+        )
+
+    def test_inc_of_set_advanced_jointly_unique_with_slice_rewritten(self):
+        """A bounded slice flattens its bounds into the index variables; those
+        must not be mistaken for advanced indices and block the joint check. With
+        a leading slice and jointly-unique advanced indices the inc-of-set still
+        collapses to ``x[lo:hi, rows, cols].set(a + b)``."""
+        n = iscalar("n")
+        x = tensor3("x", dtype="float64")
+        a = matrix("a", dtype="float64")
+        b = matrix("b", dtype="float64")
+        lo, hi = iscalar("lo"), iscalar("hi")
+        rows, cols = pt.tril_indices(n)
+
+        out = inc_subtensor(
+            set_subtensor(x[lo:hi, rows, cols], a)[lo:hi, rows, cols], b
+        )
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations(
+            [rewritten], [set_subtensor(x[lo:hi, rows, cols], a + b)]
+        )
+
     def test_inc_of_set_advanced_non_unique_not_rewritten(self):
         """Inc-of-set requires unique indices; duplicate constant indices
         on advanced axes block the rewrite."""
@@ -2068,6 +2330,52 @@ def test_local_set_to_inc_subtensor():
     # before and after optimization.
     assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor1)
     assert check_stack_trace(f2, ops_to_check="all")
+
+
+def test_local_set_to_inc_subtensor_duplicate_indices():
+    """``set(x[idx] + other)`` collapses to ``inc(x, other, idx)`` only when
+    ``idx`` is duplicate-free: a dense set is last-wins while inc accumulates, so
+    with repeated indices the inc form over-counts. The rewrite must not fire on a
+    possibly-duplicated symbolic index, and a wrongly-collapsed inc would diverge
+    at the repeated position (index 1 -> 20 + 1 + 2 instead of 20 + 2)."""
+    v = vector("v")
+    other = vector("other")
+    idx = ivector("idx")
+
+    out = set_subtensor(v[idx], v[idx] + other)
+
+    mode = (
+        get_default_mode()
+        .including(
+            "local_replace_AdvancedSubtensor",
+            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
+        )
+        .excluding("fuse_indexed_into_elemwise")
+    )
+    f = function([v, other, idx], out, mode=mode)
+
+    # The symbolic index is not provably unique, so the set survives.
+    assert all(
+        n.op.set_instead_of_inc
+        for n in f.maker.fgraph.toposort()
+        if isinstance(n.op, AdvancedIncSubtensor1)
+    )
+
+    # Soundness pinned against a no-rewrite reference at a duplicated index.
+    dv = np.array([10.0, 20.0, 30.0], dtype=v.dtype)
+    dother = np.array([1.0, 2.0], dtype=v.dtype)
+    didx = np.array([1, 1], dtype="int32")
+    f_ref = function([v, other, idx], out, mode=Mode(linker="py", optimizer=None))
+    np.testing.assert_allclose(f(dv, dother, didx), f_ref(dv, dother, didx))
+
+    # A constant duplicated index is also left alone.
+    out_const = set_subtensor(v[[1, 1]], v[[1, 1]] + other)
+    f_const = function([v, other], out_const, mode=mode)
+    assert all(
+        n.op.set_instead_of_inc
+        for n in f_const.maker.fgraph.toposort()
+        if isinstance(n.op, AdvancedIncSubtensor1)
+    )
 
 
 @pytest.mark.parametrize(
@@ -2753,8 +3061,9 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
 
     packed = pt.vector("packed")
     if exp_before_materialize:
-        # We test the same optimized result regardless of whether
-        # the diagonals are updated before or after materialization
+        # Same ``L`` two ways: exponentiate the diagonal in the packed vector
+        # before scattering, or (else branch) scatter first and exponentiate the
+        # matrix diagonal. Equivalent, but optimize to different graphs under BlasOpt.
         packed_diag_indices = pt.arange(n + 1).cumsum()[1:] - 1
         log_diag = packed[packed_diag_indices]
         packed_update = packed[packed_diag_indices].set(pt.exp(log_diag))
@@ -2778,7 +3087,6 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
 
     mode = get_default_mode().excluding("fuse_indexed_into_elemwise")
     f = function([packed], [loss, grad], mode=mode)
-    f.dprint(print_shape=True)
 
     idx_types = (
         Subtensor,
@@ -2790,13 +3098,16 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         ExtractDiag,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
-    # The ``BlasOpt`` rewrites lower ``L @ L.T`` to ``Gemm``; the gradient then
-    # fuses the diagonal-gradient term into a ``Gemm`` operand, materializing one
-    # extra set-subtensor. A linker that cannot use them lists ``BlasOpt`` in
-    # ``incompatible_rewrites`` (e.g. the numba linker), keeping the plain ``Dot``
-    # lowering with that term as a vector. Both lowerings are correct.
+    # Post-materialization, the log-det gradient is a diagonal matrix added to
+    # ``L@L.T`` at the matrix level; BlasOpt's GemmOptimizer fuses ``add(dot, C)``
+    # into one Gemm, materializing that diagonal as one extra set-subtensor (7 ops).
+    # Pre-materialization keeps the term in the packed vector's index space, so
+    # there's no matrix-level add to fuse (6 ops). Without Gemm (BlasOpt in the
+    # linker's incompatible_rewrites, e.g. numba) the term never reaches the matrix
+    # and both collapse to 6. All lowerings are correct.
     blas_rewrites_run = "BlasOpt" not in f.maker.mode.linker.incompatible_rewrites
-    assert n_idx == (7 if blas_rewrites_run else 6)
+    expected_n_idx = 7 if (blas_rewrites_run and not exp_before_materialize) else 6
+    assert n_idx == expected_n_idx
 
     x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
     # Expected values were computed once by running ``f(x)``.

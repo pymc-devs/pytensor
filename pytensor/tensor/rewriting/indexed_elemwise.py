@@ -368,6 +368,12 @@ class FuseIndexedElemwise(GraphRewriter):
         pairs = []
         for axis, entry in enumerate(op.idx_list):
             if isinstance(entry, slice):
+                # The fused loop substitutes the full source array and iterates
+                # non-indexed axes wholesale, so it can only carry a full slice.
+                # A bounded/stepped basic slice would change the axis extent or
+                # offset, which it can't represent -- don't fuse.
+                if entry != slice(None):
+                    return None
                 continue
             idx = idx_vars[entry]
             if not isinstance(idx, TensorVariable) or idx.type.dtype == "bool":
