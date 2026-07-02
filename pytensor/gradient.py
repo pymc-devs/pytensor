@@ -698,11 +698,11 @@ def grad(
         roots = ([cost] if cost is not None else []) + list(known_grads or ())
         for rewrite in _grad_graph_rewriters:
             roots = rewrite(roots, boundaries)
-        roots = iter(roots)
+        roots_iter = iter(roots)
         if cost is not None:
-            cost = next(roots)
+            cost = next(roots_iter)
         if known_grads:
-            known_grads = dict(zip(roots, known_grads.values(), strict=True))
+            known_grads = dict(zip(roots_iter, known_grads.values(), strict=True))
 
     outputs = []
     if cost is not None:

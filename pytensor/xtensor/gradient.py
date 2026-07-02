@@ -8,6 +8,8 @@ then differentiates the unit as a whole through the ordinary tensor rules. The l
 happens here, in a graph pass registered with ``grad``, never inside an Op's pullback.
 """
 
+from typing import cast
+
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import register_grad_graph_rewriter
 from pytensor.graph.basic import Constant, Variable
@@ -41,18 +43,18 @@ def _is_xtensor(var: Variable) -> bool:
 def _to_tensor_world(var: Variable) -> Variable:
     """Convert an xtensor-world variable to its tensor-world equivalent."""
     if isinstance(var.type, XTensorType):
-        return tensor_from_xtensor(var)
+        return cast(Variable, tensor_from_xtensor(var))
     if isinstance(var.type, XRandomGeneratorType):
-        return xrng_to_rng(var)
+        return cast(Variable, xrng_to_rng(var))
     return var
 
 
 def _from_tensor_world(var: Variable, dummy: Variable) -> Variable:
     """Rebuild the xtensor-world equivalent of ``var`` from a tensor-world dummy."""
     if isinstance(var.type, XTensorType):
-        return xtensor_from_tensor(dummy, dims=var.type.dims)
+        return cast(Variable, xtensor_from_tensor(dummy, dims=var.type.dims))
     if isinstance(var.type, XRandomGeneratorType):
-        return rng_to_xrng(dummy)
+        return cast(Variable, rng_to_xrng(dummy))
     return dummy
 
 
@@ -111,10 +113,16 @@ def _collapse_region(
     inner = [_from_tensor_world(v, d) for v, d in zip(inputs, dummies)]
     if inputs:
         [region] = graph_replace([exit_var], dict(zip(inputs, inner)), strict=False)
-        [lowered] = rewrite_graph([region], include=("lower_xtensor",), clone=False)
+        [lowered] = cast(
+            list[Variable],
+            rewrite_graph([region], include=("lower_xtensor",), clone=False),
+        )
     else:
         # Fully constant region: lower it in place, nothing to differentiate through.
-        [lowered] = rewrite_graph([exit_var], include=("lower_xtensor",), clone=True)
+        [lowered] = cast(
+            list[Variable],
+            rewrite_graph([exit_var], include=("lower_xtensor",), clone=True),
+        )
 
     if any(
         var.owner is not None
@@ -133,7 +141,7 @@ def _collapse_region(
         return lowered
     unit = OpFromGraph(dummies, [lowered], inline=True)
     [new_exit] = unit(*outer_inputs, return_list=True)
-    return new_exit
+    return cast(Variable, new_exit)
 
 
 @register_grad_graph_rewriter
