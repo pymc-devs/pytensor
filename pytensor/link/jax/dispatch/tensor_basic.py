@@ -20,7 +20,8 @@ from pytensor.tensor.basic import (
     get_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.subtensor import Subtensor
 
 
 ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange` to be constants.
@@ -62,13 +63,18 @@ def jax_funcify_ARange(op, node, **kwargs):
     arange_args = node.inputs
     constant_args = []
     for arg in arange_args:
-        if arg.owner and isinstance(arg.owner.op, Shape_i):
-            constant_args.append(None)
-        elif isinstance(arg, Constant):
-            constant_args.append(arg.value)
-        else:
-            # TODO: This might be failing without need (e.g., if arg = shape(x)[-1] + 1)!
-            raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
+        # Under JAX tracing an array's shape is concrete, so any element of it is a
+        # valid ``arange`` bound
+        match arg.owner_op_and_inputs:
+            case (Shape_i(), *_):
+                constant_args.append(None)
+            case (Subtensor(), shape_var, *_) if isinstance(shape_var.owner_op, Shape):
+                constant_args.append(None)
+            case _ if isinstance(arg, Constant):
+                constant_args.append(arg.value)
+            case _:
+                # TODO: This might be failing without need (e.g., if arg = shape(x)[-1] + 1)!
+                raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
 
     constant_start, constant_stop, constant_step = constant_args
 
