@@ -1,16 +1,10 @@
 from collections.abc import Sequence
 
 from pytensor.compile.ops import TypeCastingOp
-from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph import Apply, Op
 from pytensor.graph.basic import Variable
-from pytensor.tensor.type import TensorType, continuous_dtypes
+from pytensor.tensor.type import TensorType
 from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
-
-
-def grad_connected(var: Variable) -> bool:
-    """Whether an XOp input can carry a cotangent (a continuous-dtype xtensor)."""
-    return isinstance(var.type, XTensorType) and var.type.dtype in continuous_dtypes
 
 
 class XOp(Op):
@@ -24,57 +18,10 @@ class XOp(Op):
     def do_constant_folding(self, fgraph, node):
         return False
 
-    def pullback(self, inputs, outputs, cotangents):
-        # XOps carry no gradient of their own. Defer to LazyGrad, which the
-        # expand_lazy_grad rewrite differentiates by lowering core_op to tensor ops and
-        # taking their pullback, so no XOp runs lowering inside its own pullback. Discrete
-        # xtensor inputs (e.g. integer indices) have an undefined gradient; structural
-        # inputs (slices, rngs) are disconnected.
-        from pytensor.xtensor.shape import zeros_like
-
-        # A disconnected cotangent (no contribution from that output) becomes a zero,
-        # so LazyGrad never takes a DisconnectedType as an input.
-        cotangents = [
-            zeros_like(out) if isinstance(cot.type, DisconnectedType) else cot
-            for cot, out in zip(cotangents, outputs)
-        ]
-        grads = iter(
-            LazyGrad(self, len(outputs))(*inputs, *cotangents, return_list=True)
-        )
-        return [
-            next(grads)
-            if grad_connected(inp)
-            else grad_undefined(self, i, inp)
-            if isinstance(inp.type, XTensorType)
-            else disconnected_type()
-            for i, inp in enumerate(inputs)
-        ]
-
     def vectorize_node(
         self, node, *new_inputs, new_dim: str | None
     ) -> Sequence[Variable]:
         raise NotImplementedError(f"Vectorized node not implemented for {self}")
-
-
-class LazyGrad(XOp):
-    """Deferred vector-Jacobian product of another XOp.
-
-    Wraps the differentiated ``core_op`` with its inputs and the output cotangents. The
-    ``expand_lazy_grad`` rewrite differentiates it by lowering ``core_op`` to tensor ops
-    and taking their pullback, so no XOp ever runs lowering inside its own pullback.
-    There is one output per differentiable (continuous-dtype) input.
-    """
-
-    __props__ = ("core_op", "n_cotangents")
-
-    def __init__(self, core_op: Op, n_cotangents: int):
-        self.core_op = core_op
-        self.n_cotangents = n_cotangents
-
-    def make_node(self, *inputs):
-        forward_inputs = inputs[: -self.n_cotangents]
-        outputs = [inp.type() for inp in forward_inputs if grad_connected(inp)]
-        return Apply(self, list(inputs), outputs)
 
 
 class XTypeCastOp(TypeCastingOp):
@@ -173,7 +120,7 @@ class Rename(XTypeCastOp):
     def pullback(self, inputs, outs, g_outs):
         [x] = inputs
         [g_out] = g_outs
-        return [type(self)(x.type.dims)(g_out)]
+        return [rename(g_out, dims=x.type.dims)]
 
     def vectorize_node(self, node, new_x, new_dim):
         [old_x] = node.inputs

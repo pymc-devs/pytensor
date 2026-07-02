@@ -12,24 +12,10 @@ from pytensor.xtensor.type import XTensorVariable
 
 lower_xtensor_db = EquilibriumDB(ignore_newtrees=False)
 
-# Expanding the lazy gradient Op (LazyGrad) rewrites a whole grad subgraph in one shot,
-# which is unsafe to splice into the lower_xtensor equilibrium mid-flight. It runs just
-# before it instead, so the expanded grad is lowered by the normal pass like any other.
-lower_lazy_grad_db = EquilibriumDB(ignore_newtrees=False)
-
 infer_shape_db.register(
     "lower_xtensor",
     lower_xtensor_db,
     "infer_shape",
-)
-
-optdb.register(
-    "lower_lazy_grad",
-    lower_lazy_grad_db,
-    "fast_run",
-    "fast_compile",
-    "minimum_compile",
-    position=0.089,  # before lower_xtensor
 )
 
 optdb.register(
@@ -76,19 +62,6 @@ def register_lower_xtensor(
             **kwargs,
         )
         return node_rewriter
-
-
-def register_lower_lazy_grad(node_rewriter: NodeRewriter, **kwargs):
-    name = kwargs.pop("name", None) or node_rewriter.__name__  # type: ignore
-    lower_lazy_grad_db.register(
-        name,
-        node_rewriter,
-        "fast_run",
-        "fast_compile",
-        "minimum_compile",
-        **kwargs,
-    )
-    return node_rewriter
 
 
 def lower_aligned(x: XTensorVariable, out_dims: Sequence[str]) -> TensorVariable:
