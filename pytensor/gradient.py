@@ -47,6 +47,25 @@ def _match_tangent_dtype(var: Variable, tangent: Variable) -> Variable:
 grad_time: float = 0.0
 
 
+# Hooks that rewrite the graph being differentiated before the gradient traversal.
+# A subsystem whose Ops are not differentiable node-by-node (e.g. xtensor, which is
+# only meaningful once lowered to tensor Ops) registers one to collapse such a region
+# into a single differentiable node, so `grad` handles it as a unit. Each hook takes
+# the differentiated outputs and the boundary variables (`wrt` and `consider_constant`,
+# which must stay reachable) and returns rewritten outputs.
+_grad_graph_rewriters: list[
+    Callable[[list[Variable], list[Variable]], list[Variable]]
+] = []
+
+
+def register_grad_graph_rewriter(
+    fn: Callable[[list[Variable], list[Variable]], list[Variable]],
+) -> Callable[[list[Variable], list[Variable]], list[Variable]]:
+    """Register a hook applied to the graph being differentiated by `grad`."""
+    _grad_graph_rewriters.append(fn)
+    return fn
+
+
 # TODO: Add `overload` variants
 def as_list_or_tuple[V: Variable | None](
     use_list: bool, use_tuple: bool, outputs: V | Sequence[V]
@@ -670,6 +689,20 @@ def grad(
         _wrt: list[Variable] = [wrt]
     else:
         _wrt = list(wrt)
+
+    if _grad_graph_rewriters and (cost is not None or known_grads):
+        # Let a subsystem (e.g. xtensor) collapse a region it only differentiates as a
+        # whole into a single node before traversal. `wrt` and `consider_constant` are
+        # kept as graph inputs so grad can still reach (and stop at) them after collapse.
+        boundaries = [*_wrt, *(consider_constant or ())]
+        roots = ([cost] if cost is not None else []) + list(known_grads or ())
+        for rewrite in _grad_graph_rewriters:
+            roots = rewrite(roots, boundaries)
+        roots_iter = iter(roots)
+        if cost is not None:
+            cost = next(roots_iter)
+        if known_grads:
+            known_grads = dict(zip(roots_iter, known_grads.values(), strict=True))
 
     outputs = []
     if cost is not None:
