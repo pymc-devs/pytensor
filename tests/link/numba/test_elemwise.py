@@ -552,6 +552,15 @@ def test_Argmax(x, axes, exc):
         )
 
 
+@pytest.mark.parametrize("reduce_fn", [ptm.max, ptm.min], ids=["max", "min"])
+@pytest.mark.parametrize("axis", [None, 0], ids=str)
+def test_max_min_nan_propagation(reduce_fn, axis):
+    x = pt.matrix("x", dtype="float64")
+    x_test_value = rng.random(size=(3, 2))
+    x_test_value[1, 1] = np.nan
+    compare_numba_and_py([x], [reduce_fn(x, axis=axis)], [x_test_value])
+
+
 def test_elemwise_inplace_out_type():
     # Create a graph with an elemwise
     # Ravel failes if the elemwise output type is reported incorrectly
