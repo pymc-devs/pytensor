@@ -305,7 +305,7 @@ class Mode:
     def __init__(
         self,
         linker: str | Linker | None = None,
-        optimizer: str | RewriteDatabaseQuery = "default",
+        optimizer: str | RewriteDatabaseQuery | GraphRewriter = "default",
         db: RewriteDatabase = None,
     ):
         if linker is None:

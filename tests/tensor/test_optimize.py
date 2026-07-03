@@ -475,8 +475,11 @@ def test_optimize_grad_scalar_arg(optimize_op):
     obj = tensor_from_scalar((scalar_from_tensor(x) + theta_scalar) ** 2)
     x0, _ = optimize_op(obj, x)
 
-    # Confirm theta is a direct input to the node
-    assert x0.owner.inputs[1] is theta_scalar
+    # Confirm theta reaches the node. Scalar-typed parameters are wrapped as a
+    # tensor at the op boundary (so scipy, which deals in arrays, gets an
+    # ndarray), hence theta_scalar shows up under a tensor_from_scalar wrapper.
+    node_arg = x0.owner.inputs[1]
+    assert node_arg.owner is not None and node_arg.owner.inputs[0] is theta_scalar
 
     grad_wrt_theta = pt.grad(x0, theta)
     np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: np.e}), -1)
