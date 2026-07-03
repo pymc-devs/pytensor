@@ -21,11 +21,15 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
+from pytensor.link.vm import VMLinker
 from pytensor.printing import debugprint
+from pytensor.scan.basic import scan
 from pytensor.tensor.basic import constant
 from pytensor.tensor.math import dot, exp, sigmoid
 from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.random.basic import normal
+from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.rewriting.shape import ShapeOptimizer
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import (
@@ -795,3 +799,45 @@ OpFromGraph{inline=False} [id A]
 
     for truth, out in zip(exp_res.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
+
+
+@config.change_flags(mode="NUMBA")
+def test_inner_fn_never_uses_jit_default_mode():
+    # The lazily-linked inner fn stays in the py/c backend family regardless of
+    # the config default mode (NUMBA here): ``perform`` only ever runs under that
+    # family -- JIT backends funcify ``op.fgraph`` directly -- and the inner graph
+    # was baked for py/c, not for the JIT backend.
+    x = vector("x")
+
+    # Direct access links with the python VM (no C compilation)
+    op = OpFromGraph([x], [x + 1])
+    linker = op.fn.maker.mode.linker
+    assert isinstance(linker, VMLinker) and not linker.use_cloop
+
+    # Executed through an outer (cvm) function, the perform path still links a VM
+    fn = function([x], op(x), mode=Mode(linker="cvm", optimizer=None))
+    [node] = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, OpFromGraph)]
+    np.testing.assert_allclose(fn([1.0, 2.0]), [2.0, 3.0])
+    assert isinstance(node.op.fn.maker.mode.linker, VMLinker)
+
+    # The impl -> linker rule: an explicit C request uses cvm, everything else vm
+    assert op.link_mode("c").linker.use_cloop
+    assert not op.link_mode("py").linker.use_cloop
+    assert not op.link_mode(None).linker.use_cloop
+
+
+@config.change_flags(mode="NUMBA")
+def test_perform_with_inner_scan_rvs():
+    # A Scan inside the inner graph carries raw RandomVariables that only the
+    # JIT inner-graph rewrites could handle; ``perform``-based execution must
+    # therefore not compile the inner fn for a JIT default mode.
+    rng = random_generator_type("rng")
+    xs, _ = scan(
+        fn=lambda rng: normal(rng=rng, return_next_rng=True)[1],
+        non_sequences=[rng],
+        n_steps=2,
+    )
+    op = OpFromGraph([rng], [xs])
+    out = op(shared(np.random.default_rng(0)))
+    fn = function([], out, mode=Mode(linker="py", optimizer=None))
+    assert fn().shape == (2,)

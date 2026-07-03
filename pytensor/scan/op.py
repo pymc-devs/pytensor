@@ -59,6 +59,7 @@ from pytensor import tensor as pt
 from pytensor.compile.aliasing import add_supervisor_to_fgraph
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
 from pytensor.compile.debug.profiling import register_profiler_printer
+from pytensor.compile.inner_function import HasInnerFunction, link_only_mode
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.configdefaults import config
@@ -76,7 +77,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
-from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
+from pytensor.graph.op import Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasShape
@@ -835,7 +836,7 @@ class ScanMethodsMixin:
                     )
 
 
-class Scan(Op, ScanMethodsMixin, HasInnerGraph):
+class Scan(HasInnerFunction, Op, ScanMethodsMixin):
     r"""An `Op` implementing `for` and `while` loops.
 
     This `Op` has an "inner-graph" that represents the steps performed during
@@ -1542,12 +1543,26 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         return wrapped_inputs, wrapped_outputs
 
-    @property
-    def fn(self):
-        """Lazily compile the inner function graph."""
-        if getattr(self, "_fn", None) is not None:
-            return self._fn
+    def link_mode(self, impl):
+        # ``self.mode`` is a deprecated per-op override, respected when given:
+        # its linker is used as-is. Otherwise the default py/c rule applies,
+        # except FAST_COMPILE forces the pure-python VM.
+        mode = self.mode
+        if mode in (None, "FAST_RUN"):
+            return super().link_mode(impl)
+        if mode == "FAST_COMPILE":
+            return link_only_mode(VMLinker(use_cloop=False, c_thunks=False))
+        linker = get_mode(mode).clone(link_kwargs=dict(allow_gc=self.allow_gc)).linker
+        # Scan's python/cython perform sets preallocated MIT-MOT updates through
+        # the VM, which only a VMLinker provides.
+        if any(self.mitmots_preallocated) and not isinstance(linker, VMLinker):
+            raise NotImplementedError(
+                "Python/Cython implementation of Scan with preallocated MIT-MOT "
+                f"outputs requires a VMLinker, got {linker}"
+            )
+        return link_only_mode(linker)
 
+    def compile_fn(self, mode):
         # Compile a throwaway copy of the (already math-optimized) inner graph.
         # The canonical inner graph is immutable; linking setup (MIT-MOT update
         # wrapping, supervisor) and any inplace happen on this transient.
@@ -1565,45 +1580,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         elif self.profile:
             profile = self.profile
 
-        # ``inner_fgraph`` is already backend-optimized (inplace included):
-        # ``scan_inner_graph`` ran the backend optimizer on it during the outer
-        # compile. So we only need to link it (``prepare_fgraph`` still inserts the
-        # boundary deepcopies). The linker forces ``minimum_compile`` back in via
-        # its ``required_rewrites``, and (for an inner graph) ``minimum_compile``
-        # *is* that inner-graph rewrite -- so we exclude ``compile_inner_graph`` to
-        # stop it re-baking an already-baked graph. Only the linker choice depends
-        # on ``self.mode``.
-        mode = self.mode
-        if mode in (None, "FAST_RUN"):
-            mode_instance = Mode("cvm", "minimum_compile").excluding(
-                "compile_inner_graph"
-            )
-        elif mode == "FAST_COMPILE":
-            mode_instance = Mode(
-                VMLinker(use_cloop=False, c_thunks=False), "minimum_compile"
-            ).excluding("compile_inner_graph")
-        else:
-            mode_instance = (
-                get_mode(mode)
-                .clone(
-                    optimizer="minimum_compile",
-                    link_kwargs=dict(allow_gc=self.allow_gc),
-                    message=f"{self.name or 'Scan'} sub profile",
-                )
-                .excluding("compile_inner_graph")
-            )
-            # Scan python and cython perform relies on the VM being able to set updates for preallocated MIT-MOT,
-            # which only the VMs produced by VMLinker do
-            if any(self.mitmots_preallocated) and not isinstance(
-                mode_instance.linker, VMLinker
-            ):
-                raise NotImplementedError(
-                    f"Python/Cython implementation of Scan with preallocated MIT-MOT outputs requires a VMLinker, got {mode_instance.linker}"
-                )
-        self._fn = mode_instance.function_maker(
+        return mode.function_maker(
             wrapped_inputs,
             wrapped_outputs,
-            mode=mode_instance,
+            mode=mode,
             # The (already-optimized) inner graph may carry inplace ops baked in
             # by scan_inner_graph; prepare_fgraph has already attached the
             # DestroyHandler + Supervisor, so accept them here.
@@ -1612,19 +1592,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             on_unused_input="ignore",
             fgraph=inner_fgraph,
         ).create()
-
-        return self._fn
-
-    @property
-    def inner_inputs(self):
-        # A list (not the frozen tuple) so the many ``inner_*`` slicing helpers
-        # and their callers keep list semantics. These are read-only views of the
-        # immutable graph; rewrites that rebuild a Scan must ``unfreeze`` first.
-        return list(self.fgraph.inputs)
-
-    @property
-    def inner_outputs(self):
-        return list(self.fgraph.outputs)
 
     def clone(self) -> "Scan":
         # The inner graph is immutable (a frozen ``FunctionGraph``), so there is
@@ -1685,6 +1652,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # Before building the thunk, validate that the inner graph is
         # coherent
         self.validate_inner_graph()
+
+        # Lazily link the inner function for this thunk's backend (see
+        # ``HasInnerFunction``); Scan drives the resulting VM itself below.
+        if self._fn is None:
+            self._fn = self.compile_fn(self.link_mode(impl))
 
         # Setting up all my variables in what I believe is a more Cython
         # friendly form

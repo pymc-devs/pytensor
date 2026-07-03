@@ -8,8 +8,7 @@ from collections.abc import Callable, Sequence
 from copy import copy
 from functools import partial
 
-from pytensor.compile.io import In, Out
-from pytensor.compile.mode import get_mode
+from pytensor.compile.inner_function import HasInnerFunction
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import DisconnectedType, disconnected_type, grad, pushforward
 from pytensor.graph.basic import (
@@ -20,7 +19,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
-from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
+from pytensor.graph.op import Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
@@ -114,7 +113,7 @@ def construct_nominal_fgraph(
     return fgraph
 
 
-class OpFromGraph(Op, HasInnerGraph):
+class OpFromGraph(HasInnerFunction, Op):
     r"""Create an Op from inputs and outputs lists of variables.
 
     The signature is similar to :func:`pytensor.function` and the resulting Op's perform will do
@@ -839,50 +838,6 @@ class OpFromGraph(Op, HasInnerGraph):
                 idx += nb
 
         return ret
-
-    @property
-    def fn(self):
-        """Lazily compile the inner function graph."""
-        if getattr(self, "_fn", None) is not None:
-            return self._fn
-
-        # ``op.fgraph`` is already backend-optimized (inplace included): the
-        # ``ofg_inner_graph`` rewrite ran the backend optimizer on it during the
-        # outer compile. So we only need to link it. The linker forces
-        # ``minimum_compile`` back in via its ``required_rewrites``, and (for an
-        # inner graph) ``minimum_compile`` *is* that inner-graph rewrite -- so we
-        # exclude ``compile_inner_graph`` to stop it re-baking an already-baked
-        # graph. ``prepare_fgraph`` still inserts the boundary deepcopies; passing
-        # ``fgraph=`` avoids a re-clone. Unused inputs (e.g. rng, size) and
-        # internal-only inplace ops are expected and tolerated.
-        mode = (
-            get_mode(None)
-            .clone(optimizer="minimum_compile")
-            .excluding("compile_inner_graph")
-        )
-        unfrozen_fgraph = self.fgraph.unfreeze()
-        self._fn = mode.function_maker(
-            [In(inp, borrow=True) for inp in unfrozen_fgraph.inputs],
-            [Out(out, borrow=True) for out in unfrozen_fgraph.outputs],
-            mode,
-            fgraph=unfrozen_fgraph,
-            accept_inplace=True,
-            on_unused_input="ignore",
-        ).create()
-        self._fn.trust_input = True
-
-        return self._fn
-
-    @property
-    def inner_inputs(self):
-        # A list (not the frozen tuple) so callers that concatenate inner
-        # inputs/outputs keep list semantics. Read-only views of the immutable
-        # graph; manipulating them requires a fresh/unfrozen graph.
-        return list(self.fgraph.inputs)
-
-    @property
-    def inner_outputs(self):
-        return list(self.fgraph.outputs)
 
     def clone(self):
         # The inner graph is immutable (a frozen ``FunctionGraph``), so there is

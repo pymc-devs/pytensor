@@ -23,7 +23,7 @@ from pytensor.tensor.rewriting.basic import register_canonicalize
 def c_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
     # Same contract as ``OpFromGraph``: inputs (the optimization variable + args)
     # must not be mutated, so they are protected; inplace may still be baked
-    # between purely internal buffers. ``build_fn`` then only links this graph.
+    # between purely internal buffers. ``compile_fn`` then only links this graph.
     # The Supervisor is needed even with no mutable inputs: it is the feature that
     # vetoes input-destroying inplace rewrites while ``mode.optimizer`` runs them.
     input_specs = [In(x, borrow=True, mutable=False) for x in inner.inputs]
@@ -38,7 +38,7 @@ def c_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
 def jit_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
     # JIT backends manage memory themselves, so leave the inner graph functional.
     # (Unlike ``OpFromGraph`` under numba, no deepcopies are baked in either: a
-    # scipy op is never funcified -- it always perform-links via ``build_fn``,
+    # scipy op is never funcified -- it always perform-links via ``compile_fn``,
     # whose ``FunctionMaker`` pass inserts the boundary deepcopies.)
     mode.excluding("inplace").optimizer.rewrite(inner)
 
