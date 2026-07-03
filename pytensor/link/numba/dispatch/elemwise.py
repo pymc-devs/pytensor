@@ -374,8 +374,11 @@ def create_multiaxis_reducer(
         else:
             identity = np.iinfo(acc_dtype).min
 
-    # Make sure it has the correct dtype
-    identity = getattr(np, acc_dtype.name)(identity)
+    # Make sure it has the correct dtype. Cast through ``astype`` rather than the
+    # scalar constructor so a negative identity (``-1`` for bitwise AND) wraps
+    # into an unsigned acc_dtype like C does instead of raising: ``np.uint64(-1)``
+    # is out of range, but ``-1`` cast to uint64 is all-ones -- the AND identity.
+    identity = np.asarray(identity).astype(acc_dtype)[()]
 
     kept_axes = [i for i in range(ndim) if i not in axes]
     n_kept = len(kept_axes)
