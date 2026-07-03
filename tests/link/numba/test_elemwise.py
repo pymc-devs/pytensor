@@ -10,7 +10,7 @@ from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
-from pytensor.scalar import Composite, float64
+from pytensor.scalar import Composite, and_, float64, or_, xor
 from pytensor.scalar import add as scalar_add
 from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -381,6 +381,18 @@ def test_CAReduce_acc_complex_out_float(axis):
     x = matrix("x", dtype="complex128")
     out = x.sum(dtype="float64", axis=axis)
     test_x = np.array([[1 + 0.5j, 2 - 0.5j], [3 + 0.5j, 4 - 0.5j]], dtype="complex128")
+    compare_numba_and_py([x], [out], [test_x])
+
+
+@pytest.mark.parametrize("dtype", ("uint8", "uint32", "int16"))
+@pytest.mark.parametrize("scalar_op", (and_, or_, xor), ids=("and", "or", "xor"))
+def test_CAReduce_bitwise(scalar_op, dtype):
+    # Bitwise AND has identity -1, which must wrap into an unsigned acc_dtype
+    # instead of raising when coerced (regression: np.uint64(-1) overflowed).
+    x = pt.vector("x", dtype=dtype)
+    out = CAReduce(scalar_op, axis=None)(x)
+    hi = min(int(np.iinfo(dtype).max), 2**16)
+    test_x = np.random.default_rng(1).integers(0, hi, size=9).astype(dtype)
     compare_numba_and_py([x], [out], [test_x])
 
 
