@@ -9,14 +9,17 @@ eliminating materialised intermediate arrays.
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import node_rewriter
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite
+from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
+from pytensor.tensor.rewriting.subtensor import _is_shape_of_x_at
 from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -95,6 +98,51 @@ def _unwrap_axis_swapped_subtensor1(fgraph, var):
     return source, idx_var, axis
 
 
+def _unwrap_reshaped_take(fgraph, reshape_node):
+    """Unwrap ``Reshape(AdvancedSubtensor1(x, idx), S)`` into an ND take.
+
+    Matches any reshape that regroups only the taken axis: the leading and
+    trailing entries of ``S`` must provably pass through ``source``'s dims
+    (``transform_take``'s flatten+reshape form is the common instance). The
+    regrouped block becomes the ND index, so ``x[idx].reshape(S)`` turns into
+    ``x[idx.reshape(S[axis:...])]`` — the index reshape raises on exactly the
+    sizes the original reshape would have raised on. Returns
+    ``(source, nd_idx, axis)``, or ``None`` if the node doesn't match.
+    """
+    result = _unwrap_axis_swapped_subtensor1(fgraph, reshape_node.inputs[0])
+    if result is None:
+        return None
+    source, idx, axis = result
+
+    shape_input = reshape_node.inputs[1]
+    if isinstance(shape_input, Constant):
+        entries = [int(v) for v in shape_input.data]
+    elif shape_input.owner is not None and isinstance(shape_input.owner.op, MakeVector):
+        entries = list(shape_input.owner.inputs)
+    else:
+        return None
+
+    n_trail = source.type.ndim - axis - 1
+    k = len(entries) - axis - n_trail
+    if k < 2:
+        return None
+
+    def passes_through(entry, dim):
+        if isinstance(entry, int):
+            return source.type.shape[dim] == entry
+        return _is_shape_of_x_at(entry, source, dim)
+
+    if not all(passes_through(entries[d], d) for d in range(axis)):
+        return None
+    if not all(
+        passes_through(entries[axis + k + t], axis + 1 + t) for t in range(n_trail)
+    ):
+        return None
+
+    nd_idx = idx.reshape(entries[axis : axis + k])
+    return source, nd_idx, axis
+
+
 @node_rewriter([OpPattern(DimShuffle, is_transpose=True)])
 def undo_take_dimshuffle_for_fusion(fgraph, node):
     """Undo ``DimShuffle(AdvancedSubtensor1(DimShuffle(x), idx))`` -> ``AdvancedSubtensor(x, :, ..., idx, :, ...)``.
@@ -106,7 +154,7 @@ def undo_take_dimshuffle_for_fusion(fgraph, node):
     on the correct axis.
 
     See also ``undo_take_reshape_for_fusion`` which handles the analogous
-    Reshape+flatten pattern for ND indices.
+    Reshape pattern for ND indices.
     """
     # Outer DimShuffle must be consumed only by a single Elemwise
     clients = fgraph.clients[node.outputs[0]]
@@ -130,12 +178,14 @@ def undo_take_dimshuffle_for_fusion(fgraph, node):
 
 @node_rewriter([Reshape])
 def undo_take_reshape_for_fusion(fgraph, node):
-    """Undo ``Reshape(AdvancedSubtensor1(x, flatten(idx)), shape)`` for ND indices.
+    """Rewrite ``Reshape(AdvancedSubtensor1(x, idx), S)`` into an ND take.
 
-    ``transform_take`` rewrites ``x[mat_idx]`` (ND integer index) into
-    ``AdvancedSubtensor1(x, mat_idx.ravel()).reshape(mat_idx.shape + ...)``,
-    possibly with DimShuffle axis-swaps for non-zero axes.  This rewrite
-    undoes that so ``FuseIndexedElemwise`` can absorb the ND index directly.
+    Turns a take whose result is reshaped only along the taken axis into a
+    single ``AdvancedSubtensor`` with an ND index, so ``FuseIndexedElemwise``
+    can absorb the indexing directly.  Covers the ``transform_take`` normal
+    form for ND indices (``x[mat_idx]`` becomes ``x[mat_idx.ravel()].reshape(
+    mat_idx.shape + ...)``) but also any equivalent regrouping; see
+    ``_unwrap_reshaped_take`` for the exact conditions.
     """
     [reshape_out] = node.outputs
 
@@ -147,25 +197,16 @@ def undo_take_reshape_for_fusion(fgraph, node):
     if not isinstance(client_node.op, Elemwise):
         return None
 
-    result = _unwrap_axis_swapped_subtensor1(fgraph, node.inputs[0])
+    result = _unwrap_reshaped_take(fgraph, node)
     if result is None:
         return None
-    source, flat_idx, axis = result
+    source, nd_idx, axis = result
 
-    # The index input to AdvancedSubtensor1 must be Reshape{1}(mat_idx, [-1]) (flatten)
-    if flat_idx.owner is None or not isinstance(flat_idx.owner.op, Reshape):
-        return None
-    if flat_idx.owner.op.ndim != 1:
-        return None
-    mat_idx = flat_idx.owner.inputs[0]
-    if mat_idx.ndim < 2:
-        return None
-
-    # Build AdvancedSubtensor: source[:, ..., mat_idx, :, ...]
+    # Build AdvancedSubtensor: source[:, ..., nd_idx, :, ...]
     src_ndim = source.type.ndim
     idx_list = [slice(None)] * src_ndim
     idx_list[axis] = 0  # pointer to the single index variable
-    new_out = AdvancedSubtensor(idx_list=idx_list)(source, mat_idx)
+    new_out = AdvancedSubtensor(idx_list=idx_list)(source, nd_idx)
     return [new_out]
 
 
