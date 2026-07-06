@@ -21,7 +21,6 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     Subtensor,
     indices_from_subtensor,
 )
@@ -196,7 +195,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
     }
 
 
-@node_rewriter([Subtensor, AdvancedSubtensor1, AdvancedSubtensor])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_rv_lift(fgraph, node):
     """Lift a ``*Subtensor`` through ``RandomVariable`` inputs.
 

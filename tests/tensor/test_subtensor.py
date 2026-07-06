@@ -29,9 +29,7 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
     _is_provably_non_negative,
@@ -85,8 +83,8 @@ from tests.tensor.utils import inplace_func, integers_ranged, random
 subtensor_ops = (
     Subtensor,
     IncSubtensor,
-    AdvancedSubtensor1,
-    AdvancedIncSubtensor1,
+    AdvancedSubtensor,
+    AdvancedIncSubtensor,
 )
 
 
@@ -421,8 +419,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
         self.dtype = config.floatX
         mode = pytensor.compile.mode.get_default_mode()
         self.mode = mode.including(
-            "local_replace_AdvancedSubtensor",
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_useless_subtensor",
         ).excluding("bool_idx_to_nonzero", "fuse_indexed_into_elemwise")
         self.fast_compile = config.mode == "FAST_COMPILE"
@@ -676,7 +672,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             (1, Subtensor, np.index_exp[..., 1, 2, 3]),
             (1, Subtensor, np.index_exp[1, ..., 2, 3]),
             (1, Subtensor, np.index_exp[1, 2, 3, ...]),
-            (3, DimShuffle, np.index_exp[..., [0, 2, 3]]),
+            (1, AdvancedSubtensor, np.index_exp[..., [0, 2, 3]]),
             (1, DimShuffle, np.index_exp[np.newaxis, ...]),
             (
                 # ``[1, 2]`` is folded to a basic slice by
@@ -961,7 +957,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             t = n[idx]
 
             val = self.eval_output_and_check(
-                t, op_type=AdvancedSubtensor1, mode=shape_safe_mode
+                t, op_type=AdvancedSubtensor, mode=shape_safe_mode
             )
             if isinstance(idx, list):
                 good = data[idx]
@@ -971,21 +967,9 @@ class TestSubtensor(utt.OptimizationTestMixin):
             assert np.allclose(val, good), (val, good)
 
             # Test reuse of output memory
-            if type(AdvancedSubtensor1) is AdvancedSubtensor1:
-                op = AdvancedSubtensor1()
-                # When idx is a TensorConstant.
-                if hasattr(idx, "data"):
-                    idx = idx.data
-                test_out = [[None]]
-                op.perform(None, [data, idx], test_out)
-                out1 = test_out[0][0]
-                op.perform(None, [data, idx], test_out)
-                out2 = test_out[0][0]
-                assert out1 is out2
-
             # test the grad
             gn = pytensor.grad(t.sum(), n)
-            g = self.function([], gn, op=AdvancedIncSubtensor1)
+            g = self.function([], gn, op=AdvancedIncSubtensor)
             utt.verify_grad(
                 lambda m: m[[1, 3]],
                 [np.random.random((5, 5)).astype(self.dtype)],
@@ -999,7 +983,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         idx = [2, 2, 0, 0, 1, 1]
         n = self.shared(data)
         t = n[self.shared(np.asarray(idx).astype("int64"))[::2]]
-        val = self.eval_output_and_check(t, op_type=AdvancedSubtensor1, length=2)
+        val = self.eval_output_and_check(t, op_type=AdvancedSubtensor, length=2)
         utt.assert_allclose(data[idx[::2]], val)
 
     def test_err_invalid_list(self):
@@ -1017,12 +1001,12 @@ class TestSubtensor(utt.OptimizationTestMixin):
         l = lvector()
         t = n[l]
 
-        f = self.function([l], t, op=AdvancedSubtensor1)
+        f = self.function([l], t, op=AdvancedSubtensor)
 
         g = self.function(
             [l],
             inc_subtensor(t, np.asarray([[1.0]], self.dtype)),
-            op=AdvancedIncSubtensor1,
+            op=AdvancedIncSubtensor,
         )
 
         for shp in [[0, 4], [0, -3], [-10]]:
@@ -1037,11 +1021,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         idx = lvector()
         t = n[idx]
 
-        f = self.function([idx], t, op=AdvancedSubtensor1)
+        f = self.function([idx], t, op=AdvancedSubtensor)
         topo = f.maker.fgraph.toposort()
         topo_ = [node for node in topo if not isinstance(node.op, DeepCopyOp)]
         assert len(topo_) == 1
-        assert isinstance(topo_[0].op, AdvancedSubtensor1)
+        assert isinstance(topo_[0].op, AdvancedSubtensor)
         f_0 = f([0])
         assert f_0.shape == (1, 3)
         assert np.allclose(f_0, v * 5)
@@ -1054,7 +1038,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         # Test the gradient
         c = t.sum()
         gn = pytensor.grad(c, n)
-        g = self.function([idx], gn, op=AdvancedIncSubtensor1)
+        g = self.function([idx], gn, op=AdvancedIncSubtensor)
         g_0 = g([0])
         assert g_0.shape == (1, 3)
         assert np.allclose(g_0, 1)
@@ -1103,12 +1087,9 @@ class TestSubtensor(utt.OptimizationTestMixin):
         h = set_subtensor(h[indexes], h[indexes])
         g = pytensor.grad(h.sum(), W)
         N = 2
-        if (
-            config.mode == "FAST_COMPILE"
-            and AdvancedIncSubtensor1 is AdvancedIncSubtensor1
-        ):
+        if config.mode == "FAST_COMPILE":
             N = 3
-        f = self.function([x], g, op=AdvancedIncSubtensor1, N=N)
+        f = self.function([x], g, op=AdvancedIncSubtensor, N=N)
 
         f(np.random.random((10, 10, 3, 3)).astype(self.dtype))
 
@@ -1120,11 +1101,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert idx.type.shape == (1,)
         t = n[idx]
 
-        f = self.function([idx], t, op=AdvancedSubtensor1)
+        f = self.function([idx], t, op=AdvancedSubtensor)
         topo = f.maker.fgraph.toposort()
         topo_ = [node for node in topo if not isinstance(node.op, DeepCopyOp)]
         assert len(topo_) == 1
-        assert isinstance(topo_[0].op, AdvancedSubtensor1)
+        assert isinstance(topo_[0].op, AdvancedSubtensor)
         f_0 = f([0])
         assert f_0.shape == (1, 3)
         assert np.allclose(f_0, 5)
@@ -1132,7 +1113,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         # Test the gradient
         c = t.sum()
         gn = pytensor.grad(c, n)
-        g = self.function([idx], gn, op=AdvancedIncSubtensor1)
+        g = self.function([idx], gn, op=AdvancedIncSubtensor)
         g_0 = g([0])
         assert g_0.shape == (4, 3)
         assert np.allclose(g_0[0], 1)
@@ -1188,16 +1169,16 @@ class TestSubtensor(utt.OptimizationTestMixin):
             idx_pt = shared(idx_np, shape=(1 if idx_np.shape[0] == 1 else None,))
             t = n[idx_pt]
             gn = pytensor.grad(pt_sum(exp(t)), n)
-            f = self.function([], [gn, gn.shape], op=AdvancedIncSubtensor1)
+            f = self.function([], [gn, gn.shape], op=AdvancedIncSubtensor)
             topo = f.maker.fgraph.toposort()
             if not self.fast_compile:
                 assert any(
-                    isinstance(node.op, AdvancedIncSubtensor1) and node.op.inplace
+                    isinstance(node.op, AdvancedIncSubtensor) and node.op.inplace
                     for node in topo
                 )
             else:
-                assert any(isinstance(node.op, AdvancedIncSubtensor1) for node in topo)
-            assert any(isinstance(node.op, AdvancedSubtensor1) for node in topo)
+                assert any(isinstance(node.op, AdvancedIncSubtensor) for node in topo)
+            assert any(isinstance(node.op, AdvancedSubtensor) for node in topo)
             gval, gshape = f()
             good = np.zeros_like(data)
             # don't work when the same index is used many time
@@ -1221,7 +1202,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
 
             # Test shape of AdvancedIncSubtensor1 and AdvancedSubtensor1
             if not self.fast_compile:
-                ops = (AdvancedIncSubtensor1, AdvancedSubtensor1)
+                ops = (AdvancedIncSubtensor, AdvancedSubtensor)
             else:
                 ops = subtensor_ops
             if idx is idxs[0]:
@@ -1416,7 +1397,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             all_inputs_var,
             all_outputs_var,
             accept_inplace=True,
-            op=AdvancedIncSubtensor1,
+            op=AdvancedIncSubtensor,
             N=len(all_outputs_var),
         )
 
@@ -1440,7 +1421,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         f = function([y], out)
         f(np.ones((20, 5)))  # Fine
         err_message = (
-            "(Runtime broadcasting not allowed\\. AdvancedIncSubtensor1 was asked"
+            "(Runtime broadcasting not allowed\\. AdvancedIncSubtensor was asked"
             "|The number of indices and values must match)"
         )
         numba_linker = isinstance(f.maker.linker, NumbaLinker)
@@ -1849,9 +1830,9 @@ class TestAdvancedIncSubtensor1:
 
     @pytest.mark.parametrize("ignore_duplicates", [True, False])
     def test_inc_subtensor_AdvancedSubtensor1(self, ignore_duplicates):
-        x = AdvancedSubtensor1()(self.v, self.adv1q)
+        x = advanced_subtensor1(self.v, self.adv1q)
         a = inc_subtensor(x, self.v[self.adv1q], ignore_duplicates=ignore_duplicates)
-        assert isinstance(a.owner.op, AdvancedIncSubtensor1 | AdvancedIncSubtensor)
+        assert isinstance(a.owner.op, AdvancedIncSubtensor)
         assert getattr(a.owner.op, "ignore_duplicates", False) == ignore_duplicates
 
     def test_1d_inc_adv_selection(self):
@@ -2632,7 +2613,7 @@ class TestInferShape(utt.InferShapeTester):
                 )
             ],
             [admat_val, [[1, 2, 3, 4]]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [1, 3, 2]
@@ -2640,7 +2621,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, advec],
             [advanced_set_subtensor1(admat, advec, aivec_val)],
             [admat_val, [1, 2, 3, 4]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [0, 3, 0]
@@ -2648,7 +2629,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, adscal],
             [advanced_set_subtensor1(admat, adscal, aivec_val)],
             [admat_val, 1],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         adtens4 = dtensor4()
@@ -2663,7 +2644,7 @@ class TestInferShape(utt.InferShapeTester):
                 )
             ],
             [adtens4_val, [[[[1, 2, 3, 4, 5]]]]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
             warn=False,
         )
 
@@ -2672,7 +2653,7 @@ class TestInferShape(utt.InferShapeTester):
             [adtens4, advec],
             [advanced_set_subtensor1(adtens4, advec, aivec_val)],
             [adtens4_val, [1, 2, 3, 4, 5]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [0, 3, 0]
@@ -2680,7 +2661,7 @@ class TestInferShape(utt.InferShapeTester):
             [adtens4, adscal],
             [advanced_set_subtensor1(adtens4, adscal, aivec_val)],
             [adtens4_val, 1],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [2, 3]
@@ -2688,7 +2669,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, bdmat],
             [advanced_set_subtensor1(admat, bdmat, aivec_val)],
             [admat_val, [[1, 2, 3, 4], [5, 6, 7, 8]]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [1, 3, 2]
@@ -2696,7 +2677,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, advec],
             [advanced_set_subtensor1(admat, advec, aivec_val)],
             [admat_val, [1, 2, 3, 4]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [0, 3, 0]
@@ -2704,7 +2685,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, adscal],
             [advanced_set_subtensor1(admat, adscal, aivec_val)],
             [admat_val, 1],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         bdtens4 = dtensor4()
@@ -2718,7 +2699,7 @@ class TestInferShape(utt.InferShapeTester):
                 )
             ],
             [adtens4_val, [[[[1, 2, 3, 4, 5]]], [[[6, 7, 8, 9, 10]]]]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
             warn=False,
         )
 
@@ -2727,7 +2708,7 @@ class TestInferShape(utt.InferShapeTester):
             [adtens4, advec],
             [advanced_set_subtensor1(adtens4, advec, aivec_val)],
             [adtens4_val, [1, 2, 3, 4, 5]],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
         aivec_val = [0, 3, 0]
@@ -2735,7 +2716,7 @@ class TestInferShape(utt.InferShapeTester):
             [adtens4, adscal],
             [advanced_set_subtensor1(adtens4, adscal, aivec_val)],
             [adtens4_val, 2],
-            AdvancedIncSubtensor1,
+            AdvancedIncSubtensor,
         )
 
     def test_AdvancedIncSubtensor(self):
