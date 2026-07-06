@@ -749,7 +749,7 @@ def lift_subtensor_through_alloc(fgraph, node):
 
     Push the read past Alloc so the broadcast happens at most once and
     indexing operates on ``val`` (smaller) where possible. Covers basic
-    ``Subtensor``, ``AdvancedSubtensor``, and ``AdvancedSubtensor1`` reads.
+    ``Subtensor`` and ``AdvancedSubtensor`` reads.
 
     On non-broadcast ``val`` dims an advanced index could expand ``val[idx]``
     past ``val.size``; only fire when the index is provably smaller or when
@@ -1014,7 +1014,7 @@ def local_subtensor_make_vector(fgraph, node):
         [a,b,c][0] -> a
         [a,b,c][0:2] -> [a,b]
 
-    Replace all ``AdvancedSubtensor1`` and ``MakeVector`` cases like:
+    Replace all ``AdvancedSubtensor`` and ``MakeVector`` cases like:
         [a,b,c][[0,2]] -> [a,c]
 
     We can do this for constant indexes.

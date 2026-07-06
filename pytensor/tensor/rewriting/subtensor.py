@@ -1105,8 +1105,8 @@ def local_useless_inc_subtensor(fgraph, node):
 @node_rewriter([AdvancedIncSubtensor])
 def local_set_to_inc_subtensor(fgraph, node):
     r"""
-    AdvancedIncSubtensor1(x, x[ilist]+other, ilist, set_instead_of_inc=True) ->
-    AdvancedIncSubtensor1(x, other, ilist, set_instead_of_inc=False)
+    AdvancedIncSubtensor(x, x[ilist]+other, ilist, set_instead_of_inc=True) ->
+    AdvancedIncSubtensor(x, other, ilist, set_instead_of_inc=False)
 
     Only valid when ``ilist`` is duplicate-free: a dense set is last-wins while an
     inc accumulates, so duplicate indices would over-count.

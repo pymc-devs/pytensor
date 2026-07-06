@@ -78,7 +78,6 @@ NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 class TestLocalSubtensorOfBatchDims:
     rewrite_kw = dict(
         include=("ShapeOpt", "canonicalize", "specialize"),
-        exclude=("local_replace_AdvancedSubtensor",),
         clone=True,
     )
 
@@ -606,7 +605,6 @@ class TestSubtensorOfAlloc:
 
     rewrite_kw = dict(
         include=("ShapeOpt", "canonicalize", "specialize"),
-        exclude=("local_replace_AdvancedSubtensor",),
         clone=True,
     )
 

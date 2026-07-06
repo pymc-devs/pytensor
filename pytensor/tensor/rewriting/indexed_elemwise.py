@@ -1,7 +1,7 @@
 """Fuse indexed reads and updates into Elemwise iteration loops.
 
 Introduces ``IndexedElemwise``, an ``OpFromGraph`` that wraps
-``AdvancedSubtensor1`` + ``Elemwise`` + ``AdvancedIncSubtensor1`` subgraphs
+``AdvancedSubtensor`` + ``Elemwise`` + ``AdvancedIncSubtensor`` subgraphs
 so the Numba backend can generate a single loop with indirect indexing,
 eliminating materialised intermediate arrays.
 """
@@ -53,8 +53,8 @@ optdb.register(
 class IndexedElemwise(OpFromGraph):
     """Fuse indexed reads and updates into a single Elemwise iteration loop.
 
-    Absorbs ``AdvancedSubtensor1`` (indexed reads on inputs) and
-    ``AdvancedIncSubtensor1`` (indexed updates on outputs) into one loop,
+    Absorbs ``AdvancedSubtensor`` (indexed reads on inputs) and
+    ``AdvancedIncSubtensor`` (indexed updates on outputs) into one loop,
     avoiding materialisation of intermediate arrays.
 
     Inner fgraph contains the unfused subgraph.
@@ -176,8 +176,8 @@ def _op_debug_information_IndexedElemwise(op, node):
 class FuseIndexedElemwise(GraphRewriter):
     """Fuse indexed reads and indexed updates into Elemwise loops.
 
-    Absorbs single-client ``AdvancedSubtensor1`` on inputs (indexed reads)
-    and single-client ``AdvancedIncSubtensor1`` on outputs (indexed updates)
+    Absorbs single-client ``AdvancedSubtensor`` on inputs (indexed reads)
+    and single-client ``AdvancedIncSubtensor`` on outputs (indexed updates)
     into the Elemwise iteration, avoiding intermediate arrays.
 
     Supports multiple index arrays: e.g. ``x[idx_a] + y[idx_b]`` produces

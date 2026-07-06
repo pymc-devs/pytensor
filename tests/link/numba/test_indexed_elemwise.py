@@ -352,14 +352,8 @@ class TestIndexedWriteFusion:
         slices = (slice(None),) * n_slices
         out = target[(*slices, idx)].inc(pt.exp(val))
 
-        mode = NUMBA_MODE.excluding(
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
-        )
-        mode_u = NUMBA_NO_FUSION.excluding(
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
-        )
-        fn = function([val, target], out, mode=mode, trust_input=True)
-        fn_u = function([val, target], out, mode=mode_u, trust_input=True)
+        fn = function([val, target], out, mode=NUMBA_MODE, trust_input=True)
+        fn_u = function([val, target], out, mode=NUMBA_NO_FUSION, trust_input=True)
         assert_fused(fn)
         valv = rng.normal(size=val_shape)
         tv = rng.normal(size=target_shape)

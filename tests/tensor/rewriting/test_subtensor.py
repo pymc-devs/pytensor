@@ -614,8 +614,6 @@ class TestSubtensorIncSubtensor:
         cls.rng = np.random.default_rng(utt.fetch_seed())
         cls.mode = get_default_mode().including(
             "local_read_of_write_same_indices",
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
-            "local_replace_AdvancedSubtensor",
         )
 
     @pytest.mark.parametrize(
@@ -1343,8 +1341,6 @@ class TestReadOfWriteSameIndices:
     def setup_method(self):
         mode = get_default_mode()
         self.mode = mode.including(
-            "local_replace_AdvancedSubtensor",
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_read_of_write_same_indices",
         ).excluding("fusion", "fuse_indexed_into_elemwise")
 
@@ -1533,7 +1529,6 @@ class TestReadOfWriteSameIndices:
                 "fusion",
                 "fuse_indexed_into_elemwise",
                 "inplace",
-                "local_replace_AdvancedSubtensor",
             ),
         )
         result.assert_graph(x[idx] + y)
@@ -1606,7 +1601,6 @@ def test_slice_to_arange_roundtrip(sl):
 def test_slice_read_of_write():
     rw_kw = dict(
         include=("canonicalize", "specialize"),
-        exclude=("local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",),
     )
     buf = pt.vector("buf", shape=(5,))
 
@@ -1650,8 +1644,6 @@ class TestReadOfWriteConstantIndices:
         # FAST_RUN ``local_slice_read_of_write`` would convert the basic
         # Subtensor back in specialize, but FAST_COMPILE skips that.
         self.mode = mode.including(
-            "local_replace_AdvancedSubtensor",
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_advanced_read_of_write_constant_indices",
         ).excluding("fusion", "local_adv_idx_to_slice")
 
@@ -2190,14 +2182,7 @@ def test_local_set_to_inc_subtensor():
     g = s + 3
     r = set_subtensor(s, g)
 
-    mode = (
-        get_default_mode()
-        .including(
-            "local_replace_AdvancedSubtensor",
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
-        )
-        .excluding("fuse_indexed_into_elemwise")
-    )
+    mode = get_default_mode().excluding("fuse_indexed_into_elemwise")
     moder = mode.excluding("local_set_to_inc_subtensor")
     modet = mode.including("local_set_to_inc_subtensor")
     f1 = function([v], r, mode=moder)
@@ -2837,7 +2822,6 @@ class TestArangeRewrites:
 
     rewrite_kw = dict(
         include=("canonicalize", "specialize"),
-        exclude=("local_replace_AdvancedSubtensor",),
     )
 
     @pytest.mark.parametrize("offset", [0, 2])

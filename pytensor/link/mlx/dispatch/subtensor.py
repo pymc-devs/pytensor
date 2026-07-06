@@ -91,8 +91,8 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         # functional scatter-add, mirroring JAX's `x.at[indices].add(y)`.
         # Plain `x[indices] += y` writes each destination once, dropping
         # repeated-index contributions (e.g. gradients of embedding lookups).
-        # `AdvancedIncSubtensor1` has no `ignore_duplicates` flag and always
-        # accumulates, like its `np.add.at`-based `perform`.
+        # This is the `ignore_duplicates=False` branch of `AdvancedIncSubtensor`,
+        # which accumulates like its `np.add.at`-based `perform`.
         def mlx_fn(x, indices, y):
             return x.at[indices].add(y)
 
