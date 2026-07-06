@@ -8,7 +8,7 @@ from pytensor import Mode, function, get_mode
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
 from pytensor.tensor.subtensor import (
-    AdvancedIncSubtensor1,
+    AdvancedIncSubtensor,
     AdvancedSubtensor,
 )
 
@@ -276,7 +276,7 @@ class TestIndexedWriteFusion:
         # not the indexed axis. Read fusion may still create an
         # IndexedElemwise, but the AdvancedIncSubtensor1 must remain outside.
         assert any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
         xv = rng.normal(size=(85,))
         yv = rng.normal(size=(10,))
@@ -292,7 +292,7 @@ class TestIndexedWriteFusion:
         out = target[idx].inc(pt.exp(x))
         fn, fn_u = fused_and_unfused([x, target], out)
         assert any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
         xv = rng.normal(size=(1,))
         tv = rng.normal(size=(5,))
@@ -321,7 +321,7 @@ class TestIndexedWriteFusion:
             assert_fused(fn)
         else:
             assert any(
-                isinstance(n.op, AdvancedIncSubtensor1)
+                isinstance(n.op, AdvancedIncSubtensor)
                 for n in fn.maker.fgraph.toposort()
             )
         xv = rng.normal(size=(10, 1))
@@ -557,7 +557,7 @@ class TestIndexedWriteFusion:
         # The read fuses into an IndexedElemwise; the aliasing write stays external.
         assert_fused(fn)
         assert any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
         xv = rng.normal(size=9)
         np.testing.assert_allclose(fn(xv), fn_u(xv), rtol=1e-10)
@@ -583,7 +583,7 @@ class TestIndexedWriteFusion:
         # The non-inplace write fuses fully -- no external AdvancedIncSubtensor1.
         assert_fused(fn)
         assert not any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
 
         # The inner write must destroy exactly the input the op's destroy_map names.

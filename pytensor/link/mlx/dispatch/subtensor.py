@@ -3,9 +3,7 @@ from copy import deepcopy
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
     indices_from_subtensor,
@@ -27,7 +25,6 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(AdvancedSubtensor)
-@mlx_funcify.register(AdvancedSubtensor1)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
     def advanced_subtensor(x, *ilists):
         indices = indices_from_subtensor(ilists, op.idx_list)
@@ -70,7 +67,6 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(AdvancedIncSubtensor)
-@mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
     if op.set_instead_of_inc:
 
@@ -101,7 +97,7 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
             return x.at[indices].add(y)
 
     def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
-        if isinstance(op, AdvancedIncSubtensor1):
+        if op.idx_list == (0,):
             op._check_runtime_broadcasting(node, x, y, ilist[0])
 
         return mlx_fn(x, ilist, y)

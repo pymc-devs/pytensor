@@ -40,7 +40,7 @@ from pytensor.tensor.random.rewriting.basic import sidestep_unused_rng_consumer
 from pytensor.tensor.random.rewriting.numba import introduce_explicit_core_shape_rv
 from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
-from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
+from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
 from pytensor.tensor.type import iscalar
 from pytensor.tensor.type_other import NoneConst
 
@@ -830,7 +830,7 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
     )
 
     def is_subtensor_or_dimshuffle_subtensor(inp) -> bool:
-        subtensor_ops = Subtensor | AdvancedSubtensor | AdvancedSubtensor1
+        subtensor_ops = Subtensor | AdvancedSubtensor
         if isinstance(inp.owner.op, subtensor_ops):
             return True
         if isinstance(inp.owner.op, DimShuffle):
@@ -845,9 +845,7 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
             if i.owner
         ), new_out.dprint(depth=3, print_type=True)
     else:
-        assert isinstance(
-            new_out.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor
-        )
+        assert isinstance(new_out.owner.op, AdvancedSubtensor | Subtensor)
         return
 
     f_base = function(

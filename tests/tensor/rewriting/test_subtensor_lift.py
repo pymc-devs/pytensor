@@ -60,7 +60,6 @@ from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
     Subtensor,
 )
@@ -1485,10 +1484,7 @@ class TestExtractDiagLiftPass:
 
         # The partial-coverage read at offset=3 keeps exactly one scatter write of pi.
         on_topo = f_on.maker.fgraph.toposort()
-        n_writes = sum(
-            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
-            for n in on_topo
-        )
+        n_writes = sum(isinstance(n.op, AdvancedIncSubtensor) for n in on_topo)
         assert n_writes == 1
 
         for got, ref in zip(f_on(), f_off(), strict=True):

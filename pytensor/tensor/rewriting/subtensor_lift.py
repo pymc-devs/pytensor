@@ -66,7 +66,6 @@ from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     Subtensor,
     _non_consecutive_adv_indexing,
     as_index_literal,
@@ -347,7 +346,7 @@ def local_subtensor_of_dot(fgraph, node):
 
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
-@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_of_batch_dims(fgraph, node):
     """Lift a (basic or advanced) Subtensor through the batch dims of an Elemwise or Blockwise.
 
@@ -818,7 +817,7 @@ def local_basic_subtensor_of_alloc(fgraph, node):
 @register_useless
 @register_canonicalize
 @register_specialize
-@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_of_alloc(fgraph, node):
     return lift_subtensor_through_alloc(fgraph, node)
 
@@ -1007,7 +1006,7 @@ def local_subtensor_SpecifyShape_lift(fgraph, node):
 @register_specialize
 @register_canonicalize("fast_compile")
 @register_useless
-@node_rewriter([Subtensor, AdvancedSubtensor1])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_make_vector(fgraph, node):
     """Perform ``*Subtensor*`` operations on ``MakeVector`` outputs when the indices are constant.
 
@@ -1046,7 +1045,7 @@ def local_subtensor_make_vector(fgraph, node):
 
         if isinstance(idx, int):
             idx = node.inputs[1]
-    elif isinstance(node.op, AdvancedSubtensor1):
+    elif isinstance(node.op, AdvancedSubtensor):
         idx = node.inputs[1]
 
     if isinstance(idx, Variable):
@@ -1064,7 +1063,10 @@ def local_subtensor_make_vector(fgraph, node):
                 pass
         elif idx.ndim == 1 and isinstance(idx, Constant):
             values = list(map(int, list(idx.value)))
-            ret = make_vector_op(*[x.owner.inputs[v] for v in values])
+            if len(values) == 1:
+                ret = expand_dims(x.owner.inputs[values[0]], axis=0)
+            else:
+                ret = make_vector_op(*[x.owner.inputs[v] for v in values])
             copy_stack_trace(node.outputs[0], ret)
             return [ret]
     elif isinstance(idx, slice):
