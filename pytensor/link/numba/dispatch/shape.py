@@ -89,60 +89,50 @@ def numba_funcify_JoinDims(op, node, **kwargs):
     # numba's own cache key, so the default (props-based) key is safe here.
     start = op.start_axis
     n = op.n_axes
-    out_ndim = node.outputs[0].type.ndim
+    ndim = node.inputs[0].type.ndim
 
-    @numba_basic.numba_njit
-    def join_dims(x):
-        old_shape = x.shape
-        new_shape = np.empty(out_ndim, dtype=np.int64)
-        k = 0
-        for i in range(start):
-            new_shape[k] = old_shape[i]
-            k += 1
-        joined = 1
-        for i in range(start, start + n):
-            joined *= old_shape[i]
-        new_shape[k] = joined
-        k += 1
-        for i in range(start + n, len(old_shape)):
-            new_shape[k] = old_shape[i]
-            k += 1
-        # TODO: Use ascontiguousarray until https://github.com/numba/numba/issues/7353 is closed.
-        return np.reshape(
-            np.ascontiguousarray(np.asarray(x)),
-            numba_ndarray.to_fixed_tuple(new_shape, out_ndim),
-        )
+    joined = " * ".join(f"x.shape[{i}]" for i in range(start, start + n)) or "1"
+    dims = [
+        *(f"x.shape[{i}]" for i in range(start)),
+        joined,
+        *(f"x.shape[{i}]" for i in range(start + n, ndim)),
+    ]
 
-    return join_dims
+    # TODO: Use ascontiguousarray until https://github.com/numba/numba/issues/7353 is closed.
+    src = dedent(
+        f"""
+        def join_dims(x):
+            return np.reshape(np.ascontiguousarray(x), ({", ".join(dims)},))
+        """
+    )
+    join_dims = compile_function_src(src, "join_dims", globals())
+    return numba_basic.numba_njit(join_dims)
 
 
 @register_funcify_and_cache_key(SplitDims)
 def numba_funcify_SplitDims(op, node, **kwargs):
     axis = op.axis
+    ndim = node.inputs[0].type.ndim
     out_ndim = node.outputs[0].type.ndim
-    n_split = out_ndim - node.inputs[0].type.ndim + 1
+    n_split = out_ndim - ndim + 1
 
-    @numba_basic.numba_njit
-    def split_dims(x, shape):
-        old_shape = x.shape
-        new_shape = np.empty(out_ndim, dtype=np.int64)
-        k = 0
-        for i in range(axis):
-            new_shape[k] = old_shape[i]
-            k += 1
-        for j in range(n_split):
-            new_shape[k] = shape[j]
-            k += 1
-        for i in range(axis + 1, len(old_shape)):
-            new_shape[k] = old_shape[i]
-            k += 1
-        # TODO: Use ascontiguousarray until https://github.com/numba/numba/issues/7353 is closed.
-        return np.reshape(
-            np.ascontiguousarray(np.asarray(x)),
-            numba_ndarray.to_fixed_tuple(new_shape, out_ndim),
-        )
+    dims = [
+        *(f"x.shape[{i}]" for i in range(axis)),
+        *(f"shape[{j}]" for j in range(n_split)),
+        *(f"x.shape[{i}]" for i in range(axis + 1, ndim)),
+    ]
+    tuple_src = f"({', '.join(dims)},)" if dims else "()"
 
-    # out_ndim and n_split are baked into the closure but captured neither by the
+    # TODO: Use ascontiguousarray until https://github.com/numba/numba/issues/7353 is closed.
+    src = dedent(
+        f"""
+        def split_dims(x, shape):
+            return np.reshape(np.ascontiguousarray(x), {tuple_src})
+        """
+    )
+    split_dims = compile_function_src(src, "split_dims", globals())
+
+    # out_ndim and n_split are baked into the source but captured neither by the
     # op props nor by numba's input-rank key, so fold them into the cache key.
     key = default_hash_key_from_props(op, out_ndim=out_ndim, n_split=n_split)
-    return split_dims, key
+    return numba_basic.numba_njit(split_dims), key

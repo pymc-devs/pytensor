@@ -5,8 +5,9 @@ import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
 from pytensor.gradient import DisconnectedType, disconnected_type
-from pytensor.graph import Apply, Op, Variable
+from pytensor.graph import Apply, Variable
 from pytensor.graph.replace import _vectorize_node
+from pytensor.link.c.op import COp
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import infer_static_shape, join, split
@@ -18,7 +19,7 @@ from pytensor.tensor.variable import TensorVariable
 type ShapeValueType = int | np.integer | ScalarVariable | TensorVariable | np.ndarray
 
 
-class JoinDims(Op):
+class JoinDims(COp):
     __props__ = ("start_axis", "n_axes")
     view_map = {0: [0]}
 
@@ -95,6 +96,41 @@ class JoinDims(Op):
             return [disconnected_type()]
         return [self(x_tangent)]
 
+    def c_code_cache_version(self):
+        return (1,)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
+        fail = sub["fail"]
+        start = self.start_axis
+        n = self.n_axes
+        ndim_in = node.inputs[0].type.ndim
+        out_ndim = ndim_in - n + 1
+
+        joined = (
+            " * ".join(f"PyArray_DIMS({x})[{i}]" for i in range(start, start + n))
+            or "1"
+        )
+        dim_exprs = [
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(start)),
+            joined,
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(start + n, ndim_in)),
+        ]
+        assigns = "\n".join(f"new_dims[{k}] = {e};" for k, e in enumerate(dim_exprs))
+
+        return f"""
+        npy_intp new_dims[{out_ndim or 1}];
+        {assigns}
+        PyArray_Dims newshape;
+        newshape.len = {out_ndim};
+        newshape.ptr = new_dims;
+        Py_XDECREF({z});
+        {z} = (PyArrayObject *) PyArray_Newshape({x}, &newshape, NPY_CORDER);
+        if (!{z}) {{
+            {fail};
+        }}
+        """
 
 
 @_vectorize_node.register(JoinDims)
@@ -156,7 +192,7 @@ def join_dims(
     return JoinDims(start_axis, n_axes)(x)  # type: ignore[return-value]
 
 
-class SplitDims(Op):
+class SplitDims(COp):
     __props__ = ("axis",)
     view_map = {0: [0]}
 
@@ -227,6 +263,42 @@ class SplitDims(Op):
             return [disconnected_type()]
         return [self(x_tangent, inputs[1])]
 
+    def c_code_cache_version(self):
+        return (1,)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, shp = inputs
+        (z,) = outputs
+        fail = sub["fail"]
+        axis = self.axis
+        ndim_in = node.inputs[0].type.ndim
+        out_ndim = node.outputs[0].type.ndim
+        n_split = out_ndim - ndim_in + 1
+        shp_dtype = node.inputs[1].type.dtype_specs()[1]
+
+        def shp_at(j):
+            return f"(({shp_dtype}*)(PyArray_BYTES({shp}) + {j} * PyArray_STRIDES({shp})[0]))[0]"
+
+        dim_exprs = [
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(axis)),
+            *(shp_at(j) for j in range(n_split)),
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(axis + 1, ndim_in)),
+        ]
+        assigns = "\n".join(f"new_dims[{k}] = {e};" for k, e in enumerate(dim_exprs))
+
+        return f"""
+        assert(PyArray_NDIM({shp}) == 1);
+        npy_intp new_dims[{out_ndim or 1}];
+        {assigns}
+        PyArray_Dims newshape;
+        newshape.len = {out_ndim};
+        newshape.ptr = new_dims;
+        Py_XDECREF({z});
+        {z} = (PyArrayObject *) PyArray_Newshape({x}, &newshape, NPY_CORDER);
+        if (!{z}) {{
+            {fail};
+        }}
+        """
 
 
 @_vectorize_node.register(SplitDims)
