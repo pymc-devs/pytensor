@@ -1,11 +1,18 @@
+import numpy as np
+
+import pytensor
 from pytensor.graph import FunctionGraph, rewrite_graph
 from pytensor.graph.traversal import apply_ancestors
-from pytensor.tensor.basic import expand_dims
+from pytensor.tensor.basic import constant, expand_dims
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.shape import Reshape, specify_shape
 from pytensor.tensor.type import tensor
 from tests.unittest_tools import assert_equal_computations
+
+
+def _count(out, cls):
+    return sum(isinstance(node.op, cls) for node in apply_ancestors([out]))
 
 
 def test_local_split_dims_general_persists():
@@ -94,3 +101,60 @@ def test_local_split_dims_to_specify_shape():
     # Output shape should be (2, 3, 4) - dimension 1 removed
     expected = specify_shape(x, (None, 5, None))
     assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+
+def test_local_join_of_split_cancels():
+    """``JoinDims(SplitDims(x, s))`` over the same span cancels to ``x``."""
+    x = tensor("x", shape=(2, 12, 5))
+    out = join_dims(split_dims(x, shape=(3, 4), axis=1), start_axis=1, n_axes=2)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert rewritten is x
+
+
+def test_local_join_of_split_span_mismatch_stays():
+    """A join over a different span than the split does not cancel."""
+    x = tensor("x", shape=(2, 12, 5))
+    out = join_dims(split_dims(x, shape=(3, 4), axis=1), start_axis=0, n_axes=2)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, SplitDims) == 1
+    assert _count(rewritten, JoinDims) == 1
+
+
+def test_local_join_of_join_merges():
+    """Contiguous nested joins collapse into a single join."""
+    x = tensor("x", shape=(2, 3, 4, 5))
+    out = join_dims(join_dims(x, start_axis=1, n_axes=2), start_axis=0, n_axes=2)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 1
+    [join] = [n.op for n in apply_ancestors([rewritten]) if isinstance(n.op, JoinDims)]
+    assert (join.start_axis, join.n_axes) == (0, 3)
+    fn = pytensor.function([x], rewritten)
+    xv = np.random.default_rng(0).normal(size=(2, 3, 4, 5))
+    np.testing.assert_allclose(fn(xv), xv.reshape(24, 5))
+
+
+def test_local_join_of_join_disjoint_stays():
+    """Disjoint nested joins are left as two joins."""
+    x = tensor("x", shape=(2, 3, 4, 5))
+    out = join_dims(join_dims(x, start_axis=0, n_axes=2), start_axis=1, n_axes=2)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 2
+
+
+def test_local_split_of_join_cancels():
+    """``SplitDims(JoinDims(x), s)`` cancels to ``x`` when ``s`` restores dims."""
+    x = tensor("x", shape=(2, 3, 4))
+    joined = join_dims(x, start_axis=0, n_axes=2)
+    out = split_dims(joined, shape=[x.shape[0], x.shape[1]], axis=0)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert rewritten is x
+
+
+def test_local_split_of_join_unprovable_stays():
+    """A split of a join with sizes not provably the pre-join dims is left."""
+    x = tensor("x", shape=(2, 3, 4))
+    joined = join_dims(x, start_axis=0, n_axes=2)  # (6, 4)
+    out = split_dims(joined, shape=constant(np.array([3, 2], "int64")), axis=0)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 1
+    assert _count(rewritten, SplitDims) == 1
