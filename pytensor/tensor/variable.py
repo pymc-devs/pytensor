@@ -336,10 +336,10 @@ class _tensor_py_operators:
         return ds_op(self)
 
     def flatten(self, ndim=1):
-        return pt.basic.flatten(self, ndim)
+        return pt.flatten(self, ndim)
 
     def ravel(self):
-        return pt.basic.flatten(self)
+        return pt.flatten(self)
 
     def diagonal(self, offset=0, axis1=0, axis2=1):
         return pt.basic.diagonal(self, offset, axis1, axis2)

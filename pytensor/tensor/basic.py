@@ -2959,55 +2959,6 @@ def is_flat(var, ndim=1):
     return var.ndim == ndim
 
 
-def flatten(x, ndim=1):
-    """Return a copy of the array collapsed into one dimension.
-
-    Reshapes the variable `x` by keeping the first outdim-1 dimension size(s)
-    of `x` the same, and making the last dimension size of `x` equal to the
-    multiplication of its remaining dimension size(s).
-
-    Parameters
-    ----------
-    x : pytensor.tensor.var.TensorVariable
-        The variable to be reshaped.
-    ndim : int
-        The number of dimensions of the returned variable
-        The default value is ``1``.
-
-    Returns
-    -------
-    pytensor.tensor.var.TensorVariable
-        the flattened variable with dimensionality of outdim
-    """
-    if ndim is None:
-        ndim = 1
-
-    _x = as_tensor_variable(x)
-
-    # Any input variable can be flattened to have ndim of 1,
-    # even if it's a scalar. Otherwise, ndim must be positive
-    # and smaller than x.ndim.
-    if ndim < 1 or (ndim > 1 and ndim > _x.ndim):
-        raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
-
-    if ndim > 1:
-        dims = (*_x.shape[: ndim - 1], -1)
-    else:
-        dims = (-1,)
-
-    if len(dims) == _x.ndim:
-        # Nothing to ravel
-        return _x
-
-    x_reshaped = _x.reshape(dims)
-    shape_kept_dims = _x.type.shape[: ndim - 1]
-    bcast_new_dim = builtins.all(s == 1 for s in _x.type.shape[ndim - 1 :])
-    out_shape = (*shape_kept_dims, 1 if bcast_new_dim else None)
-    bcasted_indices = tuple(i for i in range(ndim) if out_shape[i] == 1)
-    x_reshaped = specify_broadcastable(x_reshaped, *bcasted_indices)
-    return x_reshaped
-
-
 def tile(
     A: "TensorLike", reps: Union[Sequence[Union[int, "TensorLike"]], "TensorLike"]
 ) -> TensorVariable:
@@ -4482,7 +4433,6 @@ __all__ = [
     "eye",
     "fill",
     "flatnonzero",
-    "flatten",
     "full",
     "full_like",
     "get_scalar_constant_value",

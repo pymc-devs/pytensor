@@ -289,6 +289,42 @@ def split_dims(
     return SplitDims(axis=axis)(x, shape)  # type: ignore[return-value]
 
 
+def flatten(x: TensorLike, ndim: int | None = 1) -> TensorVariable:
+    """Return a copy of the array collapsed into ``ndim`` dimensions.
+
+    Keeps the first ``ndim - 1`` dimensions of ``x`` and collapses the remaining
+    dimensions into the last one (C-order), i.e. a plain :func:`join_dims` of the
+    trailing axes.
+
+    Parameters
+    ----------
+    x : TensorLike
+        The variable to be reshaped.
+    ndim : int
+        The number of dimensions of the returned variable. The default is ``1``.
+
+    Returns
+    -------
+    TensorVariable
+        The flattened variable with dimensionality of ``ndim``.
+    """
+    if ndim is None:
+        ndim = 1
+
+    _x = as_tensor_variable(x)
+
+    # Any input variable can be flattened to have ndim of 1, even if it's a
+    # scalar. Otherwise, ndim must be positive and not exceed x.ndim.
+    if ndim < 1 or (ndim > 1 and ndim > _x.type.ndim):
+        raise ValueError(f"ndim {ndim} out of bound [1, {_x.type.ndim + 1})")
+
+    if ndim == _x.type.ndim:
+        # Nothing to ravel
+        return _x
+
+    return join_dims(_x, start_axis=ndim - 1)
+
+
 def _analyze_axes_list(axes) -> tuple[int, int, int]:
     """
     Analyze the provided axes list to determine how many axes are before and after the interval to be raveled, as
@@ -539,4 +575,4 @@ def unpack(
     ]
 
 
-__all__ = ["join_dims", "pack", "split_dims", "unpack"]
+__all__ = ["flatten", "join_dims", "pack", "split_dims", "unpack"]
