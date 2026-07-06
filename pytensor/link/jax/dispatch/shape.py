@@ -4,6 +4,7 @@ from pytensor.graph import Constant
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.type import TensorType
 
@@ -72,6 +73,30 @@ def jax_funcify_Reshape(op, node, **kwargs):
             return jnp.reshape(x, shape)
 
     return reshape
+
+
+@jax_funcify.register(JoinDims)
+def jax_funcify_JoinDims(op, node, **kwargs):
+    start = op.start_axis
+    n = op.n_axes
+
+    def join_dims(x):
+        shape = x.shape
+        return jnp.reshape(x, (*shape[:start], -1, *shape[start + n :]))
+
+    return join_dims
+
+
+@jax_funcify.register(SplitDims)
+def jax_funcify_SplitDims(op, node, **kwargs):
+    axis = op.axis
+    n_split = node.outputs[0].type.ndim - node.inputs[0].type.ndim + 1
+
+    def split_dims(x, shape):
+        split_sizes = tuple(shape[j] for j in range(n_split))
+        return jnp.reshape(x, (*x.shape[:axis], *split_sizes, *x.shape[axis + 1 :]))
+
+    return split_dims
 
 
 @jax_funcify.register(Shape)

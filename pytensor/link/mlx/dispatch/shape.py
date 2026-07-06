@@ -1,6 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
@@ -42,3 +43,26 @@ def mlx_funcify_Reshape(op, **kwargs):
         return mx.reshape(x, shp)
 
     return reshape
+
+
+@mlx_funcify.register(JoinDims)
+def mlx_funcify_JoinDims(op, **kwargs):
+    start = op.start_axis
+    n = op.n_axes
+
+    def join_dims(x):
+        shape = x.shape
+        return mx.reshape(x, (*shape[:start], -1, *shape[start + n :]))
+
+    return join_dims
+
+
+@mlx_funcify.register(SplitDims)
+def mlx_funcify_SplitDims(op, **kwargs):
+    axis = op.axis
+
+    def split_dims(x, shape):
+        split_sizes = tuple(int(s) for s in shape)
+        return mx.reshape(x, (*x.shape[:axis], *split_sizes, *x.shape[axis + 1 :]))
+
+    return split_dims

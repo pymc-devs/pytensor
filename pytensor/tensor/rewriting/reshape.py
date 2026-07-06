@@ -8,23 +8,45 @@ from pytensor.tensor.shape import specify_shape
 
 
 @register_canonicalize
-@node_rewriter([SplitDims])
-def local_split_dims(fgraph, node):
-    """
-    Canonicalize SplitDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
-    Special case: if shape is (0,), converts to squeeze instead.
-    """
+@node_rewriter([JoinDims])
+def local_join_dims_degenerate(fgraph, node):
+    """Canonicalize the size-1/degenerate ``JoinDims`` forms out to DimShuffle.
 
+    A join of zero axes inserts a size-1 dimension (``expand_dims``); a join of
+    a single axis is the identity. The general join stays a ``JoinDims`` Op and
+    is dispatched natively by each backend.
+    """
+    (x,) = node.inputs
+    op = node.op
+
+    if op.n_axes == 0:
+        expanded_x = expand_dims(x, axis=op.start_axis)
+        copy_stack_trace(x, expanded_x)
+        return [expanded_x]
+
+    if op.n_axes == 1:
+        return [x]
+
+    return None
+
+
+@register_canonicalize
+@node_rewriter([SplitDims])
+def local_split_dims_degenerate(fgraph, node):
+    """Canonicalize the size-1/degenerate ``SplitDims`` forms out to DimShuffle.
+
+    Splitting into zero dims squeezes the axis (which must be size 1); splitting
+    into a single dim is a ``specify_shape`` on that axis. The general split
+    stays a ``SplitDims`` Op and is dispatched natively by each backend.
+    """
     x, shape = node.inputs
     axis = node.op.axis
 
-    # Special case: empty shape -> squeeze
     if shape.type.shape == (0,):
         squeezed_x = squeeze(x, axis=axis)
         copy_stack_trace(x, squeezed_x)
         return [squeezed_x]
 
-    # Special case: size 1 shape -> SpecifyShape
     if shape.type.shape == (1,):
         specified_shape = [None] * x.type.ndim
         specified_shape[axis] = shape
@@ -32,47 +54,4 @@ def local_split_dims(fgraph, node):
         copy_stack_trace(x, specified_x)
         return [specified_x]
 
-    # General case: rewrite to reshape
-    output_shape = [
-        *x.shape[:axis],
-        *shape,
-        *x.shape[axis + 1 :],
-    ]
-
-    new_x = x.reshape(output_shape)
-    copy_stack_trace(x, new_x)
-
-    return [new_x]
-
-
-@register_canonicalize
-@node_rewriter([JoinDims])
-def local_join_dims(fgraph, node):
-    """
-    Canonicalize JoinDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
-    """
-
-    (x,) = node.inputs
-    op = node.op
-    start_axis = op.start_axis
-    n_axes = op.n_axes
-
-    if n_axes == 0:
-        expanded_x = expand_dims(x, axis=node.op.start_axis)
-        copy_stack_trace(x, expanded_x)
-        return [expanded_x]
-
-    if n_axes == 1:
-        copy_stack_trace(x, x)
-        return [x]
-
-    output_shape = [
-        *x.shape[:start_axis],
-        -1,
-        *x.shape[start_axis + n_axes :],
-    ]
-
-    new_x = x.reshape(output_shape)
-
-    copy_stack_trace(x, new_x)
-    return [new_x]
+    return None
