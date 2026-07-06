@@ -13,7 +13,7 @@ import pytensor.tensor as pt
 from pytensor import config
 from pytensor.compile.mode import get_mode
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
-from pytensor.tensor.subtensor import AdvancedIncSubtensor1, advanced_subtensor1
+from pytensor.tensor.subtensor import AdvancedIncSubtensor, advanced_subtensor1
 
 
 @pytest.fixture(
@@ -120,8 +120,7 @@ def write_benchmark_setup(request):
         isinstance(n.op, FusedElemwise) for n in fn_fused.maker.fgraph.toposort()
     ), "FusedElemwise not found in fused graph"
     assert not any(
-        isinstance(n.op, AdvancedIncSubtensor1)
-        for n in fn_fused.maker.fgraph.toposort()
+        isinstance(n.op, AdvancedIncSubtensor) for n in fn_fused.maker.fgraph.toposort()
     ), "AdvancedIncSubtensor1 still present in fused graph"
     assert not any(
         isinstance(n.op, FusedElemwise) for n in fn_unfused.maker.fgraph.toposort()

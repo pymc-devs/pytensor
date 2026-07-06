@@ -42,7 +42,7 @@ from pytensor.tensor.math import (
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
-from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
+from pytensor.tensor.subtensor import advanced_inc_subtensor, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
@@ -528,10 +528,10 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
     # since out[x] raises an exception if the indices (x) are int8.
     if weights is None:
         out = ptb.zeros([max_value], dtype=x.dtype)
-        out = advanced_inc_subtensor1(out, 1, x)
+        out = advanced_inc_subtensor(out, 1, x)
     else:
         out = ptb.zeros([max_value], dtype=weights.dtype)
-        out = advanced_inc_subtensor1(out, weights, x)
+        out = advanced_inc_subtensor(out, weights, x)
     return out
 
 
