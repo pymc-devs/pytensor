@@ -479,7 +479,7 @@ class TestFusion:
             ),  # 15
             # test with constant
             (
-                (fw + fx) + (fy + fz) + 2.0,
+                (fw + fx) + (fy + fz) + np.float32(2.0),
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
                 1,
@@ -487,7 +487,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                ((fw + fx) + 2.0 + fy) + fz,
+                ((fw + fx) + np.float32(2.0) + fy) + fz,
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
                 1,
@@ -495,7 +495,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                (fw + (fx + 2.0 + fy)) + fz,
+                (fw + (fx + np.float32(2.0) + fy)) + fz,
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
                 1,
@@ -503,7 +503,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                (fw + (fx + fy) + 2 + fz),
+                (fw + (fx + fy) + np.float32(2.0) + fz),
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
                 1,
@@ -511,7 +511,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                fw + (fx + (fy + fz) + 2.0),
+                fw + (fx + (fy + fz) + np.float32(2.0)),
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
                 1,
@@ -519,7 +519,7 @@ class TestFusion:
                 "float32",
             ),  # 20
             (
-                2 + (fw + fx) + (fy + fz),
+                np.float32(2.0) + (fw + fx) + (fy + fz),
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
                 1,
@@ -658,7 +658,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                fx - true_div(fy, 2),
+                fx - true_div(fy, np.float32(2.0)),
                 (fx, fy),
                 (fxv, fyv),
                 1,
@@ -685,7 +685,14 @@ class TestFusion:
                     "numpy": "float64",
                 },
             ),  # 40
-            (fx - (fy / 2), (fx, fy), (fxv, fyv), 1, fxv - (fyv / 2), "float32"),
+            (
+                fx - (fy / np.float32(2.0)),
+                (fx, fy),
+                (fxv, fyv),
+                1,
+                fxv - (fyv / 2),
+                "float32",
+            ),
             (
                 fx - (fy % fz),
                 (fx, fy, fz),
@@ -964,7 +971,10 @@ class TestFusion:
                     np.sum(-((fxv - fyv) ** 2) / 2),
                     -(fxv - fyv),
                 ),
-                ("float32", "float32"),
+                {
+                    "custom": ("float32", "float32"),
+                    "numpy+floatX": (config.floatX, "float32"),
+                },
             ),
             # Two Composite graphs that share the same input, but are split by
             # a non-elemwise operation (Assert)
@@ -1002,7 +1012,10 @@ class TestFusion:
                 (fxv,),
                 4,
                 (np.sum(fxv + 5) * np.exp(fxv) / (fxv + 5),),
-                ("float32",),
+                {
+                    "custom": ("float32",),
+                    "numpy+floatX": (config.floatX,),
+                },
             ),
             (
                 (sin(exp(fx)), exp(sin(fx))),
