@@ -158,3 +158,24 @@ def test_local_split_of_join_unprovable_stays():
     rewritten = rewrite_graph(out, include=("canonicalize",))
     assert _count(rewritten, JoinDims) == 1
     assert _count(rewritten, SplitDims) == 1
+
+
+def test_local_split_of_split_merges():
+    """An outer split refining an inner-produced axis collapses to one split."""
+    x = tensor("x", shape=(6, 4))
+    inner = split_dims(x, shape=(2, 3), axis=0)  # (2, 3, 4)
+    out = split_dims(inner, shape=(1, 3), axis=1)  # split the '3' -> (2, 1, 3, 4)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, SplitDims) == 1
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(24.0).reshape(6, 4)
+    np.testing.assert_allclose(fn(xv), xv.reshape(2, 1, 3, 4))
+
+
+def test_local_split_of_split_disjoint_stays():
+    """Splits of different original axes stay as two independent splits."""
+    x = tensor("x", shape=(6, 20))
+    inner = split_dims(x, shape=(2, 3), axis=0)  # (2, 3, 20)
+    out = split_dims(inner, shape=(4, 5), axis=2)  # split the untouched '20'
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, SplitDims) == 2

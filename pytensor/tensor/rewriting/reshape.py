@@ -1,8 +1,8 @@
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
-from pytensor.tensor.basic import MakeVector, expand_dims
+from pytensor.tensor.basic import MakeVector, expand_dims, join
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.reshape import JoinDims, SplitDims
+from pytensor.tensor.reshape import JoinDims, SplitDims, split_dims
 from pytensor.tensor.rewriting.basic import register_canonicalize
 from pytensor.tensor.rewriting.subtensor import _is_shape_of_x_at
 from pytensor.tensor.shape import specify_shape
@@ -141,3 +141,31 @@ def local_split_of_join(fgraph, node):
         return [x0]
 
     return None
+
+
+@register_canonicalize
+@node_rewriter([SplitDims])
+def local_split_of_split(fgraph, node):
+    """``SplitDims(SplitDims(x, s1), s2) -> SplitDims(x, spliced)``.
+
+    When the outer split refines an axis the inner split produced, the two
+    collapse into a single split of the original axis, splicing ``s2`` into
+    ``s1`` in place of the refined dim. Splits of untouched pass-through axes are
+    left as two independent splits.
+    """
+    x, s2 = node.inputs
+    inner = x.owner
+    if inner is None or not isinstance(inner.op, SplitDims):
+        return None
+
+    x0, s1 = inner.inputs
+    n1 = _split_count(inner)
+    k = node.op.axis - inner.op.axis
+    if not 0 <= k < n1:
+        return None
+
+    parts = [*([s1[:k]] if k > 0 else []), s2, *([s1[k + 1 :]] if k + 1 < n1 else [])]
+    spliced = parts[0] if len(parts) == 1 else join(0, *parts)
+    merged = split_dims(x0, shape=spliced, axis=inner.op.axis)
+    copy_stack_trace(node.outputs[0], merged)
+    return [merged]
