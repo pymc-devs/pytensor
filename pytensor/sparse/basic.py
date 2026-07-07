@@ -841,7 +841,9 @@ class GetItemList(Op):
         assert ind.ndim == 1
         assert ind.dtype in integer_dtypes
 
-        return Apply(self, [x, ind], [x.type()])
+        # The number of rows is set by the index, not by `x`.
+        out_shape = (ind.type.shape[0], x.type.shape[1])
+        return Apply(self, [x, ind], [x.type.clone(shape=out_shape)()])
 
     def perform(self, node, inp, outputs):
         (out,) = outputs
