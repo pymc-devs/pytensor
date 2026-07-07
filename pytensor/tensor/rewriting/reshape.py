@@ -1,6 +1,6 @@
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
-from pytensor.tensor.basic import MakeVector, expand_dims, join
+from pytensor.tensor.basic import MakeVector, expand_dims, join, stack
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
@@ -63,6 +63,59 @@ def local_split_dims_degenerate(fgraph, node):
         return [specified_x]
 
     return None
+
+
+@register_canonicalize
+@node_rewriter([JoinDims])
+def local_join_dims_squeeze(fgraph, node):
+    """Squeeze provably size-1 dims out of a ``JoinDims`` span.
+
+    A size-1 dim contributes a factor of 1 to the join, so it can be squeezed
+    out before joining. Keeping ``JoinDims`` free of size-1 dims is the canonical
+    form (mirrors ``local_reshape_to_dimshuffle``): it isolates the genuine
+    dimension-merge from the expand/squeeze that DimShuffle-targeting rewrites
+    can then simplify (e.g. dissolving a broadcast behind a ``repeat``).
+    """
+    (x,) = node.inputs
+    op = node.op
+    static_shape = x.type.shape
+    drop = [i for i in op.axis_range if static_shape[i] == 1]
+    if not drop:
+        return None
+
+    squeezed = squeeze(x, axis=drop)
+    out = join_dims(squeezed, start_axis=op.start_axis, n_axes=op.n_axes - len(drop))
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
+@register_canonicalize
+@node_rewriter([SplitDims])
+def local_split_dims_expand(fgraph, node):
+    """Emit ``expand_dims`` for provably size-1 factors of a ``SplitDims``.
+
+    A size-1 split factor is an inert dim, so it is expressed as an
+    ``expand_dims`` around a split of the genuine (non-1) factors rather than
+    carried inside the ``SplitDims`` (canonical form; mirror of
+    ``local_join_dims_squeeze``). Fires only in the mixed case (at least one
+    size-1 and one non-1 factor); the split of the kept factors preserves the
+    ``prod(sizes) == x.shape[axis]`` runtime check.
+    """
+    x, shape = node.inputs
+    axis = node.op.axis
+    m = _split_count(node)
+    [output] = node.outputs
+
+    split_static = output.type.shape[axis : axis + m]
+    keep = [j for j in range(m) if split_static[j] != 1]
+    drop = [axis + j for j in range(m) if split_static[j] == 1]
+    if not drop or not keep:
+        return None
+
+    inner = split_dims(x, shape=stack([shape[j] for j in keep]), axis=axis)
+    out = expand_dims(inner, axis=drop)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
 
 
 @register_canonicalize

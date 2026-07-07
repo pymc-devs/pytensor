@@ -105,6 +105,45 @@ def test_local_split_dims_to_specify_shape():
     assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
 
+def test_local_join_dims_squeeze():
+    """A size-1 dim inside a join span is squeezed out before joining."""
+    x = tensor("x", shape=(2, 1, 3, 4))
+    out = join_dims(x, start_axis=1, n_axes=2)  # merge the size-1 and the '3'
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    # Only the size-1 dim is removed; the remaining single axis needs no join.
+    assert _count(rewritten, JoinDims) == 0
+    expected = squeeze(x, axis=1)
+    assert_equal_computations([rewritten], [expected])
+
+    # With two genuine dims in the span, a join survives after the squeeze.
+    y = tensor("y", shape=(2, 1, 3, 4))
+    out2 = join_dims(y, start_axis=1, n_axes=3)  # merge size-1, '3', '4'
+    rewritten2 = rewrite_graph(out2, include=("canonicalize",))
+    assert _count(rewritten2, JoinDims) == 1
+    fn = pytensor.function([y], rewritten2)
+    yv = np.arange(24.0).reshape(2, 1, 3, 4)
+    np.testing.assert_allclose(fn(yv), yv.reshape(2, 12))
+
+
+def test_local_split_dims_expand():
+    """Size-1 split factors become expand_dims around a split of the real factors."""
+    x = tensor("x", shape=(6, 4))
+    out = split_dims(x, shape=(2, 1, 3), axis=0)  # (2, 1, 3, 4)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, SplitDims) == 1
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(24.0).reshape(6, 4)
+    np.testing.assert_allclose(fn(xv), xv.reshape(2, 1, 3, 4))
+
+    # A single genuine factor collapses to a pure expand_dims (no split left).
+    y = tensor("y", shape=(6, 4))
+    out2 = split_dims(y, shape=(1, 6, 1), axis=0)  # (1, 6, 1, 4)
+    rewritten2 = rewrite_graph(out2, include=("canonicalize",))
+    assert _count(rewritten2, SplitDims) == 0
+    expected = expand_dims(y, axis=(0, 2))
+    assert_equal_computations([rewritten2], [expected])
+
+
 def test_local_join_of_split_cancels():
     """``JoinDims(SplitDims(x, s))`` over the same span cancels to ``x``."""
     x = tensor("x", shape=(2, 12, 5))
