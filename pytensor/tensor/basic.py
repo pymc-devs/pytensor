@@ -2769,8 +2769,11 @@ def roll(x, shift, axis=None):
     _x = as_tensor_variable(x)
     if axis is None:
         if _x.ndim > 1:
+            from pytensor.tensor.reshape import split_dims
+
             y = _x.flatten()
-            return roll(y, shift, axis=0).reshape(_x.shape)
+            rolled = roll(y, shift, axis=0)
+            return split_dims(rolled, shape=_x.shape, axis=0)
         else:
             axis = 0
 
