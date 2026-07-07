@@ -2,7 +2,8 @@ from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.basic import MakeVector, expand_dims, join
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.reshape import JoinDims, SplitDims, split_dims
+from pytensor.tensor.math import prod
+from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.rewriting.basic import register_canonicalize
 from pytensor.tensor.rewriting.subtensor import _is_shape_of_x_at
 from pytensor.tensor.shape import specify_shape
@@ -66,23 +67,42 @@ def local_split_dims_degenerate(fgraph, node):
 @register_canonicalize
 @node_rewriter([JoinDims])
 def local_join_of_split(fgraph, node):
-    """``JoinDims(SplitDims(x, s)) -> x`` when the join re-merges the split span.
+    """Collapse ``JoinDims(SplitDims(x, s))`` when the spans are boundary-aligned.
 
-    Unconditional: ``SplitDims`` guarantees ``prod(s) == x.shape[axis]`` at
-    runtime, so re-joining exactly those dims restores ``x``.
+    - Join span ⊇ split span → a single ``JoinDims`` over the original axes: the
+      split group recombines and joins with the covered pass-through axes (the
+      exact-span case degenerates to ``x``).
+    - Join span ⊆ split span → a single ``SplitDims`` of ``x`` with the joined
+      sub-run of sizes multiplied into one dim.
+    - A join straddling a split boundary is a genuine dimension-mix and is left.
     """
     (inp,) = node.inputs
     split_node = inp.owner
     if split_node is None or not isinstance(split_node.op, SplitDims):
         return None
 
-    x = split_node.inputs[0]
-    op = node.op
-    if op.start_axis == split_node.op.axis and op.n_axes == _split_count(split_node):
-        copy_stack_trace(node.outputs[0], x)
-        return [x]
+    x, s = split_node.inputs
+    a = split_node.op.axis
+    m = _split_count(split_node)
+    j, nj = node.op.start_axis, node.op.n_axes
 
-    return None
+    if j <= a and j + nj >= a + m:
+        merged = join_dims(x, start_axis=j, n_axes=nj - m + 1)
+    elif a <= j and j + nj <= a + m:
+        lo, hi = j - a, j - a + nj
+        merged_size = prod(s[lo:hi], keepdims=True)
+        parts = [
+            *([s[:lo]] if lo > 0 else []),
+            merged_size,
+            *([s[hi:]] if hi < m else []),
+        ]
+        new_sizes = parts[0] if len(parts) == 1 else join(0, *parts)
+        merged = split_dims(x, shape=new_sizes, axis=a)
+    else:
+        return None
+
+    copy_stack_trace(node.outputs[0], merged)
+    return [merged]
 
 
 @register_canonicalize

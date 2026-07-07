@@ -112,12 +112,36 @@ def test_local_join_of_split_cancels():
 
 
 def test_local_join_of_split_span_mismatch_stays():
-    """A join over a different span than the split does not cancel."""
+    """A join straddling a split boundary is a genuine mix and does not cancel."""
     x = tensor("x", shape=(2, 12, 5))
     out = join_dims(split_dims(x, shape=(3, 4), axis=1), start_axis=0, n_axes=2)
     rewritten = rewrite_graph(out, include=("canonicalize",))
     assert _count(rewritten, SplitDims) == 1
     assert _count(rewritten, JoinDims) == 1
+
+
+def test_local_join_of_split_superset_merges():
+    """A join covering the split span plus neighbours becomes one join of ``x``."""
+    x = tensor("x", shape=(2, 6, 5))
+    out = join_dims(split_dims(x, shape=(2, 3), axis=1), start_axis=0, n_axes=3)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, SplitDims) == 0
+    assert _count(rewritten, JoinDims) == 1
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(60.0).reshape(2, 6, 5)
+    np.testing.assert_allclose(fn(xv), xv.reshape(12, 5))
+
+
+def test_local_join_of_split_subset_splits():
+    """A join inside the split span becomes one split with sizes multiplied."""
+    x = tensor("x", shape=(12, 5))
+    out = join_dims(split_dims(x, shape=(2, 2, 3), axis=0), start_axis=1, n_axes=2)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 0
+    assert _count(rewritten, SplitDims) == 1
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(60.0).reshape(12, 5)
+    np.testing.assert_allclose(fn(xv), xv.reshape(2, 6, 5))
 
 
 def test_local_join_of_join_merges():
