@@ -13,6 +13,7 @@ from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
 from pytensor.tensor.basic import MakeVector, arange, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.reshape import JoinDims
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -201,13 +202,25 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
         t = tensor3()
         rng = np.random.default_rng(seed=utt.fetch_seed())
         val = rng.uniform(size=(3, 4, 5)).astype(config.floatX)
+        # reshape([-1]) is built as JoinDims (a full flatten), not Reshape
         for out in [
-            t.reshape([-1]),
             t.reshape([-1, 5]),
             t.reshape([5, -1]),
             t.reshape([5, -1, 3]),
         ]:
             self._compile_and_check([t], [out], [val], self.op)
+
+    def test_reshape_minus_one_is_join_dims(self):
+        # A full flatten reshape((-1,)) is built directly as JoinDims, which keeps
+        # a per-dim static shape; other -1 shapes stay Reshape.
+        t = tensor3("t", shape=(2, 3, 4))
+        flat = t.reshape((-1,))
+        assert isinstance(flat.owner.op, JoinDims)
+        assert flat.type.shape == (24,)
+        assert isinstance(t.reshape((2, -1)).owner.op, Reshape)
+
+        val = np.arange(24.0).reshape(2, 3, 4).astype(config.floatX)
+        np.testing.assert_allclose(flat.eval({t: val}), val.reshape(-1))
 
     def test_reshape_long_in_shape(self):
         v = dvector("v")
