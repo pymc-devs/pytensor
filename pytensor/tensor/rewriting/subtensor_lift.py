@@ -38,6 +38,7 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, dot, minimum
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
     get_simplified_broadcast_shape,
@@ -215,15 +216,15 @@ def _lift_subtensor_non_axis(
 
 def _static_size_not_larger(idx, val_static_dim) -> bool:
     # A purely static bound: the index selects no more elements than the axis holds.
-    # Reshape/DimShuffle preserve the element count, so follow them to whichever
-    # view in the chain has a fully-known static shape.
+    # Reshape/JoinDims/SplitDims/DimShuffle preserve the element count, so follow
+    # them to whichever view in the chain has a fully-known static shape.
     if val_static_dim is not None:
         idx_static_shape = idx.type.shape
         if not any(d is None for d in idx_static_shape) and (
             np.prod(idx_static_shape) <= val_static_dim
         ):
             return True
-    if isinstance(idx.owner_op, Reshape | DimShuffle):
+    if isinstance(idx.owner_op, Reshape | JoinDims | SplitDims | DimShuffle):
         return _static_size_not_larger(idx.owner.inputs[0], val_static_dim)
     return False
 

@@ -44,6 +44,7 @@ from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import add, clip, minimum
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -2765,11 +2766,11 @@ def inc_subtensor(
         # instead of reusing x.owner.op().
         return inner_incsubtensor.dimshuffle(x.owner.op.new_order)
 
-    elif isinstance(x.owner.op, Reshape):
+    elif isinstance(x.owner.op, Reshape | JoinDims | SplitDims):
         # This case happens when the indices are not arranged as a vector, but
         # as a higher-dimensional array. This is handled by the subtensor
         # by flattening this list, taking the subtensor, then reshaping the
-        # result.
+        # result. JoinDims/SplitDims are the same kind of regrouping view.
         inner_x = x.owner.inputs[0]
         # Try to apply inc_subtensor on inner_x.
         # If it works, there is no need to reshape, as the inc_subtensor

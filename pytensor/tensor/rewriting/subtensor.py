@@ -60,6 +60,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.shape import (
     Reshape,
@@ -218,8 +219,8 @@ def _index_provably_unique(idx, fgraph: FunctionGraph | None) -> bool:
         return True
     if isinstance(idx.owner_op, ARange):
         return _arange_provably_unique(*idx.owner.inputs)
-    if isinstance(idx.owner_op, Reshape | DimShuffle):
-        # Views that only reorder or insert size-1 dims keep the value multiset.
+    if isinstance(idx.owner_op, Reshape | JoinDims | SplitDims | DimShuffle):
+        # Views that only regroup or reorder dims keep the value multiset.
         return _index_provably_unique(idx.owner.inputs[0], fgraph)
     return False
 
