@@ -811,11 +811,12 @@ def repeat(
         # We only use the Repeat Op for vector repeats
         return Repeat(axis=axis)(a, repeats)
     else:
-        if repeats.dtype == "uint64":
-            # numpy cannot safely cast uint64 repeats to the int64 indexing dtype
-            raise TypeError("repeat doesn't support uint64 repeats")
+        if a.dtype == "uint64":
+            # Multiplying int64 (shape) by uint64 (repeats) yields a float64
+            # Which is not valid for the `reshape` operation at the end
+            raise TypeError("repeat doesn't support dtype uint64")
 
-        # Scalar repeat, we implement this with canonical Ops broadcast + join_dims
+        # Scalar repeat, we implement this with canonical Ops broadcast + reshape
         a_shape = a.shape
 
         # Replicate a along a new axis (axis+1) repeats times
@@ -823,10 +824,10 @@ def repeat(
         broadcast_shape.insert(axis + 1, repeats)
         broadcast_a = broadcast_to(ptb.expand_dims(a, axis + 1), broadcast_shape)
 
-        # Merge axis and axis+1 (the replicated axis) into a single axis
-        from pytensor.tensor.reshape import join_dims
-
-        return join_dims(broadcast_a, start_axis=axis, n_axes=2)
+        # Reshape broadcast_a to the final shape, merging axis and axis+1
+        repeat_shape = list(a_shape)
+        repeat_shape[axis] = repeat_shape[axis] * repeats
+        return broadcast_a.reshape(repeat_shape)
 
 
 class Bartlett(Op):
