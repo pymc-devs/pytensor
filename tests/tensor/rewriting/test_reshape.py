@@ -4,7 +4,9 @@ import pytensor
 from pytensor.graph import FunctionGraph, rewrite_graph
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.tensor.basic import constant, expand_dims
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.extra_ops import squeeze
+from pytensor.tensor.math import exp
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.shape import Reshape, specify_shape
 from pytensor.tensor.type import tensor
@@ -203,3 +205,18 @@ def test_local_split_of_split_disjoint_stays():
     out = split_dims(inner, shape=(4, 5), axis=2)  # split the untouched '20'
     rewritten = rewrite_graph(out, include=("canonicalize",))
     assert _count(rewritten, SplitDims) == 2
+
+
+def test_local_join_split_dims_lift():
+    """JoinDims/SplitDims lift through a unary Elemwise to reach the elemwise."""
+    x = tensor("x", shape=(2, 3, 4))
+    rewritten = rewrite_graph(join_dims(exp(x)), include=("canonicalize",))
+    assert isinstance(rewritten.owner.op, Elemwise)
+    assert isinstance(rewritten.owner.inputs[0].owner.op, JoinDims)
+
+    xs = tensor("xs", shape=(6, 4))
+    rs = rewrite_graph(
+        split_dims(exp(xs), shape=(2, 3), axis=0), include=("canonicalize",)
+    )
+    assert isinstance(rs.owner.op, Elemwise)
+    assert isinstance(rs.owner.inputs[0].owner.op, SplitDims)

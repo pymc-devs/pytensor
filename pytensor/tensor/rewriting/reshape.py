@@ -1,10 +1,11 @@
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.basic import MakeVector, expand_dims, join
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
-from pytensor.tensor.rewriting.basic import register_canonicalize
+from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
 from pytensor.tensor.rewriting.subtensor import _is_shape_of_x_at
 from pytensor.tensor.shape import specify_shape
 
@@ -189,3 +190,26 @@ def local_split_of_split(fgraph, node):
     merged = split_dims(x0, shape=spliced, axis=inner.op.axis)
     copy_stack_trace(node.outputs[0], merged)
     return [merged]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([JoinDims, SplitDims])
+def local_join_split_dims_lift(fgraph, node):
+    """Lift a ``JoinDims``/``SplitDims`` through a unary ``Elemwise``.
+
+    ``JoinDims(UnaryElemwise(x)) -> UnaryElemwise(JoinDims(x))`` (and likewise for
+    ``SplitDims``). Mirrors ``local_reshape_lift`` so rewrites that match on the
+    Elemwise (e.g. ``log1msigm_to_softplus``) still fire when a reshape-as-view op
+    sits between them.
+    """
+    inner = node.inputs[0].owner
+    if inner is None or not isinstance(inner.op, Elemwise) or len(inner.inputs) != 1:
+        return None
+
+    (elem_input,) = inner.inputs
+    lifted = node.op(elem_input, *node.inputs[1:])
+    copy_stack_trace(node.outputs, lifted)
+    out = inner.op(lifted)
+    copy_stack_trace(node.outputs + node.inputs, out)
+    return [out]
