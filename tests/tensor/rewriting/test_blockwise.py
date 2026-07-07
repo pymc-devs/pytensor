@@ -8,10 +8,20 @@ from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
-from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
+from pytensor.tensor import (
+    add,
+    alloc,
+    as_tensor,
+    iscalar,
+    matrix,
+    scalar,
+    tensor,
+    tensor3,
+)
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.inverse import MatrixPinv
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.blockwise import local_useless_blockwise
 from pytensor.tensor.shape import Reshape
 
@@ -185,4 +195,40 @@ def test_blockwise_reshape():
     np.testing.assert_allclose(
         new_y.eval({"x": test_x}, mode=no_rewrites),
         rewritten_y.eval({"x": test_x}, mode=no_rewrites),
+    )
+
+
+def test_blockwise_join_dims():
+    # A batched JoinDims lifts to a plain JoinDims at a shifted start axis.
+    x = tensor("x", shape=(5, 2, 3))
+    out = Blockwise(JoinDims(0, 2), signature="(a,b)->(c)")(x)
+    assert isinstance(out.owner.op, Blockwise)
+
+    rewritten = rewrite_graph(out, include=("specialize",), clone=True)
+    assert isinstance(rewritten.owner.op, JoinDims)
+    assert rewritten.type.shape == (5, 6)
+
+    no_rewrites = Mode(linker="py", optimizer=None)
+    test_x = np.arange(30).reshape(5, 2, 3).astype(config.floatX)
+    np.testing.assert_allclose(
+        out.eval({x: test_x}, mode=no_rewrites),
+        rewritten.eval({x: test_x}, mode=no_rewrites),
+    )
+
+
+def test_blockwise_split_dims():
+    # A batched SplitDims with batch-invariant sizes lifts to a plain SplitDims.
+    x = tensor("x", shape=(5, 6))
+    out = Blockwise(SplitDims(0), signature="(a),(s)->(b,c)")(x, as_tensor([2, 3]))
+    assert isinstance(out.owner.op, Blockwise)
+
+    rewritten = rewrite_graph(out, include=("specialize",), clone=True)
+    assert isinstance(rewritten.owner.op, SplitDims)
+    assert rewritten.type.shape == (5, 2, 3)
+
+    no_rewrites = Mode(linker="py", optimizer=None)
+    test_x = np.arange(30).reshape(5, 6).astype(config.floatX)
+    np.testing.assert_allclose(
+        out.eval({x: test_x}, mode=no_rewrites),
+        rewritten.eval({x: test_x}, mode=no_rewrites),
     )

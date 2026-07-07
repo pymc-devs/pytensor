@@ -15,6 +15,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
+from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -272,6 +273,43 @@ def local_blockwise_reshape(fgraph, node):
         batched_shape = x.shape[:batch_ndim]
         core_reshape = _squeeze_left(output_shape, batch_ndim)
         new_out = x.reshape([*tuple(batched_shape), *tuple(core_reshape)])
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
+
+
+@register_specialize
+@node_rewriter([blockwise_of(JoinDims)])
+def local_blockwise_join_dims(fgraph, node):
+    """Lift a Blockwise ``JoinDims`` into a plain ``JoinDims`` over the batch dims.
+
+    ``JoinDims`` carries its axis span as op params, so a batched join is just a
+    join at a start axis shifted past the batch dims of the full tensor.
+    """
+    [x] = node.inputs
+    batch_ndim = node.op.batch_ndim(node)
+    core_op = node.op.core_op
+    new_out = join_dims(
+        x, start_axis=core_op.start_axis + batch_ndim, n_axes=core_op.n_axes
+    )
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_specialize
+@node_rewriter([blockwise_of(SplitDims)])
+def local_blockwise_split_dims(fgraph, node):
+    """Lift a Blockwise ``SplitDims`` into a plain ``SplitDims`` over the batch dims.
+
+    Only when the split sizes don't vary across the batch (broadcastable batch
+    dims of the shape input), so they squeeze to a single core shape vector.
+    """
+    x, shape = node.inputs
+    batch_ndim = node.op.batch_ndim(node)
+    if all(shape.type.broadcastable[:batch_ndim]):
+        core_shape = _squeeze_left(shape, batch_ndim)
+        new_out = split_dims(
+            x, shape=core_shape, axis=node.op.core_op.axis + batch_ndim
+        )
         copy_stack_trace(node.outputs[0], new_out)
         return [new_out]
 
