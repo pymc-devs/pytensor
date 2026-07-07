@@ -18,6 +18,7 @@ from pytensor.graph.type import Type
 from pytensor.tensor.basic import alloc, as_tensor_variable
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import add, cos, exp, maximum, sin
+from pytensor.tensor.reshape import JoinDims
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
@@ -494,9 +495,9 @@ def test_implicit_broadcasting_via_repeat():
     x = pt.vector("x", shape=(3,), dtype=int)
     y = pt.vector("y", shape=(9,), dtype=int)
     out = x[None, :].repeat(9, axis=0) <= y[:, None].repeat(3, axis=1)
-    # There are two Reshapes in the graph
-    assert isinstance(out.owner.inputs[0].owner.op, Reshape)
-    assert isinstance(out.owner.inputs[1].owner.op, Reshape)
+    # There are two JoinDims (merging the broadcast axis) in the graph
+    assert isinstance(out.owner.inputs[0].owner.op, JoinDims)
+    assert isinstance(out.owner.inputs[1].owner.op, JoinDims)
 
     new_out = rewrite_graph(out, include=("canonicalize", "specialize"))
     assert equal_computations([new_out], [x[None] <= y[:, None]])
