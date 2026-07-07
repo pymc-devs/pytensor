@@ -179,7 +179,9 @@ class TensorInv(Op):
 
     def make_node(self, a):
         a = as_tensor_variable(a)
-        out = a.type()
+        # `tensorinv` rotates the axes: the last `ndim - ind` dims come first.
+        out_shape = a.type.shape[self.ind :] + a.type.shape[: self.ind]
+        out = a.type.clone(shape=out_shape)()
         return Apply(self, [a], [out])
 
     def perform(self, node, inputs, outputs):

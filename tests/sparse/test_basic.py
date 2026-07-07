@@ -1227,6 +1227,16 @@ class TestGetItem:
         expected = (A[0].toarray()[sel] @ coeff_val.T).T[:, :, None]
         np.testing.assert_allclose(out, expected)
 
+    def test_GetItem2d_static_shape(self):
+        # Both output dims are set by the slices, not by `x`, so `x`'s shape
+        # must not leak into the output's static shape.
+        _a, A = sparse_random_inputs("csr", (5, 4))
+        x = as_sparse_variable(A[0])
+        assert x.type.shape == (5, 4)
+
+        assert x[0:2, :].type.shape == (2, 4)
+        assert x[1:5:2, 0:3].type.shape == (2, 3)
+
     def test_get_item_list_grad(self):
         op = sparse.basic.GetItemList()
 
