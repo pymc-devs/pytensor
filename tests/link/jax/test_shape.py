@@ -3,6 +3,7 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
+from pytensor.tensor.reshape import join_dims, split_dims
 from pytensor.tensor.shape import Shape, Shape_i, reshape
 from pytensor.tensor.type import iscalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -58,6 +59,31 @@ def test_jax_Reshape_shape_graph_input():
     x = reshape(a, (shape_pt, shape_pt))
     compare_jax_and_py(
         [a, shape_pt], [x], [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX), 2]
+    )
+
+
+def test_jax_JoinDims():
+    a = pt.tensor("a", shape=(2, 3, 4))
+    x = join_dims(a, start_axis=0, n_axes=2)
+    compare_jax_and_py(
+        [a], [x], [np.arange(24.0).reshape(2, 3, 4).astype(config.floatX)]
+    )
+
+
+def test_jax_SplitDims_constant():
+    a = vector("a")
+    x = split_dims(a, shape=(2, 2), axis=0)
+    compare_jax_and_py([a], [x], [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX)])
+
+
+def test_jax_SplitDims_shape_graph_input():
+    """Split sizes given as a symbolic MakeVector should still compile under JAX,
+    via the same shape-parameter-as-tuple rewrite used for Reshape."""
+    a = vector("a")
+    b = iscalar("b")
+    x = split_dims(a, shape=(b, b), axis=0)
+    compare_jax_and_py(
+        [a, b], [x], [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX), 2]
     )
 
 

@@ -91,10 +91,22 @@ def jax_funcify_JoinDims(op, node, **kwargs):
 def jax_funcify_SplitDims(op, node, **kwargs):
     axis = op.axis
     n_split = node.outputs[0].type.ndim - node.inputs[0].type.ndim + 1
+    shape_arg = node.inputs[1]
 
-    def split_dims(x, shape):
-        split_sizes = tuple(shape[j] for j in range(n_split))
-        return jnp.reshape(x, (*x.shape[:axis], *split_sizes, *x.shape[axis + 1 :]))
+    if isinstance(shape_arg, Constant):
+        constant_sizes = tuple(int(dim) for dim in shape_arg.data)
+
+        def split_dims(x, shape):
+            return jnp.reshape(
+                x, (*x.shape[:axis], *constant_sizes, *x.shape[axis + 1 :])
+            )
+
+    else:
+        assert_shape_argument_jax_compatible(shape_arg)
+
+        def split_dims(x, shape):
+            split_sizes = tuple(shape[j] for j in range(n_split))
+            return jnp.reshape(x, (*x.shape[:axis], *split_sizes, *x.shape[axis + 1 :]))
 
     return split_dims
 

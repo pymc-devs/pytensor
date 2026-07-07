@@ -4,6 +4,7 @@ from pytensor.graph.rewriting.basic import dfs_rewriter, node_rewriter
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
+from pytensor.tensor.reshape import SplitDims
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
 from pytensor.tensor.variable import TensorVariable
@@ -100,11 +101,15 @@ optdb.register(
 )
 
 
-@node_rewriter([Reshape])
+@node_rewriter([Reshape, SplitDims])
 def shape_parameter_as_tuple(fgraph, node):
     """Replace `MakeVector` and `DimShuffle` (when used to transform a scalar
     into a 1d vector) when they are found as the input of a `shape`
     parameter by `JAXShapeTuple` during transpilation.
+
+    Applies to the ``shape``/split-sizes input (``node.inputs[1]``) of both
+    `Reshape` and `SplitDims`, which have the same concrete-shape requirement
+    under JAX.
 
     The JAX implementations of `MakeVector` and `DimShuffle` always return JAX
     `TracedArrays`, but JAX only accepts concrete values as inputs for the `size`

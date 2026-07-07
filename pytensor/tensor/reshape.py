@@ -5,7 +5,7 @@ import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
 from pytensor.gradient import DisconnectedType, disconnected_type
-from pytensor.graph import Apply, Variable
+from pytensor.graph import Apply, Constant, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.scalar import ScalarVariable
@@ -203,10 +203,14 @@ class SplitDims(COp):
 
     def make_node(self, x, shape):
         x = as_tensor_variable(x)
-        shape = as_tensor_variable(shape, dtype=int)
+        shape = as_tensor_variable(shape)
 
         if shape.type.numpy_dtype.kind not in "iu":
-            raise TypeError("shape must be an integer tensor")
+            if isinstance(shape, Constant) and shape.data.size == 0:
+                # Empty shapes like `()` default to float dtype
+                shape = as_tensor_variable(shape.data.astype(int))
+            else:
+                raise TypeError("shape must be an integer tensor")
 
         if shape.type.ndim != 1:
             raise TypeError(
