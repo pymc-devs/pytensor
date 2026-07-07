@@ -467,7 +467,8 @@ def test_grad_abs():
 def test_constant():
     c = constant(2, name="a")
     assert c.name == "a"
-    assert c.dtype == "int8"
+    expected = "int8" if pytensor.config.cast_policy == "custom" else "int64"
+    assert c.dtype == expected
     c = constant(2, dtype="float32")
     assert c.name is None
     assert c.dtype == "float32"
