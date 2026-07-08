@@ -610,7 +610,7 @@ class OpFromGraph(HasInnerFunction, Op):
                     f"Need to override {nin} gradients, got {len(custom_input_grads)}",
                     custom_input_grads,
                 )
-            # compute non-overriding downsteam grads from upstreams grads
+            # compute non-overriding downstream grads from upstreams grads
             # it's normal some input may be disconnected, thus the 'ignore'
             wrt = [
                 lin

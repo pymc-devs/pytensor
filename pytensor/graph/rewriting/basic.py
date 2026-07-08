@@ -2400,7 +2400,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                     for node_rewriter in self.node_tracker.get_trackers(node.op):
                         nb = change_tracker.nb_imported
                         t_rewrite = time.perf_counter()
-                        # Tracks are already enfoced by `self.node_tracker.get_trackers`
+                        # Tracks are already enforced by `self.node_tracker.get_trackers`
                         node_rewriter_change = self.process_node(
                             fgraph, node, node_rewriter, enforce_tracks=False
                         )

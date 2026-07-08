@@ -597,7 +597,7 @@ def scan_reduce_trace_rewrite(
     buffers before grad() is called, the gradient will be silently wrong.
     TODO: Use a subclass that raises explicitly on `L_op`
 
-    Paramaters
+    Parameters
     ----------
     backend_supports_output_pre_allocation: bool
         When the backend supports output pre-allocation Scan must keep buffers

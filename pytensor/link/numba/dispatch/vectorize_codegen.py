@@ -665,7 +665,7 @@ def make_loop_call(
             *safe,
         )
         if core_scalar and core_ndim == 0:
-            # Retrive scalar item at index
+            # Retrieve scalar item at index
             read_val = builder.load(read_ptr)
             destination = destroyed_inputs.get(input_i)
             if destination is None:

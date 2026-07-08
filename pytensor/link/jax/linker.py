@@ -135,7 +135,7 @@ class JAXLinker(JITLinker):
         for n in self.fgraph.inputs:
             sinput = storage_map[n]
             if isinstance(sinput[0], Generator):
-                # Neet to convert Generator into JAX PRNGkey
+                # Need to convert Generator into JAX PRNGkey
                 sinput[0] = jax_typify(sinput[0])
             thunk_inputs.append(sinput)
 

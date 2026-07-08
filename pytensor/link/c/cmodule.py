@@ -432,7 +432,7 @@ def get_module_hash(src_code: str, key) -> str:
         to_hash += list(map(str, key[0]))
     c_link_key = key[1]
     # Currently, in order to catch potential bugs early, we are very
-    # convervative about the structure of the key and raise an exception
+    # conservative about the structure of the key and raise an exception
     # if it does not match exactly what we expect. In the future we may
     # modify this behavior to be less strict and be able to accommodate
     # changes to the key in an automatic way.
@@ -1550,11 +1550,11 @@ class ModuleCache:
                             continue
                     age = time_now - last_access_time(path)
 
-                    # In normal case, the processus that created this
-                    # directory will delete it. However, if this processus
+                    # In normal case, the process that created this
+                    # directory will delete it. However, if this process
                     # crashes, it will not be cleaned up.
                     # As we don't know if this directory is still used,
-                    # we wait one week and suppose that the processus
+                    # we wait one week and suppose that the process
                     # crashed, and we take care of the clean-up.
                     if age > min_age:
                         to_del.append(os.path.join(self.dirname, filename))

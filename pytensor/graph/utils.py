@@ -119,7 +119,7 @@ def add_tag_trace[T: "Apply" | "Variable"](thing: T, user_line: int | None = Non
         skips = []
 
     tr = simple_extract_stack(limit=user_line, skips=skips)
-    # Different python version use different sementic for
+    # Different python version use different semantic for
     # limit. python 2.7 include the call to extrack_stack. The -1 get
     # rid of it.
 

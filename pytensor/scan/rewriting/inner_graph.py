@@ -237,7 +237,7 @@ def numba_rewrite_scan_inner_graph(linker, op, node, inner, *, mode):
 
     Because the last untraced updates are returned as is, the inner function is not allowed to
     alias sequences, non_sequences, or other untraced inputs and outputs (violates the outer alias restriction).
-    Untraced updates are not allowed to alias traced reads (risks corruption by subsequent overwrittes),
+    Untraced updates are not allowed to alias traced reads (risks corruption by subsequent overwrites),
     but can alias traced updates, since the immediate copy to their buffer that follows, will break the alias.
 
     Because untraced inputs are immediately discarded (and protected from alias with other updates),
