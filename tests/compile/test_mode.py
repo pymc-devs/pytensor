@@ -8,6 +8,8 @@ from pytensor.compile.mode import (
 )
 from pytensor.configdefaults import config
 from pytensor.graph.features import NoOutputFromInplace
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import get_active_mode, graph_rewriter
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
 from pytensor.link.jax import JAXLinker
 from pytensor.tensor.math import dot, tanh
@@ -131,3 +133,24 @@ def test_predefined_modes_respected():
 
     default_mode_again = get_default_mode()
     assert not isinstance(default_mode_again.linker, JAXLinker)
+
+
+def test_optimizer_sets_active_compile_mode():
+    """``mode.optimizer.rewrite(fgraph)`` must expose ``mode`` as the active compile
+    mode (via ``get_active_mode``) while it runs, even outside ``FunctionMaker``, so
+    inner-graph rewrites recover the right backend. The mode is stamped only when
+    unset and restored afterwards.
+    """
+    seen = []
+
+    @graph_rewriter
+    def record_active_mode(fgraph):
+        seen.append(get_active_mode(fgraph))
+
+    mode = Mode(linker="py", optimizer=record_active_mode)
+    x = vector("x")
+    fg = FunctionGraph([x], [x])
+
+    mode.optimizer.rewrite(fg)
+    assert seen == [mode]
+    assert getattr(fg, "_compile_mode", None) is None

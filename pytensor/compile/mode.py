@@ -4,6 +4,7 @@ WRITEME
 """
 
 import logging
+import sys
 import warnings
 from typing import Any
 
@@ -279,6 +280,53 @@ optdb.register("CheckStackTrace", CheckStackTraceRewriter(), *_tags, position=-1
 del _tags
 
 
+class _ActiveModeGraphRewriter(GraphRewriter):
+    """Wrap a mode's optimizer so applying it records the active compile mode.
+
+    Exposes the compile mode as ``fgraph._compile_mode`` (see ``get_active_mode``)
+    so rewrites can make decisions based on the compile target (fusion split rules,
+    inner graph specialization, ...). Stamps the mode when the fgraph does not already carry one, and
+    restores the previous state after.
+    """
+
+    def __init__(self, rewriter: GraphRewriter, mode: "Mode"):
+        self._rewriter = rewriter
+        self._mode = mode
+
+    def add_requirements(self, fgraph):
+        return self._rewriter.add_requirements(fgraph)
+
+    def apply(self, fgraph, *args, **kwargs):
+        # Only stamp when unset, so a mode already established by an outer
+        # optimizer run (the outermost compilation, or a nested inner-graph
+        # rewrite) wins.
+        stamped = getattr(fgraph, "_compile_mode", None) is None
+        if stamped:
+            fgraph._compile_mode = self._mode
+        try:
+            return self._rewriter.apply(fgraph, *args, **kwargs)
+        finally:
+            if stamped:
+                del fgraph._compile_mode
+
+    def print_summary(self, stream=sys.stdout, level=0, depth=-1):
+        return self._rewriter.print_summary(stream=stream, level=level, depth=depth)
+
+    def print_profile(self, stream, prof, level=0):
+        # ``GraphRewriter.print_profile`` is a classmethod that raises unless
+        # overridden, so delegate to the wrapped rewriter's implementation.
+        return self._rewriter.print_profile(stream, prof, level=level)
+
+    def __getattr__(self, name):
+        # Delegate everything else (profiling helpers, query metadata, ...) to the
+        # wrapped rewriter. ``__getattr__`` only fires for names not found normally,
+        # so the overrides above take precedence. Guard ``_rewriter`` itself to avoid
+        # infinite recursion before ``__init__`` has run.
+        if name == "_rewriter":
+            raise AttributeError(name)
+        return getattr(self._rewriter, name)
+
+
 class Mode:
     """A class that specifies the rewrites/optimizations used during function compilation.
 
@@ -377,9 +425,13 @@ class Mode:
     @property
     def optimizer(self):
         if isinstance(self._optimizer, RewriteDatabaseQuery):
-            return self.optdb.query(self._optimizer)
+            rewriter = self.optdb.query(self._optimizer)
         else:
-            return self._optimizer
+            rewriter = self._optimizer
+        # Stamp this mode as the fgraph's active compile mode while rewriting, so
+        # inner-graph rewrites can recover the right linker even when the optimizer
+        # is run directly (outside ``FunctionMaker``, e.g. ``mode.optimizer.rewrite(fgraph)``).
+        return _ActiveModeGraphRewriter(rewriter, self)
 
     def get_linker_optimizer(self, linker, optimizer):
         if isinstance(linker, str) or linker is None:
