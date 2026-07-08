@@ -4211,24 +4211,37 @@ class Composite(ScalarInnerGraphOp):
         return self.outputs_type
 
     def make_node(self, *inputs):
-        if self.inputs_type == tuple(i.type for i in inputs):
+        inputs = [
+            inp if isinstance(inp, ScalarVariable) else as_scalar(inp) for inp in inputs
+        ]
+
+        if self.inputs_type == tuple(inp.type for inp in inputs):
             return super().make_node(*inputs)
+
+        if len(inputs) != self.nin:
+            raise ValueError("Number of inputs does not match expected")
+
+        # First try to coerce each input to its inner-graph input type.
+        try:
+            filtered_inputs = [
+                inner_inp.type.filter_variable(inp)
+                for inp, inner_inp in zip(inputs, self.inputs)
+            ]
+        except TypeError:
+            pass
         else:
-            # Make a new op whose inner graph is rebuilt on fresh inputs of the
-            # new types. The retype needs ``rebuild_strict=False`` (re-infers
-            # each node's output types), which in-place ``FunctionGraph``
-            # replacements cannot do, so thaw first and rebuild the mutable copy.
-            assert len(inputs) == self.nin
-            unfrozen_fgraph = self.fgraph.unfreeze()
-            new_inner_inputs = [i.type() for i in inputs]
-            new_outputs = clone_replace(
-                unfrozen_fgraph.outputs,
-                replace=dict(
-                    zip(unfrozen_fgraph.inputs, new_inner_inputs, strict=True)
-                ),
-                rebuild_strict=False,
-            )
-            return Composite(new_inner_inputs, new_outputs).make_node(*inputs)
+            return super().make_node(*filtered_inputs)
+
+        # The new input types are incompatible with the inner graph.
+        # Try to make a new inner graph with rebuild_strict=False.
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        new_inner_inputs = [i.type() for i in inputs]
+        new_outputs = clone_replace(
+            unfrozen_fgraph.outputs,
+            replace=dict(zip(unfrozen_fgraph.inputs, new_inner_inputs)),
+            rebuild_strict=False,
+        )
+        return Composite(new_inner_inputs, new_outputs).make_node(*inputs)
 
     def perform(self, node, inputs, output_storage):
         outputs = self.py_perform_fn(*inputs)
