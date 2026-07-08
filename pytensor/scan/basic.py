@@ -524,7 +524,7 @@ def scan(
                     )
                 outs_info[i]["taps"] = [-1]
             elif outs_info[i].get("taps", None) is not None:
-                # Check that taps are valid (< 0 and all dfferent)
+                # Check that taps are valid (< 0 and all different)
                 taps = outs_info[i]["taps"]
                 if len(taps) > len(set(taps)):
                     raise ValueError(

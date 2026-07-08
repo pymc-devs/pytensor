@@ -612,7 +612,7 @@ def make_loop_call(
             *safe,
         )
         if core_scalar and core_ndim == 0:
-            # Retrive scalar item at index
+            # Retrieve scalar item at index
             read_val = builder.load(read_ptr)
             # read_val.set_metadata("alias.scope", input_scope_set)
             # read_val.set_metadata("noalias", output_scope_set)

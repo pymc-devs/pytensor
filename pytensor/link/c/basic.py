@@ -1490,7 +1490,7 @@ class CLinker(Linker):
             if not len(fgraph.clients[var])
         )
 
-        # crystalize the signature and version
+        # crystallize the signature and version
         sig = tuple(sig)
         version = tuple(version)
         for v in version:

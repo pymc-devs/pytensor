@@ -657,7 +657,7 @@ class FullHistory(Feature):
                 check=False,
             )
 
-        # Remove history changes caused by the foward/backward!
+        # Remove history changes caused by the forward/backward!
         self.bw = self.bw[:history_len]
         self.fw = self.fw[:history_len]
         self.pointer = pointer
