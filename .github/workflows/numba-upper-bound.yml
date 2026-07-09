@@ -19,6 +19,7 @@ permissions: {}
 
 jobs:
   bump:
+    name: bump
     runs-on: ubuntu-latest
     permissions:
       contents: write  # push the auto-bump branch

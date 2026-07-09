@@ -17,6 +17,7 @@ permissions: {}
 
 jobs:
   update-comment:
+    name: update-comment
     runs-on: ubuntu-latest
     permissions:
       issues: write  # required to update the slow-tests tracking issue body
