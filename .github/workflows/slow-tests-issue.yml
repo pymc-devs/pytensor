@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: "0 */6 * * *"
 
+# Serialize runs; don't cancel an in-progress issue update midway.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:
