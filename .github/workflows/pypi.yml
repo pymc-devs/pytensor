@@ -64,9 +64,8 @@ jobs:
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
-      # write id-token and attestations are required to attest build provenance
-      id-token: write
-      attestations: write
+      id-token: write  # required to attest build provenance
+      attestations: write  # required to attest build provenance
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -114,9 +113,8 @@ jobs:
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ${{ matrix.platform }}
     permissions:
-      # write id-token and attestations are required to attest build provenance
-      id-token: write
-      attestations: write
+      id-token: write  # required to attest build provenance
+      attestations: write  # required to attest build provenance
     strategy:
       matrix:
         platform:
@@ -152,9 +150,8 @@ jobs:
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
-      # write id-token and attestations are required to attest build provenance
-      id-token: write
-      attestations: write
+      id-token: write  # required to attest build provenance
+      attestations: write  # required to attest build provenance
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -225,8 +222,7 @@ jobs:
     # workflow by requiring signoff from a maintainer.
     environment: release
     permissions:
-      # write id-token is required for trusted publishing (OIDC)
-      id-token: write
+      id-token: write  # required for trusted publishing (OIDC)
     needs: [check_dist]
     runs-on: ubuntu-latest
     # Don't publish from forks
