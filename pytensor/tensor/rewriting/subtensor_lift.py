@@ -36,6 +36,7 @@ from pytensor.tensor.basic import (
     register_infer_shape,
 )
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.constant_props import constant_indices_are_unique
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
@@ -49,7 +50,6 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.subtensor import (
-    _constant_has_unique_indices,
     local_adv_idx_to_diagonal,
     local_adv_idx_to_slice,
     local_advanced_read_of_write_constant_indices,
@@ -224,7 +224,7 @@ def _index_provably_not_larger(idx, val_static_dim, fgraph=None) -> bool:
         return True
     if idx.type.dtype == "bool":
         return True
-    if _constant_has_unique_indices(idx):
+    if constant_indices_are_unique(idx):
         return True
     if check_assumption(fgraph, idx, UNIQUE_INDICES):
         return True
