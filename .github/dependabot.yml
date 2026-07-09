@@ -5,6 +5,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Wait before adopting freshly-published releases to reduce exposure to
+    # compromised or yanked versions (zizmor: dependabot-cooldown).
+    cooldown:
+      default-days: 7
     labels:
       - "GitHub CI/CD"
       - "no releasenotes"
