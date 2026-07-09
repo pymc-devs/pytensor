@@ -63,6 +63,7 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.reshape import JoinDims
 from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,
@@ -76,7 +77,6 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.math import local_lift_transpose_through_dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
-    Reshape,
     Shape_i,
     SpecifyShape,
     specify_shape,
@@ -1523,17 +1523,17 @@ def test_local_flatten_lift(i):
     x = tensor4()
     out = pt.flatten(exp(x), i)
     assert out.ndim == i
-    mode = get_default_mode()
-    mode = mode.including("local_reshape_lift")
-    f = function([x], out, mode=mode)
+    f = function([x], out)
     x_np = np.random.random((5, 4, 3, 2)).astype(config.floatX)
     out_np = f(x_np)
     topo = f.maker.fgraph.toposort()
     shape_out_np = (*x_np.shape[: i - 1], np.prod(x_np.shape[i - 1 :]))
     assert shape_out_np == out_np.shape
 
-    reshape_nodes = [n for n in topo if isinstance(n.op, Reshape)]
-    assert len(reshape_nodes) == 1 and pt.is_flat(reshape_nodes[0].outputs[0], ndim=i)
+    # ``flatten`` is a ``JoinDims`` view; it lifts through the unary ``exp`` so the
+    # Elemwise ends up outermost (``local_join_split_dims_lift``).
+    join_nodes = [n for n in topo if isinstance(n.op, JoinDims)]
+    assert len(join_nodes) == 1 and pt.is_flat(join_nodes[0].outputs[0], ndim=i)
     assert isinstance(topo[-1].op, Elemwise)
 
 
