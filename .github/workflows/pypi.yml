@@ -25,7 +25,7 @@ jobs:
     name: Check for changes
     runs-on: ubuntu-latest
     outputs:
-      should_run: ${{ steps.set_should_run.outputs.should_run }}
+      should_run: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && steps.filter.outputs.any_changed == 'true') }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -41,20 +41,6 @@ jobs:
               - 'pytensor/_version.py'
               - 'pytensor/scan_perform.pyx'
               - 'pytensor/scan_perform_ext.py'
-      - name: Set should_run output
-        id: set_should_run
-        run: |
-          if [[ "${{ github.event_name == 'release' || 
-                github.ref == 'refs/heads/main' ||
-                (
-                  github.event_name == 'pull_request'
-                  && steps.filter.outputs.any_changed == 'true'
-                )
-              }}" == "true" ]]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          fi
 
   # The job to build precompiled pypi wheels.
   make_sdist:
