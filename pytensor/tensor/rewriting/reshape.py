@@ -1,3 +1,5 @@
+import math
+
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.basic import MakeVector, expand_dims, join, stack
@@ -6,8 +8,9 @@ from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
-from pytensor.tensor.rewriting.subtensor import _is_shape_of_x_at
-from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.rewriting.shape import _unpack_shape_vector
+from pytensor.tensor.rewriting.subtensor import _is_shape_of_x_at, _provable_input_axis
+from pytensor.tensor.shape import Reshape, specify_shape
 
 
 def _split_count(split_node):
@@ -367,3 +370,125 @@ def local_split_dims_transpose_lift(fgraph, node):
     out = split_dims(x.dimshuffle(*inner_order), shape=shape, axis=new_axis)
     copy_stack_trace(node.outputs[0], out)
     return [out]
+
+
+def _int_blocks(a, b):
+    """Minimal chunk alignment of two size lists with equal product and no 1s.
+
+    Yields ``(i0, i1, j0, j1)`` blocks: the shortest run of ``a`` and run of ``b``
+    whose products agree. Standard numpy reshape-as-view two-pointer walk.
+    """
+    ia = ib = 0
+    la, lb = len(a), len(b)
+    while ia < la and ib < lb:
+        i1, j1 = ia + 1, ib + 1
+        pin, ptg = a[ia], b[ib]
+        while pin != ptg:
+            if pin < ptg:
+                pin *= a[i1]
+                i1 += 1
+            else:
+                ptg *= b[j1]
+                j1 += 1
+        yield ia, i1, ib, j1
+        ia, ib = i1, j1
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Reshape])
+def local_reshape_to_join_split(fgraph, node):
+    """Decompose a provable ``Reshape`` into ``JoinDims``/``SplitDims`` views.
+
+    Greedy chunk alignment (the numpy reshape-as-view algorithm): the input and
+    target dims are walked together and cut wherever their running products
+    provably agree. Each block becomes a ``JoinDims`` (many inputs -> one target),
+    a ``SplitDims`` (one input -> many targets), a pass-through (one -> one), or a
+    ``JoinDims`` then ``SplitDims`` for a genuine straddle. Unknown dims are only
+    handled when they pass through as a proven ``x.shape[k]`` reference (anchors);
+    an opaque target keeps the ``Reshape``. Size-1 dims are left to
+    ``local_reshape_to_dimshuffle``, so this only fires once they are squeezed out.
+    """
+    x, shape = node.inputs
+    [output] = node.outputs
+    xs = x.type.shape
+    os = output.type.shape
+    n_in, n_out = x.type.ndim, output.type.ndim
+
+    if any(s == 1 for s in xs) or any(s == 1 for s in os):
+        return None
+
+    target = _unpack_shape_vector(shape)
+    if len(target) != n_out:
+        return None
+
+    # An unknown input axis can only be handled if the target passes it through
+    # unchanged as a proven ``x.shape[k]`` reference.
+    input_unknown = [i for i in range(n_in) if xs[i] is None]
+    in_tokens = [("sym", i) if xs[i] is None else ("int", xs[i]) for i in range(n_in)]
+
+    tgt_tokens: list = []
+    tgt_anchors = []
+    for j in range(n_out):
+        k = _provable_input_axis(target[j], x)
+        if k is not None and xs[k] is None:
+            tgt_tokens.append(("sym", k))
+            tgt_anchors.append(k)
+        elif isinstance(os[j], int):
+            tgt_tokens.append(("int", os[j]))
+        elif k is not None:
+            tgt_tokens.append(("int", xs[k]))
+        else:
+            return None  # opaque target dim
+
+    if tgt_anchors != input_unknown:
+        return None
+
+    y = x
+    cur = 0  # axis in ``y`` where the next unconsumed input dim currently sits
+    ip = jp = 0
+    changed = False
+    while ip < n_in or jp < n_out:
+        if (
+            ip < n_in
+            and jp < n_out
+            and in_tokens[ip][0] == "sym"
+            and tgt_tokens[jp][0] == "sym"
+        ):
+            cur += 1
+            ip += 1
+            jp += 1
+            continue
+
+        i0, j0 = ip, jp
+        while ip < n_in and in_tokens[ip][0] == "int":
+            ip += 1
+        while jp < n_out and tgt_tokens[jp][0] == "int":
+            jp += 1
+        a = [in_tokens[t][1] for t in range(i0, ip)]
+        b = [tgt_tokens[t][1] for t in range(j0, jp)]
+
+        if (ip, jp) == (i0, j0) or math.prod(a) != math.prod(b):
+            # no progress, or a segment whose products do not provably agree
+            return None
+
+        for a0, a1, b0, b1 in _int_blocks(a, b):
+            p, q = a1 - a0, b1 - b0
+            if p == 1 and q == 1:
+                cur += 1
+                continue
+            changed = True
+            if q == 1:
+                y = join_dims(y, start_axis=cur, n_axes=p)
+                cur += 1
+            else:
+                if p > 1:
+                    y = join_dims(y, start_axis=cur, n_axes=p)
+                y = split_dims(y, shape=b[b0:b1], axis=cur)
+                cur += q
+
+    if not changed:
+        return None
+
+    copy_stack_trace(node.outputs[0], y)
+    return [y]

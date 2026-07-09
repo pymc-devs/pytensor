@@ -458,6 +458,38 @@ def _is_shape_of_x_at(var, x, axis):
     return False
 
 
+def _provable_input_axis(var, x):
+    """Return ``k`` when ``var`` is a *symbolic* reference to ``x.shape[k]``.
+
+    Like :func:`_is_shape_of_x_at` but recovers *which* axis and only via the
+    symbolic forms (``Shape_i`` / ``Subtensor(Shape(x))`` / ``Squeeze(Shape(x))``);
+    a plain constant is excluded because its axis is ambiguous (any axis with the
+    same static size). Returns ``None`` when there is no such reference.
+    """
+    op = var.owner_op
+    if isinstance(op, Shape_i):
+        return op.i if var.owner.inputs[0] is x else None
+    if isinstance(op, Subtensor):
+        shape_node = var.owner.inputs[0]
+        if (
+            not isinstance(shape_node.owner_op, Shape)
+            or shape_node.owner.inputs[0] is not x
+        ):
+            return None
+        try:
+            idx_val = get_constant_idx(
+                var.owner.op.idx_list, var.owner.inputs, allow_partial=False
+            )
+        except NotScalarConstantError:
+            return None
+        return idx_val[0] if len(idx_val) == 1 else None
+    if isinstance(op, DimShuffle) and op.new_order == ():
+        shape_node = var.owner.inputs[0]
+        if isinstance(shape_node.owner_op, Shape) and shape_node.owner.inputs[0] is x:
+            return 0
+    return None
+
+
 @register_infer_shape
 @register_useless
 @register_canonicalize

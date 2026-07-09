@@ -302,3 +302,65 @@ def test_local_split_dims_transpose_within_group_irreducible():
     np.testing.assert_allclose(
         fn(xv), xv.reshape(2, 3, 4).transpose(1, 0, 2).reshape(6, 4)
     )
+
+
+def _reshape_canon(x, new_shape):
+    out = x.reshape(new_shape)
+    return rewrite_graph(out, include=("canonicalize", "specialize"))
+
+
+def test_local_reshape_to_join_split_join():
+    """A reshape that only merges adjacent dims becomes JoinDims (no Reshape)."""
+    x = tensor("x", shape=(2, 3, 4))
+    r = _reshape_canon(x, (6, 4))
+    assert _count(r, JoinDims) == 1
+    assert _count(r, SplitDims) == 0
+    assert _count(r, Reshape) == 0
+    fn = pytensor.function([x], r)
+    xv = np.arange(24.0).reshape(2, 3, 4)
+    np.testing.assert_allclose(fn(xv), xv.reshape(6, 4))
+
+
+def test_local_reshape_to_join_split_split():
+    """A reshape that only splits a dim becomes SplitDims (no Reshape)."""
+    x = tensor("x", shape=(6, 4))
+    r = _reshape_canon(x, (2, 3, 4))
+    assert _count(r, JoinDims) == 0
+    assert _count(r, SplitDims) == 1
+    assert _count(r, Reshape) == 0
+    fn = pytensor.function([x], r)
+    xv = np.arange(24.0).reshape(6, 4)
+    np.testing.assert_allclose(fn(xv), xv.reshape(2, 3, 4))
+
+
+def test_local_reshape_to_join_split_straddle():
+    """A regroup whose boundaries don't align becomes a JoinDims + SplitDims pair."""
+    x = tensor("x", shape=(3, 6))
+    r = _reshape_canon(x, (6, 3))
+    assert _count(r, JoinDims) == 1
+    assert _count(r, SplitDims) == 1
+    assert _count(r, Reshape) == 0
+    fn = pytensor.function([x], r)
+    xv = np.arange(18.0).reshape(3, 6)
+    np.testing.assert_allclose(fn(xv), xv.reshape(6, 3))
+
+
+def test_local_reshape_to_join_split_passthrough_anchor():
+    """An unknown dim passed through as x.shape[k] anchors the decomposition."""
+    x = tensor("x", shape=(None, 3, 4))
+    r = _reshape_canon(x, (x.shape[0], 12))
+    assert _count(r, JoinDims) == 1
+    assert _count(r, SplitDims) == 0
+    assert _count(r, Reshape) == 0
+    fn = pytensor.function([x], r)
+    xv = np.arange(24.0).reshape(2, 3, 4)
+    np.testing.assert_allclose(fn(xv), xv.reshape(2, 12))
+
+
+def test_local_reshape_to_join_split_opaque_stays():
+    """An opaque runtime shape (unknown leading dims + -1) stays a Reshape."""
+    x = tensor("x", shape=(None, None, 4))
+    r = _reshape_canon(x, (-1, 4))
+    assert _count(r, Reshape) == 1
+    assert _count(r, JoinDims) == 0
+    assert _count(r, SplitDims) == 0
