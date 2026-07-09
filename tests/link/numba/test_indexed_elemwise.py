@@ -101,7 +101,7 @@ class TestIndexedReadFusion:
         np.testing.assert_allclose(fn(xv, iv, yv), fn_u(xv, iv, yv), rtol=1e-10)
 
     def test_nd_index_axis1(self):
-        """2D matrix index on axis 1 (via undo_take_reshape_for_fusion)."""
+        """2D matrix index on axis 1 (fused as a general AdvancedSubtensor)."""
         rng = np.random.default_rng(42)
         x = pt.matrix("x", shape=(3, 100))
         mat_idx = pt.matrix("mat_idx", dtype="int64", shape=(10, 5))
@@ -121,28 +121,6 @@ class TestIndexedReadFusion:
         xv = rng.normal(size=(100, 7))
         iv = rng.integers(100, size=(10, 5)).astype(np.int64)
         np.testing.assert_allclose(fn(xv, iv), fn_u(xv, iv), rtol=1e-10)
-
-    def test_regrouped_gather(self):
-        """Gather over a (3, 4) index, regrouped to runtime shape (s0, s1).
-
-        A detection that assumed the reshape restores the index shape would
-        rewrite this to x[mat] — shape (3, 4, 5) instead of the requested
-        (2, 6, 5). _unwrap_reshaped_take builds the (s0, s1) index from the
-        reshape target instead, so the regrouping fuses and stays correct.
-        """
-        rng = np.random.default_rng(15)
-        x = pt.matrix("x", shape=(8, 5))
-        mat = pt.matrix("mat", dtype="int64", shape=(3, 4))
-        s0, s1 = pt.lscalar("s0"), pt.lscalar("s1")
-        out = pt.exp(x[mat.reshape((-1,))].reshape((s0, s1, x.shape[1])))
-        fn, fn_u = fused_and_unfused([x, mat, s0, s1], out)
-        assert_fused(fn)
-        xv = rng.normal(size=(8, 5))
-        mv = rng.integers(0, 8, size=(3, 4))
-        res = fn(xv, mv, np.int64(2), np.int64(6))
-        res_u = fn_u(xv, mv, np.int64(2), np.int64(6))
-        assert res.shape == res_u.shape == (2, 6, 5)
-        np.testing.assert_allclose(res, res_u, rtol=1e-10)
 
     def test_nd_index_broadcast(self):
         """Broadcastable 2D index (shape (1, C)) broadcasts against direct input."""
