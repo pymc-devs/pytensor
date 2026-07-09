@@ -259,3 +259,46 @@ def test_local_join_split_dims_lift():
     )
     assert isinstance(rs.owner.op, Elemwise)
     assert isinstance(rs.owner.inputs[0].owner.op, SplitDims)
+
+
+def test_local_join_dims_transpose_lift():
+    """A transpose over a JoinDims lifts to a transpose of the input (Join stays)."""
+    x = tensor("x", shape=(2, 3, 4, 5))
+    out = join_dims(x, start_axis=1, n_axes=2).dimshuffle(2, 0, 1)  # (5, 2, 12)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 1
+    # the JoinDims now sits above the (lifted) DimShuffle, not below it
+    assert isinstance(rewritten.owner.op, JoinDims)
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(120.0).reshape(2, 3, 4, 5)
+    np.testing.assert_allclose(fn(xv), xv.reshape(2, 12, 5).transpose(2, 0, 1))
+
+
+def test_local_split_dims_transpose_lift_enables_cancel():
+    """A whole-group transpose between a split and join lets the pair cancel."""
+    x = tensor("x", shape=(6, 4))
+    split = split_dims(x, shape=(2, 3), axis=0)  # (2, 3, 4)
+    out = join_dims(split.dimshuffle(2, 0, 1), start_axis=1, n_axes=2)  # (4, 6)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 0
+    assert _count(rewritten, SplitDims) == 0
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(24.0).reshape(6, 4)
+    np.testing.assert_allclose(
+        fn(xv), xv.reshape(2, 3, 4).transpose(2, 0, 1).reshape(4, 6)
+    )
+
+
+def test_local_split_dims_transpose_within_group_irreducible():
+    """A transpose *within* the split group is a genuine reshuffle and is kept."""
+    x = tensor("x", shape=(6, 4))
+    split = split_dims(x, shape=(2, 3), axis=0)  # (2, 3, 4)
+    out = join_dims(split.dimshuffle(1, 0, 2), start_axis=0, n_axes=2)  # (6, 4)
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert _count(rewritten, JoinDims) == 1
+    assert _count(rewritten, SplitDims) == 1
+    fn = pytensor.function([x], rewritten)
+    xv = np.arange(24.0).reshape(6, 4)
+    np.testing.assert_allclose(
+        fn(xv), xv.reshape(2, 3, 4).transpose(1, 0, 2).reshape(6, 4)
+    )

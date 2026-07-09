@@ -1,7 +1,7 @@
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.basic import MakeVector, expand_dims, join, stack
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
@@ -265,4 +265,105 @@ def local_join_split_dims_lift(fgraph, node):
     copy_stack_trace(node.outputs, lifted)
     out = inner.op(lifted)
     copy_stack_trace(node.outputs + node.inputs, out)
+    return [out]
+
+
+def _is_transposing(new_order):
+    """True if the DimShuffle permutes real axes (not a pure expand/squeeze)."""
+    perm = [v for v in new_order if v != "x"]
+    return perm != sorted(perm)
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([DimShuffle])
+def local_join_dims_transpose_lift(fgraph, node):
+    """``DimShuffle(JoinDims(x)) -> JoinDims(DimShuffle(x))``.
+
+    A joined dim is a single output axis, so any transpose moves it as a whole:
+    expand the joined axis back into its original run inside the DimShuffle and
+    re-join it afterward. Pushing the transpose toward the input (Join floats up)
+    makes an adjacent Join/Split pair meet so the cancellation laws can fire.
+    Pure expand/squeeze DimShuffles are left to the size-1 canonicalizations.
+    """
+    inner = node.inputs[0].owner
+    if inner is None or not isinstance(inner.op, JoinDims):
+        return None
+
+    new_order = node.op.new_order
+    if not _is_transposing(new_order):
+        return None
+
+    (x,) = inner.inputs
+    start, n = inner.op.start_axis, inner.op.n_axes
+
+    inner_order: list = []
+    new_start = None
+    for v in new_order:
+        if v == "x":
+            inner_order.append("x")
+        elif v == start:
+            new_start = len(inner_order)
+            inner_order.extend(range(start, start + n))
+        elif v < start:
+            inner_order.append(v)
+        else:
+            inner_order.append(v + n - 1)
+
+    if new_start is None:
+        return None
+
+    out = join_dims(x.dimshuffle(*inner_order), start_axis=new_start, n_axes=n)
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([DimShuffle])
+def local_split_dims_transpose_lift(fgraph, node):
+    """``DimShuffle(SplitDims(x, s)) -> SplitDims(DimShuffle(x), s)``.
+
+    Lifts a transpose that moves the whole split group as a unit: the group's
+    dims must stay contiguous and in order in ``new_order`` (a transpose *within*
+    the group is a genuine data reshuffle and is left). Mirror of
+    ``local_join_dims_transpose_lift``; pushes the transpose toward the input so
+    an adjacent Join/Split pair can cancel.
+    """
+    inner = node.inputs[0].owner
+    if inner is None or not isinstance(inner.op, SplitDims):
+        return None
+
+    new_order = node.op.new_order
+    if not _is_transposing(new_order):
+        return None
+
+    x, shape = inner.inputs
+    axis = inner.op.axis
+    m = _split_count(inner)
+    group = range(axis, axis + m)
+
+    pos = [i for i, v in enumerate(new_order) if v in group]
+    if [new_order[i] for i in pos] != list(group):
+        return None
+    if pos != list(range(pos[0], pos[0] + m)):
+        return None
+
+    inner_order: list = []
+    new_axis = None
+    for v in new_order:
+        if v == "x":
+            inner_order.append("x")
+        elif v == axis:
+            new_axis = len(inner_order)
+            inner_order.append(axis)
+        elif v in group:
+            continue
+        elif v < axis:
+            inner_order.append(v)
+        else:
+            inner_order.append(v - (m - 1))
+
+    out = split_dims(x.dimshuffle(*inner_order), shape=shape, axis=new_axis)
+    copy_stack_trace(node.outputs[0], out)
     return [out]
