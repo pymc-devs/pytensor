@@ -180,6 +180,13 @@ class TestTensorInv(utt.InferShapeTester):
             TensorInv,
         )
 
+    def test_static_shape(self):
+        # `tensorinv` rotates the axes, so the input's shape must not leak
+        # unrotated into the output's static shape.
+        A = tensor4("A", shape=(4, 6, 8, 3))
+        assert tensorinv(A, ind=2).type.shape == (8, 3, 4, 6)
+        assert tensorinv(A, ind=1).type.shape == (6, 8, 3, 4)
+
     def test_eval(self):
         A = self.A
         Ai = tensorinv(A)

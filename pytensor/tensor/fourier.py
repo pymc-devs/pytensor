@@ -89,15 +89,20 @@ class Fourier(Op):
                 raise TypeError(
                     "Length of the transformed axis must be a strictly positive scalar"
                 )
+        # The transformed axis is resized to `n`; the other axes keep `a`'s
+        # static sizes. Both are only known when `axis` and `n` are constant.
+        n_static = n.data.item() if isinstance(n, TensorConstant) else None
+        if isinstance(axis, TensorConstant):
+            axis_val = axis.data.item()
+            out_shape = tuple(
+                n_static if i == axis_val else s for i, s in enumerate(a.type.shape)
+            )
+        else:
+            out_shape = (None,) * a.ndim
         return Apply(
             self,
             [a, n, axis],
-            [
-                TensorType(
-                    "complex128",
-                    shape=tuple(1 if s == 1 else None for s in a.type.shape),
-                )()
-            ],
+            [TensorType("complex128", shape=out_shape)()],
         )
 
     def infer_shape(self, node, in_shapes):

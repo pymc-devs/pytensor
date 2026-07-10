@@ -3,7 +3,7 @@ import pytest
 
 import pytensor
 from pytensor.tensor.fourier import Fourier, fft
-from pytensor.tensor.type import dmatrix, dvector, iscalar
+from pytensor.tensor.type import dmatrix, dvector, iscalar, tensor
 from tests import unittest_tools as utt
 
 
@@ -20,6 +20,15 @@ class TestFourier(utt.InferShapeTester):
         f = pytensor.function([a], self.op(a, n=10, axis=0))
         a = np.random.random((8, 6))
         assert np.allclose(f(a), np.fft.fft(a, 10, 0))
+
+    def test_static_shape(self):
+        # The transformed axis is resized to `n`; a size-1 input dim there must
+        # not leak into the output's static shape.
+        a = tensor("a", shape=(3, 1))
+        assert self.op(a, n=4, axis=1).type.shape == (3, 4)
+        # Unknown `n` or `axis` stays conservative.
+        assert self.op(a, n=iscalar(), axis=1).type.shape == (3, None)
+        assert self.op(a, n=4, axis=iscalar()).type.shape == (None, None)
 
     def test_infer_shape(self):
         a = dvector()

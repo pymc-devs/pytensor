@@ -13,6 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import GradientError
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.graph.replace import vectorize_graph
 from pytensor.sparse.basic import (
     CSC,
     CSM,
@@ -1187,6 +1188,54 @@ class TestGetItem:
 
         with pytest.raises(IndexError):
             f(A[0])
+
+    def test_GetItemList_static_shape(self):
+        # The number of output rows is set by the index, not by `x`, so the
+        # parent's row count must not leak into the output's static shape.
+        _a, A = sparse_random_inputs("csr", (4, 5))
+        x = as_sparse_variable(A[0])
+        assert x.type.shape == (4, 5)
+
+        y = sparse.get_item_list(x, lvector("index"))
+        assert y.type.shape == (None, 5)
+
+        index = pt.as_tensor_variable(np.array([0, 1, 2], dtype=np.int64))
+        y = sparse.get_item_list(x, index)
+        assert y.type.shape == (3, 5)
+
+    def test_GetItemList_vectorize(self):
+        # Regression test for gh-2274: leaking the parent's row count into the
+        # static output shape made `vectorize_graph` insert a `SpecifyShape`
+        # that failed at runtime when `len(index)` differed from that count.
+        _a, A = sparse_random_inputs("csr", (4, 5))
+        x = as_sparse_variable(A[0])
+        index = lvector("index")
+
+        coef = vector("coef")
+        eta = sparse.structured_dot(sparse.get_item_list(x, index), coef[:, None])
+
+        batch_coeff = matrix("batch_coeff")
+        batch_eta = vectorize_graph(eta, replace={coef: batch_coeff})
+        f = pytensor.function([batch_coeff, index], batch_eta)
+
+        sel = np.array([0, 3, 1], dtype=np.int64)
+        coeff_val = np.random.default_rng(0).random((8, 5))
+        out = np.asarray(f(coeff_val, sel))
+        assert out.shape == (8, 3, 1)
+
+        # Each batch b is `x[sel] @ coeff_val[b]`, broadcast over the batch axis.
+        expected = (A[0].toarray()[sel] @ coeff_val.T).T[:, :, None]
+        np.testing.assert_allclose(out, expected)
+
+    def test_GetItem2d_static_shape(self):
+        # Both output dims are set by the slices, not by `x`, so `x`'s shape
+        # must not leak into the output's static shape.
+        _a, A = sparse_random_inputs("csr", (5, 4))
+        x = as_sparse_variable(A[0])
+        assert x.type.shape == (5, 4)
+
+        assert x[0:2, :].type.shape == (2, 4)
+        assert x[1:5:2, 0:3].type.shape == (2, 3)
 
     def test_get_item_list_grad(self):
         op = sparse.basic.GetItemList()

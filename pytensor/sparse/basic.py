@@ -27,6 +27,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import Split
 from pytensor.tensor.math import minimum
 from pytensor.tensor.shape import specify_broadcastable
+from pytensor.tensor.subtensor import slice_static_length
 from pytensor.tensor.type import TensorType, ivector, scalar, tensor, vector
 from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
 from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
@@ -841,7 +842,9 @@ class GetItemList(Op):
         assert ind.ndim == 1
         assert ind.dtype in integer_dtypes
 
-        return Apply(self, [x, ind], [x.type()])
+        # The number of rows is set by the index, not by `x`.
+        out_shape = (ind.type.shape[0], x.type.shape[1])
+        return Apply(self, [x, ind], [x.type.clone(shape=out_shape)()])
 
     def perform(self, node, inp, outputs):
         (out,) = outputs
@@ -1113,7 +1116,14 @@ class GetItem2d(Op):
         if len(index) == 1:
             input_op += [generic_None, generic_None, generic_None]
 
-        return Apply(self, input_op, [x.type()])
+        # Both output dims are set by the slices, not by `x`, so derive each
+        # from its slice; a single index leaves the columns untouched.
+        out_shape = [
+            slice_static_length(ind, dim) for ind, dim in zip(index, x.type.shape)
+        ]
+        if len(index) == 1:
+            out_shape.append(x.type.shape[1])
+        return Apply(self, input_op, [x.type.clone(shape=tuple(out_shape))()])
 
     def perform(self, node, inputs, outputs):
         (x, start1, stop1, step1, start2, stop2, step2) = inputs

@@ -936,6 +936,16 @@ def test_gemm_broadcasting(inplace, linker):
         )
 
 
+def test_gemm_static_shape():
+    # `z` broadcasts up to `dot(x, y)`, so a broadcastable `z` must not leak
+    # its size-1 static shape into the output.
+    a, b = scalars("a", "b")
+    z = matrix("z", shape=(1, 1))
+    x = matrix("x", shape=(5, 4))
+    y = matrix("y", shape=(4, 3))
+    assert gemm_no_inplace(z, a, x, y, b).type.shape == (5, 3)
+
+
 def test_dot22():
     for dtype1 in ["float32", "float64", "complex64", "complex128"]:
         a = matrix(dtype=dtype1)

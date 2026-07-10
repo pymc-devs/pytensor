@@ -175,7 +175,9 @@ class Gemm(GemmRelated):
         if not z.dtype.startswith("float") and not z.dtype.startswith("complex"):
             raise TypeError(Gemm.E_float, (z.dtype))
 
-        output = z.type()
+        # `z` is broadcast up to `dot(x, y)`, so the output shape is set by
+        # `x`/`y`, not by `z`'s (possibly broadcastable) static shape.
+        output = z.type.clone(shape=(x.type.shape[0], y.type.shape[1]))()
         return Apply(self, inputs, [output])
 
     def perform(self, node, inp, out):
