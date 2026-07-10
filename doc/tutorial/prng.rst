@@ -251,9 +251,12 @@ Inplace optimization
 
 As mentioned, RandomVariable Ops default to making a copy of the input RNG before using it, which can be quite slow.
 
+We compile with the Python linker here so the dprint shows the plain RandomVariable form. Some backends specialize it (e.g. Numba wraps it in a ``RandomVariableWithCoreShape``, see the Numba section below).
+
+>>> py_mode = pytensor.Mode(linker="py", optimizer="fast_run")
 >>> rng = pt.random.shared_rng(np.random.default_rng(123), name="rng")
 >>> next_rng, x = pt.random.uniform(rng=rng, return_next_rng=True)
->>> f = pytensor.function([], x)
+>>> f = pytensor.function([], x, mode=py_mode)
 >>> _ = pytensor.dprint(f, print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] 0
  ├─ rng [id B]
@@ -291,7 +294,7 @@ Users should never do this directly!
 >>> x.owner.op.inplace
 True
 
->>> inplace_f = pytensor.function([], x, accept_inplace=True)
+>>> inplace_f = pytensor.function([], x, accept_inplace=True, mode=py_mode)
 >>> _ = pytensor.dprint(inplace_f, print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  ├─ rng [id B]
@@ -319,7 +322,7 @@ The first case is true when a user uses the `mutable` `kwarg` directly.
 >>> rng = pt.random.rng("rng")
 >>> next_rng, x = rng.uniform()
 >>> with pytensor.config.change_flags(optimizer_verbose=True): # doctest: +ELLIPSIS
-...     inplace_f = pytensor.function([In(rng, mutable=True)], [x])
+...     inplace_f = pytensor.function([In(rng, mutable=True)], [x], mode=py_mode)
 rewriting: rewrite random_make_inplace replaces ...
 >>> _ = inplace_f.dprint(print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
@@ -334,7 +337,7 @@ In this case, a RandomVariable is allowed to modify the RNG because the shared v
 >>> rng = pt.random.shared_rng(np.random.default_rng(123), name="rng")
 >>> next_rng, x = rng.uniform()
 >>>
->>> inplace_f = pytensor.function([], [x], updates={rng: next_rng})
+>>> inplace_f = pytensor.function([], [x], updates={rng: next_rng}, mode=py_mode)
 >>> _ = inplace_f.dprint(print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  ├─ rng [id B]
@@ -529,8 +532,8 @@ NumPy random generators can be natively used with the Numba backend.
  ├─ [] [id B] <Vector(int64, shape=(0,))>
  ├─ randomstate_rng [id C] <RandomGeneratorType>
  ├─ NoneConst{None} [id D] <NoneTypeT>
- ├─ 0.0 [id E] <Scalar(float32, shape=())>
- └─ 1.0 [id F] <Scalar(float32, shape=())>
+ ├─ 0.0 [id E] <Scalar(float64, shape=())>
+ └─ 1.0 [id F] <Scalar(float64, shape=())>
 [normal_rv{"(),()->()"}].0 [id A] <RandomGeneratorType> 0
  └─ ···
 <BLANKLINE>
@@ -538,10 +541,10 @@ Inner graphs:
 <BLANKLINE>
 [normal_rv{"(),()->()"}] [id A]
  ← normal_rv{"(),()->()"}.0 [id G] <RandomGeneratorType>
-    ├─ *1-<RandomGeneratorType> [id H] <RandomGeneratorType>
-    ├─ *2-<NoneTypeT> [id I] <NoneTypeT>
-    ├─ *3-<Scalar(float32, shape=())> [id J] <Scalar(float32, shape=())>
-    └─ *4-<Scalar(float32, shape=())> [id K] <Scalar(float32, shape=())>
+    ├─ i1 [id H] <RandomGeneratorType>
+    ├─ i2 [id I] <NoneTypeT>
+    ├─ i3 [id J] <Scalar(float64, shape=())>
+    └─ i4 [id K] <Scalar(float64, shape=())>
  ← normal_rv{"(),()->()"}.1 [id G] <Scalar(float64, shape=())>
     └─ ···
 
