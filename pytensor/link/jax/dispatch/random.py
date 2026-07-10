@@ -4,9 +4,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.random import Generator
-from numpy.random.bit_generator import (  # type: ignore[attr-defined]
-    _coerce_to_uint32_array,
-)
 
 import pytensor.tensor.random.basic as ptr
 from pytensor.graph import Constant
@@ -22,9 +19,6 @@ try:
     numpyro_available = True
 except ImportError:
     numpyro_available = False
-
-numpy_bit_gens = {"MT19937": 0, "PCG64": 1, "Philox": 2, "SFC64": 3}
-
 
 SIZE_NOT_COMPATIBLE = """JAX random variables require concrete values for the `size` parameter of the distributions.
 Concrete values are either constants:
@@ -57,27 +51,14 @@ def assert_size_argument_jax_compatible(node):
 
 @jax_typify.register(Generator)
 def jax_typify_Generator(rng, **kwargs):
-    state = rng.bit_generator.state
-    state["bit_generator"] = numpy_bit_gens[state["bit_generator"]]
-
-    # XXX: Is this a reasonable approach?
-    state["jax_state"] = _coerce_to_uint32_array(state["state"]["state"])[0:2]
-
-    # The "state" and "inc" values in a NumPy `Generator` are 128 bits, which
-    # JAX can't handle, so we split these values into arrays of 32 bit integers
-    # and then combine the first two into a single 64 bit integers.
-    #
-    # XXX: Depending on how we expect these values to be used, is this approach
-    # reasonable?
-    #
-    # TODO: We might as well remove these altogether, since this conversion
-    # should only occur once (e.g. when the graph is converted/JAX-compiled),
-    # and, from then on, we use the custom "jax_state" value.
-    inc_32 = _coerce_to_uint32_array(state["state"]["inc"])
-    state_32 = _coerce_to_uint32_array(state["state"]["state"])
-    state["state"]["inc"] = inc_32[0] << 32 | inc_32[1]
-    state["state"]["state"] = state_32[0] << 32 | state_32[1]
-    return state
+    # A JAX threefry key holds only 2 uint32 words, far fewer than the ~256 bits
+    # of a NumPy Generator's state. Rather than truncate to the low
+    # (worst-quality) bits of the LCG state and drop the stream `inc`, fold the
+    # whole state through SeedSequence's mixer so all the entropy is hashed into
+    # the 2 words we keep.
+    state = rng.bit_generator.state["state"]
+    seed = np.random.SeedSequence([state["state"], state["inc"]])
+    return seed.generate_state(2, dtype=np.uint32)
 
 
 @jax_funcify.register(ptr.RandomVariable)
@@ -106,24 +87,20 @@ def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
         assert_size_argument_jax_compatible(node)
 
         def sample_fn(rng, size, *parameters):
-            rng_key = rng["jax_state"]
-            rng_key, sampling_key = jax.random.split(rng_key, 2)
-            rng["jax_state"] = rng_key
+            next_rng, sampling_key = jax.random.split(rng, 2)
             sample = jax_sample_fn(op, node=node)(
                 sampling_key, size, out_dtype, *parameters
             )
-            return (rng, sample)
+            return (next_rng, sample)
 
     else:
 
         def sample_fn(rng, size, *parameters):
-            rng_key = rng["jax_state"]
-            rng_key, sampling_key = jax.random.split(rng_key, 2)
-            rng["jax_state"] = rng_key
+            next_rng, sampling_key = jax.random.split(rng, 2)
             sample = jax_sample_fn(op, node=node)(
                 sampling_key, static_size, out_dtype, *parameters
             )
-            return (rng, sample)
+            return (next_rng, sample)
 
     return sample_fn
 

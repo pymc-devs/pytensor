@@ -10,20 +10,6 @@ from pytensor.graph.type import Type
 T = TypeVar("T")
 
 
-gen_states_keys = {
-    "MT19937": (["state"], ["key", "pos"]),
-    "PCG64": (["state", "has_uint32", "uinteger"], ["state", "inc"]),
-    "Philox": (
-        ["state", "buffer", "buffer_pos", "has_uint32", "uinteger"],
-        ["counter", "key"],
-    ),
-    "SFC64": (["state", "has_uint32", "uinteger"], ["state"]),
-}
-
-# We map bit generators to an integer index so that we can avoid using strings
-numpy_bit_gens = {0: "MT19937", 1: "PCG64", 2: "Philox", 3: "SFC64"}
-
-
 class RandomType(Type[T]):
     r"""A Type wrapper for `numpy.random.Generator."""
 
@@ -54,34 +40,12 @@ class AbstractRandomGeneratorType(RandomType[Generator]):
         if isinstance(data, Generator):
             return data
 
-        if not strict and isinstance(data, dict):
-            if "bit_generator" not in data:
-                raise TypeError()
-            else:
-                bit_gen_key = data["bit_generator"]
-
-                if hasattr(bit_gen_key, "_value"):
-                    bit_gen_key = int(bit_gen_key._value)
-                    bit_gen_key = numpy_bit_gens[bit_gen_key]
-
-                gen_keys, state_keys = gen_states_keys[bit_gen_key]
-
-                for key in gen_keys:
-                    if key not in data:
-                        raise TypeError()
-
-                for key in state_keys:
-                    if key not in data["state"]:
-                        raise TypeError()
-
-                return data
-
         raise TypeError()
 
     @staticmethod
     def values_eq(a, b):
-        sa = a if isinstance(a, dict) else a.bit_generator.state
-        sb = b if isinstance(b, dict) else b.bit_generator.state
+        sa = a.bit_generator.state
+        sb = b.bit_generator.state
 
         def _eq(sa, sb):
             for key in sa:
@@ -106,10 +70,6 @@ class RandomGeneratorType(AbstractRandomGeneratorType):
     The reason this exists (and `Generic` doesn't suffice) is that
     `Generator` objects that would appear to be equal do not compare equal
     with the ``==`` operator.
-
-    This `Type` also works with a ``dict`` derived from
-    `Generator.__get_state__`, unless the ``strict`` argument to `Type.filter`
-    is explicitly set to ``True``.
 
     """
 
