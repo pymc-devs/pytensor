@@ -11,6 +11,7 @@ from llvmlite import ir
 from numba import TypingError, types
 from numba.core import cgutils
 from numba.core.base import BaseContext
+from numba.core.cgutils import get_item_pointer2
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
@@ -555,7 +556,7 @@ def make_loop_call(
                     else False
                 )
                 read_idxs.append(zero if is_bc else loop_idxs[ax])
-            ptr = cgutils.get_item_pointer2(
+            ptr = get_item_pointer2(
                 context,
                 builder,
                 idx_arr.data,
@@ -654,7 +655,7 @@ def make_loop_call(
                 zero if bc else idx for idx, bc in zip(loop_idxs, inp_bc, strict=True)
             ] + [zero] * core_ndim
 
-        read_ptr = cgutils.get_item_pointer2(
+        read_ptr = get_item_pointer2(
             context,
             builder,
             inp.data,
@@ -755,7 +756,7 @@ def make_loop_call(
                 zero if bc else idx for idx, bc in zip(loop_idxs, out_bc, strict=True)
             ] + [zero] * core_ndim
         effective_core_ndim = target_core_ndim if spec is not None else core_ndim
-        write_ptr = cgutils.get_item_pointer2(
+        write_ptr = get_item_pointer2(
             context,
             builder,
             out.data,

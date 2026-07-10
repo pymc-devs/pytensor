@@ -731,3 +731,31 @@ def test_no_foreign_inplace_on_tap(case):
         graph_inputs, graph_outputs, test_inputs = [x], [outs[1]], [np.arange(1.0, 9.0)]
 
     compare_numba_and_py(graph_inputs, graph_outputs, test_inputs, numba_mode="NUMBA")
+
+
+def test_scan_2d_state_hmm_forward_trace():
+    # Regression for a numba miscompile (numba #10605): materializing the full
+    # trace of a scan whose Elemwise has an ``'A'``-layout (``expand_dims``)
+    # input next to a compile-time-constant operand used to OOM under the numba
+    # backend. The scan buffer is a tiny (1, 2, 2); the crash came from numba's
+    # ``get_item_pointer2`` forming a provenance-less pointer for non-contiguous
+    # indexing. ``log_P`` must stay a constant -- a runtime operand does not
+    # trigger it.
+    rng = np.random.default_rng(0)
+    k = 2
+    log_P = pt.constant(np.log(rng.random((k, k, k))))
+    emissions = pt.constant(rng.random((1, k)))
+    seed = pt.constant(rng.random((k, k)))
+
+    def step(emission, alpha, lp):
+        s = pt.logsumexp(pt.expand_dims(alpha, 2) + lp, axis=0)
+        return pt.expand_dims(emission, 0) + s
+
+    trace = scan(
+        step,
+        sequences=[emissions],
+        outputs_info=[seed],
+        non_sequences=[log_P],
+        return_updates=False,
+    )
+    compare_numba_and_py([], trace, [])

@@ -1,4 +1,7 @@
 # isort: off
+# Patch numba's cgutils.pointer_add before any dispatch codegen runs
+import pytensor.link.numba.dispatch._patch_pointer_add
+
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_typify
 
 # Load dispatch specializations
