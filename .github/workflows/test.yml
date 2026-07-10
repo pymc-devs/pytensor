@@ -93,6 +93,7 @@ jobs:
         install-torch: [0]
         install-mlx: [0]
         install-xarray: [0]
+        free-threading: [0]
         part:
           - [ "*rest", "tests --ignore=tests/scan --ignore=tests/tensor --ignore=tests/xtensor --ignore=tests/link/numba" ]
           - [ "scan", "tests/scan" ]
@@ -142,6 +143,12 @@ jobs:
             default-mode: "CVM"
             python-version: "3.14"
             os: "macos-15"
+          # conftest's pytest_sessionfinish asserts the GIL was never re-enabled.
+          - part: ["free-threading smoke test", "tests/tensor/test_math_scipy.py"]
+            default-mode: "FAST_RUN"
+            python-version: "3.14"
+            os: "ubuntu-latest"
+            free-threading: 1
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -155,7 +162,12 @@ jobs:
           micromamba-version: "1.5.10-0" # until https://github.com/mamba-org/setup-micromamba/issues/225 is resolved
           init-shell: bash
           post-cleanup: "all"
-          create-args: python=${{ matrix.python-version }}
+          # Create the env with python-freethreading up front so it resolves to the
+          # cp*t build from the start; adding it later conflicts with an already-solved
+          # regular CPython.
+          create-args: >-
+            python=${{ matrix.python-version }}
+            ${{ matrix.free-threading == 1 && 'python-freethreading' || '' }}
 
       - name: Create matrix id
         id: matrix-id
@@ -171,11 +183,17 @@ jobs:
         shell: micromamba-shell {0}
         run: |
 
+          # python-freethreading constrains the solve to the free-threaded CPython build
+          if [[ $FREE_THREADING == "1" ]]; then FT_PKG="python-freethreading"; else FT_PKG=""; fi
           if [[ $OS == "macos-15" ]]; then
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate rich;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" $FT_PKG numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate rich;
+          elif [[ $FREE_THREADING == "1" ]]; then
+            # mkl/mkl-service have no free-threaded (cp*t) builds, so rely on the default (openblas) BLAS.
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" $FT_PKG numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx rich;
           else
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" $FT_PKG numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
           fi
+          if [[ $FREE_THREADING == "1" ]]; then python -c 'import sysconfig; assert sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "Expected a free-threaded interpreter"'; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" && pip install "jax>=0.8,<0.9.1" jaxlib numpyro equinox tfp-nightly; fi
           if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" pytorch pytorch-cuda=12.1 "mkl<=2024.0" -c pytorch -c nvidia; fi
           if [[ $INSTALL_MLX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" "mlx<0.29.4"; fi
@@ -186,7 +204,8 @@ jobs:
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
           if [[ $OS == "macos-15" ]]; then
             python -c 'import pytensor; assert pytensor.config.blas__ldflags.startswith("-framework Accelerate"), "Blas flags are not set to MacOS Accelerate"';
-          else
+          elif [[ $FREE_THREADING != "1" ]]; then
+            # Blas flags are only used by the C backend; the free-threading job runs the numba backend.
             python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"';
           fi
         env:
@@ -195,6 +214,7 @@ jobs:
           INSTALL_TORCH: ${{ matrix.install-torch }}
           INSTALL_XARRAY: ${{ matrix.install-xarray }}
           INSTALL_MLX: ${{ matrix.install-mlx }}
+          FREE_THREADING: ${{ matrix.free-threading }}
           OS: ${{ matrix.os}}
 
       - name: Run tests
@@ -202,6 +222,9 @@ jobs:
         run: |
           if [[ $DEFAULT_MODE == "FAST_COMPILE" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
           if [[ $DEFAULT_MODE == "CVM" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,linker=cvm; fi
+          # Disable the C backend on the free-threaded build so no test imports a C
+          # extension, which would re-enable the GIL (checked in conftest).
+          if [[ $FREE_THREADING == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,cxx=; fi
           export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
           python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
         env:
@@ -211,6 +234,7 @@ jobs:
           OMP_NUM_THREADS: 1
           PART: ${{ matrix.part[1] }}
           DEFAULT_MODE: ${{ matrix.default-mode }}
+          FREE_THREADING: ${{ matrix.free-threading }}
 
       - name: Upload coverage file
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

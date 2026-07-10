@@ -1,4 +1,6 @@
 import os
+import sys
+import sysconfig
 
 import pytest
 
@@ -15,6 +17,20 @@ def pytest_sessionstart(session):
         ]
     )
     os.environ["NUMBA_BOUNDSCHECK"] = "1"
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # On a free-threaded build, importing any single-phase-init C extension
+    # re-enables the GIL. The default (numba) backend must not, so if the GIL is
+    # back on, some test pulled in PyTensor's own C extensions. Checked after the
+    # whole session so it is independent of collection order.
+    if sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys._is_gil_enabled():
+        print(  # noqa: T201
+            "\nERROR: the GIL was re-enabled during the test session. "
+            "A C-extension was imported on a free-threaded build.",
+            file=sys.stderr,
+        )
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def pytest_addoption(parser):
