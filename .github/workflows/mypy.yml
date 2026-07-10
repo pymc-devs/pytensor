@@ -5,9 +5,19 @@ on:
   push:
     branches: [main]
 
+# Cancel superseded in-progress runs for the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+permissions: {}
+
 jobs:
   mypy:
+    name: mypy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         shell: bash -leo pipefail {0}

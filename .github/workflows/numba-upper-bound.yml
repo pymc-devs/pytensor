@@ -10,13 +10,20 @@ on:
     - cron: "0 8 * * 1"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
+# Serialize runs; don't cancel an in-progress commit/PR creation midway.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
 
 jobs:
   bump:
+    name: bump
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # push the auto-bump branch
+      pull-requests: write  # open the bump PR
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3

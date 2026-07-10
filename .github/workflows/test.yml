@@ -17,10 +17,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
   cancel-in-progress: true
 
+# Deny all permissions by default; jobs opt into the minimum they need.
+permissions: {}
+
 jobs:
   changes:
     name: "Check for changes"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       changes: ${{ steps.changes.outputs.src }}
     steps:
@@ -53,6 +58,8 @@ jobs:
     name: Check code style
     needs: changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
@@ -72,6 +79,8 @@ jobs:
       - changes
       - style
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
     strategy:
       fail-fast: false
@@ -215,6 +224,8 @@ jobs:
       - changes
       - style
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
     strategy:
       fail-fast: false
@@ -259,6 +270,8 @@ jobs:
   upload-coverage:
     runs-on: ubuntu-latest
     name: "Upload coverage"
+    permissions:
+      contents: read
     needs: [changes, all-checks]
     if: ${{ needs.changes.outputs.changes == 'true' && needs.all-checks.result == 'success' }}
     steps:

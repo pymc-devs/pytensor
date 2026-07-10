@@ -22,9 +22,10 @@ permissions: {}
 
 jobs:
   check_changes:
+    name: Check for changes
     runs-on: ubuntu-latest
     outputs:
-      should_run: ${{ steps.set_should_run.outputs.should_run }}
+      should_run: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && steps.filter.outputs.any_changed == 'true') }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -40,20 +41,6 @@ jobs:
               - 'pytensor/_version.py'
               - 'pytensor/scan_perform.pyx'
               - 'pytensor/scan_perform_ext.py'
-      - name: Set should_run output
-        id: set_should_run
-        run: |
-          if [[ "${{ github.event_name == 'release' || 
-                github.ref == 'refs/heads/main' ||
-                (
-                  github.event_name == 'pull_request'
-                  && steps.filter.outputs.any_changed == 'true'
-                )
-              }}" == "true" ]]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          fi
 
   # The job to build precompiled pypi wheels.
   make_sdist:
@@ -64,9 +51,8 @@ jobs:
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
-      # write id-token and attestations are required to attest build provenance
-      id-token: write
-      attestations: write
+      id-token: write  # required to attest build provenance
+      attestations: write  # required to attest build provenance
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -114,9 +100,8 @@ jobs:
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ${{ matrix.platform }}
     permissions:
-      # write id-token and attestations are required to attest build provenance
-      id-token: write
-      attestations: write
+      id-token: write  # required to attest build provenance
+      attestations: write  # required to attest build provenance
     strategy:
       matrix:
         platform:
@@ -152,9 +137,8 @@ jobs:
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
-      # write id-token and attestations are required to attest build provenance
-      id-token: write
-      attestations: write
+      id-token: write  # required to attest build provenance
+      attestations: write  # required to attest build provenance
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -225,8 +209,7 @@ jobs:
     # workflow by requiring signoff from a maintainer.
     environment: release
     permissions:
-      # write id-token is required for trusted publishing (OIDC)
-      id-token: write
+      id-token: write  # required for trusted publishing (OIDC)
     needs: [check_dist]
     runs-on: ubuntu-latest
     # Don't publish from forks
