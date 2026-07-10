@@ -739,6 +739,36 @@ class TestDots(utt.InferShapeTester):
 
         utt.verify_grad(buildgraph_T, [mat])
 
+    def test_dot_matrix_sparse_operand_grad(self):
+        """Like `test_csr_dense_grad`, but also checks the gradient w.r.t. the sparse operand."""
+        spmat = scipy_sparse.csr_matrix(random_lil((4, 3), "float64", 3))
+        mat = np.asarray(np.random.standard_normal((2, 4)), "float64")
+        verify_grad_sparse(Dot(), [mat, spmat])
+
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    def test_dot_vector_operand_grad(self, format):
+        """Regression test for gh-2282 / gh-321: grad used to raise when one operand was a 1d vector."""
+        x = getattr(self, f"x_{format}")  # shape (10, 100)
+
+        # sparse (10, 100) @ dense vector (100,) -> vector (10,)
+        verify_grad_sparse(psm.dot, [x, self.v_100])
+
+        # dense vector (10,) @ sparse (10, 100) -> vector (100,)
+        verify_grad_sparse(psm.dot, [self.v_10, x])
+
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    def test_dot_vector_operand_grad_length_one(self, format):
+        """Edge case: a length-1 (broadcastable) dense vector operand (cf. gh-1461)."""
+        mtype = scipy_sparse.csr_matrix if format == "csr" else scipy_sparse.csc_matrix
+        x = mtype(random_lil((10, 1), pytensor.config.floatX, 4))
+        v1 = np.asarray(np.random.uniform(-1, 1, 1), dtype=pytensor.config.floatX)
+        v10 = np.asarray(np.random.uniform(-1, 1, 10), dtype=pytensor.config.floatX)
+
+        # sparse (10, 1) @ dense vector (1,) -> vector (10,)
+        verify_grad_sparse(psm.dot, [x, v1])
+        # dense vector (10,) @ sparse (10, 1) -> vector (1,)
+        verify_grad_sparse(psm.dot, [v10, x])
+
 
 class TestUsmm:
     def setup_method(self):
