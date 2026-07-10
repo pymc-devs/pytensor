@@ -1,5 +1,3 @@
-import re
-
 import numpy as np
 import pytest
 
@@ -167,11 +165,7 @@ def test_scan_rng_update():
     )
 
     # Without updates
-    with pytest.warns(
-        UserWarning,
-        match=re.escape("[rng] will not be used in the compiled JAX graph"),
-    ):
-        jax_fn = function([], [xs], updates=None, mode="JAX")
+    jax_fn = function([], [xs], updates=None, mode="JAX")
 
     res1, res2 = jax_fn(), jax_fn()
     assert np.unique(res1).size == 10
@@ -179,11 +173,7 @@ def test_scan_rng_update():
     np.testing.assert_array_equal(res1, res2)
 
     # With updates
-    with pytest.warns(
-        UserWarning,
-        match=re.escape("[rng] will not be used in the compiled JAX graph"),
-    ):
-        jax_fn = function([], [xs], updates=update, mode="JAX")
+    jax_fn = function([], [xs], updates=update, mode="JAX")
 
     res1, res2 = jax_fn(), jax_fn()
     assert np.unique(res1).size == 10

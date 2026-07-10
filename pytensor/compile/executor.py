@@ -17,6 +17,7 @@ from pytensor.graph.basic import clone_get_equiv
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
 from pytensor.graph.utils import get_variable_trace_string
+from pytensor.link.backend_conversion import HOST, backend_handles
 from pytensor.link.basic import Container
 from pytensor.link.utils import raise_with_op
 
@@ -77,6 +78,8 @@ class Function:
         "_named_inputs",
         "_nodes_with_inner_function",
         "_potential_aliased_input_groups",
+        "_reconcile_shared",
+        "_shared_update_targets",
         "_update_input_storage",
         "input_storage",
         "maker",
@@ -240,6 +243,37 @@ class Function:
                     update_storage,
                     strict=True,
                 )
+            )
+
+        # Cross-backend shared coherence: implicit shareds of a Type some backend
+        # diverges on (e.g. RNGs under JAX) are reconciled before each call and
+        # re-stamped after an update, so a write by anyone reaches the next reader.
+        # Each is paired with this function's *effective* tag: its own backend if
+        # that backend diverges on the Type, else the host container it reads.
+        tag = maker.linker.backend_tag
+        divergent = [
+            inp
+            for inp in self.maker.expanded_inputs
+            if inp.implicit and inp.variable.type.is_backend_divergent
+        ]
+        if not maker.readback:
+            # This function's updates are private; bind its views eager (host writes
+            # push into them) and enroll nothing, for a baseline __call__. A HOST-tag
+            # function needs no view: it reads the host container directly.
+            for inp in divergent:
+                if backend_handles(tag, inp.variable.type):
+                    inp.variable._view_storage(tag, eager=True)
+            self._reconcile_shared = ()
+            self._shared_update_targets = ()
+        else:
+            self._reconcile_shared = tuple(
+                (inp.variable, tag if backend_handles(tag, inp.variable.type) else HOST)
+                for inp in divergent
+            )
+            self._shared_update_targets = tuple(
+                (inp.variable, tag if backend_handles(tag, inp.variable.type) else HOST)
+                for inp in divergent
+                if inp.update is not None
             )
 
         self._input_storage_data = tuple(
@@ -514,6 +548,7 @@ class Function:
             accept_inplace=True,
             no_fgraph_prep=True,
             name=name,
+            readback=maker.readback,
         ).create(input_storage, storage_map=new_storage_map)
 
         for in_ori, in_cpy, ori, cpy in zip(
@@ -681,6 +716,10 @@ class Function:
         else:
             self._validate_inputs(args, kwargs)
 
+        if self._reconcile_shared:
+            for shared, tag in self._reconcile_shared:
+                shared._reconcile_into(tag)
+
         # Do the actual work
         try:
             if self.profile:
@@ -717,6 +756,9 @@ class Function:
         if self._has_updates:
             for i, input_storage in self._update_input_storage:
                 input_storage.storage[0] = outputs[i]
+            if self._shared_update_targets:
+                for shared, tag in self._shared_update_targets:
+                    shared._mark_written(tag)
             outputs = outputs[: self._n_returned_outputs]
 
         # Remove input and output values from storage data

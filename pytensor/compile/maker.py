@@ -80,6 +80,7 @@ def function(
     profile: bool | ProfileStats | None = None,
     on_unused_input: str | None = None,
     trust_input: bool = False,
+    readback: bool = True,
 ):
     """
     Return a :class:`callable object <pytensor.compile.executor.Function>`
@@ -143,6 +144,13 @@ def function(
         that multiple inputs are not aliased to each other. Failure to meet any
         of these conditions can lead to computational errors or to the
         interpreter crashing.
+    readback: bool, default True
+        Only relevant for shared variables with a backend-specific representation
+        (e.g. random generators under the JAX backend). When True, updates this
+        function makes to such a shared are read back so other backends and
+        ``get_value`` observe them. Set False if this function's backend updates
+        are private (it only needs to observe host ``set_value``); this removes
+        all per-call cross-backend bookkeeping from the compiled function.
 
     Returns
     -------
@@ -257,6 +265,7 @@ def function(
         on_unused_input=on_unused_input,
         name=name,
         trust_input=trust_input,
+        readback=readback,
     )
     return m.create()
 
@@ -523,6 +532,7 @@ class FunctionMaker:
         name=None,
         no_fgraph_prep=False,
         trust_input=False,
+        readback=True,
     ):
         if profile:
             self._compile_start = time.perf_counter()
@@ -632,6 +642,7 @@ class FunctionMaker:
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.name = name
         self.trust_input = trust_input
+        self.readback = readback
         self.required = [(i.value is None) for i in self.inputs]
 
     def create(self, input_storage=None, storage_map=None):

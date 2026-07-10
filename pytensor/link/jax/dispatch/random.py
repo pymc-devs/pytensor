@@ -7,8 +7,13 @@ from numpy.random import Generator
 
 import pytensor.tensor.random.basic as ptr
 from pytensor.graph import Constant
+from pytensor.link.backend_conversion import (
+    BackendConversion,
+    register_backend_conversion,
+)
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
+from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.type_other import NoneTypeT
 
@@ -51,6 +56,12 @@ def assert_size_argument_jax_compatible(node):
 
 @jax_typify.register(Generator)
 def jax_typify_Generator(rng, **kwargs):
+    """Derive a JAX threefry key from a host numpy ``Generator``.
+
+    The forward half of the lossy map completed by `jax_detypify_Generator`.
+    Hashing the ~256-bit PCG64 state into 2 words is not reversible, so this
+    seeds the JAX key deterministically but does not preserve the host stream.
+    """
     # A JAX threefry key holds only 2 uint32 words, far fewer than the ~256 bits
     # of a NumPy Generator's state. Rather than truncate to the low
     # (worst-quality) bits of the LCG state and drop the stream `inc`, fold the
@@ -59,6 +70,29 @@ def jax_typify_Generator(rng, **kwargs):
     state = rng.bit_generator.state["state"]
     seed = np.random.SeedSequence([state["state"], state["inc"]])
     return seed.generate_state(2, dtype=np.uint32)
+
+
+def jax_detypify_Generator(key):
+    """Reconcile a JAX-advanced threefry key back to a host numpy ``Generator``.
+
+    The reverse half of the lossy map started by `jax_typify_Generator`. The
+    host cannot continue the JAX stream, so this reseeds a ``Generator`` from the
+    key bits deterministically, starting a new, unrelated stream.
+    """
+    key = np.asarray(key).astype(np.uint32).ravel()
+    seed = np.random.SeedSequence(int.from_bytes(key.tobytes(), "little"))
+    return np.random.Generator(np.random.PCG64(seed))
+
+
+register_backend_conversion(
+    BackendConversion(
+        tag="jax",
+        handles=lambda type_: isinstance(type_, RandomType),
+        to_native=jax_typify,
+        from_native=jax_detypify_Generator,
+        lossy=True,
+    )
+)
 
 
 @jax_funcify.register(ptr.RandomVariable)

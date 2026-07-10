@@ -2000,6 +2000,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         name=None,
         no_fgraph_prep=False,
         trust_input=False,
+        readback=True,
     ):
         self.mode = mode
         self.profile = profile
@@ -2151,6 +2152,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.name = name
         self.trust_input = trust_input
+        self.readback = readback
 
         self.required = [(i.value is None) for i in self.inputs]
         self.refeed = [

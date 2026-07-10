@@ -13,6 +13,8 @@ T = TypeVar("T")
 class RandomType(Type[T]):
     r"""A Type wrapper for `numpy.random.Generator."""
 
+    is_backend_divergent = True
+
 
 class AbstractRandomGeneratorType(RandomType[Generator]):
     r"""Abstract base for random generator types wrapping `numpy.random.Generator`.
