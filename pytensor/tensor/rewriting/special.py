@@ -66,7 +66,7 @@ def local_logsoftmax(fgraph, node):
     return [ret]
 
 
-@register_stabilize("symbolic_op_recognition")
+@register_stabilize("symbolic_op_recognition", "fast_compile")
 @node_rewriter([true_div])
 def local_softmax_stabilize(fgraph, node):
     """Detect exp(x) / sum(exp(x), keepdims=True) and replace with Softmax(x)."""

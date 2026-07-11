@@ -242,7 +242,9 @@ optdb.register(
 )  # 'fast_run', 'fast_compile')
 
 # replace unstable subgraphs
-optdb.register("stabilize", EquilibriumDB(), "fast_run", position=1.5)
+# In fast_compile only the rewrites tagged "fast_compile" are included: those needed for the
+# scipy/numpy look-alike helpers to be stable. Naive forms get no such promise.
+optdb.register("stabilize", EquilibriumDB(), "fast_run", "fast_compile", position=1.5)
 
 optdb.register(
     "Print1.51",

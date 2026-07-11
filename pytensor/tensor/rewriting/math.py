@@ -2693,7 +2693,7 @@ def local_log1p(fgraph, node):
         return [broadcast_like_elemwise(new_out, node, fgraph=fgraph, stack_trace=True)]
 
 
-@register_stabilize
+@register_stabilize("fast_compile")
 @register_specialize
 @node_rewriter([log])
 def local_log_add_exp(fgraph, node):
@@ -2724,7 +2724,7 @@ def local_log_add_exp(fgraph, node):
             return [ret]
 
 
-@register_stabilize
+@register_stabilize("fast_compile")
 @register_specialize
 @node_rewriter([log])
 def local_log_sum_exp(fgraph, node):
