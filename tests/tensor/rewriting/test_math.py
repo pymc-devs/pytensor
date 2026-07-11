@@ -113,6 +113,7 @@ from pytensor.tensor.rewriting.math import (
     local_greedy_distributor,
     local_mul_canonizer,
     local_mul_switch_sink,
+    local_neg_to_mul,
     local_reduce_chain,
     local_reduce_join,
     local_sum_prod_of_mul_or_div,
@@ -1588,6 +1589,78 @@ class TestLocalUselessElemwiseComparison:
 
         f = function([x], le(x, x), mode=mode)
         assert check_stack_trace(f, ops_to_check="last")
+
+
+class TestLocalNegToMul:
+    """`neg(x)` becomes a multiplication by -1, already in canonical form."""
+
+    def test_neg_of_neg(self):
+        x = matrix("x")
+        assert rewrite_graph(-(-x), include=("canonicalize",)) is x
+
+    def test_neg_of_mul_absorbs_constant(self):
+        """neg(mul(c, x)) -> mul(-c, x), rather than mul(-1, mul(c, x))."""
+        x = matrix("x")
+        out = rewrite_graph(-(2.0 * x), include=("canonicalize",))
+
+        assert isinstance(out.owner.op, Elemwise)
+        assert isinstance(out.owner.op.scalar_op, ps.Mul)
+        # Just the negated constant and `x` -- no leftover -1 factor.
+        assert len(out.owner.inputs) == 2
+        [const] = [i for i in out.owner.inputs if isinstance(i, TensorConstant)]
+        assert np.all(const.data == -2.0)
+
+    @pytest.mark.parametrize("dtype, value", [("uint8", 2), ("int8", -128)])
+    def test_neg_of_mul_wrapping_int_constant(self, dtype, value):
+        """The sign is not folded into an int constant narrower than the mul.
+
+        Negating uint8(2) wraps to 254 and negating int8(-128) wraps to -128,
+        neither of which is the negation under the wider output dtype.
+        """
+        x = pt.vector("x")  # float64
+        c = pt.constant(np.array([value], dtype=dtype))
+
+        result = RewriteTester(
+            [x], [-pt.mul(c, x)], include=None, custom_rewrite=local_neg_to_mul
+        )
+        result.assert_graph(pt.mul(np.array(-1.0), c, x))
+        result.assert_eval(np.array([1.0, 2.0]))
+
+    def test_neg_of_mul_same_int_dtype_folds(self):
+        """Same-dtype integer constants wrap consistently, so the fold fires."""
+        x = pt.vector("x", dtype="int8")
+        c = pt.constant(np.array([3], dtype="int8"))
+
+        result = RewriteTester(
+            [x], [-pt.mul(c, x)], include=None, custom_rewrite=local_neg_to_mul
+        )
+        result.assert_graph(pt.mul(pt.constant(np.array([-3], dtype="int8")), x))
+        result.assert_eval(np.array([1, 2], dtype="int8"))
+
+    def test_neg_of_mul_stays_flat(self):
+        """neg(mul(x, y)) -> mul(-1, x, y), rather than mul(-1, mul(x, y))."""
+        x, y = matrices("xy")
+        out = rewrite_graph(-(x * y), include=("canonicalize",))
+
+        assert isinstance(out.owner.op, Elemwise)
+        assert isinstance(out.owner.op.scalar_op, ps.Mul)
+        assert len(out.owner.inputs) == 3
+        assert not any(
+            var.owner is not None
+            and isinstance(var.owner.op, Elemwise)
+            and isinstance(var.owner.op.scalar_op, ps.Mul)
+            for var in out.owner.inputs
+        )
+
+    def test_values(self):
+        x, y = matrices("xy")
+        xv = np.random.random((3, 3))
+        yv = np.random.random((3, 3))
+        f = function([x, y], [-(-x), -(2.0 * x), -(x * y)])
+        neg_neg, neg_mul_const, neg_mul = f(xv, yv)
+        np.testing.assert_allclose(neg_neg, xv)
+        np.testing.assert_allclose(neg_mul_const, -2.0 * xv)
+        np.testing.assert_allclose(neg_mul, -(xv * yv))
 
 
 def test_local_mul_specialize():

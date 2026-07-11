@@ -516,7 +516,12 @@ for pair in (
             allow_cast=True,
             name=f"useless_{op}_of_{inv_op}",
         )
-        register_canonicalize(rewrite)
+        if op is not neg:
+            # `local_neg_to_mul` already cancels neg(neg(x)) during
+            # canonicalize, so matching the pattern there as well is wasted
+            # work in the equilibrium loop. It is still needed in specialize,
+            # where `local_neg_to_mul` does not run.
+            register_canonicalize(rewrite)
         register_specialize(rewrite)
 
         if op is inv_op:
@@ -1647,7 +1652,42 @@ register_canonicalize(local_mul_canonizer, "shape_unsafe", name="local_mul_canon
 @register_canonicalize
 @node_rewriter([neg])
 def local_neg_to_mul(fgraph, node):
-    return [mul(np.array(-1, dtype=node.inputs[0].dtype), node.inputs[0])]
+    """Rewrite neg(x) as a multiplication by -1.
+
+    The naive emission `mul(-1, x)` hands `local_mul_canonizer` a fresh `Mul`
+    to flatten and re-fold on the next canonicalize iteration. The cases below
+    emit the already-canonical form directly, so that hand-off never happens.
+    """
+    [x] = node.inputs
+
+    match x.owner_op_and_inputs:
+        case Elemwise(ps.Neg()), y:
+            # neg(neg(y)) -> y
+            return [y]
+
+        case Elemwise(ps.Mul()), *factors:
+            for i, factor in enumerate(factors):
+                # neg(mul(c, *rest)) -> mul(-c, *rest): fold the sign into the
+                # constant rather than adding a factor. Only valid when negating the
+                # constant in its own dtype is exact under the output dtype:
+                # floats/complex always are; matching integer dtypes wrap
+                # consistently (-(c*x) == (-c)*x mod 2^n), but a narrow int constant
+                # in a wider mul is not (e.g. uint8 2 must become -2.0, not 254).
+                if isinstance(factor, TensorConstant) and (
+                    factor.type.numpy_dtype.kind in "fc" or factor.dtype == x.dtype
+                ):
+                    new_factors = list(factors)
+                    new_factors[i] = constant(-factor.data, dtype=factor.dtype)
+                    return [mul(*new_factors)]
+            # neg(mul(*xs)) -> mul(-1, *xs), flat rather than mul(-1, mul(*xs)).
+            return [mul(np.array(-1, dtype=x.dtype), *factors)]
+
+        case (None,) if isinstance(x, TensorConstant) and x.dtype != "bool":
+            # neg(c) -> -c
+            return [constant(-x.data, dtype=x.dtype)]
+
+        case _:
+            return [mul(np.array(-1, dtype=x.dtype), x)]
 
 
 @register_specialize
