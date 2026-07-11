@@ -5,6 +5,7 @@ from io import StringIO
 
 import numpy as np
 import pytest
+from scipy.special import logsumexp as scipy_logsumexp
 
 import pytensor
 import pytensor.scalar as ps
@@ -1214,12 +1215,9 @@ def test_log1p():
     assert [node.op for node in f.maker.fgraph.toposort()] == [log1p]
 
 
-def test_local_log_add_exp():
-    m = config.mode
-    if m == "FAST_COMPILE":
-        m = "FAST_RUN"
-    m = get_mode(m)
-    m = m.excluding("fusion")
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+def test_local_log_add_exp(mode):
+    m = get_mode(mode).excluding("fusion")
     m = copy.copy(m)
     # No need to put them back as we have a new object
     m.check_isfinite = False
@@ -4204,13 +4202,12 @@ def test_local_expm1():
     )
 
 
-def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None):
+def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None, mode="FAST_RUN"):
     sum_exp = pt_sum(exp(x), axis=axis)
     if dimshuffle_op:
         sum_exp = dimshuffle_op(sum_exp)
     y = log(sum_exp)
-    MODE = get_default_mode().including("local_log_sum_exp")
-    return function([x], y, mode=MODE)
+    return function([x], y, mode=mode)
 
 
 def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
@@ -4221,8 +4218,6 @@ def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
         if hasattr(node.op, "scalar_op") and node.op.scalar_op == ps.basic.maximum:
             return
 
-        # In mode FAST_COMPILE, the rewrites don't replace the
-        # `Max` `Op`.
         if isinstance(node.op, Max):
             return
 
@@ -4269,21 +4264,26 @@ def test_local_log_sum_exp_near_one():
     assert np.allclose(naive_ret, rewritten_ret)
 
 
-def test_local_log_sum_exp_large():
-    """Test that the rewrite result is correct for extreme value 100."""
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+@pytest.mark.parametrize(
+    "x_val", ([-800.0, 800.0], [-800.0, -805.0]), ids=["overflow", "underflow"]
+)
+def test_local_log_sum_exp_large(x_val, mode):
+    """Test that the rewrite result is correct for values the naive graph can't represent."""
     x = vector("x")
-    f = compile_graph_log_sum_exp(x, axis=0)
+    f = compile_graph_log_sum_exp(x, axis=0, mode=mode)
 
-    x_val = np.array([-100.0, 100.0]).astype(config.floatX)
+    x_val = np.array(x_val, dtype=config.floatX)
 
     rewritten_ret = f(x_val)
-    assert np.allclose(rewritten_ret, 100.0)
+    np.testing.assert_allclose(rewritten_ret, scipy_logsumexp(x_val), rtol=1e-5)
 
 
-def test_local_log_sum_exp_inf():
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+def test_local_log_sum_exp_inf(mode):
     """Test that when max = +-inf, the rewritten output still works correctly."""
     x = vector("x")
-    f = compile_graph_log_sum_exp(x, axis=0)
+    f = compile_graph_log_sum_exp(x, axis=0, mode=mode)
 
     assert f([-np.inf, -np.inf]) == -np.inf
     assert f([np.inf, np.inf]) == np.inf
