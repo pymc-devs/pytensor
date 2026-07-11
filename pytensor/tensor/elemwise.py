@@ -382,6 +382,19 @@ class Elemwise(OpenMPOp):
         self.__setstate__(self.__dict__)
         super().__init__(openmp=openmp)
 
+    def __eq__(self, other):
+        # Hot in rewriting. Identity accepts the singleton-op common case, and
+        # the scalar_op type check rejects mismatches without paying for the
+        # props tuples the generated __eq__ would build.
+        if self is other:
+            return True
+        return (
+            type(self) is type(other)
+            and type(self.scalar_op) is type(other.scalar_op)
+            and self.scalar_op == other.scalar_op
+            and self.inplace_pattern == other.inplace_pattern
+        )
+
     def __getstate__(self):
         d = copy(self.__dict__)
         d.pop("ufunc")
