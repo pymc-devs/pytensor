@@ -1,7 +1,6 @@
 r"""Rewrites for the `Op`\s in :mod:`pytensor.tensor.math`."""
 
 import itertools
-import operator
 from collections import defaultdict
 from functools import partial, reduce
 
@@ -36,6 +35,7 @@ from pytensor.tensor.basic import (
     moveaxis,
     ones_like,
     register_infer_shape,
+    second,
     split,
     switch,
     zeros,
@@ -1231,86 +1231,43 @@ class AlgebraicCanonizer(NodeRewriter):
         | x * y * z -> ([x, y, z], [])
 
         """
-        # This function is recursive.  The idea is that there is a
-        # get_num_denum recursion in which the internal ops are all
-        # one of (main, inverse, reciprocal, DimShuffle) and the
-        # internal data nodes all have the dtype of the 'input'
-        # argument. The leaf-Variables of the graph covered by the
-        # recursion may be of any Variable type.
-
-        if inp.owner is None or inp.owner.op not in [
-            self.main,
-            self.inverse,
-            self.reciprocal,
-        ]:
-            if inp.owner and isinstance(inp.owner.op, DimShuffle):
-                # If input is a DimShuffle of some input which does
-                # something like this:
-
-                # * change a vector of length N into a 1xN row matrix
-                # * change a scalar into a 1x1x1 tensor
-                # * in general, complete the shape of a tensor
-                #   with broadcastable 1s to the *left*
-                # Then we will simply discard the DimShuffle and return
-                # the num/denum of its input
-                dsn = inp.owner  # dimshuffle node
-                dsop = dsn.op  # dimshuffle op
-
-                # the first input of the dimshuffle i.e. the ndarray to redim
-                dsi0 = dsn.inputs[0]
-
-                # The compatible order is a DimShuffle "new_order" of the form:
-                # ('x', ..., 'x', 0, 1, 2, ..., dimshuffle_input.type.ndim)
-
-                # That kind of DimShuffle only adds broadcastable
-                # dimensions on the left, without discarding any
-                # existing broadcastable dimension and is inserted
-                # automatically by Elemwise when the inputs have
-                # different numbers of dimensions (hence why we can
-                # discard its information - we know we can retrieve it
-                # later on).
-                compatible_order = ("x",) * (inp.type.ndim - dsi0.type.ndim) + tuple(
-                    range(dsi0.type.ndim)
-                )
-                if dsop.new_order == compatible_order:
-                    # If the "new_order" is the one we recognize,
-                    # we return the num_denum of the dimshuffled input.
-                    return self.get_num_denum(inp.owner.inputs[0])
-                else:
-                    # This is when the input isn't produced by main,
-                    # inverse or reciprocal.
-                    return [inp], []
+        # The graph is walked with an explicit stack of (variable, inverted)
+        # pairs, where inverted variables accumulate into denum. Children are
+        # pushed in reverse so elements land in left-to-right traversal order.
+        # Op dispatch checks identity before (the much slower) equality, since
+        # graphs are almost always built from the singleton mul/div/... ops.
+        main, inverse, reciprocal = self.main, self.inverse, self.reciprocal
+        num, denum = [], []
+        stack = [(inp, False)]
+        while stack:
+            v, inverted = stack.pop()
+            apply = v.owner
+            if apply is None:
+                (denum if inverted else num).append(v)
+                continue
+            op = apply.op
+            if op is main or op == main:
+                # main(x, y, ...) contributes each argument's num/denum as is
+                stack.extend((i, inverted) for i in reversed(apply.inputs))
+            elif op is inverse or op == inverse:
+                # inverse(x, y) contributes y with num/denum flipped
+                x, y = apply.inputs
+                stack.append((y, not inverted))
+                stack.append((x, inverted))
+            elif op is reciprocal or op == reciprocal:
+                # reciprocal(x) contributes x with num/denum flipped
+                stack.append((apply.inputs[0], not inverted))
+            elif isinstance(op, DimShuffle) and (
+                op.is_left_expand_dims
+                or op.new_order == tuple(range(apply.inputs[0].type.ndim))
+            ):
+                # DimShuffles that only complete the shape with broadcastable
+                # dimensions to the left are inserted automatically by Elemwise
+                # when inputs have different numbers of dimensions. They are
+                # transparent to the walk: merge_num_denum recreates them.
+                stack.append((apply.inputs[0], inverted))
             else:
-                return [inp], []
-        num = []
-        denum = []
-        parent = inp.owner
-
-        # We get the (num, denum) pairs for each input
-        # pairs = [self.get_num_denum(input2) if input2.type.dtype ==
-        # input.type.dtype else ([input2], []) for input2 in
-        # parent.inputs]
-        pairs = [self.get_num_denum(input2) for input2 in parent.inputs]
-
-        if parent.op == self.main:
-            # If we have main(x, y, ...), numx, denumx, numy, denumy, ...
-            # then num is concat(numx, numy, num...) and denum is
-            # concat(denumx, denumy, denum...) note that main() can have any
-            # number of arguments >= 0 concat is list concatenation
-            num = reduce(list.__iadd__, map(operator.itemgetter(0), pairs))
-            denum = reduce(list.__iadd__, map(operator.itemgetter(1), pairs))
-        elif parent.op == self.inverse:
-            # If we have inverse(x, y), numx, denumx, numy and denumy
-            # then num is concat(numx, denumy) and denum is
-            # concat(denumx, numy) note that inverse() is binary
-            num = pairs[0][0] + pairs[1][1]
-            denum = pairs[0][1] + pairs[1][0]
-        elif parent.op == self.reciprocal:
-            # If we have reciprocal(x), numx, denumx
-            # then num is denumx and denum is numx
-            # note that reciprocal() is unary
-            num = pairs[0][1]
-            denum = pairs[0][0]
+                (denum if inverted else num).append(v)
         return num, denum
 
     def merge_num_denum(self, num, denum):
@@ -1391,6 +1348,8 @@ class AlgebraicCanonizer(NodeRewriter):
         """
         ln = len(num)
         ld = len(denum)
+        if not (ln and ld):
+            return num, denum
         if ld > 2 and ln > 2:
             # Faster version for "big" inputs.
             while True:
@@ -1447,6 +1406,11 @@ class AlgebraicCanonizer(NodeRewriter):
                 denumct.append(v.unique_value)
             else:
                 denum.append(v)
+
+        if not numct and not denumct and (self.use_reciprocal or num):
+            # No constants to fold; `calculate` would return the neutral
+            # element and everything below would be a no-op.
+            return num, denum
 
         if self.use_reciprocal or num:
             # This will calculate either:
@@ -1510,41 +1474,33 @@ class AlgebraicCanonizer(NodeRewriter):
 
         return ct + num, denum
 
+    def _broadcast_like_output(self, new, node):
+        # Equivalent to broadcast_arrays(new, *node.inputs)[0], without
+        # building the n-1 chains whose results would be discarded.
+        for inp in node.inputs:
+            new = second(inp, new)
+        return new
+
     def transform(self, fgraph, node, enforce_tracks=True):
+        # Op checks test identity before (the much slower) equality, since
+        # graphs are almost always built from the singleton mul/div/... ops.
         op = node.op
-        if enforce_tracks and (op not in {self.main, self.inverse, self.reciprocal}):
+        main, inverse, reciprocal = self.main, self.inverse, self.reciprocal
+        if enforce_tracks and not (
+            op is main
+            or op is inverse
+            or op is reciprocal
+            or op == main
+            or op == inverse
+            or op == reciprocal
+        ):
             return False
 
         assert len(node.outputs) == 1
         out = node.outputs[0]
 
-        if self.absorbing_element is not None and op == self.main:
-            # main(0, x, y) == 0. Checking the direct inputs first lets us skip
-            # the whole get_num_denum walk for what is by far the common case.
-            # Restricted to `main`: for `inverse` the element only absorbs in
-            # the numerator position (0 / x == 0, but x / 0 != 0).
-            for inp in node.inputs:
-                try:
-                    value = get_underlying_scalar_constant_value(inp)
-                except NotScalarConstantError:
-                    continue
-                if value == self.absorbing_element:
-                    out_type = out.type
-                    # Matching the output ndim up front spares Elemwise from
-                    # wrapping the constant in a DimShuffle.
-                    new = constant(
-                        np.full(
-                            (1,) * out_type.ndim,
-                            self.absorbing_element,
-                            dtype=out_type.dtype,
-                        )
-                    )
-                    if new.type.broadcastable != out_type.broadcastable:
-                        new = broadcast_arrays(new, *node.inputs)[0]
-                    copy_stack_trace(out, new)
-                    return [new]
-
-        out_clients = fgraph.clients.get(out)
+        clients = fgraph.clients
+        out_clients = clients.get(out)
 
         if not out_clients:
             return False
@@ -1552,27 +1508,80 @@ class AlgebraicCanonizer(NodeRewriter):
         # check if any of the clients of this node would be part of
         # this canonized graph...  if so, we do nothing and wait for
         # them to be transformed.
-        for c, c_idx in out_clients:
-            while (
-                isinstance(c.op, DimShuffle) and len(fgraph.clients[c.outputs[0]]) <= 1
+        for c, _ in out_clients:
+            c_op = c.op
+            while isinstance(c_op, DimShuffle):
+                c_out_clients = clients[c.outputs[0]]
+                if len(c_out_clients) > 1:
+                    break
+                c = c_out_clients[0][0]
+                c_op = c.op
+            if (
+                c_op is main
+                or c_op is inverse
+                or c_op is reciprocal
+                or c_op == main
+                or c_op == inverse
+                or c_op == reciprocal
             ):
-                c = fgraph.clients[c.outputs[0]][0][0]
-            if c.op in [self.main, self.inverse, self.reciprocal]:
                 return False
+
+        absorbing = self.absorbing_element
+        if absorbing is not None and (op is main or op == main):
+            # main(0, x, y) == 0. Checking the direct inputs lets us skip the
+            # whole get_num_denum walk for what is by far the common case.
+            # Restricted to `main`: for `inverse` the element only absorbs in
+            # the numerator position (0 / x == 0, but x / 0 != 0).
+            for inp in node.inputs:
+                if isinstance(inp, TensorConstant):
+                    # The cached unique_value avoids the exception-driven
+                    # constant walk for the direct constant case.
+                    value = inp.unique_value
+                    if value is None or value != absorbing:
+                        continue
+                elif (inp_node := inp.owner) is not None:
+                    # Inputs produced by main/inverse/reciprocal need no walk:
+                    # any absorbing constant they hide is recovered by the
+                    # get_num_denum flatten and folded in simplify_constants.
+                    inp_op = inp_node.op
+                    if (
+                        inp_op is main
+                        or inp_op is inverse
+                        or inp_op is reciprocal
+                        or inp_op == main
+                        or inp_op == inverse
+                        or inp_op == reciprocal
+                    ):
+                        continue
+                    try:
+                        value = get_underlying_scalar_constant_value(inp)
+                    except NotScalarConstantError:
+                        continue
+                    if value != absorbing:
+                        continue
+                else:
+                    continue
+                out_type = out.type
+                # Matching the output ndim up front spares Elemwise from
+                # wrapping the constant in a DimShuffle.
+                new = constant(
+                    np.full((1,) * out_type.ndim, absorbing, dtype=out_type.dtype)
+                )
+                if new.type.broadcastable != out_type.broadcastable:
+                    new = self._broadcast_like_output(new, node)
+                copy_stack_trace(out, new)
+                return [new]
 
         # Here we make the canonical version of the graph around this node
         # See the documentation of get_num_denum and simplify
-        orig_num, orig_denum = self.get_num_denum(node.outputs[0])
+        orig_num, orig_denum = self.get_num_denum(out)
         num, denum = self.simplify(list(orig_num), list(orig_denum), out.type)
 
-        def same(x, y):
-            return len(x) == len(y) and all(
-                np.all(xe == ye) for xe, ye in zip(x, y, strict=True)
-            )
-
         if (
-            same(orig_num, num)
-            and same(orig_denum, denum)
+            # Variable equality is identity, so these are cheap element-wise
+            # identity checks.
+            orig_num == num
+            and orig_denum == denum
             and
             # Check to see if we've collapsed some nested ops.
             not (
@@ -1587,7 +1596,7 @@ class AlgebraicCanonizer(NodeRewriter):
             # Do a similar check for the reciprocal op.
             not (
                 self.use_reciprocal
-                and node.op == self.reciprocal
+                and (op is reciprocal or op == reciprocal)
                 and len(orig_num) == 0
                 and node.inputs[0].owner
                 and len(node.inputs[0].owner.inputs) < len(orig_denum)
@@ -1600,7 +1609,7 @@ class AlgebraicCanonizer(NodeRewriter):
             new = cast(new, out.type.dtype)
 
         if new.type.broadcastable != out.type.broadcastable:
-            new = broadcast_arrays(new, *node.inputs)[0]
+            new = self._broadcast_like_output(new, node)
 
         if (new.type.dtype == out.type.dtype) and (
             new.type.broadcastable == out.type.broadcastable
@@ -2685,7 +2694,20 @@ def check_for_x_over_absX(numerators, denominators):
     # TODO: this function should dig/search through dimshuffles
     # This won't catch a dimshuffled absolute value
     for den in list(denominators):
-        if den.owner and den.owner.op == pt_abs and den.owner.inputs[0] in numerators:
+        # Identity/scalar_op checks reject non-abs ops without paying for the
+        # props-based Elemwise equality.
+        if (
+            den.owner
+            and (
+                (den_op := den.owner.op) is pt_abs
+                or (
+                    isinstance(den_op, Elemwise)
+                    and isinstance(den_op.scalar_op, ps.Abs)
+                    and den_op == pt_abs
+                )
+            )
+            and den.owner.inputs[0] in numerators
+        ):
             if den.owner.inputs[0].type.dtype.startswith("complex"):
                 # TODO: Make an Op that projects a complex number to
                 #      have unit length but projects 0 to 0.  That
