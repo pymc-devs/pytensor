@@ -107,6 +107,7 @@ from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
+    local_add_canonizer,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
@@ -283,6 +284,45 @@ class TestAlgebraicCanonizer:
     def test_muldiv(self, e, exp_g):
         g_rewritten = rewrite_graph(e, custom_rewrite=mul_canonizer)
         assert equal_computations([g_rewritten], [exp_g])
+
+    @pytest.mark.parametrize(
+        "e",
+        [
+            # Absorbing element sitting directly among the factors
+            lambda x, y: pt.mul(0.0, x, y),
+            # Other constants fold together with the absorbing element
+            lambda x, y: pt.mul(2.0, x, 0.5, 0.0, y),
+            # Absorbing element in the numerator of a division
+            lambda x, y: pt.mul(0.0, x) / y,
+            # Absorbing element hidden inside a division factor
+            lambda x, y: x * (0.0 / y),
+        ],
+        ids=["direct", "among_other_constants", "numerator", "in_subfactor"],
+    )
+    def test_mul_absorbing_element(self, e):
+        """`mul` has an absorbing element: mul(0, x, y) == 0, factors and all."""
+        x, y = pt.scalars("xy")
+        result = RewriteTester(
+            [x, y], [e(x, y)], include=[], custom_rewrite=local_mul_canonizer
+        )
+        result.assert_graph(constant(0.0, dtype=config.floatX))
+
+    def test_mul_absorbing_element_broadcast(self):
+        """The absorbed factors still contribute to the shape of the output."""
+        x, y = self.x, self.y
+        zero = constant(np.zeros((1, 1), dtype=config.floatX))
+        result = RewriteTester(
+            [x, y], [pt.mul(zero, x, y)], include=[], custom_rewrite=local_mul_canonizer
+        )
+        result.assert_graph(second(y, second(x, second(zero, zero))))
+
+    def test_add_has_no_absorbing_element(self):
+        """`add` only has a neutral element, so 0 must not absorb its terms."""
+        x, y = self.x, self.y
+        result = RewriteTester(
+            [x, y], [pt.add(0.0, x, y)], include=[], custom_rewrite=local_add_canonizer
+        )
+        result.assert_graph(x + y)
 
     def test_elemwise_multiple_inputs_rewrites(self):
         """Verify that the `AlgebraicCanonizer` merges sequential ``Elemwise({mul,add})``."""
