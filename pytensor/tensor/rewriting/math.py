@@ -1147,6 +1147,14 @@ class AlgebraicCanonizer(NodeRewriter):
         should be returned as a list of one element, unless
         the value is such that ``value = main()``. In that case,
         the return value should be an empty list.
+    absorbing_element
+        The absorbing (annihilating) element of `main`, if it has one, such
+        that ``main(absorbing_element, x) == absorbing_element`` for every
+        ``x`` (e.g. ``0`` for mul). When given, any `main` node with a
+        constant `absorbing_element` among its factors folds to that element
+        directly, and constants folding to it in `simplify_constants` drop
+        the surviving non-constant terms. `add` has no absorbing element, so
+        `local_add_canonizer` leaves this as ``None``.
 
     Examples
     --------
@@ -1172,12 +1180,21 @@ class AlgebraicCanonizer(NodeRewriter):
 
     """
 
-    def __init__(self, main, inverse_fn, reciprocal_fn, calculate, use_reciprocal=True):
+    def __init__(
+        self,
+        main,
+        inverse_fn,
+        reciprocal_fn,
+        calculate,
+        use_reciprocal=True,
+        absorbing_element=None,
+    ):
         self.main = main
         self.inverse = inverse_fn
         self.reciprocal = reciprocal_fn
         self.calculate = calculate
         self.use_reciprocal = use_reciprocal
+        self.absorbing_element = absorbing_element
 
         self.external_simplifiers = []
 
@@ -1444,6 +1461,19 @@ class AlgebraicCanonizer(NodeRewriter):
         # Wrapping ct in a Constant with the right dtype
         ct = [constant(c, dtype=out_type.dtype) for c in ct]
 
+        if (
+            self.absorbing_element is not None
+            and len(ct) == 1
+            and (num or denum)
+            and np.all(ct[0].data == self.absorbing_element)
+        ):
+            # The constants folded to the absorbing element of `main`, so every
+            # surviving factor is irrelevant: main(0, x, y) == 0. This has to
+            # come before the single-constant shortcut below, which would
+            # otherwise hand back `orig_num` untouched and leave the factors in
+            # place.
+            return ct, []
+
         if orig_num and len(numct) == 1 and len(denumct) == 0 and ct:
             # In that case we should only have one constant in `ct`.
             [var_ct] = ct
@@ -1482,6 +1512,32 @@ class AlgebraicCanonizer(NodeRewriter):
 
         assert len(node.outputs) == 1
         out = node.outputs[0]
+
+        if self.absorbing_element is not None and op == self.main:
+            # main(0, x, y) == 0. Checking the direct inputs first lets us skip
+            # the whole get_num_denum walk for what is by far the common case.
+            # Restricted to `main`: for `inverse` the element only absorbs in
+            # the numerator position (0 / x == 0, but x / 0 != 0).
+            for inp in node.inputs:
+                try:
+                    value = get_underlying_scalar_constant_value(inp)
+                except NotScalarConstantError:
+                    continue
+                if value == self.absorbing_element:
+                    out_type = out.type
+                    # Matching the output ndim up front spares Elemwise from
+                    # wrapping the constant in a DimShuffle.
+                    new = constant(
+                        np.full(
+                            (1,) * out_type.ndim,
+                            self.absorbing_element,
+                            dtype=out_type.dtype,
+                        )
+                    )
+                    if new.type.broadcastable != out_type.broadcastable:
+                        new = broadcast_arrays(new, *node.inputs)[0]
+                    copy_stack_trace(out, new)
+                    return [new]
 
         out_clients = fgraph.clients.get(out)
 
@@ -1583,7 +1639,7 @@ def mul_calculate(num, denum, aslist=False, out_type=None):
 
 
 local_mul_canonizer = AlgebraicCanonizer(
-    mul, true_div, reciprocal, mul_calculate, False
+    mul, true_div, reciprocal, mul_calculate, False, absorbing_element=0
 )
 register_canonicalize(local_mul_canonizer, "shape_unsafe", name="local_mul_canonizer")
 
@@ -2261,12 +2317,17 @@ def local_add_neg_to_sub(fgraph, node):
                     return [new_out]
 
 
-@register_canonicalize
 @node_rewriter([mul])
 def local_mul_zero(fgraph, node):
     """
-    As part of canonicalization, we replace multiplication by zero
-    with zero.
+    Replace multiplication by zero with zero.
+
+    Not registered in canonicalize: `local_mul_canonizer` handles the
+    absorbing element itself (`absorbing_element=0`), and does so in strictly
+    more cases -- it also folds `mul(2, x, 0.5, 0)`, where the zero only shows
+    up after the constants are folded together, which the direct-input scan
+    below misses. Kept for use in rewrite databases that run without the
+    canonizer.
 
     """
     otype = node.outputs[0].type
