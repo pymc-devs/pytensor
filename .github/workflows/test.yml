@@ -171,10 +171,15 @@ jobs:
         shell: micromamba-shell {0}
         run: |
 
+          # Install the exact numba cap from pyproject.toml so CI validates the
+          # version the bump-numba workflow pinned (fails loudly if conda-forge
+          # doesn't have it yet, rather than silently testing an older release).
+          NUMBA_VERSION=$(sed -n 's/.*"numba>=[0-9.]*,<=\([0-9.]*\)".*/\1/p' pyproject.toml | head -1)
+          echo "Installing numba==${NUMBA_VERSION}"
           if [[ $OS == "macos-15" ]]; then
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate rich;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate rich;
           else
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
           fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" && pip install "jax>=0.8,<0.9.1" jaxlib numpyro equinox tfp-nightly; fi
           if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" pytorch pytorch-cuda=12.1 "mkl<=2024.0" -c pytorch -c nvidia; fi
@@ -244,7 +249,9 @@ jobs:
       - name: Install dependencies
         shell: micromamba-shell {0}
         run: |
-          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytest-benchmark
+          NUMBA_VERSION=$(sed -n 's/.*"numba>=[0-9.]*,<=\([0-9.]*\)".*/\1/p' pyproject.toml | head -1)
+          echo "Installing numba==${NUMBA_VERSION}"
+          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" mkl numpy scipy pip mkl-service cython pytest "numba==${NUMBA_VERSION}" jax jaxlib pytest-benchmark
           pip install -e ./
           micromamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'

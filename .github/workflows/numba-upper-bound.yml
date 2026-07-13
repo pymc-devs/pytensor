@@ -1,8 +1,10 @@
 name: Bump numba upper bound
 
-# Watches PyPI for new numba releases. When one appears above our current
-# upper bound in pyproject.toml, opens a PR raising the cap so our normal
-# CI (Tests workflow) validates the new version before we ship it.
+# Watches conda-forge for new numba releases. When one appears above our
+# current upper bound in pyproject.toml, opens a PR raising the cap so our
+# normal CI (Tests workflow) validates the new version before we ship it.
+# CI installs numba from conda-forge, so gating here (rather than on PyPI)
+# ensures the bumped version is actually installable when CI runs.
 
 on:
   schedule:
@@ -38,7 +40,7 @@ jobs:
       - name: Install packaging
         run: python -m pip install --upgrade packaging
 
-      - name: Check PyPI and rewrite pin if needed
+      - name: Check conda-forge and rewrite pin if needed
         id: bump
         run: python scripts/bump_numba_upper_bound.py
 
@@ -69,7 +71,7 @@ jobs:
           remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push "$remote" "$branch"
 
-          body="numba ${LATEST} is available on PyPI. This PR raises the upper bound in \`pyproject.toml\` to \`<=${NEW_CAP}\` so the normal Tests workflow validates the new release. Merge after CI passes."
+          body="numba ${LATEST} is available on conda-forge. This PR raises the upper bound in \`pyproject.toml\` to \`<=${NEW_CAP}\` so the normal Tests workflow validates the new release. Merge after CI passes."
           body="${body}"$'\n\n'"**Note:** GitHub suppresses workflow runs triggered by the default \`GITHUB_TOKEN\`, so CI (Tests, mypy, etc.) will not start automatically on this PR. Close and reopen it (or push an empty commit) to trigger the checks."
 
           gh pr create \
