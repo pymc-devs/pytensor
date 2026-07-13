@@ -256,6 +256,10 @@ def get_io_macros(inputs: list[str], outputs: list[str]) -> tuple[str, str]:
 class ExternalCOp(COp):
     """Class for an `Op` with an external C implementation.
 
+    .. deprecated::
+        Inherit from `COp` and return the C code directly from `c_code` and
+        related methods instead.
+
     One can inherit from this class, provide its constructor with a path to
     an external C source file and the name of a function within it, and define
     an `Op` for said function.
@@ -306,6 +310,13 @@ class ExternalCOp(COp):
         files overriding sections in previous files.
 
         """
+        warnings.warn(
+            "ExternalCOp is deprecated and will be removed in a future release. "
+            "Inherit from COp and return the C code directly from `c_code` and "
+            "related methods instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         if not isinstance(func_files, list):
             self.func_files = [Path(func_files)]
         else:
@@ -633,16 +644,3 @@ class _NoPythonCOp(COp):
 
     def perform(self, node, inputs, output_storage):
         raise NotImplementedError("No Python implementation is provided by this COp.")
-
-
-class _NoPythonExternalCOp(ExternalCOp):
-    """A class used to indicate that an `ExternalCOp` does not provide a Python implementation.
-
-    XXX: Do not use this class; it's only for tracking bad implementations internally.
-
-    """
-
-    def perform(self, node, inputs, output_storage):
-        raise NotImplementedError(
-            "No Python implementation is provided by this ExternalCOp."
-        )
