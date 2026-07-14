@@ -4,7 +4,7 @@ from itertools import pairwise
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
-from pytensor.gradient import disconnected_type
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph import Apply, Op, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
@@ -88,6 +88,13 @@ class JoinDims(Op):
         x_shape = x.shape
         packed_shape = [x_shape[i] for i in self.axis_range]
         return [split_dims(g_out, shape=packed_shape, axis=self.start_axis)]
+
+    def pushforward(self, inputs, outputs, tangents):
+        (x_tangent,) = tangents
+        if isinstance(x_tangent.type, DisconnectedType):
+            return [disconnected_type()]
+        return [self(x_tangent)]
+
 
 
 @_vectorize_node.register(JoinDims)
@@ -213,6 +220,13 @@ class SplitDims(Op):
             join_dims(g_out, start_axis=self.axis, n_axes=n_axes),
             disconnected_type(),
         ]
+
+    def pushforward(self, inputs, outputs, tangents):
+        (x_tangent, _) = tangents
+        if isinstance(x_tangent.type, DisconnectedType):
+            return [disconnected_type()]
+        return [self(x_tangent, inputs[1])]
+
 
 
 @_vectorize_node.register(SplitDims)
