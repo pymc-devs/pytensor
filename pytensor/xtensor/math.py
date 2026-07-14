@@ -189,16 +189,18 @@ def gammainccinv(): ...
 def gammaincinv(): ...
 
 
-@_as_xelemwise(ps.gammal)
-def gammal(): ...
+def gammal(k, x):
+    """Lower incomplete gamma function."""
+    return gammainc(k, x) * gamma(k)
 
 
 @_as_xelemwise(ps.gammaln)
 def gammaln(): ...
 
 
-@_as_xelemwise(ps.gammau)
-def gammau(): ...
+def gammau(k, x):
+    """Upper incomplete gamma function."""
+    return gammaincc(k, x) * gamma(k)
 
 
 @_as_xelemwise(ps.ge)
