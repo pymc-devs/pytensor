@@ -1788,7 +1788,6 @@ def sqrt(a):
     """
 
 
-@scalar_elemwise
 def deg2rad(a):
     """convert degree a to radian
 
@@ -1818,9 +1817,11 @@ def deg2rad(a):
     This function corresponds to NumPy's `np.deg2rad` function.
     The conversion formula is: radians = degrees * (π / 180)
     """
+    a = as_tensor_variable(a)
+    (out_type,) = ps.upgrade_to_float(ps.get_scalar_type(a.type.dtype))
+    return a * np.asarray(np.pi / 180, dtype=out_type.dtype)
 
 
-@scalar_elemwise
 def rad2deg(a):
     """convert radian a to degree
 
@@ -1851,6 +1852,9 @@ def rad2deg(a):
     This function corresponds to NumPy's `np.rad2deg` function.
     The conversion formula is: degrees = radians * (180 / π)
     """
+    a = as_tensor_variable(a)
+    (out_type,) = ps.upgrade_to_float(ps.get_scalar_type(a.type.dtype))
+    return a * np.asarray(180 / np.pi, dtype=out_type.dtype)
 
 
 @scalar_elemwise

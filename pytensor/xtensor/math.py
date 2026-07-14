@@ -115,8 +115,11 @@ def cos(): ...
 def cosh(): ...
 
 
-@_as_xelemwise(ps.deg2rad)
-def deg2rad(): ...
+def deg2rad(x):
+    """Convert degrees to radians."""
+    x = as_xtensor(x)
+    (out_type,) = ps.upgrade_to_float(ps.get_scalar_type(x.type.dtype))
+    return x * np.asarray(np.pi / 180, dtype=out_type.dtype)
 
 
 @_as_xelemwise(ps.eq)
@@ -378,8 +381,11 @@ pow = power
 def psi(): ...
 
 
-@_as_xelemwise(ps.rad2deg)
-def rad2deg(): ...
+def rad2deg(x):
+    """Convert radians to degrees."""
+    x = as_xtensor(x)
+    (out_type,) = ps.upgrade_to_float(ps.get_scalar_type(x.type.dtype))
+    return x * np.asarray(180 / np.pi, dtype=out_type.dtype)
 
 
 @_as_xelemwise(ps.real)

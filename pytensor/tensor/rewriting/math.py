@@ -62,7 +62,6 @@ from pytensor.tensor.math import (
     arcsinh,
     arctanh,
     cosh,
-    deg2rad,
     digamma,
     dot,
     eq,
@@ -86,7 +85,6 @@ from pytensor.tensor.math import (
     neg,
     polygamma,
     prod,
-    rad2deg,
     reciprocal,
     sigmoid,
     sign,
@@ -498,7 +496,6 @@ def local_dot_to_mul(fgraph, node):
 
 
 for pair in (
-    (deg2rad, rad2deg),
     (cosh, arccosh),
     (tanh, arctanh),
     (sinh, arcsinh),
