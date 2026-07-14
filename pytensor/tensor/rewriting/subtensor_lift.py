@@ -38,6 +38,7 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, dot, minimum
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
     get_simplified_broadcast_shape,
@@ -66,7 +67,6 @@ from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     Subtensor,
     _non_consecutive_adv_indexing,
     as_index_literal,
@@ -216,15 +216,15 @@ def _lift_subtensor_non_axis(
 
 def _static_size_not_larger(idx, val_static_dim) -> bool:
     # A purely static bound: the index selects no more elements than the axis holds.
-    # Reshape/DimShuffle preserve the element count, so follow them to whichever
-    # view in the chain has a fully-known static shape.
+    # Reshape/JoinDims/SplitDims/DimShuffle preserve the element count, so follow
+    # them to whichever view in the chain has a fully-known static shape.
     if val_static_dim is not None:
         idx_static_shape = idx.type.shape
         if not any(d is None for d in idx_static_shape) and (
             np.prod(idx_static_shape) <= val_static_dim
         ):
             return True
-    if isinstance(idx.owner_op, Reshape | DimShuffle):
+    if isinstance(idx.owner_op, Reshape | JoinDims | SplitDims | DimShuffle):
         return _static_size_not_larger(idx.owner.inputs[0], val_static_dim)
     return False
 
@@ -347,7 +347,7 @@ def local_subtensor_of_dot(fgraph, node):
 
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
-@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_of_batch_dims(fgraph, node):
     """Lift a (basic or advanced) Subtensor through the batch dims of an Elemwise or Blockwise.
 
@@ -750,7 +750,7 @@ def lift_subtensor_through_alloc(fgraph, node):
 
     Push the read past Alloc so the broadcast happens at most once and
     indexing operates on ``val`` (smaller) where possible. Covers basic
-    ``Subtensor``, ``AdvancedSubtensor``, and ``AdvancedSubtensor1`` reads.
+    ``Subtensor`` and ``AdvancedSubtensor`` reads.
 
     On non-broadcast ``val`` dims an advanced index could expand ``val[idx]``
     past ``val.size``; only fire when the index is provably smaller or when
@@ -818,7 +818,7 @@ def local_basic_subtensor_of_alloc(fgraph, node):
 @register_useless
 @register_canonicalize
 @register_specialize
-@node_rewriter([Subtensor, AdvancedSubtensor, AdvancedSubtensor1])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_of_alloc(fgraph, node):
     return lift_subtensor_through_alloc(fgraph, node)
 
@@ -1007,7 +1007,7 @@ def local_subtensor_SpecifyShape_lift(fgraph, node):
 @register_specialize
 @register_canonicalize("fast_compile")
 @register_useless
-@node_rewriter([Subtensor, AdvancedSubtensor1])
+@node_rewriter([Subtensor, AdvancedSubtensor])
 def local_subtensor_make_vector(fgraph, node):
     """Perform ``*Subtensor*`` operations on ``MakeVector`` outputs when the indices are constant.
 
@@ -1015,7 +1015,7 @@ def local_subtensor_make_vector(fgraph, node):
         [a,b,c][0] -> a
         [a,b,c][0:2] -> [a,b]
 
-    Replace all ``AdvancedSubtensor1`` and ``MakeVector`` cases like:
+    Replace all ``AdvancedSubtensor`` and ``MakeVector`` cases like:
         [a,b,c][[0,2]] -> [a,c]
 
     We can do this for constant indexes.
@@ -1046,7 +1046,7 @@ def local_subtensor_make_vector(fgraph, node):
 
         if isinstance(idx, int):
             idx = node.inputs[1]
-    elif isinstance(node.op, AdvancedSubtensor1):
+    elif isinstance(node.op, AdvancedSubtensor):
         idx = node.inputs[1]
 
     if isinstance(idx, Variable):
@@ -1064,7 +1064,10 @@ def local_subtensor_make_vector(fgraph, node):
                 pass
         elif idx.ndim == 1 and isinstance(idx, Constant):
             values = list(map(int, list(idx.value)))
-            ret = make_vector_op(*[x.owner.inputs[v] for v in values])
+            if len(values) == 1:
+                ret = expand_dims(x.owner.inputs[values[0]], axis=0)
+            else:
+                ret = make_vector_op(*[x.owner.inputs[v] for v in values])
             copy_stack_trace(node.outputs[0], ret)
             return [ret]
     elif isinstance(idx, slice):

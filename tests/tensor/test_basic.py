@@ -51,7 +51,6 @@ from pytensor.tensor.basic import (
     eye,
     fill,
     flatnonzero,
-    flatten,
     full_like,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
@@ -97,7 +96,8 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import dense_dot
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import Reshape, Shape_i, shape_padright, specify_shape
+from pytensor.tensor.reshape import JoinDims, flatten
+from pytensor.tensor.shape import Shape_i, shape_padright, specify_shape
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -3850,7 +3850,7 @@ class TestInferShape(utt.InferShapeTester):
                 [atens3],
                 [flatten(atens3, ndim)],
                 [atens3_val],
-                Reshape,
+                JoinDims,
             )
 
         amat = matrix()
@@ -3860,7 +3860,7 @@ class TestInferShape(utt.InferShapeTester):
             [amat],
             [flatten(amat, ndim)],
             [amat_val],
-            Reshape,
+            JoinDims,
         )
 
     def test_Eye(self):

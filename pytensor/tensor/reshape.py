@@ -4,9 +4,10 @@ from itertools import pairwise
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
-from pytensor.gradient import disconnected_type
-from pytensor.graph import Apply, Op, Variable
+from pytensor.gradient import DisconnectedType, disconnected_type
+from pytensor.graph import Apply, Constant, Variable
 from pytensor.graph.replace import _vectorize_node
+from pytensor.link.c.op import COp
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import infer_static_shape, join, split
@@ -18,7 +19,7 @@ from pytensor.tensor.variable import TensorVariable
 type ShapeValueType = int | np.integer | ScalarVariable | TensorVariable | np.ndarray
 
 
-class JoinDims(Op):
+class JoinDims(COp):
     __props__ = ("start_axis", "n_axes")
     view_map = {0: [0]}
 
@@ -89,6 +90,48 @@ class JoinDims(Op):
         packed_shape = [x_shape[i] for i in self.axis_range]
         return [split_dims(g_out, shape=packed_shape, axis=self.start_axis)]
 
+    def pushforward(self, inputs, outputs, tangents):
+        (x_tangent,) = tangents
+        if isinstance(x_tangent.type, DisconnectedType):
+            return [disconnected_type()]
+        return [self(x_tangent)]
+
+    def c_code_cache_version(self):
+        return (1,)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
+        fail = sub["fail"]
+        start = self.start_axis
+        n = self.n_axes
+        ndim_in = node.inputs[0].type.ndim
+        out_ndim = ndim_in - n + 1
+
+        joined = (
+            " * ".join(f"PyArray_DIMS({x})[{i}]" for i in range(start, start + n))
+            or "1"
+        )
+        dim_exprs = [
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(start)),
+            joined,
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(start + n, ndim_in)),
+        ]
+        assigns = "\n".join(f"new_dims[{k}] = {e};" for k, e in enumerate(dim_exprs))
+
+        return f"""
+        npy_intp new_dims[{out_ndim or 1}];
+        {assigns}
+        PyArray_Dims newshape;
+        newshape.len = {out_ndim};
+        newshape.ptr = new_dims;
+        Py_XDECREF({z});
+        {z} = (PyArrayObject *) PyArray_Newshape({x}, &newshape, NPY_CORDER);
+        if (!{z}) {{
+            {fail};
+        }}
+        """
+
 
 @_vectorize_node.register(JoinDims)
 def _vectorize_joindims(op, node, x):
@@ -149,7 +192,7 @@ def join_dims(
     return JoinDims(start_axis, n_axes)(x)  # type: ignore[return-value]
 
 
-class SplitDims(Op):
+class SplitDims(COp):
     __props__ = ("axis",)
     view_map = {0: [0]}
 
@@ -160,10 +203,14 @@ class SplitDims(Op):
 
     def make_node(self, x, shape):
         x = as_tensor_variable(x)
-        shape = as_tensor_variable(shape, dtype=int)
+        shape = as_tensor_variable(shape)
 
         if shape.type.numpy_dtype.kind not in "iu":
-            raise TypeError("shape must be an integer tensor")
+            if isinstance(shape, Constant) and shape.data.size == 0:
+                # Empty shapes like `()` default to float dtype
+                shape = as_tensor_variable(shape.data.astype(int))
+            else:
+                raise TypeError("shape must be an integer tensor")
 
         if shape.type.ndim != 1:
             raise TypeError(
@@ -213,6 +260,49 @@ class SplitDims(Op):
             join_dims(g_out, start_axis=self.axis, n_axes=n_axes),
             disconnected_type(),
         ]
+
+    def pushforward(self, inputs, outputs, tangents):
+        (x_tangent, _) = tangents
+        if isinstance(x_tangent.type, DisconnectedType):
+            return [disconnected_type()]
+        return [self(x_tangent, inputs[1])]
+
+    def c_code_cache_version(self):
+        return (1,)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, shp = inputs
+        (z,) = outputs
+        fail = sub["fail"]
+        axis = self.axis
+        ndim_in = node.inputs[0].type.ndim
+        out_ndim = node.outputs[0].type.ndim
+        n_split = out_ndim - ndim_in + 1
+        shp_dtype = node.inputs[1].type.dtype_specs()[1]
+
+        def shp_at(j):
+            return f"(({shp_dtype}*)(PyArray_BYTES({shp}) + {j} * PyArray_STRIDES({shp})[0]))[0]"
+
+        dim_exprs = [
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(axis)),
+            *(shp_at(j) for j in range(n_split)),
+            *(f"PyArray_DIMS({x})[{i}]" for i in range(axis + 1, ndim_in)),
+        ]
+        assigns = "\n".join(f"new_dims[{k}] = {e};" for k, e in enumerate(dim_exprs))
+
+        return f"""
+        assert(PyArray_NDIM({shp}) == 1);
+        npy_intp new_dims[{out_ndim or 1}];
+        {assigns}
+        PyArray_Dims newshape;
+        newshape.len = {out_ndim};
+        newshape.ptr = new_dims;
+        Py_XDECREF({z});
+        {z} = (PyArrayObject *) PyArray_Newshape({x}, &newshape, NPY_CORDER);
+        if (!{z}) {{
+            {fail};
+        }}
+        """
 
 
 @_vectorize_node.register(SplitDims)
@@ -273,6 +363,42 @@ def split_dims(
             shape = (shape,)
 
     return SplitDims(axis=axis)(x, shape)  # type: ignore[return-value]
+
+
+def flatten(x: TensorLike, ndim: int | None = 1) -> TensorVariable:
+    """Return a copy of the array collapsed into ``ndim`` dimensions.
+
+    Keeps the first ``ndim - 1`` dimensions of ``x`` and collapses the remaining
+    dimensions into the last one (C-order), i.e. a plain :func:`join_dims` of the
+    trailing axes.
+
+    Parameters
+    ----------
+    x : TensorLike
+        The variable to be reshaped.
+    ndim : int
+        The number of dimensions of the returned variable. The default is ``1``.
+
+    Returns
+    -------
+    TensorVariable
+        The flattened variable with dimensionality of ``ndim``.
+    """
+    if ndim is None:
+        ndim = 1
+
+    _x = as_tensor_variable(x)
+
+    # Any input variable can be flattened to have ndim of 1, even if it's a
+    # scalar. Otherwise, ndim must be positive and not exceed x.ndim.
+    if ndim < 1 or (ndim > 1 and ndim > _x.type.ndim):
+        raise ValueError(f"ndim {ndim} out of bound [1, {_x.type.ndim + 1})")
+
+    if ndim == _x.type.ndim:
+        # Nothing to ravel
+        return _x
+
+    return join_dims(_x, start_axis=ndim - 1)
 
 
 def _analyze_axes_list(axes) -> tuple[int, int, int]:
@@ -525,4 +651,4 @@ def unpack(
     ]
 
 
-__all__ = ["join_dims", "pack", "split_dims", "unpack"]
+__all__ = ["flatten", "join_dims", "pack", "split_dims", "unpack"]

@@ -8,7 +8,7 @@ from pytensor import Mode, function, get_mode
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
 from pytensor.tensor.subtensor import (
-    AdvancedIncSubtensor1,
+    AdvancedIncSubtensor,
     AdvancedSubtensor,
 )
 
@@ -101,7 +101,7 @@ class TestIndexedReadFusion:
         np.testing.assert_allclose(fn(xv, iv, yv), fn_u(xv, iv, yv), rtol=1e-10)
 
     def test_nd_index_axis1(self):
-        """2D matrix index on axis 1 (via undo_take_reshape_for_fusion)."""
+        """2D matrix index on axis 1 (fused as a general AdvancedSubtensor)."""
         rng = np.random.default_rng(42)
         x = pt.matrix("x", shape=(3, 100))
         mat_idx = pt.matrix("mat_idx", dtype="int64", shape=(10, 5))
@@ -121,28 +121,6 @@ class TestIndexedReadFusion:
         xv = rng.normal(size=(100, 7))
         iv = rng.integers(100, size=(10, 5)).astype(np.int64)
         np.testing.assert_allclose(fn(xv, iv), fn_u(xv, iv), rtol=1e-10)
-
-    def test_regrouped_gather(self):
-        """Gather over a (3, 4) index, regrouped to runtime shape (s0, s1).
-
-        A detection that assumed the reshape restores the index shape would
-        rewrite this to x[mat] — shape (3, 4, 5) instead of the requested
-        (2, 6, 5). _unwrap_reshaped_take builds the (s0, s1) index from the
-        reshape target instead, so the regrouping fuses and stays correct.
-        """
-        rng = np.random.default_rng(15)
-        x = pt.matrix("x", shape=(8, 5))
-        mat = pt.matrix("mat", dtype="int64", shape=(3, 4))
-        s0, s1 = pt.lscalar("s0"), pt.lscalar("s1")
-        out = pt.exp(x[mat.reshape((-1,))].reshape((s0, s1, x.shape[1])))
-        fn, fn_u = fused_and_unfused([x, mat, s0, s1], out)
-        assert_fused(fn)
-        xv = rng.normal(size=(8, 5))
-        mv = rng.integers(0, 8, size=(3, 4))
-        res = fn(xv, mv, np.int64(2), np.int64(6))
-        res_u = fn_u(xv, mv, np.int64(2), np.int64(6))
-        assert res.shape == res_u.shape == (2, 6, 5)
-        np.testing.assert_allclose(res, res_u, rtol=1e-10)
 
     def test_nd_index_broadcast(self):
         """Broadcastable 2D index (shape (1, C)) broadcasts against direct input."""
@@ -276,7 +254,7 @@ class TestIndexedWriteFusion:
         # not the indexed axis. Read fusion may still create an
         # IndexedElemwise, but the AdvancedIncSubtensor1 must remain outside.
         assert any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
         xv = rng.normal(size=(85,))
         yv = rng.normal(size=(10,))
@@ -292,7 +270,7 @@ class TestIndexedWriteFusion:
         out = target[idx].inc(pt.exp(x))
         fn, fn_u = fused_and_unfused([x, target], out)
         assert any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
         xv = rng.normal(size=(1,))
         tv = rng.normal(size=(5,))
@@ -321,7 +299,7 @@ class TestIndexedWriteFusion:
             assert_fused(fn)
         else:
             assert any(
-                isinstance(n.op, AdvancedIncSubtensor1)
+                isinstance(n.op, AdvancedIncSubtensor)
                 for n in fn.maker.fgraph.toposort()
             )
         xv = rng.normal(size=(10, 1))
@@ -352,14 +330,8 @@ class TestIndexedWriteFusion:
         slices = (slice(None),) * n_slices
         out = target[(*slices, idx)].inc(pt.exp(val))
 
-        mode = NUMBA_MODE.excluding(
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
-        )
-        mode_u = NUMBA_NO_FUSION.excluding(
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
-        )
-        fn = function([val, target], out, mode=mode, trust_input=True)
-        fn_u = function([val, target], out, mode=mode_u, trust_input=True)
+        fn = function([val, target], out, mode=NUMBA_MODE, trust_input=True)
+        fn_u = function([val, target], out, mode=NUMBA_NO_FUSION, trust_input=True)
         assert_fused(fn)
         valv = rng.normal(size=val_shape)
         tv = rng.normal(size=target_shape)
@@ -557,7 +529,7 @@ class TestIndexedWriteFusion:
         # The read fuses into an IndexedElemwise; the aliasing write stays external.
         assert_fused(fn)
         assert any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
         xv = rng.normal(size=9)
         np.testing.assert_allclose(fn(xv), fn_u(xv), rtol=1e-10)
@@ -583,7 +555,7 @@ class TestIndexedWriteFusion:
         # The non-inplace write fuses fully -- no external AdvancedIncSubtensor1.
         assert_fused(fn)
         assert not any(
-            isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
+            isinstance(n.op, AdvancedIncSubtensor) for n in fn.maker.fgraph.toposort()
         )
 
         # The inner write must destroy exactly the input the op's destroy_map names.

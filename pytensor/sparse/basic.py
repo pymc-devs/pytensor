@@ -1909,7 +1909,7 @@ class ConstructSparseFromList(Op):
         idx_list = inputs[2:]
 
         gx = g_output
-        gy = pytensor.tensor.subtensor.advanced_subtensor1(g_output, *idx_list)
+        gy = pytensor.tensor.subtensor.advanced_subtensor(g_output, *idx_list)
 
         return [gx, gy, *(disconnected_type() for _ in range(len(idx_list)))]
 

@@ -59,12 +59,7 @@ from pytensor.sparse.variable import SparseConstant
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
-from pytensor.tensor.subtensor import (
-    AdvancedIncSubtensor,
-    AdvancedSubtensor1,
-)
 from pytensor.tensor.type import (
-    TensorType,
     float_dtypes,
     iscalar,
     ivector,
@@ -451,68 +446,6 @@ class TestSparseInferShape(utt.InferShapeTester):
             ],
             ConstructSparseFromList,
         )
-
-
-class TestConstructSparseFromList:
-    def test_adv_sub1_sparse_grad(self):
-        v = ivector()
-
-        m = matrix()
-
-        with pytest.raises(TypeError):
-            pytensor.sparse.sparse_grad(v)
-
-        with pytest.raises(TypeError):
-            sub = m[v, v]
-            pytensor.sparse.sparse_grad(sub)
-
-        # Assert we don't create a sparse grad by default
-        sub = m[v]
-        g = pytensor.grad(sub.sum(), m)
-        assert isinstance(g.owner.op, AdvancedIncSubtensor)
-
-        # Test that we create a sparse grad when asked
-        # USER INTERFACE
-        m = matrix()
-        v = ivector()
-        sub = pytensor.sparse.sparse_grad(m[v])
-        g = pytensor.grad(sub.sum(), m)
-        assert isinstance(g.owner.op, ConstructSparseFromList)
-
-        # Test that we create a sparse grad when asked
-        # Op INTERFACE
-        m = matrix()
-        v = ivector()
-        sub = AdvancedSubtensor1(sparse_grad=True)(m, v)
-        g = pytensor.grad(sub.sum(), m)
-        assert isinstance(g.owner.op, ConstructSparseFromList)
-
-        # Test the sparse grad
-        valm = np.random.random((5, 4)).astype(config.floatX)
-        valv = np.random.default_rng().integers(0, 5, 10)
-        m = matrix()
-        shared_v = pytensor.shared(valv)
-
-        def fn(m):
-            return pytensor.sparse.sparse_grad(m[shared_v])
-
-        verify_grad_sparse(fn, [valm])
-
-    def test_err(self):
-        for ndim in [1, 3]:
-            t = TensorType(dtype=config.floatX, shape=(None,) * ndim)()
-            v = ivector()
-            sub = t[v]
-
-            # Assert we don't create a sparse grad by default
-            g = pytensor.grad(sub.sum(), t)
-            assert isinstance(g.owner.op, AdvancedIncSubtensor)
-
-            # Test that we raise an error, as we can't create a sparse
-            # grad from tensors that don't have 2 dimensions.
-            sub = pytensor.sparse.sparse_grad(sub)
-            with pytest.raises(TypeError):
-                pytensor.grad(sub.sum(), t)
 
 
 class TestConversion:

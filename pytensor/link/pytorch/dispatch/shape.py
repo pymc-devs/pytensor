@@ -2,6 +2,7 @@ import torch
 
 from pytensor.graph.basic import Constant
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
+from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
@@ -23,6 +24,29 @@ def pytorch_funcify_Reshape(op, node, **kwargs):
             return torch.reshape(x, tuple(shape))
 
         return reshape
+
+
+@pytorch_funcify.register(JoinDims)
+def pytorch_funcify_JoinDims(op, node, **kwargs):
+    start = op.start_axis
+    n = op.n_axes
+
+    def join_dims(x):
+        shape = x.shape
+        return torch.reshape(x, (*shape[:start], -1, *shape[start + n :]))
+
+    return join_dims
+
+
+@pytorch_funcify.register(SplitDims)
+def pytorch_funcify_SplitDims(op, node, **kwargs):
+    axis = op.axis
+
+    def split_dims(x, shape):
+        new_shape = (*x.shape[:axis], *tuple(shape), *x.shape[axis + 1 :])
+        return torch.reshape(x, new_shape)
+
+    return split_dims
 
 
 @pytorch_funcify.register(Shape)

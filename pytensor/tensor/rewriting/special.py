@@ -6,7 +6,6 @@ from pytensor.tensor.rewriting.basic import register_stabilize
 from pytensor.tensor.special import Softmax, log_softmax
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     Subtensor,
 )
 from pytensor.tensor.type import values_eq_approx_remove_inf
@@ -15,7 +14,6 @@ from pytensor.tensor.type import values_eq_approx_remove_inf
 subtensor_ops = (
     Subtensor,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
 )
 
 

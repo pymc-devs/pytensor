@@ -42,7 +42,7 @@ from pytensor.tensor.math import (
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
-from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
+from pytensor.tensor.subtensor import advanced_inc_subtensor, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
@@ -528,10 +528,10 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
     # since out[x] raises an exception if the indices (x) are int8.
     if weights is None:
         out = ptb.zeros([max_value], dtype=x.dtype)
-        out = advanced_inc_subtensor1(out, 1, x)
+        out = advanced_inc_subtensor(out, 1, x)
     else:
         out = ptb.zeros([max_value], dtype=weights.dtype)
-        out = advanced_inc_subtensor1(out, weights, x)
+        out = advanced_inc_subtensor(out, weights, x)
     return out
 
 
@@ -811,12 +811,11 @@ def repeat(
         # We only use the Repeat Op for vector repeats
         return Repeat(axis=axis)(a, repeats)
     else:
-        if a.dtype == "uint64":
-            # Multiplying int64 (shape) by uint64 (repeats) yields a float64
-            # Which is not valid for the `reshape` operation at the end
-            raise TypeError("repeat doesn't support dtype uint64")
+        if repeats.dtype == "uint64":
+            # numpy's np.repeat rejects a 0-d uint64 repeats array
+            raise TypeError("repeat doesn't support uint64 repeats")
 
-        # Scalar repeat, we implement this with canonical Ops broadcast + reshape
+        # Scalar repeat, we implement this with canonical Ops broadcast + join_dims
         a_shape = a.shape
 
         # Replicate a along a new axis (axis+1) repeats times
@@ -824,10 +823,10 @@ def repeat(
         broadcast_shape.insert(axis + 1, repeats)
         broadcast_a = broadcast_to(ptb.expand_dims(a, axis + 1), broadcast_shape)
 
-        # Reshape broadcast_a to the final shape, merging axis and axis+1
-        repeat_shape = list(a_shape)
-        repeat_shape[axis] = repeat_shape[axis] * repeats
-        return broadcast_a.reshape(repeat_shape)
+        # Merge axis and axis+1 (the replicated axis) into a single axis
+        from pytensor.tensor.reshape import join_dims
+
+        return join_dims(broadcast_a, start_axis=axis, n_axes=2)
 
 
 class Bartlett(Op):

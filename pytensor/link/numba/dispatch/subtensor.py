@@ -23,9 +23,7 @@ from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.tensor import TensorType, TensorVariable
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
     indices_from_subtensor,
@@ -133,7 +131,7 @@ def subtensor_op_cache_key(op, **extra_fields):
             else:
                 idx_parts.append("i")
         key_parts.append(tuple(idx_parts))
-    if isinstance(op, IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1):
+    if isinstance(op, IncSubtensor | AdvancedIncSubtensor):
         key_parts.append((op.inplace, op.set_instead_of_inc))
     if isinstance(op, AdvancedIncSubtensor):
         key_parts.append(op.ignore_duplicates)
@@ -142,7 +140,6 @@ def subtensor_op_cache_key(op, **extra_fields):
 
 @register_funcify_and_cache_key(Subtensor)
 @register_funcify_and_cache_key(IncSubtensor)
-@register_funcify_and_cache_key(AdvancedSubtensor1)
 def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
@@ -163,9 +160,7 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
         else:
             raise ValueError(f"Unknown index type: {entry}")
 
-    set_or_inc = isinstance(
-        op, IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor
-    )
+    set_or_inc = isinstance(op, IncSubtensor | AdvancedIncSubtensor)
     index_start_idx = 1 + int(set_or_inc)
     op_indices = list(node.inputs[index_start_idx:])
     idx_list = op.idx_list
@@ -294,13 +289,8 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     )
 
 
-@register_funcify_and_cache_key(AdvancedIncSubtensor1)
-def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
-    return vector_integer_advanced_indexing(op, node=node, **kwargs)
-
-
 def vector_integer_advanced_indexing(
-    op: AdvancedSubtensor1 | AdvancedSubtensor | AdvancedIncSubtensor, node, **kwargs
+    op: AdvancedSubtensor | AdvancedIncSubtensor, node, **kwargs
 ):
     """Implement all forms of advanced indexing (and assignment) that combine basic and vector integer indices.
 
@@ -452,7 +442,7 @@ def vector_integer_advanced_indexing(
 
     """
 
-    if isinstance(op, AdvancedSubtensor1 | AdvancedSubtensor):
+    if isinstance(op, AdvancedSubtensor):
         x, *index_variables = node.inputs
     else:
         x, y, *index_variables = node.inputs
@@ -536,7 +526,7 @@ def vector_integer_advanced_indexing(
         ":" for _ in range(len(adv_indices_pos))
     ) + (", " + ", ".join(basic_indices) if basic_indices else "")
 
-    if isinstance(op, AdvancedSubtensor1 | AdvancedSubtensor):
+    if isinstance(op, AdvancedSubtensor):
         # Define transpose axis on the output to restore original meaning
         # After (potentially) having transposed advanced indexing dims to the front unlike numpy
         _final_axis_order = list(range(adv_idx_ndim, out.type.ndim))

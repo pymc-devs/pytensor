@@ -862,6 +862,20 @@ def reshape(
                 "variable will be. You can provide the 'ndim' keyword "
                 "argument to 'reshape' to avoid this problem."
             )
+
+        # A full flatten, reshape(x, (-1,)), is a JoinDims of all axes: build it
+        # directly so it stays a view op with per-dim static shape rather than an
+        # opaque Reshape over a runtime shape vector.
+        if ndim == 1:
+            try:
+                only_dim = ptb.get_scalar_constant_value(newshape[0])
+            except NotScalarConstantError:
+                only_dim = None
+            if only_dim == -1:
+                from pytensor.tensor.reshape import join_dims
+
+                return join_dims(x)
+
     op = Reshape(ndim)
     rval = op(x, newshape)
     return typing_cast(TensorVariable, rval)
