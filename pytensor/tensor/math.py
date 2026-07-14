@@ -2548,9 +2548,10 @@ def imag(z):
 _tensor_py_operators.imag = property(imag, doc=imag.__doc__)
 
 
-@scalar_elemwise
 def angle(z):
     """Return polar-coordinate angle of complex-valued tensor `z`"""
+    z = as_tensor_variable(z)
+    return arctan2(imag(z), real(z))
 
 
 @scalar_elemwise  # numpy.complex cannot build tensors
@@ -2573,9 +2574,14 @@ def conjugate(x):
 conj = conjugate
 
 
-@scalar_elemwise
 def complex_from_polar(abs, angle):
     """Return complex-valued tensor from polar coordinate specification."""
+    warnings.warn(
+        "complex_from_polar is deprecated and will be removed in a future release. "
+        "Use `complex(abs * cos(angle), abs * sin(angle))` instead.",
+        FutureWarning,
+    )
+    return complex(abs * cos(angle), abs * sin(angle))
 
 
 def mean(input, axis=None, dtype=None, keepdims=False, acc_dtype=None):

@@ -3829,46 +3829,6 @@ class Imag(UnaryScalarOp):
 imag = Imag(real_out, name="imag")
 
 
-class Angle(UnaryScalarOp):
-    nfunc_spec = ("angle", 1, 1)
-
-    def impl(self, x):
-        return np.angle(x)
-
-    def pullback(self, inputs, outputs, gout):
-        # y = x.imag
-        # r = sqrt(y**2 + x.real**2)
-        # g = y/r
-        # if x == 0 and y == 0:
-        #     theta = 0
-        # elif x >= 0:
-        #     theta = numpy.arcsin(g)
-        # else:
-        #     theta = -numpy.arcsin(g)+numpy.pi
-
-        (c,) = inputs
-        (gtheta,) = gout
-        x = real(c)
-        y = imag(c)
-        r = _abs(c)
-
-        gr = -gtheta * y / (r**2 * sqrt(1 - (y / r) ** 2))
-        gx = gr * x / r
-        gy = gr * y / r
-        if c in complex_types:
-            return [cast(complex(gx, gy), x.type.dtype)]
-        elif c in float_types:
-            return [cast(second(x, 0), x.type.dtype)]
-        else:
-            return [c.zeros_like(dtype=config.floatX)]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-angle = Angle(specific_out(float64), name="angle")
-
-
 class Complex(BinaryScalarOp):
     @staticmethod
     def output_types_preference(x, y):
@@ -3915,35 +3875,6 @@ class Conj(UnaryScalarOp):
 
 
 conj = Conj(same_out_min8, name="conj")
-
-
-class ComplexFromPolar(BinaryScalarOp):
-    @staticmethod
-    def output_types_preference(x, y):
-        return Complex.output_types_preference(x, y)
-
-    def impl(self, r, theta):
-        if r < 0:
-            raise ValueError("polar radius must be non-negative", r)
-        x = r * np.cos(theta)
-        y = r * np.sin(theta)
-        if x.dtype == "float32":
-            return np.complex64(builtins.complex(x, y))
-        else:
-            return np.complex128(builtins.complex(x, y))
-
-    def pullback(self, inputs, outputs, gout):
-        (r, theta) = inputs
-        (gz,) = gout
-        gr = gz * complex_from_polar(1, theta)
-        gtheta = gz * complex_from_polar(r, -theta)
-        return [gr, gtheta]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-complex_from_polar = ComplexFromPolar(name="complex_from_polar")
 
 
 class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
