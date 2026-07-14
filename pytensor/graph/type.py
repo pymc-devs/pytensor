@@ -33,6 +33,15 @@ class Type(MetaObject, Generic[D]):  # noqa: UP046
     The `Type` that will be created by a call to `Type.make_constant`.
     """
 
+    is_backend_divergent: bool = False
+    """
+    Whether this `Type`'s concrete value has a backend-specific representation
+    (e.g. a random generator or sparse matrix that some backends store
+    differently from the host). Shared variables of such a type are tracked for
+    cross-backend value reconciliation. This is intrinsic to the type and does
+    not depend on which backend dispatch modules have been imported.
+    """
+
     def in_same_class(self, otype: "Type") -> bool | None:
         """Determine if another `Type` represents a subset from the same "class" of types represented by `self`.
 

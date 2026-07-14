@@ -26,13 +26,6 @@ jax = pytest.importorskip("jax")
 from pytensor.link.jax.dispatch.random import numpyro_available
 
 
-def compile_random_function(*args, mode=jax_mode, **kwargs):
-    with pytest.warns(
-        UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
-    ):
-        return function(*args, mode=mode, **kwargs)
-
-
 def test_random_RandomStream():
     """Two successive calls of a compiled graph using `RandomStream` should
     return different values.
@@ -41,7 +34,7 @@ def test_random_RandomStream():
     srng = RandomStream(seed=123)
     out = srng.normal() - srng.normal()
 
-    fn = compile_random_function([], out)
+    fn = function([], out, mode=jax_mode)
     jax_res_1 = fn()
     jax_res_2 = fn()
 
@@ -54,10 +47,9 @@ def test_random_updates(rng_ctor):
     rng = shared(original_value, name="original_rng", borrow=False)
     next_rng, x = pt.random.normal(name="x", rng=rng).owner.outputs
 
-    f = compile_random_function([], [x], updates={rng: next_rng})
-    assert f() != f()
+    f = function([], [x], updates={rng: next_rng}, mode=jax_mode)
 
-    # Check that original rng variable content was not overwritten when calling jax_typify
+    # Materializing the JAX view must not corrupt the host Generator
     assert all(
         a == b if not isinstance(a, np.ndarray) else np.array_equal(a, b)
         for a, b in zip(
@@ -66,6 +58,50 @@ def test_random_updates(rng_ctor):
             strict=True,
         )
     )
+
+    assert f() != f()
+
+
+def test_rng_shared_across_backends():
+    """A JAX and a host function sharing one RNG advance a single stream: a call
+    on either backend is seen by the next call on the other."""
+    rng = shared(np.random.default_rng(0), borrow=False)
+    next_rng, x = rng.normal()
+    jax_fn = function([], x, updates={rng: next_rng}, mode=jax_mode)
+    host_fn = function([], x, updates={rng: next_rng})  # C backend
+
+    # A JAX call advances the shared stream, so the next host draw differs from
+    # the host draw taken straight from the same seed.
+    rng.set_value(np.random.default_rng(0))
+    host_only = host_fn()
+    rng.set_value(np.random.default_rng(0))
+    jax_fn()
+    assert host_fn() != host_only
+
+    # And symmetrically, a host call is seen by the next JAX draw.
+    rng.set_value(np.random.default_rng(0))
+    jax_only = jax_fn()
+    rng.set_value(np.random.default_rng(0))
+    host_fn()
+    assert jax_fn() != jax_only
+
+
+def test_rng_readback_false():
+    """readback=False advances the RNG privately: host get_value is unaffected by
+    the function's updates, but the function still observes user set_value."""
+    rng = shared(np.random.default_rng(0), borrow=False)
+    next_rng, x = rng.normal()
+    fn = function([], x, updates={rng: next_rng}, mode=jax_mode, readback=False)
+
+    first = fn()
+    assert fn() != first  # advances across calls
+
+    host_state = rng.get_value().bit_generator.state
+    fn()
+    assert rng.get_value().bit_generator.state == host_state  # host untouched
+
+    rng.set_value(np.random.default_rng(0))
+    assert fn() == first  # user set_value is observed
 
 
 @pytest.mark.parametrize("noise_first", (False, True))
@@ -86,7 +122,7 @@ def test_replaced_shared_rng_storage_order(noise_first):
         mu: pt.grad(out, mu),
         rng: next_rng,
     }
-    f = compile_random_function([], [out], updates=updates, mode="JAX")
+    f = function([], [out], updates=updates, mode="JAX")
 
     # The bug was found when noise used to be the first input of the fgraph
     # If this changes, the test may need to be tweaked to keep the save coverage
@@ -126,7 +162,7 @@ def test_replaced_shared_rng_storage_ordering_equality():
     # This function replaces inp by input_shared in the update expression
     # This is what caused the RNG to appear later than inp_shared in the input_storage
 
-    fn = compile_random_function(
+    fn = function(
         inputs=[],
         outputs=[],
         updates={inp_shared: inp_update},
@@ -482,7 +518,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
     )
     rng = shared(np.random.default_rng(29403))
     g = rv_op(*dist_params, size=(10000, *base_size), rng=rng)
-    g_fn = compile_random_function(dist_params, g)
+    g_fn = function(dist_params, g, mode=jax_mode)
     samples = g_fn(*test_values)
 
     bcast_dist_args = np.broadcast_arrays(*test_values)
@@ -528,7 +564,7 @@ def test_size_implied_by_broadcasted_parameters(rv_fn):
 def test_random_bernoulli(size):
     rng = shared(np.random.default_rng(123))
     g = pt.random.bernoulli(0.5, size=(1000, *size), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)
 
@@ -539,7 +575,7 @@ def test_random_mvnormal():
     mu = np.ones(4)
     cov = np.eye(4)
     g = pt.random.multivariate_normal(mu, cov, size=(10000,), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), mu, atol=0.1)
 
@@ -559,7 +595,7 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
 def test_random_dirichlet(parameter, size):
     rng = shared(np.random.default_rng(123))
     g = pt.random.dirichlet(parameter, size=(1000, *size), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)
 
@@ -568,7 +604,7 @@ def test_random_choice():
     # `replace=True` and `p is None`
     rng = shared(np.random.default_rng(123))
     g = pt.random.choice(np.arange(4), size=10_000, rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     assert samples.shape == (10_000,)
     # Elements are picked at equal frequency
@@ -577,7 +613,7 @@ def test_random_choice():
     # `replace=True` and `p is not None`
     rng = shared(np.random.default_rng(123))
     g = pt.random.choice(4, p=np.array([0.0, 0.5, 0.0, 0.5]), size=(5, 2), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     assert samples.shape == (5, 2)
     # Only odd numbers are picked
@@ -586,7 +622,7 @@ def test_random_choice():
     # `replace=False` and `p is None`
     rng = shared(np.random.default_rng(123))
     g = pt.random.choice(np.arange(100), replace=False, size=(2, 49), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     assert samples.shape == (2, 49)
     # Elements are unique
@@ -601,7 +637,7 @@ def test_random_choice():
         rng=rng,
         replace=False,
     )
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     assert samples.shape == (3,)
     # Elements are unique
@@ -613,14 +649,14 @@ def test_random_choice():
 def test_random_categorical():
     rng = shared(np.random.default_rng(123))
     g = pt.random.categorical(0.25 * np.ones(4), size=(10000, 4), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     assert samples.shape == (10000, 4)
     np.testing.assert_allclose(samples.mean(axis=0), 6 / 4, 1)
 
     # Test zero probabilities
     g = pt.random.categorical([0, 0.5, 0, 0.5], size=(1000,), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     assert samples.shape == (1000,)
     assert np.all(samples % 2 == 1)
@@ -630,7 +666,7 @@ def test_random_permutation():
     array = np.arange(4)
     rng = shared(np.random.default_rng(123))
     g = pt.random.permutation(array, rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     permuted = g_fn()
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(array, permuted)
@@ -653,7 +689,7 @@ def test_random_geometric():
     rng = shared(np.random.default_rng(123))
     p = np.array([0.3, 0.7])
     g = pt.random.geometric(p, size=(10_000, 2), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 1 / p, rtol=0.1)
     np.testing.assert_allclose(samples.std(axis=0), np.sqrt((1 - p) / p**2), rtol=0.1)
@@ -664,7 +700,7 @@ def test_negative_binomial():
     n = np.array([10, 40])
     p = np.array([0.3, 0.7])
     g = pt.random.negative_binomial(n, p, size=(10_000, 2), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n * (1 - p) / p, rtol=0.1)
     np.testing.assert_allclose(
@@ -678,7 +714,7 @@ def test_binomial():
     n = np.array([10, 40])
     p = np.array([0.3, 0.7])
     g = pt.random.binomial(n, p, size=(10_000, 2), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n * p, rtol=0.1)
     np.testing.assert_allclose(samples.std(axis=0), np.sqrt(n * p * (1 - p)), rtol=0.1)
@@ -693,7 +729,7 @@ def test_beta_binomial():
     a = np.array([1.5, 13])
     b = np.array([0.5, 9])
     g = pt.random.betabinom(n, a, b, size=(10_000, 2), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n * a / (a + b), rtol=0.1)
     np.testing.assert_allclose(
@@ -712,7 +748,7 @@ def test_multinomial():
     size = (10_000, 2)
 
     g = pt.random.multinomial(n, p, size=size, rng=rng)
-    g_fn = compile_random_function([], g, mode="JAX")
+    g_fn = function([], g, mode="JAX")
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n[..., None] * p, rtol=0.1)
     np.testing.assert_allclose(
@@ -726,7 +762,7 @@ def test_multinomial():
     pt_p = pt.matrix("p")
 
     g = pt.random.multinomial(pt_n, pt_p, rng=rng, size=None)
-    g_fn = compile_random_function([pt_n, pt_p], g, mode="JAX")
+    g_fn = function([pt_n, pt_p], g, mode="JAX")
     samples = g_fn(n, p)
     np.testing.assert_allclose(samples.mean(axis=0), n[0, :, None] * p, rtol=0.1)
     np.testing.assert_allclose(
@@ -735,13 +771,13 @@ def test_multinomial():
 
     # Test with p=0
     g = pt.random.multinomial(n=5, p=pt.eye(4))
-    g_fn = compile_random_function([], g, mode="JAX")
+    g_fn = function([], g, mode="JAX")
     samples = g_fn()
     np.testing.assert_array_equal(samples, np.eye(4) * 5)
 
     # Test with n=0
     g = pt.random.multinomial(n=0, p=np.ones(4) / 4)
-    g_fn = compile_random_function([], g, mode="JAX")
+    g_fn = function([], g, mode="JAX")
     samples = g_fn()
     np.testing.assert_array_equal(samples, np.zeros(4))
 
@@ -754,7 +790,7 @@ def test_vonmises_mu_outside_circle():
     mu = np.array([-30, 40])
     kappa = np.array([100, 10])
     g = pt.random.vonmises(mu, kappa, size=(10_000, 2), rng=rng)
-    g_fn = compile_random_function([], g)
+    g_fn = function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(
         samples.mean(axis=0), (mu + np.pi) % (2.0 * np.pi) - np.pi, rtol=0.1
@@ -798,10 +834,7 @@ def test_random_unimplemented():
     out = nonexistentrv(rng=rng)
 
     with pytest.raises(NotImplementedError):
-        with pytest.warns(
-            UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
-        ):
-            compare_jax_and_py([], [out], [])
+        compare_jax_and_py([], [out], [])
 
 
 def test_random_custom_implementation():
@@ -830,10 +863,7 @@ def test_random_custom_implementation():
     nonexistentrv = CustomRV()
     rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
-    with pytest.warns(
-        UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
-    ):
-        compare_jax_and_py([], [out], [])
+    compare_jax_and_py([], [out], [])
 
 
 class TestRandomShapeInputs:
@@ -851,14 +881,14 @@ class TestRandomShapeInputs:
         rng = shared(np.random.default_rng(123))
         x_pt = pt.dmatrix()
         out = pt.random.normal(0, 1, size=x_pt.shape, rng=rng)
-        jax_fn = compile_random_function([x_pt], out)
+        jax_fn = function([x_pt], out, mode=jax_mode)
         assert jax_fn(np.ones((2, 3))).shape == (2, 3)
 
     def test_random_concrete_shape_from_param(self):
         rng = shared(np.random.default_rng(123))
         x_pt = pt.dmatrix()
         out = pt.random.normal(x_pt, 1, rng=rng)
-        jax_fn = compile_random_function([x_pt], out)
+        jax_fn = function([x_pt], out, mode=jax_mode)
         assert jax_fn(np.ones((2, 3))).shape == (2, 3)
 
     def test_random_concrete_shape_subtensor(self):
@@ -876,7 +906,7 @@ class TestRandomShapeInputs:
         rng = shared(np.random.default_rng(123))
         x_pt = pt.dmatrix()
         out = pt.random.normal(0, 1, size=x_pt.shape[1], rng=rng)
-        jax_fn = compile_random_function([x_pt], out)
+        jax_fn = function([x_pt], out, mode=jax_mode)
         assert jax_fn(np.ones((2, 3))).shape == (3,)
 
     def test_random_concrete_shape_subtensor_tuple(self):
@@ -891,7 +921,7 @@ class TestRandomShapeInputs:
         rng = shared(np.random.default_rng(123))
         x_pt = pt.dmatrix()
         out = pt.random.normal(0, 1, size=(x_pt.shape[0],), rng=rng)
-        jax_fn = compile_random_function([x_pt], out)
+        jax_fn = function([x_pt], out, mode=jax_mode)
         assert jax_fn(np.ones((2, 3))).shape == (2,)
 
     def test_random_scalar_shape_input(self):
@@ -899,12 +929,12 @@ class TestRandomShapeInputs:
         dim1 = pt.scalar("dim1", dtype=int)
 
         out = pt.random.normal(0, 1, size=dim0)
-        jax_fn = compile_random_function([dim0], out)
+        jax_fn = function([dim0], out, mode=jax_mode)
         assert jax_fn(np.array(2)).shape == (2,)
         assert jax_fn(np.array(3)).shape == (3,)
 
         out = pt.random.normal(0, 1, size=[dim0, dim1])
-        jax_fn = compile_random_function([dim0, dim1], out)
+        jax_fn = function([dim0, dim1], out, mode=jax_mode)
         assert jax_fn(np.array(2), np.array(3)).shape == (2, 3)
         assert jax_fn(np.array(4), np.array(5)).shape == (4, 5)
 
@@ -916,7 +946,7 @@ class TestRandomShapeInputs:
         out1 = pt.random.normal(0, 1, size=dim)
         # An operation that wouldn't work if we replaced 0d array by integer
         out2 = dim[...].set(1)
-        jax_fn = compile_random_function([dim], [out1, out2])
+        jax_fn = function([dim], [out1, out2], mode=jax_mode)
 
         res1, res2 = jax_fn(np.array(2))
         assert res1.shape == (2,)
@@ -930,7 +960,7 @@ class TestRandomShapeInputs:
         # This could theoretically be supported
         # but would require knowing that * 2 is a safe operation for a python integer
         out = pt.random.normal(0, 1, size=dim * 2)
-        jax_fn = compile_random_function([dim], out)
+        jax_fn = function([dim], out, mode=jax_mode)
         assert jax_fn(np.array(2)).shape == (4,)
 
     @pytest.mark.xfail(
@@ -940,7 +970,7 @@ class TestRandomShapeInputs:
         shape = pt.vector("shape", shape=(2,), dtype=int)
         out = pt.random.normal(0, 1, size=shape)
 
-        jax_fn = compile_random_function([shape], out)
+        jax_fn = function([shape], out, mode=jax_mode)
         assert jax_fn(np.array([2, 3])).shape == (2, 3)
         assert jax_fn(np.array([4, 5])).shape == (4, 5)
 
@@ -950,16 +980,16 @@ class TestRandomShapeInputs:
         assert x.type.shape == (None, None)
 
         with pytest.raises(TypeError):
-            compile_random_function([size], x)([2, 5])
+            function([size], x, mode=jax_mode)([2, 5])
 
         # Rebuild with strict=True so output type is not updated
         # This reflects cases where size is constant folded during rewrites but the RV node is not recreated
         new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=True)
         assert new_x.type.shape == (None, None)
-        assert compile_random_function([], new_x)().shape == (2, 5)
+        assert function([], new_x, mode=jax_mode)().shape == (2, 5)
 
         # Rebuild with strict=False, so output type is updated
         # This uses a different path in the dispatch implementation
         new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=False)
         assert new_x.type.shape == (2, 5)
-        assert compile_random_function([], new_x)().shape == (2, 5)
+        assert function([], new_x, mode=jax_mode)().shape == (2, 5)

@@ -1216,6 +1216,7 @@ class VMLinker(LocalLinker):
         input_storage, output_storage, storage_map = map_storage(
             fgraph, order, input_storage, output_storage, storage_map
         )
+        self._bind_shared_backend_storage(input_storage, storage_map)
         compute_map = {}
         for k in storage_map:
             compute_map[k] = [k.owner is None]

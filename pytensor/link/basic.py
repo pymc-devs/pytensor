@@ -7,6 +7,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
+from pytensor.link.backend_conversion import HOST, backend_handles
 from pytensor.link.utils import gc_helper, map_storage, raise_with_op, streamline
 from pytensor.utils import difference
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from pytensor.compile.debug.profiling import ProfileStats
+    from pytensor.compile.sharedvalue import _BackendState
     from pytensor.graph.op import (
         BasicThunkType,
         InputStorageType,
@@ -79,6 +81,9 @@ class Container:
         self.readonly = readonly
         self.strict = strict
         self.allow_downcast = allow_downcast
+        # Lazily holds backend-native views of a shared value (see backend_conversion).
+        # Stays None for the vast majority of Containers, which need no conversion.
+        self._backend_state: _BackendState | None = None
 
     def __get__(self) -> Any:
         return self.storage[0]
@@ -113,6 +118,10 @@ class Container:
         return "<" + repr(self.storage[0]) + ">"
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Container":
+        # If a backend advanced the value more recently than the host, bring the
+        # host copy up to date first so the deep copy doesn't capture a stale value.
+        if self._backend_state is not None:
+            self._backend_state.reconcile_host(self.storage)
         data_was_in_memo = id(self.storage[0]) in memo
         r = type(self)(
             deepcopy(self.type, memo=memo),
@@ -153,6 +162,10 @@ class Linker(ABC):
 
     required_rewrites: tuple[str, ...] = ("minimum_compile",)
     incompatible_rewrites: tuple[str, ...] = ()
+    # Identifies the backend representation this linker consumes. Backends whose
+    # native format matches the host (C, numba, python) keep HOST; those that
+    # diverge (JAX) override it and register a BackendConversion under this tag.
+    backend_tag: str = HOST
 
     def __init__(
         self,
@@ -180,6 +193,38 @@ class Linker(ABC):
         if allow_gc is not None:
             new._allow_gc = allow_gc
         return new
+
+    def _bind_shared_backend_storage(self, input_storage, storage_map):
+        """Point divergent shared inputs at their backend-native view storage.
+
+        A shared variable whose Type this backend can't consume in host format
+        has the thunks' storage (in both ``storage_map`` and ``input_storage``)
+        repointed at a per-backend view materialized on its Container. The graph
+        keeps the original variable, so ``set_value``/``swap`` continue to target
+        storage the thunks read. A no-op for host backends, so any linker can call
+        it after ``map_storage``.
+        """
+        # Local import to avoid a circular import: sharedvalue imports this module.
+        from pytensor.compile.sharedvalue import SharedVariable
+
+        tag = self.backend_tag
+        if tag == HOST:
+            return
+        for inp in self.fgraph.inputs:
+            if not isinstance(inp, SharedVariable) or not backend_handles(
+                tag, inp.type
+            ):
+                continue
+            old = storage_map[inp]
+            view = inp._view_storage(tag)
+            if old is view:
+                continue
+            storage_map[inp] = view
+            for idx, cell in enumerate(input_storage):
+                # Identity, because input_storage may contain numpy arrays (issue #314)
+                if cell is old:
+                    input_storage[idx] = view
+                    break
 
     @abstractmethod
     def make_thunk(
@@ -329,6 +374,7 @@ class PerformLinker(LocalLinker):
         input_storage, output_storage, storage_map = map_storage(
             fgraph, order, input_storage, output_storage, storage_map
         )
+        self._bind_shared_backend_storage(input_storage, storage_map)
 
         compute_map = {}
         for k in storage_map:
@@ -712,6 +758,7 @@ class JITLinker(PerformLinker):
         input_storage, output_storage, storage_map = map_storage(
             fgraph, nodes, input_storage, output_storage, storage_map
         )
+        self._bind_shared_backend_storage(input_storage, storage_map)
 
         compute_map = {}
         for k in storage_map:

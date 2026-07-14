@@ -251,9 +251,12 @@ Inplace optimization
 
 As mentioned, RandomVariable Ops default to making a copy of the input RNG before using it, which can be quite slow.
 
+We compile with the Python linker here so the dprint shows the plain RandomVariable form. Some backends specialize it (e.g. Numba wraps it in a ``RandomVariableWithCoreShape``, see the Numba section below).
+
+>>> py_mode = pytensor.Mode(linker="py", optimizer="fast_run")
 >>> rng = pt.random.shared_rng(np.random.default_rng(123), name="rng")
 >>> next_rng, x = pt.random.uniform(rng=rng, return_next_rng=True)
->>> f = pytensor.function([], x)
+>>> f = pytensor.function([], x, mode=py_mode)
 >>> _ = pytensor.dprint(f, print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] 0
  ├─ rng [id B]
@@ -291,7 +294,7 @@ Users should never do this directly!
 >>> x.owner.op.inplace
 True
 
->>> inplace_f = pytensor.function([], x, accept_inplace=True)
+>>> inplace_f = pytensor.function([], x, accept_inplace=True, mode=py_mode)
 >>> _ = pytensor.dprint(inplace_f, print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  ├─ rng [id B]
@@ -319,7 +322,7 @@ The first case is true when a user uses the `mutable` `kwarg` directly.
 >>> rng = pt.random.rng("rng")
 >>> next_rng, x = rng.uniform()
 >>> with pytensor.config.change_flags(optimizer_verbose=True): # doctest: +ELLIPSIS
-...     inplace_f = pytensor.function([In(rng, mutable=True)], [x])
+...     inplace_f = pytensor.function([In(rng, mutable=True)], [x], mode=py_mode)
 rewriting: rewrite random_make_inplace replaces ...
 >>> _ = inplace_f.dprint(print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
@@ -334,7 +337,7 @@ In this case, a RandomVariable is allowed to modify the RNG because the shared v
 >>> rng = pt.random.shared_rng(np.random.default_rng(123), name="rng")
 >>> next_rng, x = rng.uniform()
 >>>
->>> inplace_f = pytensor.function([], [x], updates={rng: next_rng})
+>>> inplace_f = pytensor.function([], [x], updates={rng: next_rng}, mode=py_mode)
 >>> _ = inplace_f.dprint(print_destroy_map=True)
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  ├─ rng [id B]
@@ -529,8 +532,8 @@ NumPy random generators can be natively used with the Numba backend.
  ├─ [] [id B] <Vector(int64, shape=(0,))>
  ├─ randomstate_rng [id C] <RandomGeneratorType>
  ├─ NoneConst{None} [id D] <NoneTypeT>
- ├─ 0.0 [id E] <Scalar(float32, shape=())>
- └─ 1.0 [id F] <Scalar(float32, shape=())>
+ ├─ 0.0 [id E] <Scalar(float64, shape=())>
+ └─ 1.0 [id F] <Scalar(float64, shape=())>
 [normal_rv{"(),()->()"}].0 [id A] <RandomGeneratorType> 0
  └─ ···
 <BLANKLINE>
@@ -538,10 +541,10 @@ Inner graphs:
 <BLANKLINE>
 [normal_rv{"(),()->()"}] [id A]
  ← normal_rv{"(),()->()"}.0 [id G] <RandomGeneratorType>
-    ├─ *1-<RandomGeneratorType> [id H] <RandomGeneratorType>
-    ├─ *2-<NoneTypeT> [id I] <NoneTypeT>
-    ├─ *3-<Scalar(float32, shape=())> [id J] <Scalar(float32, shape=())>
-    └─ *4-<Scalar(float32, shape=())> [id K] <Scalar(float32, shape=())>
+    ├─ i1 [id H] <RandomGeneratorType>
+    ├─ i2 [id I] <NoneTypeT>
+    ├─ i3 [id J] <Scalar(float64, shape=())>
+    └─ i4 [id K] <Scalar(float64, shape=())>
  ← normal_rv{"(),()->()"}.1 [id G] <Scalar(float64, shape=())>
     └─ ···
 
@@ -553,22 +556,22 @@ Numba converts regular RandomVariable to RandomVariableWithCoreShape Ops, subtly
 >>> type(numba_fn.maker.fgraph.outputs[0].owner.op)
 <class 'pytensor.tensor.random.op.RandomVariableWithCoreShape'>
 
-JAX (and MLX)
--------------
+JAX
+---
 
-JAX (and MLX) use a different type of PRNG than those of NumPy. This means that the standard shared RNGs cannot be used directly in graphs transpiled to those backends.
+JAX uses a different type of PRNG than those of NumPy: a NumPy ``Generator`` holds a PCG64 bit generator state, while JAX advances a threefry key.
+Because a single PyTensor graph can be transpiled to multiple backends, the shared RNG cannot store one representation that all backends use natively.
 
-Instead a copy of the Shared RNG variable is made, and its bit generator state is expanded with a jax_state/mlx_state entry. This is what's actually used by the random variables in those backends.
+Instead, PyTensor keeps a per-backend *view* of the shared RNG's state (the JAX view expands the bit generator state with a ``jax_state`` entry).
+The shared variable is used directly in the graph, and reads and writes are reconciled so that ``get_value`` always observes the latest advancement and ``set_value`` and ``updates`` always take effect, regardless of which backend last touched the RNG.
+Reconciliation keeps the bookkeeping consistent, but crossing backends still reseeds the stream (see the warning below).
 
-In general, update rules are still respected, but they won't update/rely on the original shared variable.
-
->>> import jax
 >>> rng = pt.random.shared_rng(np.random.default_rng(123), name="rng")
 >>> next_rng, x = rng.uniform()
 >>> jax_fn = pytensor.function([], [x], updates={rng: next_rng}, mode="JAX")
 >>> _ = pytensor.dprint(jax_fn, print_type=True) # doctest: +ELLIPSIS
 uniform_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
- ├─ RNG(<Generator(PCG64) at 0x...>) [id B] <RandomGeneratorType>
+ ├─ rng [id B] <RandomGeneratorType>
  ├─ NoneConst{None} [id C] <NoneTypeT>
  ├─ 0.0 [id D] <Scalar(float32, shape=())>
  └─ 1.0 [id E] <Scalar(float32, shape=())>
@@ -576,28 +579,40 @@ uniform_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 0
  └─ ···
 
 >>> print(jax_fn(), jax_fn())
-[Array(0.89545652, dtype=float64)] [Array(0.38045988, dtype=float64)]
+[Array(0.91459085, dtype=float64)] [Array(0.01298661, dtype=float64)]
 
->>> rng.set_value(np.random.default_rng(123))  # No effect on the jax evaluation
+``set_value`` propagates to the JAX evaluation, so reseeding the shared RNG resets the stream:
+
+>>> rng.set_value(np.random.default_rng(123))
 >>> print(jax_fn(), jax_fn())
-[Array(0.98049127, dtype=float64)] [Array(0.39260106, dtype=float64)]
+[Array(0.91459085, dtype=float64)] [Array(0.01298661, dtype=float64)]
 
->>> [jax_rng] = jax_fn.input_storage[0].storage
->>> jax_rng  # doctest: +NORMALIZE_WHITESPACE
-{'bit_generator': Array(1, dtype=int64, weak_type=True),
- 'has_uint32': Array(0, dtype=int64, weak_type=True),
- 'jax_state': Array([4091271363, 1319784711], dtype=uint32),
- 'state': {'inc': Array(651939783, dtype=uint32),
-  'state': Array(1542324465, dtype=uint32)},
- 'uinteger': Array(0, dtype=int64, weak_type=True)}
+.. warning::
 
->>> [jax_rng] = jax_fn.input_storage[0].storage
->>> jax_rng["jax_state"] = jax.random.PRNGKey(0)
+    Because the algorithms differ, once one backend has drawn from the RNG, another backend cannot continue producing that same sequence of numbers.
+    It can only reseed its own generator from the current state, which is deterministic but starts a new, unrelated stream.
+    This reseed loses the stream in either direction, so crossing backends emits a ``UserWarning``. Within a single backend nothing is converted and the RNG advances at zero cost.
+
+If a function's backend-specific updates are private (it only needs to observe host ``set_value`` and never has to feed its advanced state back to other backends or ``get_value``), pass ``readback=False`` to :func:`pytensor.function`.
+This drops all per-call cross-backend bookkeeping from the compiled function.
+
+>>> rng = pt.random.shared_rng(np.random.default_rng(123), name="rng")
+>>> next_rng, x = rng.uniform()
+>>> jax_fn = pytensor.function([], [x], updates={rng: next_rng}, mode="JAX", readback=False)
 >>> print(jax_fn(), jax_fn())
-[Array(0.08062437, dtype=float64)] [Array(0.67119299, dtype=float64)]
+[Array(0.91459085, dtype=float64)] [Array(0.01298661, dtype=float64)]
 
-PyTensor could provide shared JAX-like RNGs and allow RandomVariables to accept them,
-but that would break the spirit of one graph `->` multiple backends.
+``set_value`` is still observed, so reseeding with the same seed deterministically reproduces the original draws:
 
-Alternatively, PyTensor could try to use a more general type for RNGs that can be used across different backends,
-either directly or after some conversion operation (if such operations can be implemented in the different backends).
+>>> rng.set_value(np.random.default_rng(123))
+>>> print(jax_fn(), jax_fn())
+[Array(0.91459085, dtype=float64)] [Array(0.01298661, dtype=float64)]
+
+But ``get_value`` no longer observes the function's *own* updates. The JAX view advances privately and is never read back, so the host stays exactly at whatever was last set. Even after a call that advanced the JAX view, ``get_value`` still matches a freshly seeded seed-123 generator:
+
+>>> rng.set_value(np.random.default_rng(123))
+>>> _ = jax_fn()   # advances the private JAX view
+>>> rng.get_value().uniform() == np.random.default_rng(123).uniform()
+True
+
+With the default ``readback=True`` the same check would be ``False``, because the function's update is read back into the shared variable.
