@@ -48,8 +48,10 @@ def bitwise_and(): ...
 and_ = logical_and
 
 
-@_as_xelemwise(ps.angle)
-def angle(): ...
+def angle(x):
+    """Return polar-coordinate angle of complex-valued xtensor `x`"""
+    x = as_xtensor(x)
+    return arctan2(imag(x), real(x))
 
 
 @_as_xelemwise(ps.arccos)
