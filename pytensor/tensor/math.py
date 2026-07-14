@@ -2417,14 +2417,14 @@ def gammaincc(k, x):
     """Regularized upper gamma function"""
 
 
-@scalar_elemwise
 def gammau(k, x):
     """Upper incomplete gamma function."""
+    return gammaincc(k, x) * gamma(k)
 
 
-@scalar_elemwise
 def gammal(k, x):
     """Lower incomplete gamma function."""
+    return gammainc(k, x) * gamma(k)
 
 
 @scalar_elemwise

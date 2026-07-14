@@ -198,22 +198,6 @@ Source: W.H. Press, S.A. Teukolsky, W.T. Vetterling, and B.P. Flannery
 The factor exp(n *log(x) -x) is added in the functions below.
 ----------------------------------------------------------------------*/
 
-DEVICE double lowerGamma (double n, double x)
-{                               /* --- lower incomplete Gamma fn. */
-  if ((n <= 0) || (x <= 0)) return NPY_NAN;  /* check the function arguments */
-  return _series(n, x) *exp(n *log(x) -x);
-}  /* lowerGamma() */
-
-/*--------------------------------------------------------------------*/
-
-DEVICE double upperGamma (double n, double x)
-{                               /* --- upper incomplete Gamma fn. */
-  if ((n <= 0) || (x <= 0)) return NPY_NAN;  /* check the function arguments */
-  return _cfrac(n, x) *exp(n *log(x) -x);
-}  /* upperGamma() */
-
-/*--------------------------------------------------------------------*/
-
 DEVICE double GammaP (double n, double x)
 {                               /* --- regularized Gamma function P */
   if ((n <= 0) || (x < 0)) return NPY_NAN;  /* check the function arguments */
