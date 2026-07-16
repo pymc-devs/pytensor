@@ -49,6 +49,7 @@ from pytensor.tensor.math import (
     All,
     Any,
     Dot,
+    LogErfc,
     Max,
     Min,
     Prod,
@@ -3163,50 +3164,28 @@ register_stabilize(local_erf_neg_minus_one)
 register_specialize(local_erf_neg_minus_one)
 
 
-@register_stabilize
-@register_specialize
-@node_rewriter([log])
-def local_log_erfc(fgraph, node):
-    """Stability rewrite for ``log(erfc(x))``.
+# log(erfc(x)) => LogErfc(x), which stays finite where erfc(x) underflows to 0.
+local_log_erfc = PatternNodeRewriter(
+    (log, (erfc, "x")),
+    (LogErfc(), "x"),
+    name="local_log_erfc",
+    values_eq_approx=values_eq_approx_remove_inf,
+)
+register_stabilize(local_log_erfc, "symbolic_op_recognition")
+register_specialize(local_log_erfc, "symbolic_op_recognition")
 
-    Notes
-    -----
-        log(erfc(x)) => when x>threshold,
-                    -x**2-log(x)-.5*log(pi)+log(1-1/(2*x**2)+3/(4*x**4)-15/(8*x**6))
-        for float64: threshold=26.641747557 was chosen with:
-        [(i,numpy.log(scipy.special.erfc(numpy.asarray([i],dtype='float64'))))
-        for i in numpy.arange(26.641747557,26.6417475571,.00000000001)]
-        for float32: threshold=10.0541949, [(i,numpy.log(scipy.special.erfc(
-            numpy.asarray([i],dtype='float32')))) for i in numpy.arange(
-            10.0541948,10.0541951,.0000001)]
-    """
-
-    if not (node.inputs[0].owner and node.inputs[0].owner.op == erfc):
-        return False
-
-    if hasattr(node.tag, "local_log_erfc_applied"):
-        # We use that flag to don't apply the rewrite recursively
-        # TODO FIXME: We shouldn't need to use tags for this.
-        return False
-
-    node.tag.local_log_erfc_applied = True
-
-    x = node.inputs[0].owner.inputs[0]
-    stab_value = (
-        -(x**2)
-        - log(x)
-        - 0.5 * log(np.pi)
-        + log(1 - 1 / (2 * x**2) + 3 / (4 * x**4) - 15 / (8 * x**6))
-    )
-
-    if node.outputs[0].dtype == "float32" or node.outputs[0].dtype == "float16":
-        threshold = 10.0541949
-    elif node.outputs[0].dtype == "float64":
-        threshold = 26.641747557
-
-    ret = switch(x < threshold, node.outputs[0], stab_value)
-    ret.tag.values_eq_approx = values_eq_approx_remove_inf
-    return [ret]
+# log(y * erfc(x)) => log(y) + LogErfc(x). erfc is strictly positive, so only y > 0 is
+# meaningful, and there the identity holds for any y, constant or not. A y <= 0
+# propagates nan/-inf through log(y) instead. This is the form a log of a scaled erfc
+# arrives in, e.g. ndtr(x) == 0.5 * erfc(-x / sqrt(2)).
+local_log_mul_erfc = PatternNodeRewriter(
+    (log, (mul, "y", (erfc, "x"))),
+    (add, (log, "y"), (LogErfc(), "x")),
+    name="local_log_mul_erfc",
+    values_eq_approx=values_eq_approx_remove_inf,
+)
+register_stabilize(local_log_mul_erfc, "symbolic_op_recognition")
+register_specialize(local_log_mul_erfc, "symbolic_op_recognition")
 
 
 @register_stabilize

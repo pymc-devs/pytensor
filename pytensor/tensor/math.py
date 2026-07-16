@@ -38,6 +38,7 @@ from pytensor.tensor.elemwise import (
     scalar_elemwise,
 )
 from pytensor.tensor.shape import shape, specify_shape
+from pytensor.tensor.symbolic import TensorSymbolicOp
 from pytensor.tensor.type import (
     DenseTensorType,
     complex_dtypes,
@@ -2356,6 +2357,33 @@ def erfc(a):
 @scalar_elemwise
 def erfcx(a):
     """scaled complementary error function"""
+
+
+class LogErfc(TensorSymbolicOp):
+    """Compute ``log(erfc(x))`` without underflowing in the tail.
+
+    The naive form returns ``-inf`` once ``erfc(x)`` underflows, around x=26.6 in
+    float64. ``erfcx(x) = exp(x**2) * erfc(x)`` stays finite there, so the identity
+    ``log(erfc(x)) == log(erfcx(x)) - x**2`` keeps the tail in log space.
+
+    The two branches are each unusable in the other's half: ``erfcx(x) -> 1`` as
+    ``x -> 0``, so ``log(erfcx(x))`` loses the value to cancellation (5e-5 relative at
+    x=1e-12), while ``erf(x)`` saturates to 1 around x=6, sending ``log1p(-erf(x))`` to
+    ``-inf``. Splitting at 1 leaves both accurate to ~1e-16 at the seam.
+    """
+
+    def build_inner_graph(self, x):
+        return [switch(x < 1.0, log1p(-erf(x)), log(erfcx(x)) - sqr(x))]
+
+    def pullback(self, inputs, outputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
+        # d/dx log(erfc(x)) is -2/sqrt(pi) * exp(-x**2) / erfc(x), a 0/0 quotient once
+        # both underflow. Substituting erfc(x) = exp(-x**2) * erfcx(x) cancels it to
+        # -2/(sqrt(pi) * erfcx(x)), which is finite for every x: erfcx overflows to inf
+        # for x << 0, where the derivative does vanish.
+        cst = np.array(-2.0 / np.sqrt(np.pi), dtype=x.type.dtype)
+        return [gz * cst / erfcx(x)]
 
 
 @scalar_elemwise

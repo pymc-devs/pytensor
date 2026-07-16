@@ -5,6 +5,7 @@ from io import StringIO
 
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor
 import pytensor.scalar as ps
@@ -41,6 +42,7 @@ from pytensor.tensor.math import (
     All,
     Any,
     Dot,
+    LogErfc,
     Max,
     Min,
     Prod,
@@ -111,6 +113,8 @@ from pytensor.tensor.rewriting.math import (
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
+    local_log_erfc,
+    local_log_mul_erfc,
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
@@ -2565,42 +2569,56 @@ class TestLocalErfc:
         assert [n.op for n in f.maker.fgraph.toposort()] == [erf]
 
     def test_local_log_erfc(self):
-        val = [-30, -27, -26, -11, -10, -3, -2, -1, 0, 1, 2, 3, 10, 11, 26, 27, 28, 30]
-        if config.mode in ["DebugMode", "DEBUG_MODE", "FAST_COMPILE"]:
-            # python mode doesn't like the reciprocal(0)
-            val.remove(0)
-        val = np.asarray(val, dtype=config.floatX)
+        """``log(erfc(x))`` folds into `LogErfc`."""
         x = vector("x")
 
-        # their are some `nan`s that will appear in the graph due to the logs
-        # of negatives values
+        result = RewriteTester(
+            [x], [log(erfc(x))], include=None, custom_rewrite=local_log_erfc
+        )
+        result.assert_graph(LogErfc()(x))
+        # Equivalent to the naive form wherever that one doesn't underflow
+        result.assert_eval(np.asarray([-3.0, -1.0, 0.0, 1.0, 3.0], dtype=config.floatX))
+
+    def test_local_log_erfc_scaled(self):
+        """``log(y * erfc(x))`` folds too, as log(y) + LogErfc(x).
+
+        erfc is strictly positive, so log(y * erfc(x)) == log(y) + log(erfc(x)) holds
+        for any positive y, whether or not it is constant. This is the form a log of a
+        scaled erfc arrives in, e.g. ``ndtr(x) == 0.5 * erfc(-x / sqrt(2))``.
+        """
+        x, y = vectors("x", "y")
+
+        result = RewriteTester(
+            [x, y], [log(y * erfc(x))], include=None, custom_rewrite=local_log_mul_erfc
+        )
+        result.assert_graph(log(y) + LogErfc()(x))
+        # Splitting into log(y) + log(erfc(x)) subtracts two near-equal numbers when
+        # y * erfc(x) ~ 1, so compare where the result is well conditioned.
+        result.assert_eval(
+            np.asarray([0.0, 0.5, 1.0, 2.0, 3.0], dtype=config.floatX),
+            np.full((5,), 0.5, dtype=config.floatX),
+        )
+
+    def test_local_log_erfc_tail(self):
+        """`LogErfc` must stay finite where the naive ``log(erfc(x))`` gives ``-inf``."""
+        x = vector("x")
+        val = np.asarray([26.0, 30.0, 100.0], dtype=config.floatX)
+
+        naive = function([x], log(erfc(x)), mode="FAST_COMPILE")(val)
+        assert np.isneginf(naive[1:]).all()
+
         mode = copy.copy(self.mode)
         mode.check_isfinite = False
-        mode_fusion = copy.copy(self.mode_fusion)
-        mode_fusion.check_isfinite = False
-
-        f = function([x], log(erfc(x)), mode=mode)
-        assert len(f.maker.fgraph.apply_nodes) == 22
-        assert f.maker.fgraph.outputs[0].dtype == config.floatX
-        assert all(np.isfinite(f(val)))
-
-        f = function([x], log(erfc(-x)), mode=mode)
-        assert len(f.maker.fgraph.apply_nodes) == 23
-        assert f.maker.fgraph.outputs[0].dtype == config.floatX
-        assert all(np.isfinite(f(-val)))
-
-        f = function([x], log(erfc(x)), mode=mode_fusion)
-        assert len(f.maker.fgraph.apply_nodes) == 1
-        assert f.maker.fgraph.outputs[0].dtype == config.floatX
-        assert len(f.maker.fgraph.toposort()[0].op.scalar_op.fgraph.apply_nodes) == 22
-
-        # TODO: fix this problem: The python code upcast somewhere internally
-        #  some value of float32 to python float for part of its computation.
-        #  That makes the c and python code generate slightly different values
-        if not (
-            config.floatX == "float32" and config.mode in ["DebugMode", "DEBUG_MODE"]
-        ):
-            assert all(np.isfinite(f(val)))
+        actual = function([x], log(erfc(x)), mode=mode)(val)
+        assert np.isfinite(actual).all()
+        assert actual.dtype == config.floatX
+        # erfc(x) == 2 * ndtr(-x * sqrt(2))
+        expected = np.log(2) + scipy.special.log_ndtr(
+            -val.astype("float64") * np.sqrt(2)
+        )
+        np.testing.assert_allclose(
+            actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-4
+        )
 
     @np.errstate(divide="ignore", invalid="ignore")
     def test_local_grad_log_erfc_neg(self):
