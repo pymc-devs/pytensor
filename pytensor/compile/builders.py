@@ -902,8 +902,36 @@ class SymbolicOp(OpFromGraph):
         if "__props__" in cls.__dict__:
             # MetaType installs props-only __hash__ and __eq__ which ignores the inner graph
             # override with fgraph-aware version
-            cls.__hash__ = OpFromGraph.__hash__
-            cls.__eq__ = OpFromGraph.__eq__
+            cls.__hash__ = SymbolicOp.__hash__
+            cls.__eq__ = SymbolicOp.__eq__
+
+    def _deferred_key(self):
+        """Identity of an op whose inner graph hasn't been built yet.
+
+        Construction is deferred until the first ``__call__`` (see ``__init__``), so
+        until then there is no ``fgraph`` to identify the op by. Two deferred ops of the
+        same type and props will build the same inner graph for any given input types,
+        so the type and props are what identify them.
+        """
+        props = getattr(type(self), "__props__", ())
+        return (type(self), tuple(getattr(self, p) for p in props))
+
+    def __hash__(self):
+        if not hasattr(self, "fgraph"):
+            return hash(self._deferred_key())
+        return OpFromGraph.__hash__(self)
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if type(self) is not type(other):
+            return False
+        self_built = hasattr(self, "fgraph")
+        if self_built != hasattr(other, "fgraph"):
+            return False
+        if not self_built:
+            return self._deferred_key() == other._deferred_key()
+        return OpFromGraph.__eq__(self, other)
 
     @staticmethod
     def filter_inputs(*inputs):
