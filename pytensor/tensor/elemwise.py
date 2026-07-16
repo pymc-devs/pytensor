@@ -461,7 +461,6 @@ class Elemwise(OpenMPOp):
         d = copy(self.__dict__)
         d.pop("ufunc")
         d.pop("nfunc")
-        d.pop("__epydoc_asRoutine", None)
         return d
 
     def __setstate__(self, d):
@@ -1741,9 +1740,6 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
         if getattr(symbol, "__doc__"):
             rval.__doc__ = symbol.__doc__
 
-        # for the meaning of this see the ./epydoc script
-        # it makes epydoc display rval as if it were a function, not an object
-        rval.__epydoc_asRoutine = symbol
         rval.__module__ = symbol.__module__
 
         return rval

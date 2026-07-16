@@ -737,8 +737,6 @@ def vectorize_scalar_from_tensor(op, node, batch_x):
     return batch_x.copy().owner
 
 
-# to be removed as we get the epydoc routine-documenting thing going
-# -JB 20080924
 def _conversion(real_value: Op, name: str) -> Op:
     __oplist_tag(real_value, "casting")
     real_value.__module__ = "tensor.basic"
