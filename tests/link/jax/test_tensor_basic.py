@@ -89,6 +89,16 @@ def test_arange_nonconcrete():
         compare_jax_and_py([a], [out], [a_test_value])
 
 
+def test_arange_shape_bound_over_int8():
+    """A shape-derived arange bound above 127 must not be downcast to int8.
+
+    Regression test for https://github.com/pymc-devs/pytensor/issues/2296
+    """
+    x = vector("x")
+    out = ptb.arange(x.shape[-1])
+    compare_jax_and_py([x], [out], [np.zeros(200)], jax_mode="JAX")
+
+
 def test_jax_Join():
     a = matrix("a")
     b = matrix("b")
