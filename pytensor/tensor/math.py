@@ -2525,6 +2525,58 @@ def kn(n, x):
     return kv(n, x)
 
 
+# `scipy.special.jn` is an alias of `jv`, not a separate function
+jn = jv
+
+
+def i0e(x):
+    """exponentially scaled modified Bessel function of order 0
+
+    Matches :func:`scipy.special.i0e`.
+    """
+    return ive(0, x)
+
+
+def i1e(x):
+    """exponentially scaled modified Bessel function of order 1
+
+    Matches :func:`scipy.special.i1e`.
+    """
+    return ive(1, x)
+
+
+def k0(x):
+    """modified Bessel function of the second kind of order 0
+
+    Matches :func:`scipy.special.k0`.
+    """
+    return kv(0, x)
+
+
+def k1(x):
+    """modified Bessel function of the second kind of order 1
+
+    Matches :func:`scipy.special.k1`.
+    """
+    return kv(1, x)
+
+
+def k0e(x):
+    """exponentially scaled modified Bessel function of the second kind of order 0
+
+    Matches :func:`scipy.special.k0e`.
+    """
+    return kve(0, x)
+
+
+def k1e(x):
+    """exponentially scaled modified Bessel function of the second kind of order 1
+
+    Matches :func:`scipy.special.k1e`.
+    """
+    return kve(1, x)
+
+
 @scalar_elemwise
 def sigmoid(x):
     """Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit"""
@@ -4305,7 +4357,9 @@ __all__ = [
     "gt",
     "hyp2f1",
     "i0",
+    "i0e",
     "i1",
+    "i1e",
     "imag",
     "int_div",
     "invert",
@@ -4320,7 +4374,12 @@ __all__ = [
     "ive",
     "j0",
     "j1",
+    "jn",
     "jv",
+    "k0",
+    "k0e",
+    "k1",
+    "k1e",
     "kn",
     "kv",
     "kve",

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.special
 from scipy.special import beta as scipy_beta
 from scipy.special import factorial as scipy_factorial
 from scipy.special import log_ndtr as scipy_log_ndtr
@@ -16,19 +17,28 @@ from pytensor import grad
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import vectorize_graph
-from pytensor.tensor.math import log
+from pytensor.tensor.math import i0e, i1e, k0, k0e, k1, k1e, log
 from pytensor.tensor.special import (
     LogSoftmax,
     Softmax,
     beta,
     betaln,
+    chdtr,
+    chdtrc,
+    chdtri,
     factorial,
+    gdtr,
+    gdtrc,
+    log_expit,
     log_ndtr,
     log_softmax,
     logit,
     ndtr,
     ndtri,
+    pdtr,
+    pdtrc,
     poch,
+    rgamma,
     softmax,
     xlog1py,
     xlogy,
@@ -402,3 +412,81 @@ def test_xlog1py_no_distribute_at_boundary():
     f = function([a, y], xlog1py(a / 2 - 1, y))
     out = f(np.int64(3), np.array([-1.0, 0.0, 1.0]))
     np.testing.assert_array_equal(out, np.array([-np.inf, 0.0, 0.5 * np.log(2.0)]))
+
+
+@pytest.mark.parametrize(
+    "pt_fn, scipy_fn, test_values",
+    [
+        (log_expit, scipy.special.log_expit, [np.linspace(-30, 30, 21)]),
+        (i0e, scipy.special.i0e, [np.linspace(-10, 10, 21)]),
+        (i1e, scipy.special.i1e, [np.linspace(-10, 10, 21)]),
+        (k0, scipy.special.k0, [np.linspace(0.1, 10, 21)]),
+        (k1, scipy.special.k1, [np.linspace(0.1, 10, 21)]),
+        (k0e, scipy.special.k0e, [np.linspace(0.1, 10, 21)]),
+        (k1e, scipy.special.k1e, [np.linspace(0.1, 10, 21)]),
+        (chdtr, scipy.special.chdtr, [np.linspace(0.5, 8, 9), np.linspace(0.1, 9, 9)]),
+        (
+            chdtrc,
+            scipy.special.chdtrc,
+            [np.linspace(0.5, 8, 9), np.linspace(0.1, 9, 9)],
+        ),
+        (
+            chdtri,
+            scipy.special.chdtri,
+            [np.linspace(0.5, 8, 9), np.linspace(0.05, 0.95, 9)],
+        ),
+        (
+            gdtr,
+            scipy.special.gdtr,
+            [np.full(9, 1.5), np.linspace(0.5, 8, 9), np.linspace(0.1, 9, 9)],
+        ),
+        (
+            gdtrc,
+            scipy.special.gdtrc,
+            [np.full(9, 1.5), np.linspace(0.5, 8, 9), np.linspace(0.1, 9, 9)],
+        ),
+        # non-integer k exercises the truncation scipy applies
+        (
+            pdtr,
+            scipy.special.pdtr,
+            [np.array([0.0, 1.0, 3.0, 3.7, 9.0]), np.array([0.5, 2.0, 2.0, 2.0, 4.0])],
+        ),
+        (
+            pdtrc,
+            scipy.special.pdtrc,
+            [np.array([0.0, 1.0, 3.0, 3.7, 9.0]), np.array([0.5, 2.0, 2.0, 2.0, 4.0])],
+        ),
+        # includes the poles of gamma, where rgamma is 0 but 1 / gamma(x) is nan
+        (
+            rgamma,
+            scipy.special.rgamma,
+            [np.array([-3.0, -2.0, -1.0, 0.0, 0.5, 1.0, 4.5, 20.0])],
+        ),
+    ],
+    ids=[
+        "log_expit",
+        "i0e",
+        "i1e",
+        "k0",
+        "k1",
+        "k0e",
+        "k1e",
+        "chdtr",
+        "chdtrc",
+        "chdtri",
+        "gdtr",
+        "gdtrc",
+        "pdtr",
+        "pdtrc",
+        "rgamma",
+    ],
+)
+def test_scipy_aliases(pt_fn, scipy_fn, test_values):
+    """Each alias must agree with the scipy function it claims to match."""
+    inputs = [vector(f"x{i}") for i in range(len(test_values))]
+    fn = function(inputs, pt_fn(*inputs), allow_input_downcast=True)
+    np.testing.assert_allclose(
+        fn(*test_values),
+        scipy_fn(*test_values),
+        rtol=1e-7 if config.floatX == "float64" else 1e-5,
+    )

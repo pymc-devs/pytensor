@@ -12,12 +12,18 @@ from pytensor.tensor.math import (
     erfcinv,
     erfcx,
     exp,
+    floor,
     gamma,
+    gammainc,
+    gammaincc,
+    gammainccinv,
     gammaln,
+    le,
     log,
     log1p,
     lt,
     mul,
+    softplus,
     sqr,
     sum,
     switch,
@@ -138,6 +144,92 @@ def logit(x):
 
     """
     return log(x / (1 - x))
+
+
+def log_expit(x):
+    """Logarithm of the logistic sigmoid.
+
+    Matches :func:`scipy.special.log_expit`. Unlike ``log(expit(x))``, this does not
+    underflow to ``-inf`` for large negative x.
+
+    """
+    return -softplus(-x)
+
+
+def rgamma(x):
+    """Reciprocal of the gamma function.
+
+    Matches :func:`scipy.special.rgamma`, which is 0 at the poles of gamma.
+
+    """
+    x = as_tensor_variable(x)
+    # gamma returns nan rather than inf at the non-positive integers, so 1 / gamma(x)
+    # cannot pick up the 0 that the poles call for on its own.
+    is_pole = le(x, 0) & eq(x, floor(x))
+    return switch(is_pole, 0, 1 / gamma(x))
+
+
+def chdtr(v, x):
+    """Chi-square cumulative distribution function.
+
+    Matches :func:`scipy.special.chdtr`.
+
+    """
+    return gammainc(v / 2, x / 2)
+
+
+def chdtrc(v, x):
+    """Chi-square survival function.
+
+    Matches :func:`scipy.special.chdtrc`.
+
+    """
+    return gammaincc(v / 2, x / 2)
+
+
+def chdtri(v, p):
+    """Inverse of the chi-square survival function `chdtrc`.
+
+    Matches :func:`scipy.special.chdtri`.
+
+    """
+    return 2 * gammainccinv(v / 2, p)
+
+
+def gdtr(a, b, x):
+    """Gamma cumulative distribution function.
+
+    Matches :func:`scipy.special.gdtr`.
+
+    """
+    return gammainc(b, a * x)
+
+
+def gdtrc(a, b, x):
+    """Gamma survival function.
+
+    Matches :func:`scipy.special.gdtrc`.
+
+    """
+    return gammaincc(b, a * x)
+
+
+def pdtr(k, m):
+    """Poisson cumulative distribution function.
+
+    Matches :func:`scipy.special.pdtr`, including its truncation of ``k``.
+
+    """
+    return gammaincc(floor(k) + 1, m)
+
+
+def pdtrc(k, m):
+    """Poisson survival function.
+
+    Matches :func:`scipy.special.pdtrc`, including its truncation of ``k``.
+
+    """
+    return gammainc(floor(k) + 1, m)
 
 
 def _sqrt_2():
@@ -366,13 +458,22 @@ def xlog1py(x, y):
 __all__ = [
     "beta",
     "betaln",
+    "chdtr",
+    "chdtrc",
+    "chdtri",
     "factorial",
+    "gdtr",
+    "gdtrc",
+    "log_expit",
     "log_ndtr",
     "log_softmax",
     "logit",
     "ndtr",
     "ndtri",
+    "pdtr",
+    "pdtrc",
     "poch",
+    "rgamma",
     "softmax",
     "xlog1py",
     "xlogy",
