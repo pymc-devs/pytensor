@@ -986,7 +986,7 @@ class TestLocalSubtensorMakeVector:
         r = f(0, 1, 2)
         assert r[0] == 0 and r[1] == 2
 
-    def test_AdvancedSubtensor1_idx(self):
+    def test_AdvancedSubtensor_idx(self):
         x, y, z = lscalars("xyz")
         v = make_vector(x, y, z)
         f = function([x, y, z], v[[0, 2]], mode=self.mode)
@@ -997,6 +997,23 @@ class TestLocalSubtensorMakeVector:
         assert len(prog[0].inputs) == 2
         r = f(0, 1, 2)
         assert r[0] == 0 and r[1] == 2
+
+    @pytest.mark.parametrize(
+        "mask", [[True, True, True], [True, False, True], [False, True, False]]
+    )
+    def test_AdvancedSubtensor_boolean_mask_idx(self, mask):
+        """A boolean mask selects the entries it is True at, not the positions
+        ``int(True)``/``int(False)`` would name, so it is left alone here and
+        handed to `bool_idx_to_nonzero` instead."""
+        x, y, z = lscalars("xyz")
+        v = make_vector(x, y, z)
+        out = v[np.array(mask)]
+
+        result = RewriteTester(
+            [x, y, z], [out], include=None, custom_rewrite=local_subtensor_make_vector
+        )
+        result.assert_graph(out)
+        result.assert_eval(0, 1, 2)
 
     def test_MakeVector_idx(self):
         x, y, z, q = lscalars("xyzq")

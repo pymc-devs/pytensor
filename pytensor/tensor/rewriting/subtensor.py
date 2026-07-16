@@ -76,7 +76,6 @@ from pytensor.tensor.subtensor import (
     _is_provably_non_negative,
     _is_provably_positive,
     _non_consecutive_adv_indexing,
-    advanced_inc_subtensor,
     as_index_literal,
     flatten_index_variables,
     get_canonical_form_slice,
@@ -1104,11 +1103,13 @@ def local_useless_inc_subtensor(fgraph, node):
 @register_specialize
 @node_rewriter([AdvancedIncSubtensor])
 def local_set_to_inc_subtensor(fgraph, node):
-    r"""
-    AdvancedIncSubtensor(x, x[ilist]+other, ilist, set_instead_of_inc=True) ->
-    AdvancedIncSubtensor(x, other, ilist, set_instead_of_inc=False)
+    r"""Set of a read at the same indices: ``x[idx].set(x[idx] + other)``.
 
-    Only valid when ``ilist`` is duplicate-free: a dense set is last-wins while an
+    .. code::
+
+        x[idx].set(x[idx] + other) -> x[idx].inc(other)
+
+    Only valid when ``idx`` is duplicate-free: a dense set is last-wins while an
     inc accumulates, so duplicate indices would over-count.
 
     TODO FIXME: Why doesn't this apply to all `*IncSubtensor*` `Op`\s?  If it
@@ -1136,14 +1137,30 @@ def local_set_to_inc_subtensor(fgraph, node):
         other = addn.inputs[0]
     else:
         return
-    if subn.inputs[1] != node.inputs[2] or subn.inputs[0] != node.inputs[0]:
+    # The read has to gather exactly the positions the write stores to: same base,
+    # same axes, same indices. `idx_list` must be compared too -- it is what pins
+    # the indices to their axes, so without it a read of ``x[:, i]`` would match a
+    # write to ``x[i]``.
+    if (
+        subn.inputs[0] != node.inputs[0]
+        or subn.op.idx_list != node.op.idx_list
+        or subn.inputs[1:] != node.inputs[2:]
+    ):
         return
-    # set->inc is only valid when ilist is duplicate-free: ``set(x[ilist] + other)``
-    # is last-wins at repeated positions, while ``inc(other)`` would accumulate the
-    # contributions of every occurrence and over-count them.
-    if not _index_provably_unique(node.inputs[2], fgraph):
+    # set->inc is only valid when the written positions are duplicate-free:
+    # ``set(x[idx] + other)`` is last-wins at repeated positions, while
+    # ``inc(other)`` would accumulate the contributions of every occurrence and
+    # over-count them.
+    indices = indices_from_subtensor(node.inputs[2:], node.op.idx_list)
+    if not _advanced_indices_jointly_unique(indices, fgraph):
         return
-    ret = advanced_inc_subtensor(node.inputs[0], other, node.inputs[2])
+    new_op = type(node.op)(
+        idx_list=node.op.idx_list,
+        inplace=node.op.inplace,
+        set_instead_of_inc=False,
+        ignore_duplicates=node.op.ignore_duplicates,
+    )
+    ret = new_op(node.inputs[0], other, *node.inputs[2:])
 
     copy_stack_trace(node.outputs, ret)
 
@@ -1339,52 +1356,6 @@ def local_convert_negative_indices(fgraph, node):
     new_subtensor = x[tuple(new_idxs)]
     copy_stack_trace(node.outputs, new_subtensor)
     return [new_subtensor]
-
-
-@register_canonicalize
-@register_specialize
-@node_rewriter([AdvancedSubtensor])
-def local_useless_AdvancedSubtensor1(fgraph, node):
-    """Remove a leading-axis vector take that selects the full input.
-
-    The full input is taken when the index is equivalent to
-    ``arange(0, input.shape[0], 1)`` using either an explicit list/vector or
-    the `ARange` `Op`.
-
-    """
-    if node.op.idx_list != (0,):
-        # Only the leading integer-vector take (x[ilist])
-        return
-
-    # This optimization needs ShapeOpt and fgraph.shape_feature
-    if not hasattr(fgraph, "shape_feature"):
-        return
-
-    shape_feature = fgraph.shape_feature
-
-    # get length of the indexed tensor along the first axis
-    try:
-        length = get_scalar_constant_value(
-            shape_feature.get_shape(node.inputs[0], 0), only_process_constants=True
-        )
-    except NotScalarConstantError:
-        return False
-
-    # get index (which must be a vector by definition)
-    idx = node.inputs[1]
-
-    # `idx` must be equivalent to [0,1,...,shape[0] - 1] to qualify for
-    # this optimization
-    if isinstance(idx, Constant):
-        idx = idx.value
-        if len(idx) != length:
-            return False
-        if np.any(idx != np.arange(length)):
-            return False
-    else:
-        return False
-
-    return [node.inputs[0]]
 
 
 def _arange_index_to_slice(idx):
@@ -2343,8 +2314,7 @@ def local_write_of_write_same_indices(fgraph, node):
     base, a, *inner_idx_vars = inner_x.owner.inputs
 
     # Same indices: idx_list (slice specs) must match and all index
-    # variables must be identical.  AdvancedIncSubtensor1 has a fixed
-    # class-level idx_list = (0,) so the comparison is trivially true.
+    # variables must be identical.
     if node.op.idx_list != inner_x.owner.op.idx_list:
         return
     if not all(o is i for o, i in zip(outer_idx_vars, inner_idx_vars, strict=True)):
