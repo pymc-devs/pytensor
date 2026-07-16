@@ -307,9 +307,7 @@ class TestIndexProvablyUniqueArange:
 class TestLocalUselessSubtensor:
     x = matrix("x")
     s = ps.int32("s")
-    mode = mode_opt.including(
-        "local_useless_subtensor", "local_useless_AdvancedSubtensor1"
-    )
+    mode = mode_opt.including("local_useless_subtensor", "local_adv_idx_to_slice")
 
     @pytest.mark.parametrize(
         "idx",
@@ -2250,6 +2248,63 @@ def test_local_set_to_inc_subtensor_duplicate_indices():
         for n in f_const.maker.fgraph.toposort()
         if isinstance(n.op, AdvancedIncSubtensor)
     )
+
+
+def test_local_set_to_inc_subtensor_indexed_axis():
+    """The collapsed inc must keep indexing the axis the set wrote to. ``idx_list``
+    is what pins an index to its axis, so a read of ``x[:, i]`` matching a write to
+    ``x[i]`` would transpose the update."""
+    x = matrix("x", shape=(3, 3))
+    other = matrix("other", shape=(3, 3))
+    i = pt.constant(np.array([2, 0, 1]))
+
+    result = utt.RewriteTester([x, other], [x[:, i].set(x[:, i] + other)])
+    result.assert_graph(x[:, i].inc(other))
+    result.assert_eval(np.zeros((3, 3)), np.arange(9.0).reshape(3, 3))
+
+
+@pytest.mark.parametrize(
+    "rows, cols, collapses",
+    [
+        # No axis is duplicate-free on its own, but the joint pairs (0,2), (1,2)
+        # are distinct, so accumulating is safe.
+        ([0, 1], [2, 2], True),
+        # The joint pairs (1,2), (1,2) repeat: an inc would double-count.
+        ([1, 1], [2, 2], False),
+    ],
+)
+def test_local_set_to_inc_subtensor_multiple_indices(rows, cols, collapses):
+    """With several advanced indices the written positions are the broadcast tuples
+    of the entries, so joint uniqueness governs the collapse. The indices also have
+    to survive it: rebuilding with only the first would write the wrong positions."""
+    x = matrix("x", shape=(3, 3))
+    other = vector("other", shape=(2,))
+    rows = pt.constant(np.array(rows))
+    cols = pt.constant(np.array(cols))
+
+    out = x[rows, cols].set(x[rows, cols] + other)
+    result = utt.RewriteTester([x, other], [out])
+    if collapses:
+        result.assert_graph(x[rows, cols].inc(other))
+    else:
+        result.assert_graph(out)
+    result.assert_eval(np.arange(9.0).reshape(3, 3), np.array([100.0, 200.0]))
+
+
+def test_local_adv_idx_to_slice_boolean_mask():
+    """A boolean mask is a single index on the leading axis just like an integer
+    vector, but selects where it is True rather than by position, so the arange
+    reasoning must not be applied to it."""
+    x = matrix("x", shape=(5, 2))
+    mask = np.zeros((5, 2), dtype=bool)
+    mask[2, 0] = True
+    mask[3, 1] = True
+
+    # `o3` rather than the default `canonicalize`: the rewrites that read a
+    # leading-axis index only run once the shape feature is in place.
+    result = utt.RewriteTester([x], [x[mask]], include="o3")
+    result.assert_graph(x[mask])
+    result.assert_eval(np.arange(10.0).reshape(5, 2))
 
 
 @pytest.mark.parametrize(

@@ -1062,6 +1062,11 @@ def local_subtensor_make_vector(fgraph, node):
             except NotScalarConstantError:
                 pass
         elif idx.ndim == 1 and isinstance(idx, Constant):
+            if idx.type.dtype == "bool":
+                # A boolean mask selects the entries it is True at, which is not
+                # what mapping it to positions below would read it as. Leave it
+                # for `bool_idx_to_nonzero` to turn into integer positions.
+                return False
             values = list(map(int, list(idx.value)))
             if len(values) == 1:
                 ret = expand_dims(x.owner.inputs[values[0]], axis=0)
