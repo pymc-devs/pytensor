@@ -1,9 +1,14 @@
-from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    PatternNodeRewriter,
+    copy_stack_trace,
+    node_rewriter,
+)
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Exp
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Sum, log, true_div
 from pytensor.tensor.rewriting.basic import register_stabilize
-from pytensor.tensor.special import Softmax, log_softmax
+from pytensor.tensor.special import LogNdtr, Ndtr, Softmax, log_softmax
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     AdvancedSubtensor1,
@@ -17,6 +22,17 @@ subtensor_ops = (
     AdvancedSubtensor,
     AdvancedSubtensor1,
 )
+
+
+# Detect Log(Ndtr(x)) and replace it with LogNdtr(x), which stays finite in both tails.
+# Note: only forward pass is affected, as the gradient graph is built before this runs.
+local_log_ndtr = PatternNodeRewriter(
+    (log, (OpPattern(Ndtr), "x")),
+    (LogNdtr(), "x"),
+    name="local_log_ndtr",
+    values_eq_approx=values_eq_approx_remove_inf,
+)
+register_stabilize(local_log_ndtr)
 
 
 @register_stabilize

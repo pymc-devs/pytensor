@@ -1,17 +1,24 @@
+import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
 
+from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import (
     eq,
+    erfc,
+    erfcinv,
+    erfcx,
     exp,
     gamma,
     gammaln,
     log,
     log1p,
+    lt,
     mul,
+    sqr,
     sum,
     switch,
 )
@@ -133,6 +140,137 @@ def logit(x):
     return log(x / (1 - x))
 
 
+def _sqrt_2():
+    return as_tensor_variable(np.sqrt(2.0), dtype=config.floatX)
+
+
+class Ndtr(TensorSymbolicOp):
+    """Op for `ndtr`."""
+
+    def build_inner_graph(self, x):
+        return [0.5 * erfc(-x / _sqrt_2())]
+
+
+def ndtr(x):
+    """Cumulative distribution function of the standard normal distribution.
+
+    Computes the element-wise area under the standard normal density from -inf to x.
+
+    Parameters
+    ----------
+    x : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the normal CDF evaluated at each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.special.ndtr(x))
+    >>> f([-1, 0, 1])
+    array([0.15865525, 0.5       , 0.84134475])
+
+    Notes
+    -----
+    This function corresponds to SciPy's `scipy.special.ndtr` function. Prefer
+    `log_ndtr` over ``log(ndtr(x))``, which underflows to ``-inf`` for x below about
+    -37 and saturates to ``0`` for x above about 8.
+
+    """
+    return Ndtr()(x)
+
+
+class LogNdtr(TensorSymbolicOp):
+    """Op for `log_ndtr`."""
+
+    def build_inner_graph(self, x):
+        sqrt_2 = _sqrt_2()
+        # For x < -1 the naive log(ndtr(x)) underflows to -inf once ndtr(x) drops below
+        # the smallest float, so use erfc(z) = exp(-z**2) * erfcx(z), which keeps the
+        # tail in log space. Above it log1p avoids the cancellation as ndtr(x) -> 1.
+        return [
+            switch(
+                lt(x, -1.0),
+                log(erfcx(-x / sqrt_2) / 2.0) - sqr(x) / 2.0,
+                log1p(-erfc(x / sqrt_2) / 2.0),
+            )
+        ]
+
+
+def log_ndtr(x):
+    """Logarithm of the cumulative distribution function of the standard normal.
+
+    Stays accurate in both tails, where the naive ``log(ndtr(x))`` does not.
+
+    Parameters
+    ----------
+    x : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the log normal CDF evaluated at each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.special.log_ndtr(x))
+    >>> f([-1, 0, 1])
+    array([-1.84102165, -0.69314718, -0.17275378])
+
+    Where the naive form has lost the value entirely, this one has not:
+
+    >>> f([-300.0, 10.0])
+    array([-4.50066227e+04, -7.61985302e-24])
+
+    Notes
+    -----
+    This function corresponds to SciPy's `scipy.special.log_ndtr` function.
+
+    """
+    return LogNdtr()(x)
+
+
+def ndtri(p):
+    """Quantile function of the standard normal distribution.
+
+    Inverse of :func:`ndtr`: returns the x for which ``ndtr(x) == p``.
+
+    Parameters
+    ----------
+    p : TensorLike
+        Input tensor, with values in [0, 1]
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the normal quantile evaluated at each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> p = pt.vector("p")
+    >>> f = pytensor.function([p], pt.special.ndtri(p))
+    >>> f([0.1, 0.5, 0.9])
+    array([-1.28155157,  0.        ,  1.28155157])
+
+    Notes
+    -----
+    This function corresponds to SciPy's `scipy.special.ndtri` function.
+    """
+    p = as_tensor_variable(p)
+    return -_sqrt_2() * erfcinv(2 * p)
+
+
 def beta(a, b):
     """
     Beta function.
@@ -229,8 +367,11 @@ __all__ = [
     "beta",
     "betaln",
     "factorial",
+    "log_ndtr",
     "log_softmax",
     "logit",
+    "ndtr",
+    "ndtri",
     "poch",
     "softmax",
     "xlog1py",

@@ -2,8 +2,11 @@ import numpy as np
 import pytest
 from scipy.special import beta as scipy_beta
 from scipy.special import factorial as scipy_factorial
+from scipy.special import log_ndtr as scipy_log_ndtr
 from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import logit as scipy_logit
+from scipy.special import ndtr as scipy_ndtr
+from scipy.special import ndtri as scipy_ndtri
 from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
 from scipy.special import xlog1py as scipy_xlog1py
@@ -13,14 +16,18 @@ from pytensor import grad
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import vectorize_graph
+from pytensor.tensor.math import log
 from pytensor.tensor.special import (
     LogSoftmax,
     Softmax,
     beta,
     betaln,
     factorial,
+    log_ndtr,
     log_softmax,
     logit,
+    ndtr,
+    ndtri,
     poch,
     softmax,
     xlog1py,
@@ -195,6 +202,76 @@ def test_logit():
     expected = scipy_logit(x_test)
     np.testing.assert_allclose(
         actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+@pytest.mark.parametrize(
+    "pt_fn, scipy_fn, x_test",
+    [
+        (ndtr, scipy_ndtr, np.linspace(-10, 10, 101)),
+        (ndtri, scipy_ndtri, np.linspace(0.01, 0.99, 101)),
+        (log_ndtr, scipy_log_ndtr, np.linspace(-10, 10, 101)),
+    ],
+    ids=["ndtr", "ndtri", "log_ndtr"],
+)
+def test_ndtr_family(pt_fn, scipy_fn, x_test):
+    x = vector("x")
+    actual_fn = function([x], pt_fn(x), allow_input_downcast=True)
+    np.testing.assert_allclose(
+        actual_fn(x_test),
+        scipy_fn(x_test),
+        rtol=1e-7 if config.floatX == "float64" else 1e-5,
+    )
+
+
+@pytest.mark.skipif(
+    config.floatX == "float32", reason="Tail underflows in float32 precision"
+)
+def test_log_ndtr_extreme_tail():
+    """``log_ndtr`` must stay finite where the naive ``log(ndtr(x))`` underflows.
+
+    Both tails are checked: below the lower one ``ndtr(x)`` underflows to 0 so the naive
+    form gives ``-inf``, and above the upper one it saturates to 1 so the naive form
+    gives exactly ``0`` and loses the value entirely.
+    """
+    x = vector("x")
+    x_test = np.array([-300.0, -100.0, -50.0, -10.0, 0.0, 10.0])
+
+    naive = function([x], log(ndtr(x)), mode="FAST_COMPILE")(x_test)
+    assert np.isneginf(naive[:3]).all()
+    assert naive[-1] == 0.0
+
+    actual = function([x], log_ndtr(x))(x_test)
+    np.testing.assert_allclose(actual, scipy_log_ndtr(x_test), rtol=1e-7)
+    assert np.isfinite(actual).all()
+
+    naive_grad = function([x], grad(log(ndtr(x)).sum(), x), mode="FAST_COMPILE")(x_test)
+    assert np.isnan(naive_grad[:3]).all()
+
+    actual_grad = function([x], grad(log_ndtr(x).sum(), x))(x_test)
+    assert np.isfinite(actual_grad).all()
+
+
+@pytest.mark.parametrize("pt_fn", [ndtr, log_ndtr], ids=["ndtr", "log_ndtr"])
+def test_ndtr_family_grad(pt_fn):
+    rng = np.random.default_rng(2321)
+    utt.verify_grad(pt_fn, [rng.normal(size=(3, 4))])
+
+
+def test_ndtri_grad():
+    rng = np.random.default_rng(2321)
+    utt.verify_grad(ndtri, [rng.uniform(0.1, 0.9, size=(3, 4))])
+
+
+def test_ndtri_inverts_ndtr():
+    x = vector("x")
+    # ndtr saturates towards 1 in the upper tail, so the roundtrip is only well
+    # conditioned while ndtr(x) still holds enough significant bits: at x=5,
+    # ndtr(x) rounds to 0.9999997, which leaves float32 nothing left to invert.
+    lim, tol = (5.0, 1e-7) if config.floatX == "float64" else (3.0, 1e-5)
+    x_test = np.linspace(-lim, lim, 51).astype(config.floatX)
+    np.testing.assert_allclose(
+        function([x], ndtri(ndtr(x)))(x_test), x_test, rtol=tol, atol=tol
     )
 
 

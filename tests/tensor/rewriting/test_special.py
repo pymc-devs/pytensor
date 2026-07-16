@@ -11,9 +11,17 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.math import exp, log
-from pytensor.tensor.special import LogSoftmax, Softmax, softmax
-from pytensor.tensor.type import matrix
+from pytensor.tensor.rewriting.special import local_log_ndtr
+from pytensor.tensor.special import (
+    LogSoftmax,
+    Softmax,
+    log_ndtr,
+    ndtr,
+    softmax,
+)
+from pytensor.tensor.type import matrix, vector
 from tests import unittest_tools as utt
+from tests.unittest_tools import RewriteTester
 
 
 _fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"])
@@ -114,3 +122,44 @@ def test_softmax_graph():
         return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])
+
+
+def test_local_log_ndtr():
+    """``log(ndtr(x))`` folds into `LogNdtr`, the stable form."""
+    x = vector("x")
+
+    result = RewriteTester(
+        [x], [log(ndtr(x))], include=None, custom_rewrite=local_log_ndtr
+    )
+    result.assert_graph(log_ndtr(x))
+    # Equivalent to the naive form wherever that one doesn't lose the value
+    result.assert_eval(
+        np.asarray([-3.0, -1.0, 0.0, 1.0], dtype=config.floatX),
+        rtol=1e-7 if config.floatX == "float64" else 1e-5,
+    )
+
+
+def test_local_log_ndtr_tail():
+    """The rewritten graph holds both tails, where the naive one loses the value.
+
+    Below the lower tail ndtr(x) underflows to 0 and the naive form gives ``-inf``;
+    above the upper one it saturates to 1 and the naive form gives exactly ``0``.
+    """
+    x = vector("x")
+    x_test = np.array([-300.0, -50.0, 10.0], dtype=config.floatX)
+
+    naive = pytensor.function([x], log(ndtr(x)), mode="FAST_COMPILE")(x_test)
+    assert np.isneginf(naive[:2]).all()
+    assert naive[-1] == 0.0
+
+    rewritten = pytensor.function([x], log(ndtr(x)))(x_test)
+    assert np.isfinite(rewritten).all()
+    # Bit-for-bit the explicit stable form, not an approximation of it
+    np.testing.assert_array_equal(
+        rewritten, pytensor.function([x], log_ndtr(x))(x_test)
+    )
+    np.testing.assert_allclose(
+        rewritten,
+        scipy.special.log_ndtr(x_test.astype("float64")),
+        rtol=1e-7 if config.floatX == "float64" else 1e-5,
+    )
