@@ -140,6 +140,53 @@ def diag_of_kronecker(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@node_rewriter([ExtractDiag])
+def diag_of_dot(fgraph, node):
+    """Extract the diagonal of a matrix product without materializing it.
+
+    diag(A @ B) -> (A * B.mT).sum(-1)
+
+    The full product is ``O(N**2 * K)``; the diagonal only needs the ``i``-th row of
+    ``A`` dotted with the ``i``-th column of ``B``, which is ``O(N * K)``. For a general
+    ``offset`` the two operands' rows are shifted relative to each other.
+    """
+    op = node.op
+    [x] = node.inputs
+
+    # Only the diagonal over the last two (matrix) axes of the product.
+    if op.axis1 != x.type.ndim - 2 or op.axis2 != x.type.ndim - 1:
+        return None
+
+    match x.owner_op_and_inputs:
+        case ((Dot() | Blockwise(Dot())), a, b):
+            pass
+        case _:
+            return None
+
+    # If the product feeds other clients it is materialized anyway, so the rewrite
+    # would only add work.
+    if len(fgraph.clients[x]) != 1:
+        return None
+
+    offset = op.offset
+    b_transposed = b.mT
+    row_start_a = max(0, -offset)
+    row_start_b = max(0, offset)
+    a_rows = a[..., row_start_a:, :]
+    b_rows = b_transposed[..., row_start_b:, :]
+
+    diag_size = pt.minimum(a_rows.shape[-2], b_rows.shape[-2])
+    new_out = (a_rows[..., :diag_size, :] * b_rows[..., :diag_size, :]).sum(-1)
+
+    if new_out.type.dtype != node.outputs[0].type.dtype:
+        new_out = new_out.astype(node.outputs[0].type.dtype)
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
 @node_rewriter([det])
 def det_of_kronecker(fgraph, node):
     """
