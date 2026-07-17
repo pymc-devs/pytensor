@@ -23,6 +23,7 @@ from pytensor.tensor.math import (
     kve,
     log,
     log1mexp,
+    ndtri_exp,
     polygamma,
     psi,
     sigmoid,
@@ -141,6 +142,13 @@ def test_erfinv():
     out = erfinv(x)
 
     compare_jax_and_py([x], [out], [0.95])
+
+
+def test_ndtri_exp():
+    x = scalar("x")
+    out = ndtri_exp(x)
+
+    compare_jax_and_py([x], [out], [-4.0])
 
 
 @pytest.mark.parametrize(

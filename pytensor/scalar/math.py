@@ -268,6 +268,40 @@ class Erfcinv(UnaryScalarOp):
 erfcinv = Erfcinv(upgrade_to_float_no_complex, name="erfcinv")
 
 
+class NdtriExp(UnaryScalarOp):
+    """
+    Implements the inverse of the standard normal CDF evaluated at the
+    exponent of x, `ndtri(exp(x))`, in a way that remains accurate for very
+    negative x, where `exp(x)` underflows.
+    """
+
+    monotonic_increasing = True
+    nfunc_spec = ("scipy.special.ndtri_exp", 1, 1)
+
+    def impl(self, x):
+        return special.ndtri_exp(x)
+
+    def pullback(self, inputs, outputs, grads):
+        (x,) = inputs
+        (z,) = outputs
+        (gz,) = grads
+        if x.type in complex_types:
+            raise NotImplementedError()
+        if z.type in discrete_types:
+            if x.type in discrete_types:
+                return [x.zeros_like(dtype=config.floatX)]
+            else:
+                return [x.zeros_like()]
+
+        # d/dx ndtri(exp(x)) = exp(x) / pdf(z), evaluated as sqrt(2 * pi) * exp(x + z ** 2 / 2)
+        # so that the underflowing exp(x) and the overflowing 1 / pdf(z) never appear on their own
+        cst = np.asarray(np.sqrt(2 * np.pi), dtype=gz.type.dtype)
+        return (gz * cst * exp(x + z**2 / 2),)
+
+
+ndtri_exp = NdtriExp(upgrade_to_float_no_complex, name="ndtri_exp")
+
+
 class Owens_t(BinaryScalarOp):
     nfunc_spec = ("scipy.special.owens_t", 2, 1)
 

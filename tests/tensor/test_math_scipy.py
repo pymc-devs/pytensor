@@ -52,6 +52,7 @@ expected_erf = special.erf
 expected_erfc = special.erfc
 expected_erfinv = special.erfinv
 expected_erfcinv = special.erfcinv
+expected_ndtri_exp = special.ndtri_exp
 expected_owenst = special.owens_t
 expected_gamma = special.gamma
 expected_gammaln = special.gammaln
@@ -123,6 +124,25 @@ TestErfcinvBroadcast = makeBroadcastTester(
         "empty": [np.asarray([], dtype=config.floatX)],
     },
     grad=_grad_broadcast_unary_0_2_no_complex,
+    eps=2e-10,
+    mode=mode_no_scipy,
+)
+
+TestNdtriExpBroadcast = makeBroadcastTester(
+    op=pt.ndtri_exp,
+    expected=expected_ndtri_exp,
+    good={
+        "normal": [random_ranged(-10, -0.1, (2, 3))],
+        # exp(x) underflows here, so these are only accurate when computed
+        # directly in logspace
+        "extreme": [
+            np.array(
+                [[-50.0, -100.0, -500.0], [-745.0, -1000.0, -1e6]], dtype=config.floatX
+            )
+        ],
+        "empty": [np.asarray([], dtype=config.floatX)],
+    },
+    grad={"normal": [random_ranged(-5, -0.5, (2, 3))]},
     eps=2e-10,
     mode=mode_no_scipy,
 )
