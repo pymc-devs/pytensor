@@ -102,6 +102,7 @@ from pytensor.tensor.math import (
     minimum,
     mod,
     mul,
+    multiply,
     nan_to_num,
     neg,
     neq,
@@ -3972,3 +3973,14 @@ def test_median(ndim, axis):
 
     assert np.allclose(result_odd, expected_odd)
     assert np.allclose(result_even, expected_even)
+
+
+def test_multiply():
+    x = vector()
+    y = vector()
+    z = multiply(x, y)
+    f = function([x, y], z)
+    a = np.array([1.0, 2.0, 3.0])
+    b = np.array([4.0, 5.0, 6.0])
+    assert np.allclose(f(a, b), a * b)
+

@@ -2936,6 +2936,9 @@ def mul(a, *other_terms):
     # see decorator for function body
 
 
+multiply = mul
+
+
 def variadic_mul(*args):
     """Mul that accepts arbitrary number of inputs, including zero or one."""
     if not args:
@@ -4330,6 +4333,7 @@ __all__ = [
     "minimum",
     "mod",
     "mul",
+    "multiply",
     "nan_to_num",
     "neg",
     "neq",
