@@ -2373,6 +2373,11 @@ def erfcinv(a):
 
 
 @scalar_elemwise
+def ndtri_exp(a):
+    """inverse standard normal cdf of the exponent of a"""
+
+
+@scalar_elemwise
 def owens_t(h, a):
     """owens t function"""
 
@@ -4331,6 +4336,7 @@ __all__ = [
     "mod",
     "mul",
     "nan_to_num",
+    "ndtri_exp",
     "neg",
     "neq",
     "not_equal",
