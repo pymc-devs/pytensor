@@ -48,6 +48,7 @@ from pytensor.tensor.type import (
     fmatrix,
     iscalar,
     ivector,
+    lvector,
     matrix,
     scalar,
     tensor,
@@ -297,6 +298,45 @@ class TestIndexProvablyUniqueArange:
         # Straddling zero -> may wrap -> not provably unique.
         assert unique(pt.arange(-2, 2)) is False
         assert unique(pt.arange(0, -5, -1)) is False  # 0 with negatives
+
+    def test_shifted_arange(self):
+        """A constant shift slides the whole range, so folding it into the bounds
+        decides uniqueness -- a shift can rescue a straddling range or ruin a
+        single-signed one."""
+        k = iscalar("k")
+
+        def unique(arange):
+            return _index_provably_unique(arange, None)
+
+        # Shifted clear of zero: unique even though the unshifted range is not.
+        assert unique(pt.arange(-5, 5) + 5) is True
+        assert unique(pt.arange(-5, 5) + 6) is True
+        assert unique(pt.arange(5) - 10) is True  # shifted to all-negative
+
+        # Still straddling after the shift.
+        assert unique(pt.arange(-5, 5) + 1) is False
+        assert unique(pt.arange(5) - 2) is False
+
+        # Symbolic stop: a non-negative start and positive step still suffice.
+        assert unique(pt.arange(k) + 2) is True
+        assert unique(2 + pt.arange(k)) is True
+        assert unique(pt.arange(k) - 2) is False  # start -2, may straddle
+
+        # Descending and negative ranges shift the same way: the entry count depends
+        # only on ``stop - start`` and the step, both of which a shift preserves.
+        assert unique(pt.arange(10, 0, -1) + 5) is True  # [15..6]
+        assert unique(pt.arange(10, 0, -1) - 5) is False  # [5..-4] straddles
+        assert unique(pt.arange(-1, -9, -2) - 1) is True  # [-2,-4,-6,-8]
+        assert unique(pt.arange(-1, -9, -2) + 1) is False  # [0,-2,-4,-6] straddles
+
+        # The shifted bound can outgrow the dtype the original bounds were stored in
+        # (``arange(5)`` carries int8 bounds).
+        assert unique(pt.arange(5) + 200) is True
+        assert unique(pt.arange(5) - 200) is True
+
+        # A symbolic shift leaves the range's position unknown.
+        assert unique(pt.arange(k) + lvector("i")) is False
+        assert unique(pt.arange(k) + pt.arange(k)) is False
 
         # Sign not statically known.
         assert unique(pt.arange(5, k, -1)) is False  # unknown stop sign
