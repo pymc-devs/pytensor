@@ -164,3 +164,47 @@ def test_arange():
     out = arange(1, 10, 2)
 
     compare_mlx_and_py([], [out], [])
+
+
+def test_arange_dynamic_shape():
+    # Shape-derived bounds are concrete under mx.compile even when the static
+    # shape is unknown, so a genuinely dynamic length must work (regression: this
+    # used to raise NotImplementedError because of an over-aggressive constant
+    # check). Exercises every position (start/stop/step) being shape-derived, an
+    # offset, and an empty result.
+    x = pt.vector("x")
+    y = pt.vector("y")
+    outs = [
+        arange(x.shape[0]),  # dynamic stop
+        arange(x.shape[0] + 2),  # shape-derived expression
+        arange(x.shape[0], y.shape[0]),  # dynamic start and stop
+        arange(0, y.shape[0], x.shape[0]),  # dynamic step
+        arange(y.shape[0], x.shape[0]),  # start > stop -> empty
+    ]
+    compare_mlx_and_py(
+        [x, y],
+        outs,
+        [np.zeros(3, dtype="float32"), np.zeros(7, dtype="float32")],
+    )
+
+
+def test_arange_dynamic_advanced_index():
+    # The motivating case: a vectorized gather lowers to advanced indexing that
+    # internally builds arange(idx.shape[0]) with a runtime-dynamic length.
+    logp = pt.matrix("logp")
+    targets = pt.lvector("targets")
+    out = logp[arange(targets.shape[0]), targets]
+    compare_mlx_and_py(
+        [logp, targets],
+        [out],
+        [np.arange(12, dtype="float32").reshape(3, 4), np.array([0, 2, 3])],
+    )
+
+
+def test_arange_data_dependent_raises():
+    # A genuinely data-dependent length has a runtime-only output shape, which MLX
+    # cannot compile. This must fail loudly (at compile time) rather than silently.
+    x = pt.vector("x")
+    out = arange(pt.sum(x > 0).astype("int64"))
+    with pytest.raises(NotImplementedError, match="data-dependent length"):
+        pytensor.function([x], out, mode=compile_mode)
