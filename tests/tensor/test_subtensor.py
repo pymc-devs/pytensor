@@ -1413,13 +1413,20 @@ class TestSubtensor(utt.OptimizationTestMixin):
     @pytest.mark.parametrize("func", (advanced_inc_subtensor1, advanced_set_subtensor1))
     def test_advanced1_inc_runtime_broadcast(self, func):
         y = matrix("y", dtype="float64", shape=(None, None))
+        idx = lvector("idx")
 
         x = ptb.zeros((10, 5))
         idxs = np.repeat(np.arange(10), 2)
-        out = func(x, y, idxs)
+        out = func(x, y, idx)
 
-        f = function([y], out)
-        f(np.ones((20, 5)))  # Fine
+        f = function([y, idx], out)
+        f(np.ones((20, 5)), idxs)  # Fine
+
+        # A length-one index is an exact fit for a length-one update, not a broadcast
+        expected = np.zeros((10, 5))
+        expected[1] = 1.0
+        assert_array_equal(f(np.ones((1, 5)), np.array([1])), expected)
+
         err_message = (
             "(Runtime broadcasting not allowed\\. AdvancedIncSubtensor was asked"
             "|The number of indices and values must match)"
@@ -1431,13 +1438,42 @@ class TestSubtensor(utt.OptimizationTestMixin):
             if numba_linker
             else pytest.raises(ValueError, match=err_message)
         ):
-            f(np.ones((1, 5)))
+            f(np.ones((1, 5)), idxs)
         with (
             nullcontext()
             if numba_linker
             else pytest.raises(ValueError, match=err_message)
         ):
-            f(np.ones((20, 1)))
+            f(np.ones((20, 1)), idxs)
+
+    @pytest.mark.xfail(reason="Runtime broadcasting is only checked for a vector index")
+    @pytest.mark.parametrize("idx_dtype", ("bool", "int64"))
+    def test_advanced_set_runtime_broadcast_unchecked_indices(self, idx_dtype):
+        """These index forms should be checked too, but we only kept the original AdvancedIncSubtensor1 check.
+
+        Rewrites are off to keep `bool_idx_to_nonzero` from turning the mask into
+        integer positions before it reaches the Op.
+        """
+        x = vector("x", dtype="float64", shape=(None,))
+        y = vector("y", dtype="float64", shape=(None,))
+        idx = (
+            vector("idx", dtype="bool", shape=(None,))
+            if idx_dtype == "bool"
+            else lmatrix("idx")
+        )
+
+        out = advanced_set_subtensor(x, y, idx)
+        f = function([x, y, idx], out, mode=Mode(linker="py", optimizer=None))
+
+        idx_val = (
+            np.array([True, True, True, False, False])
+            if idx_dtype == "bool"
+            else np.array([[0, 1], [2, 3]])
+        )
+        with pytest.raises(
+            ValueError, match=r"Runtime broadcasting not allowed\. AdvancedIncSubtensor"
+        ):
+            f(np.zeros(5), np.ones(1), idx_val)
 
     def test_adv_constant_arg(self):
         # Test case provided (and bug detected, gh-607) by John Salvatier

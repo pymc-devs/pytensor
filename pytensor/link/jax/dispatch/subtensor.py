@@ -59,8 +59,8 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
         if len(indices) == 1:
             indices = indices[0]
 
-        if isinstance(op, AdvancedIncSubtensor) and op.idx_list == (0,):
-            op._check_runtime_broadcasting(node, x, y, indices)
+        if isinstance(op, AdvancedIncSubtensor):
+            op._check_runtime_broadcast_of_vector_index(node, x, y, indices)
 
         return jax_fn(x, indices, y)
 

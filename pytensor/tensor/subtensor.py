@@ -2445,29 +2445,32 @@ class AdvancedIncSubtensor(BaseSubtensor, COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def _check_runtime_broadcasting(self, node, x, y, idx) -> None:
-        """Raise if ``y`` would silently broadcast against the leading-axis update.
+    def _check_runtime_broadcast_of_vector_index(self, node, x, y, idx) -> None:
+        """Raise if ``x[idx] (+)= y`` would broadcast ``y`` at runtime.
 
-        Applies to the leading integer-vector form; ``y`` must already match the
-        indexed shape rather than being broadcast at runtime.
+        Only the single integer vector index form is checked, where the update
+        must have shape ``(idx.shape[0], *x.shape[1:])``. Other index forms
+        (boolean masks, multidimensional or multiple indices) are left to the
+        numpy-like broadcasting of the underlying implementation.
         """
-        if y.ndim > 0:
-            y_pt_bcast = node.inputs[1].broadcastable
+        if self.idx_list != (0,):
+            return
+        idx_type = node.inputs[2].type
+        if idx_type.ndim != 1 or idx_type.dtype == "bool":
+            return
 
-            if not y_pt_bcast[0] and y.shape[0] == 1 and y.shape[0] != idx.shape[0]:
-                # Attempting to broadcast with index
-                raise ValueError(self._runtime_broadcast_error_msg)
-            if any(
-                not y_bcast and y_dim == 1 and y_dim != x_dim
-                for y_bcast, y_dim, x_dim in zip(
-                    reversed(y_pt_bcast),
-                    reversed(y.shape),
-                    reversed(x.shape),
-                    strict=False,
-                )
-            ):
-                # Attempting to broadcast with buffer
-                raise ValueError(self._runtime_broadcast_error_msg)
+        y_static_bcast = node.inputs[1].type.broadcastable
+        expected_shape = (idx.shape[0], *x.shape[1:])
+        if any(
+            not y_bcast and y_dim == 1 and expected_dim != 1
+            for y_bcast, y_dim, expected_dim in zip(
+                reversed(y_static_bcast),
+                reversed(y.shape),
+                reversed(expected_shape),
+                strict=False,
+            )
+        ):
+            raise ValueError(self._runtime_broadcast_error_msg)
 
     def __init__(
         self,
@@ -2510,8 +2513,7 @@ class AdvancedIncSubtensor(BaseSubtensor, COp):
     def perform(self, node, inputs, out_):
         x, y, *index_variables = inputs
 
-        if self.idx_list == (0,):
-            self._check_runtime_broadcasting(node, x, y, index_variables[0])
+        self._check_runtime_broadcast_of_vector_index(node, x, y, index_variables[0])
 
         full_indices = unflatten_index_variables(index_variables, self.idx_list)
 

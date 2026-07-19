@@ -63,8 +63,6 @@ def pytorch_funcify_IncSubtensor(op, node, **kwargs):
         def set_subtensor(x, y, *flattened_indices):
             indices = indices_from_subtensor(flattened_indices, idx_list)
             check_negative_steps(indices)
-            if op.idx_list == (0,):
-                op._check_runtime_broadcasting(node, x, y, indices[0])
             if not inplace:
                 x = x.clone()
             x[indices] = y
@@ -77,8 +75,6 @@ def pytorch_funcify_IncSubtensor(op, node, **kwargs):
         def inc_subtensor(x, y, *flattened_indices):
             indices = indices_from_subtensor(flattened_indices, idx_list)
             check_negative_steps(indices)
-            if op.idx_list == (0,):
-                op._check_runtime_broadcasting(node, x, y, indices[0])
             if not inplace:
                 x = x.clone()
             x[indices] += y
@@ -98,8 +94,7 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def adv_set_subtensor(x, y, *flattened_indices):
             indices = indices_from_subtensor(flattened_indices, idx_list)
             check_negative_steps(indices)
-            if op.idx_list == (0,):
-                op._check_runtime_broadcasting(node, x, y, indices[0])
+            op._check_runtime_broadcast_of_vector_index(node, x, y, indices[0])
             if not inplace:
                 x = x.clone()
             x[indices] = y.type_as(x)
@@ -112,8 +107,7 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def adv_inc_subtensor_no_duplicates(x, y, *flattened_indices):
             indices = indices_from_subtensor(flattened_indices, idx_list)
             check_negative_steps(indices)
-            if op.idx_list == (0,):
-                op._check_runtime_broadcasting(node, x, y, indices[0])
+            op._check_runtime_broadcast_of_vector_index(node, x, y, indices[0])
             if not inplace:
                 x = x.clone()
             x[indices] += y.type_as(x)
@@ -131,8 +125,7 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
             indices = indices_from_subtensor(flattened_indices, idx_list)
             # Not needed because slices aren't supported in this path
             # check_negative_steps(indices)
-            if op.idx_list == (0,):
-                op._check_runtime_broadcasting(node, x, y, indices[0])
+            op._check_runtime_broadcast_of_vector_index(node, x, y, indices[0])
             if not inplace:
                 x = x.clone()
             x.index_put_(indices, y.type_as(x), accumulate=True)
