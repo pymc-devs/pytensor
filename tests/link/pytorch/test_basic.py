@@ -426,7 +426,7 @@ def test_ScalarLoop_while():
 def test_ScalarLoop_Elemwise_single_carries():
     n_steps = int64("n_steps")
     x0 = float64("x0")
-    x = x0 * 2
+    x = x0 * np.int8(2)
     until = x >= 10
 
     scalarop = ScalarLoop(init=[x0], update=[x], until=until)
@@ -452,8 +452,8 @@ def test_ScalarLoop_Elemwise_multi_carries():
     n_steps = int64("n_steps")
     x0 = float64("x0")
     x1 = float64("x1")
-    x = x0 * 2
-    x1_n = x1 * 3
+    x = x0 * np.int8(2)
+    x1_n = x1 * np.int8(3)
     until = x >= 10
 
     scalarop = ScalarLoop(init=[x0, x1], update=[x, x1_n], until=until)

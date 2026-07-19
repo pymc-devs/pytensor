@@ -1288,7 +1288,8 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         self.t_gemv1((3, 0))
         self.t_gemv1((0, 0))
 
-    def test_gemv2(self):
+    @pytest.mark.parametrize("cast_policy", ["custom", "numpy+floatX"])
+    def test_gemv2(self, cast_policy):
         # test vector2+dot(vector1,matrix)
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         v1 = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
@@ -1296,7 +1297,8 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         v2 = shared(v2_orig)
         m = shared(np.array(rng.uniform(size=(2, 3)), dtype="float32"))
 
-        f = function([], v2 + pytensor.tensor.dot(v1, m), mode=mode_blas_opt)
+        with config.change_flags(cast_policy=cast_policy):
+            f = function([], v2 + pytensor.tensor.dot(v1, m), mode=mode_blas_opt)
 
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(v1.get_value(), m.get_value()) + v2.get_value())
@@ -1305,9 +1307,13 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         assert topo[-1].op.inplace is False
 
         # test the inplace version
-        g = function(
-            [], [], updates=[(v2, v2 + pytensor.tensor.dot(v1, m))], mode=mode_blas_opt
-        )
+        with config.change_flags(cast_policy=cast_policy):
+            g = function(
+                [],
+                [],
+                updates=[(v2, v2 + pytensor.tensor.dot(v1, m))],
+                mode=mode_blas_opt,
+            )
 
         # Assert they produce the same output
         g()
