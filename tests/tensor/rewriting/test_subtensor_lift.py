@@ -51,6 +51,7 @@ from pytensor.tensor.rewriting.subtensor import (
 )
 from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
+    local_advanced_subtensor_of_dot,
     local_subtensor_make_vector,
     local_subtensor_of_batch_dims,
     local_subtensor_of_expand_dims,
@@ -1504,3 +1505,159 @@ class TestExtractDiagLiftPass:
 
         for got, ref in zip(f_on(), f_off(), strict=True):
             np.testing.assert_allclose(got, ref, equal_nan=True)
+
+
+class TestAdvancedSubtensorOfDot:
+    """``dot(A, B)[i, j]``: a separable index leaves a smaller ``Dot``, a coupled
+    one has to become ``Mul`` + ``Sum``.  Both are gated on the index provably not
+    selecting more elements than the product holds.
+    """
+
+    rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    def test_coupled_constant_indices(self):
+        """Statically shorter constant indices are provably not larger."""
+        rng = np.random.default_rng(0)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+        j = pt.constant(np.array([2, 2, 4, 0]))
+
+        result = RewriteTester([A, B], [(A @ B)[i, j]], **self.rewrite_kw)
+        result.assert_graph((A[i] * B.mT[j]).sum(-1))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_coupled_assumed_unique_indices(self):
+        """With no static shape anywhere, a ``unique_indices`` assumption is what
+        proves the gather can't enlarge the operands."""
+        rng = np.random.default_rng(1)
+        A = pt.matrix("A")
+        B = pt.matrix("B")
+        i = pt.lvector("i")
+        j = pt.lvector("j")
+        i_unique = assume(i, unique_indices=True)
+        j_unique = assume(j, unique_indices=True)
+
+        result = RewriteTester(
+            [A, B, i, j],
+            [(A @ B)[i_unique, j_unique]],
+            **self.rewrite_kw,
+            custom_rewrite=DrainSpecifyAssumptions(),
+        )
+        result.assert_graph((A[i] * B.mT[j]).sum(-1))
+        result.assert_eval(
+            rng.standard_normal((6, 4)),
+            rng.standard_normal((4, 6)),
+            np.array([0, 3, 5, 1]),
+            np.array([2, 2, 4, 0]),
+        )
+
+    def test_coupled_unbounded_indices_bail(self):
+        """A plain index vector could be longer than the product has elements, so
+        folding it in may do strictly more work than materializing the product."""
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.lvector("i")
+        j = pt.lvector("j")
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B, i, j],
+            [M[i, j]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[i, j])
+
+    def test_repeated_index(self):
+        """The same index on both axes gathers a permuted diagonal."""
+        rng = np.random.default_rng(2)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+
+        result = RewriteTester([A, B], [(A @ B)[i, i]], **self.rewrite_kw)
+        result.assert_graph((A[i] * B.mT[i]).sum(-1))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_row_index_keeps_dot(self):
+        """One index leaves the operands independent, so a cheaper ``Dot`` survives."""
+        rng = np.random.default_rng(3)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 1, 3]))
+
+        result = RewriteTester([A, B], [(A @ B)[i]], **self.rewrite_kw)
+        result.assert_graph(pt.dot(A[i], B))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_column_index_keeps_dot(self):
+        rng = np.random.default_rng(4)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        j = pt.constant(np.array([2, 4, 0]))
+
+        result = RewriteTester([A, B], [(A @ B)[:, j]], **self.rewrite_kw)
+        result.assert_graph(pt.dot(A, B[:, j]))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_batched_coupled_indices(self):
+        rng = np.random.default_rng(5)
+        A = pt.tensor("A", shape=(3, 6, 4))
+        B = pt.tensor("B", shape=(3, 4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+        j = pt.constant(np.array([2, 2, 4, 0]))
+
+        result = RewriteTester([A, B], [(A @ B)[:, i, j]], **self.rewrite_kw)
+        result.assert_eval(
+            rng.standard_normal((3, 6, 4)), rng.standard_normal((3, 4, 6))
+        )
+        assert not any(
+            isinstance(node.op, Dot | Blockwise) for node in result.rewr_fg.apply_nodes
+        )
+
+    def test_provably_larger_index_bails(self):
+        """Gathering more elements than the product holds is more work than
+        materializing it once, so the size gate has to reject it."""
+        rng = np.random.default_rng(6)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        idx = pt.constant(rng.integers(0, 6, 500))
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B],
+            [M[idx, idx]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[idx, idx])
+
+    def test_multi_client_bails(self):
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B],
+            [M[i, i] + M.sum()],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[i, i] + M.sum())
+
+    def test_boolean_mask_bails(self):
+        """A boolean mask has a data-dependent size the gate cannot weigh."""
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        mask = pt.vector("mask", shape=(6,), dtype=bool)
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B, mask],
+            [M[mask, mask]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[mask, mask])

@@ -192,6 +192,54 @@ def _arange_provably_unique(start, stop, step) -> bool:
     return False
 
 
+def _arange_shifted_bounds(idx):
+    """``arange(a, b, s) +/- k`` as the bounds of the ``arange`` it is equal to.
+
+    A scalar shift slides the whole range, so whether the entries straddle zero — the
+    only thing that makes distinct values alias onto one position — is still decided by
+    the bounds, once the shift is folded into them. ``arange(-5, 5) + 5`` is
+    ``arange(0, 10)``, unique, even though the unshifted range is not.
+    """
+    if not (
+        isinstance(idx.owner_op, Elemwise)
+        and isinstance(idx.owner.op.scalar_op, Add | Sub)
+    ):
+        return None
+    x, y = idx.owner.inputs
+    if isinstance(x.owner_op, ARange) and all(y.type.broadcastable):
+        arange_var, shift_var = x, y
+    elif (
+        isinstance(idx.owner.op.scalar_op, Add)
+        and isinstance(y.owner_op, ARange)
+        and all(x.type.broadcastable)
+    ):
+        arange_var, shift_var = y, x
+    else:
+        return None
+    try:
+        shift = int(get_underlying_scalar_constant_value(shift_var))
+    except NotScalarConstantError:
+        # A symbolic shift moves the range by an unknown amount, so where it sits
+        # relative to zero -- the only thing that matters here -- stays unknown.
+        return None
+    if isinstance(idx.owner.op.scalar_op, Sub):
+        shift = -shift
+
+    def shifted(bound):
+        # Fold eagerly: the sign checks below read the bound itself, not a value
+        # they could recover from an unevaluated Add. The shifted value can leave the
+        # original bound's dtype (``arange(5)`` carries int8 bounds), and only its
+        # sign and magnitude are ever read, so let the constant pick its own.
+        try:
+            value = int(get_scalar_constant_value(bound)) + shift
+        except NotScalarConstantError:
+            return bound + shift
+        return tensor_constant(np.asarray(value))
+
+    start, stop, step = arange_var.owner.inputs
+    return shifted(start), shifted(stop), step
+
+
 def _index_provably_unique(idx, fgraph: FunctionGraph | None) -> bool:
     """Whether a single index selects each position on its own axis at most once.
 
@@ -217,6 +265,8 @@ def _index_provably_unique(idx, fgraph: FunctionGraph | None) -> bool:
         return True
     if isinstance(idx.owner_op, ARange):
         return _arange_provably_unique(*idx.owner.inputs)
+    if (shifted_bounds := _arange_shifted_bounds(idx)) is not None:
+        return _arange_provably_unique(*shifted_bounds)
     if isinstance(idx.owner_op, Reshape | DimShuffle):
         # Views that only reorder or insert size-1 dims keep the value multiset.
         return _index_provably_unique(idx.owner.inputs[0], fgraph)
@@ -384,7 +434,8 @@ def eager_add_zero(x, y):
 def _eager_scalar(x):
     """Reduce a 0d or ``(1,)``-shaped tensor to the simplest scalar form."""
     if isinstance(x, TensorConstant):
-        return int(x.data)
+        # ``.item()`` covers the ``(1,)`` case the 0d-only ``int()`` rejects.
+        return int(x.data.item())
     if isinstance(x.owner_op, DimShuffle) and x.owner.op.input_ndim == 0:
         inner = x.owner.inputs[0]
         return int(inner.data) if isinstance(inner, TensorConstant) else inner
