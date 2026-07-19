@@ -909,16 +909,15 @@ class TestHyp2F1Grad:
         mode = get_default_mode().including("local_useless_2f1grad_loop")
         f_grad = function([a1, a2, b1, z], hyp2f1_grad, mode=mode)
 
-        if len(wrt) == 3 and (config.mode == "FAST_COMPILE" or not config.cxx):
-            # In this case we actually get two scalar_loops, because the merged one can't be executed in Python
-            [scalar_loop_op1, scalar_loop_op2] = [
-                node.op.scalar_op
-                for node in f_grad.maker.fgraph.toposort()
+        if len(wrt) == 3 and "py_only" in mode.linker.required_rewrites:
+            # `split_2f1grad_loop` splits the merged loop, which can't be executed in Python
+            scalar_loop_nins = sorted(
+                node.op.scalar_op.nin
+                for node in f_grad.maker.fgraph.apply_nodes
                 if isinstance(node.op, Elemwise)
                 and isinstance(node.op.scalar_op, ScalarLoop)
-            ]
-            assert scalar_loop_op1.nin == 10 + 3 * 1  # wrt=[2]
-            assert scalar_loop_op2.nin == 10 + 3 * 2  # wrt=[0, 1]
+            )
+            assert scalar_loop_nins == [10 + 3 * 1, 10 + 3 * 2]  # wrt=[2], wrt=[0, 1]
         else:
             [scalar_loop_op] = [
                 node.op.scalar_op
