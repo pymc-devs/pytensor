@@ -9,12 +9,13 @@ from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.tensor.basic import alloc_diag
+from pytensor.tensor.basic import ExtractDiag, alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.math import Dot
-from tests.unittest_tools import assert_equal_computations
+from pytensor.tensor.rewriting.subtensor_lift import extract_diag_lift_pass
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_nested_blockdiag_fusion():
@@ -482,3 +483,128 @@ def test_det_of_non_permutation_selection_is_not_rewritten():
     f = function([idx], pt.linalg.det(S), mode="FAST_RUN")
     assert any(isinstance(node.op, Det) for node in f.maker.fgraph.apply_nodes)
     assert_allclose(f(np.array([0, 1, 1, 3])), 0.0)  # duplicate column -> singular
+
+
+class TestDiagOfDot:
+    """``diag(A @ B)`` is lowered to a paired-arange gather by
+    ``local_extract_diag_lift`` and folded into the operands by
+    ``local_advanced_subtensor_of_dot``, so it needs the specialize pass.
+    """
+
+    rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    @pytest.mark.parametrize("batch", [(), (3,)], ids=["2d", "batched"])
+    @pytest.mark.parametrize("offset", [0, 1, -1, 2, -2], ids=str)
+    def test_diag_of_dot(self, batch, offset):
+        rng = np.random.default_rng(0)
+        n, contracted = 6, 4
+        A = pt.tensor("A", shape=(*batch, n, contracted))
+        B = pt.tensor("B", shape=(*batch, contracted, n))
+
+        out = pt.diagonal(A @ B, offset=offset, axis1=-2, axis2=-1)
+        result = RewriteTester([A, B], [out], **self.rewrite_kw)
+
+        # The main diagonal has a stable closed form; shifted diagonals only differ
+        # by slicing, whose exact canonical shape is verified against the oracle below.
+        if offset == 0:
+            result.assert_graph((A * B.mT).sum(-1))
+
+        result.assert_eval(
+            rng.standard_normal((*batch, n, contracted)),
+            rng.standard_normal((*batch, contracted, n)),
+        )
+
+    @pytest.mark.parametrize("offset", [9, -9], ids=str)
+    def test_out_of_range_offset(self, offset):
+        """An offset past the matrix gives an empty diagonal, so only values are checked."""
+        rng = np.random.default_rng(1)
+        A = pt.matrix("A", shape=(6, 6))
+        B = pt.matrix("B", shape=(6, 6))
+        result = RewriteTester(
+            [A, B], [pt.diagonal(A @ B, offset=offset)], **self.rewrite_kw
+        )
+        result.assert_eval(rng.standard_normal((6, 6)), rng.standard_normal((6, 6)))
+
+    def test_rectangular_product(self):
+        """A non-square product exercises the trim to the shorter side."""
+        rng = np.random.default_rng(2)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 3))
+        result = RewriteTester([A, B], [pt.diag(A @ B)], **self.rewrite_kw)
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 3)))
+
+    @pytest.mark.parametrize("offset", [0, 2, -2], ids=str)
+    def test_dynamic_shapes(self, offset):
+        """With no static shapes the diagonal length stays symbolic, so the size gate
+        rests on the paired ``arange``. An offset diagonal indexes with ``arange(d) +
+        k``, whose entry count is the ``arange``'s even though the shift can alias
+        entries onto each other -- the gate has to read it as a size, not a uniqueness.
+        """
+        rng = np.random.default_rng(3)
+        A = pt.matrix("A")
+        B = pt.matrix("B")
+        result = RewriteTester(
+            [A, B], [pt.diagonal(A @ B, offset=offset)], **self.rewrite_kw
+        )
+        assert not any(
+            isinstance(node.op, Dot | ExtractDiag)
+            for node in result.rewr_fg.apply_nodes
+        )
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_trace_of_dot(self):
+        """``trace`` is ``diagonal(...).sum()``, so it folds through the same path."""
+        rng = np.random.default_rng(4)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        result = RewriteTester([A, B], [pt.trace(A @ B)], **self.rewrite_kw)
+        assert not any(isinstance(node.op, Dot) for node in result.rewr_fg.apply_nodes)
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_diag_of_einsum(self):
+        """``einsum`` only inlines to a ``Dot`` during specialize, so the fold has
+        to be reachable there and not only in canonicalize."""
+        rng = np.random.default_rng(5)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        out = pt.diagonal(pt.einsum("ik,kj->ij", A, B))
+        result = RewriteTester([A, B], [out], **self.rewrite_kw)
+        assert not any(isinstance(node.op, Dot) for node in result.rewr_fg.apply_nodes)
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_single_client_guard(self):
+        """The product also feeds ``M.sum()`` so it is materialized regardless; the
+        rewrite must not fire and add a redundant elementwise path."""
+        A = pt.matrix("A", shape=(5, 5))
+        B = pt.matrix("B", shape=(5, 5))
+        M = pt.dot(A, B)
+        result = RewriteTester(
+            [A, B],
+            [pt.diag(M) + M.sum()],
+            include=None,
+            custom_rewrite=extract_diag_lift_pass,
+        )
+        result.assert_graph(pt.diag(M) + M.sum())
+
+    def test_wrong_axis_guard(self):
+        """A diagonal over the batch/row axes, not the contracted axes, has no
+        closed form in the operands and must be left alone."""
+        A = pt.tensor("A", shape=(4, 5, 5))
+        B = pt.tensor("B", shape=(4, 5, 5))
+        out = pt.diagonal(A @ B, axis1=0, axis2=1)
+        result = RewriteTester([A, B], [out], **self.rewrite_kw)
+        assert any(
+            isinstance(node.op, ExtractDiag) for node in result.rewr_fg.apply_nodes
+        )
+
+    def test_dtype_preserved(self):
+        """``sum`` upcasts an int32 accumulator to int64, so the rewrite must cast back."""
+        rng = np.random.default_rng(6)
+        A = pt.matrix("A", shape=(6, 4), dtype="int32")
+        B = pt.matrix("B", shape=(4, 6), dtype="int32")
+        result = RewriteTester([A, B], [pt.diag(A @ B)], **self.rewrite_kw)
+        result.assert_graph((A * B.mT).sum(-1).astype("int32"))
+        result.assert_eval(
+            rng.integers(0, 5, (6, 4)).astype("int32"),
+            rng.integers(0, 5, (4, 6)).astype("int32"),
+        )
