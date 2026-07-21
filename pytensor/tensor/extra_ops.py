@@ -1710,6 +1710,10 @@ def linspace(
         axis=axis,
     )
 
+    if retstep:
+        samples, step = ls
+        return samples.astype(dtype), step
+
     return ls.astype(dtype)
 
 
