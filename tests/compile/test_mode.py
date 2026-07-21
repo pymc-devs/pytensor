@@ -101,11 +101,10 @@ class TestBunchOfModes:
         # regression check:
         # there should be
         # - NumbaLinker
-        # - `VMLinker`
-        # - OpWiseCLinker (FAST_RUN)
-        # - PerformLinker (FAST_COMPILE)
+        # - `VMLinker`  (py, vm, cvm, FAST_COMPILE)
+        # - OpWiseCLinker (c|py)
         # - DebugMode's Linker  (DEBUG_MODE)
-        assert 5 == len(set(linker_classes_involved))
+        assert 4 == len(set(linker_classes_involved))
 
 
 class TestOldModesProblem:
