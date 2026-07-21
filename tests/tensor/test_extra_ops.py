@@ -1356,6 +1356,22 @@ def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
     )
 
 
+@pytest.mark.parametrize("dtype", [None, "int64", "floatX"])
+def test_linspace_retstep(dtype):
+    dtype = dtype if dtype != "floatX" else config.floatX
+    samples, step = pt.linspace(0, 1, num=3, retstep=True, dtype=dtype)
+
+    result = function(inputs=[], outputs=[samples, step], mode="FAST_COMPILE")()
+    assert result is not None
+    actual_samples, actual_step = result
+    expected_samples, expected_step = np.linspace(
+        0, 1, num=3, retstep=True, dtype=dtype
+    )
+
+    np.testing.assert_allclose(actual_samples, expected_samples)
+    np.testing.assert_allclose(actual_step, expected_step)
+
+
 def test_concat_with_broadcast():
     rng = np.random.default_rng()
     a = pt.tensor("a", shape=(1, 3, 5))
