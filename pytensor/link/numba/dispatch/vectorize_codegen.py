@@ -167,10 +167,20 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
             _, out_axis, _ = entry
             group_min_axis[root] = min(group_min_axis.get(root, out_axis), out_axis)
 
-    return tuple(
-        tuple(range(group_min_axis[find(k)], group_min_axis[find(k)] + idx_ndims[k]))
-        for k in range(n_indices)
-    )
+    # Indices in a group broadcast together right-aligned (NumPy semantics), so
+    # a lower-ndim index occupies the trailing loop dims of the group's span,
+    # whose width is the max ndim across the group.
+    group_max_ndim: dict[int, int] = {}
+    for k in range(n_indices):
+        root = find(k)
+        group_max_ndim[root] = max(group_max_ndim.get(root, 0), idx_ndims[k])
+
+    load_axes = []
+    for k in range(n_indices):
+        root = find(k)
+        end = group_min_axis[root] + group_max_ndim[root]
+        load_axes.append(tuple(range(end - idx_ndims[k], end)))
+    return tuple(load_axes)
 
 
 def _core_slice_layout(full_layout, batch_bc_pattern):

@@ -230,6 +230,35 @@ class TestIndexedReadFusion:
         yv = rng.normal(size=5)
         np.testing.assert_allclose(fn(xv, iv, yv), fn_u(xv, iv, yv), rtol=1e-10)
 
+    def test_mixed_ndim_indices(self):
+        """Indices of different ndims broadcast right-aligned within the group.
+
+        A lower-ndim index aligns with the trailing loop dims of its group's
+        span, not the leading ones (regression: it was loaded left-aligned,
+        reading with the wrong loop counter).
+        """
+        rng = np.random.default_rng(42)
+        x = pt.tensor("x", shape=(3, 4, 5))
+        i2 = pt.matrix("i2", dtype="int64", shape=(3, 4))
+        i1 = pt.vector("i1", dtype="int64", shape=(4,))
+        ic = pt.matrix("ic", dtype="int64", shape=(3, 4))
+        xv = rng.normal(size=(3, 4, 5))
+        i2v = rng.integers(3, size=(3, 4)).astype(np.int64)
+        i1v = rng.integers(4, size=4).astype(np.int64)
+        icv = rng.integers(5, size=(3, 4)).astype(np.int64)
+
+        # (2, 1) column, (4,) row and (3, 4) full index on the three axes
+        col = pt.arange(3)[:, None]
+        row = pt.arange(4)
+        fn, fn_u = fused_and_unfused([x, ic], x[col, row, ic].sum(axis=-1))
+        assert_fused(fn)
+        np.testing.assert_allclose(fn(xv, icv), fn_u(xv, icv), rtol=1e-10)
+
+        # 2-D and 1-D index pair on the two leading axes
+        fn, fn_u = fused_and_unfused([x, i2, i1], pt.exp(x[i2, i1]))
+        assert_fused(fn)
+        np.testing.assert_allclose(fn(xv, i2v, i1v), fn_u(xv, i2v, i1v), rtol=1e-10)
+
 
 class TestIndexedWriteFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
