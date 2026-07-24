@@ -14,7 +14,7 @@ def _reshape_stream(dtype):
 @mlx_funcify.register(Blockwise)
 def funcify_Blockwise(op: Blockwise, node, **kwargs):
     core_node = op._create_dummy_core_node(node.inputs)
-    core_f = mlx_funcify(op.core_op, core_node)
+    core_f = mlx_funcify(op.core_op, node=core_node)
 
     batch_ndim = op.batch_ndim(node)
     if batch_ndim == 0:

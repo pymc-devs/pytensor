@@ -4,6 +4,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor import tensor
+from pytensor.tensor.basic import Join, MakeVector, ScalarFromTensor
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import Dot
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode, py_mode
@@ -107,6 +108,50 @@ def test_blockwise_fallback_signature(batch):
         [out],
         [rng.standard_normal((*batch, 2, 3)), rng.standard_normal((*batch, 3, 4))],
     )
+
+
+def _makevector_graph(rng, batch):
+    a = tensor("a", shape=batch, dtype="float32")
+    b = tensor("b", shape=batch, dtype="float32")
+    op = Blockwise(MakeVector(dtype="float32"), signature="(),()->(2)")
+    values = [
+        rng.standard_normal(batch).astype("float32"),
+        rng.standard_normal(batch).astype("float32"),
+    ]
+    return [a, b], op(a, b), values
+
+
+def _join_graph(rng, batch):
+    a = tensor("a", shape=(*batch, 3), dtype="float32")
+    b = tensor("b", shape=(*batch, 4), dtype="float32")
+    op = Blockwise(Join(0), signature="(i),(j)->(k)")
+    values = [
+        rng.standard_normal((*batch, 3)).astype("float32"),
+        rng.standard_normal((*batch, 4)).astype("float32"),
+    ]
+    return [a, b], op(a, b), values
+
+
+def _scalar_from_tensor_graph(rng, batch):
+    a = tensor("a", shape=batch, dtype="float32")
+    op = Blockwise(ScalarFromTensor(), signature="()->()")
+    return [a], op(a), [rng.standard_normal(batch).astype("float32")]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [_makevector_graph, _join_graph, _scalar_from_tensor_graph],
+    ids=["makevector", "join", "scalar_from_tensor"],
+)
+def test_blockwise_kwargs_only_core_op(build):
+    # Core ops whose dispatch signature is (op, **kwargs) must receive the core
+    # node by keyword; passing it positionally raised a TypeError inside
+    # funcify_Blockwise.
+    rng = np.random.default_rng(7)
+    inputs, out, values = build(rng, (5,))
+
+    assert isinstance(out.owner.op, Blockwise)
+    compare_mlx_and_py(inputs, [out], values)
 
 
 def test_blockwise_multi_output():
