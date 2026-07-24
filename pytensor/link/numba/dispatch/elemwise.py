@@ -993,7 +993,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 3
+    cache_version = 4
     if scalar_cache_key is None:
         key = None
     else:
