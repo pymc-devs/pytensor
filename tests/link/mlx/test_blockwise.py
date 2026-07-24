@@ -14,45 +14,46 @@ matmul = Blockwise(Dot(), signature="(i,j),(j,k)->(i,k)")
 odd_matmul = Blockwise(Dot(), signature="(i00,i01),(i10,i11)->(o00,o01)")
 
 
-def _spd_batch(rng, batch):
-    """A batch of symmetric positive-definite matrices for Cholesky."""
-    a = rng.standard_normal((*batch, 3, 3))
-    return a @ np.swapaxes(a, -1, -2) + 3 * np.eye(3)
-
-
-# Core ops with distinct gufunc signatures, each built for a leading batch shape:
-# two rank-2 inputs, one rank-2 input, two rank-1 inputs.
-def _matmul_graph(rng, batch):
+@pytest.mark.parametrize("batch", [(5,), (2, 3)], ids=["single_batch", "nested_batch"])
+def test_blockwise_matmul(batch):
+    rng = np.random.default_rng(7)
     a = tensor("a", shape=(*batch, 2, 3))
     b = tensor("b", shape=(*batch, 3, 4))
-    values = [rng.standard_normal((*batch, 2, 3)), rng.standard_normal((*batch, 3, 4))]
-    return [a, b], matmul(a, b), values
-
-
-def _cholesky_graph(rng, batch):
-    m = tensor("m", shape=(*batch, 3, 3))
-    return [m], pt.linalg.cholesky(m), [_spd_batch(rng, batch)]
-
-
-def _convolve_graph(rng, batch):
-    v = tensor("v", shape=(*batch, 16))
-    k = tensor("k", shape=(*batch, 5))
-    values = [rng.standard_normal((*batch, 16)), rng.standard_normal((*batch, 5))]
-    return [v, k], pt.signal.convolve1d(v, k, mode="valid"), values
-
-
-@pytest.mark.parametrize(
-    "build",
-    [_matmul_graph, _cholesky_graph, _convolve_graph],
-    ids=["matmul", "cholesky", "convolve1d"],
-)
-@pytest.mark.parametrize("batch", [(5,), (2, 3)], ids=["single_batch", "nested_batch"])
-def test_blockwise_signatures(build, batch):
-    rng = np.random.default_rng(7)
-    inputs, out, values = build(rng, batch)
+    out = matmul(a, b)
 
     assert isinstance(out.owner.op, Blockwise)
-    compare_mlx_and_py(inputs, [out], values)
+    compare_mlx_and_py(
+        [a, b],
+        [out],
+        [rng.standard_normal((*batch, 2, 3)), rng.standard_normal((*batch, 3, 4))],
+    )
+
+
+@pytest.mark.parametrize("batch", [(5,), (2, 3)], ids=["single_batch", "nested_batch"])
+def test_blockwise_cholesky(batch):
+    rng = np.random.default_rng(7)
+    m = tensor("m", shape=(*batch, 3, 3))
+    a = rng.standard_normal((*batch, 3, 3))
+    spd = a @ np.swapaxes(a, -1, -2) + 3 * np.eye(3)
+    out = pt.linalg.cholesky(m)
+
+    assert isinstance(out.owner.op, Blockwise)
+    compare_mlx_and_py([m], [out], [spd])
+
+
+@pytest.mark.parametrize("batch", [(5,), (2, 3)], ids=["single_batch", "nested_batch"])
+def test_blockwise_convolve1d(batch):
+    rng = np.random.default_rng(7)
+    v = tensor("v", shape=(*batch, 16))
+    k = tensor("k", shape=(*batch, 5))
+    out = pt.signal.convolve1d(v, k, mode="valid")
+
+    assert isinstance(out.owner.op, Blockwise)
+    compare_mlx_and_py(
+        [v, k],
+        [out],
+        [rng.standard_normal((*batch, 16)), rng.standard_normal((*batch, 5))],
+    )
 
 
 @pytest.mark.parametrize(
@@ -110,48 +111,44 @@ def test_blockwise_fallback_signature(batch):
     )
 
 
-def _makevector_graph(rng, batch):
-    a = tensor("a", shape=batch, dtype="float32")
-    b = tensor("b", shape=batch, dtype="float32")
-    op = Blockwise(MakeVector(dtype="float32"), signature="(),()->(2)")
-    values = [
-        rng.standard_normal(batch).astype("float32"),
-        rng.standard_normal(batch).astype("float32"),
-    ]
-    return [a, b], op(a, b), values
-
-
-def _join_graph(rng, batch):
-    a = tensor("a", shape=(*batch, 3), dtype="float32")
-    b = tensor("b", shape=(*batch, 4), dtype="float32")
-    op = Blockwise(Join(0), signature="(i),(j)->(k)")
-    values = [
-        rng.standard_normal((*batch, 3)).astype("float32"),
-        rng.standard_normal((*batch, 4)).astype("float32"),
-    ]
-    return [a, b], op(a, b), values
-
-
-def _scalar_from_tensor_graph(rng, batch):
-    a = tensor("a", shape=batch, dtype="float32")
-    op = Blockwise(ScalarFromTensor(), signature="()->()")
-    return [a], op(a), [rng.standard_normal(batch).astype("float32")]
-
-
-@pytest.mark.parametrize(
-    "build",
-    [_makevector_graph, _join_graph, _scalar_from_tensor_graph],
-    ids=["makevector", "join", "scalar_from_tensor"],
-)
-def test_blockwise_kwargs_only_core_op(build):
+def test_blockwise_kwargs_only_core_op():
     # Core ops whose dispatch signature is (op, **kwargs) must receive the core
     # node by keyword; passing it positionally raised a TypeError inside
     # funcify_Blockwise.
     rng = np.random.default_rng(7)
-    inputs, out, values = build(rng, (5,))
 
-    assert isinstance(out.owner.op, Blockwise)
-    compare_mlx_and_py(inputs, [out], values)
+    a = tensor("a", shape=(5,), dtype="float32")
+    b = tensor("b", shape=(5,), dtype="float32")
+    make_vector = Blockwise(MakeVector(dtype="float32"), signature="(),()->(2)")(a, b)
+    assert isinstance(make_vector.owner.op, Blockwise)
+    compare_mlx_and_py(
+        [a, b],
+        [make_vector],
+        [
+            rng.standard_normal(5).astype("float32"),
+            rng.standard_normal(5).astype("float32"),
+        ],
+    )
+
+    a = tensor("a", shape=(5, 3), dtype="float32")
+    b = tensor("b", shape=(5, 4), dtype="float32")
+    join = Blockwise(Join(0), signature="(i),(j)->(k)")(a, b)
+    assert isinstance(join.owner.op, Blockwise)
+    compare_mlx_and_py(
+        [a, b],
+        [join],
+        [
+            rng.standard_normal((5, 3)).astype("float32"),
+            rng.standard_normal((5, 4)).astype("float32"),
+        ],
+    )
+
+    a = tensor("a", shape=(5,), dtype="float32")
+    scalar_from_tensor = Blockwise(ScalarFromTensor(), signature="()->()")(a)
+    assert isinstance(scalar_from_tensor.owner.op, Blockwise)
+    compare_mlx_and_py(
+        [a], [scalar_from_tensor], [rng.standard_normal(5).astype("float32")]
+    )
 
 
 def test_blockwise_multi_output():
