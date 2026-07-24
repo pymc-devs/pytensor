@@ -298,6 +298,9 @@ class NdtriExp(UnaryScalarOp):
         cst = np.asarray(np.sqrt(2 * np.pi), dtype=gz.type.dtype)
         return (gz * cst * exp(x + z**2 / 2),)
 
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
 
 ndtri_exp = NdtriExp(upgrade_to_float_no_complex, name="ndtri_exp")
 
