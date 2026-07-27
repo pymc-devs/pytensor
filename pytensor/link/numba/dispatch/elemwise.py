@@ -53,6 +53,7 @@ from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, Dot, MulWithoutZeros
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+from pytensor.tensor.rewriting.scalarize import ScalarCAReduce
 
 
 @singledispatch
@@ -241,6 +242,7 @@ def create_multiaxis_reducer(
     ndim,
     acc_dtype=None,
     out_dtype,
+    scalar_out=False,
 ):
     r"""Construct a function that reduces multiple axes.
 
@@ -505,7 +507,15 @@ def create_multiaxis_reducer(
 
     if n_kept == 0:
         # Full reduction: Use scalar accumulation
-        if complex_to_real:
+        if scalar_out:
+            # Hand the accumulator out as a scalar rather than boxing it in a 0-d
+            # array, saving one heap allocation per fully-reduced output.
+            return_obj = (
+                f"{out_dtype_str}(res.real)"
+                if complex_to_real
+                else f"{out_dtype_str}(res)"
+            )
+        elif complex_to_real:
             return_obj = f"np.array(res).real.astype({out_dtype_str})"
         else:
             return_obj = f"np.array(res, dtype={out_dtype_str})"
@@ -1179,7 +1189,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
 
 
 @register_funcify_and_cache_key(CAReduce)
-def numba_funcify_CAReduce(op, node, **kwargs):
+def numba_funcify_CAReduce(op, node, scalar_out=False, **kwargs):
     axes = op.axis
     if axes is None:
         axes = list(range(node.inputs[0].ndim))
@@ -1199,10 +1209,11 @@ def numba_funcify_CAReduce(op, node, **kwargs):
         ndim=ndim,
         acc_dtype=acc_dtype,
         out_dtype=out_dtype,
+        scalar_out=scalar_out,
     )
     careduce_fn = numba_basic.numba_njit(careduce_py_fn, boundscheck=False)
 
-    cache_version = 7
+    cache_version = 8
     careduce_key = sha256(
         str(
             (
@@ -1213,11 +1224,21 @@ def numba_funcify_CAReduce(op, node, **kwargs):
                 acc_dtype,
                 op.scalar_op.identity,
                 MAX_CAREDUCE_LOOPS,
+                # Selects a register value vs a 0-d array in the generated source.
+                scalar_out,
                 cache_version,
             )
         ).encode()
     ).hexdigest()
     return careduce_fn, careduce_key
+
+
+@register_funcify_and_cache_key(ScalarCAReduce)
+def numba_funcify_ScalarCAReduce(op, node, **kwargs):
+    [careduce_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, CAReduce)]
+    return numba_funcify_CAReduce(
+        careduce_node.op, careduce_node, scalar_out=True, **kwargs
+    )
 
 
 def _dimshuffle_out_layout(

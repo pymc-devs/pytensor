@@ -14,6 +14,7 @@ from pytensor.link.numba.dispatch.string_codegen import (
     build_source_code,
     create_tuple_string,
 )
+from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -27,6 +28,7 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
+from pytensor.tensor.rewriting.scalarize import ScalarJoin
 
 
 @register_funcify_default_op_cache_key(AllocEmpty)
@@ -311,6 +313,49 @@ def numba_funcify_Join(op, node, **kwargs):
     # The loop nests cannot go out of bounds: the output is allocated from the
     # validated input shapes
     return numba_basic.numba_njit(join_fn, boundscheck=False), cache_key
+
+
+@register_funcify_and_cache_key(ScalarJoin)
+def numba_funcify_ScalarJoin(op, node, **kwargs):
+    # Same allocate-and-write shape as the 1-d ``Join`` above, but each entry may
+    # be a bare scalar (which contributes a single element) rather than an array,
+    # so it is written directly without ever being boxed.
+    dtype = np.dtype(node.outputs[0].type.dtype)
+    is_scalar = [isinstance(inp.type, ScalarType) for inp in node.inputs]
+    names = [f"i{i}" for i in range(len(node.inputs))]
+    length = " + ".join(
+        "1" if scalar else f"{name}.shape[0]"
+        for name, scalar in zip(names, is_scalar, strict=True)
+    )
+    code: list[str | CODE_TOKEN] = [
+        f"def scalar_join({', '.join(names)}):",
+        CODE_TOKEN.INDENT,
+        f"out = np.empty({length}, dtype=dtype)",
+        "offset = 0",
+    ]
+    for name, scalar in zip(names, is_scalar, strict=True):
+        if scalar:
+            code.extend([f"out[offset] = {name}", "offset += 1"])
+        else:
+            code.extend(
+                [
+                    f"for k in range({name}.shape[0]):",
+                    CODE_TOKEN.INDENT,
+                    f"out[offset] = {name}[k]",
+                    "offset += 1",
+                    CODE_TOKEN.DEDENT,
+                ]
+            )
+    code.extend(["return out", CODE_TOKEN.DEDENT])
+    scalar_join = compile_numba_function_src(
+        build_source_code(code),
+        "scalar_join",
+        global_env=globals() | {"np": np, "dtype": dtype},
+    )
+    key = sha256(
+        str(("ScalarJoin", 1, str(dtype), tuple(is_scalar))).encode()
+    ).hexdigest()
+    return numba_basic.numba_njit(scalar_join), key
 
 
 @register_funcify_default_op_cache_key(Split)
