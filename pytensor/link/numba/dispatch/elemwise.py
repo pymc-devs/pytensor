@@ -912,8 +912,12 @@ def _build_reduce_impl_src(nout, post_specs, const_positions, n_outer):
         kept_axes, out_dtype, cast_needed = spec
         np_dtype = "bool_" if out_dtype == "bool" else out_dtype
         if not kept_axes:
-            # Full reduction → 0-d array of the single accumulated value.
-            code.append(f"{sym} = np.array({src}.ravel()[0], dtype=np.{np_dtype})")
+            # Full reduction: squeeze the size-1 keepdims buffer to a 0-d view,
+            # the same strided view a DimShuffle squeeze emits -- no ravel() copy.
+            expr = f"as_strided({src}, shape=(), strides=())"
+            if cast_needed:
+                expr = f"{expr}.astype(np.{np_dtype})"
+            code.append(f"{sym} = {expr}")
         else:
             shape_expr = create_tuple_string(
                 tuple(f"{src}.shape[{k}]" for k in kept_axes)
