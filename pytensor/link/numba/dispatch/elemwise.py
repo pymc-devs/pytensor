@@ -981,7 +981,9 @@ def _build_reduce_impl_src(nout, post_specs, const_positions, n_outer):
     Calls ``_vectorized`` (which produces a keepdims, size-1-on-reduced-axes
     buffer in ``acc_dtype``) then, per reduction output, squeezes the reduced
     axes back out and casts to the true output dtype.  ``post_specs[i]`` is
-    ``None`` for a passthrough output, else ``(kept_axes, out_dtype, cast_needed)``.
+    ``None`` for a passthrough output, else
+    ``(kept_axes, out_dtype, cast_needed, scalar_out)``; ``scalar_out`` returns a
+    full reduction as a scalar register rather than a 0-d array.
 
     ``const_positions`` lists the outer input positions that are ``ScalarType``
     and so are handed to ``_vectorized`` as loop-invariant ``constant_inputs``
@@ -1034,14 +1036,21 @@ def _build_reduce_impl_src(nout, post_specs, const_positions, n_outer):
         if spec is None:
             code.append(f"{sym} = {src}")
             continue
-        kept_axes, out_dtype, cast_needed = spec
+        kept_axes, out_dtype, cast_needed, scalar_out = spec
         np_dtype = "bool_" if out_dtype == "bool" else out_dtype
         if not kept_axes:
-            # Full reduction: squeeze the size-1 keepdims buffer to a 0-d view,
-            # the same strided view a DimShuffle squeeze emits -- no ravel() copy.
-            expr = f"as_strided({src}, shape=(), strides=())"
-            if cast_needed:
-                expr = f"{expr}.astype(np.{np_dtype})"
+            if scalar_out:
+                # ScalarType output: take the single value out of the size-1
+                # buffer (ScalarFromTensor: .item()); no array to materialize.
+                expr = f"{src}.item()"
+                if cast_needed:
+                    expr = f"np.{np_dtype}({expr})"
+            else:
+                # Squeeze the size-1 keepdims buffer to a 0-d view, the same
+                # strided view a DimShuffle squeeze emits -- no ravel() copy.
+                expr = f"as_strided({src}, shape=(), strides=())"
+                if cast_needed:
+                    expr = f"{expr}.astype(np.{np_dtype})"
             code.append(f"{sym} = {expr}")
         else:
             shape_expr = create_tuple_string(
@@ -1182,7 +1191,10 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         kept_axes = tuple(d for d in range(len(bc)) if d not in axes)
         out_dtype = node.outputs[i].type.dtype
         cast_needed = np.dtype(acc_dtype) != np.dtype(out_dtype)
-        post_specs.append((kept_axes, out_dtype, cast_needed))
+        # A ScalarType fused output is a full reduction handed out as a scalar
+        # (FuseElemwise wraps it in scalar_from_tensor) rather than a 0-d box.
+        scalar_out = isinstance(node.outputs[i].type, ScalarType)
+        post_specs.append((kept_axes, out_dtype, cast_needed, scalar_out))
 
     output_bc_patterns = tuple(output_bc_patterns_list)
     output_dtypes = tuple(output_dtypes_list)
@@ -1290,6 +1302,9 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     if scalar_cache_key is None:
         key = None
     else:
+        # Include each output's scalar-vs-array kind: a ScalarType reduced output
+        # generates a different (scalar-returning) reduction epilogue.
+        out_kinds = tuple(isinstance(o.type, ScalarType) for o in node.outputs)
         reduced_key = tuple(
             (type(r[0]).__name__, r[1], str(np.dtype(r[3]))) if r is not None else None
             for r in reduced_outputs
@@ -1305,6 +1320,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 idx_broadcastable,
                 indexed_outputs,
                 reduced_key,
+                out_kinds,
                 scalar_cache_key,
             )
         )
