@@ -21,6 +21,7 @@ from pytensor.link.numba.dispatch.basic import (
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.tensor import TensorType, TensorVariable
+from pytensor.tensor.rewriting.scalarize import ScalarSubtensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
@@ -230,6 +231,14 @@ def {function_name}({", ".join(input_names)}):
         scalar_out=scalar_out,
     )
     return numba_basic.numba_njit(func, boundscheck=True), cache_key
+
+
+@register_funcify_and_cache_key(ScalarSubtensor)
+def numba_funcify_ScalarSubtensor(op, node, **kwargs):
+    [subtensor_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, Subtensor)]
+    return numba_funcify_default_subtensor(
+        subtensor_node.op, subtensor_node, scalar_out=True, **kwargs
+    )
 
 
 @register_funcify_and_cache_key(AdvancedSubtensor)
