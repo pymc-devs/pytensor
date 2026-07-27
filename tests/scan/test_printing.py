@@ -3,6 +3,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.compile.mode import get_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.printing import _try_pydot_import, debugprint, pydotprint
@@ -611,6 +612,8 @@ def test_debugprint_compiled_fn():
     M = pt.tensor(dtype=np.float64, shape=(20000, 2, 2))
     one = pt.as_tensor(1, dtype=np.int64)
     zero = pt.as_tensor(0, dtype=np.int64)
+    # Numba-only scalarization would make the inner graph linker-dependent
+    mode = get_mode("FAST_RUN").excluding("scalarize")
 
     def no_shared_fn(n, x_tm1, M):
         p = M[n, x_tm1]
@@ -622,12 +625,12 @@ def test_debugprint_compiled_fn():
         sequences=[pt.arange(M.shape[0])],
         non_sequences=[M],
         allow_gc=False,
-        mode="FAST_RUN",
+        mode=mode,
     )
 
     # In this case, `debugprint` should print the compiled inner-graph
     # (i.e. from `Scan._fn`)
-    out = pytensor.function([M], out, updates=updates, mode="FAST_RUN")
+    out = pytensor.function([M], out, updates=updates, mode=mode)
 
     expected_output = """Subtensor{start:} [id A] 3
  ├─ Scan{scan_fn, while_loop=False, inplace=all} [id B] 2 (outer_out_sit_sot-0)

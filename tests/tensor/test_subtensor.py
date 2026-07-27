@@ -500,7 +500,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         mode = pytensor.compile.mode.get_default_mode()
         self.mode = mode.including(
             "local_useless_subtensor",
-        ).excluding("bool_idx_to_nonzero", "fuse_indexed_into_elemwise")
+        ).excluding("bool_idx_to_nonzero", "fuse_indexed_into_elemwise", "scalarize")
         self.fast_compile = config.mode == "FAST_COMPILE"
 
     def function(
