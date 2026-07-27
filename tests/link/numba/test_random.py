@@ -569,7 +569,7 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
                 ),
                 (
                     pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
+                    np.array(3.0, dtype=np.float64),
                 ),
             ],
             (2,),
