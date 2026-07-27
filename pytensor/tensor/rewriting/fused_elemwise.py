@@ -7,7 +7,7 @@ indexing and inline accumulation, eliminating materialised intermediate arrays.
 """
 
 from pytensor.compile import optdb
-from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.builders import OpFromGraph, construct_nominal_fgraph
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
@@ -22,12 +22,19 @@ from pytensor.scalar.basic import (
     Maximum,
     Minimum,
     Mul,
+    ScalarType,
+    get_scalar_type,
 )
 from pytensor.scalar.basic import (
     identity as scalar_identity,
 )
+from pytensor.tensor.basic import (
+    TensorFromScalar,
+    tensor_from_scalar,
+)
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
+from pytensor.tensor.rewriting.scalarize import ScalarizedElemwise
 from pytensor.tensor.shape import shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -288,6 +295,38 @@ class FuseElemwise(GraphRewriter):
     """
 
     @staticmethod
+    def _unwrap_scalarized(fgraph, node, worklist):
+        """Inline a ``ScalarizedElemwise`` back to its plain ``Elemwise`` form.
+
+        Called only once a fusion has been found for it: each ``ScalarType`` input
+        is re-boxed with ``tensor_from_scalar`` (and the expand_dims the inner
+        graph applied) so the result is exactly the pre-scalarize
+        ``Elemwise(tensor_from_scalar(s), ...)``. The new node is queued so the
+        fusion re-anchors on it and the normal swallow carries the scalars back to
+        const -- i.e. the fusion ignores the boxing and uses the scalars directly.
+        """
+        op = node.op
+        [elemwise_node] = [
+            n for n in op.fgraph.apply_nodes if isinstance(n.op, Elemwise)
+        ]
+        new_inputs = []
+        for i, outer in enumerate(node.inputs):
+            if isinstance(outer.type, ScalarType):
+                box = tensor_from_scalar(outer)
+                ndim = elemwise_node.inputs[i].type.ndim
+                if ndim:
+                    box = box.dimshuffle(["x"] * ndim)
+                new_inputs.append(box)
+            else:
+                new_inputs.append(outer)
+        unwrapped = elemwise_node.op(*new_inputs, return_list=True)
+        fgraph.replace_all_validate(
+            list(zip(node.outputs, unwrapped, strict=True)),
+            reason="unwrap_scalarized",
+        )
+        worklist.append(unwrapped[0].owner)
+
+    @staticmethod
     def _extract_idx_axis_pairs(node, *, write=False):
         """Extract ``(idx_var, axis)`` pairs from an Advanced(Inc)Subtensor node.
 
@@ -429,9 +468,12 @@ class FuseElemwise(GraphRewriter):
         worklist = list(reversed(fgraph.toposort()))
         while worklist:
             node = worklist.pop()
-            if not isinstance(node.op, Elemwise):
-                continue
             if node not in fgraph.apply_nodes:
+                continue
+            # ScalarizedElemwise is an Elemwise that declared some inputs const; it
+            # anchors like any Elemwise. Once a fusion is found for it (below) it is
+            # inlined so the scalars flow straight into the fused loop as const.
+            if not isinstance(node.op, (Elemwise, ScalarizedElemwise)):
                 continue
 
             idx_groups = {}  # (idx_var, axis) -> (reads: list[int], writes: list[int])
@@ -558,6 +600,17 @@ class FuseElemwise(GraphRewriter):
                     extra_reduction = (out_idx, car_clients[1])
                     break
                 reduced_outputs[out_idx] = car_clients[0]
+
+            # A ScalarizedElemwise anchors like an Elemwise, but the code below
+            # reads node.op.scalar_op / inplace_pattern. Once the detections above
+            # have found something to fuse for it, inline it back to the plain
+            # Elemwise (scalars re-boxed) and re-anchor -- the swallow then carries
+            # the scalars into the fused loop as const. With nothing to fuse it is
+            # left scalarized, so its scalar inputs stay unboxed.
+            if isinstance(node.op, ScalarizedElemwise):
+                if idx_groups or reduced_outputs or extra_reduction is not None:
+                    self._unwrap_scalarized(fgraph, node, worklist)
+                continue
 
             # An output consumed by several eligible reductions: peel one reduction
             # per pass onto a duplicate output, until each reduction has its own copy
@@ -833,11 +886,55 @@ class FuseElemwise(GraphRewriter):
                 for key, (_, writes) in idx_groups.items()
             )
 
+            # Swallow loop-invariant TensorFromScalar inputs (from the scalarize
+            # pass) as ScalarType, so the value crosses into the loop as a scalar
+            # constant_input instead of a boxed array. The inner graph is built on
+            # a fresh scalar input whose ``tensor_from_scalar`` is folded into the
+            # single nominalizing clone; the real (possibly shared) value is bound
+            # only at the call, so a scalar feeding several fused positions is just
+            # the same value passed several times. An indexed-read or inplace
+            # destination must stay a real array.
+            destroyed = set(node.op.inplace_pattern.values())
+            inner_replace = {}
+            outer_scalars = {}
+            for i in range(len(node.inputs)):
+                if i in indexed_reads or i in destroyed:
+                    continue
+                outer_var = node.inputs[i]
+                behind = outer_var
+                if behind.owner is not None and isinstance(behind.owner.op, DimShuffle):
+                    behind = behind.owner.inputs[0]
+                if not (
+                    all(outer_var.type.broadcastable)
+                    and behind.owner is not None
+                    and isinstance(behind.owner.op, TensorFromScalar)
+                ):
+                    continue
+                inner_scalar = get_scalar_type(fgraph_inputs[i].type.dtype)()
+                replacement = tensor_from_scalar(inner_scalar)
+                if fgraph_inputs[i].type.ndim:
+                    replacement = replacement.dimshuffle(
+                        ["x"] * fgraph_inputs[i].type.ndim
+                    )
+                inner_replace[fgraph_inputs[i]] = replacement
+                fgraph_inputs[i] = inner_scalar
+                outer_scalars[i] = behind.owner.inputs[0]
+
             outer_inputs = []
             for i, inp in enumerate(fgraph_inputs):
+                if i in outer_scalars:
+                    outer_inputs.append(outer_scalars[i])
+                    continue
                 val = outer_write_targets.get(i, inp)
                 outer_inputs.append(val.copy() if i in copy_positions else val)
 
+            frozen = (
+                construct_nominal_fgraph(
+                    fgraph_inputs, fgraph_outputs, replace=inner_replace
+                ).freeze()
+                if inner_replace
+                else None
+            )
             new_outs = FusedElemwise(
                 fgraph_inputs,
                 fgraph_outputs,
@@ -845,6 +942,7 @@ class FuseElemwise(GraphRewriter):
                 indexed_inputs=indexed_inputs_spec,
                 indexed_outputs=indexed_outputs_spec,
                 reduced_outputs=reduced_spec,
+                fgraph=frozen,
             )(*outer_inputs, return_list=True)
 
             replacements = []

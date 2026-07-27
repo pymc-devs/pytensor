@@ -54,7 +54,7 @@ from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, Dot, MulWithoutZeros
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
-from pytensor.tensor.rewriting.scalarize import ScalarCAReduce
+from pytensor.tensor.rewriting.scalarize import ScalarCAReduce, ScalarizedElemwise
 
 
 @singledispatch
@@ -688,22 +688,51 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
 
 @register_funcify_and_cache_key(Elemwise)
+@register_funcify_and_cache_key(ScalarizedElemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
-    scalar_node = op.make_scalar_node(*node.inputs)
+    """Funcify an ``Elemwise`` loop, shared with ``ScalarizedElemwise``.
+
+    A ``ScalarizedElemwise`` is an ``Elemwise`` some of whose inputs are
+    ``ScalarType`` (loop-invariant): those positions go through ``_vectorized``'s
+    ``constant_inputs`` instead of being boxed into 0-d arrays and reloaded each
+    iteration. A plain ``Elemwise`` is the same machinery with no such positions.
+    """
+    if isinstance(op, ScalarizedElemwise):
+        [elemwise_node] = [
+            n for n in op.fgraph.apply_nodes if isinstance(n.op, Elemwise)
+        ]
+        elemwise_op = elemwise_node.op
+        const_positions = tuple(
+            p
+            for p in range(len(node.inputs))
+            if isinstance(node.inputs[p].type, ScalarType)
+        )
+        inplace_pattern = ()
+    else:
+        elemwise_node = node
+        elemwise_op = op
+        const_positions = ()
+        inplace_pattern = tuple(op.inplace_pattern.items())
+
+    scalar_node = elemwise_op.make_scalar_node(*elemwise_node.inputs)
     scalar_op_fn, scalar_cache_key = numba_funcify_and_cache_key(
-        op.scalar_op,
+        elemwise_op.scalar_op,
         node=scalar_node,
         **kwargs,
     )
 
     nin = len(node.inputs)
     nout = len(node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    array_positions = [p for p in range(nin) if p not in frozenset(const_positions)]
+    core_op_fn = store_core_outputs(
+        scalar_op_fn, nin=nin, nout=nout, const_positions=const_positions
+    )
 
-    input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
-    output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
+    input_bc_patterns = tuple(
+        elemwise_node.inputs[p].type.broadcastable for p in array_positions
+    )
+    output_bc_patterns = tuple(out.type.broadcastable for out in elemwise_node.outputs)
     output_dtypes = tuple(out.type.dtype for out in node.outputs)
-    inplace_pattern = tuple(op.inplace_pattern.items())
     core_output_shapes = tuple(() for _ in range(nout))
 
     # numba doesn't support nested literals right now...
@@ -712,46 +741,79 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     output_dtypes_enc = encode_literals(output_dtypes)
     inplace_pattern_enc = encode_literals(inplace_pattern)
 
-    # Pure python implementation, that will be used in tests
-    def elemwise(*inputs):
-        Elemwise._check_runtime_broadcast(node, inputs)
-        inputs_bc = np.broadcast_arrays(*inputs)
-        shape = inputs_bc[0].shape
+    if isinstance(op, ScalarizedElemwise):
+        # Python-mode fallback (Numba eval_python_only): run the inner fgraph
+        # faithfully, exactly like OpFromGraph.perform.
+        def elemwise(*outer_inputs):
+            res = op.fn(*outer_inputs)
+            return res[0] if len(res) == 1 else tuple(res)
+    else:
+        # Pure python implementation, that will be used in tests
+        def elemwise(*inputs):
+            Elemwise._check_runtime_broadcast(node, inputs)
+            inputs_bc = np.broadcast_arrays(*inputs)
+            shape = inputs_bc[0].shape
 
-        if len(output_dtypes) == 1:
-            output = np.empty(shape, dtype=output_dtypes[0])
-            for idx in np.ndindex(shape):
-                output[idx] = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
-            return output
+            if len(output_dtypes) == 1:
+                output = np.empty(shape, dtype=output_dtypes[0])
+                for idx in np.ndindex(shape):
+                    output[idx] = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
+                return output
 
-        else:
-            outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
-            for idx in np.ndindex(shape):
-                outs_vals = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
-                for out, out_val in zip(outputs, outs_vals):
-                    out[idx] = out_val
-            return outputs
+            else:
+                outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
+                for idx in np.ndindex(shape):
+                    outs_vals = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
+                    for out, out_val in zip(outputs, outs_vals):
+                        out[idx] = out_val
+                return outputs
 
-    @overload(elemwise)
-    def ov_elemwise(*inputs):
-        def impl(*inputs):
-            return _vectorized(
-                core_op_fn,
-                input_bc_patterns_enc,
-                output_bc_patterns_enc,
-                output_dtypes_enc,
-                inplace_pattern_enc,
-                True,  # allow_core_scalar
-                (),  # constant_inputs
-                inputs,
-                core_output_shapes,
-                NO_SIZE,
-                NO_INDEXED_INPUTS,
-                NO_INDEXED_OUTPUTS,
-                NO_REDUCE_OUTPUTS,
-            )
+    if not const_positions:
 
-        return impl
+        @overload(elemwise)
+        def ov_elemwise(*inputs):
+            def impl(*inputs):
+                return _vectorized(
+                    core_op_fn,
+                    input_bc_patterns_enc,
+                    output_bc_patterns_enc,
+                    output_dtypes_enc,
+                    inplace_pattern_enc,
+                    True,  # allow_core_scalar
+                    (),  # constant_inputs
+                    inputs,
+                    core_output_shapes,
+                    NO_SIZE,
+                    NO_INDEXED_INPUTS,
+                    NO_INDEXED_OUTPUTS,
+                    NO_REDUCE_OUTPUTS,
+                )
+
+            return impl
+    else:
+        # Const inputs must be split out of ``outer_inputs`` by static index,
+        # which the inline closure cannot do, so route through generated source.
+        impl_src = _build_reduce_impl_src(nout, [None] * nout, const_positions, nin)
+        impl_fn = compile_numba_function_src(
+            impl_src,
+            "fused_elemwise_impl",
+            {
+                **globals(),
+                "core_op_fn": core_op_fn,
+                "input_bc_patterns_enc": input_bc_patterns_enc,
+                "output_bc_patterns_enc": output_bc_patterns_enc,
+                "output_dtypes_enc": output_dtypes_enc,
+                "inplace_pattern_enc": inplace_pattern_enc,
+                "core_output_shapes": core_output_shapes,
+                "indexed_inputs_enc": NO_INDEXED_INPUTS,
+                "indexed_outputs_enc": NO_INDEXED_OUTPUTS,
+                "reduce_outputs_enc": NO_REDUCE_OUTPUTS,
+            },
+        )
+
+        @overload(elemwise, jit_options=_jit_options)
+        def ov_elemwise(*outer_inputs):
+            return impl_fn
 
     if scalar_cache_key is None:
         # If the scalar op cannot be cached, the Elemwise wrapper cannot be cached either
@@ -760,8 +822,12 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         elemwise_key = str(
             (
                 type(op),
-                tuple(op.inplace_pattern.items()),
+                1,  # cache version
+                inplace_pattern,
+                const_positions,
                 input_bc_patterns,
+                output_bc_patterns,
+                output_dtypes,
                 scalar_cache_key,
             )
         )
