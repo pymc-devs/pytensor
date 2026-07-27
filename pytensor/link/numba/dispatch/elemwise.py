@@ -1039,13 +1039,16 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
             bc[ax] = True
         output_bc_patterns_list.append(tuple(bc))
         output_dtypes_list.append(str(np.dtype(acc_dtype)))
-        reduce_identities.append((i, _reduce_identity(identity, acc_dtype)))
         kept_axes = tuple(d for d in range(len(bc)) if d not in axes)
         out_dtype = node.outputs[i].type.dtype
         cast_needed = np.dtype(acc_dtype) != np.dtype(out_dtype)
         # A ScalarType fused output is a full reduction handed out as a scalar
         # (FuseElemwise wraps it in scalar_from_tensor) rather than a 0-d box.
         scalar_out = isinstance(node.outputs[i].type, ScalarType)
+        # With every axis reduced the accumulator is a single element and, being a
+        # scalar output, never escapes -- so its buffer can live on the stack.
+        on_stack = scalar_out and not kept_axes
+        reduce_identities.append((i, _reduce_identity(identity, acc_dtype), on_stack))
         post_specs.append((kept_axes, out_dtype, cast_needed, scalar_out))
 
     output_bc_patterns = tuple(output_bc_patterns_list)
@@ -1138,12 +1141,12 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 5
+    cache_version = 6
     if scalar_cache_key is None:
         key = None
     else:
         # Include each output's scalar-vs-array kind: a ScalarType reduced output
-        # generates a different (scalar-returning) reduction epilogue.
+        # generates a different (scalar-returning, stack-buffer) reduction epilogue.
         out_kinds = tuple(isinstance(o.type, ScalarType) for o in node.outputs)
         reduced_key = tuple(
             (type(r[0]).__name__, r[1], str(np.dtype(r[3]))) if r is not None else None
