@@ -55,6 +55,21 @@ class ScalarJoin(OpFromGraph):
         return "ScalarJoin"
 
 
+class ScalarizedElemwise(OpFromGraph):
+    """An ``Elemwise`` some of whose inputs are ``ScalarType`` (loop-invariant).
+
+    Its inner graph is the faithful ``Elemwise(tensor_from_scalar(s), ...)``, so
+    every backend runs it via ``perform``; only Numba peels the scalar positions
+    off and hands them to ``_vectorized`` as ``constant_inputs`` -- so a scalar
+    param feeding an array Elemwise is never boxed into a 0-d array and reloaded
+    each iteration. The output is a normal array.
+    """
+
+    def __str__(self):
+        [node] = [n for n in self.fgraph.apply_nodes if isinstance(n.op, Elemwise)]
+        return f"Scalarized{node.op}"
+
+
 # Op types that can swallow a scalar input (so a producer feeding one is worth
 # scalarizing). Elemwise swallows via its scalar_op / the mixed-Elemwise op.
 _SCALAR_CONSUMERS = (Join, Elemwise)
@@ -93,12 +108,15 @@ class Scalarize(GraphRewriter):
                 replacement = self._swallow_join(node)
             elif isinstance(op, Subtensor) and node.outputs[0].type.ndim == 0:
                 replacement = self._emit_producer(fgraph, node, ScalarSubtensor)
-            elif isinstance(op, Elemwise):
+            elif isinstance(op, Elemwise) and len(node.outputs) == 1:
                 scalars = [_scalar_behind(inp) for inp in node.inputs]
-                # A size-1 all-scalar Elemwise is a pure scalar computation: run
-                # the scalar op on the scalars and box only the output.
-                if len(node.outputs) == 1 and all(s is not None for s in scalars):
+                if all(s is not None for s in scalars):
+                    # A size-1 all-scalar Elemwise is a pure scalar computation:
+                    # run the scalar op on the scalars and box only the output.
                     self._pass_through_elemwise(fgraph, node, scalars)
+                elif any(s is not None for s in scalars):
+                    # Mixed: keep an array output, carry the scalars as ScalarType.
+                    replacement = self._scalarize_elemwise(node, scalars)
             if replacement is None:
                 continue
             try:
@@ -143,6 +161,30 @@ class Scalarize(GraphRewriter):
             return None
         Scalarize._distribute(fgraph, out, node.op.scalar_op(*scalars))
         return None
+
+    @staticmethod
+    def _scalarize_elemwise(node, scalars):
+        # Mixed Elemwise (some scalar inputs, some genuine arrays): keep it an
+        # array op but carry the scalar inputs as ScalarType, so their 0-d boxes
+        # vanish. The inner graph re-boxes each scalar with tensor_from_scalar so
+        # it stays a faithful Elemwise; only Numba passes them as constant_inputs.
+        outer, inner, elemwise_inputs = [], [], []
+        for inp, scalar in zip(node.inputs, scalars):
+            if scalar is None:
+                dummy = inp.type()
+                elemwise_inputs.append(dummy)
+                outer.append(inp)
+            else:
+                dummy = scalar.type()
+                box = tensor_from_scalar(dummy)
+                if inp.type.ndim:
+                    box = box.dimshuffle(["x"] * inp.type.ndim)
+                elemwise_inputs.append(box)
+                outer.append(scalar)
+            inner.append(dummy)
+        inner_outs = node.op(*elemwise_inputs, return_list=True)
+        new_outs = ScalarizedElemwise(inner, inner_outs)(*outer, return_list=True)
+        return list(zip(node.outputs, new_outs, strict=True))
 
     @staticmethod
     def _swallow_join(node):
