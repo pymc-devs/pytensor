@@ -36,6 +36,7 @@ def store_core_outputs(
     nout: int,
     accum_fns: dict[int, Callable[[str, str], Sequence[str | CODE_TOKEN]]]
     | None = None,
+    const_positions: tuple[int, ...] = (),
 ) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
@@ -54,8 +55,18 @@ def store_core_outputs(
     ``["o1[...] += t1"]`` for a sum reduction, or the multi-line conditional for
     a max reduction).  Outputs absent from ``accum_fns`` are stored with ``=``.
     Both reductions and indexed ``inc`` writes go through this mechanism.
+
+    ``const_positions`` lists the input positions supplied as loop-invariant
+    ``constant_inputs``, which ``_vectorized`` passes ahead of the per-iteration
+    array values.  The generated signature is permuted to receive them first
+    while the call to ``core_op_fn`` keeps the original input order, so the inner
+    fgraph never has to be reordered.
     """
     if getattr(core_op_fn, "handles_out", False):
+        if const_positions:
+            raise NotImplementedError(
+                "constant_inputs are not supported for a handles_out core function"
+            )
         return core_op_fn
 
     accum_fns = accum_fns or {}
@@ -64,12 +75,18 @@ def store_core_outputs(
     outputs = [f"o{i}" for i in range(nout)]
     inner_outputs = [f"t{output}" for output in outputs]
 
+    const_set = frozenset(const_positions)
+    permuted_inputs = [f"i{i}" for i in const_positions] + [
+        f"i{i}" for i in range(nin) if i not in const_set
+    ]
+
     inp_signature = ", ".join(inputs)
+    permuted_signature = ", ".join(permuted_inputs)
     out_signature = ", ".join(outputs)
     inner_out_signature = ", ".join(inner_outputs)
 
     code: list[str | CODE_TOKEN] = [
-        f"def store_core_outputs({inp_signature}, {out_signature}):",
+        f"def store_core_outputs({permuted_signature}, {out_signature}):",
         CODE_TOKEN.INDENT,
         f"{inner_out_signature} = core_op_fn({inp_signature})",
     ]

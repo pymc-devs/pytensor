@@ -45,6 +45,7 @@ from pytensor.scalar.basic import (
     Maximum,
     Minimum,
     Mul,
+    ScalarType,
     Sub,
     TrueDiv,
     add,
@@ -784,14 +785,30 @@ def _reduce_identity(identity, acc_dtype):
     return acc_dtype.type(identity)
 
 
-def _build_reduce_impl_src(nout, post_specs):
-    """Build the ``@overload`` impl source for a fused op with reduction outputs.
+def _build_reduce_impl_src(nout, post_specs, const_positions, n_outer):
+    """Build the ``@overload`` impl source for a fused op.
 
     Calls ``_vectorized`` (which produces a keepdims, size-1-on-reduced-axes
     buffer in ``acc_dtype``) then, per reduction output, squeezes the reduced
     axes back out and casts to the true output dtype.  ``post_specs[i]`` is
     ``None`` for a passthrough output, else ``(kept_axes, out_dtype, cast_needed)``.
+
+    ``const_positions`` lists the outer input positions that are ``ScalarType``
+    and so are handed to ``_vectorized`` as loop-invariant ``constant_inputs``
+    rather than as arrays to be iterated.
     """
+    const_set = frozenset(const_positions)
+    if const_positions:
+        const_expr = create_tuple_string(
+            tuple(f"outer_inputs[{p}]" for p in const_positions)
+        )
+        array_expr = create_tuple_string(
+            tuple(f"outer_inputs[{p}]" for p in range(n_outer) if p not in const_set)
+        )
+    else:
+        const_expr = "()"
+        array_expr = "outer_inputs"
+
     code: list[str | CODE_TOKEN] = [
         "def fused_elemwise_impl(*outer_inputs):",
         CODE_TOKEN.INDENT,
@@ -803,8 +820,8 @@ def _build_reduce_impl_src(nout, post_specs):
         "output_dtypes_enc,",
         "inplace_pattern_enc,",
         "True,",
-        "(),",
-        "outer_inputs,",
+        f"{const_expr},",
+        f"{array_expr},",
         "core_output_shapes,",
         "NO_SIZE,",
         "indexed_inputs_enc,",
@@ -898,11 +915,29 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
             accumulate_into_slice(_op, out, inner)
         )
 
+    # A ScalarType elemwise input is loop-invariant: it carries one value for the
+    # whole iteration space, so it goes through ``constant_inputs`` instead of
+    # being materialised as an array and re-loaded every iteration.  Everything
+    # keyed by elemwise input position (bc patterns, indexed reads, inplace
+    # aliasing) is stated over the array inputs only, so those positions remap.
+    const_positions = tuple(
+        p for p in range(nin_elemwise) if isinstance(node.inputs[p].type, ScalarType)
+    )
+    const_set = frozenset(const_positions)
+    array_positions = [p for p in range(nin_elemwise) if p not in const_set]
+    array_pos_map = {p: new_p for new_p, p in enumerate(array_positions)}
+
     core_op_fn = store_core_outputs(
-        scalar_op_fn, nin=nin_elemwise, nout=nout, accum_fns=accum_fns
+        scalar_op_fn,
+        nin=nin_elemwise,
+        nout=nout,
+        accum_fns=accum_fns,
+        const_positions=const_positions,
     )
 
-    input_bc_patterns = tuple(inp.type.broadcastable for inp in elemwise_node.inputs)
+    input_bc_patterns = tuple(
+        elemwise_node.inputs[p].type.broadcastable for p in array_positions
+    )
 
     # Reduction outputs keep their reduced axes as bc=True (size-1, keepdims) and
     # are accumulated in acc_dtype; post_specs squeezes + casts them back to the
@@ -933,7 +968,19 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
 
     output_bc_patterns = tuple(output_bc_patterns_list)
     output_dtypes = tuple(output_dtypes_list)
-    inplace_pattern = tuple(elemwise_node.op.inplace_pattern.items())
+    # A scalar input can be neither an inplace destination nor an indexed read
+    # source, so remapping onto array-only positions never drops an entry.
+    inplace_pattern = tuple(
+        (out_idx, array_pos_map[inp_idx])
+        for out_idx, inp_idx in elemwise_node.op.inplace_pattern.items()
+    )
+    if const_positions:
+        indexed_inputs = tuple(
+            None
+            if entry is None
+            else (tuple(array_pos_map[src] for src in entry[0]), *entry[1:])
+            for entry in indexed_inputs
+        )
     core_output_shapes = tuple(() for _ in range(nout))
 
     idx_broadcastable = tuple(
@@ -958,7 +1005,11 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         res = op.fn(*outer_inputs)
         return res[0] if len(res) == 1 else tuple(res)
 
-    if not has_reductions:
+    # Const inputs must be split out of ``outer_inputs`` by static index, which the
+    # inline closure cannot do, so route through the generated source whenever
+    # there are const inputs (or reductions). The common no-const, no-reduction
+    # path keeps its simpler inline impl.
+    if not has_reductions and not const_positions:
 
         @overload(fused_elemwise_fn, jit_options=_jit_options)
         def ov_fused_elemwise_fn(*outer_inputs):
@@ -981,7 +1032,9 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
 
             return impl
     else:
-        impl_src = _build_reduce_impl_src(nout, post_specs)
+        impl_src = _build_reduce_impl_src(
+            nout, post_specs, const_positions, len(node.inputs)
+        )
         impl_fn = compile_numba_function_src(
             impl_src,
             "fused_elemwise_impl",
