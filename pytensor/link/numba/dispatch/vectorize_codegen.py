@@ -29,6 +29,22 @@ def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
+def store_core_outputs(core_op_fn, nin, nout, accum_fns=None, const_positions=()):
+    """Reorder loop-invariant scalar arguments before array arguments."""
+    if not const_positions:
+        return core_op_fn
+    if getattr(core_op_fn, "handles_out", False):
+        raise NotImplementedError("Scalar inputs require a value-returning core")
+    inputs = [f"i{i}" for i in range(nin)]
+    const_set = frozenset(const_positions)
+    ordered = [inputs[i] for i in const_positions] + [
+        name for i, name in enumerate(inputs) if i not in const_set
+    ]
+    src = f"def scalar_core({', '.join(ordered)}):\n    return core_op_fn({', '.join(inputs)})\n"
+    fn = compile_numba_function_src(src, "scalar_core", {"core_op_fn": core_op_fn})
+    return numba_basic.numba_njit(fn)
+
+
 def _jit_options() -> dict[str, Any]:
     """Jit options for the overloads that call `_vectorized`.
 
