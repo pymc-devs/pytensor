@@ -29,12 +29,18 @@ from pytensor.scalar.basic import (
     identity as scalar_identity,
 )
 from pytensor.tensor.basic import (
+    ScalarFromTensor,
     TensorFromScalar,
+    scalar_from_tensor,
     tensor_from_scalar,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.rewriting.basic import (
+    local_scalar_tensor_scalar,
+    local_tensor_scalar_tensor,
+)
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
-from pytensor.tensor.rewriting.scalarize import ScalarizedElemwise
+from pytensor.tensor.rewriting.scalarize import ScalarCAReduce, ScalarizedElemwise
 from pytensor.tensor.shape import shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -839,6 +845,7 @@ class FuseElemwise(GraphRewriter):
             # reduced_spec carries the (scalar_op, axes, identity, acc_dtype) the
             # Numba backend reads to fuse the reduction into the loop instead.
             reduced_spec_by_idx = {}
+            scalarized_out_idxs = set()
             for out_idx, car_node in sorted(reduced_outputs.items()):
                 car_op = car_node.op
                 ndim = node.outputs[out_idx].type.ndim
@@ -858,7 +865,17 @@ class FuseElemwise(GraphRewriter):
                     car_op.scalar_op.identity,
                     acc_dtype,
                 )
-                fgraph_outputs[out_idx] = car_op(node.outputs[out_idx])
+                reduced = car_op(node.outputs[out_idx])
+                # A full reduction yields a single value; carrying it as a 0-d
+                # tensor costs one allocation per output. Hand it out as ScalarType
+                # and let the boundary cancel against a consuming ScalarFromTensor
+                # (see the boundary rewrites registered on fused_elemwise_optdb).
+                # The value is re-boxed at the replacement below, so a consumer that
+                # genuinely wants the tensor keeps exactly the box it always had.
+                if reduced.type.ndim == 0:
+                    scalarized_out_idxs.add(out_idx)
+                    reduced = scalar_from_tensor(reduced)
+                fgraph_outputs[out_idx] = reduced
 
             reduced_spec = (
                 tuple(
@@ -952,9 +969,14 @@ class FuseElemwise(GraphRewriter):
                         (write_targets[out_idx].outputs[0], new_outs[out_idx])
                     )
                 elif out_idx in reduced_outputs:
-                    replacements.append(
-                        (reduced_outputs[out_idx].outputs[0], new_outs[out_idx])
-                    )
+                    new_out = new_outs[out_idx]
+                    # Re-box a scalarized reduced output: the CAReduce it replaces
+                    # is a 0-d tensor, so the boundary must stay valid. A consuming
+                    # ScalarFromTensor cancels it (boundary rewrites below); anything
+                    # that wants the tensor keeps the one box it always had.
+                    if out_idx in scalarized_out_idxs:
+                        new_out = tensor_from_scalar(new_out)
+                    replacements.append((reduced_outputs[out_idx].outputs[0], new_out))
                 else:
                     replacements.append((node.outputs[out_idx], new_outs[out_idx]))
 
@@ -975,4 +997,57 @@ fused_elemwise_optdb.register(
     FuseElemwise(),
     "numba",
     position=1,
+)
+# Cancel the scalar/tensor boundaries introduced on scalarized reduction outputs:
+# tensor_from_scalar(FusedElemwise scalar) feeding a ScalarFromTensor collapses to
+# the bare scalar. Where a consumer wants the tensor, the box stays (never a loss).
+fused_elemwise_optdb.register(
+    "local_scalar_tensor_scalar",
+    dfs_rewriter(local_scalar_tensor_scalar, ignore_newtrees=True),
+    "numba",
+    position=2,
+)
+fused_elemwise_optdb.register(
+    "local_tensor_scalar_tensor",
+    dfs_rewriter(local_tensor_scalar_tensor, ignore_newtrees=True),
+    "numba",
+    position=3,
+)
+
+
+@node_rewriter([ScalarFromTensor])
+def wrap_scalar_careduce(fgraph, node):
+    """Fuse ``ScalarFromTensor(CAReduce(...))`` into a single scalar-valued Op.
+
+    A full reduction fusion did not absorb still accumulates into a register and
+    ends in ``np.array(res, ...)``, costing one allocation purely to carry the
+    value to a consuming ``ScalarFromTensor``. Hand the scalar out directly.
+    """
+    [reduced] = node.inputs
+    careduce_node = reduced.owner
+    if careduce_node is None or not isinstance(careduce_node.op, CAReduce):
+        return None
+    # Only a full reduction accumulates into a register; a partial one writes an
+    # array that has to exist anyway.
+    if reduced.type.ndim != 0:
+        return None
+    # A client that wants the 0-d tensor forces it onto the heap anyway, and
+    # wrapping would then run the whole reduction twice.
+    if any(
+        not isinstance(client.op, ScalarFromTensor)
+        for client, _ in fgraph.clients[reduced]
+        if client != "output"
+    ):
+        return None
+
+    inner_inputs = [inp.type() for inp in careduce_node.inputs]
+    inner_out = scalar_from_tensor(careduce_node.op(*inner_inputs))
+    return [ScalarCAReduce(inner_inputs, [inner_out])(*careduce_node.inputs)]
+
+
+fused_elemwise_optdb.register(
+    wrap_scalar_careduce.__name__,
+    dfs_rewriter(wrap_scalar_careduce, ignore_newtrees=True),
+    "numba",
+    position=6,
 )
