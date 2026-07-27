@@ -928,10 +928,17 @@ def _build_reduce_impl_src(nout, post_specs, const_positions, n_outer):
                     expr = f"{expr}.astype(np.{np_dtype})"
             code.append(f"{sym} = {expr}")
         else:
+            # Partial reduction: squeeze the size-1 reduced axes back out with the
+            # same as_strided trick DimShuffle uses -- pure stride arithmetic,
+            # whereas reshape emits a runtime numba_attempt_nocopy_reshape call and
+            # only works on contiguous input.
             shape_expr = create_tuple_string(
                 tuple(f"{src}.shape[{k}]" for k in kept_axes)
             )
-            expr = f"{src}.reshape({shape_expr})"
+            strides_expr = create_tuple_string(
+                tuple(f"{src}.strides[{k}]" for k in kept_axes)
+            )
+            expr = f"as_strided({src}, shape={shape_expr}, strides={strides_expr})"
             if cast_needed:
                 expr = f"{expr}.astype(np.{np_dtype})"
             code.append(f"{sym} = {expr}")
@@ -1141,7 +1148,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 6
+    cache_version = 7
     if scalar_cache_key is None:
         key = None
     else:
