@@ -352,6 +352,32 @@ def compute_itershape(
     return shape
 
 
+def _make_stack_array(ctx, builder, arrtype, shape):
+    """Build a single-element array struct backed by a stack slot.
+
+    Used for full-reduction accumulators, whose buffer is statically one element
+    and never escapes the caller (the value is read straight back out as a
+    scalar).  ``_empty_nd_impl`` would put those on the heap, costing an NRT
+    allocation, an identity memset and a free to carry one register's worth of
+    data.  An ``alloca`` costs nothing and, not escaping, is promoted to a
+    register by LLVM.  ``meminfo`` is NULL, which numba's incref/decref already
+    tolerate (``numba.carray`` views are built the same way).
+    """
+    ll_dtype = ctx.get_data_type(arrtype.dtype)
+    data = cgutils.alloca_once(builder, ll_dtype)
+    itemsize = ctx.get_abi_sizeof(ll_dtype)
+    ary = arrayobj.make_array(arrtype)(ctx, builder)
+    arrayobj.populate_array(
+        ary,
+        data=data,
+        shape=[ir.IntType(64)(1)] * len(shape),
+        strides=[ir.IntType(64)(itemsize)] * len(shape),
+        itemsize=ir.IntType(64)(itemsize),
+        meminfo=None,
+    )
+    return ary
+
+
 def make_outputs(
     ctx: numba.core.base.BaseContext,
     builder: ir.IRBuilder,
@@ -364,6 +390,7 @@ def make_outputs(
     output_core_shapes: tuple,
     update_outputs: dict | None = None,
     reduce_identities: dict | None = None,
+    stack_outputs: frozenset[int] = frozenset(),
 ) -> tuple[list[ir.Value], list[types.Array]]:
     """Allocate output arrays for vectorized loop.
 
@@ -374,6 +401,10 @@ def make_outputs(
     outputs.  Such outputs are freshly allocated (size 1 on the reduced axes, via
     their ``bc=True`` pattern) and pre-filled with the reduction identity so the
     accumulating store in the loop reduces into them correctly.
+
+    ``stack_outputs`` holds the indices of those reduction outputs whose buffer
+    is statically a single element and does not escape; they go on the stack
+    rather than the heap (see ``_make_stack_array``).
     """
     output_arrays = []
     output_arry_types = []
@@ -402,7 +433,10 @@ def make_outputs(
             for length, bc_dim in zip(iter_shape, bc, strict=True)
         ]
         shape = batch_shape + core_shape
-        array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
+        if i in stack_outputs:
+            array = _make_stack_array(ctx, builder, arrtype, shape)
+        else:
+            array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
         if reduce_identities is not None and i in reduce_identities:
             # Pre-fill the freshly allocated (C-contiguous) buffer with the
             # reduction identity.  A flat scan over every element is valid
@@ -1155,6 +1189,7 @@ def _vectorized(
         if len(entry) > 3 and entry[3]
     }
     output_updates = {entry[0]: entry[2] for entry in reduce_entries if len(entry) > 2}
+    stack_outputs = frozenset(entry[0] for entry in reduce_entries if len(entry) > 4 and entry[4])
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -1461,6 +1496,7 @@ def _vectorized(
             output_core_shapes,
             update_outputs=update_outputs_dict,
             reduce_identities=remaining_reduce_identities or None,
+            stack_outputs=stack_outputs,
         )
 
         core_arg_types = [*constant_inputs_types, *core_input_types]
