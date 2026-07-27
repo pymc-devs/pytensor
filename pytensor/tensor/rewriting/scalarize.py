@@ -108,14 +108,24 @@ class Scalarize(GraphRewriter):
                 replacement = self._swallow_join(node)
             elif isinstance(op, Subtensor) and node.outputs[0].type.ndim == 0:
                 replacement = self._emit_producer(fgraph, node, ScalarSubtensor)
-            elif isinstance(op, Elemwise) and len(node.outputs) == 1:
+            elif isinstance(op, Elemwise):
                 scalars = [_scalar_behind(inp) for inp in node.inputs]
-                if all(s is not None for s in scalars):
-                    # A size-1 all-scalar Elemwise is a pure scalar computation:
-                    # run the scalar op on the scalars and box only the output.
-                    self._pass_through_elemwise(fgraph, node, scalars)
-                elif any(s is not None for s in scalars):
-                    # Mixed: keep an array output, carry the scalars as ScalarType.
+                single = len(node.outputs) == 1
+                # All-size-1 outputs => a pure scalar computation, so it never
+                # needs its scalar inputs boxed -- even with several outputs.
+                scalar_computation = all(
+                    all(out.type.broadcastable) for out in node.outputs
+                )
+                if not any(s is not None for s in scalars):
+                    pass
+                elif all(s is not None for s in scalars):
+                    # Pure scalar computation: run the scalar op on the scalars,
+                    # box only the outputs (no input is boxed, no vectorized loop).
+                    if single:
+                        self._pass_through_elemwise(fgraph, node, scalars)
+                    else:
+                        replacement = self._emit_scalar_elemwise(node, scalars)
+                elif single or scalar_computation:
                     replacement = self._scalarize_elemwise(node, scalars)
             if replacement is None:
                 continue
@@ -161,6 +171,22 @@ class Scalarize(GraphRewriter):
             return None
         Scalarize._distribute(fgraph, out, node.op.scalar_op(*scalars))
         return None
+
+    @staticmethod
+    def _emit_scalar_elemwise(node, scalars):
+        # A multi-output pure scalar computation: apply the scalar op on the
+        # scalars directly and box each 0-d output once. The single-output case
+        # goes through _pass_through_elemwise (which distributes per consumer).
+        scalar_outs = node.op.scalar_op(*scalars)
+        if not isinstance(scalar_outs, list):
+            scalar_outs = [scalar_outs]
+        replacements = []
+        for out, scalar_out in zip(node.outputs, scalar_outs, strict=True):
+            box = tensor_from_scalar(scalar_out)
+            if out.type.ndim:
+                box = box.dimshuffle(["x"] * out.type.ndim)
+            replacements.append((out, box))
+        return replacements
 
     @staticmethod
     def _scalarize_elemwise(node, scalars):
