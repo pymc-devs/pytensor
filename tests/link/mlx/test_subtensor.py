@@ -60,7 +60,7 @@ def test_mlx_AdvancedSubtensor():
 
     # Advanced indexing with array indices
     out_pt = pt_subtensor.advanced_subtensor1(x_pt, [1, 2])
-    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor1)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
     # Multi-dimensional advanced indexing
@@ -168,7 +168,7 @@ def test_mlx_AdvancedIncSubtensor1_operations():
 
     # Create AdvancedIncSubtensor1 manually for set operation
     out_pt = pt_subtensor.advanced_set_subtensor1(x_pt, st_pt, indices)
-    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
     assert out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
@@ -241,7 +241,7 @@ def test_mlx_AdvancedIncSubtensor1_runtime_broadcast(func):
     x = pt.zeros((10, 5))
     idxs = np.repeat(np.arange(10), 2)  # 20 indices
     out = func(x, y, idxs)
-    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
 
     f = function([y], out, mode=Mode(linker="mlx", optimizer=None))
     f(np.ones((20, 5), dtype=np.float32))  # correctly sized y works
@@ -295,7 +295,7 @@ def test_mlx_AdvancedIncSubtensor1_duplicate_indices(func):
     y = pt.vector("y", dtype="float32")
     idxs = np.array([0, 0, 0, 1], dtype=np.int64)
     out = func(x, y, idxs)
-    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
 
     x_np = np.zeros(3, dtype=np.float32)
     y_np = np.ones(4, dtype=np.float32)
@@ -308,7 +308,7 @@ def test_mlx_AdvancedIncSubtensor1_duplicate_indices_edge_cases():
     y = pt.scalar("y", dtype="int32")
     idxs = np.array([-1, -1, 0, -1], dtype=np.int64)
     out = pt_subtensor.advanced_inc_subtensor1(x, y, idxs)
-    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
 
     compare_mlx_and_py([x, y], [out], [np.zeros(3, dtype=np.int32), np.int32(2)])
 

@@ -396,6 +396,61 @@ def test_inplace_taps(n_steps_constant):
     assert set(destroyed_inputs) == {untraced_sit_sot_inps[0]}
 
 
+def test_mitmot_inplace():
+    """A mit-mot tap read may be destroyed in place by an intermediate inner node.
+
+    Gradients of scans produce mit-mot taps whose read slot is overwritten by the
+    accumulator write-back the same iteration, so scan grants ``mutable=True`` on the
+    certainly-overwritten reads. The destroy is realized only when a read feeds an
+    *intermediate* (non-output) op that can run in place -- the ``Dot`` here breaks
+    Elemwise fusion, leaving an intermediate that consumes a gradient accumulator. The
+    same-iteration overwrite still forbids an *output* from carrying the read, so the
+    result stays correct.
+    """
+    k = 3
+    W = pt.dmatrix("W")
+    init = pt.dmatrix("init")  # two initial taps, each a length-k state
+    seq = pt.dvector("seq")
+
+    def step(seq_t, x2, x1):
+        return pt.tanh(W @ x1 + x2 + seq_t)
+
+    out = scan(
+        step,
+        sequences=seq,
+        outputs_info={"initial": init, "taps": [-2, -1]},
+        return_updates=False,
+    )
+    g = grad(out.sum(), [init, W])
+
+    rng = np.random.default_rng(0)
+    test_vals = [
+        rng.standard_normal(5),
+        rng.standard_normal((2, k)),
+        rng.standard_normal((k, k)),
+    ]
+    numba_fn, _ = compare_numba_and_py(
+        [seq, init, W], g, test_vals, numba_mode="NUMBA", eval_obj_mode=False
+    )
+
+    mitmot_scan_ops = [
+        node.op
+        for node in numba_fn.maker.fgraph.toposort()
+        if isinstance(node.op, Scan) and node.op.info.n_mit_mot
+    ]
+    assert mitmot_scan_ops, "expected the gradient to produce a mit-mot scan"
+    destroyed_mitmot_reads = []
+    for scan_op in mitmot_scan_ops:
+        mitmot_reads = set(scan_op.inner_mitmot(scan_op.fgraph.inputs))
+        for node in scan_op.fgraph.toposort():
+            destroyed_mitmot_reads.extend(
+                node.inputs[idx]
+                for idx in chain.from_iterable(node.op.destroy_map.values())
+                if node.inputs[idx] in mitmot_reads
+            )
+    assert destroyed_mitmot_reads, "expected a mit-mot read destroyed in place"
+
+
 @pytest.mark.parametrize(
     "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
 )
@@ -676,3 +731,31 @@ def test_no_foreign_inplace_on_tap(case):
         graph_inputs, graph_outputs, test_inputs = [x], [outs[1]], [np.arange(1.0, 9.0)]
 
     compare_numba_and_py(graph_inputs, graph_outputs, test_inputs, numba_mode="NUMBA")
+
+
+def test_scan_2d_state_hmm_forward_trace():
+    # Regression for a numba miscompile (numba #10605): materializing the full
+    # trace of a scan whose Elemwise has an ``'A'``-layout (``expand_dims``)
+    # input next to a compile-time-constant operand used to OOM under the numba
+    # backend. The scan buffer is a tiny (1, 2, 2); the crash came from numba's
+    # ``get_item_pointer2`` forming a provenance-less pointer for non-contiguous
+    # indexing. ``log_P`` must stay a constant -- a runtime operand does not
+    # trigger it.
+    rng = np.random.default_rng(0)
+    k = 2
+    log_P = pt.constant(np.log(rng.random((k, k, k))))
+    emissions = pt.constant(rng.random((1, k)))
+    seed = pt.constant(rng.random((k, k)))
+
+    def step(emission, alpha, lp):
+        s = pt.logsumexp(pt.expand_dims(alpha, 2) + lp, axis=0)
+        return pt.expand_dims(emission, 0) + s
+
+    trace = scan(
+        step,
+        sequences=[emissions],
+        outputs_info=[seed],
+        non_sequences=[log_P],
+        return_updates=False,
+    )
+    compare_numba_and_py([], trace, [])

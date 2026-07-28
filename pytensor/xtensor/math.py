@@ -48,8 +48,10 @@ def bitwise_and(): ...
 and_ = logical_and
 
 
-@_as_xelemwise(ps.angle)
-def angle(): ...
+def angle(x):
+    """Return polar-coordinate angle of complex-valued xtensor `x`"""
+    x = as_xtensor(x)
+    return arctan2(imag(x), real(x))
 
 
 @_as_xelemwise(ps.arccos)
@@ -115,8 +117,11 @@ def cos(): ...
 def cosh(): ...
 
 
-@_as_xelemwise(ps.deg2rad)
-def deg2rad(): ...
+def deg2rad(x):
+    """Convert degrees to radians."""
+    x = as_xtensor(x)
+    (out_type,) = ps.upgrade_to_float(ps.get_scalar_type(x.type.dtype))
+    return x * np.asarray(np.pi / 180, dtype=out_type.dtype)
 
 
 @_as_xelemwise(ps.eq)
@@ -144,6 +149,10 @@ def erfcx(): ...
 
 @_as_xelemwise(ps.erfinv)
 def erfinv(): ...
+
+
+@_as_xelemwise(ps.ndtri_exp)
+def ndtri_exp(): ...
 
 
 @_as_xelemwise(ps.exp)
@@ -189,16 +198,18 @@ def gammainccinv(): ...
 def gammaincinv(): ...
 
 
-@_as_xelemwise(ps.gammal)
-def gammal(): ...
+def gammal(k, x):
+    """Lower incomplete gamma function."""
+    return gammainc(k, x) * gamma(k)
 
 
 @_as_xelemwise(ps.gammaln)
 def gammaln(): ...
 
 
-@_as_xelemwise(ps.gammau)
-def gammau(): ...
+def gammau(k, x):
+    """Upper incomplete gamma function."""
+    return gammaincc(k, x) * gamma(k)
 
 
 @_as_xelemwise(ps.ge)
@@ -376,8 +387,11 @@ pow = power
 def psi(): ...
 
 
-@_as_xelemwise(ps.rad2deg)
-def rad2deg(): ...
+def rad2deg(x):
+    """Convert radians to degrees."""
+    x = as_xtensor(x)
+    (out_type,) = ps.upgrade_to_float(ps.get_scalar_type(x.type.dtype))
+    return x * np.asarray(180 / np.pi, dtype=out_type.dtype)
 
 
 @_as_xelemwise(ps.real)

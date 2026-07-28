@@ -5,6 +5,7 @@ from pytensor.link.utils import unique_name_generator
 class PytorchLinker(JITLinker):
     """A `Linker` that compiles NumPy-based operations using torch.compile."""
 
+    required_rewrites = ("minimum_compile",)
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",

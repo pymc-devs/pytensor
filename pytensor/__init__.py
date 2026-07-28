@@ -33,6 +33,7 @@ from pytensor.ifelse import ifelse
 from pytensor.scan.basic import scan
 from pytensor.scan.views import map
 from pytensor.compile.builders import OpFromGraph
+import pytensor.compile.rewriting  # register OpFromGraph rewrites in optdb
 from pytensor.link.jax.ops import wrap_jax
 from pytensor import _sparse_lazy
 # isort: on

@@ -12,7 +12,7 @@ from typing import (
     overload,
 )
 
-from pytensor.graph.basic import Apply, Constant, Node, Variable
+from pytensor.graph.basic import AbstractApply, Apply, Constant, Node, Variable
 
 
 T = TypeVar("T", bound=Node)
@@ -340,7 +340,7 @@ def apply_depends_on(apply: Apply, depends_on: Apply | Iterable[Apply]) -> bool:
     bool
 
     """
-    if isinstance(depends_on, Apply):
+    if isinstance(depends_on, AbstractApply):
         depends_on = frozenset((depends_on,))
     else:
         depends_on = frozenset(depends_on)
@@ -683,7 +683,7 @@ def toposort_with_orderings(
             def compute_deps(obj, blocker_set=frozenset(blockers), orderings=orderings):
                 if obj in blocker_set:
                     return None
-                if isinstance(obj, Apply):
+                if isinstance(obj, AbstractApply):
                     return [*obj.inputs, *orderings.get(obj, [])]
                 else:
                     if (apply := obj.owner) is not None:
@@ -694,7 +694,7 @@ def toposort_with_orderings(
             # mypy doesn't like conditional functions with different signatures,
             # but passing the globals as optional is faster
             def compute_deps(obj, orderings=orderings):  # type: ignore[misc]
-                if isinstance(obj, Apply):
+                if isinstance(obj, AbstractApply):
                     return [*obj.inputs, *orderings.get(obj, [])]
                 else:
                     if (apply := obj.owner) is not None:
@@ -706,7 +706,7 @@ def toposort_with_orderings(
             apply
             for apply in walk_toposort(graphs, deps=compute_deps)
             # mypy doesn't understand that our generator will return both Apply and Variables
-            if isinstance(apply, Apply)  # type: ignore
+            if isinstance(apply, AbstractApply)  # type: ignore
         )
 
 

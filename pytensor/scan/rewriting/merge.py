@@ -10,7 +10,6 @@ from itertools import chain
 
 from pytensor.graph.basic import NominalVariable, equal_computations
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, node_rewriter
 from pytensor.graph.rewriting.reachability import (
     ancestor_bitsets,
@@ -19,7 +18,7 @@ from pytensor.graph.rewriting.reachability import (
 )
 from pytensor.graph.traversal import ancestors
 from pytensor.scan.op import Scan, ScanInfo
-from pytensor.scan.utils import ScanArgs, reconstruct_graph
+from pytensor.scan.utils import ScanArgs
 from pytensor.tensor.basic import get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
 
@@ -126,15 +125,12 @@ class ScanMerge(GraphRewriter):
             # add the condition, which was the one of nodes[0]
             inner_outs[0].append([condition])
 
-        # Clone the inner graph of each node independently
+        # Thaw the frozen inner graph of each node independently; the category
+        # slices (all existing inner variables) map through the memo.
         for idx, nd in enumerate(nodes):
-            # concatenate all inner_ins and inner_outs of nd
-            flat_inner_ins = list(chain.from_iterable(inner_ins[idx]))
-            flat_inner_outs = list(chain.from_iterable(inner_outs[idx]))
-            # clone
-            flat_inner_ins, flat_inner_outs = reconstruct_graph(
-                flat_inner_ins, flat_inner_outs
-            )
+            _, memo = nd.op.fgraph.unfreeze(return_memo=True)
+            flat_inner_ins = [memo[v] for v in chain.from_iterable(inner_ins[idx])]
+            flat_inner_outs = [memo[v] for v in chain.from_iterable(inner_outs[idx])]
             # split the new inner variables again in seq, mitmot, etc.
             new_inner_ins = []
             count = 0
@@ -369,11 +365,12 @@ def scan_merge_inouts(fgraph, node):
     # Do a first pass to merge identical external inputs.
     # Equivalent inputs will be stored in inp_equiv, then a new
     # scan node created without duplicates.
+    unfrozen_fgraph = node.op.fgraph.unfreeze()
     a = ScanArgs(
         node.inputs,
         node.outputs,
-        node.op.inner_inputs,
-        node.op.inner_outputs,
+        unfrozen_fgraph.inputs,
+        unfrozen_fgraph.outputs,
         node.op.info,
     )
 
@@ -412,8 +409,10 @@ def scan_merge_inouts(fgraph, node):
         inner_inputs = a.inner_inputs
         outer_inputs = a.outer_inputs
         info = a.info
-        a_inner_outs = a.inner_outputs
-        inner_outputs = clone_replace(a_inner_outs, replace=inp_equiv)
+        unfrozen_fgraph.replace_all(list(inp_equiv.items()))
+        # Read the outputs back from the graph: an output that was itself a
+        # replaced input is rewired there, not in ``a``'s stored slices.
+        inner_outputs = list(unfrozen_fgraph.outputs)
 
         new_op = Scan(
             inner_inputs,
@@ -431,6 +430,7 @@ def scan_merge_inouts(fgraph, node):
         if not isinstance(outputs, list | tuple):
             outputs = [outputs]
 
+        # Read-only analysis below; slice the frozen inner graph directly.
         na = ScanArgs(
             outer_inputs,
             outputs,

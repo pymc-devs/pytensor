@@ -26,6 +26,7 @@ from pytensor.gradient import disconnected_type, grad_undefined
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FrozenFunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import applys_between
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.graph.utils import MetaObject, MethodNotDefined
@@ -90,14 +91,6 @@ def upcast(dtype, *dtypes) -> str:
     return rval
 
 
-def as_common_dtype(*vars):
-    """
-    For for pytensor.scalar.ScalarType and TensorVariable.
-    """
-    dtype = upcast(*[v.dtype for v in vars])
-    return (v.astype(dtype) for v in vars)
-
-
 class NumpyAutocaster:
     """
     This class is used to cast python ints and floats to numpy arrays.
@@ -138,9 +131,7 @@ class NumpyAutocaster:
             isinstance(x, np.ndarray) and x.ndim == 0
         )
 
-        if config.cast_policy == "numpy":
-            return np.asarray(x)
-        elif config.cast_policy == "numpy+floatX":
+        if config.cast_policy == "numpy+floatX":
             rval = np.asarray(x)
             if (
                 not hasattr(x, "dtype")
@@ -1137,53 +1128,6 @@ def same_out_nocomplex(type):
     if type in complex_types:
         raise TypeError("complex argument not supported")
     return (type,)
-
-
-def int_out_nocomplex(*types):
-    for type in types:
-        if type in complex_types:
-            raise TypeError("complex argument not supported")
-    return (int64,)
-
-
-def float_out_nocomplex(*types):
-    for type in types:
-        if type in complex_types:
-            raise TypeError("complex argument not supported")
-    return (float64,)
-
-
-class unary_out_lookup(MetaObject):
-    """
-    Get a output_types_preference object by passing a dictionary:
-
-    unary_out_lookup({int8:int32, float32:complex128})
-
-    The result is an op that maps in8 to int32 and float32 to
-    complex128 and other input types lead to a TypeError.
-
-    """
-
-    def __init__(self, type_table):
-        self.tbl = type_table
-
-    def __call__(self, *types):
-        if len(types) == 1:
-            types = types[0]
-        try:
-            rval = self.tbl[types]
-        except Exception:
-            raise TypeError(types)
-        if isinstance(types, list | tuple):
-            return rval
-        else:
-            return [rval]
-
-    def __eq__(self, other):
-        return type(self) is type(other) and self.tbl == other.tbl
-
-    def __hash__(self):
-        return hash(type(self))  # ignore hash of table
 
 
 def real_out(type):
@@ -2499,11 +2443,6 @@ class Cast(UnaryScalarOp):
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.o_type.dtype}}}"
 
-    def clone_float32(self):
-        if self.o_type == float16:
-            return convert_to_float32
-        return self
-
     def impl(self, input):
         return self.ctor(input)
 
@@ -3328,82 +3267,6 @@ class Sqrt(UnaryScalarOp):
 sqrt = Sqrt(upgrade_to_float, name="sqrt")
 
 
-class Deg2Rad(UnaryScalarOp):
-    preserves_zero = True
-    monotonic_increasing = True
-
-    nfunc_spec = ("deg2rad", 1, 1)
-
-    def impl(self, x):
-        # If x is an int8 or uint8, numpy.deg2rad will compute the result in
-        # half-precision (float16), where we want float32.
-        x_dtype = str(getattr(x, "dtype", ""))
-        if x_dtype in ("int8", "uint8"):
-            return np.deg2rad(x, dtype=np.float32)
-        return np.deg2rad(x)
-
-    def pullback(self, inputs, outputs, gout):
-        (x,) = inputs
-        (gz,) = gout
-        if gz.type in complex_types:
-            raise NotImplementedError()
-        if outputs[0].type in discrete_types:
-            if x.type in discrete_types:
-                return [x.zeros_like(dtype=config.floatX)]
-            else:
-                return [x.zeros_like()]
-
-        return (gz * np.array(np.pi / 180, dtype=gz.dtype),)
-
-    def c_code(self, node, name, inputs, outputs, sub):
-        (x,) = inputs
-        (z,) = outputs
-        if node.inputs[0].type in complex_types:
-            raise NotImplementedError("type not supported", type)
-        return f"{z} = {x} * (M_PI / 180.0);"
-
-
-deg2rad = Deg2Rad(upgrade_to_float, name="deg2rad")
-
-
-class Rad2Deg(UnaryScalarOp):
-    preserves_zero = True
-    monotonic_increasing = True
-
-    nfunc_spec = ("rad2deg", 1, 1)
-
-    def impl(self, x):
-        # If x is an int8 or uint8, numpy.rad2deg will compute the result in
-        # half-precision (float16), where we want float32.
-        x_dtype = str(getattr(x, "dtype", ""))
-        if x_dtype in ("int8", "uint8"):
-            return np.rad2deg(x, dtype=np.float32)
-        return np.rad2deg(x)
-
-    def pullback(self, inputs, outputs, gout):
-        (x,) = inputs
-        (gz,) = gout
-        if gz.type in complex_types:
-            raise NotImplementedError()
-        if outputs[0].type in discrete_types:
-            if x.type in discrete_types:
-                return [x.zeros_like(dtype=config.floatX)]
-            else:
-                return [x.zeros_like()]
-
-        return (gz * np.array(180.0 / np.pi, dtype=gz.dtype),)
-
-    def c_code(self, node, name, inputs, outputs, sub):
-        (x,) = inputs
-        (z,) = outputs
-        if node.inputs[0].type in complex_types:
-            raise NotImplementedError("type not supported", type)
-        return f"{z} = {x} * (180.0 / M_PI);"
-
-
-rad2deg = Rad2Deg(upgrade_to_float, name="rad2deg")
-
-
 class Cos(UnaryScalarOp):
     nfunc_spec = ("cos", 1, 1)
     amd_float32 = "amd_vrsa_cosf"
@@ -3966,46 +3829,6 @@ class Imag(UnaryScalarOp):
 imag = Imag(real_out, name="imag")
 
 
-class Angle(UnaryScalarOp):
-    nfunc_spec = ("angle", 1, 1)
-
-    def impl(self, x):
-        return np.angle(x)
-
-    def pullback(self, inputs, outputs, gout):
-        # y = x.imag
-        # r = sqrt(y**2 + x.real**2)
-        # g = y/r
-        # if x == 0 and y == 0:
-        #     theta = 0
-        # elif x >= 0:
-        #     theta = numpy.arcsin(g)
-        # else:
-        #     theta = -numpy.arcsin(g)+numpy.pi
-
-        (c,) = inputs
-        (gtheta,) = gout
-        x = real(c)
-        y = imag(c)
-        r = _abs(c)
-
-        gr = -gtheta * y / (r**2 * sqrt(1 - (y / r) ** 2))
-        gx = gr * x / r
-        gy = gr * y / r
-        if c in complex_types:
-            return [cast(complex(gx, gy), x.type.dtype)]
-        elif c in float_types:
-            return [cast(second(x, 0), x.type.dtype)]
-        else:
-            return [c.zeros_like(dtype=config.floatX)]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-angle = Angle(specific_out(float64), name="angle")
-
-
 class Complex(BinaryScalarOp):
     @staticmethod
     def output_types_preference(x, y):
@@ -4052,35 +3875,6 @@ class Conj(UnaryScalarOp):
 
 
 conj = Conj(same_out_min8, name="conj")
-
-
-class ComplexFromPolar(BinaryScalarOp):
-    @staticmethod
-    def output_types_preference(x, y):
-        return Complex.output_types_preference(x, y)
-
-    def impl(self, r, theta):
-        if r < 0:
-            raise ValueError("polar radius must be non-negative", r)
-        x = r * np.cos(theta)
-        y = r * np.sin(theta)
-        if x.dtype == "float32":
-            return np.complex64(builtins.complex(x, y))
-        else:
-            return np.complex128(builtins.complex(x, y))
-
-    def pullback(self, inputs, outputs, gout):
-        (r, theta) = inputs
-        (gz,) = gout
-        gr = gz * complex_from_polar(1, theta)
-        gtheta = gz * complex_from_polar(r, -theta)
-        return [gr, gtheta]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-complex_from_polar = ComplexFromPolar(name="complex_from_polar")
 
 
 class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
@@ -4204,6 +3998,7 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         rval = dict(self.__dict__)
         rval.pop("_c_code", None)
         rval.pop("_py_perform_fn", None)
+        rval.pop("_name", None)
         rval.pop("prepare_node_called", None)
         return rval
 
@@ -4222,6 +4017,8 @@ class Composite(ScalarInnerGraphOp):
 
     """
 
+    _name = None
+
     def __init__(
         self,
         inputs,
@@ -4229,12 +4026,13 @@ class Composite(ScalarInnerGraphOp):
         name="Composite",
     ):
         self.name = name
-        self._name = None
 
         for i in inputs:
             assert i not in outputs  # This isn't supported, use identity
 
-        self.fgraph = FrozenFunctionGraph(inputs, outputs)
+        # Composite inner graphs have no inplace ops, so structurally-identical
+        # nodes can be safely deduplicated.
+        self.fgraph = FrozenFunctionGraph.from_io(inputs, outputs, dedup_nodes=True)
         self._validate_inner_graph(self.fgraph)
 
         self.inputs = self.fgraph.inputs
@@ -4268,24 +4066,37 @@ class Composite(ScalarInnerGraphOp):
         return self.outputs_type
 
     def make_node(self, *inputs):
-        if self.inputs_type == tuple(i.type for i in inputs):
+        inputs = [
+            inp if isinstance(inp, ScalarVariable) else as_scalar(inp) for inp in inputs
+        ]
+
+        if self.inputs_type == tuple(inp.type for inp in inputs):
             return super().make_node(*inputs)
+
+        if len(inputs) != self.nin:
+            raise ValueError("Number of inputs does not match expected")
+
+        # First try to coerce each input to its inner-graph input type.
+        try:
+            filtered_inputs = [
+                inner_inp.type.filter_variable(inp)
+                for inp, inner_inp in zip(inputs, self.inputs)
+            ]
+        except TypeError:
+            pass
         else:
-            # Make a new op with the right input types.
-            assert len(inputs) == self.nin
-            fg = self.fgraph
-            res = pytensor.compile.rebuild_collect_shared(
-                fg.outputs,
-                replace=dict(zip(fg.inputs, inputs, strict=True)),
-                rebuild_strict=False,
-            )
-            # After rebuild_collect_shared, the Variable in inputs
-            # are not necessarily in the graph represented by res.
-            # res[2][0] is a dict that map from the original variable to the
-            # cloned variable.
-            cloned_inputs = [res[2][0][i] for i in inputs]
-            node = Composite(cloned_inputs, res[1]).make_node(*inputs)
-            return node
+            return super().make_node(*filtered_inputs)
+
+        # The new input types are incompatible with the inner graph.
+        # Try to make a new inner graph with rebuild_strict=False.
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        new_inner_inputs = [i.type() for i in inputs]
+        new_outputs = clone_replace(
+            unfrozen_fgraph.outputs,
+            replace=dict(zip(unfrozen_fgraph.inputs, new_inner_inputs)),
+            rebuild_strict=False,
+        )
+        return Composite(new_inner_inputs, new_outputs).make_node(*inputs)
 
     def perform(self, node, inputs, output_storage):
         outputs = self.py_perform_fn(*inputs)

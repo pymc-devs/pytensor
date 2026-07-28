@@ -7,9 +7,7 @@ import pytensor.tensor as pt
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
     advanced_inc_subtensor1,
@@ -60,13 +58,13 @@ def test_Subtensor(x, indices):
 def test_AdvancedSubtensor1(x, indices):
     """Test NumPy's advanced indexing in one dimension."""
     out_pt = advanced_subtensor1(x, *indices)
-    assert isinstance(out_pt.owner.op, AdvancedSubtensor1)
+    assert isinstance(out_pt.owner.op, AdvancedSubtensor)
     compare_numba_and_py([], [out_pt], [])
 
 
 def test_AdvancedSubtensor1_out_of_bounds():
     out_pt = advanced_subtensor1(np.arange(3), [4])
-    assert isinstance(out_pt.owner.op, AdvancedSubtensor1)
+    assert isinstance(out_pt.owner.op, AdvancedSubtensor)
     with pytest.raises(IndexError):
         compare_numba_and_py([], [out_pt], [])
 
@@ -246,25 +244,25 @@ def test_IncSubtensor(x, y, indices):
 )
 def test_AdvancedIncSubtensor1(x, y, indices):
     out_pt = advanced_set_subtensor1(x, y, *indices)
-    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
+    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     compare_numba_and_py([], [out_pt], [])
 
     out_pt = advanced_inc_subtensor1(x, y, *indices)
-    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
+    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     compare_numba_and_py([], [out_pt], [])
 
     # With symbolic inputs
     x_pt = x.type()
     y_pt = y.type()
 
-    out_pt = AdvancedIncSubtensor1(inplace=True)(x_pt, y_pt, *indices)
-    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
+    out_pt = AdvancedIncSubtensor((0,), inplace=True)(x_pt, y_pt, *indices)
+    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data], inplace=True)
 
-    out_pt = AdvancedIncSubtensor1(set_instead_of_inc=True, inplace=True)(
+    out_pt = AdvancedIncSubtensor((0,), set_instead_of_inc=True, inplace=True)(
         x_pt, y_pt, *indices
     )
-    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
+    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data], inplace=True)
 
 

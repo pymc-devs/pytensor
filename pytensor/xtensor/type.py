@@ -429,7 +429,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     @property
     def broadcastable(self):
-        # The concept of broadcastable is not revelant for XTensorVariables, but part of the codebase may request it
+        # The concept of broadcastable is not relevant for XTensorVariables, but part of the codebase may request it
         return self.type.broadcastable
 
     # DataArray contents

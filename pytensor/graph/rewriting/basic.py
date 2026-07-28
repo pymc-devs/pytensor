@@ -26,7 +26,15 @@ from pytensor.graph.basic import (
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
-from pytensor.graph.rewriting.unify import OpPattern, Var, convert_strs_to_vars
+from pytensor.graph.rewriting.unify import (
+    Asterisk,
+    OpPattern,
+    PatternNode,
+    PatternVar,
+    convert_strs_to_vars,
+    match_pattern,
+    reify_pattern,
+)
 from pytensor.graph.traversal import (
     apply_ancestors,
     applys_between,
@@ -129,6 +137,21 @@ class GraphRewriter(Rewriter):
                 "The function `print_profile` must be overridden when the"
                 " rewriter returns profiling information."
             )
+
+
+def get_active_mode(fgraph):
+    """Return the compile `Mode` currently being used to rewrite `fgraph`.
+
+    Set by `FunctionMaker` around the optimization pass. Used by inner-graph
+    rewrites to recover the active linker's required/incompatible rewrites.
+    Falls back to the default mode when called outside a compilation.
+    """
+    from pytensor.compile.mode import get_mode
+    from pytensor.configdefaults import config
+
+    if (active := getattr(fgraph, "_compile_mode", None)) is not None:
+        return get_mode(active)
+    return get_mode(config.mode)
 
 
 class NodeRewriter(Rewriter):
@@ -1104,7 +1127,7 @@ class OpToRewriterTracker:
                     else:
                         # An OpPattern without parameters behaves like a regular tracked_type
                         self.tracked_types[c.op_type].append(rw)
-                if isinstance(c, type):
+                elif isinstance(c, type):
                     self.tracked_types[c].append(rw)
                 else:
                     self.tracked_instances[c].append(rw)
@@ -1447,17 +1470,27 @@ class PatternNodeRewriter(NodeRewriter):
 
     .. code-block:: python
 
+        from pytensor.graph.basic import Constant
         from pytensor.graph.rewriting.basic import PatternNodeRewriter
-        from pytensor.tensor import add, mul, sub, pow, square
+        from pytensor.tensor import add, log, mul, pow, square, sub, true_div
 
-        PatternNodeRewriter((add, "x", "y"), (add, "y", "x"))
+
+        def positive_constant(expr):
+            return isinstance(expr, Constant) and bool((expr.data > 0).all())
+
+
         PatternNodeRewriter((mul, "x", "x"), (square, "x"))
         PatternNodeRewriter((sub, (add, "x", "y"), "y"), "x")
         PatternNodeRewriter((pow, "x", 2.0), (square, "x"))
+        # log(x / c) -> log(x) - log(c), but only when `c` is a positive constant.
+        # The dict form attaches a constraint that restricts when "c" matches.
         PatternNodeRewriter(
-            (mul, {"pattern": "x", "constraint": lambda expr: expr.ndim == 0}, "y"),
-            (mul, "y", "x"),
+            (log, (true_div, "x", {"pattern": "c", "constraint": positive_constant})),
+            (sub, (log, "x"), (log, "c")),
         )
+
+    Inputs of commutative ops (such as ``add`` and ``mul``) are matched in any
+    order automatically, so there is no need to write both orderings of a pattern.
 
     You can use OpPattern to match a subtype of an Op, with some parameter constraints
     You can also specify a callable as the output pattern, which will be called with (fgraph, node, subs_dict) as arguments.
@@ -1551,9 +1584,14 @@ class PatternNodeRewriter(NodeRewriter):
         frequent `Op`, which will prevent the rewrite from being tried as often.
 
         """
-        var_map: dict[str, Var] = {}
+        var_map: dict[str, PatternVar] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
+        if not isinstance(self.in_pattern, PatternNode):
+            raise TypeError(
+                "The in_pattern must be a tuple starting with an Op or OpPattern; "
+                f"got {in_pattern!r} of type {type(in_pattern)}"
+            )
         self.values_eq_approx = values_eq_approx
         self.allow_cast = allow_cast
         self.allow_multiple_clients = allow_multiple_clients
@@ -1565,27 +1603,15 @@ class PatternNodeRewriter(NodeRewriter):
                 raise ValueError("Custom `tracks` requires `get_nodes` to be provided.")
             self._tracks = tracks
         else:
-            if isinstance(in_pattern, list | tuple):
-                op = self.in_pattern[0]
-            elif isinstance(in_pattern, dict):
-                op = self.in_pattern["pattern"][0]
-            else:
-                raise TypeError(
-                    f"The in_pattern must be a sequence or a dict, but got {in_pattern} of type {type(in_pattern)}"
-                )
+            op = self.in_pattern.op_match
             if isinstance(op, Op):
                 self._tracks = [op]
-            elif isinstance(op, type) and issubclass(op, Op):
-                raise ValueError(
-                    f"The in_pattern starts with an Op class {op}, not an instance.\n"
-                    "You can use pytensor.graph.unify.OpPattern instead if you want to match instances of a class."
-                )
             elif isinstance(op, OpPattern):
                 self._tracks = [op.op_type]
             else:
                 raise ValueError(
                     f"The in_pattern must start with a specific Op or an OpPattern instance. "
-                    f"Got {op}, with type {type(op)}."
+                    f"Got {op!r}, with type {type(op)}."
                 )
 
     def tracks(self):
@@ -1597,9 +1623,6 @@ class PatternNodeRewriter(NodeRewriter):
         If it does, it constructs ``out_pattern`` and performs the replacement.
 
         """
-        from etuples.core import ExpressionTuple
-        from unification import reify, unify
-
         if get_nodes and self.get_nodes is not None:
             for real_node in self.get_nodes(fgraph, node):
                 ret = self.transform(fgraph, real_node, get_nodes=False)
@@ -1610,13 +1633,20 @@ class PatternNodeRewriter(NodeRewriter):
             # PatternNodeRewriter doesn't support replacing multi-output nodes
             return False
 
-        s = unify(self.in_pattern, node.out, {})
-
-        if s is False:
+        s = match_pattern(self.in_pattern, node)
+        if s is None:
             return False
 
         if not self.allow_multiple_clients:
-            input_vars = set(s.values())
+            # The matched subgraph's internal nodes (those strictly between the
+            # captured inputs and the root) must not be used elsewhere, or the
+            # replacement would leave/duplicate their computation.
+            input_vars = set()
+            for v in s.values():
+                if isinstance(v, tuple):  # Asterisk captures a tuple of inputs
+                    input_vars.update(v)
+                else:
+                    input_vars.add(v)
             clients = fgraph.clients
             if any(
                 len(clients[v]) > 1
@@ -1636,9 +1666,7 @@ class PatternNodeRewriter(NodeRewriter):
                     f"The output of the PatternNodeRewriter callable must be a variable got {ret} of type {type(ret)}."
                 )
         else:
-            ret = reify(self.out_pattern, s)
-            if isinstance(ret, ExpressionTuple):
-                ret = ret.evaled_obj
+            ret = reify_pattern(self.out_pattern, s)
 
         if self.values_eq_approx:
             ret.tag.values_eq_approx = self.values_eq_approx
@@ -1668,13 +1696,15 @@ class PatternNodeRewriter(NodeRewriter):
             return self.__name__
 
         def pattern_to_str(pattern):
-            if isinstance(pattern, list | tuple):
-                args = ", ".join(pattern_to_str(p) for p in pattern[1:])
-                return f"{pattern[0]!s}({args})"
-            elif isinstance(pattern, dict):
-                a = pattern_to_str(pattern["pattern"])
-                b = pattern.get("constraint", "no conditions")
-                return f"{a} subject to {b}"
+            if isinstance(pattern, PatternNode):
+                args = ", ".join(pattern_to_str(p) for p in pattern.inputs)
+                return f"{pattern.op_match!s}({args})"
+            elif isinstance(pattern, PatternVar):
+                if pattern.constraint is not None:
+                    return f"{pattern.token} subject to {pattern.constraint}"
+                return pattern.token
+            elif isinstance(pattern, Asterisk):
+                return f"*{pattern.token}"
             else:
                 return str(pattern)
 
@@ -2385,7 +2415,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                     for node_rewriter in self.node_tracker.get_trackers(node.op):
                         nb = change_tracker.nb_imported
                         t_rewrite = time.perf_counter()
-                        # Tracks are already enfoced by `self.node_tracker.get_trackers`
+                        # Tracks are already enforced by `self.node_tracker.get_trackers`
                         node_rewriter_change = self.process_node(
                             fgraph, node, node_rewriter, enforce_tracks=False
                         )
