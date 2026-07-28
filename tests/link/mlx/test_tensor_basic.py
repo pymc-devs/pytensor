@@ -208,3 +208,9 @@ def test_arange_data_dependent_raises():
     out = arange(pt.sum(x > 0).astype("int64"))
     with pytest.raises(NotImplementedError, match="data-dependent length"):
         pytensor.function([x], out, mode=compile_mode)
+
+
+def test_arange_root_input_raises():
+    end = pt.lscalar("end")
+    with pytest.raises(NotImplementedError, match="data-dependent length"):
+        pytensor.function([end], arange(end), mode=compile_mode)
