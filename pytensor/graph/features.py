@@ -1,4 +1,3 @@
-import inspect
 import sys
 import time
 import warnings
@@ -657,7 +656,7 @@ class FullHistory(Feature):
                 check=False,
             )
 
-        # Remove history changes caused by the foward/backward!
+        # Remove history changes caused by the forward/backward!
         self.bw = self.bw[:history_len]
         self.fw = self.fw[:history_len]
         self.pointer = pointer
@@ -693,32 +692,8 @@ class Validator(Feature):
             )
 
     def validate(self, fgraph):
-        """
-        If the caller is replace_all_validate, just raise the
-        exception. replace_all_validate will print out the
-        verbose output. Or it has to be done here before raise.
-        """
         t0 = time.perf_counter()
-        try:
-            ret = fgraph.execute_callbacks("on_validate")
-        except Exception as e:
-            cf = inspect.currentframe()
-            uf = cf.f_back
-            uf_info = inspect.getframeinfo(uf)
-
-            # If the caller is replace_all_validate, just raise the
-            # exception. replace_all_validate will print out the
-            # verbose output.
-            # Or it has to be done here before raise.
-            if uf_info.function == "replace_all_validate":
-                raise
-            else:
-                verbose = uf.f_locals.get("verbose", False)
-                if verbose:
-                    r = uf.f_locals.get("r", "")
-                    reason = uf_info.function
-                    print(f"validate failed on node {r}.\n Reason: {reason}, {e}")  # noqa: T201
-                raise
+        ret = fgraph.execute_callbacks("on_validate")
         t1 = time.perf_counter()
         if fgraph.profile:
             fgraph.profile.validate_time += t1 - t0
@@ -916,4 +891,69 @@ class NoOutputFromInplace(Feature):
                     "being computed by modifying another variable in-place."
                 )
 
+        return True
+
+
+class NoOutputInplaceOnInput(Feature):
+    """Forbid any `FunctionGraph` output from carrying a protected input destroyed in place.
+
+    Intermediate nodes may still destroy the protected inputs; only the graph
+    outputs may not be (a view of) the destroyed buffer. This suits a buffer the
+    surrounding code overwrites between evaluations — e.g. a
+    :class:`~pytensor.scan.op.Scan` tap, which the loop overwrites in place: an
+    output aliasing it would be read after the overwrite. Such an output could be
+    copied back out to stay correct, but needing that copy defeats the in-place
+    computation, so it is forbidden outright instead.
+
+    Parameters
+    ----------
+    protected_input_idxs
+        Positions in ``fgraph.inputs`` of the inputs that no output may carry.
+    """
+
+    def __init__(self, protected_input_idxs):
+        self.protected_input_idxs = tuple(protected_input_idxs)
+
+    def on_attach(self, fgraph):
+        if hasattr(fgraph, "_no_output_inplace_on_input"):
+            raise AlreadyThere(
+                f"NoOutputInplaceOnInput is already attached to {fgraph}."
+            )
+        fgraph._no_output_inplace_on_input = self
+
+    def clone(self):
+        return type(self)(self.protected_input_idxs)
+
+    def on_validate(self, fgraph):
+        if not hasattr(fgraph, "destroyers"):
+            return True
+        destroyed = {
+            fgraph.inputs[i]
+            for i in self.protected_input_idxs
+            if fgraph.destroyers(fgraph.inputs[i])
+        }
+        if not destroyed:
+            return True
+        # A protected input is an fgraph input (no owner), so it is the root of any alias
+        # chain it belongs to. Walk each output back along view_map *and* destroy_map edges
+        # to its memory root (as ``pytensor.compile.aliasing.alias_root`` does, which we
+        # can't import here without a graph<->compile cycle); the output carries a destroyed
+        # protected input -- as a view, or as the in-place result that destroyed it -- iff
+        # that root is one. (DestroyHandler's cached ``droot`` won't do: it tracks only
+        # view_map edges, so it omits the destroyer's own output.)
+        for out_idx, out in enumerate(fgraph.outputs):
+            root = out
+            while root.owner is not None:
+                pos = root.owner.outputs.index(root)
+                rop = root.owner.op
+                sources = (*rop.view_map.get(pos, ()), *rop.destroy_map.get(pos, ()))
+                if not sources:
+                    break
+                root = root.owner.inputs[sources[0]]
+            if root in destroyed:
+                raise InconsistencyError(
+                    f"Output {out_idx} would carry input {fgraph.inputs.index(root)} "
+                    "destroyed in place; that input may be destroyed by intermediate "
+                    "nodes only, not aliased by an output."
+                )
         return True

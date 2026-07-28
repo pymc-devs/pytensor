@@ -32,6 +32,7 @@ from pytensor.scalar.math import (
     Ive,
     Kve,
     Log1mexp,
+    NdtriExp,
     Psi,
     TriGamma,
 )
@@ -268,6 +269,16 @@ def jax_funcify_from_tfp(op, **kwargs):
     tfp_jax_op = try_import_tfp_jax_op(op)
 
     return tfp_jax_op
+
+
+@jax_funcify.register(NdtriExp)
+def jax_funcify_NdtriExp(op, **kwargs):
+    def ndtri_exp(x):
+        # JAX has no ndtri_exp, so this composition loses accuracy where
+        # exp(x) underflows
+        return jax.scipy.special.ndtri(jnp.exp(x))
+
+    return ndtri_exp
 
 
 @jax_funcify.register(Ive)

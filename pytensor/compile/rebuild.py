@@ -29,7 +29,7 @@ def rebuild_collect_shared(
     rebuild_strict=True,
     copy_inputs_over=True,
     no_default_updates=False,
-    clone_inner_graphs=False,
+    clone_inner_graphs=None,
 ) -> tuple[
     list[Variable],
     Variable,
@@ -51,7 +51,7 @@ def rebuild_collect_shared(
     rebuild_strict=True,
     copy_inputs_over=True,
     no_default_updates=False,
-    clone_inner_graphs=False,
+    clone_inner_graphs=None,
 ) -> tuple[
     list[Variable],
     list[Variable],
@@ -73,7 +73,7 @@ def rebuild_collect_shared(
     rebuild_strict=True,
     copy_inputs_over=True,
     no_default_updates=False,
-    clone_inner_graphs=False,
+    clone_inner_graphs=None,
 ) -> tuple[
     list[Variable],
     Out,
@@ -95,7 +95,7 @@ def rebuild_collect_shared(
     rebuild_strict=True,
     copy_inputs_over=True,
     no_default_updates=False,
-    clone_inner_graphs=False,
+    clone_inner_graphs=None,
 ) -> tuple[
     list[Variable],
     list[Out],
@@ -116,7 +116,7 @@ def rebuild_collect_shared(
     rebuild_strict=True,
     copy_inputs_over=True,
     no_default_updates=False,
-    clone_inner_graphs=False,
+    clone_inner_graphs=None,
 ) -> tuple[
     list[Variable],
     list[Variable] | Variable | Out | list[Out],
@@ -156,11 +156,12 @@ def rebuild_collect_shared(
         If False (default), perform them all.
         Else, perform automatic updates on all Variables that are neither in
         "updates" nor in "no_default_updates".
-    clone_inner_graphs : bool
-        If ``True``, clone `Op`\s that are subclasses of `HasInnerGraph` and their
-        inner-graphs.
 
     """
+
+    from pytensor.graph.basic import _warn_deprecated_clone_inner_graph
+
+    _warn_deprecated_clone_inner_graph(clone_inner_graphs, "clone_inner_graphs")
 
     if isinstance(outputs, tuple):
         outputs = list(outputs)
@@ -201,7 +202,6 @@ def rebuild_collect_shared(
                         owner,
                         clone_d,
                         strict=rebuild_strict,
-                        clone_inner_graphs=clone_inner_graphs,
                     )
                 clone_d.setdefault(var, var)
                 continue
@@ -481,7 +481,6 @@ def construct_function_ins_and_outs(
             rebuild_strict=rebuild_strict,
             copy_inputs_over=True,
             no_default_updates=no_default_updates,
-            clone_inner_graphs=True,
         )
         input_variables, cloned_extended_outputs, other_stuff = output_vars
         clone_d, update_d, _update_expr, shared_inputs = other_stuff

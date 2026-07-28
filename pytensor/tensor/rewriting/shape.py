@@ -43,7 +43,6 @@ from pytensor.tensor.shape import (
 )
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     IncSubtensor,
     Subtensor,
 )
@@ -925,7 +924,7 @@ def local_lift_specify_shape_inc_subtensor(fgraph, node):
     inc_x, *specified_shape = node.inputs
     if isinstance(
         (inc_op := inc_x.owner_op),
-        IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor,
+        IncSubtensor | AdvancedIncSubtensor,
     ):
         x, y, *idx_vars = inc_x.owner.inputs
         new_x = specify_shape(x, specified_shape)

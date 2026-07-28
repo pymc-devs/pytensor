@@ -6,7 +6,6 @@ from pytensor.tensor.rewriting.basic import register_stabilize
 from pytensor.tensor.special import Softmax, log_softmax
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     Subtensor,
 )
 from pytensor.tensor.type import values_eq_approx_remove_inf
@@ -15,7 +14,6 @@ from pytensor.tensor.type import values_eq_approx_remove_inf
 subtensor_ops = (
     Subtensor,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
 )
 
 
@@ -66,7 +64,7 @@ def local_logsoftmax(fgraph, node):
     return [ret]
 
 
-@register_stabilize("symbolic_op_recognition")
+@register_stabilize("symbolic_op_recognition", "fast_compile")
 @node_rewriter([true_div])
 def local_softmax_stabilize(fgraph, node):
     """Detect exp(x) / sum(exp(x), keepdims=True) and replace with Softmax(x)."""

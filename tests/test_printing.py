@@ -567,9 +567,10 @@ Composite{(i0 + 1.0)} [id A, B]
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
         assert exp_line.strip() == res_line.strip()
 
-    # An Op that only appears nested inside other inner graphs: its nodes are
-    # only discovered while the parent bodies are printed, and the shared
-    # header must still list every node id
+    # An Op that only appears nested inside other inner graphs is still
+    # discovered and printed in the "Inner graphs" section. Here both A and B
+    # apply the same Relu to their (nominal) input, so global FrozenApply
+    # interning collapses it to a single shared node, printed once.
     i1 = dvector("i")
     a_op = OpFromGraph([i1], [relu_ofg()(i1) + 1], inline=False, name="A")
     i2 = dvector("i")
@@ -594,16 +595,16 @@ A{inline=False} [id B]
 
 B{inline=False} [id D]
  ← Mul [id J]
-    ├─ Relu{inline=False} [id K]
-    │  └─ i0 [id G]
-    └─ ExpandDims{axis=0} [id L]
-       └─ 2 [id M]
+    ├─ Relu{inline=False} [id F]
+    │  └─ ···
+    └─ ExpandDims{axis=0} [id K]
+       └─ 2 [id L]
 
-Relu{inline=False} [id F, K]
- ← Maximum [id N]
+Relu{inline=False} [id F]
+ ← Maximum [id M]
     ├─ i0 [id G]
-    └─ ExpandDims{axis=0} [id O]
-       └─ 0 [id P]
+    └─ ExpandDims{axis=0} [id N]
+       └─ 0 [id O]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):

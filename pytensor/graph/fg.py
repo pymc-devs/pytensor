@@ -5,10 +5,11 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Sequence, Set
 from functools import partial
-from typing import Any, Union, cast
+from typing import Any, Literal, Union, cast, overload
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
+    AbstractApply,
     Apply,
     AtomicVariable,
     Constant,
@@ -23,6 +24,7 @@ from pytensor.graph.op import Op
 from pytensor.graph.traversal import (
     applys_between,
     graph_inputs,
+    io_toposort,
     toposort,
     toposort_with_orderings,
     vars_between,
@@ -848,13 +850,12 @@ class FunctionGraph(AbstractFunctionGraph):
     def __repr__(self):
         return f"FunctionGraph({', '.join(graph_as_string(self.inputs, self.outputs))})"
 
-    def clone(
-        self, check_integrity=True, clone_inner_graphs: bool = False
-    ) -> "FunctionGraph":
+    def clone(self, check_integrity=True, clone_inner_graphs=None) -> "FunctionGraph":
         """Clone the graph."""
-        return self.clone_get_equiv(
-            check_integrity, clone_inner_graphs=clone_inner_graphs
-        )[0]
+        from pytensor.graph.basic import _warn_deprecated_clone_inner_graph
+
+        _warn_deprecated_clone_inner_graph(clone_inner_graphs, "clone_inner_graphs")
+        return self.clone_get_equiv(check_integrity)[0]
 
     def clone_get_equiv(
         self, check_integrity: bool = True, attach_feature: bool = True, **kwargs
@@ -916,10 +917,10 @@ class FunctionGraph(AbstractFunctionGraph):
         d.pop("_execute_callbacks_times_dict", None)
         return d
 
-    def __contains__(self, item: Variable | Apply) -> bool:
+    def __contains__(self, item: Variable | AbstractApply) -> bool:
         if isinstance(item, Variable):
             return item in self.variables
-        elif isinstance(item, Apply):
+        elif isinstance(item, AbstractApply):
             return item in self.apply_nodes
         else:
             raise TypeError()
@@ -937,8 +938,16 @@ class FunctionGraph(AbstractFunctionGraph):
         return debugprint(self, **kwargs)
 
     def freeze(self) -> "FrozenFunctionGraph":
-        """Return a frozen, hashable version of this FunctionGraph."""
-        return FrozenFunctionGraph(self.inputs, self.outputs)
+        """Return a frozen, hashable version of this FunctionGraph.
+
+        The frozen graph bakes ``self.toposort()``, so when ``self`` carries a
+        ``DestroyHandler`` (e.g. a graph that was just inplace-rewritten) the order
+        is destroy-aware -- a baked inplace op runs after every reader of the buffer
+        it destroys -- and a backend may funcify the frozen graph as-is.
+        """
+        return FrozenFunctionGraph.from_toposort(
+            self.inputs, self.outputs, self.toposort()
+        )
 
 
 class FrozenFunctionGraph(AbstractFunctionGraph):
@@ -949,8 +958,9 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
     graphs share the same interned output objects, so equality reduces to
     identity comparison on the outputs tuple.
 
-    Use ``FunctionGraph.freeze()`` or ``FrozenFunctionGraph(inputs, outputs)``
-    to create instances.
+    Use ``FunctionGraph.freeze()``, `from_io`, or `from_toposort` to freeze a
+    graph; the constructor itself only assembles already-frozen parts (it is
+    the path ``__reduce__`` round-trips through).
 
     .. code-block:: python
 
@@ -967,9 +977,62 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
     def __init__(
         self,
+        inputs: tuple[Variable, ...],
+        toposort: tuple[Apply, ...],
+        output_nodes: tuple[Apply, ...],
+    ):
+        self.inputs: tuple[Variable, ...] = inputs
+        self.outputs: tuple[Variable, ...] = tuple(
+            node.inputs[0] for node in output_nodes
+        )
+        self.apply_nodes: frozenset[Apply] = frozenset(toposort)
+        self._toposort: tuple[Apply, ...] = toposort
+        self._output_nodes: tuple[Apply, ...] = output_nodes
+        self._variables: frozenset[Variable] | None = None
+        self._clients: dict[Variable, list[ClientType]] | None = None
+
+    @classmethod
+    def from_io(
+        cls,
         inputs: Sequence[Variable],
         outputs: Sequence[Variable],
-    ):
+        dedup_nodes: bool = False,
+    ) -> "FrozenFunctionGraph":
+        """Freeze the graph between ``inputs`` and ``outputs`` in plain toposort order.
+
+        By default structurally-identical nodes are kept as distinct interned
+        nodes (keyed by toposort position): folding them would alias distinct
+        buffers that downstream inplace/``destroy_map`` logic relies on, and two
+        structurally-identical graphs still compare equal because positions line
+        up. Pass ``dedup_nodes=True`` to fold such nodes onto a single interned
+        node (no order is baked); only safe for graphs free of inplace ops
+        (e.g. ``Composite``/``ScalarLoop``).
+        """
+        return cls._freeze(inputs, outputs, io_toposort(inputs, outputs), dedup_nodes)
+
+    @classmethod
+    def from_toposort(
+        cls,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+        toposort: Sequence[Apply],
+    ) -> "FrozenFunctionGraph":
+        """Freeze the graph baking ``toposort`` as the node order.
+
+        Each node's position becomes part of its interning key, so a custom
+        (e.g. destroy-aware) order survives interning and pickling and a backend
+        may funcify the frozen graph as-is.
+        """
+        return cls._freeze(inputs, outputs, toposort, dedup_nodes=False)
+
+    @classmethod
+    def _freeze(
+        cls,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+        toposort: Sequence[Apply],
+        dedup_nodes: bool,
+    ) -> "FrozenFunctionGraph":
         nominal_inputs = tuple(
             NominalVariable(i, inp.type) for i, inp in enumerate(inputs)
         )
@@ -990,11 +1053,16 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 "or produced by Apply nodes reachable from the inputs."
             )
 
-        for node in toposort(outputs, blockers=inputs):
+        for node_idx, node in enumerate(toposort):
             new_inputs = tuple(_resolve_input(inp) for inp in node.inputs)
             output_types = tuple(out.type for out in node.outputs)
-            new_node = FrozenApply(node.op, new_inputs, output_types)
-            sorted_apply_nodes.append(new_node)
+            new_node = FrozenApply(
+                node.op,
+                new_inputs,
+                output_types,
+                topo_idx=-1 if dedup_nodes else node_idx,
+            )
+            sorted_apply_nodes.append(new_node)  # type: ignore[arg-type]
 
             memo.update(zip(node.outputs, new_node.outputs, strict=True))
 
@@ -1021,15 +1089,11 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             else:
                 output_nodes.append(FrozenApply(Output(i), (resolved,), ()))
 
-        self.inputs: tuple[Variable, ...] = nominal_inputs
-        self.outputs: tuple[Variable, ...] = tuple(
-            node.inputs[0] for node in output_nodes
+        return cls(
+            nominal_inputs,
+            tuple(sorted_apply_nodes),
+            tuple(output_nodes),  # type: ignore[arg-type]
         )
-        self.apply_nodes: frozenset[Apply] = frozenset(sorted_apply_nodes)
-        self._toposort: tuple[Apply, ...] = tuple(sorted_apply_nodes)
-        self._output_nodes: tuple[Apply, ...] = tuple(output_nodes)
-        self._variables: frozenset[Variable] | None = None
-        self._clients: dict[Variable, list[ClientType]] | None = None
 
     @classmethod
     def from_structural_inputs(
@@ -1058,12 +1122,23 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         roots = [
             v for v in graph_inputs([*inputs, *outputs]) if not isinstance(v, Constant)
         ]
-        interned = cls(roots, [*inputs, *outputs])
+        # Structural matching requires deduplication: each intermediate input
+        # expression must intern onto the same node as its occurrences in the
+        # outputs so they can be rewired (position-keyed interning would keep
+        # them distinct).
+        interned = cls.from_io(roots, [*inputs, *outputs], dedup_nodes=True)
         n_inputs = len(inputs)
-        return cls(interned.outputs[:n_inputs], interned.outputs[n_inputs:])
+        return cls.from_io(
+            interned.outputs[:n_inputs],
+            interned.outputs[n_inputs:],
+            dedup_nodes=True,
+        )
 
     def __reduce__(self):
-        return FrozenFunctionGraph, (self.inputs, self.outputs)
+        # Plain reassembly: every part re-interns itself on unpickling
+        # (``FrozenApply``/``NominalVariable`` interning), restoring the
+        # canonical graph with its baked order and dedup keys.
+        return FrozenFunctionGraph, (self.inputs, self._toposort, self._output_nodes)
 
     def __hash__(self):
         return hash(self._output_nodes)
@@ -1105,13 +1180,28 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             self._clients = clients
         return self._clients
 
+    @overload
     def bind(
-        self, replace: Sequence[Variable] | dict[Variable, Variable]
-    ) -> list[Variable]:
+        self,
+        replace: Sequence[Variable] | dict[Variable, Variable],
+        *,
+        return_memo: Literal[False] = ...,
+    ) -> list[Variable]: ...
+    @overload
+    def bind(
+        self,
+        replace: Sequence[Variable] | dict[Variable, Variable],
+        *,
+        return_memo: Literal[True],
+    ) -> tuple[list[Variable], dict[Any, Any]]: ...
+    def bind(self, replace, *, return_memo: bool = False):
         """Return fresh outputs with root inputs substituted per *replace*.
 
         Constants are reused; any non-Constant input not in *replace* raises KeyError.
+        With ``return_memo=True``, also return the memo mapping each frozen
+        variable and Apply node to its rebuilt counterpart.
         """
+        memo: dict[Any, Any]
         if isinstance(replace, dict):
             memo = replace.copy()
         else:
@@ -1129,14 +1219,33 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 [memo[i] for i in node.inputs],
                 [o.type() for o in node.outputs],
             )
+            memo[node] = new_node
             memo.update(zip(node.outputs, new_node.outputs))
-        return [out if isinstance(out, Constant) else memo[out] for out in self.outputs]
+        for out in self.outputs:
+            if isinstance(out, Constant):
+                memo.setdefault(out, out)
+        outputs = [memo[out] for out in self.outputs]
+        if return_memo:
+            return outputs, memo
+        return outputs
 
-    def unfreeze(self) -> "FunctionGraph":
-        """Return a mutable FunctionGraph with fresh mutable Apply nodes."""
+    @overload
+    def unfreeze(self, *, return_memo: Literal[False] = ...) -> "FunctionGraph": ...
+    @overload
+    def unfreeze(
+        self, *, return_memo: Literal[True]
+    ) -> tuple["FunctionGraph", dict[Any, Any]]: ...
+    def unfreeze(self, *, return_memo: bool = False):
+        """Return a mutable FunctionGraph with fresh mutable Apply nodes.
+
+        With ``return_memo=True``, also return the memo mapping each frozen
+        variable and Apply node to its mutable counterpart.
+        """
         fresh_inputs = [inp.type() for inp in self.inputs]
-        return FunctionGraph(
-            fresh_inputs,
-            self.bind(dict(zip(self.inputs, fresh_inputs))),
-            clone=False,
+        outputs, memo = self.bind(
+            dict(zip(self.inputs, fresh_inputs)), return_memo=True
         )
+        fgraph = FunctionGraph(fresh_inputs, outputs, clone=False)
+        if return_memo:
+            return fgraph, memo
+        return fgraph

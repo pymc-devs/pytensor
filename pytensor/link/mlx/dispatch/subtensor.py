@@ -5,9 +5,7 @@ import mlx.core as mx
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
     indices_from_subtensor,
@@ -39,7 +37,6 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(AdvancedSubtensor)
-@mlx_funcify.register(AdvancedSubtensor1)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
     def advanced_subtensor(x, *ilists):
         indices = indices_from_subtensor(ilists, op.idx_list)
@@ -82,7 +79,6 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(AdvancedIncSubtensor)
-@mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
     if op.set_instead_of_inc:
 
@@ -107,14 +103,13 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         # functional scatter-add, mirroring JAX's `x.at[indices].add(y)`.
         # Plain `x[indices] += y` writes each destination once, dropping
         # repeated-index contributions (e.g. gradients of embedding lookups).
-        # `AdvancedIncSubtensor1` has no `ignore_duplicates` flag and always
-        # accumulates, like its `np.add.at`-based `perform`.
+        # This is the `ignore_duplicates=False` branch of `AdvancedIncSubtensor`,
+        # which accumulates like its `np.add.at`-based `perform`.
         def mlx_fn(x, indices, y):
             return x.at[indices].add(y)
 
     def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
-        if isinstance(op, AdvancedIncSubtensor1):
-            op._check_runtime_broadcasting(node, x, y, ilist[0])
+        op._check_runtime_broadcast_of_vector_index(node, x, y, ilist[0])
 
         return mlx_fn(x, ilist, y)
 

@@ -5,9 +5,7 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from pytensor.compile.aliasing import add_supervisor_to_fgraph, insert_deepcopy
-from pytensor.compile.io import In, Out
-from pytensor.compile.mode import NUMBA, get_mode
+from pytensor.compile.aliasing import alias_root
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -56,70 +54,24 @@ def array0d_range(x):
 
 @register_funcify_and_cache_key(Scan)
 def numba_funcify_Scan(op: Scan, node, **kwargs):
-    # Apply inner rewrites
-    # TODO: Not sure this is the right place to do this, should we have a rewrite that
-    #  explicitly triggers the optimization of the inner graphs of Scan?
-    #  The C-code defers it to the make_thunk phase
-    rewriter = (
-        get_mode(op.mode)
-        .including("numba")
-        .excluding(*NUMBA._optimizer.exclude)
-        .optimizer
-    )
-    fgraph = op.fgraph
-    # When the buffer can only hold one SITSOT or as as many MITSOT as there are taps,
-    # We must always discard the oldest tap, so it's safe to destroy it in the inner function.
-    # TODO: Allow inplace for MITMOT
-    destroyable_sitsot = [
-        inner_sitsot
-        for outer_sitsot, inner_sitsot in zip(
-            op.outer_sitsot(node.inputs), op.inner_sitsot(fgraph.inputs), strict=True
-        )
-        if outer_sitsot.type.shape[0] == 1
-    ]
-    destroyable_mitsot = [
-        oldest_inner_mitmot
-        for outer_mitsot, oldest_inner_mitmot, taps in zip(
-            op.outer_mitsot(node.inputs),
-            op.oldest_inner_mitsot(fgraph.inputs),
-            op.info.mit_sot_in_slices,
+    """Generate a Numba implementation of a `Scan` loop."""
+    # Outer untraced_sit_sot outputs whose inner input the baked step fn destroys;
+    # when not owned, the codegen copies the outer input on the first iteration.
+    destroyed_roots = {
+        alias_root(inner_node.inputs[pos])
+        for inner_node in op.fgraph.apply_nodes
+        for positions in inner_node.op.destroy_map.values()
+        for pos in positions
+    }
+    untraced_inputs_destroyed_by_inner_function = {
+        outer_out_idx
+        for inner_inp, (outer_out_idx, _) in zip(
+            op.inner_untraced_sit_sot(op.fgraph.inputs),
+            op.outer_untraced_sit_sot_outs(node.outputs, with_idx=True),
             strict=True,
         )
-        if outer_mitsot.type.shape[0] == abs(min(taps))
-    ]
-    # Always allow the inner function to destroy untraced_sit_sot inputs.
-    # After the first iteration, these come from the previous output so
-    # destroying is always safe. For the first iteration, the codegen
-    # copies the outer input if the Scan's destroy_map doesn't allow it.
-    destroyable_untraced_sit_sot = list(op.inner_untraced_sit_sot(fgraph.inputs))
-    destroyable = {
-        *destroyable_sitsot,
-        *destroyable_mitsot,
-        *destroyable_untraced_sit_sot,
+        if inner_inp in destroyed_roots
     }
-    input_specs = [In(x, borrow=True, mutable=x in destroyable) for x in fgraph.inputs]
-    add_supervisor_to_fgraph(
-        fgraph=fgraph,
-        input_specs=input_specs,
-        accept_inplace=True,
-    )
-    rewriter(fgraph)
-    untraced_sit_sot_inner_outputs = set(op.inner_untraced_sit_sot_outs(fgraph.outputs))
-    output_specs = [
-        Out(x, borrow=x in untraced_sit_sot_inner_outputs) for x in fgraph.outputs
-    ]
-    insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
-
-    # Track which untraced_sit_sot outputs have their inner input destroyed
-    # by the optimized inner function (transitively, via DestroyHandler).
-    untraced_start = (
-        op.info.n_mit_mot + op.info.n_mit_sot + op.info.n_sit_sot + op.info.n_nit_sot
-    )
-    inner_destroyed_untraced_out_idxs = set()
-    if hasattr(fgraph, "destroyers"):
-        for j, inner_inp in enumerate(op.inner_untraced_sit_sot(fgraph.inputs)):
-            if fgraph.destroyers(inner_inp):
-                inner_destroyed_untraced_out_idxs.add(untraced_start + j)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
         op.fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
@@ -357,12 +309,13 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_out_to_outer_in_stmts.append(storage_name)
 
             output_idx = outer_output_names.index(storage_name)
-            # Copy the outer input when it will be mutated during the loop
-            # but the Scan's destroy_map doesn't grant ownership.
-            # Tapped outputs: the loop writes into the buffer via circular indexing.
-            # Untraced sit_sot: the inner function may destroy the input inplace.
+            # Copy the outer inputs when the loop mutates them and the destroy_map doesn't already grant permission
             needs_copy = output_idx not in node.op.destroy_map and (
-                is_tapped or output_idx in inner_destroyed_untraced_out_idxs
+                # Traced buffers are always mutated by the loop write-back procedure
+                is_tapped
+                # Untraced inputs are only mutated by the inner function,
+                # so we make the copy conditional on that actually happening
+                or output_idx in untraced_inputs_destroyed_by_inner_function
             )
             if needs_copy:
                 storage_alloc_stmt = f"{storage_name} = numba_deepcopy({outer_in_name})"
@@ -496,8 +449,9 @@ def scan({", ".join(outer_in_names)}):
         # If we can't cache the inner function, we can't cache the Scan either
         scan_cache_key = None
     else:
+        scan_cache_version = 1
         scan_cache_key = sha256(
-            f"({scan_op_src}, {inner_func_cache_key})".encode()
+            f"({scan_op_src}, {inner_func_cache_key}, {scan_cache_version})".encode()
         ).hexdigest()
 
     return numba_basic.numba_njit(scan_op_fn, boundscheck=False), scan_cache_key

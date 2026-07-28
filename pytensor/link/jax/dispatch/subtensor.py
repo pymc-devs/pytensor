@@ -1,9 +1,7 @@
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
-    AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
     indices_from_subtensor,
@@ -32,7 +30,6 @@ slice length.
 
 @jax_funcify.register(Subtensor)
 @jax_funcify.register(AdvancedSubtensor)
-@jax_funcify.register(AdvancedSubtensor1)
 def jax_funcify_Subtensor(op, node, **kwargs):
     def subtensor(x, *ilists):
         indices = indices_from_subtensor(ilists, op.idx_list)
@@ -46,7 +43,6 @@ def jax_funcify_Subtensor(op, node, **kwargs):
 
 @jax_funcify.register(IncSubtensor)
 @jax_funcify.register(AdvancedIncSubtensor)
-@jax_funcify.register(AdvancedIncSubtensor1)
 def jax_funcify_IncSubtensor(op, node, **kwargs):
     if getattr(op, "set_instead_of_inc", False):
 
@@ -63,8 +59,8 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
         if len(indices) == 1:
             indices = indices[0]
 
-        if isinstance(op, AdvancedIncSubtensor1):
-            op._check_runtime_broadcasting(node, x, y, indices)
+        if isinstance(op, AdvancedIncSubtensor):
+            op._check_runtime_broadcast_of_vector_index(node, x, y, indices)
 
         return jax_fn(x, indices, y)
 

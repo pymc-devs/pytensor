@@ -338,7 +338,8 @@ class TestParamsType:
         a, b, c = 2, 3, -7
         x = matrix(dtype="float64")
         y1 = QuadraticOpFunc(a, b, c)(x)
-        y2 = QuadraticCOpFunc(a, b, c)(x)
+        with pytest.warns(FutureWarning, match="ExternalCOp is deprecated"):
+            y2 = QuadraticCOpFunc(a, b, c)(x)
         f1 = pytensor.function([x], y1, mode="CVM")
         f2 = pytensor.function([x], y2, mode="CVM")
         shape = (100, 100)

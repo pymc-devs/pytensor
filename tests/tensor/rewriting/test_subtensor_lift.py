@@ -60,7 +60,6 @@ from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedIncSubtensor1,
     AdvancedSubtensor,
     Subtensor,
 )
@@ -79,7 +78,6 @@ NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 class TestLocalSubtensorOfBatchDims:
     rewrite_kw = dict(
         include=("ShapeOpt", "canonicalize", "specialize"),
-        exclude=("local_replace_AdvancedSubtensor",),
         clone=True,
     )
 
@@ -234,6 +232,36 @@ class TestLocalSubtensorOfBatchDims:
             custom_rewrite=DrainSpecifyAssumptions(),
         )
         result.assert_graph(x[idx] + y[idx])
+
+    def test_elemwise_jointly_unique_adv_indices_lift(self):
+        """A group of adv indices that each repeat but pair up to distinct
+        coordinates (tril_indices) can't select more elements than the indexed
+        axes hold, so it lifts."""
+        # Symbolic indices: the outputs of a single Nonzero.
+        n = pt.scalar("n", dtype="int64")
+        x = pt.matrix("x")
+        rows, cols = pt.tril_indices(n)
+        # ``local_add_canonizer`` simplifies the ``n - 0`` inside ``tril_indices``,
+        # which then lets the duplicate ``arange`` merge -- noise for this test.
+        result = RewriteTester(
+            [n, x], [pt.exp(x)[rows, cols]], exclude=("local_add_canonizer",)
+        )
+        result.assert_graph(pt.exp(x[rows, cols]))
+        result.assert_eval(3, np.arange(9.0).reshape(3, 3))
+
+        # Constant indices, static array shape: proved through the exact size.
+        x = pt.matrix("x", shape=(5, 5))
+        rows, cols = (pt.constant(i) for i in np.tril_indices(5))
+        result = RewriteTester([x], [pt.exp(x)[rows, cols]])
+        result.assert_graph(pt.exp(x[rows, cols]))
+        result.assert_eval(np.arange(25.0).reshape(5, 5))
+
+        # Constant indices, unknown array shape: proved through joint uniqueness.
+        x = pt.matrix("x")
+        rows, cols = (pt.constant(i) for i in np.tril_indices(5))
+        result = RewriteTester([x], [pt.exp(x)[rows, cols]])
+        result.assert_graph(pt.exp(x[rows, cols]))
+        result.assert_eval(np.arange(25.0).reshape(5, 5))
 
     def test_blockwise(self):
         class CoreTestOp(Op):
@@ -577,7 +605,6 @@ class TestSubtensorOfAlloc:
 
     rewrite_kw = dict(
         include=("ShapeOpt", "canonicalize", "specialize"),
-        exclude=("local_replace_AdvancedSubtensor",),
         clone=True,
     )
 
@@ -755,6 +782,21 @@ class TestSubtensorOfAlloc:
         out = pt.alloc(val, 5, 3)[:, idx]
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         assert_equal_computations([rewritten], [out], strict_dtype=False)
+
+    def test_jointly_unique_adv_indices_lift(self):
+        """Indices that each repeat but pair up to distinct coordinates
+        (tril_indices) don't enlarge val, so the read lifts through Alloc."""
+        val = pt.matrix("val", shape=(5, 5))
+        rows, cols = (pt.constant(i) for i in np.tril_indices(5))
+
+        result = RewriteTester(
+            [val],
+            [pt.alloc(val, 5, 5)[rows, cols]],
+            include=("ShapeOpt", "canonicalize", "specialize"),
+            exclude=("local_replace_AdvancedSubtensor",),
+        )
+        result.assert_graph(val[rows, cols], strict_dtype=False)
+        result.assert_eval(np.arange(25.0).reshape(5, 5))
 
     def test_negative_step_idx_to_slice(self):
         """Negative-step constant arange ``[7, 5, 3, 1]`` rewrites to ``x[7::-2]``."""
@@ -944,7 +986,7 @@ class TestLocalSubtensorMakeVector:
         r = f(0, 1, 2)
         assert r[0] == 0 and r[1] == 2
 
-    def test_AdvancedSubtensor1_idx(self):
+    def test_AdvancedSubtensor_idx(self):
         x, y, z = lscalars("xyz")
         v = make_vector(x, y, z)
         f = function([x, y, z], v[[0, 2]], mode=self.mode)
@@ -955,6 +997,23 @@ class TestLocalSubtensorMakeVector:
         assert len(prog[0].inputs) == 2
         r = f(0, 1, 2)
         assert r[0] == 0 and r[1] == 2
+
+    @pytest.mark.parametrize(
+        "mask", [[True, True, True], [True, False, True], [False, True, False]]
+    )
+    def test_AdvancedSubtensor_boolean_mask_idx(self, mask):
+        """A boolean mask selects the entries it is True at, not the positions
+        ``int(True)``/``int(False)`` would name, so it is left alone here and
+        handed to `bool_idx_to_nonzero` instead."""
+        x, y, z = lscalars("xyz")
+        v = make_vector(x, y, z)
+        out = v[np.array(mask)]
+
+        result = RewriteTester(
+            [x, y, z], [out], include=None, custom_rewrite=local_subtensor_make_vector
+        )
+        result.assert_graph(out)
+        result.assert_eval(0, 1, 2)
 
     def test_MakeVector_idx(self):
         x, y, z, q = lscalars("xyzq")
@@ -1440,10 +1499,7 @@ class TestExtractDiagLiftPass:
 
         # The partial-coverage read at offset=3 keeps exactly one scatter write of pi.
         on_topo = f_on.maker.fgraph.toposort()
-        n_writes = sum(
-            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
-            for n in on_topo
-        )
+        n_writes = sum(isinstance(n.op, AdvancedIncSubtensor) for n in on_topo)
         assert n_writes == 1
 
         for got, ref in zip(f_on(), f_off(), strict=True):

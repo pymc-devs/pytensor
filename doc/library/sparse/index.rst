@@ -292,5 +292,3 @@ List of Implemented Operations
 
 .. automodule:: pytensor.sparse.basic
     :members:
-
-.. autofunction:: pytensor.sparse.sparse_grad

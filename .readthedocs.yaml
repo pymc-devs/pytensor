@@ -4,6 +4,6 @@ sphinx:
 conda:
   environment: doc/environment.yml
 build:
-  os: "ubuntu-lts-latest"
+  os: "ubuntu-24.04"
   tools:
-    python: "mambaforge-latest"
+    python: "miniforge3-latest"

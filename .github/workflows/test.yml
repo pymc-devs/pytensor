@@ -17,18 +17,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
   cancel-in-progress: true
 
+# Deny all permissions by default; jobs opt into the minimum they need.
+permissions: {}
+
 jobs:
   changes:
     name: "Check for changes"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       changes: ${{ steps.changes.outputs.src }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: changes
         with:
           filters: |
@@ -53,15 +58,17 @@ jobs:
     name: Check code style
     needs: changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
         python-version: ["3.12", "3.14"]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
@@ -72,6 +79,8 @@ jobs:
       - changes
       - style
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
     strategy:
       fail-fast: false
@@ -135,7 +144,7 @@ jobs:
             os: "macos-15"
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -193,7 +202,7 @@ jobs:
         run: |
           if [[ $DEFAULT_MODE == "FAST_COMPILE" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
           if [[ $DEFAULT_MODE == "CVM" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,linker=cvm; fi
-          export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
           python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
         env:
           MATRIX_ID: ${{ steps.matrix-id.outputs.id }}
@@ -215,11 +224,13 @@ jobs:
       - changes
       - style
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
     strategy:
       fail-fast: false
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -240,28 +251,11 @@ jobs:
           python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
         env:
           PYTHON_VERSION: 3.12
-      - name: Download previous benchmark data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ./cache
-          key: ${{ runner.os }}-benchmark
       - name: Run benchmarks
         shell: micromamba-shell {0}
         run: |
-          export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest --runslow --benchmark-only --benchmark-json output.json
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
-        with:
-          name: Python Benchmark with pytest-benchmark
-          tool: "pytest"
-          output-file-path: output.json
-          external-data-json-path: ./cache/benchmark-data.json
-          alert-threshold: "200%"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: false
-          fail-on-alert: false
-          auto-push: false
+          export PYTENSOR_FLAGS=on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          python -m pytest --runslow --benchmark-only
 
   all-checks:
     if: ${{ always() }}
@@ -276,15 +270,17 @@ jobs:
   upload-coverage:
     runs-on: ubuntu-latest
     name: "Upload coverage"
+    permissions:
+      contents: read
     needs: [changes, all-checks]
     if: ${{ needs.changes.outputs.changes == 'true' && needs.all-checks.result == 'success' }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14"
 

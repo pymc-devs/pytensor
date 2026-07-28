@@ -743,6 +743,28 @@ def test_repeated_args():
     assert final_node.inputs[-2] is final_node.inputs[-1]
 
 
+def test_core_shape_from_random_input():
+    """A RV whose core shape reads the shape of another RV feeding it.
+
+    ``introduce_explicit_core_shape_rv`` must still wrap such a RV: the RV in the
+    core-shape graph (here the random ``mean``, whose runtime-only trailing dim is
+    the core shape) is computed before the node anyway, so reading its shape needs
+    no extra draw. Regression test for the previously over-conservative bail.
+    """
+    rng = shared(np.random.default_rng(123))
+    n = pt.scalar("n", dtype=int)
+    # Random mean whose trailing (core) dim is only known at runtime
+    mean = ptr.normal(size=(2, n), rng=rng)
+    x = ptr.multivariate_normal(mean=mean, cov=pt.eye(n), rng=rng)
+
+    fn = function([n], x, mode="NUMBA")
+    # Both RVs are wrapped -- no raw RandomVariable survives to funcify
+    assert not any(
+        isinstance(node.op, ptr.RandomVariable) for node in fn.maker.fgraph.apply_nodes
+    )
+    assert fn(3).shape == (2, 3)
+
+
 def test_rv_fallback():
     """Test that random variables can fallback to object mode."""
 

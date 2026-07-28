@@ -41,7 +41,7 @@ def test_jax_Subtensor_constant():
 
     # Advanced indexing
     out_pt = pt_subtensor.advanced_subtensor1(x_pt, [1, 2])
-    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor1)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
 
     compare_jax_and_py([x_pt], [out_pt], [x_np])
 

@@ -34,6 +34,7 @@ with PyTensor itself.
 
     graphstructures
     graph_rewriting
+    unification_kanren
     op
     creating_an_op
     creating_a_c_op

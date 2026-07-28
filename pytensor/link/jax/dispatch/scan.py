@@ -4,7 +4,6 @@ import jax.numpy as jnp
 import numpy as np
 from jax._src.lax.control_flow import scan as jax_scan
 
-from pytensor.compile.mode import JAX, get_mode
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.scan.op import Scan
 
@@ -27,14 +26,6 @@ def jax_funcify_Scan(op: Scan, node, **kwargs):
     if info.as_while:
         raise NotImplementedError("While Scan cannot yet be converted to JAX")
 
-    # Optimize inner graph (exclude any defalut rewrites that are incompatible with JAX mode)
-    rewriter = (
-        get_mode(op.mode)
-        .including("jax")
-        .excluding("numba", *JAX._optimizer.exclude)
-        .optimizer
-    )
-    rewriter(op.fgraph)
     scan_inner_func = jax_funcify(op.fgraph, **kwargs)
 
     def scan(*outer_inputs):
