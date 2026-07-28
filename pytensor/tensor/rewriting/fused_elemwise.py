@@ -40,7 +40,11 @@ from pytensor.tensor.rewriting.basic import (
     local_tensor_scalar_tensor,
 )
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
-from pytensor.tensor.rewriting.scalarize import ScalarCAReduce, ScalarizedElemwise
+from pytensor.tensor.rewriting.scalarize import (
+    ScalarCAReduce,
+    Scalarize,
+    ScalarizedElemwise,
+)
 from pytensor.tensor.shape import shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -1012,6 +1016,17 @@ fused_elemwise_optdb.register(
     dfs_rewriter(local_tensor_scalar_tensor, ignore_newtrees=True),
     "numba",
     position=3,
+)
+# The scalarized reduction outputs above are boundaries the pre-fusion scalarize
+# run (50.4) could not see, because fusion is what creates them. Run the same walk
+# again so consumers that take ScalarType -- ScalarizedElemwise, a size-1 Elemwise,
+# a Join -- swallow them instead of reading the re-box.
+fused_elemwise_optdb.register(
+    "scalarize_post_fusion",
+    Scalarize(),
+    "numba",
+    "scalarize",
+    position=4,
 )
 
 

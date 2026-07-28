@@ -18,15 +18,20 @@ A boundary swallowed all the way cancels (no alloc); one that stops materializes
 as the single box the producer always had, so scalarizing is never a loss. Topo
 order carries the cascade, so there is no fixpoint.
 
-Runs after Composite fusion and before inplace (an inplace destination is an
-array that survives scalarization), and before IndexedFusion -- so it never sees
-the ``FusedElemwise``. See ``spec_scalarize.md``.
+Runs twice. First after Composite fusion and before inplace (an inplace
+destination is an array that survives scalarization) and before IndexedFusion, so
+it never sees the ``FusedElemwise``. Then again *after* IndexedFusion, because
+fusion creates boundaries of its own: it hands each full reduction out as a scalar
+and re-boxes it, and only a second walk can swallow those into the consumers. The
+second run is the only one that can meet an inplace node, hence the ``destroy_map``
+guard. See ``spec_scalarize.md``.
 """
 
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.graph.rewriting.basic import GraphRewriter
 from pytensor.graph.utils import InconsistencyError
+from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Join,
     TensorFromScalar,
@@ -72,7 +77,7 @@ class ScalarizedElemwise(OpFromGraph):
 
 # Op types that can swallow a scalar input (so a producer feeding one is worth
 # scalarizing). Elemwise swallows via its scalar_op / the mixed-Elemwise op.
-_SCALAR_CONSUMERS = (Join, Elemwise)
+_SCALAR_CONSUMERS = (Join, Elemwise, ScalarizedElemwise)
 
 
 def _scalar_behind(var):
@@ -104,7 +109,15 @@ class Scalarize(GraphRewriter):
                 continue
             op = node.op
             replacement = None
-            if isinstance(op, Join) and op.axis == 0 and node.outputs[0].type.ndim == 1:
+            if op.destroy_map:
+                # Rebuilding would silently drop the inplace the InplaceOptimizer
+                # chose; only the post-fusion run can meet one (inplace is 50.5).
+                continue
+            if isinstance(op, ScalarizedElemwise):
+                replacement = self._rescalarize(node)
+            elif (
+                isinstance(op, Join) and op.axis == 0 and node.outputs[0].type.ndim == 1
+            ):
                 replacement = self._swallow_join(node)
             elif isinstance(op, Subtensor) and node.outputs[0].type.ndim == 0:
                 replacement = self._emit_producer(fgraph, node, ScalarSubtensor)
@@ -124,7 +137,9 @@ class Scalarize(GraphRewriter):
                     if single:
                         self._pass_through_elemwise(fgraph, node, scalars)
                     else:
-                        replacement = self._emit_scalar_elemwise(node, scalars)
+                        replacement = self._emit_scalar_elemwise(
+                            op.scalar_op, node.outputs, scalars
+                        )
                 elif single or scalar_computation:
                     replacement = self._scalarize_elemwise(node, scalars)
             if replacement is None:
@@ -173,15 +188,15 @@ class Scalarize(GraphRewriter):
         return None
 
     @staticmethod
-    def _emit_scalar_elemwise(node, scalars):
+    def _emit_scalar_elemwise(scalar_op, outputs, scalars):
         # A multi-output pure scalar computation: apply the scalar op on the
         # scalars directly and box each 0-d output once. The single-output case
         # goes through _pass_through_elemwise (which distributes per consumer).
-        scalar_outs = node.op.scalar_op(*scalars)
+        scalar_outs = scalar_op(*scalars)
         if not isinstance(scalar_outs, list):
             scalar_outs = [scalar_outs]
         replacements = []
-        for out, scalar_out in zip(node.outputs, scalar_outs, strict=True):
+        for out, scalar_out in zip(outputs, scalar_outs, strict=True):
             box = tensor_from_scalar(scalar_out)
             if out.type.ndim:
                 box = box.dimshuffle(["x"] * out.type.ndim)
@@ -189,28 +204,76 @@ class Scalarize(GraphRewriter):
         return replacements
 
     @staticmethod
+    def _build_scalarized(elemwise_op, node_outputs, sources, ndims):
+        # ``sources`` pairs each position's outer variable with whether it enters
+        # as a scalar; ``ndims`` are the ranks the inner Elemwise expects, so each
+        # scalar is re-boxed to exactly the rank it replaces.
+        outer, inner, elemwise_inputs = [], [], []
+        for (source, is_scalar), ndim in zip(sources, ndims, strict=True):
+            dummy = source.type()
+            if is_scalar:
+                box = tensor_from_scalar(dummy)
+                if ndim:
+                    box = box.dimshuffle(["x"] * ndim)
+                elemwise_inputs.append(box)
+            else:
+                elemwise_inputs.append(dummy)
+            inner.append(dummy)
+            outer.append(source)
+        inner_outs = elemwise_op(*elemwise_inputs, return_list=True)
+        new_outs = ScalarizedElemwise(inner, inner_outs)(*outer, return_list=True)
+        return list(zip(node_outputs, new_outs, strict=True))
+
+    @staticmethod
     def _scalarize_elemwise(node, scalars):
         # Mixed Elemwise (some scalar inputs, some genuine arrays): keep it an
         # array op but carry the scalar inputs as ScalarType, so their 0-d boxes
         # vanish. The inner graph re-boxes each scalar with tensor_from_scalar so
         # it stays a faithful Elemwise; only Numba passes them as constant_inputs.
-        outer, inner, elemwise_inputs = [], [], []
-        for inp, scalar in zip(node.inputs, scalars):
+        sources = [
+            (inp, False) if scalar is None else (scalar, True)
+            for inp, scalar in zip(node.inputs, scalars, strict=True)
+        ]
+        ndims = [inp.type.ndim for inp in node.inputs]
+        return Scalarize._build_scalarized(node.op, node.outputs, sources, ndims)
+
+    @staticmethod
+    def _rescalarize(node):
+        # A ScalarizedElemwise built before fusion meets new boundaries after it:
+        # a FusedElemwise hands each full reduction out as ScalarType and re-boxes
+        # it, and those boxes land on consumers like this one. Pull them in as
+        # scalars too, so the re-box cancels.
+        [elemwise_node] = [
+            n for n in node.op.fgraph.apply_nodes if isinstance(n.op, Elemwise)
+        ]
+        sources, found = [], False
+        for inp in node.inputs:
+            if isinstance(inp.type, ScalarType):
+                sources.append((inp, True))
+                continue
+            scalar = _scalar_behind(inp)
             if scalar is None:
-                dummy = inp.type()
-                elemwise_inputs.append(dummy)
-                outer.append(inp)
+                sources.append((inp, False))
             else:
-                dummy = scalar.type()
-                box = tensor_from_scalar(dummy)
-                if inp.type.ndim:
-                    box = box.dimshuffle(["x"] * inp.type.ndim)
-                elemwise_inputs.append(box)
-                outer.append(scalar)
-            inner.append(dummy)
-        inner_outs = node.op(*elemwise_inputs, return_list=True)
-        new_outs = ScalarizedElemwise(inner, inner_outs)(*outer, return_list=True)
-        return list(zip(node.outputs, new_outs, strict=True))
+                sources.append((scalar, True))
+                found = True
+        if not found:
+            return None
+        if all(is_scalar for _, is_scalar in sources):
+            # Nothing is an array any more, so there is no vectorized loop left to
+            # run: this is a pure scalar computation and only its outputs get boxed.
+            # (A wider output would have no array to take its shape from.)
+            if not all(all(out.type.broadcastable) for out in node.outputs):
+                return None
+            return Scalarize._emit_scalar_elemwise(
+                elemwise_node.op.scalar_op,
+                node.outputs,
+                [source for source, _ in sources],
+            )
+        ndims = [inp.type.ndim for inp in elemwise_node.inputs]
+        return Scalarize._build_scalarized(
+            elemwise_node.op, node.outputs, sources, ndims
+        )
 
     @staticmethod
     def _swallow_join(node):
