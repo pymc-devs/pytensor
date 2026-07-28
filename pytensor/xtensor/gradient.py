@@ -141,6 +141,7 @@ def _collapse_region(
         return lowered
     unit = OpFromGraph(dummies, [lowered], inline=True)
     [new_exit] = unit(*outer_inputs, return_list=True)
+    new_exit.name = exit_var.name
     return cast(Variable, new_exit)
 
 

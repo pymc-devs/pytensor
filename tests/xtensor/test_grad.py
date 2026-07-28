@@ -79,6 +79,13 @@ def test_grad_repeated_input():
         np.testing.assert_allclose(g, power * x_test ** (power - 1))
 
 
+def test_grad_preserves_cost_name():
+    xt = pt.vector("x", shape=(3,))
+    loss = (as_xtensor(xt, dims=("a",)) ** 2).sum().values
+    loss.name = "loss"
+    assert pt.grad(loss, xt).name == "(dloss/dx)"
+
+
 def test_grad_second_order():
     W = pytensor.shared(np.ones((3, 2)), name="W")
     xt = pt.vector("x", shape=(3,))
