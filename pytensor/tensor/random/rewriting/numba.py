@@ -2,7 +2,7 @@ from pytensor.compile import optdb
 from pytensor.configdefaults import config
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
-from pytensor.graph.traversal import applys_between
+from pytensor.graph.traversal import ancestors
 from pytensor.tensor import as_tensor, constant
 from pytensor.tensor.basic import cast
 from pytensor.tensor.random.basic import (
@@ -87,11 +87,16 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     else:
         core_shape = as_tensor(core_shape)
 
+    # ``get_non_recursive_shape`` reads only this node's own inputs, so any
+    # RandomVariable in the core-shape graph is itself an input and gets blocked
+    # here -- it is computed before the node, so reading its shape needs no extra
+    # draw (e.g. a random ``mean`` whose trailing dim is the core shape). Only a
+    # RandomVariable reachable *past* the inputs would force a duplicate draw.
+    node_inputs = frozenset(node.inputs)
     if any(
-        isinstance(node.op, RandomVariable)
-        for node in applys_between(node.inputs, [core_shape])
+        var not in node_inputs and isinstance(var.owner_op, RandomVariable)
+        for var in ancestors([core_shape], blockers=node_inputs)
     ):
-        # If the RandomVariable shows up in the shape graph we can't introduce the core shape
         return None
 
     [core_shape] = simplify_core_shape_graphs([core_shape], fgraph)

@@ -1528,6 +1528,10 @@ Mathematical
 
     Returns a variable representing the inverse error function or the inverse complementary error function. `wikipedia <http://en.wikipedia.org/wiki/Error_function#Inverse_functions>`__
 
+.. function:: ndtri_exp(a)
+
+    Returns a variable representing the inverse of the standard normal CDF evaluated at the exponent of a, computed accurately even where ``exp(a)`` underflows.
+
 .. function:: gamma(a)
 
    Returns a variable representing the gamma function.

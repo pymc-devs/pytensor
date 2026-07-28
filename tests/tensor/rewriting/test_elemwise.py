@@ -249,7 +249,11 @@ class TestFusion:
             "add_mul_fusion",
             "inplace",
         ],
-        exclude=["cxx_only", "BlasOpt"],
+        # Exclude both careduce-fusion paths so reductions stay unfused here:
+        # cxx_only covers local_careduce_fusion (C backend); the indexed/reduce
+        # fusion is the Numba-specific equivalent. This class tests the generic
+        # Composite fusion, independent of the active backend.
+        exclude=["cxx_only", "BlasOpt", "fuse_indexed_into_elemwise"],
     )
     mode = Mode(get_default_mode().linker, rewrites)
     _shared = staticmethod(shared)

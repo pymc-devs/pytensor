@@ -1466,7 +1466,7 @@ class CachedEquilibrimDB(EquilibriumDB):
 
     def register(self, *args, **kwargs):
         # If new rewrites are registered, the default cached query is void
-        self.cached_default_query = None
+        self._cached_default_query = None
         super().register(*args, **kwargs)
 
     @property
@@ -1766,7 +1766,6 @@ class Alloc(COp):
         from pytensor.tensor.blas import CGemv, CGer, Gemv, Ger
         from pytensor.tensor.subtensor import (
             AdvancedIncSubtensor,
-            AdvancedIncSubtensor1,
             IncSubtensor,
             Subtensor,
         )
@@ -1797,13 +1796,7 @@ class Alloc(COp):
                 idx == 0
                 and isinstance(
                     client_op,
-                    IncSubtensor
-                    | AdvancedIncSubtensor1
-                    | AdvancedIncSubtensor
-                    | Gemv
-                    | CGemv
-                    | Ger
-                    | CGer,
+                    IncSubtensor | AdvancedIncSubtensor | Gemv | CGemv | Ger | CGer,
                 )
             ):
                 # Ops that will work inplace on the Alloc. So if they

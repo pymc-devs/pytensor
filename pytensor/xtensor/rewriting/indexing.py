@@ -106,7 +106,7 @@ def _lower_index(node):
                 ):
                     # We can use basic indexing directly if no other index acts on this dimension
                     # This is an optimization that avoids creating an unnecessary arange tensor
-                    # and facilitates the use of the specialized AdvancedSubtensor1 when possible
+                    # and keeps the indexing as basic (rather than advanced) when possible
                     aligned_idxs.append(to_basic_idx(idx))
                     basic_idx_axis.append(out_dims.index(x_dim))
                 else:

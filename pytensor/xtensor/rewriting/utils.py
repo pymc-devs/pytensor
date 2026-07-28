@@ -2,10 +2,10 @@ import typing
 from collections.abc import Sequence
 
 from pytensor.compile import optdb
+from pytensor.compile.rewriting import inline_ofg_expansion
 from pytensor.graph.rewriting.basic import NodeRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import EquilibriumDB, RewriteDatabase
 from pytensor.tensor.basic import infer_shape_db
-from pytensor.tensor.rewriting.ofg import inline_ofg_expansion
 from pytensor.tensor.variable import TensorVariable
 from pytensor.xtensor.type import XTensorVariable
 

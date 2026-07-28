@@ -6,6 +6,7 @@ destroyable, mirroring the behavior any other in-place rewriter would
 have if it understood Scan's input categories.
 """
 
+from copy import copy
 from itertools import chain
 
 from pytensor.compile.ops import deep_copy_op
@@ -85,7 +86,13 @@ class ScanInplaceOptimizer(GraphRewriter):
 
         inputs = ls_begin + ls + ls_end
 
-        new_op = op.clone()
+        # Shallow-copy the op so we can give it its own ``destroy_map`` without
+        # mutating the canonical op; the frozen inner graph is immutable and
+        # safely shared. (``op.clone()`` returns ``self`` for immutable ops.)
+        new_op = copy(op)
+        # The compiled inner function depends on ``destroy_map`` (it drives the
+        # untraced-copy and inplace setup), so drop any cached copy.
+        new_op._fn = None
 
         destroy_map = op.destroy_map.copy()
         for out_idx in output_indices:
