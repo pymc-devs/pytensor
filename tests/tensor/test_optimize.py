@@ -103,6 +103,33 @@ def test_simple_minimize():
     utt.verify_grad(f, [0.0, a_val, c_val], eps=1e-6)
 
 
+def test_minimize_replace_input_with_more_specific_type():
+    """Substituting an outer input of the minimize node with a compatible but
+    more specific type (a static shape ``(3,)`` in place of the symbolic ``(?,)``
+    of the minimized variable) must be accepted rather than rejected by a strict
+    ``input.type == inner_input.type`` check in ``make_node``. This mirrors the
+    Laplace/INLA init-point substitution ``graph_replace(x_star, {x: x0_init})``.
+    """
+    x = pt.vector("x")  # shape (?,)
+    a = pt.vector("a")  # shape (?,)
+    objective = ((x - a) ** 2).sum()
+    x_star, _ = minimize(objective, x)
+
+    x0_init = pt.ones(3)  # static shape (3,), more specific than x's (?,)
+    assert x0_init.type != x.type
+    # Before the fix this raised in ``ScipyWrapperOp.make_node``.
+    x_star_init = graph_replace(x_star, {x: x0_init})
+
+    f = function([a], x_star_init)
+    a_val = np.array([1.0, 2.0, 3.0], dtype=x.type.dtype)
+    np.testing.assert_allclose(
+        f(a_val),
+        a_val,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+
+
 @pytest.mark.parametrize(
     "method, jac, hess",
     [
@@ -475,8 +502,11 @@ def test_optimize_grad_scalar_arg(optimize_op):
     obj = tensor_from_scalar((scalar_from_tensor(x) + theta_scalar) ** 2)
     x0, _ = optimize_op(obj, x)
 
-    # Confirm theta is a direct input to the node
-    assert x0.owner.inputs[1] is theta_scalar
+    # Confirm theta reaches the node. Scalar-typed parameters are wrapped as a
+    # tensor at the op boundary (so scipy, which deals in arrays, gets an
+    # ndarray), hence theta_scalar shows up under a tensor_from_scalar wrapper.
+    node_arg = x0.owner.inputs[1]
+    assert node_arg.owner is not None and node_arg.owner.inputs[0] is theta_scalar
 
     grad_wrt_theta = pt.grad(x0, theta)
     np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: np.e}), -1)

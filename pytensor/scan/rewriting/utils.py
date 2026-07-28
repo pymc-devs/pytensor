@@ -3,7 +3,6 @@ from collections.abc import Collection
 from typing import cast
 
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.replace import clone_replace
 from pytensor.scan.op import Scan
 
 
@@ -24,9 +23,9 @@ def _rebuild_scan_with_new_signature(
 
     Each ``drop_*`` argument is a set of indices into its category; the
     rebuilt op retains only the entries whose index is not listed.
-    ``inner_substitutions``, when provided, is applied via ``clone_replace``
-    on the inner outputs before the rebuild -- use it to inline constants
-    or rewire duplicate inner inputs.
+    ``inner_substitutions``, when provided, is applied on the thawed inner
+    graph before the rebuild -- use it to inline constants or rewire
+    duplicate inner inputs.
 
     Returns a ``replacements`` dict: kept outer outputs map to their
     counterparts on the new op, dropped outputs carry no mapping (they
@@ -57,12 +56,16 @@ def _rebuild_scan_with_new_signature(
         n_non_seqs=len(keep_non_seqs),
     )
 
-    inner_seqs = op.inner_seqs(op.inner_inputs)
-    inner_mm_groups = op.inner_mitmot_grouped(op.inner_inputs)
-    inner_ms_groups = op.inner_mitsot_grouped(op.inner_inputs)
-    inner_ss = op.inner_sitsot(op.inner_inputs)
-    inner_us = op.inner_untraced_sit_sot(op.inner_inputs)
-    inner_non_seqs = op.inner_non_seqs(op.inner_inputs)
+    # Thaw the frozen inner graph; slices and substitutions map through the memo.
+    unfrozen_fgraph, memo = op.fgraph.unfreeze(return_memo=True)
+    inner_inputs = list(unfrozen_fgraph.inputs)
+
+    inner_seqs = op.inner_seqs(inner_inputs)
+    inner_mm_groups = op.inner_mitmot_grouped(inner_inputs)
+    inner_ms_groups = op.inner_mitsot_grouped(inner_inputs)
+    inner_ss = op.inner_sitsot(inner_inputs)
+    inner_us = op.inner_untraced_sit_sot(inner_inputs)
+    inner_non_seqs = op.inner_non_seqs(inner_inputs)
 
     new_inner_inputs = (
         [inner_seqs[k] for k in keep_seqs]
@@ -73,9 +76,12 @@ def _rebuild_scan_with_new_signature(
         + [inner_non_seqs[k] for k in keep_non_seqs]
     )
 
-    inner_outputs = op.inner_outputs
     if inner_substitutions:
-        inner_outputs = clone_replace(inner_outputs, replace=inner_substitutions)
+        unfrozen_fgraph.replace_all(
+            [(memo.get(k, k), memo.get(v, v)) for k, v in inner_substitutions.items()],
+            import_missing=True,
+        )
+    inner_outputs = list(unfrozen_fgraph.outputs)
     inner_mm_out_groups = op.inner_mitmot_outs_grouped(inner_outputs)
     inner_ms_outs = op.inner_mitsot_outs(inner_outputs)
     inner_ss_outs = op.inner_sitsot_outs(inner_outputs)

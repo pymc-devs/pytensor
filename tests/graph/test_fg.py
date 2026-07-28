@@ -875,13 +875,13 @@ class TestFrozenFunctionGraph:
         orphan = MyVariable("orphan")
         out = op1(var1, orphan)
         with pytest.raises(ValueError, match=r"Orphan.*orphan"):
-            FrozenFunctionGraph([var1], [out])
+            FrozenFunctionGraph.from_io([var1], [out])
 
     def test_unmapped_output_raises(self):
         var1 = MyVariable("x")
         disconnected = MyVariable("disconnected")
         with pytest.raises(ValueError, match="could not be mapped"):
-            FrozenFunctionGraph([var1], [disconnected])
+            FrozenFunctionGraph.from_io([var1], [disconnected])
 
     def test_interned_constant_in_variables(self):
         """Regression test: all node inputs must appear in variables.
@@ -898,7 +898,7 @@ class TestFrozenFunctionGraph:
         # Populate FrozenApply cache: op_shared(NomVar_0, c1)
         x1 = MyVariable("x")
         c1 = MyConstant("c", data=42)
-        FrozenFunctionGraph([x1], [op_shared(x1, c1)])
+        FrozenFunctionGraph.from_io([x1], [op_shared(x1, c1)])
 
         # New graph with a fresh constant c2 (same value, different object).
         # op_unique: cache miss → FrozenApply stores c2
@@ -906,7 +906,7 @@ class TestFrozenFunctionGraph:
         # Both c1 and c2 must be in variables.
         x2 = MyVariable("x")
         c2 = MyConstant("c", data=42)
-        fg = FrozenFunctionGraph([x2], [op_shared(x2, c2), op_unique(x2, c2)])
+        fg = FrozenFunctionGraph.from_io([x2], [op_shared(x2, c2), op_unique(x2, c2)])
 
         for node in fg.toposort():
             for inp in node.inputs:
@@ -918,8 +918,8 @@ class TestFrozenFunctionGraph:
         c2 = ScalarConstant(float64, 3.14)
         assert c1 is not c2
 
-        ffg1 = FrozenFunctionGraph([], [c1])
-        ffg2 = FrozenFunctionGraph([], [c2])
+        ffg1 = FrozenFunctionGraph.from_io([], [c1])
+        ffg2 = FrozenFunctionGraph.from_io([], [c2])
         assert ffg1 == ffg2
         assert hash(ffg1) == hash(ffg2)
         assert ffg1.outputs == ffg2.outputs
@@ -973,8 +973,8 @@ class TestFrozenFunctionGraph:
 
         # s1/s2 are MakeVector variables used as inputs, so freezing nominalizes them and
         # discards the [2,3]/[3,2] values that informed each reshape's output shape.
-        ffg1 = FrozenFunctionGraph([x, s1], [rs1])
-        ffg2 = FrozenFunctionGraph([x, s2], [rs2])
+        ffg1 = FrozenFunctionGraph.from_io([x, s1], [rs1])
+        ffg2 = FrozenFunctionGraph.from_io([x, s2], [rs2])
 
         # The original output types are part of the FrozenApply key, so the fgraphs aren't identical.
         # Alternative design: the two ffg get merged with a general output type (None, None)
@@ -993,12 +993,19 @@ class TestFrozenFunctionGraph:
         """bind must handle constants that appear directly as outputs."""
         x = float64("x")
         c = ScalarConstant(float64, 42.0)
-        ffg = FunctionGraph([x], [add(x, c), c]).freeze()
+        # c2 appears *only* as an output, never as a node input
+        c2 = ScalarConstant(float64, 7.0)
+        ffg = FunctionGraph([x], [add(x, c), c, c2]).freeze()
 
         y = float64("y")
-        bound = ffg.bind({ffg.inputs[0]: y})
-        assert len(bound) == 2
+        bound, memo = ffg.bind({ffg.inputs[0]: y}, return_memo=True)
+        assert len(bound) == 3
         assert bound[1] is c
+        assert bound[2].data == 7.0
+        # Callers index the memo with inner outputs directly (e.g. ScanMerge),
+        # so it must cover constant-only outputs too.
+        assert memo[ffg.outputs[1]] is bound[1]
+        assert memo[ffg.outputs[2]] is bound[2]
 
     def test_from_structural_inputs_only_root_inputs(self):
         """All inputs are roots: behaves like the plain constructor."""

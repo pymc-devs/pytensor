@@ -8,6 +8,7 @@ import inspect
 
 import numpy as np
 from scipy.special import logsumexp as scipy_logsumexp
+from scipy.special import softmax as scipy_softmax
 from xarray import DataArray
 
 import pytensor.scalar as ps
@@ -15,7 +16,7 @@ import pytensor.xtensor.math as pxm
 from pytensor import function
 from pytensor.scalar import ScalarOp
 from pytensor.xtensor.basic import rename
-from pytensor.xtensor.math import add, exp, logsumexp
+from pytensor.xtensor.math import add, exp, logsumexp, softmax
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     check_vectorization,
@@ -158,6 +159,7 @@ def test_cast():
         yc64.astype("float64")
 
 
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
 @pytest.mark.parametrize(
     ["shape", "dims", "axis"],
     [
@@ -166,17 +168,40 @@ def test_cast():
         ((3, 4), "b", 1),
     ],
 )
-def test_logsumexp(shape, dims, axis):
-    scipy_inp = np.zeros(shape)
-    scipy_out = scipy_logsumexp(scipy_inp, axis=axis)
+def test_logsumexp(shape, dims, axis, mode):
+    x = xtensor("x", dims=("a", "b"), shape=shape)
+    fn = function([x], logsumexp(x, dim=dims), mode=mode)
 
-    pytensor_inp = DataArray(scipy_inp, dims=("a", "b"))
-    f = function([], logsumexp(pytensor_inp, dim=dims))
-    pytensor_out = f()
+    # Offset the inputs so the naive log(sum(exp(x))) graph would overflow
+    x_test = xr_arange_like(x) + 800.0
 
-    np.testing.assert_array_almost_equal(
-        pytensor_out,
-        scipy_out,
+    np.testing.assert_allclose(
+        fn(x_test.values),
+        scipy_logsumexp(x_test.values, axis=axis),
+        rtol=1e-6,
+    )
+
+
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+@pytest.mark.parametrize(
+    ["shape", "dims", "axis"],
+    [
+        ((3, 4), ("a", "b"), None),
+        ((3, 4), "a", 0),
+        ((3, 4), "b", 1),
+    ],
+)
+def test_softmax(shape, dims, axis, mode):
+    x = xtensor("x", dims=("a", "b"), shape=shape)
+    fn = function([x], softmax(x, dim=dims), mode=mode)
+
+    # Offset the inputs so the naive exp(x) / exp(x).sum() graph would overflow
+    x_test = xr_arange_like(x) + 800.0
+
+    np.testing.assert_allclose(
+        fn(x_test.values),
+        scipy_softmax(x_test.values, axis=axis),
+        rtol=1e-6,
     )
 
 

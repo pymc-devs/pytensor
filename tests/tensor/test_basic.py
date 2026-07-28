@@ -18,6 +18,8 @@ from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import clone_replace, vectorize_graph
+from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import Assert
@@ -963,6 +965,28 @@ def test_infer_static_shape():
     x = scalar("x")
     _sh, static_shape = infer_static_shape([x.size])
     assert static_shape == (1,)
+
+
+def test_cached_equilibrium_db_invalidates_on_register():
+    # Registering after the default query is cached must drop the cache, so the
+    # newly registered rewrite is picked up on the next query.
+    db = ptb.CachedEquilibrimDB(default_query=RewriteDatabaseQuery(include=("tag",)))
+
+    @node_rewriter(None)
+    def noop(fgraph, node):
+        return None
+
+    db.register("noop", noop, "tag")
+    # Populate the cache.
+    assert db.default_query is not None
+    assert db._cached_default_query is not None
+
+    @node_rewriter(None)
+    def noop2(fgraph, node):
+        return None
+
+    db.register("noop2", noop2, "tag")
+    assert db._cached_default_query is None
 
 
 class TestEye:

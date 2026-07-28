@@ -1,44 +1,8 @@
-from pytensor.compile import optdb
-from pytensor.compile.builders import OpFromGraph
-from pytensor.graph import Apply, Variable, node_rewriter
-from pytensor.graph.fg import FrozenFunctionGraph
-from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
+from pytensor.compile.rewriting import inline_ofg_node
+from pytensor.graph import node_rewriter
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.special import XLog1PY, XLogY
-
-
-def inline_ofg_node(node: Apply) -> list[Variable]:
-    frozen_fg: FrozenFunctionGraph = node.op._frozen_fgraph
-    replacements = dict(zip(frozen_fg.inputs, node.inputs))
-    inlined_outs = frozen_fg.bind(replacements)
-    copy_stack_trace(frozen_fg.outputs, inlined_outs)
-    return inlined_outs
-
-
-@node_rewriter([OpFromGraph])
-def inline_ofg_expansion(fgraph, node):
-    """
-    This optimization expands internal graph of OpFromGraph.
-    Only performed if node.op.is_inline == True
-    Doing so can improve optimization at the cost of compilation speed.
-    """
-    op = node.op
-    if not op.is_inline:
-        return False
-
-    return inline_ofg_node(node)
-
-
-# We want to run this before the first merge optimizer
-# and before the first scan optimizer.
-optdb.register(
-    "inline_ofg_expansion",
-    dfs_rewriter(inline_ofg_expansion),
-    "fast_compile",
-    "fast_run",
-    position=-0.01,
-)
 
 
 @register_specialize("inline_ofg")

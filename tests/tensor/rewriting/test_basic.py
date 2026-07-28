@@ -82,7 +82,7 @@ from pytensor.tensor.shape import (
     specify_shape,
 )
 from pytensor.tensor.subtensor import (
-    AdvancedIncSubtensor1,
+    AdvancedIncSubtensor,
     Subtensor,
     advanced_inc_subtensor,
     advanced_inc_subtensor1,
@@ -405,8 +405,8 @@ class TestLocalUselessIncSubtensorAlloc:
         utt.assert_allclose(r1, r2)
 
         # Check stacktrace was copied over correctly after rewrite was applied
-        assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor1)
-        assert check_stack_trace(f2, ops_to_check=AdvancedIncSubtensor1)
+        assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor)
+        assert check_stack_trace(f2, ops_to_check=AdvancedIncSubtensor)
 
     def test_advanced_inc_subtensor1(self):
         x = vector("x")
@@ -436,7 +436,7 @@ class TestLocalUselessIncSubtensorAlloc:
 
         utt.assert_allclose(r1, r2)
 
-        assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor1)
+        assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor)
         assert check_stack_trace(f2, ops_to_check="all")
 
     def test_incsubtensor(self):

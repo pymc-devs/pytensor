@@ -464,10 +464,10 @@ class TestPushOutNonSeqScan:
 
         y = shared(1.0, name="y")
 
-        test_ofg = OpFromGraph([], [1 + y])
+        test_ofg = OpFromGraph([y], [1 + y])
 
         def inner_func():
-            return test_ofg()
+            return test_ofg(y)
 
         out, out_updates = pytensor.scan(inner_func, n_steps=10)
 
@@ -484,17 +484,17 @@ class TestPushOutNonSeqScan:
     def test_nested_OpFromGraph_shared(self):
         y = pytensor.shared(1.0, name="y")
 
-        test_ofg = OpFromGraph([], [y])
+        test_ofg = OpFromGraph([y], [y])
 
         def inner_func(x):
-            out = pytensor.scan(lambda: test_ofg(), n_steps=x, return_updates=False)
+            out = pytensor.scan(lambda: test_ofg(y), n_steps=x, return_updates=False)
             return out
 
         out = pytensor.scan(
             inner_func, sequences=[pt.arange(1, 2)], return_updates=False
         )
 
-        _ = pytensor.function([], test_ofg())
+        _ = pytensor.function([], test_ofg(y))
 
         out_fn = pytensor.function([], out)
 

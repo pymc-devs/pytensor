@@ -21,11 +21,10 @@ import pytensor.tensor as pt
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
-from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.type import HasShape
 from pytensor.scan.op import Scan
-from pytensor.scan.utils import ScanArgs, reconstruct_graph, safe_new
+from pytensor.scan.utils import ScanArgs, safe_new
 from pytensor.tensor.basic import get_scalar_constant_value
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot
@@ -176,8 +175,15 @@ def scan_push_out_non_seq(fgraph, node):
                 nw_outer.append(repl_out)
             givens[to_repl] = repl_in
 
-        op_outs = clone_replace(node_outputs, replace=givens)
-        op_ins = node_inputs + nw_inner
+        # Thaw the frozen inner graph and rewire the pushed-out variables to
+        # their placeholders (imported as fresh inputs) on the mutable copy.
+        unfrozen_fgraph, memo = op.fgraph.unfreeze(return_memo=True)
+        unfrozen_fgraph.replace_all(
+            [(memo[to_repl], repl_in) for to_repl, repl_in in givens.items()],
+            import_missing=True,
+        )
+        op_outs = list(unfrozen_fgraph.outputs)
+        op_ins = [memo[inp] for inp in node_inputs] + nw_inner
 
         new_info = dataclasses.replace(
             op.info, n_non_seqs=op.info.n_non_seqs + len(nw_outer)
@@ -399,8 +405,15 @@ def scan_push_out_seq(fgraph, node):
 
             givens[to_repl] = repl_in
 
-        op_outs = clone_replace(node_outputs, replace=givens)
-        op_ins = nw_inner + node_inputs
+        # Thaw the frozen inner graph and rewire the pushed-out variables to
+        # their placeholders (imported as fresh inputs) on the mutable copy.
+        unfrozen_fgraph, memo = op.fgraph.unfreeze(return_memo=True)
+        unfrozen_fgraph.replace_all(
+            [(memo[to_repl], repl_in) for to_repl, repl_in in givens.items()],
+            import_missing=True,
+        )
+        op_outs = list(unfrozen_fgraph.outputs)
+        op_ins = nw_inner + [memo[inp] for inp in node_inputs]
 
         # Reconstruct node
         nw_info = dataclasses.replace(op.info, n_seqs=op.info.n_seqs + len(nw_inner))
@@ -560,6 +573,7 @@ def push_out_inner_vars(
 
         assert isinstance(new_scan_node.op, Scan)
 
+        # Only the outer bookkeeping is read; slice the frozen inner graph directly.
         new_scan_args = ScanArgs(
             new_scan_node.inputs,
             new_scan_node.outputs,
@@ -604,10 +618,12 @@ def add_nitsot_outputs(
 
     assert isinstance(old_scan_node.op, Scan)
 
-    # Create the `Scan` `Op` from the `ScanArgs`
+    # Thaw the frozen inner graph to build the new `Scan` `Op`; the appended
+    # nitsot outputs are existing inner variables, covered by the memo.
+    _, memo = old_scan_node.op.fgraph.unfreeze(return_memo=True)
     new_scan_op = Scan(
-        new_scan_args.inner_inputs,
-        new_scan_args.inner_outputs,
+        [memo[v] for v in new_scan_args.inner_inputs],
+        [memo[v] for v in new_scan_args.inner_outputs],
         new_scan_args.info,
         mode=old_scan_node.op.mode,
         profile=old_scan_node.op.profile,
@@ -700,7 +716,6 @@ def scan_push_out_add(fgraph, node):
         op.inner_inputs,
         op.inner_outputs,
         op.info,
-        clone=False,
     )
 
     for nd in add_of_dot_nodes:
@@ -878,9 +893,11 @@ def scan_push_out_dot1(fgraph, node):
                         + inner_nitsot_outs
                         + inner_untraced_sitsot_outs
                     )
-                    new_inner_inps, new_inner_outs = reconstruct_graph(
-                        _new_inner_inps, _new_inner_outs
-                    )
+                    # Thaw the frozen inner graph; the category slices (all
+                    # existing inner variables) map through the memo.
+                    _, memo = op.fgraph.unfreeze(return_memo=True)
+                    new_inner_inps = [memo[v] for v in _new_inner_inps]
+                    new_inner_outs = [memo[v] for v in _new_inner_outs]
                     new_op = Scan(
                         new_inner_inps,
                         new_inner_outs,

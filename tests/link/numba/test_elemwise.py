@@ -10,7 +10,7 @@ from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
-from pytensor.scalar import Composite, float64
+from pytensor.scalar import Composite, and_, float64, or_, xor
 from pytensor.scalar import add as scalar_add
 from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -384,6 +384,18 @@ def test_CAReduce_acc_complex_out_float(axis):
     compare_numba_and_py([x], [out], [test_x])
 
 
+@pytest.mark.parametrize("dtype", ("uint8", "uint32", "int16"))
+@pytest.mark.parametrize("scalar_op", (and_, or_, xor), ids=("and", "or", "xor"))
+def test_CAReduce_bitwise(scalar_op, dtype):
+    # Bitwise AND has identity -1, which must wrap into an unsigned acc_dtype
+    # instead of raising when coerced (regression: np.uint64(-1) overflowed).
+    x = pt.vector("x", dtype=dtype)
+    out = CAReduce(scalar_op, axis=None)(x)
+    hi = min(int(np.iinfo(dtype).max), 2**16)
+    test_x = np.random.default_rng(1).integers(0, hi, size=9).astype(dtype)
+    compare_numba_and_py([x], [out], [test_x])
+
+
 @pytest.mark.parametrize("axis", (-1, (0, -1), None))
 def test_CAReduce_discrete_infinity_identity(axis):
     rng = np.random.default_rng(337)
@@ -550,6 +562,15 @@ def test_Argmax(x, axes, exc):
             [g],
             [x_test_value],
         )
+
+
+@pytest.mark.parametrize("reduce_fn", [ptm.max, ptm.min], ids=["max", "min"])
+@pytest.mark.parametrize("axis", [None, 0], ids=str)
+def test_max_min_nan_propagation(reduce_fn, axis):
+    x = pt.matrix("x", dtype="float64")
+    x_test_value = rng.random(size=(3, 2))
+    x_test_value[1, 1] = np.nan
+    compare_numba_and_py([x], [reduce_fn(x, axis=axis)], [x_test_value])
 
 
 def test_elemwise_inplace_out_type():

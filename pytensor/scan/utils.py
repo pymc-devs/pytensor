@@ -2,6 +2,7 @@
 
 import copy
 import logging
+import warnings
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from itertools import chain
@@ -167,38 +168,6 @@ class ScanProfileStats(ProfileStats):
             file=file,
         )
         print("", file=file)
-
-
-def traverse(out, x, x_copy, d, visited=None):
-    """
-    Function used by scan to parse the tree and figure out which nodes
-    it needs to replace.
-
-    There are two options :
-        1) x and x_copy or on host, then you would replace x with x_copy
-
-    """
-    # ``visited`` is a set of nodes that are already known and don't need to be
-    # checked again, speeding up the traversal of multiply-connected graphs.
-    # if a ``visited`` set is given, it will be updated in-place so the callee
-    # knows which nodes we have seen.
-    if visited is None:
-        visited = set()
-    if out in visited:
-        return d
-    visited.add(out)
-
-    if out == x:
-        # assert isinstance(x.type, GpuArrayType)
-        # d[out] = GpuFromHost(x.type.context_name)(x_copy)
-        # return d
-        raise RuntimeError("Not supported")
-    elif out.owner is None:
-        return d
-    else:
-        for inp in out.owner.inputs:
-            d = traverse(inp, x, x_copy, d, visited)
-        return d
 
 
 def expand_empty(tensor_var, size):
@@ -369,23 +338,27 @@ class ScanArgs:
         _inner_inputs: Sequence[Variable],
         _inner_outputs: Sequence[Variable],
         info: "ScanInfo",
-        clone: bool | None = True,
+        clone: bool | None = None,
     ):
+        if clone is not None:
+            warnings.warn(
+                "The `clone` argument of ScanArgs is deprecated and ignored: the "
+                "inner graph is sliced as-is. For a detached mutable copy of a "
+                "Scan's inner graph use `ScanArgs.from_node(node, clone=True)` or "
+                "thaw it with `node.op.fgraph.unfreeze()`.",
+                FutureWarning,
+            )
+
         self.n_steps = outer_inputs[0]
         self.as_while = info.as_while
 
-        if clone:
-            rval = reconstruct_graph(_inner_inputs, _inner_outputs, "")
-        else:
-            rval = (_inner_inputs, _inner_outputs)
-
         if self.as_while:
-            self.cond = [rval[1][-1]]
-            inner_outputs = rval[1][:-1]
+            self.cond = [_inner_outputs[-1]]
+            inner_outputs = _inner_outputs[:-1]
         else:
             self.cond = []
-            inner_outputs = rval[1]
-        inner_inputs = rval[0]
+            inner_outputs = _inner_outputs
+        inner_inputs = _inner_inputs
 
         p = 1
         q = 0
@@ -491,13 +464,20 @@ class ScanArgs:
 
         if not isinstance(node.op, Scan):
             raise TypeError(f"{node} is not a Scan node")
+        if clone:
+            # Thaw the frozen inner graph into a fresh mutable copy.
+            unfrozen_fgraph = node.op.fgraph.unfreeze()
+            inner_inputs = list(unfrozen_fgraph.inputs)
+            inner_outputs = list(unfrozen_fgraph.outputs)
+        else:
+            inner_inputs = node.op.inner_inputs
+            inner_outputs = node.op.inner_outputs
         return ScanArgs(
             node.inputs,
             node.outputs,
-            node.op.inner_inputs,
-            node.op.inner_outputs,
+            inner_inputs,
+            inner_outputs,
             node.op.info,
-            clone=clone,
         )
 
     @property

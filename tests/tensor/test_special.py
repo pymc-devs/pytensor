@@ -160,6 +160,21 @@ def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
     assert new_out.owner.op.axis == batch_axis
 
 
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+@pytest.mark.parametrize(
+    "constructor, scipy_fn",
+    [(softmax, scipy_softmax), (log_softmax, scipy_log_softmax)],
+)
+def test_softmax_stability(constructor, scipy_fn, mode):
+    """The helpers must be stable in any mode, whatever graph they end up emitting."""
+    x = matrix("x")
+    x_val = np.array([[800.0, 805.0]], dtype=config.floatX)
+
+    f = function([x], constructor(x, axis=-1), mode=mode)
+
+    np.testing.assert_allclose(f(x_val), scipy_fn(x_val, axis=-1), rtol=1e-6)
+
+
 def test_poch():
     _z, _m = vectors("z", "m")
     actual_fn = function([_z, _m], poch(_z, _m))

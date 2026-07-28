@@ -58,15 +58,6 @@ def is_StdLibDirsAndLibsType(
     return cast(StdLibDirsAndLibsType, fn)
 
 
-class GCCLLVMType(Protocol):
-    is_llvm: bool | None
-    __call__: Callable[[], bool | None]
-
-
-def is_GCCLLVMType(fn: Callable[[], bool | None]) -> GCCLLVMType:
-    return cast(GCCLLVMType, fn)
-
-
 _logger = logging.getLogger("pytensor.link.c.cmodule")
 
 METH_VARARGS = "METH_VARARGS"
@@ -262,10 +253,7 @@ def _get_ext_suffix():
     """Get the suffix for compiled extensions"""
     from setuptools._distutils.sysconfig import get_config_var
 
-    dist_suffix = get_config_var("EXT_SUFFIX")
-    if dist_suffix is None:
-        dist_suffix = get_config_var("SO")
-    return dist_suffix
+    return get_config_var("EXT_SUFFIX")
 
 
 def add_gcc_dll_directory() -> AbstractContextManager[None]:
@@ -444,7 +432,7 @@ def get_module_hash(src_code: str, key) -> str:
         to_hash += list(map(str, key[0]))
     c_link_key = key[1]
     # Currently, in order to catch potential bugs early, we are very
-    # convervative about the structure of the key and raise an exception
+    # conservative about the structure of the key and raise an exception
     # if it does not match exactly what we expect. In the future we may
     # modify this behavior to be less strict and be able to accommodate
     # changes to the key in an automatic way.
@@ -1562,11 +1550,11 @@ class ModuleCache:
                             continue
                     age = time_now - last_access_time(path)
 
-                    # In normal case, the processus that created this
-                    # directory will delete it. However, if this processus
+                    # In normal case, the process that created this
+                    # directory will delete it. However, if this process
                     # crashes, it will not be cleaned up.
                     # As we don't know if this directory is still used,
-                    # we wait one week and suppose that the processus
+                    # we wait one week and suppose that the process
                     # crashed, and we take care of the clean-up.
                     if age > min_age:
                         to_del.append(os.path.join(self.dirname, filename))
@@ -1815,33 +1803,6 @@ def std_libs():
 
 def std_lib_dirs():
     return std_lib_dirs_and_libs()[1]
-
-
-@is_GCCLLVMType
-def gcc_llvm() -> bool | None:
-    """
-    Detect if the g++ version used is the llvm one or not.
-
-    It don't support all g++ parameters even if it support many of them.
-
-    """
-    if gcc_llvm.is_llvm is None:
-        try:
-            p_out = output_subprocess_Popen([config.cxx, "--version"])
-            output = p_out[0] + p_out[1]
-        except OSError:
-            # Typically means g++ cannot be found.
-            # So it is not an llvm compiler.
-
-            # Normally this should not happen as we should not try to
-            # compile when g++ is not available. If this happen, it
-            # will crash later so supposing it is not llvm is "safe".
-            output = b""
-        gcc_llvm.is_llvm = b"llvm" in output
-    return gcc_llvm.is_llvm
-
-
-gcc_llvm.is_llvm = None
 
 
 class Compiler:

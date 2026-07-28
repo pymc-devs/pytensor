@@ -5,6 +5,7 @@ from io import StringIO
 
 import numpy as np
 import pytest
+from scipy.special import logsumexp as scipy_logsumexp
 
 import pytensor
 import pytensor.scalar as ps
@@ -27,7 +28,7 @@ from pytensor.graph.rewriting.basic import (
     out2in,
 )
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
@@ -107,11 +108,13 @@ from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
+    local_add_canonizer,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_mul_canonizer,
     local_mul_switch_sink,
+    local_neg_to_mul,
     local_reduce_chain,
     local_reduce_join,
     local_sum_prod_of_mul_or_div,
@@ -283,6 +286,45 @@ class TestAlgebraicCanonizer:
     def test_muldiv(self, e, exp_g):
         g_rewritten = rewrite_graph(e, custom_rewrite=mul_canonizer)
         assert equal_computations([g_rewritten], [exp_g])
+
+    @pytest.mark.parametrize(
+        "e",
+        [
+            # Absorbing element sitting directly among the factors
+            lambda x, y: pt.mul(0.0, x, y),
+            # Other constants fold together with the absorbing element
+            lambda x, y: pt.mul(2.0, x, 0.5, 0.0, y),
+            # Absorbing element in the numerator of a division
+            lambda x, y: pt.mul(0.0, x) / y,
+            # Absorbing element hidden inside a division factor
+            lambda x, y: x * (0.0 / y),
+        ],
+        ids=["direct", "among_other_constants", "numerator", "in_subfactor"],
+    )
+    def test_mul_absorbing_element(self, e):
+        """`mul` has an absorbing element: mul(0, x, y) == 0, factors and all."""
+        x, y = pt.scalars("xy")
+        result = RewriteTester(
+            [x, y], [e(x, y)], include=[], custom_rewrite=local_mul_canonizer
+        )
+        result.assert_graph(constant(0.0, dtype=config.floatX))
+
+    def test_mul_absorbing_element_broadcast(self):
+        """The absorbed factors still contribute to the shape of the output."""
+        x, y = self.x, self.y
+        zero = constant(np.zeros((1, 1), dtype=config.floatX))
+        result = RewriteTester(
+            [x, y], [pt.mul(zero, x, y)], include=[], custom_rewrite=local_mul_canonizer
+        )
+        result.assert_graph(second(y, second(x, second(zero, zero))))
+
+    def test_add_has_no_absorbing_element(self):
+        """`add` only has a neutral element, so 0 must not absorb its terms."""
+        x, y = self.x, self.y
+        result = RewriteTester(
+            [x, y], [pt.add(0.0, x, y)], include=[], custom_rewrite=local_add_canonizer
+        )
+        result.assert_graph(x + y)
 
     def test_elemwise_multiple_inputs_rewrites(self):
         """Verify that the `AlgebraicCanonizer` merges sequential ``Elemwise({mul,add})``."""
@@ -1173,12 +1215,9 @@ def test_log1p():
     assert [node.op for node in f.maker.fgraph.toposort()] == [log1p]
 
 
-def test_local_log_add_exp():
-    m = config.mode
-    if m == "FAST_COMPILE":
-        m = "FAST_RUN"
-    m = get_mode(m)
-    m = m.excluding("fusion")
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+def test_local_log_add_exp(mode):
+    m = get_mode(mode).excluding("fusion")
     m = copy.copy(m)
     # No need to put them back as we have a new object
     m.check_isfinite = False
@@ -1548,6 +1587,78 @@ class TestLocalUselessElemwiseComparison:
 
         f = function([x], le(x, x), mode=mode)
         assert check_stack_trace(f, ops_to_check="last")
+
+
+class TestLocalNegToMul:
+    """`neg(x)` becomes a multiplication by -1, already in canonical form."""
+
+    def test_neg_of_neg(self):
+        x = matrix("x")
+        assert rewrite_graph(-(-x), include=("canonicalize",)) is x
+
+    def test_neg_of_mul_absorbs_constant(self):
+        """neg(mul(c, x)) -> mul(-c, x), rather than mul(-1, mul(c, x))."""
+        x = matrix("x")
+        out = rewrite_graph(-(2.0 * x), include=("canonicalize",))
+
+        assert isinstance(out.owner.op, Elemwise)
+        assert isinstance(out.owner.op.scalar_op, ps.Mul)
+        # Just the negated constant and `x` -- no leftover -1 factor.
+        assert len(out.owner.inputs) == 2
+        [const] = [i for i in out.owner.inputs if isinstance(i, TensorConstant)]
+        assert np.all(const.data == -2.0)
+
+    @pytest.mark.parametrize("dtype, value", [("uint8", 2), ("int8", -128)])
+    def test_neg_of_mul_wrapping_int_constant(self, dtype, value):
+        """The sign is not folded into an int constant narrower than the mul.
+
+        Negating uint8(2) wraps to 254 and negating int8(-128) wraps to -128,
+        neither of which is the negation under the wider output dtype.
+        """
+        x = pt.vector("x")  # float64
+        c = pt.constant(np.array([value], dtype=dtype))
+
+        result = RewriteTester(
+            [x], [-pt.mul(c, x)], include=None, custom_rewrite=local_neg_to_mul
+        )
+        result.assert_graph(pt.mul(np.array(-1.0), c, x))
+        result.assert_eval(np.array([1.0, 2.0]))
+
+    def test_neg_of_mul_same_int_dtype_folds(self):
+        """Same-dtype integer constants wrap consistently, so the fold fires."""
+        x = pt.vector("x", dtype="int8")
+        c = pt.constant(np.array([3], dtype="int8"))
+
+        result = RewriteTester(
+            [x], [-pt.mul(c, x)], include=None, custom_rewrite=local_neg_to_mul
+        )
+        result.assert_graph(pt.mul(pt.constant(np.array([-3], dtype="int8")), x))
+        result.assert_eval(np.array([1, 2], dtype="int8"))
+
+    def test_neg_of_mul_stays_flat(self):
+        """neg(mul(x, y)) -> mul(-1, x, y), rather than mul(-1, mul(x, y))."""
+        x, y = matrices("xy")
+        out = rewrite_graph(-(x * y), include=("canonicalize",))
+
+        assert isinstance(out.owner.op, Elemwise)
+        assert isinstance(out.owner.op.scalar_op, ps.Mul)
+        assert len(out.owner.inputs) == 3
+        assert not any(
+            var.owner is not None
+            and isinstance(var.owner.op, Elemwise)
+            and isinstance(var.owner.op.scalar_op, ps.Mul)
+            for var in out.owner.inputs
+        )
+
+    def test_values(self):
+        x, y = matrices("xy")
+        xv = np.random.random((3, 3))
+        yv = np.random.random((3, 3))
+        f = function([x, y], [-(-x), -(2.0 * x), -(x * y)])
+        neg_neg, neg_mul_const, neg_mul = f(xv, yv)
+        np.testing.assert_allclose(neg_neg, xv)
+        np.testing.assert_allclose(neg_mul_const, -2.0 * xv)
+        np.testing.assert_allclose(neg_mul, -(xv * yv))
 
 
 def test_local_mul_specialize():
@@ -2843,7 +2954,13 @@ class TestLocalSumProd:
     )
 
     def setup_method(self):
-        self.mode = get_default_mode().including("canonicalize", "specialize")
+        # Exclude the Numba reduction fusion so CAReduce nodes stay visible in
+        # the toposort for the structural assertions below.
+        self.mode = (
+            get_default_mode()
+            .including("canonicalize", "specialize")
+            .excluding("fuse_indexed_into_elemwise")
+        )
 
     def test_local_sum_prod_of_scalar_mul(self):
         # Test the rewrite `local_sum_prod_mul_by_scalar` for both Sum and
@@ -3467,7 +3584,9 @@ class TestLocalSumProd:
         c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
         d_val = np.asarray(rng.standard_normal(), config.floatX)
 
-        default_mode = get_default_mode()
+        # Exclude the Numba reduction fusion so the outer reduction op stays
+        # visible in the toposort for the structural assertions below.
+        default_mode = get_default_mode().excluding("fuse_indexed_into_elemwise")
         # `FusionOptimizer` is included to make sure that `expected_outer_operator`
         # remains the same for all rewrite modes.
         mode_with_rewrite = default_mode.including(
@@ -3524,8 +3643,12 @@ class TestLocalSumProd:
 
 class TestLocalReduce:
     def setup_method(self):
-        self.mode = get_default_mode().including(
-            "canonicalize", "specialize", "uncanonicalize"
+        # Exclude the Numba reduction fusion so CAReduce nodes stay visible in
+        # the toposort for the structural assertions below.
+        self.mode = (
+            get_default_mode()
+            .including("canonicalize", "specialize", "uncanonicalize")
+            .excluding("fuse_indexed_into_elemwise")
         )
 
     def test_local_reduce_broadcast_all_0(self):
@@ -4079,13 +4202,12 @@ def test_local_expm1():
     )
 
 
-def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None):
+def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None, mode="FAST_RUN"):
     sum_exp = pt_sum(exp(x), axis=axis)
     if dimshuffle_op:
         sum_exp = dimshuffle_op(sum_exp)
     y = log(sum_exp)
-    MODE = get_default_mode().including("local_log_sum_exp")
-    return function([x], y, mode=MODE)
+    return function([x], y, mode=mode)
 
 
 def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
@@ -4096,8 +4218,6 @@ def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
         if hasattr(node.op, "scalar_op") and node.op.scalar_op == ps.basic.maximum:
             return
 
-        # In mode FAST_COMPILE, the rewrites don't replace the
-        # `Max` `Op`.
         if isinstance(node.op, Max):
             return
 
@@ -4144,21 +4264,26 @@ def test_local_log_sum_exp_near_one():
     assert np.allclose(naive_ret, rewritten_ret)
 
 
-def test_local_log_sum_exp_large():
-    """Test that the rewrite result is correct for extreme value 100."""
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+@pytest.mark.parametrize(
+    "x_val", ([-800.0, 800.0], [-800.0, -805.0]), ids=["overflow", "underflow"]
+)
+def test_local_log_sum_exp_large(x_val, mode):
+    """Test that the rewrite result is correct for values the naive graph can't represent."""
     x = vector("x")
-    f = compile_graph_log_sum_exp(x, axis=0)
+    f = compile_graph_log_sum_exp(x, axis=0, mode=mode)
 
-    x_val = np.array([-100.0, 100.0]).astype(config.floatX)
+    x_val = np.array(x_val, dtype=config.floatX)
 
     rewritten_ret = f(x_val)
-    assert np.allclose(rewritten_ret, 100.0)
+    np.testing.assert_allclose(rewritten_ret, scipy_logsumexp(x_val), rtol=1e-5)
 
 
-def test_local_log_sum_exp_inf():
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+def test_local_log_sum_exp_inf(mode):
     """Test that when max = +-inf, the rewritten output still works correctly."""
     x = vector("x")
-    f = compile_graph_log_sum_exp(x, axis=0)
+    f = compile_graph_log_sum_exp(x, axis=0, mode=mode)
 
     assert f([-np.inf, -np.inf]) == -np.inf
     assert f([np.inf, np.inf]) == np.inf
@@ -4417,7 +4542,7 @@ class TestSigmoidRewrites:
             trees = [parse_mul_tree(e) for e in (expr1, expr2)]
             perform_sigm_times_exp(trees[0])
             trees[0] = simplify_mul(trees[0])
-            good = is_same_graph(compute_mul(trees[0]), compute_mul(trees[1]))
+            good = equal_computations([compute_mul(trees[0])], [compute_mul(trees[1])])
             # if not good:
             #     print(trees[0])
             #     print(trees[1])
@@ -4587,7 +4712,7 @@ class TestSigmoidUtils:
         tree = (x * y) * -z
         mul_tree = parse_mul_tree(tree)
         assert parse_mul_tree(compute_mul(mul_tree)) == mul_tree
-        assert is_same_graph(compute_mul(parse_mul_tree(tree)), tree)
+        assert equal_computations([compute_mul(parse_mul_tree(tree))], [tree])
 
     def test_parse_mul_tree(self):
         x, y, z = vectors("x", "y", "z")
@@ -4609,7 +4734,7 @@ class TestSigmoidUtils:
             is_1pexp(x, only_process_constants=False)
             for x in [(1 + exp_op(-x)), (exp_op(-x) + 1)]
         ):
-            assert not neg_ and is_same_graph(exp_arg, -x)
+            assert not neg_ and equal_computations([exp_arg], [-x])
         assert is_1pexp(1 - exp_op(x), False) is None
         assert is_1pexp(2 + exp_op(x), False) is None
         assert is_1pexp(exp_op(x) + 2, False) is None

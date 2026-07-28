@@ -11,7 +11,9 @@ from jax.errors import ConcretizationTypeError
 
 import pytensor
 import pytensor.tensor.basic as ptb
+from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
+from pytensor.link.jax.linker import JAXLinker
 from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_basic import check_alloc_runtime_broadcast
@@ -68,6 +70,14 @@ def test_arange_of_shape():
     compare_jax_and_py([x], [out], [np.zeros((5,))], jax_mode="JAX")
 
 
+def test_arange_of_shape_minimum_compile():
+    # The shape read stays `Subtensor(Shape(x))`, instead of `Shape_i(x)`
+    x = vector("x")
+    out = ptb.arange(1, x.shape[-1], 2)
+    minimum_jax_mode = Mode(linker=JAXLinker(), optimizer=None)
+    compare_jax_and_py([x], [out], [np.zeros((5,))], jax_mode=minimum_jax_mode)
+
+
 def test_arange_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.arange` when arguments are not concrete values."""
 
@@ -77,6 +87,16 @@ def test_arange_nonconcrete():
 
     with pytest.raises(NotImplementedError):
         compare_jax_and_py([a], [out], [a_test_value])
+
+
+def test_arange_shape_bound_over_int8():
+    """A shape-derived arange bound above 127 must not be downcast to int8.
+
+    Regression test for https://github.com/pymc-devs/pytensor/issues/2296
+    """
+    x = vector("x")
+    out = ptb.arange(x.shape[-1])
+    compare_jax_and_py([x], [out], [np.zeros(200)], jax_mode="JAX")
 
 
 def test_jax_Join():

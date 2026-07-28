@@ -23,8 +23,12 @@ from tests.link.test_link import make_function
 
 class TestMinMax:
     def setup_method(self):
-        self.mode = pytensor.compile.mode.get_default_mode().including(
-            "canonicalize", "fast_run"
+        # Exclude the Numba reduction fusion so the Max/Min CAReduce nodes stay
+        # visible in the toposort for the structural assertions below.
+        self.mode = (
+            pytensor.compile.mode.get_default_mode()
+            .including("canonicalize", "fast_run")
+            .excluding("fuse_indexed_into_elemwise")
         )
 
     def test_optimization_min(self):

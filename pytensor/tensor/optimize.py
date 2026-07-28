@@ -1,18 +1,18 @@
 import logging
 from collections.abc import Sequence
 from copy import copy
+from functools import singledispatch
 
 import numpy as np
 
 import pytensor.scalar as ps
-from pytensor.compile.maker import function
+from pytensor.compile.inner_function import HasInnerFunction
 from pytensor.gradient import DisconnectedType, grad, jacobian
 from pytensor.graph.basic import Apply, Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import (
     ComputeMapType,
-    HasInnerGraph,
     Op,
     StorageMapType,
     io_connection_pattern,
@@ -162,52 +162,98 @@ def _find_optimization_parameters(
     ]
 
 
-class ScipyWrapperOp(Op, HasInnerGraph):
-    """Shared logic for scipy optimization ops"""
+def _tensorize_scalar_parameters(
+    objective: TensorVariable, args: list[Variable]
+) -> tuple[TensorVariable, list[Variable], list[Variable]]:
+    """Replace ``ScalarType`` parameters with equivalent ``TensorType`` inputs.
 
-    def build_fn(self):
-        """
-        This is overloaded because scipy converts scalar inputs to lists, changing the return type. The
-        wrapper function logic is there to handle this.
-        """
-        outputs = self.inner_outputs
-        self._fn = fn = function(self.inner_inputs, outputs, trust_input=True)
+    scipy hands every value to the objective as a numpy array, and stores/forwards
+    a ``ScalarType`` value as a bare python float -- which no C thunk accepts under
+    ``trust_input``. Re-expressing such a parameter as a 0-d ``TensorType`` input
+    (reconstructed inside the graph with ``scalar_from_tensor``) makes the op
+    boundary array-typed, so scipy passes a preserved 0-d ndarray. Returns the
+    rewritten objective, the inner-graph parameters, and the matching outer inputs.
+    """
+    replacements: dict[Variable, Variable] = {}
+    inner_args: list[Variable] = []
+    outer_args: list[Variable] = []
+    for arg in args:
+        if isinstance(arg.type, ScalarType):
+            inner = tensor(name=arg.name, shape=(), dtype=arg.type.dtype)
+            replacements[arg] = scalar_from_tensor(inner)
+            inner_args.append(inner)
+            outer_args.append(tensor_from_scalar(arg))
+        else:
+            inner_args.append(arg)
+            outer_args.append(arg)
 
-        # Do this reassignment to see the compiled graph in the dprint
-        # self.fgraph = fn.maker.fgraph
+    if replacements:
+        [objective] = graph_replace([objective], replacements)
+    return objective, inner_args, outer_args
 
-        self._fn_wrapped = LRUCache1(fn)
 
-    @property
-    def fn(self):
-        if self._fn is None:
-            self.build_fn()
-        return self._fn
+class ScipyWrapperOp(HasInnerFunction, Op):
+    """Shared logic for scipy optimization ops.
+
+    The inner graph is held frozen (immutable) as ``self.fgraph``, so the
+    canonical op can never be mutated in place. Graph manipulation (``grad`` /
+    ``graph_replace`` / ``function``) runs on a fresh mutable copy obtained via
+    ``self.fgraph.unfreeze()`` -- ``graph_replace`` on frozen nodes would
+    otherwise leak them into the outer graph.
+    """
+
+    # Attribute names (besides the frozen inner graph) that distinguish two ops
+    # of the same type for eq/hash. Subclasses override.
+    _scipy_props: tuple[str, ...] = ()
 
     @property
     def fn_wrapped(self):
         if self._fn_wrapped is None:
-            self.build_fn()
+            self._fn_wrapped = LRUCache1(self.fn)
         return self._fn_wrapped
 
-    @property
-    def inner_inputs(self):
-        return self.fgraph.inputs
+    def _prop_values(self):
+        return tuple(getattr(self, name) for name in self._scipy_props)
 
-    @property
-    def inner_outputs(self):
-        return self.fgraph.outputs
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if type(self) is not type(other):
+            return False
+        return (
+            self.fgraph == other.fgraph and self._prop_values() == other._prop_values()
+        )
 
-    def clone_with_new_fgraph(self, fgraph):
+    def __hash__(self):
+        # ``optimizer_kwargs`` may hold nested dicts, so the props stay out of
+        # the hash; equal ops still hash equal on the type and inner graph.
+        return hash((type(self), self.fgraph))
+
+    def clone_with_inner_graph(self, inner_fgraph):
+        """Return a copy of this op whose inner graph is ``inner_fgraph``.
+
+        Used by the ``optimize_inner_graph`` rewrite to bake an
+        already-optimized inner graph into a NEW immutable op without touching
+        ``self``. ``inner_fgraph`` may be a mutable ``FunctionGraph`` (it is
+        frozen here) or an already-frozen graph.
+        """
         clone_op = copy(self)
         clone_op._fn = None
         clone_op._fn_wrapped = None
-        clone_op.fgraph = fgraph
+        clone_op.fgraph = (
+            inner_fgraph
+            if isinstance(inner_fgraph, FrozenFunctionGraph)
+            else inner_fgraph.freeze()
+        )
         return clone_op
 
+    # Name used by the canonicalization rewrite that rebuilds the inner graph.
+    clone_with_new_fgraph = clone_with_inner_graph
+
     def clone(self):
-        clone_fgraph = self.fgraph.clone(clone_inner_graphs=True)
-        return self.clone_with_new_fgraph(clone_fgraph)
+        # The inner graph is immutable (a frozen ``FunctionGraph``), so there is
+        # nothing to deep-clone -- mirror ``Composite``/``OpFromGraph``.
+        return self
 
     def prepare_node(
         self,
@@ -217,34 +263,44 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         impl: str | None,
     ):
         """Trigger the compilation of the inner fgraph so it shows in the dprint before the first call"""
-        self.build_fn()
+        self.fn
 
     def make_node(self, *inputs):
         assert len(inputs) == len(self.inner_inputs)
-        for input, inner_input in zip(inputs, self.inner_inputs):
-            assert input.type == inner_input.type, (
-                f"Input {input} does not match expected type {inner_input.type}"
-            )
+        inputs = [
+            inner_input.type.filter_variable(input)
+            for input, inner_input in zip(inputs, self.inner_inputs)
+        ]
 
         return Apply(self, inputs, [self.inner_inputs[0].type(), ps.bool("success")])
 
 
+@singledispatch
+def rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
+    """Rewrite an ``optimize`` op (Minimize/Root) inner graph for ``linker``.
+
+    Each linker registers its own; see ``pytensor.tensor.rewriting.optimize``.
+    """
+    raise NotImplementedError(
+        f"Linker {type(linker).__name__} has not registered an optimize-op "
+        "inner-graph rewrite"
+    )
+
+
 class ScipyScalarWrapperOp(ScipyWrapperOp):
-    def build_fn(self):
+    def compile_fn(self, mode):
         # We need to adjust the graph to work with what scipy will be passing into the inner function --
         # always scalar array of float64 type
-        x, *args = self.inner_inputs
+        fgraph = self.fgraph.unfreeze()
+        x, *args = fgraph.inputs
         new_root_x = ps.float64(name="x_scalar")
         new_x = tensor_from_scalar(new_root_x.astype(x.type.dtype))
 
-        new_outputs = graph_replace(self.inner_outputs, {x: new_x})
+        new_outputs = graph_replace(fgraph.outputs, {x: new_x})
 
-        self._fn = fn = function([new_root_x, *args], new_outputs, trust_input=True)
-
-        # Do this reassignment to see the compiled graph in the dprint
-        # self.fgraph = fn.maker.fgraph
-
-        self._fn_wrapped = LRUCache1(fn)
+        return self.link_fgraph(
+            FunctionGraph([new_root_x, *args], new_outputs, clone=False), mode
+        )
 
     def compute_implicit_gradients(
         self,
@@ -270,9 +326,9 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
             Whether the optimization problem is a minimization problem. If False, it is assumed to be a root-finding
             problem.
         """
-        fgraph = self.fgraph
-        inner_x, *inner_args = self.inner_inputs
-        inner_fx = self.inner_outputs[0]
+        fgraph = self.fgraph.unfreeze()
+        inner_x, *inner_args = fgraph.inputs
+        inner_fx = fgraph.outputs[0]
 
         if is_minimization:
             # The implicit function in minimization is grad(x, theta) == 0
@@ -320,21 +376,20 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
 
 
 class ScipyVectorWrapperOp(ScipyWrapperOp):
-    def build_fn(self):
+    def compile_fn(self, mode):
         # We need to adjust the graph to work with what scipy will be passing into the inner function --
         # always a vector array with size of at least 1
-        x, *args = self.inner_inputs
-        if x.type.shape != ():
-            return super().build_fn()
+        if self.inner_inputs[0].type.shape != ():
+            return super().compile_fn(mode)
 
+        fgraph = self.fgraph.unfreeze()
+        x, *args = fgraph.inputs
         new_root_x = x[None].type()
         new_x = new_root_x.squeeze()
-        new_outputs = graph_replace(self.inner_outputs, {x: new_x})
-        self._fn = fn = function([new_root_x, *args], new_outputs, trust_input=True)
-
-        # Do this reassignment to see the compiled graph in the dprint
-        # self.fgraph = fn.maker.fgraph
-        self._fn_wrapped = LRUCache1(fn)
+        new_outputs = graph_replace(fgraph.outputs, {x: new_x})
+        return self.link_fgraph(
+            FunctionGraph([new_root_x, *args], new_outputs, clone=False), mode
+        )
 
     def compute_implicit_gradients(
         self,
@@ -383,9 +438,9 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         problem, where `f` is the objective function. In this case, we instead take `f` to be the gradient of the objective
         function, which *is* indeed zero at the minimum.
         """
-        fgraph = self.fgraph
-        inner_x, *inner_args = self.inner_inputs
-        implicit_f = self.inner_outputs[0]
+        fgraph = self.fgraph.unfreeze()
+        inner_x, *inner_args = fgraph.inputs
+        implicit_f = fgraph.outputs[0]
         if is_minimization:
             # The implicit function in minimization is grad(x, theta) == 0
             implicit_f = grad(implicit_f, inner_x)
@@ -484,6 +539,7 @@ def _optimizer_connection_pattern(fgraph, is_minimization):
     An input may be connected to the objective but disconnected from its gradient (e.g. an
     additive constant), so the connection pattern must reflect the actual implicit function.
     """
+    fgraph = fgraph.unfreeze()
     inner_x = fgraph.inputs[0]
     fx = fgraph.outputs[0]
     if is_minimization:
@@ -494,6 +550,8 @@ def _optimizer_connection_pattern(fgraph, is_minimization):
 
 
 class MinimizeScalarOp(ScipyScalarWrapperOp):
+    _scipy_props = ("method", "optimizer_kwargs")
+
     def __init__(
         self,
         x: TensorVariable,
@@ -514,7 +572,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
             raise ValueError(
                 "The variable `x` must be an input to the computational graph of the objective function."
             )
-        self.fgraph = FunctionGraph([x, *args], [objective])
+        self.fgraph = FrozenFunctionGraph.from_io([x, *args], [objective])
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
@@ -596,6 +654,7 @@ def minimize_scalar(
         value, based on the requested convergence criteria.
     """
     args = _find_optimization_parameters(objective, x)
+    objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
 
     minimize_scalar_op = MinimizeScalarOp(
         x,
@@ -605,12 +664,21 @@ def minimize_scalar(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    solution, success = minimize_scalar_op(x, *args)
+    solution, success = minimize_scalar_op(x, *outer_args)
 
     return solution, success
 
 
 class MinimizeOp(ScipyVectorWrapperOp):
+    _scipy_props = (
+        "method",
+        "jac",
+        "hess",
+        "hessp",
+        "use_vectorized_jac",
+        "optimizer_kwargs",
+    )
+
     def __init__(
         self,
         x: TensorVariable,
@@ -650,6 +718,8 @@ class MinimizeOp(ScipyVectorWrapperOp):
                 vectorize=use_vectorized_jac,
             )
             self.fgraph.add_output(hess_wrt_x)
+
+        self.fgraph = self.fgraph.freeze()
 
         self.jac = jac
         self.hess = hess
@@ -792,6 +862,7 @@ def minimize(
 
     packed_input, packed_shapes, objective = pack_inputs_of_objective(objective, x)
     args = _find_optimization_parameters(objective, packed_input)
+    objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
 
     minimize_op = MinimizeOp(
         packed_input,
@@ -804,7 +875,7 @@ def minimize(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    solution, success = minimize_op(packed_input, *args)
+    solution, success = minimize_op(packed_input, *outer_args)
 
     if packed_shapes is not None:
         solution = unpack(solution, packed_shapes)
@@ -813,6 +884,8 @@ def minimize(
 
 
 class RootScalarOp(ScipyScalarWrapperOp):
+    _scipy_props = ("method", "jac", "hess", "optimizer_kwargs")
+
     def __init__(
         self,
         variables: TensorVariable,
@@ -850,6 +923,8 @@ class RootScalarOp(ScipyScalarWrapperOp):
                 )
             f_double_prime = grad(self.fgraph.outputs[-1], self.fgraph.inputs[0])
             self.fgraph.add_output(f_double_prime)
+
+        self.fgraph = self.fgraph.freeze()
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
@@ -948,6 +1023,7 @@ def root_scalar(
         Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
     """
     args = _find_optimization_parameters(equation, variable)
+    equation, args, outer_args = _tensorize_scalar_parameters(equation, args)
 
     root_scalar_op = RootScalarOp(
         variable,
@@ -959,15 +1035,16 @@ def root_scalar(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    solution, success = root_scalar_op(variable, *args)
+    solution, success = root_scalar_op(variable, *outer_args)
 
     return solution, success
 
 
 class RootOp(ScipyVectorWrapperOp):
-    # These __props__ were wrong: they ignore the inner graph,
-    # making RootOps of different equations compare equal (and get merged)
-    # __props__ = ("method", "jac")
+    # eq/hash key on the (frozen) inner graph plus these props -- keying on the
+    # inner graph is what keeps RootOps of different equations distinct (an
+    # earlier ``__props__ = ("method", "jac")`` ignored it and merged them).
+    _scipy_props = ("method", "jac", "use_vectorized_jac", "optimizer_kwargs")
 
     def __init__(
         self,
@@ -1003,6 +1080,8 @@ class RootOp(ScipyVectorWrapperOp):
             )
             self.fgraph.add_output(atleast_2d(jac_wrt_x))
 
+        self.fgraph = self.fgraph.freeze()
+
         self.jac = jac
 
         self.method = method
@@ -1019,9 +1098,10 @@ class RootOp(ScipyVectorWrapperOp):
         )
         return f"{self.__class__.__name__}({str_args})"
 
-    def build_fn(self):
-        outputs = self.inner_outputs
-        variables, *args = self.inner_inputs
+    def compile_fn(self, mode):
+        fgraph = self.fgraph.unfreeze()
+        variables, *args = fgraph.inputs
+        outputs = fgraph.outputs
 
         if variables.ndim > 0:
             new_root_variables = variables
@@ -1036,14 +1116,9 @@ class RootOp(ScipyVectorWrapperOp):
 
             new_outputs = graph_replace(outputs, {variables: new_variables})
 
-        self._fn = fn = function(
-            [new_root_variables, *args], new_outputs, trust_input=True
+        return self.link_fgraph(
+            FunctionGraph([new_root_variables, *args], new_outputs, clone=False), mode
         )
-
-        # Do this reassignment to see the compiled graph in the dprint
-        # self.fgraph = fn.maker.fgraph
-
-        self._fn_wrapped = LRUCache1(fn)
 
     def perform(self, node, inputs, outputs):
         global optimize
@@ -1130,6 +1205,7 @@ def root(
         equations, variables
     )
     args = _find_optimization_parameters(equations, packed_variables)
+    equations, args, outer_args = _tensorize_scalar_parameters(equations, args)
 
     root_op = RootOp(
         packed_variables,
@@ -1141,7 +1217,7 @@ def root(
         use_vectorized_jac=use_vectorized_jac,
     )
 
-    solution, success = root_op(packed_variables, *args)
+    solution, success = root_op(packed_variables, *outer_args)
     if packed_shapes is not None:
         solution = unpack(solution, packed_shapes)
 

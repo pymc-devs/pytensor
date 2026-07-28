@@ -1925,19 +1925,46 @@ class Dot(Op):
         out[0] = np.asarray(rval, dtype=node.outputs[0].dtype)
 
     def pullback(self, inputs, outputs, gout):
+        """Compute the gradient of ``x @ y`` with respect to `x` and `y`.
+
+        `x` and `y` may be 2d, or 1d if dense (a sparse operand is always
+        2d, so at most one of the two can be 1d here). A 1d operand is
+        promoted to a 2d row/column so the matrix-product formulas below
+        apply, `gz` is promoted the same way, and the added axis is
+        squeezed back out of the corresponding gradient term before it is
+        returned. Mirrors the promotion `dense_dot` does for the dense
+        `Dot` `Op`.
+        """
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) or psb._is_sparse_variable(y)
+
+        x_is_vector = x.type.ndim == 1
+        y_is_vector = y.type.ndim == 1
+        x2 = x[None] if x_is_vector else x
+        y2 = y[:, None] if y_is_vector else y
+        if x_is_vector:
+            gz2 = gz[None]
+        elif y_is_vector:
+            gz2 = gz[:, None]
+        else:
+            gz2 = gz
+
         rval = []
 
-        if psb._is_dense_variable(y):
-            rval.append(ptm.dot(gz, y.T))
+        if psb._is_dense_variable(y2):
+            rval.append(ptm.dot(gz2, y2.T))
         else:
-            rval.append(dot(gz, y.T))
-        if psb._is_dense_variable(x):
-            rval.append(ptm.dot(x.T, gz))
+            rval.append(dot(gz2, y2.T))
+        if psb._is_dense_variable(x2):
+            rval.append(ptm.dot(x2.T, gz2))
         else:
-            rval.append(dot(x.T, gz))
+            rval.append(dot(x2.T, gz2))
+
+        if x_is_vector:
+            rval[0] = rval[0].squeeze(0)
+        if y_is_vector:
+            rval[1] = rval[1].squeeze(-1)
 
         return rval
 
