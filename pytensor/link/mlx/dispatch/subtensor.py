@@ -1,5 +1,7 @@
 from copy import deepcopy
 
+import mlx.core as mx
+
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -8,6 +10,17 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
+
+
+# Fixed in MLX 0.32.0 (ml-explore/mlx#3720).
+_MLX_COMPILE_NEGATIVE_STRIDE_BUG = tuple(
+    int(part) for part in mx.__version__.split(".", maxsplit=3)[:3]
+) < (0, 32, 0)
+
+
+def _has_negative_step(indices):
+    idxs = indices if isinstance(indices, tuple) else (indices,)
+    return any(isinstance(i, slice) and i.step is not None and i.step < 0 for i in idxs)
 
 
 @mlx_funcify.register(Subtensor)
@@ -19,7 +32,10 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
         if len(indices) == 1:
             indices = indices[0]
 
-        return x.__getitem__(indices)
+        res = x.__getitem__(indices)
+        if _MLX_COMPILE_NEGATIVE_STRIDE_BUG and _has_negative_step(indices):
+            res = mx.contiguous(res)
+        return res
 
     return subtensor
 

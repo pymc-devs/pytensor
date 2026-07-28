@@ -265,18 +265,12 @@ def test_mlx_IncSubtensor_slice_grad():
         compare_mlx_and_py([x_pt], [g], [x_np])
 
 
-@pytest.mark.xfail(
-    reason="Upstream mx.compile bug (ml-explore/mlx#3716): assigning an "
-    "elementwise expression to a negative-strided slice returns wrong values "
-    "under mx.compile (correct when eager / use_compile=False).",
-    strict=True,
-)
 def test_mlx_IncSubtensor_negative_step_slice_grad():
     x_pt = pt.vector("x", dtype="float32")
     x_np = np.arange(6, dtype=np.float32)
     g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
     assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
-    compare_mlx_and_py([x_pt], [g], [x_np])
+    compare_mlx_and_py([x_pt], [g], [x_np], mlx_mode="MLX")
 
 
 @pytest.mark.parametrize(
@@ -343,3 +337,23 @@ def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
     assert out.owner.op.ignore_duplicates
 
     compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])
+
+
+@pytest.mark.parametrize(
+    "indices",
+    [
+        (slice(None, None, -1), slice(None)),
+        (slice(None), slice(None, None, -1)),
+        (slice(None, None, -2), slice(None)),
+        (slice(None, None, -1), slice(None, None, -1)),
+    ],
+    ids=("axis0", "axis1", "axis0-step2", "both-axes"),
+)
+def test_mlx_negative_step_slice_elemwise(indices):
+    """A negative-stride slice feeding an elementwise op must be correct."""
+    x = pt.matrix("x", dtype="float32")
+    rev = x[indices]
+    out = 2.0 * rev
+    assert isinstance(rev.owner.op, pt_subtensor.Subtensor)
+    x_np = np.arange(15, dtype=np.float32).reshape(5, 3)
+    compare_mlx_and_py([x], [out], [x_np], mlx_mode="MLX")
