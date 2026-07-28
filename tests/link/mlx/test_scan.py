@@ -196,31 +196,11 @@ def test_scan_grad_over_sequence():
     compare_mlx_and_py(inputs, outputs, test_inputs)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Under the full `mode='MLX'` (fast_run) the gradient over a sequence "
-        "reverses the trace, and MLX miscompiles an elementwise op fed by a "
-        "negative-stride array (`mx.compile(lambda x: 2.0 * x[::-1])` zeroes the "
-        "tail). Unrelated to the Scan dispatch; fixed by a follow-up that "
-        "materializes negative-stride Subtensor results in the MLX backend."
-    ),
-)
 def test_scan_grad_over_sequence_default_mode():
     inputs, outputs, test_inputs = _rnn_grad_over_sequence()
     compare_mlx_and_py(inputs, outputs, test_inputs, mlx_mode="MLX")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The second-order backward Scan reads the forward trace through "
-        "negative-stride Subtensor views, hitting the same MLX miscompilation "
-        "as test_scan_grad_over_sequence_default_mode (here even under the base "
-        "optimizer query). Correct with `MLXLinker(use_compile=False)`; fixed by "
-        "the follow-up that materializes negative-stride Subtensor results."
-    ),
-)
 def test_higher_order_derivatives():
     # rtol loosened because MLX casts the check's float64 to float32
     ScanCompatibilityTests.check_higher_order_derivative(mode="MLX", rtol=1e-6)

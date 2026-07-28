@@ -2,7 +2,6 @@ from itertools import chain
 
 import mlx.core as mx
 
-from pytensor.compile.mode import MLX, get_mode
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import get_scalar_constant_value
@@ -42,13 +41,6 @@ def mlx_funcify_Scan(op: Scan, node, **kwargs):
     except NotScalarConstantError:
         static_n_steps = None
 
-    rewriter = (
-        get_mode(op.mode)
-        .including("mlx")
-        .excluding("numba", *MLX._optimizer.exclude)
-        .optimizer
-    )
-    rewriter(op.fgraph)
     scan_inner_func = mlx_funcify(op.fgraph, **kwargs)
 
     def scan(*outer_inputs):
