@@ -12,6 +12,12 @@ from pytensor.tensor.subtensor import (
 )
 
 
+# Fixed in MLX 0.32.0 (#3720).
+_MLX_COMPILE_NEGATIVE_STRIDE_BUG = tuple(
+    int(part) for part in mx.__version__.split(".", maxsplit=3)[:3]
+) < (0, 32, 0)
+
+
 def _has_negative_step(indices):
     idxs = indices if isinstance(indices, tuple) else (indices,)
     return any(isinstance(i, slice) and i.step is not None and i.step < 0 for i in idxs)
@@ -27,9 +33,7 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
             indices = indices[0]
 
         res = x.__getitem__(indices)
-        # MLX miscompiles an elementwise op fed by a negative-stride view under
-        # `mx.compile`, so materialize reversed slices into a contiguous array.
-        if _has_negative_step(indices):
+        if _MLX_COMPILE_NEGATIVE_STRIDE_BUG and _has_negative_step(indices):
             res = mx.contiguous(res)
         return res
 

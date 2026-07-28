@@ -266,9 +266,6 @@ def test_mlx_IncSubtensor_slice_grad():
 
 
 def test_mlx_IncSubtensor_negative_step_slice_grad():
-    # The wrong result here (previously attributed to ml-explore/mlx#3716) was
-    # actually the negative-stride read feeding the elementwise gradient term,
-    # now materialized by the Subtensor dispatch.
     x_pt = pt.vector("x", dtype="float32")
     x_np = np.arange(6, dtype=np.float32)
     g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
@@ -344,13 +341,7 @@ def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
 
 @pytest.mark.parametrize("axis", [0, 1])
 def test_mlx_negative_step_slice_elemwise(axis):
-    """A negative-stride slice feeding an elementwise op must materialize.
-
-    Under the full ``mode="MLX"`` (``mx.compile``), an elementwise op fed by a
-    negative-stride view used to be miscompiled (trailing entries zeroed). The
-    Subtensor dispatch now copies reversed slices into a contiguous array. This
-    is what unblocks Scan gradients over sequences, which reverse the trace.
-    """
+    """A negative-stride slice feeding an elementwise op must be correct."""
     x = pt.matrix("x", dtype="float32")
     rev = x[::-1] if axis == 0 else x[:, ::-1]
     out = 2.0 * rev
