@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from packaging.version import parse as V
 
 import pytensor.tensor as pt
 from pytensor.scan import until
@@ -196,11 +197,27 @@ def test_scan_grad_over_sequence():
     compare_mlx_and_py(inputs, outputs, test_inputs)
 
 
+@pytest.mark.xfail(
+    V(mx.__version__) < V("0.32.0"),
+    strict=True,
+    reason=(
+        "MLX <0.32.0 miscompiles negative-strided inputs under mx.compile; "
+        "fixed in 0.32.0 (ml-explore/mlx#3720)."
+    ),
+)
 def test_scan_grad_over_sequence_default_mode():
     inputs, outputs, test_inputs = _rnn_grad_over_sequence()
     compare_mlx_and_py(inputs, outputs, test_inputs, mlx_mode="MLX")
 
 
+@pytest.mark.xfail(
+    V(mx.__version__) < V("0.32.0"),
+    strict=True,
+    reason=(
+        "MLX <0.32.0 miscompiles negative-strided inputs under mx.compile; "
+        "fixed in 0.32.0 (ml-explore/mlx#3720)."
+    ),
+)
 def test_higher_order_derivatives():
     # rtol loosened because MLX casts the check's float64 to float32
     ScanCompatibilityTests.check_higher_order_derivative(mode="MLX", rtol=1e-6)
