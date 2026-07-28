@@ -12,7 +12,7 @@ from pytensor.tensor.subtensor import (
 )
 
 
-# Fixed in MLX 0.32.0 (#3720).
+# Fixed in MLX 0.32.0 (ml-explore/mlx#3720).
 _MLX_COMPILE_NEGATIVE_STRIDE_BUG = tuple(
     int(part) for part in mx.__version__.split(".", maxsplit=3)[:3]
 ) < (0, 32, 0)

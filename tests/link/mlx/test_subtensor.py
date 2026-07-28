@@ -339,11 +339,20 @@ def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
     compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])
 
 
-@pytest.mark.parametrize("axis", [0, 1])
-def test_mlx_negative_step_slice_elemwise(axis):
+@pytest.mark.parametrize(
+    "indices",
+    [
+        (slice(None, None, -1), slice(None)),
+        (slice(None), slice(None, None, -1)),
+        (slice(None, None, -2), slice(None)),
+        (slice(None, None, -1), slice(None, None, -1)),
+    ],
+    ids=("axis0", "axis1", "axis0-step2", "both-axes"),
+)
+def test_mlx_negative_step_slice_elemwise(indices):
     """A negative-stride slice feeding an elementwise op must be correct."""
     x = pt.matrix("x", dtype="float32")
-    rev = x[::-1] if axis == 0 else x[:, ::-1]
+    rev = x[indices]
     out = 2.0 * rev
     assert isinstance(rev.owner.op, pt_subtensor.Subtensor)
     x_np = np.arange(15, dtype=np.float32).reshape(5, 3)
