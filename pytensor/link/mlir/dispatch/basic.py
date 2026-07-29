@@ -9,7 +9,8 @@ import numpy as np
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph import Constant
 from pytensor.graph.fg import AbstractFunctionGraph
-from pytensor.scalar.basic import Add, Mul, Second
+from pytensor.scalar.basic import Add, Mul, Second, Sub
+from pytensor.scalar.math import Sigmoid
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
@@ -28,7 +29,9 @@ class MLIRModule:
 
 def _typify_array(array):
     if array.dtype.name not in MLIR_DTYPES:
-        raise TypeError(f"MLIR only supports float32 and float64 inputs, got {array.dtype}")
+        raise TypeError(
+            f"MLIR only supports float32 and float64 inputs, got {array.dtype}"
+        )
     return array if array.ndim == 0 else np.ascontiguousarray(array)
 
 
@@ -131,22 +134,32 @@ class _MLIREmitter:
         rank = output.type.ndim
         dtype = self._element_dtype(output)
         if rank > 2:
-            raise NotImplementedError("MLIR Elemwise lowering supports tensors up to rank 2")
+            raise NotImplementedError(
+                "MLIR Elemwise lowering supports tensors up to rank 2"
+            )
 
         inputs = list(node.inputs)
         for variable in inputs:
             self._validate_elemwise_input(variable, output)
 
-        nonconstant_inputs = [variable for variable in inputs if not isinstance(variable, Constant)]
+        nonconstant_inputs = [
+            variable for variable in inputs if not isinstance(variable, Constant)
+        ]
         if not nonconstant_inputs:
             raise NotImplementedError("MLIR Elemwise lowering requires a tensor input")
 
         init = self._empty_for_elemwise_output(output, inputs)
-        input_maps = [self._elemwise_map(variable, output) for variable in nonconstant_inputs]
+        input_maps = [
+            self._elemwise_map(variable, output) for variable in nonconstant_inputs
+        ]
         output_map = self._identity_map(rank)
         iterator_types = ", ".join('"parallel"' for _ in range(rank))
-        input_names = ", ".join(self._value(variable) for variable in nonconstant_inputs)
-        input_types = ", ".join(self._tensor_type(variable) for variable in nonconstant_inputs)
+        input_names = ", ".join(
+            self._value(variable) for variable in nonconstant_inputs
+        )
+        input_types = ", ".join(
+            self._tensor_type(variable) for variable in nonconstant_inputs
+        )
         result = self._fresh("value")
         maps = ", ".join((*input_maps, output_map))
         ins = f"ins({input_names} : {input_types}) "
@@ -158,7 +171,10 @@ class _MLIREmitter:
 
         block_arguments = ", ".join(
             [
-                *(f"%input{index}: {dtype}" for index in range(len(nonconstant_inputs))),
+                *(
+                    f"%input{index}: {dtype}"
+                    for index in range(len(nonconstant_inputs))
+                ),
                 f"%output: {dtype}",
             ]
         )
@@ -179,14 +195,18 @@ class _MLIREmitter:
 
     def emit_dimshuffle(self, node):
         if len(node.inputs) != 1 or len(node.outputs) != 1:
-            raise NotImplementedError("MLIR DimShuffle lowering requires one input and one output")
+            raise NotImplementedError(
+                "MLIR DimShuffle lowering requires one input and one output"
+            )
 
         input_variable = node.inputs[0]
         output = node.outputs[0]
         input_type = self._tensor_type(input_variable)
         output_type = self._tensor_type(output)
         if input_variable.type.ndim > 2 or output.type.ndim > 2:
-            raise NotImplementedError("MLIR DimShuffle lowering supports tensors up to rank 2")
+            raise NotImplementedError(
+                "MLIR DimShuffle lowering supports tensors up to rank 2"
+            )
         if self._element_dtype(input_variable) != self._element_dtype(output):
             raise TypeError("MLIR DimShuffle requires matching input and output dtypes")
 
@@ -210,14 +230,18 @@ class _MLIREmitter:
 
     def emit_deepcopy(self, node):
         if len(node.inputs) != 1 or len(node.outputs) != 1:
-            raise NotImplementedError("MLIR DeepCopyOp lowering requires one input and one output")
+            raise NotImplementedError(
+                "MLIR DeepCopyOp lowering requires one input and one output"
+            )
 
         input_variable = node.inputs[0]
         output = node.outputs[0]
         input_type = self._tensor_type(input_variable)
         output_type = self._tensor_type(output)
         if input_variable.type.ndim > 2 or output.type.ndim > 2:
-            raise NotImplementedError("MLIR DeepCopyOp lowering supports tensors up to rank 2")
+            raise NotImplementedError(
+                "MLIR DeepCopyOp lowering supports tensors up to rank 2"
+            )
         dtype = self._element_dtype(output)
         if self._element_dtype(input_variable) != dtype:
             raise TypeError("MLIR DeepCopyOp requires matching input and output dtypes")
@@ -246,7 +270,9 @@ class _MLIREmitter:
 
     def emit_dot22(self, node):
         if len(node.inputs) != 2 or len(node.outputs) != 1:
-            raise NotImplementedError("MLIR Dot22 lowering requires two inputs and one output")
+            raise NotImplementedError(
+                "MLIR Dot22 lowering requires two inputs and one output"
+            )
 
         lhs, rhs = node.inputs
         if isinstance(lhs, Constant) or isinstance(rhs, Constant):
@@ -283,12 +309,32 @@ class _MLIREmitter:
     def _emit_scalar_op(self, scalar_op, operands, dtype):
         if isinstance(scalar_op, Second):
             return operands[1]
+        if isinstance(scalar_op, Sigmoid):
+            negative = self._fresh("scalar")
+            exponential = self._fresh("scalar")
+            one = self._fresh("scalar")
+            denominator = self._fresh("scalar")
+            result = self._fresh("scalar")
+            self.body.append(f"    {negative} = arith.negf {operands[0]} : {dtype}")
+            self.body.append(f"    {exponential} = math.exp {negative} : {dtype}")
+            self.body.append(f"    {one} = arith.constant 1.0 : {dtype}")
+            self.body.append(
+                f"    {denominator} = arith.addf {one}, {exponential} : {dtype}"
+            )
+            self.body.append(
+                f"    {result} = arith.divf {one}, {denominator} : {dtype}"
+            )
+            return result
         if isinstance(scalar_op, Add):
             operation = "arith.addf"
+        elif isinstance(scalar_op, Sub):
+            operation = "arith.subf"
         elif isinstance(scalar_op, Mul):
             operation = "arith.mulf"
         else:
-            raise NotImplementedError(f"MLIR Elemwise lowering does not support {scalar_op}")
+            raise NotImplementedError(
+                f"MLIR Elemwise lowering does not support {scalar_op}"
+            )
 
         value = operands[0]
         for operand in operands[1:]:
@@ -357,10 +403,14 @@ class _MLIREmitter:
         for variable, value in zip(self.fgraph.inputs, inputs, strict=True):
             shape = np.asarray(value).shape
             if len(shape) != variable.type.ndim:
-                raise ValueError(f"MLIR expected rank {variable.type.ndim} for {variable}")
+                raise ValueError(
+                    f"MLIR expected rank {variable.type.ndim} for {variable}"
+                )
             for actual, expected in zip(shape, variable.type.shape, strict=True):
                 if expected is not None and actual != expected:
-                    raise ValueError(f"MLIR expected shape {variable.type.shape} for {variable}")
+                    raise ValueError(
+                        f"MLIR expected shape {variable.type.shape} for {variable}"
+                    )
             shapes[variable] = shape
 
         for node in self.nodes:
@@ -370,7 +420,8 @@ class _MLIREmitter:
             elif isinstance(node.op, DimShuffle):
                 input_shape = self._runtime_shape(node.inputs[0], shapes)
                 shape = tuple(
-                    1 if axis == "x" else input_shape[axis] for axis in node.op.new_order
+                    1 if axis == "x" else input_shape[axis]
+                    for axis in node.op.new_order
                 )
             elif isinstance(node.op, DeepCopyOp):
                 shape = self._runtime_shape(node.inputs[0], shapes)
@@ -396,7 +447,9 @@ class _MLIREmitter:
                 if input_axis < 0 or variable.type.shape[input_axis] == 1:
                     continue
                 dimensions.append(input_shape[input_axis])
-            if dimensions and any(dimension != dimensions[0] for dimension in dimensions[1:]):
+            if dimensions and any(
+                dimension != dimensions[0] for dimension in dimensions[1:]
+            ):
                 raise ValueError(
                     "Runtime broadcasting not allowed: a dynamic dimension differs "
                     "from another input dimension."
@@ -477,7 +530,9 @@ class _MLIREmitter:
             dtype = self._element_dtype(variable)
             shape = variable.type.shape
         except AttributeError as error:
-            raise TypeError(f"MLIR only supports TensorType values, got {variable.type}") from error
+            raise TypeError(
+                f"MLIR only supports TensorType values, got {variable.type}"
+            ) from error
         dimensions = "x".join("?" if size is None else str(size) for size in shape)
         return f"tensor<{dimensions + 'x' if dimensions else ''}{dtype}>"
 
@@ -495,7 +550,9 @@ class _MLIREmitter:
             return self.values[variable]
         except KeyError as error:
             if isinstance(variable, Constant):
-                raise NotImplementedError("MLIR does not support a constant graph output") from error
+                raise NotImplementedError(
+                    "MLIR does not support a constant graph output"
+                ) from error
             raise ValueError(f"MLIR value was not emitted for {variable}") from error
 
     def _index(self, value):
