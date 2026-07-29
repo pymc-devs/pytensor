@@ -4,6 +4,7 @@ from scipy.special import beta as scipy_beta
 from scipy.special import factorial as scipy_factorial
 from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import logit as scipy_logit
+from scipy.special import logsumexp as scipy_logsumexp
 from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
 from scipy.special import xlog1py as scipy_xlog1py
@@ -13,6 +14,7 @@ from pytensor import grad
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import vectorize_graph
+from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.special import (
     LogSoftmax,
     Softmax,
@@ -20,13 +22,25 @@ from pytensor.tensor.special import (
     betaln,
     factorial,
     log_softmax,
+    logaddexp,
     logit,
+    logsumexp,
     poch,
     softmax,
     xlog1py,
     xlogy,
 )
-from pytensor.tensor.type import matrix, tensor, tensor3, tensor4, vector, vectors
+from pytensor.tensor.type import (
+    matrices,
+    matrix,
+    scalar,
+    scalars,
+    tensor,
+    tensor3,
+    tensor4,
+    vector,
+    vectors,
+)
 from tests import unittest_tools as utt
 from tests.tensor.utils import random_ranged
 
@@ -173,6 +187,94 @@ def test_softmax_stability(constructor, scipy_fn, mode):
     f = function([x], constructor(x, axis=-1), mode=mode)
 
     np.testing.assert_allclose(f(x_val), scipy_fn(x_val, axis=-1), rtol=1e-6)
+
+
+def test_logaddexp():
+    # Test more than two multidimensional inputs
+    x, y, z = matrices("x", "y", "z")
+    out = logaddexp(x, y, z)
+    f = function([x, y, z], out)
+
+    inp = np.zeros((3, 3), dtype=config.floatX)
+    np.testing.assert_allclose(
+        f(inp, inp, inp),
+        np.full((3, 3), np.log(3)),
+    )
+
+    # Test scalar inputs
+    x, y = scalars("x", "y")
+    out = logaddexp(x, y)
+    f = function([x, y], out)
+
+    res = f(0, 0)
+    assert np.ndim(res) == 0
+    assert np.isclose(res, np.log(2))
+
+    # Test scalar and matrix inputs
+    x = scalar("x")
+    y = matrix("y")
+    out = logaddexp(x, y)
+    f = function([x, y], out)
+
+    res = f(
+        np.array(0, dtype=config.floatX),
+        np.zeros((3, 3), dtype=config.floatX),
+    )
+    assert np.shape(res) == (3, 3)
+    np.testing.assert_allclose(
+        res,
+        np.full((3, 3), np.log(2)),
+    )
+
+
+@pytest.mark.parametrize(
+    ["shape", "axis"],
+    [
+        ((1,), 0),
+        ((3,), 0),
+        ((3, 4), None),
+        ((3, 4), 0),
+        ((3, 4), 1),
+        ((3, 4, 5), None),
+        ((3, 3, 5), 0),
+        ((3, 4, 5), 1),
+        ((3, 4, 5), 2),
+    ],
+)
+@pytest.mark.parametrize(
+    "keepdims",
+    [True, False],
+)
+def test_logsumexp(shape, axis, keepdims):
+    scipy_inp = np.zeros(shape)
+    scipy_out = scipy_logsumexp(scipy_inp, axis=axis, keepdims=keepdims)
+
+    pytensor_inp = as_tensor_variable(scipy_inp)
+    f = function([], logsumexp(pytensor_inp, axis=axis, keepdims=keepdims))
+    pytensor_out = f()
+
+    np.testing.assert_array_almost_equal(
+        pytensor_out,
+        scipy_out,
+    )
+
+
+@pytest.mark.parametrize("mode", ["FAST_RUN", "FAST_COMPILE"])
+def test_logsumexp_logaddexp_stable_grad(mode):
+    """Both helpers promise a stable forward, so their gradient must be stable too.
+
+    A naive ``log(sum(exp(x)))`` is only stabilized by `local_log_sum_exp`, which runs
+    too late to help `grad`: the gradient built from the raw form is
+    ``exp(x) / sum(exp(x))``, which overflows for large ``x`` and is 0/0 for very
+    negative ``x``. Multiplying by ``w`` keeps the output gradient from folding to 1,
+    which is what would otherwise let `local_softmax_stabilize` repair the pattern.
+    """
+    x, w = vector("x"), scalar("w")
+
+    for out in (logsumexp(x), logaddexp(x[0], x[1])):
+        f = function([x, w], grad(out * w, x), mode=mode)
+        for inp in (np.array([1000.0, 1001.0]), np.array([-800.0, -805.0])):
+            np.testing.assert_allclose(f(inp, 2.0), 2.0 * scipy_softmax(inp))
 
 
 def test_poch():

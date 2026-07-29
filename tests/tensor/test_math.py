@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 import scipy.special
 from numpy.testing import assert_array_equal
-from scipy.special import logsumexp as scipy_logsumexp
 
 import pytensor
 import pytensor.scalar as ps
@@ -89,8 +88,6 @@ from pytensor.tensor.math import (
     log1p,
     log2,
     log10,
-    logaddexp,
-    logsumexp,
     matmul,
     matvec,
     max,
@@ -151,7 +148,6 @@ from pytensor.tensor.type import (
     matrices,
     matrix,
     scalar,
-    scalars,
     tensor,
     tensor3,
     tensor4,
@@ -3699,76 +3695,6 @@ def test_tanh_grad_broadcast():
     grad(tanh(x + y).sum(), y)
     # TODO FIXME: This is a bad test
     grad(tanh(x + y).sum(), [x, y])
-
-
-def test_logaddexp():
-    # Test more than two multidimensional inputs
-    x, y, z = matrices("x", "y", "z")
-    out = logaddexp(x, y, z)
-    f = function([x, y, z], out)
-
-    inp = np.zeros((3, 3), dtype=config.floatX)
-    np.testing.assert_allclose(
-        f(inp, inp, inp),
-        np.full((3, 3), np.log(3)),
-    )
-
-    # Test scalar inputs
-    x, y = scalars("x", "y")
-    out = logaddexp(x, y)
-    f = function([x, y], out)
-
-    res = f(0, 0)
-    assert np.ndim(res) == 0
-    assert np.isclose(res, np.log(2))
-
-    # Test scalar and matrix inputs
-    x = scalar("x")
-    y = matrix("y")
-    out = logaddexp(x, y)
-    f = function([x, y], out)
-
-    res = f(
-        np.array(0, dtype=config.floatX),
-        np.zeros((3, 3), dtype=config.floatX),
-    )
-    assert np.shape(res) == (3, 3)
-    np.testing.assert_allclose(
-        res,
-        np.full((3, 3), np.log(2)),
-    )
-
-
-@pytest.mark.parametrize(
-    ["shape", "axis"],
-    [
-        ((1,), 0),
-        ((3,), 0),
-        ((3, 4), None),
-        ((3, 4), 0),
-        ((3, 4), 1),
-        ((3, 4, 5), None),
-        ((3, 3, 5), 0),
-        ((3, 4, 5), 1),
-        ((3, 4, 5), 2),
-    ],
-)
-@pytest.mark.parametrize(
-    "keepdims",
-    [True, False],
-)
-def test_logsumexp(shape, axis, keepdims):
-    scipy_inp = np.zeros(shape)
-    scipy_out = scipy_logsumexp(scipy_inp, axis=axis, keepdims=keepdims)
-
-    pytensor_inp = as_tensor_variable(scipy_inp)
-    f = function([], logsumexp(pytensor_inp, axis=axis, keepdims=keepdims))
-    pytensor_out = f()
-
-    np.testing.assert_array_almost_equal(
-        pytensor_out,
-        scipy_out,
-    )
 
 
 def test_pprint():
