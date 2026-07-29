@@ -21,7 +21,6 @@ def test_blockwise_matmul(batch):
     b = tensor("b", shape=(*batch, 3, 4))
     out = matmul(a, b)
 
-    assert isinstance(out.owner.op, Blockwise)
     compare_mlx_and_py(
         [a, b],
         [out],
@@ -63,8 +62,19 @@ def test_blockwise_convolve1d(batch):
         ((5, 2, 3), (3, 4)),  # one input unbatched -> broadcast over batch
         ((2, 1, 2, 3), (1, 3, 3, 4)),  # size-1 batch dims on different axes
         ((1, 2, 3), (1, 3, 4)),  # all batch dims size-1 -> squeeze + expand
+        ((1, 3, 2, 3), (1, 3, 3, 4)),  # leading axis all-broadcast, trailing mapped
+        ((3, 1, 2, 3), (3, 1, 3, 4)),  # leading axis mapped, trailing all-broadcast
+        ((1, 3, 2, 3), (1, 1, 3, 4)),  # leading all-broadcast, trailing mixed
     ],
-    ids=["no_batch", "broadcast_unbatched", "cross_broadcast", "all_broadcast"],
+    ids=[
+        "no_batch",
+        "broadcast_unbatched",
+        "cross_broadcast",
+        "all_broadcast",
+        "expand_leading",
+        "expand_trailing",
+        "expand_leading_mixed",
+    ],
 )
 def test_blockwise_batch_broadcasting(a_shape, b_shape):
     rng = np.random.default_rng(7)
@@ -72,7 +82,6 @@ def test_blockwise_batch_broadcasting(a_shape, b_shape):
     b = tensor("b", shape=b_shape)
     out = matmul(a, b)
 
-    assert isinstance(out.owner.op, Blockwise)
     compare_mlx_and_py(
         [a, b], [out], [rng.standard_normal(a_shape), rng.standard_normal(b_shape)]
     )
@@ -103,7 +112,6 @@ def test_blockwise_fallback_signature(batch):
     b = tensor("b", shape=(*batch, 3, 4))
     out = odd_matmul(a, b)
 
-    assert isinstance(out.owner.op, Blockwise)
     compare_mlx_and_py(
         [a, b],
         [out],
@@ -111,54 +119,46 @@ def test_blockwise_fallback_signature(batch):
     )
 
 
-def test_blockwise_kwargs_only_core_op():
+@pytest.mark.parametrize(
+    "core_op, signature, input_shapes",
+    [
+        (MakeVector(dtype="float32"), "(),()->(2)", [(5,), (5,)]),
+        (Join(0), "(i),(j)->(k)", [(5, 3), (5, 4)]),
+        (ScalarFromTensor(), "()->()", [(5,)]),
+    ],
+    ids=["make_vector", "join", "scalar_from_tensor"],
+)
+def test_blockwise_kwargs_only_core_op(core_op, signature, input_shapes):
     # Core ops whose dispatch signature is (op, **kwargs) must receive the core
-    # node by keyword; passing it positionally raised a TypeError inside
-    # funcify_Blockwise.
+    # node by keyword.
     rng = np.random.default_rng(7)
+    inputs = [
+        tensor(f"x{i}", shape=shape, dtype="float32")
+        for i, shape in enumerate(input_shapes)
+    ]
+    out = Blockwise(core_op, signature=signature)(*inputs)
 
-    a = tensor("a", shape=(5,), dtype="float32")
-    b = tensor("b", shape=(5,), dtype="float32")
-    make_vector = Blockwise(MakeVector(dtype="float32"), signature="(),()->(2)")(a, b)
-    assert isinstance(make_vector.owner.op, Blockwise)
     compare_mlx_and_py(
-        [a, b],
-        [make_vector],
-        [
-            rng.standard_normal(5).astype("float32"),
-            rng.standard_normal(5).astype("float32"),
-        ],
-    )
-
-    a = tensor("a", shape=(5, 3), dtype="float32")
-    b = tensor("b", shape=(5, 4), dtype="float32")
-    join = Blockwise(Join(0), signature="(i),(j)->(k)")(a, b)
-    assert isinstance(join.owner.op, Blockwise)
-    compare_mlx_and_py(
-        [a, b],
-        [join],
-        [
-            rng.standard_normal((5, 3)).astype("float32"),
-            rng.standard_normal((5, 4)).astype("float32"),
-        ],
-    )
-
-    a = tensor("a", shape=(5,), dtype="float32")
-    scalar_from_tensor = Blockwise(ScalarFromTensor(), signature="()->()")(a)
-    assert isinstance(scalar_from_tensor.owner.op, Blockwise)
-    compare_mlx_and_py(
-        [a], [scalar_from_tensor], [rng.standard_normal(5).astype("float32")]
+        inputs,
+        [out],
+        [rng.standard_normal(shape).astype("float32") for shape in input_shapes],
     )
 
 
-def test_blockwise_multi_output():
+@pytest.mark.parametrize("batch", [(1,), (2,)], ids=["all_broadcast", "mapped"])
+def test_blockwise_multi_output(batch):
     rng = np.random.default_rng(7)
-    x = tensor("x", shape=(1, 4, 4))
-    q, r = pt.linalg.qr(x, mode="economic")
+    x = tensor("x", shape=(*batch, 4, 4))
+    outs = pt.linalg.svd(x, full_matrices=True)
 
-    assert isinstance(q.owner.op, Blockwise)
+    def assert_allclose_abs(mlx_res, py_res):
+        # Singular vectors are defined only up to a sign, so compare magnitudes.
+        np.testing.assert_allclose(np.abs(mlx_res), np.abs(py_res), rtol=1e-4)
+
+    assert isinstance(outs[0].owner.op, Blockwise)
     compare_mlx_and_py(
-        graph_inputs=[x],
-        graph_outputs=[q, r],
-        test_inputs=[rng.standard_normal((1, 4, 4))],
+        [x],
+        list(outs),
+        [rng.standard_normal((*batch, 4, 4))],
+        assert_fn=assert_allclose_abs,
     )

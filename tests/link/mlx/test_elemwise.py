@@ -239,6 +239,7 @@ def test_erfcx() -> None:
     # Test with positive values where erfcx is most numerically stable
     x_test = mx.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
 
+    # MLX's erfcx sits close to the default 1e-4 tolerance; relax for headroom.
     relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-3)
 
     compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
