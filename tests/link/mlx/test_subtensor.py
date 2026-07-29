@@ -266,8 +266,10 @@ def test_mlx_IncSubtensor_slice_grad():
         compare_mlx_and_py([x_pt], [g], [x_np])
 
 
-@pytest.mark.parametrize("stream", [mx.cpu, mx.gpu], ids=["cpu", "gpu"])
-def test_mlx_IncSubtensor_negative_step_slice_grad(stream):
+def test_mlx_IncSubtensor_negative_step_slice_grad():
+    # Correctness is asserted on the CPU stream only: assigning an elementwise
+    # expression to a negative-strided slice returns wrong values on the GPU
+    # stream under mx.compile (ml-explore/mlx#3716).
     x_pt = pt.vector("x", dtype="float32")
     x_np = np.arange(6, dtype=np.float32)
     g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
@@ -275,13 +277,10 @@ def test_mlx_IncSubtensor_negative_step_slice_grad(stream):
 
     expected = pytensor.function([x_pt], g, mode=py_mode)(x_np)
     mlx_fn = pytensor.function([x_pt], g, mode=mlx_mode)
-    with mx.stream(stream):
+    with mx.stream(mx.cpu):
         result = np.asarray(mlx_fn(x_np))
 
-    if stream == mx.cpu:
-        np.testing.assert_allclose(result, expected, rtol=1e-4)
-    else:
-        assert not np.allclose(result, expected, rtol=1e-4)
+    np.testing.assert_allclose(result, expected, rtol=1e-4)
 
 
 @pytest.mark.parametrize(
