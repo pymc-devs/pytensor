@@ -71,7 +71,6 @@ from pytensor.tensor.math import (
     expm1,
     ge,
     int_div,
-    isinf,
     ive,
     kve,
     le,
@@ -79,8 +78,6 @@ from pytensor.tensor.math import (
     log1mexp,
     log1p,
     log1pexp,
-    makeKeepDims,
-    maximum,
     mul,
     neg,
     polygamma,
@@ -100,9 +97,7 @@ from pytensor.tensor.math import (
     variadic_mul,
 )
 from pytensor.tensor.math import abs as pt_abs
-from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
     broadcast_like_elemwise,
     local_second_sink,
@@ -2811,87 +2806,6 @@ def local_log1p(fgraph, node):
 
         new_out = log1p(neg(other))
         return [broadcast_like_elemwise(new_out, node, fgraph=fgraph, stack_trace=True)]
-
-
-@register_stabilize("fast_compile")
-@register_specialize
-@node_rewriter([log])
-def local_log_add_exp(fgraph, node):
-    """
-    ``log(exp(x)+exp(y)+exp(z)) = max + log(x-max, y-max, z-max)``
-
-    TODO: in canonicalize, change log10 and log2 -> log
-    """
-
-    z = node.inputs[0]
-    if z.owner and z.owner.op == add:
-        zi = z.owner.inputs
-        pre_exp = [x.owner.inputs[0] for x in zi if x.owner and x.owner.op == exp]
-        # all arguments to add are exp(<something>)
-        if len(pre_exp) == len(zi):
-            # Do not offset when max_pre = -np.inf, to avoid nan in the output
-            # Switch statement is placed directly inside add to break the self-symmetry
-            # of the returned output (otherwise the rewrite would not stabilize)
-            max_pre = reduce(maximum, pre_exp)
-            ret = max_pre + log(
-                add(
-                    *[
-                        switch(isinf(max_pre), exp(max_pre), exp(p - max_pre))
-                        for p in pre_exp
-                    ]
-                )
-            )
-            return [ret]
-
-
-@register_stabilize("fast_compile")
-@register_specialize
-@node_rewriter([log])
-def local_log_sum_exp(fgraph, node):
-    # log(sum_i(exp(x_i))) = x_max + log(sum_i(exp(x_i - x_max)))
-
-    sum_node = node.inputs[0].owner
-    # If the sum has keepdims=True, there might be a dimshuffle
-    if sum_node and isinstance(sum_node.op, DimShuffle):
-        dimshuffle_op = sum_node.op
-        sum_node = sum_node.inputs[0].owner
-    else:
-        dimshuffle_op = None
-
-    if not (sum_node and isinstance(sum_node.op, Sum)):
-        return
-
-    exp_node, axis = sum_node.inputs[0].owner, sum_node.op.axis
-    if not (
-        exp_node
-        and isinstance(exp_node.op, Elemwise)
-        and isinstance(exp_node.op.scalar_op, ps.Exp)
-    ):
-        return
-
-    pre_exp = exp_node.inputs[0]
-    max_pre_exp = pt_max(pre_exp, axis=axis)
-    max_pre_exp_keepdims = makeKeepDims(pre_exp, max_pre_exp, axis)
-
-    # Do not offset when max_pre = -np.inf, to avoid nan in the output
-    # Switch statement is placed directly inside sum to break the self-symmetry
-    # of the returned output (otherwise the rewrite would not stabilize)
-    ret = max_pre_exp + log(
-        pt_sum(
-            switch(
-                isinf(max_pre_exp_keepdims),
-                exp(max_pre_exp_keepdims),
-                exp(pre_exp - max_pre_exp_keepdims),
-            ),
-            axis=axis,
-        ),
-    )
-
-    # Restore the dimshuffle op, if any.
-    if dimshuffle_op:
-        ret = dimshuffle_op(ret)
-
-    return [ret]
 
 
 def add_calculate(num, denum, aslist=False, out_type=None):

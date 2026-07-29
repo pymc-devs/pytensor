@@ -2,11 +2,11 @@ from pytensor.compile.rewriting import inline_ofg_node
 from pytensor.graph import node_rewriter
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
-from pytensor.tensor.special import XLog1PY, XLogY
+from pytensor.tensor.special import LogAddExp, LogSumExp, XLog1PY, XLogY
 
 
 @register_specialize("inline_ofg")
-@node_rewriter([AllocDiag, XLogY, XLog1PY])
+@node_rewriter([AllocDiag, XLogY, XLog1PY, LogSumExp, LogAddExp])
 def late_inline_OpFromGraph(fgraph, node):
     """
     Inline `OpFromGraph` nodes.
