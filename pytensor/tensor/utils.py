@@ -229,10 +229,16 @@ def safe_signature(
     return f"{inputs_sig}->{outputs_sig}"
 
 
-def normalize_reduce_axis(axis, ndim: int) -> tuple[int, ...] | None:
-    """Normalize the axis parameter for reduce operations."""
+def normalize_reduce_axis(
+    axis, ndim: int, normalize_none: bool = False
+) -> tuple[int, ...] | None:
+    """Normalize the axis parameter for reduce operations.
+
+    With ``normalize_none`` a ``None`` axis becomes every axis, for Ops that need them
+    spelled out so that ``None`` and the explicit axes give Ops that compare equal.
+    """
     if axis is None:
-        return None
+        return tuple(range(ndim)) if normalize_none else None
 
     # scalar inputs are treated as 1D regarding axis in reduce operations
     if axis is not None:

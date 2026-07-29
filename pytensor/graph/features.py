@@ -546,10 +546,10 @@ class FullHistory(Feature):
                      └─ ···
         >> local_softmax_stabilize
         Log [id A] 1
-         └─ Softmax{axis=None} [id B] 0
+         └─ Softmax{axis=(0,)} [id B] 0
             └─ x [id C]
         >> local_logsoftmax
-        LogSoftmax{axis=None} [id A] 0
+        LogSoftmax{axis=(0,)} [id A] 0
          └─ x [id B]
 
 
@@ -563,7 +563,7 @@ class FullHistory(Feature):
     .. testoutput::
         >> local_logsoftmax
         Log [id A] 1
-         └─ Softmax{axis=None} [id B] 0
+         └─ Softmax{axis=(0,)} [id B] 0
             └─ x [id C]
         >> local_softmax_stabilize
         Log [id A] 4
@@ -591,7 +591,7 @@ class FullHistory(Feature):
 
     .. testoutput::
         Log [id A] 1
-         └─ Softmax{axis=None} [id B] 0
+         └─ Softmax{axis=(0,)} [id B] 0
             └─ x [id C]
 
 

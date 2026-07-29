@@ -1,14 +1,27 @@
-from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    PatternNodeRewriter,
+    copy_stack_trace,
+    node_rewriter,
+)
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Exp
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Sum, add, exp, log, true_div
+from pytensor.tensor.math import Sum, add, exp, log, sub, true_div
 from pytensor.tensor.rewriting.basic import register_stabilize
-from pytensor.tensor.special import Softmax, log_softmax, logaddexp, logsumexp
+from pytensor.tensor.special import (
+    LogSoftmax,
+    LogSumExp,
+    Softmax,
+    log_softmax,
+    logaddexp,
+    logsumexp,
+)
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     Subtensor,
 )
 from pytensor.tensor.type import values_eq_approx_remove_inf
+from pytensor.tensor.utils import normalize_reduce_axis
 
 
 subtensor_ops = (
@@ -64,6 +77,32 @@ def local_logsoftmax(fgraph, node):
     return [ret]
 
 
+# Exp(LogSoftmax(x)) -> Softmax(x)
+local_exp_log_softmax = PatternNodeRewriter(
+    (exp, (OpPattern(LogSoftmax, axis="axis"), "x")),
+    (OpPattern(Softmax, axis="axis"), "x"),
+    name="local_exp_log_softmax",
+)
+register_stabilize(local_exp_log_softmax)
+
+
+# x - logsumexp(x, axis, keepdims=True) -> LogSoftmax(x)
+# The shared "axis" makes the DimShuffle match only when it re-expands the reduced axes
+local_log_softmax_from_logsumexp = PatternNodeRewriter(
+    (
+        sub,
+        "x",
+        (
+            OpPattern(DimShuffle, is_expand_dims=True, augment="axis"),
+            (OpPattern(LogSumExp, axis="axis"), "x"),
+        ),
+    ),
+    (OpPattern(LogSoftmax, axis="axis"), "x"),
+    name="local_log_softmax_from_logsumexp",
+)
+register_stabilize(local_log_softmax_from_logsumexp)
+
+
 @register_stabilize("symbolic_op_recognition", "fast_compile")
 @node_rewriter([true_div])
 def local_softmax_stabilize(fgraph, node):
@@ -92,7 +131,7 @@ def local_softmax_stabilize(fgraph, node):
         case _:
             return None
 
-    ret = Softmax(axis=axis)(x)
+    ret = Softmax(axis=normalize_reduce_axis(axis, x.type.ndim, normalize_none=True))(x)
     copy_stack_trace(node.outputs, ret)
     return [ret]
 

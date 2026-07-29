@@ -1,7 +1,5 @@
 from functools import reduce
 
-from numpy.lib.array_utils import normalize_axis_tuple
-
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import as_tensor_variable
@@ -22,6 +20,7 @@ from pytensor.tensor.math import (
     switch,
 )
 from pytensor.tensor.symbolic import TensorSymbolicOp
+from pytensor.tensor.utils import normalize_reduce_axis
 
 
 class Softmax(TensorSymbolicOp):
@@ -61,8 +60,7 @@ class Softmax(TensorSymbolicOp):
 
 def softmax(c, axis=None):
     c = as_tensor_variable(c)
-    if axis is not None:
-        axis = normalize_axis_tuple(axis, c.type.ndim)
+    axis = normalize_reduce_axis(axis, c.type.ndim, normalize_none=True)
     return Softmax(axis=axis)(c)
 
 
@@ -97,8 +95,7 @@ class LogSoftmax(TensorSymbolicOp):
 
 def log_softmax(c, axis=None):
     c = as_tensor_variable(c)
-    if axis is not None:
-        axis = normalize_axis_tuple(axis, c.type.ndim)
+    axis = normalize_reduce_axis(axis, c.type.ndim, normalize_none=True)
     return LogSoftmax(axis=axis)(c)
 
 
@@ -153,11 +150,7 @@ def logsumexp(x, axis=None, keepdims=False):
 
     """
     x = as_tensor_variable(x)
-    axis = (
-        tuple(range(x.type.ndim))
-        if axis is None
-        else normalize_axis_tuple(axis, x.type.ndim)
-    )
+    axis = normalize_reduce_axis(axis, x.type.ndim, normalize_none=True)
     out = LogSumExp(axis=axis)(x)
     return expand_dims(out, axis) if keepdims else out
 
