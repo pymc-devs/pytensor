@@ -16,9 +16,14 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Max, exp, log
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.special import LogSoftmax, Softmax, softmax
+from pytensor.tensor.rewriting.special import (
+    local_exp_log_softmax,
+    local_log_softmax_from_logsumexp,
+)
+from pytensor.tensor.special import LogSoftmax, Softmax, log_softmax, logsumexp, softmax
 from pytensor.tensor.type import TensorType, dvector, matrix, tensor3, vector
 from tests import unittest_tools as utt
+from tests.unittest_tools import RewriteTester
 
 
 _fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"])
@@ -42,6 +47,46 @@ class TestLogSoftmaxRewrites:
         assert isinstance(fgraph.outputs[0].owner.op, LogSoftmax)
         assert check_stack_trace(fgraph, ops_to_check=LogSoftmax)
         assert check_stack_trace(fgraph, ops_to_check="all")
+
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_local_exp_log_softmax_rewrite(self, axis):
+        """Check that ``Exp(LogSoftmax(x)) -> Softmax(x)``."""
+        x = matrix("x")
+        test_val = np.array([[1000.0, 1001.0], [1.0, 2.0]])
+
+        result = RewriteTester(
+            [x], [exp(log_softmax(x, axis=axis))], custom_rewrite=local_exp_log_softmax
+        )
+        result.assert_graph(softmax(x, axis=axis))
+        result.assert_eval(test_val)
+
+        # When the LogSoftmax is needed anyway, reusing it beats repeating the reduction
+        log_sm = log_softmax(x, axis=axis)
+        result = RewriteTester(
+            [x], [log_sm, exp(log_sm)], custom_rewrite=local_exp_log_softmax
+        )
+        result.assert_graph(log_sm, exp(log_sm))
+
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_local_log_softmax_from_logsumexp(self, axis):
+        """Check that ``x - logsumexp(x, axis, keepdims=True) -> LogSoftmax(x)``."""
+        x = matrix("x")
+        test_val = np.array([[1000.0, 1001.0], [1.0, 2.0]])
+
+        result = RewriteTester(
+            [x],
+            [x - logsumexp(x, axis=axis, keepdims=True)],
+            custom_rewrite=local_log_softmax_from_logsumexp,
+        )
+        result.assert_graph(log_softmax(x, axis=axis))
+        result.assert_eval(test_val)
+
+        # When the logsumexp is needed anyway, reusing it beats repeating the reduction
+        lse = logsumexp(x, axis=axis, keepdims=True)
+        result = RewriteTester(
+            [x], [x - lse, lse], custom_rewrite=local_log_softmax_from_logsumexp
+        )
+        result.assert_graph(x - lse, lse)
 
     @pytest.mark.parametrize("axis", [None, 0, -1])
     @pytest.mark.parametrize("idx0", [0, slice(1, None), slice(None)])
