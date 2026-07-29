@@ -539,6 +539,11 @@ MLIR = Mode(
     RewriteDatabaseQuery(include=["fast_compile"], exclude=["fusion"]),
 )
 
+MLIR_METAL = Mode(
+    MLIRLinker(target_backend="metal-spirv"),
+    RewriteDatabaseQuery(include=["fast_compile"], exclude=["fusion"]),
+)
+
 FAST_COMPILE = Mode(
     VMLinker(use_cloop=False, c_thunks=False),
     RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
@@ -559,6 +564,7 @@ predefined_modes = {
     "PYTORCH": PYTORCH,
     "MLX": MLX,
     "MLIR": MLIR,
+    "MLIR_METAL": MLIR_METAL,
 }
 
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}
