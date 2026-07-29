@@ -2,6 +2,7 @@ from functools import partial
 
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import Mode
@@ -841,3 +842,17 @@ def test_perform_with_inner_scan_rvs():
     out = op(shared(np.random.default_rng(0)))
     fn = function([], out, mode=Mode(linker="py", optimizer=None))
     assert fn().shape == (2,)
+
+
+def test_inner_graph_keeps_symbolic_op_recognition():
+    # Wrapping an expression in an OpFromGraph must not destabilize it: the inner graph
+    # still needs the rewrite recognizing exp(x) / sum(exp(x)) as the stable Softmax.
+    x = pt.vector("x")
+    inner = pt.vector("inner")
+    e = exp(inner)
+    op = OpFromGraph([inner], [e / e.sum()])
+
+    test_val = np.array([1000.0, 1001.0])
+    np.testing.assert_allclose(
+        function([x], op(x))(test_val), scipy.special.softmax(test_val)
+    )
