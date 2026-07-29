@@ -5,7 +5,7 @@ from pytensor.tensor.linalg.summary import Det, SLogDet
 
 
 def _lu_det_parts(x):
-    """Compute sign and logdet via LU factorization."""
+    """Compute sign and logdet via LU factorization. Call within a CPU stream context."""
     lu, pivots = mx.linalg.lu_factor(x)
     diag_u = mx.diagonal(lu)
     n_swaps = mx.sum(pivots != mx.arange(pivots.shape[0], dtype=pivots.dtype))
