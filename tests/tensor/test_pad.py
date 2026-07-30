@@ -425,3 +425,35 @@ def test_pad_rejects_non_integral_pad_width(mode):
 
     with pytest.raises(TypeError):
         pad(x, (1.5, 1.5), mode=mode, **MODE_KWARGS.get(mode, {}))
+
+
+@pytest.mark.xfail(
+    reason="edge gradient broadcasts the border slice against the wrong width"
+)
+@pytest.mark.parametrize(
+    "pad_width",
+    [((1, 1), (2, 2)), ((0, 3), (2, 1)), 2],
+    ids=["axes", "sides", "scalar"],
+)
+def test_edge_pad_grad(pad_width):
+    """``edge`` gradients fail for any pad width other than 1 on every side.
+
+    Each input element is copied a fixed number of times into the output, so
+    ``d(sum(pad(x)))/dx`` is exactly that copy count.
+    """
+    x = pt.tensor("x", shape=(8, 8))
+    grad_x = grad(pad(x, pad_width, mode="edge").sum(), x)
+
+    x_val = np.arange(64, dtype=floatX).reshape(8, 8)
+    got = pytensor.function([x], grad_x, mode=Mode(linker="py", optimizer="fast_run"))(
+        x_val
+    )
+
+    width = pad_width if not isinstance(pad_width, int) else ((pad_width,) * 2,) * 2
+    expected = np.zeros_like(x_val)
+    for i in range(8):
+        for j in range(8):
+            probe = np.zeros_like(x_val)
+            probe[i, j] = 1.0
+            expected[i, j] = np.pad(probe, width, mode="edge").sum()
+    np.testing.assert_allclose(got, expected, atol=ATOL, rtol=RTOL)
