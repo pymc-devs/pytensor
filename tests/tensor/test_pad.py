@@ -5,7 +5,12 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.mode import Mode
+from pytensor.gradient import grad
+from pytensor.graph.basic import Constant
 from pytensor.tensor.pad import PadMode, pad
+from pytensor.tensor.subtensor import Subtensor
 
 
 floatX = pytensor.config.floatX
@@ -243,6 +248,43 @@ MODE_KWARGS = {
 }
 
 
+def _pad_width_as_symbolic_expression(ndim, width):
+    """Build a pad_width that is symbolic but constant-foldable.
+
+    This is the shape ``convolve2d`` used to construct, and it is the reason
+    static shapes were lost downstream.
+    """
+    pad_width = pt.zeros((ndim, 2), dtype="int64")
+    for axis in range(ndim):
+        pad_width = pad_width[axis, 0].set(width)
+        pad_width = pad_width[axis, 1].set(width)
+    return pad_width
+
+
+def _dynamic_subtensors(inputs, outputs):
+    """Subtensor idx_lists whose index inputs are not all constants.
+
+    Descends into ``OpFromGraph`` inner graphs, which is where ``Pad`` hides the
+    interior slice it takes in its gradient.
+    """
+    fn = pytensor.function(
+        inputs, outputs, mode=Mode(linker="py", optimizer="fast_run")
+    )
+    found = []
+
+    def walk(nodes):
+        for node in nodes:
+            if isinstance(node.op, Subtensor) and any(
+                not isinstance(i, Constant) for i in node.inputs[1:]
+            ):
+                found.append(node.op.idx_list)
+            if isinstance(node.op, OpFromGraph):
+                walk(node.op.fgraph.apply_nodes)
+
+    walk(fn.maker.fgraph.apply_nodes)
+    return found
+
+
 @pytest.mark.parametrize("mode", ALL_MODES)
 def test_pad_static_shape(mode):
     """A statically known pad_width should give a statically known output shape."""
@@ -256,6 +298,85 @@ def test_pad_static_shape(mode):
 # constants. The slice-based modes still read pad_width at runtime.
 SLICE_BASED_MODES = ["constant", "edge", "linear_ramp", "mean", "maximum", "minimum"]
 GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        *[
+            pytest.param(
+                m,
+                marks=pytest.mark.xfail(
+                    reason="pad_width is an opaque OpFromGraph input, so constant "
+                    "folding cannot reach the interior slice bounds in the gradient"
+                ),
+            )
+            for m in SLICE_BASED_MODES
+        ],
+        *GATHER_BASED_MODES,
+    ],
+)
+def test_pad_grad_has_static_slice_bounds(mode):
+    """The gradient must not index the padded interior with runtime values.
+
+    ``Pad`` takes ``pad_width`` as a graph input, so inside the inner graph its
+    value is opaque even when the caller passed a literal. The gradient then
+    slices the interior with widths read out of a tensor at runtime, which
+    backends requiring static slice bounds cannot compile.
+    """
+    x = pt.tensor("x", shape=(8, 8))
+    z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
+    grad_x = grad(z.sum(), x)
+
+    assert _dynamic_subtensors([x], grad_x) == []
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        *[
+            pytest.param(
+                m,
+                marks=pytest.mark.xfail(
+                    reason="slice-based pad gradients index with runtime pad_width, "
+                    "which jax.jit cannot compile"
+                ),
+            )
+            for m in SLICE_BASED_MODES
+        ],
+        *GATHER_BASED_MODES,
+    ],
+)
+def test_pad_grad_jax(mode):
+    """The gradient of every pad mode should compile and run under jax.jit."""
+    pytest.importorskip("jax")
+
+    x = pt.tensor("x", shape=(8, 8))
+    z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
+    grad_x = grad(z.sum(), x)
+
+    test_x = np.random.default_rng(7).normal(size=(8, 8)).astype(floatX)
+    expected = pytensor.function(
+        [x], grad_x, mode=Mode(linker="py", optimizer="fast_run")
+    )(test_x)
+    got = pytensor.function([x], grad_x, mode="JAX")(test_x)
+
+    np.testing.assert_allclose(got, expected, atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.xfail(reason="pad does not constant-fold a symbolic pad_width")
+@pytest.mark.parametrize("mode", ["constant", "edge"])
+def test_pad_static_shape_from_foldable_pad_width(mode):
+    """A constant-foldable pad_width expression should still give static shapes.
+
+    Without this, callers are forced to build ``pad_width`` as a literal nested
+    list to keep static shapes, which is what ``convolve2d`` had to work around.
+    """
+    x = pt.tensor("x", shape=(8, 8))
+    pad_width = _pad_width_as_symbolic_expression(2, 1)
+    z = pad(x, pad_width, mode=mode, **MODE_KWARGS.get(mode, {}))
+
+    assert z.type.shape == (10, 10)
 
 
 @pytest.mark.parametrize("mode", GATHER_BASED_MODES)
