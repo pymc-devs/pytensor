@@ -83,7 +83,13 @@ def _get_edges(
     right_slice = slice_at_axis(slice(right_index - 1, right_index), axis)
     right_edge = padded[right_slice]
 
-    return left_edge, right_edge
+    # The slices are symbolic, so `axis` comes back with an unknown length. Callers
+    # broadcast these edges across the pad area, and the gradient of that
+    # broadcast is only summed when the length is known to be 1.
+    return (
+        specify_broadcastable(left_edge, axis),
+        specify_broadcastable(right_edge, axis),
+    )
 
 
 def _symbolic_pad(

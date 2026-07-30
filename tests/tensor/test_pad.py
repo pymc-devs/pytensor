@@ -316,23 +316,7 @@ def test_pad_grad_has_static_slice_bounds(mode):
     assert _dynamic_subtensors([x], grad_x) == []
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [
-        pytest.param(
-            m,
-            marks=(
-                pytest.mark.xfail(
-                    reason="edge gradient broadcasts the border slice against the "
-                    "wrong width, so it fails on every backend"
-                )
-                if m == "edge"
-                else ()
-            ),
-        )
-        for m in ALL_MODES
-    ],
-)
+@pytest.mark.parametrize("mode", ALL_MODES)
 def test_pad_grad_jax(mode):
     """The gradient of every pad mode should compile and run under jax.jit."""
     pytest.importorskip("jax")
@@ -413,18 +397,13 @@ def test_pad_rejects_non_integral_pad_width(mode):
         pad(x, (1.5, 1.5), mode=mode, **MODE_KWARGS.get(mode, {}))
 
 
-@pytest.mark.xfail(
-    reason="edge gradient broadcasts the border slice against the wrong width"
-)
 @pytest.mark.parametrize(
     "pad_width",
-    [((1, 1), (2, 2)), ((0, 3), (2, 1)), 2],
-    ids=["axes", "sides", "scalar"],
+    [((1, 1), (1, 1)), ((1, 1), (2, 2)), ((0, 3), (2, 1)), 2, ((5, 5), (5, 5))],
+    ids=["all_ones", "axes", "sides", "scalar", "wider_than_axis"],
 )
 def test_edge_pad_grad(pad_width):
-    """``edge`` gradients fail for any pad width other than 1 on every side.
-
-    Each input element is copied a fixed number of times into the output, so
+    """Each input element is copied a fixed number of times into the output, so
     ``d(sum(pad(x)))/dx`` is exactly that copy count.
     """
     x = pt.tensor("x", shape=(8, 8))
