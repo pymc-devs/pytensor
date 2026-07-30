@@ -298,35 +298,16 @@ def test_pad_static_shape(mode):
     assert z.type.shape == (10, 12)
 
 
-# The gather-based modes index the input directly, so their slice bounds are
-# constants. The slice-based modes still read pad_width at runtime.
-SLICE_BASED_MODES = ["constant", "edge", "linear_ramp", "mean", "maximum", "minimum"]
 GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [
-        *[
-            pytest.param(
-                m,
-                marks=pytest.mark.xfail(
-                    reason="pad_width is an opaque OpFromGraph input, so constant "
-                    "folding cannot reach the interior slice bounds in the gradient"
-                ),
-            )
-            for m in SLICE_BASED_MODES
-        ],
-        *GATHER_BASED_MODES,
-    ],
-)
+@pytest.mark.parametrize("mode", ALL_MODES)
 def test_pad_grad_has_static_slice_bounds(mode):
     """The gradient must not index the padded interior with runtime values.
 
-    ``Pad`` takes ``pad_width`` as a graph input, so inside the inner graph its
-    value is opaque even when the caller passed a literal. The gradient then
-    slices the interior with widths read out of a tensor at runtime, which
-    backends requiring static slice bounds cannot compile.
+    A statically known ``pad_width`` travels as an Op property, so the inner
+    graph indexes with literals and the gradient's slice bounds stay constant.
+    Backends that require static slice bounds could not compile them otherwise.
     """
     x = pt.tensor("x", shape=(8, 8))
     z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
@@ -338,17 +319,18 @@ def test_pad_grad_has_static_slice_bounds(mode):
 @pytest.mark.parametrize(
     "mode",
     [
-        *[
-            pytest.param(
-                m,
-                marks=pytest.mark.xfail(
-                    reason="slice-based pad gradients index with runtime pad_width, "
-                    "which jax.jit cannot compile"
-                ),
-            )
-            for m in SLICE_BASED_MODES
-        ],
-        *GATHER_BASED_MODES,
+        pytest.param(
+            m,
+            marks=(
+                pytest.mark.xfail(
+                    reason="edge gradient broadcasts the border slice against the "
+                    "wrong width, so it fails on every backend"
+                )
+                if m == "edge"
+                else ()
+            ),
+        )
+        for m in ALL_MODES
     ],
 )
 def test_pad_grad_jax(mode):
