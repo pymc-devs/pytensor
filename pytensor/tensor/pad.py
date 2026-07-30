@@ -1,27 +1,24 @@
 from collections.abc import Callable
-from functools import partial
 from typing import Literal, cast
 
+import numpy as np
+
 from pytensor.compile.builders import OpFromGraph
-from pytensor.ifelse import ifelse
-from pytensor.scan import scan
+from pytensor.graph.basic import Constant
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     TensorVariable,
+    arange,
     as_tensor,
-    concatenate,
-    expand_dims,
-    moveaxis,
     switch,
     zeros,
 )
 from pytensor.tensor.extra_ops import broadcast_to, linspace
-from pytensor.tensor.math import divmod as pt_divmod
-from pytensor.tensor.math import eq, gt, mean, minimum
 from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import maximum, mean, minimum
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
-from pytensor.tensor.subtensor import flip, set_subtensor, slice_at_axis
+from pytensor.tensor.subtensor import flip, set_subtensor, slice_at_axis, take
 
 
 PadMode = Literal[
@@ -277,139 +274,79 @@ def _linear_ramp_pad(
     return padded
 
 
-def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
-    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
-
-    for axis in range(x.ndim):
-        size = x.shape[axis]
-
-        # Compute how many complete copies of the input will be padded on this dimension, along with the amount of
-        # overflow on the final copy
-        repeats, (left_remainder, right_remainder) = pt_divmod(pad_width[axis], size)
-
-        # In the next step we will generate extra copies of the input, and then trim them down to the correct size.
-        left_trim = size - left_remainder
-        right_trim = size - right_remainder
-
-        # The total number of copies needed is always the sum of the number of complete copies to add, plus the original
-        # input itself, plus the two edge copies that will be trimmed down.
-        total_repeats = repeats.sum() + 3
-
-        # Create a batch dimension and clone the input the required number of times
-        parts = expand_dims(x, (0,)).repeat(total_repeats, axis=0)
-
-        # Move the batch dimension to the active dimension
-        parts = moveaxis(parts, 0, axis)
-
-        # Ravel the active dimension while preserving the shapes of the inactive dimensions. This will expand the
-        # active dimension to have the correctly padded shape, plus excess to be trimmed
-        new_shape = [-1 if i == axis else x.shape[i] for i in range(x.ndim)]
-        x = parts.reshape(new_shape)
-
-        # Trim the excess on the active dimension
-        trim_slice = slice_at_axis(slice(left_trim, -right_trim), axis)
-        x = x[trim_slice]
-
-    return x
+def _static_pad_width(pad_width: TensorVariable, ndim: int) -> np.ndarray | None:
+    """``pad_width`` broadcast to ``(ndim, 2)`` Python ints, or None if not constant."""
+    if not isinstance(pad_width, Constant):
+        return None
+    widths = np.asarray(pad_width.data)
+    if not np.issubdtype(widths.dtype, np.integer):
+        raise TypeError("`pad_width` must be of integral type.")
+    return np.broadcast_to(widths.astype("int64"), (ndim, 2))
 
 
-def _build_padding_one_direction(array, array_flipped, repeats, *, inner_func, axis):
-    [_, parts] = scan(
-        inner_func,
-        non_sequences=[array, array_flipped],
-        outputs_info=[0, None],
-        n_steps=repeats,
-        return_updates=False,
-    )
+def _gather_indices(
+    mode: Literal["wrap", "symmetric", "reflect"],
+    size: int | TensorVariable,
+    before: int | TensorVariable,
+    after: int | TensorVariable,
+) -> TensorVariable:
+    """Map output positions along one axis back to the input positions they copy.
 
-    parts = moveaxis(parts, 0, axis)
-    new_shape = [-1 if i == axis else array.shape[i] for i in range(array.ndim)]
-    padding = parts.reshape(new_shape)
+    ``wrap``, ``symmetric`` and ``reflect`` never compute new values: every
+    padded element is some element of the input, selected by a periodic index
+    map. ``wrap`` has period ``size``, ``symmetric`` period ``2 * size`` (each
+    edge value repeated once at the turning point), and ``reflect`` period
+    ``2 * size - 2`` (turning points not repeated).
 
-    return padding
+    When ``size``, ``before`` and ``after`` are all Python ints the map is built
+    with NumPy, which keeps the padded output shape statically known.
+    """
+    if all(isinstance(value, int) for value in (size, before, after)):
+        offsets = np.arange(before + size + after) - before
+        where, clamp = np.where, max
+    else:
+        offsets = arange(before + size + after) - before
+        where, clamp = switch, maximum
 
+    if mode == "wrap":
+        indices = offsets % size
+    elif mode == "symmetric":
+        period = 2 * size
+        folded = offsets % period
+        indices = where(folded < size, folded, period - 1 - folded)
+    elif mode == "reflect":
+        # A size of 1 degenerates the period to 0. Clamping it to 1 maps every
+        # position onto the single element, which is what reflecting a length-1
+        # axis means.
+        period = clamp(2 * size - 2, 1)
+        folded = offsets % period
+        indices = where(folded < size, folded, period - folded)
+    else:
+        raise ValueError(f"Invalid gather pad mode: {mode}")
 
-def _symmetric_pad(x, pad_width):
-    def _symmetric_inner(i, x, x_flipped, padding_left):
-        return i + 1, ifelse(eq(i % 2, int(padding_left)), x_flipped, x)
-
-    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
-
-    for axis in range(x.ndim):
-        x_flipped = flip(x, axis=axis)
-        original_size = x.shape[axis]
-
-        repeats, remainders = pt_divmod(pad_width[axis], original_size)
-        has_remainder = gt(remainders, 0)
-        repeats = repeats + has_remainder
-
-        left_padding = _build_padding_one_direction(
-            x,
-            x_flipped,
-            repeats[0],
-            axis=axis,
-            inner_func=partial(_symmetric_inner, padding_left=True),
-        )
-        right_padding = _build_padding_one_direction(
-            x,
-            x_flipped,
-            repeats[1],
-            axis=axis,
-            inner_func=partial(_symmetric_inner, padding_left=False),
-        )
-
-        x = concatenate([flip(left_padding, axis), x, right_padding], axis=axis)
-
-        (left_trim, right_trim) = switch(
-            has_remainder, original_size - remainders, remainders
-        )
-        right_trim = x.shape[axis] - right_trim
-
-        trim_slice = slice_at_axis(slice(left_trim, right_trim), axis)
-        x = x[trim_slice]
-
-    return x
+    return as_tensor(indices)
 
 
-def _reflect_pad(x, pad_width):
-    def _reflect_inner(i, x, x_flipped, padding_left):
-        return i + 1, ifelse(eq(i % 2, int(padding_left)), x_flipped, x)
+def _gather_pad(
+    x: TensorVariable,
+    pad_width: TensorVariable,
+    mode: Literal["wrap", "symmetric", "reflect"],
+) -> TensorVariable:
+    """Pad by gathering input elements, one axis at a time."""
+    static_widths = _static_pad_width(pad_width, x.ndim)
+    if static_widths is None:
+        widths = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
+        width_pairs = [(widths[axis, 0], widths[axis, 1]) for axis in range(x.ndim)]
+    else:
+        width_pairs = [(int(before), int(after)) for before, after in static_widths]
 
-    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
-    for axis in range(x.ndim):
-        trimmed_size = x.shape[axis] - 1
+    for axis, (before, after) in enumerate(width_pairs):
+        size = x.type.shape[axis]
+        if size is None:
+            size = x.shape[axis]
 
-        trim_slice = slice_at_axis(slice(None, -1), axis)
-        x_trimmed = x[trim_slice]
-        x_flipped = flip(x, axis=axis)[trim_slice]
+        x = take(x, _gather_indices(mode, size, before, after), axis=axis)
 
-        repeats, remainders = pt_divmod(pad_width[axis], trimmed_size)
-        repeats = repeats + 1
-
-        left_padding = _build_padding_one_direction(
-            x_trimmed,
-            x_flipped,
-            repeats[0],
-            axis=axis,
-            inner_func=partial(_reflect_inner, padding_left=True),
-        )
-        right_padding = _build_padding_one_direction(
-            x_trimmed,
-            x_flipped,
-            repeats[1],
-            axis=axis,
-            inner_func=partial(_reflect_inner, padding_left=False),
-        )
-
-        left_trim = slice_at_axis(slice(trimmed_size - remainders[0] - 1, -1), axis)
-        right_trim = slice_at_axis(
-            slice(1, right_padding.shape[axis] - trimmed_size + remainders[1] + 1), axis
-        )
-
-        x = concatenate(
-            [flip(left_padding, axis)[left_trim], x, right_padding[right_trim]],
-            axis=axis,
-        )
     return x
 
 
@@ -661,9 +598,9 @@ def pad(
         outputs = _linear_ramp_pad(x, pad_width, end_values)
 
     elif mode == "wrap":
-        outputs = _wrap_pad(x, pad_width)
+        outputs = _gather_pad(x, pad_width, "wrap")
 
-    elif mode == "symmetric":
+    elif mode == "symmetric" or mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
             raise NotImplementedError(
@@ -671,17 +608,7 @@ def pad(
                 "issue at https://github.com/pymc-devs/pytensor/issues"
             )
         attrs.update({"reflect_type": reflect_type})
-        outputs = _symmetric_pad(x, pad_width)
-
-    elif mode == "reflect":
-        reflect_type = kwargs.pop("reflect_type", "even")
-        if reflect_type == "odd":
-            raise NotImplementedError(
-                "Odd reflection not implemented. If you need this feature, please open an "
-                "issue at https://github.com/pymc-devs/pytensor/issues"
-            )
-        attrs.update({"reflect_type": reflect_type})
-        outputs = _reflect_pad(x, pad_width)
+        outputs = _gather_pad(x, pad_width, mode)
 
     else:
         raise ValueError(f"Invalid mode: {mode}")

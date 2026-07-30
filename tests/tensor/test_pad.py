@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.tensor as pt
 from pytensor.tensor.pad import PadMode, pad
 
 
@@ -222,3 +223,84 @@ def test_nd_padding(mode, padding):
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
+
+
+ALL_MODES = [
+    "constant",
+    "edge",
+    "linear_ramp",
+    "mean",
+    "maximum",
+    "minimum",
+    "wrap",
+    "symmetric",
+    "reflect",
+]
+
+MODE_KWARGS = {
+    "constant": {"constant_values": 0},
+    "linear_ramp": {"end_values": 0},
+}
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_pad_static_shape(mode):
+    """A statically known pad_width should give a statically known output shape."""
+    x = pt.tensor("x", shape=(8, 8))
+    z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
+
+    assert z.type.shape == (10, 12)
+
+
+# The gather-based modes index the input directly, so their slice bounds are
+# constants. The slice-based modes still read pad_width at runtime.
+SLICE_BASED_MODES = ["constant", "edge", "linear_ramp", "mean", "maximum", "minimum"]
+GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
+
+
+@pytest.mark.parametrize("mode", GATHER_BASED_MODES)
+@pytest.mark.parametrize(
+    "pad_width",
+    [(1, 1), (7, 7), (13, 4), (0, 9)],
+    ids=["within_axis", "wider_than_axis", "asymmetric_wide", "one_sided_wide"],
+)
+@pytest.mark.parametrize("size", [(1,), (2,), (5,), (3, 4)], ids=str)
+def test_gather_pad_wider_than_axis(mode, pad_width, size):
+    """Padding wider than the axis wraps/reflects repeatedly.
+
+    This is the case the previous replicate-and-trim implementation needed its
+    repeat/remainder bookkeeping for; the index map handles it directly.
+    """
+    x = np.arange(np.prod(size), dtype=floatX).reshape(size)
+    expected = np.pad(x, pad_width, mode=mode)
+
+    z = pad(pt.as_tensor(x), pad_width, mode=mode)
+    assert z.type.shape == expected.shape
+
+    np.testing.assert_allclose(z.eval(), expected, atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.parametrize("mode", GATHER_BASED_MODES)
+def test_gather_pad_symbolic_pad_width(mode):
+    """A symbolic pad_width still works, without static shapes."""
+    x = pt.tensor("x", shape=(5,))
+    pad_width = pt.vector("pad_width", shape=(2,), dtype="int64")
+    z = pad(x, pad_width, mode=mode)
+
+    x_val = np.arange(5, dtype=floatX)
+    for width in [(1, 1), (7, 2)]:
+        np.testing.assert_allclose(
+            z.eval({x: x_val, pad_width: np.array(width, dtype="int64")}),
+            np.pad(x_val, width, mode=mode),
+            atol=ATOL,
+            rtol=RTOL,
+        )
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_pad_rejects_non_integral_pad_width(mode):
+    """A float pad_width must be rejected, not silently truncated."""
+    x = pt.tensor("x", shape=(5,))
+
+    with pytest.raises(TypeError):
+        pad(x, (1.5, 1.5), mode=mode, **MODE_KWARGS.get(mode, {}))
