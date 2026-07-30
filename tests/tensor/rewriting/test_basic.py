@@ -306,12 +306,14 @@ class TestLocalCanonicalizeAlloc:
                 f()
         else:
             assert has_alloc
-            # Error raised by Alloc Op
+            # Error raised by Alloc Op. Numba swapped the two shapes in its message in
+            # 0.66 (numba/numba#10499), so accept them in either order.
             with pytest.raises(
                 ValueError,
                 match=(
                     r"(could not broadcast input array from shape \(3,7\) into shape \(6,7\)"
-                    r"|cannot assign slice of shape \(3, 7\) from input of shape \(6, 7\))"
+                    r"|cannot assign slice of shape \((3, 7|6, 7)\) "
+                    r"from input of shape \((3, 7|6, 7)\))"
                 ),
             ):
                 f()
