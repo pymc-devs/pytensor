@@ -17,10 +17,14 @@ floatX = pytensor.config.floatX
 RTOL = ATOL = 1e-8 if floatX.endswith("64") else 1e-4
 
 
-def test_unknown_mode_raises():
+@pytest.mark.parametrize(
+    "kwargs", [{}, {"foo": 1}, {"constant_values": 0}], ids=["none", "unknown", "valid"]
+)
+def test_unknown_mode_raises(kwargs):
+    """An unknown mode is reported as such whatever keyword arguments come with it."""
     x = np.random.normal(size=(3, 3)).astype(floatX)
     with pytest.raises(ValueError, match="Invalid mode: unknown"):
-        pad(x, 1, mode="unknown")
+        pad(x, 1, mode="unknown", **kwargs)
 
 
 @pytest.mark.parametrize(

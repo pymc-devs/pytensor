@@ -557,6 +557,8 @@ def pad(
         [4 5 1 2 3 4 5 1 2 3]
 
     """
+    if mode not in allowed_kwargs:
+        raise ValueError(f"Invalid mode: {mode}")
     if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
         raise ValueError(
             f"Invalid keyword arguments for mode '{mode}': {kwargs.keys()}"
