@@ -535,7 +535,7 @@ class DimShuffleImpl(CImpl):
         # `new_order`/`input_ndim` ride `DimShuffle.__props__` and the input's
         # static shape rides its type signature, so both are keyed automatically;
         # bump this only when the emitted C below changes.
-        return (1,)
+        return (3,)
 
     def c_code(
         self,
