@@ -137,7 +137,7 @@ def numba_core_HalfNormalRV(op, node):
 def numba_core_CauchyRV(op, node):
     @numba_basic.numba_njit
     def random(rng, loc, scale):
-        return (loc + rng.standard_cauchy()) / scale
+        return loc + scale * rng.standard_cauchy()
 
     return random
 
