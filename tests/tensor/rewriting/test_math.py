@@ -4638,6 +4638,24 @@ def test_local_logit_sigmoid():
     assert fg.inputs[0] is fg.outputs[0]
 
 
+def test_local_odds_sigmoid():
+    """Test that ``sigmoid(x) / (1 - sigmoid(x))`` and its inverse rewrite to ``exp(+-x)``.
+
+    1 - sigmoid(x) cancels to exactly zero for x >~ 37, so the un-rewritten ratio is
+    inf (resp. 0) long before exp(+-x) stops being representable.
+    """
+    x = dscalar("x")
+
+    result = RewriteTester([x], [sigmoid(x) / (1 - sigmoid(x))])
+    result.assert_graph(exp(x))
+    result.assert_eval(np.array(0.5))
+
+    # canonicalization spells the negation as a mul
+    result = RewriteTester([x], [(1 - sigmoid(x)) / sigmoid(x)])
+    result.assert_graph(exp(-1.0 * x))
+    result.assert_eval(np.array(0.5))
+
+
 def test_local_useless_conj():
     default_mode = get_default_mode()
 

@@ -3956,19 +3956,6 @@ logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
 )
 register_stabilize(logdiffexp_to_log1mexpdiff)
 
-# log(sigmoid(x) / (1 - sigmoid(x))) -> x
-# i.e logit(sigmoid(x)) -> x
-local_logit_sigmoid = PatternNodeRewriter(
-    (log, (true_div, (sigmoid, "x"), (sub, 1, (sigmoid, "x")))),
-    "x",
-    tracks=[sigmoid],
-    get_nodes=get_clients_at_depth2,
-    allow_multiple_clients=True,
-    name="local_logit_sigmoid",
-)
-register_canonicalize(local_logit_sigmoid)
-register_specialize(local_logit_sigmoid)
-
 # sigmoid(log(x / (1-x)) -> x
 # i.e., sigmoid(logit(x)) -> x
 local_sigmoid_logit = PatternNodeRewriter(
@@ -3979,6 +3966,37 @@ local_sigmoid_logit = PatternNodeRewriter(
 )
 register_canonicalize(local_sigmoid_logit)
 register_specialize(local_sigmoid_logit)
+
+# sigmoid(x) / (1 - sigmoid(x)) -> exp(x)
+# i.e. odds(sigmoid(x)) -> exp(x)
+# 1 - sigmoid(x) cancels to exactly zero for x >~ 37, making the ratio inf where the
+# true value stays representable up to x ~ 709.
+# Composed with log(exp(x)) -> x this also covers logit(sigmoid(x)) -> x, so no
+# separate rewrite is needed for the logged form.
+local_odds_sigmoid = PatternNodeRewriter(
+    (true_div, (sigmoid, "x"), (sub, 1, (sigmoid, "x"))),
+    (exp, "x"),
+    tracks=[sigmoid],
+    get_nodes=get_clients_at_depth1,
+    allow_multiple_clients=True,
+    name="local_odds_sigmoid",
+)
+register_canonicalize(local_odds_sigmoid)
+register_stabilize(local_odds_sigmoid)
+register_specialize(local_odds_sigmoid)
+
+# (1 - sigmoid(x)) / sigmoid(x) -> exp(-x)
+local_inv_odds_sigmoid = PatternNodeRewriter(
+    (true_div, (sub, 1, (sigmoid, "x")), (sigmoid, "x")),
+    (exp, (neg, "x")),
+    tracks=[sigmoid],
+    get_nodes=get_clients_at_depth1,
+    allow_multiple_clients=True,
+    name="local_inv_odds_sigmoid",
+)
+register_canonicalize(local_inv_odds_sigmoid)
+register_stabilize(local_inv_odds_sigmoid)
+register_specialize(local_inv_odds_sigmoid)
 
 
 @register_canonicalize
