@@ -113,6 +113,7 @@ from pytensor.tensor.shape import Shape, Shape_i, specify_shape
 from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
 from pytensor.tensor.type import (
     complex_dtypes,
+    float_dtypes,
     uint_dtypes,
     values_eq_approx_remove_inf,
     values_eq_approx_remove_inf_nan,
@@ -865,6 +866,9 @@ def local_sum_mul_to_dot(fgraph, node):
         return None
 
     if data.type.ndim != inp_ndim:
+        return None
+
+    if node.outputs[0].type.dtype not in float_dtypes:
         return None
 
     result = dot(data, weight)
