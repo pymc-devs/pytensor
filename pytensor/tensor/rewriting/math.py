@@ -800,6 +800,81 @@ def local_sumsqr2dot(fgraph, node):
 
 
 @register_specialize
+@node_rewriter([Sum])
+def local_sum_mul_to_dot(fgraph, node):
+    r"""Rewrite ``Sum(Elemwise(Mul)(ExpandDims(w), X), axis=-1)`` → ``Dot(X, w)``.
+
+    Detects the pattern ``(X * w).sum(axis=-1)`` where ``w`` is a 1-D vector
+    broadcast along every axis except the last via ``DimShuffle``, and replaces
+    it with ``dot(X, w)``, which uses a fused BLAS operation instead of the
+    separate elementwise multiply + reduce.
+
+    This targets common MMM/regression patterns where per-channel coefficients
+    are broadcast-multiplied with a data matrix then summed — for example:
+
+        channel_contribution = (channel_data * beta).sum(axis=-1)
+
+    becomes:
+
+        mu = dot(channel_data, beta)
+    """
+    if node.op.axis is None:
+        return None
+
+    [inp] = node.inputs
+    if inp.owner is None or not isinstance(inp.owner.op, Elemwise):
+        return None
+    if not isinstance(inp.owner.op.scalar_op, ps.Mul):
+        return None
+
+    mul_inputs = inp.owner.inputs
+    if len(mul_inputs) != 2:
+        return None
+
+    a, b = mul_inputs
+
+    def _unwrap_weight(var):
+        new_order = []
+        while var.owner is not None and isinstance(var.owner.op, DimShuffle):
+            new_order = list(var.owner.op.new_order)
+            var = var.owner.inputs[0]
+        if var.type.ndim != 1:
+            return None
+        if not new_order:
+            return None
+        if new_order[-1] != 0:
+            return None
+        if any(o != "x" for o in new_order[:-1]):
+            return None
+        return var
+
+    weight_a = _unwrap_weight(a)
+    if weight_a is not None:
+        weight = weight_a
+        data = b
+    else:
+        weight = _unwrap_weight(b)
+        if weight is None:
+            return None
+        data = a
+
+    inp_ndim = inp.type.ndim
+    if len(node.op.axis) != 1:
+        return None
+    if node.op.axis != (inp_ndim - 1,):
+        return None
+
+    if data.type.ndim != inp_ndim:
+        return None
+
+    result = dot(data, weight)
+    if result.dtype != node.outputs[0].dtype:
+        result = cast(result, dtype=node.outputs[0].dtype)
+    copy_stack_trace(node.outputs, result)
+    return [result]
+
+
+@register_specialize
 @node_rewriter([mul, true_div])
 def local_mul_exp_to_exp_add(fgraph, node):
     """

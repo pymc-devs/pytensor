@@ -3954,6 +3954,23 @@ def test_local_sumsqr2dot():
     )
 
 
+def test_local_sum_mul_to_dot():
+    X = matrix("X")
+    w = vector("w")
+
+    out = (X * w).sum(axis=-1)
+    result = RewriteTester([X, w], [out], include=["canonicalize", "specialize"])
+    result.assert_graph(dot(X, w))
+    result.assert_eval(
+        np.random.default_rng(42).normal(size=(100, 10)).astype(config.floatX),
+        np.random.default_rng(42).normal(size=(10,)).astype(config.floatX),
+    )
+
+    out = (w * X).sum(axis=-1)
+    result = RewriteTester([X, w], [out], include=["canonicalize", "specialize"])
+    result.assert_graph(dot(X, w))
+
+
 def test_local_mul_exp_to_exp_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
