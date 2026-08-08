@@ -101,5 +101,4 @@ def test_jax_pad_grad(mode: PadMode):
         [x],
         assert_fn=lambda x, y: np.testing.assert_allclose(x, y, rtol=RTOL, atol=ATOL),
         jax_mode="JAX",
-        py_mode="FAST_RUN",
     )
