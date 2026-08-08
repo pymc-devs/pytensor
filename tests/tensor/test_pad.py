@@ -11,6 +11,7 @@ from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.tensor.pad import PadMode, pad
 from pytensor.tensor.subtensor import Subtensor
+from tests import unittest_tools as utt
 
 
 floatX = pytensor.config.floatX
@@ -352,20 +353,28 @@ def test_gather_pad_wider_than_axis(mode, pad_width, size):
 
 
 @pytest.mark.parametrize("mode", GATHER_BASED_MODES)
-def test_gather_pad_symbolic_pad_width(mode):
-    """A symbolic pad_width still works, without static shapes."""
-    x = pt.tensor("x", shape=(5,))
+@pytest.mark.parametrize(
+    "width", [(1, 1), (7, 2)], ids=["within_axis", "wider_than_axis"]
+)
+@pytest.mark.parametrize("size", [5, 1], ids=["size_5", "size_1"])
+def test_gather_pad_symbolic_pad_width(mode, width, size):
+    """A symbolic pad_width still works, without static shapes.
+
+    A size-1 axis degenerates the reflect period, which the symbolic branch of the
+    index map has to clamp separately from the static one.
+    """
+    x = pt.tensor("x", shape=(size,))
     pad_width = pt.vector("pad_width", shape=(2,), dtype="int64")
     z = pad(x, pad_width, mode=mode)
+    assert z.type.shape == (None,)
 
-    x_val = np.arange(5, dtype=floatX)
-    for width in [(1, 1), (7, 2)]:
-        np.testing.assert_allclose(
-            z.eval({x: x_val, pad_width: np.array(width, dtype="int64")}),
-            np.pad(x_val, width, mode=mode),
-            atol=ATOL,
-            rtol=RTOL,
-        )
+    x_val = np.arange(size, dtype=floatX)
+    np.testing.assert_allclose(
+        z.eval({x: x_val, pad_width: np.array(width, dtype="int64")}),
+        np.pad(x_val, width, mode=mode),
+        atol=ATOL,
+        rtol=RTOL,
+    )
 
 
 @pytest.mark.parametrize("mode", ALL_MODES)
@@ -373,8 +382,21 @@ def test_pad_rejects_non_integral_pad_width(mode):
     """A float pad_width must be rejected, not silently truncated."""
     x = pt.tensor("x", shape=(5,))
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="must be of integral type"):
         pad(x, (1.5, 1.5), mode=mode)
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_pad_grad_matches_numeric(mode):
+    """Every mode's gradient must match finite differences."""
+    rng = np.random.default_rng(11)
+    x_val = rng.normal(size=(4, 4))
+
+    utt.verify_grad(
+        lambda x: pad(x, ((1, 2), (2, 1)), mode=mode),
+        [x_val],
+        rng=np.random.default_rng(11),
+    )
 
 
 @pytest.mark.parametrize(
