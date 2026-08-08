@@ -4,6 +4,7 @@ from packaging import version
 
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.gradient import grad
 from pytensor.tensor.pad import PadMode
 from tests.link.jax.test_basic import compare_jax_and_py
 
@@ -66,5 +67,39 @@ def test_jax_pad(mode: PadMode, kwargs):
         [res],
         [x],
         assert_fn=lambda x, y: np.testing.assert_allclose(x, y, rtol=RTOL, atol=ATOL),
+        py_mode="FAST_RUN",
+    )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "constant",
+        "edge",
+        "linear_ramp",
+        "mean",
+        "maximum",
+        "minimum",
+        "wrap",
+        "symmetric",
+        "reflect",
+    ],
+)
+def test_jax_pad_grad(mode: PadMode):
+    x_pt = pt.tensor("x", shape=(8, 8))
+    x = np.random.normal(size=(8, 8))
+
+    res = pt.pad(x_pt, mode=mode, pad_width=[[1, 1], [2, 2]])
+    grad_x = grad(res.sum(), x_pt)
+
+    # The gradient allocates its zero buffer from the padded shape, which jax can
+    # only trace once constant folding has resolved that shape to literals, so the
+    # module's thinner `jax_mode` is not enough here.
+    compare_jax_and_py(
+        [x_pt],
+        [grad_x],
+        [x],
+        assert_fn=lambda x, y: np.testing.assert_allclose(x, y, rtol=RTOL, atol=ATOL),
+        jax_mode="JAX",
         py_mode="FAST_RUN",
     )

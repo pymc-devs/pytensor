@@ -316,24 +316,6 @@ def test_pad_grad_has_static_slice_bounds(mode):
     assert _dynamic_subtensors([x], grad_x) == []
 
 
-@pytest.mark.parametrize("mode", ALL_MODES)
-def test_pad_grad_jax(mode):
-    """The gradient of every pad mode should compile and run under jax.jit."""
-    pytest.importorskip("jax")
-
-    x = pt.tensor("x", shape=(8, 8))
-    z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
-    grad_x = grad(z.sum(), x)
-
-    test_x = np.random.default_rng(7).normal(size=(8, 8)).astype(floatX)
-    expected = pytensor.function(
-        [x], grad_x, mode=Mode(linker="py", optimizer="fast_run")
-    )(test_x)
-    got = pytensor.function([x], grad_x, mode="JAX")(test_x)
-
-    np.testing.assert_allclose(got, expected, atol=ATOL, rtol=RTOL)
-
-
 @pytest.mark.xfail(reason="pad does not constant-fold a symbolic pad_width")
 @pytest.mark.parametrize("mode", ["constant", "edge"])
 def test_pad_static_shape_from_foldable_pad_width(mode):
