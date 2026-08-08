@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from packaging import version
 
 import pytensor.tensor as pt
 from pytensor import config
@@ -18,14 +17,7 @@ RTOL = ATOL = 1e-6 if floatX.endswith("64") else 1e-3
     "mode, kwargs",
     [
         ("constant", {"constant_values": 0}),
-        pytest.param(
-            "constant",
-            {"constant_values": (1, 2)},
-            marks=pytest.mark.skipif(
-                version.parse(jax.__version__) > version.parse("0.4.35"),
-                reason="Bug in JAX: https://github.com/jax-ml/jax/issues/26888",
-            ),
-        ),
+        ("constant", {"constant_values": (1, 2)}),
         ("edge", {}),
         ("linear_ramp", {"end_values": 0}),
         ("linear_ramp", {"end_values": (1, 2)}),
