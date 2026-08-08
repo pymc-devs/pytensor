@@ -1,18 +1,7 @@
-from functools import reduce
-
 import mlx.core as mx
 import numpy as np
 
-from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
-from pytensor.scalar.basic import (
-    Cast,
-    Clip,
-    Composite,
-    Identity,
-    Mod,
-    ScalarOp,
-    Second,
-)
+from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.scalar.math import (
     Erfc,
     Erfcx,
@@ -24,13 +13,9 @@ from pytensor.scalar.math import (
 )
 
 
-# MLX name overrides for nfunc_spec names that don't match mlx.core
-MLX_NFUNC_OVERRIDES = {
-    "true_divide": "divide",
-    "invert": "bitwise_invert",
-}
-
 _LANCZOS_G = 7.0
+
+
 _LANCZOS_COEFFS = (
     0.99999999999980993,
     676.5203681218851,
@@ -46,6 +31,8 @@ _LANCZOS_COEFFS = (
 # Asymptotic expansion of psi, with terms B_2n / 2n, applied after the recurrence has
 # carried the argument up by _PSI_SHIFTS. Single precision reaches its own limit with a
 # shorter recurrence and fewer terms, and every one of them costs a pass over the array.
+
+
 _PSI_COEFFS = (
     1 / 12,
     -1 / 120,
@@ -55,8 +42,14 @@ _PSI_COEFFS = (
     -691 / 32760,
     1 / 12,
 )
+
+
 _PSI_SHIFTS = 10
+
+
 _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
+
+
 _PSI_SHIFTS_SINGLE = 6
 
 
@@ -89,108 +82,6 @@ def _working_precision(x):
         return mx.array(value, dtype=working_dtype)
 
     return x.astype(working_dtype), const, x.dtype
-
-
-@mlx_funcify.register(ScalarOp)
-def mlx_funcify_ScalarOp(op, node=None, **kwargs):
-    """Generic handler for scalar ops, using nfunc_spec for auto-resolution.
-
-    Most scalar ops have a ``nfunc_spec`` attribute like ``('add', 2, 1)`` that
-    names the corresponding numpy function, along with the number of inputs and
-    outputs. Since MLX mirrors numpy's API, we resolve most ops via
-    ``getattr(mx, name)``.
-    """
-    nfunc_spec = getattr(op, "nfunc_spec", None)
-    if nfunc_spec is None:
-        raise NotImplementedError(
-            f"No MLX conversion for scalar op {op}. "
-            "It has no nfunc_spec and no specific dispatch."
-        )
-
-    # MLX doesn't have scipy submodules, everything is in the main mlx.core namespace
-    func_name = nfunc_spec[0].removeprefix("scipy.special.")
-
-    func_name = MLX_NFUNC_OVERRIDES.get(func_name, func_name)
-    mlx_func = getattr(mx, func_name, None)
-    if mlx_func is None:
-        raise NotImplementedError(
-            f"No MLX conversion for scalar op {op} (mx.{func_name} not found)"
-        )
-
-    # Handle variadic ops (e.g. Add with 3+ inputs) by folding the binary op
-    if node is not None and len(node.inputs) > nfunc_spec[1]:
-
-        def variadic_fold(*args):
-            return reduce(mlx_func, args)
-
-        return variadic_fold
-
-    return mlx_func
-
-
-@mlx_funcify.register(Cast)
-def mlx_funcify_Cast(op, **kwargs):
-    # Cast can be called as a tensor-level op (op.scalar_op.o_type)
-    # or as a scalar op directly (op.o_type). Handle both.
-    scalar_op = getattr(op, "scalar_op", op)
-
-    def cast(x):
-        dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
-        try:
-            return x.astype(dtype)
-        except ValueError as e:
-            if "is not supported on the GPU" in str(e):
-                import warnings
-
-                warnings.warn(
-                    f"MLX GPU limitation: {e}. Attempting automatic fallback casting.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                fallback_dtype = convert_dtype_to_mlx(
-                    scalar_op.o_type.dtype, auto_cast_unsupported=True
-                )
-                return x.astype(fallback_dtype)
-            else:
-                raise
-
-    return cast
-
-
-@mlx_funcify.register(Mod)
-def mlx_funcify_Mod(op, **kwargs):
-    def mlx_mod(x, y):
-        _, res = mx.divmod(x, y)
-        return res
-
-    return mlx_mod
-
-
-@mlx_funcify.register(Clip)
-def mlx_funcify_Clip(op, **kwargs):
-    def clip(x, min, max):
-        return mx.where(x < min, min, mx.where(x > max, max, x))
-
-    return clip
-
-
-@mlx_funcify.register(Identity)
-def mlx_funcify_Identity(op, **kwargs):
-    def identity(x):
-        return x
-
-    return identity
-
-
-@mlx_funcify.register(Second)
-def mlx_funcify_Second(op, **kwargs):
-    def second(x, y):
-        x = mx.array(x)
-        y = mx.array(y)
-        _, out = mx.broadcast_arrays(x, y)
-        return out
-
-    return second
 
 
 @mlx_funcify.register(Sigmoid)
@@ -326,8 +217,3 @@ def mlx_funcify_Psi(op, **kwargs):
         return out.astype(out_dtype)
 
     return psi
-
-
-@mlx_funcify.register(Composite)
-def mlx_funcify_Composite(op, node=None, **kwargs):
-    return mlx_funcify(op.fgraph, squeeze_output=True)
