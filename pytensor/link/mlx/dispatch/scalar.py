@@ -18,6 +18,7 @@ from pytensor.scalar.math import (
     Erfcx,
     GammaLn,
     Log1mexp,
+    Psi,
     Sigmoid,
     Softplus,
 )
@@ -41,6 +42,22 @@ _LANCZOS_COEFFS = (
     9.9843695780195716e-6,
     1.5056327351493116e-7,
 )
+
+# Asymptotic expansion of psi, with terms B_2n / 2n, applied after the recurrence has
+# carried the argument up by _PSI_SHIFTS. Single precision reaches its own limit with a
+# shorter recurrence and fewer terms, and every one of them costs a pass over the array.
+_PSI_COEFFS = (
+    1 / 12,
+    -1 / 120,
+    1 / 252,
+    -1 / 240,
+    1 / 132,
+    -691 / 32760,
+    1 / 12,
+)
+_PSI_SHIFTS = 10
+_PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
+_PSI_SHIFTS_SINGLE = 6
 
 
 def _working_precision(x):
@@ -270,6 +287,45 @@ def mlx_funcify_GammaLn(op, **kwargs):
         return out.astype(out_dtype)
 
     return gammaln
+
+
+@mlx_funcify.register(Psi)
+def mlx_funcify_Psi(op, **kwargs):
+    def psi(x):
+        z, const, out_dtype = _working_precision(x)
+
+        double = z.dtype == mx.float64
+        n_shifts = _PSI_SHIFTS if double else _PSI_SHIFTS_SINGLE
+        coeffs = _PSI_COEFFS if double else _PSI_COEFFS_SINGLE
+
+        # Only negative arguments need reflecting; the recurrence below walks a
+        # small positive argument up to the asymptotic regime on its own, and it
+        # keeps full precision where cot(pi x) would not
+        reflect = z < const(0.0)
+        y = mx.where(reflect, const(1.0) - z, z)
+
+        # psi(y) = psi(y + n) - sum 1/(y + i), which holds for every y, so the shift
+        # is applied unconditionally. Testing whether each element still needs it
+        # would cost a comparison and a select per iteration and buy nothing
+        one = const(1.0)
+        shift = -one / y
+        for i in range(1, n_shifts):
+            shift = shift - one / (y + const(float(i)))
+        y = y + const(float(n_shifts))
+
+        r2 = one / (y * y)
+        series = const(coeffs[-1])
+        for coeff in reversed(coeffs[:-1]):
+            series = const(coeff) + series * r2
+        out = shift + mx.log(y) - const(0.5) / y - series * r2
+
+        # psi(x) = psi(1 - x) - pi * cot(pi x)
+        pi_z = const(np.pi) * z
+        out = mx.where(reflect, out - const(np.pi) * mx.cos(pi_z) / mx.sin(pi_z), out)
+
+        return out.astype(out_dtype)
+
+    return psi
 
 
 @mlx_funcify.register(Composite)
