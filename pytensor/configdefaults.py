@@ -966,6 +966,20 @@ def add_numba_configvars():
         BoolParam(True),
         in_c_key=False,
     )
+    config.add(
+        "numba__veclib",
+        (
+            "Name of the vectorizing math library wired into LLVM, or '' (the default) "
+            "for none. Any non-empty name (e.g. 'libmvec', 'svml', 'amdlibm', or a "
+            "custom build) enables Numba lowerings (e.g. for expm1) that rely on a "
+            "vectorizable exp/log. The value is used verbatim to key the compile cache, "
+            "so artifacts built against different libraries are never reused; pick a "
+            "stable name per library. You must wire the library into LLVM yourself "
+            "before importing numba; verify it with scripts/check_numba_veclib.py."
+        ),
+        StrParam(""),
+        in_c_key=False,
+    )
 
 
 def _filter_base_compiledir(path: str | Path) -> Path:
