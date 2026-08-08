@@ -267,11 +267,7 @@ GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
 
 
 def _pad_width_as_symbolic_expression(ndim, width):
-    """Build a pad_width that is symbolic but constant-foldable.
-
-    This is the shape ``convolve2d`` used to construct, and it is the reason
-    static shapes were lost downstream.
-    """
+    """Build a uniform pad_width of ``width`` that is symbolic but constant-foldable."""
     pad_width = pt.zeros((ndim, 2), dtype="int64")
     for axis in range(ndim):
         pad_width = pad_width[axis, 0].set(width)
@@ -280,10 +276,10 @@ def _pad_width_as_symbolic_expression(ndim, width):
 
 
 def _dynamic_subtensors(inputs, outputs):
-    """Subtensor idx_lists whose index inputs are not all constants.
+    """Collect the ``idx_list`` of every Subtensor whose indices are not all constants.
 
-    Descends into ``OpFromGraph`` inner graphs, which is where ``Pad`` hides the
-    interior slice it takes in its gradient.
+    Descends into ``OpFromGraph`` inner graphs, where ``Pad`` keeps the interior
+    slice it takes in its gradient.
     """
     fn = pytensor.function(
         inputs, outputs, mode=Mode(linker="py", optimizer="fast_run")
@@ -316,9 +312,8 @@ def test_pad_static_shape(mode):
 def test_pad_grad_has_static_slice_bounds(mode):
     """The gradient must not index the padded interior with runtime values.
 
-    A statically known ``pad_width`` travels as an Op property, so the inner
-    graph indexes with literals and the gradient's slice bounds stay constant.
-    Backends that require static slice bounds could not compile them otherwise.
+    Backends that require static slice bounds cannot compile a gradient whose
+    interior slice is bounded by a runtime value.
     """
     x = pt.tensor("x", shape=(8, 8))
     z = pad(x, [[1, 1], [2, 2]], mode=mode)
@@ -330,11 +325,7 @@ def test_pad_grad_has_static_slice_bounds(mode):
 @pytest.mark.xfail(reason="pad does not constant-fold a symbolic pad_width")
 @pytest.mark.parametrize("mode", ["constant", "edge"])
 def test_pad_static_shape_from_foldable_pad_width(mode):
-    """A constant-foldable pad_width expression should still give static shapes.
-
-    Without this, callers are forced to build ``pad_width`` as a literal nested
-    list to keep static shapes, which is what ``convolve2d`` had to work around.
-    """
+    """A constant-foldable pad_width expression should still give static shapes."""
     x = pt.tensor("x", shape=(8, 8))
     pad_width = _pad_width_as_symbolic_expression(2, 1)
     z = pad(x, pad_width, mode=mode)
@@ -350,11 +341,7 @@ def test_pad_static_shape_from_foldable_pad_width(mode):
 )
 @pytest.mark.parametrize("size", [(1,), (2,), (5,), (3, 4)], ids=str)
 def test_gather_pad_wider_than_axis(mode, pad_width, size):
-    """Padding wider than the axis wraps/reflects repeatedly.
-
-    This is the case the previous replicate-and-trim implementation needed its
-    repeat/remainder bookkeeping for; the index map handles it directly.
-    """
+    """Padding wider than the axis wraps/reflects repeatedly."""
     x = np.arange(np.prod(size), dtype=floatX).reshape(size)
     expected = np.pad(x, pad_width, mode=mode)
 
