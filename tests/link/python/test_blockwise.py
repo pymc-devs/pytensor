@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.linalg as sla
 
 import pytensor
 import pytensor.tensor as pt
@@ -31,8 +32,18 @@ def _pd_matrices(shape, seed=0):
 def test_cholesky_dispatch(shape, lower):
     A = pt.tensor("A", shape=(None,) * len(shape))
     out = pt.linalg.cholesky(A, lower=lower)
-    fn, _ = compare_py_and_pyjit([A], out, [_pd_matrices(shape)])
+    Av = _pd_matrices(shape)
+    fn, factor = compare_py_and_pyjit([A], out, [Av])
     assert _has_cholesky(fn.maker.fgraph)
+
+    assert factor.shape == Av.shape
+    assert factor.dtype == out.type.dtype
+    if lower:
+        np.testing.assert_allclose(factor, np.tril(factor), atol=1e-12)
+        np.testing.assert_allclose(factor @ factor.mT, Av)
+    else:
+        np.testing.assert_allclose(factor, np.triu(factor), atol=1e-12)
+        np.testing.assert_allclose(factor.mT @ factor, Av)
 
 
 @pytest.mark.parametrize("lower", [True, False])
@@ -42,34 +53,76 @@ def test_solve_triangular_dispatch(batch, b_shape, lower):
     rng = np.random.default_rng(1)
     Av = np.tril(rng.standard_normal((*batch, 4, 4))) + 4 * np.eye(4)
     if not lower:
-        Av = np.swapaxes(Av, -1, -2)
+        Av = Av.mT
     bv = rng.standard_normal((*batch, *b_shape))
     A = pt.tensor("A", shape=(None,) * Av.ndim)
     b = pt.tensor("b", shape=(None,) * bv.ndim)
     out = pt.linalg.solve_triangular(A, b, lower=lower, b_ndim=len(b_shape))
-    compare_py_and_pyjit([A, b], out, [Av.astype("float64"), bv.astype("float64")])
+    _, x = compare_py_and_pyjit([A, b], out, [Av, bv])
+
+    assert x.shape == bv.shape
+    assert x.dtype == out.type.dtype
+    if len(b_shape) == 1:
+        np.testing.assert_allclose(np.einsum("...ij,...j->...i", Av, x), bv)
+    else:
+        np.testing.assert_allclose(Av @ x, bv)
 
 
 @pytest.mark.parametrize("pivoting", [False, True])
-@pytest.mark.parametrize("mode", ["full", "economic", "r", "raw"])
+@pytest.mark.parametrize("mode", ["full", "economic", "r"])
 @pytest.mark.parametrize("shape", [(4, 3), (3, 4), (5, 3, 4)])
 def test_qr_dispatch(shape, mode, pivoting):
     rng = np.random.default_rng(0)
     A = pt.tensor("A", shape=(None,) * len(shape))
-    out = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
-    compare_py_and_pyjit([A], out, [rng.standard_normal(shape)])
+    outputs = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
+    if not isinstance(outputs, list):
+        outputs = [outputs]
+    Av = rng.standard_normal(shape)
+    _, results = compare_py_and_pyjit([A], outputs, [Av])
+
+    if pivoting:
+        *factors, jpvt = results
+        assert jpvt.shape == (*shape[:-2], shape[-1])
+        # A permutation, not just any index vector.
+        np.testing.assert_array_equal(
+            np.sort(jpvt, axis=-1),
+            np.broadcast_to(np.arange(shape[-1]), jpvt.shape),
+        )
+        Av = np.take_along_axis(Av, jpvt[..., None, :], axis=-1)
+    else:
+        factors = results
+
+    if mode == "r":
+        [R] = factors
+        np.testing.assert_allclose(R, np.triu(R), atol=1e-12)
+        # Q drops out of the normal equations, so R alone is pinned by them.
+        np.testing.assert_allclose(R.mT @ R, Av.mT @ Av, atol=1e-10)
+        return
+
+    Q, R = factors
+    np.testing.assert_allclose(R, np.triu(R), atol=1e-12)
+    np.testing.assert_allclose(Q @ R, Av, atol=1e-10)
+    gram = Q.mT @ Q
+    np.testing.assert_allclose(
+        gram, np.broadcast_to(np.eye(Q.shape[-1]), gram.shape), atol=1e-10
+    )
 
 
-def test_blockwise_falls_back_without_core_dispatch():
-    # The general Solve has no python_funcify dispatch, so Blockwise must fall
-    # back to its (vectorized) perform and still match the reference.
-    A = pt.matrix("A")
-    b = pt.vector("b")
-    out = pt.linalg.solve(A, b)
-    rng = np.random.default_rng(2)
-    Av = rng.standard_normal((4, 4)) + 4 * np.eye(4)
-    bv = rng.standard_normal(4)
-    compare_py_and_pyjit([A, b], out, [Av, bv])
+@pytest.mark.parametrize("pivoting", [False, True])
+@pytest.mark.parametrize("shape", [(4, 3), (3, 4), (5, 3, 4)])
+def test_qr_raw_dispatch(shape, pivoting):
+    # `raw` returns the packed Householder reflectors, whose layout is a scipy
+    # convention rather than a mathematical property, so scipy is the reference.
+    rng = np.random.default_rng(0)
+    A = pt.tensor("A", shape=(None,) * len(shape))
+    out = pt.linalg.qr(A, mode="raw", pivoting=pivoting)
+    Av = rng.standard_normal(shape)
+    _, results = compare_py_and_pyjit([A], out, [Av])
+
+    for index in np.ndindex(shape[:-2]):
+        (factor, tau), *rest = sla.qr(Av[index], mode="raw", pivoting=pivoting)
+        for got, expected in zip(results, [factor, tau, *rest], strict=True):
+            np.testing.assert_allclose(got[index], expected)
 
 
 @pytest.mark.parametrize("mode", ["PYTHON", "PYJIT"])
@@ -111,3 +164,15 @@ def test_empty_input_shortcut(mode):
     )
     assert solved.dtype == solved_out.type.dtype
     assert solved.shape == (0, 2)
+
+
+def test_blockwise_falls_back_without_core_dispatch():
+    # The general Solve has no python_funcify dispatch, so Blockwise must fall
+    # back to its (vectorized) perform and still match the reference.
+    A = pt.matrix("A")
+    b = pt.vector("b")
+    out = pt.linalg.solve(A, b)
+    rng = np.random.default_rng(2)
+    Av = rng.standard_normal((4, 4)) + 4 * np.eye(4)
+    bv = rng.standard_normal(4)
+    compare_py_and_pyjit([A, b], out, [Av, bv])
