@@ -355,7 +355,13 @@ def _gemm_from_factored_list(fgraph, lst):
         # sM can be a tuple of 2 elements or an PyTensor variable.
         if isinstance(sM, tuple):
             sm0, sm1 = sM
-            sm0 = ptb.as_tensor_variable(sm0)
+            if isinstance(sm0, int | float):
+                # Python literal scales (the +/-1.0 seeded by
+                # `_gemm_canonicalize`) adopt the matrix dtype instead of
+                # following the autocast policy
+                sm0 = ptb.as_tensor_variable(np.asarray(sm0, dtype=sm1.dtype))
+            else:
+                sm0 = ptb.as_tensor_variable(sm0)
             if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
                 lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
 

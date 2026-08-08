@@ -570,7 +570,7 @@ class TestGrad:
         # get upcasted to float64.
         # x has dtype float32, regardless of the value of floatX
         x = fscalar("x")
-        y = x * 2
+        y = x * np.float32(2)
         z = lscalar("z")
 
         c = y + z
