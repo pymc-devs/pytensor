@@ -1178,8 +1178,13 @@ class Sigmoid(UnaryScalarOp):
     def pullback(self, inp, outputs, grads):
         (x,) = inp
         (gz,) = grads
-        y = sigmoid(x)
-        rval = gz * y * (1.0 - y)
+        # sigmoid'(x) == sigmoid(x) * (1 - sigmoid(x)) needs a single sigmoid, but 1 - sigmoid(x)
+        # cancels to exactly zero for x >~ 37. A backward-only graph could stay at one sigmoid with
+        # y = sigmoid(switch(x >= 0, -x, x)); y * (1 - y), bounded by 0.5 so it never cancels.
+        # We pay for a second sigmoid to reuse the forward one, usually needed too and, being the
+        # same node, cancellable in ratios: grad(log(sigmoid(x))) is
+        # sigmoid(x) * sigmoid(-x) / sigmoid(x) -> sigmoid(-x).
+        rval = gz * sigmoid(x) * sigmoid(-x)
 
         assert rval.type.dtype.find("float") != -1
 
