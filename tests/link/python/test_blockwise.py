@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -69,3 +70,23 @@ def test_blockwise_falls_back_without_core_dispatch():
     Av = rng.standard_normal((4, 4)) + 4 * np.eye(4)
     bv = rng.standard_normal(4)
     compare_py_and_pyjit([A, b], out, [Av, bv])
+
+
+@pytest.mark.parametrize("mode", ["PYTHON", "PYJIT"])
+def test_blockwise_rejects_runtime_broadcast(mode):
+    # A batch dimension declared non-broadcastable must not be broadcast at
+    # runtime, even though `np.vectorize` would happily do it.
+    A = pt.tensor("A", shape=(None, 3, 3))
+    b = pt.tensor("b", shape=(None, 3))
+    out = pt.linalg.solve_triangular(A, b, lower=True, b_ndim=1)
+    Av = (np.tril(np.ones((3, 3))) + 3 * np.eye(3))[None]
+    bv = np.ones((4, 3))
+
+    fn = pytensor.function([A, b], out, mode=mode)
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        fn(Av, bv)
+
+    # The same graph still solves once the batch lengths agree.
+    Av_batched = np.repeat(Av, 4, axis=0)
+    x = fn(Av_batched, bv)
+    np.testing.assert_allclose(np.einsum("...ij,...j->...i", Av_batched, x), bv)
