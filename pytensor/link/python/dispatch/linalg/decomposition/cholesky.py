@@ -9,11 +9,12 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 def python_funcify_Cholesky(op, node=None, **kwargs):
     lower = op.lower
     overwrite_a = op.overwrite_a
+    out_dtype = node.outputs[0].type.dtype
     (potrf,) = get_lapack_funcs(("potrf",), dtype=node.inputs[0].type.dtype)
 
     def cholesky(x):
         if x.size == 0:
-            return np.empty_like(x)
+            return np.empty_like(x, dtype=out_dtype)
 
         # potrf only honors overwrite_a for F-contiguous input; transpose a
         # C-contiguous array to benefit from it.

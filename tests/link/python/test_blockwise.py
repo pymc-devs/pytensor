@@ -90,3 +90,24 @@ def test_blockwise_rejects_runtime_broadcast(mode):
     Av_batched = np.repeat(Av, 4, axis=0)
     x = fn(Av_batched, bv)
     np.testing.assert_allclose(np.einsum("...ij,...j->...i", Av_batched, x), bv)
+
+
+@pytest.mark.parametrize("mode", ["PYTHON", "PYJIT"])
+def test_empty_input_shortcut(mode):
+    # Cholesky upcasts integer input; the empty-input shortcut must honour that.
+    x = pt.matrix("x", dtype="int64")
+    factor_out = pt.linalg.cholesky(x)
+    factor = pytensor.function([x], factor_out, mode=mode)(
+        np.zeros((0, 0), dtype="int64")
+    )
+    assert factor.dtype == factor_out.type.dtype
+    assert factor.shape == (0, 0)
+
+    A = pt.matrix("A", dtype="int64")
+    b = pt.matrix("b", dtype="int64")
+    solved_out = pt.linalg.solve_triangular(A, b, lower=True)
+    solved = pytensor.function([A, b], solved_out, mode=mode)(
+        np.zeros((0, 0), dtype="int64"), np.zeros((0, 2), dtype="int64")
+    )
+    assert solved.dtype == solved_out.type.dtype
+    assert solved.shape == (0, 2)

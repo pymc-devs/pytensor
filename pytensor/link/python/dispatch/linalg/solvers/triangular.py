@@ -10,11 +10,12 @@ def python_funcify_SolveTriangular(op, node=None, **kwargs):
     lower = op.lower
     unit_diagonal = op.unit_diagonal
     overwrite_b = op.overwrite_b
-    (trtrs,) = get_lapack_funcs(("trtrs",), dtype=node.outputs[0].type.dtype)
+    out_dtype = node.outputs[0].type.dtype
+    (trtrs,) = get_lapack_funcs(("trtrs",), dtype=out_dtype)
 
     def solve_triangular(A, b):
         if b.size == 0:
-            return np.empty_like(b)
+            return np.empty_like(b, dtype=out_dtype)
 
         if A.flags["F_CONTIGUOUS"]:
             x, info = trtrs(
