@@ -1622,6 +1622,29 @@ def test_constant_fold_branches_add_mul(op):
     assert equal_computations([new_out], [op(py_op(a, b), c, x)])
 
 
+@pytest.mark.parametrize("op", (add, mul))
+def test_reassociate_broadcast_aware_add_mul(op):
+    a = pt.tensor("a", shape=(2,))
+    b = pt.tensor("b", shape=(2,))
+    c = pt.tensor("c", shape=(1000, 2))
+    out = op(op(a, b), c)
+
+    rewritten_out = rewrite_graph(out, include=("add_mul_fusion",))
+    fgraph = FunctionGraph([a, b, c], [rewritten_out], clone=False)
+    op_nodes = [
+        node
+        for node in fgraph.apply_nodes
+        if isinstance(node.op, Elemwise) and node.op == op
+    ]
+
+    # We should keep a smaller-rank subgroup op(a, b) instead of fully flattening.
+    assert any(
+        len(node.inputs) == 2 and node.outputs[0].type.ndim == 1 for node in op_nodes
+    )
+
+    assert equal_computations([rewritten_out], [out])
+
+
 def test_InplaceElemwiseOptimizer_bug():
     # Regression test for https://github.com/pymc-devs/pytensor/issues/1420
 
