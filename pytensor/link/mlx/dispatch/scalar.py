@@ -1,6 +1,7 @@
 from functools import reduce
 
 import mlx.core as mx
+import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scalar.basic import (
@@ -12,7 +13,15 @@ from pytensor.scalar.basic import (
     ScalarOp,
     Second,
 )
-from pytensor.scalar.math import Erfc, Erfcx, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.math import (
+    Erfc,
+    Erfcx,
+    GammaLn,
+    Log1mexp,
+    Psi,
+    Sigmoid,
+    Softplus,
+)
 
 
 # MLX name overrides for nfunc_spec names that don't match mlx.core
@@ -20,6 +29,66 @@ MLX_NFUNC_OVERRIDES = {
     "true_divide": "divide",
     "invert": "bitwise_invert",
 }
+
+_LANCZOS_G = 7.0
+_LANCZOS_COEFFS = (
+    0.99999999999980993,
+    676.5203681218851,
+    -1259.1392167224028,
+    771.32342877765313,
+    -176.61502916214059,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.9843695780195716e-6,
+    1.5056327351493116e-7,
+)
+
+# Asymptotic expansion of psi, with terms B_2n / 2n, applied after the recurrence has
+# carried the argument up by _PSI_SHIFTS. Single precision reaches its own limit with a
+# shorter recurrence and fewer terms, and every one of them costs a pass over the array.
+_PSI_COEFFS = (
+    1 / 12,
+    -1 / 120,
+    1 / 252,
+    -1 / 240,
+    1 / 132,
+    -691 / 32760,
+    1 / 12,
+)
+_PSI_SHIFTS = 10
+_PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
+_PSI_SHIFTS_SINGLE = 6
+
+
+def _working_precision(x):
+    """Set up a series approximation over ``x``.
+
+    Half precision is widened to float32, having too few mantissa bits for series
+    coefficients to mean anything.
+
+    Parameters
+    ----------
+    x : mx.array
+        Input to the approximation.
+
+    Returns
+    -------
+    z : mx.array
+        ``x`` at the working precision.
+    const : callable
+        Materialize a Python float as an ``mx.array`` of the working precision. MLX
+        weak-types Python floats to float32, which would otherwise silently pin a
+        float64 approximation to float32 accuracy.
+    out_dtype : MLX dtype
+        The dtype the result should be cast back to.
+    """
+    x = mx.array(x)
+    working_dtype = mx.float32 if x.dtype in (mx.float16, mx.bfloat16) else x.dtype
+
+    def const(value):
+        return mx.array(value, dtype=working_dtype)
+
+    return x.astype(working_dtype), const, x.dtype
 
 
 @mlx_funcify.register(ScalarOp)
@@ -171,6 +240,92 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
         return mx.where(x < mx.log(0.5), mx.log1p(-mx.exp(x)), mx.log(-mx.expm1(x)))
 
     return log1mexp
+
+
+@mlx_funcify.register(GammaLn)
+def mlx_funcify_GammaLn(op, **kwargs):
+    def gammaln(x):
+        z, const, out_dtype = _working_precision(x)
+
+        double = z.dtype == mx.float64
+        half = const(0.5)
+        one = const(1.0)
+
+        # In double precision, small positive arguments go up by one via
+        # lgamma(x) = lgamma(x + 1) - log(x) rather than through the reflection formula
+        # below. Both are exact as mathematics, but reflection would route them through
+        # mx.sin, which is only float32-accurate whatever the input dtype. Single
+        # precision has nothing to protect, and the extra log costs a pass
+        shift_up = (z > const(0.0)) & (z < half) if double else None
+        y = mx.where(shift_up, z + one, z) if double else z
+        reflect = y < half
+
+        # Evaluating the series on the reflected argument means one polynomial
+        # covers both branches, and neither can produce a NaN the other must mask
+        w = mx.where(reflect, one - y, y) - one
+        series = const(_LANCZOS_COEFFS[0])
+        for i, coeff in enumerate(_LANCZOS_COEFFS[1:], start=1):
+            series = series + const(coeff) / (w + const(float(i)))
+
+        t = w + const(_LANCZOS_G + 0.5)
+        lanczos = (
+            const(0.5 * np.log(2.0 * np.pi))
+            + (w + half) * mx.log(t)
+            - t
+            + mx.log(series)
+        )
+
+        # Reducing the argument before sin keeps log|sin(pi x)| accurate at large |x|
+        log_sin = mx.log(mx.abs(mx.sin(const(np.pi) * (y - mx.floor(y)))))
+        out = mx.where(reflect, const(np.log(np.pi)) - log_sin - lanczos, lanczos)
+        if double:
+            out = mx.where(shift_up, out - mx.log(z), out)
+
+        # The series returns NaN at +/-inf, where both limits are +inf
+        out = mx.where(mx.isinf(z), const(np.inf), out)
+
+        return out.astype(out_dtype)
+
+    return gammaln
+
+
+@mlx_funcify.register(Psi)
+def mlx_funcify_Psi(op, **kwargs):
+    def psi(x):
+        z, const, out_dtype = _working_precision(x)
+
+        double = z.dtype == mx.float64
+        n_shifts = _PSI_SHIFTS if double else _PSI_SHIFTS_SINGLE
+        coeffs = _PSI_COEFFS if double else _PSI_COEFFS_SINGLE
+
+        # Only negative arguments need reflecting; the recurrence below walks a
+        # small positive argument up to the asymptotic regime on its own, and it
+        # keeps full precision where cot(pi x) would not
+        reflect = z < const(0.0)
+        y = mx.where(reflect, const(1.0) - z, z)
+
+        # psi(y) = psi(y + n) - sum 1/(y + i), which holds for every y, so the shift
+        # is applied unconditionally. Testing whether each element still needs it
+        # would cost a comparison and a select per iteration and buy nothing
+        one = const(1.0)
+        shift = -one / y
+        for i in range(1, n_shifts):
+            shift = shift - one / (y + const(float(i)))
+        y = y + const(float(n_shifts))
+
+        r2 = one / (y * y)
+        series = const(coeffs[-1])
+        for coeff in reversed(coeffs[:-1]):
+            series = const(coeff) + series * r2
+        out = shift + mx.log(y) - const(0.5) / y - series * r2
+
+        # psi(x) = psi(1 - x) - pi * cot(pi x)
+        pi_z = const(np.pi) * z
+        out = mx.where(reflect, out - const(np.pi) * mx.cos(pi_z) / mx.sin(pi_z), out)
+
+        return out.astype(out_dtype)
+
+    return psi
 
 
 @mlx_funcify.register(Composite)

@@ -2,6 +2,7 @@
 Basic tests for the MLX backend.
 """
 
+import warnings
 from collections.abc import Callable, Iterable
 from functools import partial
 
@@ -21,6 +22,8 @@ from pytensor.raise_op import assert_op
 
 
 mx = pytest.importorskip("mlx.core")
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
+
 
 optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
 mlx_mode = Mode(linker=MLXLinker(), optimizer=optimizer)
@@ -189,62 +192,40 @@ def test_scalar_from_tensor_pytensor_integration():
     assert isinstance(result, mx.array)
 
 
-def test_mlx_float64_auto_casting():
-    """Test MLX automatic casting of float64 to float32 with warnings."""
-    import warnings
-
-    # Test 1: Direct Cast operation with warning
-    x = pt.scalar("x", dtype="float32")
-    y = pt.cast(x, "float64")
-
-    # Capture warnings
-    with warnings.catch_warnings(record=True) as warning_list:
+def test_mlx_float64_downcast_on_gpu_warns():
+    # Only the dtype resolution is exercised, not a kernel: the suite pins the CPU
+    # device (see conftest) because Metal aborts on some runners
+    with mx.stream(mx.gpu), warnings.catch_warnings(record=True) as warning_list:
         warnings.simplefilter("always")
+        dtype = convert_dtype_to_mlx("float64")
 
-        f = pytensor.function([x], y, mode=mlx_mode, allow_input_downcast=True)
-        result = f(3.14)
-
-        # Check that the operation succeeded
-        assert result.dtype == mx.float32  # Should be auto-cast to float32
-        assert abs(float(result) - 3.14) < 1e-6
-
-        # Check that a warning was issued
-        warning_messages = [str(w.message) for w in warning_list]
-        dtype_warnings = [
-            msg for msg in warning_messages if "float64" in msg and "float32" in msg
-        ]
-        assert len(dtype_warnings) > 0, (
-            f"Expected dtype warning, got warnings: {warning_messages}"
-        )
+    assert dtype == mx.float32
+    assert any(
+        "float64" in str(w.message) and "float32" in str(w.message)
+        for w in warning_list
+    )
 
 
-def test_mlx_float64_complex_operations():
-    """Test float64 casting in more complex operations."""
-    import warnings
+def test_mlx_float64_preserved_on_cpu():
+    x = pt.vector("x", dtype="float64")
+    # log and arithmetic are genuinely float64 in MLX; exp, sin, and cos are computed
+    # to float32 accuracy whatever the input dtype, and would mask the thing under test
+    out = pt.log(x) * 2.0 + x
 
-    # Test with vector operations
-    x = pt.vector("x", dtype="float32")
-    y = pt.cast(x, "float64")
-    z = pt.exp(y) + pt.sin(y)  # Multiple operations on float64
+    x_test_value = np.array([1.0, 2.0, 3.0], dtype="float64")
 
     with warnings.catch_warnings(record=True) as warning_list:
         warnings.simplefilter("always")
+        with mx.stream(mx.cpu):
+            f = function([x], out, mode=mlx_mode)
+            res = f(x_test_value)
 
-        f = pytensor.function([x], z, mode=mlx_mode, allow_input_downcast=True)
-        result = f([1.0, 2.0, 3.0])
-
-        # Should work and return float32 results
-        assert result.dtype == mx.float32
-        assert result.shape == (3,)
-
-        # Should have issued warnings
-        warning_messages = [str(w.message) for w in warning_list]
-        dtype_warnings = [
-            msg
-            for msg in warning_messages
-            if "float64" in msg or "MLX GPU limitation" in msg
-        ]
-        assert len(dtype_warnings) > 0
+    assert res.dtype == mx.float64
+    # Narrowing would cost about seven digits here, so this is a precision check too
+    np.testing.assert_allclose(
+        np.asarray(res), np.log(x_test_value) * 2.0 + x_test_value, rtol=1e-15
+    )
+    assert not any("float64" in str(w.message) for w in warning_list)
 
 
 def test_mlx_float64_no_warning_when_disabled():

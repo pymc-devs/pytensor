@@ -15,25 +15,36 @@ from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import Assert, CheckAndRaise
 
 
+def float64_supported():
+    """Return whether the current default device can operate on float64.
+
+    MLX implements float64 on the CPU only; the Metal backend rejects it outright.
+    """
+    return mx.default_device() == mx.cpu
+
+
 def convert_dtype_to_mlx(dtype_str, auto_cast_unsupported=True):
     """Convert PyTensor dtype strings to MLX dtype objects.
 
     MLX expects dtype objects rather than string literals for type conversion.
     This function maps common dtype strings to their MLX equivalents.
 
+    float64 survives when the default device supports it and is narrowed to float32
+    otherwise. complex128 is always narrowed, MLX having no wider complex type.
+
     Parameters
     ----------
     dtype_str : str or MLX dtype
         The dtype to convert
-    auto_cast_unsupported : bool
-        If True, automatically cast unsupported dtypes to supported ones with warnings
+    auto_cast_unsupported : bool, optional
+        If True, narrow dtypes the current device cannot handle, warning as it does so.
+        If False, return the requested dtype and let any later failure surface. Default
+        True.
 
     Returns
     -------
     MLX dtype object
     """
-    import warnings
-
     if isinstance(dtype_str, str):
         if dtype_str == "bool":
             return mx.bool_
@@ -58,11 +69,12 @@ def convert_dtype_to_mlx(dtype_str, auto_cast_unsupported=True):
         elif dtype_str == "float32":
             return mx.float32
         elif dtype_str == "float64":
-            if auto_cast_unsupported:
+            if auto_cast_unsupported and not float64_supported():
                 warnings.warn(
                     "MLX does not support float64 on GPU. Automatically casting to float32. "
-                    "This may result in reduced precision. To avoid this warning, "
-                    "explicitly use float32 in your code or set floatX='float32' in PyTensor config.",
+                    "This may result in reduced precision. To keep float64, run on the CPU "
+                    "device with mx.set_default_device(mx.cpu); to avoid this warning, use "
+                    "float32 or set floatX='float32' in PyTensor config.",
                     UserWarning,
                     stacklevel=3,
                 )
@@ -116,6 +128,10 @@ def mlx_typify(data, **kwargs):
 
 @mlx_typify.register(np.ndarray)
 def mlx_typify_tensor(data, dtype=None, **kwargs):
+    # mx.array narrows float64 input to float32 unless the dtype is named explicitly,
+    # and it does so on the CPU too, where float64 is perfectly usable
+    if dtype is None and data.dtype == np.float64 and float64_supported():
+        dtype = mx.float64
     return _nan_safe_constant(data, dtype=dtype)
 
 
