@@ -17,14 +17,31 @@ floatX = pytensor.config.floatX
 RTOL = ATOL = 1e-8 if floatX.endswith("64") else 1e-4
 
 
-@pytest.mark.parametrize(
-    "kwargs", [{}, {"foo": 1}, {"constant_values": 0}], ids=["none", "unknown", "valid"]
-)
+@pytest.mark.parametrize("kwargs", [{}, {"constant_values": 0}], ids=["none", "valid"])
 def test_unknown_mode_raises(kwargs):
-    """An unknown mode is reported as such whatever keyword arguments come with it."""
+    """An unknown mode is reported as such, before its options are looked up."""
     x = np.random.normal(size=(3, 3)).astype(floatX)
     with pytest.raises(ValueError, match="Invalid mode: unknown"):
         pad(x, 1, mode="unknown", **kwargs)
+
+
+@pytest.mark.parametrize(
+    "mode, kwargs",
+    [
+        ("edge", {"constant_values": 1}),
+        ("constant", {"end_values": 1}),
+        ("wrap", {"stat_length": 2}),
+        ("mean", {"reflect_type": "even"}),
+    ],
+    ids=str,
+)
+def test_option_not_valid_for_mode_raises(mode, kwargs):
+    """An option a mode does not accept is rejected rather than silently ignored."""
+    x = np.random.normal(size=(3, 3)).astype(floatX)
+    with pytest.raises(
+        ValueError, match=f"Invalid keyword arguments for mode '{mode}'"
+    ):
+        pad(x, 1, mode=mode, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -246,10 +263,7 @@ ALL_MODES = [
     "reflect",
 ]
 
-MODE_KWARGS = {
-    "constant": {"constant_values": 0},
-    "linear_ramp": {"end_values": 0},
-}
+GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
 
 
 def _pad_width_as_symbolic_expression(ndim, width):
@@ -293,12 +307,9 @@ def _dynamic_subtensors(inputs, outputs):
 def test_pad_static_shape(mode):
     """A statically known pad_width should give a statically known output shape."""
     x = pt.tensor("x", shape=(8, 8))
-    z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
+    z = pad(x, [[1, 1], [2, 2]], mode=mode)
 
     assert z.type.shape == (10, 12)
-
-
-GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
 
 
 @pytest.mark.parametrize("mode", ALL_MODES)
@@ -310,7 +321,7 @@ def test_pad_grad_has_static_slice_bounds(mode):
     Backends that require static slice bounds could not compile them otherwise.
     """
     x = pt.tensor("x", shape=(8, 8))
-    z = pad(x, [[1, 1], [2, 2]], mode=mode, **MODE_KWARGS.get(mode, {}))
+    z = pad(x, [[1, 1], [2, 2]], mode=mode)
     grad_x = grad(z.sum(), x)
 
     assert _dynamic_subtensors([x], grad_x) == []
@@ -326,7 +337,7 @@ def test_pad_static_shape_from_foldable_pad_width(mode):
     """
     x = pt.tensor("x", shape=(8, 8))
     pad_width = _pad_width_as_symbolic_expression(2, 1)
-    z = pad(x, pad_width, mode=mode, **MODE_KWARGS.get(mode, {}))
+    z = pad(x, pad_width, mode=mode)
 
     assert z.type.shape == (10, 10)
 
@@ -376,7 +387,7 @@ def test_pad_rejects_non_integral_pad_width(mode):
     x = pt.tensor("x", shape=(5,))
 
     with pytest.raises(TypeError):
-        pad(x, (1.5, 1.5), mode=mode, **MODE_KWARGS.get(mode, {}))
+        pad(x, (1.5, 1.5), mode=mode)
 
 
 @pytest.mark.parametrize(

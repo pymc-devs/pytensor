@@ -35,17 +35,17 @@ PadMode = Literal[
 ]
 stat_funcs = {"maximum": pt_max, "minimum": pt_min, "mean": mean}
 
-allowed_kwargs = {
-    "edge": [],
-    "wrap": [],
-    "constant": ["constant_values"],
-    "linear_ramp": ["end_values"],
-    "maximum": ["stat_length"],
-    "mean": ["stat_length"],
-    "median": ["stat_length"],
-    "minimum": ["stat_length"],
-    "reflect": ["reflect_type"],
-    "symmetric": ["reflect_type"],
+mode_options = {
+    "edge": set(),
+    "wrap": set(),
+    "constant": {"constant_values"},
+    "linear_ramp": {"end_values"},
+    "maximum": {"stat_length"},
+    "mean": {"stat_length"},
+    "median": {"stat_length"},
+    "minimum": {"stat_length"},
+    "reflect": {"reflect_type"},
+    "symmetric": {"reflect_type"},
 }
 
 
@@ -405,14 +405,21 @@ class Pad(TensorSymbolicOp):
 
 
 def pad(
-    x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs
+    x: TensorLike,
+    pad_width: TensorLike,
+    mode: PadMode = "constant",
+    *,
+    constant_values: TensorLike | None = None,
+    end_values: TensorLike | None = None,
+    stat_length: TensorLike | None = None,
+    reflect_type: Literal["even", "odd"] | None = None,
 ) -> TensorVariable:
     """
     Pad an array.
 
     Parameters
     ----------
-    array : array_like of rank N
+    x : array_like of rank N
         The array to pad.
 
     pad_width : sequence, array_like, or int
@@ -424,10 +431,10 @@ def pad(
         ``(pad,)`` or ``int`` is a shortcut for before = after = pad width
         for all axes.
 
-    mode : str or function, optional
-        One of the following string values or a user supplied function.
+    mode : str, optional
+        One of the following string values. Default is 'constant'.
 
-        'constant' (default)
+        'constant'
             Pads with a constant value.
         'edge'
             Pads with the edge values of array.
@@ -455,24 +462,9 @@ def pad(
             The first values are used to pad the end and the
             end values are used to pad the beginning.
 
-    stat_length : sequence or int, optional
-        Used in 'maximum', 'mean', and 'minimum'.  Number of
-        values at edge of each axis used to calculate the statistic value.
-
-        ``((before_1, after_1), ... (before_N, after_N))`` unique statistic
-        lengths for each axis.
-
-        ``(before, after)`` or ``((before, after),)`` yields same before
-        and after statistic lengths for each axis.
-
-        ``(stat_length,)`` or ``int`` is a shortcut for
-        ``before = after = statistic`` length for all axes.
-
-        Default is ``None``, to use the entire axis.
-
     constant_values : sequence or scalar, optional
-        Used in 'constant'.  The values to set the padded values for each
-        axis.
+        Only valid for mode 'constant'. The values to set the padded values to
+        for each axis.
 
         ``((before_1, after_1), ... (before_N, after_N))`` unique pad constants
         for each axis.
@@ -486,8 +478,8 @@ def pad(
         Default is 0.
 
     end_values : sequence or scalar, optional
-        Used in 'linear_ramp'.  The values used for the ending value of the
-        linear_ramp and that will form the edge of the padded array.
+        Only valid for mode 'linear_ramp'. The values used for the ending value
+        of the linear ramp, which form the edge of the padded array.
 
         ``((before_1, after_1), ... (before_N, after_N))`` unique end values
         for each axis.
@@ -500,15 +492,41 @@ def pad(
 
         Default is 0.
 
+    stat_length : sequence or int, optional
+        Only valid for modes 'maximum', 'mean', and 'minimum'. Number of values
+        at the edge of each axis used to compute the statistic.
+
+        ``((before_1, after_1), ... (before_N, after_N))`` unique statistic
+        lengths for each axis.
+
+        ``(before, after)`` or ``((before, after),)`` yields same before
+        and after statistic lengths for each axis.
+
+        ``(stat_length,)`` or ``int`` is a shortcut for
+        ``before = after = statistic`` length for all axes.
+
+        Default is ``None``, to use the entire axis.
+
     reflect_type : str, optional
-        Only 'even' is currently accepted. Used in 'reflect', and 'symmetric'.  The 'even' style is the
-        default with an unaltered reflection around the edge value.
+        Only valid for modes 'reflect' and 'symmetric'. Only 'even' is currently
+        accepted, which reflects around the edge value without altering it.
+        Default is 'even'.
 
     Returns
     -------
-    pad : ndarray
-        Padded array of rank equal to `array` with shape increased
-        according to `pad_width`.
+    padded : TensorVariable
+        Padded array of rank equal to ``x`` with shape increased according to
+        ``pad_width``.
+
+    Raises
+    ------
+    ValueError
+        If ``mode`` is not a recognized padding mode, or a keyword argument is
+        given that ``mode`` does not accept.
+    TypeError
+        If ``pad_width`` is a constant of non-integral dtype.
+    NotImplementedError
+        If ``mode`` is 'median', or ``reflect_type`` is 'odd'.
 
     Examples
     --------
@@ -596,42 +614,61 @@ def pad(
         [4 5 1 2 3 4 5 1 2 3]
 
     """
-    if mode not in allowed_kwargs:
+    if mode not in mode_options:
         raise ValueError(f"Invalid mode: {mode}")
-    if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
-        raise ValueError(
-            f"Invalid keyword arguments for mode '{mode}': {kwargs.keys()}"
+
+    supplied = {
+        name
+        for name, value in (
+            ("constant_values", constant_values),
+            ("end_values", end_values),
+            ("stat_length", stat_length),
+            ("reflect_type", reflect_type),
         )
+        if value is not None
+    }
+    unsupported = supplied - mode_options[mode]
+    if unsupported:
+        raise ValueError(
+            f"Invalid keyword arguments for mode '{mode}': {sorted(unsupported)}. "
+            f"Mode '{mode}' accepts {sorted(mode_options[mode])}"
+        )
+
     x = as_tensor(x, name="x")
     pad_width = as_tensor(pad_width, name="pad_width")
     inputs = [x, pad_width]
-    reflect_type: str | None = None
     has_stat_length = False
 
     if mode == "constant":
-        inputs += [as_tensor(kwargs.pop("constant_values", 0), name="constant_values")]
+        if constant_values is None:
+            constant_values = 0
+        inputs += [as_tensor(constant_values, name="constant_values")]
 
     elif mode == "linear_ramp":
-        inputs += [as_tensor(kwargs.pop("end_values", 0))]
+        if end_values is None:
+            end_values = 0
+        inputs += [as_tensor(end_values, name="end_values")]
 
-    elif mode in ["maximum", "minimum", "mean", "median"]:
+    elif mode in ("maximum", "minimum", "mean", "median"):
         if mode == "median":
             # TODO: Revisit this after we implement a quantile function.
             #  See https://github.com/pymc-devs/pytensor/issues/53
             raise NotImplementedError("Median padding not implemented")
-        stat_length = kwargs.get("stat_length")
         if stat_length is not None:
             has_stat_length = True
             inputs += [as_tensor(stat_length, name="stat_length")]
 
-    elif mode == "symmetric" or mode == "reflect":
-        reflect_type = kwargs.pop("reflect_type", "even")
+    elif mode in ("symmetric", "reflect"):
+        if reflect_type is None:
+            reflect_type = "even"
         if reflect_type == "odd":
             raise NotImplementedError(
                 "Odd reflection not implemented. If you need this feature, please open an "
                 "issue at https://github.com/pymc-devs/pytensor/issues"
             )
 
+    # Every other mode is rejected above if it was given a `reflect_type`, so this stays
+    # None outside the reflecting modes.
     op = Pad(
         pad_mode=mode,
         reflect_type=reflect_type,
