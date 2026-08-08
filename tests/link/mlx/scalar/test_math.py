@@ -24,22 +24,57 @@ mlx = pytest.importorskip("mlx.core")
 from pytensor.link.mlx.dispatch import mlx_funcify
 
 
-def test_erf():
-    x = scalar("x")
-    out = erf(x)
-    compare_mlx_and_py([x], [out], [1.0])
+# erf keeps the native mx.erf. It is a float32 kernel whatever dtype it is handed, so
+# these tolerances are float32 tolerances at both precisions, but erf is well conditioned
+# everywhere and never loses more than that. erfc and erfcx cannot be built on it -- both
+# decay to where 1 - erf has no significant digits left -- so they carry their own kernel
+# and are held to much tighter tolerances below.
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+@pytest.mark.parametrize(
+    "low, high, rtol, atol",
+    [
+        # erf vanishes at the origin, so an absolute tolerance carries the assertion for
+        # any sample that lands near it
+        (-1.0, 1.0, 3e-6, 1e-6),
+        (1.0, 3.0, 3e-6, 0.0),
+        (3.0, 6.0, 3e-7, 0.0),
+    ],
+    ids=["central", "moderate", "large"],
+)
+def test_erf(low, high, rtol, atol, dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(17).uniform(low, high, 101).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [erf(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=rtol, atol=atol),
+    )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+@pytest.mark.parametrize(
+    "low, high, rtol",
+    [(-0.9, 0.9, 1e-6), (0.9, 0.999, 1e-5)],
+    ids=["central", "edge"],
+)
+def test_erfinv(low, high, rtol, dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(23).uniform(low, high, 101).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [erfinv(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=rtol, atol=0.0),
+    )
 
 
 def test_erfc():
     x = scalar("x")
     out = erfc(x)
     compare_mlx_and_py([x], [out], [1.0])
-
-
-def test_erfinv():
-    x = scalar("x")
-    out = erfinv(x)
-    compare_mlx_and_py([x], [out], [0.95])
 
 
 def test_erfcx():
