@@ -6,7 +6,7 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.scalar.math import GammaLn, Psi
+from pytensor.scalar.math import Erfc, Erfcx, GammaLn, Psi
 from pytensor.tensor.math import (
     erf,
     erfc,
@@ -16,7 +16,7 @@ from pytensor.tensor.math import (
     sigmoid,
     softplus,
 )
-from pytensor.tensor.type import scalar, vector
+from pytensor.tensor.type import vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
@@ -56,6 +56,31 @@ def test_erf(low, high, rtol, atol, dtype):
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
 @pytest.mark.parametrize(
     "low, high, rtol",
+    [
+        (-3.0, 0.0, 3e-7),
+        (0.0, 1.0, 1e-6),
+        (1.0, 4.0, 1e-5),
+        # erfc is exp(-y**2) * erfcx(y) out here. The exponential is the accuracy floor,
+        # and squaring the argument amplifies its error in proportion to y**2
+        (4.0, 9.0, 1e-4),
+    ],
+    ids=["negative", "small", "moderate", "tail"],
+)
+def test_erfc(low, high, rtol, dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(19).uniform(low, high, 101).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [erfc(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=rtol, atol=0.0),
+    )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+@pytest.mark.parametrize(
+    "low, high, rtol",
     [(-0.9, 0.9, 1e-6), (0.9, 0.999, 1e-5)],
     ids=["central", "edge"],
 )
@@ -71,16 +96,124 @@ def test_erfinv(low, high, rtol, dtype):
     )
 
 
-def test_erfc():
-    x = scalar("x")
-    out = erfc(x)
-    compare_mlx_and_py([x], [out], [1.0])
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+@pytest.mark.parametrize(
+    "low, high, rtol",
+    [
+        (-3.0, 0.0, 3e-6),
+        (0.0, 0.47, 1e-6),
+        (0.47, 4.0, 3e-6),
+        (4.0, 27.0, 1e-6),
+        # erfcx decays like 1 / (y sqrt(pi)) rather than vanishing, so the far tail is
+        # no harder than the near one once the asymptotic rational takes over
+        (27.0, 1e3, 1e-6),
+    ],
+    ids=["negative", "small", "moderate", "large", "far-tail"],
+)
+def test_erfcx(low, high, rtol, dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(29).uniform(low, high, 101).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [erfcx(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=rtol, atol=0.0),
+    )
 
 
-def test_erfcx():
-    x = scalar("x")
-    out = erfcx(x)
-    compare_mlx_and_py([x], [out], [0.7])
+@pytest.mark.parametrize(
+    "low, high",
+    [(0.47, 4.0), (4.0, 27.0), (27.0, 1e4)],
+    ids=["mid-rational", "asymptotic", "far-tail"],
+)
+def test_erfcx_float64_precision(low, high):
+    # The two upper Cody intervals are free of exp, which is what lets erfcx hold full
+    # float64 accuracy where every other member of the family is capped near 1e-7. This
+    # is also the test that fails if the coefficients are weak-typed to float32, since
+    # MLX weak-types Python floats. float64 lives on the CPU stream, so the dispatch is
+    # exercised directly rather than through a compiled function.
+    x_test_value = np.linspace(low, high, 201)
+
+    with mlx.stream(mlx.cpu):
+        erfcx_fn = mlx_funcify(Erfcx())
+        res = np.asarray(erfcx_fn(mlx.array(x_test_value, dtype=mlx.float64)))
+
+    np.testing.assert_allclose(res, scipy.special.erfcx(x_test_value), rtol=1e-13)
+
+
+def test_erfc_tail_is_not_truncated():
+    # erfc reaches 1e-309 before it stops being representable. Deriving it from
+    # 1 - erf(x) collapses it to exactly zero from x = 4, and a plain mx.exp scale
+    # factor stops at x = 9.5, mx.exp having float32 range as well as float32 precision.
+    x_test_value = np.array([4.0, 6.0, 9.0, 12.0, 20.0, 26.0])
+
+    with mlx.stream(mlx.cpu):
+        erfc_fn = mlx_funcify(Erfc())
+        res = np.asarray(erfc_fn(mlx.array(x_test_value, dtype=mlx.float64)))
+
+    assert (res > 0).all()
+    np.testing.assert_allclose(res, scipy.special.erfc(x_test_value), rtol=1e-5)
+
+
+def test_log_ndtr_via_erfcx():
+    # log(erfcx(-z / sqrt(2)) / 2) - z**2 / 2 is the stable form for the log of the
+    # Gaussian cdf in the left tail, and the clearest reason erfcx exists as its own op:
+    # it stays finite for as long as the result is representable, where the erfc form
+    # below underflows to -inf long before that
+    z = vector("z", dtype="float64")
+    lcdf = pt.switch(
+        pt.lt(z, -1.0),
+        pt.log(erfcx(-z / np.sqrt(2.0)) / 2.0) - pt.sqr(z) / 2.0,
+        pt.log1p(-erfc(z / np.sqrt(2.0)) / 2.0),
+    )
+    z_test_value = np.array([2.0, 0.0, -1.0, -5.0, -10.0, -20.0, -40.0])
+
+    compare_mlx_and_py(
+        [z],
+        [lcdf],
+        [z_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-5),
+    )
+
+
+def test_log_ndtr_via_erfc():
+    # The same quantity through erfc alone. That form is exact as mathematics and bounded
+    # in practice by erfc's own underflow, so it is worth pinning over the range where it
+    # still has to agree with the erfcx form above
+    x = vector("x", dtype="float64")
+    x_test_value = np.array([-12.0, -8.0, -6.0, -3.0, 0.0, 3.0])
+
+    compare_mlx_and_py(
+        [x],
+        [pt.log(0.5 * erfc(-x / np.sqrt(2.0)))],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-5),
+    )
+
+
+@pytest.mark.parametrize("op", [erf, erfc, erfcx], ids=["erf", "erfc", "erfcx"])
+def test_erf_family_edge_cases(op):
+    # Both infinities, both signed zeros, and nan. erfcx(-inf) is +inf rather than a
+    # finite limit, so this also pins the reflection erfcx(-y) = 2 exp(y**2) - erfcx(y)
+    x = vector("x", dtype="float64")
+    x_test_value = np.array([0.0, -0.0, np.inf, -np.inf, np.nan])
+
+    compare_mlx_and_py([x], [op(x)], [x_test_value])
+
+
+@pytest.mark.parametrize("op", [erf, erfc, erfcx], ids=["erf", "erfc", "erfcx"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_erf_family_grad(op, dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(31).uniform(-3.0, 3.0, 51).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [pt.grad(op(x).sum(), x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-5, atol=1e-7),
+    )
 
 
 # float32 and float64 take deliberately different paths through both dispatches, so

@@ -53,6 +53,187 @@ _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
 _PSI_SHIFTS_SINGLE = 6
 
 
+# W. J. Cody, "Rational Chebyshev Approximation for the Error Function" (Math. Comp. 23,
+# 1969), in the arrangement used by the netlib SPECFUN CALERF routine. Three intervals:
+# a series for erf below 0.46875, and two rationals that yield erfcx directly above it.
+#
+# Deriving all three from one kernel, rather than composing them out of mx.erf, is what
+# makes them accurate. mx.erf is a float32 kernel whatever dtype it is handed, as are
+# mx.exp, mx.sin and mx.cos, while mx.log and mx.sqrt are genuine at float64. Both upper
+# intervals here are free of exp, so erfcx holds the full working precision across the
+# range where erfc has decayed far past anything 1 - erf could resolve. The subunit
+# interval and the negative-argument reflections still need exp and inherit its ceiling
+# of roughly 1e-7 relative, which is why erfcx keeps its rational branches rather than
+# being derived from a single form.
+
+
+_ERF_A = (
+    3.16112374387056560e00,
+    1.13864154151050156e02,
+    3.77485237685302021e02,
+    3.20937758913846947e03,
+    1.85777706184603153e-1,
+)
+
+
+_ERF_B = (
+    2.36012909523441209e01,
+    2.44024637934444173e02,
+    1.28261652607737228e03,
+    2.84423683343917062e03,
+)
+
+
+_ERFCX_C = (
+    5.64188496988670089e-1,
+    8.88314979438837594e00,
+    6.61191906371416295e01,
+    2.98635138197400131e02,
+    8.81952221241769090e02,
+    1.71204761263407058e03,
+    2.05107837782607147e03,
+    1.23033935479799725e03,
+    2.15311535474403846e-8,
+)
+
+
+_ERFCX_D = (
+    1.57449261107098347e01,
+    1.17693950891312499e02,
+    5.37181101862009858e02,
+    1.62138957456669019e03,
+    3.29079923573345963e03,
+    4.36261909014324716e03,
+    3.43936767414372164e03,
+    1.23033935480374942e03,
+)
+
+
+_ERFCX_P = (
+    3.05326634961232344e-1,
+    3.60344899949804439e-1,
+    1.25781726111229246e-1,
+    1.60837851487422766e-2,
+    6.58749161529837803e-4,
+    1.63153871373020978e-2,
+)
+
+
+_ERFCX_Q = (
+    2.56852019228982242e00,
+    1.87295284992346047e00,
+    5.27905102951428412e-1,
+    6.05183413124413191e-2,
+    2.33520497626869185e-3,
+)
+
+
+_SQRT_PI_INV = 5.6418958354775628695e-1
+
+
+_ERF_THRESH = 0.46875
+
+
+_ERFCX_SPLIT = 4.0
+_LN2 = 0.6931471805599453
+
+
+_EXP_CLAMP = 1e4
+
+
+def _exp_wide(t, const):
+    """``exp(t)`` with the exponent range of the working precision.
+
+    ``mx.exp`` is a float32 kernel in range as well as in precision: it flushes to zero
+    below roughly ``exp(-87)`` and overflows above ``exp(88)`` even when handed float64.
+    ``erfc`` needs ``exp(-y**2)`` down to ``exp(-708)`` before its result stops being
+    representable, so without this the tail would return zero from ``y = 9.5`` rather
+    than the true 26.6.
+
+    Writing :math:`e^{t} = 2^{k} e^{r}` with :math:`k` an integer and
+    :math:`\\lvert r \\rvert \\le \\tfrac{1}{2}\\ln 2` keeps the exponential's argument
+    small while ``mx.power`` supplies the scale, which it computes over the full float64
+    range. Precision is unchanged -- ``exp(r)`` is still the float32 kernel -- so this
+    buys range only.
+    """
+    # An infinite argument would leave r = -inf + inf = nan, so it is clamped first. The
+    # bound is far outside the representable range of either precision, where 2**k has
+    # already saturated to zero or infinity, so no finite result is altered
+    t = mx.minimum(mx.maximum(t, const(-_EXP_CLAMP)), const(_EXP_CLAMP))
+    k = mx.round(t / const(_LN2))
+    r = t - k * const(_LN2)
+    return mx.exp(r) * mx.power(const(2.0), k)
+
+
+def _erf_series(x, const):
+    """erf on |x| <= 0.46875, where 1 - erfc would cancel. Free of exp."""
+    z = x * x
+    num = const(_ERF_A[4]) * z
+    den = z
+    for a, b in zip(_ERF_A[:3], _ERF_B[:3]):
+        num = (num + const(a)) * z
+        den = (den + const(b)) * z
+    return x * (num + const(_ERF_A[3])) / (den + const(_ERF_B[3]))
+
+
+def _erfcx_upper(y, const):
+    """erfcx on y >= 0.46875, where neither branch needs exp.
+
+    Callers must clamp ``y`` to the threshold themselves. Keeping this separate from
+    ``_erfcx_positive`` is what lets ``erf`` and ``erfc`` skip the subunit branch, which
+    their own clamps guarantee is never selected -- every branch is evaluated for every
+    element, so an unreachable one is not free.
+    """
+    split = const(_ERFCX_SPLIT)
+
+    # 0.46875 <= y <= 4
+    mid_y = mx.minimum(y, split)
+    num = const(_ERFCX_C[8]) * mid_y
+    den = mid_y
+    for c, d in zip(_ERFCX_C[:7], _ERFCX_D[:7]):
+        num = (num + const(c)) * mid_y
+        den = (den + const(d)) * mid_y
+    mid = (num + const(_ERFCX_C[7])) / (den + const(_ERFCX_D[7]))
+
+    # y > 4, as an asymptotic rational in 1 / y^2
+    high_y = mx.maximum(y, split)
+    z = const(1.0) / (high_y * high_y)
+    num = const(_ERFCX_P[5]) * z
+    den = z
+    for p, q in zip(_ERFCX_P[:4], _ERFCX_Q[:4]):
+        num = (num + const(p)) * z
+        den = (den + const(q)) * z
+    r = z * (num + const(_ERFCX_P[4])) / (den + const(_ERFCX_Q[4]))
+    high = (const(_SQRT_PI_INV) - r) / high_y
+
+    return mx.where(y <= split, mid, high)
+
+
+def _erfc_tail(y, const):
+    """erfc on y >= 0.46875. Callers must clamp ``y`` to the threshold themselves.
+
+    Multiplying by ``exp(-y**2)`` underflows to zero smoothly, where ``1 - erf(y)``
+    cancels to it abruptly and loses every significant digit on the way.
+    """
+    return _exp_wide(-(y * y), const) * _erfcx_upper(y, const)
+
+
+def _erfcx_positive(y, const):
+    """erfcx on y >= 0, for non-negative ``y`` only."""
+    thresh = const(_ERF_THRESH)
+    # y < 0.46875 is the one branch that needs exp, and exp(y^2) <= 1.25 there
+    small_y = mx.minimum(y, thresh)
+    small = mx.exp(small_y * small_y) * (const(1.0) - _erf_series(small_y, const))
+    return mx.where(y <= thresh, small, _erfcx_upper(mx.maximum(y, thresh), const))
+
+
+def _erfc_positive(y, const):
+    """erfc on y >= 0, for non-negative ``y`` only."""
+    thresh = const(_ERF_THRESH)
+    near = const(1.0) - _erf_series(mx.minimum(y, thresh), const)
+    return mx.where(y <= thresh, near, _erfc_tail(mx.maximum(y, thresh), const))
+
+
 def _working_precision(x):
     """Set up a series approximation over ``x``.
 
@@ -92,7 +273,13 @@ def mlx_funcify_Sigmoid(op, **kwargs):
 @mlx_funcify.register(Erfc)
 def mlx_funcify_Erfc(op, **kwargs):
     def erfc(x):
-        return 1.0 - mx.erf(x)
+        z, const, out_dtype = _working_precision(x)
+        y = mx.abs(z)
+
+        # Both branches evaluate erfc(|x|); erfc(-y) = 2 - erfc(y) restores the sign
+        pos = _erfc_positive(y, const)
+        out = mx.where(z >= const(0.0), pos, const(2.0) - pos)
+        return out.astype(out_dtype)
 
     return erfc
 
@@ -100,7 +287,14 @@ def mlx_funcify_Erfc(op, **kwargs):
 @mlx_funcify.register(Erfcx)
 def mlx_funcify_Erfcx(op, **kwargs):
     def erfcx(x):
-        return mx.exp(x * x) * (1.0 - mx.erf(x))
+        z, const, out_dtype = _working_precision(x)
+        y = mx.abs(z)
+
+        pos = _erfcx_positive(y, const)
+        # erfcx(-y) = 2 exp(y^2) - erfcx(y). The exponential is unavoidable here and
+        # genuinely overflows past y ~ 26.6, which is the function's own behavior
+        reflected = const(2.0) * _exp_wide(y * y, const) - pos
+        return mx.where(z >= const(0.0), pos, reflected).astype(out_dtype)
 
     return erfcx
 
