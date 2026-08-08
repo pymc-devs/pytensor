@@ -136,6 +136,23 @@ def test_erfcx():
     compare_mlx_and_py([x], [out], [0.7])
 
 
+@pytest.mark.parametrize(
+    "min_val, max_val", [(-1.0, 1.0), (1.0, -1.0)], ids=["ordered", "min_gt_max"]
+)
+def test_clip(min_val, max_val):
+    x, min_, max_ = vector("x"), scalar("min"), scalar("max")
+    out = pt.clip(x, min_, max_)
+    compare_mlx_and_py(
+        [x, min_, max_],
+        [out],
+        [
+            np.array([-3.0, -0.5, 0.0, 0.5, 3.0], dtype=config.floatX),
+            np.array(min_val, dtype=config.floatX),
+            np.array(max_val, dtype=config.floatX),
+        ],
+    )
+
+
 def test_log1mexp():
     x = vector("x")
     out = log1mexp(x)

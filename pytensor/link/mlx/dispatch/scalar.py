@@ -5,6 +5,7 @@ import mlx.core as mx
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scalar.basic import (
     Cast,
+    Clip,
     Composite,
     Identity,
     Mod,
@@ -94,6 +95,14 @@ def mlx_funcify_Mod(op, **kwargs):
         return res
 
     return mlx_mod
+
+
+@mlx_funcify.register(Clip)
+def mlx_funcify_Clip(op, **kwargs):
+    def clip(x, min, max):
+        return mx.where(x < min, min, mx.where(x > max, max, x))
+
+    return clip
 
 
 @mlx_funcify.register(Identity)
