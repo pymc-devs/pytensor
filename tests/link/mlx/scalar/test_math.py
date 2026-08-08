@@ -156,6 +156,26 @@ def test_erfc_tail_is_not_truncated():
     np.testing.assert_allclose(res, scipy.special.erfc(x_test_value), rtol=1e-5)
 
 
+@pytest.mark.skipif(
+    not mlx.metal.is_available(), reason="only one implementation is reachable"
+)
+@pytest.mark.parametrize("op", [Erfc, Erfcx], ids=["erfc", "erfcx"])
+def test_erf_family_paths_agree(op):
+    # erfc and erfcx are implemented twice: a Metal kernel, taken for float32 on the GPU
+    # stream, and the vectorized fallback taken everywhere else. The two share generated
+    # coefficients but not their branch structure or their negative-argument reflection,
+    # so this is what keeps them from drifting apart. The range spans every branch of
+    # both, stopping short of where float32 underflows and the comparison goes trivial
+    x_test_value = np.random.default_rng(41).uniform(-4.0, 9.0, 1001).astype("float32")
+
+    with mlx.stream(mlx.gpu):
+        metal = np.asarray(mlx_funcify(op())(mlx.array(x_test_value)))
+    with mlx.stream(mlx.cpu):
+        vectorized = np.asarray(mlx_funcify(op())(mlx.array(x_test_value)))
+
+    np.testing.assert_allclose(metal, vectorized, rtol=1e-5, atol=0.0)
+
+
 def test_log_ndtr_via_erfcx():
     # log(erfcx(-z / sqrt(2)) / 2) - z**2 / 2 is the stable form for the log of the
     # Gaussian cdf in the left tail, and the clearest reason erfcx exists as its own op:
