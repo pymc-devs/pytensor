@@ -167,6 +167,38 @@ def test_empty_input_shortcut(mode):
     assert solved.shape == (0, 2)
 
 
+@pytest.mark.parametrize("mode", ["PYTHON", "PYJIT"])
+def test_cholesky_returns_nan_when_not_positive_definite(mode):
+    x = pt.matrix("x")
+    out = pt.linalg.cholesky(x)
+    not_pd = np.array([[1.0, 2.0], [2.0, 1.0]])
+    factor = pytensor.function([x], out, mode=mode)(not_pd)
+    assert np.isnan(factor).all()
+
+
+@pytest.mark.parametrize("mode", ["PYTHON", "PYJIT"])
+def test_batched_cholesky_nans_only_the_failing_matrix(mode):
+    # `np.vectorize` writes each core result into a shared output buffer, so a
+    # single failing matrix must not poison its neighbours.
+    x = pt.tensor("x", shape=(None, None, None))
+    out = pt.linalg.cholesky(x, lower=True)
+    batch = np.stack([np.eye(2) * 4.0, np.array([[1.0, 2.0], [2.0, 1.0]])])
+    factor = pytensor.function([x], out, mode=mode)(batch)
+
+    np.testing.assert_allclose(factor[0], np.eye(2) * 2.0)
+    assert np.isnan(factor[1]).all()
+
+
+@pytest.mark.parametrize("mode", ["PYTHON", "PYJIT"])
+def test_solve_triangular_returns_nan_when_singular(mode):
+    A = pt.matrix("A")
+    b = pt.vector("b")
+    out = pt.linalg.solve_triangular(A, b, lower=True)
+    singular = np.array([[0.0, 0.0], [1.0, 1.0]])
+    x = pytensor.function([A, b], out, mode=mode)(singular, np.array([1.0, 2.0]))
+    assert np.isnan(x).all()
+
+
 def test_blockwise_falls_back_without_core_dispatch():
     # The general Solve has no python_funcify dispatch, so Blockwise must fall
     # back to its (vectorized) perform.
