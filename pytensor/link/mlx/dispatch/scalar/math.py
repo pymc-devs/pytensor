@@ -141,6 +141,158 @@ _LN2 = 0.6931471805599453
 _EXP_CLAMP = 1e4
 
 
+def _metal_constants(**arrays):
+    """Render Python float tuples as Metal ``constant`` arrays, one per keyword."""
+    return "\n".join(
+        f"constant float {name}[{len(values)}] = {{"
+        + ", ".join(f"{v!r}f" for v in values)
+        + "};"
+        for name, values in arrays.items()
+    )
+
+
+# Generating the coefficients rather than transcribing them keeps the two implementations
+# from drifting apart, and emitting them as named Metal arrays keeps everything below this
+# point ordinary Metal: only the numbers are generated, not the surrounding code.
+#
+# The kernel is worth having because it can branch. The vectorized path has to evaluate
+# every interval for every element and select afterwards, which costs it an order of
+# magnitude at the sizes where memory bandwidth dominates; a kernel just takes the branch.
+
+
+_METAL_HEADER = (
+    _metal_constants(
+        ERF_A=_ERF_A,
+        ERF_B=_ERF_B,
+        ERFCX_C=_ERFCX_C,
+        ERFCX_D=_ERFCX_D,
+        ERFCX_P=_ERFCX_P,
+        ERFCX_Q=_ERFCX_Q,
+        ERF_SPLITS=(_ERF_THRESH, _ERFCX_SPLIT, _SQRT_PI_INV),
+    )
+    + """
+#define ERF_THRESH   ERF_SPLITS[0]
+#define ERFCX_SPLIT  ERF_SPLITS[1]
+#define SQRT_PI_INV  ERF_SPLITS[2]
+
+static inline float erf_series(float t) {
+    float z = t * t;
+    float num = ERF_A[4] * z;
+    float den = z;
+    for (int i = 0; i < 3; ++i) {
+        num = (num + ERF_A[i]) * z;
+        den = (den + ERF_B[i]) * z;
+    }
+    return t * (num + ERF_A[3]) / (den + ERF_B[3]);
+}
+
+static inline float erfcx_upper(float y) {
+    if (y <= ERFCX_SPLIT) {
+        float num = ERFCX_C[8] * y;
+        float den = y;
+        for (int i = 0; i < 7; ++i) {
+            num = (num + ERFCX_C[i]) * y;
+            den = (den + ERFCX_D[i]) * y;
+        }
+        return (num + ERFCX_C[7]) / (den + ERFCX_D[7]);
+    }
+    float z = 1.0f / (y * y);
+    float num = ERFCX_P[5] * z;
+    float den = z;
+    for (int i = 0; i < 4; ++i) {
+        num = (num + ERFCX_P[i]) * z;
+        den = (den + ERFCX_Q[i]) * z;
+    }
+    float r = z * (num + ERFCX_P[4]) / (den + ERFCX_Q[4]);
+    return (SQRT_PI_INV - r) / y;
+}
+"""
+)
+
+
+_METAL_ERFC_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float xv = (float)x[i];
+    float y = fabs(xv);
+    float res;
+    if (y <= ERF_THRESH) {
+        res = 1.0f - erf_series(y);
+    } else {
+        res = exp(-y * y) * erfcx_upper(y);
+    }
+    if (xv < 0.0f) res = 2.0f - res;
+    out[i] = (T)res;
+"""
+
+
+_METAL_ERFCX_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float xv = (float)x[i];
+    float y = fabs(xv);
+    float res;
+    if (y <= ERF_THRESH) {
+        res = exp(y * y) * (1.0f - erf_series(y));
+    } else {
+        res = erfcx_upper(y);
+    }
+    if (xv < 0.0f) res = 2.0f * exp(y * y) - res;
+    out[i] = (T)res;
+"""
+
+
+_METAL_SOURCES = {"erfc": _METAL_ERFC_SOURCE, "erfcx": _METAL_ERFCX_SOURCE}
+
+
+_METAL_KERNELS: dict[str, object | None] = {}
+
+
+def _metal_erf_kernel(name):
+    """Build and cache the Metal kernel for ``name``, or None where none can be built."""
+    if name not in _METAL_KERNELS:
+        try:
+            _METAL_KERNELS[name] = mx.fast.metal_kernel(
+                name=f"pytensor_{name}",
+                input_names=["x"],
+                output_names=["out"],
+                header=_METAL_HEADER,
+                source=_METAL_SOURCES[name],
+            )
+        except Exception:
+            _METAL_KERNELS[name] = None
+    return _METAL_KERNELS[name]
+
+
+def _metal_erf_call(name, x):
+    """Evaluate ``name`` through its Metal kernel, or return None to fall back.
+
+    Metal has no float64 and the kernel needs the GPU stream, which between them leave
+    exactly the case the vectorized path handles least well and float64 needs least: the
+    default device at single precision.
+    """
+    if (
+        x.dtype != mx.float32
+        or not mx.metal.is_available()
+        or mx.default_device() != mx.gpu
+    ):
+        return None
+    kernel = _metal_erf_kernel(name)
+    if kernel is None:
+        return None
+    # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
+    # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
+    # it fails to compile. Reshaping covers every rank at once
+    flat = x.reshape(-1)
+    (out,) = kernel(
+        inputs=[flat],
+        template=[("T", flat.dtype)],
+        grid=(flat.size, 1, 1),
+        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
+        output_shapes=[flat.shape],
+        output_dtypes=[flat.dtype],
+    )
+    return out.reshape(x.shape)
+
+
 def _exp_wide(t, const):
     """``exp(t)`` with the exponent range of the working precision.
 
@@ -273,6 +425,11 @@ def mlx_funcify_Sigmoid(op, **kwargs):
 @mlx_funcify.register(Erfc)
 def mlx_funcify_Erfc(op, **kwargs):
     def erfc(x):
+        x = mx.array(x)
+        fast = _metal_erf_call("erfc", x)
+        if fast is not None:
+            return fast
+
         z, const, out_dtype = _working_precision(x)
         y = mx.abs(z)
 
@@ -287,6 +444,11 @@ def mlx_funcify_Erfc(op, **kwargs):
 @mlx_funcify.register(Erfcx)
 def mlx_funcify_Erfcx(op, **kwargs):
     def erfcx(x):
+        x = mx.array(x)
+        fast = _metal_erf_call("erfcx", x)
+        if fast is not None:
+            return fast
+
         z, const, out_dtype = _working_precision(x)
         y = mx.abs(z)
 

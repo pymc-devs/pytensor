@@ -16,7 +16,7 @@ from pytensor.tensor.math import (
     sigmoid,
     softplus,
 )
-from pytensor.tensor.type import vector
+from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
@@ -193,6 +193,25 @@ def test_log_ndtr_via_erfc():
 
 
 @pytest.mark.parametrize("op", [erf, erfc, erfcx], ids=["erf", "erfc", "erfcx"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_erf_family_ranks(op, dtype):
+    # A scalar is rank 0, and the fast path indexes a flat buffer, so it has to reshape
+    # before dispatching: Metal binds a 0-d argument as a value rather than a pointer and
+    # subscripting it does not compile. Matrices check that the flattening round-trips
+    s = scalar("s", dtype=dtype)
+    compare_mlx_and_py([s], [op(s)], [np.array(1.5, dtype=dtype)])
+
+    m = matrix("m", dtype=dtype)
+    m_test_value = np.random.default_rng(37).uniform(-3.0, 5.0, (4, 7)).astype(dtype)
+    compare_mlx_and_py(
+        [m],
+        [op(m)],
+        [m_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-5, atol=1e-7),
+    )
+
+
+@pytest.mark.parametrize("op", [erf, erfc, erfcx], ids=["erf", "erfc", "erfcx"])
 def test_erf_family_edge_cases(op):
     # Both infinities, both signed zeros, and nan. erfcx(-inf) is +inf rather than a
     # finite limit, so this also pins the reflection erfcx(-y) = 2 exp(y**2) - erfcx(y)
@@ -287,8 +306,7 @@ def test_gammaln_float64_precision(low, high):
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
 def test_gammaln_grad(dtype):
-    # d/dx gammaln is psi, which is why the two dispatches ship together: this is the
-    # graph PyMC builds for the Gamma, Beta, Poisson and NegativeBinomial logps
+    # d/dx gammaln is psi, which is why the two dispatches ship together
     x = vector("x", dtype=dtype)
     x_test_value = np.random.default_rng(13).uniform(0.1, 20.0, 51).astype(dtype)
 
