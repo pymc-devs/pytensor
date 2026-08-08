@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import mlx.core as mx
 import numpy as np
 
@@ -14,8 +16,6 @@ from pytensor.scalar.math import (
 
 
 _LANCZOS_G = 7.0
-
-
 _LANCZOS_COEFFS = (
     0.99999999999980993,
     676.5203681218851,
@@ -31,8 +31,6 @@ _LANCZOS_COEFFS = (
 # Asymptotic expansion of psi, with terms B_2n / 2n, applied after the recurrence has
 # carried the argument up by _PSI_SHIFTS. Single precision reaches its own limit with a
 # shorter recurrence and fewer terms, and every one of them costs a pass over the array.
-
-
 _PSI_COEFFS = (
     1 / 12,
     -1 / 120,
@@ -42,16 +40,9 @@ _PSI_COEFFS = (
     -691 / 32760,
     1 / 12,
 )
-
-
 _PSI_SHIFTS = 10
-
-
 _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
-
-
 _PSI_SHIFTS_SINGLE = 6
-
 
 # W. J. Cody, "Rational Chebyshev Approximation for the Error Function" (Math. Comp. 23,
 # 1969), in the arrangement used by the netlib SPECFUN CALERF routine. Three intervals:
@@ -65,8 +56,6 @@ _PSI_SHIFTS_SINGLE = 6
 # interval and the negative-argument reflections still need exp and inherit its ceiling
 # of roughly 1e-7 relative, which is why erfcx keeps its rational branches rather than
 # being derived from a single form.
-
-
 _ERF_A = (
     3.16112374387056560e00,
     1.13864154151050156e02,
@@ -74,16 +63,12 @@ _ERF_A = (
     3.20937758913846947e03,
     1.85777706184603153e-1,
 )
-
-
 _ERF_B = (
     2.36012909523441209e01,
     2.44024637934444173e02,
     1.28261652607737228e03,
     2.84423683343917062e03,
 )
-
-
 _ERFCX_C = (
     5.64188496988670089e-1,
     8.88314979438837594e00,
@@ -95,8 +80,6 @@ _ERFCX_C = (
     1.23033935479799725e03,
     2.15311535474403846e-8,
 )
-
-
 _ERFCX_D = (
     1.57449261107098347e01,
     1.17693950891312499e02,
@@ -107,8 +90,6 @@ _ERFCX_D = (
     3.43936767414372164e03,
     1.23033935480374942e03,
 )
-
-
 _ERFCX_P = (
     3.05326634961232344e-1,
     3.60344899949804439e-1,
@@ -117,8 +98,6 @@ _ERFCX_P = (
     6.58749161529837803e-4,
     1.63153871373020978e-2,
 )
-
-
 _ERFCX_Q = (
     2.56852019228982242e00,
     1.87295284992346047e00,
@@ -126,18 +105,11 @@ _ERFCX_Q = (
     6.05183413124413191e-2,
     2.33520497626869185e-3,
 )
-
-
 _SQRT_PI_INV = 5.6418958354775628695e-1
-
-
 _ERF_THRESH = 0.46875
-
-
 _ERFCX_SPLIT = 4.0
+
 _LN2 = 0.6931471805599453
-
-
 _EXP_CLAMP = 1e4
 
 
@@ -243,11 +215,11 @@ _METAL_ERFCX_SOURCE = """
 _METAL_SOURCES = {"erfc": _METAL_ERFC_SOURCE, "erfcx": _METAL_ERFCX_SOURCE}
 
 
-_METAL_KERNELS: dict[str, object | None] = {}
+_METAL_KERNELS: dict[str, Callable | None] = {}
 
 
 def _metal_erf_kernel(name):
-    """Build and cache the Metal kernel for ``name``, or None where none can be built."""
+    """Build and cache the Metal kernel for ``name``, or None if it cannot be built."""
     if name not in _METAL_KERNELS:
         try:
             _METAL_KERNELS[name] = mx.fast.metal_kernel(
@@ -294,21 +266,16 @@ def _metal_erf_call(name, x):
 
 
 def _exp_wide(t, const):
-    """``exp(t)`` with the exponent range of the working precision.
+    r"""``exp(t)`` over the full exponent range of the working precision.
 
-    ``mx.exp`` is a float32 kernel in range as well as in precision: it flushes to zero
-    below roughly ``exp(-87)`` and overflows above ``exp(88)`` even when handed float64.
-    ``erfc`` needs ``exp(-y**2)`` down to ``exp(-708)`` before its result stops being
-    representable, so without this the tail would return zero from ``y = 9.5`` rather
-    than the true 26.6.
-
-    Writing :math:`e^{t} = 2^{k} e^{r}` with :math:`k` an integer and
-    :math:`\\lvert r \\rvert \\le \\tfrac{1}{2}\\ln 2` keeps the exponential's argument
-    small while ``mx.power`` supplies the scale, which it computes over the full float64
-    range. Precision is unchanged -- ``exp(r)`` is still the float32 kernel -- so this
-    buys range only.
+    ``mx.exp`` is a float32 kernel in range as well as in precision, flushing to zero
+    below ``exp(-87)`` and overflowing above ``exp(88)`` whatever the dtype. This holds
+    to the range the dtype itself supports, at ``mx.exp``'s float32 precision.
     """
-    # An infinite argument would leave r = -inf + inf = nan, so it is clamped first. The
+    # Splitting e^t into 2^k e^r, with k an integer and |r| <= ln(2)/2, keeps the
+    # exponential's argument small while mx.power supplies the scale over the full range.
+    #
+    # An infinite argument would leave r = -inf + inf = nan, so t is clamped first. The
     # bound is far outside the representable range of either precision, where 2**k has
     # already saturated to zero or infinity, so no finite result is altered
     t = mx.minimum(mx.maximum(t, const(-_EXP_CLAMP)), const(_EXP_CLAMP))
