@@ -36,6 +36,7 @@ def store_core_outputs(
     nout: int,
     accum_fns: dict[int, Callable[[str, str], Sequence[str | CODE_TOKEN]]]
     | None = None,
+    const_positions: tuple[int, ...] = (),
 ) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
@@ -54,8 +55,18 @@ def store_core_outputs(
     ``["o1[...] += t1"]`` for a sum reduction, or the multi-line conditional for
     a max reduction).  Outputs absent from ``accum_fns`` are stored with ``=``.
     Both reductions and indexed ``inc`` writes go through this mechanism.
+
+    ``const_positions`` lists the input positions supplied as loop-invariant
+    ``constant_inputs``, which ``_vectorized`` passes ahead of the per-iteration
+    array values.  The generated signature is permuted to receive them first
+    while the call to ``core_op_fn`` keeps the original input order, so the inner
+    fgraph never has to be reordered.
     """
     if getattr(core_op_fn, "handles_out", False):
+        if const_positions:
+            raise NotImplementedError(
+                "constant_inputs are not supported for a handles_out core function"
+            )
         return core_op_fn
 
     accum_fns = accum_fns or {}
@@ -64,12 +75,18 @@ def store_core_outputs(
     outputs = [f"o{i}" for i in range(nout)]
     inner_outputs = [f"t{output}" for output in outputs]
 
+    const_set = frozenset(const_positions)
+    permuted_inputs = [f"i{i}" for i in const_positions] + [
+        f"i{i}" for i in range(nin) if i not in const_set
+    ]
+
     inp_signature = ", ".join(inputs)
+    permuted_signature = ", ".join(permuted_inputs)
     out_signature = ", ".join(outputs)
     inner_out_signature = ", ".join(inner_outputs)
 
     code: list[str | CODE_TOKEN] = [
-        f"def store_core_outputs({inp_signature}, {out_signature}):",
+        f"def store_core_outputs({permuted_signature}, {out_signature}):",
         CODE_TOKEN.INDENT,
         f"{inner_out_signature} = core_op_fn({inp_signature})",
     ]
@@ -392,6 +409,32 @@ def compute_itershape(
     return shape
 
 
+def _make_stack_array(ctx, builder, arrtype, shape):
+    """Build a single-element array struct backed by a stack slot.
+
+    Used for full-reduction accumulators, whose buffer is statically one element
+    and never escapes the caller (the value is read straight back out as a
+    scalar).  ``_empty_nd_impl`` would put those on the heap, costing an NRT
+    allocation, an identity memset and a free to carry one register's worth of
+    data.  An ``alloca`` costs nothing and, not escaping, is promoted to a
+    register by LLVM.  ``meminfo`` is NULL, which numba's incref/decref already
+    tolerate (``numba.carray`` views are built the same way).
+    """
+    ll_dtype = ctx.get_data_type(arrtype.dtype)
+    data = cgutils.alloca_once(builder, ll_dtype)
+    itemsize = ctx.get_abi_sizeof(ll_dtype)
+    ary = arrayobj.make_array(arrtype)(ctx, builder)
+    arrayobj.populate_array(
+        ary,
+        data=data,
+        shape=[ir.IntType(64)(1)] * len(shape),
+        strides=[ir.IntType(64)(itemsize)] * len(shape),
+        itemsize=ir.IntType(64)(itemsize),
+        meminfo=None,
+    )
+    return ary
+
+
 def make_outputs(
     ctx: numba.core.base.BaseContext,
     builder: ir.IRBuilder,
@@ -404,6 +447,7 @@ def make_outputs(
     output_core_shapes: tuple,
     update_outputs: dict | None = None,
     reduce_identities: dict | None = None,
+    stack_outputs: frozenset[int] = frozenset(),
 ) -> tuple[list[ir.Value], list[types.Array]]:
     """Allocate output arrays for vectorized loop.
 
@@ -414,6 +458,10 @@ def make_outputs(
     outputs.  Such outputs are freshly allocated (size 1 on the reduced axes, via
     their ``bc=True`` pattern) and pre-filled with the reduction identity so the
     accumulating store in the loop reduces into them correctly.
+
+    ``stack_outputs`` holds the indices of those reduction outputs whose buffer
+    is statically a single element and does not escape; they go on the stack
+    rather than the heap (see ``_make_stack_array``).
     """
     output_arrays = []
     output_arry_types = []
@@ -442,7 +490,10 @@ def make_outputs(
             for length, bc_dim in zip(iter_shape, bc, strict=True)
         ]
         shape = batch_shape + core_shape
-        array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
+        if i in stack_outputs:
+            array = _make_stack_array(ctx, builder, arrtype, shape)
+        else:
+            array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
         if reduce_identities is not None and i in reduce_identities:
             # Pre-fill the freshly allocated (C-contiguous) buffer with the
             # reduction identity.  A flat scan over every element is valid
@@ -863,7 +914,7 @@ def _vectorized(
     ``((out_0, out_1), mode)`` means that index updates outputs out_0 and
     out_1 with *mode* ``"set"`` or ``"inc"``.
 
-    ``reduce_outputs`` lists ``(output_idx, identity)`` pairs for reduction
+    ``reduce_outputs`` lists ``(output_idx, identity, on_stack)`` triples for reduction
     outputs.  Such an output carries ``bc=True`` on its reduced axes; the buffer
     is allocated size 1 there, pre-filled with ``identity``, and the per-iteration
     store (baked into ``core_func`` via ``store_core_outputs``) accumulates into it.
@@ -890,7 +941,9 @@ def _vectorized(
     output_bc_patterns = _decode_literal(output_bc_patterns, "output_bc_patterns")
     output_dtypes = _decode_literal(output_dtypes, "output_dtypes")
     inplace_pattern = _decode_literal(inplace_pattern, "inplace_pattern")
-    reduce_identities = dict(_decode_literal(reduce_outputs, "reduce_outputs"))
+    reduce_outputs = _decode_literal(reduce_outputs, "reduce_outputs")
+    reduce_identities = {idx: ident for idx, ident, _ in reduce_outputs}
+    stack_outputs = frozenset(idx for idx, _, on_stack in reduce_outputs if on_stack)
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -1174,6 +1227,7 @@ def _vectorized(
             output_core_shapes,
             update_outputs=update_outputs_dict,
             reduce_identities=reduce_identities,
+            stack_outputs=stack_outputs,
         )
 
         core_signature = typingctx.resolve_function_type(
