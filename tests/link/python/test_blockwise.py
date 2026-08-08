@@ -4,6 +4,7 @@ import scipy.linalg as sla
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.link.python.dispatch.basic import python_funcify
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from tests.link.python.test_basic import compare_py_and_pyjit
@@ -168,11 +169,19 @@ def test_empty_input_shortcut(mode):
 
 def test_blockwise_falls_back_without_core_dispatch():
     # The general Solve has no python_funcify dispatch, so Blockwise must fall
-    # back to its (vectorized) perform and still match the reference.
-    A = pt.matrix("A")
-    b = pt.vector("b")
-    out = pt.linalg.solve(A, b)
+    # back to its (vectorized) perform.
+    A = pt.tensor("A", shape=(None, None, None))
+    b = pt.tensor("b", shape=(None, None))
+    out = pt.linalg.solve(A, b, b_ndim=1)
     rng = np.random.default_rng(2)
-    Av = rng.standard_normal((4, 4)) + 4 * np.eye(4)
-    bv = rng.standard_normal(4)
-    compare_py_and_pyjit([A, b], out, [Av, bv])
+    Av = rng.standard_normal((3, 4, 4)) + 4 * np.eye(4)
+    bv = rng.standard_normal((3, 4))
+    fn, x = compare_py_and_pyjit([A, b], out, [Av, bv])
+
+    [node] = [
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Blockwise)
+    ]
+    with pytest.raises(NotImplementedError):
+        python_funcify(node.op, node=node)
+
+    np.testing.assert_allclose(np.einsum("...ij,...j->...i", Av, x), bv)
