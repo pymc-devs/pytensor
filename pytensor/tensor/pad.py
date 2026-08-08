@@ -1,27 +1,24 @@
-from collections.abc import Callable
-from functools import partial
+from collections.abc import Callable, Sequence
 from typing import Literal, cast
 
-from pytensor.compile.builders import OpFromGraph
-from pytensor.ifelse import ifelse
-from pytensor.scan import scan
+import numpy as np
+
+from pytensor.graph.basic import Constant
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     TensorVariable,
+    arange,
     as_tensor,
-    concatenate,
-    expand_dims,
-    moveaxis,
     switch,
     zeros,
 )
 from pytensor.tensor.extra_ops import broadcast_to, linspace
-from pytensor.tensor.math import divmod as pt_divmod
-from pytensor.tensor.math import eq, gt, mean, minimum
 from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import maximum, mean, minimum
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
-from pytensor.tensor.subtensor import flip, set_subtensor, slice_at_axis
+from pytensor.tensor.subtensor import flip, set_subtensor, slice_at_axis, take
+from pytensor.tensor.symbolic import TensorSymbolicOp
 
 
 PadMode = Literal[
@@ -38,17 +35,17 @@ PadMode = Literal[
 ]
 stat_funcs = {"maximum": pt_max, "minimum": pt_min, "mean": mean}
 
-allowed_kwargs = {
-    "edge": [],
-    "wrap": [],
-    "constant": ["constant_values"],
-    "linear_ramp": ["end_values"],
-    "maximum": ["stat_length"],
-    "mean": ["stat_length"],
-    "median": ["stat_length"],
-    "minimum": ["stat_length"],
-    "reflect": ["reflect_type"],
-    "symmetric": ["reflect_type"],
+mode_options = {
+    "edge": set(),
+    "wrap": set(),
+    "constant": {"constant_values"},
+    "linear_ramp": {"end_values"},
+    "maximum": {"stat_length"},
+    "mean": {"stat_length"},
+    "median": {"stat_length"},
+    "minimum": {"stat_length"},
+    "reflect": {"reflect_type"},
+    "symmetric": {"reflect_type"},
 }
 
 
@@ -86,7 +83,13 @@ def _get_edges(
     right_slice = slice_at_axis(slice(right_index - 1, right_index), axis)
     right_edge = padded[right_slice]
 
-    return left_edge, right_edge
+    # The slices are symbolic, so `axis` comes back with an unknown length. Callers
+    # broadcast these edges across the pad area, and the gradient of that
+    # broadcast is only summed when the length is known to be 1.
+    return (
+        specify_broadcastable(left_edge, axis),
+        specify_broadcastable(right_edge, axis),
+    )
 
 
 def _symbolic_pad(
@@ -277,166 +280,146 @@ def _linear_ramp_pad(
     return padded
 
 
-def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
-    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
-
-    for axis in range(x.ndim):
-        size = x.shape[axis]
-
-        # Compute how many complete copies of the input will be padded on this dimension, along with the amount of
-        # overflow on the final copy
-        repeats, (left_remainder, right_remainder) = pt_divmod(pad_width[axis], size)
-
-        # In the next step we will generate extra copies of the input, and then trim them down to the correct size.
-        left_trim = size - left_remainder
-        right_trim = size - right_remainder
-
-        # The total number of copies needed is always the sum of the number of complete copies to add, plus the original
-        # input itself, plus the two edge copies that will be trimmed down.
-        total_repeats = repeats.sum() + 3
-
-        # Create a batch dimension and clone the input the required number of times
-        parts = expand_dims(x, (0,)).repeat(total_repeats, axis=0)
-
-        # Move the batch dimension to the active dimension
-        parts = moveaxis(parts, 0, axis)
-
-        # Ravel the active dimension while preserving the shapes of the inactive dimensions. This will expand the
-        # active dimension to have the correctly padded shape, plus excess to be trimmed
-        new_shape = [-1 if i == axis else x.shape[i] for i in range(x.ndim)]
-        x = parts.reshape(new_shape)
-
-        # Trim the excess on the active dimension
-        trim_slice = slice_at_axis(slice(left_trim, -right_trim), axis)
-        x = x[trim_slice]
-
-    return x
-
-
-def _build_padding_one_direction(array, array_flipped, repeats, *, inner_func, axis):
-    [_, parts] = scan(
-        inner_func,
-        non_sequences=[array, array_flipped],
-        outputs_info=[0, None],
-        n_steps=repeats,
-        return_updates=False,
+def _static_pad_width(
+    pad_width: TensorVariable, ndim: int
+) -> tuple[tuple[int, int], ...] | None:
+    """``pad_width`` broadcast to ``ndim`` (before, after) pairs, or None if not constant."""
+    if not isinstance(pad_width, Constant):
+        return None
+    widths = np.asarray(pad_width.data)
+    if not np.issubdtype(widths.dtype, np.integer):
+        raise TypeError("`pad_width` must be of integral type.")
+    return tuple(
+        (int(before), int(after))
+        for before, after in np.broadcast_to(widths, (ndim, 2))
     )
 
-    parts = moveaxis(parts, 0, axis)
-    new_shape = [-1 if i == axis else array.shape[i] for i in range(array.ndim)]
-    padding = parts.reshape(new_shape)
 
-    return padding
+def _gather_indices(
+    mode: Literal["wrap", "symmetric", "reflect"],
+    size: int | TensorVariable,
+    before: int | TensorVariable,
+    after: int | TensorVariable,
+) -> TensorVariable:
+    """Map output positions along one axis back to the input positions they copy.
+
+    ``wrap``, ``symmetric`` and ``reflect`` never compute new values: every
+    padded element is some element of the input, selected by a periodic index
+    map. ``wrap`` has period ``size``, ``symmetric`` period ``2 * size`` (each
+    edge value repeated once at the turning point), and ``reflect`` period
+    ``2 * size - 2`` (turning points not repeated).
+
+    When ``size``, ``before`` and ``after`` are all Python ints the map is built
+    with NumPy, which keeps the padded output shape statically known.
+    """
+    if all(isinstance(value, int) for value in (size, before, after)):
+        offsets = np.arange(before + size + after) - before
+        where, clamp = np.where, max
+    else:
+        offsets = arange(before + size + after) - before
+        where, clamp = switch, maximum
+
+    if mode == "wrap":
+        indices = offsets % size
+    elif mode == "symmetric":
+        period = 2 * size
+        folded = offsets % period
+        indices = where(folded < size, folded, period - 1 - folded)
+    elif mode == "reflect":
+        # A size of 1 degenerates the period to 0. Clamping it to 1 maps every
+        # position onto the single element, which is what reflecting a length-1
+        # axis means.
+        period = clamp(2 * size - 2, 1)
+        folded = offsets % period
+        indices = where(folded < size, folded, period - folded)
+    else:
+        raise ValueError(f"Invalid gather pad mode: {mode}")
+
+    return as_tensor(indices)
 
 
-def _symmetric_pad(x, pad_width):
-    def _symmetric_inner(i, x, x_flipped, padding_left):
-        return i + 1, ifelse(eq(i % 2, int(padding_left)), x_flipped, x)
+def _gather_pad(
+    x: TensorVariable,
+    pad_width: TensorVariable,
+    mode: Literal["wrap", "symmetric", "reflect"],
+) -> TensorVariable:
+    """Pad by gathering input elements, one axis at a time."""
+    width_pairs: Sequence[tuple[int | TensorVariable, int | TensorVariable]]
+    static_widths = _static_pad_width(pad_width, x.ndim)
+    if static_widths is None:
+        widths = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
+        width_pairs = [(widths[axis, 0], widths[axis, 1]) for axis in range(x.ndim)]
+    else:
+        width_pairs = static_widths
 
-    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
+    for axis, (before, after) in enumerate(width_pairs):
+        size = x.type.shape[axis]
+        if size is None:
+            size = x.shape[axis]
 
-    for axis in range(x.ndim):
-        x_flipped = flip(x, axis=axis)
-        original_size = x.shape[axis]
-
-        repeats, remainders = pt_divmod(pad_width[axis], original_size)
-        has_remainder = gt(remainders, 0)
-        repeats = repeats + has_remainder
-
-        left_padding = _build_padding_one_direction(
-            x,
-            x_flipped,
-            repeats[0],
-            axis=axis,
-            inner_func=partial(_symmetric_inner, padding_left=True),
-        )
-        right_padding = _build_padding_one_direction(
-            x,
-            x_flipped,
-            repeats[1],
-            axis=axis,
-            inner_func=partial(_symmetric_inner, padding_left=False),
-        )
-
-        x = concatenate([flip(left_padding, axis), x, right_padding], axis=axis)
-
-        (left_trim, right_trim) = switch(
-            has_remainder, original_size - remainders, remainders
-        )
-        right_trim = x.shape[axis] - right_trim
-
-        trim_slice = slice_at_axis(slice(left_trim, right_trim), axis)
-        x = x[trim_slice]
+        x = take(x, _gather_indices(mode, size, before, after), axis=axis)
 
     return x
 
 
-def _reflect_pad(x, pad_width):
-    def _reflect_inner(i, x, x_flipped, padding_left):
-        return i + 1, ifelse(eq(i % 2, int(padding_left)), x_flipped, x)
+class Pad(TensorSymbolicOp):
+    """Pad an array, with the padding graph built from the input types."""
 
-    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
-    for axis in range(x.ndim):
-        trimmed_size = x.shape[axis] - 1
-
-        trim_slice = slice_at_axis(slice(None, -1), axis)
-        x_trimmed = x[trim_slice]
-        x_flipped = flip(x, axis=axis)[trim_slice]
-
-        repeats, remainders = pt_divmod(pad_width[axis], trimmed_size)
-        repeats = repeats + 1
-
-        left_padding = _build_padding_one_direction(
-            x_trimmed,
-            x_flipped,
-            repeats[0],
-            axis=axis,
-            inner_func=partial(_reflect_inner, padding_left=True),
-        )
-        right_padding = _build_padding_one_direction(
-            x_trimmed,
-            x_flipped,
-            repeats[1],
-            axis=axis,
-            inner_func=partial(_reflect_inner, padding_left=False),
-        )
-
-        left_trim = slice_at_axis(slice(trimmed_size - remainders[0] - 1, -1), axis)
-        right_trim = slice_at_axis(
-            slice(1, right_padding.shape[axis] - trimmed_size + remainders[1] + 1), axis
-        )
-
-        x = concatenate(
-            [flip(left_padding, axis)[left_trim], x, right_padding[right_trim]],
-            axis=axis,
-        )
-    return x
-
-
-class Pad(OpFromGraph):
-    """
-    Wrapper Op for Pad graphs
-    """
+    __props__ = ("pad_mode", "reflect_type", "has_stat_length", "static_pad_width")
 
     def __init__(
-        self, inputs, outputs, pad_mode, reflect_type=None, has_stat_length=False
+        self,
+        *,
+        pad_mode: PadMode,
+        reflect_type: str | None = None,
+        has_stat_length: bool = False,
+        static_pad_width: tuple[tuple[int, int], ...] | None = None,
+        **kwargs,
     ):
         self.pad_mode = pad_mode
         self.reflect_type = reflect_type
         self.has_stat_length = has_stat_length
+        # `pad_width` reaches build_inner_graph as a dummy with no value, so a
+        # constant one has to travel alongside it to stay visible inside the graph.
+        self.static_pad_width = static_pad_width
 
-        super().__init__(inputs=inputs, outputs=outputs)
+        super().__init__(**kwargs)
+
+    def build_inner_graph(self, x, pad_width, *extra_inputs):
+        if self.static_pad_width is not None:
+            pad_width = as_tensor(np.asarray(self.static_pad_width, dtype="int64"))
+
+        mode = self.pad_mode
+        if mode == "constant":
+            (constant_values,) = extra_inputs
+            return [_constant_pad(x, pad_width, constant_values)]
+        if mode == "edge":
+            return [_edge_pad(x, pad_width)]
+        if mode == "linear_ramp":
+            (end_values,) = extra_inputs
+            return [_linear_ramp_pad(x, pad_width, end_values)]
+        if mode in ("maximum", "minimum", "mean"):
+            stat_length = extra_inputs[0] if self.has_stat_length else None
+            return [_stat_pad(x, pad_width, stat_funcs[mode], stat_length)]
+        return [_gather_pad(x, pad_width, mode)]
 
 
 def pad(
-    x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs
+    x: TensorLike,
+    pad_width: TensorLike,
+    mode: PadMode = "constant",
+    *,
+    constant_values: TensorLike | None = None,
+    end_values: TensorLike | None = None,
+    stat_length: TensorLike | None = None,
+    reflect_type: Literal["even", "odd"] | None = None,
 ) -> TensorVariable:
     """
     Pad an array.
 
     Parameters
     ----------
-    array : array_like of rank N
+    x : array_like of rank N
         The array to pad.
 
     pad_width : sequence, array_like, or int
@@ -448,10 +431,10 @@ def pad(
         ``(pad,)`` or ``int`` is a shortcut for before = after = pad width
         for all axes.
 
-    mode : str or function, optional
-        One of the following string values or a user supplied function.
+    mode : str, optional
+        One of the following string values. Default is 'constant'.
 
-        'constant' (default)
+        'constant'
             Pads with a constant value.
         'edge'
             Pads with the edge values of array.
@@ -479,24 +462,9 @@ def pad(
             The first values are used to pad the end and the
             end values are used to pad the beginning.
 
-    stat_length : sequence or int, optional
-        Used in 'maximum', 'mean', and 'minimum'.  Number of
-        values at edge of each axis used to calculate the statistic value.
-
-        ``((before_1, after_1), ... (before_N, after_N))`` unique statistic
-        lengths for each axis.
-
-        ``(before, after)`` or ``((before, after),)`` yields same before
-        and after statistic lengths for each axis.
-
-        ``(stat_length,)`` or ``int`` is a shortcut for
-        ``before = after = statistic`` length for all axes.
-
-        Default is ``None``, to use the entire axis.
-
     constant_values : sequence or scalar, optional
-        Used in 'constant'.  The values to set the padded values for each
-        axis.
+        Only valid for mode 'constant'. The values to set the padded values to
+        for each axis.
 
         ``((before_1, after_1), ... (before_N, after_N))`` unique pad constants
         for each axis.
@@ -510,8 +478,8 @@ def pad(
         Default is 0.
 
     end_values : sequence or scalar, optional
-        Used in 'linear_ramp'.  The values used for the ending value of the
-        linear_ramp and that will form the edge of the padded array.
+        Only valid for mode 'linear_ramp'. The values used for the ending value
+        of the linear ramp, which form the edge of the padded array.
 
         ``((before_1, after_1), ... (before_N, after_N))`` unique end values
         for each axis.
@@ -524,15 +492,41 @@ def pad(
 
         Default is 0.
 
+    stat_length : sequence or int, optional
+        Only valid for modes 'maximum', 'mean', and 'minimum'. Number of values
+        at the edge of each axis used to compute the statistic.
+
+        ``((before_1, after_1), ... (before_N, after_N))`` unique statistic
+        lengths for each axis.
+
+        ``(before, after)`` or ``((before, after),)`` yields same before
+        and after statistic lengths for each axis.
+
+        ``(stat_length,)`` or ``int`` is a shortcut for
+        ``before = after = statistic`` length for all axes.
+
+        Default is ``None``, to use the entire axis.
+
     reflect_type : str, optional
-        Only 'even' is currently accepted. Used in 'reflect', and 'symmetric'.  The 'even' style is the
-        default with an unaltered reflection around the edge value.
+        Only valid for modes 'reflect' and 'symmetric'. Only 'even' is currently
+        accepted, which reflects around the edge value without altering it.
+        Default is 'even'.
 
     Returns
     -------
-    pad : ndarray
-        Padded array of rank equal to `array` with shape increased
-        according to `pad_width`.
+    padded : TensorVariable
+        Padded array of rank equal to ``x`` with shape increased according to
+        ``pad_width``.
+
+    Raises
+    ------
+    ValueError
+        If ``mode`` is not a recognized padding mode, or a keyword argument is
+        given that ``mode`` does not accept.
+    TypeError
+        If ``pad_width`` is a constant of non-integral dtype.
+    NotImplementedError
+        If ``mode`` is 'median', or ``reflect_type`` is 'odd'.
 
     Examples
     --------
@@ -620,74 +614,68 @@ def pad(
         [4 5 1 2 3 4 5 1 2 3]
 
     """
-    if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
-        raise ValueError(
-            f"Invalid keyword arguments for mode '{mode}': {kwargs.keys()}"
+    if mode not in mode_options:
+        raise ValueError(f"Invalid mode: {mode}")
+
+    supplied = {
+        name
+        for name, value in (
+            ("constant_values", constant_values),
+            ("end_values", end_values),
+            ("stat_length", stat_length),
+            ("reflect_type", reflect_type),
         )
+        if value is not None
+    }
+    unsupported = supplied - mode_options[mode]
+    if unsupported:
+        raise ValueError(
+            f"Invalid keyword arguments for mode '{mode}': {sorted(unsupported)}. "
+            f"Mode '{mode}' accepts {sorted(mode_options[mode])}"
+        )
+
     x = as_tensor(x, name="x")
     pad_width = as_tensor(pad_width, name="pad_width")
     inputs = [x, pad_width]
-    attrs = {}
+    has_stat_length = False
 
     if mode == "constant":
-        constant_values = as_tensor(
-            kwargs.pop("constant_values", 0), name="constant_values"
-        )
-        inputs += [constant_values]
-        outputs = _constant_pad(x, pad_width, constant_values)
+        if constant_values is None:
+            constant_values = 0
+        inputs += [as_tensor(constant_values, name="constant_values")]
 
-    elif mode == "edge":
-        outputs = _edge_pad(x, pad_width)
+    elif mode == "linear_ramp":
+        if end_values is None:
+            end_values = 0
+        inputs += [as_tensor(end_values, name="end_values")]
 
-    elif mode in ["maximum", "minimum", "mean", "median"]:
+    elif mode in ("maximum", "minimum", "mean", "median"):
         if mode == "median":
             # TODO: Revisit this after we implement a quantile function.
             #  See https://github.com/pymc-devs/pytensor/issues/53
             raise NotImplementedError("Median padding not implemented")
-        stat_func = cast(Callable, stat_funcs[mode])
-        stat_length = kwargs.get("stat_length")
         if stat_length is not None:
-            attrs.update({"has_stat_length": True})
-            stat_length = as_tensor(stat_length, name="stat_length")
-            inputs += [stat_length]
+            has_stat_length = True
+            inputs += [as_tensor(stat_length, name="stat_length")]
 
-        outputs = _stat_pad(x, pad_width, stat_func, stat_length)
-
-    elif mode == "linear_ramp":
-        end_values = kwargs.pop("end_values", 0)
-        end_values = as_tensor(end_values)
-
-        inputs += [end_values]
-        outputs = _linear_ramp_pad(x, pad_width, end_values)
-
-    elif mode == "wrap":
-        outputs = _wrap_pad(x, pad_width)
-
-    elif mode == "symmetric":
-        reflect_type = kwargs.pop("reflect_type", "even")
+    elif mode in ("symmetric", "reflect"):
+        if reflect_type is None:
+            reflect_type = "even"
         if reflect_type == "odd":
             raise NotImplementedError(
                 "Odd reflection not implemented. If you need this feature, please open an "
                 "issue at https://github.com/pymc-devs/pytensor/issues"
             )
-        attrs.update({"reflect_type": reflect_type})
-        outputs = _symmetric_pad(x, pad_width)
 
-    elif mode == "reflect":
-        reflect_type = kwargs.pop("reflect_type", "even")
-        if reflect_type == "odd":
-            raise NotImplementedError(
-                "Odd reflection not implemented. If you need this feature, please open an "
-                "issue at https://github.com/pymc-devs/pytensor/issues"
-            )
-        attrs.update({"reflect_type": reflect_type})
-        outputs = _reflect_pad(x, pad_width)
-
-    else:
-        raise ValueError(f"Invalid mode: {mode}")
-
-    op = Pad(inputs=inputs, outputs=[outputs], pad_mode=mode, **attrs)(*inputs)
-    return cast(TensorVariable, op)
+    # Every other mode is rejected above if it was given a `reflect_type`, so this stays
+    # None outside the reflecting modes.
+    op = Pad(
+        pad_mode=mode,
+        reflect_type=reflect_type,
+        has_stat_length=has_stat_length,
+        static_pad_width=_static_pad_width(pad_width, x.ndim),
+    )
+    return cast(TensorVariable, op(*inputs))
 
 
 __all__ = ["flip", "pad"]
