@@ -1,6 +1,7 @@
 from functools import reduce
 
 import mlx.core as mx
+import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scalar.basic import (
@@ -12,7 +13,14 @@ from pytensor.scalar.basic import (
     ScalarOp,
     Second,
 )
-from pytensor.scalar.math import Erfc, Erfcx, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.math import (
+    Erfc,
+    Erfcx,
+    GammaLn,
+    Log1mexp,
+    Sigmoid,
+    Softplus,
+)
 
 
 # MLX name overrides for nfunc_spec names that don't match mlx.core
@@ -20,6 +28,50 @@ MLX_NFUNC_OVERRIDES = {
     "true_divide": "divide",
     "invert": "bitwise_invert",
 }
+
+_LANCZOS_G = 7.0
+_LANCZOS_COEFFS = (
+    0.99999999999980993,
+    676.5203681218851,
+    -1259.1392167224028,
+    771.32342877765313,
+    -176.61502916214059,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.9843695780195716e-6,
+    1.5056327351493116e-7,
+)
+
+
+def _working_precision(x):
+    """Set up a series approximation over ``x``.
+
+    Half precision is widened to float32, having too few mantissa bits for series
+    coefficients to mean anything.
+
+    Parameters
+    ----------
+    x : mx.array
+        Input to the approximation.
+
+    Returns
+    -------
+    z : mx.array
+        ``x`` at the working precision.
+    const : callable
+        Materialize a Python float as an ``mx.array`` of the working precision. MLX
+        weak-types Python floats to float32, which would otherwise silently pin a
+        float64 approximation to float32 accuracy.
+    out_dtype : MLX dtype
+        The dtype the result should be cast back to.
+    """
+    x = mx.array(x)
+    working_dtype = mx.float32 if x.dtype in (mx.float16, mx.bfloat16) else x.dtype
+
+    def const(value):
+        return mx.array(value, dtype=working_dtype)
+
+    return x.astype(working_dtype), const, x.dtype
 
 
 @mlx_funcify.register(ScalarOp)
@@ -171,6 +223,53 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
         return mx.where(x < mx.log(0.5), mx.log1p(-mx.exp(x)), mx.log(-mx.expm1(x)))
 
     return log1mexp
+
+
+@mlx_funcify.register(GammaLn)
+def mlx_funcify_GammaLn(op, **kwargs):
+    def gammaln(x):
+        z, const, out_dtype = _working_precision(x)
+
+        double = z.dtype == mx.float64
+        half = const(0.5)
+        one = const(1.0)
+
+        # In double precision, small positive arguments go up by one via
+        # lgamma(x) = lgamma(x + 1) - log(x) rather than through the reflection formula
+        # below. Both are exact as mathematics, but reflection would route them through
+        # mx.sin, which is only float32-accurate whatever the input dtype. Single
+        # precision has nothing to protect, and the extra log costs a pass
+        shift_up = (z > const(0.0)) & (z < half) if double else None
+        y = mx.where(shift_up, z + one, z) if double else z
+        reflect = y < half
+
+        # Evaluating the series on the reflected argument means one polynomial
+        # covers both branches, and neither can produce a NaN the other must mask
+        w = mx.where(reflect, one - y, y) - one
+        series = const(_LANCZOS_COEFFS[0])
+        for i, coeff in enumerate(_LANCZOS_COEFFS[1:], start=1):
+            series = series + const(coeff) / (w + const(float(i)))
+
+        t = w + const(_LANCZOS_G + 0.5)
+        lanczos = (
+            const(0.5 * np.log(2.0 * np.pi))
+            + (w + half) * mx.log(t)
+            - t
+            + mx.log(series)
+        )
+
+        # Reducing the argument before sin keeps log|sin(pi x)| accurate at large |x|
+        log_sin = mx.log(mx.abs(mx.sin(const(np.pi) * (y - mx.floor(y)))))
+        out = mx.where(reflect, const(np.log(np.pi)) - log_sin - lanczos, lanczos)
+        if double:
+            out = mx.where(shift_up, out - mx.log(z), out)
+
+        # The series returns NaN at +/-inf, where both limits are +inf
+        out = mx.where(mx.isinf(z), const(np.inf), out)
+
+        return out.astype(out_dtype)
+
+    return gammaln
 
 
 @mlx_funcify.register(Composite)

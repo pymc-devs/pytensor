@@ -1,11 +1,15 @@
+from functools import partial
+
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor.scalar.basic as ps
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
+from pytensor.scalar.math import GammaLn
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
@@ -150,6 +154,75 @@ def test_clip(min_val, max_val):
             np.array(min_val, dtype=config.floatX),
             np.array(max_val, dtype=config.floatX),
         ],
+    )
+
+
+# float32 and float64 take deliberately different paths through both dispatches, so
+# every range is checked at both precisions with tolerances the path actually supports
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+@pytest.mark.parametrize(
+    "low, high, tolerances",
+    [
+        # gammaln has zeros at 1 and 2 and a minimum of -0.12 in between, so the
+        # moderate and tiny ranges need an absolute tolerance to stay meaningful
+        (0.5, 20.0, {"float32": (1e-5, 1e-4), "float64": (1e-11, 1e-11)}),
+        (1e-3, 0.5, {"float32": (1e-5, 1e-4), "float64": (1e-11, 1e-11)}),
+        (20.0, 1e4, {"float32": (1e-5, 0.0), "float64": (1e-12, 0.0)}),
+        # Negative arguments go through the log|sin(pi x)| reflection formula, which
+        # loses precision to cancellation near the poles. mx.sin is float32-accurate
+        # whatever the dtype, so float64 gains nothing here
+        (-5.4, -0.6, {"float32": (1e-3, 1e-3), "float64": (1e-3, 1e-3)}),
+    ],
+    ids=["moderate", "tiny", "large", "negative"],
+)
+def test_gammaln(low, high, tolerances, dtype):
+    rtol, atol = tolerances[dtype]
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(11).uniform(low, high, 101).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [pt.gammaln(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=rtol, atol=atol),
+    )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_gammaln_edge_cases(dtype):
+    x = vector("x", dtype=dtype)
+    # Poles at the non-positive integers, plus inf and nan propagation. The finite
+    # entries keep the test from passing on an implementation that returns inf for
+    # everything
+    x_test_value = np.array([0.0, -1.0, -2.0, np.inf, np.nan, 0.5, 4.0], dtype=dtype)
+
+    compare_mlx_and_py([x], [pt.gammaln(x)], [x_test_value])
+
+
+@pytest.mark.parametrize(
+    "low, high",
+    [
+        (0.5, 20.0),
+        # Below 0.5 the argument must be shifted up by the recurrence rather than
+        # reflected: reflection would route it through mx.sin, which is float32-accurate
+        # whatever the input dtype, and that alone costs seven orders of magnitude
+        (1e-3, 0.5),
+    ],
+    ids=["above-half", "below-half"],
+)
+def test_gammaln_float64_precision(low, high):
+    # MLX weak-types Python floats to float32, which would silently pin the Lanczos
+    # coefficients (and so the whole result) to float32 accuracy. float64 lives on
+    # the CPU stream, so the dispatch is exercised directly rather than through a
+    # compiled function.
+    x_test_value = np.linspace(low, high, 201)
+
+    with mlx.stream(mlx.cpu):
+        gammaln = mlx_funcify(GammaLn())
+        res = np.asarray(gammaln(mlx.array(x_test_value, dtype=mlx.float64)))
+
+    np.testing.assert_allclose(
+        res, scipy.special.gammaln(x_test_value), rtol=1e-13, atol=1e-14
     )
 
 
