@@ -19,6 +19,7 @@ from pytensor.graph.basic import Variable
 from pytensor.ifelse import ifelse
 from pytensor.link.mlx import MLXLinker
 from pytensor.raise_op import assert_op
+from pytensor.tensor.type import vector
 
 
 mx = pytest.importorskip("mlx.core")
@@ -328,3 +329,29 @@ def test_mlx_ifelse():
 
     a_test = np.array(0.8, dtype="float64")
     compare_mlx_and_py([a], [x], [a_test])
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_nan_constant(dtype):
+    # ``mx.compile`` inlines size-1 constants as Metal source literals, but Metal
+    # has no ``nan`` literal (it accepts ``inf``), so a size-1 NaN constant fed to
+    # a fused op must be materialized through an op instead. This is the class of
+    # graph the ``local_sqrt_sqr`` rewrite produces on normalization
+    # input-gradients. The constant is shape ``(1,)`` (matching the operand rank)
+    # so it reaches the ``Switch`` without an intervening broadcast.
+    x = vector("x", shape=(None,), dtype=dtype)
+    nan = pt.constant(np.array([np.nan], dtype=dtype))
+    out = pt.switch(x > 0, x, nan)
+
+    compare_mlx_and_py([x], [out], [np.array([-1.0, 1.0, -2.0, 2.0], dtype=dtype)])
+
+
+def test_nan_array_constant():
+    # A NaN constant with more than one element is passed as a buffer (not
+    # inlined), so it compiles without materialization.
+    x = vector("x", shape=(3,))
+    c = pt.constant(np.array([np.nan, 1.0, np.nan], dtype=config.floatX))
+
+    compare_mlx_and_py(
+        [x], [x + c], [np.array([10.0, 20.0, 30.0], dtype=config.floatX)]
+    )

@@ -240,6 +240,9 @@ jobs:
           PART: ${{ matrix.part[1] }}
           DEFAULT_MODE: ${{ matrix.default-mode }}
           FREE_THREADING: ${{ matrix.free-threading }}
+          # The macOS runners are virtualized and abort when a kernel is executed on the
+          # MLX GPU stream, so the tests that need one are skipped here and run locally.
+          PYTENSOR_MLX_SKIP_GPU: 1
 
       - name: Upload coverage file
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
