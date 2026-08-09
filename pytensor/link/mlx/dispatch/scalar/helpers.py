@@ -1,6 +1,9 @@
 import mlx.core as mx
 
 
+_LN2 = 0.6931471805599453
+
+
 def _working_precision(x):
     """Set up a series approximation over ``x``.
 

@@ -3,7 +3,7 @@ from collections.abc import Callable
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.helpers import _working_precision
+from pytensor.link.mlx.dispatch.scalar.helpers import _LN2, _working_precision
 from pytensor.scalar.math import Erfc, Erfcx
 
 
@@ -72,7 +72,6 @@ _SQRT_PI_INV = 5.6418958354775628695e-1
 _ERF_THRESH = 0.46875
 _ERFCX_SPLIT = 4.0
 
-_LN2 = 0.6931471805599453
 _EXP_CLAMP = 1e4
 
 
