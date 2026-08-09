@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import numpy as np
@@ -157,7 +158,8 @@ def test_erfc_tail_is_not_truncated():
 
 
 @pytest.mark.skipif(
-    not mlx.metal.is_available(), reason="only one implementation is reachable"
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
 )
 @pytest.mark.parametrize("op", [Erfc, Erfcx], ids=["erfc", "erfcx"])
 def test_erf_family_paths_agree(op):
@@ -165,7 +167,12 @@ def test_erf_family_paths_agree(op):
     # stream, and the vectorized fallback taken everywhere else. The two share generated
     # coefficients but not their branch structure or their negative-argument reflection,
     # so this is what keeps them from drifting apart. The range spans every branch of
-    # both, stopping short of where float32 underflows and the comparison goes trivial
+    # both, stopping short of where float32 underflows and the comparison goes trivial.
+    #
+    # This is the only test in the suite that *executes* on the GPU stream. Virtualized
+    # machines abort outright when asked to, which is why conftest pins the CPU for the
+    # session and why test_mlx_float64_downcast_on_gpu_warns opens that stream without
+    # running a kernel on it. CI sets PYTENSOR_MLX_SKIP_GPU; a developer machine runs it.
     x_test_value = np.random.default_rng(41).uniform(-4.0, 9.0, 1001).astype("float32")
 
     with mlx.stream(mlx.gpu):
