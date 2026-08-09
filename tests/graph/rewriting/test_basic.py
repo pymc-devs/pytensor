@@ -322,6 +322,61 @@ class TestPatternNodeRewriter:
         rewriter.rewrite(g)
         assert equal_computations(g.outputs, [e1, a])
 
+    def test_multiple_in_patterns(self):
+        rewriter = PatternNodeRewriter(
+            [(op1, "1"), (op2, (op3, "1"))],
+            (op4, "1"),
+        )
+        assert rewriter.tracks() == [op1, op2]
+        x = MyVariable("x")
+        for e in (op1(x), op2(op3(x))):
+            g = FunctionGraph([x], [e])
+            EquilibriumGraphRewriter([rewriter], max_use_ratio=1).rewrite(g)
+            assert str(g) == "FunctionGraph(Op4(x))"
+
+    def test_tracked_subpattern_anchoring(self):
+        # tracks below the pattern root: candidate roots are found by walking
+        # up from the tracked node's clients along the pattern structure
+        rewriter = PatternNodeRewriter(
+            [
+                (op1, (op5, "1")),
+                (op2, (op3, (op5, "1"))),
+            ],
+            (op4, "1"),
+            tracks=[op5],
+        )
+        assert rewriter.tracks() == [op5]
+        x = MyVariable("x")
+        for e in (op1(op5(x)), op2(op3(op5(x)))):
+            g = FunctionGraph([x], [e])
+            EquilibriumGraphRewriter([rewriter], max_use_ratio=1).rewrite(g)
+            assert str(g) == "FunctionGraph(Op4(x))"
+
+        # A direct call on the pattern root node also works
+        e = op1(op5(x))
+        g = FunctionGraph([x], [e], clone=False)
+        assert rewriter.transform(g, e.owner) is not False
+
+        # A call on the tracked node returns a dict keyed by the root's output
+        e = op2(op3(op5(x)))
+        g = FunctionGraph([x], [e], clone=False)
+        op5_node = e.owner.inputs[0].owner.inputs[0].owner
+        repl = rewriter.transform(g, op5_node)
+        assert isinstance(repl, dict)
+        [(replaced_out, new_out)] = repl.items()
+        assert replaced_out is g.outputs[0]
+        assert equal_computations([new_out], [op4(x)])
+
+    def test_in_patterns_validation(self):
+        with pytest.raises(ValueError, match="same variables"):
+            PatternNodeRewriter([(op1, "1"), (op2, "2")], (op4, "1"))
+
+        with pytest.raises(ValueError, match="does not appear"):
+            PatternNodeRewriter((op1, "1"), (op4, "1"), tracks=[op2])
+
+        with pytest.raises(TypeError, match="Op instances"):
+            PatternNodeRewriter((op1, "1"), (op4, "1"), tracks=[MyOp])
+
 
 class NoInputOp(Op):
     __props__ = ("param",)
@@ -666,7 +721,7 @@ def test_pre_greedy_node_rewriter():
 @pytest.mark.parametrize("tracks", [True, False])
 @pytest.mark.parametrize("out_pattern", [(op2, "x"), "x", 1.0])
 def test_patternsub_values_eq_approx(out_pattern, tracks):
-    # PatternNodeRewriter would fail when `values_eq_approx` and `get_nodes` were specified
+    # PatternNodeRewriter would fail when `values_eq_approx` and `tracks` were specified
     x = MyVariable("x")
     e = op1(x)
     fg = FunctionGraph([x], [e], clone=False)
@@ -677,7 +732,6 @@ def test_patternsub_values_eq_approx(out_pattern, tracks):
                 (op1, "x"),
                 out_pattern,
                 tracks=[op1] if tracks else (),
-                get_nodes=(lambda fgraph, node: [node]) if tracks else None,
                 values_eq_approx=values_eq_approx_always_true,
             )
         ],
