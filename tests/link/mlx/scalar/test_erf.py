@@ -45,20 +45,22 @@ def test_erf(low, high, rtol, atol, dtype):
     )
 
 
+# erfc is exp(-y**2) * erfcx(y), so the exponential sets the float32 tolerances and
+# squaring the argument amplifies its error in proportion to y**2. float64 goes through
+# mx.power instead, which is genuine, so it holds full precision across every range.
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
 @pytest.mark.parametrize(
-    "low, high, rtol",
+    "low, high, tolerances",
     [
-        (-3.0, 0.0, 3e-7),
-        (0.0, 1.0, 1e-6),
-        (1.0, 4.0, 1e-5),
-        # erfc is exp(-y**2) * erfcx(y) out here. The exponential is the accuracy floor,
-        # and squaring the argument amplifies its error in proportion to y**2
-        (4.0, 9.0, 1e-4),
+        (-3.0, 0.0, {"float32": 3e-7, "float64": 1e-14}),
+        (0.0, 1.0, {"float32": 1e-6, "float64": 1e-14}),
+        (1.0, 4.0, {"float32": 1e-5, "float64": 1e-14}),
+        (4.0, 9.0, {"float32": 1e-4, "float64": 1e-14}),
     ],
     ids=["negative", "small", "moderate", "tail"],
 )
-def test_erfc(low, high, rtol, dtype):
+def test_erfc(low, high, tolerances, dtype):
+    rtol = tolerances[dtype]
     x = vector("x", dtype=dtype)
     x_test_value = np.random.default_rng(19).uniform(low, high, 101).astype(dtype)
 
@@ -88,21 +90,22 @@ def test_erfinv(low, high, rtol, dtype):
     )
 
 
+# erfcx decays like 1 / (y sqrt(pi)) rather than vanishing, so the far tail is no harder
+# than the near one once the asymptotic rational takes over
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
 @pytest.mark.parametrize(
-    "low, high, rtol",
+    "low, high, tolerances",
     [
-        (-3.0, 0.0, 3e-6),
-        (0.0, 0.47, 1e-6),
-        (0.47, 4.0, 3e-6),
-        (4.0, 27.0, 1e-6),
-        # erfcx decays like 1 / (y sqrt(pi)) rather than vanishing, so the far tail is
-        # no harder than the near one once the asymptotic rational takes over
-        (27.0, 1e3, 1e-6),
+        (-3.0, 0.0, {"float32": 3e-6, "float64": 1e-14}),
+        (0.0, 0.47, {"float32": 1e-6, "float64": 1e-14}),
+        (0.47, 4.0, {"float32": 3e-6, "float64": 1e-14}),
+        (4.0, 27.0, {"float32": 1e-6, "float64": 1e-14}),
+        (27.0, 1e3, {"float32": 1e-6, "float64": 1e-14}),
     ],
     ids=["negative", "small", "moderate", "large", "far-tail"],
 )
-def test_erfcx(low, high, rtol, dtype):
+def test_erfcx(low, high, tolerances, dtype):
+    rtol = tolerances[dtype]
     x = vector("x", dtype=dtype)
     x_test_value = np.random.default_rng(29).uniform(low, high, 101).astype(dtype)
 
@@ -120,10 +123,8 @@ def test_erfcx(low, high, rtol, dtype):
     ids=["mid-rational", "asymptotic", "far-tail"],
 )
 def test_erfcx_float64_precision(low, high):
-    # The two upper Cody intervals are free of exp, which is what lets erfcx hold full
-    # float64 accuracy where every other member of the family is capped near 1e-7. This
-    # is also the test that fails if the coefficients are weak-typed to float32, since
-    # MLX weak-types Python floats. float64 lives on the CPU stream, so the dispatch is
+    # The test that fails if the coefficients are weak-typed to float32, since MLX
+    # weak-types Python floats. float64 lives on the CPU stream, so the dispatch is
     # exercised directly rather than through a compiled function.
     x_test_value = np.linspace(low, high, 201)
 
@@ -136,8 +137,8 @@ def test_erfcx_float64_precision(low, high):
 
 def test_erfc_tail_is_not_truncated():
     # erfc reaches 1e-309 before it stops being representable. Deriving it from
-    # 1 - erf(x) collapses it to exactly zero from x = 4, and a plain mx.exp scale
-    # factor stops at x = 9.5, mx.exp having float32 range as well as float32 precision.
+    # 1 - erf(x) collapses it to exactly zero from x = 4, and a plain mx.exp scale factor
+    # stops at x = 9.5, mx.exp having float32 range as well as float32 precision.
     x_test_value = np.array([4.0, 6.0, 9.0, 12.0, 20.0, 26.0])
 
     with mlx.stream(mlx.cpu):
@@ -145,7 +146,28 @@ def test_erfc_tail_is_not_truncated():
         res = np.asarray(erfc_fn(mlx.array(x_test_value, dtype=mlx.float64)))
 
     assert (res > 0).all()
-    np.testing.assert_allclose(res, scipy.special.erfc(x_test_value), rtol=1e-5)
+    np.testing.assert_allclose(res, scipy.special.erfc(x_test_value), rtol=1e-13)
+
+
+def test_erfc_float32_subnormal_tail():
+    # erfc is still representable as a float32 subnormal past x = 9.5, where mx.exp
+    # flushes to zero and would send log(erfc) to -inf against a true value near -93.
+    x_test_value = np.array([9.3, 9.5], dtype="float32")
+
+    with mlx.stream(mlx.cpu):
+        res = np.asarray(mlx_funcify(Erfc())(mlx.array(x_test_value)))
+        # x = 10 sits on the smallest float32 subnormal, carrying a bit or two, and by
+        # x = 10.5 erfc is 7e-50 and genuinely underflows -- zero is the right answer
+        bottom = np.asarray(
+            mlx_funcify(Erfc())(mlx.array(np.array([10.0, 10.5], dtype="float32")))
+        )
+
+    assert (res > 0).all()
+    np.testing.assert_allclose(
+        res, scipy.special.erfc(x_test_value.astype("float64")), rtol=1e-5
+    )
+    assert bottom[0] > 0.0
+    assert bottom[1] == 0.0
 
 
 @pytest.mark.skipif(

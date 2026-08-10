@@ -3,7 +3,7 @@ from collections.abc import Callable
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.helpers import _LN2, _working_precision
+from pytensor.link.mlx.dispatch.scalar.helpers import _exp, _working_precision
 from pytensor.scalar.math import Erfc, Erfcx
 
 
@@ -12,13 +12,13 @@ from pytensor.scalar.math import Erfc, Erfcx
 # a series for erf below 0.46875, and two rationals that yield erfcx directly above it.
 #
 # Deriving all three from one kernel, rather than composing them out of mx.erf, is what
-# makes them accurate. mx.erf is a float32 kernel whatever dtype it is handed, as are
-# mx.exp, mx.sin and mx.cos, while mx.log and mx.sqrt are genuine at float64. Both upper
-# intervals here are free of exp, so erfcx holds the full working precision across the
-# range where erfc has decayed far past anything 1 - erf could resolve. The subunit
-# interval and the negative-argument reflections still need exp and inherit its ceiling
-# of roughly 1e-7 relative, which is why erfcx keeps its rational branches rather than
-# being derived from a single form.
+# makes them accurate: mx.erf is a float32 kernel whatever dtype it is handed. The two
+# upper intervals are free of exp entirely, and where exp is unavoidable the family goes
+# through _exp rather than mx.exp, which is float32 in range as well as in precision.
+#
+# The intervals are a matter of conditioning rather than precision. erfcx is the bounded
+# quantity and is computed directly, because reaching it as exp(x**2) * erfc(x) overflows
+# while erfc has decayed far past anything 1 - erf could resolve.
 _ERF_A = (
     3.16112374387056560e00,
     1.13864154151050156e02,
@@ -71,8 +71,6 @@ _ERFCX_Q = (
 _SQRT_PI_INV = 5.6418958354775628695e-1
 _ERF_THRESH = 0.46875
 _ERFCX_SPLIT = 4.0
-
-_EXP_CLAMP = 1e4
 
 
 def _metal_constants(**arrays):
@@ -227,25 +225,6 @@ def _metal_erf_call(name, x):
     return out.reshape(x.shape)
 
 
-def _exp_wide(t, const):
-    r"""``exp(t)`` over the full exponent range of the working precision.
-
-    ``mx.exp`` is a float32 kernel in range as well as in precision, flushing to zero
-    below ``exp(-87)`` and overflowing above ``exp(88)`` whatever the dtype. This holds
-    to the range the dtype itself supports, at ``mx.exp``'s float32 precision.
-    """
-    # Splitting e^t into 2^k e^r, with k an integer and |r| <= ln(2)/2, keeps the
-    # exponential's argument small while mx.power supplies the scale over the full range.
-    #
-    # An infinite argument would leave r = -inf + inf = nan, so t is clamped first. The
-    # bound is far outside the representable range of either precision, where 2**k has
-    # already saturated to zero or infinity, so no finite result is altered
-    t = mx.minimum(mx.maximum(t, const(-_EXP_CLAMP)), const(_EXP_CLAMP))
-    k = mx.round(t / const(_LN2))
-    r = t - k * const(_LN2)
-    return mx.exp(r) * mx.power(const(2.0), k)
-
-
 def _erf_series(x, const):
     """erf on |x| <= 0.46875, where 1 - erfc would cancel. Free of exp."""
     z = x * x
@@ -296,7 +275,7 @@ def _erfc_tail(y, const):
     Multiplying by ``exp(-y**2)`` underflows to zero smoothly, where ``1 - erf(y)``
     cancels to it abruptly and loses every significant digit on the way.
     """
-    return _exp_wide(-(y * y), const) * _erfcx_upper(y, const)
+    return _exp(-(y * y), const) * _erfcx_upper(y, const)
 
 
 def _erfcx_positive(y, const):
@@ -304,7 +283,7 @@ def _erfcx_positive(y, const):
     thresh = const(_ERF_THRESH)
     # y < 0.46875 is the one branch that needs exp, and exp(y^2) <= 1.25 there
     small_y = mx.minimum(y, thresh)
-    small = mx.exp(small_y * small_y) * (const(1.0) - _erf_series(small_y, const))
+    small = _exp(small_y * small_y, const) * (const(1.0) - _erf_series(small_y, const))
     return mx.where(y <= thresh, small, _erfcx_upper(mx.maximum(y, thresh), const))
 
 
@@ -348,7 +327,7 @@ def mlx_funcify_Erfcx(op, **kwargs):
         pos = _erfcx_positive(y, const)
         # erfcx(-y) = 2 exp(y^2) - erfcx(y). The exponential is unavoidable here and
         # genuinely overflows past y ~ 26.6, which is the function's own behavior
-        reflected = const(2.0) * _exp_wide(y * y, const) - pos
+        reflected = const(2.0) * _exp(y * y, const) - pos
         return mx.where(z >= const(0.0), pos, reflected).astype(out_dtype)
 
     return erfcx
