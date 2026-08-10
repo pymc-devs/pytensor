@@ -7,22 +7,22 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+permissions: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install build environment
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@d7c9bd84e824b79d2af72a2d4196c7f4300d3476 # v3.0.0
         with:
           environment-file: environment-wasm-build.yml
           environment-name: pytensor-wasm-build
@@ -55,12 +55,14 @@ jobs:
           set -euxo pipefail
           jupyter lite build \
             --XeusAddon.prefix="${PYTENSOR_WASM_PREFIX}" \
+            --XeusAddon.default_channels=https://repo.prefix.dev/emscripten-forge-4x \
+            --XeusAddon.default_channels=https://repo.prefix.dev/conda-forge \
             --XeusAddon.mounts="$(pwd)/build/pytensor-wheel:/lib/python3.13/site-packages" \
             --contents=.github/jupyterlite/pytensor_numba.ipynb \
             --output-dir=dist-jupyterlite
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:
           path: dist-jupyterlite
 
@@ -68,6 +70,9 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
 
     environment:
       name: github-pages
@@ -76,4 +81,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
