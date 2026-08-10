@@ -42,6 +42,21 @@ _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
 _PSI_SHIFTS_SINGLE = 6
 
 
+def _lanczos_log_gamma(w, const):
+    """``log Gamma(w + 1)`` by the Lanczos series, for ``w`` at or above ``-0.5``."""
+    series = const(_LANCZOS_COEFFS[0])
+    for i, coeff in enumerate(_LANCZOS_COEFFS[1:], start=1):
+        series = series + const(coeff) / (w + const(float(i)))
+
+    t = w + const(_LANCZOS_G + 0.5)
+    return (
+        const(0.5 * np.log(2.0 * np.pi))
+        + (w + const(0.5)) * mx.log(t)
+        - t
+        + mx.log(series)
+    )
+
+
 @mlx_funcify.register(Sigmoid)
 def mlx_funcify_Sigmoid(op, **kwargs):
     return mx.sigmoid
@@ -96,17 +111,7 @@ def mlx_funcify_GammaLn(op, **kwargs):
         # Evaluating the series on the reflected argument means one polynomial
         # covers both branches, and neither can produce a NaN the other must mask
         w = mx.where(reflect, one - y, y) - one
-        series = const(_LANCZOS_COEFFS[0])
-        for i, coeff in enumerate(_LANCZOS_COEFFS[1:], start=1):
-            series = series + const(coeff) / (w + const(float(i)))
-
-        t = w + const(_LANCZOS_G + 0.5)
-        lanczos = (
-            const(0.5 * np.log(2.0 * np.pi))
-            + (w + half) * mx.log(t)
-            - t
-            + mx.log(series)
-        )
+        lanczos = _lanczos_log_gamma(w, const)
 
         # Reducing the argument before sin keeps log|sin(pi x)| accurate at large |x|
         log_sin = mx.log(mx.abs(mx.sin(const(np.pi) * (y - mx.floor(y)))))
