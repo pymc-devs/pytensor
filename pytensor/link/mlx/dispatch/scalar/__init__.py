@@ -1,1 +1,1 @@
-from pytensor.link.mlx.dispatch.scalar import basic, erf, math
+from pytensor.link.mlx.dispatch.scalar import basic, erf, erfcinv, math
