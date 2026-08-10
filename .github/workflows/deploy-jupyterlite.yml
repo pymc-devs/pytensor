@@ -1,0 +1,79 @@
+name: Build and deploy JupyterLite
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install build environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment-wasm-build.yml
+          environment-name: pytensor-wasm-build
+          init-shell: bash
+
+      - name: Build PyTensor from this checkout
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+          PYTENSOR_PURE_PYTHON=1 python -m build --wheel --no-isolation
+
+          mkdir -p build/pytensor-wheel
+          wheels=(dist/pytensor-*.whl)
+          test "${#wheels[@]}" -eq 1
+          python -m zipfile -e "${wheels[0]}" build/pytensor-wheel
+
+      - name: Create the WebAssembly environment
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+          micromamba create -y \
+            -f environment-wasm-host.yml \
+            --platform=emscripten-wasm32
+
+          echo "PYTENSOR_WASM_PREFIX=${MAMBA_ROOT_PREFIX}/envs/pytensor-wasm-host" >> "${GITHUB_ENV}"
+
+      - name: Build JupyterLite
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+          jupyter lite build \
+            --XeusAddon.prefix="${PYTENSOR_WASM_PREFIX}" \
+            --XeusAddon.mounts="$(pwd)/build/pytensor-wheel:/lib/python3.13/site-packages" \
+            --contents=.github/jupyterlite/pytensor_numba.ipynb \
+            --output-dir=dist-jupyterlite
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist-jupyterlite
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

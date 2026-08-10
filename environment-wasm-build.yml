@@ -1,0 +1,15 @@
+name: pytensor-wasm-build
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.13
+  - python-build
+  - setuptools
+  - cython
+  - numpy=2.4.*
+  - versioneer=0.29
+  - jupyterlite-core
+  - jupyterlite-xeus
+
