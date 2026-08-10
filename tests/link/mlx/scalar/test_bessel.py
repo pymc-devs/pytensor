@@ -5,7 +5,7 @@ import pytest
 import scipy.special
 
 import pytensor.tensor as pt
-from pytensor.scalar.math import I0
+from pytensor.scalar.math import I0, I1
 from pytensor.tensor.type import vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
@@ -75,3 +75,76 @@ def test_i0_edge_cases():
     x_test_value = np.array([0.0, -0.0, -1.0, -30.0, 713.0, np.inf, -np.inf, np.nan])
 
     compare_mlx_and_py([x], [pt.i0(x)], [x_test_value])
+
+
+# i1 splits at the same x = 8, and is odd rather than even
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+@pytest.mark.parametrize(
+    "low, high, tolerances",
+    [
+        (1e-8, 1.0, {"float32": 1e-6, "float64": 1e-13}),
+        (1.0, 8.0, {"float32": 5e-6, "float64": 1e-12}),
+        (8.0, 20.0, {"float32": 5e-6, "float64": 1e-12}),
+        (20.0, 80.0, {"float32": 2e-5, "float64": 1e-13}),
+    ],
+    ids=["small", "below-split", "above-split", "large"],
+)
+def test_i1(low, high, tolerances, dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(59).uniform(low, high, 101).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [pt.i1(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=tolerances[dtype]),
+    )
+
+
+@pytest.mark.parametrize(
+    "low, high, rtol",
+    [
+        (1e-12, 1.0, 1e-14),
+        (1.0, 8.0, 1e-14),
+        (8.0, 100.0, 1e-13),
+        (100.0, 700.0, 1e-12),
+    ],
+    ids=["tiny", "below-split", "above-split", "near-overflow"],
+)
+def test_i1_float64_precision(low, high, rtol):
+    # The small-interval series is fitted to i1e(x) / x, because i1 vanishes at the
+    # origin and a series fitted to i1e itself holds absolute error there rather than
+    # relative. This is the test that would catch dropping that division.
+    x_test_value = np.exp(np.linspace(np.log(low), np.log(high), 401))
+
+    with mlx.stream(mlx.cpu):
+        res = np.asarray(mlx_funcify(I1())(mlx.array(x_test_value, dtype=mlx.float64)))
+
+    np.testing.assert_allclose(res, scipy.special.i1(x_test_value), rtol=rtol)
+
+
+def test_i1_edge_cases():
+    # i1 is odd and zero at the origin, where i0 is even and one
+    x = vector("x", dtype="float64")
+    x_test_value = np.array([0.0, -0.0, -1.0, -30.0, 713.0, np.inf, -np.inf, np.nan])
+
+    compare_mlx_and_py([x], [pt.i1(x)], [x_test_value])
+
+
+@pytest.mark.parametrize("op", [pt.i0, pt.i1], ids=["i0", "i1"])
+def test_bessel_i_continuous_across_split(op):
+    # x = 8 is where the two Chebyshev intervals meet, and they are independent
+    # approximations that have to agree there. Every other range stops at the boundary
+    # rather than crossing it, and no uniform sample lands on it exactly, so a mismatched
+    # clamp or a < where <= belongs would go unnoticed.
+    x = vector("x", dtype="float64")
+    x_test_value = np.array(
+        [np.nextafter(8.0, 0.0), 8.0, np.nextafter(8.0, 9.0), 7.999999, 8.000001]
+    )
+
+    compare_mlx_and_py(
+        [x],
+        [op(x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-14),
+    )

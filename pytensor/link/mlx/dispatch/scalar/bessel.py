@@ -2,7 +2,7 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.helpers import _exp, _working_precision
-from pytensor.scalar.math import I0
+from pytensor.scalar.math import I0, I1
 
 
 # Chebyshev expansions of the exponentially scaled modified Bessel functions, from the
@@ -89,6 +89,70 @@ _I0E_B = (
 
 _I0E_B_SINGLE = _I0E_B[-_SINGLE_LARGE_TERMS:]
 
+_I1E_A = (
+    2.77791411276104639959e-18,
+    -2.11142121435816608115e-17,
+    1.55363195773620046921e-16,
+    -1.10559694773538630805e-15,
+    7.60068429473540693410e-15,
+    -5.04218550472791168711e-14,
+    3.22379336594557470981e-13,
+    -1.98397439776494371520e-12,
+    1.17361862988909016308e-11,
+    -6.66348972350202774223e-11,
+    3.62559028155211703701e-10,
+    -1.88724975172282928790e-9,
+    9.38153738649577178388e-9,
+    -4.44505912879632808065e-8,
+    2.00329475355213526229e-7,
+    -8.56872026469545474066e-7,
+    3.47025130813767847674e-6,
+    -1.32731636560394358279e-5,
+    4.78156510755005422638e-5,
+    -1.61760815825896745588e-4,
+    5.12285956168575772895e-4,
+    -1.51357245063125314899e-3,
+    4.15642294431288815669e-3,
+    -1.05640848946261981558e-2,
+    2.47264490306265168283e-2,
+    -5.29459812080949914269e-2,
+    1.02643658689847095384e-1,
+    -1.76416518357834055153e-1,
+    2.52587186443633654823e-1,
+)
+
+_I1E_A_SINGLE = _I1E_A[-_SINGLE_SMALL_TERMS:]
+
+_I1E_B = (
+    7.51729631084210481353e-18,
+    4.41434832307170791151e-18,
+    -4.65030536848935832153e-17,
+    -3.20952592199342395980e-17,
+    2.96262899764595013876e-16,
+    3.30820231092092828324e-16,
+    -1.88035477551078244854e-15,
+    -3.81440307243700780478e-15,
+    1.04202769841288027642e-14,
+    4.27244001671195135429e-14,
+    -2.10154184277266431302e-14,
+    -4.08355111109219731823e-13,
+    -7.19855177624590851209e-13,
+    2.03562854414708950722e-12,
+    1.41258074366137813316e-11,
+    3.25260358301548823856e-11,
+    -1.89749581235054123450e-11,
+    -5.58974346219658380687e-10,
+    -3.83538038596423702205e-9,
+    -2.63146884688951950684e-8,
+    -2.51223623787020892529e-7,
+    -3.88256480887769039346e-6,
+    -1.10588938762623716291e-4,
+    -9.76109749136146840777e-3,
+    7.78576235018280120474e-1,
+)
+
+_I1E_B_SINGLE = _I1E_B[-_SINGLE_LARGE_TERMS:]
+
 
 def _chbevl(coeffs, x, const):
     """Evaluate a Chebyshev series at ``x`` in [-2, 2], in Cephes' arrangement.
@@ -126,6 +190,22 @@ def _i0e_positive(y, const):
     return mx.where(y <= split, small, large)
 
 
+def _i1e_positive(y, const):
+    """``i1e`` for non-negative ``y``, as a series on whichever interval holds it."""
+    double = y.dtype == mx.float64
+    split = const(_SPLIT)
+
+    # i1e vanishes like y / 2 at the origin, so the small-interval series is in
+    # i1e(y) / y and is multiplied back. A series fitted to i1e itself holds absolute
+    # error and lets the relative error run away as y -> 0
+    small_y = mx.minimum(y, split)
+    small_t = small_y / const(2.0) - const(2.0)
+    small = _chbevl(_I1E_A if double else _I1E_A_SINGLE, small_t, const) * small_y
+
+    large = _large_series(y, _I1E_B if double else _I1E_B_SINGLE, const)
+    return mx.where(y <= split, small, large)
+
+
 @mlx_funcify.register(I0)
 def mlx_funcify_I0(op, **kwargs):
     def i0(x):
@@ -139,3 +219,16 @@ def mlx_funcify_I0(op, **kwargs):
         return out.astype(out_dtype)
 
     return i0
+
+
+@mlx_funcify.register(I1)
+def mlx_funcify_I1(op, **kwargs):
+    def i1(x):
+        z, const, out_dtype = _working_precision(x)
+
+        # i1 is odd, so the series runs on |x| and the sign is restored afterwards
+        y = mx.abs(z)
+        out = _i1e_positive(y, const) * _exp(y, const)
+        return mx.where(z < const(0.0), -out, out).astype(out_dtype)
+
+    return i1
