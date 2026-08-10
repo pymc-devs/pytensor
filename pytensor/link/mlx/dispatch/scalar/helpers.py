@@ -8,9 +8,10 @@ def _exp(t, const):
     ``mx.exp`` is a float32 kernel in range as well as in precision: its float64 result
     is bitwise equal to its float32 one, it overflows past ``exp(88)`` whatever the
     dtype, and it flushes the float32 subnormals to zero from ``exp(-90)``. ``mx.power``
-    carries none of those limits, is at least as accurate at both precisions, and costs
-    nothing measurable inside a compiled dispatch, leaving only the :math:`x \epsilon`
-    the exponent itself carries.
+    carries none of those limits and is at least as accurate at both precisions, leaving
+    only the :math:`x \epsilon` the exponent itself carries. It is free on the GPU at
+    float32 and costs around a fifth more on the CPU float64 path -- which is the path
+    that would otherwise be returning ``inf``.
 
     Parameters
     ----------
