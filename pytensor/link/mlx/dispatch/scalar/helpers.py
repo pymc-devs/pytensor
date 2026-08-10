@@ -1,4 +1,32 @@
 import mlx.core as mx
+import numpy as np
+
+
+def _exp(t, const):
+    r"""``exp(t)`` at the working precision, over the full exponent range of the dtype.
+
+    ``mx.exp`` is a float32 kernel in range as well as in precision: its float64 result
+    is bitwise equal to its float32 one, and it overflows past ``exp(88)`` whatever the
+    dtype. ``mx.power`` is genuine at float64, so double precision goes through it and
+    is left with only the :math:`x \epsilon` the exponent itself carries. Single
+    precision keeps ``mx.exp``, which is cheaper and, at float32, the more accurate of
+    the two.
+
+    Parameters
+    ----------
+    t : mx.array
+        Exponent, at the working precision.
+    const : callable
+        Materializes a Python float at the working precision.
+
+    Returns
+    -------
+    mx.array
+        ``exp(t)`` at the dtype of ``t``.
+    """
+    if t.dtype == mx.float64:
+        return mx.power(const(np.e), t)
+    return mx.exp(t)
 
 
 _LN2 = 0.6931471805599453
