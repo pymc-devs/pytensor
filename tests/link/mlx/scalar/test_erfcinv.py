@@ -145,3 +145,16 @@ def test_normal_icdf():
     np.testing.assert_allclose(
         np.asarray(res), scipy.stats.norm.ppf(q_test_value), rtol=1e-10
     )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_erfcinv_grad(dtype):
+    x = vector("x", dtype=dtype)
+    x_test_value = np.random.default_rng(47).uniform(0.05, 1.95, 51).astype(dtype)
+
+    compare_mlx_and_py(
+        [x],
+        [pt.grad(pt.erfcinv(x).sum(), x)],
+        [x_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-5, atol=1e-6),
+    )
