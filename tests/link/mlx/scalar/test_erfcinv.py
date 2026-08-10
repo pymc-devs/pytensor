@@ -3,6 +3,7 @@ from functools import partial
 import numpy as np
 import pytest
 import scipy.special
+import scipy.stats
 
 import pytensor.tensor as pt
 from pytensor.scalar.math import Erfcinv
@@ -126,3 +127,21 @@ def test_erfcinv_half_precision():
     )
     # the widening is internal; the result comes back at the dtype it went in as
     assert np.asarray(res).dtype == "float16"
+
+
+def test_normal_icdf():
+    # mu + sigma * -sqrt(2) * erfcinv(2 * q) is Normal.icdf, and pymc's ErfcTransform
+    # inverts through the same op, so any model applying erfc to a variable needs it
+    q = vector("q", dtype="float64")
+    icdf = -np.sqrt(2.0) * pt.erfcinv(2.0 * q)
+    q_test_value = np.array([1e-12, 1e-6, 1e-3, 0.025, 0.5, 0.975, 1.0 - 1e-9])
+
+    _, [res] = compare_mlx_and_py(
+        [q],
+        [icdf],
+        [q_test_value],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-10, atol=1e-10),
+    )
+    np.testing.assert_allclose(
+        np.asarray(res), scipy.stats.norm.ppf(q_test_value), rtol=1e-10
+    )
