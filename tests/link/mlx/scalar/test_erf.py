@@ -149,6 +149,27 @@ def test_erfc_tail_is_not_truncated():
     np.testing.assert_allclose(res, scipy.special.erfc(x_test_value), rtol=1e-13)
 
 
+def test_erfc_float32_subnormal_tail():
+    # erfc is still representable as a float32 subnormal past x = 9.5, where mx.exp
+    # flushes to zero and would send log(erfc) to -inf against a true value near -93.
+    x_test_value = np.array([9.3, 9.5], dtype="float32")
+
+    with mlx.stream(mlx.cpu):
+        res = np.asarray(mlx_funcify(Erfc())(mlx.array(x_test_value)))
+        # x = 10 sits on the smallest float32 subnormal, carrying a bit or two, and by
+        # x = 10.5 erfc is 7e-50 and genuinely underflows -- zero is the right answer
+        bottom = np.asarray(
+            mlx_funcify(Erfc())(mlx.array(np.array([10.0, 10.5], dtype="float32")))
+        )
+
+    assert (res > 0).all()
+    np.testing.assert_allclose(
+        res, scipy.special.erfc(x_test_value.astype("float64")), rtol=1e-5
+    )
+    assert bottom[0] > 0.0
+    assert bottom[1] == 0.0
+
+
 @pytest.mark.skipif(
     not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
     reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",

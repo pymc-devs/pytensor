@@ -6,11 +6,11 @@ def _exp(t, const):
     r"""``exp(t)`` at the working precision, over the full exponent range of the dtype.
 
     ``mx.exp`` is a float32 kernel in range as well as in precision: its float64 result
-    is bitwise equal to its float32 one, and it overflows past ``exp(88)`` whatever the
-    dtype. ``mx.power`` is genuine at float64, so double precision goes through it and
-    is left with only the :math:`x \epsilon` the exponent itself carries. Single
-    precision keeps ``mx.exp``, which is cheaper and, at float32, the more accurate of
-    the two.
+    is bitwise equal to its float32 one, it overflows past ``exp(88)`` whatever the
+    dtype, and it flushes the float32 subnormals to zero from ``exp(-90)``. ``mx.power``
+    carries none of those limits, is at least as accurate at both precisions, and costs
+    nothing measurable inside a compiled dispatch, leaving only the :math:`x \epsilon`
+    the exponent itself carries.
 
     Parameters
     ----------
@@ -24,9 +24,7 @@ def _exp(t, const):
     mx.array
         ``exp(t)`` at the dtype of ``t``.
     """
-    if t.dtype == mx.float64:
-        return mx.power(const(np.e), t)
-    return mx.exp(t)
+    return mx.power(const(np.e), t)
 
 
 _LN2 = 0.6931471805599453

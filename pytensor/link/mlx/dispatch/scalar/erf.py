@@ -12,12 +12,13 @@ from pytensor.scalar.math import Erfc, Erfcx
 # a series for erf below 0.46875, and two rationals that yield erfcx directly above it.
 #
 # Deriving all three from one kernel, rather than composing them out of mx.erf, is what
-# makes them accurate. mx.erf is a float32 kernel whatever dtype it is handed, as are
-# mx.exp, mx.sin and mx.cos, while mx.log and mx.sqrt are genuine at float64. Both upper
-# intervals here are free of exp, so erfcx holds the full working precision across the
-# range where erfc has decayed far past anything 1 - erf could resolve. The subunit
-# interval and the negative-argument reflections still need exp, which is why erfcx
-# keeps its rational branches rather than being derived from a single form.
+# makes them accurate: mx.erf is a float32 kernel whatever dtype it is handed. The two
+# upper intervals are free of exp entirely, and where exp is unavoidable the family goes
+# through _exp rather than mx.exp, which is float32 in range as well as in precision.
+#
+# The intervals are a matter of conditioning rather than precision. erfcx is the bounded
+# quantity and is computed directly, because reaching it as exp(x**2) * erfc(x) overflows
+# while erfc has decayed far past anything 1 - erf could resolve.
 _ERF_A = (
     3.16112374387056560e00,
     1.13864154151050156e02,
