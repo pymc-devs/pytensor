@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import numpy as np
@@ -14,6 +15,12 @@ from tests.link.mlx.test_basic import compare_mlx_and_py
 
 mlx = pytest.importorskip("mlx.core")
 from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.link.mlx.dispatch.scalar.bessel import (
+    _constant_order as constant_order,
+)
+from pytensor.link.mlx.dispatch.scalar.bessel import (
+    _metal_ive_call as metal_ive_call,
+)
 
 
 # The series splits at x = 8, so the ranges straddle it rather than sampling across it.
@@ -259,6 +266,45 @@ def test_ive_large_order_raises():
 
     with pytest.raises(NotImplementedError, match="orders up to 20"):
         pytensor.function([x], pt.ive(25.0, x), mode="MLX")
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize("order", [0.0, 0.5, 1.0, 2.5, 5.0, -0.5, -1.0, -2.5], ids=str)
+def test_ive_paths_agree(order):
+    # ive is implemented twice: a Metal kernel, taken for float32 on the GPU stream, and
+    # the vectorized fallback taken everywhere else -- which is every float64 graph,
+    # since Metal has no float64 at all. Only the fallback runs on CI, so this is the
+    # only thing standing between the kernel and a silent drift.
+    #
+    # The negative non-integer orders are the ones that matter. Their series terms
+    # alternate in sign, and a convergence test written on the term rather than its
+    # magnitude stops at the first one, which is wrong by a factor of two rather than by
+    # an ulp. Every order with strictly positive terms passes such a test happily.
+    x_test_value = np.exp(
+        np.random.default_rng(71).uniform(np.log(1e-4), np.log(500.0), 1001)
+    ).astype("float32")
+    x = vector("x", dtype="float32")
+    node = pt.ive(order, x).owner
+
+    with mlx.stream(mlx.gpu):
+        # Without this the test compares the fallback against itself and passes whatever
+        # the kernel does. A scalar order reaches the dispatch with shape (1,) once it
+        # has been broadcast against the argument, which is enough to disqualify it from
+        # the kernel if the guard checks rank rather than size.
+        graph_order = constant_order(node.inputs[0])
+        assert metal_ive_call(graph_order, mlx.array(x_test_value)) is not None, (
+            "the Metal kernel did not engage, so this comparison proves nothing"
+        )
+        metal = np.asarray(mlx_funcify(Ive(), node=node)(None, mlx.array(x_test_value)))
+    with mlx.stream(mlx.cpu):
+        vectorized = np.asarray(
+            mlx_funcify(Ive(), node=node)(None, mlx.array(x_test_value))
+        )
+
+    np.testing.assert_allclose(metal, vectorized, rtol=1e-4, atol=0.0)
 
 
 def test_ive_vector_order():

@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import mlx.core as mx
 import numpy as np
 from scipy.special import gammaln as scipy_gammaln
@@ -284,6 +286,111 @@ def _ive_asymptotic_coeffs(order, n_terms):
     return tuple(coeffs)
 
 
+# The vectorized ive evaluates a fixed trip count for every element and both branches on
+# top of that -- 62x a single fused pass at n = 1e7, the worst ratio in this module. A
+# kernel takes the branch and stops the series when it has converged, which for most
+# arguments is long before the worst-case term count. The order is a constant, so its
+# split, trip count and 1 / Gamma(v + 1) are baked into the source and the kernel is
+# cached per order.
+_METAL_IVE_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float y = fabs((float)x[i]);
+    float res;
+    if (y <= IVE_SPLIT) {
+        float quarter = 0.25f * y * y;
+        float term = 1.0f;
+        float total = 1.0f;
+        for (int k = 1; k < IVE_TERMS; ++k) {
+            term *= quarter / (float)(k * (IVE_ORDER + k));
+            total += term;
+            // the terms alternate in sign for a negative non-integer order, so the
+            // convergence test has to be on the magnitude or it fires on the first one
+            if (fabs(term) <= 1e-9f * fabs(total)) break;
+        }
+        float scale = IVE_RGAMMA * exp(-y);
+        if (IVE_ORDER != 0.0f) scale *= pow(0.5f * y, IVE_ORDER);
+        res = total * scale;
+    } else {
+        float term = 1.0f;
+        float total = 1.0f;
+        for (int k = 1; k < IVE_ASYMPTOTIC_TERMS; ++k) {
+            term *= -(IVE_MU - (float)((2 * k - 1) * (2 * k - 1))) / (8.0f * y * (float)k);
+            total += term;
+        }
+        res = total * rsqrt(2.0f * 3.14159265358979323846f * y);
+    }
+    out[i] = (T)res;
+"""
+
+
+_METAL_IVE_KERNELS: dict[float, Callable | None] = {}
+
+
+def _metal_ive_kernel(order):
+    """Build and cache the Metal kernel for ``order``, or None if it cannot be built."""
+    # .item() rather than float(): a scalar order arrives with shape (1,) once the op
+    # has broadcast it, and NumPy is retiring the implicit conversion of those
+    order = np.asarray(order).item()
+    if order not in _METAL_IVE_KERNELS:
+        # the trailing newline matters: MLX appends its own template declaration straight
+        # after this header, and a #define running into it fails to compile
+        header = (
+            "\n".join(
+                f"#define {name} {value}"
+                for name, value in (
+                    ("IVE_SPLIT", f"{_ive_split(order):.8f}f"),
+                    ("IVE_TERMS", _ive_series_terms(order)),
+                    ("IVE_ORDER", f"{order:.8f}f"),
+                    ("IVE_MU", f"{4.0 * order * order:.8f}f"),
+                    ("IVE_RGAMMA", f"{np.exp(-scipy_gammaln(order + 1.0)):.10e}f"),
+                    ("IVE_ASYMPTOTIC_TERMS", _IVE_ASYMPTOTIC_TERMS),
+                )
+            )
+            + "\n"
+        )
+        try:
+            _METAL_IVE_KERNELS[order] = mx.fast.metal_kernel(
+                name=f"pytensor_ive_{str(order).replace('.', '_').replace('-', 'neg')}",
+                input_names=["x"],
+                output_names=["out"],
+                header=header,
+                source=_METAL_IVE_SOURCE,
+            )
+        except Exception:
+            _METAL_IVE_KERNELS[order] = None
+    return _METAL_IVE_KERNELS[order]
+
+
+def _metal_ive_call(order, y):
+    """Evaluate ``ive(order, y)`` through its Metal kernel, or None to fall back.
+
+    The kernel bakes the order into its source, so it serves a single order only; a
+    vector of orders takes the vectorized path, where they cost one evaluation between
+    them rather than one each. A scalar order reaches this with shape ``(1,)`` when the
+    argument is an array, since the op broadcasts it, so size rather than rank decides.
+    """
+    if (
+        np.size(order) != 1
+        or y.dtype != mx.float32
+        or not mx.metal.is_available()
+        or mx.default_device() != mx.gpu
+    ):
+        return None
+    kernel = _metal_ive_kernel(order)
+    if kernel is None:
+        return None
+    flat = y.reshape(-1)
+    (out,) = kernel(
+        inputs=[flat],
+        template=[("T", flat.dtype)],
+        grid=(flat.size, 1, 1),
+        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
+        output_shapes=[flat.shape],
+        output_dtypes=[flat.dtype],
+    )
+    return out.reshape(y.shape)
+
+
 def _ive_series(y, order, const):
     """``ive(order, y)`` by the ascending series, for ``y`` at or below the split."""
     quarter_sq = y * y * const(0.25)
@@ -328,6 +435,10 @@ def _ive_positive(y, order, const):
     vector of orders at once -- as the HSGP approximation of a periodic kernel does --
     is one evaluation rather than one per order.
     """
+    fast = _metal_ive_call(order, y)
+    if fast is not None:
+        return fast
+
     # Both branches run for every element and are selected afterwards, so each is
     # clamped into its own interval first
     split = const(_ive_split(order))
