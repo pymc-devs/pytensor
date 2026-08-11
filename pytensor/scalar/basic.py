@@ -1772,9 +1772,9 @@ class Maximum(BinaryScalarOp):
                 x.zeros_like(dtype=config.floatX),
                 y.zeros_like(dtype=config.floatX),
             ]
-        # This form handle the case when both value are the same.
-        # In that case, gx will be gz, gy will be 0.
-        e = eq(outputs[0], x)
+        # maximum returns x when x >= y, ties included; testing eq(outputs[0], x)
+        # would need x recomputed bit-for-bit, which fastmath reassoc can break.
+        e = ge(x, y)
         gx = e * gz
         gy = (constant(1, dtype=gz.dtype) - e) * gz
         return (gx, gy)
@@ -1817,9 +1817,9 @@ class Minimum(BinaryScalarOp):
                 x.zeros_like(dtype=config.floatX),
                 y.zeros_like(dtype=config.floatX),
             ]
-        # This form handle the case when both value are the same.
-        # In that case, gx will be gz, gy will be 0.
-        e = eq(outputs[0], x)
+        # minimum returns x when x <= y, ties included; testing eq(outputs[0], x)
+        # would need x recomputed bit-for-bit, which fastmath reassoc can break.
+        e = le(x, y)
         gx = e * gz
         gy = (constant(1, dtype=gz.dtype) - e) * gz
         return (gx, gy)
