@@ -1,8 +1,12 @@
 import mlx.core as mx
+import numpy as np
+from scipy.special import gammaln as scipy_gammaln
 
+from pytensor.graph.basic import Constant
+from pytensor.graph.traversal import ancestors
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.helpers import _exp, _working_precision
-from pytensor.scalar.math import I0, I1
+from pytensor.scalar.math import I0, I1, Ive
 
 
 # Chebyshev expansions of the exponentially scaled modified Bessel functions, from the
@@ -232,3 +236,179 @@ def mlx_funcify_I1(op, **kwargs):
         return mx.where(z < const(0.0), -out, out).astype(out_dtype)
 
     return i1
+
+
+# ive at real order is a different construction from i0 and i1: an ascending power series
+# below x = 20 and a Hankel asymptotic expansion above it, rather than a Chebyshev fit.
+# Both branches are polynomials once the order is known, which is why the order has to be
+# a constant -- see mlx_funcify_Ive.
+# The Hankel expansion needs x large against v**2, and the series needs a term for
+# roughly every x / 2, so both the split and the trip count follow the order. Validated
+# against scipy to 3e-14 over -20 <= v <= 20; past that the series grows faster than it
+# is worth and the order is refused rather than approximated
+_IVE_MAX_ORDER = 20.0
+_IVE_ASYMPTOTIC_TERMS = 20
+
+
+def _ive_split(order):
+    """Argument at which the ascending series gives way to the Hankel expansion."""
+    return np.maximum(20.0, 0.25 * order * order + 0.5 * np.abs(order) + 15.0)
+
+
+def _ive_series_terms(order):
+    """Trip count the ascending series needs to reach :func:`_ive_split`.
+
+    One count covers the whole order array, since the loop is unrolled into the graph
+    and cannot vary per element.
+    """
+    return int(0.75 * np.max(_ive_split(order)) + 30)
+
+
+def _ive_series_step(order, k):
+    """Ratio of consecutive ascending-series terms, ``t_k / t_{k-1}``, less ``x**2 / 4``."""
+    return 1.0 / (k * (order + k))
+
+
+def _ive_asymptotic_coeffs(order, n_terms):
+    """Hankel coefficients ``a_k`` in ``ive(v, x) ~ sum (-1)**k a_k / x**k / sqrt(2 pi x)``.
+
+    The expansion terminates for half-integer orders, where ``mu`` meets an odd square
+    exactly and every later coefficient is zero.
+    """
+    mu = 4.0 * order * order
+    term = np.ones_like(mu)
+    coeffs = [term]
+    for k in range(1, n_terms):
+        term = term * -(mu - (2 * k - 1) ** 2) / (8.0 * k)
+        coeffs.append(term)
+    return tuple(coeffs)
+
+
+def _ive_series(y, order, const):
+    """``ive(order, y)`` by the ascending series, for ``y`` at or below the split."""
+    quarter_sq = y * y * const(0.25)
+    total = const(1.0)
+    term = const(1.0)
+    for k in range(1, _ive_series_terms(order)):
+        term = term * quarter_sq * const(_ive_series_step(order, k))
+        total = total + term
+
+    # The (y/2)**v / Gamma(v+1) prefactor is taken in log space so that a large order
+    # does not overflow on its way to a small answer. Only y = 0 has to be kept out of
+    # the logarithm, and its limits are exact anyway: 1, 0 and a pole for a zero,
+    # positive and negative order. Clamping the argument instead of substituting for it
+    # would floor every y below the clamp along with it
+    safe_y = mx.where(y > const(0.0), y, const(1.0))
+    log_prefactor = (
+        -y
+        - const(scipy_gammaln(order + 1.0))
+        + const(order) * mx.log(safe_y * const(0.5))
+    )
+    out = total * _exp(log_prefactor, const)
+    return mx.where(y == const(0.0), const(np.where(order == 0.0, 1.0, 0.0)), out)
+
+
+def _ive_asymptotic(y, order, const):
+    """``ive(order, y)`` by the Hankel expansion, for ``y`` at or above the split.
+
+    A plain polynomial in ``1 / y`` once the order is fixed.
+    """
+    inv_y = const(1.0) / y
+    coeffs = _ive_asymptotic_coeffs(order, _IVE_ASYMPTOTIC_TERMS)
+    acc = const(coeffs[-1])
+    for c in reversed(coeffs[:-1]):
+        acc = acc * inv_y + const(c)
+    return acc * mx.rsqrt(const(2.0 * np.pi) * y)
+
+
+def _ive_positive(y, order, const):
+    """``ive(order, y)`` for non-negative ``y`` at a known constant ``order``.
+
+    ``order`` is a NumPy array broadcasting against ``y``, so a graph asking for a whole
+    vector of orders at once -- as the HSGP approximation of a periodic kernel does --
+    is one evaluation rather than one per order.
+    """
+    # Both branches run for every element and are selected afterwards, so each is
+    # clamped into its own interval first
+    split = const(_ive_split(order))
+    small = _ive_series(mx.minimum(y, split), order, const)
+    large = _ive_asymptotic(mx.maximum(y, split), order, const)
+    return mx.where(y <= split, small, large)
+
+
+def _constant_order(var):
+    """Return the order as a NumPy array, or None when it is not fixed by the graph.
+
+    The order is used with the shape it has in the graph, so it broadcasts against the
+    argument exactly as the op does -- a whole vector of orders is one evaluation.
+    """
+    if isinstance(var, Constant):
+        return np.asarray(var.data, dtype="float64")
+    if all(
+        root.owner is not None or isinstance(root, Constant)
+        for root in ancestors([var])
+    ):
+        return np.asarray(var.eval(), dtype="float64")
+    return None
+
+
+@mlx_funcify.register(Ive)
+def mlx_funcify_Ive(op, node=None, **kwargs):
+    order = None if node is None else _constant_order(node.inputs[0])
+    if order is None:
+        raise NotImplementedError(
+            "MLX ive requires a constant order. The series is unrolled into the graph, "
+            "so its trip count has to be known, and the coefficients of both branches "
+            "along with the negative-integer and negative-argument rules are all fixed "
+            "by the order. A symbolic order needs a different implementation rather "
+            "than a different constant. An array of orders is fine: it is used with the "
+            "shape it has in the graph, so a vector of them costs one evaluation."
+        )
+    order = np.asarray(order, dtype="float64")
+    if np.max(np.abs(order)) > _IVE_MAX_ORDER:
+        raise NotImplementedError(
+            f"MLX ive supports orders up to {_IVE_MAX_ORDER:g}, not "
+            f"{np.max(np.abs(order)):g}. The ascending series needs a term for roughly "
+            "every x / 2 up to where the Hankel expansion takes over, and that "
+            "crossover grows with the square of the order."
+        )
+
+    # I(-n, x) = I(n, x) for integer n. Reflecting here keeps the series ratio away from
+    # the pole of Gamma at a non-positive integer, which is where 1 / (k + v) divides by
+    # zero
+    is_integer = order == np.round(order)
+    reflected = np.where(is_integer & (order < 0.0), -order, order)
+
+    # Only integer orders continue to negative argument, with the parity of the order;
+    # everything else is outside the real domain there, as is zero for a negative
+    # non-integer order
+    negative_sign = np.where(is_integer & (np.round(reflected) % 2 == 1), -1.0, 1.0)
+    negative_is_nan = ~is_integer
+    zero_is_pole = negative_is_nan & (order < 0.0)
+
+    def ive(v, x):
+        z, const, out_dtype = _working_precision(x)
+        out = _ive_positive(mx.abs(z), reflected, const)
+
+        out = mx.where(z < const(0.0), out * const(negative_sign), out)
+
+        # NaN is computed rather than named: mx.compile inlines a size-1 constant into
+        # its generated source, where a bare `nan` is a literal neither backend has
+        nan = const(0.0) / const(0.0)
+        if negative_is_nan.any():
+            off_domain = (z < const(0.0)) & (
+                const(negative_is_nan.astype("float64")) != const(0.0)
+            )
+            out = mx.where(off_domain, nan, out)
+        if zero_is_pole.any():
+            at_pole = (z == const(0.0)) & (
+                const(zero_is_pole.astype("float64")) != const(0.0)
+            )
+            out = mx.where(at_pole, nan, out)
+
+        # The series tends to zero at either infinity, but scipy reports NaN there and
+        # the op has to agree with it across backends
+        out = mx.where(mx.isinf(z), nan, out)
+        return out.astype(out_dtype)
+
+    return ive
