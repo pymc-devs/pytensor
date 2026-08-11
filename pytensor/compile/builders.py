@@ -65,17 +65,28 @@ def infer_shape(outs, inputs, input_shapes):
 
 
 def construct_nominal_fgraph(
-    inputs: Sequence[Variable], outputs: Sequence[Variable]
+    inputs: Sequence[Variable],
+    outputs: Sequence[Variable],
+    *,
+    replace: dict[Variable, Variable] | None = None,
 ) -> FunctionGraph:
     """Construct an inner-`FunctionGraph` with ordered nominal inputs.
 
     Raises ``MissingInputError`` if ``outputs`` implicitly depend on a variable
     that is neither a `Constant` nor listed in ``inputs`` (including shared
     variables, which must be passed explicitly).
+
+    ``replace`` folds an extra substitution into the same clone that nominalizes
+    the inputs, so a caller can rewrite some leaves (e.g. a tensor into
+    ``tensor_from_scalar`` of a scalar input) without a separate clone. Its keys
+    are exempt from the missing-input check and its values may reference
+    ``inputs``.
     """
+    replace = replace or {}
     dummy_inputs = [inp.type() for inp in inputs]
-    for var in graph_inputs(outputs, inputs):
-        if var in inputs or isinstance(var, Constant):
+    provided = set(inputs) | set(replace)
+    for var in graph_inputs(outputs, provided):
+        if var in provided or isinstance(var, Constant):
             continue
         if isinstance(var, SharedVariable):
             raise MissingInputError(
@@ -84,7 +95,13 @@ def construct_nominal_fgraph(
             )
         raise MissingInputError(f"NominalGraph is missing an input: {var}")
 
-    replacements = dict(zip(inputs, dummy_inputs, strict=True))
+    input_to_dummy = dict(zip(inputs, dummy_inputs, strict=True))
+    # ``replace`` values may reference ``inputs``; rewrite them onto the dummies
+    # so the whole substitution happens in the single clone below.
+    replacements = {
+        k: clone_replace([v], replace=input_to_dummy)[0] for k, v in replace.items()
+    }
+    replacements.update(input_to_dummy)
 
     # ``outputs`` must be mutable ``Apply`` graphs; a caller holding a frozen
     # graph thaws it first (``FrozenFunctionGraph.unfreeze``).
@@ -217,6 +234,7 @@ class OpFromGraph(HasInnerFunction, Op):
         strict: bool = False,
         name: str | None = None,
         destroy_map: dict[int, tuple[int, ...]] | None = None,
+        fgraph: FrozenFunctionGraph | None = None,
         **kwargs,
     ):
         """
@@ -313,11 +331,17 @@ class OpFromGraph(HasInnerFunction, Op):
 
         self.is_inline = inline
 
-        inner_fgraph = construct_nominal_fgraph(inputs, outputs)
-        # The inner graph is stored immutable. The default freeze (no dedup)
-        # keeps distinct buffers for inplace ``destroy_map`` ops; structural
-        # folding would alias them. See ``FunctionGraph.freeze``.
-        self.fgraph = inner_fgraph.freeze()
+        if fgraph is not None:
+            # Caller supplies an already-nominalized frozen inner graph (built,
+            # e.g., with construct_nominal_fgraph + a substitution). ``inputs``/
+            # ``outputs`` are still passed for the outer input/output types.
+            self.fgraph = fgraph
+        else:
+            inner_fgraph = construct_nominal_fgraph(inputs, outputs)
+            # The inner graph is stored immutable. The default freeze (no dedup)
+            # keeps distinct buffers for inplace ``destroy_map`` ops; structural
+            # folding would alias them. See ``FunctionGraph.freeze``.
+            self.fgraph = inner_fgraph.freeze()
 
         # `compile_kwargs` used to control how the inner graph was compiled.
         # That is now the job of the `ofg_inner_graph` rewrite (which
