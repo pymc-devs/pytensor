@@ -27,10 +27,11 @@ from pytensor.link.mlx.dispatch import mlx_funcify
         (0.5, 20.0, {"float32": (1e-5, 1e-4), "float64": (1e-11, 1e-11)}),
         (1e-3, 0.5, {"float32": (1e-5, 1e-4), "float64": (1e-11, 1e-11)}),
         (20.0, 1e4, {"float32": (1e-5, 0.0), "float64": (1e-12, 0.0)}),
-        # Negative arguments go through the log|sin(pi x)| reflection formula, which
-        # loses precision to cancellation near the poles. mx.sin is float32-accurate
-        # whatever the dtype, so float64 gains nothing here
-        (-5.4, -0.6, {"float32": (1e-3, 1e-3), "float64": (1e-3, 1e-3)}),
+        # Negative arguments go through the log|sin(pi x)| reflection, which takes its
+        # sine from the tangent by the half-angle identity. mx.tan is genuine at float64
+        # where mx.sin is a float32 kernel whatever it is handed, so float64 holds here
+        # rather than sharing single precision's ceiling
+        (-5.4, -0.6, {"float32": (1e-3, 1e-3), "float64": (1e-11, 1e-11)}),
     ],
     ids=["moderate", "tiny", "large", "negative"],
 )
@@ -123,7 +124,10 @@ def test_special_half_precision(op):
         # Negative arguments pick up the pi*cot(pi x) reflection term, which loses
         # precision to cancellation near the poles. mx.cos and mx.sin are
         # float32-accurate whatever the dtype, so float64 gains nothing here
-        (-5.85, -5.15, {"float32": (1e-4, 1e-4), "float64": (1e-4, 1e-4)}),
+        # The reflection's pi * cot(pi x) is taken as a reciprocal tangent rather than
+        # a ratio of cosine to sine, both of which are float32 kernels at any dtype. The
+        # absolute tolerance carries float32, where psi's own zeros sit near its poles
+        (-5.85, -5.15, {"float32": (1e-2, 1e-4), "float64": (1e-10, 1e-12)}),
     ],
     ids=["moderate", "tiny", "large", "negative"],
 )
@@ -142,10 +146,14 @@ def test_psi(low, high, tolerances, dtype):
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
 def test_psi_edge_cases(dtype):
-    # Negative integers are left out: PyTensor's own C implementation returns inf
-    # there while scipy returns nan, so there is no agreed reference to compare to.
-    # The finite entries keep the poles from being the only thing asserted
-    x_test_value = np.array([0.0, np.inf, np.nan, 0.5, 4.0], dtype=dtype)
+    # The negative integers are left out. psi has a pole at each of them and the three
+    # implementations disagree on what to report: scipy says nan, PyTensor's C code says
+    # inf, and this dispatch says -inf, because reducing the cotangent's argument by the
+    # nearest integer puts the tangent on a true zero there. All three are infinite or
+    # undefined rather than a plausible finite number, which is what matters; there is
+    # just no agreed reference to assert against. The finite entries keep the remaining
+    # poles from being the only thing asserted
+    x_test_value = np.array([0.0, np.inf, np.nan, 0.5, 4.0, -1.5], dtype=dtype)
     x = vector("x", dtype=dtype)
 
     compare_mlx_and_py([x], [pt.psi(x)], [x_test_value])
@@ -183,3 +191,31 @@ def test_nnet():
 
     out = softplus(x)
     compare_mlx_and_py([x], [out], [x_test_value])
+
+
+@pytest.mark.parametrize(
+    "scalar_op, reference",
+    [(GammaLn, scipy.special.gammaln), (Psi, scipy.special.digamma)],
+    ids=["gammaln", "psi"],
+)
+def test_reflection_near_the_poles(scalar_op, reference):
+    # Both reflections divide by something that vanishes at every negative integer, and
+    # both grow without bound approaching one. Every other range here samples uniformly
+    # and so never lands near a pole, which is how a reflection that was 45% wrong
+    # within 1e-12 of one went unnoticed. The tolerance is set by the argument
+    # reduction, which loses a digit for each decade closer to the pole.
+    poles = -np.array([1.0, 2.0, 5.0, 20.0])
+    offsets = np.array([1e-1, 1e-3, 1e-5, 1e-7, 1e-9])
+    x_test_value = np.unique(
+        np.concatenate(
+            [(poles[:, None] - offsets).ravel(), (poles[:, None] + offsets).ravel()]
+        )
+    )
+    x_test_value = x_test_value[x_test_value < 0.0]
+
+    with mlx.stream(mlx.cpu):
+        res = np.asarray(
+            mlx_funcify(scalar_op())(mlx.array(x_test_value, dtype=mlx.float64))
+        )
+
+    np.testing.assert_allclose(res, reference(x_test_value), rtol=1e-5)
