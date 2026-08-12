@@ -333,7 +333,8 @@ def vector_integer_advanced_indexing(
 
             # Index over tuples of raveled advanced indices and write to output buffer
             for i, scalar_idxs in enumerate(zip(idx0.ravel(), idx2.ravel())):
-                out_buffer[i] = basic_indexed_x[scalar_idxs]
+                for j0 in range(out_buffer.shape[1]):
+                    out_buffer[(i, j0)] = basic_indexed_x[(*scalar_idxs, j0)]
 
             # Unravel out_buffer (if needed)
             out_buffer = out_buffer.reshape((*adv_idx_shape, *basic_idx_shape))
@@ -385,7 +386,8 @@ def vector_integer_advanced_indexing(
 
             # Index over tuples of raveled advanced indices and update buffer
             for i, scalar_idxs in enumerate(zip(idx0, idx2)):
-                basic_indexed_x[scalar_idxs] = y_bcast[i]
+                for j0 in range(y_bcast.shape[1]):
+                    basic_indexed_x[(*scalar_idxs, j0)] = y_bcast[(i, j0)]
 
             # Return the original x, with the entries updated
             return x
@@ -435,7 +437,8 @@ def vector_integer_advanced_indexing(
 
             # Index over tuples of raveled advanced indices and update buffer
             for i, scalar_idxs in enumerate(zip(idx1, idx2)):
-                basic_indexed_x[scalar_idxs] += y_bcast[i]
+                for j0 in range(y_bcast.shape[1]):
+                    basic_indexed_x[(*scalar_idxs, j0)] += y_bcast[(i, j0)]
 
             # Return the original x, with the entries updated
             return x
@@ -492,6 +495,26 @@ def vector_integer_advanced_indexing(
     basic_indices = [idxs[i] for i in basic_indices_pos]
 
     to_tuple = create_tuple_string  # alias to make code more readable below
+
+    # Number of trailing dimensions carried along by each scalar-index step.
+    # Basic indices are always slices here, so `basic_indexed_x` keeps x's rank and the
+    # advanced group consumes `len(adv_indices_pos)` of its dimensions.
+    n_basic_dims = x.type.ndim - len(adv_indices_pos)
+    trailing_idxs = [f"j{k}" for k in range(n_basic_dims)]
+    buffer_idx = to_tuple(["i", *trailing_idxs])
+    indexed_idx = to_tuple(["*scalar_idxs", *trailing_idxs])
+
+    def trailing_loop_nest(assignment: str, extents_from: str) -> str:
+        # An index step written on whole subarrays goes through Numba's generic array
+        # machinery, and the `+=` form materialises a temporary. Spell it out as a scalar
+        # loop nest instead. The trailing rank is known here, the extents only at run time.
+        # Returned with relative indentation -- the caller places it.
+        lines = [
+            f"{'    ' * k}for {j} in range({extents_from}.shape[{k + 1}]):"
+            for k, j in enumerate(trailing_idxs)
+        ]
+        lines.append(f"{'    ' * n_basic_dims}{assignment}")
+        return "\n".join(lines)
 
     # Compute number of dimensions in advanced indices (after broadcasting)
     if len(adv_indices_pos) == 1:
@@ -568,7 +591,7 @@ def vector_integer_advanced_indexing(
 
                 # Index over tuples of raveled advanced indices and write to output buffer
                 for i, scalar_idxs in enumerate(zip{to_tuple([f"{idx}.ravel()" for idx in adv_indices] if adv_idx_ndim != 1 else adv_indices)}):
-                    out_buffer[i] = basic_indexed_x[scalar_idxs]
+{indent(trailing_loop_nest(f"out_buffer[{buffer_idx}] = basic_indexed_x[{indexed_idx}]", "out_buffer"), " " * 20)}
 
                 # Unravel out_buffer (if needed)
                 out_buffer = {f"out_buffer.reshape((*{adv_indices[0]}.shape, *basic_idx_shape))" if adv_idx_ndim != 1 else "out_buffer"}
@@ -657,7 +680,7 @@ def vector_integer_advanced_indexing(
 
                 # Index over tuples of raveled advanced indices and update buffer
                 for i, scalar_idxs in enumerate(zip{to_tuple([f"{idx}.ravel()" for idx in adv_indices] if adv_idx_ndim != 1 else adv_indices)}):
-                    basic_indexed_x[scalar_idxs] {"=" if op.set_instead_of_inc else "+="} y_bcast[i]
+{indent(trailing_loop_nest(f"basic_indexed_x[{indexed_idx}] {'=' if op.set_instead_of_inc else '+='} y_bcast[{buffer_idx}]", "y_bcast"), " " * 20)}
 
                 # Return the original x, with the entries updated
                 return x
