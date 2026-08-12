@@ -26,7 +26,10 @@ from tests import unittest_tools as utt
 from tests.unittest_tools import RewriteTester
 
 
-_fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"])
+# Fusion inlines `Softmax` and `LogSoftmax`, which would hide the ops these tests check for
+_fast_run_rewrites = RewriteDatabaseQuery(
+    include=["fast_run"], exclude=["inline_symbolic_for_fusion"]
+)
 _fast_run_rewrites = optdb.query(_fast_run_rewrites)
 
 

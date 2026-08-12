@@ -1458,6 +1458,60 @@ class TestFusion:
         fgraph = FunctionGraph([x_row, x_mat], [m])
         FusionOptimizer().apply(fgraph)
 
+    def test_fuse_across_symbolic_op(self):
+        # A SymbolicOp with no backend dispatch is a fusion barrier: its body is
+        # compiled on its own, so the ops around it cannot join the ops inside it.
+        # Inlining it at the start of the fusion pass lets the whole chain fuse --
+        # the subtraction from the log_softmax body ends up in the same Composite
+        # as the surrounding exp and add.
+        rng = np.random.default_rng(75)
+        x = pt.tensor("x", shape=(5, 4))
+        out = exp(pt.special.log_softmax(x * 2.0, axis=-1)) + 1.0
+
+        def output_scalar_ops(fn):
+            scalar_op = fn.maker.fgraph.outputs[0].owner.op.scalar_op
+            assert isinstance(scalar_op, Composite)
+            return {node.op for node in scalar_op.fgraph.apply_nodes}
+
+        fn = function([x], out, mode=self.mode)
+        assert output_scalar_ops(fn) == {ps.add, ps.exp, ps.sub}
+
+        # Without the inlining the body stays sealed off, so only the outer ops fuse
+        barrier_fn = function(
+            [x], out, mode=self.mode.excluding("inline_symbolic_for_fusion")
+        )
+        assert output_scalar_ops(barrier_fn) == {ps.add, ps.exp}
+
+        x_val = rng.normal(size=(5, 4)).astype(config.floatX)
+        np.testing.assert_allclose(fn(x_val), barrier_fn(x_val), rtol=1e-6)
+
+    def test_merge_inlined_symbolic_ops(self):
+        # Each SymbolicOp is inlined from its own inner graph, so a Softmax and a
+        # LogSoftmax over the same logits come out with distinct copies of everything
+        # their bodies share. Merging them before fusion is what keeps the Composite
+        # from evaluating the exponential over each copy.
+        x = pt.tensor("x", shape=(5, 4))
+        outs = [pt.special.softmax(x, axis=-1), pt.special.log_softmax(x, axis=-1)]
+
+        def n_exp(fn):
+            scalar_ops = []
+            for node in fn.maker.fgraph.toposort():
+                scalar_op = getattr(node.op, "scalar_op", None)
+                if isinstance(scalar_op, Composite):
+                    scalar_ops.extend(n.op for n in scalar_op.fgraph.apply_nodes)
+                elif scalar_op is not None:
+                    scalar_ops.append(scalar_op)
+            return scalar_ops.count(ps.exp)
+
+        fn = function([x], outs, mode=self.mode)
+        assert n_exp(fn) == 1
+
+        # Without the merge the two copies survive into the Composite
+        unmerged_fn = function(
+            [x], outs, mode=self.mode.excluding("merge_inlined_symbolic")
+        )
+        assert n_exp(unmerged_fn) == 2
+
 
 class TimesN(ps.basic.UnaryScalarOp):
     """
