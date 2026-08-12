@@ -69,7 +69,11 @@ class TestSoftmax(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         admat_val = rng.random((3, 4)).astype(config.floatX)
         self._compile_and_check(
-            [admat], [Softmax(axis=-1)(admat)], [admat_val], Softmax
+            [admat],
+            [Softmax(axis=-1)(admat)],
+            [admat_val],
+            Softmax,
+            excluding=["inline_symbolic_for_fusion"],
         )
 
     def test_vector_perform(self):
