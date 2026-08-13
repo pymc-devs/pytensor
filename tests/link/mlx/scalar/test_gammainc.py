@@ -173,6 +173,22 @@ def test_incomplete_gamma_paths_agree(lower):
     # branch for that to mean anything, so it spans the ratio rather than the value.
     rng = np.random.default_rng(71)
     a_test_value, x_test_value = _sample(rng, (1e-2, 1e4), (1e-2, 20.0), 5001)
+
+    # Enforce the claim above rather than trusting it: a later edit to the ranges could
+    # empty a branch, and the test would keep passing while covering less than it says
+    in_temme = (
+        (a_test_value >= _TEMME_MIN_A)
+        & (x_test_value >= _TEMME_MIN_RATIO * a_test_value)
+        & (x_test_value <= _TEMME_MAX_RATIO * a_test_value)
+    )
+    in_series = ~in_temme & (x_test_value <= a_test_value + 1.0)
+    for name, reached in (
+        ("temme", in_temme),
+        ("series", in_series),
+        ("continued fraction", ~in_temme & ~in_series),
+    ):
+        assert reached.mean() > 0.05, f"the sample barely reaches the {name} branch"
+
     a_test_value = a_test_value.astype("float32")
     x_test_value = x_test_value.astype("float32")
 
@@ -196,10 +212,54 @@ def test_incomplete_gamma_paths_agree(lower):
         )
 
     # Both are float32, so agreement is claimed at float32 terms; below the smallest
-    # normal neither carries a relative answer to compare
+    # normal neither carries a relative answer to compare. The two disagree by 1.2e-4 at
+    # worst and by nothing at all at the median, so the bound sits just above the observed
+    # spread rather than at a round number that would let real drift through
     np.testing.assert_allclose(
-        metal, vectorized, rtol=1e-3, atol=np.finfo("float32").tiny
+        metal, vectorized, rtol=3e-4, atol=np.finfo("float32").tiny
     )
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize(
+    "op_class, lower", [(GammaInc, True), (GammaIncC, False)], ids=["P", "Q"]
+)
+def test_incomplete_gamma_dispatch_reaches_kernel(op_class, lower):
+    # Everything else that exercises the kernel calls it directly, and everything that
+    # goes through the registered dispatch runs on the CPU stream the conftest pins. So
+    # removing the kernel from the dispatch would leave the whole suite green while every
+    # float32 GPU graph silently took the path that is an order of magnitude slower.
+    a_test_value, x_test_value = _sample(
+        np.random.default_rng(5), (0.1, 1e3), (0.05, 10.0), 1001
+    )
+    a_test_value = a_test_value.astype("float32")
+    x_test_value = x_test_value.astype("float32")
+
+    with mlx.stream(mlx.gpu):
+        a_mlx = mlx.array(a_test_value)
+        x_mlx = mlx.array(x_test_value)
+        dispatched = np.asarray(mlx_funcify(op_class())(a_mlx, x_mlx))
+        kernel = _metal_gammainc_call(a_mlx, x_mlx, lower)
+        assert kernel is not None, "the Metal kernel refused this input"
+        kernel = np.asarray(kernel)
+
+    with mlx.stream(mlx.cpu):
+        z, const, _ = _working_precision(mlx.array(x_test_value))
+        vectorized = np.asarray(
+            _incomplete_gamma(
+                mlx.array(a_test_value), z, const, mlx_funcify(Erfc()), lower=lower
+            )
+        )
+
+    # Bit equality is only a discriminator while the two paths actually differ; if they
+    # ever agree exactly this test would pass without checking anything
+    assert not np.array_equal(kernel, vectorized), (
+        "the two paths agree bitwise, so this test cannot tell them apart"
+    )
+    np.testing.assert_array_equal(dispatched, kernel)
 
 
 @pytest.mark.skipif(
