@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import numpy as np
@@ -5,7 +6,7 @@ import pytest
 import scipy.special
 
 import pytensor.tensor as pt
-from pytensor.scalar.math import GammaInc, GammaIncC
+from pytensor.scalar.math import Erfc, GammaInc, GammaIncC
 from pytensor.tensor.type import vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
@@ -17,7 +18,10 @@ from pytensor.link.mlx.dispatch.scalar.gammainc import (
     _TEMME_MIN_A,
     _TEMME_MIN_RATIO,
     _TINY,
+    _incomplete_gamma,
+    _metal_gammainc_call,
 )
+from pytensor.link.mlx.dispatch.scalar.helpers import _working_precision
 
 
 def _sample(rng, shape_range, ratio_range, n):
@@ -150,6 +154,85 @@ def test_incomplete_gamma_branch_boundaries():
     np.testing.assert_allclose(
         upper, scipy.special.gammaincc(a_test_value, x_test_value), rtol=1e-10
     )
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize("lower", [True, False], ids=["P", "Q"])
+def test_incomplete_gamma_paths_agree(lower):
+    # Both tails are implemented twice: a Metal kernel, taken for float32 on the GPU
+    # stream, and the vectorized fallback taken everywhere else -- which is every float64
+    # graph, since Metal has no float64 at all. Only the fallback runs on CI, so this is
+    # the only thing standing between the kernel and a silent drift.
+    #
+    # The kernel is not a transcription of the fallback: it takes one branch per element
+    # where the fallback evaluates all three, and it stops each series on convergence
+    # where the fallback always runs the full trip count. The sample has to reach every
+    # branch for that to mean anything, so it spans the ratio rather than the value.
+    rng = np.random.default_rng(71)
+    a_test_value, x_test_value = _sample(rng, (1e-2, 1e4), (1e-2, 20.0), 5001)
+    a_test_value = a_test_value.astype("float32")
+    x_test_value = x_test_value.astype("float32")
+
+    with mlx.stream(mlx.gpu):
+        a_mlx = mlx.array(a_test_value)
+        x_mlx = mlx.array(x_test_value)
+        # Without this the test compares the fallback against itself and passes whatever
+        # the kernel does
+        kernel = _metal_gammainc_call(a_mlx, x_mlx, lower)
+        assert kernel is not None, (
+            "the Metal kernel did not engage, so this comparison proves nothing"
+        )
+        metal = np.asarray(kernel)
+
+    with mlx.stream(mlx.cpu):
+        z, const, _ = _working_precision(mlx.array(x_test_value))
+        vectorized = np.asarray(
+            _incomplete_gamma(
+                mlx.array(a_test_value), z, const, mlx_funcify(Erfc()), lower=lower
+            )
+        )
+
+    # Both are float32, so agreement is claimed at float32 terms; below the smallest
+    # normal neither carries a relative answer to compare
+    np.testing.assert_allclose(
+        metal, vectorized, rtol=1e-3, atol=np.finfo("float32").tiny
+    )
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize("lower", [True, False], ids=["P", "Q"])
+def test_incomplete_gamma_kernel_edge_cases(lower):
+    # The kernel handles every edge a second time, and nothing else reaches it with these
+    # arguments: test_incomplete_gamma_edge_cases runs on the default device, which the
+    # conftest pins to the CPU, and test_incomplete_gamma_paths_agree samples log-uniform
+    # ratios that never produce a zero, an infinity or a nan. That gap is how the kernel
+    # and the fallback both returned nan at x = inf.
+    a_test_value = np.array(
+        [1.0, 0.5, 1e-3, 200.0, 1.0, 200.0, 1.0, 0.5, 200.0, 1.0], dtype="float32"
+    )
+    x_test_value = np.array(
+        [0.0, 0.0, 0.0, 0.0, 1e30, 1e30, np.inf, np.inf, np.inf, np.nan],
+        dtype="float32",
+    )
+
+    with mlx.stream(mlx.gpu):
+        kernel = _metal_gammainc_call(
+            mlx.array(a_test_value), mlx.array(x_test_value), lower
+        )
+        assert kernel is not None, (
+            "the Metal kernel did not engage, so this comparison proves nothing"
+        )
+        metal = np.asarray(kernel)
+
+    reference = scipy.special.gammainc if lower else scipy.special.gammaincc
+    truth = reference(a_test_value.astype("float64"), x_test_value.astype("float64"))
+    np.testing.assert_allclose(metal, truth, rtol=1e-5)
 
 
 def test_continued_fraction_floor_survives_float32():

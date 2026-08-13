@@ -1,9 +1,16 @@
+from collections.abc import Callable
+
 import mlx.core as mx
 import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.scalar.erf import _METAL_HEADER, _metal_constants
 from pytensor.link.mlx.dispatch.scalar.helpers import _exp, _working_precision
-from pytensor.link.mlx.dispatch.scalar.math import _lanczos_log_gamma
+from pytensor.link.mlx.dispatch.scalar.math import (
+    _LANCZOS_COEFFS,
+    _LANCZOS_G,
+    _lanczos_log_gamma,
+)
 from pytensor.scalar.math import Erfc, GammaInc, GammaIncC
 
 
@@ -352,25 +359,229 @@ def _incomplete_gamma(a, x, const, erfc, *, lower):
     return mx.where(saturated, const(1.0 if lower else 0.0), selected)
 
 
-@mlx_funcify.register(GammaIncC)
-def mlx_funcify_GammaIncC(op, **kwargs):
+# The vectorized form runs all three expansions for every element and discards two:
+# timed separately under mx.compile at n = 1e6 they cost 1.6, 2.4 and 6.4 ms against
+# 11.6 ms for the composite, so it is very nearly their sum. A kernel takes one branch
+# and stops each series when it has converged, which for the ascending series is a
+# median of 8 terms out of the 50 the graph must always unroll.
+_METAL_GAMMAINC_HEADER = (
+    _METAL_HEADER
+    + _metal_constants(
+        GI_LANCZOS=_LANCZOS_COEFFS,
+        GI_TEMME_D=tuple(value for row in _TEMME_D for value in row),
+        # The eta series coefficients are loop-invariant, so they are tabulated for the
+        # same reason the vectorized path folds them at trace time: written inline they
+        # are a division per term that only constant folding would remove
+        GI_ETA_C=tuple(2.0 / (k + 2.0) for k in range(_ETA_SERIES_TERMS)),
+    )
+    + f"""
+#define GI_SERIES_TERMS   {_SERIES_TERMS}
+#define GI_CF_TERMS       {_CF_TERMS}
+#define GI_ETA_TERMS      {_ETA_SERIES_TERMS}
+#define GI_ETA_MAX_SIGMA  {_ETA_SERIES_MAX_SIGMA}f
+#define GI_TEMME_MIN_A    {_TEMME_MIN_A}f
+#define GI_TEMME_MIN_R    {_TEMME_MIN_RATIO}f
+#define GI_TEMME_MAX_R    {_TEMME_MAX_RATIO}f
+#define GI_TEMME_ROWS     {len(_TEMME_D)}
+#define GI_TEMME_COLS     {len(_TEMME_D[0])}
+#define GI_LANCZOS_N      {len(_LANCZOS_COEFFS)}
+#define GI_LANCZOS_T      {_LANCZOS_G + 0.5}f
+#define GI_LOG_SQRT_2PI   {float(0.5 * np.log(2.0 * np.pi))!r}f
+#define GI_TINY           {_TINY}f
+// just under one float32 epsilon: below this a term no longer moves the sum
+#define GI_CONVERGED      1.0e-7f
+
+static inline float gi_erfc(float value) {{
+    float y = fabs(value);
+    float res = (y <= ERF_THRESH) ? 1.0f - erf_series(y)
+                                  : exp(-y * y) * erfcx_upper(y);
+    return (value < 0.0f) ? 2.0f - res : res;
+}}
+
+// log Gamma(w + 1), shifted the same way the vectorized Lanczos helper is
+static inline float gi_lgamma1p(float w) {{
+    float series = GI_LANCZOS[0];
+    for (int i = 1; i < GI_LANCZOS_N; ++i) series += GI_LANCZOS[i] / (w + (float)i);
+    float t = w + GI_LANCZOS_T;
+    return GI_LOG_SQRT_2PI + (w + 0.5f) * log(t) - t + log(series);
+}}
+
+static inline float gi_series(float a, float x) {{
+    // x - x rather than 0, so a nan argument still propagates
+    if (!(x > 0.0f)) return x - x;
+    float term = 1.0f;
+    float total = 1.0f;
+    for (int n = 1; n < GI_SERIES_TERMS; ++n) {{
+        term *= x / (a + (float)n);
+        total += term;
+        if (fabs(term) <= GI_CONVERGED * fabs(total)) break;
+    }}
+    return total * exp(-x + a * log(x) - gi_lgamma1p(a));
+}}
+
+static inline float gi_cf(float a, float x) {{
+    float b = x + 1.0f - a;
+    float c = 1.0f / GI_TINY;
+    float d = 1.0f / ((b == 0.0f) ? GI_TINY : b);
+    float h = d;
+    for (int i = 1; i < GI_CF_TERMS; ++i) {{
+        float an = -(float)i * ((float)i - a);
+        b += 2.0f;
+        d = an * d + b;
+        if (fabs(d) < GI_TINY) d = GI_TINY;
+        c = b + an / c;
+        if (fabs(c) < GI_TINY) c = GI_TINY;
+        d = 1.0f / d;
+        float delta = d * c;
+        h *= delta;
+        if (fabs(delta - 1.0f) <= GI_CONVERGED) break;
+    }}
+    return h * exp(-x + a * log(x) - gi_lgamma1p(a - 1.0f));
+}}
+
+static inline float gi_eta(float a, float x) {{
+    float sigma = (x - a) / a;
+    float value;
+    if (fabs(sigma) <= GI_ETA_MAX_SIGMA) {{
+        float series = 0.0f;
+        for (int k = GI_ETA_TERMS - 1; k >= 0; --k) {{
+            series = series * (-sigma) + GI_ETA_C[k];
+        }}
+        value = sigma * sigma * series;
+    }} else {{
+        value = -2.0f * (log1p(sigma) - sigma);
+    }}
+    return sign(sigma) * sqrt(fmax(value, 0.0f));
+}}
+
+static inline float gi_temme(float a, float x, float sgn) {{
+    float eta = gi_eta(a, x);
+    float total = 0.0f;
+    float a_power = 1.0f;
+    float inverse_a = 1.0f / a;
+    for (int k = 0; k < GI_TEMME_ROWS; ++k) {{
+        int row = k * GI_TEMME_COLS;
+        float coefficient = GI_TEMME_D[row + GI_TEMME_COLS - 1];
+        for (int n = GI_TEMME_COLS - 2; n >= 0; --n) {{
+            coefficient = coefficient * eta + GI_TEMME_D[row + n];
+        }}
+        total += coefficient * a_power;
+        a_power *= inverse_a;
+    }}
+    float correction = exp(-0.5f * a * eta * eta) * rsqrt(2.0f * M_PI_F * a) * total;
+    return 0.5f * gi_erfc(sgn * eta * sqrt(a * 0.5f)) + sgn * correction;
+}}
+"""
+)
+
+
+_METAL_GAMMAINC_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float a = (float)a_buf[i];
+    float x = (float)x_buf[i];
+    float res;
+    if (isinf(x) && x > 0.0f) {
+        // the continued fraction would form (1 / inf) * inf here and return nan
+        res = GI_LOWER ? 1.0f : 0.0f;
+    } else if (a >= GI_TEMME_MIN_A && x >= GI_TEMME_MIN_R * a && x <= GI_TEMME_MAX_R * a) {
+        res = gi_temme(a, x, GI_SIGN);
+    } else if (x <= a + 1.0f) {
+        float lower = gi_series(a, x);
+        res = GI_LOWER ? lower : 1.0f - lower;
+    } else {
+        float upper = gi_cf(a, x);
+        res = GI_LOWER ? 1.0f - upper : upper;
+    }
+    out[i] = (T)res;
+"""
+
+
+_METAL_GAMMAINC_KERNELS: dict[bool, Callable | None] = {}
+
+
+def _metal_gammainc_kernel(lower):
+    """Build and cache the Metal kernel for one tail, or None if it cannot be built.
+
+    The guard catches a failure to construct the kernel object. It does not catch a
+    malformed source: Metal compiles lazily on first call and aborts the process rather
+    than raising, so the source has no runtime safety net and the fallback cannot stand
+    in for one.
+    """
+    if lower not in _METAL_GAMMAINC_KERNELS:
+        # the trailing newline matters: MLX appends its own template declaration
+        # straight after this header, and a #define running into it fails to compile
+        header = (
+            _METAL_GAMMAINC_HEADER
+            + f"#define GI_LOWER {int(lower)}\n"
+            + f"#define GI_SIGN {-1.0 if lower else 1.0}f\n"
+        )
+        try:
+            _METAL_GAMMAINC_KERNELS[lower] = mx.fast.metal_kernel(
+                name=f"pytensor_gamma{'inc' if lower else 'incc'}",
+                input_names=["a_buf", "x_buf"],
+                output_names=["out"],
+                header=header,
+                source=_METAL_GAMMAINC_SOURCE,
+            )
+        except Exception:
+            _METAL_GAMMAINC_KERNELS[lower] = None
+    return _METAL_GAMMAINC_KERNELS[lower]
+
+
+def _metal_gammainc_call(a, x, lower):
+    """Evaluate one tail through its Metal kernel, or return None to fall back.
+
+    Metal has no float64 and the kernel needs the GPU stream, which between them leave
+    exactly the case the vectorized path handles least well and float64 needs least: the
+    default device at single precision.
+    """
+    if (
+        a.dtype != mx.float32
+        or x.dtype != mx.float32
+        or not mx.metal.is_available()
+        or mx.default_device() != mx.gpu
+    ):
+        return None
+    kernel = _metal_gammainc_kernel(lower)
+    if kernel is None:
+        return None
+    # The kernel indexes two flat buffers in lockstep, so the operands are broadcast
+    # against each other first: the op admits a scalar shape parameter against an array
+    # of values, and a 0-d input binds as a value rather than a pointer and cannot be
+    # subscripted
+    shape, value = mx.broadcast_arrays(a, x)
+    flat_shape, flat_value = shape.reshape(-1), value.reshape(-1)
+    (out,) = kernel(
+        inputs=[flat_shape, flat_value],
+        template=[("T", flat_value.dtype)],
+        grid=(flat_value.size, 1, 1),
+        threadgroup=(min(256, max(flat_value.size, 1)), 1, 1),
+        output_shapes=[flat_value.shape],
+        output_dtypes=[flat_value.dtype],
+    )
+    return out.reshape(shape.shape)
+
+
+def _incomplete_gamma_dispatch(lower):
+    """Build the callable one of the two ops dispatches to."""
     erfc = mlx_funcify(Erfc())
 
-    def gammaincc(a, x):
+    def incomplete_gamma(a, x):
         z, const, out_dtype = _working_precision(x)
         shape = mx.array(a).astype(z.dtype)
-        return _incomplete_gamma(shape, z, const, erfc, lower=False).astype(out_dtype)
+        out = _metal_gammainc_call(shape, z, lower)
+        if out is None:
+            out = _incomplete_gamma(shape, z, const, erfc, lower=lower)
+        return out.astype(out_dtype)
 
-    return gammaincc
+    return incomplete_gamma
+
+
+@mlx_funcify.register(GammaIncC)
+def mlx_funcify_GammaIncC(op, **kwargs):
+    return _incomplete_gamma_dispatch(lower=False)
 
 
 @mlx_funcify.register(GammaInc)
 def mlx_funcify_GammaInc(op, **kwargs):
-    erfc = mlx_funcify(Erfc())
-
-    def gammainc(a, x):
-        z, const, out_dtype = _working_precision(x)
-        shape = mx.array(a).astype(z.dtype)
-        return _incomplete_gamma(shape, z, const, erfc, lower=True).astype(out_dtype)
-
-    return gammainc
+    return _incomplete_gamma_dispatch(lower=True)
