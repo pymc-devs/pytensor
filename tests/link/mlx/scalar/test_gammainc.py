@@ -183,11 +183,15 @@ def test_incomplete_gamma_complement():
 def test_incomplete_gamma_edge_cases(op):
     # x = 0 is exactly P = 0, which a log prefactor clamped away from zero rather than
     # substituted gets wrong by a whole answer: a * log(tiny) in the exponent lands on
-    # 1e-150 for a = 0.5. The rest pin the saturated ends and nan propagation.
+    # 1e-150 for a = 0.5. x = inf saturates, where the continued fraction it would
+    # otherwise reach forms (1 / inf) * inf and returns nan. The rest pin the large-but-
+    # finite end and nan propagation.
     a = vector("a", dtype="float64")
     x = vector("x", dtype="float64")
-    a_test_value = np.array([1.0, 0.5, 1e-3, 200.0, 1.0, 200.0, 1.0, 1.0])
-    x_test_value = np.array([0.0, 0.0, 0.0, 0.0, 1e30, 1e30, 1e-8, np.nan])
+    a_test_value = np.array([1.0, 0.5, 1e-3, 200.0, 1.0, 200.0, 1.0, 0.5, 200.0, 1.0])
+    x_test_value = np.array(
+        [0.0, 0.0, 0.0, 0.0, 1e30, 1e30, np.inf, np.inf, np.inf, np.nan]
+    )
 
     compare_mlx_and_py([a, x], [op(a, x)], [a_test_value, x_test_value])
 

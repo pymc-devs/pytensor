@@ -331,20 +331,25 @@ def _incomplete_gamma(a, x, const, erfc, *, lower):
         & (x <= const(_TEMME_MAX_RATIO) * a)
     )
     use_series = ~use_temme & (x <= a + const(1.0))
+    # x = inf saturates instead of reaching the continued fraction, where b = x + 1 - a is
+    # itself inf and the Lentz step forms (1 / inf) * inf. Tested rather than compared
+    # against a constant, so no infinity is ever materialized for mx.compile to inline
+    saturated = mx.isinf(x) & (x > const(0.0))
 
     # Every branch runs for every element, so each is handed an argument it can survive
     # rather than the one belonging to whichever branch will actually be selected
     temme = _temme(a, mx.where(use_temme, x, a), -1.0 if lower else 1.0, const, erfc)
     series = _gammainc_series(a, mx.where(use_series, x, a * const(0.25)), const)
     fraction = _gammaincc_cf(
-        a, mx.where(use_temme | use_series, a + const(2.0), x), const
+        a, mx.where(use_temme | use_series | saturated, a + const(2.0), x), const
     )
     if lower:
         fraction = const(1.0) - fraction
     else:
         series = const(1.0) - series
 
-    return mx.where(use_temme, temme, mx.where(use_series, series, fraction))
+    selected = mx.where(use_temme, temme, mx.where(use_series, series, fraction))
+    return mx.where(saturated, const(1.0 if lower else 0.0), selected)
 
 
 @mlx_funcify.register(GammaIncC)
