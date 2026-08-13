@@ -1234,6 +1234,10 @@ def local_add_of_sparse_write(fgraph, node):
     ``x`` itself, so duplicate indices accumulate identically on both sides. Only
     the ``zeros[idx].set(v)`` form needs duplicate-free indices, since a dense set
     is last-wins and collapsing it to an inc would over-count repeats.
+
+    The rewrite only applies when the add broadcasts neither addend: a dense
+    write that the add broadcasts has no sparse equivalent at the original
+    indices, and a broadcast ``x`` could not carry the replacement's type.
     """
     for i, sparse_candidate in enumerate(node.inputs):
         if not (
@@ -1271,6 +1275,15 @@ def local_add_of_sparse_write(fgraph, node):
 
         others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
         other = variadic_add(*others)
+
+        # The replacement writes ``v`` into ``other`` at the original indices,
+        # which is only equivalent when the add broadcasts neither addend: a
+        # dense write that the add broadcasts has no sparse equivalent at those
+        # indices (its values also land on every broadcast copy), while a
+        # broadcast ``other`` would type the replacement narrower than the add
+        # itself. Identical broadcast patterns rule out both.
+        if other.type.broadcastable != sparse_candidate.type.broadcastable:
+            continue
 
         if inner_op.set_instead_of_inc:
             new_op = type(inner_op)(

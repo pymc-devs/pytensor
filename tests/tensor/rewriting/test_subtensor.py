@@ -257,6 +257,70 @@ def test_local_add_of_sparse_write():
     )
 
 
+def test_local_add_of_sparse_write_broadcast():
+    """The rewrite must bail when the add broadcasts either addend.
+
+    When the zeros base is the broadcast side, ``x + set(zeros(1), v, [0])``
+    used to be rewritten to ``x[[0]].inc(v)``, silently dropping the broadcast
+    and corrupting the result. In the mirrored direction (``other`` narrower
+    than the write) the proposed replacement could not carry the add's type and
+    was only caught by fgraph validation, logging spurious ``BUG IN
+    FGRAPH.REPLACE`` tracebacks. Regression test for #2349.
+    """
+    sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
+
+    dx = np.arange(7, dtype=config.floatX) * 10
+    dv = np.array([5.0], dtype=config.floatX)
+
+    # The zeros base is the broadcast side: the write must stay dense, both for
+    # the set form and for the unconditionally-rewritten inc form.
+    x = vector("x", shape=(7,))
+    v = vector("v", shape=(1,))
+    for write in (
+        pt.zeros((1,))[np.array([0])].set(v),
+        pt.zeros((1,))[np.array([0])].inc(v),
+    ):
+        out = x + write
+        result = utt.RewriteTester(
+            [x, v], [out], include=[], custom_rewrite=sparse_rewriter
+        )
+        result.assert_graph(out)
+        result.assert_eval(dx, dv)
+        # End-to-end through the default pipeline, where the mis-rewrite used
+        # to slip past validation because the shapes coincided.
+        np.testing.assert_allclose(function([x, v], out)(dx, dv), dx + dv)
+
+    # Same through the basic IncSubtensor path: a written column broadcast
+    # across the add.
+    m = matrix("m", shape=(3, 4))
+    c = scalar("c")
+    out_basic = m + pt.zeros((3, 1))[0, 0].set(c)
+    dm = np.zeros((3, 4), dtype=config.floatX)
+    dc = np.asarray(5.0, dtype=config.floatX)
+    expected = dm + np.array([[5.0], [0.0], [0.0]], dtype=config.floatX)
+    result_basic = utt.RewriteTester(
+        [m, c], [out_basic], include=[], custom_rewrite=sparse_rewriter
+    )
+    result_basic.assert_graph(out_basic)
+    result_basic.assert_eval(dm, dc)
+    np.testing.assert_allclose(function([m, c], out_basic)(dm, dc), expected)
+
+    # ``other`` is the broadcast side: the replacement would be narrower than
+    # the add, so the rewrite must bail instead of proposing it (previously
+    # rejected only at validation, with a logged TypeError).
+    y = vector("y", shape=(1,))
+    w = vector("w", shape=(3,))
+    out_other = y + pt.zeros((7,))[np.array([0, 2, 4])].set(w)
+    result_other = utt.RewriteTester(
+        [y, w], [out_other], include=[], custom_rewrite=sparse_rewriter
+    )
+    result_other.assert_graph(out_other)
+    result_other.assert_eval(
+        np.array([10.0], dtype=config.floatX),
+        np.array([1.0, 2.0, 3.0], dtype=config.floatX),
+    )
+
+
 class TestIndexProvablyUniqueArange:
     """An ``arange`` index is duplicate-free when its entries don't wrap around
     zero, i.e. they all share a sign. ``_index_provably_unique`` proves this for
