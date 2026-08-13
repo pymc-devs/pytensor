@@ -7,6 +7,7 @@ import numba
 import numpy as np
 from numba.core import cgutils, types
 from numba.core.extending import intrinsic, overload
+from numba.core.imputils import impl_ret_borrowed
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 from numpy.lib.stride_tricks import as_strided
 
@@ -1061,14 +1062,92 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     return careduce_fn, careduce_key
 
 
-@register_funcify_default_op_cache_key(DimShuffle)
+def _dimshuffle_out_layout(
+    in_layout: str, new_order: tuple[int, ...], unit_axes: frozenset[int]
+) -> str:
+    """Numba layout of a DimShuffle output, given the layout Numba proved for its input.
+
+    The strides of length-1 dimensions don't matter, so adding, dropping or moving them
+    never changes the layout. Only the relative order of the remaining dimensions does:
+    preserving it preserves the layout, reversing it swaps C for F, and any other
+    permutation leaves neither.
+
+    An input that Numba could not prove contiguous stays "A", as it may be a strided
+    view such as ``x[::2]``.
+    """
+    if in_layout not in ("C", "F"):
+        return "A"
+    # -1 marks a newly added axis; dropped axes are absent from `new_order` already.
+    kept = [axis for axis in new_order if axis != -1 and axis not in unit_axes]
+    if kept == sorted(kept):
+        return in_layout
+    if kept == sorted(kept, reverse=True):
+        return "F" if in_layout == "C" else "C"
+    return "A"
+
+
+def _make_strided_view(new_order: tuple[int, ...], unit_axes: frozenset[int]):
+    """`as_strided`, but typed with the layout the shuffle provably preserves."""
+
+    @intrinsic
+    def typed_view(typingctx, arr, shape, strides):
+        out_type = types.Array(
+            arr.dtype,
+            shape.count,
+            _dimshuffle_out_layout(arr.layout, new_order, unit_axes),
+        )
+        sig = out_type(arr, shape, strides)
+
+        def codegen(context, builder, signature, args):
+            in_array = context.make_array(signature.args[0])(context, builder, args[0])
+            out_array = context.make_array(out_type)(context, builder)
+            intp_t = context.get_value_type(types.intp)
+            context.populate_array(
+                out_array,
+                data=in_array.data,
+                shape=cgutils.pack_array(
+                    builder, cgutils.unpack_tuple(builder, args[1]), ty=intp_t
+                ),
+                strides=cgutils.pack_array(
+                    builder, cgutils.unpack_tuple(builder, args[2]), ty=intp_t
+                ),
+                itemsize=in_array.itemsize,
+                meminfo=in_array.meminfo,
+                parent=in_array.parent,
+            )
+            return impl_ret_borrowed(context, builder, out_type, out_array._getvalue())
+
+        return sig, codegen
+
+    def strided_view(x, shape, strides):
+        # Used when the generated code runs without Numba; the layout is only a hint.
+        return as_strided(x, shape=shape, strides=strides)
+
+    @overload(strided_view)
+    def strided_view_ovl(x, shape, strides):
+        def impl(x, shape, strides):
+            return typed_view(x, shape, strides)
+
+        return impl
+
+    return strided_view
+
+
+@register_funcify_and_cache_key(DimShuffle)
 def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
-    # We use `as_strided` to achieve the DimShuffle behavior of transposing and expanding/squezing dimensions in one call
+    # We use a strided view to achieve the DimShuffle behavior of transposing and expanding/squezing dimensions in one call
     # Numba doesn't currently support multiple expand/squeeze, and reshape is limited to contiguous arrays.
     new_order = tuple(op._new_order)
     drop = tuple(op.drop)
     shape_template = (1,) * node.outputs[0].ndim
     strides_template = (0,) * node.outputs[0].ndim
+    unit_axes = frozenset(
+        axis for axis, length in enumerate(node.inputs[0].type.shape) if length == 1
+    )
+    cache_version = 3
+    dimshuffle_key = sha256(
+        str((type(op), new_order, sorted(unit_axes), cache_version)).encode()
+    ).hexdigest()
 
     if new_order == ():
         # Special case needed because of https://github.com/numba/numba/issues/9933
@@ -1082,7 +1161,7 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
             assert x.size == 1
             return as_strided(x, shape=(), strides=())
 
-        return squeeze_to_0d
+        return squeeze_to_0d, dimshuffle_key
 
     elif op.input_ndim == 0:
         # DimShuffle can only be an expand_dims or a no_op
@@ -1095,6 +1174,7 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
             return as_strided(np.asarray(x), shape=new_shape, strides=new_strides)
 
     else:
+        strided_view = _make_strided_view(new_order, unit_axes)
 
         @numba_basic.numba_njit
         def dimshuffle(x):
@@ -1116,10 +1196,9 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
                             "DimShuffle: Attempting to squeeze axes with size not equal to one"
                         )
 
-            return as_strided(x, shape=new_shape, strides=new_strides)
+            return strided_view(x, new_shape, new_strides)
 
-    cache_version = 2
-    return dimshuffle, cache_version
+    return dimshuffle, dimshuffle_key
 
 
 @register_funcify_default_op_cache_key(Argmax)
