@@ -732,6 +732,25 @@ class TestConstantFolding:
         assert len(topo) == 2
         assert all(isinstance(n.op, DeepCopyOp) for n in topo)
 
+    @pytest.mark.parametrize("advanced", [False, True], ids=["basic", "advanced"])
+    def test_alloc_folds_when_its_inplace_client_is_constant(self, advanced):
+        idx = constant(np.array([0, 2])) if advanced else slice(0, 2)
+
+        # An Alloc feeding an (Advanced)IncSubtensor is not folded when the update
+        # is not constant: the IncSubtensor would have to copy the constant.
+        y = pt.matrix("y")
+        out = pt.set_subtensor(pt.zeros((3, 4))[idx], y)
+        fg = FunctionGraph([y], [out], clone=True)
+        topo_constant_folding.apply(fg)
+        assert any(isinstance(node.op, Alloc) for node in fg.apply_nodes)
+
+        # It is folded when the IncSubtensor is itself constant: that folds away
+        # too, so no copy survives to run time.
+        out = pt.set_subtensor(pt.zeros((3, 4))[idx], np.ones((2, 4)))
+        fg = FunctionGraph([], [out], clone=True)
+        topo_constant_folding.apply(fg)
+        assert isinstance(fg.outputs[0], Constant)
+
     @pytest.mark.xfail(
         reason="PyTensor rewrites constants before stabilization. "
         "This breaks stabilization rewrites in some cases. See #504.",

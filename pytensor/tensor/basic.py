@@ -1798,6 +1798,11 @@ class Alloc(COp):
                     client_op,
                     IncSubtensor | AdvancedIncSubtensor | Gemv | CGemv | Ger | CGer,
                 )
+                # ... unless the client is constant in every other input, in which
+                # case it folds away as well and no copy survives to run time.
+                # Refusing to fold then leaves the whole cone recomputing the same
+                # bytes on every call.
+                and not all(isinstance(inp, Constant) for inp in client.inputs[1:])
             ):
                 # Ops that will work inplace on the Alloc. So if they
                 # get constant_folded, they would copy the constant
