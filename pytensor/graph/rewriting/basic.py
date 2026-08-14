@@ -684,16 +684,6 @@ class MergeFeature(Feature):
                 self.noinput_nodes.add(node)
 
 
-def _has_direct_destroyer(fgraph, var):
-    """Whether any direct client destroys `var` (view-chain destroyers not seen)."""
-    return any(
-        i in destroyed_idxs
-        for client, i in fgraph.clients[var]
-        if client.op.destroy_map
-        for destroyed_idxs in client.op.destroy_map.values()
-    )
-
-
 class MergeOptimizer(GraphRewriter):
     r"""Merges parts of the graph that are identical and redundant.
 
@@ -714,6 +704,15 @@ class MergeOptimizer(GraphRewriter):
             fgraph.attach_feature(MergeFeature())
 
     def apply(self, fgraph):
+        def has_direct_destroyer(var):
+            """Whether any direct client destroys `var` (view-chain destroyers not seen)."""
+            return any(
+                i in destroyed_idxs
+                for client, i in fgraph.clients[var]
+                if client.op.destroy_map
+                for destroyed_idxs in client.op.destroy_map.values()
+            )
+
         sched = fgraph.merge_feature.scheduled
         nb_fail = 0
         t0 = time.perf_counter()
@@ -773,9 +772,9 @@ class MergeOptimizer(GraphRewriter):
                         # through view chains are rare: both are left to
                         # validation, keeping this check O(clients) with no
                         # droot recomputation.
-                        if _has_direct_destroyer(
-                            fgraph, pairs[0][0]
-                        ) and _has_direct_destroyer(fgraph, pairs[0][1]):
+                        if has_direct_destroyer(pairs[0][0]) and has_direct_destroyer(
+                            pairs[0][1]
+                        ):
                             continue
 
                 # Keep the variable with the most specific static type from the pairs
