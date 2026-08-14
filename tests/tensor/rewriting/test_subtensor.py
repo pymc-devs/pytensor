@@ -1474,6 +1474,21 @@ class TestReadOfWriteSameIndices:
         topo = f.maker.fgraph.toposort()
         assert not any(isinstance(n.op, AdvancedIncSubtensor) for n in topo)
 
+    def test_inc_narrower_buffer(self):
+        """``x[slice] += v`` sums in the promoted dtype and rounds on store, so a
+        buffer narrower than ``v`` must keep that rounding as an explicit cast.
+        """
+        x = vector("x", dtype="float32")
+        v = vector("v", dtype="float64")
+        stop = iscalar("stop")
+
+        out = x[:stop].inc(v)[:stop]
+        result = utt.RewriteTester(
+            [x, v, stop], [out], include=("canonicalize", "specialize")
+        )
+        result.assert_graph((x[:stop] + v).astype("float32"))
+        result.assert_eval(np.arange(7, dtype="float32"), np.array([1.7, 2.3, 3.9]), 3)
+
     def test_inc_unique_constant_idx(self):
         x = matrix(dtype="float64")
         y = matrix(dtype="float64")
