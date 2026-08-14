@@ -56,6 +56,7 @@ from pytensor.tensor.math import (
     variadic_add,
 )
 from pytensor.tensor.rewriting.basic import (
+    get_simplified_shape,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -1235,21 +1236,29 @@ def local_add_of_sparse_write(fgraph, node):
     the ``zeros[idx].set(v)`` form needs duplicate-free indices, since a dense set
     is last-wins and collapsing it to an inc would over-count repeats.
 
-    The rewrite only applies when the add broadcasts neither addend: a dense
-    write that the add broadcasts has no sparse equivalent at the original
-    indices, and a broadcast ``x`` could not carry the replacement's type.
+    An ``x`` the add broadcasts is alloc'd up to the write's shape first, since the
+    replacement writes into ``x`` itself::
+
+        x(3, 4) + zeros((3, 4))[idx].set(v) -> x[idx].inc(v)
+        x(4,) + zeros((3, 4))[idx].set(v)   -> alloc(x, 3, 4)[idx].inc(v)
+
+    A write the add broadcasts is left alone. ``x(3, 4) + zeros(4)[idx].set(v)``,
+    which is the same case as ``zeros((3, 1))[idx]`` up to a transpose and as
+    ``zeros((3, 1))[idx, 0]`` up to a dummy dim, could become ``x[:, idx].inc(v)``
+    by following the broadcast into the indices. That multiplies the written
+    positions by the broadcast dim while still only saving the (small) zeros base,
+    so whether it is an improvement depends on how sparse the write is to begin
+    with -- unlike the cases above, which never write more positions than before.
     """
+    out_type = node.outputs[0].type
     for i, sparse_candidate in enumerate(node.inputs):
-        if not (
-            sparse_candidate.owner
-            and isinstance(
-                sparse_candidate.owner.op,
-                IncSubtensor | AdvancedIncSubtensor,
-            )
-        ):
+        if sparse_candidate.type.broadcastable != out_type.broadcastable:
             continue
 
-        inner_op = sparse_candidate.owner.op
+        inner_op = sparse_candidate.owner_op
+        if not isinstance(inner_op, IncSubtensor | AdvancedIncSubtensor):
+            continue
+
         base, v, *idx_vars = sparse_candidate.owner.inputs
 
         if (
@@ -1268,30 +1277,32 @@ def local_add_of_sparse_write(fgraph, node):
         # positions. Basic (slice/scalar) IncSubtensor is always unique; advanced
         # integer-array set indices must be jointly duplicate-free, weighing only
         # the advanced indices and not the flattened slice bounds.
-        if inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
-            indices = indices_from_subtensor(idx_vars, inner_op.idx_list)
-            if not _advanced_indices_jointly_unique(indices, fgraph):
-                continue
-
-        others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
-        other = variadic_add(*others)
-
-        # The replacement writes ``v`` into ``other`` at the original indices,
-        # which is only equivalent when the add broadcasts neither addend: a
-        # dense write that the add broadcasts has no sparse equivalent at those
-        # indices (its values also land on every broadcast copy), while a
-        # broadcast ``other`` would type the replacement narrower than the add
-        # itself. Identical broadcast patterns rule out both.
-        if other.type.broadcastable != sparse_candidate.type.broadcastable:
+        advanced = not isinstance(inner_op, IncSubtensor)
+        indices = indices_from_subtensor(idx_vars, inner_op.idx_list)
+        if (
+            inner_op.set_instead_of_inc
+            and advanced
+            and not _advanced_indices_jointly_unique(indices, fgraph)
+        ):
             continue
 
-        if inner_op.set_instead_of_inc:
-            new_op = type(inner_op)(
-                **(inner_op._props_dict() | {"set_instead_of_inc": False})
-            )
-        else:
-            new_op = inner_op
-        r = new_op(other, v, *idx_vars)
+        # Dropping the base also drops its say in the add's dtype promotion, in both
+        # directions: a base narrower than the output stops truncating ``v`` (the
+        # write does that cast at runtime), and one wider than the rest of the add
+        # stops upcasting it.
+        if base.type.dtype != out_type.dtype:
+            v = cast(v, base.type.dtype)
+
+        other = variadic_add(*node.inputs[:i], *node.inputs[i + 1 :])
+
+        if other.type.dtype != out_type.dtype:
+            other = cast(other, out_type.dtype)
+        if other.type.broadcastable != out_type.broadcastable:
+            other = alloc(other, *get_simplified_shape(base, fgraph=fgraph))
+
+        r = other[indices].inc(
+            v, ignore_duplicates=advanced and inner_op.ignore_duplicates
+        )
         copy_stack_trace([node.outputs[0], sparse_candidate], r)
         return [r]
 
