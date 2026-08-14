@@ -258,67 +258,68 @@ def test_local_add_of_sparse_write():
 
 
 def test_local_add_of_sparse_write_broadcast():
-    """The rewrite must bail when the add broadcasts either addend.
-
-    When the zeros base is the broadcast side, ``x + set(zeros(1), v, [0])``
-    used to be rewritten to ``x[[0]].inc(v)``, silently dropping the broadcast
-    and corrupting the result. In the mirrored direction (``other`` narrower
-    than the write) the proposed replacement could not carry the add's type and
-    was only caught by fgraph validation, logging spurious ``BUG IN
-    FGRAPH.REPLACE`` tracebacks. Regression test for #2349.
+    """A broadcast ``x`` is alloc'd up to the base it replaces; a broadcast write,
+    in any of its spellings, is left alone.
     """
     sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
 
-    dx = np.arange(7, dtype=config.floatX) * 10
-    dv = np.array([5.0], dtype=config.floatX)
-
-    # The zeros base is the broadcast side: the write must stay dense, both for
-    # the set form and for the unconditionally-rewritten inc form.
-    x = vector("x", shape=(7,))
-    v = vector("v", shape=(1,))
-    for write in (
-        pt.zeros((1,))[np.array([0])].set(v),
-        pt.zeros((1,))[np.array([0])].inc(v),
-    ):
-        out = x + write
-        result = utt.RewriteTester(
-            [x, v], [out], include=[], custom_rewrite=sparse_rewriter
+    def rewrite(inputs, out):
+        return utt.RewriteTester(
+            inputs, [out], include=[], custom_rewrite=sparse_rewriter
         )
-        result.assert_graph(out)
-        result.assert_eval(dx, dv)
-        # End-to-end through the default pipeline, where the mis-rewrite used
-        # to slip past validation because the shapes coincided.
-        np.testing.assert_allclose(function([x, v], out)(dx, dv), dx + dv)
 
-    # Same through the basic IncSubtensor path: a written column broadcast
-    # across the add.
-    m = matrix("m", shape=(3, 4))
-    c = scalar("c")
-    out_basic = m + pt.zeros((3, 1))[0, 0].set(c)
-    dm = np.zeros((3, 4), dtype=config.floatX)
-    dc = np.asarray(5.0, dtype=config.floatX)
-    expected = dm + np.array([[5.0], [0.0], [0.0]], dtype=config.floatX)
-    result_basic = utt.RewriteTester(
-        [m, c], [out_basic], include=[], custom_rewrite=sparse_rewriter
-    )
-    result_basic.assert_graph(out_basic)
-    result_basic.assert_eval(dm, dc)
-    np.testing.assert_allclose(function([m, c], out_basic)(dm, dc), expected)
-
-    # ``other`` is the broadcast side: the replacement would be narrower than
-    # the add, so the rewrite must bail instead of proposing it (previously
-    # rejected only at validation, with a logged TypeError).
+    # ``x`` is the broadcast side: it must be alloc'd before it can be written into.
     y = vector("y", shape=(1,))
-    w = vector("w", shape=(3,))
-    out_other = y + pt.zeros((7,))[np.array([0, 2, 4])].set(w)
-    result_other = utt.RewriteTester(
-        [y, w], [out_other], include=[], custom_rewrite=sparse_rewriter
-    )
-    result_other.assert_graph(out_other)
-    result_other.assert_eval(
+    v = vector("v", shape=(3,))
+    idx3 = np.array([0, 2, 4])
+    zeros = pt.zeros((7,))
+    result = rewrite([y, v], y + zeros[idx3].inc(v))
+    result.assert_graph(pt.alloc(y, 7)[idx3].inc(v))
+    result.assert_eval(
         np.array([10.0], dtype=config.floatX),
         np.array([1.0, 2.0, 3.0], dtype=config.floatX),
     )
+
+    # The write is the broadcast side, whether the add gives it a new dim or
+    # stretches a size-1 one it already has.
+    idx = np.array([0, 2])
+    m = matrix("m", shape=(3, 4))
+    w = vector("w", shape=(2,))
+    ws = matrix("ws", shape=(2, 1))
+    for inputs, write in (
+        ([m, w], pt.zeros((4,))[idx].set(w)),
+        ([m, ws], pt.zeros((3, 1))[idx].set(ws)),
+        ([m, w], pt.zeros((3, 1))[idx, 0].set(w)),
+    ):
+        out = m + write
+        rewrite(inputs, out).assert_graph(out)
+
+
+def test_local_add_of_sparse_write_dtype():
+    """Neither the write's cast of ``v`` to the base dtype nor the add's own output
+    dtype may be dropped when the write collapses into ``x``.
+    """
+    sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
+
+    def rewrite(inputs, out):
+        return utt.RewriteTester(
+            inputs, [out], include=[], custom_rewrite=sparse_rewriter
+        )
+
+    idx = np.array([0, 2, 4])
+    v = vector("v", dtype="float64", shape=(3,))
+
+    # A base narrower than the add truncates ``v`` before the add ever sees it.
+    x = vector("x", dtype="float64", shape=(7,))
+    result = rewrite([x, v], x + pt.zeros((7,), dtype="int64")[idx].set(v))
+    result.assert_graph(x[idx].inc(v.astype("int64")))
+    result.assert_eval(np.zeros(7), np.array([1.7, 2.3, 3.9]))
+
+    # An ``x`` narrower than the add is cast up, so the write can land in it.
+    xi = vector("xi", dtype="int32", shape=(7,))
+    result = rewrite([xi, v], xi + pt.zeros((7,), dtype="float64")[idx].set(v))
+    result.assert_graph(xi.astype("float64")[idx].inc(v))
+    result.assert_eval(np.arange(7, dtype="int32"), np.array([1.5, 2.5, 3.5]))
 
 
 class TestIndexProvablyUniqueArange:
