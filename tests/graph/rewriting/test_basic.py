@@ -6,6 +6,7 @@ import pytest
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
 from pytensor.graph.basic import Apply, Constant, equal_computations
+from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import Feature
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -374,6 +375,47 @@ class TestMergeOptimizer:
         g = FunctionGraph([x, y, z], [e])
         g.attach_feature(AssertNoChanges())
         MergeOptimizer().rewrite(g)
+
+    def test_no_merge_attempt_on_destroyed_variables(self):
+        x, y = MyVariable("x"), MyVariable("y")
+        twin1, twin2 = op2(x, y), op2(x, y)
+        destroyer = MyOp("destroyer", dmap={0: [0]})
+        g = FunctionGraph([x, y], [destroyer(twin1), destroyer(twin2)], clone=False)
+        g.attach_feature(DestroyHandler())
+        prof = MergeOptimizer().rewrite(g)
+        nb_fail = prof[0]
+        assert nb_fail == 0
+        assert g.outputs[0].owner.inputs[0] is not g.outputs[1].owner.inputs[0]
+
+    def test_merge_single_destroyer_feasible(self):
+        # Only one twin is destroyed: the merge goes through, with the reader
+        # ordered before the destroyer.
+        x, y = MyVariable("x"), MyVariable("y")
+        twin1, twin2 = op2(x, y), op2(x, y)
+        destroyer = MyOp("destroyer", dmap={0: [0]})
+        g = FunctionGraph([x, y], [destroyer(twin1), op1(twin2)], clone=False)
+        g.attach_feature(DestroyHandler())
+        prof = MergeOptimizer().rewrite(g)
+        nb_fail = prof[0]
+        assert nb_fail == 0
+        assert g.outputs[0].owner.inputs[0] is g.outputs[1].owner.inputs[0]
+
+    def test_merge_single_destroyer_infeasible(self):
+        # The reader needs both the undestroyed twin and the destroyer's
+        # result, so it cannot run before the destroyer: validation rejects
+        # the attempted merge and the twins stay distinct.
+        x, y = MyVariable("x"), MyVariable("y")
+        twin1, twin2 = op2(x, y), op2(x, y)
+        destroyer = MyOp("destroyer", dmap={0: [0]})
+        g = FunctionGraph([x, y], [op1(twin2, destroyer(twin1))], clone=False)
+        g.attach_feature(DestroyHandler())
+        prof = MergeOptimizer().rewrite(g)
+        nb_fail = prof[0]
+        # The attempt is made (and rejected) -- single-destroyer pairs are for
+        # validation to decide, not for the cheap guard to skip.
+        assert nb_fail >= 1
+        reader = g.outputs[0].owner
+        assert reader.inputs[0] is not reader.inputs[1].owner.inputs[0]
 
     def test_merge_outputs(self):
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
