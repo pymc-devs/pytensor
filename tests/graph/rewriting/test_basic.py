@@ -377,14 +377,6 @@ class TestMergeOptimizer:
         MergeOptimizer().rewrite(g)
 
     def test_no_merge_attempt_on_destroyed_variables(self):
-        # The two `op2(x, y)` nodes are identical, but each output is
-        # destroyed by its own destructive client, so merging them would give
-        # the survivor two destroyers and `DestroyHandler` validation would
-        # reject it. The pair must be skipped outright: attempting the merge
-        # and reverting on the `InconsistencyError` -- once per scheduled pair,
-        # rescheduled after every graph change -- made rewriting quadratic on
-        # graphs with many identical destroyed nodes (e.g. the gradient of
-        # ``sum_i params_i[idx_i]``, one destroyed zeros-`Alloc` per term).
         x, y = MyVariable("x"), MyVariable("y")
         twin1, twin2 = op2(x, y), op2(x, y)
         destroyer = MyOp("destroyer", dmap={0: [0]})

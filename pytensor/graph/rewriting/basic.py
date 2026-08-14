@@ -684,6 +684,16 @@ class MergeFeature(Feature):
                 self.noinput_nodes.add(node)
 
 
+def _has_direct_destroyer(fgraph, var):
+    """Whether any direct client destroys `var` (view-chain destroyers not seen)."""
+    return any(
+        i in destroyed_idxs
+        for client, i in fgraph.clients[var]
+        if client.op.destroy_map
+        for destroyed_idxs in client.op.destroy_map.values()
+    )
+
+
 class MergeOptimizer(GraphRewriter):
     r"""Merges parts of the graph that are identical and redundant.
 
@@ -754,14 +764,18 @@ class MergeOptimizer(GraphRewriter):
                         continue
 
                     if hasattr(fgraph, "destroy_handler"):
-                        # If both variables are destroyed (directly, or through
-                        # a view chain), merging them would give the survivor
-                        # two destroyers, which `DestroyHandler` validation
-                        # always rejects -- skip instead of paying a
-                        # checkpoint + failed validate + revert per pair.
-                        if fgraph.destroyers(pairs[0][0]) and fgraph.destroyers(
-                            pairs[0][1]
-                        ):
+                        # Merging two variables that both have a destroyer is
+                        # always rejected by `DestroyHandler` validation
+                        # ("multiple destroyers") -- skip those outright
+                        # instead of paying a checkpoint + failed validate +
+                        # revert per scheduled pair. A single-destroyer merge
+                        # may still be feasible, and destroyers reachable only
+                        # through view chains are rare: both are left to
+                        # validation, keeping this check O(clients) with no
+                        # droot recomputation.
+                        if _has_direct_destroyer(
+                            fgraph, pairs[0][0]
+                        ) and _has_direct_destroyer(fgraph, pairs[0][1]):
                             continue
 
                 # Keep the variable with the most specific static type from the pairs
