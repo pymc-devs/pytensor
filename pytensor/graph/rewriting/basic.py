@@ -43,7 +43,6 @@ from pytensor.graph.traversal import (
 )
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
-from pytensor.utils import flatten
 
 
 _logger = logging.getLogger("pytensor.graph.rewriting.basic")
@@ -755,15 +754,13 @@ class MergeOptimizer(GraphRewriter):
                         continue
 
                     if hasattr(fgraph, "destroy_handler"):
-                        # If both nodes have clients that destroy them, we
-                        # can't merge them.
-                        clients = (
-                            fgraph.clients[pairs[0][0]] + fgraph.clients[pairs[0][1]]
-                        )
-                        if any(
-                            i in flatten(c.op.destroy_map.values())
-                            for c, i in clients
-                            if c.op.destroy_map
+                        # If both variables are destroyed (directly, or through
+                        # a view chain), merging them would give the survivor
+                        # two destroyers, which `DestroyHandler` validation
+                        # always rejects -- skip instead of paying a
+                        # checkpoint + failed validate + revert per pair.
+                        if fgraph.destroyers(pairs[0][0]) and fgraph.destroyers(
+                            pairs[0][1]
                         ):
                             continue
 
