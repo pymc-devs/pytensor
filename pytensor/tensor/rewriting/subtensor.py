@@ -2056,7 +2056,9 @@ def local_read_of_write_same_indices(fgraph, node):
 
         x_at_idx = x[tuple(indices)]
         copy_stack_trace(out, x_at_idx)
-        r = x_at_idx + v
+        # ``x[idx] += v`` sums in the promoted dtype and rounds once on store, so a
+        # buffer narrower than ``v`` needs that rounding to survive as a cast.
+        r = cast(x_at_idx + v, out.dtype)
         copy_stack_trace(out, r)
         return [r]
 
