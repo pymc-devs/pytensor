@@ -4284,7 +4284,16 @@ class AllocEmpty(COp):
         return (4,)
 
     def do_constant_folding(self, fgraph, node):
-        return False
+        # The contents are undefined, so a constant is only ever as good as the
+        # buffer it replaces if it does not survive the fold: every client must be
+        # constant in its other inputs, so that it folds away as well.
+        [out] = node.outputs
+        clients = fgraph.clients[out]
+        return bool(clients) and all(
+            not isinstance(client.op, Output)
+            and all(inp is out or isinstance(inp, Constant) for inp in client.inputs)
+            for client, _ in clients
+        )
 
     def connection_pattern(self, node):
         return [[False] for i in node.inputs]
