@@ -9,7 +9,11 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
-from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
+from pytensor.link.numba.dispatch.string_codegen import (
+    CODE_TOKEN,
+    build_source_code,
+    create_tuple_string,
+)
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -55,47 +59,146 @@ def allocempty({", ".join(shape_var_names)}):
 
 @register_funcify_and_cache_key(Alloc)
 def numba_funcify_Alloc(op, node, **kwargs):
-    shape_var_names = [f"sh{i}" for i in range(len(node.inputs) - 1)]
+    r"""Generate one of three fills, chosen by the static shape of the value.
+
+    Examples
+    --------
+
+    A 0d value is filled directly, as in ``alloc(scalar, m, n)``:
+
+    .. code-block:: python
+
+        def alloc(val, sh0, sh1):
+            sh0_item = sh0.item()
+            sh1_item = sh1.item()
+            scalar_shape = (sh0_item, sh1_item)
+            res = np.empty(scalar_shape, dtype=np.float64)
+            res[...] = val
+            return res
+
+    A value that broadcasts in every dimension is filled by its only element, as in
+    ``alloc(tensor(shape=(1, 1)), m, n)``:
+
+    .. code-block:: python
+
+        def alloc(val, sh0, sh1):
+            sh0_item = sh0.item()
+            sh1_item = sh1.item()
+            scalar_shape = (sh0_item, sh1_item)
+            res = np.empty(scalar_shape, dtype=np.float64)
+            res[...] = val[0, 0]
+            return res
+
+    Any other value is copied by a loop nest that indexes broadcast dimensions with a
+    literal 0, as in ``alloc(tensor(shape=(None, 1)), m, n)``. Dimensions that do not
+    broadcast are checked first, so that every index in the loop is in bounds:
+
+    .. code-block:: python
+
+        def alloc(val, sh0, sh1):
+            sh0_item = sh0.item()
+            sh1_item = sh1.item()
+            scalar_shape = (sh0_item, sh1_item)
+            if val.shape[-2] != scalar_shape[-2]:
+                if val.shape[-2] == 1:
+                    raise ValueError(...)  # Runtime broadcasting not allowed
+                raise ValueError(...)  # Could not broadcast into the requested shape
+            res = np.empty(scalar_shape, dtype=np.float64)
+            for i0 in range(sh0_item):
+                for i1 in range(sh1_item):
+                    res[i0, i1] = val[i0, 0]
+            return res
+
+    """
+    val, *shape_vars = node.inputs
+    out_ndim = len(shape_vars)
+    # The dimensions of `val` align with the trailing dimensions of the output
+    offset = out_ndim - val.type.ndim
+
+    shape_var_names = [f"sh{i}" for i in range(out_ndim)]
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
-    shapes_to_items_src = indent(
-        "\n".join(
+
+    code: list[str | CODE_TOKEN] = [
+        f"def alloc(val, {', '.join(shape_var_names)}):",
+        CODE_TOKEN.INDENT,
+        *(
             f"{item_name} = {shape_name}.item()"
             for item_name, shape_name in zip(
                 shape_var_item_names, shape_var_names, strict=True
             )
         ),
-        " " * 4,
-    )
+        f"scalar_shape = {create_tuple_string(shape_var_item_names)}",
+    ]
 
-    check_runtime_broadcast = []
-    for i, val_static_dim in enumerate(node.inputs[0].type.shape[::-1]):
-        if val_static_dim is None:
-            check_runtime_broadcast.append(
-                f'if val.shape[{-i - 1}] == 1 and scalar_shape[{-i - 1}] != 1: raise ValueError("{Alloc._runtime_broadcast_error_msg}")'
+    mismatch_error_msg = (
+        "could not broadcast input array into the shape requested by Alloc"
+    )
+    for i, val_static_dim in enumerate(val.type.shape[::-1]):
+        if val_static_dim == 1:
+            # Broadcasts against any output dimension
+            continue
+        code.extend(
+            (
+                f"if val.shape[{-i - 1}] != scalar_shape[{-i - 1}]:",
+                CODE_TOKEN.INDENT,
             )
-    check_runtime_broadcast_src = indent("\n".join(check_runtime_broadcast), " " * 4)
-    dtype = node.inputs[0].type.dtype
-    alloc_def_src = f"""
-def alloc(val, {", ".join(shape_var_names)}):
-{shapes_to_items_src}
-    scalar_shape = {create_tuple_string(shape_var_item_names)}
-{check_runtime_broadcast_src}
-    res = np.empty(scalar_shape, dtype=np.{dtype})
-    res[...] = val
-    return res
-    """
+        )
+        if val_static_dim is None:
+            code.append(
+                f'if val.shape[{-i - 1}] == 1: raise ValueError("{Alloc._runtime_broadcast_error_msg}")'
+            )
+        code.extend((f'raise ValueError("{mismatch_error_msg}")', CODE_TOKEN.DEDENT))
+
+    code.append(f"res = np.empty(scalar_shape, dtype=np.{val.type.dtype})")
+
+    # A dimension of `val` is either statically size 1, and so broadcasts, or it
+    # matches the output dimension (the checks above reject every other case), so
+    # the whole broadcasting pattern is known here. Filling `res` with an explicit
+    # loop nest instead of `res[...] = val` matters: Numba lowers array-to-array
+    # assignment to a dtype-generic byte-wise copy helper, while the loop nest
+    # vectorizes.
+    val_idxs = [
+        "0" if val.type.shape[d - offset] == 1 else f"i{d}"
+        for d in range(offset, out_ndim)
+    ]
+    if all(idx == "0" for idx in val_idxs):
+        # Every dimension broadcasts, so this is a fill by a scalar, which Numba
+        # already lowers well. This is also the only branch valid for a 0d output.
+        # A 0d value is filled directly, without indexing it into a scalar first,
+        # because Numba is not consistent about the distinction and may hand us a
+        # scalar that cannot be indexed.
+        val_item = f"val[{', '.join(val_idxs)}]" if val_idxs else "val"
+        code.append(f"res[...] = {val_item}")
+    else:
+        for d in range(out_ndim):
+            code.extend(
+                (f"for i{d} in range({shape_var_item_names[d]}):", CODE_TOKEN.INDENT)
+            )
+        out_idxs = [f"i{d}" for d in range(out_ndim)]
+        code.append(f"res[{', '.join(out_idxs)}] = val[{', '.join(val_idxs)}]")
+        code.extend([CODE_TOKEN.DEDENT] * out_ndim)
+
+    code.extend(("return res", CODE_TOKEN.DEDENT))
+
     alloc_fn = compile_numba_function_src(
-        alloc_def_src,
+        build_source_code(code),
         "alloc",
         globals() | {"np": np},
         write_to_disk=True,
     )
 
-    cache_version = -1
+    cache_version = 1
+    # The code branches on whether a dimension of the value is statically 1 (it
+    # broadcasts), of unknown size (it needs a runtime broadcast check) or of known
+    # size, but never on the concrete sizes.
+    static_shape_key = tuple(
+        dim if dim in (1, None) else "known" for dim in val.type.shape
+    )
     cache_key = sha256(
-        str((type(op), node.inputs[0].type.broadcastable, cache_version)).encode()
+        str((type(op), static_shape_key, cache_version)).encode()
     ).hexdigest()
-    return numba_basic.numba_njit(alloc_fn), cache_key
+    # The shape checks above make every index in the fill loop in-bounds by construction
+    return numba_basic.numba_njit(alloc_fn, boundscheck=False), cache_key
 
 
 @register_funcify_default_op_cache_key(ARange)
