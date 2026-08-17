@@ -51,6 +51,7 @@ class TestSolves:
 
         complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
         dtype = complex_dtype if is_complex else floatX
+        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-8
 
         def A_func(x):
             if assume_a == "pos":
@@ -123,14 +124,14 @@ class TestSolves:
         A_val_f_contig = np.copy(A_val, order="F")
         b_val_f_contig = np.copy(b_val, order="F")
         res_f_contig = f(A_val_f_contig, b_val_f_contig)
-        np.testing.assert_allclose(res_f_contig, res)
+        np.testing.assert_allclose(res_f_contig, res, rtol=rtol)
         assert (A_val == A_val_f_contig).all() == (not overwrite_a)
         assert (b_val == b_val_f_contig).all() == (not overwrite_b)
 
         A_val_c_contig = np.copy(A_val, order="C")
         b_val_c_contig = np.copy(b_val, order="C")
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
-        np.testing.assert_allclose(res_c_contig, res)
+        np.testing.assert_allclose(res_c_contig, res, rtol=rtol)
         can_destroy_c_contig_A = overwrite_a and not (
             is_complex and assume_a in ("pos", "her")
         )
@@ -142,7 +143,7 @@ class TestSolves:
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
         res_not_contig = f(A_val_not_contig, b_val_not_contig)
-        np.testing.assert_allclose(res_not_contig, res)
+        np.testing.assert_allclose(res_not_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
@@ -173,6 +174,7 @@ class TestSolves:
     ):
         complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
         dtype = complex_dtype if is_complex else floatX
+        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-8
 
         def A_func(x):
             x = x @ x.conj().T
@@ -221,14 +223,14 @@ class TestSolves:
         A_val_f_contig = np.copy(A_val, order="F")
         b_val_f_contig = np.copy(b_val, order="F")
         res_f_contig = f(A_val_f_contig, b_val_f_contig)
-        np.testing.assert_allclose(res_f_contig, res)
+        np.testing.assert_allclose(res_f_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val, A_val_f_contig)
         assert (b_val == b_val_f_contig).all() == (not overwrite_b)
 
         A_val_c_contig = np.copy(A_val, order="C")
         b_val_c_contig = np.copy(b_val, order="C")
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
-        np.testing.assert_allclose(res_c_contig, res)
+        np.testing.assert_allclose(res_c_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_c_contig, A_val)
         assert np.allclose(b_val_c_contig, b_val) == (
             not (overwrite_b and b_val_c_contig.flags.f_contiguous)
@@ -237,7 +239,7 @@ class TestSolves:
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
         res_not_contig = f(A_val_not_contig, b_val_not_contig)
-        np.testing.assert_allclose(res_not_contig, res)
+        np.testing.assert_allclose(res_not_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
