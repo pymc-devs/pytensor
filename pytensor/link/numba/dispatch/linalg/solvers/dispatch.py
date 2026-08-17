@@ -114,7 +114,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
             overwrite_b=overwrite_b,
         )
 
-    cache_version = 2
+    cache_version = 3
     return solve_triangular, cache_version
 
 

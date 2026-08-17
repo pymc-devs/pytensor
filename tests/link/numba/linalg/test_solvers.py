@@ -7,6 +7,7 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
+from pytensor.link.numba.dispatch.linalg.solvers.triangular import _solve_triangular
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -19,6 +20,11 @@ pytestmark = pytest.mark.filterwarnings("error")
 numba = pytest.importorskip("numba")
 
 floatX = config.floatX
+
+
+@numba.njit
+def njit_solve_triangular(A, B, trans, lower, unit_diagonal, overwrite_b):
+    return _solve_triangular(A, B, trans, lower, unit_diagonal, overwrite_b)
 
 
 class TestSolves:
@@ -232,9 +238,9 @@ class TestSolves:
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
         np.testing.assert_allclose(res_c_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_c_contig, A_val)
-        assert np.allclose(b_val_c_contig, b_val) == (
-            not (overwrite_b and b_val_c_contig.flags.f_contiguous)
-        )
+        # A c-contiguous b is consumed in place as well: trtrs takes it when it is also f-contiguous
+        # (vectors and single-column matrices), trsm otherwise.
+        assert np.allclose(b_val_c_contig, b_val) == (not overwrite_b)
 
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
@@ -242,6 +248,85 @@ class TestSolves:
         np.testing.assert_allclose(res_not_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
+
+    @pytest.mark.parametrize("lower", [True, False], ids=lambda x: f"lower={x}")
+    @pytest.mark.parametrize("trans", [0, 1, 2], ids=lambda x: f"trans={x}")
+    @pytest.mark.parametrize("A_order", ["C", "F"], ids=lambda x: f"A_order={x}")
+    def test_solve_triangular_trans_with_c_contiguous_rhs(
+        self, lower: bool, trans: int, A_order: Literal["C", "F"]
+    ):
+        # test_solve_triangular covers trans=0 through the graph, which is all the op ever passes.
+        # The overload is called directly to reach trans=1 and 2, with a complex dtype so that a
+        # missing conjugation shows up.
+        dtype = "complex64" if floatX.endswith("32") else "complex128"
+        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-8
+
+        rng = np.random.default_rng(418)
+        A_base = rng.normal(size=(5, 5)) + 1j * rng.normal(size=(5, 5))
+        A_val = scipy.linalg.cholesky(A_base @ A_base.conj().T, lower=lower).astype(
+            dtype
+        )
+        A_val = np.copy(A_val, order=A_order)
+
+        b_val = (rng.normal(size=(5, 3)) + 1j * rng.normal(size=(5, 3))).astype(dtype)
+        b_val = np.copy(b_val, order="C")
+
+        expected = scipy.linalg.solve_triangular(A_val, b_val, trans=trans, lower=lower)
+        result = njit_solve_triangular(
+            A_val,
+            b_val,
+            trans=trans,
+            lower=lower,
+            unit_diagonal=False,
+            overwrite_b=True,
+        )
+
+        np.testing.assert_allclose(result, expected, rtol=rtol)
+        # A c-contiguous 2d rhs picks trsm, which solves into b itself. trans=2 has no trsm form,
+        # so it falls back to trtrs, which copies.
+        assert np.shares_memory(result, b_val) == (trans != 2)
+
+    def test_solve_triangular_unit_diagonal_ignores_zero_diagonal(self):
+        rtol = 1e-4 if np.dtype(floatX).char in "fF" else 1e-8
+
+        rng = np.random.default_rng(418)
+        A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
+        A_val[2, 2] = 0.0
+        b_val = np.copy(rng.normal(size=(5, 3)).astype(floatX), order="C")
+
+        expected = scipy.linalg.solve_triangular(
+            A_val, b_val, lower=True, unit_diagonal=True
+        )
+        result = njit_solve_triangular(
+            A_val,
+            b_val,
+            trans=0,
+            lower=True,
+            unit_diagonal=True,
+            overwrite_b=False,
+        )
+
+        np.testing.assert_allclose(result, expected, rtol=rtol)
+
+    @pytest.mark.parametrize("b_shape", [(5, 3), (5,)], ids=["b_matrix", "b_vec"])
+    def test_solve_triangular_singular_returns_nan(self, b_shape: tuple[int, ...]):
+        # A 2d rhs takes trsm, which reports no INFO and needs its own singularity check; a vector
+        # takes trtrs, which reports it.
+        rng = np.random.default_rng(418)
+        A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
+        A_val[2, 2] = 0.0
+        b_val = np.copy(rng.normal(size=b_shape).astype(floatX), order="C")
+
+        result = njit_solve_triangular(
+            A_val,
+            b_val,
+            trans=0,
+            lower=True,
+            unit_diagonal=False,
+            overwrite_b=False,
+        )
+
+        assert np.isnan(result).all()
 
     @pytest.mark.parametrize("value", [np.nan, np.inf])
     def test_solve_triangular_does_not_raise_on_nan_inf(self, value):
@@ -397,9 +482,7 @@ class TestSolves:
         np.testing.assert_allclose(res_c_contig, res)
         np.testing.assert_allclose(A_val_c_contig, A_val)
 
-        assert not (
-            should_destroy and b_val_c_contig.flags.f_contiguous
-        ) == np.allclose(b_val_c_contig, b_val)
+        assert np.allclose(b_val_c_contig, b_val) == (not should_destroy)
 
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
