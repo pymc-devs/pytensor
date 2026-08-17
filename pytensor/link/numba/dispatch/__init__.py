@@ -2,6 +2,9 @@
 # Patch numba's cgutils.pointer_add before any dispatch codegen runs
 import pytensor.link.numba.dispatch._patch_pointer_add
 
+# Patch numba's list_to_tuple peephole so >30-argument calls don't lower quadratically
+import pytensor.link.numba.dispatch._patch_list_to_tuple
+
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_typify
 
 # Load dispatch specializations
