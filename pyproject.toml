@@ -131,7 +131,11 @@ filterwarnings =[
 
 [tool.ruff]
 line-length = 88
-exclude = ["pytensor/_version.py"]
+# _patch_list_to_tuple.py is copied verbatim from numba; keep it diffable upstream
+exclude = [
+    "pytensor/_version.py",
+    "pytensor/link/numba/dispatch/_patch_list_to_tuple.py",
+]
 
 [tool.ruff.format]
 docstring-code-format = true
