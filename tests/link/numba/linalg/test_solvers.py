@@ -426,6 +426,6 @@ class TestSolves:
         compare_numba_and_py(
             [a, b],
             [out],
-            [np.zeros((0, 0)), np.zeros(0)],
+            [np.zeros((0, 0), dtype=floatX), np.zeros(0, dtype=floatX)],
             eval_obj_mode=False,
         )
