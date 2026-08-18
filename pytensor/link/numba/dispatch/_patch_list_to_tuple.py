@@ -23,11 +23,16 @@ def _collapse_tuple_chains(func_ir):
     uses = Counter()
     for blk in func_ir.blocks.values():
         for stmt in blk.body:
-            vars_ = (
-                stmt.value.list_vars()
-                if isinstance(stmt, ir.Assign) and isinstance(stmt.value, ir.Expr)
-                else stmt.list_vars()
-            )
+            if isinstance(stmt, ir.Assign):
+                vars_ = (
+                    stmt.value.list_vars()
+                    if isinstance(stmt.value, ir.Expr)
+                    else [stmt.value]
+                    if isinstance(stmt.value, ir.Var)
+                    else []
+                )
+            else:
+                vars_ = stmt.list_vars()
             for var in vars_:
                 uses[var.name] += 1
 
@@ -84,6 +89,27 @@ def _collapse_tuple_chains(func_ir):
                 changed = True
             if expr.op == "build_tuple" and len(defs.get(stmt.target.name, ())) == 1:
                 tuples[stmt.target.name] = (idx, list(expr.items))
+            elif (
+                expr.op == "call"
+                and expr.vararg is not None
+                and expr.varkwarg is None
+                and not expr.args
+                and expr.vararg.name in tuples
+                and uses[expr.vararg.name] == 1
+            ):
+                # Inline the tuple back into direct call arguments: a wide
+                # vararg call round-trips every argument through one wide
+                # tuple, whose LLVM lowering is O(n^2) in the item count
+                t_idx, t_items = tuples.pop(expr.vararg.name)
+                new_call = ir.Expr.call(
+                    expr.func, t_items, expr.kws, expr.loc, target=expr.target
+                )
+                defs[expr.vararg.name].clear()
+                defs[stmt.target.name].remove(expr)
+                defs[stmt.target.name].append(new_call)
+                body[t_idx] = None
+                body[idx] = ir.Assign(new_call, stmt.target, stmt.loc)
+                changed = True
         if changed:
             new_body = [s for s in body if s is not None]
             body.clear()

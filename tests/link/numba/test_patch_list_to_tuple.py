@@ -24,30 +24,22 @@ def _make_wide_caller(n_args):
     return glb["caller"]
 
 
-def test_wide_call_collapses_to_single_build_tuple():
-    """A >30-argument call leaves one build_tuple, not a chain of prefix tuples."""
+def test_wide_call_becomes_direct_call():
+    """A >30-argument call ends up with direct arguments: no prefix-tuple
+    chain, no tuple at all."""
     from numba.core import ir
 
     func_ir = _interpret(_make_wide_caller(40))
-    tuple_adds = [
-        stmt
+    exprs = [
+        stmt.value
         for blk in func_ir.blocks.values()
         for stmt in blk.body
-        if isinstance(stmt, ir.Assign)
-        and isinstance(stmt.value, ir.Expr)
-        and stmt.value.op == "binop"
-        and stmt.value.fn is operator.add
+        if isinstance(stmt, ir.Assign) and isinstance(stmt.value, ir.Expr)
     ]
-    assert not tuple_adds
-    widths = [
-        len(stmt.value.items)
-        for blk in func_ir.blocks.values()
-        for stmt in blk.body
-        if isinstance(stmt, ir.Assign)
-        and isinstance(stmt.value, ir.Expr)
-        and stmt.value.op == "build_tuple"
-    ]
-    assert widths == [40]
+    assert not any(e.op == "binop" and e.fn is operator.add for e in exprs)
+    assert not any(e.op == "build_tuple" for e in exprs)
+    [call] = [e for e in exprs if e.op == "call"]
+    assert len(call.args) == 40 and call.vararg is None
 
 
 def test_wide_call_computes_correctly():
