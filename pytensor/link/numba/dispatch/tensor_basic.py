@@ -9,7 +9,11 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
-from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
+from pytensor.link.numba.dispatch.string_codegen import (
+    CODE_TOKEN,
+    build_source_code,
+    create_tuple_string,
+)
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -115,14 +119,79 @@ def numba_funcify_ARange(op, **kwargs):
 
 
 @register_funcify_default_op_cache_key(Join)
-def numba_funcify_Join(op, **kwargs):
-    axis = op.axis
+def numba_funcify_Join(op, node, **kwargs):
+    """Write each input into its slice of a preallocated output.
 
-    @numba_basic.numba_njit
-    def join(*tensors):
-        return np.concatenate(tensors, axis)
+    ``np.concatenate`` on a tuple of arrays compiles ~3x slower for the same
+    result. For ``join(1, x0, x1, x2)`` on matrices this emits::
 
-    return join
+        def join(*tensors):
+            total = tensors[0].shape[1]
+            total += tensors[1].shape[1]
+            total += tensors[2].shape[1]
+            if tensors[1].shape[0] != tensors[0].shape[0]:
+                raise ValueError(_mismatch_msg)
+            if tensors[2].shape[0] != tensors[0].shape[0]:
+                raise ValueError(_mismatch_msg)
+            out = np.empty((tensors[0].shape[0], total), dtype)
+            off = 0
+            l = tensors[0].shape[1]
+            out[:, off : off + l] = tensors[0]
+            off += l
+            ...
+            return out
+    """
+    ndim = node.outputs[0].type.ndim
+    ax = op.axis % ndim
+    pre = ":, " * ax
+    post = ", :" * (ndim - ax - 1)
+    names = [f"tensors[{i}]" for i in range(len(node.inputs))]
+
+    shape = [f"tensors[0].shape[{d}]" for d in range(ndim)]
+    shape[ax] = "total"
+    code: list[str | CODE_TOKEN] = [
+        "def join(*tensors):",
+        CODE_TOKEN.INDENT,
+        f"total = tensors[0].shape[{ax}]",
+        *(f"total += {name}.shape[{ax}]" for name in names[1:]),
+    ]
+    for name in names[1:]:
+        for d in range(ndim):
+            if d != ax:
+                code += [
+                    f"if {name}.shape[{d}] != tensors[0].shape[{d}]:",
+                    CODE_TOKEN.INDENT,
+                    "raise ValueError(_mismatch_msg)",
+                    CODE_TOKEN.DEDENT,
+                ]
+    code += [
+        f"out = np.empty({create_tuple_string(shape)}, dtype)",
+        "off = 0",
+    ]
+    for name in names:
+        code += [
+            f"l = {name}.shape[{ax}]",
+            f"out[{pre}off:off + l{post}] = {name}",
+            "off += l",
+        ]
+    code += ["return out", CODE_TOKEN.DEDENT]
+
+    join_fn = compile_numba_function_src(
+        build_source_code(code),
+        "join",
+        globals()
+        | {
+            "np": np,
+            "dtype": np.dtype(node.outputs[0].type.dtype),
+            "_mismatch_msg": "all the input array dimensions except for the "
+            "concatenation axis must match exactly",
+        },
+    )
+
+    cache_version = 3
+    # The explicit slice writes cannot go out of bounds: the output is
+    # allocated from the validated input shapes
+    return numba_basic.numba_njit(join_fn, boundscheck=False), cache_version
 
 
 @register_funcify_default_op_cache_key(Split)

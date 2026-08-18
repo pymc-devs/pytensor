@@ -172,6 +172,14 @@ def test_Join(vals, axis):
     )
 
 
+def test_Join_mismatched_shape_raises():
+    xs = [pt.matrix("x0"), pt.matrix("x1")]
+    fn = function(xs, pt.join(0, *xs), mode=get_mode("NUMBA"))
+    rng = np.random.default_rng(0)
+    with pytest.raises(ValueError, match="dimensions except for the concatenation"):
+        fn(rng.normal(size=(2, 3)), rng.normal(size=(2, 4)))
+
+
 @pytest.mark.parametrize(
     "n_splits, axis, values, sizes",
     [
