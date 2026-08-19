@@ -238,8 +238,8 @@ class TestSolves:
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
         np.testing.assert_allclose(res_c_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_c_contig, A_val)
-        # A c-contiguous b is consumed in place as well: trtrs takes it when it is also f-contiguous
-        # (vectors and single-column matrices), trsm otherwise.
+        # A c-contiguous b is consumed in place as well: side="L" takes it when it is also
+        # f-contiguous (vectors and single-column matrices), side="R" otherwise.
         assert np.allclose(b_val_c_contig, b_val) == (not overwrite_b)
 
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
@@ -282,8 +282,8 @@ class TestSolves:
         )
 
         np.testing.assert_allclose(result, expected, rtol=rtol)
-        # A c-contiguous 2d rhs picks trsm, which solves into b itself. trans=2 has no trsm form,
-        # so it falls back to trtrs, which copies.
+        # A c-contiguous 2d rhs is solved in place by side="R". trans=2 has no side="R" form, so it
+        # falls back to side="L", which needs an f-contiguous copy.
         assert np.shares_memory(result, b_val) == (trans != 2)
 
     def test_solve_triangular_unit_diagonal_ignores_zero_diagonal(self):
@@ -310,8 +310,8 @@ class TestSolves:
 
     @pytest.mark.parametrize("b_shape", [(5, 3), (5,)], ids=["b_matrix", "b_vec"])
     def test_solve_triangular_singular_returns_nan(self, b_shape: tuple[int, ...]):
-        # A 2d rhs takes trsm, which reports no INFO and needs its own singularity check; a vector
-        # takes trtrs, which reports it.
+        # trsm reports no INFO, so both sides depend on our own zero-pivot scan: a 2d rhs goes
+        # through side="R" and a vector through side="L".
         rng = np.random.default_rng(418)
         A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
         A_val[2, 2] = 0.0

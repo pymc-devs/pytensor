@@ -1,16 +1,12 @@
 import numpy as np
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import ensure_lapack
+from numba.np.linalg import ensure_blas
 from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
-from pytensor.link.numba.dispatch.linalg._LAPACK import (
-    _LAPACK,
-    int_ptr_to_val,
-    val_to_int_ptr,
-)
+from pytensor.link.numba.dispatch.linalg._LAPACK import val_to_int_ptr
 from pytensor.link.numba.dispatch.linalg.solvers.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
@@ -42,7 +38,7 @@ def _solve_triangular(
 
 @overload(_solve_triangular)
 def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
-    ensure_lapack()
+    ensure_blas()
 
     _check_linalg_matrix(
         A, ndim=2, dtype=(Float, Complex), func_name="solve_triangular"
@@ -52,7 +48,6 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
     )
     _check_dtypes_match((A, B), func_name="solve_triangular")
     dtype = A.dtype
-    numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
     numba_trsm = _BLAS().numba_xtrsm(dtype)
     B_is_1d = B.ndim == 1
 
@@ -70,86 +65,59 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
         else:
             A_f = np.asfortranarray(A)
 
+        if not unit_diagonal and _has_zero_on_diagonal(A_f):
+            # trsm reports no INFO, so a zero pivot has to be caught before the call
+            return np.full_like(B, np.nan)
+
+        ALPHA = np.ones(1, dtype=dtype)
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         DIAG = val_to_int_ptr(ord("U") if unit_diagonal else ord("N"))
+        LDA = val_to_int_ptr(_N)
 
         # A c_contiguous B reinterpreted as f_contiguous is B^T, so op(A) X = B can be solved as
-        # X^T op(A)^T = B^T, which is what trsm computes with side="R". That spares the transposing copy trtrs
-        # needs to consume B. op(A)^T is not expressible for trans=2, since trsm has no conjugate-only mode.
+        # X^T op(A)^T = B^T, which is what trsm computes with side="R", straight out of B's own buffer.
+        # op(A)^T is not expressible for trans=2, since trsm has no conjugate-only mode.
         if (
             not B_is_1d
             and trans != 2
             and B.flags.c_contiguous
             and not B.flags.f_contiguous
         ):
-            if not unit_diagonal and _has_zero_on_diagonal(A_f):
-                # trsm reports no INFO, so singular A has to be caught before the call
-                return np.full_like(B, np.nan)
-
             B_work = B if overwrite_b else B.copy()
             _NRHS = np.int32(B_work.shape[-1])
-            ALPHA = np.ones(1, dtype=dtype)
-
             SIDE = val_to_int_ptr(ord("R"))
             # op(A)^T is A^T for trans=0 and A for trans=1
             TRANSA = val_to_int_ptr(ord("T") if trans == 0 else ord("N"))
             M = val_to_int_ptr(_NRHS)
             N = val_to_int_ptr(_N)
-            LDA = val_to_int_ptr(_N)
             LDB = val_to_int_ptr(_NRHS)
-
-            numba_trsm(
-                SIDE,
-                UPLO,
-                TRANSA,
-                DIAG,
-                M,
-                N,
-                ALPHA.ctypes,
-                A_f.ctypes,
-                LDA,
-                B_work.ctypes,
-                LDB,
-            )
-
-            return B_work
-
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
         else:
-            B_copy = _copy_to_fortran_order_even_if_1d(B)
+            if overwrite_b and B.flags.f_contiguous:
+                B_work = B
+            else:
+                B_work = _copy_to_fortran_order_even_if_1d(B)
+            _NRHS = np.int32(1 if B_is_1d else B_work.shape[-1])
+            SIDE = val_to_int_ptr(ord("L"))
+            TRANSA = val_to_int_ptr(_trans_char_to_int(trans))
+            M = val_to_int_ptr(_N)
+            N = val_to_int_ptr(_NRHS)
+            LDB = val_to_int_ptr(_N)
 
-        if B_is_1d:
-            B_copy = np.expand_dims(B_copy, -1)
-
-        NRHS = 1 if B_is_1d else int(B_copy.shape[-1])
-
-        TRANS = val_to_int_ptr(_trans_char_to_int(trans))
-        N = val_to_int_ptr(_N)
-        NRHS = val_to_int_ptr(NRHS)
-        LDA = val_to_int_ptr(_N)
-        LDB = val_to_int_ptr(_N)
-        INFO = val_to_int_ptr(0)
-
-        numba_trtrs(
+        numba_trsm(
+            SIDE,
             UPLO,
-            TRANS,
+            TRANSA,
             DIAG,
+            M,
             N,
-            NRHS,
+            ALPHA.ctypes,
             A_f.ctypes,
             LDA,
-            B_copy.ctypes,
+            B_work.ctypes,
             LDB,
-            INFO,
         )
-        if int_ptr_to_val(INFO) != 0:
-            B_copy = np.full_like(B_copy, np.nan)
 
-        if B_is_1d:
-            return B_copy[..., 0]
-
-        return B_copy
+        return B_work
 
     return impl
 
