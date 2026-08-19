@@ -28,9 +28,6 @@ def _solve_triangular(
 
     This function is overloaded instead of the original scipy function to avoid unexpected side-effects to users who
     import pytensor.
-
-    The signature must be the same as solve_triangular_impl, so b_ndim is included, although this argument is not
-    used by scipy.linalg.solve_triangular.
     """
     return linalg.solve_triangular(
         A,
