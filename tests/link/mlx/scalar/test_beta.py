@@ -6,6 +6,7 @@ import pytest
 import scipy.special
 import scipy.stats
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor.scalar.math import BetaInc
 from pytensor.tensor.type import vector
@@ -133,12 +134,12 @@ def test_betainc(shape_range, ratio_range, tolerances, dtype):
 
 
 @pytest.mark.parametrize(
-    "shape_range, ratio_range",
+    "shape_range, ratio_range, temme_share",
     [
-        ((1e-2, 5.0), (0.2, 5.0)),
-        ((5.0, 500.0), (0.2, 5.0)),
-        ((2e3, 5e5), (0.2, 5.0)),
-        ((5.0, 1e3), (20.0, 500.0)),
+        ((1e-2, 5.0), (0.2, 5.0), 0.0),
+        ((5.0, 500.0), (0.2, 5.0), 0.0),
+        ((2e3, 5e5), (0.2, 5.0), 0.5),
+        ((5.0, 1e3), (20.0, 500.0), 0.0),
     ],
     ids=[
         "fraction-small",
@@ -147,10 +148,22 @@ def test_betainc(shape_range, ratio_range, tolerances, dtype):
         "asymmetric-small",
     ],
 )
-def test_betainc_float64_precision(shape_range, ratio_range):
+def test_betainc_float64_precision(shape_range, ratio_range, temme_share):
     a_test_value, b_test_value, x_test_value = _sample(
         np.random.default_rng(23), shape_range, ratio_range, 2001
     )
+
+    # The ids above name a branch, and moving either gate silently moves which one a row
+    # exercises -- so the row asserts the split it claims rather than trusting it
+    lower = np.minimum(a_test_value, b_test_value)
+    in_temme = (lower >= _TEMME_MIN_A) & (
+        lower / (a_test_value + b_test_value) >= _TEMME_MIN_P
+    )
+    if temme_share:
+        assert in_temme.mean() >= temme_share, "this row no longer reaches Temme"
+    else:
+        assert not in_temme.any(), "this row was meant to stay on the fraction"
+
     got = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
 
     # Past 1e-290 a tail has run out of exponent rather than of accuracy, so those
@@ -161,13 +174,21 @@ def test_betainc_float64_precision(shape_range, ratio_range):
 
 
 def test_betainc_uncovered_corner():
-    # The corner both expansions find hardest: min(a, b) large and p small, where the
-    # fraction needs terms growing like sqrt(min(a, b)) -- around 340 against the 120 the
-    # graph unrolls -- and Temme leans hardest on its leading coefficient. It degrades
-    # gracefully rather than failing, and this pins how far.
+    # The corner both expansions find hardest: min(a, b) large and p small. The fraction
+    # would need terms growing like sqrt(min(a, b)) there -- around 340 against the 120
+    # the graph unrolls -- and Temme is leaning on its leading coefficient with c_1 to
+    # c_3 extrapolating in s. It degrades gracefully rather than failing, and this pins
+    # how far.
     a_test_value, b_test_value, x_test_value = _sample(
         np.random.default_rng(11), (2e3, 1e5), (20.0, 500.0), 501
     )
+
+    # Both halves of "hardest", asserted rather than assumed: without this the sample
+    # could drift into an easy region and the tolerance below would still pass
+    lower = np.minimum(a_test_value, b_test_value)
+    assert lower.min() > 1e3, "the corner needs min(a, b) large"
+    assert (lower / (a_test_value + b_test_value)).max() < 0.05, "and p small"
+
     truth = scipy.special.betainc(a_test_value, b_test_value, x_test_value)
     keep = truth > 1e-290
     got = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
@@ -310,18 +331,18 @@ def test_beta_logcdf():
     _assert_logcdf(got, scipy.stats.beta.logcdf(value, alpha, beta))
 
 
-def test_studentt_logcdf():
+@pytest.mark.parametrize("nu", [2.5, 30.0, 4e3, 4e4], ids=lambda v: f"nu={v:g}")
+def test_studentt_logcdf(nu):
     # pymc.StudentT.logcdf, which is log(betainc(nu / 2, nu / 2, x)) with x set from the
     # standardized value. nu / 2 on both sides is the symmetric corner, where the
     # continued fraction is slowest and Temme takes over
-    for nu in (2.5, 30.0, 4e3, 4e4):
-        z = np.linspace(-30.0, 30.0, 501)
-        root = np.sqrt(z * z + nu)
-        x = (z + root) / (2.0 * root)
-        half = np.full_like(z, nu / 2.0)
-        _assert_logcdf(
-            np.log(_direct(half, half, x, mlx.float64)), scipy.stats.t.logcdf(z, nu)
-        )
+    z = np.linspace(-30.0, 30.0, 501)
+    root = np.sqrt(z * z + nu)
+    x = (z + root) / (2.0 * root)
+    half = np.full_like(z, nu / 2.0)
+    _assert_logcdf(
+        np.log(_direct(half, half, x, mlx.float64)), scipy.stats.t.logcdf(z, nu)
+    )
 
 
 def test_skew_studentt_logcdf():
@@ -335,31 +356,33 @@ def test_skew_studentt_logcdf():
     )
 
 
-def test_binomial_logcdf():
+@pytest.mark.parametrize(
+    "n, p", [(10.0, 0.3), (1e4, 0.5), (1e5, 0.01)], ids=lambda v: f"{v:g}"
+)
+def test_binomial_logcdf(n, p):
     # pymc.Binomial.logcdf, which is log(betainc(n - value, value + 1, 1 - p)). Its
     # arguments are built from counts, so they reach much further than a user would type
-    for n, p in ((10.0, 0.3), (1e4, 0.5), (1e5, 0.01)):
-        value = np.unique(np.linspace(0.0, n - 1.0, 301).astype(np.int64)).astype(float)
-        _assert_logcdf(
-            np.log(
-                _direct(
-                    n - value, value + 1.0, np.full_like(value, 1.0 - p), mlx.float64
-                )
-            ),
-            scipy.stats.binom.logcdf(value, int(n), p),
-        )
+    value = np.unique(np.linspace(0.0, n - 1.0, 301).astype(np.int64)).astype(float)
+    _assert_logcdf(
+        np.log(
+            _direct(n - value, value + 1.0, np.full_like(value, 1.0 - p), mlx.float64)
+        ),
+        scipy.stats.binom.logcdf(value, int(n), p),
+    )
 
 
-def test_negative_binomial_logcdf():
+@pytest.mark.parametrize(
+    "n, p", [(5.0, 0.4), (1e3, 0.5), (1e4, 0.9)], ids=lambda v: f"{v:g}"
+)
+def test_negative_binomial_logcdf(n, p):
     # pymc.NegativeBinomial.logcdf, which is log(betainc(n, floor(value) + 1, p))
-    for n, p in ((5.0, 0.4), (1e3, 0.5), (1e4, 0.9)):
-        value = np.unique(np.linspace(0.0, 3.0 * n, 301).astype(np.int64)).astype(float)
-        got = np.log(
-            _direct(
-                np.full_like(value, n), value + 1.0, np.full_like(value, p), mlx.float64
-            )
+    value = np.unique(np.linspace(0.0, 3.0 * n, 301).astype(np.int64)).astype(float)
+    got = np.log(
+        _direct(
+            np.full_like(value, n), value + 1.0, np.full_like(value, p), mlx.float64
         )
-        _assert_logcdf(got, scipy.stats.nbinom.logcdf(value, n, p))
+    )
+    _assert_logcdf(got, scipy.stats.nbinom.logcdf(value, n, p))
 
 
 def test_betainc_grad():
@@ -379,6 +402,19 @@ def test_betainc_grad():
         [a_test_value, b_test_value, x_test_value],
         assert_fn=partial(np.testing.assert_allclose, rtol=1e-7),
     )
+
+
+@pytest.mark.parametrize("wrt", [0, 1], ids=["a", "b"])
+def test_betainc_shape_gradient_raises(wrt):
+    # The counterpart to test_betainc_grad: differentiating with respect to either shape
+    # parameter goes through ScalarLoop, which this backend does not dispatch. It raises
+    # rather than returning something wrong, and this pins that until step 6 lands -- at
+    # which point this test is the one that should start failing.
+    inputs = [vector(name, dtype="float64") for name in "abx"]
+    graph = pt.grad(pt.betainc(*inputs).sum(), inputs[wrt])
+
+    with pytest.raises(NotImplementedError, match="ScalarLoop"):
+        pytensor.function(inputs, graph, mode="MLX")
 
 
 @pytest.mark.skipif(
