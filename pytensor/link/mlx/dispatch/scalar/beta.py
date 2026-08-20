@@ -44,7 +44,7 @@ _TEMME_MIN_P = 0.002
 # both diverge as eta -> 0, so it carries about eps / |eta| and the table takes over near
 # the mode, where it is the cancellation-free form of the same thing. The thresholds are
 # where each dtype's loss falls under what the table delivers.
-_C0_MIN_ETA = {"float32": 6e-3, "float64": 1e-5}
+_C0_MIN_ETA = {mx.float32: 6e-3, mx.float64: 1e-5}
 
 # log Gamma(z) - (z - 1/2) log z + z - log(2 pi) / 2, the Stirling remainder, is
 # reached by shifting the argument up to where its asymptotic series holds and walking
@@ -706,11 +706,13 @@ def _betainc_eta(p, q, x, const):
     return mx.sign(offset) * mx.sqrt(mx.maximum(value, const(0.0)))
 
 
-def _temme(mu, p, q, eta, leading, use_leading, sign, const, erfc):
+def _temme(mu, s, eta, leading, use_leading, sign, const, erfc):
     r"""The uniform asymptotic expansion, for large :math:`\mu = a + b` near the mode.
 
     Parameters
     ----------
+    s : mx.array
+        :math:`(q - p) / \sqrt{p q}`, the asymmetry the coefficients are tabulated in.
     leading : mx.array
         :math:`c_0` from DLMF 8.18.11, used where ``use_leading`` is true and the
         tabulated coefficient used elsewhere.
@@ -726,8 +728,6 @@ def _temme(mu, p, q, eta, leading, use_leading, sign, const, erfc):
         so each is built from terms of its own magnitude rather than as a subtraction
         from one.
     """
-    s = (q - p) * mx.rsqrt(p * q)
-
     total = const(0.0)
     mu_power = const(1.0)
     for order, rows in enumerate(_TEMME_C):
@@ -827,9 +827,10 @@ def _betainc_cf(a, b, x, half_mu_eta_squared, const):
 def _betainc(a, b, x, min_eta, const, erfc):
     r"""The regularized incomplete beta function over the whole domain.
 
-    The two expansions are selected per element and both run for every element, so each
-    is handed an argument it can survive rather than the one belonging to whichever
-    will actually be selected.
+    Both expansions run for every element and one is selected afterwards. Temme is
+    handed substitute arguments where it will not be selected, since its window is
+    where the fraction's are singular; the fraction survives Temme's territory on the
+    real ones and needs no such guard.
     """
     one = const(1.0)
 
@@ -845,8 +846,8 @@ def _betainc(a, b, x, min_eta, const, erfc):
     # 1 - x under the normalized one: eta is odd under the swap, and forming 1 - x
     # would throw away a small x entirely -- at float32 it costs 3% of x = 8e-7, and
     # the answer there is proportional to x**a
-    p_given = a / mu
-    eta = _betainc_eta(p_given, b / mu, x, const)
+    p_given, q_given = a / mu, b / mu
+    eta = _betainc_eta(p_given, q_given, x, const)
     eta = mx.where(swapped, -eta, eta)
     p = lower / mu
     q = upper / mu
@@ -864,10 +865,11 @@ def _betainc(a, b, x, min_eta, const, erfc):
         use_leading, offset, one
     )
 
+    safe_p = mx.where(use_temme, p, const(0.5))
+    safe_q = mx.where(use_temme, q, const(0.5))
     temme = _temme(
         mu,
-        mx.where(use_temme, p, const(0.5)),
-        mx.where(use_temme, q, const(0.5)),
+        (safe_q - safe_p) * mx.rsqrt(safe_p * safe_q),
         mx.where(use_temme, eta, const(0.0)),
         leading,
         use_leading,
@@ -916,7 +918,7 @@ _METAL_BETAINC_HEADER = (
 #define BI_TEMME_MIN_A    {_TEMME_MIN_A}f
 #define BI_TEMME_MIN_P    {_TEMME_MIN_P}f
 #define BI_TEMME_MAX_ETA  {_TEMME_MAX_ETA}f
-#define BI_C0_MIN_ETA     {_C0_MIN_ETA["float32"]}f
+#define BI_C0_MIN_ETA     {_C0_MIN_ETA[mx.float32]}f
 #define BI_STIRLING_SHIFT {_STIRLING_SHIFT}
 #define BI_STIRLING_N     {len(_STIRLING_SERIES)}
 #define BI_TEMME_TERMS    {len(_TEMME_C)}
@@ -1116,14 +1118,7 @@ def mlx_funcify_BetaInc(op, **kwargs):
         second = mx.array(b).astype(z.dtype)
         out = _metal_betainc_call(first, second, z)
         if out is None:
-            out = _betainc(
-                first,
-                second,
-                z,
-                _C0_MIN_ETA[str(z.dtype).rsplit(".", 1)[-1]],
-                const,
-                erfc,
-            )
+            out = _betainc(first, second, z, _C0_MIN_ETA[z.dtype], const, erfc)
         return out.astype(out_dtype)
 
     return betainc
