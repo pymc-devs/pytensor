@@ -28,13 +28,8 @@ from pytensor.link.numba.dispatch.string_codegen import (
     create_tuple_string,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
-    NO_INDEXED_INPUTS,
-    NO_INDEXED_OUTPUTS,
-    NO_REDUCE_OUTPUTS,
-    NO_SIZE,
     _jit_options,
-    _vectorized,
-    encode_literals,
+    make_vectorized,
     store_core_outputs,
 )
 from pytensor.scalar.basic import (
@@ -696,14 +691,8 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     inplace_pattern = tuple(op.inplace_pattern.items())
     core_output_shapes = tuple(() for _ in range(nout))
 
-    # numba doesn't support nested literals right now...
-    input_bc_patterns_enc = encode_literals(input_bc_patterns)
-    output_bc_patterns_enc = encode_literals(output_bc_patterns)
-    output_dtypes_enc = encode_literals(output_dtypes)
-    inplace_pattern_enc = encode_literals(inplace_pattern)
-
     # Pure python implementation, that will be used in tests
-    def elemwise(*inputs):
+    def _elemwise_py(*inputs):
         Elemwise._check_runtime_broadcast(node, inputs)
         inputs_bc = np.broadcast_arrays(*inputs)
         shape = inputs_bc[0].shape
@@ -722,26 +711,41 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                     out[idx] = out_val
             return outputs
 
-    @overload(elemwise)
-    def ov_elemwise(*inputs):
-        def impl(*inputs):
-            return _vectorized(
-                core_op_fn,
-                input_bc_patterns_enc,
-                output_bc_patterns_enc,
-                output_dtypes_enc,
-                inplace_pattern_enc,
-                True,  # allow_core_scalar
-                (),  # constant_inputs
-                inputs,
-                core_output_shapes,
-                NO_SIZE,
-                NO_INDEXED_INPUTS,
-                NO_INDEXED_OUTPUTS,
-                NO_REDUCE_OUTPUTS,
-            )
+    # Named parameters throughout, not *args: numba types every star-args
+    # boundary with one wide tuple, which lowers as O(n^2) LLVM IR
+    params = ", ".join(f"i{k}" for k in range(len(node.inputs)))
+    elemwise = compile_numba_function_src(
+        f"def elemwise({params}):\n    return _elemwise_py({params})\n",
+        "elemwise",
+        {"_elemwise_py": _elemwise_py},
+    )
+    impl_fn = compile_numba_function_src(
+        f"""
+def elemwise_impl({params}):
+    return _vectorized(core_op_fn, (), core_output_shapes, None, {params})
+""",
+        "elemwise_impl",
+        {
+            **globals(),
+            "_vectorized": make_vectorized(
+                input_bc_patterns,
+                output_bc_patterns,
+                output_dtypes,
+                inplace_pattern,
+                True,
+                n_outer=len(node.inputs),
+            ),
+            "core_op_fn": core_op_fn,
+            "core_output_shapes": core_output_shapes,
+        },
+    )
 
-        return impl
+    ov_fn = compile_numba_function_src(
+        f"def ov_elemwise({params}):\n    return impl_fn\n",
+        "ov_elemwise",
+        {"impl_fn": impl_fn},
+    )
+    overload(elemwise)(ov_fn)
 
     if scalar_cache_key is None:
         # If the scalar op cannot be cached, the Elemwise wrapper cannot be cached either
@@ -750,6 +754,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         elemwise_key = str(
             (
                 type(op),
+                3,  # cache_version
                 tuple(op.inplace_pattern.items()),
                 input_bc_patterns,
                 scalar_cache_key,
@@ -775,7 +780,7 @@ def _reduce_identity(identity, acc_dtype):
     return acc_dtype.type(identity)
 
 
-def _build_reduce_impl_src(nout, post_specs):
+def _build_reduce_impl_src(params, nout, post_specs):
     """Build the ``@overload`` impl source for a fused op with reduction outputs.
 
     Calls ``_vectorized`` (which produces a keepdims, size-1-on-reduced-axes
@@ -784,23 +789,15 @@ def _build_reduce_impl_src(nout, post_specs):
     ``None`` for a passthrough output, else ``(kept_axes, out_dtype, cast_needed)``.
     """
     code: list[str | CODE_TOKEN] = [
-        "def fused_elemwise_impl(*outer_inputs):",
+        f"def fused_elemwise_impl({params}):",
         CODE_TOKEN.INDENT,
         "raw = _vectorized(",
         CODE_TOKEN.INDENT,
         "core_op_fn,",
-        "input_bc_patterns_enc,",
-        "output_bc_patterns_enc,",
-        "output_dtypes_enc,",
-        "inplace_pattern_enc,",
-        "True,",
         "(),",
-        "outer_inputs,",
         "core_output_shapes,",
-        "NO_SIZE,",
-        "indexed_inputs_enc,",
-        "indexed_outputs_enc,",
-        "reduce_outputs_enc,",
+        "None,",
+        f"{params},",
         CODE_TOKEN.DEDENT,
         ")",
     ]
@@ -931,15 +928,19 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         node.inputs[nin_elemwise + k].type.broadcastable for k in range(n_indices)
     )
 
-    input_bc_patterns_enc = encode_literals(input_bc_patterns)
-    output_bc_patterns_enc = encode_literals(output_bc_patterns)
-    output_dtypes_enc = encode_literals(output_dtypes)
-    inplace_pattern_enc = encode_literals(inplace_pattern)
-    indexed_inputs_enc = encode_literals((indexed_inputs, idx_broadcastable))
-    indexed_outputs_enc = encode_literals(indexed_outputs)
-    reduce_outputs_enc = encode_literals(tuple(reduce_identities))
+    vectorized_intr = make_vectorized(
+        input_bc_patterns,
+        output_bc_patterns,
+        output_dtypes,
+        inplace_pattern,
+        True,
+        (indexed_inputs, idx_broadcastable),
+        indexed_outputs,
+        tuple(reduce_identities),
+        n_outer=len(node.inputs),
+    )
 
-    def fused_elemwise_fn(*outer_inputs):
+    def _fused_elemwise_py(*outer_inputs):
         # Python-mode fallback (e.g. Numba's ``eval_python_only`` path, which
         # runs the funcified function without JIT). Evaluate the inner fgraph
         # faithfully, exactly like ``OpFromGraph.perform`` — so the fused op
@@ -949,52 +950,42 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         res = op.fn(*outer_inputs)
         return res[0] if len(res) == 1 else tuple(res)
 
+    # Named parameters throughout, not *args: numba types every star-args
+    # boundary with one wide tuple, which lowers as O(n^2) LLVM IR
+    params = ", ".join(f"i{k}" for k in range(len(node.inputs)))
+    fused_elemwise_fn = compile_numba_function_src(
+        f"def fused_elemwise_fn({params}):\n    return _fused_elemwise_py({params})\n",
+        "fused_elemwise_fn",
+        {"_fused_elemwise_py": _fused_elemwise_py},
+    )
+
     if not has_reductions:
-
-        @overload(fused_elemwise_fn, jit_options=_jit_options)
-        def ov_fused_elemwise_fn(*outer_inputs):
-            def impl(*outer_inputs):
-                return _vectorized(
-                    core_op_fn,
-                    input_bc_patterns_enc,
-                    output_bc_patterns_enc,
-                    output_dtypes_enc,
-                    inplace_pattern_enc,
-                    True,  # allow_core_scalar
-                    (),  # constant_inputs
-                    outer_inputs,
-                    core_output_shapes,
-                    NO_SIZE,
-                    indexed_inputs_enc,
-                    indexed_outputs_enc,
-                    reduce_outputs_enc,
-                )
-
-            return impl
+        impl_src = f"""
+def fused_elemwise_impl({params}):
+    return _vectorized(core_op_fn, (), core_output_shapes, None, {params})
+"""
     else:
-        impl_src = _build_reduce_impl_src(nout, post_specs)
-        impl_fn = compile_numba_function_src(
-            impl_src,
-            "fused_elemwise_impl",
-            {
-                **globals(),
-                "core_op_fn": core_op_fn,
-                "input_bc_patterns_enc": input_bc_patterns_enc,
-                "output_bc_patterns_enc": output_bc_patterns_enc,
-                "output_dtypes_enc": output_dtypes_enc,
-                "inplace_pattern_enc": inplace_pattern_enc,
-                "core_output_shapes": core_output_shapes,
-                "indexed_inputs_enc": indexed_inputs_enc,
-                "indexed_outputs_enc": indexed_outputs_enc,
-                "reduce_outputs_enc": reduce_outputs_enc,
-            },
-        )
+        impl_src = _build_reduce_impl_src(params, nout, post_specs)
 
-        @overload(fused_elemwise_fn, jit_options=_jit_options)
-        def ov_fused_elemwise_fn(*outer_inputs):
-            return impl_fn
+    impl_fn = compile_numba_function_src(
+        impl_src,
+        "fused_elemwise_impl",
+        {
+            **globals(),
+            "_vectorized": vectorized_intr,
+            "core_op_fn": core_op_fn,
+            "core_output_shapes": core_output_shapes,
+        },
+    )
 
-    cache_version = 4
+    ov_fn = compile_numba_function_src(
+        f"def ov_fused_elemwise_fn({params}):\n    return impl_fn\n",
+        "ov_fused_elemwise_fn",
+        {"impl_fn": impl_fn},
+    )
+    overload(fused_elemwise_fn, jit_options=_jit_options)(ov_fn)
+
+    cache_version = 6
     if scalar_cache_key is None:
         key = None
     else:

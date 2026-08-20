@@ -1080,3 +1080,19 @@ class TestReductionPythonMode:
         np.testing.assert_allclose(
             perform_fn(xv, yv, idxv)[0], np.sum(xv[idxv] + yv, axis=1), rtol=1e-10
         )
+
+
+@pytest.mark.parametrize("n_terms", [35, 60])
+def test_wide_gathered_add(n_terms):
+    """>30-input fused kernels (sum of gathered tables) compile and match numpy."""
+    rng = np.random.default_rng(n_terms)
+    idx = pt.lvector("idx")
+    mats = [pt.matrix(f"m{i}") for i in range(n_terms)]
+    out = sum(m[idx] for m in mats)
+
+    fn = function([idx, *mats], out, mode=get_mode("NUMBA"))
+    idx_val = rng.integers(0, 8, 50)
+    vals = [rng.normal(size=(8, 20)) for _ in range(n_terms)]
+    np.testing.assert_allclose(
+        fn(idx_val, *vals), sum(v[idx_val] for v in vals), rtol=1e-12
+    )
