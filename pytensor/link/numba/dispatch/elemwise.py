@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from functools import singledispatch
+from functools import cache, singledispatch
 from hashlib import sha256
 from itertools import combinations
 
@@ -1086,6 +1086,7 @@ def _dimshuffle_out_layout(
     return "A"
 
 
+@cache
 def _make_strided_view(new_order: tuple[int, ...], unit_axes: frozenset[int]):
     """`as_strided`, but typed with the layout the shuffle provably preserves."""
 
