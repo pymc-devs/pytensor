@@ -215,6 +215,27 @@ def test_Join(vals, axis):
     )
 
 
+@pytest.mark.parametrize("n_terms, axis", [(35, 0), (35, 1), (35, -1)])
+def test_Join_wide(n_terms, axis):
+    """>30-input joins (e.g. gradient assembly) with ragged join-axis sizes."""
+    rng = np.random.default_rng(n_terms)
+    xs = [pt.matrix(f"x{i}") for i in range(n_terms)]
+    vals = [
+        rng.normal(size=(2, 1 + i % 3) if axis != 0 else (1 + i % 3, 2)).astype(
+            config.floatX
+        )
+        for i in range(n_terms)
+    ]
+    compare_numba_and_py(xs, pt.join(axis, *xs), vals)
+
+
+def test_MakeVector_wide():
+    rng = np.random.default_rng(0)
+    xs = [pt.scalar(f"x{i}") for i in range(64)]
+    vals = [v.astype(config.floatX) for v in rng.normal(size=64)]
+    compare_numba_and_py(xs, pt.stack(xs), vals)
+
+
 @pytest.mark.parametrize(
     "n_splits, axis, values, sizes",
     [

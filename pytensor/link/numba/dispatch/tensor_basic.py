@@ -218,14 +218,60 @@ def numba_funcify_ARange(op, **kwargs):
 
 
 @register_funcify_default_op_cache_key(Join)
-def numba_funcify_Join(op, **kwargs):
-    axis = op.axis
+def numba_funcify_Join(op, node, **kwargs):
+    # Generated with one named parameter and one slice-write per input:
+    # np.concatenate typed with an n-tuple lowers as O(n^2) LLVM IR
+    ndim = node.outputs[0].type.ndim
+    ax = op.axis % ndim
+    pre = ":, " * ax
+    post = ", :" * (ndim - ax - 1)
+    names = [f"x{i}" for i in range(len(node.inputs))]
 
-    @numba_basic.numba_njit
-    def join(*tensors):
-        return np.concatenate(tensors, axis)
+    shape = [f"x0.shape[{d}]" for d in range(ndim)]
+    shape[ax] = "total"
+    code: list[str | CODE_TOKEN] = [
+        f"def join({', '.join(names)}):",
+        CODE_TOKEN.INDENT,
+        f"total = x0.shape[{ax}]",
+        *(f"total += {name}.shape[{ax}]" for name in names[1:]),
+    ]
+    for name in names[1:]:
+        for d in range(ndim):
+            if d != ax:
+                code += [
+                    f"if {name}.shape[{d}] != x0.shape[{d}]:",
+                    CODE_TOKEN.INDENT,
+                    "raise ValueError(_mismatch_msg)",
+                    CODE_TOKEN.DEDENT,
+                ]
+    code += [
+        f"out = np.empty({create_tuple_string(shape)}, dtype)",
+        "off = 0",
+    ]
+    for name in names:
+        code += [
+            f"l = {name}.shape[{ax}]",
+            f"out[{pre}off:off + l{post}] = {name}",
+            "off += l",
+        ]
+    code += ["return out", CODE_TOKEN.DEDENT]
 
-    return join
+    join_fn = compile_numba_function_src(
+        build_source_code(code),
+        "join",
+        globals()
+        | {
+            "np": np,
+            "dtype": np.dtype(node.outputs[0].type.dtype),
+            "_mismatch_msg": "all the input array dimensions except for the "
+            "concatenation axis must match exactly",
+        },
+    )
+
+    cache_version = 3
+    # The explicit slice writes cannot go out of bounds: the output is
+    # allocated from the validated input shapes
+    return numba_basic.numba_njit(join_fn, boundscheck=False), cache_version
 
 
 @register_funcify_default_op_cache_key(Split)
