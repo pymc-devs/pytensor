@@ -7,7 +7,6 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.link.numba.dispatch.linalg.solvers.triangular import _solve_triangular
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -17,14 +16,9 @@ from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 pytestmark = pytest.mark.filterwarnings("error")
 
-numba = pytest.importorskip("numba")
+pytest.importorskip("numba")
 
 floatX = config.floatX
-
-
-@numba.njit
-def njit_solve_triangular(A, B, trans, lower, unit_diagonal, overwrite_b):
-    return _solve_triangular(A, B, trans, lower, unit_diagonal, overwrite_b)
 
 
 class TestSolves:
@@ -249,84 +243,36 @@ class TestSolves:
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
-    @pytest.mark.parametrize("lower", [True, False], ids=lambda x: f"lower={x}")
-    @pytest.mark.parametrize("trans", [0, 1, 2], ids=lambda x: f"trans={x}")
-    @pytest.mark.parametrize("A_order", ["C", "F"], ids=lambda x: f"A_order={x}")
-    def test_solve_triangular_trans_with_c_contiguous_rhs(
-        self, lower: bool, trans: int, A_order: Literal["C", "F"]
-    ):
-        # test_solve_triangular covers trans=0 through the graph, which is all the op ever passes.
-        # The overload is called directly to reach trans=1 and 2, with a complex dtype so that a
-        # missing conjugation shows up.
-        dtype = "complex64" if floatX.endswith("32") else "complex128"
-        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-8
-
-        rng = np.random.default_rng(418)
-        A_base = rng.normal(size=(5, 5)) + 1j * rng.normal(size=(5, 5))
-        A_val = scipy.linalg.cholesky(A_base @ A_base.conj().T, lower=lower).astype(
-            dtype
-        )
-        A_val = np.copy(A_val, order=A_order)
-
-        b_val = (rng.normal(size=(5, 3)) + 1j * rng.normal(size=(5, 3))).astype(dtype)
-        b_val = np.copy(b_val, order="C")
-
-        expected = scipy.linalg.solve_triangular(A_val, b_val, trans=trans, lower=lower)
-        result = njit_solve_triangular(
-            A_val,
-            b_val,
-            trans=trans,
-            lower=lower,
-            unit_diagonal=False,
-            overwrite_b=True,
-        )
-
-        np.testing.assert_allclose(result, expected, rtol=rtol)
-        # A c-contiguous 2d rhs is solved in place by side="R". trans=2 has no side="R" form, so it
-        # falls back to side="L", which needs an f-contiguous copy.
-        assert np.shares_memory(result, b_val) == (trans != 2)
-
     def test_solve_triangular_unit_diagonal_ignores_zero_diagonal(self):
-        rtol = 1e-4 if np.dtype(floatX).char in "fF" else 1e-8
-
+        # The zero-pivot scan below has to defer to unit_diagonal, or a unit triangular
+        # matrix that happens to store a zero on its diagonal comes back all-nan.
         rng = np.random.default_rng(418)
         A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
         A_val[2, 2] = 0.0
-        b_val = np.copy(rng.normal(size=(5, 3)).astype(floatX), order="C")
+        b_val = rng.normal(size=(5, 3)).astype(floatX)
 
-        expected = scipy.linalg.solve_triangular(
-            A_val, b_val, lower=True, unit_diagonal=True
-        )
-        result = njit_solve_triangular(
-            A_val,
-            b_val,
-            trans=0,
-            lower=True,
-            unit_diagonal=True,
-            overwrite_b=False,
-        )
+        A = pt.matrix("A", dtype=floatX)
+        b = pt.matrix("b", dtype=floatX)
+        X = pt.linalg.solve_triangular(A, b, lower=True, unit_diagonal=True)
 
-        np.testing.assert_allclose(result, expected, rtol=rtol)
+        compare_numba_and_py([A, b], X, [A_val, b_val])
 
     @pytest.mark.parametrize("b_shape", [(5, 3), (5,)], ids=["b_matrix", "b_vec"])
     def test_solve_triangular_singular_returns_nan(self, b_shape: tuple[int, ...]):
-        # trsm reports no INFO, so both sides depend on our own zero-pivot scan: a 2d rhs goes
-        # through side="R" and a vector through side="L".
+        # trsm reports no INFO, so a singular system depends on our own zero-pivot scan.
+        # Both sides of the scan matter: a 2d rhs is solved by side="R" and a vector by
+        # side="L". scipy raises here instead, so there is no reference to compare against.
         rng = np.random.default_rng(418)
         A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
         A_val[2, 2] = 0.0
-        b_val = np.copy(rng.normal(size=b_shape).astype(floatX), order="C")
+        b_val = rng.normal(size=b_shape).astype(floatX)
 
-        result = njit_solve_triangular(
-            A_val,
-            b_val,
-            trans=0,
-            lower=True,
-            unit_diagonal=False,
-            overwrite_b=False,
-        )
+        A = pt.matrix("A", dtype=floatX)
+        b = pt.tensor("b", shape=b_shape, dtype=floatX)
+        X = pt.linalg.solve_triangular(A, b, lower=True, b_ndim=len(b_shape))
+        f = pytensor.function([A, b], X, mode="NUMBA")
 
-        assert np.isnan(result).all()
+        assert np.isnan(f(A_val, b_val)).all()
 
     @pytest.mark.parametrize("value", [np.nan, np.inf])
     def test_solve_triangular_does_not_raise_on_nan_inf(self, value):

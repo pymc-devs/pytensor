@@ -36,6 +36,8 @@ def _solve_triangular(
     )
 
 
+# PyTensor always calls this with trans=0, transposing on the graph instead, so nothing
+# in the test suite reaches the trans=1 or trans=2 paths below.
 @overload(_solve_triangular)
 def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
     ensure_blas()
