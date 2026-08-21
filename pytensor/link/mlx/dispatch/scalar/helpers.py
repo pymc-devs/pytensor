@@ -60,3 +60,77 @@ def _working_precision(x):
         return mx.array(value, dtype=working_dtype)
 
     return x.astype(working_dtype), const, x.dtype
+
+
+# The floor a continued fraction puts under its own denominators. It has to be a normal
+# at float32 as well as float64, or it rounds to zero there and takes the guard with it
+_TINY = 1e-30
+
+# 0.25**25 sits below float64 epsilon, so the series is exact to working precision
+# everywhere it is selected
+_DEFICIT_SERIES_TERMS = 25
+_DEFICIT_MAX_Z = 0.25
+
+
+def _metal_constants(**arrays):
+    """Render Python float tuples as Metal ``constant`` arrays, one per keyword."""
+    return "\n".join(
+        f"constant float {name}[{len(values)}] = {{"
+        + ", ".join(f"{v!r}f" for v in values)
+        + "};"
+        for name, values in arrays.items()
+    )
+
+
+def _log1p_deficit(z, one_plus_z, const):
+    r"""``2 (z - \log(1 + z))``, without either cancellation it carries.
+
+    The subtraction cancels as :math:`z \to 0`, which the Maclaurin series covers, and
+    :math:`1 + z` cancels as :math:`z \to -1`, which the caller covers by passing the
+    ratio it already holds exactly.
+
+    Parameters
+    ----------
+    z : mx.array
+        Argument, at the working precision.
+    one_plus_z : mx.array
+        ``1 + z``, formed without cancellation. Values at or below zero return ``inf``.
+    const : callable
+        Materializes a Python float at the working precision.
+
+    Returns
+    -------
+    mx.array
+        ``2 * (z - log(1 + z))``, non-negative over the whole domain.
+    """
+    series = const(0.0)
+    for k in reversed(range(_DEFICIT_SERIES_TERMS)):
+        series = series * (-z) + const(2.0 / (k + 2.0))
+    return mx.where(
+        mx.abs(z) <= const(_DEFICIT_MAX_Z),
+        z * z * series,
+        const(2.0) * (z - mx.log(one_plus_z)),
+    )
+
+
+# The Metal twin of _log1p_deficit, generated from the same constants so that the two
+# cannot drift: a kernel that computes eta by a different formula from the vectorized
+# path it is checked against is a kernel whose agreement test proves nothing.
+_METAL_DEFICIT = (
+    _metal_constants(
+        DEFICIT_C=tuple(2.0 / (k + 2.0) for k in range(_DEFICIT_SERIES_TERMS))
+    )
+    + f"""
+#define DEFICIT_TERMS {_DEFICIT_SERIES_TERMS}
+#define DEFICIT_MAX_Z {_DEFICIT_MAX_Z}f
+
+static inline float log1p_deficit(float z, float one_plus_z) {{
+    if (fabs(z) <= DEFICIT_MAX_Z) {{
+        float series = 0.0f;
+        for (int k = DEFICIT_TERMS - 1; k >= 0; --k) series = series * (-z) + DEFICIT_C[k];
+        return z * z * series;
+    }}
+    return 2.0f * (z - log(one_plus_z));
+}}
+"""
+)
