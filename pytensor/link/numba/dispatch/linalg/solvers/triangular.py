@@ -58,6 +58,12 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
         _N = np.int32(A.shape[-1])
         _solve_check_input_shapes(A, B)
 
+        # trsm reports no INFO, so a zero pivot has to be caught before the call. A is
+        # scanned as given, ahead of any copy: the diagonal does not depend on layout,
+        # and a singular system should not pay to be reordered first.
+        if not unit_diagonal and _has_zero_on_diagonal(A):
+            return np.full_like(B, np.nan)
+
         if A.flags.f_contiguous or (A.flags.c_contiguous and trans in (0, 1)):
             A_f = A
             if A.flags.c_contiguous:
@@ -67,10 +73,6 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
                 trans = 1 - trans
         else:
             A_f = np.asfortranarray(A)
-
-        if not unit_diagonal and _has_zero_on_diagonal(A_f):
-            # trsm reports no INFO, so a zero pivot has to be caught before the call
-            return np.full_like(B, np.nan)
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         DIAG = val_to_int_ptr(ord("U") if unit_diagonal else ord("N"))
