@@ -15,6 +15,7 @@ from tests.link.mlx.test_basic import compare_mlx_and_py
 mlx = pytest.importorskip("mlx.core")
 from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.beta import (
+    _C0_MIN_ETA,
     _TEMME_MAX_ETA,
     _TEMME_MIN_A,
     _TEMME_MIN_P,
@@ -307,6 +308,40 @@ def test_betainc_temme_boundary():
         _direct(a_test_value, b_test_value, x_test_value, mlx.float64),
         scipy.special.betainc(a_test_value, b_test_value, x_test_value),
         rtol=1e-8,
+    )
+
+
+def test_betainc_c0_threshold():
+    # Inside the Temme branch the leading coefficient switches form at
+    # |eta| = _C0_MIN_ETA: the closed form above it, the tabulated series below, where
+    # the closed form is the cancelling difference the series expands. The two have to
+    # meet without a step, and the three seams test_betainc_temme_boundary walks are all
+    # between expansions rather than inside one, so nothing else looks here.
+    #
+    # float64 only. The coefficient reaches the answer through a correction of order
+    # 1 / sqrt(mu), and Temme needs mu of 1e4 or more, so it is a few parts in a thousand
+    # of the result -- float32 cannot resolve a wrong coefficient at all, while this
+    # catches a drift of 1e-7. The float32 seam is covered only as far as
+    # test_betainc_float32_precision's temme row reaches.
+    cutoff = _C0_MIN_ETA[mlx.float64]
+    shapes, others, values = [], [], []
+    for p, mu in ((0.5, 4e4), (0.2, 1e5), (0.05, 4e5)):
+        # eta -> (x - p) / sqrt(p q) as x approaches the mode, which is accurate well
+        # inside the margins below, so x is placed without inverting eta numerically
+        width = np.sqrt(p * (1.0 - p))
+        for multiple in (0.2, 0.5, 0.8, 1.25, 2.0, 5.0):
+            shapes.append(p * mu)
+            others.append((1.0 - p) * mu)
+            values.append(p + cutoff * multiple * width)
+    a_test_value, b_test_value, x_test_value = (
+        np.array(v) for v in (shapes, others, values)
+    )
+
+    got = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
+    np.testing.assert_allclose(
+        got,
+        scipy.special.betainc(a_test_value, b_test_value, x_test_value),
+        rtol=1e-10,
     )
 
 
