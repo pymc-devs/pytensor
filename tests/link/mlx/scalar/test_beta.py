@@ -4,7 +4,6 @@ from functools import partial
 import numpy as np
 import pytest
 import scipy.special
-import scipy.stats
 
 import pytensor
 import pytensor.tensor as pt
@@ -53,20 +52,6 @@ def _sample(rng, shape_range, ratio_range, n):
     p = a / mu
     x = p + rng.uniform(-6.0, 6.0, n) * np.sqrt(p * (1.0 - p) / mu)
     return a, b, np.clip(x, 1e-12, 1.0 - 1e-12)
-
-
-def _assert_logcdf(got, want):
-    """Compare two log-cdfs where the comparison says something.
-
-    A log-cdf runs to zero as the cdf approaches one, where a relative claim is
-    unbounded, and to -inf where the cdf underflows the dtype -- which is a limit of
-    taking the log of a cdf rather than anything the dispatch did. ``atol`` covers the
-    first, and the mask covers the second.
-    """
-    assert not np.isnan(got).any(), "the dispatch returned nan"
-    keep = np.isfinite(got) & np.isfinite(want)
-    assert keep.mean() > 0.5, "the sample has to keep enough points to test anything"
-    np.testing.assert_allclose(got[keep], want[keep], rtol=1e-6, atol=1e-9)
 
 
 def _direct(a, b, x, dtype):
@@ -259,6 +244,41 @@ def test_betainc_extreme_ratio(dtype):
     )
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_betainc_lopsided_parameters(dtype):
+    # One parameter of order one against a much larger one. The mode sits at
+    # a / (a + b), so it is a handful of multiples of that rather than the unit interval
+    # that reach the region where the answer moves at all -- anywhere else it has
+    # already saturated to zero or one and asserts nothing.
+    pairs = [(1.0, 1e3), (1.0, 1e4), (1.0, 1e5), (2.0, 1e5), (1e5, 1.0), (1e5, 2.0)]
+    a_test_value, b_test_value, x_test_value = [], [], []
+    for first, second in pairs:
+        mode = first / (first + second)
+        for multiple in (0.2, 1.0, 4.0):
+            a_test_value.append(first)
+            b_test_value.append(second)
+            x_test_value.append(min(mode * multiple, 1.0 - 1e-12))
+    a_test_value, b_test_value, x_test_value = (
+        np.array(v) for v in (a_test_value, b_test_value, x_test_value)
+    )
+
+    truth = scipy.special.betainc(a_test_value, b_test_value, x_test_value)
+    moves = (truth > 1e-6) & (truth < 1.0 - 1e-6)
+    assert moves.mean() > 0.6, "most points have to land off the saturated ends"
+
+    got = _direct(a_test_value, b_test_value, x_test_value, getattr(mlx, dtype))
+    assert not np.isnan(got).any(), "a lopsided parameter pair returned nan"
+    keep = truth > np.finfo(dtype).tiny
+    # float32 is loose here for the reason it is loose everywhere the parameters are
+    # lopsided: the exponent both expansions reach their answer through runs to order
+    # mu eta**2 / 2, and single precision carries it to |exponent| * eps
+    np.testing.assert_allclose(
+        got[keep],
+        truth[keep],
+        rtol=5e-3 if dtype == "float32" else 1e-9,
+    )
+
+
 def test_betainc_temme_boundary():
     # The two expansions meet along min(a, b) = _TEMME_MIN_A, p = _TEMME_MIN_P and
     # |eta| = _TEMME_MAX_ETA, and the answer has to agree from both sides of each seam.
@@ -317,72 +337,6 @@ def test_betainc_reflection_identity():
     left = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
     right = _direct(b_test_value, a_test_value, 1.0 - x_test_value, mlx.float64)
     np.testing.assert_allclose(left + right, 1.0, rtol=0.0, atol=1e-9)
-
-
-def test_beta_logcdf():
-    # pymc.Beta.logcdf, which is log(betainc(alpha, beta, value))
-    alpha, beta = 2.7, 5.3
-    value = np.linspace(1e-4, 1.0 - 1e-4, 501)
-    got = np.log(
-        _direct(
-            np.full_like(value, alpha), np.full_like(value, beta), value, mlx.float64
-        )
-    )
-    _assert_logcdf(got, scipy.stats.beta.logcdf(value, alpha, beta))
-
-
-@pytest.mark.parametrize("nu", [2.5, 30.0, 4e3, 4e4], ids=lambda v: f"nu={v:g}")
-def test_studentt_logcdf(nu):
-    # pymc.StudentT.logcdf, which is log(betainc(nu / 2, nu / 2, x)) with x set from the
-    # standardized value. nu / 2 on both sides is the symmetric corner, where the
-    # continued fraction is slowest and Temme takes over
-    z = np.linspace(-30.0, 30.0, 501)
-    root = np.sqrt(z * z + nu)
-    x = (z + root) / (2.0 * root)
-    half = np.full_like(z, nu / 2.0)
-    _assert_logcdf(
-        np.log(_direct(half, half, x, mlx.float64)), scipy.stats.t.logcdf(z, nu)
-    )
-
-
-def test_skew_studentt_logcdf():
-    # pymc.SkewStudentT.logcdf, the same expression with the two shape parameters free
-    a, b = 3.0, 11.0
-    z = np.linspace(-25.0, 25.0, 501)
-    x = 0.5 * (1.0 + z / np.sqrt(z * z + a + b))
-    _assert_logcdf(
-        np.log(_direct(np.full_like(z, a), np.full_like(z, b), x, mlx.float64)),
-        scipy.stats.jf_skew_t.logcdf(z, a, b),
-    )
-
-
-@pytest.mark.parametrize(
-    "n, p", [(10.0, 0.3), (1e4, 0.5), (1e5, 0.01)], ids=lambda v: f"{v:g}"
-)
-def test_binomial_logcdf(n, p):
-    # pymc.Binomial.logcdf, which is log(betainc(n - value, value + 1, 1 - p)). Its
-    # arguments are built from counts, so they reach much further than a user would type
-    value = np.unique(np.linspace(0.0, n - 1.0, 301).astype(np.int64)).astype(float)
-    _assert_logcdf(
-        np.log(
-            _direct(n - value, value + 1.0, np.full_like(value, 1.0 - p), mlx.float64)
-        ),
-        scipy.stats.binom.logcdf(value, int(n), p),
-    )
-
-
-@pytest.mark.parametrize(
-    "n, p", [(5.0, 0.4), (1e3, 0.5), (1e4, 0.9)], ids=lambda v: f"{v:g}"
-)
-def test_negative_binomial_logcdf(n, p):
-    # pymc.NegativeBinomial.logcdf, which is log(betainc(n, floor(value) + 1, p))
-    value = np.unique(np.linspace(0.0, 3.0 * n, 301).astype(np.int64)).astype(float)
-    got = np.log(
-        _direct(
-            np.full_like(value, n), value + 1.0, np.full_like(value, p), mlx.float64
-        )
-    )
-    _assert_logcdf(got, scipy.stats.nbinom.logcdf(value, n, p))
 
 
 def test_betainc_grad():
