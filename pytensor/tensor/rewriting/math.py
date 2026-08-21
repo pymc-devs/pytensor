@@ -2,7 +2,7 @@ r"""Rewrites for the `Op`\s in :mod:`pytensor.tensor.math`."""
 
 import itertools
 from collections import defaultdict
-from functools import partial, reduce
+from functools import reduce
 
 import numpy as np
 
@@ -3003,9 +3003,6 @@ def local_greedy_distributor(fgraph, node):
     return [rval]
 
 
-get_clients_at_depth1 = partial(get_clients_at_depth, depth=1)
-get_clients_at_depth2 = partial(get_clients_at_depth, depth=2)
-
 # 1+erf(x)=>erfc(-x)
 local_one_plus_erf = PatternNodeRewriter(
     (add, 1, (erf, "x")),
@@ -3013,7 +3010,6 @@ local_one_plus_erf = PatternNodeRewriter(
     allow_multiple_clients=True,
     name="local_one_plus_erf",
     tracks=[erf],
-    get_nodes=get_clients_at_depth1,
 )
 register_canonicalize(local_one_plus_erf)
 register_stabilize(local_one_plus_erf)
@@ -3026,7 +3022,6 @@ local_one_minus_erf = PatternNodeRewriter(
     allow_multiple_clients=True,
     name="local_one_minus_erf",
     tracks=[erf],
-    get_nodes=get_clients_at_depth1,
 )
 register_canonicalize(local_one_minus_erf)
 register_stabilize(local_one_minus_erf)
@@ -3041,7 +3036,6 @@ local_erf_minus_one = PatternNodeRewriter(
     allow_multiple_clients=True,
     name="local_erf_minus_one",
     tracks=[erf],
-    get_nodes=get_clients_at_depth1,
 )
 register_canonicalize(local_erf_minus_one)
 register_stabilize(local_erf_minus_one)
@@ -3054,7 +3048,6 @@ local_one_minus_erfc = PatternNodeRewriter(
     allow_multiple_clients=True,
     name="local_one_minus_erfc",
     tracks=[erfc],
-    get_nodes=get_clients_at_depth1,
 )
 register_canonicalize(local_one_minus_erfc)
 register_stabilize(local_one_minus_erfc)
@@ -3067,7 +3060,6 @@ local_erf_neg_minus_one = PatternNodeRewriter(
     allow_multiple_clients=True,
     name="local_erf_neg_minus_one",
     tracks=[erfc],
-    get_nodes=get_clients_at_depth1,
 )
 register_canonicalize(local_erf_neg_minus_one)
 register_stabilize(local_erf_neg_minus_one)
@@ -3320,51 +3312,31 @@ def isclose(x, ref, rtol=0, atol=0, num_ulps=10):
     return np.allclose(x, ref, rtol=rtol, atol=atol)
 
 
-def _is_1(expr):
-    """
-
-    Returns
-    -------
-    bool
-        True iff expr is a constant close to 1.
-
-    """
-    try:
-        v = get_underlying_scalar_constant_value(expr)
-        return isclose(v, 1)
-    except NotScalarConstantError:
-        return False
-
-
 logsigm_to_softplus = PatternNodeRewriter(
     (log, (sigmoid, "x")),
     (neg, (softplus, (neg, "x"))),
     allow_multiple_clients=True,
     values_eq_approx=values_eq_approx_remove_inf,
     tracks=[sigmoid],
-    get_nodes=get_clients_at_depth1,
 )
+# log(1 - sigmoid(x)) / log1p(-sigmoid(x)) -> -softplus(x), covering both the
+# as-written spellings and the canonicalized ones (neg -> mul(-1), sub -> add)
 log1msigm_to_softplus = PatternNodeRewriter(
-    (log, (sub, dict(pattern="y", constraint=_is_1), (sigmoid, "x"))),
+    [
+        (log, (sub, 1, (sigmoid, "x"))),
+        (log, (add, 1, (mul, -1, (sigmoid, "x")))),
+        (log1p, (neg, (sigmoid, "x"))),
+        (log1p, (mul, -1, (sigmoid, "x"))),
+    ],
     (neg, (softplus, "x")),
     allow_multiple_clients=True,
     values_eq_approx=values_eq_approx_remove_inf,
     tracks=[sigmoid],
-    get_nodes=get_clients_at_depth2,
-)
-log1p_neg_sigmoid = PatternNodeRewriter(
-    (log1p, (neg, (sigmoid, "x"))),
-    (neg, (softplus, "x")),
-    values_eq_approx=values_eq_approx_remove_inf,
-    allow_multiple_clients=True,
-    tracks=[sigmoid],
-    get_nodes=get_clients_at_depth2,
 )
 
 register_stabilize(logsigm_to_softplus, name="logsigm_to_softplus")
 register_stabilize(log1msigm_to_softplus, name="log1msigm_to_softplus")
-register_stabilize(log1p_neg_sigmoid, name="log1p_neg_sigmoid")
-register_specialize(log1p_neg_sigmoid, name="log1p_neg_sigmoid")
+register_specialize(log1msigm_to_softplus, name="log1msigm_to_softplus")
 
 
 def is_1pexp(t, only_process_constants=True):
@@ -3901,10 +3873,12 @@ def local_reciprocal_1_plus_exp(fgraph, node):
 
 # 1 - sigmoid(x) -> sigmoid(-x)
 local_1msigmoid = PatternNodeRewriter(
-    (sub, dict(pattern="y", constraint=_is_1), (sigmoid, "x")),
+    [
+        (sub, 1, (sigmoid, "x")),
+        (add, 1, (mul, -1, (sigmoid, "x"))),
+    ],
     (sigmoid, (neg, "x")),
     tracks=[sigmoid],
-    get_nodes=get_clients_at_depth1,
     name="local_1msigmoid",
 )
 register_stabilize(local_1msigmoid)
@@ -3974,10 +3948,14 @@ register_specialize(local_sigmoid_logit)
 # Composed with log(exp(x)) -> x this also covers logit(sigmoid(x)) -> x, so no
 # separate rewrite is needed for the logged form.
 local_odds_sigmoid = PatternNodeRewriter(
-    (true_div, (sigmoid, "x"), (sub, 1, (sigmoid, "x"))),
+    [
+        (true_div, (sigmoid, "x"), (sub, 1, (sigmoid, "x"))),
+        (true_div, (sigmoid, "x"), (add, 1, (mul, -1, (sigmoid, "x")))),
+        (true_div, (sigmoid, "x"), (sigmoid, (neg, "x"))),
+        (true_div, (sigmoid, "x"), (sigmoid, (mul, -1, "x"))),
+    ],
     (exp, "x"),
     tracks=[sigmoid],
-    get_nodes=get_clients_at_depth1,
     allow_multiple_clients=True,
     name="local_odds_sigmoid",
 )
@@ -3987,10 +3965,14 @@ register_specialize(local_odds_sigmoid)
 
 # (1 - sigmoid(x)) / sigmoid(x) -> exp(-x)
 local_inv_odds_sigmoid = PatternNodeRewriter(
-    (true_div, (sub, 1, (sigmoid, "x")), (sigmoid, "x")),
+    [
+        (true_div, (sub, 1, (sigmoid, "x")), (sigmoid, "x")),
+        (true_div, (add, 1, (mul, -1, (sigmoid, "x"))), (sigmoid, "x")),
+        (true_div, (sigmoid, (neg, "x")), (sigmoid, "x")),
+        (true_div, (sigmoid, (mul, -1, "x")), (sigmoid, "x")),
+    ],
     (exp, (neg, "x")),
     tracks=[sigmoid],
-    get_nodes=get_clients_at_depth1,
     allow_multiple_clients=True,
     name="local_inv_odds_sigmoid",
 )
@@ -4036,7 +4018,6 @@ local_log_kv = PatternNodeRewriter(
     name="local_log_kv",
     # Start the rewrite from the less likely kve node
     tracks=[kve],
-    get_nodes=get_clients_at_depth2,
 )
 
 register_stabilize(local_log_kv)
@@ -4050,7 +4031,6 @@ local_log_iv = PatternNodeRewriter(
     name="local_log_iv",
     # Start the rewrite from the less likely ive node
     tracks=[ive],
-    get_nodes=get_clients_at_depth2,
 )
 
 register_stabilize(local_log_iv)
