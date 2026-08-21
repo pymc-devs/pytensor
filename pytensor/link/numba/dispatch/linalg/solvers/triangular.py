@@ -51,6 +51,7 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
     _check_dtypes_match((A, B), func_name="solve_triangular")
     dtype = A.dtype
     numba_trsm = _BLAS().numba_xtrsm(dtype)
+    ALPHA = np.ones(1, dtype=np.dtype(dtype.name))
     B_is_1d = B.ndim == 1
 
     def impl(A, B, trans, lower, unit_diagonal, overwrite_b):
@@ -71,7 +72,6 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
             # trsm reports no INFO, so a zero pivot has to be caught before the call
             return np.full_like(B, np.nan)
 
-        ALPHA = np.ones(1, dtype=dtype)
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         DIAG = val_to_int_ptr(ord("U") if unit_diagonal else ord("N"))
         LDA = val_to_int_ptr(_N)
