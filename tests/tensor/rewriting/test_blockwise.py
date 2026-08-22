@@ -9,6 +9,8 @@ from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
 from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
+from pytensor.tensor.basic import AllocEmpty
+from pytensor.tensor.blas import Gemv
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.inverse import MatrixPinv
@@ -186,3 +188,38 @@ def test_blockwise_reshape():
         new_y.eval({"x": test_x}, mode=no_rewrites),
         rewritten_y.eval({"x": test_x}, mode=no_rewrites),
     )
+
+
+def test_split_alloc_empty_clients_enables_inplace():
+    """Two destructive clients of one `AllocEmpty` each get a buffer they can destroy."""
+    x = matrix("x")
+    y = tensor("y", shape=(None,))
+    z = tensor("z", shape=(None,))
+
+    f = function([x, y, z], [y @ x, z @ x], mode="cvm")
+    nodes = f.maker.fgraph.apply_nodes
+    gemvs = [n.op for n in nodes if isinstance(n.op, Gemv)]
+    assert len(gemvs) == 2
+    assert all(op.inplace for op in gemvs), gemvs
+    # One buffer per destroyer, rather than one shared between them.
+    assert len([n for n in nodes if isinstance(n.op, AllocEmpty)]) == 2
+
+    rng = np.random.default_rng(sum(map(ord, "split_alloc_empty")))
+    x_val = rng.normal(size=(3, 3))
+    y_val = rng.normal(size=(3,))
+    z_val = rng.normal(size=(3,))
+    out_y, out_z = f(x_val, y_val, z_val)
+    np.testing.assert_allclose(out_y, y_val @ x_val)
+    np.testing.assert_allclose(out_z, z_val @ x_val)
+
+
+def test_split_alloc_empty_clients_leaves_readers_alone():
+    """An `AllocEmpty` shared by clients that cannot destroy it stays a single buffer."""
+    shape = iscalar("shape")
+    buffer = AllocEmpty(config.floatX)(shape)
+    out = add(buffer * 2, buffer * 3)
+
+    fg = FunctionGraph([shape], [out])
+    rewrite_graph(fg, include=("fast_run", "inplace"))
+    allocs = [n for n in fg.apply_nodes if isinstance(n.op, AllocEmpty)]
+    assert len(allocs) == 1, allocs
