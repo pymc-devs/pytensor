@@ -35,7 +35,7 @@ from pytensor.tensor.blas import (
     gemv_inplace,
     gemv_no_inplace,
     ger,
-    ger_destructive,
+    ger_inplace,
 )
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, dot, mean, mul, outer, sigmoid
@@ -1719,10 +1719,10 @@ class TestGerMakeNode:
 
 class TestGerOpContract(unittest_tools.OpContractTestMixin):
     def setup_method(self):
-        self.ops = [ger, ger_destructive]
+        self.ops = [ger, ger_inplace]
 
     def clone(self, op):
-        return Ger(op.destructive)
+        return Ger(op.inplace)
 
 
 class TestGer(unittest_tools.OptimizationTestMixin):
@@ -1736,7 +1736,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         self.x = tensor(dtype=dtype, shape=(None,))
         self.y = tensor(dtype=dtype, shape=(None,))
         self.ger = ger
-        self.ger_destructive = ger_destructive
+        self.ger_inplace = ger_inplace
         self.gemm = gemm_no_inplace
 
     def function(self, inputs, outputs, updates=None):
@@ -1802,7 +1802,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
     def test_outer(self):
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         f = self.function([self.x, self.y], outer(self.x, self.y))
-        self.assertFunctionContains(f, self.ger_destructive)
+        self.assertFunctionContains(f, self.ger_inplace)
         f(
             rng.random(5).astype(self.dtype),
             rng.random(4).astype(self.dtype),
@@ -1861,7 +1861,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
             rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
 
-    def given_dtype(self, dtype, M, N, *, destructive=True):
+    def given_dtype(self, dtype, M, N, *, inplace=True):
         # test corner case shape and dtype
         rng = np.random.default_rng(unittest_tools.fetch_seed())
 
@@ -1870,9 +1870,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         y = tensor(dtype=dtype, shape=(None,))
 
         f = self.function([A, x, y], A + 0.1 * outer(x, y))
-        self.assertFunctionContains(
-            f, self.ger_destructive if destructive else self.ger
-        )
+        self.assertFunctionContains(f, self.ger_inplace if inplace else self.ger)
         f(
             rng.random((M, N)).astype(dtype),
             rng.random(M).astype(dtype),
@@ -1885,28 +1883,28 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         ).shape == (5, 4)
 
     def test_f32_0_0(self):
-        return self.given_dtype("float32", 0, 0, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 0, 0, inplace=config.floatX != "float32")
 
     def test_f32_1_0(self):
-        return self.given_dtype("float32", 1, 0, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 1, 0, inplace=config.floatX != "float32")
 
     def test_f32_0_1(self):
-        return self.given_dtype("float32", 0, 1, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 0, 1, inplace=config.floatX != "float32")
 
     def test_f32_1_1(self):
-        return self.given_dtype("float32", 1, 1, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 1, 1, inplace=config.floatX != "float32")
 
     def test_f32_4_4(self):
-        return self.given_dtype("float32", 4, 4, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 4, 4, inplace=config.floatX != "float32")
 
     def test_f32_7_1(self):
-        return self.given_dtype("float32", 7, 1, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 7, 1, inplace=config.floatX != "float32")
 
     def test_f32_1_2(self):
-        return self.given_dtype("float32", 1, 2, destructive=config.floatX != "float32")
+        return self.given_dtype("float32", 1, 2, inplace=config.floatX != "float32")
 
     def test_f64_4_5(self):
-        return self.given_dtype("float64", 4, 5, destructive=False)
+        return self.given_dtype("float64", 4, 5, inplace=False)
 
     def test_c64_7_1(self):
         return self.given_dtype("complex64", 7, 1)
@@ -1924,7 +1922,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
                 (A, A + pt.constant(0.1, dtype=self.dtype) * outer(self.x, self.y))
             ],
         )
-        self.assertFunctionContains(f, self.ger_destructive)
+        self.assertFunctionContains(f, self.ger_inplace)
         # TODO: Test something about the updated value of `A`
         f(
             rng.random(4).astype(self.dtype),
