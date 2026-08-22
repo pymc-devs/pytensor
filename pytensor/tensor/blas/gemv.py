@@ -1,8 +1,3 @@
-"""BLAS GEMV operation: matrix-vector multiply with accumulation.
-
-Computes: beta * y + alpha * dot(A, x)
-"""
-
 import numpy as np
 
 from pytensor.graph.basic import Apply
@@ -14,22 +9,30 @@ from pytensor.tensor.type import DenseTensorType
 
 
 class Gemv(Op):
-    """
-    expression is beta * y + alpha * A x
+    r"""Matrix-vector product with accumulation.
 
-    A is matrix
-    x, y are vectors
-    alpha, beta are scalars
-    output is a vector that can be inplace on y
+    .. math::
 
+        y \leftarrow \beta y + \alpha A x
+
+    for matrix :math:`A`, vectors :math:`x` and :math:`y` and scalars :math:`\alpha` and
+    :math:`\beta`. Constructed with ``inplace=True``, the output aliases ``y``'s storage
+    and the op destroys it; otherwise ``y`` is left untouched.
     """
 
     __props__ = ("inplace",)
+    gufunc_signature = "(m),(),(m,n),(n),()->(m)"
 
     def __init__(self, inplace):
         self.inplace = inplace
         if inplace:
             self.destroy_map = {0: [0]}
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> Op:
+        """``Gemv`` accumulates into ``y``, so that is the only input it can destroy."""
+        if 0 in allowed_inplace_inputs:
+            return type(self)(inplace=True)
+        return self
 
     def __str__(self):
         if self.inplace:
