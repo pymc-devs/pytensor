@@ -22,6 +22,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.link.numba.dispatch.linalg.products import _gemm
 from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
@@ -1256,6 +1257,11 @@ def numba_funcify_Argmax(op, node, **kwargs):
     return argmax, cache_version
 
 
+_GEMM_DTYPES = frozenset(
+    np.dtype(name) for name in ("float32", "float64", "complex64", "complex128")
+)
+
+
 @register_funcify_default_op_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
     # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
@@ -1280,7 +1286,55 @@ def numba_funcify_Dot(op, node, **kwargs):
             f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
         )
 
-    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
+    cast_x = x_dtype != numba_dot_dtype
+    cast_y = y_dtype != numba_dot_dtype
+
+    if numba_dot_dtype in _GEMM_DTYPES:
+        # `gemm` reads each operand's memory order as a transpose flag, so an
+        # operand that reaches here transposed costs nothing, where `np.dot` would
+        # have to be handed a contiguous copy of it.
+        if not cast_x and not cast_y:
+
+            @numba_basic.numba_njit
+            def dot(x, y, out=None):
+                if out is None:
+                    out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+                return _gemm(x, y, out, False, False, 1.0, 0.0)
+
+        elif cast_x and not cast_y:
+
+            @numba_basic.numba_njit
+            def dot(x, y, out=None):
+                if out is None:
+                    out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+                return _gemm(x.astype(numba_dot_dtype), y, out, False, False, 1.0, 0.0)
+
+        elif not cast_x and cast_y:
+
+            @numba_basic.numba_njit
+            def dot(x, y, out=None):
+                if out is None:
+                    out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+                return _gemm(x, y.astype(numba_dot_dtype), out, False, False, 1.0, 0.0)
+
+        else:
+
+            @numba_basic.numba_njit
+            def dot(x, y, out=None):
+                if out is None:
+                    out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+                return _gemm(
+                    x.astype(numba_dot_dtype),
+                    y.astype(numba_dot_dtype),
+                    out,
+                    False,
+                    False,
+                    1.0,
+                    0.0,
+                )
+
+    elif not cast_x and not cast_y:
+        # A dtype BLAS has no kind for, float16 being the one that reaches here.
 
         @numba_basic.numba_njit
         def dot(x, y, out=None):
@@ -1289,22 +1343,22 @@ def numba_funcify_Dot(op, node, **kwargs):
             np.dot(x, y, out)
             return out
 
-    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
-            np.dot(x, y.astype(numba_dot_dtype), out)
-            return out
-
-    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
+    elif cast_x and not cast_y:
 
         @numba_basic.numba_njit
         def dot(x, y, out=None):
             if out is None:
                 return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
             np.dot(x.astype(numba_dot_dtype), y, out)
+            return out
+
+    elif not cast_x and cast_y:
+
+        @numba_basic.numba_njit
+        def dot(x, y, out=None):
+            if out is None:
+                return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
+            np.dot(x, y.astype(numba_dot_dtype), out)
             return out
 
     else:
@@ -1318,15 +1372,17 @@ def numba_funcify_Dot(op, node, **kwargs):
             np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype), out)
             return out
 
-    cache_version = 2
+    # Bump whenever `_gemm` changes: it is inlined here, so its source is not
+    # part of this key.
+    cache_version = 6
 
     if out_dtype == numba_dot_dtype:
-        # np.dot can write straight into the pre-allocated batch output slice.
+        # The product can be written straight into the pre-allocated batch output slice.
         dot.handles_out = True
         return dot, cache_version
 
     else:
-        # Output needs a dtype cast np.dot can't do in place, so fall back to
+        # Output needs a dtype cast the product can't do in place, so fall back to
         # the copying store_core_outputs wrapper.
         @numba_basic.numba_njit
         def dot_with_cast(x, y):
@@ -1338,18 +1394,34 @@ def numba_funcify_Dot(op, node, **kwargs):
 @register_funcify_default_op_cache_key(BatchedDot)
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
+    x, y = node.inputs
 
-    @numba_basic.numba_njit
-    def batched_dot(x, y, out=None):
-        # Numba does not support 3D matmul
-        # https://github.com/numba/numba/issues/3804
-        if out is None:
-            shape = x.shape[:-1] + y.shape[2:]
-            out = np.empty(shape, dtype=dtype)
-        for i in range(out.shape[0]):
-            out[i] = np.dot(x[i], y[i])
+    # Numba does not support 3D matmul (numba#3804), so either path loops over the batch.
+    if x.type.numpy_dtype == y.type.numpy_dtype == dtype and dtype in _GEMM_DTYPES:
 
-        return out
+        @numba_basic.numba_njit
+        def batched_dot(x, y, out=None):
+            if out is None:
+                shape = x.shape[:-1] + y.shape[2:]
+                out = np.empty(shape, dtype=dtype)
+            for i in range(out.shape[0]):
+                # Each slice keeps whatever layout its batch carries, and gemm reads that as a
+                # transpose flag rather than copying the slice to satisfy `np.dot`.
+                _gemm(x[i], y[i], out[i], False, False, 1.0, 0.0)
+
+            return out
+
+    else:
+
+        @numba_basic.numba_njit
+        def batched_dot(x, y, out=None):
+            if out is None:
+                shape = x.shape[:-1] + y.shape[2:]
+                out = np.empty(shape, dtype=dtype)
+            for i in range(out.shape[0]):
+                out[i] = np.dot(x[i], y[i])
+
+            return out
 
     batched_dot.handles_out = True
-    return batched_dot, 1
+    return batched_dot, 2
