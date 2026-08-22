@@ -4,7 +4,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config
-from pytensor.tensor.blas import Gemm, Gemv
+from pytensor.tensor.blas import Gemm, Gemv, Ger
 
 
 pytestmark = pytest.mark.filterwarnings("error")
@@ -126,3 +126,91 @@ def test_gemv_inplace_writes_through_its_accumulator():
     )
     np.testing.assert_allclose(fn(2.0, A_np, x_np, 0.5), expected, rtol=1e-5)
     np.testing.assert_allclose(y.get_value(), expected, rtol=1e-5)
+
+
+@pytest.mark.parametrize("A_shape", [(6, 5), (1, 5)], ids=["full", "broadcast_row"])
+def test_ger_broadcasts_its_accumulator(A_shape):
+    """``Ger`` takes an ``A`` that is only broadcast against the outer product, so the buffer the
+    update writes into is the product's shape, not ``A``'s."""
+    A = pt.tensor("A", shape=A_shape, dtype=floatX)
+    x = pt.tensor("x", shape=(6,), dtype=floatX)
+    y = pt.tensor("y", shape=(5,), dtype=floatX)
+    alpha = pt.scalar("alpha", dtype=floatX)
+
+    rng = np.random.default_rng(sum(map(ord, f"ger_broadcasts {A_shape}")))
+    A_np = rng.normal(size=A_shape).astype(floatX)
+    x_np = rng.normal(size=6).astype(floatX)
+    y_np = rng.normal(size=5).astype(floatX)
+
+    fn = pytensor.function(
+        [A, alpha, x, y], Ger(inplace=False)(A, alpha, x, y), mode="NUMBA"
+    )
+    np.testing.assert_allclose(
+        fn(A_np, 2.0, x_np, y_np), A_np + 2.0 * np.outer(x_np, y_np), rtol=1e-5
+    )
+
+
+def test_ger_no_inplace_leaves_its_accumulator_alone():
+    """The non-inplace form must not write through ``A``; only the inplace form may."""
+    A = pt.tensor("A", shape=(6, 5), dtype=floatX)
+    x = pt.tensor("x", shape=(6,), dtype=floatX)
+    y = pt.tensor("y", shape=(5,), dtype=floatX)
+    alpha = pt.scalar("alpha", dtype=floatX)
+
+    rng = np.random.default_rng(sum(map(ord, "ger_no_inplace")))
+    A_np = rng.normal(size=(6, 5)).astype(floatX)
+    original = A_np.copy()
+    x_np = rng.normal(size=6).astype(floatX)
+    y_np = rng.normal(size=5).astype(floatX)
+
+    fn = pytensor.function(
+        [A, alpha, x, y], Ger(inplace=False)(A, alpha, x, y), mode="NUMBA"
+    )
+    result = fn(A_np, 2.0, x_np, y_np)
+    np.testing.assert_allclose(result, original + 2.0 * np.outer(x_np, y_np), rtol=1e-5)
+    np.testing.assert_array_equal(A_np, original)
+
+
+def test_ger_inplace_writes_through_its_accumulator():
+    """The inplace form is chosen precisely to avoid the copy, so it has to destroy ``A``."""
+    rng = np.random.default_rng(sum(map(ord, "ger_inplace")))
+    A_np = rng.normal(size=(6, 5)).astype(floatX)
+    x_np = rng.normal(size=6).astype(floatX)
+    y_np = rng.normal(size=5).astype(floatX)
+    expected = A_np + 2.0 * np.outer(x_np, y_np)
+
+    A = pytensor.shared(A_np)
+    x = pt.tensor("x", shape=(6,), dtype=floatX)
+    y = pt.tensor("y", shape=(5,), dtype=floatX)
+    alpha = pt.scalar("alpha", dtype=floatX)
+
+    fn = pytensor.function(
+        [alpha, x, y],
+        Ger(inplace=True)(A, alpha, x, y),
+        mode="NUMBA",
+        accept_inplace=True,
+    )
+    np.testing.assert_allclose(fn(2.0, x_np, y_np), expected, rtol=1e-5)
+    np.testing.assert_allclose(A.get_value(), expected, rtol=1e-5)
+
+
+def test_ger_inplace_reads_strided_vectors():
+    """``ger`` walks each vector by a fixed increment, so a strided view has to be copied."""
+    rng = np.random.default_rng(sum(map(ord, "ger_strided")))
+    A_np = rng.normal(size=(6, 5)).astype(floatX)
+    x_np = rng.normal(size=12).astype(floatX)
+    y_np = rng.normal(size=10).astype(floatX)
+    expected = A_np + 2.0 * np.outer(x_np[::2], y_np[::2])
+
+    A = pytensor.shared(A_np)
+    x = pt.tensor("x", shape=(12,), dtype=floatX)
+    y = pt.tensor("y", shape=(10,), dtype=floatX)
+    alpha = pt.scalar("alpha", dtype=floatX)
+
+    fn = pytensor.function(
+        [alpha, x, y],
+        Ger(inplace=True)(A, alpha, x[::2], y[::2]),
+        mode="NUMBA",
+        accept_inplace=True,
+    )
+    np.testing.assert_allclose(fn(2.0, x_np, y_np), expected, rtol=1e-5)

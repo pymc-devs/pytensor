@@ -510,6 +510,14 @@ def _ger_impl(alpha, x, y, A):
         ALPHA = np.full(1, alpha, dtype=dtype)
         INC = val_to_int_ptr(np.int32(1))
 
+        # ger walks each vector by a fixed increment of one element, so a strided view
+        # reads the wrong entries unless it is made contiguous first. The vectors are
+        # O(m + n) against the update's O(m n), so copying one costs less than carrying
+        # its own increment would, and it keeps a negative stride -- which BLAS addresses
+        # from the far end of the buffer -- out of the picture entirely.
+        x_work = x if x.flags.c_contiguous else np.ascontiguousarray(x)
+        y_work = y if y.flags.c_contiguous else np.ascontiguousarray(y)
+
         # ger has no transpose flag and does not need one: a C-ordered A's buffer is
         # A^T, and transposing the identity gives A^T <- alpha y x^T + A^T. Swapping
         # the vectors and the extents computes that, updating a row-major A in place.
@@ -518,9 +526,9 @@ def _ger_impl(alpha, x, y, A):
                 val_to_int_ptr(np.int32(A.shape[0])),
                 val_to_int_ptr(np.int32(A.shape[1])),
                 ALPHA.ctypes,
-                x.ctypes,
+                x_work.ctypes,
                 INC,
-                y.ctypes,
+                y_work.ctypes,
                 INC,
                 A.ctypes,
                 val_to_int_ptr(np.int32(max(1, A.shape[0]))),
@@ -534,9 +542,9 @@ def _ger_impl(alpha, x, y, A):
                 val_to_int_ptr(np.int32(A_work.shape[1])),
                 val_to_int_ptr(np.int32(A_work.shape[0])),
                 ALPHA.ctypes,
-                y.ctypes,
+                y_work.ctypes,
                 INC,
-                x.ctypes,
+                x_work.ctypes,
                 INC,
                 A_work.ctypes,
                 val_to_int_ptr(np.int32(max(1, A_work.shape[1]))),

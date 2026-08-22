@@ -2,8 +2,8 @@ import numpy as np
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
-from pytensor.link.numba.dispatch.linalg.products import _gemm
-from pytensor.tensor.blas import Gemm, Gemv
+from pytensor.link.numba.dispatch.linalg.products import _gemm, _ger
+from pytensor.tensor.blas import Gemm, Gemv, Ger
 
 
 @register_funcify_default_op_cache_key(Gemm)
@@ -74,3 +74,31 @@ def numba_funcify_Gemv(op, node, **kwargs):
 
     cache_version = 1
     return gemv, cache_version
+
+
+@register_funcify_default_op_cache_key(Ger)
+def numba_funcify_Ger(op, node, **kwargs):
+    """Dispatch ``Ger`` to one BLAS rank-1 update."""
+    dtype = node.outputs[0].type.numpy_dtype
+
+    if op.inplace:
+
+        @numba_basic.numba_njit
+        def ger(A, alpha, x, y):
+            return _ger(alpha.item(), x, y, A)
+
+    else:
+
+        @numba_basic.numba_njit
+        def ger(A, alpha, x, y):
+            # `A` is only broadcast against the outer product, so the buffer the update
+            # writes into takes the product's shape rather than `A`'s. Copying also leaves
+            # `A` intact, which is the whole difference between this op and its inplace form.
+            out = np.empty((x.shape[0], y.shape[0]), dtype=dtype)
+            out[:] = A
+            return _ger(alpha.item(), x, y, out)
+
+    # Bump whenever `_ger` changes: it is inlined here, so its source is not part of
+    # this key.
+    cache_version = 1
+    return ger, cache_version
