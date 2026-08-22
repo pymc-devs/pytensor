@@ -682,7 +682,7 @@ def local_dot22_to_ger_or_gemv(fgraph, node):
         new_out = [rval]
     elif xb[0] and yb[1]:
         # x and y are both vectors so this qualifies for a sdot / ddot
-        # PyTensor's CGemv will call sdot/ddot at runtime, the Scipy Gemv may not
+        # PyTensor's C Gemv will call sdot/ddot at runtime, the Scipy Gemv may not
         xv = x.dimshuffle(1)
         zeros = ptb.AllocEmpty(x.dtype)(1)
         rval = gemv_no_inplace(zeros, one, y.T, xv, zero)

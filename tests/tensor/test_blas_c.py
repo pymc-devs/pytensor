@@ -1,14 +1,13 @@
-from warnings import warn
-
 import numpy as np
 import pytest
 
 import pytensor
 import pytensor.tensor as pt
 from pytensor.compile import get_mode
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.dispatch.basic import c_funcify
 from pytensor.tensor.basic import AllocEmpty
-from pytensor.tensor.blas import Ger
-from pytensor.tensor.blas.blas_c import CGemv, CGer, must_initialize_y_gemv
+from pytensor.tensor.blas import Gemv, Ger
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -38,7 +37,7 @@ def skip_if_blas_ldflags_empty(*functions_detected):
         )
 
 
-class TestCGer(OptimizationTestMixin):
+class TestGerC(OptimizationTestMixin):
     def setup_method(self):
         self.manual_setup_method()
 
@@ -69,46 +68,34 @@ class TestCGer(OptimizationTestMixin):
     def b(self, bval):
         return pt.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
 
-    def test_eq(self):
-        assert CGer(True) == CGer(True)
-        assert CGer(False) == CGer(False)
-        assert CGer(False) != CGer(True)
-
-        assert CGer(True) != Ger(True)
-        assert CGer(False) != Ger(False)
-
-        # assert that eq works for non-CGer instances
-        assert CGer(False) is not None
-        assert CGer(True) is not None
-
-    def test_hash(self):
-        assert hash(CGer(True)) == hash(CGer(True))
-        assert hash(CGer(False)) == hash(CGer(False))
-        assert hash(CGer(False)) != hash(CGer(True))
-
     def test_optimization_pipeline(self):
         skip_if_blas_ldflags_empty()
         f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(inplace=True))
+        self.assertFunctionContains(f, Ger(inplace=True))
         f(self.xval, self.yval)  # DebugMode tests correctness
 
     def test_optimization_pipeline_float(self):
         skip_if_blas_ldflags_empty()
         self.manual_setup_method("float32")
         f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(inplace=True))
+        self.assertFunctionContains(f, Ger(inplace=True))
         f(self.xval, self.yval)  # DebugMode tests correctness
 
-    def test_int_fails(self):
+    def test_integer_outer_product_is_not_routed_to_ger(self):
+        # `Ger.make_node` rejects integer dtypes, so a rewrite that routed this to `Ger`
+        # would raise while rewriting rather than fall back.
         self.manual_setup_method("int32")
         f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains0(f, CGer(inplace=True))
-        self.assertFunctionContains0(f, CGer(inplace=False))
+        self.assertFunctionContains0(f, Ger(inplace=True))
+        self.assertFunctionContains0(f, Ger(inplace=False))
+        np.testing.assert_array_equal(
+            f(self.xval, self.yval), np.outer(self.xval, self.yval)
+        )
 
     def test_A_plus_outer(self):
         skip_if_blas_ldflags_empty()
         f = self.function([self.A, self.x, self.y], self.A + pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(inplace=False))
+        self.assertFunctionContains(f, Ger(inplace=False))
         self.run_f(f)  # DebugMode tests correctness
 
     def test_A_plus_scaled_outer(self):
@@ -116,16 +103,16 @@ class TestCGer(OptimizationTestMixin):
         f = self.function(
             [self.A, self.x, self.y], self.A + 0.1 * pt.outer(self.x, self.y)
         )
-        self.assertFunctionContains(f, CGer(inplace=False))
+        self.assertFunctionContains(f, Ger(inplace=False))
         self.run_f(f)  # DebugMode tests correctness
 
 
-class TestCGemv(OptimizationTestMixin):
+class TestGemvC(OptimizationTestMixin):
     """
-    Tests of CGemv specifically.
+    Tests of the C implementation of `Gemv`.
 
     Generic tests of Gemv-compatibility, including both dtypes are
-    done below in TestCGemvFloat32 and TestCGemvFloat64
+    done below in TestGemvCFloat32 and TestGemvCFloat64
     """
 
     def setup_method(self):
@@ -156,7 +143,7 @@ class TestCGemv(OptimizationTestMixin):
             mode=mode,
         )
         [node] = f.maker.fgraph.apply_nodes
-        assert isinstance(node.op, CGemv) and node.op.inplace == inplace
+        assert isinstance(node.op, Gemv) and node.op.inplace == inplace
         for rows in (3, 1, 0):
             for cols in (1, 0):
                 Aval = np.ones((rows, cols), dtype=self.dtype)
@@ -172,7 +159,7 @@ class TestCGemv(OptimizationTestMixin):
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, pt.dot)
-        self.assertFunctionContains1(f, CGemv(inplace=True))
+        self.assertFunctionContains1(f, Gemv(inplace=True))
 
         # Assert they produce the same output
         assert np.allclose(f(self.xval, self.Aval), np.dot(self.xval, self.Aval))
@@ -190,7 +177,7 @@ class TestCGemv(OptimizationTestMixin):
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, pt.dot)
-        self.assertFunctionContains1(f, CGemv(inplace=True))
+        self.assertFunctionContains1(f, Gemv(inplace=True))
 
         # Assert they produce the same output
         assert np.allclose(f(self.Aval, self.yval), np.dot(self.Aval, self.yval))
@@ -199,16 +186,6 @@ class TestCGemv(OptimizationTestMixin):
             f(self.Aval[::-1, ::-1], self.yval),
             np.dot(self.Aval[::-1, ::-1], self.yval),
         )
-
-    def test_must_initialize_y_gemv(self):
-        if must_initialize_y_gemv():
-            # FIME: This warn should be emitted by the function if we find it relevant
-            # Not in a test that doesn't care about the outcome either way
-            warn(
-                "WARNING: The current BLAS requires PyTensor to initialize"
-                " memory for some GEMV calls which will result in a minor"
-                " degradation in performance for such calls."
-            )
 
     def t_gemv1(self, m_shp):
         """test vector2 + dot(matrix, vector1)"""
@@ -223,7 +200,7 @@ class TestCGemv(OptimizationTestMixin):
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
         topo = [n.op for n in f.maker.fgraph.toposort()]
-        assert topo == [CGemv(inplace=False)], topo
+        assert topo == [Gemv(inplace=False)], topo
 
         # test the inplace version
         g = pytensor.function(
@@ -236,7 +213,7 @@ class TestCGemv(OptimizationTestMixin):
             v2.get_value(), np.dot(m.get_value(), v1.get_value()) + v2_orig
         )
         topo = [n.op for n in g.maker.fgraph.toposort()]
-        assert topo == [CGemv(inplace=True)]
+        assert topo == [Gemv(inplace=True)]
 
         # Do the same tests with a matrix with strides in both dimensions
         m.set_value(m.get_value(borrow=True)[::-1, ::-1], borrow=True)
@@ -308,7 +285,7 @@ class TestCGemv(OptimizationTestMixin):
         y = dvector("y")
         alpha = 1.0
         beta = dscalar("beta")
-        gemv = CGemv(inplace=True)(y, alpha, A, x, beta)
+        gemv = Gemv(inplace=True)(y, alpha, A, x, beta)
         fn = pytensor.function(
             [A, x, y, beta],
             gemv,
@@ -323,29 +300,29 @@ class TestCGemv(OptimizationTestMixin):
             np.testing.assert_allclose(out, expected)
 
 
-class TestCGemvFloat32(BaseGemv, OptimizationTestMixin):
+class TestGemvCFloat32(BaseGemv, OptimizationTestMixin):
     mode = mode_blas_opt
     dtype = "float32"
-    gemv = CGemv(inplace=False)
-    gemv_inplace = CGemv(inplace=True)
+    gemv = Gemv(inplace=False)
+    gemv_inplace = Gemv(inplace=True)
 
     def setup_method(self):
         skip_if_blas_ldflags_empty()
 
 
-class TestCGemvFloat64(BaseGemv, OptimizationTestMixin):
+class TestGemvCFloat64(BaseGemv, OptimizationTestMixin):
     mode = mode_blas_opt
     dtype = "float64"
-    gemv = CGemv(inplace=False)
-    gemv_inplace = CGemv(inplace=True)
+    gemv = Gemv(inplace=False)
+    gemv_inplace = Gemv(inplace=True)
 
     def setup_method(self):
         skip_if_blas_ldflags_empty()
 
 
-class TestCGemvNoFlags:
+class TestGemvCNoFlags:
     mode = mode_blas_opt
-    gemv = CGemv(inplace=False)
+    gemv = Gemv(inplace=False)
     M = 4
     N = 5
     slice_step = 3
@@ -407,14 +384,14 @@ class TestCGemvNoFlags:
         return ref_val
 
     @pytensor.config.change_flags(blas__ldflags="")
-    def run_cgemv(self, dtype, ALPHA, BETA, transpose_A, slice_tensors):
+    def run_gemv(self, dtype, ALPHA, BETA, transpose_A, slice_tensors):
         f = self.get_function(
             dtype, transpose_A=transpose_A, slice_tensors=slice_tensors
         )
         values = self.get_data(
             dtype, ALPHA, BETA, transpose_A=transpose_A, slice_tensors=slice_tensors
         )
-        assert any(isinstance(node.op, CGemv) for node in f.maker.fgraph.apply_nodes)
+        assert any(isinstance(node.op, Gemv) for node in f.maker.fgraph.apply_nodes)
         z_val = f(*values)
         assert z_val.dtype == dtype
         assert z_val.ndim == 1
@@ -422,13 +399,13 @@ class TestCGemvNoFlags:
         ref_val = self.compute_ref(*((*values, transpose_A, slice_tensors)))
         unittest_tools.assert_allclose(ref_val, z_val)
 
-    def test_cgemv(self):
+    def test_gemv(self):
         for dtype in ("float32", "float64"):
             for alpha in (0, 1, -2):
                 for beta in (0, 1, -2):
                     for transpose_A in (False, True):
                         for slice_tensors in (False, True):
-                            self.run_cgemv(
+                            self.run_gemv(
                                 dtype,
                                 alpha,
                                 beta,
@@ -437,9 +414,53 @@ class TestCGemvNoFlags:
                             )
 
 
-class TestSdotNoFlags(TestCGemvNoFlags):
+class TestSdotNoFlags(TestGemvCNoFlags):
     M = 1
 
 
 class TestBlasStridesC(TestBlasStrides):
     mode = mode_blas_opt
+
+
+class TestGerCNoFlags:
+    """`Ger` has no C implementation to fall back on when BLAS is not linked.
+
+    The bundled no-BLAS header supplies ``[sd]gemm_`` and ``[sd]gemv_`` but no ``[sd]ger_``,
+    so the C implementation declines the node and the Python ``perform`` runs instead.
+    """
+
+    @pytensor.config.change_flags(blas__ldflags="")
+    def test_c_implementation_declines(self):
+        A = matrix(dtype="float64")
+        x = vector(dtype="float64")
+        y = vector(dtype="float64")
+        alpha = scalar(dtype="float64")
+        node = Ger(inplace=False)(A, alpha, x, y).owner
+
+        impl = c_funcify(node.op, node=node)
+        # Emitting the code anyway would reach the linker and fail there instead.
+        with pytest.raises(MethodNotDefined):
+            impl.c_code(
+                node, "n", ["A", "a", "x", "y"], ["Z"], {"fail": "", "params": "p"}
+            )
+
+    @pytensor.config.change_flags(blas__ldflags="")
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_ger_without_blas(self, dtype):
+        A = matrix(dtype=dtype)
+        x = vector(dtype=dtype)
+        y = vector(dtype=dtype)
+        alpha = scalar(dtype=dtype)
+
+        f = pytensor.function(
+            [A, alpha, x, y], Ger(inplace=False)(A, alpha, x, y), mode=mode_blas_opt
+        )
+
+        rng = np.random.default_rng(sum(map(ord, f"ger_without_blas {dtype}")))
+        A_val = rng.random((4, 5)).astype(dtype)
+        x_val = rng.random(4).astype(dtype)
+        y_val = rng.random(5).astype(dtype)
+
+        out = f(A_val, np.asarray(2.0, dtype=dtype), x_val, y_val)
+        assert out.dtype == dtype
+        unittest_tools.assert_allclose(A_val + 2.0 * np.outer(x_val, y_val), out)
