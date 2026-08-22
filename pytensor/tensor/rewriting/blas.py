@@ -85,16 +85,14 @@ from pytensor.graph.utils import InconsistencyError
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import (
     Dot22,
+    Gemm,
+    Gemv,
+    Ger,
     _batched_dot,
     _dot22,
     _dot22scalar,
-    gemm_inplace,
-    gemm_no_inplace,
-    gemv_inplace,
-    gemv_no_inplace,
-    ger,
-    ger_inplace,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
@@ -106,9 +104,12 @@ from pytensor.tensor.math import (
     sub,
     variadic_add,
 )
+from pytensor.tensor.rewriting.basic import elemwise_of
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.type import (
     TensorType,
+    float_dtypes,
     integer_dtypes,
     values_eq_approx_remove_inf_nan,
 )
@@ -177,7 +178,7 @@ def _beta_L_plus_alpha_M(fgraph, beta, L, alpha, M, recurse_flip=True):
     # if res_is_a(M, _dot22, 1):
     if M.owner and M.owner.op == _dot22:
         Ml, Mr = M.owner.inputs
-        rval = [gemm_no_inplace(L, alpha, Ml, Mr, beta)]
+        rval = [Blockwise(Gemm(inplace=False))(L, alpha, Ml, Mr, beta)]
         return rval, M
 
     # it also might be the case that there is a dimshuffle between the +
@@ -192,19 +193,25 @@ def _beta_L_plus_alpha_M(fgraph, beta, L, alpha, M, recurse_flip=True):
         if M.owner.op.new_order == (0,):
             # it is making a column MM into a vector
             MMl, MMr = MM.owner.inputs
-            g = gemm_no_inplace(L.dimshuffle(0, "x"), alpha, MMl, MMr, beta)
+            g = Blockwise(Gemm(inplace=False))(
+                L.dimshuffle(0, "x"), alpha, MMl, MMr, beta
+            )
             rval = [g.dimshuffle(0)]
             return rval, MM
         if M.owner.op.new_order == (1,):
             # it is making a row MM into a vector
             MMl, MMr = MM.owner.inputs
-            g = gemm_no_inplace(L.dimshuffle("x", 0), alpha, MMl, MMr, beta)
+            g = Blockwise(Gemm(inplace=False))(
+                L.dimshuffle("x", 0), alpha, MMl, MMr, beta
+            )
             rval = [g.dimshuffle(1)]
             return rval, MM
         if len(M.owner.op.new_order) == 0:
             # it is making a row MM into a vector
             MMl, MMr = MM.owner.inputs
-            g = gemm_no_inplace(L.dimshuffle("x", "x"), alpha, MMl, MMr, beta)
+            g = Blockwise(Gemm(inplace=False))(
+                L.dimshuffle("x", "x"), alpha, MMl, MMr, beta
+            )
             rval = [g.dimshuffle()]
             return rval, MM
 
@@ -595,39 +602,21 @@ def local_dot_to_dot22(fgraph, node):
     _logger.info(f"Not optimizing dot with inputs {x} {y} {x.type} {y.type}")
 
 
-@node_rewriter([gemm_no_inplace], inplace=True)
-def local_inplace_gemm(fgraph, node):
-    if node.op == gemm_no_inplace:
-        new_out = [gemm_inplace(*node.inputs)]
-        copy_stack_trace(node.outputs, new_out)
-        return new_out
-
-
-@node_rewriter([gemv_no_inplace], inplace=True)
-def local_inplace_gemv(fgraph, node):
-    if node.op == gemv_no_inplace:
-        new_out = [gemv_inplace(*node.inputs)]
-        copy_stack_trace(node.outputs, new_out)
-        return new_out
-
-
-@node_rewriter([ger], inplace=True)
-def local_inplace_ger(fgraph, node):
-    if node.op == ger:
-        new_out = [ger_inplace(*node.inputs)]
-        copy_stack_trace(node.outputs, new_out)
-        return new_out
-
-
-@node_rewriter([gemm_no_inplace])
+@node_rewriter([Gemm, blockwise_of(Gemm)])
 def local_gemm_to_gemv(fgraph, node):
     """GEMM acting on row or column matrices -> GEMV."""
+    # These trackers match any `Gemm`; an inplace one must not be traded for a `Gemv`
+    # or `Ger` that would no longer destroy `z`.
+    core_op = node.op.core_op if isinstance(node.op, Blockwise) else node.op
+    if core_op.inplace:
+        return None
+
     z, a, x, y, b = node.inputs
     if z.broadcastable == x.broadcastable == (True, False):
-        r = gemv_no_inplace(z.dimshuffle(1), a, y.T, x.dimshuffle(1), b)
+        r = Blockwise(Gemv(inplace=False))(z.dimshuffle(1), a, y.T, x.dimshuffle(1), b)
         new_out = [r.dimshuffle("x", 0)]
     elif z.broadcastable == y.broadcastable == (False, True):
-        r = gemv_no_inplace(z.dimshuffle(0), a, x, y.dimshuffle(0), b)
+        r = Blockwise(Gemv(inplace=False))(z.dimshuffle(0), a, x, y.dimshuffle(0), b)
         new_out = [r.dimshuffle(0, "x")]
     else:
         return
@@ -635,9 +624,15 @@ def local_gemm_to_gemv(fgraph, node):
     return new_out
 
 
-@node_rewriter([gemm_no_inplace])
+@node_rewriter([Gemm, blockwise_of(Gemm)])
 def local_gemm_to_ger(fgraph, node):
     """GEMM computing an outer-product -> GER."""
+    # These trackers match any `Gemm`; an inplace one must not be traded for a `Gemv`
+    # or `Ger` that would no longer destroy `z`.
+    core_op = node.op.core_op if isinstance(node.op, Blockwise) else node.op
+    if core_op.inplace:
+        return None
+
     z, a, x, y, b = node.inputs
     if x.broadcastable[1] and y.broadcastable[0]:
         # x and y are both vectors so this might qualifies for a GER
@@ -650,11 +645,11 @@ def local_gemm_to_ger(fgraph, node):
             return
 
         if bval == 1:  # best case a natural GER
-            rval = ger(z, a, xv, yv)
+            rval = Blockwise(Ger(inplace=False))(z, a, xv, yv)
             new_out = [rval]
         elif bval == 0:  # GER on zeros_like should be faster than GEMM
             zeros = ptb.zeros([x.shape[0], y.shape[1]], x.dtype)
-            rval = ger(zeros, a, xv, yv)
+            rval = Blockwise(Ger(inplace=False))(zeros, a, xv, yv)
             new_out = [rval]
         else:
             # if bval is another constant, then z is being usefully
@@ -678,26 +673,26 @@ def local_dot22_to_ger_or_gemv(fgraph, node):
         xv = x.dimshuffle(0)
         yv = y.dimshuffle(1)
         zeros = ptb.zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
-        rval = ger(zeros, one, xv, yv)
+        rval = Blockwise(Ger(inplace=False))(zeros, one, xv, yv)
         new_out = [rval]
     elif xb[0] and yb[1]:
         # x and y are both vectors so this qualifies for a sdot / ddot
         # PyTensor's C Gemv will call sdot/ddot at runtime, the Scipy Gemv may not
         xv = x.dimshuffle(1)
         zeros = ptb.AllocEmpty(x.dtype)(1)
-        rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
+        rval = Blockwise(Gemv(inplace=False))(zeros, one, y.T, xv, zero)
         new_out = [rval.dimshuffle("x", 0)]
     elif xb[0] and not yb[0] and not yb[1]:
         # x is vector, y is matrix so try gemv
         xv = x.dimshuffle(1)
         zeros = ptb.AllocEmpty(x.dtype)(y.shape[1])
-        rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
+        rval = Blockwise(Gemv(inplace=False))(zeros, one, y.T, xv, zero)
         new_out = [rval.dimshuffle("x", 0)]
     elif not xb[0] and not xb[1] and yb[1]:
         # x is matrix, y is vector, try gemv
         yv = y.dimshuffle(0)
         zeros = ptb.AllocEmpty(x.dtype)(x.shape[0])
-        rval = gemv_no_inplace(zeros, one, x, yv, zero)
+        rval = Blockwise(Gemv(inplace=False))(zeros, one, x, yv, zero)
         new_out = [rval.dimshuffle(0, "x")]
     else:
         return
@@ -741,20 +736,6 @@ blas_optdb.register(
     ),
     "fast_run",
     position=11,
-)
-
-
-blas_opt_inplace = dfs_rewriter(
-    local_inplace_gemm, local_inplace_gemv, local_inplace_ger, name="blas_opt_inplace"
-)
-optdb.register(
-    "InplaceBlasOpt",
-    blas_opt_inplace,
-    "fast_run",
-    "inplace",
-    "blas_opt_inplace",
-    # Before we try to make elemwise things inplace (70.5)
-    position=50.2,
 )
 
 
@@ -923,3 +904,134 @@ def specialize_matmul_to_batched_dot(fgraph, node):
 
     copy_stack_trace(node.outputs, [new_out])
     return [new_out]
+
+
+def _split_scalar_factor(var, dtype):
+    """
+    Split ``alpha * X`` into the scalar and the rest.
+
+    Parameters
+    ----------
+    var : TensorVariable
+        The term to inspect.
+    dtype : str
+        The dtype the scalar has to be usable as.
+
+    Returns
+    -------
+    alpha : TensorVariable or None
+        The scalar factor, or None when there is none to peel.
+    rest : TensorVariable
+        ``var`` with the scalar removed, or ``var`` itself when ``alpha`` is None.
+    """
+    node = var.owner
+    if node is None or not isinstance(node.op, Elemwise):
+        return None, var
+    if not isinstance(node.op.scalar_op, pytensor.scalar.Mul):
+        return None, var
+
+    scalars, others = [], []
+    for term in node.inputs:
+        scalar = _as_scalar(term, dtype=dtype)
+        if scalar is None:
+            others.append(term)
+        else:
+            scalars.append(scalar)
+
+    # Anything but a single non-scalar term is a product this rewrite cannot read.
+    if not scalars or len(others) != 1:
+        return None, var
+
+    alpha = scalars[0] if len(scalars) == 1 else mul(*scalars)
+    return alpha, others[0]
+
+
+def _as_matrix_product(fgraph, var):
+    """
+    Return the two matrices of a rank-2 matrix product, or None if ``var`` is not one.
+
+    A product read by more than one client is rejected: folding it into a `Gemm`
+    would compute it a second time for whoever else consumes it.
+    """
+    node = var.owner
+    if node is None:
+        return None
+
+    op = node.op
+    core_op = op.core_op if isinstance(op, Blockwise) else op
+    if not isinstance(core_op, Dot):
+        return None
+    if len(fgraph.clients[var]) > 1:
+        return None
+
+    x, y = node.inputs
+    if x.type.ndim != 2 or y.type.ndim != 2:
+        return None
+    return x, y
+
+
+@register_specialize
+@node_rewriter([elemwise_of(pytensor.scalar.Add)])
+def local_add_dot_to_gemm(fgraph, node):
+    r"""
+    Rewrite :math:`\beta C + \alpha A B` as a single `Gemm`.
+
+    Either scalar may be absent, so this also covers :math:`C + AB`,
+    :math:`C + \alpha AB` and :math:`\beta C + AB`. The matrix product is matched
+    through `Blockwise` as well as bare, because ``@`` builds a `Blockwise` of `Dot`
+    that is only unwrapped much later.
+
+    An accumulator that only broadcasts against the product is left alone: BLAS writes
+    into the output buffer itself, so folding one in would cost the pass it saves.
+    """
+    if len(node.inputs) != 2:
+        return None
+
+    [out] = node.outputs
+    dtype = out.type.dtype
+    if dtype not in float_dtypes or out.type.ndim != 2:
+        return None
+
+    for index, term in enumerate(node.inputs):
+        alpha, product = _split_scalar_factor(term, dtype)
+
+        # `Gemm` computes into a buffer shaped like the product, so a product that only
+        # broadcasts against the sum would hand the replacement a narrower type than the
+        # node it replaces.
+        if product.type.broadcastable != out.type.broadcastable:
+            continue
+        matrices = _as_matrix_product(fgraph, product)
+        if matrices is None:
+            continue
+        x, y = matrices
+
+        beta, z = _split_scalar_factor(node.inputs[1 - index], dtype)
+        if z.type.ndim != 2:
+            continue
+        # BLAS accumulates into the output buffer itself, so an accumulator that only
+        # broadcasts against the product would have to be materialized to the product's
+        # shape first -- exactly the pass this rewrite exists to remove.
+        if z.type.broadcastable != out.type.broadcastable:
+            continue
+
+        # Gemm reads one dtype across all five inputs and will not upcast for us.
+        one = ptb.constant(np.asarray(1.0, dtype=dtype))
+        alpha = one if alpha is None else alpha
+        beta = one if beta is None else beta
+        if not all(term.type.dtype == dtype for term in (z, x, y, alpha, beta)):
+            continue
+
+        # Emitted through `Blockwise` so that `InplaceBlockwiseOptimizer` can ask the op itself
+        # whether it may destroy `z`; the wrapper is unwrapped again once inplace has been decided.
+        new_out = [Blockwise(Gemm(inplace=False))(z, alpha, x, y, beta)]
+        copy_stack_trace(node.outputs, new_out)
+        return new_out
+
+    return None
+
+
+# Both also run inside `blas_optdb`, which sits at optdb position 1.7, ahead of
+# `specialize` at 2.0. The `Gemm` above is created after that has already run, so they
+# are registered here as well to catch the rank-1 and row/column-matrix products.
+register_specialize(local_gemm_to_ger, name="local_gemm_to_ger_after_add_dot")
+register_specialize(local_gemm_to_gemv, name="local_gemm_to_gemv_after_add_dot")
