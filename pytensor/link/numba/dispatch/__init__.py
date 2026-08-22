@@ -5,6 +5,7 @@ import pytensor.link.numba.dispatch._patch_pointer_add
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_typify
 
 # Load dispatch specializations
+import pytensor.link.numba.dispatch.blas
 import pytensor.link.numba.dispatch.blockwise
 import pytensor.link.numba.dispatch.compile_ops
 import pytensor.link.numba.dispatch.elemwise
