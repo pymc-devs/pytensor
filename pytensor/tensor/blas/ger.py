@@ -78,9 +78,3 @@ class Ger(Op):
 
     def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
-
-
-ger_no_inplace = Ger(inplace=False)
-ger_inplace = Ger(inplace=True)
-
-ger = ger_no_inplace

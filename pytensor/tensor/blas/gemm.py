@@ -216,12 +216,8 @@ class Gemm(Op):
         return self
 
 
-gemm_inplace = Gemm(inplace=True)
-gemm_no_inplace = Gemm(inplace=False)
-# For the user interface. PyTensor optimization will make them inplace
-gemm = gemm_no_inplace
-pprint.assign(gemm_inplace, FunctionPrinter(["gemm_inplace"]))
-pprint.assign(gemm_no_inplace, FunctionPrinter(["gemm_no_inplace"]))
+pprint.assign(Gemm(inplace=True), FunctionPrinter(["gemm_inplace"]))
+pprint.assign(Gemm(inplace=False), FunctionPrinter(["gemm_no_inplace"]))
 
 
 class Dot22(GemmRelated):
