@@ -2,11 +2,10 @@ import numpy as np
 
 import pytensor.scalar
 from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.link.c.op import COp
-from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import FunctionPrinter, pprint
-from pytensor.scalar import bool as bool_t
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blas._core import (
     ldflags,
@@ -19,7 +18,6 @@ from pytensor.tensor.blas.c_code.blas_headers import (
 from pytensor.tensor.blas.c_code.codegen import (
     dot22_c_code,
     dot22scalar_c_code,
-    gemm_c_code,
 )
 from pytensor.tensor.type import DenseTensorType, tensor
 
@@ -73,27 +71,16 @@ class GemmRelated(COp):
         return (14, blas_header_version())
 
 
-class Gemm(GemmRelated):
-    """In-place version of matrix-matrix multiplication (with accumulation).
+class Gemm(Op):
+    r"""Matrix-matrix product with accumulation.
 
-    When a and b are scalars and x, y, and z are matrices, then
+    .. math::
 
-        gemm(z,a,x,y,b)
+        Z \leftarrow \beta Z + \alpha X Y
 
-    is similar to
-
-        b*z + a*dot(x,y)
-
-    The difference between the two is that the top form is destructive
-    on z, whereas the bottom form is not.  Gemm works in-place on the
-    storage associated with z, and the L{Variable} returned by Gemm
-    has a storage that will be aliased to the storage of the z
-    argument. Because of this in-place computation, an L{Apply} of
-    this op will destroy the L{Variable} z on which it operates.  (See
-    L{DestructiveOps} for an explanation of what destroying means in
-    the context of pytensor graphs. See L{BlasLapackSupport} for more
-    optimized linear algebra operations.)
-
+    for matrices :math:`X`, :math:`Y` and :math:`Z` and scalars :math:`\alpha` and
+    :math:`\beta`. Constructed with ``inplace=True``, the output aliases ``Z``'s storage
+    and the op destroys it; otherwise ``Z`` is left untouched.
     """
 
     E_rank = "gemm only works for rank 2"
@@ -103,10 +90,8 @@ class Gemm(GemmRelated):
     E_float = "gemm requires floating-point dtypes"
 
     __props__ = ("inplace",)
-    params_type = ParamsType(
-        inplace=bool_t,
-    )
     check_input = False
+    gufunc_signature = "(m,n),(),(m,k),(k,n),()->(m,n)"
 
     def __init__(self, inplace):
         self.inplace = inplace
@@ -224,17 +209,11 @@ class Gemm(GemmRelated):
             )
         ]
 
-    def c_code(self, node, name, inp, out, sub):
-        if node.inputs[0].type.dtype.startswith("complex"):
-            raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
-        return gemm_c_code(node, name, inp, out, sub)
-
-    def c_code_cache_version(self):
-        gv = self.build_gemm_version()
-        if gv:
-            return (8, *gv)
-        else:
-            return gv
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> Op:
+        """``Gemm`` accumulates into its first input, so that is the only one it can destroy."""
+        if 0 in allowed_inplace_inputs:
+            return type(self)(inplace=True)
+        return self
 
 
 gemm_inplace = Gemm(inplace=True)

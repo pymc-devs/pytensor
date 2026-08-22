@@ -6,22 +6,30 @@ from pytensor.tensor.type import DenseTensorType
 
 
 class Ger(Op):
-    """
-    BLAS defines general rank-1 update GER as A <- A + alpha x y'
+    r"""Rank-1 update of a matrix.
 
-    for matrix A, scalar alpha, vectors x and y.
+    .. math::
 
-    This interface to GER allows in-place or copying operation on A via the
-    ``inplace`` argument to the constructor.
+        A \leftarrow A + \alpha x y^{\top}
 
+    for matrix :math:`A`, scalar :math:`\alpha` and vectors :math:`x` and :math:`y`.
+    Constructed with ``inplace=True``, the output aliases ``A``'s storage and the op
+    destroys it; otherwise ``A`` is left untouched.
     """
 
     __props__ = ("inplace",)
+    gufunc_signature = "(m,n),(),(m),(n)->(m,n)"
 
     def __init__(self, inplace):
         self.inplace = inplace
         if inplace:
             self.destroy_map = {0: [0]}
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> Op:
+        """``Ger`` updates ``A`` in place, so that is the only input it can destroy."""
+        if 0 in allowed_inplace_inputs:
+            return type(self)(inplace=True)
+        return self
 
     def __str__(self):
         if self.inplace:
