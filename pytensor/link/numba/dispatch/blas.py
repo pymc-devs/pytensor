@@ -25,10 +25,15 @@ def numba_funcify_Gemm(op, node, **kwargs):
             # the product's shape rather than `Z`'s. Copying also leaves `Z` intact, which is the
             # whole difference between this op and its inplace form.
             out = np.empty((X.shape[0], Y.shape[1]), dtype=dtype)
-            out[:] = Z
-            return _gemm(X, Y, out, False, False, alpha.item(), beta.item())
+            _gemm(X, Y, out, False, False, alpha.item(), 0.0)
+            b = beta.item()
+            if b == 1.0:
+                out += Z
+            elif b != 0.0:
+                out += b * Z
+            return out
 
-    cache_version = 2
+    cache_version = 3
     return gemm, cache_version
 
 
@@ -91,14 +96,21 @@ def numba_funcify_Ger(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def ger(A, alpha, x, y):
-            # `A` is only broadcast against the outer product, so the buffer the update
-            # writes into takes the product's shape rather than `A`'s. Copying also leaves
-            # `A` intact, which is the whole difference between this op and its inplace form.
-            out = np.empty((x.shape[0], y.shape[0]), dtype=dtype)
-            out[:] = A
-            return _ger(alpha.item(), x, y, out)
+            # Writing `A` and the update together keeps this to one pass over the
+            # output; copying `A` in and letting BLAS accumulate on top would touch it
+            # twice. Leaving `A` itself alone is the whole difference between this op
+            # and its inplace form.
+            rows = x.shape[0]
+            cols = y.shape[0]
+            out = np.empty((rows, cols), dtype=dtype)
+            a = alpha.item()
+            for i in range(rows):
+                scaled = a * x[i]
+                for j in range(cols):
+                    out[i, j] = A[i, j] + scaled * y[j]
+            return out
 
     # Bump whenever `_ger` changes: it is inlined here, so its source is not part of
     # this key.
-    cache_version = 1
+    cache_version = 4
     return ger, cache_version
