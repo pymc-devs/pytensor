@@ -1,6 +1,7 @@
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, Op, node_rewriter
 from pytensor.graph.destroyhandler import inplace_candidates
+from pytensor.graph.fg import Output
 from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
@@ -342,6 +343,61 @@ class InplaceBlockwiseOptimizer(InplaceGraphOptimizer):
         )
 
         return inplace_blockwise_op.make_node(*node.inputs)
+
+
+def _accepts_inplace_on(node, input_index):
+    """Return whether ``node``'s op would destroy the input at ``input_index`` if allowed."""
+    op = node.op
+    core_op = op.core_op if isinstance(op, Blockwise) else op
+    inplace_op = core_op.inplace_on_inputs(allowed_inplace_inputs=[input_index])
+    return any(
+        input_index in destroyed for destroyed in inplace_op.destroy_map.values()
+    )
+
+
+@node_rewriter([AllocEmpty])
+def local_split_alloc_empty_clients(fgraph, node):
+    """Give each client that wants to write into an `AllocEmpty` a buffer of its own.
+
+    `AllocEmpty` produces uninitialized memory, so no client can depend on what another
+    left in it. Sharing one buffer only stops every client but the first from claiming it
+    for an inplace operation.
+    """
+    [out] = node.outputs
+    clients = fgraph.clients[out]
+    if len(clients) < 2:
+        return None
+
+    # The first client keeps the original buffer; the rest get their own. Kept in client
+    # order so the rewrite emits the same graph on every run.
+    destroyers = dict.fromkeys(
+        client
+        for client, input_index in clients[1:]
+        if not isinstance(client.op, Output)
+        and _accepts_inplace_on(client, input_index)
+    )
+    if not destroyers:
+        return None
+
+    replacements = {}
+    for client in destroyers:
+        new_inputs = [
+            node.op(*node.inputs) if inp is out else inp for inp in client.inputs
+        ]
+        new_client = client.clone_with_new_inputs(new_inputs)
+        copy_stack_trace(client.outputs, new_client.outputs)
+        replacements.update(zip(client.outputs, new_client.outputs, strict=True))
+    return replacements
+
+
+optdb.register(
+    "local_split_alloc_empty_clients",
+    dfs_rewriter(local_split_alloc_empty_clients),
+    "fast_run",
+    "inplace",
+    # After the last merge pass, before any inplace rewrite claims the shared buffer.
+    position=49.4,
+)
 
 
 optdb.register(
