@@ -11,17 +11,8 @@ This documentation describes PyTensor's BLAS optimization pipeline.
 Where there is a discrepancy between how things do work and how they *should*
 work, both aspects should be documented.
 
-There are four kinds of BLAS Ops in PyTensor:
-    - Python implementations (this file)
-    - SciPy-based (blas_scipy)
-    - C-based (blas_c)
-
-Notes
------
-Unfortunately (because it's confusing) this file currently contains Ops
-that contain both Python and C versions.  I think it would be better to
-move the C implementations to blas_c so that this file is pure Python.
--JB
+The Ops here are pure Python; their SciPy and C implementations live in the
+corresponding backend dispatch registries.
 
 
 Ops
@@ -90,18 +81,6 @@ from pytensor.tensor.blas.batched import (
     BatchedDot,
     _batched_dot,
 )
-from pytensor.tensor.blas.blas_c import (
-    BaseBLAS,
-    CGemv,
-    CGer,
-    cgemv_inplace,
-    cgemv_no_inplace,
-    cger_inplace,
-    cger_no_inplace,
-)
-from pytensor.tensor.blas.blas_c import (
-    must_initialize_y_gemv as must_initialize_y_gemv_c,
-)
 from pytensor.tensor.blas.c_code.blas_headers import (
     blas_header_text,
     blas_header_version,
@@ -124,10 +103,7 @@ from pytensor.tensor.blas.ger import Ger, ger, ger_inplace, ger_no_inplace
 
 
 __all__ = [
-    "BaseBLAS",
     "BatchedDot",
-    "CGemv",
-    "CGer",
     "Dot22",
     "Dot22Scalar",
     "Gemm",
@@ -141,10 +117,6 @@ __all__ = [
     "_logger",
     "blas_header_text",
     "blas_header_version",
-    "cgemv_inplace",
-    "cgemv_no_inplace",
-    "cger_inplace",
-    "cger_no_inplace",
     "gemm",
     "gemm_inplace",
     "gemm_no_inplace",
@@ -157,7 +129,6 @@ __all__ = [
     "ldflags",
     "mkl_threads_text",
     "must_initialize_y_gemv",
-    "must_initialize_y_gemv_c",
     "openblas_threads_text",
     "view_roots",
 ]
