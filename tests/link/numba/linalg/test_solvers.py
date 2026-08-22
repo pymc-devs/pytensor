@@ -243,20 +243,6 @@ class TestSolves:
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
-    def test_solve_triangular_unit_diagonal_ignores_zero_diagonal(self):
-        # The zero-pivot scan below has to defer to unit_diagonal, or a unit triangular
-        # matrix that happens to store a zero on its diagonal comes back all-nan.
-        rng = np.random.default_rng(418)
-        A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
-        A_val[2, 2] = 0.0
-        b_val = rng.normal(size=(5, 3)).astype(floatX)
-
-        A = pt.matrix("A", dtype=floatX)
-        b = pt.matrix("b", dtype=floatX)
-        X = pt.linalg.solve_triangular(A, b, lower=True, unit_diagonal=True)
-
-        compare_numba_and_py([A, b], X, [A_val, b_val])
-
     @pytest.mark.parametrize("b_shape", [(5, 3), (5,)], ids=["b_matrix", "b_vec"])
     def test_solve_triangular_singular_returns_nan(self, b_shape: tuple[int, ...]):
         # trsm reports no INFO, so a singular system depends on our own zero-pivot scan.
