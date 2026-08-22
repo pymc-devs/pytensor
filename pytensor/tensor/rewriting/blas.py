@@ -93,7 +93,7 @@ from pytensor.tensor.blas import (
     gemv_inplace,
     gemv_no_inplace,
     ger,
-    ger_destructive,
+    ger_inplace,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -614,7 +614,7 @@ def local_inplace_gemv(fgraph, node):
 @node_rewriter([ger], inplace=True)
 def local_inplace_ger(fgraph, node):
     if node.op == ger:
-        new_out = [ger_destructive(*node.inputs)]
+        new_out = [ger_inplace(*node.inputs)]
         copy_stack_trace(node.outputs, new_out)
         return new_out
 
