@@ -112,9 +112,3 @@ class Gemv(Op):
 
     def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
-
-
-gemv_no_inplace = Gemv(inplace=False)
-gemv_inplace = Gemv(inplace=True)
-# For the user interface. Opt will make them inplace later
-gemv = gemv_no_inplace

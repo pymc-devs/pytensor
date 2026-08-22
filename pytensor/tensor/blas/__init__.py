@@ -94,12 +94,9 @@ from pytensor.tensor.blas.gemm import (
     GemmRelated,
     _dot22,
     _dot22scalar,
-    gemm,
-    gemm_inplace,
-    gemm_no_inplace,
 )
-from pytensor.tensor.blas.gemv import Gemv, gemv, gemv_inplace, gemv_no_inplace
-from pytensor.tensor.blas.ger import Ger, ger, ger_inplace, ger_no_inplace
+from pytensor.tensor.blas.gemv import Gemv
+from pytensor.tensor.blas.ger import Ger
 
 
 __all__ = [
@@ -117,15 +114,6 @@ __all__ = [
     "_logger",
     "blas_header_text",
     "blas_header_version",
-    "gemm",
-    "gemm_inplace",
-    "gemm_no_inplace",
-    "gemv",
-    "gemv_inplace",
-    "gemv_no_inplace",
-    "ger",
-    "ger_inplace",
-    "ger_no_inplace",
     "ldflags",
     "mkl_threads_text",
     "must_initialize_y_gemv",
