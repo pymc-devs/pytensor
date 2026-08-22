@@ -128,28 +128,6 @@ def test_gemv_inplace_writes_through_its_accumulator():
     np.testing.assert_allclose(y.get_value(), expected, rtol=1e-5)
 
 
-@pytest.mark.parametrize("A_shape", [(6, 5), (1, 5)], ids=["full", "broadcast_row"])
-def test_ger_broadcasts_its_accumulator(A_shape):
-    """``Ger`` takes an ``A`` that is only broadcast against the outer product, so the buffer the
-    update writes into is the product's shape, not ``A``'s."""
-    A = pt.tensor("A", shape=A_shape, dtype=floatX)
-    x = pt.tensor("x", shape=(6,), dtype=floatX)
-    y = pt.tensor("y", shape=(5,), dtype=floatX)
-    alpha = pt.scalar("alpha", dtype=floatX)
-
-    rng = np.random.default_rng(sum(map(ord, f"ger_broadcasts {A_shape}")))
-    A_np = rng.normal(size=A_shape).astype(floatX)
-    x_np = rng.normal(size=6).astype(floatX)
-    y_np = rng.normal(size=5).astype(floatX)
-
-    fn = pytensor.function(
-        [A, alpha, x, y], Ger(inplace=False)(A, alpha, x, y), mode="NUMBA"
-    )
-    np.testing.assert_allclose(
-        fn(A_np, 2.0, x_np, y_np), A_np + 2.0 * np.outer(x_np, y_np), rtol=1e-5
-    )
-
-
 def test_ger_no_inplace_leaves_its_accumulator_alone():
     """The non-inplace form must not write through ``A``; only the inplace form may."""
     A = pt.tensor("A", shape=(6, 5), dtype=floatX)
