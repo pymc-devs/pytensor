@@ -120,7 +120,7 @@ from pytensor.tensor.blas.gemm import (
     gemm_no_inplace,
 )
 from pytensor.tensor.blas.gemv import Gemv, gemv, gemv_inplace, gemv_no_inplace
-from pytensor.tensor.blas.ger import Ger, ger, ger_destructive
+from pytensor.tensor.blas.ger import Ger, ger, ger_inplace, ger_no_inplace
 
 
 __all__ = [
@@ -152,7 +152,8 @@ __all__ = [
     "gemv_inplace",
     "gemv_no_inplace",
     "ger",
-    "ger_destructive",
+    "ger_inplace",
+    "ger_no_inplace",
     "ldflags",
     "mkl_threads_text",
     "must_initialize_y_gemv",

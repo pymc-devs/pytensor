@@ -592,7 +592,7 @@ def gemv_c_code(node, name, inputs, outputs, sub):
 
     fbeta = dbeta = ((dtype_%(beta)s*)PyArray_DATA(%(beta)s))[0];
 
-    // copy y if not destructive
+    // copy y if not inplace
     if (!%(params)s->inplace)
     {
         if ((NULL == %(z)s)
@@ -849,8 +849,8 @@ def ger_c_code(node, name, inputs, outputs, sub):
         {fail};
     }}
 
-    // copy A if !self.destructive or A is fully strided
-    if (!{params}->destructive
+    // copy A if !self.inplace or A is fully strided
+    if (!{params}->inplace
         || (PyArray_STRIDES({A})[0] < 0)
         || (PyArray_STRIDES({A})[1] < 0)
         || ((PyArray_STRIDES({A})[0] != elemsize)

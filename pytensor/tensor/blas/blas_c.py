@@ -37,7 +37,7 @@ class CGer(BaseBLAS, Ger):
     """C implementation of GER (rank-1 update): Z = A + alpha * outer(x, y)."""
 
     params_type = ParamsType(
-        destructive=bool_t,
+        inplace=bool_t,
     )
 
     def c_code(self, node, name, inp, out, sub):

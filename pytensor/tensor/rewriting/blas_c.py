@@ -1,7 +1,7 @@
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.blas import gemv_inplace, gemv_no_inplace, ger, ger_destructive
+from pytensor.tensor.blas import gemv_inplace, gemv_no_inplace, ger, ger_inplace
 from pytensor.tensor.blas.blas_c import (
     CGemv,
     CGer,
@@ -12,14 +12,14 @@ from pytensor.tensor.blas.blas_c import (
 from pytensor.tensor.rewriting.blas import blas_optdb, node_rewriter, optdb
 
 
-@node_rewriter([ger, ger_destructive])
+@node_rewriter([ger, ger_inplace])
 def use_c_ger(fgraph, node):
     if not config.blas__ldflags:
         return
     # Only float32 and float64 are supported for now.
     if node.op == ger and node.outputs[0].dtype in ("float32", "float64"):
         return [CGer(False)(*node.inputs)]
-    if node.op == ger_destructive and node.outputs[0].dtype in ("float32", "float64"):
+    if node.op == ger_inplace and node.outputs[0].dtype in ("float32", "float64"):
         return [CGer(True)(*node.inputs)]
 
 

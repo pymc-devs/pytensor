@@ -89,26 +89,26 @@ class TestCGer(OptimizationTestMixin):
     def test_optimization_pipeline(self):
         skip_if_blas_ldflags_empty()
         f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(destructive=True))
+        self.assertFunctionContains(f, CGer(inplace=True))
         f(self.xval, self.yval)  # DebugMode tests correctness
 
     def test_optimization_pipeline_float(self):
         skip_if_blas_ldflags_empty()
         self.manual_setup_method("float32")
         f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(destructive=True))
+        self.assertFunctionContains(f, CGer(inplace=True))
         f(self.xval, self.yval)  # DebugMode tests correctness
 
     def test_int_fails(self):
         self.manual_setup_method("int32")
         f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains0(f, CGer(destructive=True))
-        self.assertFunctionContains0(f, CGer(destructive=False))
+        self.assertFunctionContains0(f, CGer(inplace=True))
+        self.assertFunctionContains0(f, CGer(inplace=False))
 
     def test_A_plus_outer(self):
         skip_if_blas_ldflags_empty()
         f = self.function([self.A, self.x, self.y], self.A + pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(destructive=False))
+        self.assertFunctionContains(f, CGer(inplace=False))
         self.run_f(f)  # DebugMode tests correctness
 
     def test_A_plus_scaled_outer(self):
@@ -116,7 +116,7 @@ class TestCGer(OptimizationTestMixin):
         f = self.function(
             [self.A, self.x, self.y], self.A + 0.1 * pt.outer(self.x, self.y)
         )
-        self.assertFunctionContains(f, CGer(destructive=False))
+        self.assertFunctionContains(f, CGer(inplace=False))
         self.run_f(f)  # DebugMode tests correctness
 
 
