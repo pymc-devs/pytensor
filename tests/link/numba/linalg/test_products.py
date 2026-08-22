@@ -3,6 +3,8 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import In, config
+from pytensor.link.numba.dispatch.basic import numba_njit
+from pytensor.link.numba.dispatch.linalg.products import _gemm
 from pytensor.tensor.linalg.products import Expm, expm
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
@@ -86,3 +88,25 @@ class TestExpm:
         _, res = compare_numba_and_py([A], [y], [val])
         np.testing.assert_array_equal(val, original)
         assert res[0].dtype == np.float64
+
+
+@numba_njit(final_function=True)
+def _gemm_jit(A, B, C, transa, transb, alpha, beta):
+    return _gemm(A, B, C, transa, transb, alpha, beta)
+
+
+@pytest.mark.parametrize("poison", [np.inf, np.nan], ids=["inf", "nan"])
+def test_gemm_ignores_C_when_beta_is_zero(poison):
+    """`numba_funcify_Dot` allocates C with `np.empty` and passes beta=0, so C holds whatever the
+    allocator returned. BLAS does not read C in that case and neither may the reference, or stray
+    non-finite bytes would multiply by zero into nan."""
+    A = np.ascontiguousarray(rng.normal(size=(3, 2)))
+    B = np.ascontiguousarray(rng.normal(size=(2, 4)))
+    uninitialized = np.full((3, 4), poison)
+
+    np.testing.assert_allclose(
+        _gemm(A, B, uninitialized.copy(), False, False, 1.0, 0.0), A @ B
+    )
+    np.testing.assert_allclose(
+        _gemm_jit(A, B, uninitialized.copy(), False, False, 1.0, 0.0), A @ B
+    )
