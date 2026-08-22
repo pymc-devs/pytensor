@@ -3046,9 +3046,9 @@ class Dot(Op):
     -----
     Matrix-matrix products are sometimes optimized to Dot22 or Gemm ops
     (see tensor.blas).
-    Vector-vector products are sometimes optimized to Ger or CGer (see
+    Vector-vector products are sometimes optimized to Ger (see
     tensor.blas).
-    Matrix-vector products are sometimes optimized to Gemv, CGemv (see
+    Matrix-vector products are sometimes optimized to Gemv (see
     tensor.blas).
 
     """
@@ -3197,9 +3197,9 @@ def dense_dot(a, b):
     -----
     Matrix-matrix products are sometimes optimized to Dot22 or Gemm ops
     (see tensor.blas).
-    Vector-vector products are sometimes optimized to Ger or CGer (see
+    Vector-vector products are sometimes optimized to Ger (see
     tensor.blas).
-    Matrix-vector products are sometimes optimized to Gemv, CGemv (see
+    Matrix-vector products are sometimes optimized to Gemv (see
     tensor.blas).
 
     """
