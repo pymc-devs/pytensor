@@ -312,17 +312,32 @@ register_implies(PERMUTATION, SELECTION, ORTHOGONAL)
 
 
 def register_assumption(
-    key: AssumptionKey, *op_types: type
+    key: AssumptionKey, *op_types: type, prepend: bool = False
 ) -> Callable[[InferFactFn], InferFactFn]:
     """Decorator that registers an inference rule for ``(key, op_type)`` pairs.
 
     The decorated function is called as ``fn(key, op, feature, fgraph, node, input_states)``
     and must return a list of :class:`FactState` with one entry per node output.
+
+    Parameters
+    ----------
+    key : AssumptionKey
+        The property the rule infers.
+    *op_types : type
+        Op classes the rule applies to.
+    prepend : bool, optional
+        Run this rule ahead of those already registered for the same pair rather than
+        after them. Rules are tried in order until one returns a non-UNKNOWN state, so
+        this is how a key overrides a rule it inherited from a bundle. Default False.
     """
 
     def decorator(fn: InferFactFn) -> InferFactFn:
         for op_type in op_types:
-            ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), []).append(fn)
+            rules = ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), [])
+            if prepend:
+                rules.insert(0, fn)
+            else:
+                rules.append(fn)
         return fn
 
     return decorator

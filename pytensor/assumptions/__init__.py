@@ -14,6 +14,7 @@ import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
 import pytensor.assumptions.symmetric
 import pytensor.assumptions.triangular
+from pytensor.assumptions.bundles import register_matrix_property_rules
 from pytensor.assumptions.core import (
     ALL_KEYS,
     DIAGONAL,
