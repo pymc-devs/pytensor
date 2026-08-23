@@ -3,7 +3,11 @@ from collections.abc import Callable
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.helpers import _exp, _working_precision
+from pytensor.link.mlx.dispatch.scalar.helpers import (
+    _exp,
+    _metal_constants,
+    _working_precision,
+)
 from pytensor.scalar.math import Erfc, Erfcx
 
 
@@ -73,16 +77,6 @@ _ERF_THRESH = 0.46875
 _ERFCX_SPLIT = 4.0
 
 
-def _metal_constants(**arrays):
-    """Render Python float tuples as Metal ``constant`` arrays, one per keyword."""
-    return "\n".join(
-        f"constant float {name}[{len(values)}] = {{"
-        + ", ".join(f"{v!r}f" for v in values)
-        + "};"
-        for name, values in arrays.items()
-    )
-
-
 # Generating the coefficients rather than transcribing them keeps the two implementations
 # from drifting apart, and emitting them as named Metal arrays keeps everything below this
 # point ordinary Metal: only the numbers are generated, not the surrounding code.
@@ -138,22 +132,21 @@ static inline float erfcx_upper(float y) {
     float r = z * (num + ERFCX_P[4]) / (den + ERFCX_Q[4]);
     return (SQRT_PI_INV - r) / y;
 }
+
+// erfc over the whole line, from the two half-line pieces above
+static inline float erfc_full(float value) {
+    float y = fabs(value);
+    float res = (y <= ERF_THRESH) ? 1.0f - erf_series(y)
+                                  : exp(-y * y) * erfcx_upper(y);
+    return (value < 0.0f) ? 2.0f - res : res;
+}
 """
 )
 
 
 _METAL_ERFC_SOURCE = """
     uint i = thread_position_in_grid.x;
-    float xv = (float)x[i];
-    float y = fabs(xv);
-    float res;
-    if (y <= ERF_THRESH) {
-        res = 1.0f - erf_series(y);
-    } else {
-        res = exp(-y * y) * erfcx_upper(y);
-    }
-    if (xv < 0.0f) res = 2.0f - res;
-    out[i] = (T)res;
+    out[i] = (T)erfc_full((float)x[i]);
 """
 
 
