@@ -1,5 +1,5 @@
 from collections import deque
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import IntFlag, auto
 from typing import Any
@@ -125,7 +125,7 @@ class AssumptionKey:
     def __repr__(self) -> str:
         return self.name
 
-    def assume(self, x: TensorLike, *, state: bool = True) -> Variable:
+    def assume(self, x: TensorLike, *, state: bool = True):
         """Return a view of *x* declaring this assumption.
 
         Parameters
@@ -232,22 +232,22 @@ def register_universal_assumption(
     return decorator
 
 
-class KeyRegistryView(Sequence[AssumptionKey]):
-    """Live, read-only sequence of every registered :class:`AssumptionKey`."""
+class KeyRegistryView:
+    """Live, read-only view of every registered :class:`AssumptionKey`."""
 
     __slots__ = ()
 
-    def __getitem__(self, index: int) -> AssumptionKey:
-        return tuple(KEY_REGISTRY.values())[index]
-
     def __iter__(self) -> Iterator[AssumptionKey]:
         # Snapshot: a rule that constructs a key would otherwise resize the registry
-        # mid-iteration. Defining this at all keeps iteration off the inherited
-        # ``Sequence.__iter__``, which walks ``__getitem__`` index by index.
+        # mid-iteration.
         return iter(tuple(KEY_REGISTRY.values()))
 
-    def __contains__(self, value) -> bool:
-        return KEY_REGISTRY.get(getattr(value, "name", None)) == value
+    def __contains__(self, value: object) -> bool:
+        # Only a key can be registered, so the isinstance both guards the ``name``
+        # access and lets the lookup be a hit rather than a scan.
+        return (
+            isinstance(value, AssumptionKey) and KEY_REGISTRY.get(value.name) == value
+        )
 
     def __len__(self) -> int:
         return len(KEY_REGISTRY)
