@@ -111,19 +111,20 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
+@node_rewriter([blockwise_of(Solve)])
 def psd_solve_to_chol_solve(fgraph, node):
     """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
-    assume_a = node.op.core_op.assume_a
+    core_op = node.op.core_op
     A, b = node.inputs
     if (
-        assume_a == "pos"
+        core_op.assume_a == "pos"
         or getattr(A.tag, "psd", None) is True
         or check_assumption(fgraph, A, POSITIVE_DEFINITE)
     ):
+        b_ndim = core_op.b_ndim
         L = cholesky(A)
-        Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
-        x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=2)
+        Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
+        x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=b_ndim)
         return [x]
 
 
