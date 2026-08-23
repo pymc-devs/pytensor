@@ -1,3 +1,5 @@
+import pickle
+
 import pytest
 
 import pytensor.tensor as pt
@@ -10,6 +12,7 @@ from pytensor.assumptions import (
     register_assumption,
     register_universal_assumption,
 )
+from pytensor.assumptions.core import ASSUMPTION_INFER_REGISTRY
 from pytensor.assumptions.specify import SpecifyAssumptions, assume
 from pytensor.printing import debugprint
 from pytensor.tensor.basic import AllocDiag, alloc_diag
@@ -152,3 +155,42 @@ def test_drain_resolves_extension_key():
         isinstance(node.op, SpecifyAssumptions) for node in fgraph.apply_nodes
     )
     assert af.check(x, TIME_VARYING)
+
+
+def test_graph_carries_keys_not_names():
+    """The declaration holds the key itself, so it cannot name an unregistered fact."""
+    TIME_VARYING = AssumptionKey("time_varying", short_name="tv")
+    x_tv = assume(pt.tensor3("x"), time_varying=True)
+    assert x_tv.owner.op.assumptions == ((TIME_VARYING, FactState.TRUE),)
+
+
+def test_declaring_by_name_is_rejected():
+    AssumptionKey("time_varying", short_name="tv")
+    with pytest.raises(TypeError, match="not by name"):
+        SpecifyAssumptions({"time_varying": FactState.TRUE})
+
+
+def test_key_survives_a_pickle_round_trip():
+    """A key restored from a cached graph re-registers and keeps its universal rules."""
+    key = AssumptionKey("time_varying", short_name="tv")
+    blob = pickle.dumps(key)
+    del KEY_REGISTRY["time_varying"]
+
+    restored = pickle.loads(blob)
+
+    assert KEY_REGISTRY["time_varying"] == restored
+    assert (restored, SpecifyAssumptions) in ASSUMPTION_INFER_REGISTRY
+    assert restored.holds(restored.assume(pt.tensor3("x")))
+
+
+def test_pickled_graph_keeps_its_declaration():
+    """A graph outliving the library that declared its key still drains the fact."""
+    key = AssumptionKey("time_varying", short_name="tv")
+    blob = pickle.dumps(key.assume(pt.tensor3("x")))
+    del KEY_REGISTRY["time_varying"]
+
+    restored_graph = pickle.loads(blob)
+    [(restored_key, state)] = restored_graph.owner.op.assumptions
+
+    assert state is FactState.TRUE
+    assert restored_key.holds(restored_graph)

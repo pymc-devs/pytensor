@@ -1,4 +1,4 @@
-from pytensor.assumptions import KEY_REGISTRY, AssumptionFeature
+from pytensor.assumptions import AssumptionFeature
 from pytensor.assumptions.specify import SpecifyAssumptions
 from pytensor.compile.mode import optdb
 from pytensor.graph.rewriting.basic import GraphRewriter
@@ -35,8 +35,8 @@ class DrainSpecifyAssumptions(GraphRewriter):
         for node in nodes:
             [out] = node.outputs
             # Resolve the asserted facts into the cache.
-            for name, _ in node.op.assumptions:
-                assumption_feature.get(out, KEY_REGISTRY[name])
+            for key, _ in node.op.assumptions:
+                assumption_feature.get(out, key)
             # Drain the marker: redirect its consumers to the raw input, peeling
             # already-drained nested SpecifyAssumptions -- ``nodes`` is in toposort
             # order, so a single replace_all collapses ``assume(assume(...))`` chains

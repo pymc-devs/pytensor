@@ -116,6 +116,12 @@ class AssumptionKey:
         for op_types, fn in UNIVERSAL_RULES:
             _install_rule(self, op_types, fn)
 
+    def __reduce__(self):
+        # Unpickle through the constructor: the default dataclass path skips __init__,
+        # leaving a key that is in no registry and has no rules installed -- not even
+        # the one that reads declarations back off SpecifyAssumptions.
+        return type(self), (self.name, self.short_name)
+
     def __repr__(self) -> str:
         return self.name
 
@@ -137,7 +143,7 @@ class AssumptionKey:
         from pytensor.assumptions.specify import SpecifyAssumptions
 
         fact = FactState.TRUE if state else FactState.FALSE
-        return SpecifyAssumptions({self.name: fact})(x)
+        return SpecifyAssumptions({self: fact})(x)
 
     def holds(self, var: Variable, fgraph: FunctionGraph | None = None) -> bool:
         """Return True iff this assumption is provably TRUE for *var*.
@@ -184,8 +190,9 @@ InferFactFn = Callable[
 ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], list[InferFactFn]] = {}
 
 # Every AssumptionKey ever constructed, by name. Downstream libraries join the system
-# by constructing a key; nothing else is required of them. This is what resolves the
-# names :func:`assume` takes as keywords.
+# by constructing a key; nothing else is required of them. This resolves the names
+# :func:`assume` takes as keywords -- graphs themselves carry keys, not names, so
+# nothing downstream of graph construction needs to look anything up here.
 KEY_REGISTRY: dict[str, AssumptionKey] = {}
 
 # Rules that hold for every key regardless of what the key means, as (op_types, fn)

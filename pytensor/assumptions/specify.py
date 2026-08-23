@@ -2,6 +2,7 @@ from collections.abc import Sequence
 
 from pytensor.assumptions.core import (
     KEY_REGISTRY,
+    AssumptionKey,
     FactState,
     register_universal_assumption,
 )
@@ -14,26 +15,42 @@ from pytensor.tensor.basic import as_tensor_variable
 class SpecifyAssumptions(TypeCastingOp):
     """No-op that declares structural assumptions on a tensor for use by graph rewrites.
 
-    ``assumptions`` is a tuple of ``(name, FactState)`` pairs sorted by ``name``, where
-    ``name`` matches the name of an :class:`AssumptionKey`. Two instances with the same
-    fact set compare equal via ``__props__``, so PyTensor's graph merge collapses
-    duplicates.
+    ``assumptions`` is a tuple of ``(AssumptionKey, FactState)`` pairs sorted by key
+    name. Declaring a fact therefore requires holding the key itself, and constructing
+    a key registers it, so a graph cannot carry an assumption the system has never
+    heard of. Two instances with the same fact set compare equal via ``__props__``, so
+    PyTensor's graph merge collapses duplicates.
+
+    Parameters
+    ----------
+    assumptions : dict mapping AssumptionKey to FactState
+        The facts to declare.
     """
 
     __props__ = ("assumptions",)
 
-    assumptions: tuple[tuple[str, FactState], ...]
+    assumptions: tuple[tuple[AssumptionKey, FactState], ...]
 
-    def __init__(self, assumptions: dict[str, FactState]):
+    def __init__(self, assumptions: dict[AssumptionKey, FactState]):
         super().__init__()
+        passed_by_name = [
+            key for key in assumptions if not isinstance(key, AssumptionKey)
+        ]
+        if passed_by_name:
+            raise TypeError(
+                f"SpecifyAssumptions is keyed by AssumptionKey, not by name: "
+                f"{passed_by_name!r}. Pass the key objects, or declare by name "
+                f"with assume()."
+            )
         self.assumptions = tuple(
-            (name, FactState(state)) for name, state in sorted(assumptions.items())
+            (key, FactState(state))
+            for key, state in sorted(assumptions.items(), key=lambda kv: kv[0].name)
         )
 
     def __str__(self):
         facts = ", ".join(
-            name if state is FactState.TRUE else f"!{name}"
-            for name, state in self.assumptions
+            key.name if state is FactState.TRUE else f"!{key.name}"
+            for key, state in self.assumptions
         )
         return f"{type(self).__name__}{{{facts}}}"
 
@@ -58,8 +75,8 @@ def specify_assumption_rule(key, op, feature, fgraph, node, input_states):
     from the input. The join surfaces ``ConflictingAssumptionsError`` when the user
     asserts a state that contradicts what the system can prove (e.g. asserting
     ``diagonal=False`` on something proved diagonal)."""
-    for name, state in op.assumptions:
-        if name == key.name:
+    for declared_key, state in op.assumptions:
+        if declared_key == key:
             return [FactState.join(state, input_states[0])]
     return [input_states[0]]
 
@@ -153,7 +170,7 @@ def assume(
         )
 
     declared = {
-        name: FactState.TRUE if value else FactState.FALSE
+        KEY_REGISTRY[name]: FactState.TRUE if value else FactState.FALSE
         for name, value in (core_values | assumptions).items()
         if value is not None
     }
