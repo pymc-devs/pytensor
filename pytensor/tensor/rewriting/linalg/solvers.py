@@ -15,6 +15,7 @@ from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.basic import atleast_Nd, split
+from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -34,6 +35,7 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
     tridiagonal_lu_factor,
     tridiagonal_lu_solve,
 )
+from pytensor.tensor.math import Dot, _matmul
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -702,3 +704,98 @@ optdb.register(
     "jax",
     position=0.9,  # Run before canonicalization
 )
+
+
+def _peel_shuffles_of_quadratic_form(var):
+    r"""Strip DimShuffles that leave a quadratic form's reading intact.
+
+    Adding or dropping broadcastable axes is safe, and so is the matrix transpose that
+    writes the form as :math:`x^\top M x`. Any other permutation of the retained axes
+    changes which axis the surrounding dot contracts.
+    """
+    while (owner := var.owner) is not None and isinstance(owner.op, DimShuffle):
+        op = owner.op
+        axes_kept_in_order = tuple(sorted(op.shuffle)) == op.shuffle
+        if not (axes_kept_in_order or op.is_left_expanded_matrix_transpose):
+            break
+        var = owner.inputs[0]
+    return var
+
+
+@register_specialize
+@node_rewriter([Dot, _matmul, BatchedDot])
+def quadratic_form_to_single_solve(fgraph, node):
+    r"""Halve the substitutions in the quadratic form :math:`b^\top K^{-1} b`.
+
+    Applying :math:`K^{-1}` to :math:`b` costs a forward *and* a back substitution, but a
+    surrounding dot against the same :math:`b` contracts the result straight back to a
+    scalar. Writing the triangular factor as :math:`C`,
+
+    .. math::
+
+        b^\top K^{-1} b = \lVert C^{-1} b \rVert^2 \quad (K = C C^\top), \\
+        b^\top K^{-1} b = \lVert C^{-\top} b \rVert^2 \quad (K = C^\top C),
+
+    so one triangular solve suffices. Matches ``cho_solve`` and a hand-written pair of
+    transposed triangular solves, whose factor need not come from a Cholesky.
+    """
+    [out] = node.outputs
+    # A quadratic form contracts both core axes away, leaving them singleton.
+    if out.type.ndim < 2 or any(dim != 1 for dim in out.type.shape[-2:]):
+        return None
+
+    # Either input may hold the solve, under the shuffles its variant puts on each side.
+    left, right = (_peel_shuffles_of_quadratic_form(inp) for inp in node.inputs)
+    for solve_side, other in ((left, right), (right, left)):
+        owner = solve_side.owner
+        if owner is None:
+            continue
+        core_op = owner.op
+        if isinstance(core_op, Blockwise):
+            core_op = core_op.core_op
+
+        if isinstance(core_op, CholeskySolve):
+            factor, b = owner.inputs[:2]
+            if (
+                _peel_shuffles_of_quadratic_form(b) is not other
+                # The cho_solve would stay for its other consumers, making the new
+                # solve a third substitution rather than a replacement for the second.
+                or len(fgraph.clients[solve_side]) > 1
+                # cho_solve reads a complex K as C C^H, which the plain transpose of
+                # the surrounding dot does not undo.
+                or factor.type.dtype.startswith("complex")
+            ):
+                continue
+            lower, b_ndim = core_op.lower, core_op.b_ndim
+            # An upper factor means K = C.T @ C, so the single solve is against C.T.
+            z = solve_triangular(
+                factor, b, lower=lower, trans=0 if lower else 1, b_ndim=b_ndim
+            )
+            break
+
+        if isinstance(core_op, SolveTriangular):
+            # solve_triangular(A.mT, solve_triangular(A, b, lower=l), lower=not l),
+            # which is also what the user-facing ``trans`` flag lowers to. The inner
+            # solve is kept, so the rewrite pays off however many clients it has.
+            factor_T, inner = owner.inputs
+            match (factor_T.owner_op_and_inputs, inner.owner_op_and_inputs):
+                case (
+                    (DimShuffle(is_left_expanded_matrix_transpose=True), factor),
+                    (Blockwise(SolveTriangular() as inner_op), inner_factor, b),
+                ) if (
+                    inner_factor is factor
+                    and inner_op.lower != core_op.lower
+                    and inner_op.unit_diagonal == core_op.unit_diagonal
+                    and _peel_shuffles_of_quadratic_form(b) is other
+                ):
+                    z, b_ndim = inner, inner_op.b_ndim
+                    break
+    else:
+        return None
+
+    core_axes = tuple(range(z.type.ndim - b_ndim, z.type.ndim))
+    # Restore the singleton core axes the dot contracted away. Not via ``out.shape``,
+    # which would make the replacement depend on the node it replaces.
+    quad = pt.shape_padright((z * z).sum(axis=core_axes), 2)
+    copy_stack_trace(out, quad)
+    return [quad]

@@ -29,11 +29,12 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
     SolveLUFactorTridiagonal,
 )
 from pytensor.tensor.rewriting.linalg.solvers import (
+    quadratic_form_to_single_solve,
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor, vector
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_generic_solve_to_solve_triangular():
@@ -663,3 +664,171 @@ def test_orthogonal_solve_to_transpose_matmul():
     rewritten = rewrite_graph(out, include=rewrites)
     expected = rewrite_graph(Q_orth.mT @ b, include=rewrites)
     assert_equal_computations([rewritten], [expected])
+
+
+# The rewrite is registered in specialize, and reaching it needs the earlier passes:
+# canonicalize lowers the dot, stabilize turns a positive-definite solve into a
+# Cholesky pair.
+REWRITE_PASSES = ("canonicalize", "stabilize", "specialize")
+
+
+class TestQuadraticFormToSingleSolve:
+    # Inputs for the table of graphs the rewrite must leave alone.
+    psd = matrix("psd", shape=(6, 6))
+    dense = matrix("dense", shape=(6, 6))
+    tri_factor = matrix("tri_factor", shape=(6, 6))
+    other_tri_factor = matrix("other_tri_factor", shape=(6, 6))
+    lhs, rhs = vector("lhs", shape=(6,)), vector("rhs", shape=(6,))
+    complex_psd = matrix("complex_psd", shape=(4, 4), dtype="complex128")
+    complex_rhs = vector("complex_rhs", shape=(4,), dtype="complex128")
+    chol = cholesky(psd, lower=True)
+    cho_solved = cho_solve((chol, True), rhs)
+    inner_solve = solve_triangular(tri_factor, rhs, lower=True)
+
+    @pytest.mark.parametrize(
+        "solve_on_left", [False, True], ids=["solve_on_right", "solve_on_left"]
+    )
+    @pytest.mark.parametrize("batch", [(), (4,)], ids=["unbatched", "batched"])
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_cho_solve_variant(self, lower, batch, solve_on_left):
+        """An upper factor means ``cho_solve`` reads ``K = C.T @ C``, so the single
+        remaining solve is against ``C.T``."""
+        K = tensor("K", shape=(*batch, 6, 6))
+        y = tensor("y", shape=(*batch, 6))
+        factor = cholesky(K, lower=lower)
+        solved = cho_solve((factor, lower), y, b_ndim=1)
+        quad = (
+            solved[..., None, :] @ y[..., :, None]
+            if solve_on_left
+            else y[..., None, :] @ solved[..., :, None]
+        )
+
+        result = RewriteTester([K, y], [quad.squeeze((-2, -1))], include=REWRITE_PASSES)
+
+        z = solve_triangular(factor if lower else factor.mT, y, lower=True, b_ndim=1)
+        result.assert_graph(pt.sqr(z).sum(axis=-1))
+
+        rng = np.random.default_rng(0)
+        M = rng.normal(size=(*batch, 6, 6))
+        result.assert_eval(
+            M @ np.swapaxes(M, -1, -2) + 6 * np.eye(6), rng.normal(size=(*batch, 6))
+        )
+
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    @pytest.mark.parametrize(
+        "unit_diagonal", [False, True], ids=["stored_diagonal", "unit_diagonal"]
+    )
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_paired_solves_variant(self, lower, unit_diagonal, dtype):
+        """``b.T @ A^-T @ A^-1 @ b`` is the squared norm of the inner solve for any
+        invertible ``A``, Cholesky factor or not, and for any dtype: both transposes are
+        unconjugated. The inner solve is kept, so another consumer of it does not hold
+        the rewrite back."""
+        C = matrix("C", shape=(6, 6), dtype=dtype)
+        y = vector("y", shape=(6,), dtype=dtype)
+        inner = solve_triangular(C, y, lower=lower, unit_diagonal=unit_diagonal)
+        outer = solve_triangular(
+            C.mT, inner, lower=not lower, unit_diagonal=unit_diagonal
+        )
+
+        result = RewriteTester(
+            [C, y], [y @ outer, pt.exp(inner)], include=REWRITE_PASSES
+        )
+
+        result.assert_graph(pt.sqr(inner).sum(axis=-1), pt.exp(inner))
+
+        rng = np.random.default_rng(7)
+        M = rng.normal(size=(6, 6)) + 6 * np.eye(6)
+        y_val = rng.normal(size=6)
+        if dtype == "complex128":
+            M = M + 1j * rng.normal(size=(6, 6))
+            y_val = y_val + 1j * rng.normal(size=6)
+        result.assert_eval(np.tril(M) if lower else np.triu(M), y_val)
+
+    @pytest.mark.parametrize(
+        "transposed", [False, True], ids=["promoted", "transposed"]
+    )
+    def test_column_right_hand_side(self, transposed):
+        """A matrix rhs of one column is a quadratic form under DimShuffles: promoting a
+        vector and indexing back down, or a column already written as ``x.mT @ ...``."""
+        K = matrix("K", shape=(6, 6))
+        L = cholesky(K, lower=True)
+        x = matrix("x", shape=(6, 1)) if transposed else vector("x", shape=(6,))
+        solved = cho_solve((L, True), x if transposed else x[:, None])
+        out = x.mT @ solved if transposed else x @ solved[:, 0]
+
+        result = RewriteTester([K, x], [out], include=REWRITE_PASSES)
+
+        z = solve_triangular(
+            L, x if transposed else pt.expand_dims(x, 1), lower=True, b_ndim=2
+        ).squeeze(1)
+        quad = pt.sqr(z).sum(axis=-1)
+        result.assert_graph(pt.expand_dims(quad, (0, 1)) if transposed else quad)
+
+        rng = np.random.default_rng(5)
+        M = rng.normal(size=(6, 6))
+        result.assert_eval(
+            M @ M.T + 6 * np.eye(6), rng.normal(size=(6, 1) if transposed else 6)
+        )
+
+    @pytest.mark.parametrize(
+        "inputs, outputs",
+        [
+            pytest.param(
+                [psd, dense],
+                [dense @ cho_solve((chol, True), dense)],
+                id="core_axes_survive",
+            ),
+            pytest.param(
+                [psd, lhs, rhs],
+                [lhs @ cho_solve((chol, True), rhs)],
+                id="contracted_against_other",
+            ),
+            # cho_solve reads a complex K as C @ C.conj().T, which the dot's
+            # unconjugated transpose does not undo into a squared norm.
+            pytest.param(
+                [complex_psd, complex_rhs],
+                [complex_rhs @ cho_solve((cholesky(complex_psd), True), complex_rhs)],
+                id="complex_cho_solve",
+            ),
+            # The cho_solve stays for its other consumer, so collapsing the quadratic
+            # form would add a third substitution instead of removing one.
+            pytest.param(
+                [psd, rhs],
+                [rhs @ cho_solved, pt.exp(cho_solved)],
+                id="reused_cho_solve",
+            ),
+            pytest.param(
+                [tri_factor, other_tri_factor, rhs],
+                [rhs @ solve_triangular(other_tri_factor.mT, inner_solve, lower=False)],
+                id="outer_factor_does_not_undo_inner",
+            ),
+            pytest.param(
+                [tri_factor, rhs],
+                [
+                    rhs
+                    @ solve_triangular(
+                        tri_factor.mT, inner_solve, lower=False, unit_diagonal=True
+                    )
+                ],
+                id="unit_diagonal_mismatch",
+            ),
+        ],
+    )
+    def test_not_applied(self, inputs, outputs):
+        """Each of these looks like a quadratic form somewhere and is not one, so the
+        graph has to come out as the other passes left it."""
+        rewritten = RewriteTester(inputs, outputs, include=REWRITE_PASSES)
+        untouched = RewriteTester(
+            inputs,
+            outputs,
+            include=REWRITE_PASSES,
+            exclude=(quadratic_form_to_single_solve.name,),
+        )
+
+        assert_equal_computations(
+            rewritten.rewr_fg.outputs,
+            untouched.rewr_fg.outputs,
+            in_xs=rewritten.rewr_fg.inputs,
+            in_ys=untouched.rewr_fg.inputs,
+        )
