@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from pytensor.assumptions.core import ALL_KEYS, FactState, register_assumption
+from pytensor.assumptions.core import FactState, register_universal_assumption
 from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Apply, Variable
 from pytensor.tensor import TensorLike
@@ -48,6 +48,7 @@ class SpecifyAssumptions(TypeCastingOp):
         return list(output_cotangents)
 
 
+@register_universal_assumption(SpecifyAssumptions)
 def specify_assumption_rule(key, op, feature, fgraph, node, input_states):
     """Report the declared state for ``key`` joined with whatever inference derived
     from the input. The join surfaces ``ConflictingAssumptionsError`` when the user
@@ -103,7 +104,6 @@ def assume(
         aliases a non-negative one (e.g. ``-1`` and ``n-1``). Such an index can
         never enlarge the axis it indexes, so it can be lifted earlier through
         operations without risk of duplicating computation.
-
     Returns
     -------
     out : TensorVariable
@@ -111,10 +111,13 @@ def assume(
 
     Examples
     --------
-    >>> import pytensor.tensor as pt
-    >>> x = pt.dmatrix("x")
-    >>> x_diag = assume(x, diagonal=True)
-    >>> x_not_sym = assume(x, symmetric=False)
+    .. code-block:: python
+
+        import pytensor.tensor as pt
+
+        x = pt.dmatrix("x")
+        x_diag = assume(x, diagonal=True)
+        x_not_sym = assume(x, symmetric=False)
     """
     if not isinstance(x, Variable):
         x = as_tensor_variable(x)
@@ -130,17 +133,13 @@ def assume(
         "permutation": permutation,
         "unique_indices": unique_indices,
     }
-    assumptions = {
+    declared = {
         name: FactState.TRUE if value else FactState.FALSE
         for name, value in values.items()
         if value is not None
     }
 
-    if not assumptions:
+    if not declared:
         return x
 
-    return SpecifyAssumptions(assumptions)(x)
-
-
-for _key in ALL_KEYS:
-    register_assumption(_key, SpecifyAssumptions)(specify_assumption_rule)
+    return SpecifyAssumptions(declared)(x)

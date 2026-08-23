@@ -1,5 +1,5 @@
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import IntFlag, auto
 from typing import Any
@@ -41,12 +41,41 @@ class FactState(IntFlag):
 class AssumptionKey:
     """Identifies a named structural property (e.g. "diagonal" or "triangular").
 
-    ``short_name`` is an abbreviated label used by ``debugprint(print_assumptions=True)``;
-    it falls back to ``name`` when empty.
+    Constructing a key registers it in :data:`KEY_REGISTRY` and installs every rule
+    declared with :func:`register_universal_assumption` for it, which is all a
+    downstream library must do to add a property of its own.
+
+    ``name`` is the key's identity: two keys may not share one unless they are
+    identical in every field.
+
+    Parameters
+    ----------
+    name : str
+        Unique identifier for the property.
+    short_name : str, optional
+        Abbreviated label used by ``debugprint(print_assumptions=True)``. Falls back
+        to ``name`` when empty.
     """
 
     name: str
     short_name: str = ""
+
+    def __post_init__(self) -> None:
+        registered = KEY_REGISTRY.get(self.name)
+        if registered is not None:
+            if registered != self:
+                raise ValueError(
+                    f"An assumption named {self.name!r} is already registered as "
+                    f"{registered!r} with different metadata. Assumption names are "
+                    f"global identifiers; pick a distinct one."
+                )
+            # Re-creating an identical key (a module imported twice) is a no-op:
+            # equal keys hash alike, so the installed rules already apply to it.
+            return
+
+        KEY_REGISTRY[self.name] = self
+        for op_types, fn in UNIVERSAL_RULES:
+            _install_rule(self, op_types, fn)
 
     def __repr__(self) -> str:
         return self.name
@@ -71,6 +100,71 @@ InferFactFn = Callable[
 # The global inference registry maps (AssumptionKey, Op type) pairs to lists of inference functions.
 # Rules are tried in registration order; the first to return TRUE wins.
 ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], list[InferFactFn]] = {}
+
+# Every AssumptionKey ever constructed, by name. Downstream libraries join the system
+# by constructing a key; nothing else is required of them.
+KEY_REGISTRY: dict[str, AssumptionKey] = {}
+
+# Rules that hold for every key regardless of what the key means, as (op_types, fn)
+# pairs. Kept separately from ASSUMPTION_INFER_REGISTRY so that keys created *after*
+# the rule is declared still receive it -- see AssumptionKey.__post_init__.
+UNIVERSAL_RULES: list[tuple[tuple[type, ...], InferFactFn]] = []
+
+
+def _install_rule(
+    key: AssumptionKey, op_types: tuple[type, ...], fn: InferFactFn
+) -> None:
+    for op_type in op_types:
+        ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), []).append(fn)
+
+
+def register_universal_assumption(
+    *op_types: type,
+) -> Callable[[InferFactFn], InferFactFn]:
+    """Decorator registering an inference rule that applies to *every* assumption key.
+
+    Use this for rules that are indifferent to what the property means -- an Op that
+    forwards its input unchanged, or one that delegates to another Op. The rule is
+    installed for keys that already exist and for every key created later.
+
+    Parameters
+    ----------
+    *op_types : type
+        Op classes the rule applies to.
+    """
+
+    def decorator(fn: InferFactFn) -> InferFactFn:
+        UNIVERSAL_RULES.append((op_types, fn))
+        for key in KEY_REGISTRY.values():
+            _install_rule(key, op_types, fn)
+        return fn
+
+    return decorator
+
+
+class KeyRegistryView(Sequence[AssumptionKey]):
+    """Live, read-only sequence of every registered :class:`AssumptionKey`."""
+
+    __slots__ = ()
+
+    def __getitem__(self, index: int) -> AssumptionKey:
+        return tuple(KEY_REGISTRY.values())[index]
+
+    def __iter__(self) -> Iterator[AssumptionKey]:
+        # Snapshot: a rule that constructs a key would otherwise resize the registry
+        # mid-iteration. Defining this at all keeps iteration off the inherited
+        # ``Sequence.__iter__``, which walks ``__getitem__`` index by index.
+        return iter(tuple(KEY_REGISTRY.values()))
+
+    def __contains__(self, value) -> bool:
+        return KEY_REGISTRY.get(getattr(value, "name", None)) == value
+
+    def __len__(self) -> int:
+        return len(KEY_REGISTRY)
+
+    def __repr__(self) -> str:
+        return f"({', '.join(KEY_REGISTRY)})"
+
 
 # Registry mapping assumptions to other assumptions they imply.  For example, a "diagonal" matrix is also "symmetric"
 # and "triangular".  This is consulted after all other inference rules to derive additional facts.
@@ -116,7 +210,10 @@ MATRIX_KEYS = (
     PERMUTATION,
 )
 
-ALL_KEYS = (*MATRIX_KEYS, UNIQUE_INDICES)
+# Live view rather than a tuple: a key registered by a downstream library shows up here
+# too, so anything that iterates the keys at call time (debugprint, the drain rewrite)
+# covers it without further registration.
+ALL_KEYS = KeyRegistryView()
 
 # Implications about structural properties derivably from other structural properties
 register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC)
