@@ -1,6 +1,10 @@
 from collections.abc import Sequence
 
-from pytensor.assumptions.core import FactState, register_universal_assumption
+from pytensor.assumptions.core import (
+    KEY_REGISTRY,
+    FactState,
+    register_universal_assumption,
+)
 from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Apply, Variable
 from pytensor.tensor import TensorLike
@@ -71,6 +75,7 @@ def assume(
     selection: bool | None = None,
     permutation: bool | None = None,
     unique_indices: bool | None = None,
+    **assumptions: bool | None,
 ):
     """Attach structural assumptions to a symbolic tensor.
 
@@ -104,6 +109,10 @@ def assume(
         aliases a non-negative one (e.g. ``-1`` and ``n-1``). Such an index can
         never enlarge the axis it indexes, so it can be lifted earlier through
         operations without risk of duplicating computation.
+    **assumptions : bool, optional
+        Assumptions registered by downstream libraries, passed by key name, e.g.
+        ``time_varying=True``.
+
     Returns
     -------
     out : TensorVariable
@@ -122,7 +131,7 @@ def assume(
     if not isinstance(x, Variable):
         x = as_tensor_variable(x)
 
-    values = {
+    core_values = {
         "diagonal": diagonal,
         "lower_triangular": lower_triangular,
         "upper_triangular": upper_triangular,
@@ -133,9 +142,19 @@ def assume(
         "permutation": permutation,
         "unique_indices": unique_indices,
     }
+
+    unknown = [name for name in assumptions if name not in KEY_REGISTRY]
+    if unknown:
+        extensions = sorted(KEY_REGISTRY.keys() - core_values.keys())
+        raise ValueError(
+            f"Unknown assumption(s): {', '.join(unknown)}. Registered extension "
+            f"assumptions are: {', '.join(extensions) if extensions else '(none)'}. "
+            f"Register a new one by constructing an AssumptionKey."
+        )
+
     declared = {
         name: FactState.TRUE if value else FactState.FALSE
-        for name, value in values.items()
+        for name, value in (core_values | assumptions).items()
         if value is not None
     }
 

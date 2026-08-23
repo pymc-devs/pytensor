@@ -5,8 +5,10 @@ from enum import IntFlag, auto
 from typing import Any
 
 from pytensor.graph import Apply, FunctionGraph, Op
+from pytensor.graph.basic import Variable
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.traversal import walk_toposort
+from pytensor.tensor import TensorLike
 from pytensor.tensor.variable import TensorConstant
 
 
@@ -45,16 +47,53 @@ class AssumptionKey:
     declared with :func:`register_universal_assumption` for it, which is all a
     downstream library must do to add a property of its own.
 
-    ``name`` is the key's identity: two keys may not share one unless they are
-    identical in every field.
+    ``name`` is the key's identity: it is what :func:`assume` accepts as a keyword and
+    what two keys may not share unless they are identical in every field.
 
     Parameters
     ----------
     name : str
-        Unique identifier for the property.
+        Unique identifier for the property, also the keyword :func:`assume` accepts.
     short_name : str, optional
         Abbreviated label used by ``debugprint(print_assumptions=True)``. Falls back
         to ``name`` when empty.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import pytensor.tensor as pt
+        from pytensor.assumptions import AssumptionKey, FactState, register_assumption
+        from pytensor.tensor.elemwise import Elemwise
+
+        TOEPLITZ = AssumptionKey("toeplitz", short_name="toep")
+
+        x = TOEPLITZ.assume(pt.matrix("x"))
+        TOEPLITZ.holds(x)  # True
+        TOEPLITZ.holds(pt.exp(x))  # False -- no rule teaches it about Elemwise yet
+
+    A key answers only what its rules can derive, so teach it the Ops it should see
+    through. Constant diagonals survive an entrywise op, unless an input broadcasts
+    along one of the last two axes while varying along the other:
+
+    .. code-block:: python
+
+        @register_assumption(TOEPLITZ, Elemwise)
+        def _elemwise_is_toeplitz(key, op, feature, fgraph, node, input_states):
+            entrywise = all(
+                feature.check(inp, key)  # the operand is itself Toeplitz
+                or all(inp.type.broadcastable[-2:])  # or broadcasts a single value
+                for inp in node.inputs
+            )
+            return [FactState.TRUE if entrywise else FactState.UNKNOWN]
+
+
+        TOEPLITZ.holds(pt.exp(x))  # True
+        TOEPLITZ.holds(x + x)  # True
+        TOEPLITZ.holds(x + pt.vector("v"))  # False -- the row varies along one axis
+
+    See :func:`register_matrix_property_rules` for the rules a property of the
+    trailing two axes needs to survive transposes, reshapes, and indexing.
     """
 
     name: str
@@ -80,6 +119,49 @@ class AssumptionKey:
     def __repr__(self) -> str:
         return self.name
 
+    def assume(self, x: TensorLike, *, state: bool = True) -> Variable:
+        """Return a view of *x* declaring this assumption.
+
+        Parameters
+        ----------
+        x : tensor-like
+            The input to annotate.
+        state : bool, optional
+            Whether to assert the property holds or that it does not. Default True.
+
+        Returns
+        -------
+        out : TensorVariable
+            A view of *x* with the assumption attached.
+        """
+        from pytensor.assumptions.specify import SpecifyAssumptions
+
+        fact = FactState.TRUE if state else FactState.FALSE
+        return SpecifyAssumptions({self.name: fact})(x)
+
+    def holds(self, var: Variable, fgraph: FunctionGraph | None = None) -> bool:
+        """Return True iff this assumption is provably TRUE for *var*.
+
+        Parameters
+        ----------
+        var : Variable
+            The variable to ask about.
+        fgraph : FunctionGraph, optional
+            Graph to resolve the question in. Pass one when asking about several
+            variables of the same graph: without it a throwaway ``FunctionGraph`` is
+            built per call, which walks the ancestors of *var* and discards the
+            inference cache afterwards.
+
+        Returns
+        -------
+        holds : bool
+            True when the property is known to hold, False when it is known not to
+            hold or is simply unknown.
+        """
+        if fgraph is None:
+            fgraph = FunctionGraph(outputs=[var], clone=False)
+        return check_assumption(fgraph, var, self)
+
 
 class ConflictingAssumptionsError(ValueError):
     """Raised when joining evidence about a (variable, key) produces ``FactState.CONFLICT``.
@@ -102,7 +184,8 @@ InferFactFn = Callable[
 ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], list[InferFactFn]] = {}
 
 # Every AssumptionKey ever constructed, by name. Downstream libraries join the system
-# by constructing a key; nothing else is required of them.
+# by constructing a key; nothing else is required of them. This is what resolves the
+# names :func:`assume` takes as keywords.
 KEY_REGISTRY: dict[str, AssumptionKey] = {}
 
 # Rules that hold for every key regardless of what the key means, as (op_types, fn)
