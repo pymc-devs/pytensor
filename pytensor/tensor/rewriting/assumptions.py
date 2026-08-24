@@ -30,7 +30,7 @@ def _drain_marker(feature: AssumptionFeature, node) -> Variable:
     for name, _ in node.op.assumptions:
         feature.get(out, _KEY_BY_NAME[name])
 
-    inp = node.inputs[0]
+    inp: Variable = node.inputs[0]
     while inp.owner is not None and isinstance(inp.owner.op, SpecifyAssumptions):
         inp = inp.owner.inputs[0]
     return inp
