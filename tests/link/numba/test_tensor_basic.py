@@ -159,6 +159,24 @@ def test_ARange():
             ),
             1,
         ),
+        # More than two inputs, ragged along the join axis, with dimensions both
+        # ahead of and behind it
+        (
+            (
+                (pt.tensor3(), rng.normal(size=(2, 1, 3)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 2, 3)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 3, 3)).astype(config.floatX)),
+            ),
+            1,
+        ),
+        (
+            (
+                (pt.tensor3(), rng.normal(size=(2, 3, 1)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 3, 2)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 3, 3)).astype(config.floatX)),
+            ),
+            2,
+        ),
     ],
 )
 def test_Join(vals, axis):
