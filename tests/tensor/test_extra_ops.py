@@ -151,12 +151,13 @@ class TestSearchsortedOp(utt.InferShapeTester):
         )
 
     def test_searchsortedOp_on_right_side(self):
+        # searchsorted on unsorted input is undefined behavior, and numpy's
+        # results there depend on its binary search implementation details
+        sa = self.a[self.idx_sorted]
         f = pytensor.function(
             [self.x, self.v], searchsorted(self.x, self.v, side="right")
         )
-        assert np.allclose(
-            np.searchsorted(self.a, self.b, side="right"), f(self.a, self.b)
-        )
+        assert np.allclose(np.searchsorted(sa, self.b, side="right"), f(sa, self.b))
 
     def test_infer_shape(self):
         # Test using default parameters' value
