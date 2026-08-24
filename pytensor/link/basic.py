@@ -619,12 +619,12 @@ class JITLinker(PerformLinker):
         return inp
 
     def output_filter(self, var: Variable, out: Any) -> Any:
-        """Convert a value the JITed function produced into one `pytensor` can store.
+        """Convert a value the JITed function produced into one PyTensor can store.
 
-        Values returned to the caller keep whatever native type the backend produced,
-        but a value written back into a shared variable's container outlives the call
-        and may later be read by a function compiled for another backend. Backends whose
-        arrays are not `numpy` ones override this; the default passes the value through.
+        Only values written back into a shared variable's container pass through here.
+        Those outlive the call and may later be read by a function compiled for another
+        backend, so a backend whose arrays are not NumPy ones overrides this; the default
+        passes the value through.
         """
         return out
 
@@ -673,9 +673,11 @@ class JITLinker(PerformLinker):
 
         # Shared variable updates are the only outputs worth converting, and a backend
         # that leaves `output_filter` alone pays nothing for the hook.
-        filters_output = type(self).output_filter is not JITLinker.output_filter
+        overrides_output_filter = (
+            type(self).output_filter is not JITLinker.output_filter
+        )
         update_output_idxs = (
-            tuple(self.fgraph.update_mapping or ()) if filters_output else ()
+            tuple(self.fgraph.update_mapping or ()) if overrides_output_filter else ()
         )
 
         if thunk_outputs:
@@ -700,8 +702,10 @@ class JITLinker(PerformLinker):
                     o_storage[0] = o_val
 
                 for idx in update_output_idxs:
-                    o_storage = thunk_outputs[idx]
-                    o_storage[0] = output_filter(fgraph_outputs[idx], o_storage[0])
+                    update_storage = thunk_outputs[idx]
+                    update_storage[0] = output_filter(
+                        fgraph_outputs[idx], update_storage[0]
+                    )
 
         else:
             # Edge case - functions without outputs
