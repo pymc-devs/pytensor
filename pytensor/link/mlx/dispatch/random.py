@@ -64,19 +64,39 @@ def mlx_sample_fn(op, node):
 
 
 @mlx_sample_fn.register(ptr.NormalRV)
-@mlx_sample_fn.register(ptr.LaplaceRV)
-@mlx_sample_fn.register(ptr.GumbelRV)
-def mlx_sample_fn_loc_scale(op, node):
-    """Loc-scale families: MLX names the standard sampler like the Op, so draw
-    it and apply ``loc + scale * z`` (mirrors the JAX dispatch)."""
-    mlx_op = getattr(mx.random, op.name)
-
+def mlx_sample_fn_normal(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
         loc = mx.array(loc, dtype=mlx_dtype)
         scale = mx.array(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
-        return loc + scale * mlx_op(shape=shape, dtype=mlx_dtype, key=rng_key)
+        return loc + scale * mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
+
+    return sample_fn
+
+
+@mlx_sample_fn.register(ptr.LaplaceRV)
+def mlx_sample_fn_laplace(op, node):
+    def sample_fn(rng_key, size, dtype, loc, scale):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        loc = mx.array(loc, dtype=mlx_dtype)
+        scale = mx.array(scale, dtype=mlx_dtype)
+        shape = _shape_from_size(size, loc, scale)
+        return loc + scale * mx.random.laplace(
+            shape=shape, dtype=mlx_dtype, key=rng_key
+        )
+
+    return sample_fn
+
+
+@mlx_sample_fn.register(ptr.GumbelRV)
+def mlx_sample_fn_gumbel(op, node):
+    def sample_fn(rng_key, size, dtype, loc, scale):
+        mlx_dtype = convert_dtype_to_mlx(dtype)
+        loc = mx.array(loc, dtype=mlx_dtype)
+        scale = mx.array(scale, dtype=mlx_dtype)
+        shape = _shape_from_size(size, loc, scale)
+        return loc + scale * mx.random.gumbel(shape=shape, dtype=mlx_dtype, key=rng_key)
 
     return sample_fn
 
@@ -217,7 +237,8 @@ def mlx_sample_fn_exponential(op, node):
         scale = mx.array(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, scale)
         u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
-        return -scale * mx.log(u)
+        # log1p(-u) avoids -inf when u=0 (u is in [0, 1))
+        return -scale * mx.log1p(-u)
 
     return sample_fn
 

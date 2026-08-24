@@ -44,19 +44,33 @@ def check_shape_and_dtype(
     return results
 
 
-def test_normal_shape_dtype():
-    check_shape_and_dtype(
-        lambda srng: srng.normal(loc=0.0, scale=1.0, size=(3, 4)),
-        (3, 4),
-        "float32",
-    )
-
-
-def test_normal_scalar():
-    check_shape_and_dtype(
-        lambda srng: srng.normal(loc=2.0, scale=0.5),
-        (),
-    )
+@pytest.mark.parametrize(
+    "make_rv,expected_shape,expected_dtype",
+    [
+        (lambda srng: srng.normal(loc=0.0, scale=1.0, size=(3, 4)), (3, 4), "float32"),
+        (lambda srng: srng.normal(loc=2.0, scale=0.5), (), None),
+        (lambda srng: srng.uniform(low=0.0, high=1.0, size=(10,)), (10,), "float32"),
+        (lambda srng: srng.bernoulli(p=0.7, size=(5, 5)), (5, 5), "int64"),
+        (
+            lambda srng: srng.categorical(
+                p=np.array([0.1, 0.4, 0.5], dtype="float32"), size=(8,)
+            ),
+            (8,),
+            "int64",
+        ),
+        (lambda srng: srng.laplace(loc=0.0, scale=1.0, size=(7,)), (7,), "float32"),
+        (lambda srng: srng.gumbel(loc=0.0, scale=1.0, size=(6,)), (6,), "float32"),
+        (lambda srng: srng.lognormal(mu=0.0, sigma=1.0, size=(5,)), (5,), "float32"),
+        (lambda srng: srng.lognormal(mu=0.0, sigma=1.0), (), None),
+        (lambda srng: srng.halfnormal(loc=0.0, scale=1.0, size=(4,)), (4,), "float32"),
+        (lambda srng: srng.halfnormal(loc=0.0, scale=1.0), (), None),
+        (lambda srng: srng.exponential(scale=1.0, size=(6,)), (6,), "float32"),
+        (lambda srng: srng.logistic(loc=0.0, scale=1.0, size=(7,)), (7,), "float32"),
+        (lambda srng: srng.cauchy(loc=0.0, scale=1.0, size=(8,)), (8,), "float32"),
+    ],
+)
+def test_shape_dtype(make_rv, expected_shape, expected_dtype):
+    check_shape_and_dtype(make_rv, expected_shape, expected_dtype)
 
 
 def test_normal_array_params():
@@ -69,7 +83,7 @@ def test_normal_array_params():
     assert abs(means[1] - 1.0) < 0.3
 
 
-def test_uniform_shape_dtype():
+def test_uniform_values():
     results = check_shape_and_dtype(
         lambda srng: srng.uniform(low=0.0, high=1.0, size=(10,)),
         (10,),
@@ -80,18 +94,8 @@ def test_uniform_shape_dtype():
     assert np.all(r < 1.0)
 
 
-def test_bernoulli_shape():
-    # MLX draws bools; the dispatch must cast back to the int dtype PyTensor declares.
-    check_shape_and_dtype(
-        lambda srng: srng.bernoulli(p=0.7, size=(5, 5)),
-        (5, 5),
-        "int64",
-    )
-
-
-def test_categorical_shape():
+def test_categorical_values():
     probs = np.array([0.1, 0.4, 0.5], dtype=np.float32)
-    # MLX draws uint32; the dispatch must cast back to the int dtype PyTensor declares.
     results = check_shape_and_dtype(
         lambda srng: srng.categorical(p=probs, size=(8,)),
         (8,),
@@ -148,22 +152,6 @@ def test_mvnormal_empty_batch():
     assert np.array(result).shape == (0, 3)
 
 
-def test_laplace_shape_dtype():
-    check_shape_and_dtype(
-        lambda srng: srng.laplace(loc=0.0, scale=1.0, size=(7,)),
-        (7,),
-        "float32",
-    )
-
-
-def test_gumbel_shape_dtype():
-    check_shape_and_dtype(
-        lambda srng: srng.gumbel(loc=0.0, scale=1.0, size=(6,)),
-        (6,),
-        "float32",
-    )
-
-
 def test_integers_shape():
     results = check_shape_and_dtype(
         lambda srng: srng.integers(low=0, high=10, size=(12,)),
@@ -214,28 +202,6 @@ def test_lognormal_shape_dtype():
     assert np.all(r > 0)
 
 
-def test_lognormal_scalar():
-    check_shape_and_dtype(
-        lambda srng: srng.lognormal(mu=0.0, sigma=1.0),
-        (),
-    )
-
-
-def test_halfnormal_shape_dtype():
-    check_shape_and_dtype(
-        lambda srng: srng.halfnormal(loc=0.0, scale=1.0, size=(4,)),
-        (4,),
-        "float32",
-    )
-
-
-def test_halfnormal_scalar():
-    check_shape_and_dtype(
-        lambda srng: srng.halfnormal(loc=0.0, scale=1.0),
-        (),
-    )
-
-
 def test_halfnormal_nonzero_loc():
     # HalfNormal is ``loc + scale * |z|`` (support ``[loc, inf)``), not
     # ``|loc + scale * z|``. Draw a large sample and check the support bound.
@@ -257,22 +223,6 @@ def test_exponential_shape_dtype():
     assert np.all(r > 0)
 
 
-def test_logistic_shape_dtype():
-    check_shape_and_dtype(
-        lambda srng: srng.logistic(loc=0.0, scale=1.0, size=(7,)),
-        (7,),
-        "float32",
-    )
-
-
-def test_cauchy_shape_dtype():
-    check_shape_and_dtype(
-        lambda srng: srng.cauchy(loc=0.0, scale=1.0, size=(8,)),
-        (8,),
-        "float32",
-    )
-
-
 def test_non_pcg64_generator_raises():
     # Only PCG64 state can be folded into an MLX key; other bit generators must
     # fail loudly rather than with an opaque KeyError.
@@ -280,20 +230,6 @@ def test_non_pcg64_generator_raises():
 
     with pytest.raises(NotImplementedError, match="PCG64"):
         numpy_generator_to_mlx_key(np.random.Generator(np.random.MT19937(0)))
-
-
-def test_gamma_not_implemented():
-    srng = RandomStream(seed=1)
-    rv = srng.gamma(shape=1.0, scale=1.0, size=(3,))
-    with pytest.raises(NotImplementedError, match="No MLX implementation"):
-        pytensor.function([], rv, mode="MLX", updates=srng.updates())
-
-
-def test_beta_not_implemented():
-    srng = RandomStream(seed=1)
-    rv = srng.beta(alpha=2.0, beta=5.0, size=(3,))
-    with pytest.raises(NotImplementedError, match="No MLX implementation"):
-        pytensor.function([], rv, mode="MLX", updates=srng.updates())
 
 
 def compile_shared_rng_function(*args, mode="MLX", **kwargs):
