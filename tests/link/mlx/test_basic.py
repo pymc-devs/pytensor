@@ -394,3 +394,27 @@ def test_shared_updates():
     assert res1 == 5
     assert res2 == 6
     assert a.get_value() == 7
+
+
+def test_shared_updates_are_not_device_arrays():
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
+
+    pytensor_mlx_fn = function([], a, updates={a: a + 1}, mode=mlx_mode)
+    mlx_res = pytensor_mlx_fn()
+
+    # The returned value stays an MLX array, but the one stored back in the shared
+    # variable must not, or any other consumer of the container chokes on it.
+    assert isinstance(mlx_res, mx.array)
+    assert isinstance(a.container.storage[0], np.ndarray)
+    assert isinstance(a.get_value(borrow=True), np.ndarray)
+    np.testing.assert_allclose(a.get_value(), np.array([2, 3, 4], dtype=config.floatX))
+
+
+def test_shared_updates_readable_by_other_backend():
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
+
+    mlx_fn = function([], a, updates={a: a + 1}, mode=mlx_mode)
+    other_fn = function([], a * 2)
+
+    mlx_fn()
+    np.testing.assert_allclose(other_fn(), np.array([4, 6, 8], dtype=config.floatX))

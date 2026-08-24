@@ -1,3 +1,5 @@
+import numpy as np
+
 from pytensor.link.basic import JITLinker
 
 
@@ -57,6 +59,11 @@ class MLXLinker(JITLinker):
             return inner_fn(*(mlx_typify(inp) for inp in inputs))
 
         return fn
+
+    def output_filter(self, var, out):
+        import mlx.core as mx
+
+        return np.asarray(out) if isinstance(out, mx.array) else out
 
     def create_thunk_inputs(self, storage_map):
         """Create inputs for the MLX thunk.
