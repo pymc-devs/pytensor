@@ -145,12 +145,13 @@ def apply_ancestors(
     graphs: Iterable[Variable],
     blockers: Iterable[Variable] | None = None,
 ) -> Generator[Apply, None, None]:
-    """Return the Apply nodes that contribute to those in given graphs (inclusive)."""
+    """Return the Apply nodes that contribute to those in given graphs, excluding the owners of the blockers."""
     seen = {None}  # This filters out Variables without an owner
+    blockers = frozenset(blockers or ())
     for var in ancestors(graphs, blockers):
         # For multi-output nodes, we'll see multiple variables
         # but we should only yield the Apply once
-        if (apply := var.owner) not in seen:
+        if var not in blockers and (apply := var.owner) not in seen:
             yield apply
             seen.add(apply)
     return
