@@ -44,8 +44,8 @@ def test_mlx_solve(assume_a):
         )
 
 
-@pytest.mark.parametrize("lower, trans", [(False, False), (True, True)])
-def test_mlx_SolveTriangular(lower, trans):
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+def test_mlx_SolveTriangular(lower):
     rng = np.random.default_rng(15)
 
     A = pt.tensor("A", shape=(5, 5))
