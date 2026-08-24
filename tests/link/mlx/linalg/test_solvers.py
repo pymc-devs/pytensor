@@ -70,3 +70,61 @@ def test_mlx_SolveTriangular(lower):
             np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
         ),
     )
+
+
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["b_vec", "b_mat"])
+def test_mlx_CholeskySolve(batch_shape, lower, b_ndim):
+    rng = np.random.default_rng(15)
+    n = 5
+    b_shape = (*batch_shape, n) if b_ndim == 1 else (*batch_shape, n, 3)
+
+    C = pt.tensor("C", shape=(*batch_shape, n, n))
+    b = pt.tensor("b", shape=b_shape)
+
+    out = pt.linalg.cho_solve((C, lower), b, b_ndim=b_ndim)
+
+    A_val = rng.normal(size=(*batch_shape, n, n)).astype(config.floatX)
+    A_val = A_val @ np.swapaxes(A_val, -1, -2) + n * np.eye(n, dtype=config.floatX)
+    C_val = np.linalg.cholesky(A_val)
+    if not lower:
+        C_val = np.swapaxes(C_val, -1, -2).copy()
+
+    b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+    compare_mlx_and_py(
+        [C, b],
+        [out],
+        [C_val, b_val],
+        mlx_mode=mlx_mode,
+        assert_fn=partial(
+            np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
+        ),
+    )
+
+
+def test_mlx_CholeskySolve_mixed_dtypes():
+    rng = np.random.default_rng(15)
+    n = 5
+
+    C = pt.tensor("C", shape=(n, n), dtype="float32")
+    b = pt.tensor("b", shape=(n,), dtype="float64")
+
+    out = pt.linalg.cho_solve((C, True), b, b_ndim=1)
+    assert out.type.dtype == "float64"
+
+    A_val = rng.normal(size=(n, n))
+    A_val = A_val @ A_val.T + n * np.eye(n)
+    C_val = np.linalg.cholesky(A_val).astype("float32")
+    b_val = rng.normal(size=(n,))
+
+    compare_mlx_and_py(
+        [C, b],
+        [out],
+        [C_val, b_val],
+        mlx_mode=mlx_mode,
+        assert_fn=partial(
+            np.testing.assert_allclose, atol=1e-5, rtol=1e-5, strict=True
+        ),
+    )

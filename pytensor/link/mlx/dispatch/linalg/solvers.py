@@ -4,6 +4,7 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.linalg.solvers.general import Solve
+from pytensor.tensor.linalg.solvers.psd import CholeskySolve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
 
 
@@ -44,3 +45,22 @@ def mlx_funcify_SolveTriangular(op, node, **kwargs):
         )
 
     return solve_triangular
+
+
+@mlx_funcify.register(CholeskySolve)
+def mlx_funcify_CholeskySolve(op, node, **kwargs):
+    lower = op.lower
+    c_dtype = getattr(mx, node.inputs[0].dtype)
+    b_dtype = getattr(mx, node.inputs[1].dtype)
+
+    # MLX has no cho_solve, so with A = L L.T we solve L y = b then L.T x = y.
+    def cho_solve(c, b):
+        c = c.astype(stream=mx.cpu, dtype=c_dtype)
+        b = b.astype(stream=mx.cpu, dtype=b_dtype)
+        c_T = mx.swapaxes(c, -1, -2, stream=mx.cpu)
+        L, L_T = (c, c_T) if lower else (c_T, c)
+
+        y = mx.linalg.solve_triangular(L, b, upper=False, stream=mx.cpu)
+        return mx.linalg.solve_triangular(L_T, y, upper=True, stream=mx.cpu)
+
+    return cho_solve
