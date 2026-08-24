@@ -6,6 +6,7 @@ import scipy
 
 from pytensor import function
 from pytensor import tensor as pt
+from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import TensorVariable
@@ -206,20 +207,164 @@ class TestSolve(utt.InferShapeTester):
             lambda A, b: solve_op(A_func(A), b), [A_val, b_val], 3, rng, eps=eps
         )
 
+    @staticmethod
+    def _op_names(fn):
+        return [
+            type(getattr(node.op, "core_op", node.op)).__name__
+            for node in fn.maker.fgraph.apply_nodes
+        ]
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Consumers rely on rewrites"
+    )
+    @pytest.mark.parametrize("assume_a", ["sym", "pos", "her"])
+    def test_assume_a_records_an_assumption_about_a(self, assume_a):
+        """``assume_a`` promises a property of ``a``, so other readers of ``a`` get it.
+
+        Nothing else in the graph tells ``eig`` that ``a`` is symmetric, and ``pos``
+        reaches ``eigh`` through the implication that positive definite matrices are.
+        """
+        a, b = matrix("a"), matrix("b")
+        w, _ = pt.linalg.eig(a)
+        fn = function([a, b], [solve(a, b, assume_a=assume_a), w])
+
+        op_names = self._op_names(fn)
+        assert "Eigh" in op_names
+        assert "Eig" not in op_names
+        assert "SpecifyAssumptions" not in op_names, (
+            "the marker must not outlive the drain"
+        )
+
+        rng = np.random.default_rng(31)
+        X = rng.normal(size=(6, 6)).astype(config.floatX)
+        a_val = X @ X.T + 6 * np.eye(6, dtype=config.floatX)
+        b_val = rng.normal(size=(6, 2)).astype(config.floatX)
+
+        ATOL = 1e-8 if config.floatX.endswith("64") else 1e-4
+        RTOL = 1e-8 if config.floatX.endswith("64") else 1e-4
+        solved, eigenvalues = fn(a_val, b_val)
+        np.testing.assert_allclose(
+            solved, np.linalg.solve(a_val, b_val), atol=ATOL, rtol=RTOL
+        )
+        np.testing.assert_allclose(
+            np.sort(eigenvalues), np.linalg.eigvalsh(a_val), atol=ATOL, rtol=RTOL
+        )
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Consumers rely on rewrites"
+    )
+    def test_hermitian_is_not_recorded_as_symmetric_for_complex_input(self):
+        """A complex Hermitian matrix satisfies ``a.conj().T == a``, not ``a.T == a``.
+
+        Recording it as symmetric would license every rewrite that transposes ``a``
+        freely, so the promise stops at the solve for complex dtypes.
+        """
+        a = matrix("a", dtype="complex128")
+        b = matrix("b", dtype="complex128")
+        w, _ = pt.linalg.eig(a)
+        fn = function([a, b], [solve(a, b, assume_a="her"), w])
+
+        op_names = self._op_names(fn)
+        assert "Eig" in op_names
+        assert "Eigh" not in op_names
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Consumers rely on rewrites"
+    )
+    def test_rewrite_built_solve_records_nothing(self):
+        """``inv_to_solve`` builds a solve from an assumption it has already read.
+
+        Recording it again would leave a marker behind, as rewriting runs long after
+        the pass that resolves them.
+        """
+        X, r = matrix("X"), matrix("r")
+        fn = function([X, r], pt.linalg.inv(assume(X, positive_definite=True)) @ r)
+
+        assert "SpecifyAssumptions" not in self._op_names(fn)
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Consumers rely on rewrites"
+    )
+    def test_assume_a_diagonal_records_an_assumption_about_a(self):
+        """``assume_a='diagonal'`` lowers to a division, erasing the promise.
+
+        Recording it first keeps the property available to every other reader of ``a``,
+        each of which drops from a dense op to an elementwise one.
+        """
+        a, b, c = matrix("a"), matrix("b"), matrix("c")
+        fn = function(
+            [a, b, c], [solve(a, b, assume_a="diagonal"), a @ c, pt.linalg.det(a)]
+        )
+
+        op_names = self._op_names(fn)
+        assert "Dot" not in op_names
+        assert "Det" not in op_names
+
+        rng = np.random.default_rng(42)
+        a_val = np.diag(rng.normal(size=6) + 5.0).astype(config.floatX)
+        b_val = rng.normal(size=(6, 2)).astype(config.floatX)
+        c_val = rng.normal(size=(6, 3)).astype(config.floatX)
+
+        ATOL = 1e-8 if config.floatX.endswith("64") else 1e-4
+        RTOL = 1e-8 if config.floatX.endswith("64") else 1e-4
+        solved, product, det = fn(a_val, b_val, c_val)
+        np.testing.assert_allclose(
+            solved, np.linalg.solve(a_val, b_val), atol=ATOL, rtol=RTOL
+        )
+        np.testing.assert_allclose(product, a_val @ c_val, atol=ATOL, rtol=RTOL)
+        np.testing.assert_allclose(det, np.linalg.det(a_val), atol=ATOL, rtol=RTOL)
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Consumers rely on rewrites"
+    )
+    def test_assume_a_reaches_an_untagged_solve_of_the_same_matrix(self):
+        """A second solve that made no promise of its own still picks the property up.
+
+        The two use different right-hand sides so that they cannot simply merge.
+        """
+        a, b, c = matrix("a"), matrix("b"), matrix("c")
+        fn = function([a, b, c], [solve(a, b, assume_a="pos"), solve(a, c)])
+
+        op_names = self._op_names(fn)
+        assert "Solve" not in op_names
+        assert op_names.count("Cholesky") == 1
+        assert op_names.count("CholeskySolve") == 2
+
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE", reason="Consumers rely on rewrites"
+    )
+    def test_no_assumption_recorded_without_a_promise(self):
+        """``assume_a='gen'`` asserts nothing, so nothing is recorded about ``a``."""
+        a, b = matrix("a"), matrix("b")
+        w, _ = pt.linalg.eig(a)
+        fn = function([a, b], [solve(a, b), w])
+
+        op_names = self._op_names(fn)
+        assert "Eig" in op_names
+        assert "Eigh" not in op_names
+        assert "Cholesky" not in op_names
+
     def test_solve_tringular_indirection(self):
+        """The triangular assume_a dispatches to solve_triangular and records itself."""
         a = pt.matrix("a")
         b = pt.vector("b")
 
         indirect = solve(a, b, assume_a="lower triangular")
-        direct = solve_triangular(a, b, lower=True, trans=False)
+        direct = solve_triangular(
+            assume(a, lower_triangular=True), b, lower=True, trans=False
+        )
         assert equal_computations([indirect], [direct])
 
         indirect = solve(a, b, assume_a="upper triangular")
-        direct = solve_triangular(a, b, lower=False, trans=False)
+        direct = solve_triangular(
+            assume(a, upper_triangular=True), b, lower=False, trans=False
+        )
         assert equal_computations([indirect], [direct])
 
         indirect = solve(a, b, assume_a="upper triangular", transposed=True)
-        direct = solve_triangular(a, b, lower=False, trans=True)
+        direct = solve_triangular(
+            assume(a, upper_triangular=True), b, lower=False, trans=True
+        )
         assert equal_computations([indirect], [direct])
 
 
