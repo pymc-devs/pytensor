@@ -621,52 +621,30 @@ def local_useless_abs(fgraph, node):
     return [x]
 
 
-@register_specialize
-@node_rewriter([log])
-def local_log_sqrt(fgraph, node):
-    x = node.inputs[0]
-
-    if (
-        not x.owner
-        or not isinstance(x.owner.op, Elemwise)
-        or not isinstance(x.owner.op.scalar_op, ps.Sqrt)
-    ):
-        return
-
-    # Case for log(sqrt(x)) -> 0.5 * log(x)
-    x = x.owner.inputs[0]
-    old_out = node.outputs[0]
-    new_out = mul(as_tensor_variable(0.5, dtype=x.dtype), log(x))
-    if new_out.dtype != old_out.dtype:
-        new_out = cast(new_out, old_out.dtype)
-
-    copy_stack_trace(node.out, new_out)
-    return [new_out]
-
-
 @register_stabilize
 @register_specialize
 @node_rewriter([log])
-def local_log_sqr(fgraph, node):
-    x = node.inputs[0]
+def local_log_sqrt_sqr(fgraph, node):
+    [x] = node.inputs
 
-    if (
-        not x.owner
-        or not isinstance(x.owner.op, Elemwise)
-        or not isinstance(x.owner.op.scalar_op, ps.Sqr)
-    ):
-        return
+    match x.owner_op_and_inputs:
+        # Case for log(sqrt(x)) -> 0.5 * log(x)
+        case (Elemwise(ps.Sqrt()), inner):
+            factor, inner_out = 0.5, log(inner)
 
-    x = x.owner.inputs[0]
+        # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square,
+        # so a value that would over- or underflow when squared survives the log.
+        case (Elemwise(ps.Sqr()), inner):
+            # abs() of a complex input is real and would drop the imaginary part
+            if inner.dtype.startswith("complex"):
+                return
+            factor, inner_out = 2.0, log(pt_abs(inner))
 
-    # For complex x, abs(x) is real and would silently drop the imaginary part
-    if x.dtype.startswith("complex"):
-        return
+        case _:
+            return
 
-    # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square, so a
-    # value that would over- or underflow when squared survives the log.
     old_out = node.outputs[0]
-    new_out = mul(as_tensor_variable(2.0, dtype=old_out.dtype), log(pt_abs(x)))
+    new_out = mul(as_tensor_variable(factor, dtype=old_out.dtype), inner_out)
     if new_out.dtype != old_out.dtype:
         new_out = cast(new_out, old_out.dtype)
 

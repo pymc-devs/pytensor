@@ -112,6 +112,7 @@ from pytensor.tensor.rewriting.math import (
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
+    local_log_sqrt_sqr,
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
@@ -2143,28 +2144,36 @@ class TestExpLog:
         assert len(ops_graph) == expected_switches
 
 
-def test_log_sqrt() -> None:
+def test_log_sqrt():
     x = pt.tensor("x", shape=(None, None))
-    out = log(sqrt(x))
-
-    out = rewrite_graph(out, include=["specialize"])
-
-    assert utt.assert_equal_computations(
-        [out],
-        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
+    result = RewriteTester(
+        [x], [log(sqrt(x))], include=None, custom_rewrite=local_log_sqrt_sqr
     )
 
+    result.assert_graph(0.5 * log(x))
+    result.assert_eval(np.array([[1.0, 2.0], [3.0, 4.0]]))
 
-def test_log_sqr() -> None:
-    x = pt.tensor("x", shape=(None, None))
-    out = log(sqr(x))
 
-    out = rewrite_graph(out, include=["specialize"])
-
-    assert utt.assert_equal_computations(
-        [out],
-        [mul(pt.as_tensor_variable([[2.0]], dtype=x.dtype), log(pt_abs(x)))],
+def test_log_sqrt_integer_input():
+    # A 0.5 factor typed from the integer input would truncate to 0
+    x = ivector("x")
+    result = RewriteTester(
+        [x], [log(sqrt(x))], include=None, custom_rewrite=local_log_sqrt_sqr
     )
+
+    result.assert_graph(0.5 * log(x))
+    assert result.rewr_fg.outputs[0].type.dtype == result.orig_fg.outputs[0].type.dtype
+    result.assert_eval(np.array([2, 3, 4], dtype="int32"))
+
+
+def test_log_sqr():
+    x = pt.tensor("x", shape=(None, None))
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    result.assert_graph(2.0 * log(pt_abs(x)))
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
 
 
 @pytest.mark.parametrize(
@@ -2215,40 +2224,45 @@ def test_useless_abs_signed_integer_overflow():
 
 def test_log_sqr_integer_input():
     x = ivector("x")
-    out = log(sqr(x))
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
 
-    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
-    assert rewritten.type.dtype == out.type.dtype
-
-    fn = function([x], rewritten, mode=Mode("py", None))
-    x_test = np.array([2, 3, 4], dtype="int32")
-    np.testing.assert_allclose(fn(x_test), np.log(x_test.astype("float64") ** 2))
+    result.assert_graph(2.0 * log(pt_abs(x)))
+    assert result.rewr_fg.outputs[0].type.dtype == result.orig_fg.outputs[0].type.dtype
+    result.assert_eval(np.array([2, 3, 4], dtype="int32"))
 
 
 def test_log_sqr_extreme_magnitudes():
-    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64
+    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64, so the
+    # rewritten graph is deliberately not equivalent to the original one here
     x = pt.vector("x")
-    fn = function([x], log(sqr(x)), mode="FAST_RUN")
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
 
     x_test = np.array([1e200, 1e-200, 3.0])
-    np.testing.assert_allclose(fn(x_test), 2 * np.log(np.abs(x_test)))
+    [orig_out] = result.orig_fn(x_test)
+    [rewr_out] = result.rewr_fn(x_test)
+    assert np.isinf(orig_out).sum() == 2
+    np.testing.assert_allclose(rewr_out, 2 * np.log(np.abs(x_test)))
 
 
 @pytest.mark.parametrize(
-    "original_fn",
+    "original_fn, rewrite",
     [
-        pytest.param(lambda x: log(sqr(x)), id="log_sqr"),
-        pytest.param(lambda x: pt_abs(sqr(x)), id="abs_sqr"),
+        pytest.param(lambda x: log(sqr(x)), local_log_sqrt_sqr, id="log_sqr"),
+        pytest.param(lambda x: pt_abs(sqr(x)), local_useless_abs, id="abs_sqr"),
     ],
 )
-def test_sqr_rewrites_skip_complex(original_fn):
-    # abs() of a complex input is real, so both rewrites would change the dtype
+def test_sqr_rewrites_skip_complex(original_fn, rewrite):
+    # abs() of a complex input is real, so both rewrites would change the output dtype
     x = pt.vector("x", dtype="complex128")
     out = original_fn(x)
+    result = RewriteTester([x], [out], include=None, custom_rewrite=rewrite)
 
-    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
-
-    assert utt.assert_equal_computations([rewritten], [out])
+    result.assert_graph(out)
+    result.assert_eval(np.array([1 + 2j, 0.5 - 1j]))
 
 
 class TestSqrSqrt:
