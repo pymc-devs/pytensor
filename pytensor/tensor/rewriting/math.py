@@ -110,7 +110,11 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
+from pytensor.tensor.subtensor import (
+    Subtensor,
+    _is_provably_non_negative,
+    _is_provably_positive,
+)
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -594,20 +598,6 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
 
-def _is_non_negative(var) -> bool:
-    """``True`` when ``var`` is known to be ``>= 0`` from the op that produced it.
-
-    Signed integers wrap on overflow (``sqr(int8(12)) == -112``) and complex values are
-    unordered, so the flag on the scalar op only carries over for floating-point and
-    unsigned outputs.
-    """
-    op = var.owner_op
-    if not (isinstance(op, Elemwise) and isinstance(op.scalar_op, ps.UnaryScalarOp)):
-        return False
-
-    return op.scalar_op.non_negative and var.dtype.startswith(("float", "uint"))
-
-
 @register_canonicalize
 @register_specialize
 @node_rewriter([pt_abs])
@@ -615,7 +605,7 @@ def local_useless_abs(fgraph, node):
     # Case for abs(x) -> x, when x is already non-negative
     [x] = node.inputs
 
-    if not _is_non_negative(x):
+    if not _is_provably_non_negative(x):
         return
 
     return [x]

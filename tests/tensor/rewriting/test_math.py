@@ -2188,6 +2188,27 @@ def test_useless_abs(inner_fn):
     result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
 
 
+def test_useless_abs_unsigned_dtype():
+    x = pt.vector("x", dtype="uint8")
+    result = RewriteTester(
+        [x], [pt_abs(x)], include=None, custom_rewrite=local_useless_abs
+    )
+
+    result.assert_graph(x)
+    result.assert_eval(np.array([200, 3], dtype="uint8"))
+
+
+def test_useless_abs_of_clipped_input():
+    # maximum() is proven non-negative by the shared predicate, not by an op flag
+    x = pt.vector("x")
+    result = RewriteTester(
+        [x], [pt_abs(pt.maximum(x, 0))], include=None, custom_rewrite=local_useless_abs
+    )
+
+    result.assert_graph(pt.maximum(x, 0))
+    result.assert_eval(np.array([-2.0, 0.0, 3.0]))
+
+
 @pytest.mark.parametrize("inner_fn", [sin, neg], ids=["sin", "neg"])
 def test_useless_abs_sign_indefinite(inner_fn):
     x = pt.tensor("x", shape=(None, None))
