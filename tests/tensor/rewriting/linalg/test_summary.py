@@ -10,6 +10,7 @@ from pytensor.graph import rewrite_graph
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.linalg.summary import Det, SLogDet, det
+from pytensor.tensor.math import Prod
 from pytensor.tensor.type import matrix
 from tests.unittest_tools import assert_equal_computations
 
@@ -239,13 +240,18 @@ def test_slogdet_specialization():
         ),
         pytest.param(
             lambda x: pt.log(pt.prod(x**2)),
-            lambda x: pt.sum(pt.log(pt.sqr(x))),
+            lambda x: np.float64(2.0) * pt.sum(pt.log(pt.abs(x))),
             id="log_prod_sqr",
         ),
         pytest.param(
             lambda x: pt.log(pt.abs(pt.prod(x))),
             lambda x: pt.sum(pt.log(pt.abs(x))),
             id="log_abs_prod",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.abs(pt.sqr(pt.prod(x)))),
+            lambda x: np.float64(2.0) * pt.sum(pt.log(pt.abs(x))),
+            id="log_abs_sqr_prod",
         ),
         pytest.param(
             lambda x: pt.log(pt.prod(pt.abs(x), axis=0)),
@@ -265,6 +271,24 @@ def test_local_log_prod_to_sum_log(original_fn, expected_fn):
     expected = expected_fn(x)
     rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
     assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize("n", [200, 250, 300])
+def test_log_abs_sqr_prod_no_underflow(n):
+    """A float32 product of this many terms is zero once squared, so it must not be materialized."""
+    x = pt.vector("x", dtype="float32")
+    out = pt.log(pt.abs(pt.sqr(pt.prod(x))))
+
+    fn = function([x], out, mode="FAST_RUN")
+    assert not any(isinstance(node.op, Prod) for node in fn.maker.fgraph.apply_nodes)
+
+    rng = np.random.default_rng(sum(map(ord, "log_sqr_prod")))
+    # Mixed signs, so a rewrite that dropped the abs would return nan
+    x_test = (rng.uniform(0.5, 0.9, size=n) * rng.choice([-1, 1], size=n)).astype(
+        "float32"
+    )
+    expected = 2 * np.sum(np.log(np.abs(x_test.astype("float64"))))
+    assert_allclose(fn(x_test), expected, rtol=1e-4)
 
 
 @pytest.mark.parametrize(

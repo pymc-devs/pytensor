@@ -2153,6 +2153,65 @@ def test_log_sqrt() -> None:
     )
 
 
+def test_log_sqr() -> None:
+    x = pt.tensor("x", shape=(None, None))
+    out = log(sqr(x))
+
+    out = rewrite_graph(out, include=["specialize"])
+
+    assert utt.assert_equal_computations(
+        [out],
+        [mul(pt.as_tensor_variable([[2.0]], dtype=x.dtype), log(pt_abs(x)))],
+    )
+
+
+def test_abs_sqr() -> None:
+    x = pt.tensor("x", shape=(None, None))
+    out = pt_abs(sqr(x))
+
+    out = rewrite_graph(out, include=["canonicalize", "specialize"])
+
+    assert utt.assert_equal_computations([out], [sqr(x)])
+
+
+def test_log_sqr_integer_input():
+    x = ivector("x")
+    out = log(sqr(x))
+
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
+    assert rewritten.type.dtype == out.type.dtype
+
+    fn = function([x], rewritten, mode=Mode("py", None))
+    x_test = np.array([2, 3, 4], dtype="int32")
+    np.testing.assert_allclose(fn(x_test), np.log(x_test.astype("float64") ** 2))
+
+
+def test_log_sqr_extreme_magnitudes():
+    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64
+    x = pt.vector("x")
+    fn = function([x], log(sqr(x)), mode="FAST_RUN")
+
+    x_test = np.array([1e200, 1e-200, 3.0])
+    np.testing.assert_allclose(fn(x_test), 2 * np.log(np.abs(x_test)))
+
+
+@pytest.mark.parametrize(
+    "original_fn",
+    [
+        pytest.param(lambda x: log(sqr(x)), id="log_sqr"),
+        pytest.param(lambda x: pt_abs(sqr(x)), id="abs_sqr"),
+    ],
+)
+def test_sqr_rewrites_skip_complex(original_fn):
+    # abs() of a complex input is real, so both rewrites would change the dtype
+    x = pt.vector("x", dtype="complex128")
+    out = original_fn(x)
+
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
+
+    assert utt.assert_equal_computations([rewritten], [out])
+
+
 class TestSqrSqrt:
     def setup_method(self):
         mode = get_default_mode()

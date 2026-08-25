@@ -594,6 +594,27 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([pt_abs])
+def local_abs_sqr(fgraph, node):
+    [sqr_x] = node.inputs
+
+    if not (
+        sqr_x.owner
+        and isinstance(sqr_x.owner.op, Elemwise)
+        and isinstance(sqr_x.owner.op.scalar_op, ps.Sqr)
+    ):
+        return
+
+    # For complex x, abs(sqr(x)) is the squared modulus rather than the square
+    if sqr_x.dtype.startswith("complex"):
+        return
+
+    # Case for abs(sqr(x)) -> sqr(x)
+    return [sqr_x]
+
+
 @register_specialize
 @node_rewriter([log])
 def local_log_sqrt(fgraph, node):
@@ -610,6 +631,36 @@ def local_log_sqrt(fgraph, node):
     x = x.owner.inputs[0]
     old_out = node.outputs[0]
     new_out = mul(as_tensor_variable(0.5, dtype=x.dtype), log(x))
+    if new_out.dtype != old_out.dtype:
+        new_out = cast(new_out, old_out.dtype)
+
+    copy_stack_trace(node.out, new_out)
+    return [new_out]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_sqr(fgraph, node):
+    x = node.inputs[0]
+
+    if (
+        not x.owner
+        or not isinstance(x.owner.op, Elemwise)
+        or not isinstance(x.owner.op.scalar_op, ps.Sqr)
+    ):
+        return
+
+    x = x.owner.inputs[0]
+
+    # For complex x, abs(x) is real and would silently drop the imaginary part
+    if x.dtype.startswith("complex"):
+        return
+
+    # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square, so a
+    # value that would over- or underflow when squared survives the log.
+    old_out = node.outputs[0]
+    new_out = mul(as_tensor_variable(2.0, dtype=old_out.dtype), log(pt_abs(x)))
     if new_out.dtype != old_out.dtype:
         new_out = cast(new_out, old_out.dtype)
 
