@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.scalar.basic as ps
+import pytensor.scalar.math as ps_math
 import pytensor.tensor as pt
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.fg import FunctionGraph
@@ -59,6 +61,7 @@ from pytensor.scalar.basic import (
     true_div,
 )
 from pytensor.tensor import tensor_from_scalar
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.type import fscalar, imatrix, matrix
 from tests.link.test_link import make_function
 
@@ -558,3 +561,23 @@ def test_pow_negative_base_fractional_exponent(mode):
             f"Expected numpy float, got {type(result)}: {result}"
         )
     assert np.isnan(result), f"Expected nan, got {result}"
+
+
+def test_non_negative_scalar_ops():
+    """Every op declaring ``non_negative`` must return >= 0, sign of zero included."""
+    flagged = {
+        op
+        for mod in (ps, ps_math)
+        for op in vars(mod).values()
+        if isinstance(op, ps.UnaryScalarOp) and op.non_negative
+    }
+    assert flagged, "no op carries the flag, the test is not exercising anything"
+
+    x_test = np.array([-1e3, -2.5, -1.0, -0.0, 0.0, 1e-8, 1.0, 2.5, 1e3])
+    for op in flagged:
+        x = pt.vector("x")
+        fn = pytensor.function([x], Elemwise(op)(x), mode=Mode("py", None))
+        out = fn(x_test)
+
+        assert (out >= 0).all(), f"{op} returned a negative value"
+        assert not np.signbit(out).any(), f"{op} returned -0.0"

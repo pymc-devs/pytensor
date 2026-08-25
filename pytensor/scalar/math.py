@@ -90,6 +90,7 @@ erf = Erf(upgrade_to_float, name="erf")
 
 class Erfc(UnaryScalarOp):
     monotonic_decreasing = True
+    non_negative = True
     nfunc_spec = ("scipy.special.erfc", 1, 1)
 
     def impl(self, x):
@@ -1170,6 +1171,7 @@ class Sigmoid(UnaryScalarOp):
     """
 
     monotonic_increasing = True
+    non_negative = True
     nfunc_spec = ("scipy.special.expit", 1, 1)
 
     def impl(self, x):
@@ -1225,6 +1227,7 @@ class Softplus(UnaryScalarOp):
     """
 
     monotonic_increasing = True
+    non_negative = True
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.exp will compute the result in
