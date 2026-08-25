@@ -87,6 +87,7 @@ from pytensor.tensor.math import (
     reciprocal,
     sigmoid,
     sign,
+    sin,
     sinh,
     softplus,
     sqr,
@@ -117,6 +118,7 @@ from pytensor.tensor.rewriting.math import (
     local_reduce_chain,
     local_reduce_join,
     local_sum_prod_of_mul_or_div,
+    local_useless_abs,
     mul_canonizer,
     parse_mul_tree,
     perform_sigm_times_exp,
@@ -2165,13 +2167,50 @@ def test_log_sqr() -> None:
     )
 
 
-def test_abs_sqr() -> None:
+@pytest.mark.parametrize(
+    "inner_fn", [sqr, pt_abs, exp, sigmoid], ids=["sqr", "abs", "exp", "sigmoid"]
+)
+def test_useless_abs(inner_fn):
     x = pt.tensor("x", shape=(None, None))
+    result = RewriteTester(
+        [x], [pt_abs(inner_fn(x))], include=None, custom_rewrite=local_useless_abs
+    )
+
+    result.assert_graph(inner_fn(x))
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+
+
+@pytest.mark.parametrize("inner_fn", [sin, neg], ids=["sin", "neg"])
+def test_useless_abs_sign_indefinite(inner_fn):
+    x = pt.tensor("x", shape=(None, None))
+    out = pt_abs(inner_fn(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+
+    result.assert_graph(out)
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+
+
+def test_useless_abs_keeps_signed_zero():
+    # sqrt(-0.0) is -0.0, which abs() normalizes to +0.0, so dropping the abs would flip
+    # the sign of any downstream division
+    x = pt.vector("x")
+    out = pt_abs(sqrt(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+
+    result.assert_graph(out)
+    [rewr_out] = result.rewr_fn(np.array([-0.0]))
+    assert not np.signbit(rewr_out)
+
+
+def test_useless_abs_signed_integer_overflow():
+    # sqr() wraps on signed ints (sqr(int8(12)) == -112), so its output is not
+    # non-negative and the abs() has to stay
+    x = pt.vector("x", dtype="int8")
     out = pt_abs(sqr(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
 
-    out = rewrite_graph(out, include=["canonicalize", "specialize"])
-
-    assert utt.assert_equal_computations([out], [sqr(x)])
+    result.assert_graph(out)
+    result.assert_eval(np.array([12, 16, 3], dtype="int8"))
 
 
 def test_log_sqr_integer_input():

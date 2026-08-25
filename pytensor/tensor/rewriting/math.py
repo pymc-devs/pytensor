@@ -594,25 +594,31 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
 
+def _is_non_negative(var) -> bool:
+    """``True`` when ``var`` is known to be ``>= 0`` from the op that produced it.
+
+    Signed integers wrap on overflow (``sqr(int8(12)) == -112``) and complex values are
+    unordered, so the flag on the scalar op only carries over for floating-point and
+    unsigned outputs.
+    """
+    op = var.owner_op
+    if not (isinstance(op, Elemwise) and isinstance(op.scalar_op, ps.UnaryScalarOp)):
+        return False
+
+    return op.scalar_op.non_negative and var.dtype.startswith(("float", "uint"))
+
+
 @register_canonicalize
 @register_specialize
 @node_rewriter([pt_abs])
-def local_abs_sqr(fgraph, node):
-    [sqr_x] = node.inputs
+def local_useless_abs(fgraph, node):
+    # Case for abs(x) -> x, when x is already non-negative
+    [x] = node.inputs
 
-    if not (
-        sqr_x.owner
-        and isinstance(sqr_x.owner.op, Elemwise)
-        and isinstance(sqr_x.owner.op.scalar_op, ps.Sqr)
-    ):
+    if not _is_non_negative(x):
         return
 
-    # For complex x, abs(sqr(x)) is the squared modulus rather than the square
-    if sqr_x.dtype.startswith("complex"):
-        return
-
-    # Case for abs(sqr(x)) -> sqr(x)
-    return [sqr_x]
+    return [x]
 
 
 @register_specialize
