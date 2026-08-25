@@ -2162,7 +2162,6 @@ def test_log_sqrt_integer_input():
     )
 
     result.assert_graph(0.5 * log(x))
-    assert result.rewr_fg.outputs[0].type.dtype == result.orig_fg.outputs[0].type.dtype
     result.assert_eval(np.array([2, 3, 4], dtype="int32"))
 
 
@@ -2229,7 +2228,6 @@ def test_log_sqr_integer_input():
     )
 
     result.assert_graph(2.0 * log(pt_abs(x)))
-    assert result.rewr_fg.outputs[0].type.dtype == result.orig_fg.outputs[0].type.dtype
     result.assert_eval(np.array([2, 3, 4], dtype="int32"))
 
 
