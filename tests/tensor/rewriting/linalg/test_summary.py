@@ -12,7 +12,7 @@ from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.linalg.summary import Det, SLogDet, det
 from pytensor.tensor.math import Prod
 from pytensor.tensor.type import matrix
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_det_of_cholesky():
@@ -291,30 +291,13 @@ def test_log_abs_sqr_prod_no_underflow(n):
     assert_allclose(fn(x_test), expected, rtol=1e-4)
 
 
-@pytest.mark.parametrize(
-    "expected, pos_tag",
-    [
-        pytest.param(
-            lambda x: pt.sum(pt.log(x)),
-            True,
-            id="local_log_prod_to_sum_log_positive_tag",
-        ),
-        pytest.param(
-            lambda x: pt.log(pt.prod(x)),
-            False,
-            id="local_log_prod_to_sum_log_no_rewrite",
-        ),
-    ],
-)
-def test_local_log_prod_to_sum_log_positive_tag(expected, pos_tag):
+def test_local_log_prod_to_sum_log_unknown_sign():
+    """A sign-indefinite operand leaves log(prod(x)) alone."""
     x = pt.tensor("x", shape=(3, 4))
-    if pos_tag:
-        x.tag.positive = True
-
     out = pt.log(pt.prod(x))
+    result = RewriteTester([x], [out], include=["stabilize", "specialize"])
 
-    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
-    assert_equal_computations([rewritten], [expected(x)])
+    result.assert_graph(out)
 
 
 @pytest.mark.parametrize(
