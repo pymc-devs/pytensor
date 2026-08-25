@@ -122,11 +122,13 @@ def numba_funcify_ARange(op, **kwargs):
 def numba_funcify_Join(op, node, **kwargs):
     """Copy each input into its slice of a preallocated output.
 
-    ``np.concatenate`` on a tuple of arrays compiles ~3x slower for the same result.
-    A whole-array slice write instead goes through Numba's fancy indexing, which
-    rebuilds the source as an ``A``-layout view and so copies it with gathers; the
-    dimensions ahead of the join axis are peeled with integer indexing so that the
-    destination slice stays contiguous. For ``join(1, x0, x1, x2)`` on matrices this
+    ``np.concatenate`` on a tuple of arrays compiles ~3x slower for the same
+    result. A whole-array slice write instead goes through Numba's fancy
+    indexing, which rebuilds the source as an ``A``-layout view and so copies it
+    with gathers; the dimensions ahead of the join axis are peeled with integer
+    indexing so that the destination slice stays contiguous.
+
+    For ``join(1, x0, x1, x2)`` on matrices (axis 1, the last one here) this
     emits::
 
         def join(*tensors):
@@ -141,12 +143,25 @@ def numba_funcify_Join(op, node, **kwargs):
             off = 0
             l = tensors[0].shape[1]
             for i0 in range(tensors[0].shape[0]):
-                dst = out[i0][off : off + l]
+                dst = out[i0, off : off + l]
                 src = tensors[0][i0]
                 for j0 in range(src.shape[0]):
                     dst[j0] = src[j0]
             off += l
-            ...
+            l = tensors[1].shape[1]
+            for i0 in range(tensors[1].shape[0]):
+                dst = out[i0, off : off + l]
+                src = tensors[1][i0]
+                for j0 in range(src.shape[0]):
+                    dst[j0] = src[j0]
+            off += l
+            l = tensors[2].shape[1]
+            for i0 in range(tensors[2].shape[0]):
+                dst = out[i0, off : off + l]
+                src = tensors[2][i0]
+                for j0 in range(src.shape[0]):
+                    dst[j0] = src[j0]
+            off += l
             return out
     """
     ndim = node.outputs[0].type.ndim
@@ -174,15 +189,14 @@ def numba_funcify_Join(op, node, **kwargs):
         f"out = np.empty({create_tuple_string(shape)}, dtype)",
         "off = 0",
     ]
-    # Dimensions before the join axis are peeled with integer indexing, so that the
-    # destination slice on the join axis stays contiguous whenever the input is.
     leading = "".join(f"[i{d}]" for d in range(ax))
+    leading_idx = "".join(f"i{d}, " for d in range(ax))
     trailing_idxs = ", ".join(f"j{k}" for k in range(ndim - ax))
     for name in names:
         code += [f"l = {name}.shape[{ax}]"]
         for d in range(ax):
             code += [f"for i{d} in range({name}.shape[{d}]):", CODE_TOKEN.INDENT]
-        code += [f"dst = out{leading}[off:off + l]", f"src = {name}{leading}"]
+        code += [f"dst = out[{leading_idx}off:off + l]", f"src = {name}{leading}"]
         for k in range(ndim - ax):
             code += [f"for j{k} in range(src.shape[{k}]):", CODE_TOKEN.INDENT]
         code += [f"dst[{trailing_idxs}] = src[{trailing_idxs}]"]
