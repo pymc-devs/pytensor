@@ -39,6 +39,10 @@ def mlx_funcify_Shape_i(op, node, **kwargs):
 @mlx_funcify.register(Reshape)
 def mlx_funcify_Reshape(op, **kwargs):
     def reshape(x, shp):
+        # `shp` comes in as an `mx.array` because the linker typifies every
+        # constant/input, but `mx.reshape` wants a plain sequence of ints.
+        if isinstance(shp, mx.array):
+            shp = tuple(shp.tolist())
         return mx.reshape(x, shp)
 
     return reshape
