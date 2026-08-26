@@ -48,7 +48,10 @@ optdb.register(
     "jax_boolean_indexing_set_or_inc",
     dfs_rewriter(boolean_indexing_set_or_inc),
     "jax",
-    position=100,
+    "mlx",
+    # Must run before `specialize`: `bool_idx_to_nonzero` lives there and rewrites
+    # the mask into integer indices, leaving nothing for this to match.
+    position=1.95,
 )
 
 
@@ -96,7 +99,12 @@ def boolean_indexing_sum(fgraph, node):
 
 
 optdb.register(
-    "jax_boolean_indexing_sum", dfs_rewriter(boolean_indexing_sum), "jax", position=100
+    "jax_boolean_indexing_sum",
+    dfs_rewriter(boolean_indexing_sum),
+    "jax",
+    "mlx",
+    # Before `specialize`, for the same reason as `boolean_indexing_set_or_inc`.
+    position=1.95,
 )
 
 
