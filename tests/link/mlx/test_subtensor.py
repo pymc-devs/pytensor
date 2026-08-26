@@ -12,6 +12,10 @@ from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode, py_mode
 
 mx = pytest.importorskip("mlx.core")
 
+# `bool_idx_to_nonzero`, which converts boolean masks into the integer indices MLX
+# supports, lives in `specialize`, which `mlx_mode` does not include.
+bool_idx_mode = mlx_mode.including("specialize")
+
 
 def test_mlx_Subtensor_basic():
     """Test basic subtensor operations with constant indices."""
@@ -79,9 +83,6 @@ def test_mlx_AdvancedSubtensor():
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
 
-@pytest.mark.xfail(
-    raises=ValueError, reason="MLX does not support boolean indexing yet"
-)
 def test_mlx_AdvancedSubtensor_boolean():
     """Test advanced subtensor operations with boolean indexing."""
     shape = (3, 4, 5)
@@ -92,7 +93,7 @@ def test_mlx_AdvancedSubtensor_boolean():
     bool_mask = np.array([True, False, True])
     out_pt = x_pt[bool_mask]
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
-    compare_mlx_and_py([x_pt], [out_pt], [x_np])
+    compare_mlx_and_py([x_pt], [out_pt], [x_np], mlx_mode=bool_idx_mode)
 
 
 def test_mlx_IncSubtensor_set():
@@ -405,3 +406,49 @@ def test_mlx_AdvancedSubtensor_slice_bounds(index):
     assert isinstance(out.owner.op, pt_subtensor.AdvancedSubtensor)
 
     compare_mlx_and_py([x], [out], [np.arange(36, dtype="float32").reshape(6, 6)])
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        np.array([True, False, True, False, True, False]),
+        (slice(None), np.array([True, False, True, False, True, False])),
+        (np.array([True, False, True, False, True, False]), slice(1, 4)),
+        np.zeros((6,), dtype=bool),
+        np.arange(36).reshape(6, 6) % 3 == 0,
+    ],
+    ids=["rows", "columns", "rows-and-slice", "all-false", "2d-mask"],
+)
+def test_mlx_AdvancedSubtensor_boolean_mask(index):
+    """MLX has no boolean gather; `bool_idx_to_nonzero` supplies integer indices."""
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    out = x[index]
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedSubtensor)
+
+    x_np = np.arange(36, dtype="float32").reshape(6, 6)
+    compare_mlx_and_py([x], [out], [x_np], mlx_mode=bool_idx_mode)
+
+
+@pytest.mark.parametrize("set_instead_of_inc", [True, False], ids=["set", "inc"])
+@pytest.mark.parametrize(
+    "index, y_shape",
+    [
+        (np.array([True, False, True, False, True, False]), (3, 6)),
+        (np.arange(36).reshape(6, 6) % 3 == 0, (12,)),
+    ],
+    ids=["rows", "2d-mask"],
+)
+def test_mlx_AdvancedIncSubtensor_boolean_mask(index, y_shape, set_instead_of_inc):
+    """MLX has no boolean scatter; `bool_idx_to_nonzero` supplies integer indices."""
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    y = tensor("y", shape=y_shape, dtype="float32")
+
+    inc_fn = (
+        pt_subtensor.set_subtensor if set_instead_of_inc else pt_subtensor.inc_subtensor
+    )
+    out = inc_fn(x[index], y)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+
+    x_np = np.arange(36, dtype="float32").reshape(6, 6)
+    y_np = np.arange(np.prod(y_shape), dtype="float32").reshape(y_shape)
+    compare_mlx_and_py([x, y], [out], [x_np, y_np], mlx_mode=bool_idx_mode)
