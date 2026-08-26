@@ -45,13 +45,12 @@ _MOVED_FUNCTIONS = {
     "graph_inputs",
     "explicit_graph_inputs",
     "vars_between",
-    "orhpans_between",
+    "orphans_between",
     "applys_between",
     "apply_depends_on",
     "truncated_graph_inputs",
     "general_toposort",
     "io_toposort",
-    "list_of_nodes",
     "get_var_by_name",
 }
 
