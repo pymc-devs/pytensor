@@ -2947,6 +2947,7 @@ optdb["specialize"].register(
     bool_idx_to_nonzero.__name__,
     bool_idx_to_nonzero,
     "numba",
+    "mlx",
     "shape_unsafe",  # It can mask invalid mask sizes
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
