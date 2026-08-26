@@ -387,3 +387,21 @@ def test_mlx_AdvancedIncSubtensor_batched_diagonal_grad():
     grad = pytensor.grad(x[..., idx, idx].sum(), x)
 
     compare_mlx_and_py([x], [grad], [np.zeros((5, 3, 3), dtype="float32")])
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        (np.array([0, 2, 4]), slice(1, 4)),
+        (np.array([0, 2, 4]), slice(None, None, 2)),
+        (slice(1, 4), np.array([0, 2, 4])),
+    ],
+    ids=["stop-bound", "step-bound", "slice-first"],
+)
+def test_mlx_AdvancedSubtensor_slice_bounds(index):
+    """Slice bounds arrive as MLX scalars and must be coerced to Python ints."""
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    out = x[index]
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedSubtensor)
+
+    compare_mlx_and_py([x], [out], [np.arange(36, dtype="float32").reshape(6, 6)])
