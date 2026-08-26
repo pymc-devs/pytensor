@@ -155,3 +155,49 @@ def test_mlx_qr(mode):
     out = pt.linalg.qr(A, mode=mode)
 
     compare_mlx_and_py([A], out, [A_val])
+
+
+@pytest.mark.parametrize("batch_shape", [(4,), (2, 3)], ids=["batch", "batch_2d"])
+def test_mlx_lu_factor_batched(batch_shape):
+    """`mx.vmap` has no rule for the `LUF` primitive `lu_factor` builds (#2385)."""
+    rng = np.random.default_rng(15)
+    n = 5
+
+    A = pt.tensor("A", shape=(*batch_shape, n, n))
+    A_val = rng.normal(size=(*batch_shape, n, n)).astype(config.floatX)
+
+    compare_mlx_and_py([A], pt.linalg.lu_factor(A), [A_val], mlx_mode=mlx_mode)
+
+
+@pytest.mark.parametrize("inverse", [True, False], ids=["inverse", "forward"])
+@pytest.mark.parametrize("batch_shape", [(4,), (2, 3)], ids=["batch", "batch_2d"])
+def test_mlx_pivot_to_permutations_batched(batch_shape, inverse):
+    """Coverage for the batched pivot scan reached by a batched `lu_solve`.
+
+    The core dispatch loops in Python over ``pivots.shape[0]``, which is the
+    *core* length under `mx.vmap`, so this path is already correct -- pinning it
+    so the batched `lu_solve` fix cannot regress it. Built directly because
+    `pivot_to_permutation` itself only accepts a 1-d input.
+    """
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.linalg.decomposition.lu import PivotToPermutations
+
+    rng = np.random.default_rng(15)
+    n = 5
+
+    pivots = pt.tensor("pivots", shape=(*batch_shape, n), dtype="int32")
+    # LAPACK-style pivots: entry i may only reference row i or later.
+    pivots_val = (
+        np.stack(
+            [
+                np.array([rng.integers(i, n) for i in range(n)])
+                for _ in range(int(np.prod(batch_shape)))
+            ]
+        )
+        .reshape(*batch_shape, n)
+        .astype("int32")
+    )
+
+    out = Blockwise(PivotToPermutations(inverse=inverse))(pivots)
+
+    compare_mlx_and_py([pivots], [out], [pivots_val], mlx_mode=mlx_mode)

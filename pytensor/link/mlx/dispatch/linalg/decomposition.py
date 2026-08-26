@@ -1,6 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.blockwise import mlx_funcify_batched
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
@@ -175,3 +176,16 @@ def mlx_funcify_QR(op, node, **kwargs):
         return Q, R
 
     return qr
+
+
+@mlx_funcify_batched.register(LUFactor)
+def mlx_funcify_batched_LUFactor(op, node, **kwargs):
+    """`mx.linalg.lu_factor` is already batched; `mx.vmap` has no `LUF` rule (#2385)."""
+    A_dtype = getattr(mx, node.inputs[0].dtype)
+
+    def lu_factor(a):
+        with mx.stream(mx.cpu):
+            lu, pivots = mx.linalg.lu_factor(a.astype(dtype=A_dtype))
+            return lu, pivots.astype(mx.int32)
+
+    return lu_factor
