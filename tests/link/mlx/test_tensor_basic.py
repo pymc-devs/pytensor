@@ -164,3 +164,49 @@ def test_arange():
     out = arange(1, 10, 2)
 
     compare_mlx_and_py([], [out], [])
+
+
+@pytest.mark.parametrize("ndim", [1, 2], ids=["vector", "matrix"])
+def test_nonzero(ndim):
+    shape = (6,) * ndim
+    x = pt.tensor("x", shape=shape, dtype="float32")
+    out = pt.stack(pt.nonzero(x)) if ndim > 1 else pt.nonzero(x)[0]
+
+    x_np = (np.arange(np.prod(shape), dtype="float32") % 3).reshape(shape)
+    compare_mlx_and_py([x], [out], [x_np], mlx_mode=mlx_mode_no_compile)
+
+
+def test_nonzero_skips_compilation():
+    """A data-dependent output shape cannot be traced, so the graph runs eagerly."""
+    x = pt.vector("x", shape=(6,), dtype="float32")
+    x_np = np.array([0, 1, 0, 2, 0, 3], dtype="float32")
+
+    with pytest.warns(UserWarning, match="output shape depends on its input values"):
+        compiled_f = pytensor.function([x], pt.nonzero(x)[0], mode=compile_mode)
+
+    np.testing.assert_array_equal(compiled_f(x_np), [1, 3, 5])
+
+
+def test_nonzero_inside_inner_graph_skips_compilation():
+    """The check has to see into inner graphs, where an `Op` can hide a `Nonzero`."""
+    from pytensor.compile.builders import OpFromGraph
+
+    a = pt.vector("a", shape=(6,), dtype="float32")
+    x = pt.vector("x", shape=(6,), dtype="float32")
+    out = OpFromGraph([a], [pt.nonzero(a)[0]], inline=False)(x)
+
+    with pytest.warns(UserWarning, match="output shape depends on its input values"):
+        f = pytensor.function([x], out, mode=compile_mode)
+
+    assert any(isinstance(node.op, OpFromGraph) for node in f.maker.fgraph.apply_nodes)
+    np.testing.assert_array_equal(
+        f(np.array([0, 1, 0, 2, 0, 3], dtype="float32")), [1, 3, 5]
+    )
+
+
+@pytest.mark.filterwarnings("error")  # Raise if we did not expect to skip compilation
+def test_compiles_without_data_dependent_shape():
+    x = pt.vector("x", shape=(6,), dtype="float32")
+    f = pytensor.function([x], x * 2, mode=compile_mode)
+
+    np.testing.assert_allclose(f(np.ones(6, dtype="float32")), 2.0)

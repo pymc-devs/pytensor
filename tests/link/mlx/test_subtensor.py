@@ -452,3 +452,53 @@ def test_mlx_AdvancedIncSubtensor_boolean_mask(index, y_shape, set_instead_of_in
     x_np = np.arange(36, dtype="float32").reshape(6, 6)
     y_np = np.arange(np.prod(y_shape), dtype="float32").reshape(y_shape)
     compare_mlx_and_py([x, y], [out], [x_np, y_np], mlx_mode=bool_idx_mode)
+
+
+@pytest.mark.parametrize(
+    "index_fn, y_shape",
+    [
+        (lambda x, mask: x[mask], (3, 6)),
+        (lambda x, mask: x[:, mask], (6, 3)),
+        (lambda x, mask: x[mask, 1:4], (3, 3)),
+    ],
+    ids=["rows", "columns", "rows-and-slice"],
+)
+def test_mlx_runtime_boolean_mask(index_fn, y_shape):
+    """A mask only known at runtime needs `Nonzero`, so the linker runs it eagerly."""
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    mask = pt.vector("mask", shape=(6,), dtype="bool")
+    y = tensor("y", shape=y_shape, dtype="float32")
+
+    x_np = np.arange(36, dtype="float32").reshape(6, 6)
+    mask_np = np.array([True, False, True, False, True, False])
+    y_np = np.arange(np.prod(y_shape), dtype="float32").reshape(y_shape)
+
+    compare_mlx_and_py(
+        [x, mask],
+        [index_fn(x, mask)],
+        [x_np, mask_np],
+        mlx_mode=bool_idx_mode,
+    )
+    compare_mlx_and_py(
+        [x, mask, y],
+        [pt_subtensor.set_subtensor(index_fn(x, mask), y)],
+        [x_np, mask_np, y_np],
+        mlx_mode=bool_idx_mode,
+    )
+
+
+def test_mlx_runtime_boolean_mask_grad():
+    """`Nonzero` has to survive being differentiated through and scattered back."""
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    mask = pt.matrix("mask", shape=(6, 6), dtype="bool")
+    grad = pytensor.grad((x[mask] ** 2).sum(), x)
+
+    compare_mlx_and_py(
+        [x, mask],
+        [grad],
+        [
+            np.arange(36, dtype="float32").reshape(6, 6),
+            np.arange(36).reshape(6, 6) % 3 == 0,
+        ],
+        mlx_mode=bool_idx_mode,
+    )
