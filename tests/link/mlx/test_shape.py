@@ -89,6 +89,15 @@ def test_mlx_Reshape_negative_one():
     compare_mlx_and_py([a], [y], [np.arange(8, dtype=config.floatX)])
 
 
+def test_mlx_Reshape_matrix_method():
+    """`x.reshape((n,))` on a 2D input, the case reported in #2386."""
+    x = pt.matrix("x", shape=(6, 4), dtype=config.floatX)
+    out = x.reshape((24,))
+    compare_mlx_and_py(
+        [x], [out], [np.zeros((6, 4), dtype=config.floatX)]
+    )
+
+
 def test_mlx_Reshape_concrete_shape():
     """MLX should compile when a concrete value is passed for the `shape` parameter."""
     a = vector("a")
