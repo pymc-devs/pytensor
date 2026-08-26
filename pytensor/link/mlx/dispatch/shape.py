@@ -1,6 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.tensor_basic import _coerce_to_int
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
@@ -39,6 +40,8 @@ def mlx_funcify_Shape_i(op, node, **kwargs):
 @mlx_funcify.register(Reshape)
 def mlx_funcify_Reshape(op, **kwargs):
     def reshape(x, shp):
-        return mx.reshape(x, shp)
+        # The linker typifies ``shp`` to an ``mx.array``, but ``mx.reshape``
+        # expects a Python sequence of ints, so coerce each dimension.
+        return mx.reshape(x, tuple(_coerce_to_int(dim) for dim in shp))
 
     return reshape
