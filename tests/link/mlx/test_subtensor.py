@@ -7,6 +7,7 @@ from pytensor import function
 from pytensor.compile.mode import Mode
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor import tensor
+from pytensor.tensor.basic import Nonzero
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode, py_mode
 
 
@@ -393,24 +394,6 @@ def test_mlx_AdvancedIncSubtensor_batched_diagonal_grad():
 @pytest.mark.parametrize(
     "index",
     [
-        (np.array([0, 2, 4]), slice(1, 4)),
-        (np.array([0, 2, 4]), slice(None, None, 2)),
-        (slice(1, 4), np.array([0, 2, 4])),
-    ],
-    ids=["stop-bound", "step-bound", "slice-first"],
-)
-def test_mlx_AdvancedSubtensor_slice_bounds(index):
-    """Slice bounds arrive as MLX scalars and must be coerced to Python ints."""
-    x = pt.matrix("x", shape=(6, 6), dtype="float32")
-    out = x[index]
-    assert isinstance(out.owner.op, pt_subtensor.AdvancedSubtensor)
-
-    compare_mlx_and_py([x], [out], [np.arange(36, dtype="float32").reshape(6, 6)])
-
-
-@pytest.mark.parametrize(
-    "index",
-    [
         np.array([True, False, True, False, True, False]),
         (slice(None), np.array([True, False, True, False, True, False])),
         (np.array([True, False, True, False, True, False]), slice(1, 4)),
@@ -452,6 +435,24 @@ def test_mlx_AdvancedIncSubtensor_boolean_mask(index, y_shape, set_instead_of_in
     x_np = np.arange(36, dtype="float32").reshape(6, 6)
     y_np = np.arange(np.prod(y_shape), dtype="float32").reshape(y_shape)
     compare_mlx_and_py([x, y], [out], [x_np, y_np], mlx_mode=bool_idx_mode)
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        (np.array([0, 2, 4]), slice(1, 4)),
+        (np.array([0, 2, 4]), slice(None, None, 2)),
+        (slice(1, 4), np.array([0, 2, 4])),
+    ],
+    ids=["stop-bound", "step-bound", "slice-first"],
+)
+def test_mlx_AdvancedSubtensor_slice_bounds(index):
+    """Slice bounds arrive as MLX scalars and must be coerced to Python ints."""
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    out = x[index]
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedSubtensor)
+
+    compare_mlx_and_py([x], [out], [np.arange(36, dtype="float32").reshape(6, 6)])
 
 
 @pytest.mark.parametrize(
@@ -502,3 +503,32 @@ def test_mlx_runtime_boolean_mask_grad():
         ],
         mlx_mode=bool_idx_mode,
     )
+
+
+@pytest.mark.filterwarnings("error")  # The eager fallback warns; the rewrite avoids it
+def test_mlx_boolean_mask_sum_reexpressible():
+    """`boolean_indexing_sum` rewrites a masked sum into `where`, which compiles."""
+    x = pt.matrix("x", shape=(5, 5), dtype="float32")
+    out = x[x < 0].sum()
+
+    x_np = np.arange(-12, 13, dtype="float32").reshape(5, 5)
+    fn, _ = compare_mlx_and_py([x], [out], [x_np], mlx_mode=bool_idx_mode)
+
+    assert not any(isinstance(node.op, Nonzero) for node in fn.maker.fgraph.apply_nodes)
+
+
+@pytest.mark.parametrize("set_instead_of_inc", [True, False], ids=["set", "inc"])
+@pytest.mark.filterwarnings("error")  # The eager fallback warns; the rewrite avoids it
+def test_mlx_boolean_mask_scalar_update_reexpressible(set_instead_of_inc):
+    """`boolean_indexing_set_or_inc` rewrites a scalar masked update into `where`."""
+    x = pt.matrix("x", shape=(4, 5), dtype="float32")
+    inc_fn = (
+        pt_subtensor.set_subtensor if set_instead_of_inc else pt_subtensor.inc_subtensor
+    )
+    out = inc_fn(x[x > 0], np.float32(0.0 if set_instead_of_inc else 1.0))
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+
+    x_np = np.arange(-10, 10, dtype="float32").reshape(4, 5)
+    fn, _ = compare_mlx_and_py([x], [out], [x_np], mlx_mode=bool_idx_mode)
+
+    assert not any(isinstance(node.op, Nonzero) for node in fn.maker.fgraph.apply_nodes)
