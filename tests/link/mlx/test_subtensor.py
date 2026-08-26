@@ -347,3 +347,43 @@ def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
     assert out.owner.op.ignore_duplicates
 
     compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])
+
+
+@pytest.mark.parametrize("set_instead_of_inc", [True, False], ids=["set", "inc"])
+@pytest.mark.parametrize(
+    "index, y_shape",
+    [
+        ((slice(None), np.array([0, 1, 2])), (6, 3)),
+        ((np.array([0, 1, 2]), slice(None)), (3, 6)),
+        ((slice(None), np.array([0, 0, 1])), (6, 3)),
+        ((1, np.array([0, 1, 2])), (3,)),
+    ],
+    ids=["slice-first", "slice-last", "duplicate-columns", "int-and-array"],
+)
+def test_mlx_AdvancedIncSubtensor_mixed_indices(index, y_shape, set_instead_of_inc):
+    """Slices and integers in ``idx_list`` must be spliced back into the scatter.
+
+    Without them the update lands on the leading axis instead of the indexed one.
+    """
+    x = pt.matrix("x", shape=(6, 6), dtype="float32")
+    y = tensor("y", shape=y_shape, dtype="float32")
+
+    inc_fn = (
+        pt_subtensor.set_subtensor if set_instead_of_inc else pt_subtensor.inc_subtensor
+    )
+    out = inc_fn(x[index], y)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    assert out.owner.op.set_instead_of_inc == set_instead_of_inc
+
+    x_np = np.zeros((6, 6), dtype="float32")
+    y_np = np.arange(np.prod(y_shape), dtype="float32").reshape(y_shape)
+    compare_mlx_and_py([x, y], [out], [x_np, y_np])
+
+
+def test_mlx_AdvancedIncSubtensor_batched_diagonal_grad():
+    """The adjoint of ``x[..., i, i]`` scatters through an ellipsis of slices."""
+    x = pt.tensor("x", shape=(5, 3, 3), dtype="float32")
+    idx = pt.arange(3)
+    grad = pytensor.grad(x[..., idx, idx].sum(), x)
+
+    compare_mlx_and_py([x], [grad], [np.zeros((5, 3, 3), dtype="float32")])

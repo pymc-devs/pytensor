@@ -96,9 +96,16 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def mlx_fn(x, indices, y):
             return x.at[indices].add(y)
 
-    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
+    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=op.idx_list):
         op._check_runtime_broadcast_of_vector_index(node, x, y, ilist[0])
 
-        return mlx_fn(x, ilist, y)
+        # Slices and plain integers live in `idx_list`, not in `ilist`, and have
+        # to be spliced back in; without them `x[:, idx] = y` would scatter
+        # along the leading axis instead.
+        indices = indices_from_subtensor(ilist, idx_list)
+        if len(indices) == 1:
+            indices = indices[0]
+
+        return mlx_fn(x, indices, y)
 
     return advancedincsubtensor
