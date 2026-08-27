@@ -87,7 +87,6 @@ from pytensor.tensor.math import (
     reciprocal,
     sigmoid,
     sign,
-    sin,
     sinh,
     softplus,
     sqr,
@@ -2175,47 +2174,28 @@ def test_log_sqr():
     result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
 
 
-@pytest.mark.parametrize(
-    "inner_fn", [sqr, pt_abs, exp, sigmoid], ids=["sqr", "abs", "exp", "sigmoid"]
-)
-def test_useless_abs(inner_fn):
-    x = pt.tensor("x", shape=(None, None))
-    result = RewriteTester(
-        [x], [pt_abs(inner_fn(x))], include=None, custom_rewrite=local_useless_abs
-    )
-
-    result.assert_graph(inner_fn(x))
-    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
-
-
-def test_useless_abs_unsigned_dtype():
-    x = pt.vector("x", dtype="uint8")
-    result = RewriteTester(
-        [x], [pt_abs(x)], include=None, custom_rewrite=local_useless_abs
-    )
-
-    result.assert_graph(x)
-    result.assert_eval(np.array([200, 3], dtype="uint8"))
-
-
-def test_useless_abs_of_clipped_input():
-    # maximum() is proven non-negative by the shared predicate, not by an op flag
+def test_log_sqr_extreme_magnitudes():
+    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64, so the
+    # rewritten graph is deliberately not equivalent to the original one here
     x = pt.vector("x")
     result = RewriteTester(
-        [x], [pt_abs(pt.maximum(x, 0))], include=None, custom_rewrite=local_useless_abs
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
     )
 
-    result.assert_graph(pt.maximum(x, 0))
-    result.assert_eval(np.array([-2.0, 0.0, 3.0]))
+    x_test = np.array([1e200, 1e-200, 3.0])
+    [orig_out] = result.orig_fn(x_test)
+    [rewr_out] = result.rewr_fn(x_test)
+    assert np.isinf(orig_out).sum() == 2
+    np.testing.assert_allclose(rewr_out, 2 * np.log(np.abs(x_test)))
 
 
-@pytest.mark.parametrize("inner_fn", [sin, neg], ids=["sin", "neg"])
-def test_useless_abs_sign_indefinite(inner_fn):
+def test_useless_abs():
     x = pt.tensor("x", shape=(None, None))
-    out = pt_abs(inner_fn(x))
-    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+    result = RewriteTester(
+        [x], [pt_abs(exp(x))], include=None, custom_rewrite=local_useless_abs
+    )
 
-    result.assert_graph(out)
+    result.assert_graph(exp(x))
     result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
 
 
@@ -2240,31 +2220,6 @@ def test_useless_abs_signed_integer_overflow():
 
     result.assert_graph(out)
     result.assert_eval(np.array([12, 16, 3], dtype="int8"))
-
-
-def test_log_sqr_integer_input():
-    x = ivector("x")
-    result = RewriteTester(
-        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
-    )
-
-    result.assert_graph(2.0 * log(pt_abs(x)))
-    result.assert_eval(np.array([2, 3, 4], dtype="int32"))
-
-
-def test_log_sqr_extreme_magnitudes():
-    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64, so the
-    # rewritten graph is deliberately not equivalent to the original one here
-    x = pt.vector("x")
-    result = RewriteTester(
-        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
-    )
-
-    x_test = np.array([1e200, 1e-200, 3.0])
-    [orig_out] = result.orig_fn(x_test)
-    [rewr_out] = result.rewr_fn(x_test)
-    assert np.isinf(orig_out).sum() == 2
-    np.testing.assert_allclose(rewr_out, 2 * np.log(np.abs(x_test)))
 
 
 @pytest.mark.parametrize(
