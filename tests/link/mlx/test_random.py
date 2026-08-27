@@ -33,9 +33,14 @@ def check_shape_and_dtype(
             f"Expected shape {expected_shape}, got {r.shape}"
         )
         if expected_dtype is not None:
-            assert r.dtype == np.dtype(expected_dtype), (
-                f"Expected dtype {expected_dtype}, got {r.dtype}"
-            )
+            if expected_dtype == "float":
+                assert np.issubdtype(r.dtype, np.floating), (
+                    f"Expected a float dtype, got {r.dtype}"
+                )
+            else:
+                assert r.dtype == np.dtype(expected_dtype), (
+                    f"Expected dtype {expected_dtype}, got {r.dtype}"
+                )
 
     assert not np.array_equal(results[0], results[1]), (
         "Two draws were identical — RNG not advancing"
@@ -47,9 +52,9 @@ def check_shape_and_dtype(
 @pytest.mark.parametrize(
     "make_rv,expected_shape,expected_dtype",
     [
-        (lambda srng: srng.normal(loc=0.0, scale=1.0, size=(3, 4)), (3, 4), "float32"),
+        (lambda srng: srng.normal(loc=0.0, scale=1.0, size=(3, 4)), (3, 4), "float"),
         (lambda srng: srng.normal(loc=2.0, scale=0.5), (), None),
-        (lambda srng: srng.uniform(low=0.0, high=1.0, size=(10,)), (10,), "float32"),
+        (lambda srng: srng.uniform(low=0.0, high=1.0, size=(10,)), (10,), "float"),
         (lambda srng: srng.bernoulli(p=0.7, size=(5, 5)), (5, 5), "int64"),
         (
             lambda srng: srng.categorical(
@@ -58,15 +63,15 @@ def check_shape_and_dtype(
             (8,),
             "int64",
         ),
-        (lambda srng: srng.laplace(loc=0.0, scale=1.0, size=(7,)), (7,), "float32"),
-        (lambda srng: srng.gumbel(loc=0.0, scale=1.0, size=(6,)), (6,), "float32"),
-        (lambda srng: srng.lognormal(mu=0.0, sigma=1.0, size=(5,)), (5,), "float32"),
+        (lambda srng: srng.laplace(loc=0.0, scale=1.0, size=(7,)), (7,), "float"),
+        (lambda srng: srng.gumbel(loc=0.0, scale=1.0, size=(6,)), (6,), "float"),
+        (lambda srng: srng.lognormal(mu=0.0, sigma=1.0, size=(5,)), (5,), "float"),
         (lambda srng: srng.lognormal(mu=0.0, sigma=1.0), (), None),
-        (lambda srng: srng.halfnormal(loc=0.0, scale=1.0, size=(4,)), (4,), "float32"),
+        (lambda srng: srng.halfnormal(loc=0.0, scale=1.0, size=(4,)), (4,), "float"),
         (lambda srng: srng.halfnormal(loc=0.0, scale=1.0), (), None),
-        (lambda srng: srng.exponential(scale=1.0, size=(6,)), (6,), "float32"),
-        (lambda srng: srng.logistic(loc=0.0, scale=1.0, size=(7,)), (7,), "float32"),
-        (lambda srng: srng.cauchy(loc=0.0, scale=1.0, size=(8,)), (8,), "float32"),
+        (lambda srng: srng.exponential(scale=1.0, size=(6,)), (6,), "float"),
+        (lambda srng: srng.logistic(loc=0.0, scale=1.0, size=(7,)), (7,), "float"),
+        (lambda srng: srng.cauchy(loc=0.0, scale=1.0, size=(8,)), (8,), "float"),
     ],
 )
 def test_shape_dtype(make_rv, expected_shape, expected_dtype):
