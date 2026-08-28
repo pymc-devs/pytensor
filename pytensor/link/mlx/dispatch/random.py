@@ -46,11 +46,18 @@ def mlx_funcify_RandomVariable(op, node, **kwargs):
     rv = node.outputs[1]
     out_dtype = rv.type.dtype
 
+    # MLX random primitives reject float64 regardless of device, so sample in
+    # float32 and widen the draw to the declared output dtype afterwards.
+    mlx_out_dtype = convert_dtype_to_mlx(out_dtype)
+    sample_dtype = mx.float32 if mlx_out_dtype == mx.float64 else mlx_out_dtype
+
     sample_fn_inner = mlx_sample_fn(op, node)
 
     def sample_fn(rng, size, *parameters):
         new_rng, sampling_key = mx.random.split(rng, num=2)
-        sample = sample_fn_inner(sampling_key, size, out_dtype, *parameters)
+        sample = sample_fn_inner(sampling_key, size, sample_dtype, *parameters)
+        if sample.dtype != mlx_out_dtype:
+            sample = sample.astype(mlx_out_dtype)
         return (new_rng, sample)
 
     return sample_fn

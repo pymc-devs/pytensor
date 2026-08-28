@@ -92,7 +92,7 @@ def test_uniform_values():
     results = check_shape_and_dtype(
         lambda srng: srng.uniform(low=0.0, high=1.0, size=(10,)),
         (10,),
-        "float32",
+        "float",
     )
     r = np.array(results[0])
     assert np.all(r >= 0.0)
@@ -117,7 +117,7 @@ def test_mvnormal_shape():
     check_shape_and_dtype(
         lambda srng: srng.multivariate_normal(mean=mean, cov=cov, size=(6,)),
         (6, 4),
-        "float32",
+        "float",
     )
 
 
@@ -130,7 +130,7 @@ def test_mvnormal_decomposition_method(method):
             mean=mean, cov=cov, size=(6,), method=method
         ),
         (6, 4),
-        "float32",
+        "float",
     )
 
 
@@ -142,7 +142,7 @@ def test_mvnormal_batched_params_with_size():
     check_shape_and_dtype(
         lambda srng: srng.multivariate_normal(mean=mean, cov=cov, size=(2,)),
         (2, 3),
-        "float32",
+        "float",
     )
 
 
@@ -201,7 +201,7 @@ def test_lognormal_shape_dtype():
     results = check_shape_and_dtype(
         lambda srng: srng.lognormal(mu=0.0, sigma=1.0, size=(5,)),
         (5,),
-        "float32",
+        "float",
     )
     r = np.array(results[0])
     assert np.all(r > 0)
@@ -222,7 +222,7 @@ def test_exponential_shape_dtype():
     results = check_shape_and_dtype(
         lambda srng: srng.exponential(scale=1.0, size=(6,)),
         (6,),
-        "float32",
+        "float",
     )
     r = np.array(results[0])
     assert np.all(r > 0)
