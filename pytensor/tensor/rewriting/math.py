@@ -110,7 +110,11 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
+from pytensor.tensor.subtensor import (
+    Subtensor,
+    _is_provably_non_negative,
+    _is_provably_positive,
+)
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -594,22 +598,43 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
 
+@register_canonicalize
 @register_specialize
-@node_rewriter([log])
-def local_log_sqrt(fgraph, node):
-    x = node.inputs[0]
+@node_rewriter([pt_abs])
+def local_useless_abs(fgraph, node):
+    # Case for abs(x) -> x, when x is already non-negative
+    [x] = node.inputs
 
-    if (
-        not x.owner
-        or not isinstance(x.owner.op, Elemwise)
-        or not isinstance(x.owner.op.scalar_op, ps.Sqrt)
-    ):
+    if not _is_provably_non_negative(x):
         return
 
-    # Case for log(sqrt(x)) -> 0.5 * log(x)
-    x = x.owner.inputs[0]
+    return [x]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_sqrt_sqr(fgraph, node):
+    [x] = node.inputs
+
+    match x.owner_op_and_inputs:
+        # Case for log(sqrt(x)) -> 0.5 * log(x)
+        case (Elemwise(ps.Sqrt()), inner):
+            factor, inner_out = 0.5, log(inner)
+
+        # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square,
+        # so a value that would over- or underflow when squared survives the log.
+        case (Elemwise(ps.Sqr()), inner):
+            # abs() of a complex input is real and would drop the imaginary part
+            if inner.dtype.startswith("complex"):
+                return
+            factor, inner_out = 2.0, log(pt_abs(inner))
+
+        case _:
+            return
+
     old_out = node.outputs[0]
-    new_out = mul(as_tensor_variable(0.5, dtype=x.dtype), log(x))
+    new_out = mul(as_tensor_variable(factor, dtype=old_out.dtype), inner_out)
     if new_out.dtype != old_out.dtype:
         new_out = cast(new_out, old_out.dtype)
 

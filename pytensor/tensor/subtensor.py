@@ -22,6 +22,7 @@ from pytensor.scalar.basic import (
     ScalarMaximum,
     ScalarMinimum,
     ScalarVariable,
+    UnaryScalarOp,
 )
 from pytensor.tensor import (
     TensorLike,
@@ -253,12 +254,15 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
     - ``minimum(a, b)`` when both ``a`` and ``b`` are positive.
     - ``maximum(a, b)`` when at least one of ``a``, ``b`` is positive.
 
-    Three further cases prove non-negativity but not strict positivity, so they
+    Four further cases prove non-negativity but not strict positivity, so they
     are recognized only when ``strict=False``:
 
     - Unsigned-integer dtype (a ``uint`` may be 0).
     - ``Shape`` / ``Shape_i`` outputs (a dimension may be 0).
     - ``Cast`` of a non-negative input (a float :math:`0 < x < 1` truncates to 0).
+    - A unary scalar op declaring ``non_negative`` (``abs``, ``sqr``, ``exp``, ...),
+      restricted to float and unsigned outputs: signed integers wrap on overflow
+      (``sqr(int8(12)) == -112``) and complex values are unordered.
 
     Parameters
     ----------
@@ -293,6 +297,13 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
         scalar_op = op.scalar_op
         if not strict and isinstance(scalar_op, Cast):
             return _is_provably_positive(var.owner.inputs[0], strict)
+        if (
+            not strict
+            and isinstance(scalar_op, UnaryScalarOp)
+            and scalar_op.non_negative
+            and var.type.dtype.startswith(("float", "uint"))
+        ):
+            return True
         if isinstance(scalar_op, ScalarMinimum):
             return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
         if isinstance(scalar_op, ScalarMaximum):

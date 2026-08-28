@@ -134,11 +134,13 @@ class TestProvablyPositive:
             pytest.param(lambda: vector("v", dtype="uint8"), id="uint-dtype"),
             pytest.param(lambda: matrix("m").shape[0], id="shape-dim"),
             pytest.param(lambda: constant(np.array([0.5])).astype("int64"), id="cast"),
+            pytest.param(lambda: exp(vector("v")), id="non-negative-op"),
         ],
     )
     def test_proves_non_negative_but_not_strict_positive(self, make_var):
-        """A uint value, a shape dimension, and a cast can each equal zero, so
-        they establish ``>= 0`` but never strict ``> 0``."""
+        """A uint value, a shape dimension, a cast, and the output of an op flagged
+        ``non_negative`` can each equal zero, so they establish ``>= 0`` but never
+        strict ``> 0``."""
         var = make_var()
         assert _is_provably_non_negative(var) is True
         assert _is_provably_positive(var, strict=True) is False

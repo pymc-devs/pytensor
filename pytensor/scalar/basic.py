@@ -1296,6 +1296,11 @@ class UnaryScalarOp(ScalarOp):
     monotonic_increasing = False
     monotonic_decreasing = False
 
+    # Set only when the output is >= 0 for every real input, including the sign of zero
+    # (`sqrt` returns -0.0 for -0.0, so it does not qualify). Consumers must still check
+    # the dtype: signed integers wrap on overflow and complex values are unordered.
+    non_negative = False
+
     def c_code_contiguous(self, node, name, inputs, outputs, sub):
         (x,) = inputs
         (z,) = outputs
@@ -2523,6 +2528,7 @@ def cast(x, dtype):
 
 class Abs(UnaryScalarOp):
     preserves_zero = True
+    non_negative = True
     nfunc_spec = ("abs", 1, 1)
 
     def make_node(self, x):
@@ -3084,6 +3090,7 @@ log1p = Log1p(upgrade_to_float, name="log1p")
 
 class Exp(UnaryScalarOp):
     monotonic_increasing = True
+    non_negative = True
     nfunc_spec = ("exp", 1, 1)
     amd_float32 = "amd_vrsa_expf"
     amd_float64 = "amd_vrda_exp"
@@ -3123,6 +3130,7 @@ exp = Exp(upgrade_to_float, name="exp")
 
 class Exp2(UnaryScalarOp):
     monotonic_increasing = True
+    non_negative = True
     nfunc_spec = ("exp2", 1, 1)
 
     def impl(self, x):
@@ -3201,6 +3209,7 @@ expm1 = Expm1(upgrade_to_float, name="expm1")
 
 class Sqr(UnaryScalarOp):
     preserves_zero = True
+    non_negative = True
     nfunc_spec = ("square", 1, 1)
 
     def impl(self, x):
@@ -3545,6 +3554,8 @@ class Cosh(UnaryScalarOp):
     cosh(x) = (exp(x) + exp(-x)) / 2.
 
     """
+
+    non_negative = True
 
     nfunc_spec = ("cosh", 1, 1)
 

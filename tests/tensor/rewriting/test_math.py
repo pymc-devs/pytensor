@@ -111,12 +111,14 @@ from pytensor.tensor.rewriting.math import (
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
+    local_log_sqrt_sqr,
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
     local_reduce_chain,
     local_reduce_join,
     local_sum_prod_of_mul_or_div,
+    local_useless_abs,
     mul_canonizer,
     parse_mul_tree,
     perform_sigm_times_exp,
@@ -2141,16 +2143,100 @@ class TestExpLog:
         assert len(ops_graph) == expected_switches
 
 
-def test_log_sqrt() -> None:
+def test_log_sqrt():
     x = pt.tensor("x", shape=(None, None))
-    out = log(sqrt(x))
-
-    out = rewrite_graph(out, include=["specialize"])
-
-    assert utt.assert_equal_computations(
-        [out],
-        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
+    result = RewriteTester(
+        [x], [log(sqrt(x))], include=None, custom_rewrite=local_log_sqrt_sqr
     )
+
+    result.assert_graph(0.5 * log(x))
+    result.assert_eval(np.array([[1.0, 2.0], [3.0, 4.0]]))
+
+
+def test_log_sqrt_integer_input():
+    # A 0.5 factor typed from the integer input would truncate to 0
+    x = ivector("x")
+    result = RewriteTester(
+        [x], [log(sqrt(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    result.assert_graph(0.5 * log(x))
+    result.assert_eval(np.array([2, 3, 4], dtype="int32"))
+
+
+def test_log_sqr():
+    x = pt.tensor("x", shape=(None, None))
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    result.assert_graph(2.0 * log(pt_abs(x)))
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+
+
+def test_log_sqr_extreme_magnitudes():
+    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64, so the
+    # rewritten graph is deliberately not equivalent to the original one here
+    x = pt.vector("x")
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    x_test = np.array([1e200, 1e-200, 3.0])
+    [orig_out] = result.orig_fn(x_test)
+    [rewr_out] = result.rewr_fn(x_test)
+    assert np.isinf(orig_out).sum() == 2
+    np.testing.assert_allclose(rewr_out, 2 * np.log(np.abs(x_test)))
+
+
+def test_useless_abs():
+    x = pt.tensor("x", shape=(None, None))
+    result = RewriteTester(
+        [x], [pt_abs(exp(x))], include=None, custom_rewrite=local_useless_abs
+    )
+
+    result.assert_graph(exp(x))
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+
+
+def test_useless_abs_keeps_signed_zero():
+    # sqrt(-0.0) is -0.0, which abs() normalizes to +0.0, so dropping the abs would flip
+    # the sign of any downstream division
+    x = pt.vector("x")
+    out = pt_abs(sqrt(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+
+    result.assert_graph(out)
+    [rewr_out] = result.rewr_fn(np.array([-0.0]))
+    assert not np.signbit(rewr_out)
+
+
+def test_useless_abs_signed_integer_overflow():
+    # sqr() wraps on signed ints, so its output is not non-negative and the abs()
+    # has to stay
+    x = pt.vector("x", dtype="int8")
+    out = pt_abs(sqr(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+
+    result.assert_graph(out)
+    [rewr_out] = result.rewr_fn(np.array([12, 16, 3], dtype="int8"))
+    np.testing.assert_array_equal(rewr_out, np.array([112, 0, 9], dtype="int8"))
+
+
+@pytest.mark.parametrize(
+    "original_fn, rewrite",
+    [
+        pytest.param(lambda x: log(sqr(x)), local_log_sqrt_sqr, id="log_sqr"),
+        pytest.param(lambda x: pt_abs(sqr(x)), local_useless_abs, id="abs_sqr"),
+    ],
+)
+def test_sqr_rewrites_skip_complex(original_fn, rewrite):
+    # abs() of a complex input is real, so both rewrites would change the output dtype
+    x = pt.vector("x", dtype="complex128")
+    out = original_fn(x)
+    result = RewriteTester([x], [out], include=None, custom_rewrite=rewrite)
+
+    result.assert_graph(out)
 
 
 class TestSqrSqrt:
