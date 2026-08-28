@@ -1,4 +1,39 @@
+import warnings
+
 from pytensor.link.basic import JITLinker
+
+
+UNCOMPILABLE_SHAPE_WARNING = (
+    "This graph contains an `Op` whose output shape depends on its input "
+    "values, which `mx.compile` cannot trace, so the whole graph will run "
+    "uncompiled. To get compilation back, give the graph static shapes: a "
+    "boolean mask that is constant becomes integer indices, and a mask only "
+    "known at runtime can often be replaced by shape-preserving arithmetic, "
+    "e.g. `(x * mask).sum()` rather than `x[mask].sum()`."
+)
+
+
+def _has_data_dependent_shape(fgraph):
+    """Whether any `Op` in ``fgraph`` has an output shape that depends on data.
+
+    `mx.compile` traces a graph once per input *shape*, so an output whose shape
+    is only known from the values cannot be traced at all.
+    """
+    # Imported here because `pytensor.compile` imports this module while
+    # `pytensor.tensor` is still initializing.
+    from pytensor.graph.op import HasInnerGraph
+    from pytensor.tensor.basic import Nonzero
+
+    for node in fgraph.apply_nodes:
+        if isinstance(node.op, Nonzero):
+            return True
+
+        if isinstance(node.op, HasInnerGraph):
+            inner_fgraph = getattr(node.op, "fgraph", None)
+            if inner_fgraph is not None and _has_data_dependent_shape(inner_fgraph):
+                return True
+
+    return False
 
 
 class MLXLinker(JITLinker):
@@ -44,7 +79,12 @@ class MLXLinker(JITLinker):
 
         from pytensor.link.mlx.dispatch import mlx_typify
 
-        if not self.use_compile:
+        use_compile = self.use_compile
+        if use_compile and _has_data_dependent_shape(self.fgraph):
+            warnings.warn(UNCOMPILABLE_SHAPE_WARNING, UserWarning, stacklevel=2)
+            use_compile = False
+
+        if not use_compile:
             # Skip compilation and just return the function with MLX typification
             def fn_no_compile(*inputs):
                 return fn(*(mlx_typify(inp) for inp in inputs))

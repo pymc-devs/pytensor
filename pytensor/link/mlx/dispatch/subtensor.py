@@ -26,8 +26,27 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 
 @mlx_funcify.register(AdvancedSubtensor)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
-    def advanced_subtensor(x, *ilists):
-        indices = indices_from_subtensor(ilists, op.idx_list)
+    # MLX slices reject array-typed bounds, so every flat index position a slice
+    # uses as a bound is coerced to a Python int; array-valued indices are left
+    # alone.
+    bound_positions = {
+        bound
+        for idx_entry in op.idx_list
+        if isinstance(idx_entry, slice)
+        for bound in (idx_entry.start, idx_entry.stop, idx_entry.step)
+        if bound is not None
+    }
+
+    def advanced_subtensor(
+        x, *ilists, idx_list=op.idx_list, bound_positions=bound_positions
+    ):
+        indices = indices_from_subtensor(
+            tuple(
+                int(index) if position in bound_positions else index
+                for position, index in enumerate(ilists)
+            ),
+            idx_list,
+        )
         if len(indices) == 1:
             indices = indices[0]
 
@@ -96,9 +115,40 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def mlx_fn(x, indices, y):
             return x.at[indices].add(y)
 
-    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
+    # MLX slices reject array-typed bounds, so every flat index position a slice
+    # uses as a bound is coerced to a Python int; array-valued indices are left
+    # alone.
+    bound_positions = {
+        bound
+        for idx_entry in op.idx_list
+        if isinstance(idx_entry, slice)
+        for bound in (idx_entry.start, idx_entry.stop, idx_entry.step)
+        if bound is not None
+    }
+
+    def advancedincsubtensor(
+        x,
+        y,
+        *ilist,
+        mlx_fn=mlx_fn,
+        idx_list=op.idx_list,
+        bound_positions=bound_positions,
+    ):
         op._check_runtime_broadcast_of_vector_index(node, x, y, ilist[0])
 
-        return mlx_fn(x, ilist, y)
+        # Slices and plain integers live in `idx_list`, not in `ilist`, and have
+        # to be spliced back in; without them `x[:, idx] = y` would scatter
+        # along the leading axis instead.
+        indices = indices_from_subtensor(
+            tuple(
+                int(index) if position in bound_positions else index
+                for position, index in enumerate(ilist)
+            ),
+            idx_list,
+        )
+        if len(indices) == 1:
+            indices = indices[0]
+
+        return mlx_fn(x, indices, y)
 
     return advancedincsubtensor
