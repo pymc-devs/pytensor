@@ -1,7 +1,44 @@
+from functools import singledispatch
+
 import mlx.core as mx
+import numpy as np
 
 from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.tensor.blockwise import Blockwise, _check_runtime_broadcast_core
+
+
+@singledispatch
+def mlx_funcify_batched(core_op, node, **kwargs):
+    """Return a natively batched implementation of ``core_op``, or ``None``.
+
+    ``Blockwise`` is lowered with ``mx.vmap``, which has no batching rule for
+    every MLX primitive: ``mx.linalg.solve`` and ``mx.linalg.lu_factor`` both
+    build an ``LUF`` primitive and raise "[Primitive::vmap] Not implemented for
+    LUF" (#2385). Their CPU-stream implementations already accept batched
+    input, so the ``vmap`` wrapper is not needed for them in the first place.
+
+    An ``Op`` registered here receives all of its inputs already aligned to a
+    common batch shape -- ``mx.linalg.solve`` requires identical batch dims
+    across inputs and, unlike ``solve_triangular``, does not broadcast them
+    itself.
+    """
+    return None
+
+
+def _align_batch_dims(args, core_ndims):
+    """Broadcast every input to the common batch shape implied by ``core_ndims``."""
+    batch_shapes = [
+        arg.shape[: arg.ndim - n_core] for arg, n_core in zip(args, core_ndims)
+    ]
+    batch_shape = tuple(np.broadcast_shapes(*batch_shapes))
+
+    aligned = []
+    for arg, n_core in zip(args, core_ndims):
+        target = (*batch_shape, *arg.shape[arg.ndim - n_core :])
+        aligned.append(
+            arg if arg.shape == target else mx.broadcast_to(arg, target, stream=mx.cpu)
+        )
+    return aligned
 
 
 @mlx_funcify.register(Blockwise)
@@ -18,6 +55,19 @@ def funcify_Blockwise(op: Blockwise, node, **kwargs):
 
     # Hoisted out of the per-call path, unlike Blockwise._check_runtime_broadcast.
     batch_bcast = [inp.type.broadcastable[:batch_ndim] for inp in node.inputs]
+
+    # Prefer a natively batched implementation over `mx.vmap` when the core `Op`
+    # provides one, both to sidestep missing `vmap` rules (#2385) and to let MLX
+    # batch the primitive itself.
+    batched_f = mlx_funcify_batched(op.core_op, node=core_node, **kwargs)
+    if batched_f is not None:
+
+        def blockwise_batched(*args):
+            _check_runtime_broadcast_core(args, batch_bcast, batch_ndim)
+            out = batched_f(*_align_batch_dims(args, core_ndims))
+            return tuple(out) if multi_output else out
+
+        return blockwise_batched
 
     # Decide batching purely from static shapes so a graph batches identically
     # here and in every other backend: a batch axis broadcasts (is never mapped)
