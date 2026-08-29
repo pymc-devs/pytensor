@@ -117,3 +117,29 @@ def test_mlx_compile_ops():
     x = ViewOp()(pt.as_tensor_variable(x_np))
 
     compare_mlx_and_py([], [x], [])
+
+
+def test_mlx_Reshape_full_mlx_mode():
+    # Under the full "MLX" mode the linker typifies the shape input to an
+    # ``mx.array``, which ``mx.reshape`` rejects outright, so every reshape
+    # raised ``TypeError`` (#2386). The shape has to be resolved at funcify
+    # time instead.
+    x = pt.matrix("x", shape=(6, 4), dtype="float32")
+    x_val = np.arange(24, dtype="float32").reshape(6, 4)
+
+    for shape in ((24,), (4, 6), (2, 12), (-1, 3), (3, -1), (2, 3, 4)):
+        compare_mlx_and_py([x], [reshape(x, shape)], [x_val], mlx_mode="MLX")
+
+
+def test_mlx_Reshape_shape_from_other_input():
+    # A shape read off another input is not a ``Constant``, but PyTensor's shape
+    # inference still resolves it statically, so it must compile under "MLX".
+    x = pt.matrix("x", shape=(6, 4), dtype="float32")
+    y = vector("y", shape=(24,), dtype="float32")
+
+    compare_mlx_and_py(
+        [x, y],
+        [reshape(x, y.shape)],
+        [np.arange(24, dtype="float32").reshape(6, 4), np.zeros(24, dtype="float32")],
+        mlx_mode="MLX",
+    )
