@@ -347,3 +347,69 @@ def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
     assert out.owner.op.ignore_duplicates
 
     compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])
+
+
+def test_mlx_AdvancedIncSubtensor_leading_slice():
+    """``idx_list`` may place the advanced indices after a leading slice.
+
+    The dispatch used to pass the flat index list straight through, anchoring
+    the advanced indices at axis 0 and shifting every one of them left, so any
+    destination carrying leading batch axes failed to broadcast (#2382, #2387).
+    """
+    x = tensor("x", shape=(5, 3, 3), dtype="float32")
+    idx = pt.arange(3)
+    out = pt_subtensor.inc_subtensor(x[..., idx, idx], np.float32(1.0))
+
+    op = out.owner.op
+    assert isinstance(op, pt_subtensor.AdvancedIncSubtensor)
+    assert op.idx_list == (slice(None, None, None), 0, 1)
+
+    compare_mlx_and_py([x], [out], [np.zeros((5, 3, 3), dtype="float32")])
+
+
+def test_mlx_AdvancedIncSubtensor_grad_batched_diagonal():
+    """Gradient of a batched diagonal read, the form `specialize` produces.
+
+    `specialize` rewrites ``diagonal(...)`` into advanced indexing, so the
+    gradient of a log-determinant over a batch of matrices hit #2387 without
+    the user writing any indexing.
+    """
+    x = tensor("x", shape=(5, 3, 3), dtype="float32")
+    idx = pt.arange(3)
+    out = pt.grad(x[..., idx, idx].sum(), x)
+
+    compare_mlx_and_py([x], [out], [np.zeros((5, 3, 3), dtype="float32")])
+
+
+def test_mlx_AdvancedIncSubtensor_vectorized_scatter():
+    """A scatter-add that ``vectorize_graph`` has given a leading batch dim (#2382)."""
+    from pytensor.graph.replace import vectorize_graph
+
+    n_batch, n_obs, n_levels = 4, 7, 3
+    idx = pt.constant(
+        np.random.default_rng(0).integers(0, n_levels, size=n_obs), dtype="int64"
+    )
+    levels = pt.vector("levels", shape=(n_levels,), dtype="float32")
+    grad = pt.grad(levels[idx].sum(), levels)
+
+    batched = pt.matrix("batched", shape=(n_batch, n_levels), dtype="float32")
+    out = vectorize_graph(grad, replace={levels: batched})
+
+    # Needs the full "MLX" mode: it is `specialize` that collapses the
+    # `Blockwise` into a single `AdvancedIncSubtensor` with a leading slice.
+    compare_mlx_and_py(
+        [batched],
+        [out],
+        [np.ones((n_batch, n_levels), dtype="float32")],
+        mlx_mode="MLX",
+    )
+
+
+def test_mlx_AdvancedSetSubtensor_leading_slice():
+    """The ``set_instead_of_inc`` branch takes the same ``idx_list`` path."""
+    x = tensor("x", shape=(5, 3, 3), dtype="float32")
+    idx = pt.arange(3)
+    out = pt_subtensor.set_subtensor(x[..., idx, idx], np.float32(7.0))
+
+    assert out.owner.op.set_instead_of_inc
+    compare_mlx_and_py([x], [out], [np.zeros((5, 3, 3), dtype="float32")])
