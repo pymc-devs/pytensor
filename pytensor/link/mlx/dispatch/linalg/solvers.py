@@ -30,19 +30,32 @@ def mlx_funcify_Solve(op, node, **kwargs):
     return solve
 
 
+def _unit_diagonal(A):
+    """Replace the stored diagonal of ``A`` with ones.
+
+    Call within a CPU stream context. Broadcasts over any leading batch dims.
+    """
+    eye = mx.eye(A.shape[-1], dtype=A.dtype)
+    return A * (1 - eye) + eye
+
+
 @mlx_funcify.register(SolveTriangular)
 def mlx_funcify_SolveTriangular(op, node, **kwargs):
     lower = op.lower
+    unit_diagonal = op.unit_diagonal
     A_dtype = getattr(mx, node.inputs[0].dtype)
     b_dtype = getattr(mx, node.inputs[1].dtype)
 
     def solve_triangular(A, b):
-        return mx.linalg.solve_triangular(
-            A.astype(stream=mx.cpu, dtype=A_dtype),
-            b.astype(stream=mx.cpu, dtype=b_dtype),
-            upper=not lower,
-            stream=mx.cpu,
-        )
+        with mx.stream(mx.cpu):
+            A = A.astype(dtype=A_dtype)
+            b = b.astype(dtype=b_dtype)
+            if unit_diagonal:
+                # `mx.linalg.solve_triangular` has no `unit_diagonal` argument,
+                # so the stored diagonal would be used instead of ones and the
+                # wrong answer returned silently (#2384).
+                A = _unit_diagonal(A)
+            return mx.linalg.solve_triangular(A, b, upper=not lower)
 
     return solve_triangular
 
