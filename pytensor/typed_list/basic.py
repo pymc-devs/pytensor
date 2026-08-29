@@ -64,6 +64,20 @@ class TypedListConstant(_typed_list_py_operators, Constant):
 
     """
 
+    def signature(self):
+        """Return a hashable, safely comparable signature.
+
+        The base `Constant.signature` returns ``(self.type, self.data)``, but
+        ``data`` is a Python list of (usually) arrays, which is unhashable and
+        compares elementwise. Delegate to the signature of the inner type's
+        constants instead.
+        """
+        ttype = self.type.ttype
+        return (
+            self.type,
+            tuple(ttype.constant_type(ttype, d).signature() for d in self.data),
+        )
+
 
 TypedListType.constant_type = TypedListConstant
 
