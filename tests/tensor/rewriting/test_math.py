@@ -4444,8 +4444,13 @@ class TestSigmoidRewrites:
             (np.array(1.0, "float64") - pt.sigmoid(x), cast(sigmoid(-x), "float64")),
             (np.array(1.0, "float32") - sigmoid(xd), sigmoid(-xd)),
             (np.array(1.0, "float64") - sigmoid(xd), sigmoid(-xd)),
+            # This sum folds to exactly 1.0 in float32
             (np.sum(1 / np.array([2, 3, 6], "float32")) - sigmoid(x), sigmoid(-x)),
-            (np.sum(1 / np.array([2, 3, 6], "float64")) - sigmoid(xd), sigmoid(-xd)),
+            # In float64 it is one ulp below 1, so it must not be treated as 1
+            (
+                np.sum(1 / np.array([2, 3, 6], "float64")) - sigmoid(xd),
+                np.sum(1 / np.array([2, 3, 6], "float64")) - sigmoid(xd),
+            ),
             (np.float32(1 - 9e-6) - sigmoid(x), np.float32(1 - 9e-6) - sigmoid(x)),
             (np.float64(1 - 1e-9) - sigmoid(xd), np.float64(1 - 1e-9) - sigmoid(xd)),
         ]:
@@ -4599,14 +4604,15 @@ class TestSoftplusRewrites:
         # assert check_stack_trace(f, ops_to_check='all')
         f(np.random.random((54, 11)).astype(config.floatX))
 
-        # Test close to 1
+        # A constant one ulp away from 1 must not be treated as 1
         x_dtype = np.dtype(x.dtype).type
         out = log(np.nextafter(x_dtype(1), x_dtype(2)) - sigmoid(x))
         f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
-        assert len(topo) == 2
-        assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Softplus)
-        assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Neg)
+        assert not any(
+            isinstance(getattr(node.op, "scalar_op", None), pytensor.scalar.Softplus)
+            for node in topo
+        )
 
         # Same test with a flatten
         out = log(1 - pt.flatten(sigmoid(x)))
@@ -4739,6 +4745,24 @@ def test_local_odds_sigmoid():
     # canonicalization spells the negation as a mul
     result = RewriteTester([x], [(1 - sigmoid(x)) / sigmoid(x)])
     result.assert_graph(exp(-1.0 * x))
+    result.assert_eval(np.array(0.5))
+
+    # the sigmoid(-x) spelling produced by local_1msigmoid
+    result = RewriteTester([x], [sigmoid(x) / sigmoid(-x)])
+    result.assert_graph(exp(x))
+    result.assert_eval(np.array(0.5))
+
+
+def test_1msigmoid_canonicalized_spellings():
+    """log1p(-sigmoid(x)) is canonicalized to log1p((-1) * sigmoid(x)) before
+    stabilize runs, which used to escape log1msigm_to_softplus until specialize.
+    """
+    x = dscalar("x")
+
+    result = RewriteTester(
+        [x], [log1p(-sigmoid(x))], include=("canonicalize", "stabilize")
+    )
+    result.assert_graph(-softplus(x))
     result.assert_eval(np.array(0.5))
 
 
