@@ -1798,6 +1798,11 @@ class Alloc(COp):
                     client_op,
                     IncSubtensor | AdvancedIncSubtensor | Gemv | CGemv | Ger | CGer,
                 )
+                # ... unless the client is constant in every other input, in which
+                # case it folds away as well and no copy survives to run time.
+                # Refusing to fold then leaves the whole cone recomputing the same
+                # bytes on every call.
+                and not all(isinstance(inp, Constant) for inp in client.inputs[1:])
             ):
                 # Ops that will work inplace on the Alloc. So if they
                 # get constant_folded, they would copy the constant
@@ -4279,7 +4284,16 @@ class AllocEmpty(COp):
         return (4,)
 
     def do_constant_folding(self, fgraph, node):
-        return False
+        # The contents are undefined, so a constant is only ever as good as the
+        # buffer it replaces if it does not survive the fold: every client must be
+        # constant in its other inputs, so that it folds away as well.
+        [out] = node.outputs
+        clients = fgraph.clients[out]
+        return bool(clients) and all(
+            not isinstance(client.op, Output)
+            and all(inp is out or isinstance(inp, Constant) for inp in client.inputs)
+            for client, _ in clients
+        )
 
     def connection_pattern(self, node):
         return [[False] for i in node.inputs]
