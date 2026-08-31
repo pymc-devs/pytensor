@@ -120,16 +120,13 @@ def numba_funcify_ARange(op, **kwargs):
 
 @register_funcify_default_op_cache_key(Join)
 def numba_funcify_Join(op, node, **kwargs):
-    """Copy each input into its slice of a preallocated output.
+    """Copy each input into a preallocated output with a scalar loop nest.
 
-    ``np.concatenate`` on a tuple of arrays compiles ~3x slower for the same
-    result. A whole-array slice write instead goes through Numba's fancy
-    indexing, which rebuilds the source as an ``A``-layout view and so copies it
-    with gathers; the dimensions ahead of the join axis are peeled with integer
-    indexing so that the destination slice stays contiguous.
+    ``np.concatenate`` on a tuple of arrays compiles slower for the same result.
+    To let LLVM vectorize the inner copy loop, the join axis offset is unsigned
+    (provably non-negative) and broadcastable dimensions are indexed with zero.
 
-    For ``join(1, x0, x1, x2)`` on matrices (axis 1, the last one here) this
-    emits::
+    For ``join(1, x0, x1, x2)`` on matrices this emits::
 
         def join(*tensors):
             total = tensors[0].shape[1]
@@ -140,28 +137,19 @@ def numba_funcify_Join(op, node, **kwargs):
             if tensors[2].shape[0] != tensors[0].shape[0]:
                 raise ValueError(_mismatch_msg)
             out = np.empty((tensors[0].shape[0], total), dtype)
-            off = 0
-            l = tensors[0].shape[1]
-            for i0 in range(tensors[0].shape[0]):
-                dst = out[i0, off : off + l]
-                src = tensors[0][i0]
-                for j0 in range(src.shape[0]):
-                    dst[j0] = src[j0]
-            off += l
-            l = tensors[1].shape[1]
-            for i0 in range(tensors[1].shape[0]):
-                dst = out[i0, off : off + l]
-                src = tensors[1][i0]
-                for j0 in range(src.shape[0]):
-                    dst[j0] = src[j0]
-            off += l
-            l = tensors[2].shape[1]
-            for i0 in range(tensors[2].shape[0]):
-                dst = out[i0, off : off + l]
-                src = tensors[2][i0]
-                for j0 in range(src.shape[0]):
-                    dst[j0] = src[j0]
-            off += l
+            off = np.uint64(0)
+            for j0 in range(tensors[0].shape[0]):
+                for j1 in range(tensors[0].shape[1]):
+                    out[j0, np.uint64(j1) + off] = tensors[0][j0, j1]
+            off += np.uint64(tensors[0].shape[1])
+            for j0 in range(tensors[1].shape[0]):
+                for j1 in range(tensors[1].shape[1]):
+                    out[j0, np.uint64(j1) + off] = tensors[1][j0, j1]
+            off += np.uint64(tensors[1].shape[1])
+            for j0 in range(tensors[2].shape[0]):
+                for j1 in range(tensors[2].shape[1]):
+                    out[j0, np.uint64(j1) + off] = tensors[2][j0, j1]
+            off += np.uint64(tensors[2].shape[1])
             return out
     """
     ndim = node.outputs[0].type.ndim
@@ -187,22 +175,22 @@ def numba_funcify_Join(op, node, **kwargs):
                 ]
     code += [
         f"out = np.empty({create_tuple_string(shape)}, dtype)",
-        "off = 0",
+        "off = np.uint64(0)",
     ]
-    leading = "".join(f"[i{d}]" for d in range(ax))
-    leading_idx = "".join(f"i{d}, " for d in range(ax))
-    trailing_idxs = ", ".join(f"j{k}" for k in range(ndim - ax))
+    # The join axis is never broadcastable here: its static length is the sum.
+    static_shape = node.outputs[0].type.shape
+    looped = [d for d in range(ndim) if d == ax or static_shape[d] != 1]
+    src_idx = ", ".join(f"j{d}" if d in looped else "0" for d in range(ndim))
+    dst_idx = ", ".join(
+        f"np.uint64(j{d}) + off" if d == ax else (f"j{d}" if d in looped else "0")
+        for d in range(ndim)
+    )
     for name in names:
-        code += [f"l = {name}.shape[{ax}]"]
-        for d in range(ax):
-            code += [f"for i{d} in range({name}.shape[{d}]):", CODE_TOKEN.INDENT]
-        code += [f"dst = out[{leading_idx}off:off + l]", f"src = {name}{leading}"]
-        for k in range(ndim - ax):
-            code += [f"for j{k} in range(src.shape[{k}]):", CODE_TOKEN.INDENT]
-        code += [f"dst[{trailing_idxs}] = src[{trailing_idxs}]"]
-        code += [CODE_TOKEN.DEDENT] * (ndim - ax)
-        code += [CODE_TOKEN.DEDENT] * ax
-        code += ["off += l"]
+        for d in looped:
+            code += [f"for j{d} in range({name}.shape[{d}]):", CODE_TOKEN.INDENT]
+        code += [f"out[{dst_idx}] = {name}[{src_idx}]"]
+        code += [CODE_TOKEN.DEDENT] * len(looped)
+        code += [f"off += np.uint64({name}.shape[{ax}])"]
     code += ["return out", CODE_TOKEN.DEDENT]
 
     join_fn = compile_numba_function_src(
@@ -217,7 +205,7 @@ def numba_funcify_Join(op, node, **kwargs):
         },
     )
 
-    cache_version = 4
+    cache_version = 5
     # The loop nests cannot go out of bounds: the output is allocated from the
     # validated input shapes
     return numba_basic.numba_njit(join_fn, boundscheck=False), cache_version
