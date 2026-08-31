@@ -177,6 +177,20 @@ def test_ARange():
             ),
             2,
         ),
+        # A broadcastable dimension is indexed with a constant rather than looped over
+        (
+            (
+                (
+                    pt.tensor("x0", shape=(None, None, 1)),
+                    rng.normal(size=(2, 1, 1)).astype(config.floatX),
+                ),
+                (
+                    pt.tensor("x1", shape=(None, None, 1)),
+                    rng.normal(size=(2, 3, 1)).astype(config.floatX),
+                ),
+            ),
+            1,
+        ),
     ],
 )
 def test_Join(vals, axis):
