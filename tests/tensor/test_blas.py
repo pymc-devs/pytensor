@@ -29,7 +29,7 @@ from pytensor.tensor.blas import (
     _dot22,
     _dot22scalar,
 )
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot, mean, mul, outer, sigmoid
 from pytensor.tensor.rewriting.blas import local_dot22_to_dot22scalar, local_gemm_to_ger
 from pytensor.tensor.type import (
@@ -2593,3 +2593,106 @@ def test_broadcast_product_is_left_out_of_gemm():
         length is None or length == actual
         for length, actual in zip(declared, result.shape, strict=True)
     )
+
+
+class TestGeneralBlasLowering:
+    """`Gemm`, `Gemv` and `Ger` built outside `blas_optdb`.
+
+    These rewrites run in `specialize` and match `Dot` directly rather than `Dot22`, so
+    they are the only BLAS lowering the backends that exclude `blas_optdb` ever see.
+    """
+
+    mode = Mode(linker="py", optimizer="fast_run").excluding("BlasOpt")
+
+    @staticmethod
+    def _apply_of(fn, op_type):
+        return [ap for ap in fn.maker.fgraph.toposort() if isinstance(ap.op, op_type)]
+
+    @staticmethod
+    def _inputs(rng, *shapes):
+        return [rng.standard_normal(shape) for shape in shapes]
+
+    def test_matrix_product_to_gemm(self):
+        alpha = pt.scalar("alpha", dtype="float64")
+        x = pt.matrix("x", dtype="float64")
+        y = pt.matrix("y", dtype="float64")
+        c = pt.matrix("c", dtype="float64")
+
+        fn = pytensor.function([alpha, x, y, c], c + alpha * (x @ y), mode=self.mode)
+        assert len(self._apply_of(fn, Gemm)) == 1
+        # The sum is carried by Gemm's own beta rather than left as a separate add.
+        adds = [
+            ap
+            for ap in self._apply_of(fn, Elemwise)
+            if isinstance(ap.op.scalar_op, ps.Add)
+        ]
+        assert not adds
+
+        rng = np.random.default_rng(2)
+        xv, yv, cv = self._inputs(rng, (4, 5), (5, 3), (4, 3))
+        np.testing.assert_allclose(fn(2.5, xv, yv, cv), cv + 2.5 * (xv @ yv))
+
+    def test_outer_product_to_ger(self):
+        alpha = pt.scalar("alpha", dtype="float64")
+        u = pt.vector("u", dtype="float64")
+        v = pt.vector("v", dtype="float64")
+        c = pt.matrix("c", dtype="float64")
+
+        fn = pytensor.function(
+            [alpha, u, v, c], c + alpha * pt.outer(u, v), mode=self.mode
+        )
+        assert len(self._apply_of(fn, Ger)) == 1
+
+        rng = np.random.default_rng(3)
+        uv, vv, cv = self._inputs(rng, 4, 3, (4, 3))
+        np.testing.assert_allclose(fn(2.5, uv, vv, cv), cv + 2.5 * np.outer(uv, vv))
+
+    @pytest.mark.parametrize("build", [lambda x, v: x @ v, dot], ids=["matmul", "dot"])
+    def test_matrix_vector_to_gemv(self, build):
+        """``@`` promotes the vector and squeezes the result; `dot` builds the rank-1
+        operand directly. Both reach `Gemv` through `_as_matrix_product`."""
+        alpha = pt.scalar("alpha", dtype="float64")
+        x = pt.matrix("x", dtype="float64")
+        v = pt.vector("v", dtype="float64")
+        w = pt.vector("w", dtype="float64")
+
+        fn = pytensor.function(
+            [alpha, x, v, w], w + alpha * build(x, v), mode=self.mode
+        )
+        assert len(self._apply_of(fn, Gemv)) == 1
+
+        rng = np.random.default_rng(4)
+        xv, vv, wv = self._inputs(rng, (4, 5), 5, 4)
+        np.testing.assert_allclose(fn(2.5, xv, vv, wv), wv + 2.5 * (xv @ vv))
+
+    def test_vector_matrix_to_gemv(self):
+        alpha = pt.scalar("alpha", dtype="float64")
+        v = pt.vector("v", dtype="float64")
+        y = pt.matrix("y", dtype="float64")
+        w = pt.vector("w", dtype="float64")
+
+        fn = pytensor.function([alpha, v, y, w], w + alpha * (v @ y), mode=self.mode)
+        assert len(self._apply_of(fn, Gemv)) == 1
+
+        rng = np.random.default_rng(5)
+        vv, yv, wv = self._inputs(rng, 5, (5, 3), 3)
+        np.testing.assert_allclose(fn(2.5, vv, yv, wv), wv + 2.5 * (vv @ yv))
+
+    def test_shared_product_is_left_alone(self):
+        """Folding a product read twice would compute it once for each consumer."""
+        alpha = pt.scalar("alpha", dtype="float64")
+        x = pt.matrix("x", dtype="float64")
+        y = pt.matrix("y", dtype="float64")
+        c = pt.matrix("c", dtype="float64")
+
+        product = x @ y
+        fn = pytensor.function(
+            [alpha, x, y, c], [c + alpha * product, product], mode=self.mode
+        )
+        assert not self._apply_of(fn, Gemm)
+
+        rng = np.random.default_rng(7)
+        xv, yv, cv = self._inputs(rng, (4, 5), (5, 3), (4, 3))
+        summed, plain = fn(2.5, xv, yv, cv)
+        np.testing.assert_allclose(plain, xv @ yv)
+        np.testing.assert_allclose(summed, cv + 2.5 * (xv @ yv))

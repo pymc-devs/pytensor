@@ -979,7 +979,9 @@ def local_add_dot_to_gemm(fgraph, node):
     Either scalar may be absent, so this also covers :math:`C + AB`,
     :math:`C + \alpha AB` and :math:`\beta C + AB`. The matrix product is matched
     through `Blockwise` as well as bare, because ``@`` builds a `Blockwise` of `Dot`
-    that is only unwrapped much later.
+    that is only unwrapped much later. A matrix-vector product is matched too, and is
+    handed to `Gemm` as a column or row matrix so that `local_gemm_to_gemv` can turn it
+    into a `Gemv`.
 
     An accumulator that only broadcasts against the product is left alone: BLAS writes
     into the output buffer itself, so folding one in would cost the pass it saves.
@@ -989,7 +991,7 @@ def local_add_dot_to_gemm(fgraph, node):
 
     [out] = node.outputs
     dtype = out.type.dtype
-    if dtype not in float_dtypes or out.type.ndim != 2:
+    if dtype not in float_dtypes or out.type.ndim not in (1, 2):
         return None
 
     for index, term in enumerate(node.inputs):
@@ -1000,13 +1002,25 @@ def local_add_dot_to_gemm(fgraph, node):
         # node it replaces.
         if product.type.broadcastable != out.type.broadcastable:
             continue
+
+        # `matmul` and `dot` both promote a vector operand to a matrix and squeeze the
+        # rank-2 product back down, so a rank-1 sum reaches this rewrite with the squeeze
+        # still on it. Take it off, build the `Gemm` at rank 2, and squeeze the result.
+        squeeze_order = None
+        if product.owner is not None and isinstance(product.owner.op, DimShuffle):
+            if out.type.ndim != 1 or len(fgraph.clients[product]) > 1:
+                continue
+            squeeze_order = product.owner.op.new_order
+            if squeeze_order not in ((0,), (1,)):
+                continue
+            [product] = product.owner.inputs
         matrices = _as_matrix_product(fgraph, product)
         if matrices is None:
             continue
         x, y = matrices
 
         beta, z = _split_scalar_factor(node.inputs[1 - index], dtype)
-        if z.type.ndim != 2:
+        if z.type.ndim != out.type.ndim:
             continue
         # BLAS accumulates into the output buffer itself, so an accumulator that only
         # broadcasts against the product would have to be materialized to the product's
@@ -1021,9 +1035,15 @@ def local_add_dot_to_gemm(fgraph, node):
         if not all(term.type.dtype == dtype for term in (z, x, y, alpha, beta)):
             continue
 
+        if squeeze_order == (0,):
+            z = z.dimshuffle(0, "x")
+        elif squeeze_order == (1,):
+            z = z.dimshuffle("x", 0)
+
         # Emitted through `Blockwise` so that `InplaceBlockwiseOptimizer` can ask the op itself
         # whether it may destroy `z`; the wrapper is unwrapped again once inplace has been decided.
-        new_out = [Blockwise(Gemm(inplace=False))(z, alpha, x, y, beta)]
+        gemm = Blockwise(Gemm(inplace=False))(z, alpha, x, y, beta)
+        new_out = [gemm if squeeze_order is None else gemm.dimshuffle(*squeeze_order)]
         copy_stack_trace(node.outputs, new_out)
         return new_out
 
