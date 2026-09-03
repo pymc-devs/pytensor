@@ -218,14 +218,96 @@ def numba_funcify_ARange(op, **kwargs):
 
 
 @register_funcify_default_op_cache_key(Join)
-def numba_funcify_Join(op, **kwargs):
-    axis = op.axis
+def numba_funcify_Join(op, node, **kwargs):
+    """Copy each input into a preallocated output with a scalar loop nest.
 
-    @numba_basic.numba_njit
-    def join(*tensors):
-        return np.concatenate(tensors, axis)
+    ``np.concatenate`` on a tuple of arrays compiles slower for the same result.
+    To let LLVM vectorize the inner copy loop, the join axis offset is unsigned
+    (provably non-negative) and broadcastable dimensions are indexed with zero.
 
-    return join
+    For ``join(1, x0, x1, x2)`` on matrices this emits::
+
+        def join(*tensors):
+            total = tensors[0].shape[1]
+            total += tensors[1].shape[1]
+            total += tensors[2].shape[1]
+            if tensors[1].shape[0] != tensors[0].shape[0]:
+                raise ValueError(_mismatch_msg)
+            if tensors[2].shape[0] != tensors[0].shape[0]:
+                raise ValueError(_mismatch_msg)
+            out = np.empty((tensors[0].shape[0], total), dtype)
+            off = np.uint64(0)
+            for j0 in range(tensors[0].shape[0]):
+                for j1 in range(tensors[0].shape[1]):
+                    out[j0, np.uint64(j1) + off] = tensors[0][j0, j1]
+            off += np.uint64(tensors[0].shape[1])
+            for j0 in range(tensors[1].shape[0]):
+                for j1 in range(tensors[1].shape[1]):
+                    out[j0, np.uint64(j1) + off] = tensors[1][j0, j1]
+            off += np.uint64(tensors[1].shape[1])
+            for j0 in range(tensors[2].shape[0]):
+                for j1 in range(tensors[2].shape[1]):
+                    out[j0, np.uint64(j1) + off] = tensors[2][j0, j1]
+            off += np.uint64(tensors[2].shape[1])
+            return out
+    """
+    ndim = node.outputs[0].type.ndim
+    ax = op.axis
+    names = [f"tensors[{i}]" for i in range(len(node.inputs))]
+
+    shape = [f"tensors[0].shape[{d}]" for d in range(ndim)]
+    shape[ax] = "total"
+    code: list[str | CODE_TOKEN] = [
+        "def join(*tensors):",
+        CODE_TOKEN.INDENT,
+        f"total = tensors[0].shape[{ax}]",
+        *(f"total += {name}.shape[{ax}]" for name in names[1:]),
+    ]
+    for name in names[1:]:
+        for d in range(ndim):
+            if d != ax:
+                code += [
+                    f"if {name}.shape[{d}] != tensors[0].shape[{d}]:",
+                    CODE_TOKEN.INDENT,
+                    "raise ValueError(_mismatch_msg)",
+                    CODE_TOKEN.DEDENT,
+                ]
+    code += [
+        f"out = np.empty({create_tuple_string(shape)}, dtype)",
+        "off = np.uint64(0)",
+    ]
+    # The join axis is never broadcastable here: its static length is the sum.
+    static_shape = node.outputs[0].type.shape
+    looped = [d for d in range(ndim) if d == ax or static_shape[d] != 1]
+    src_idx = ", ".join(f"j{d}" if d in looped else "0" for d in range(ndim))
+    dst_idx = ", ".join(
+        f"np.uint64(j{d}) + off" if d == ax else (f"j{d}" if d in looped else "0")
+        for d in range(ndim)
+    )
+    for name in names:
+        for d in looped:
+            code += [f"for j{d} in range({name}.shape[{d}]):", CODE_TOKEN.INDENT]
+        code += [f"out[{dst_idx}] = {name}[{src_idx}]"]
+        code += [CODE_TOKEN.DEDENT] * len(looped)
+        code += [f"off += np.uint64({name}.shape[{ax}])"]
+    code += ["return out", CODE_TOKEN.DEDENT]
+
+    join_fn = compile_numba_function_src(
+        build_source_code(code),
+        "join",
+        globals()
+        | {
+            "np": np,
+            "dtype": np.dtype(node.outputs[0].type.dtype),
+            "_mismatch_msg": "all the input array dimensions except for the "
+            "concatenation axis must match exactly",
+        },
+    )
+
+    cache_version = 5
+    # The loop nests cannot go out of bounds: the output is allocated from the
+    # validated input shapes
+    return numba_basic.numba_njit(join_fn, boundscheck=False), cache_version
 
 
 @register_funcify_default_op_cache_key(Split)
