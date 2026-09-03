@@ -29,6 +29,7 @@ from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
 from pytensor.link.mlx.linker import MLXLinker
+from pytensor.link.mlir.linker import MLIRLinker
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.link.vm import VMLinker
@@ -53,6 +54,7 @@ predefined_linkers = {
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
+    "mlir": MLIRLinker(),
 }
 
 
@@ -534,6 +536,16 @@ MLX = Mode(
     RewriteDatabaseQuery(include=["fast_run", "mlx"], exclude=["fusion"]),
 )
 
+MLIR = Mode(
+    MLIRLinker(),
+    RewriteDatabaseQuery(include=["fast_compile"], exclude=["fusion"]),
+)
+
+MLIR_METAL = Mode(
+    MLIRLinker(target_backend="metal-spirv"),
+    RewriteDatabaseQuery(include=["fast_compile"], exclude=["fusion"]),
+)
+
 FAST_COMPILE = Mode(
     VMLinker(use_cloop=False, c_thunks=False),
     RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
@@ -553,6 +565,8 @@ predefined_modes = {
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
     "MLX": MLX,
+    "MLIR": MLIR,
+    "MLIR_METAL": MLIR_METAL,
 }
 
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}
