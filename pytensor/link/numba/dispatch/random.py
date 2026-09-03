@@ -21,13 +21,9 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.vectorize_codegen import (
-    NO_INDEXED_INPUTS,
-    NO_INDEXED_OUTPUTS,
-    NO_REDUCE_OUTPUTS,
     NO_SIZE,
     _jit_options,
-    _vectorized,
-    encode_literals,
+    make_vectorized,
     store_core_outputs,
 )
 from pytensor.link.utils import (
@@ -455,15 +451,17 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
     batch_ndim = rv_op.batch_ndim(rv_node)
 
-    # numba doesn't support nested literals right now...
-    input_bc_patterns = encode_literals(
-        tuple(input_var.type.broadcastable[:batch_ndim] for input_var in dist_params)
+    input_bc_patterns = tuple(
+        input_var.type.broadcastable[:batch_ndim] for input_var in dist_params
     )
-    output_bc_patterns = encode_literals(
-        (rv_node.outputs[1].type.broadcastable[:batch_ndim],)
+    output_bc_patterns = (rv_node.outputs[1].type.broadcastable[:batch_ndim],)
+    _vectorized = make_vectorized(
+        input_bc_patterns,
+        output_bc_patterns,
+        (rv_node.default_output().type.dtype,),
+        (),  # inplace_pattern
+        True,  # allow_core_scalar
     )
-    output_dtypes = encode_literals((rv_node.default_output().type.dtype,))
-    inplace_pattern = encode_literals(())
 
     def random(core_shape, rng, size, *dist_params):
         raise NotImplementedError(
@@ -478,20 +476,12 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
             draws = _vectorized(
                 core_op_fn,
-                input_bc_patterns,
-                output_bc_patterns,
-                output_dtypes,
-                inplace_pattern,
-                True,  # allow_core_scalar
                 (rng,),
-                dist_params,
                 (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
                 NO_SIZE
                 if size_len is None
                 else numba_ndarray.to_fixed_tuple(size, size_len),
-                NO_INDEXED_INPUTS,
-                NO_INDEXED_OUTPUTS,
-                NO_REDUCE_OUTPUTS,
+                dist_params,
             )
             return rng, draws
 
@@ -510,6 +500,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
             input_bc_patterns,
             output_bc_patterns,
             core_cache_key,
+            1,  # cache_version
         )
         random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
     return random, random_rv_key

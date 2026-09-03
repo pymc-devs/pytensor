@@ -11,13 +11,9 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
-    NO_INDEXED_INPUTS,
-    NO_INDEXED_OUTPUTS,
-    NO_REDUCE_OUTPUTS,
     NO_SIZE,
     _jit_options,
-    _vectorized,
-    encode_literals,
+    make_vectorized,
     store_core_outputs,
 )
 from pytensor.tensor import TensorVariable, get_vector_length
@@ -46,15 +42,16 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
 
     batch_ndim = blockwise_op.batch_ndim(node)
 
-    # numba doesn't support nested literals right now...
-    input_bc_patterns = encode_literals(
-        tuple(inp.type.broadcastable[:batch_ndim] for inp in node.inputs[:nin])
+    input_bc_patterns = tuple(
+        inp.type.broadcastable[:batch_ndim] for inp in node.inputs[:nin]
     )
-    output_bc_patterns = encode_literals(
-        tuple(out.type.broadcastable[:batch_ndim] for out in node.outputs)
+    _vectorized = make_vectorized(
+        input_bc_patterns,
+        tuple(out.type.broadcastable[:batch_ndim] for out in node.outputs),
+        tuple(out.type.dtype for out in node.outputs),
+        (),  # inplace_pattern
+        False,  # allow_core_scalar
     )
-    output_dtypes = encode_literals(tuple(out.type.dtype for out in node.outputs))
-    inplace_pattern = encode_literals(())
 
     # Numba does not allow a tuple generator in the Jitted function so we have to compile a helper to convert core_shapes into tuples
     # Alternatively, add an Op that converts shape vectors into tuples, like we did for JAX
@@ -86,18 +83,10 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
             tuple_core_shapes = to_tuple(core_shapes)
             return _vectorized(
                 core_op_fn,
-                input_bc_patterns,
-                output_bc_patterns,
-                output_dtypes,
-                inplace_pattern,
-                False,  # allow_core_scalar
                 (),  # constant_inputs
-                inputs,
                 tuple_core_shapes,
                 NO_SIZE,
-                NO_INDEXED_INPUTS,
-                NO_INDEXED_OUTPUTS,
-                NO_REDUCE_OUTPUTS,
+                inputs,
             )
 
         return impl
@@ -106,7 +95,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         # If the core op cannot be cached, the Blockwise wrapper cannot be cached either
         blockwise_key = None
     else:
-        blockwise_cache_version = 2
+        blockwise_cache_version = 3
         blockwise_key = "_".join(
             map(
                 str,
