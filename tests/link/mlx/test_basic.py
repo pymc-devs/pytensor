@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import config
+from pytensor import config, shared
 from pytensor import tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import MLX, Mode
@@ -355,3 +355,82 @@ def test_nan_array_constant():
     compare_mlx_and_py(
         [x], [x + c], [np.array([10.0, 20.0, 30.0], dtype=config.floatX)]
     )
+
+
+def test_shared():
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
+
+    pytensor_mlx_fn = function([], a, mode=mlx_mode)
+    mlx_res = pytensor_mlx_fn()
+
+    assert isinstance(mlx_res, mx.array)
+    np.testing.assert_allclose(np.asarray(mlx_res), a.get_value())
+
+    pytensor_mlx_fn = function([], a * 2, mode=mlx_mode)
+    mlx_res = pytensor_mlx_fn()
+
+    assert isinstance(mlx_res, mx.array)
+    np.testing.assert_allclose(np.asarray(mlx_res), a.get_value() * 2)
+
+    new_a_value = np.array([3, 4, 5], dtype=config.floatX)
+    a.set_value(new_a_value)
+
+    mlx_res = pytensor_mlx_fn()
+    assert isinstance(mlx_res, mx.array)
+    np.testing.assert_allclose(np.asarray(mlx_res), new_a_value * 2)
+
+
+def test_shared_updates():
+    a = shared(0)
+
+    pytensor_mlx_fn = function([], a, updates={a: a + 1}, mode=mlx_mode)
+    res1, res2 = pytensor_mlx_fn(), pytensor_mlx_fn()
+    assert res1 == 0
+    assert res2 == 1
+    assert a.get_value() == 2
+
+    a.set_value(5)
+    res1, res2 = pytensor_mlx_fn(), pytensor_mlx_fn()
+    assert res1 == 5
+    assert res2 == 6
+    assert a.get_value() == 7
+
+
+def test_shared_updates_are_not_device_arrays():
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
+
+    pytensor_mlx_fn = function([], a, updates={a: a + 1}, mode=mlx_mode)
+    mlx_res = pytensor_mlx_fn()
+
+    # The returned value stays an MLX array, but the one stored back in the shared
+    # variable must not, or any other consumer of the container chokes on it.
+    assert isinstance(mlx_res, mx.array)
+    assert isinstance(a.get_value(borrow=True), np.ndarray)
+    assert isinstance(a.get_value(borrow=False), np.ndarray)
+    np.testing.assert_allclose(a.get_value(), np.array([2, 3, 4], dtype=config.floatX))
+
+
+def test_multiple_shared_updates():
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
+    b = shared(np.array([10, 20, 30], dtype=config.floatX))
+    x = pt.vector("x", dtype=config.floatX)
+
+    pytensor_mlx_fn = function([x], x * 2, updates={a: a + 1, b: b * 2}, mode=mlx_mode)
+    mlx_res = pytensor_mlx_fn(np.array([1, 1, 1], dtype=config.floatX))
+
+    assert isinstance(mlx_res, mx.array)
+    for shared_var, expected in ((a, [2, 3, 4]), (b, [20, 40, 60])):
+        assert isinstance(shared_var.get_value(borrow=True), np.ndarray)
+        np.testing.assert_allclose(
+            shared_var.get_value(), np.array(expected, dtype=config.floatX)
+        )
+
+
+def test_shared_updates_readable_by_other_backend():
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
+
+    mlx_fn = function([], a, updates={a: a + 1}, mode=mlx_mode)
+    other_fn = function([], a * 2)
+
+    mlx_fn()
+    np.testing.assert_allclose(other_fn(), np.array([4, 6, 8], dtype=config.floatX))

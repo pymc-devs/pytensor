@@ -619,7 +619,13 @@ class JITLinker(PerformLinker):
         return inp
 
     def output_filter(self, var: Variable, out: Any) -> Any:
-        """Apply a filter to the data output by a JITed function call."""
+        """Convert a value the JITed function produced into one PyTensor can store.
+
+        Only values written back into a shared variable's container pass through here.
+        Those outlive the call and may later be read by a function compiled for another
+        backend, so a backend whose arrays are not NumPy ones overrides this; the default
+        passes the value through.
+        """
         return out
 
     def create_jitable_thunk(
@@ -665,12 +671,24 @@ class JITLinker(PerformLinker):
         thunk_outputs = [storage_map[n] for n in self.fgraph.outputs]
         fgraph_jit = self.jit_compile(converted_fgraph)
 
+        # Shared variable updates are the only outputs worth converting, and a backend
+        # that leaves `output_filter` alone pays nothing for the hook.
+        overrides_output_filter = (
+            type(self).output_filter is not JITLinker.output_filter
+        )
+        update_output_idxs = (
+            tuple(self.fgraph.update_mapping or ()) if overrides_output_filter else ()
+        )
+
         if thunk_outputs:
 
             def thunk(
                 fgraph_jit=fgraph_jit,
                 thunk_inputs=thunk_inputs,
                 thunk_outputs=thunk_outputs,
+                update_output_idxs=update_output_idxs,
+                output_filter=self.output_filter,
+                fgraph_outputs=self.fgraph.outputs,
             ):
                 try:
                     outputs = fgraph_jit(*(x[0] for x in thunk_inputs))
@@ -682,6 +700,12 @@ class JITLinker(PerformLinker):
                 # zip strict not specified because we are in a hot loop
                 for o_storage, o_val in zip(thunk_outputs, outputs):
                     o_storage[0] = o_val
+
+                for idx in update_output_idxs:
+                    update_storage = thunk_outputs[idx]
+                    update_storage[0] = output_filter(
+                        fgraph_outputs[idx], update_storage[0]
+                    )
 
         else:
             # Edge case - functions without outputs
