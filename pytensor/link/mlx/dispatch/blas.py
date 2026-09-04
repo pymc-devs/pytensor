@@ -1,8 +1,8 @@
 import mlx.core as mx
 
-from pytensor.graph.basic import Constant
 from pytensor.link.mlx.dispatch import mlx_funcify
-from pytensor.tensor.blas import BatchedDot, Gemv, Ger
+from pytensor.link.utils import get_static_scalar
+from pytensor.tensor.blas import BatchedDot, Gemm, Gemv, Ger
 
 
 @mlx_funcify.register(BatchedDot)
@@ -15,10 +15,28 @@ def mlx_funcify_BatchedDot(op, **kwargs):
     return batched_dot
 
 
+@mlx_funcify.register(Gemm)
+def mlx_funcify_Gemm(op, node=None, **kwargs):
+    static_alpha = get_static_scalar(node, 1)
+    static_beta = get_static_scalar(node, 4)
+
+    if static_alpha is not None and static_beta is not None:
+
+        def gemm(z, alpha, x, y, beta):
+            return mx.addmm(z, x, y, alpha=static_alpha, beta=static_beta)
+
+    else:
+
+        def gemm(z, alpha, x, y, beta):
+            return beta * z + alpha * mx.matmul(x, y)
+
+    return gemm
+
+
 @mlx_funcify.register(Gemv)
 def mlx_funcify_Gemv(op, node=None, **kwargs):
-    static_alpha = _as_float_constant(node.inputs[1]) if node is not None else None
-    static_beta = _as_float_constant(node.inputs[4]) if node is not None else None
+    static_alpha = get_static_scalar(node, 1)
+    static_beta = get_static_scalar(node, 4)
 
     if static_alpha is not None and static_beta is not None:
 
@@ -35,7 +53,7 @@ def mlx_funcify_Gemv(op, node=None, **kwargs):
 
 @mlx_funcify.register(Ger)
 def mlx_funcify_Ger(op, node=None, **kwargs):
-    static_alpha = _as_float_constant(node.inputs[1]) if node is not None else None
+    static_alpha = get_static_scalar(node, 1)
 
     if static_alpha is not None:
 
@@ -52,12 +70,3 @@ def mlx_funcify_Ger(op, node=None, **kwargs):
             return A + alpha * mx.outer(x, y)
 
     return ger
-
-
-def _as_float_constant(var):
-    if not isinstance(var, Constant):
-        return None
-    try:
-        return float(var.data)
-    except (TypeError, ValueError):
-        return None

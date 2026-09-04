@@ -1763,7 +1763,7 @@ class Alloc(COp):
         if not clients:
             return False
 
-        from pytensor.tensor.blas import CGemv, CGer, Gemv, Ger
+        from pytensor.tensor.blas import Gemv, Ger
         from pytensor.tensor.subtensor import (
             AdvancedIncSubtensor,
             IncSubtensor,
@@ -1796,7 +1796,7 @@ class Alloc(COp):
                 idx == 0
                 and isinstance(
                     client_op,
-                    IncSubtensor | AdvancedIncSubtensor | Gemv | CGemv | Ger | CGer,
+                    IncSubtensor | AdvancedIncSubtensor | Gemv | Ger,
                 )
             ):
                 # Ops that will work inplace on the Alloc. So if they

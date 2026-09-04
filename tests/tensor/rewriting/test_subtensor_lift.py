@@ -46,7 +46,6 @@ from pytensor.tensor.basic import (
     make_vector,
 )
 from pytensor.tensor.blas import Dot22, Gemv
-from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
@@ -386,7 +385,7 @@ def test_local_subtensor_of_dot():
     topo = f.maker.fgraph.toposort()
     assert test_equality(f(d1, d2), np.dot(d1, d2)[1])
     # DimShuffle happen in FAST_COMPILE
-    assert isinstance(topo[-1].op, CGemv | Gemv | DimShuffle)
+    assert isinstance(topo[-1].op, Gemv | DimShuffle)
 
     # slice
     f = function([m1, m2], pt.dot(m1, m2)[1:2], mode=mode)
