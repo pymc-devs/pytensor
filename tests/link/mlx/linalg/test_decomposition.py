@@ -5,7 +5,7 @@ import pytest
 from packaging.version import parse as V
 
 import pytensor.tensor as pt
-from pytensor import config
+from pytensor import config, grad
 from pytensor.tensor.linalg.decomposition import lu, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
@@ -129,6 +129,27 @@ def test_mlx_lu_factor():
     out = pt.linalg.lu_factor(A)
 
     compare_mlx_and_py([A], out, [A_val])
+
+
+def test_mlx_lu_solve_grad():
+    """The pullback folds non-contiguous constants, which MLX must read correctly."""
+    rng = np.random.default_rng(15)
+
+    A = pt.tensor(name="A", shape=(5, 5))
+    b = pt.tensor(name="b", shape=(5,))
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    b_val = rng.normal(size=(5,)).astype(config.floatX)
+
+    x = pt.linalg.lu_solve(pt.linalg.lu_factor(A), b)
+
+    # `fast_run` so the permutation `arange` in the pullback folds to a constant,
+    # which MLX's `arange` requires
+    compare_mlx_and_py(
+        [A, b],
+        [grad(x.sum(), A)],
+        [A_val, b_val],
+        mlx_mode=mlx_mode.including("fast_run"),
+    )
 
 
 def test_mlx_pivot_to_permutations():
