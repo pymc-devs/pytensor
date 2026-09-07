@@ -123,8 +123,6 @@ def graph_replace(
         Replace mapping
     strict: bool
         Raise an error if some replacements were not used
-    return_unused: bool
-        Return replacements that were not used
 
     Returns
     -------
