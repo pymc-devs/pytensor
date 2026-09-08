@@ -666,9 +666,9 @@ def toposort_with_orderings(
     Parameters
     ----------
     graphs : list or tuple of Variable instances
-        Graph inputs.
-    outputs : list or tuple of Apply instances
         Graph outputs.
+    blockers : list or tuple of Variable instances
+        Graph inputs.
     orderings : dict
         Keys are `Apply` or `Variable` instances, values are lists of `Apply` or `Variable` instances.
 

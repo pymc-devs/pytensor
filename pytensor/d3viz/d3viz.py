@@ -18,7 +18,7 @@ def replace_patterns(x, replace):
 
     Parameters
     ----------
-    s : str
+    x : str
         String on which function is applied
     replace : dict
         `key`, `value` pairs where key is a regular expression and `value` a
