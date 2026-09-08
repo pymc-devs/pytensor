@@ -321,7 +321,7 @@ class FunctionGraph(AbstractFunctionGraph):
 
         Parameters
         ----------
-        variable : pytensor.graph.basic.Variable
+        var : pytensor.graph.basic.Variable
             The variable to be imported.
         reason : str
             The name of the optimization or operation in progress.
