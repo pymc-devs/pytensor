@@ -44,14 +44,19 @@ def test_mlx_solve(assume_a):
         )
 
 
+@pytest.mark.parametrize(
+    "unit_diagonal", [False, True], ids=["full_diagonal", "unit_diagonal"]
+)
 @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
-def test_mlx_SolveTriangular(lower):
+def test_mlx_SolveTriangular(lower, unit_diagonal):
     rng = np.random.default_rng(15)
 
     A = pt.tensor("A", shape=(5, 5))
     b = pt.tensor("B", shape=(5, 5))
 
+    # A diagonal far from one, so ignoring `unit_diagonal` gives a different answer
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    A_val[np.diag_indices(5)] = rng.uniform(3, 4, size=5).astype(config.floatX)
     b_val = rng.normal(size=(5, 5)).astype(config.floatX)
 
     out = pt.linalg.solve_triangular(
@@ -59,7 +64,7 @@ def test_mlx_SolveTriangular(lower):
         b,
         trans=0,
         lower=lower,
-        unit_diagonal=False,
+        unit_diagonal=unit_diagonal,
     )
     compare_mlx_and_py(
         [A, b],

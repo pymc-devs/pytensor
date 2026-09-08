@@ -23,7 +23,7 @@ from pytensor.tensor.type import vector
 
 
 mx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_typify
 
 
 optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
@@ -355,3 +355,25 @@ def test_nan_array_constant():
     compare_mlx_and_py(
         [x], [x + c], [np.array([10.0, 20.0, 30.0], dtype=config.floatX)]
     )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        np.asfortranarray(np.arange(6, dtype="float32").reshape(2, 3)),
+        np.arange(6, dtype="float32").reshape(2, 3).T,
+        np.arange(6, dtype="float32").reshape(2, 3),
+        np.array(2.0, dtype="float32"),
+    ],
+    ids=["fortran_order", "transposed_view", "already_contiguous", "scalar"],
+)
+def test_mlx_typify_row_contiguous(data):
+    # MLX's elementwise kernels misread a non-contiguous buffer, and rewriting
+    # produces such arrays (``triu`` of a transpose, for one). Only the full LU
+    # pullback reproduces the wrong answer, so the invariant is pinned here.
+    result = mlx_typify(data)
+    as_numpy = np.asarray(result)
+
+    np.testing.assert_array_equal(as_numpy, data)
+    assert as_numpy.flags["C_CONTIGUOUS"]
+    assert result.shape == data.shape

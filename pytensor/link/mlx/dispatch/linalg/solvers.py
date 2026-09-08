@@ -33,12 +33,22 @@ def mlx_funcify_Solve(op, node, **kwargs):
 @mlx_funcify.register(SolveTriangular)
 def mlx_funcify_SolveTriangular(op, node, **kwargs):
     lower = op.lower
+    unit_diagonal = op.unit_diagonal
     A_dtype = getattr(mx, node.inputs[0].dtype)
     b_dtype = getattr(mx, node.inputs[1].dtype)
 
     def solve_triangular(A, b):
+        A = A.astype(stream=mx.cpu, dtype=A_dtype)
+
+        if unit_diagonal:
+            # MLX's `solve_triangular` has no `unit_diagonal`. LAPACK's `trtrs`
+            # never reads the diagonal in that mode, so overwriting it with ones
+            # gives the same answer.
+            diagonal_mask = mx.eye(A.shape[-1], dtype=mx.bool_, stream=mx.cpu)
+            A = mx.where(diagonal_mask, mx.array(1, dtype=A_dtype), A, stream=mx.cpu)
+
         return mx.linalg.solve_triangular(
-            A.astype(stream=mx.cpu, dtype=A_dtype),
+            A,
             b.astype(stream=mx.cpu, dtype=b_dtype),
             upper=not lower,
             stream=mx.cpu,

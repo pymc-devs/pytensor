@@ -132,7 +132,9 @@ def mlx_typify_tensor(data, dtype=None, **kwargs):
     # and it does so on the CPU too, where float64 is perfectly usable
     if dtype is None and data.dtype == np.float64 and float64_supported():
         dtype = mx.float64
-    return _nan_safe_constant(data, dtype=dtype)
+    # MLX's elementwise kernels misread a non-contiguous buffer, and rewriting
+    # produces such arrays -- `triu` of a transpose, for one
+    return _nan_safe_constant(np.asarray(data, order="C"), dtype=dtype)
 
 
 @mlx_typify.register(slice)
