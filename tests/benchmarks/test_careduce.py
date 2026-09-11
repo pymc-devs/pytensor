@@ -4,7 +4,7 @@ import pytest
 from pytensor import function, shared
 
 
-def careduce_benchmark_tester(axis, layout, N, mode, benchmark):
+def careduce_benchmark_tester(axis, layout, N, mode, benchmark, op="sum"):
     if layout == "c_contiguous":
         x_test = np.random.uniform(size=(N, N, N))
         transpose_axis = (0, 1, 2)
@@ -19,16 +19,14 @@ def careduce_benchmark_tester(axis, layout, N, mode, benchmark):
         raise ValueError(f"Unknown layout: {layout}")
 
     x = shared(x_test, name="x", shape=x_test.shape)
-    out = (
-        (x[::2] if layout == "strided" else x).transpose(transpose_axis).sum(axis=axis)
+    out = getattr((x[::2] if layout == "strided" else x).transpose(transpose_axis), op)(
+        axis=axis
     )
     fn = function([], out, mode=mode, trust_input=True)
 
-    expected = (
-        (x_test[::2] if layout == "strided" else x_test)
-        .transpose(transpose_axis)
-        .sum(axis=axis)
-    )
+    expected = getattr(
+        (x_test[::2] if layout == "strided" else x_test).transpose(transpose_axis), op
+    )(axis=axis)
     np.testing.assert_allclose(fn(), expected)
     benchmark(fn)
 
@@ -87,3 +85,19 @@ def test_careduce_benchmark_numba_large(axis, layout, benchmark):
 )
 def test_careduce_benchmark_numba_small(axis, layout, benchmark):
     careduce_benchmark_tester(axis, layout, N=3, mode="NUMBA", benchmark=benchmark)
+
+
+@pytest.mark.parametrize(
+    "axis",
+    (0, 1, 2, (0, 1), (0, 2), (1, 2), None),
+    ids=lambda x: f"axis={x}",
+)
+@pytest.mark.parametrize(
+    "layout",
+    ("c_contiguous", "transposed", "strided"),
+    ids=lambda x: f"layout={x}",
+)
+def test_max_careduce_benchmark_numba_large(axis, layout, benchmark):
+    careduce_benchmark_tester(
+        axis, layout, N=256, mode="NUMBA", benchmark=benchmark, op="max"
+    )
