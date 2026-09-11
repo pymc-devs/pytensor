@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import pickle
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -24,10 +22,6 @@ from pytensor.link.numba.dispatch.string_codegen import CODE_TOKEN, build_source
 
 
 ensure_self_ref_metadata_support()
-
-
-def encode_literals(literals: Sequence) -> str:
-    return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
 def store_core_outputs(
@@ -104,12 +98,6 @@ _jit_options = {
     "no_cpython_wrapper": True,
     "no_cfunc_wrapper": True,
 }
-
-
-def _decode_literal(val, name):
-    if not isinstance(val, types.Literal):
-        raise TypingError(f"{name} must be literal.")
-    return pickle.loads(base64.decodebytes(val.literal_value.encode()))
 
 
 def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
@@ -294,9 +282,6 @@ def _codegen_return_outputs(
     )
 
 
-NO_INDEXED_INPUTS = encode_literals(((), ()))
-NO_INDEXED_OUTPUTS = encode_literals(())
-NO_REDUCE_OUTPUTS = encode_literals(())
 NO_SIZE = None
 
 
@@ -827,24 +812,23 @@ def make_loop_call(
         loop.__exit__(None, None, None)
 
 
-@numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
-def _vectorized(
+def _vectorized_typer(
+    metadata,
     typingctx,
     core_func,
-    input_bc_patterns,
-    output_bc_patterns,
-    output_dtypes,
-    inplace_pattern,
-    allow_core_scalar,
     constant_inputs_types,
-    outer_input_types,
     output_core_shape_types,
     size_type,
-    indexed_inputs,
-    indexed_outputs,
-    reduce_outputs,
+    *outer_input_types,
 ):
     """Vectorized intrinsic with optional indirect indexing for reads and writes.
+
+    Per-node static information arrives via `metadata` (closed over by the
+    generated intrinsic — see `make_vectorized`), keeping it out of the typed
+    signature: literal-encoded arguments would be re-hashed and re-decoded on
+    every type-inference sweep. The outer inputs are passed as trailing
+    individual arguments, or as one trailing tuple — individual arguments
+    avoid a wide tuple, whose LLVM lowering is O(n^2) in the input count.
 
     For indexed operations, outer inputs are ordered as
     ``[core_inputs..., idx_0, idx_1, ..., write_target_0, ...]``.
@@ -865,35 +849,30 @@ def _vectorized(
 
     For non-indexed/non-reducing calls, these are ``()``.
     """
+    tuple_mode = len(outer_input_types) == 1 and isinstance(
+        outer_input_types[0], types.BaseTuple
+    )
     arg_types = [
         core_func,
+        constant_inputs_types,
+        output_core_shape_types,
+        size_type,
+        *outer_input_types,
+    ]
+    if tuple_mode:
+        outer_input_types = tuple(outer_input_types[0])
+
+    (
         input_bc_patterns,
         output_bc_patterns,
         output_dtypes,
         inplace_pattern,
         allow_core_scalar,
-        constant_inputs_types,
-        outer_input_types,
-        output_core_shape_types,
-        size_type,
-        indexed_inputs,
+        (indexed_inputs, idx_broadcastable),
         indexed_outputs,
         reduce_outputs,
-    ]
-
-    input_bc_patterns = _decode_literal(input_bc_patterns, "input_bc_patterns")
-    output_bc_patterns = _decode_literal(output_bc_patterns, "output_bc_patterns")
-    output_dtypes = _decode_literal(output_dtypes, "output_dtypes")
-    inplace_pattern = _decode_literal(inplace_pattern, "inplace_pattern")
-    reduce_identities = dict(_decode_literal(reduce_outputs, "reduce_outputs"))
-    indexed_inputs, idx_broadcastable = _decode_literal(
-        indexed_inputs, "indexed_inputs"
-    )
-    indexed_outputs = _decode_literal(indexed_outputs, "indexed_outputs")
-
-    if not isinstance(allow_core_scalar, types.Literal):
-        raise TypingError("allow_core_scalar must be literal.")
-    allow_core_scalar = allow_core_scalar.literal_value
+    ) = metadata
+    reduce_identities = dict(reduce_outputs)
 
     # Count write targets (one per unique output index)
     write_out_idxs = set()
@@ -1022,22 +1001,18 @@ def _vectorized(
     def codegen(ctx, builder, sig, args):
         [
             _,
-            _,
-            _,
-            _,
-            _,
-            _,
             constant_inputs,
-            outer_inputs,
             output_core_shapes,
             size,
-            _,
-            _,
-            _,
+            *outer_inputs,
         ] = args
 
         constant_inputs = cgutils.unpack_tuple(builder, constant_inputs)
-        all_outer = cgutils.unpack_tuple(builder, outer_inputs)
+        all_outer = (
+            cgutils.unpack_tuple(builder, outer_inputs[0])
+            if tuple_mode
+            else outer_inputs
+        )
         output_core_shapes = [
             cgutils.unpack_tuple(builder, shape)
             for shape in cgutils.unpack_tuple(builder, output_core_shapes)
@@ -1215,3 +1190,60 @@ def _vectorized(
         )
 
     return sig, codegen
+
+
+NO_INDEXED = ((), ())
+NO_REDUCE = ()
+
+_vectorized_cache: dict = {}
+
+
+def make_vectorized(
+    input_bc_patterns,
+    output_bc_patterns,
+    output_dtypes,
+    inplace_pattern,
+    allow_core_scalar,
+    indexed_inputs=NO_INDEXED,
+    indexed_outputs=NO_REDUCE,
+    reduce_outputs=NO_REDUCE,
+    n_outer=1,
+):
+    """A `_vectorized_typer` intrinsic instance closing over the per-node
+    metadata, with ``n_outer`` named trailing parameters.
+
+    The closure keeps the metadata out of the typed signature (encoded-literal
+    arguments are re-hashed and re-decoded on every type-inference sweep), and
+    named parameters keep wide inputs out of one wide tuple (a *args signature
+    would be repacked by numba's lowering, which is O(n^2) in the tuple width).
+    """
+    metadata = (
+        input_bc_patterns,
+        output_bc_patterns,
+        output_dtypes,
+        inplace_pattern,
+        allow_core_scalar,
+        indexed_inputs,
+        indexed_outputs,
+        reduce_outputs,
+    )
+    key = (metadata, n_outer)
+    try:
+        return _vectorized_cache[key]
+    except KeyError:
+        pass
+    outer = ", ".join(f"o{i}" for i in range(n_outer))
+    src = (
+        f"def _vectorized(typingctx, core_func, constant_inputs, "
+        f"output_core_shapes, size, {outer}):\n"
+        f"    return _vectorized_typer(metadata, typingctx, core_func, "
+        f"constant_inputs, output_core_shapes, size, {outer})\n"
+    )
+    fn = compile_numba_function_src(
+        src,
+        "_vectorized",
+        {"_vectorized_typer": _vectorized_typer, "metadata": metadata},
+    )
+    intr = numba.extending.intrinsic(jit_options=_jit_options)(fn)
+    _vectorized_cache[key] = intr
+    return intr
