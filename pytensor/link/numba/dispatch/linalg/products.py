@@ -1,4 +1,5 @@
 import numpy as np
+from numba.core import types
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_blas, ensure_lapack
@@ -12,7 +13,11 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,
     int_ptr_to_val,
+    val_to_cptr,
+    val_to_dptr,
     val_to_int_ptr,
+    val_to_sptr,
+    val_to_zptr,
 )
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 from pytensor.tensor.linalg.products import Expm
@@ -370,6 +375,15 @@ def _gemm(A, B, C, transa=False, transb=False, alpha=1.0, beta=0.0):
     return C
 
 
+# Stack slots; a one-element array would cost a heap allocation per call
+_SCALAR_PTR_INTRINSICS = {
+    types.float32: val_to_sptr,
+    types.float64: val_to_dptr,
+    types.complex64: val_to_cptr,
+    types.complex128: val_to_zptr,
+}
+
+
 @overload(_gemm)
 def _gemm_impl(A, B, C, transa, transb, alpha, beta):
     ensure_blas()
@@ -379,6 +393,7 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
 
     numba_gemm = _BLAS().numba_xgemm(A.dtype)
     dtype = A.dtype
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
 
     def impl(A, B, C, transa, transb, alpha, beta):
         # BLAS reads column-major, so a C-ordered array's buffer already *is* its
@@ -424,8 +439,8 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
         if C.shape[0] != M or C.shape[1] != N:
             raise ValueError("gemm: output shape does not match the product")
 
-        ALPHA = np.full(1, alpha, dtype=dtype)
-        BETA = np.full(1, beta, dtype=dtype)
+        ALPHA = scalar_ptr(alpha)
+        BETA = scalar_ptr(beta)
 
         if C.flags.f_contiguous:
             numba_gemm(
@@ -434,12 +449,12 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
                 val_to_int_ptr(K),
-                ALPHA.ctypes,
+                ALPHA,
                 A_work.ctypes,
                 val_to_int_ptr(LDA),
                 B_work.ctypes,
                 val_to_int_ptr(LDB),
-                BETA.ctypes,
+                BETA,
                 C.ctypes,
                 val_to_int_ptr(np.int32(max(1, C.shape[0]))),
             )
@@ -456,12 +471,12 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
                 val_to_int_ptr(N),
                 val_to_int_ptr(M),
                 val_to_int_ptr(K),
-                ALPHA.ctypes,
+                ALPHA,
                 B_work.ctypes,
                 val_to_int_ptr(LDB),
                 A_work.ctypes,
                 val_to_int_ptr(LDA),
-                BETA.ctypes,
+                BETA,
                 C_work.ctypes,
                 val_to_int_ptr(np.int32(max(1, C_work.shape[1]))),
             )
@@ -504,10 +519,10 @@ def _ger_impl(alpha, x, y, A):
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="ger")
 
     numba_ger = _BLAS().numba_xger(A.dtype)
-    dtype = A.dtype
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[A.dtype]
 
     def impl(alpha, x, y, A):
-        ALPHA = np.full(1, alpha, dtype=dtype)
+        ALPHA = scalar_ptr(alpha)
         INC = val_to_int_ptr(np.int32(1))
 
         # ger walks each vector by a fixed increment of one element, so a strided view
@@ -525,7 +540,7 @@ def _ger_impl(alpha, x, y, A):
             numba_ger(
                 val_to_int_ptr(np.int32(A.shape[0])),
                 val_to_int_ptr(np.int32(A.shape[1])),
-                ALPHA.ctypes,
+                ALPHA,
                 x_work.ctypes,
                 INC,
                 y_work.ctypes,
@@ -541,7 +556,7 @@ def _ger_impl(alpha, x, y, A):
             numba_ger(
                 val_to_int_ptr(np.int32(A_work.shape[1])),
                 val_to_int_ptr(np.int32(A_work.shape[0])),
-                ALPHA.ctypes,
+                ALPHA,
                 y_work.ctypes,
                 INC,
                 x_work.ctypes,
