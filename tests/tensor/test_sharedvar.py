@@ -527,11 +527,11 @@ def makeSharedTester(
                     == 1
                 )
                 assert all(
-                    node.op == pytensor.tensor.blas.gemm_inplace
+                    node.op == pytensor.tensor.blas.Gemm(inplace=True)
                     for node in topo
                     if isinstance(node.op, pytensor.tensor.blas.Gemm)
                 )
-            # Their is no inplace gemm for sparse
+            # There is no inplace Gemm for sparse
             # assert all(node.op.inplace for node in topo if node.op.__class__.__name__ == "StructuredDot")
             s_shared_specify = specify_shape(
                 s_shared, s_shared.get_value(borrow=True).shape
@@ -561,7 +561,7 @@ def makeSharedTester(
                     == 1
                 )
                 assert all(
-                    node.op == pytensor.tensor.blas.gemm_inplace
+                    node.op == pytensor.tensor.blas.Gemm(inplace=True)
                     for node in topo
                     if isinstance(node.op, pytensor.tensor.blas.Gemm)
                 )
@@ -593,7 +593,7 @@ def makeSharedTester(
                     == 1
                 )
                 assert all(
-                    node.op == pytensor.tensor.blas.gemm_inplace
+                    node.op == pytensor.tensor.blas.Gemm(inplace=True)
                     for node in topo
                     if isinstance(node.op, pytensor.tensor.blas.Gemm)
                 )

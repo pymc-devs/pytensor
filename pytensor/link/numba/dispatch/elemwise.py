@@ -22,6 +22,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.link.numba.dispatch.linalg.products import _gemm
 from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
@@ -1256,6 +1257,11 @@ def numba_funcify_Argmax(op, node, **kwargs):
     return argmax, cache_version
 
 
+_GEMM_DTYPES = frozenset(
+    np.dtype(name) for name in ("float32", "float64", "complex64", "complex128")
+)
+
+
 @register_funcify_default_op_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
     # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
@@ -1338,18 +1344,33 @@ def numba_funcify_Dot(op, node, **kwargs):
 @register_funcify_default_op_cache_key(BatchedDot)
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
+    x, y = node.inputs
 
-    @numba_basic.numba_njit
-    def batched_dot(x, y, out=None):
-        # Numba does not support 3D matmul
-        # https://github.com/numba/numba/issues/3804
-        if out is None:
-            shape = x.shape[:-1] + y.shape[2:]
-            out = np.empty(shape, dtype=dtype)
-        for i in range(out.shape[0]):
-            out[i] = np.dot(x[i], y[i])
+    # Numba does not support 3D matmul (numba#3804), so either path loops over the batch.
+    if x.type.numpy_dtype == y.type.numpy_dtype == dtype and dtype in _GEMM_DTYPES:
 
-        return out
+        @numba_basic.numba_njit
+        def batched_dot(x, y, out=None):
+            if out is None:
+                shape = x.shape[:-1] + y.shape[2:]
+                out = np.empty(shape, dtype=dtype)
+            for i in range(out.shape[0]):
+                # Writes into out[i] directly and reads an F-ordered slice without a copy
+                _gemm(x[i], y[i], out[i], False, False, 1.0, 0.0)
+
+            return out
+
+    else:
+
+        @numba_basic.numba_njit
+        def batched_dot(x, y, out=None):
+            if out is None:
+                shape = x.shape[:-1] + y.shape[2:]
+                out = np.empty(shape, dtype=dtype)
+            for i in range(out.shape[0]):
+                out[i] = np.dot(x[i], y[i])
+
+            return out
 
     batched_dot.handles_out = True
-    return batched_dot, 1
+    return batched_dot, 2
