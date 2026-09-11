@@ -21,19 +21,19 @@ def numba_funcify_Gemm(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def gemm(Z, alpha, X, Y, beta):
-            # `Z` is only broadcast against the product, so the accumulator gemm writes into takes
-            # the product's shape rather than `Z`'s. Copying also leaves `Z` intact, which is the
-            # whole difference between this op and its inplace form.
+            # BLAS scales Z in a separate pass and numba would build a temporary for
+            # `out += beta * Z`; an explicit loop beats both. Z may broadcast against out.
             out = np.empty((X.shape[0], Y.shape[1]), dtype=dtype)
             _gemm(X, Y, out, False, False, alpha.item(), 0.0)
-            b = beta.item()
-            if b == 1.0:
-                out += Z
-            elif b != 0.0:
-                out += b * Z
+            beta_value = beta.item()
+            if beta_value != 0.0:
+                Z_full = np.broadcast_to(Z, out.shape)
+                for i in range(out.shape[0]):
+                    for j in range(out.shape[1]):
+                        out[i, j] += beta_value * Z_full[i, j]
             return out
 
-    cache_version = 3
+    cache_version = 4
     return gemm, cache_version
 
 
