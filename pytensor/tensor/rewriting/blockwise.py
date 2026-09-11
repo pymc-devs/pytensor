@@ -355,14 +355,18 @@ def _accepts_inplace_on(node, input_index):
     )
 
 
-@node_rewriter([AllocEmpty])
-def local_split_alloc_empty_clients(fgraph, node):
-    """Give each client that wants to write into an `AllocEmpty` a buffer of its own.
+@node_rewriter([AllocEmpty, Alloc])
+def local_split_alloc_clients(fgraph, node):
+    """Give each client that wants to write into a fresh buffer a buffer of its own.
 
-    `AllocEmpty` produces uninitialized memory, so no client can depend on what another
-    left in it. Sharing one buffer only stops every client but the first from claiming it
+    `AllocEmpty` produces uninitialized memory, and an `Alloc` of a constant is as cheap
+    to run again as it is to read, so no client can depend on what another left in
+    either. Sharing one buffer only stops every client but the first from claiming it
     for an inplace operation.
     """
+    if isinstance(node.op, Alloc) and not isinstance(node.inputs[0], Constant):
+        return None
+
     [out] = node.outputs
     clients = fgraph.clients[out]
     if len(clients) < 2:
@@ -391,8 +395,8 @@ def local_split_alloc_empty_clients(fgraph, node):
 
 
 optdb.register(
-    "local_split_alloc_empty_clients",
-    dfs_rewriter(local_split_alloc_empty_clients),
+    "local_split_alloc_clients",
+    dfs_rewriter(local_split_alloc_clients),
     "fast_run",
     "inplace",
     # After the last merge pass, before any inplace rewrite claims the shared buffer.

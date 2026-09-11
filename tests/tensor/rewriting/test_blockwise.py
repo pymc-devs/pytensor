@@ -8,8 +8,8 @@ from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
-from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
-from pytensor.tensor.basic import AllocEmpty
+from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3, zeros
+from pytensor.tensor.basic import Alloc, AllocEmpty
 from pytensor.tensor.blas import Gemv
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
@@ -211,6 +211,23 @@ def test_split_alloc_empty_clients_enables_inplace():
     out_y, out_z = f(x_val, y_val, z_val)
     np.testing.assert_allclose(out_y, y_val @ x_val)
     np.testing.assert_allclose(out_z, z_val @ x_val)
+
+
+def test_split_alloc_zeros_clients_enables_inplace():
+    """An `Alloc` of a constant shared by two destructive clients is split like `AllocEmpty`."""
+    x = matrix("x")
+    y = tensor("y", shape=(None,))
+    z = tensor("z", shape=(None,))
+    buffer = zeros((x.shape[1],), dtype=config.floatX)
+    one = np.asarray(1.0, dtype=config.floatX)
+    outs = [Blockwise(Gemv(inplace=False))(buffer, one, x.T, v, one) for v in (y, z)]
+
+    fg = FunctionGraph([x, y, z], outs)
+    rewrite_graph(fg, include=("fast_run", "inplace"))
+    gemvs = [n.op for n in fg.apply_nodes if isinstance(n.op, Gemv)]
+    assert len(gemvs) == 2
+    assert all(op.inplace for op in gemvs), gemvs
+    assert len([n for n in fg.apply_nodes if isinstance(n.op, Alloc)]) == 2
 
 
 def test_split_alloc_empty_clients_leaves_readers_alone():
