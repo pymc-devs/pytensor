@@ -97,7 +97,7 @@ def _gemm_jit(A, B, C, transa, transb, alpha, beta):
 
 @pytest.mark.parametrize("poison", [np.inf, np.nan], ids=["inf", "nan"])
 def test_gemm_ignores_C_when_beta_is_zero(poison):
-    """`numba_funcify_Dot` allocates C with `np.empty` and passes beta=0, so C holds whatever the
+    """`BatchedDot` allocates C with `np.empty` and passes beta=0, so C holds whatever the
     allocator returned. BLAS does not read C in that case and neither may the reference, or stray
     non-finite bytes would multiply by zero into nan."""
     A = np.ascontiguousarray(rng.normal(size=(3, 2)))
