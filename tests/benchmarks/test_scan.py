@@ -449,7 +449,7 @@ def _test_scan_hessian_benchmark(mode, benchmark):
 
     def loss_outer(sum_outer, W):
         def loss_inner(sum_inner, W):
-            return sum_inner + (W**2).sum()
+            return sum_inner + (W ** np.int8(2)).sum()
 
         result_inner = scan(
             fn=loss_inner,
@@ -651,7 +651,7 @@ def _jax_cyclical_reduction():
 
             A0_L1_norm = linalg.norm(A0, ord=1)
 
-            return A0, A1, A2, A1_hat, A0_L1_norm, step_num + 1
+            return A0, A1, A2, A1_hat, A0_L1_norm, step_num + np.int8(1)
 
         return ifelse(
             norm < tol,
