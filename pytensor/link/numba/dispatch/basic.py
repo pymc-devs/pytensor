@@ -470,11 +470,18 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
         return jitable_func, None
     else:
         op_name = jitable_func.__name__
+        # A vector math library is wired into LLVM globally (not encoded in the
+        # generated source), so a function compiled against one emits calls to that
+        # library's symbols; reusing it under a different (or no) library segfaults on
+        # the unresolved symbol. Fold the library into the key so each variant caches
+        # separately. Only when set, so the default leaves existing caches untouched.
+        veclib = config.numba__veclib
+        veclib_key = f"_veclib{veclib}" if veclib else ""
         cached_func = compile_numba_function_src(
             src=f"def {op_name}(*args): return jitable_func(*args)",
             function_name=op_name,
             global_env=globals() | {"jitable_func": jitable_func},
-            cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
+            cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}{veclib_key}",
         )
         return numba_njit(cached_func, cache=True), cache_key
 
