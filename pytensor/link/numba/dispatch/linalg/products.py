@@ -403,27 +403,19 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
             A_work = A
             A_trans = transa
             LDA = np.int32(max(1, A.shape[0]))
-        elif A.flags.c_contiguous:
-            A_work = A
+        else:
+            A_work = A if A.flags.c_contiguous else np.ascontiguousarray(A)
             A_trans = not transa
             LDA = np.int32(max(1, A.shape[1]))
-        else:
-            A_work = _copy_to_fortran_order(A)
-            A_trans = transa
-            LDA = np.int32(max(1, A.shape[0]))
 
         if B.flags.f_contiguous:
             B_work = B
             B_trans = transb
             LDB = np.int32(max(1, B.shape[0]))
-        elif B.flags.c_contiguous:
-            B_work = B
+        else:
+            B_work = B if B.flags.c_contiguous else np.ascontiguousarray(B)
             B_trans = not transb
             LDB = np.int32(max(1, B.shape[1]))
-        else:
-            B_work = _copy_to_fortran_order(B)
-            B_trans = transb
-            LDB = np.int32(max(1, B.shape[0]))
 
         # M, N and K describe the logical product, so they come from the caller's
         # transposes rather than the layout-adjusted ones.
