@@ -1,3 +1,4 @@
+import pytensor.xtensor.gradient  # registers the grad hook for xtensor regions
 import pytensor.xtensor.rewriting
 from pytensor.xtensor import linalg, math, random, signal
 from pytensor.xtensor.math import dot, where
