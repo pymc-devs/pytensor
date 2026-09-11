@@ -9,6 +9,7 @@ import pytensor.assumptions.orthogonal
 import pytensor.assumptions.permutation
 import pytensor.assumptions.positive_definite
 import pytensor.assumptions.reshape
+import pytensor.assumptions.scan
 import pytensor.assumptions.selection
 import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
