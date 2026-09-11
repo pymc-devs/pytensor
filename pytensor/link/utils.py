@@ -848,24 +848,7 @@ def get_destroy_dependencies(fgraph: FunctionGraph) -> dict[Apply, list[Variable
 
 
 def get_static_scalar(node: Apply | None, input_index: int) -> float | None:
-    """Return one of a node's inputs as a Python float, when it is constant at compile time.
-
-    Backends use this to decide whether a scalar can be baked into a fused kernel call,
-    several of which take their scaling factors as plain floats rather than as arrays.
-
-    Parameters
-    ----------
-    node : Apply or None
-        The node being dispatched. None when the backend was given no node.
-    input_index : int
-        Position of the input to resolve.
-
-    Returns
-    -------
-    float or None
-        The value, or None when that input is not a compile-time scalar or cannot be
-        expressed as a float.
-    """
+    """Return ``node.inputs[input_index]`` as a float if it is constant, else None."""
     from pytensor.tensor.basic import get_underlying_scalar_constant_value
 
     if node is None:
