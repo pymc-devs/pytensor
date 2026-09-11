@@ -16,6 +16,8 @@ class JAXLinker(JITLinker):
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",
+        # No fused BLAS ops in JAX, XLA does its own fusion
+        "blas_fusion",
         "local_careduce_fusion",
         "scan_reduce_trace_prealloc",
         # JAX does it his own inplace optimization
