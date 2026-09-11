@@ -1,0 +1,19 @@
+name: pytensor-wasm-host
+
+channels:
+  - https://prefix.dev/emscripten-forge-4x
+  - https://prefix.dev/conda-forge
+
+dependencies:
+  - python=3.13
+  - xeus-python
+  - numpy=2.4.*
+  - scipy
+  - numba=0.66.*
+  - llvmlite=0.48.*
+  - setuptools
+  - filelock
+  - etuples
+  - logical-unification
+  - minikanren
+  - cons
