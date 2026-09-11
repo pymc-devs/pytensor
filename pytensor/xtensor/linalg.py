@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 
+from pytensor.assumptions.specify import assume
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.xtensor.type import as_xtensor
@@ -93,6 +94,19 @@ def solve(
         output_core_dims = ((m1_dim, n_dim),)
     else:
         raise ValueError("Solve dims must have length 2 or 3")
+
+    assume_a = assume_a.lower()
+
+    # Restate what ``assume_a`` promises as an assumption, so every other consumer of ``a`` can
+    # act on it too. "general" promises nothing, and "tridiagonal" and "banded" have no key.
+    match assume_a:
+        case "pos" | "positive definite":
+            a = assume(a, positive_definite=True)
+        case "sym" | "symmetric":
+            a = assume(a, symmetric=True)
+        case "her" | "hermitian" if not a.type.dtype.startswith("complex"):
+            # A real Hermitian matrix is symmetric; a complex one is not.
+            a = assume(a, symmetric=True)
 
     core_op = Solve(b_ndim=b_ndim, assume_a=assume_a, lower=lower)
     x_op = XBlockwise(

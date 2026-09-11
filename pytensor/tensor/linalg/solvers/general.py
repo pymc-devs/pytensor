@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 
 from pytensor import tensor as pt
+from pytensor.assumptions.specify import assume
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import diagonal
 from pytensor.tensor.blockwise import Blockwise
@@ -154,7 +155,25 @@ def solve(
         This will influence how batched dimensions are interpreted.
         By default, we assume b_ndim = b.ndim is 2 if b.ndim > 1, else 1.
     """
+    a = pt.as_tensor_variable(a)
     assume_a = assume_a.lower()
+
+    # Restate what ``assume_a`` promises as an assumption, so every other consumer of ``a`` can
+    # act on it too. "general" promises nothing, and "tridiagonal" and "banded" have no key.
+    match assume_a:
+        case "diagonal":
+            a = assume(a, diagonal=True)
+        case "lower triangular":
+            a = assume(a, lower_triangular=True)
+        case "upper triangular":
+            a = assume(a, upper_triangular=True)
+        case "pos" | "positive definite":
+            a = assume(a, positive_definite=True)
+        case "sym" | "symmetric":
+            a = assume(a, symmetric=True)
+        case "her" | "hermitian" if not a.type.dtype.startswith("complex"):
+            # A real Hermitian matrix is symmetric; a complex one is not.
+            a = assume(a, symmetric=True)
 
     if assume_a in ("lower triangular", "upper triangular"):
         lower = "lower" in assume_a
