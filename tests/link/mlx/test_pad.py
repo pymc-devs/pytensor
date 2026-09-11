@@ -49,3 +49,18 @@ def test_mlx_pad_non_scalar_constant_values():
         NotImplementedError, match="only accepts a scalar constant_values"
     ):
         compare_mlx_and_py([x_pt], [res], [np.ones((3, 3))])
+
+
+@pytest.mark.parametrize("mode", ["constant", "edge"])
+@pytest.mark.parametrize(
+    "pad_width", [2, (1, 2), ((1, 2), (3, 0))], ids=["scalar", "pair", "per_axis"]
+)
+def test_mlx_pad_width_forms(mode, pad_width):
+    # `pad_width` reaches the dispatch as an `mx.array` because the linker
+    # typifies every input, while `mx.pad` takes an int or a list of int pairs,
+    # so nothing on this backend padded at all. Same root cause as #2386.
+    x = pt.tensor("x", shape=(3, 4), dtype="float32")
+    x_val = np.random.default_rng(0).normal(size=(3, 4)).astype("float32")
+    compare_mlx_and_py(
+        [x], [pt.pad(x, pad_width=pad_width, mode=mode)], [x_val], mlx_mode="MLX"
+    )
