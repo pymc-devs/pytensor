@@ -1080,3 +1080,12 @@ class TestReductionPythonMode:
         np.testing.assert_allclose(
             perform_fn(xv, yv, idxv)[0], np.sum(xv[idxv] + yv, axis=1), rtol=1e-10
         )
+
+
+def test_wide_add_pairwise_matches():
+    rng = np.random.default_rng(0)
+    xs = [pt.vector(f"x{i}") for i in range(60)]
+    vals = [rng.normal(size=5) for _ in xs]
+
+    fn = function(xs, sum(xs[1:], xs[0]), mode=get_mode("NUMBA"))
+    np.testing.assert_allclose(fn(*vals), np.sum(vals, axis=0), rtol=1e-12)

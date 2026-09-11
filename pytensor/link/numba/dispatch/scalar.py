@@ -1,5 +1,6 @@
 import math
 from hashlib import sha256
+from itertools import zip_longest
 
 import numba
 import numpy as np
@@ -190,11 +191,21 @@ def numba_funcify_Switch(op, node, **kwargs):
 
 
 def binary_to_nary_func(inputs: list[Variable], binary_op_name: str, binary_op: str):
-    """Create a Numba-compatible N-ary function from a binary function."""
+    """Create a Numba-compatible N-ary function from a binary function.
+
+    Terms combine pairwise rather than left-to-right: same associative result,
+    log-depth dependency chains, and better float accuracy (pairwise summation).
+    """
     var_prefix = "x" if binary_op_name != "x" else "y"
     input_names = [f"{var_prefix}{i}" for i in range(len(inputs))]
     input_signature = ", ".join(input_names)
-    output_expr = binary_op.join(input_names)
+    terms = input_names
+    while len(terms) > 1:
+        terms = [
+            f"({a} {binary_op} {b})" if b is not None else a
+            for a, b in zip_longest(terms[::2], terms[1::2])
+        ]
+    [output_expr] = terms
 
     nary_src = f"""
 def {binary_op_name}({input_signature}):
@@ -225,14 +236,14 @@ def numba_funcify_Pow(op, node, **kwargs):
 def numba_funcify_Add(op, node, **kwargs):
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
-    return numba_basic.numba_njit(nary_add_fn), scalar_op_cache_key(op)
+    return numba_basic.numba_njit(nary_add_fn), scalar_op_cache_key(op, cache_version=1)
 
 
 @register_funcify_and_cache_key(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
     nary_mul_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
-    return numba_basic.numba_njit(nary_mul_fn), scalar_op_cache_key(op)
+    return numba_basic.numba_njit(nary_mul_fn), scalar_op_cache_key(op, cache_version=1)
 
 
 @register_funcify_and_cache_key(Cast)
