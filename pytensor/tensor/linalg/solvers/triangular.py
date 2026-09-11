@@ -31,44 +31,17 @@ class SolveTriangular(SolveBase):
 
     def perform(self, node, inputs, outputs):
         A, b = inputs
-
-        if A.ndim != 2 or A.shape[0] != A.shape[1]:
-            raise ValueError("expected square matrix")
-
-        if A.shape[0] != b.shape[0]:
-            raise ValueError(f"shapes of a {A.shape} and b {b.shape} are incompatible")
-
-        (trtrs,) = scipy_linalg.get_lapack_funcs(("trtrs",), (A, b))
-
-        # Quick return for empty arrays
-        if b.size == 0:
-            outputs[0][0] = np.empty_like(b, dtype=trtrs.dtype)
-            return
-
-        if A.flags["F_CONTIGUOUS"]:
-            x, info = trtrs(
+        try:
+            outputs[0][0] = scipy_linalg.solve_triangular(
                 A,
                 b,
-                overwrite_b=self.overwrite_b,
                 lower=self.lower,
-                trans=0,
-                unitdiag=self.unit_diagonal,
-            )
-        else:
-            # transposed system is solved since trtrs expects Fortran ordering
-            x, info = trtrs(
-                A.T,
-                b,
+                unit_diagonal=self.unit_diagonal,
                 overwrite_b=self.overwrite_b,
-                lower=not self.lower,
-                trans=1,
-                unitdiag=self.unit_diagonal,
+                check_finite=False,
             )
-
-        if info != 0:
-            x[...] = np.nan
-
-        outputs[0][0] = x
+        except scipy_linalg.LinAlgError:
+            outputs[0][0] = np.full(b.shape, np.nan, dtype=node.outputs[0].type.dtype)
 
     def pullback(self, inputs, outputs, output_gradients):
         res = super().pullback(inputs, outputs, output_gradients)

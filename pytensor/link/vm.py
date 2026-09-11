@@ -1203,6 +1203,35 @@ class VMLinker(LocalLinker):
                 )
         return vm
 
+    def _make_node_thunk(self, node, storage_map, compute_map, implementation):
+        """Create the thunk for a single node.
+
+        On the pure-Python path (``implementation == "py"``) a registered
+        ``python_funcify`` implementation is wrapped into a thunk; otherwise the
+        node's ``Op.make_thunk`` is used (which also covers lazy ops like
+        ``IfElse``).
+        """
+        if implementation == "py":
+            from pytensor.link.python.dispatch.basic import (
+                make_node_thunk_with_python_dispatch,
+            )
+
+            return make_node_thunk_with_python_dispatch(
+                node,
+                storage_map,
+                compute_map,
+                fallback=self._make_perform_thunk,
+                implementation=implementation,
+            )
+        return self._make_perform_thunk(node, storage_map, compute_map, implementation)
+
+    def _make_perform_thunk(self, node, storage_map, compute_map, implementation):
+        # no-recycling is done at each VM.__call__, so there is no need to cause
+        # duplicate C code by passing no_recycling here.
+        return node.op.make_thunk(
+            node, storage_map, compute_map, [], impl=implementation
+        )
+
     def make_all(
         self,
         profiler=None,
@@ -1224,17 +1253,16 @@ class VMLinker(LocalLinker):
 
         t0 = time.perf_counter()
         linker_make_thunk_time = {}
-        impl = None
+        implementation = None
         if self.c_thunks is False:
-            impl = "py"
+            implementation = "py"
         for node in order:
             try:
                 thunk_start = time.perf_counter()
-                # no-recycling is done at each VM.__call__ So there is
-                # no need to cause duplicate c code by passing
-                # no_recycling here.
                 thunks.append(
-                    node.op.make_thunk(node, storage_map, compute_map, [], impl=impl)
+                    self._make_node_thunk(
+                        node, storage_map, compute_map, implementation
+                    )
                 )
                 linker_make_thunk_time[node] = time.perf_counter() - thunk_start
                 if not hasattr(thunks[-1], "lazy"):
