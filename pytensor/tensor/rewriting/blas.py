@@ -970,7 +970,7 @@ def _as_matrix_product(fgraph, var):
     return x, y
 
 
-@register_specialize
+@register_specialize("blas_fusion")
 @node_rewriter([elemwise_of(pytensor.scalar.Add)])
 def local_add_dot_to_gemm(fgraph, node):
     r"""
@@ -1050,8 +1050,12 @@ def local_add_dot_to_gemm(fgraph, node):
     return None
 
 
-# Both also run inside `blas_optdb`, which sits at optdb position 1.7, ahead of
-# `specialize` at 2.0. The `Gemm` above is created after that has already run, so they
-# are registered here as well to catch the rank-1 and row/column-matrix products.
-register_specialize(local_gemm_to_ger, name="local_gemm_to_ger_after_add_dot")
-register_specialize(local_gemm_to_gemv, name="local_gemm_to_gemv_after_add_dot")
+# blas_optdb (1.7) runs before the Gemm above exists, so these run again in specialize
+# to catch the rank-1 and row/column cases. Tagged blas_fusion so backends without
+# fused BLAS ops (JAX) skip them.
+register_specialize(
+    local_gemm_to_ger, "blas_fusion", name="local_gemm_to_ger_after_add_dot"
+)
+register_specialize(
+    local_gemm_to_gemv, "blas_fusion", name="local_gemm_to_gemv_after_add_dot"
+)
