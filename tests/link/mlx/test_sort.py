@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from pytensor.tensor.sort import argsort, sort
-from pytensor.tensor.type import matrix
+from pytensor.tensor.type import matrix, tensor
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
@@ -20,3 +20,15 @@ def test_sort_invalid_kind_warning():
     z = sort(x, axis=-1, kind="mergesort")
     with pytest.warns(UserWarning, match="MLX sort does not support the kind argument"):
         z.eval({x: np.array([[3.0, 1.0], [2.0, 4.0]])}, mode="MLX")
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1, -1, -2])
+@pytest.mark.parametrize("func", (sort, argsort))
+def test_sort_axis_variants(func, axis):
+    # `axis` reaches the dispatch as an `mx.array` because the linker typifies
+    # every input, and `mx.sort`/`mx.argsort` require a Python int, so nothing
+    # on this backend sorted at all. `axis=None` additionally flattens through
+    # `Reshape`, which had the same root cause (#2386).
+    x = tensor("x", shape=(2, 3, 4), dtype="float32")
+    arr = np.random.default_rng(0).normal(size=(2, 3, 4)).astype("float32")
+    compare_mlx_and_py([x], [func(x, axis=axis)], [arr], mlx_mode="MLX")

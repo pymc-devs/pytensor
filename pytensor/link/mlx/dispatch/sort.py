@@ -17,7 +17,10 @@ def mlx_funcify_Sort(op, **kwargs):
         )
 
     def sort(x, axis):
-        return mx.sort(x, axis=axis)
+        # The linker typifies every input to `mx.array`, but `mx.sort` wants a
+        # Python int for `axis`, so no sort worked on this backend at all.
+        # Same root cause as the `Reshape` dispatch (#2386).
+        return mx.sort(x, axis=int(axis))
 
     return sort
 
@@ -33,6 +36,7 @@ def mlx_funcify_ArgSort(op, **kwargs):
         )
 
     def argsort(x, axis):
-        return mx.argsort(x, axis=axis)
+        # As for `sort`: `axis` arrives as an `mx.array` and must be an int.
+        return mx.argsort(x, axis=int(axis))
 
     return argsort
