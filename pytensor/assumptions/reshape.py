@@ -1,4 +1,4 @@
-from pytensor.assumptions.core import ALL_KEYS, FactState, register_assumption
+from pytensor.assumptions.core import MATRIX_KEYS, FactState, register_assumption
 from pytensor.tensor.reshape import JoinDims, SplitDims
 
 
@@ -23,6 +23,6 @@ def split_dims_propagates_matrix_property(
     return [FactState.UNKNOWN]
 
 
-for _key in ALL_KEYS:
+for _key in MATRIX_KEYS:
     register_assumption(_key, JoinDims)(join_dims_propagates_matrix_property)
     register_assumption(_key, SplitDims)(split_dims_propagates_matrix_property)

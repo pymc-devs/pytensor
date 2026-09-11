@@ -1,4 +1,4 @@
-from pytensor.assumptions.core import ALL_KEYS, FactState, register_assumption
+from pytensor.assumptions.core import MATRIX_KEYS, FactState, register_assumption
 from pytensor.tensor.shape import Reshape, SpecifyShape
 
 
@@ -25,6 +25,6 @@ def reshape_propagates_matrix_property(
     return [input_states[0]]
 
 
-for _key in ALL_KEYS:
+for _key in MATRIX_KEYS:
     register_assumption(_key, SpecifyShape)(specify_shape_propagates_matrix_property)
     register_assumption(_key, Reshape)(reshape_propagates_matrix_property)
