@@ -274,6 +274,7 @@ def test_slogdet_specialization():
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
 
+
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
     [
