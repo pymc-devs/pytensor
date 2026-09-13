@@ -1,5 +1,7 @@
 import copy
 
+import pytest
+
 from pytensor.compile.maker import function
 from pytensor.compile.mode import (
     AddFeatureOptimizer,
@@ -12,6 +14,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import get_active_mode, graph_rewriter
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
 from pytensor.link.jax import JAXLinker
+from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.type import matrix, vector
 
@@ -133,6 +136,18 @@ def test_predefined_modes_respected():
 
     default_mode_again = get_default_mode()
     assert not isinstance(default_mode_again.linker, JAXLinker)
+
+
+@pytest.mark.parametrize("linker_cls", [JAXLinker, PytorchLinker])
+def test_linker_incompatible_rewrites(linker_cls):
+    expected_rewrites = {
+        "reuse_decomposition_multiple_solves",
+        "scan_split_non_sequence_decomposition_and_solve",
+    }
+
+    linker = linker_cls()
+
+    assert expected_rewrites <= set(linker.incompatible_rewrites)
 
 
 def test_optimizer_sets_active_compile_mode():
