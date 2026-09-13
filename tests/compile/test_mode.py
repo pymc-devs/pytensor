@@ -140,14 +140,10 @@ def test_predefined_modes_respected():
 
 @pytest.mark.parametrize("linker_cls", [JAXLinker, PytorchLinker])
 def test_linker_incompatible_rewrites(linker_cls):
-    expected_rewrites = {
-        "reuse_decomposition_multiple_solves",
-        "scan_split_non_sequence_decomposition_and_solve",
-    }
-
     linker = linker_cls()
+    mode = Mode(linker=linker, optimizer="fast_run")
 
-    assert expected_rewrites <= set(linker.incompatible_rewrites)
+    assert set(linker.incompatible_rewrites) <= set(mode._optimizer.exclude)
 
 
 def test_optimizer_sets_active_compile_mode():
