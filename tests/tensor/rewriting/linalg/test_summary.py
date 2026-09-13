@@ -174,17 +174,15 @@ def test_slogdet_specialization(batch_dim):
 
     # REWRITE TESTS
     # sign(det(x))
-    sign_x, _ = Blockwise(SLogDet())(x)
+    expected_sign_det_x, expected_log_abs_det_x = Blockwise(SLogDet())(x)
 
     result = RewriteTester([x], [sign_det_x], include=["stabilize", "specialize"])
-    result.assert_graph(sign_x)
+    result.assert_graph(expected_sign_det_x)
     result.assert_eval(a)
 
     # log(abs(det(x)))
-    _, log_abs_x = Blockwise(SLogDet())(x)
-
     result = RewriteTester([x], [log_abs_det_x], include=["stabilize", "specialize"])
-    result.assert_graph(log_abs_x)
+    result.assert_graph(expected_log_abs_det_x)
     result.assert_eval(a)
 
     # log(det(x))
@@ -197,7 +195,7 @@ def test_slogdet_specialization(batch_dim):
         [sign_det_x, log_abs_det_x],
         include=["stabilize", "specialize"],
     )
-    result.assert_graph(sign_x, log_abs_x)
+    result.assert_graph(expected_sign_det_x, expected_log_abs_det_x)
     result.assert_eval(a)
 
     # Other functions (rewrite shouldn't be applied to these)
