@@ -225,6 +225,55 @@ def test_slogdet_specialization():
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
 
+    # Batched input
+    x_batched = pt.tensor("x_batched", shape=(4, 3, 3), dtype=config.floatX)
+    det_x_batched = pt.linalg.det(x_batched)
+
+    sign_det_x_batched = pt.sign(det_x_batched)
+    log_abs_det_x_batched = pt.log(pt.abs(det_x_batched))
+    log_det_x_batched = pt.log(det_x_batched)
+
+    f = function(
+        [x_batched],
+        [sign_det_x_batched, log_abs_det_x_batched, log_det_x_batched],
+        mode="FAST_RUN",
+    )
+
+    slogdet_nodes = [
+        node
+        for node in f.maker.fgraph.apply_nodes
+        if hasattr(node.op, "core_op") and isinstance(node.op.core_op, SLogDet)
+    ]
+    assert len(slogdet_nodes) == 1
+    assert not any(isinstance(node.op, SLogDet) for node in f.maker.fgraph.apply_nodes)
+
+    x_batched_value = np.broadcast_to(
+        np.eye(3, dtype=config.floatX) * 2,
+        (4, 3, 3),
+    ).copy()
+    expected_det = np.linalg.det(x_batched_value)
+
+    rw_sign_det, rw_log_abs_det, rw_log_det = f(x_batched_value)
+
+    assert_allclose(
+        np.sign(expected_det),
+        rw_sign_det,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        np.log(np.abs(expected_det)),
+        rw_log_abs_det,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        np.log(expected_det),
+        rw_log_det,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
 
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
