@@ -191,12 +191,12 @@ jobs:
           # python-freethreading constrains the solve to the free-threaded CPython build
           if [[ $FREE_THREADING == "1" ]]; then FT_PKG="python-freethreading"; else FT_PKG=""; fi
           if [[ $OS == "macos-15" ]]; then
-            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy "scipy<1.17.0" "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate rich;
+            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy scipy "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate rich;
           elif [[ $FREE_THREADING == "1" ]]; then
             # mkl/mkl-service have no free-threaded (cp*t) builds, so rely on the default (openblas) BLAS.
-            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy "scipy<1.17.0" "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx rich;
+            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy scipy "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx rich;
           else
-            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy "scipy<1.17.0" "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
+            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy scipy "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
           fi
           if [[ $FREE_THREADING == "1" ]]; then python -c 'import sysconfig; assert sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "Expected a free-threaded interpreter"'; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" && pip install "jax>=0.8,<0.9.1" jaxlib numpyro equinox tfp-nightly; fi
