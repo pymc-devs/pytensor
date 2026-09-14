@@ -908,7 +908,7 @@ def specialize_matmul_to_batched_dot(fgraph, node):
 
 def _split_scalar_factor(var, dtype):
     """
-    Split ``alpha * X`` into the scalar and the rest.
+    Split ``alpha * X`` or ``-(alpha * X)`` into the scalar and the rest.
 
     Parameters
     ----------
@@ -919,16 +919,22 @@ def _split_scalar_factor(var, dtype):
 
     Returns
     -------
-    alpha : TensorVariable or None
-        The scalar factor, or None when there is none to peel.
+    alpha : TensorVariable
+        The scalar factor, a constant 1 when there is none to peel.
     rest : TensorVariable
-        ``var`` with the scalar removed, or ``var`` itself when ``alpha`` is None.
+        ``var`` with the scalar removed, or ``var`` itself when nothing was peeled.
     """
+    one = ptb.constant(np.asarray(1.0, dtype=dtype))
     node = var.owner
     if node is None or not isinstance(node.op, Elemwise):
-        return None, var
+        return one, var
+
+    if isinstance(node.op.scalar_op, pytensor.scalar.Neg):
+        alpha, rest = _split_scalar_factor(node.inputs[0], dtype)
+        return -alpha, rest
+
     if not isinstance(node.op.scalar_op, pytensor.scalar.Mul):
-        return None, var
+        return one, var
 
     scalars, others = [], []
     for term in node.inputs:
@@ -940,7 +946,7 @@ def _split_scalar_factor(var, dtype):
 
     # Anything but a single non-scalar term is a product this rewrite cannot read.
     if not scalars or len(others) != 1:
-        return None, var
+        return one, var
 
     alpha = scalars[0] if len(scalars) == 1 else mul(*scalars)
     return alpha, others[0]
@@ -971,13 +977,15 @@ def _as_matrix_product(fgraph, var):
 
 
 @register_specialize("blas_fusion")
-@node_rewriter([elemwise_of(pytensor.scalar.Add)])
+@node_rewriter([elemwise_of(pytensor.scalar.Add | pytensor.scalar.Sub)])
 def local_add_dot_to_gemm(fgraph, node):
     r"""
-    Rewrite :math:`\beta C + \alpha A B` as a single `Gemm`.
+    Rewrite :math:`\beta C \pm \alpha A B` as a single `Gemm`.
 
     Either scalar may be absent, so this also covers :math:`C + AB`,
-    :math:`C + \alpha AB` and :math:`\beta C + AB`. The matrix product is matched
+    :math:`C + \alpha AB` and :math:`\beta C + AB`. A subtraction, or a negated term,
+    folds its sign into that term's scalar, so :math:`C - \alpha AB` becomes
+    ``Gemm(C, -alpha, A, B, 1)``, the shape of a gradient-descent update. The matrix product is matched
     through `Blockwise` as well as bare, because ``@`` builds a `Blockwise` of `Dot`
     that is only unwrapped much later. A matrix-vector product is matched too, and is
     handed to `Gemm` as a column or row matrix so that `local_gemm_to_gemv` can turn it
@@ -994,8 +1002,12 @@ def local_add_dot_to_gemm(fgraph, node):
     if dtype not in float_dtypes or out.type.ndim not in (1, 2):
         return None
 
+    subtracted = isinstance(node.op.scalar_op, pytensor.scalar.Sub)
+
     for index, term in enumerate(node.inputs):
         alpha, product = _split_scalar_factor(term, dtype)
+        if subtracted and index == 1:
+            alpha = -alpha
 
         # `Gemm` computes into a buffer shaped like the product, so a product that only
         # broadcasts against the sum would hand the replacement a narrower type than the
@@ -1020,6 +1032,8 @@ def local_add_dot_to_gemm(fgraph, node):
         x, y = matrices
 
         beta, z = _split_scalar_factor(node.inputs[1 - index], dtype)
+        if subtracted and index == 0:
+            beta = -beta
         if z.type.ndim != out.type.ndim:
             continue
         # BLAS accumulates into the output buffer itself, so an accumulator that only
@@ -1029,9 +1043,6 @@ def local_add_dot_to_gemm(fgraph, node):
             continue
 
         # Gemm reads one dtype across all five inputs and will not upcast for us.
-        one = ptb.constant(np.asarray(1.0, dtype=dtype))
-        alpha = one if alpha is None else alpha
-        beta = one if beta is None else beta
         if not all(term.type.dtype == dtype for term in (z, x, y, alpha, beta)):
             continue
 

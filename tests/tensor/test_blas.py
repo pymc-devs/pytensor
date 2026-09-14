@@ -2612,25 +2612,42 @@ class TestGeneralBlasLowering:
     def _inputs(rng, *shapes):
         return [rng.standard_normal(shape) for shape in shapes]
 
-    def test_matrix_product_to_gemm(self):
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda c, alpha, x, y: c + alpha * (x @ y),
+            lambda c, alpha, x, y: c - alpha * (x @ y),
+            lambda c, alpha, x, y: c + (-(alpha * (x @ y))),
+            lambda c, alpha, x, y: alpha * (x @ y) - c,
+            lambda c, alpha, x, y: -c - alpha * (x @ y),
+        ],
+        ids=[
+            "add",
+            "sub_product",
+            "add_negated_product",
+            "sub_accumulator",
+            "neg_both",
+        ],
+    )
+    def test_matrix_product_to_gemm(self, build):
         alpha = pt.scalar("alpha", dtype="float64")
         x = pt.matrix("x", dtype="float64")
         y = pt.matrix("y", dtype="float64")
         c = pt.matrix("c", dtype="float64")
 
-        fn = pytensor.function([alpha, x, y, c], c + alpha * (x @ y), mode=self.mode)
+        fn = pytensor.function([alpha, x, y, c], build(c, alpha, x, y), mode=self.mode)
         assert len(self._apply_of(fn, Gemm)) == 1
-        # The sum is carried by Gemm's own beta rather than left as a separate add.
-        adds = [
+        # The sum and its sign are carried by Gemm's own scalars rather than left as a
+        # separate add or sub.
+        assert not [
             ap
             for ap in self._apply_of(fn, Elemwise)
-            if isinstance(ap.op.scalar_op, ps.Add)
+            if isinstance(ap.op.scalar_op, ps.Add | ps.Sub)
         ]
-        assert not adds
 
         rng = np.random.default_rng(2)
         xv, yv, cv = self._inputs(rng, (4, 5), (5, 3), (4, 3))
-        np.testing.assert_allclose(fn(2.5, xv, yv, cv), cv + 2.5 * (xv @ yv))
+        np.testing.assert_allclose(fn(2.5, xv, yv, cv), build(cv, 2.5, xv, yv))
 
     def test_outer_product_to_ger(self):
         alpha = pt.scalar("alpha", dtype="float64")
