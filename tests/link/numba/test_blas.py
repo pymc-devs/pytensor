@@ -225,3 +225,23 @@ def test_gemm_reads_strided_operands(layout):
     np.testing.assert_allclose(
         fn(Z_np, 2.0, A_np, B_np, 0.5), 0.5 * Z_np + 2.0 * (A_np @ B_np), rtol=1e-5
     )
+
+
+@pytest.mark.parametrize("layout", list(_matrix_views(np.random.default_rng(0), 2, 2)))
+def test_gemv_reads_strided_matrix(layout):
+    y = pt.tensor("y", shape=(6,), dtype=floatX)
+    A = pt.tensor("A", shape=(6, 5), dtype=floatX)
+    x = pt.tensor("x", shape=(5,), dtype=floatX)
+    alpha, beta = pt.scalar("alpha", dtype=floatX), pt.scalar("beta", dtype=floatX)
+
+    rng = np.random.default_rng(sum(map(ord, f"gemv_strided {layout}")))
+    A_np = _matrix_views(rng, 6, 5)[layout]
+    x_np = rng.normal(size=10).astype(floatX)[::2]
+    y_np = rng.normal(size=6).astype(floatX)
+
+    fn = pytensor.function(
+        [y, alpha, A, x, beta], Gemv(inplace=False)(y, alpha, A, x, beta), mode="NUMBA"
+    )
+    np.testing.assert_allclose(
+        fn(y_np, 2.0, A_np, x_np, 0.5), 0.5 * y_np + 2.0 * (A_np @ x_np), rtol=1e-5
+    )
