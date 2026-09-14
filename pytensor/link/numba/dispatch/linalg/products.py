@@ -338,41 +338,66 @@ def numba_funcify_Expm(op, node, **kwargs):
 
 def _gemm(A, B, C, transa=False, transb=False, alpha=1.0, beta=0.0):
     r"""
-    Compute a general matrix-matrix product, overwriting ``C``.
-
-    .. math::
-
-        C \leftarrow \alpha \, op(A) \, op(B) + \beta C
+    Overwrite ``C`` with :math:`\alpha \, op(A) \, op(B) + \beta C`.
 
     Parameters
     ----------
-    A, B : ndarray
-        The operands, each 2-d and of the same dtype as ``C``.
-    C : ndarray
-        The output, overwritten in place and also returned. Either memory order
-        works; a row-major ``C`` is handled by computing the transposed product
-        rather than by copying.
+    A, B, C : ndarray
+        2-d arrays of one dtype. ``C`` is the output and is returned.
     transa, transb : bool, optional
-        Transpose the corresponding operand. The transpose is a flag BLAS reads, not
-        an array that gets built, so neither operand is ever copied to apply one.
-        Both default to False.
+        Read ``A`` or ``B`` transposed. Both default to False.
     alpha, beta : scalar, optional
-        Scale the product and the incoming ``C`` respectively. ``alpha`` defaults to
-        1.0 and ``beta`` to 0.0, which overwrites ``C`` rather than accumulating into
-        it.
+        Default 1.0 and 0.0. With ``beta == 0`` the incoming ``C`` is not read.
 
     Returns
     -------
     C : ndarray
-        The same array passed in.
     """
     op_a = A.T if transa else A
     op_b = B.T if transb else B
     product = alpha * (op_a @ op_b)
-    # BLAS leaves C unread when beta is zero, so callers are free to pass a buffer they never
-    # initialized. Scaling that buffer by zero would turn stray inf or nan bytes into nan here.
+    # An uninitialized C may hold inf or nan bytes, which beta * C would keep.
     C[:] = product if beta == 0 else product + beta * C
     return C
+
+
+@numba_basic.numba_njit(inline="always")
+def _leading_dim(unit_stride, other_stride, unit_extent, other_extent, itemsize):
+    """Leading dimension BLAS can walk the matrix with, or 0 when it cannot."""
+    if unit_extent != 1 and unit_stride != itemsize:
+        return 0
+    if other_extent == 1:
+        return max(1, unit_extent)
+    if other_stride <= 0 or other_stride % itemsize != 0:
+        return 0
+    ld = other_stride // itemsize
+    return ld if ld >= unit_extent else 0
+
+
+@numba_basic.numba_njit(inline="always")
+def _column_major_ld(X):
+    return _leading_dim(X.strides[0], X.strides[1], X.shape[0], X.shape[1], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _row_major_ld(X):
+    return _leading_dim(X.strides[1], X.strides[0], X.shape[1], X.shape[0], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _blas_operand(X, trans):
+    """Buffer, transpose flag and leading dimension for one gemm operand.
+
+    A row-major buffer is its own transpose to BLAS, so its flag flips. A layout
+    with no unit-stride axis is copied to C order.
+    """
+    ld = _column_major_ld(X)
+    if ld:
+        return X, trans, np.int32(ld)
+    ld = _row_major_ld(X)
+    if ld:
+        return X, not trans, np.int32(ld)
+    return np.ascontiguousarray(X), not trans, np.int32(max(1, X.shape[1]))
 
 
 # Stack slots; a one-element array would cost a heap allocation per call
@@ -396,26 +421,8 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
     scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
 
     def impl(A, B, C, transa, transb, alpha, beta):
-        # BLAS reads column-major, so a C-ordered array's buffer already *is* its
-        # transpose. Folding that into the flag each operand carries keeps every case
-        # copy-free: only an array that is neither C- nor F-contiguous is materialized.
-        if A.flags.f_contiguous:
-            A_work = A
-            A_trans = transa
-            LDA = np.int32(max(1, A.shape[0]))
-        else:
-            A_work = A if A.flags.c_contiguous else np.ascontiguousarray(A)
-            A_trans = not transa
-            LDA = np.int32(max(1, A.shape[1]))
-
-        if B.flags.f_contiguous:
-            B_work = B
-            B_trans = transb
-            LDB = np.int32(max(1, B.shape[0]))
-        else:
-            B_work = B if B.flags.c_contiguous else np.ascontiguousarray(B)
-            B_trans = not transb
-            LDB = np.int32(max(1, B.shape[1]))
+        A_work, A_trans, LDA = _blas_operand(A, transa)
+        B_work, B_trans, LDB = _blas_operand(B, transb)
 
         # M, N and K describe the logical product, so they come from the caller's
         # transposes rather than the layout-adjusted ones.
@@ -424,56 +431,51 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
         N = np.int32(B.shape[0] if transb else B.shape[1])
 
         # BLAS trusts the extents it is handed, so a mismatch here reads past the end
-        # of an operand rather than failing. numpy raises for these inputs, so
-        # must this.
+        # of an operand rather than failing.
         if (B.shape[1] if transb else B.shape[0]) != K:
             raise ValueError("gemm: operands have mismatched contraction dimensions")
         if C.shape[0] != M or C.shape[1] != N:
             raise ValueError("gemm: output shape does not match the product")
 
-        ALPHA = scalar_ptr(alpha)
-        BETA = scalar_ptr(beta)
-
-        if C.flags.f_contiguous:
-            numba_gemm(
-                val_to_int_ptr(ord("T") if A_trans else ord("N")),
-                val_to_int_ptr(ord("T") if B_trans else ord("N")),
-                val_to_int_ptr(M),
-                val_to_int_ptr(N),
-                val_to_int_ptr(K),
-                ALPHA,
-                A_work.ctypes,
-                val_to_int_ptr(LDA),
-                B_work.ctypes,
-                val_to_int_ptr(LDB),
-                BETA,
-                C.ctypes,
-                val_to_int_ptr(np.int32(max(1, C.shape[0]))),
-            )
+        # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
+        # swap places and each flag flips. A C with no unit-stride axis goes through
+        # a copy.
+        LDC = _column_major_ld(C)
+        if LDC:
+            C_work = C
+            swap = False
         else:
-            # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
-            # swap places and each flag flips. This is the case pytensor hits, since
-            # its outputs are C-ordered. A C that is neither C- nor F-contiguous has no
-            # leading dimension BLAS can address, so it goes through a copy.
-            needs_writeback = not C.flags.c_contiguous
-            C_work = np.ascontiguousarray(C) if needs_writeback else C
-            numba_gemm(
-                val_to_int_ptr(ord("N") if B_trans else ord("T")),
-                val_to_int_ptr(ord("N") if A_trans else ord("T")),
-                val_to_int_ptr(N),
-                val_to_int_ptr(M),
-                val_to_int_ptr(K),
-                ALPHA,
-                B_work.ctypes,
-                val_to_int_ptr(LDB),
-                A_work.ctypes,
-                val_to_int_ptr(LDA),
-                BETA,
-                C_work.ctypes,
-                val_to_int_ptr(np.int32(max(1, C_work.shape[1]))),
-            )
-            if needs_writeback:
-                C[:] = C_work
+            LDC = _row_major_ld(C)
+            swap = True
+            if LDC:
+                C_work = C
+            else:
+                C_work = np.ascontiguousarray(C)
+                LDC = max(1, C.shape[1])
+
+        if swap:
+            A_work, B_work = B_work, A_work
+            A_trans, B_trans = not B_trans, not A_trans
+            LDA, LDB = LDB, LDA
+            M, N = N, M
+
+        numba_gemm(
+            val_to_int_ptr(ord("T") if A_trans else ord("N")),
+            val_to_int_ptr(ord("T") if B_trans else ord("N")),
+            val_to_int_ptr(M),
+            val_to_int_ptr(N),
+            val_to_int_ptr(K),
+            scalar_ptr(alpha),
+            A_work.ctypes,
+            val_to_int_ptr(LDA),
+            B_work.ctypes,
+            val_to_int_ptr(LDB),
+            scalar_ptr(beta),
+            C_work.ctypes,
+            val_to_int_ptr(np.int32(LDC)),
+        )
+        if C_work is not C:
+            C[:] = C_work
         return C
 
     return impl
@@ -481,25 +483,19 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
 
 def _ger(alpha, x, y, A):
     r"""
-    Add a rank-1 update to a general matrix, overwriting ``A``.
-
-    .. math::
-
-        A \leftarrow \alpha \, x \, y^T + A
+    Overwrite ``A`` with :math:`\alpha \, x \, y^T + A`.
 
     Parameters
     ----------
     alpha : scalar
-        Scale the outer product.
     x, y : ndarray
-        The 1-d factors, of lengths matching ``A``'s rows and columns respectively.
+        1-d, of lengths matching the rows and columns of ``A``.
     A : ndarray
-        The matrix updated in place and also returned.
+        The matrix updated in place and returned.
 
     Returns
     -------
     A : ndarray
-        The same array passed in.
     """
     A[:] = alpha * np.outer(x, y) + A
     return A
@@ -514,50 +510,43 @@ def _ger_impl(alpha, x, y, A):
     scalar_ptr = _SCALAR_PTR_INTRINSICS[A.dtype]
 
     def impl(alpha, x, y, A):
-        ALPHA = scalar_ptr(alpha)
-        INC = val_to_int_ptr(np.int32(1))
-
-        # ger walks each vector by a fixed increment of one element, so a strided view
-        # reads the wrong entries unless it is made contiguous first. The vectors are
-        # O(m + n) against the update's O(m n), so copying one costs less than carrying
-        # its own increment would, and it keeps a negative stride -- which BLAS addresses
-        # from the far end of the buffer -- out of the picture entirely.
+        # The vectors are O(m + n) against the update's O(m n), so a strided one is
+        # copied rather than carried through its own increment.
         x_work = x if x.flags.c_contiguous else np.ascontiguousarray(x)
         y_work = y if y.flags.c_contiguous else np.ascontiguousarray(y)
 
-        # ger has no transpose flag and does not need one: a C-ordered A's buffer is
-        # A^T, and transposing the identity gives A^T <- alpha y x^T + A^T. Swapping
-        # the vectors and the extents computes that, updating a row-major A in place.
-        if A.flags.f_contiguous:
-            numba_ger(
-                val_to_int_ptr(np.int32(A.shape[0])),
-                val_to_int_ptr(np.int32(A.shape[1])),
-                ALPHA,
-                x_work.ctypes,
-                INC,
-                y_work.ctypes,
-                INC,
-                A.ctypes,
-                val_to_int_ptr(np.int32(max(1, A.shape[0]))),
-            )
+        # A row-major A is A^T to BLAS, and A^T <- alpha y x^T + A^T is the same
+        # update with the vectors swapped. A with no unit-stride axis goes through a
+        # copy.
+        LDA = _column_major_ld(A)
+        if LDA:
+            A_work = A
+            u, v = x_work, y_work
+            rows, cols = A.shape[0], A.shape[1]
         else:
-            # An array that is neither C- nor F-contiguous has to be updated through a
-            # copy, so the result is written back to keep the in-place contract.
-            needs_writeback = not A.flags.c_contiguous
-            A_work = np.ascontiguousarray(A) if needs_writeback else A
-            numba_ger(
-                val_to_int_ptr(np.int32(A_work.shape[1])),
-                val_to_int_ptr(np.int32(A_work.shape[0])),
-                ALPHA,
-                y_work.ctypes,
-                INC,
-                x_work.ctypes,
-                INC,
-                A_work.ctypes,
-                val_to_int_ptr(np.int32(max(1, A_work.shape[1]))),
-            )
-            if needs_writeback:
-                A[:] = A_work
+            LDA = _row_major_ld(A)
+            if LDA:
+                A_work = A
+            else:
+                A_work = np.ascontiguousarray(A)
+                LDA = max(1, A.shape[1])
+            u, v = y_work, x_work
+            rows, cols = A.shape[1], A.shape[0]
+
+        INC = val_to_int_ptr(np.int32(1))
+        numba_ger(
+            val_to_int_ptr(np.int32(rows)),
+            val_to_int_ptr(np.int32(cols)),
+            scalar_ptr(alpha),
+            u.ctypes,
+            INC,
+            v.ctypes,
+            INC,
+            A_work.ctypes,
+            val_to_int_ptr(np.int32(LDA)),
+        )
+        if A_work is not A:
+            A[:] = A_work
         return A
 
     return impl

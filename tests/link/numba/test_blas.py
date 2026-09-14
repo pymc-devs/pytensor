@@ -192,3 +192,36 @@ def test_ger_inplace_reads_strided_vectors():
         accept_inplace=True,
     )
     np.testing.assert_allclose(fn(2.0, x_np, y_np), expected, rtol=1e-5)
+
+
+def _matrix_views(rng, rows, cols):
+    wide = rng.normal(size=(rows, 2 * cols)).astype(floatX)
+    full = np.ascontiguousarray(wide[:, :cols])
+    return {
+        "column_slice": wide[:, :cols],
+        "row_step": np.ascontiguousarray(np.vstack([full, full]))[::2],
+        "reversed_rows": full[::-1],
+        "reversed_columns": full[:, ::-1],
+        "reversed_both": full[::-1, ::-1],
+        "fortran_reversed_rows": np.asfortranarray(full)[::-1],
+    }
+
+
+@pytest.mark.parametrize("layout", list(_matrix_views(np.random.default_rng(0), 2, 2)))
+def test_gemm_reads_strided_operands(layout):
+    A = pt.tensor("A", shape=(6, 5), dtype=floatX)
+    B = pt.tensor("B", shape=(5, 4), dtype=floatX)
+    Z = pt.tensor("Z", shape=(6, 4), dtype=floatX)
+    alpha, beta = pt.scalar("alpha", dtype=floatX), pt.scalar("beta", dtype=floatX)
+
+    rng = np.random.default_rng(sum(map(ord, f"gemm_strided {layout}")))
+    A_np = _matrix_views(rng, 6, 5)[layout]
+    B_np = _matrix_views(rng, 5, 4)[layout]
+    Z_np = _matrix_views(rng, 6, 4)[layout]
+
+    fn = pytensor.function(
+        [Z, alpha, A, B, beta], Gemm(inplace=False)(Z, alpha, A, B, beta), mode="NUMBA"
+    )
+    np.testing.assert_allclose(
+        fn(Z_np, 2.0, A_np, B_np, 0.5), 0.5 * Z_np + 2.0 * (A_np @ B_np), rtol=1e-5
+    )
