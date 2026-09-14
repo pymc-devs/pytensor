@@ -21,8 +21,7 @@ def numba_funcify_Gemm(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def gemm(Z, alpha, X, Y, beta):
-            # BLAS scales Z in a separate pass and numba would build a temporary for
-            # `out += beta * Z`; an explicit loop beats both. Z may broadcast against out.
+            # One pass adds beta * Z, which may broadcast, without a temporary.
             out = np.empty((X.shape[0], Y.shape[1]), dtype=dtype)
             _gemm(X, Y, out, False, False, alpha.item(), 0.0)
             beta_value = beta.item()
@@ -88,10 +87,8 @@ def numba_funcify_Ger(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def ger(A, alpha, x, y):
-            # Writing `A` and the update together keeps this to one pass over the
-            # output; copying `A` in and letting BLAS accumulate on top would touch it
-            # twice. Leaving `A` itself alone is the whole difference between this op
-            # and its inplace form.
+            # One pass writes A and the update together instead of copying A in and
+            # letting BLAS accumulate on top.
             rows = x.shape[0]
             cols = y.shape[0]
             out = np.empty((rows, cols), dtype=dtype)
@@ -102,7 +99,5 @@ def numba_funcify_Ger(op, node, **kwargs):
                     out[i, j] = A[i, j] + scaled * y[j]
             return out
 
-    # Bump whenever `_ger` changes: it is inlined here, so its source is not part of
-    # this key.
     cache_version = 4
     return ger, cache_version

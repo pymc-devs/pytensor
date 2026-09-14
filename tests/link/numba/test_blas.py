@@ -18,8 +18,7 @@ floatX = config.floatX
     "z_shape", [(6, 5), (1, 5), (6, 1), (1, 1)], ids=["full", "row", "column", "scalar"]
 )
 def test_gemm_broadcasts_its_accumulator(z_shape):
-    """``Gemm`` takes a ``z`` that is only broadcast against the product -- a bias row is the common
-    case -- so the buffer it accumulates into is the product's shape, not ``z``'s."""
+    """The buffer ``Gemm`` accumulates into has the product's shape, not ``z``'s."""
     z = pt.tensor("z", shape=z_shape, dtype=floatX)
     x = pt.tensor("x", shape=(6, 3), dtype=floatX)
     y = pt.tensor("y", shape=(3, 5), dtype=floatX)
@@ -39,7 +38,6 @@ def test_gemm_broadcasts_its_accumulator(z_shape):
 
 
 def test_gemm_no_inplace_leaves_its_accumulator_alone():
-    """The non-inplace form must not write through ``z``; only the inplace form may."""
     z = pt.tensor("z", shape=(6, 5), dtype=floatX)
     x = pt.tensor("x", shape=(6, 3), dtype=floatX)
     y = pt.tensor("y", shape=(3, 5), dtype=floatX)
@@ -60,7 +58,6 @@ def test_gemm_no_inplace_leaves_its_accumulator_alone():
 
 
 def test_gemm_inplace_writes_through_its_accumulator():
-    """The inplace form is chosen precisely to avoid the copy, so it has to destroy ``z``."""
     rng = np.random.default_rng(sum(map(ord, "gemm_inplace")))
     z_np = rng.normal(size=(6, 5)).astype(floatX)
     x_np = rng.normal(size=(6, 3)).astype(floatX)
@@ -72,8 +69,6 @@ def test_gemm_inplace_writes_through_its_accumulator():
     y = pt.tensor("y", shape=(3, 5), dtype=floatX)
     alpha, beta = pt.scalar("alpha", dtype=floatX), pt.scalar("beta", dtype=floatX)
 
-    # An inplace op cannot be built into a graph directly; only the rewrite that introduces one
-    # may, so the test has to say it knows what it is asking for.
     fn = pytensor.function(
         [alpha, x, y, beta],
         Gemm(inplace=True)(z, alpha, x, y, beta),
@@ -85,7 +80,6 @@ def test_gemm_inplace_writes_through_its_accumulator():
 
 
 def test_gemv_no_inplace_leaves_its_accumulator_alone():
-    """The non-inplace form must not write through ``y``; only the inplace form may."""
     y = pt.tensor("y", shape=(6,), dtype=floatX)
     A = pt.tensor("A", shape=(6, 5), dtype=floatX)
     x = pt.tensor("x", shape=(5,), dtype=floatX)
@@ -106,7 +100,6 @@ def test_gemv_no_inplace_leaves_its_accumulator_alone():
 
 
 def test_gemv_inplace_writes_through_its_accumulator():
-    """The inplace form is chosen precisely to avoid the copy, so it has to destroy ``y``."""
     rng = np.random.default_rng(sum(map(ord, "gemv_inplace")))
     y_np = rng.normal(size=6).astype(floatX)
     A_np = rng.normal(size=(6, 5)).astype(floatX)
@@ -129,7 +122,6 @@ def test_gemv_inplace_writes_through_its_accumulator():
 
 
 def test_ger_no_inplace_leaves_its_accumulator_alone():
-    """The non-inplace form must not write through ``A``; only the inplace form may."""
     A = pt.tensor("A", shape=(6, 5), dtype=floatX)
     x = pt.tensor("x", shape=(6,), dtype=floatX)
     y = pt.tensor("y", shape=(5,), dtype=floatX)
@@ -150,7 +142,6 @@ def test_ger_no_inplace_leaves_its_accumulator_alone():
 
 
 def test_ger_inplace_writes_through_its_accumulator():
-    """The inplace form is chosen precisely to avoid the copy, so it has to destroy ``A``."""
     rng = np.random.default_rng(sum(map(ord, "ger_inplace")))
     A_np = rng.normal(size=(6, 5)).astype(floatX)
     x_np = rng.normal(size=6).astype(floatX)
@@ -173,7 +164,6 @@ def test_ger_inplace_writes_through_its_accumulator():
 
 
 def test_ger_inplace_reads_strided_vectors():
-    """``ger`` walks each vector by a fixed increment, so a strided view has to be copied."""
     rng = np.random.default_rng(sum(map(ord, "ger_strided")))
     A_np = rng.normal(size=(6, 5)).astype(floatX)
     x_np = rng.normal(size=12).astype(floatX)
