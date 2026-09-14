@@ -3,6 +3,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor
 from pytensor import Mode, config, function
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
@@ -46,6 +47,14 @@ def test_useless_unbatched_blockwise():
         fn.maker.fgraph.outputs[0].owner.op, Blockwise | BlockwiseWithCoreShape
     )
     assert isinstance(fn.maker.fgraph.outputs[0].owner.op.core_op, MatrixPinv)
+
+    # Equivalent factorizations should share the same core computation.
+    x = matrix("x")
+    out = [pytensor.tensor.linalg.cholesky(x), pytensor.tensor.linalg.cholesky(x[None])]
+    fn = function([x], out, mode="FAST_RUN")
+
+    nodes = list(apply_ancestors(fn.maker.fgraph.outputs))
+    assert sum(type(node.op).__name__ == "Cholesky" for node in nodes) == 1
 
 
 def test_local_blockwise_alloc_inputs():
