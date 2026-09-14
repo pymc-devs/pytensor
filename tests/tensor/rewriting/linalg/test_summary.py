@@ -186,7 +186,19 @@ def test_slogdet_specialization(batch_dim):
     result.assert_eval(a)
 
     # log(det(x))
+    expected_sign_value = np.array([-1], dtype=np.int8) if batch_dim else -1
+    expected_nan_value = (
+        np.array([np.nan], dtype=config.floatX) if batch_dim else np.nan
+    )
+
+    expected_log_det_x = pt.where(
+        pt.eq(expected_sign_det_x, expected_sign_value),
+        expected_nan_value,
+        expected_log_abs_det_x,
+    )
+
     result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(expected_log_det_x)
     result.assert_eval(a)
 
     # More than 1 valid function
