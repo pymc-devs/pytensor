@@ -1373,4 +1373,4 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
             return out
 
     batched_dot.handles_out = True
-    return batched_dot, 2
+    return batched_dot, 3

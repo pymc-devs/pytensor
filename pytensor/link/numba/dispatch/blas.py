@@ -33,7 +33,7 @@ def numba_funcify_Gemm(op, node, **kwargs):
                         out[i, j] += beta_value * Z_full[i, j]
             return out
 
-    cache_version = 4
+    cache_version = 5
     return gemm, cache_version
 
 
