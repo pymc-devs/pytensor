@@ -37,47 +37,39 @@ def numba_funcify_Gemm(op, node, **kwargs):
     return gemm, cache_version
 
 
+@numba_basic.numba_njit(inline="always")
+def _gemv_into(y, alpha, A, x, beta):
+    # A reversed axis of A is read forwards by reversing the vector that runs along
+    # it, which turns a layout gemm would copy into one it addresses in place.
+    if A.strides[0] < 0:
+        A = A[::-1]
+        y = y[::-1]
+    if A.strides[1] < 0:
+        A = A[:, ::-1]
+        x = x[::-1]
+    _gemm(A, np.expand_dims(x, 1), np.expand_dims(y, 1), False, False, alpha, beta)
+
+
 @register_funcify_default_op_cache_key(Gemv)
 def numba_funcify_Gemv(op, node, **kwargs):
-    """Dispatch ``Gemv`` to a single BLAS call, with its scalars carried as gemm's own
-    alpha and beta."""
-    # The vectors reach `_gemm` as one-column matrices rather than through a separate
-    # gemv binding: BLAS reads the same buffers either way, and gemm already resolves
-    # each operand's memory order without copying.
+    """Dispatch ``Gemv`` through gemm on one-column matrices, which reads the same
+    buffers and already resolves each operand's layout."""
     if op.inplace:
 
         @numba_basic.numba_njit
         def gemv(y, alpha, A, x, beta):
-            _gemm(
-                A,
-                np.expand_dims(x, 1),
-                np.expand_dims(y, 1),
-                False,
-                False,
-                alpha.item(),
-                beta.item(),
-            )
+            _gemv_into(y, alpha.item(), A, x, beta.item())
             return y
 
     else:
 
         @numba_basic.numba_njit
         def gemv(y, alpha, A, x, beta):
-            # Accumulating into a copy leaves `y` intact, which is the whole difference
-            # between this op and its inplace form.
             out = y.copy()
-            _gemm(
-                A,
-                np.expand_dims(x, 1),
-                np.expand_dims(out, 1),
-                False,
-                False,
-                alpha.item(),
-                beta.item(),
-            )
+            _gemv_into(out, alpha.item(), A, x, beta.item())
             return out
 
-    cache_version = 1
+    cache_version = 2
     return gemv, cache_version
 
 
