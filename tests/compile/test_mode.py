@@ -14,6 +14,8 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import get_active_mode, graph_rewriter
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
 from pytensor.link.jax import JAXLinker
+from pytensor.link.mlx import MLXLinker
+from pytensor.link.numba import NumbaLinker
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.type import matrix, vector
@@ -138,7 +140,9 @@ def test_predefined_modes_respected():
     assert not isinstance(default_mode_again.linker, JAXLinker)
 
 
-@pytest.mark.parametrize("linker_cls", [JAXLinker, PytorchLinker])
+@pytest.mark.parametrize(
+    "linker_cls", [JAXLinker, MLXLinker, NumbaLinker, PytorchLinker]
+)
 def test_linker_incompatible_rewrites(linker_cls):
     linker = linker_cls()
     mode = Mode(linker=linker, optimizer="fast_run")
