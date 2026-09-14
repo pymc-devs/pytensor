@@ -3,9 +3,10 @@ import pytest
 
 from pytensor import config, grad, wrap_jax
 from pytensor.compile.sharedvalue import shared
+from pytensor.gradient import DisconnectedInputError
 from pytensor.link.jax.ops import JAXOp
 from pytensor.scalar import all_types
-from pytensor.tensor import TensorType, tensor
+from pytensor.tensor import TensorType, tensor, vectorize
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -349,6 +350,40 @@ def test_unused_matrix_product():
     out = jax_op(x, y)
     grad_out = grad(out[1].sum(), [x])
     compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
+
+
+def test_discrete_input():
+    # Integer inputs are not differentiable, so they must be reported as
+    # disconnected instead of getting an integer gradient. Regression test for #2072.
+    rng = np.random.default_rng(12)
+    x = tensor("x", shape=(5,))
+    idx = tensor("idx", shape=(3,), dtype="int32")
+    test_values = [
+        rng.normal(size=x.type.shape).astype(config.floatX),
+        np.array([0, 2, 2], dtype="int32"),
+    ]
+
+    def f(x, idx):
+        return jax.numpy.sum(x[idx])
+
+    out = wrap_jax(f)(x, idx)
+    [grad_out] = grad(out, [x])
+    _, jax_res = compare_jax_and_py([x, idx], [out, grad_out], test_values)
+    np.testing.assert_allclose(jax_res[1], [1.0, 0.0, 2.0, 0.0, 0.0])
+
+    with pytest.raises(DisconnectedInputError):
+        grad(out, [idx])
+
+    # Blockwise consults the core Op's connection_pattern, so the same must hold
+    # when the wrapped function is vectorized.
+    batched_x = tensor("batched_x", shape=(2, 5))
+    batched_out = vectorize(wrap_jax(f), signature="(n),(m)->()")(batched_x, idx)
+    [batched_grad_out] = grad(batched_out.sum(), [batched_x])
+    compare_jax_and_py(
+        [batched_x, idx],
+        [batched_out, batched_grad_out],
+        [np.repeat(test_values[0][None], 2, axis=0), test_values[1]],
+    )
 
 
 def test_unknown_static_shape():
