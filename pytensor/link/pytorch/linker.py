@@ -12,8 +12,8 @@ class PytorchLinker(JITLinker):
         "fusion",
         "inplace",
         "scan_reduce_trace_prealloc",
-        "reuse_lu_decomposition_multiple_solves",
-        "scan_split_non_sequence_lu_decomposition_solve",
+        "reuse_decomposition_multiple_solves",
+        "scan_split_non_sequence_decomposition_and_solve",
     )
 
     def __init__(self, *args, **kwargs):
