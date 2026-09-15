@@ -202,8 +202,7 @@ def test_scan_grad_over_sequence_default_mode():
 
 
 def test_higher_order_derivatives():
-    # rtol loosened because MLX casts the check's float64 to float32
-    ScanCompatibilityTests.check_higher_order_derivative(mode="MLX", rtol=1e-6)
+    ScanCompatibilityTests.check_higher_order_derivative(mode="MLX")
 
 
 @pytest.mark.parametrize("static_shape", [True, False])
