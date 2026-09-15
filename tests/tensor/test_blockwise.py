@@ -15,6 +15,7 @@ from pytensor.graph.replace import _vectorize_node, vectorize_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor import (
+    add,
     matrices,
     matrix,
     ones_like,
@@ -37,6 +38,7 @@ from pytensor.tensor.linalg.solvers.triangular import solve_triangular
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
+from pytensor.tensor.signal.conv import Convolve1d
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
@@ -83,6 +85,46 @@ def test_perform_method_per_node():
     res_out_x, res_out_y = fn(np.zeros(3, dtype="float32"), np.zeros(3, dtype="int32"))
     np.testing.assert_array_equal(res_out_x, np.ones(3, dtype="float32"))
     np.testing.assert_array_equal(res_out_y, -np.ones(3, dtype="int32"))
+
+
+@pytest.mark.skipif(
+    config.cxx == "", reason="Requires a C compiler for the core C thunk"
+)
+@pytest.mark.parametrize("full_mode", [True, False], ids=["full", "valid"])
+@pytest.mark.parametrize("batched_mode", [False, True], ids=["broadcast", "batched"])
+def test_blockwise_perform_scalar_core_input(batched_mode, full_mode):
+    """Blockwise.perform must store numpy scalars into ScalarType core-input
+    storage; the core C thunk rejects 0d arrays ("Scalar check failed").
+
+    Regression test for https://github.com/pymc-devs/pytensor/issues/2360
+    """
+    x = tensor("x", shape=(2, None))
+    k = tensor("k", shape=(2, None))
+    m = tensor("m", shape=(None,) if batched_mode else (1,), dtype=bool)
+    out = Blockwise(Convolve1d())(x, k, m)
+    node = out.owner
+
+    rng = np.random.default_rng(2360)
+    x_val = rng.normal(size=(2, 6))
+    k_val = rng.normal(size=(2, 3))
+    m_val = np.full(2 if batched_mode else 1, full_mode)
+    out_storage = [[None]]
+    node.op.perform(node, [x_val, k_val, m_val], out_storage)
+
+    np_mode = "full" if full_mode else "valid"
+    expected = np.stack(
+        [np.convolve(x_val[i], k_val[i], mode=np_mode) for i in range(2)]
+    )
+    np.testing.assert_allclose(out_storage[0][0], expected)
+
+    # A 0d TensorType core input needs the opposite coercion: indexing the batch
+    # dimensions yields a numpy scalar, but the storage must hold an ndarray
+    a = tensor("a", shape=(2,))
+    b = tensor("b", shape=(2,))
+    node = Blockwise(add, signature="(),()->()")(a, b).owner
+    out_storage = [[None]]
+    node.op.perform(node, [x_val[:, 0], k_val[:, 0]], out_storage)
+    np.testing.assert_allclose(out_storage[0][0], x_val[:, 0] + k_val[:, 0])
 
 
 def test_vectorize_blockwise():

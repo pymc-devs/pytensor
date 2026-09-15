@@ -7,7 +7,7 @@ from pytensor.compile.aliasing import (
     add_supervisor_to_fgraph,
     insert_deepcopy,
 )
-from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.builders import OpFromGraph, SymbolicOp
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Variable
@@ -134,12 +134,12 @@ def rewrite_ofg_inner_graph(linker, op, node, inner, *, mode):
     )
 
 
-def _ofg_inner_optimizer(mode):
-    # Recognition rewrites fold a pattern into an inner-graph op (e.g.
-    # ``exp(x) / sum(exp(x))`` -> ``Softmax``, itself an ``OpFromGraph``). Running
-    # them on an ``OpFromGraph`` inner graph -- which may *be* that pattern --
-    # would re-create the op inside itself and recurse without end.
-    return mode.excluding("symbolic_op_recognition").optimizer
+def _ofg_inner_optimizer(mode, op):
+    # Recognition would re-create a `SymbolicOp` inside its own inner graph and never
+    # terminate. Any other `OpFromGraph` must keep it, or wrapping destabilizes the body.
+    if isinstance(op, SymbolicOp):
+        return mode.excluding("symbolic_op_recognition").optimizer
+    return mode.optimizer
 
 
 @rewrite_ofg_inner_graph.register(VMLinker)
@@ -152,7 +152,7 @@ def destructive_rewrite_ofg_inner_graph(linker, op, node, inner, *, mode):
     # still be baked between purely internal buffers.
     input_specs = [In(x, borrow=True, mutable=False) for x in inner.inputs]
     add_supervisor_to_fgraph(fgraph=inner, input_specs=input_specs, accept_inplace=True)
-    _ofg_inner_optimizer(mode).rewrite(inner)
+    _ofg_inner_optimizer(mode, op).rewrite(inner)
     # The op's outputs must not alias its inputs or each other (it declares no
     # view_map, so the outer graph cannot see such aliases); deepcopies break any
     # boundary alias the optimized graph ends up with.
@@ -165,7 +165,7 @@ def destructive_rewrite_ofg_inner_graph(linker, op, node, inner, *, mode):
 @rewrite_ofg_inner_graph.register(MLXLinker)
 def functional_rewrite_ofg_inner_graph(linker, op, node, inner, *, mode):
     """Structurally optimize the inner graph for the functional JIT backends."""
-    _ofg_inner_optimizer(mode).rewrite(inner)
+    _ofg_inner_optimizer(mode, op).rewrite(inner)
 
 
 @graph_rewriter

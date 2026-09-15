@@ -1,12 +1,13 @@
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor import function
 from pytensor.compile.mode import Mode
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor import tensor
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode, py_mode
 
 
 mx = pytest.importorskip("mlx.core")
@@ -265,18 +266,21 @@ def test_mlx_IncSubtensor_slice_grad():
         compare_mlx_and_py([x_pt], [g], [x_np])
 
 
-@pytest.mark.xfail(
-    reason="Upstream mx.compile bug (ml-explore/mlx#3716): assigning an "
-    "elementwise expression to a negative-strided slice returns wrong values "
-    "under mx.compile (correct when eager / use_compile=False).",
-    strict=True,
-)
 def test_mlx_IncSubtensor_negative_step_slice_grad():
+    # Correctness is asserted on the CPU stream only: assigning an elementwise
+    # expression to a negative-strided slice returns wrong values on the GPU
+    # stream under mx.compile (ml-explore/mlx#3716).
     x_pt = pt.vector("x", dtype="float32")
     x_np = np.arange(6, dtype=np.float32)
     g = pt.grad((x_pt[::-1] ** 2).sum(), x_pt)
     assert isinstance(g.owner.op, pt_subtensor.IncSubtensor)
-    compare_mlx_and_py([x_pt], [g], [x_np])
+
+    expected = pytensor.function([x_pt], g, mode=py_mode)(x_np)
+    mlx_fn = pytensor.function([x_pt], g, mode=mlx_mode)
+    with mx.stream(mx.cpu):
+        result = np.asarray(mlx_fn(x_np))
+
+    np.testing.assert_allclose(result, expected, rtol=1e-4)
 
 
 @pytest.mark.parametrize(

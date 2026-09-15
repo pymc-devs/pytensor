@@ -56,6 +56,7 @@ from pytensor.tensor.math import (
     variadic_add,
 )
 from pytensor.tensor.rewriting.basic import (
+    get_simplified_shape,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -192,6 +193,54 @@ def _arange_provably_unique(start, stop, step) -> bool:
     return False
 
 
+def _arange_shifted_bounds(idx):
+    """``arange(a, b, s) +/- k`` as the bounds of the ``arange`` it is equal to.
+
+    A scalar shift slides the whole range, so whether the entries straddle zero — the
+    only thing that makes distinct values alias onto one position — is still decided by
+    the bounds, once the shift is folded into them. ``arange(-5, 5) + 5`` is
+    ``arange(0, 10)``, unique, even though the unshifted range is not.
+    """
+    if not (
+        isinstance(idx.owner_op, Elemwise)
+        and isinstance(idx.owner.op.scalar_op, Add | Sub)
+    ):
+        return None
+    x, y = idx.owner.inputs
+    if isinstance(x.owner_op, ARange) and all(y.type.broadcastable):
+        arange_var, shift_var = x, y
+    elif (
+        isinstance(idx.owner.op.scalar_op, Add)
+        and isinstance(y.owner_op, ARange)
+        and all(x.type.broadcastable)
+    ):
+        arange_var, shift_var = y, x
+    else:
+        return None
+    try:
+        shift = int(get_underlying_scalar_constant_value(shift_var))
+    except NotScalarConstantError:
+        # A symbolic shift moves the range by an unknown amount, so where it sits
+        # relative to zero -- the only thing that matters here -- stays unknown.
+        return None
+    if isinstance(idx.owner.op.scalar_op, Sub):
+        shift = -shift
+
+    def shifted(bound):
+        # Fold eagerly: the sign checks below read the bound itself, not a value
+        # they could recover from an unevaluated Add. The shifted value can leave the
+        # original bound's dtype (``arange(5)`` carries int8 bounds), and only its
+        # sign and magnitude are ever read, so let the constant pick its own.
+        try:
+            value = int(get_scalar_constant_value(bound)) + shift
+        except NotScalarConstantError:
+            return bound + shift
+        return tensor_constant(np.asarray(value))
+
+    start, stop, step = arange_var.owner.inputs
+    return shifted(start), shifted(stop), step
+
+
 def _index_provably_unique(idx, fgraph: FunctionGraph | None) -> bool:
     """Whether a single index selects each position on its own axis at most once.
 
@@ -217,6 +266,8 @@ def _index_provably_unique(idx, fgraph: FunctionGraph | None) -> bool:
         return True
     if isinstance(idx.owner_op, ARange):
         return _arange_provably_unique(*idx.owner.inputs)
+    if (shifted_bounds := _arange_shifted_bounds(idx)) is not None:
+        return _arange_provably_unique(*shifted_bounds)
     if isinstance(idx.owner_op, Reshape | DimShuffle):
         # Views that only reorder or insert size-1 dims keep the value multiset.
         return _index_provably_unique(idx.owner.inputs[0], fgraph)
@@ -384,7 +435,8 @@ def eager_add_zero(x, y):
 def _eager_scalar(x):
     """Reduce a 0d or ``(1,)``-shaped tensor to the simplest scalar form."""
     if isinstance(x, TensorConstant):
-        return int(x.data)
+        # ``.item()`` covers the ``(1,)`` case the 0d-only ``int()`` rejects.
+        return int(x.data.item())
     if isinstance(x.owner_op, DimShuffle) and x.owner.op.input_ndim == 0:
         inner = x.owner.inputs[0]
         return int(inner.data) if isinstance(inner, TensorConstant) else inner
@@ -1183,18 +1235,30 @@ def local_add_of_sparse_write(fgraph, node):
     ``x`` itself, so duplicate indices accumulate identically on both sides. Only
     the ``zeros[idx].set(v)`` form needs duplicate-free indices, since a dense set
     is last-wins and collapsing it to an inc would over-count repeats.
+
+    An ``x`` the add broadcasts is alloc'd up to the write's shape first, since the
+    replacement writes into ``x`` itself::
+
+        x(3, 4) + zeros((3, 4))[idx].set(v) -> x[idx].inc(v)
+        x(4,) + zeros((3, 4))[idx].set(v)   -> alloc(x, 3, 4)[idx].inc(v)
+
+    A write the add broadcasts is left alone. ``x(3, 4) + zeros(4)[idx].set(v)``,
+    which is the same case as ``zeros((3, 1))[idx]`` up to a transpose and as
+    ``zeros((3, 1))[idx, 0]`` up to a dummy dim, could become ``x[:, idx].inc(v)``
+    by following the broadcast into the indices. That multiplies the written
+    positions by the broadcast dim while still only saving the (small) zeros base,
+    so whether it is an improvement depends on how sparse the write is to begin
+    with -- unlike the cases above, which never write more positions than before.
     """
+    out_type = node.outputs[0].type
     for i, sparse_candidate in enumerate(node.inputs):
-        if not (
-            sparse_candidate.owner
-            and isinstance(
-                sparse_candidate.owner.op,
-                IncSubtensor | AdvancedIncSubtensor,
-            )
-        ):
+        if sparse_candidate.type.broadcastable != out_type.broadcastable:
             continue
 
-        inner_op = sparse_candidate.owner.op
+        inner_op = sparse_candidate.owner_op
+        if not isinstance(inner_op, IncSubtensor | AdvancedIncSubtensor):
+            continue
+
         base, v, *idx_vars = sparse_candidate.owner.inputs
 
         if (
@@ -1213,21 +1277,32 @@ def local_add_of_sparse_write(fgraph, node):
         # positions. Basic (slice/scalar) IncSubtensor is always unique; advanced
         # integer-array set indices must be jointly duplicate-free, weighing only
         # the advanced indices and not the flattened slice bounds.
-        if inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
-            indices = indices_from_subtensor(idx_vars, inner_op.idx_list)
-            if not _advanced_indices_jointly_unique(indices, fgraph):
-                continue
+        advanced = not isinstance(inner_op, IncSubtensor)
+        indices = indices_from_subtensor(idx_vars, inner_op.idx_list)
+        if (
+            inner_op.set_instead_of_inc
+            and advanced
+            and not _advanced_indices_jointly_unique(indices, fgraph)
+        ):
+            continue
 
-        others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
-        other = variadic_add(*others)
+        # Dropping the base also drops its say in the add's dtype promotion, in both
+        # directions: a base narrower than the output stops truncating ``v`` (the
+        # write does that cast at runtime), and one wider than the rest of the add
+        # stops upcasting it.
+        if base.type.dtype != out_type.dtype:
+            v = cast(v, base.type.dtype)
 
-        if inner_op.set_instead_of_inc:
-            new_op = type(inner_op)(
-                **(inner_op._props_dict() | {"set_instead_of_inc": False})
-            )
-        else:
-            new_op = inner_op
-        r = new_op(other, v, *idx_vars)
+        other = variadic_add(*node.inputs[:i], *node.inputs[i + 1 :])
+
+        if other.type.dtype != out_type.dtype:
+            other = cast(other, out_type.dtype)
+        if other.type.broadcastable != out_type.broadcastable:
+            other = alloc(other, *get_simplified_shape(base, fgraph=fgraph))
+
+        r = other[indices].inc(
+            v, ignore_duplicates=advanced and inner_op.ignore_duplicates
+        )
         copy_stack_trace([node.outputs[0], sparse_candidate], r)
         return [r]
 
@@ -1981,7 +2056,9 @@ def local_read_of_write_same_indices(fgraph, node):
 
         x_at_idx = x[tuple(indices)]
         copy_stack_trace(out, x_at_idx)
-        r = x_at_idx + v
+        # ``x[idx] += v`` sums in the promoted dtype and rounds once on store, so a
+        # buffer narrower than ``v`` needs that rounding to survive as a cast.
+        r = cast(x_at_idx + v, out.dtype)
         copy_stack_trace(out, r)
         return [r]
 

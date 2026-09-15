@@ -5,6 +5,7 @@ from pytensor import tensor as pt
 from pytensor.graph import Apply, ancestors, graph_inputs
 from pytensor.graph.basic import Variable
 from pytensor.graph.traversal import (
+    apply_ancestors,
     apply_depends_on,
     explicit_graph_inputs,
     general_toposort,
@@ -186,6 +187,21 @@ def test_ancestors():
     res = ancestors([o2], blockers=[o1])
     res_list = list(res)
     assert res_list == [o2, o1, r3]
+
+
+def test_apply_ancestors():
+    """Blockers are yielded by `ancestors`, but their owners do not contribute."""
+    r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
+    o1 = MyOp(r1, r2)
+    o1.name = "o1"
+    o2 = MyOp(r3, o1)
+    o2.name = "o2"
+
+    res_list = list(apply_ancestors([o2], blockers=None))
+    assert res_list == [o2.owner, o1.owner]
+
+    res_list = list(apply_ancestors([o2], blockers=[o1]))
+    assert res_list == [o2.owner]
 
 
 def test_graph_inputs():

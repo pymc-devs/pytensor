@@ -344,6 +344,94 @@ def local_subtensor_of_dot(fgraph, node):
     return [r]
 
 
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([AdvancedSubtensor])
+def local_advanced_subtensor_of_dot(fgraph, node):
+    """Push an advanced index of a matrix product into its operands.
+
+    ``dot(A, B)[i]    -> dot(A[i], B)``
+    ``dot(A, B)[:, j] -> dot(A, B[:, j])``
+    ``dot(A, B)[i, j] -> (A[i] * B.mT[j]).sum(-1)``
+
+    Since ``dot(A, B)[i, j] = sum_c A[i, c] * B[c, j]``, an index on one product axis
+    only gathers from the operand that axis comes from, leaving a smaller ``Dot``.
+    Indexing *both* axes couples them, and a coupled index cannot be a product at all
+    — its output index appears on both operands (``ik,ki->i``) — so it becomes a
+    gather of rows of ``A`` and of ``B.mT`` contracted elementwise.
+    ``ExtractDiag`` is the ``i is j is arange(d)`` case, which
+    ``local_extract_diag_lift`` lowers into this form.
+
+    This is the advanced-indexing counterpart of ``local_subtensor_of_dot``, whose
+    basic indices can only ever be separable.
+    """
+    x, *idx_vars = node.inputs
+
+    match x.owner_op:
+        case Dot() | Blockwise(Dot()):
+            pass
+        case _:
+            return None
+
+    # If the product feeds other clients it is materialized anyway, so pushing the
+    # index into the operands would only add work.
+    if len(fgraph.clients[x]) > 1:
+        return None
+
+    ndim = x.type.ndim
+    idx_tuple = indices_from_subtensor(idx_vars, node.op.idx_list)
+    idx_tuple = (*idx_tuple, *(slice(None),) * (ndim - len(idx_tuple)))
+    *batch_idx, row_idx, col_idx = idx_tuple
+    if any(idx != slice(None) for idx in batch_idx):
+        return None
+
+    def is_advanced(idx):
+        # Boolean masks have a data-dependent shape the size gate can't weigh.
+        return (
+            isinstance(idx, TensorVariable)
+            and idx.type.ndim > 0
+            and idx.type.dtype != "bool"
+        )
+
+    row_adv, col_adv = is_advanced(row_idx), is_advanced(col_idx)
+    row_dim, col_dim = x.type.shape[-2:]
+    a, b = x.owner.inputs
+    a_batch = (slice(None),) * (a.type.ndim - 2)
+    b_batch = (slice(None),) * (b.type.ndim - 2)
+
+    if row_adv and col_adv:
+        if not _indices_provably_not_larger(
+            [(row_idx, row_dim), (col_idx, col_dim)], fgraph
+        ):
+            return None
+        a_rows = a[(*a_batch, row_idx)]
+        b_rows = b.mT[(*b_batch, col_idx)]
+        new_out = (a_rows * b_rows).sum(-1)
+    elif row_adv and col_idx == slice(None):
+        # A multidimensional index would leave the gathered operand with more than
+        # the two core dims `matmul` contracts, so only vector indices are pushed.
+        if row_idx.type.ndim != 1:
+            return None
+        if not _indices_provably_not_larger([(row_idx, row_dim)], fgraph):
+            return None
+        new_out = a[(*a_batch, row_idx)] @ b
+    elif col_adv and row_idx == slice(None):
+        if col_idx.type.ndim != 1:
+            return None
+        if not _indices_provably_not_larger([(col_idx, col_dim)], fgraph):
+            return None
+        new_out = a @ b[(*b_batch, slice(None), col_idx)]
+    else:
+        return None
+
+    if new_out.type.dtype != node.outputs[0].type.dtype:
+        new_out = new_out.astype(node.outputs[0].type.dtype)
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([Subtensor, AdvancedSubtensor])
@@ -903,9 +991,13 @@ def local_extract_diag_lift(fgraph, node):
     - ``Alloc`` parent — gated on ``local_subtensor_of_alloc``; rebuilds the
       outer Alloc shape with the diag length ``d`` so ``Shape(arange(d))[0]``
       doesn't survive.
+    - ``Dot`` / ``Blockwise(Dot)`` parent over the two contracted axes — gated on
+      ``local_advanced_subtensor_of_dot``, which turns the paired-arange gather
+      into ``(A * B.mT).sum(-1)``.
     - ``Elemwise`` / ``Blockwise`` parent — gated on
       ``local_subtensor_of_batch_dims``. Blockwise core dims bail (the lift
-      can't push past core ndim).
+      can't push past core ndim), so a batched dot diagonalized over its batch
+      dims lands here rather than on the branch above.
     - ``AdvancedIncSubtensor`` write-chain parent — gated on
       ``local_advanced_read_of_write_constant_indices``.
     """
@@ -916,14 +1008,25 @@ def local_extract_diag_lift(fgraph, node):
 
     if isinstance(parent_op, Alloc):
         shape_inputs = inner.owner.inputs[1:]
+        gate = local_subtensor_of_alloc
+    # A dot whose diagonal straddles both core dims: the paired index couples the
+    # two operands, which only the fold below can express.
+    elif (
+        isinstance(parent_op, Dot)
+        or (isinstance(parent_op, Blockwise) and isinstance(parent_op.core_op, Dot))
+    ) and (a1, a2) == (inner.type.ndim - 2, inner.type.ndim - 1):
+        shape_inputs = inner.shape
+        gate = local_advanced_subtensor_of_dot
     elif isinstance(parent_op, Elemwise | Blockwise):
         if isinstance(parent_op, Blockwise):
             batch_ndim = inner.owner.op.batch_ndim(inner.owner)
             if a1 >= batch_ndim or a2 >= batch_ndim:
                 return None
         shape_inputs = inner.shape
+        gate = local_subtensor_of_batch_dims
     elif isinstance(parent_op, AdvancedIncSubtensor):
         shape_inputs = inner.shape
+        gate = local_advanced_read_of_write_constant_indices
     else:
         return None
 
@@ -943,13 +1046,7 @@ def local_extract_diag_lift(fgraph, node):
     idxs = _diag_indices(inner.type.ndim, a1, a2, diag_len, row_off, col_off)
     hypothetical = inner[tuple(idxs)].owner
 
-    if isinstance(parent_op, Alloc):
-        return local_subtensor_of_alloc.fn(fgraph, hypothetical)
-    elif isinstance(parent_op, Elemwise | Blockwise):
-        return local_subtensor_of_batch_dims.fn(fgraph, hypothetical)
-    else:
-        # AdvancedIncSubtensor write chain
-        return local_advanced_read_of_write_constant_indices.fn(fgraph, hypothetical)
+    return gate.fn(fgraph, hypothetical)
 
 
 extract_diag_lift_pass = SequentialGraphRewriter(
@@ -958,6 +1055,7 @@ extract_diag_lift_pass = SequentialGraphRewriter(
         local_extract_diag_of_eye,
         local_extract_diag_lift,
         local_subtensor_of_alloc,
+        local_advanced_subtensor_of_dot,
         local_subtensor_of_batch_dims,
         local_slice_read_of_write,
         local_advanced_read_of_write_constant_indices,

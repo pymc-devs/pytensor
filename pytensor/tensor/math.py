@@ -3891,53 +3891,6 @@ def power(x, y):
     return x**y
 
 
-def logaddexp(*xs):
-    """Logarithm of the sum of exponentiations of the inputs.
-
-    See ``numpy.logaddexp``.
-
-    Parameters
-    ----------
-    xs : symbolic tensors
-        Input
-
-    Returns
-    -------
-    TensorVariable
-
-    """
-
-    return log(add(*[exp(x) for x in xs]))
-
-
-def logsumexp(x, axis=None, keepdims=False):
-    """Compute the log of the sum of exponentials of input elements.
-
-    See ``scipy.special.logsumexp``.
-
-    Parameters
-    ----------
-    x : symbolic tensor
-        Input
-
-    axis : None or int or tuple of ints, optional
-        Axis or axes over which the sum is taken. By default axis is None,
-        and all elements are summed.
-
-    keepdims : bool, optional
-        If this is set to True, the axes which are reduced are left in the
-        result as dimensions with size one. With this option, the result will
-        broadcast correctly against the original array.
-
-    Returns
-    -------
-    TensorVariable
-
-    """
-
-    return log(sum(exp(x), axis=axis, keepdims=keepdims))
-
-
 _matmul = Blockwise(_dot, name="Matmul")
 
 
@@ -4321,8 +4274,6 @@ __all__ = [
     "log1pexp",
     "log2",
     "log10",
-    "logaddexp",
-    "logsumexp",
     "lt",
     "matmul",
     "matvec",

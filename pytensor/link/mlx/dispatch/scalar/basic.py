@@ -5,16 +5,15 @@ import mlx.core as mx
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scalar.basic import (
     Cast,
+    Clip,
     Composite,
     Identity,
     Mod,
     ScalarOp,
     Second,
 )
-from pytensor.scalar.math import Erfc, Erfcx, Log1mexp, Sigmoid, Softplus
 
 
-# MLX name overrides for nfunc_spec names that don't match mlx.core
 MLX_NFUNC_OVERRIDES = {
     "true_divide": "divide",
     "invert": "bitwise_invert",
@@ -96,6 +95,14 @@ def mlx_funcify_Mod(op, **kwargs):
     return mlx_mod
 
 
+@mlx_funcify.register(Clip)
+def mlx_funcify_Clip(op, **kwargs):
+    def clip(x, min, max):
+        return mx.where(x < min, min, mx.where(x > max, max, x))
+
+    return clip
+
+
 @mlx_funcify.register(Identity)
 def mlx_funcify_Identity(op, **kwargs):
     def identity(x):
@@ -113,55 +120,6 @@ def mlx_funcify_Second(op, **kwargs):
         return out
 
     return second
-
-
-@mlx_funcify.register(Sigmoid)
-def mlx_funcify_Sigmoid(op, **kwargs):
-    return mx.sigmoid
-
-
-@mlx_funcify.register(Erfc)
-def mlx_funcify_Erfc(op, **kwargs):
-    def erfc(x):
-        return 1.0 - mx.erf(x)
-
-    return erfc
-
-
-@mlx_funcify.register(Erfcx)
-def mlx_funcify_Erfcx(op, **kwargs):
-    def erfcx(x):
-        return mx.exp(x * x) * (1.0 - mx.erf(x))
-
-    return erfcx
-
-
-@mlx_funcify.register(Softplus)
-def mlx_funcify_Softplus(op, **kwargs):
-    def softplus(x):
-        return mx.where(
-            x < -37.0,
-            mx.exp(x),
-            mx.where(
-                x < 18.0,
-                mx.log1p(mx.exp(x)),
-                mx.where(
-                    x < 33.3,
-                    x + mx.exp(-x),
-                    x,
-                ),
-            ),
-        )
-
-    return softplus
-
-
-@mlx_funcify.register(Log1mexp)
-def mlx_funcify_Log1mexp(op, node, **kwargs):
-    def log1mexp(x):
-        return mx.where(x < mx.log(0.5), mx.log1p(-mx.exp(x)), mx.log(-mx.expm1(x)))
-
-    return log1mexp
 
 
 @mlx_funcify.register(Composite)

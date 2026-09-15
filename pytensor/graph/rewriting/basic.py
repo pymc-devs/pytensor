@@ -43,7 +43,6 @@ from pytensor.graph.traversal import (
 )
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
-from pytensor.utils import flatten
 
 
 _logger = logging.getLogger("pytensor.graph.rewriting.basic")
@@ -705,6 +704,15 @@ class MergeOptimizer(GraphRewriter):
             fgraph.attach_feature(MergeFeature())
 
     def apply(self, fgraph):
+        def has_direct_destroyer(var):
+            """Whether any direct client destroys `var` (view-chain destroyers not seen)."""
+            return any(
+                i in destroyed_idxs
+                for client, i in fgraph.clients[var]
+                if client.op.destroy_map
+                for destroyed_idxs in client.op.destroy_map.values()
+            )
+
         sched = fgraph.merge_feature.scheduled
         nb_fail = 0
         t0 = time.perf_counter()
@@ -755,15 +763,17 @@ class MergeOptimizer(GraphRewriter):
                         continue
 
                     if hasattr(fgraph, "destroy_handler"):
-                        # If both nodes have clients that destroy them, we
-                        # can't merge them.
-                        clients = (
-                            fgraph.clients[pairs[0][0]] + fgraph.clients[pairs[0][1]]
-                        )
-                        if any(
-                            i in flatten(c.op.destroy_map.values())
-                            for c, i in clients
-                            if c.op.destroy_map
+                        # Merging two variables that both have a destroyer is
+                        # always rejected by `DestroyHandler` validation
+                        # ("multiple destroyers") -- skip those outright
+                        # instead of paying a checkpoint + failed validate +
+                        # revert per scheduled pair. A single-destroyer merge
+                        # may still be feasible, and destroyers reachable only
+                        # through view chains are rare: both are left to
+                        # validation, keeping this check O(clients) with no
+                        # droot recomputation.
+                        if has_direct_destroyer(pairs[0][0]) and has_direct_destroyer(
+                            pairs[0][1]
                         ):
                             continue
 

@@ -1265,11 +1265,11 @@ def tril_indices_from(
     k: int | ScalarVariable = 0,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
-    Return the indices for the lower-triangle of arr.
+    Return the indices for the lower-triangle of `a`.
 
     Parameters
     ----------
-    arr : {array_like, TensorVariable}, shape(N, N)
+    a : {array_like, TensorVariable}, shape(N, N)
         The indices will be valid for square arrays.
     k : integer scalar, optional
         Diagonal offset to use when forming the indices. `k = 0` (the default)
@@ -1278,7 +1278,7 @@ def tril_indices_from(
     Returns
     -------
     tril_indices_from : tuple, shape(2) of TensorVariable, shape(N)
-        Indices for the lower-triangle of arr.
+        Indices for the lower-triangle of `a`.
 
     Raises
     ------
@@ -1323,11 +1323,11 @@ def triu_indices_from(
     k: int | ScalarVariable = 0,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
-    Return the indices for the upper-triangle of arr.
+    Return the indices for the upper-triangle of `a`.
 
     Parameters
     ----------
-    arr : {array_like, TensorVariable}, shape(N, N)
+    a : {array_like, TensorVariable}, shape(N, N)
         The indices will be valid for square arrays.
     k : integer scalar, optional
         Diagonal offset to use when forming the indices. `k = 0` (the default)
@@ -1336,7 +1336,7 @@ def triu_indices_from(
     Returns
     -------
     triu_indices_from : tuple, shape(2) of TensorVariable, shape(N)
-        Indices for the upper-triangle of arr.
+        Indices for the upper-triangle of `a`.
 
     Raises
     ------
