@@ -228,6 +228,26 @@ def test_jax_IncSubtensor():
 @pytest.mark.parametrize(
     "func", (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1)
 )
+def test_jax_AdvancedIncSubtensor1_scalar_y(func):
+    """A 0d update must not trip the runtime-broadcast check.
+
+    The check is written against array values, but ``jax_typify`` turns a 0d array into a
+    Python scalar, which has no ``.shape``.
+    """
+    from pytensor import function
+
+    x = pt.zeros((5,))
+    out = func(x, 1.0, np.array([1, 3]))
+
+    res = function([], out, mode="JAX")()
+    expected = np.zeros(5)
+    expected[[1, 3]] = 1.0
+    np.testing.assert_allclose(res, expected)
+
+
+@pytest.mark.parametrize(
+    "func", (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1)
+)
 def test_jax_AdvancedIncSubtensor1_runtime_broadcast(func):
     """Test that JAX backend checks for runtime broadcasting in AdvancedIncSubtensor1.
 

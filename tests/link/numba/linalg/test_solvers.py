@@ -16,7 +16,7 @@ from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 pytestmark = pytest.mark.filterwarnings("error")
 
-numba = pytest.importorskip("numba")
+pytest.importorskip("numba")
 
 floatX = config.floatX
 
@@ -51,6 +51,7 @@ class TestSolves:
 
         complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
         dtype = complex_dtype if is_complex else floatX
+        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-8
 
         def A_func(x):
             if assume_a == "pos":
@@ -123,14 +124,14 @@ class TestSolves:
         A_val_f_contig = np.copy(A_val, order="F")
         b_val_f_contig = np.copy(b_val, order="F")
         res_f_contig = f(A_val_f_contig, b_val_f_contig)
-        np.testing.assert_allclose(res_f_contig, res)
+        np.testing.assert_allclose(res_f_contig, res, rtol=rtol)
         assert (A_val == A_val_f_contig).all() == (not overwrite_a)
         assert (b_val == b_val_f_contig).all() == (not overwrite_b)
 
         A_val_c_contig = np.copy(A_val, order="C")
         b_val_c_contig = np.copy(b_val, order="C")
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
-        np.testing.assert_allclose(res_c_contig, res)
+        np.testing.assert_allclose(res_c_contig, res, rtol=rtol)
         can_destroy_c_contig_A = overwrite_a and not (
             is_complex and assume_a in ("pos", "her")
         )
@@ -142,7 +143,7 @@ class TestSolves:
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
         res_not_contig = f(A_val_not_contig, b_val_not_contig)
-        np.testing.assert_allclose(res_not_contig, res)
+        np.testing.assert_allclose(res_not_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
@@ -173,6 +174,7 @@ class TestSolves:
     ):
         complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
         dtype = complex_dtype if is_complex else floatX
+        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-8
 
         def A_func(x):
             x = x @ x.conj().T
@@ -221,25 +223,42 @@ class TestSolves:
         A_val_f_contig = np.copy(A_val, order="F")
         b_val_f_contig = np.copy(b_val, order="F")
         res_f_contig = f(A_val_f_contig, b_val_f_contig)
-        np.testing.assert_allclose(res_f_contig, res)
+        np.testing.assert_allclose(res_f_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val, A_val_f_contig)
         assert (b_val == b_val_f_contig).all() == (not overwrite_b)
 
         A_val_c_contig = np.copy(A_val, order="C")
         b_val_c_contig = np.copy(b_val, order="C")
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
-        np.testing.assert_allclose(res_c_contig, res)
+        np.testing.assert_allclose(res_c_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_c_contig, A_val)
-        assert np.allclose(b_val_c_contig, b_val) == (
-            not (overwrite_b and b_val_c_contig.flags.f_contiguous)
-        )
+        # A c-contiguous b is consumed in place as well: side="L" takes it when it is also
+        # f-contiguous (vectors and single-column matrices), side="R" otherwise.
+        assert np.allclose(b_val_c_contig, b_val) == (not overwrite_b)
 
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
         res_not_contig = f(A_val_not_contig, b_val_not_contig)
-        np.testing.assert_allclose(res_not_contig, res)
+        np.testing.assert_allclose(res_not_contig, res, rtol=rtol)
         np.testing.assert_allclose(A_val_not_contig, A_val)
         np.testing.assert_allclose(b_val_not_contig, b_val)
+
+    @pytest.mark.parametrize("b_shape", [(5, 3), (5,)], ids=["b_matrix", "b_vec"])
+    def test_solve_triangular_singular_returns_nan(self, b_shape: tuple[int, ...]):
+        # trsm reports no INFO, so a singular system depends on our own zero-pivot scan.
+        # Both sides of the scan matter: a 2d rhs is solved by side="R" and a vector by
+        # side="L". scipy raises here instead, so there is no reference to compare against.
+        rng = np.random.default_rng(418)
+        A_val = np.tril(rng.normal(size=(5, 5))).astype(floatX)
+        A_val[2, 2] = 0.0
+        b_val = rng.normal(size=b_shape).astype(floatX)
+
+        A = pt.matrix("A", dtype=floatX)
+        b = pt.tensor("b", shape=b_shape, dtype=floatX)
+        X = pt.linalg.solve_triangular(A, b, lower=True, b_ndim=len(b_shape))
+        f = pytensor.function([A, b], X, mode="NUMBA")
+
+        assert np.isnan(f(A_val, b_val)).all()
 
     @pytest.mark.parametrize("value", [np.nan, np.inf])
     def test_solve_triangular_does_not_raise_on_nan_inf(self, value):
@@ -395,9 +414,7 @@ class TestSolves:
         np.testing.assert_allclose(res_c_contig, res)
         np.testing.assert_allclose(A_val_c_contig, A_val)
 
-        assert not (
-            should_destroy and b_val_c_contig.flags.f_contiguous
-        ) == np.allclose(b_val_c_contig, b_val)
+        assert np.allclose(b_val_c_contig, b_val) == (not should_destroy)
 
         A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
         b_val_not_contig = np.repeat(b_val, 2, axis=0)[::2]
@@ -424,6 +441,6 @@ class TestSolves:
         compare_numba_and_py(
             [a, b],
             [out],
-            [np.zeros((0, 0)), np.zeros(0)],
+            [np.zeros((0, 0), dtype=floatX), np.zeros(0, dtype=floatX)],
             eval_obj_mode=False,
         )

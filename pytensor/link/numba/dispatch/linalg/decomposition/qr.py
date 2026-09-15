@@ -34,7 +34,6 @@ def _qr_full_pivot(
         pivoting=pivoting,
         overwrite_a=overwrite_a,
         check_finite=False,
-        lwork=lwork,
     )
 
 
@@ -57,7 +56,6 @@ def _qr_full_no_pivot(
         pivoting=pivoting,
         overwrite_a=overwrite_a,
         check_finite=False,
-        lwork=lwork,
     )
 
 
@@ -80,7 +78,6 @@ def _qr_r_pivot(
         pivoting=pivoting,
         overwrite_a=overwrite_a,
         check_finite=False,
-        lwork=lwork,
     )
 
 
@@ -103,7 +100,6 @@ def _qr_r_no_pivot(
         pivoting=pivoting,
         overwrite_a=overwrite_a,
         check_finite=False,
-        lwork=lwork,
     )
 
 
@@ -126,7 +122,6 @@ def _qr_raw_no_pivot(
         pivoting=pivoting,
         overwrite_a=overwrite_a,
         check_finite=False,
-        lwork=lwork,
     )
 
     return H, tau, R
@@ -151,7 +146,6 @@ def _qr_raw_pivot(
         pivoting=pivoting,
         overwrite_a=overwrite_a,
         check_finite=False,
-        lwork=lwork,
     )
 
     return H, tau, R, P

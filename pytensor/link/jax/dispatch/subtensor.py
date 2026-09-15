@@ -1,3 +1,5 @@
+import jax.numpy as jnp
+
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -60,7 +62,11 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
             indices = indices[0]
 
         if isinstance(op, AdvancedIncSubtensor):
-            op._check_runtime_broadcast_of_vector_index(node, x, y, indices)
+            # jax_typify downgrades 0d arrays to Python scalars, which have no .shape,
+            # so re-arrayify y for a check that is written against array values.
+            op._check_runtime_broadcast_of_vector_index(
+                node, x, jnp.asarray(y), indices
+            )
 
         return jax_fn(x, indices, y)
 

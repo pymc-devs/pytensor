@@ -572,7 +572,8 @@ def reify_pattern(pattern, subs: Mapping[PatternVar | Asterisk, Any]):
                 inputs.extend(captured)
             else:
                 inputs.append(reify_pattern(p, subs))
-        return op.make_node(*inputs).default_output()
+        # Call the Op, so those that build state lazily (SymbolicOp) are constructed
+        return op(*inputs)
 
     if isinstance(pattern, OpPattern):
         op_type = pattern.op_type

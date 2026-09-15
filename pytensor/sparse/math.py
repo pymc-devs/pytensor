@@ -786,7 +786,14 @@ class SparseDenseMultiply(Op):
         (gz,) = gout
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
         assert psb._is_sparse_variable(gz)
-        return y * gz, psb.dense_from_sparse(x * gz)
+        if y.type.ndim == 0:
+            # y was broadcast against every entry of x, so its gradient is the
+            # sum of the contributions of all entries. Reduce on the sparse
+            # product directly instead of densifying it first.
+            gy = sp_sum(x * gz, sparse_grad=True)
+        else:
+            gy = psb.dense_from_sparse(x * gz)
+        return y * gz, gy
 
     def infer_shape(self, node, shapes):
         return [shapes[0]]

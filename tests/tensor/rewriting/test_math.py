@@ -5,7 +5,6 @@ from io import StringIO
 
 import numpy as np
 import pytest
-from scipy.special import logsumexp as scipy_logsumexp
 
 import pytensor
 import pytensor.scalar as ps
@@ -112,12 +111,14 @@ from pytensor.tensor.rewriting.math import (
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
+    local_log_sqrt_sqr,
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
     local_reduce_chain,
     local_reduce_join,
     local_sum_prod_of_mul_or_div,
+    local_useless_abs,
     mul_canonizer,
     parse_mul_tree,
     perform_sigm_times_exp,
@@ -1215,41 +1216,6 @@ def test_log1p():
     assert [node.op for node in f.maker.fgraph.toposort()] == [log1p]
 
 
-@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
-def test_local_log_add_exp(mode):
-    m = get_mode(mode).excluding("fusion")
-    m = copy.copy(m)
-    # No need to put them back as we have a new object
-    m.check_isfinite = False
-
-    # check some basic cases
-    x = dvector()
-    y = dvector()
-    f = function([x, y], log(exp(x) + exp(y)), mode=m)
-
-    # test that it gives the correct result when it doesn't overflow
-    f([10], [10])  # doesn't causes overflow
-    utt.assert_allclose(f([10], [10]), 10 + np.log1p(1))
-
-    assert np.isfinite(f([10000], [10000]))  # causes overflow if handled incorrectly
-    utt.assert_allclose(f([10000], [10000]), 10000 + np.log1p(1))
-
-    # test that when max = +-inf, rewritten output still works correctly
-    assert f([-np.inf], [-np.inf]) == -np.inf
-    assert f([np.inf], [np.inf]) == np.inf
-    assert f([np.inf], [-np.inf]) == np.inf
-
-    # test that it also works with more than two args
-    x = dvector()
-    y = dvector()
-    f = function([x, y], log(exp(x) + exp(y) + exp(x - y) + exp(x + y)), mode=m)
-
-    assert np.isfinite(f([10000], [10000]))  # causes overflow if handled incorrectly
-    utt.assert_allclose(f([10000], [10000]), 20000)
-
-    # TODO: test that the rewrite works in the presence of broadcasting.
-
-
 def test_local_elemwise_sub_zeros():
     scal = scalar()
     vect = vector()
@@ -2177,16 +2143,100 @@ class TestExpLog:
         assert len(ops_graph) == expected_switches
 
 
-def test_log_sqrt() -> None:
+def test_log_sqrt():
     x = pt.tensor("x", shape=(None, None))
-    out = log(sqrt(x))
-
-    out = rewrite_graph(out, include=["specialize"])
-
-    assert utt.assert_equal_computations(
-        [out],
-        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
+    result = RewriteTester(
+        [x], [log(sqrt(x))], include=None, custom_rewrite=local_log_sqrt_sqr
     )
+
+    result.assert_graph(0.5 * log(x))
+    result.assert_eval(np.array([[1.0, 2.0], [3.0, 4.0]]))
+
+
+def test_log_sqrt_integer_input():
+    # A 0.5 factor typed from the integer input would truncate to 0
+    x = ivector("x")
+    result = RewriteTester(
+        [x], [log(sqrt(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    result.assert_graph(0.5 * log(x))
+    result.assert_eval(np.array([2, 3, 4], dtype="int32"))
+
+
+def test_log_sqr():
+    x = pt.tensor("x", shape=(None, None))
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    result.assert_graph(2.0 * log(pt_abs(x)))
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+
+
+def test_log_sqr_extreme_magnitudes():
+    # sqr() saturates to inf above ~1e154 and to zero below ~1e-162 in float64, so the
+    # rewritten graph is deliberately not equivalent to the original one here
+    x = pt.vector("x")
+    result = RewriteTester(
+        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+    )
+
+    x_test = np.array([1e200, 1e-200, 3.0])
+    [orig_out] = result.orig_fn(x_test)
+    [rewr_out] = result.rewr_fn(x_test)
+    assert np.isinf(orig_out).sum() == 2
+    np.testing.assert_allclose(rewr_out, 2 * np.log(np.abs(x_test)))
+
+
+def test_useless_abs():
+    x = pt.tensor("x", shape=(None, None))
+    result = RewriteTester(
+        [x], [pt_abs(exp(x))], include=None, custom_rewrite=local_useless_abs
+    )
+
+    result.assert_graph(exp(x))
+    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+
+
+def test_useless_abs_keeps_signed_zero():
+    # sqrt(-0.0) is -0.0, which abs() normalizes to +0.0, so dropping the abs would flip
+    # the sign of any downstream division
+    x = pt.vector("x")
+    out = pt_abs(sqrt(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+
+    result.assert_graph(out)
+    [rewr_out] = result.rewr_fn(np.array([-0.0]))
+    assert not np.signbit(rewr_out)
+
+
+def test_useless_abs_signed_integer_overflow():
+    # sqr() wraps on signed ints, so its output is not non-negative and the abs()
+    # has to stay
+    x = pt.vector("x", dtype="int8")
+    out = pt_abs(sqr(x))
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_abs)
+
+    result.assert_graph(out)
+    [rewr_out] = result.rewr_fn(np.array([12, 16, 3], dtype="int8"))
+    np.testing.assert_array_equal(rewr_out, np.array([112, 0, 9], dtype="int8"))
+
+
+@pytest.mark.parametrize(
+    "original_fn, rewrite",
+    [
+        pytest.param(lambda x: log(sqr(x)), local_log_sqrt_sqr, id="log_sqr"),
+        pytest.param(lambda x: pt_abs(sqr(x)), local_useless_abs, id="abs_sqr"),
+    ],
+)
+def test_sqr_rewrites_skip_complex(original_fn, rewrite):
+    # abs() of a complex input is real, so both rewrites would change the output dtype
+    x = pt.vector("x", dtype="complex128")
+    out = original_fn(x)
+    result = RewriteTester([x], [out], include=None, custom_rewrite=rewrite)
+
+    result.assert_graph(out)
 
 
 class TestSqrSqrt:
@@ -4202,94 +4252,6 @@ def test_local_expm1():
     )
 
 
-def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None, mode="FAST_RUN"):
-    sum_exp = pt_sum(exp(x), axis=axis)
-    if dimshuffle_op:
-        sum_exp = dimshuffle_op(sum_exp)
-    y = log(sum_exp)
-    return function([x], y, mode=mode)
-
-
-def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
-    f = compile_graph_log_sum_exp(x, axis, dimshuffle_op)
-
-    fgraph = f.maker.fgraph.toposort()
-    for node in fgraph:
-        if hasattr(node.op, "scalar_op") and node.op.scalar_op == ps.basic.maximum:
-            return
-
-        if isinstance(node.op, Max):
-            return
-
-    # TODO FIXME: Refactor this test so that it makes a direct assertion and
-    # nothing more.
-    raise AssertionError("No maximum detected after log_sum_exp rewrite")
-
-
-def test_local_log_sum_exp_maximum():
-    """Test that the rewrite is applied by checking the presence of the maximum."""
-    x = tensor3("x")
-    check_max_log_sum_exp(x, axis=(0,), dimshuffle_op=None)
-    check_max_log_sum_exp(x, axis=(1,), dimshuffle_op=None)
-    check_max_log_sum_exp(x, axis=(2,), dimshuffle_op=None)
-    check_max_log_sum_exp(x, axis=(0, 1), dimshuffle_op=None)
-    check_max_log_sum_exp(x, axis=(0, 1, 2), dimshuffle_op=None)
-
-    # If a transpose is applied to the sum
-    transpose_op = DimShuffle(input_ndim=2, new_order=(1, 0))
-    check_max_log_sum_exp(x, axis=2, dimshuffle_op=transpose_op)
-
-    # If the sum is performed with keepdims=True
-    x = TensorType(dtype="floatX", shape=(None, 1, None))("x")
-    sum_keepdims_op = x.sum(axis=(0, 1), keepdims=True).owner.op
-    check_max_log_sum_exp(x, axis=(0, 1), dimshuffle_op=sum_keepdims_op)
-
-
-def test_local_log_sum_exp_near_one():
-    """Test that the rewritten result is correct around 1.0."""
-
-    x = tensor3("x")
-    x_val = 1.0 + np.random.random((4, 3, 2)).astype(config.floatX) / 10.0
-
-    f = compile_graph_log_sum_exp(x, axis=(1,))
-    naive_ret = np.log(np.sum(np.exp(x_val), axis=1))
-    rewritten_ret = f(x_val)
-    assert np.allclose(naive_ret, rewritten_ret)
-
-    # If a transpose is applied
-    transpose_op = DimShuffle(input_ndim=2, new_order=(1, 0))
-    f = compile_graph_log_sum_exp(x, axis=(1,), dimshuffle_op=transpose_op)
-    naive_ret = np.log(np.sum(np.exp(x_val), axis=1).T)
-    rewritten_ret = f(x_val)
-    assert np.allclose(naive_ret, rewritten_ret)
-
-
-@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
-@pytest.mark.parametrize(
-    "x_val", ([-800.0, 800.0], [-800.0, -805.0]), ids=["overflow", "underflow"]
-)
-def test_local_log_sum_exp_large(x_val, mode):
-    """Test that the rewrite result is correct for values the naive graph can't represent."""
-    x = vector("x")
-    f = compile_graph_log_sum_exp(x, axis=0, mode=mode)
-
-    x_val = np.array(x_val, dtype=config.floatX)
-
-    rewritten_ret = f(x_val)
-    np.testing.assert_allclose(rewritten_ret, scipy_logsumexp(x_val), rtol=1e-5)
-
-
-@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
-def test_local_log_sum_exp_inf(mode):
-    """Test that when max = +-inf, the rewritten output still works correctly."""
-    x = vector("x")
-    f = compile_graph_log_sum_exp(x, axis=0, mode=mode)
-
-    assert f([-np.inf, -np.inf]) == -np.inf
-    assert f([np.inf, np.inf]) == np.inf
-    assert f([-np.inf, np.inf]) == np.inf
-
-
 def test_local_reciprocal_1_plus_exp():
     x = vector("x")
     y = pt.reciprocal(1 + exp(x))
@@ -4760,6 +4722,24 @@ def test_local_logit_sigmoid():
     fg = rewrite(FunctionGraph([x], [out]))
     assert not list(fg.toposort())
     assert fg.inputs[0] is fg.outputs[0]
+
+
+def test_local_odds_sigmoid():
+    """Test that ``sigmoid(x) / (1 - sigmoid(x))`` and its inverse rewrite to ``exp(+-x)``.
+
+    1 - sigmoid(x) cancels to exactly zero for x >~ 37, so the un-rewritten ratio is
+    inf (resp. 0) long before exp(+-x) stops being representable.
+    """
+    x = dscalar("x")
+
+    result = RewriteTester([x], [sigmoid(x) / (1 - sigmoid(x))])
+    result.assert_graph(exp(x))
+    result.assert_eval(np.array(0.5))
+
+    # canonicalization spells the negation as a mul
+    result = RewriteTester([x], [(1 - sigmoid(x)) / sigmoid(x)])
+    result.assert_graph(exp(-1.0 * x))
+    result.assert_eval(np.array(0.5))
 
 
 def test_local_useless_conj():

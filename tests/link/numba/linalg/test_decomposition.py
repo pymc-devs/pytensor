@@ -480,7 +480,7 @@ class TestDecompositions:
         compare_numba_and_py(
             [x],
             outs,
-            [np.zeros((0, 0))],
+            [np.zeros((0, 0), dtype=floatX)],
         )
 
     @pytest.mark.parametrize("output", ["real", "complex"], ids=lambda x: f"output_{x}")

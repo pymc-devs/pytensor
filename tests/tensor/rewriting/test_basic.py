@@ -306,14 +306,9 @@ class TestLocalCanonicalizeAlloc:
                 f()
         else:
             assert has_alloc
-            # Error raised by Alloc Op
-            with pytest.raises(
-                ValueError,
-                match=(
-                    r"(could not broadcast input array from shape \(3,7\) into shape \(6,7\)"
-                    r"|cannot assign slice of shape \(3, 7\) from input of shape \(6, 7\))"
-                ),
-            ):
+            # Error raised by Alloc Op. Backends differ on how they report the offending
+            # shapes, so only the common prefix of the message is checked.
+            with pytest.raises(ValueError, match="could not broadcast input array"):
                 f()
 
         good_x_val = self.rng.standard_normal((6, 7))
