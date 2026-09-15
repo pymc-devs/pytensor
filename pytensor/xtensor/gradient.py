@@ -140,9 +140,9 @@ def _collapse_region(
     if not inputs:
         return lowered
     unit = OpFromGraph(dummies, [lowered], inline=True)
-    [new_exit] = unit(*outer_inputs, return_list=True)
+    [new_exit] = cast(list[Variable], unit(*outer_inputs, return_list=True))
     new_exit.name = exit_var.name
-    return cast(Variable, new_exit)
+    return new_exit
 
 
 @register_grad_graph_rewriter
