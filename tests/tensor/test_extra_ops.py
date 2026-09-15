@@ -151,12 +151,13 @@ class TestSearchsortedOp(utt.InferShapeTester):
         )
 
     def test_searchsortedOp_on_right_side(self):
+        # searchsorted on unsorted input is undefined behavior, and numpy's
+        # results there depend on its binary search implementation details
+        sa = self.a[self.idx_sorted]
         f = pytensor.function(
             [self.x, self.v], searchsorted(self.x, self.v, side="right")
         )
-        assert np.allclose(
-            np.searchsorted(self.a, self.b, side="right"), f(self.a, self.b)
-        )
+        assert np.allclose(np.searchsorted(sa, self.b, side="right"), f(sa, self.b))
 
     def test_infer_shape(self):
         # Test using default parameters' value
@@ -1354,6 +1355,22 @@ def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
         atol=1e-6 if config.floatX.endswith("64") else 1e-4,
         rtol=1e-6 if config.floatX.endswith("64") else 1e-4,
     )
+
+
+@pytest.mark.parametrize("dtype", [None, "int64"])
+def test_linspace_retstep(dtype):
+    samples, step = pt.linspace(0, 1, num=3, retstep=True, dtype=dtype)
+    expected_samples, expected_step = np.linspace(
+        0, 1, num=3, retstep=True, dtype=dtype
+    )
+
+    assert samples.dtype == (config.floatX if dtype is None else dtype)
+    # step is never cast to `dtype`
+    assert step.dtype == expected_step.dtype
+
+    actual_samples, actual_step = function([], [samples, step])()
+    np.testing.assert_allclose(actual_samples, expected_samples)
+    np.testing.assert_allclose(actual_step, expected_step)
 
 
 def test_concat_with_broadcast():

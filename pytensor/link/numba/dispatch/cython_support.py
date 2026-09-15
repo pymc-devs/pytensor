@@ -1,8 +1,7 @@
 import importlib
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
 
 import numba
 import numpy as np
@@ -33,9 +32,7 @@ _C_TO_NUMPY: dict[str, DTypeLike] = {
 @dataclass
 class Signature:
     res_dtype: DTypeLike
-    res_c_type: str
     arg_dtypes: list[DTypeLike]
-    arg_c_types: list[str]
     arg_names: list[str | None]
 
     @property
@@ -92,7 +89,6 @@ class Signature:
 
         arg_dtypes = []
         arg_names: list[str | None] = []
-        arg_c_types = []
         for raw_arg in raw_args.split(b","):
             re_match = re.fullmatch(decl_expr, raw_arg)
             if re_match is None:
@@ -104,7 +100,6 @@ class Signature:
             except KeyError:
                 raise ValueError(f"Unknown C type: {arg_c_type}")
 
-            arg_c_types.append(arg_c_type)
             arg_dtypes.append(arg_dtype)
             name = groups["name"]
             if not name:
@@ -112,36 +107,38 @@ class Signature:
             else:
                 arg_names.append(name.decode())
 
-        return Signature(res_dtype, res_c_type, arg_dtypes, arg_c_types, arg_names)
+        return Signature(res_dtype, arg_dtypes, arg_names)
 
 
-def _available_impls(func: Callable) -> list[tuple[Signature, Any, str]]:
+def _available_impls(func: Callable) -> list[tuple[Signature, str]]:
     """Find all available implementations for a fused cython function.
 
-    Each entry is ``(signature, capsule, capi_name)``, where ``capi_name`` is the key under
+    Each entry is ``(signature, capi_name)``, where ``capi_name`` is the key under
     which the implementation is exported in the module's ``__pyx_capi__`` table. That name is a
     stable, picklable handle for the C function, used to re-resolve its address at runtime.
     """
     impls = []
     mod = importlib.import_module(func.__module__)
 
-    signatures = getattr(func, "__signatures__", None)
-    if signatures is not None:
-        # Cython function with __signatures__ should be fused and thus
-        # indexable
-        func_map = cast(Mapping, func)
-        candidates = [func_map[key] for key in signatures]
+    if getattr(func, "__signatures__", None) is not None:
+        # Cython 3.3 exports typed names and retains the numbered names as aliases.
+        # Python specialization names need not match either C API name.
+        names = [
+            name for name in mod.__pyx_capi__ if name.startswith(f"{func.__name__}[")
+        ]
+        if not names:
+            pattern = re.compile(rf"__pyx_fuse_[0-9_]+{re.escape(func.__name__)}")
+            names = [name for name in mod.__pyx_capi__ if pattern.fullmatch(name)]
     else:
-        candidates = [func]
-    for candidate in candidates:
-        name = candidate.__name__
+        names = [func.__name__]
+    for name in names:
         capsule = mod.__pyx_capi__[name]
         llc = LowLevelCallable(capsule)
         try:
             signature = Signature.from_c_types(llc.signature.encode())
         except KeyError:
             continue
-        impls.append((signature, capsule, name))
+        impls.append((signature, name))
     return impls
 
 
@@ -178,7 +175,7 @@ class _CythonFunctionSpec:
 def wrap_cython_function(func, restype, arg_types):
     impls = _available_impls(func)
     compatible = []
-    for sig, _capsule, capi_name in impls:
+    for sig, capi_name in impls:
         if sig.provides(restype, arg_types):
             compatible.append((sig, capi_name))
 

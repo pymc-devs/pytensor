@@ -13,11 +13,12 @@ object the pointer points into (see the audit in `numba#10696
 <https://github.com/numba/numba/pull/10696>`_), so forming the result with a
 byte-wise ``getelementptr`` -- which preserves provenance -- is always valid.
 
-Imported for its side effect from ``pytensor.link.numba.dispatch``; drop this
-module once the numba-side fix is released.
+Imported for its side effect from ``pytensor.link.numba.dispatch``; applied only
+on numba < 0.67, where the fix landed. Drop this module once that is our minimum.
 """
 
 from llvmlite import ir
+from numba import version_info as numba_version_info
 from numba.core import cgutils
 
 
@@ -32,6 +33,8 @@ def _pointer_add_gep(builder, ptr, offset, return_type=None):
     return builder.bitcast(addr, return_type or ptr.type)
 
 
-# Every numba caller resolves ``pointer_add`` through the module at call time,
-# so reassigning the attribute reaches them all (including ``get_item_pointer2``).
-cgutils.pointer_add = _pointer_add_gep
+# Fixed upstream in numba 0.67.0 (numba/numba#10696)
+if numba_version_info.short < (0, 67):
+    # Every numba caller resolves ``pointer_add`` through the module at call time,
+    # so reassigning the attribute reaches them all (including ``get_item_pointer2``).
+    cgutils.pointer_add = _pointer_add_gep

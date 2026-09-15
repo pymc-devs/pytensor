@@ -100,6 +100,20 @@ class TestAddMul:
             np.array([[1.0, 2], [3, 0], [0, 6]]),
         )
 
+    @pytest.mark.parametrize("format", ["csc", "csr"])
+    def test_MulSD_scalar_grad(self, format):
+        # Multiplying a sparse matrix by a scalar broadcasts the scalar over
+        # every entry, so the gradient wrt the scalar must be a scalar too.
+        array = np.array([[1.0, 0], [3, 0], [0, 6]])
+        x = as_sparse_variable(as_sparse_format(array, format))
+        y = scalar("y", dtype="float64")
+
+        gy = pytensor.grad(psm.sp_sum(multiply(x, y)), y)
+        assert gy.type.ndim == 0
+
+        f = pytensor.function([y], gy)
+        utt.assert_allclose(array.sum(), f(2.0))
+
     def _testSS(self, op, array1=None, array2=None):
         if array1 is None:
             array1 = np.array([[1.0, 0], [3, 0], [0, 6]])

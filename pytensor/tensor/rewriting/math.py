@@ -71,7 +71,6 @@ from pytensor.tensor.math import (
     expm1,
     ge,
     int_div,
-    isinf,
     ive,
     kve,
     le,
@@ -79,8 +78,6 @@ from pytensor.tensor.math import (
     log1mexp,
     log1p,
     log1pexp,
-    makeKeepDims,
-    maximum,
     mul,
     neg,
     polygamma,
@@ -100,9 +97,7 @@ from pytensor.tensor.math import (
     variadic_mul,
 )
 from pytensor.tensor.math import abs as pt_abs
-from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
     broadcast_like_elemwise,
     local_second_sink,
@@ -115,7 +110,11 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
+from pytensor.tensor.subtensor import (
+    Subtensor,
+    _is_provably_non_negative,
+    _is_provably_positive,
+)
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -599,22 +598,43 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
 
+@register_canonicalize
 @register_specialize
-@node_rewriter([log])
-def local_log_sqrt(fgraph, node):
-    x = node.inputs[0]
+@node_rewriter([pt_abs])
+def local_useless_abs(fgraph, node):
+    # Case for abs(x) -> x, when x is already non-negative
+    [x] = node.inputs
 
-    if (
-        not x.owner
-        or not isinstance(x.owner.op, Elemwise)
-        or not isinstance(x.owner.op.scalar_op, ps.Sqrt)
-    ):
+    if not _is_provably_non_negative(x):
         return
 
-    # Case for log(sqrt(x)) -> 0.5 * log(x)
-    x = x.owner.inputs[0]
+    return [x]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_sqrt_sqr(fgraph, node):
+    [x] = node.inputs
+
+    match x.owner_op_and_inputs:
+        # Case for log(sqrt(x)) -> 0.5 * log(x)
+        case (Elemwise(ps.Sqrt()), inner):
+            factor, inner_out = 0.5, log(inner)
+
+        # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square,
+        # so a value that would over- or underflow when squared survives the log.
+        case (Elemwise(ps.Sqr()), inner):
+            # abs() of a complex input is real and would drop the imaginary part
+            if inner.dtype.startswith("complex"):
+                return
+            factor, inner_out = 2.0, log(pt_abs(inner))
+
+        case _:
+            return
+
     old_out = node.outputs[0]
-    new_out = mul(as_tensor_variable(0.5, dtype=x.dtype), log(x))
+    new_out = mul(as_tensor_variable(factor, dtype=old_out.dtype), inner_out)
     if new_out.dtype != old_out.dtype:
         new_out = cast(new_out, old_out.dtype)
 
@@ -2813,87 +2833,6 @@ def local_log1p(fgraph, node):
         return [broadcast_like_elemwise(new_out, node, fgraph=fgraph, stack_trace=True)]
 
 
-@register_stabilize("fast_compile")
-@register_specialize
-@node_rewriter([log])
-def local_log_add_exp(fgraph, node):
-    """
-    ``log(exp(x)+exp(y)+exp(z)) = max + log(x-max, y-max, z-max)``
-
-    TODO: in canonicalize, change log10 and log2 -> log
-    """
-
-    z = node.inputs[0]
-    if z.owner and z.owner.op == add:
-        zi = z.owner.inputs
-        pre_exp = [x.owner.inputs[0] for x in zi if x.owner and x.owner.op == exp]
-        # all arguments to add are exp(<something>)
-        if len(pre_exp) == len(zi):
-            # Do not offset when max_pre = -np.inf, to avoid nan in the output
-            # Switch statement is placed directly inside add to break the self-symmetry
-            # of the returned output (otherwise the rewrite would not stabilize)
-            max_pre = reduce(maximum, pre_exp)
-            ret = max_pre + log(
-                add(
-                    *[
-                        switch(isinf(max_pre), exp(max_pre), exp(p - max_pre))
-                        for p in pre_exp
-                    ]
-                )
-            )
-            return [ret]
-
-
-@register_stabilize("fast_compile")
-@register_specialize
-@node_rewriter([log])
-def local_log_sum_exp(fgraph, node):
-    # log(sum_i(exp(x_i))) = x_max + log(sum_i(exp(x_i - x_max)))
-
-    sum_node = node.inputs[0].owner
-    # If the sum has keepdims=True, there might be a dimshuffle
-    if sum_node and isinstance(sum_node.op, DimShuffle):
-        dimshuffle_op = sum_node.op
-        sum_node = sum_node.inputs[0].owner
-    else:
-        dimshuffle_op = None
-
-    if not (sum_node and isinstance(sum_node.op, Sum)):
-        return
-
-    exp_node, axis = sum_node.inputs[0].owner, sum_node.op.axis
-    if not (
-        exp_node
-        and isinstance(exp_node.op, Elemwise)
-        and isinstance(exp_node.op.scalar_op, ps.Exp)
-    ):
-        return
-
-    pre_exp = exp_node.inputs[0]
-    max_pre_exp = pt_max(pre_exp, axis=axis)
-    max_pre_exp_keepdims = makeKeepDims(pre_exp, max_pre_exp, axis)
-
-    # Do not offset when max_pre = -np.inf, to avoid nan in the output
-    # Switch statement is placed directly inside sum to break the self-symmetry
-    # of the returned output (otherwise the rewrite would not stabilize)
-    ret = max_pre_exp + log(
-        pt_sum(
-            switch(
-                isinf(max_pre_exp_keepdims),
-                exp(max_pre_exp_keepdims),
-                exp(pre_exp - max_pre_exp_keepdims),
-            ),
-            axis=axis,
-        ),
-    )
-
-    # Restore the dimshuffle op, if any.
-    if dimshuffle_op:
-        ret = dimshuffle_op(ret)
-
-    return [ret]
-
-
 def add_calculate(num, denum, aslist=False, out_type=None):
     # TODO: make sure that this function and mul_calculate are similar
     if out_type is None:
@@ -4042,19 +3981,6 @@ logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
 )
 register_stabilize(logdiffexp_to_log1mexpdiff)
 
-# log(sigmoid(x) / (1 - sigmoid(x))) -> x
-# i.e logit(sigmoid(x)) -> x
-local_logit_sigmoid = PatternNodeRewriter(
-    (log, (true_div, (sigmoid, "x"), (sub, 1, (sigmoid, "x")))),
-    "x",
-    tracks=[sigmoid],
-    get_nodes=get_clients_at_depth2,
-    allow_multiple_clients=True,
-    name="local_logit_sigmoid",
-)
-register_canonicalize(local_logit_sigmoid)
-register_specialize(local_logit_sigmoid)
-
 # sigmoid(log(x / (1-x)) -> x
 # i.e., sigmoid(logit(x)) -> x
 local_sigmoid_logit = PatternNodeRewriter(
@@ -4065,6 +3991,37 @@ local_sigmoid_logit = PatternNodeRewriter(
 )
 register_canonicalize(local_sigmoid_logit)
 register_specialize(local_sigmoid_logit)
+
+# sigmoid(x) / (1 - sigmoid(x)) -> exp(x)
+# i.e. odds(sigmoid(x)) -> exp(x)
+# 1 - sigmoid(x) cancels to exactly zero for x >~ 37, making the ratio inf where the
+# true value stays representable up to x ~ 709.
+# Composed with log(exp(x)) -> x this also covers logit(sigmoid(x)) -> x, so no
+# separate rewrite is needed for the logged form.
+local_odds_sigmoid = PatternNodeRewriter(
+    (true_div, (sigmoid, "x"), (sub, 1, (sigmoid, "x"))),
+    (exp, "x"),
+    tracks=[sigmoid],
+    get_nodes=get_clients_at_depth1,
+    allow_multiple_clients=True,
+    name="local_odds_sigmoid",
+)
+register_canonicalize(local_odds_sigmoid)
+register_stabilize(local_odds_sigmoid)
+register_specialize(local_odds_sigmoid)
+
+# (1 - sigmoid(x)) / sigmoid(x) -> exp(-x)
+local_inv_odds_sigmoid = PatternNodeRewriter(
+    (true_div, (sub, 1, (sigmoid, "x")), (sigmoid, "x")),
+    (exp, (neg, "x")),
+    tracks=[sigmoid],
+    get_nodes=get_clients_at_depth1,
+    allow_multiple_clients=True,
+    name="local_inv_odds_sigmoid",
+)
+register_canonicalize(local_inv_odds_sigmoid)
+register_stabilize(local_inv_odds_sigmoid)
+register_specialize(local_inv_odds_sigmoid)
 
 
 @register_canonicalize

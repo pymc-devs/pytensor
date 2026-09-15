@@ -33,6 +33,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Free Threading :: 1 - Unstable",
 ]
 
 keywords = [
@@ -49,7 +50,7 @@ dependencies = [
     "setuptools>=59.0.0",
     "scipy>=1,<2",
     "numpy>=2.0",
-    "numba>=0.58,<=0.65.1",
+    "numba>=0.58,<=0.67.0",
     "filelock>=3.15",
 ]
 
@@ -77,7 +78,7 @@ tests = [
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot"]
 jax = ["jax", "jaxlib"]
-numba = ["numba>=0.58,<=0.65.1", "llvmlite"]
+numba = ["numba>=0.58,<=0.67.0", "llvmlite"]
 kanren = [
     "etuples",
     "logical-unification",
@@ -130,7 +131,11 @@ filterwarnings =[
 
 [tool.ruff]
 line-length = 88
-exclude = ["pytensor/_version.py"]
+# _patch_list_to_tuple.py is copied verbatim from numba; keep it diffable upstream
+exclude = [
+    "pytensor/_version.py",
+    "pytensor/link/numba/dispatch/_patch_list_to_tuple.py",
+]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -146,6 +151,7 @@ unfixable = [
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
+known-first-party = ["pytensor", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # TODO: Get rid of these:
@@ -185,11 +191,18 @@ files = ["pytensor", "tests"]
 build = "*"
 # Uncomment to skip builds that compile but fail when trying to test (maybe due to incompatibility with runner)
 # archs = ["auto64"]
-# Disable any-platform (pp*), 32-bit builds, and free-threaded builds (cp*t-*)
+# Disable any-platform (pp*) and 32-bit builds
 # Additional options to consider: "*musllinux*"
-skip = ["pp*", "*-win32", "*-manylinux_i686", "cp*t-*"]
+skip = ["pp*", "*-win32", "*-manylinux_i686"]
+# Free-threaded (cp*t-*) wheels are built by default. The compiled extensions
+# are not marked free-threading-safe, so importing them re-enables the GIL
+# (with a warning). That's fine: they're no longer loaded by default.
 build-frontend = "build"
-test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
+# Import the compiled extensions and evaluate a function to check the wheel loads and
+# runs everywhere, including free-threaded builds. cxx="" disables the C backend (the
+# minimal wheel-test env has no libpython to link a runtime-compiled thunk against) and
+# FAST_COMPILE avoids numba, which crashes on free-threaded Windows.
+test-command = '''python -c "import pytensor; pytensor.config.cxx = ''; import pytensor.tensor as pt; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version()); x = pt.vector(); f = pytensor.function([x], (x * 2).sum(), mode='FAST_COMPILE'); assert float(f([1.0, 2.0, 3.0])) == 12.0"'''
 test-skip = ["*musllinux*", "*i686*"]
 
 # Testing seems to be running into issues locating libs where expected

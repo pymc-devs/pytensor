@@ -38,7 +38,13 @@ from pytensor.tensor import (
     tensor3,
     vector,
 )
-from pytensor.tensor.basic import MakeVector, concatenate, expand_dims, make_vector
+from pytensor.tensor.basic import (
+    ExtractDiag,
+    MakeVector,
+    concatenate,
+    expand_dims,
+    make_vector,
+)
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
@@ -51,6 +57,8 @@ from pytensor.tensor.rewriting.subtensor import (
 )
 from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
+    extract_diag_lift_pass,
+    local_advanced_subtensor_of_dot,
     local_subtensor_make_vector,
     local_subtensor_of_batch_dims,
     local_subtensor_of_expand_dims,
@@ -1504,3 +1512,284 @@ class TestExtractDiagLiftPass:
 
         for got, ref in zip(f_on(), f_off(), strict=True):
             np.testing.assert_allclose(got, ref, equal_nan=True)
+
+
+class TestAdvancedSubtensorOfDot:
+    """``dot(A, B)[i, j]``: a separable index leaves a smaller ``Dot``, a coupled
+    one has to become ``Mul`` + ``Sum``.  Both are gated on the index provably not
+    selecting more elements than the product holds.
+    """
+
+    rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    def test_coupled_constant_indices(self):
+        """Statically shorter constant indices are provably not larger."""
+        rng = np.random.default_rng(0)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+        j = pt.constant(np.array([2, 2, 4, 0]))
+
+        result = RewriteTester([A, B], [(A @ B)[i, j]], **self.rewrite_kw)
+        result.assert_graph((A[i] * B.mT[j]).sum(-1))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_coupled_assumed_unique_indices(self):
+        """With no static shape anywhere, a ``unique_indices`` assumption is what
+        proves the gather can't enlarge the operands."""
+        rng = np.random.default_rng(1)
+        A = pt.matrix("A")
+        B = pt.matrix("B")
+        i = pt.lvector("i")
+        j = pt.lvector("j")
+        i_unique = assume(i, unique_indices=True)
+        j_unique = assume(j, unique_indices=True)
+
+        result = RewriteTester(
+            [A, B, i, j],
+            [(A @ B)[i_unique, j_unique]],
+            **self.rewrite_kw,
+            custom_rewrite=DrainSpecifyAssumptions(),
+        )
+        result.assert_graph((A[i] * B.mT[j]).sum(-1))
+        result.assert_eval(
+            rng.standard_normal((6, 4)),
+            rng.standard_normal((4, 6)),
+            np.array([0, 3, 5, 1]),
+            np.array([2, 2, 4, 0]),
+        )
+
+    def test_coupled_unbounded_indices_bail(self):
+        """A plain index vector could be longer than the product has elements, so
+        folding it in may do strictly more work than materializing the product."""
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.lvector("i")
+        j = pt.lvector("j")
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B, i, j],
+            [M[i, j]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[i, j])
+
+    def test_repeated_index(self):
+        """The same index on both axes gathers a permuted diagonal."""
+        rng = np.random.default_rng(2)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+
+        result = RewriteTester([A, B], [(A @ B)[i, i]], **self.rewrite_kw)
+        result.assert_graph((A[i] * B.mT[i]).sum(-1))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_row_index_keeps_dot(self):
+        """One index leaves the operands independent, so a cheaper ``Dot`` survives."""
+        rng = np.random.default_rng(3)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 1, 3]))
+
+        result = RewriteTester([A, B], [(A @ B)[i]], **self.rewrite_kw)
+        result.assert_graph(pt.dot(A[i], B))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_column_index_keeps_dot(self):
+        rng = np.random.default_rng(4)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        j = pt.constant(np.array([2, 4, 0]))
+
+        result = RewriteTester([A, B], [(A @ B)[:, j]], **self.rewrite_kw)
+        result.assert_graph(pt.dot(A, B[:, j]))
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_batched_coupled_indices(self):
+        rng = np.random.default_rng(5)
+        A = pt.tensor("A", shape=(3, 6, 4))
+        B = pt.tensor("B", shape=(3, 4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+        j = pt.constant(np.array([2, 2, 4, 0]))
+
+        result = RewriteTester([A, B], [(A @ B)[:, i, j]], **self.rewrite_kw)
+        result.assert_eval(
+            rng.standard_normal((3, 6, 4)), rng.standard_normal((3, 4, 6))
+        )
+        assert not any(
+            isinstance(node.op, Dot | Blockwise) for node in result.rewr_fg.apply_nodes
+        )
+
+    def test_provably_larger_index_bails(self):
+        """Gathering more elements than the product holds is more work than
+        materializing it once, so the size gate has to reject it."""
+        rng = np.random.default_rng(6)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        idx = pt.constant(rng.integers(0, 6, 500))
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B],
+            [M[idx, idx]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[idx, idx])
+
+    def test_multi_client_bails(self):
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        i = pt.constant(np.array([0, 3, 5, 1]))
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B],
+            [M[i, i] + M.sum()],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[i, i] + M.sum())
+
+    def test_boolean_mask_bails(self):
+        """A boolean mask has a data-dependent size the gate cannot weigh."""
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        mask = pt.vector("mask", shape=(6,), dtype=bool)
+        M = pt.dot(A, B)
+
+        result = RewriteTester(
+            [A, B, mask],
+            [M[mask, mask]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        result.assert_graph(M[mask, mask])
+
+
+class TestDiagOfDot:
+    """``diag(A @ B)`` is lowered to a paired-arange gather by
+    ``local_extract_diag_lift`` and folded into the operands by
+    ``local_advanced_subtensor_of_dot``, so it needs the specialize pass.
+    """
+
+    rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    @pytest.mark.parametrize("batch", [(), (3,)], ids=["2d", "batched"])
+    @pytest.mark.parametrize("offset", [0, 1, -1, 2, -2], ids=str)
+    def test_diag_of_dot(self, batch, offset):
+        rng = np.random.default_rng(0)
+        n, contracted = 6, 4
+        A = pt.tensor("A", shape=(*batch, n, contracted))
+        B = pt.tensor("B", shape=(*batch, contracted, n))
+
+        out = pt.diagonal(A @ B, offset=offset, axis1=-2, axis2=-1)
+        result = RewriteTester([A, B], [out], **self.rewrite_kw)
+
+        # The main diagonal has a stable closed form; shifted diagonals only differ
+        # by slicing, whose exact canonical shape is verified against the oracle below.
+        if offset == 0:
+            result.assert_graph((A * B.mT).sum(-1))
+
+        result.assert_eval(
+            rng.standard_normal((*batch, n, contracted)),
+            rng.standard_normal((*batch, contracted, n)),
+        )
+
+    @pytest.mark.parametrize("offset", [9, -9], ids=str)
+    def test_out_of_range_offset(self, offset):
+        """An offset past the matrix gives an empty diagonal, so only values are checked."""
+        rng = np.random.default_rng(1)
+        A = pt.matrix("A", shape=(6, 6))
+        B = pt.matrix("B", shape=(6, 6))
+        result = RewriteTester(
+            [A, B], [pt.diagonal(A @ B, offset=offset)], **self.rewrite_kw
+        )
+        result.assert_eval(rng.standard_normal((6, 6)), rng.standard_normal((6, 6)))
+
+    def test_rectangular_product(self):
+        """A non-square product exercises the trim to the shorter side."""
+        rng = np.random.default_rng(2)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 3))
+        result = RewriteTester([A, B], [pt.diag(A @ B)], **self.rewrite_kw)
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 3)))
+
+    @pytest.mark.parametrize("offset", [0, 2, -2], ids=str)
+    def test_dynamic_shapes(self, offset):
+        """With no static shapes the diagonal length stays symbolic, so the size gate
+        rests on the paired ``arange``. An offset diagonal indexes with ``arange(d) +
+        k``, whose entry count is the ``arange``'s even though the shift can alias
+        entries onto each other -- the gate has to read it as a size, not a uniqueness.
+        """
+        rng = np.random.default_rng(3)
+        A = pt.matrix("A")
+        B = pt.matrix("B")
+        result = RewriteTester(
+            [A, B], [pt.diagonal(A @ B, offset=offset)], **self.rewrite_kw
+        )
+        assert not any(
+            isinstance(node.op, Dot | ExtractDiag)
+            for node in result.rewr_fg.apply_nodes
+        )
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_trace_of_dot(self):
+        """``trace`` is ``diagonal(...).sum()``, so it folds through the same path."""
+        rng = np.random.default_rng(4)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        result = RewriteTester([A, B], [pt.trace(A @ B)], **self.rewrite_kw)
+        assert not any(isinstance(node.op, Dot) for node in result.rewr_fg.apply_nodes)
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_diag_of_einsum(self):
+        """``einsum`` only inlines to a ``Dot`` during specialize, so the fold has
+        to be reachable there and not only in canonicalize."""
+        rng = np.random.default_rng(5)
+        A = pt.matrix("A", shape=(6, 4))
+        B = pt.matrix("B", shape=(4, 6))
+        out = pt.diagonal(pt.einsum("ik,kj->ij", A, B))
+        result = RewriteTester([A, B], [out], **self.rewrite_kw)
+        assert not any(isinstance(node.op, Dot) for node in result.rewr_fg.apply_nodes)
+        result.assert_eval(rng.standard_normal((6, 4)), rng.standard_normal((4, 6)))
+
+    def test_single_client_guard(self):
+        """The product also feeds ``M.sum()`` so it is materialized regardless; the
+        rewrite must not fire and add a redundant elementwise path."""
+        A = pt.matrix("A", shape=(5, 5))
+        B = pt.matrix("B", shape=(5, 5))
+        M = pt.dot(A, B)
+        result = RewriteTester(
+            [A, B],
+            [pt.diag(M) + M.sum()],
+            include=None,
+            custom_rewrite=extract_diag_lift_pass,
+        )
+        result.assert_graph(pt.diag(M) + M.sum())
+
+    def test_wrong_axis_guard(self):
+        """A diagonal over the batch/row axes, not the contracted axes, has no
+        closed form in the operands and must be left alone."""
+        A = pt.tensor("A", shape=(4, 5, 5))
+        B = pt.tensor("B", shape=(4, 5, 5))
+        out = pt.diagonal(A @ B, axis1=0, axis2=1)
+        result = RewriteTester([A, B], [out], **self.rewrite_kw)
+        assert any(
+            isinstance(node.op, ExtractDiag) for node in result.rewr_fg.apply_nodes
+        )
+
+    def test_dtype_preserved(self):
+        """``sum`` upcasts an int32 accumulator to int64, so the rewrite must cast back."""
+        rng = np.random.default_rng(6)
+        A = pt.matrix("A", shape=(6, 4), dtype="int32")
+        B = pt.matrix("B", shape=(4, 6), dtype="int32")
+        result = RewriteTester([A, B], [pt.diag(A @ B)], **self.rewrite_kw)
+        result.assert_graph((A * B.mT).sum(-1).astype("int32"))
+        result.assert_eval(
+            rng.integers(0, 5, (6, 4)).astype("int32"),
+            rng.integers(0, 5, (4, 6)).astype("int32"),
+        )

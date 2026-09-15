@@ -391,7 +391,9 @@ def test_UnravelIndex(arr, shape, requires_obj_mode):
         pytest.param(
             (
                 pt.vector(),
-                np.array([0.29769574, 0.71649186, 0.20475563]).astype(config.floatX),
+                # Must be sorted: searchsorted on unsorted input is undefined
+                # behavior and numba/numpy implementations disagree there
+                np.array([0.20475563, 0.29769574, 0.71649186]).astype(config.floatX),
             ),
             (
                 pt.matrix(),

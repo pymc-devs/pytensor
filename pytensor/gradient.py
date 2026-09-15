@@ -1335,8 +1335,8 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     raise ValueError(
                         f"{node.op} returned the wrong number of gradient terms."
                     )
-            # We can not enforce this, as AdvancedSubtensor1 has an option to
-            # return the sparse grad for optimization reason.
+            # We can not enforce this, as sparse Ops have an option to return a
+            # structured grad for optimization reason.
 
             #            for ig, i in zip(input_grads, inputs):
             #                if (not isinstance(ig.type, (DisconnectedType, NullType)) and
