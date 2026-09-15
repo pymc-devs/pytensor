@@ -1,5 +1,3 @@
-# ruff: noqa: T201
-
 """Benchmark equivalent PyTensor MLX and MLIR Metal float32 graphs on Apple Silicon.
 
 The timings intentionally include the host NumPy input to device and device to host

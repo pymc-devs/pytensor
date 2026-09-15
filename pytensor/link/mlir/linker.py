@@ -32,9 +32,13 @@ class MLIRLinker(JITLinker):
     def __init__(self, target_backend="llvm-cpu", *args, **kwargs):
         super().__init__(*args, **kwargs)
         try:
-            self.runtime_driver, self.compile_args = self._target_options[target_backend]
+            self.runtime_driver, self.compile_args = self._target_options[
+                target_backend
+            ]
         except KeyError:
-            raise ValueError(f"Unsupported MLIR target backend: {target_backend}") from None
+            raise ValueError(
+                f"Unsupported MLIR target backend: {target_backend}"
+            ) from None
         self.target_backend = target_backend
 
     def accept(self, fgraph, no_recycling=None, profile=None):
@@ -74,9 +78,9 @@ class MLIRLinker(JITLinker):
             target_backends=[self.target_backend],
             extra_args=self.compile_args,
         )
-        entrypoint = iree.runtime.load_vm_flatbuffer(
-            vmfb, driver=self.runtime_driver
-        )[module.entrypoint]
+        entrypoint = iree.runtime.load_vm_flatbuffer(vmfb, driver=self.runtime_driver)[
+            module.entrypoint
+        ]
 
         def run(*inputs):
             runtime_inputs = tuple(mlir_typify(input) for input in inputs)

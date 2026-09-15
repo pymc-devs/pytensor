@@ -1,10 +1,9 @@
-import numpy as np
-
 import iree.compiler.tools
 import iree.runtime
+import numpy as np
 
 
-MLIR_SOURCE = r'''
+MLIR_SOURCE = r"""
 module {
   func.func @add(%lhs: tensor<?xf64>, %rhs: tensor<?xf64>) -> tensor<?xf64> {
     %c0 = arith.constant 0 : index
@@ -25,7 +24,7 @@ module {
     return %result : tensor<?xf64>
   }
 }
-'''
+"""
 
 
 if __name__ == "__main__":

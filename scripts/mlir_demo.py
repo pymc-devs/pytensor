@@ -79,7 +79,6 @@ if __name__ == "__main__":
     else:
         raise AssertionError("MLIR_METAL must reject float64 graphs")
 
-
     metal_vector32 = compare(
         x32 + y32 * np.float32(2),
         [x32, y32],
@@ -139,7 +138,6 @@ if __name__ == "__main__":
             metal_dot32,
         )
     )
-
 
     print("vector_float64", vector)
     print("multiply_float64", multiply)
