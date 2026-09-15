@@ -22,6 +22,7 @@ from pytensor.scalar.basic import (
     ScalarMaximum,
     ScalarMinimum,
     ScalarVariable,
+    UnaryScalarOp,
 )
 from pytensor.tensor import (
     TensorLike,
@@ -253,12 +254,15 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
     - ``minimum(a, b)`` when both ``a`` and ``b`` are positive.
     - ``maximum(a, b)`` when at least one of ``a``, ``b`` is positive.
 
-    Three further cases prove non-negativity but not strict positivity, so they
+    Four further cases prove non-negativity but not strict positivity, so they
     are recognized only when ``strict=False``:
 
     - Unsigned-integer dtype (a ``uint`` may be 0).
     - ``Shape`` / ``Shape_i`` outputs (a dimension may be 0).
     - ``Cast`` of a non-negative input (a float :math:`0 < x < 1` truncates to 0).
+    - A unary scalar op declaring ``non_negative`` (``abs``, ``sqr``, ``exp``, ...),
+      restricted to float and unsigned outputs: signed integers wrap on overflow
+      (``sqr(int8(12)) == -112``) and complex values are unordered.
 
     Parameters
     ----------
@@ -293,6 +297,13 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
         scalar_op = op.scalar_op
         if not strict and isinstance(scalar_op, Cast):
             return _is_provably_positive(var.owner.inputs[0], strict)
+        if (
+            not strict
+            and isinstance(scalar_op, UnaryScalarOp)
+            and scalar_op.non_negative
+            and var.type.dtype.startswith(("float", "uint"))
+        ):
+            return True
         if isinstance(scalar_op, ScalarMinimum):
             return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
         if isinstance(scalar_op, ScalarMaximum):
@@ -2768,20 +2779,8 @@ def inc_subtensor(
         return the_op(real_x, y, *index_variables)
     elif isinstance(x.owner.op, DimShuffle):
         inner_x = x.owner.inputs[0]
-        # In the dimshuffle case, there are in fact two dimshuffles:
-        # one to make the indexed dimension the last one,
-        # and one to put it back where it was. So, in the case where we have
-        # inc_subtensor(x[:,i], y), the graph is actually
-        # inc_subtensor((x.T)[i].T, y).
-        # We could get all the way to x, and then get rid of the dimshuffles
-        # completely, but the problem is that advanced_inc_subtensor1 can only
-        # work on the first (outer-most, left-most) dimension of x,
-        # just like advanced_subtensor1.
-        # So we call advanced_inc_subtensor1(x.T, i, y.T) (as we also need to
-        # transpose y if it is not a scalar or a vector), but then we need to
-        # return something that has the same shape as x, not as x.T (inner_x).
-        # So re-apply the outer dimshuffle on the new inc_subtensor,
-        # and return advanced_inc_subtensor1(x.T, i, y.T).T.
+        # Push the increment through to inner_x and re-apply the dimshuffle on the
+        # result, so what we return has the shape of x rather than of inner_x.
 
         # Get the dimshuffle pattern to apply to y.
         x_order = x.owner.op.new_order

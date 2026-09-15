@@ -126,6 +126,10 @@ from pytensor.tensor.interpolate import interp, interpolate1d
 from pytensor.tensor.math import *
 from pytensor.tensor.pad import pad
 
+# Kept in the top-level namespace for backwards compatibility; the rest of
+# `pytensor.tensor.special` is only reachable as `pt.special.*`
+from pytensor.tensor.special import logaddexp, logsumexp
+
 
 # isort: off
 # reshape needs to be imported before shape.reshape, otherwise the tensor.reshape imports fail

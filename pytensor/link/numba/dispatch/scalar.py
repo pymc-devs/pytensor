@@ -122,16 +122,10 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
         scalar_func_setup = ""
 
     if input_inner_dtypes is None and output_inner_dtype is None:
-        if not has_pyx_skip_dispatch:
-            scalar_op_src = f"""
+        scalar_op_src = f"""
 def {scalar_op_fn_name}({input_signature}):
 {scalar_func_setup}    return scalar_func_numba({input_signature})
-            """
-        else:
-            scalar_op_src = f"""
-def {scalar_op_fn_name}({input_signature}):
-{scalar_func_setup}    return scalar_func_numba({input_signature}, np.intc(1))
-            """
+        """
 
     else:
         global_env["direct_cast"] = numba_basic.direct_cast

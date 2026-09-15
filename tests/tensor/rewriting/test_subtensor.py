@@ -48,6 +48,7 @@ from pytensor.tensor.type import (
     fmatrix,
     iscalar,
     ivector,
+    lvector,
     matrix,
     scalar,
     tensor,
@@ -256,6 +257,71 @@ def test_local_add_of_sparse_write():
     )
 
 
+def test_local_add_of_sparse_write_broadcast():
+    """A broadcast ``x`` is alloc'd up to the base it replaces; a broadcast write,
+    in any of its spellings, is left alone.
+    """
+    sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
+
+    def rewrite(inputs, out):
+        return utt.RewriteTester(
+            inputs, [out], include=[], custom_rewrite=sparse_rewriter
+        )
+
+    # ``x`` is the broadcast side: it must be alloc'd before it can be written into.
+    y = vector("y", shape=(1,))
+    v = vector("v", shape=(3,))
+    idx3 = np.array([0, 2, 4])
+    zeros = pt.zeros((7,))
+    result = rewrite([y, v], y + zeros[idx3].inc(v))
+    result.assert_graph(pt.alloc(y, 7)[idx3].inc(v))
+    result.assert_eval(
+        np.array([10.0], dtype=config.floatX),
+        np.array([1.0, 2.0, 3.0], dtype=config.floatX),
+    )
+
+    # The write is the broadcast side, whether the add gives it a new dim or
+    # stretches a size-1 one it already has.
+    idx = np.array([0, 2])
+    m = matrix("m", shape=(3, 4))
+    w = vector("w", shape=(2,))
+    ws = matrix("ws", shape=(2, 1))
+    for inputs, write in (
+        ([m, w], pt.zeros((4,))[idx].set(w)),
+        ([m, ws], pt.zeros((3, 1))[idx].set(ws)),
+        ([m, w], pt.zeros((3, 1))[idx, 0].set(w)),
+    ):
+        out = m + write
+        rewrite(inputs, out).assert_graph(out)
+
+
+def test_local_add_of_sparse_write_dtype():
+    """Neither the write's cast of ``v`` to the base dtype nor the add's own output
+    dtype may be dropped when the write collapses into ``x``.
+    """
+    sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
+
+    def rewrite(inputs, out):
+        return utt.RewriteTester(
+            inputs, [out], include=[], custom_rewrite=sparse_rewriter
+        )
+
+    idx = np.array([0, 2, 4])
+    v = vector("v", dtype="float64", shape=(3,))
+
+    # A base narrower than the add truncates ``v`` before the add ever sees it.
+    x = vector("x", dtype="float64", shape=(7,))
+    result = rewrite([x, v], x + pt.zeros((7,), dtype="int64")[idx].set(v))
+    result.assert_graph(x[idx].inc(v.astype("int64")))
+    result.assert_eval(np.zeros(7), np.array([1.7, 2.3, 3.9]))
+
+    # An ``x`` narrower than the add is cast up, so the write can land in it.
+    xi = vector("xi", dtype="int32", shape=(7,))
+    result = rewrite([xi, v], xi + pt.zeros((7,), dtype="float64")[idx].set(v))
+    result.assert_graph(xi.astype("float64")[idx].inc(v))
+    result.assert_eval(np.arange(7, dtype="int32"), np.array([1.5, 2.5, 3.5]))
+
+
 class TestIndexProvablyUniqueArange:
     """An ``arange`` index is duplicate-free when its entries don't wrap around
     zero, i.e. they all share a sign. ``_index_provably_unique`` proves this for
@@ -297,6 +363,45 @@ class TestIndexProvablyUniqueArange:
         # Straddling zero -> may wrap -> not provably unique.
         assert unique(pt.arange(-2, 2)) is False
         assert unique(pt.arange(0, -5, -1)) is False  # 0 with negatives
+
+    def test_shifted_arange(self):
+        """A constant shift slides the whole range, so folding it into the bounds
+        decides uniqueness -- a shift can rescue a straddling range or ruin a
+        single-signed one."""
+        k = iscalar("k")
+
+        def unique(arange):
+            return _index_provably_unique(arange, None)
+
+        # Shifted clear of zero: unique even though the unshifted range is not.
+        assert unique(pt.arange(-5, 5) + 5) is True
+        assert unique(pt.arange(-5, 5) + 6) is True
+        assert unique(pt.arange(5) - 10) is True  # shifted to all-negative
+
+        # Still straddling after the shift.
+        assert unique(pt.arange(-5, 5) + 1) is False
+        assert unique(pt.arange(5) - 2) is False
+
+        # Symbolic stop: a non-negative start and positive step still suffice.
+        assert unique(pt.arange(k) + 2) is True
+        assert unique(2 + pt.arange(k)) is True
+        assert unique(pt.arange(k) - 2) is False  # start -2, may straddle
+
+        # Descending and negative ranges shift the same way: the entry count depends
+        # only on ``stop - start`` and the step, both of which a shift preserves.
+        assert unique(pt.arange(10, 0, -1) + 5) is True  # [15..6]
+        assert unique(pt.arange(10, 0, -1) - 5) is False  # [5..-4] straddles
+        assert unique(pt.arange(-1, -9, -2) - 1) is True  # [-2,-4,-6,-8]
+        assert unique(pt.arange(-1, -9, -2) + 1) is False  # [0,-2,-4,-6] straddles
+
+        # The shifted bound can outgrow the dtype the original bounds were stored in
+        # (``arange(5)`` carries int8 bounds).
+        assert unique(pt.arange(5) + 200) is True
+        assert unique(pt.arange(5) - 200) is True
+
+        # A symbolic shift leaves the range's position unknown.
+        assert unique(pt.arange(k) + lvector("i")) is False
+        assert unique(pt.arange(k) + pt.arange(k)) is False
 
         # Sign not statically known.
         assert unique(pt.arange(5, k, -1)) is False  # unknown stop sign
@@ -1368,6 +1473,21 @@ class TestReadOfWriteSameIndices:
         np.testing.assert_allclose(dy, res)
         topo = f.maker.fgraph.toposort()
         assert not any(isinstance(n.op, AdvancedIncSubtensor) for n in topo)
+
+    def test_inc_narrower_buffer(self):
+        """``x[slice] += v`` sums in the promoted dtype and rounds on store, so a
+        buffer narrower than ``v`` must keep that rounding as an explicit cast.
+        """
+        x = vector("x", dtype="float32")
+        v = vector("v", dtype="float64")
+        stop = iscalar("stop")
+
+        out = x[:stop].inc(v)[:stop]
+        result = utt.RewriteTester(
+            [x, v, stop], [out], include=("canonicalize", "specialize")
+        )
+        result.assert_graph((x[:stop] + v).astype("float32"))
+        result.assert_eval(np.arange(7, dtype="float32"), np.array([1.7, 2.3, 3.9]), 3)
 
     def test_inc_unique_constant_idx(self):
         x = matrix(dtype="float64")

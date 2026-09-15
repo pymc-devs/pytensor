@@ -28,6 +28,37 @@ rng = np.random.default_rng(42849)
         (1.1, (2, 3)),
         ((pt.scalar("a"), np.array(10.0, dtype=config.floatX)), (20,)),
         ((pt.vector("a"), np.ones(10, dtype=config.floatX)), (20, 10)),
+        # Cover each broadcasting pattern of the generated fill loop
+        (
+            (pt.tensor("a", shape=(1, None)), np.arange(10, dtype=config.floatX)[None]),
+            (20, 10),
+        ),
+        (
+            (
+                pt.tensor("a", shape=(None, 1)),
+                np.arange(20, dtype=config.floatX)[:, None],
+            ),
+            (20, 10),
+        ),
+        (
+            (
+                pt.tensor("a", shape=(None, 1, None)),
+                np.arange(20 * 10, dtype=config.floatX).reshape(20, 1, 10),
+            ),
+            (20, 5, 10),
+        ),
+        (
+            (pt.matrix("a"), np.arange(20 * 10, dtype=config.floatX).reshape(20, 10)),
+            (20, 10),
+        ),
+        # Non-contiguous value
+        (
+            (
+                pt.matrix("a"),
+                np.arange(40 * 10, dtype=config.floatX).reshape(40, 10)[::2],
+            ),
+            (20, 10),
+        ),
     ],
 )
 def test_Alloc(v, shape):
@@ -45,6 +76,18 @@ def test_Alloc(v, shape):
 
 def test_alloc_runtime_broadcast():
     check_alloc_runtime_broadcast(get_mode("NUMBA"))
+
+
+def test_alloc_shape_mismatch():
+    # A value that neither broadcasts nor matches the requested shape must be rejected,
+    # instead of running past the end of the value in the fill loop
+    mode = get_mode("NUMBA").excluding("shape_unsafe")
+    x_test = np.zeros((3, 7), dtype=config.floatX)
+    for static_shape in ((None, 7), (None, None)):
+        x = pt.tensor("x", shape=static_shape)
+        fn = function([x], pt.alloc(x, 6, 7), mode=mode)
+        with pytest.raises(ValueError, match="could not broadcast input array"):
+            fn(x_test)
 
 
 def test_AllocEmpty():
@@ -159,6 +202,38 @@ def test_ARange():
             ),
             1,
         ),
+        # More than two inputs, ragged along the join axis, with dimensions both
+        # ahead of and behind it
+        (
+            (
+                (pt.tensor3(), rng.normal(size=(2, 1, 3)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 2, 3)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 3, 3)).astype(config.floatX)),
+            ),
+            1,
+        ),
+        (
+            (
+                (pt.tensor3(), rng.normal(size=(2, 3, 1)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 3, 2)).astype(config.floatX)),
+                (pt.tensor3(), rng.normal(size=(2, 3, 3)).astype(config.floatX)),
+            ),
+            2,
+        ),
+        # A broadcastable dimension is indexed with a constant rather than looped over
+        (
+            (
+                (
+                    pt.tensor("x0", shape=(None, None, 1)),
+                    rng.normal(size=(2, 1, 1)).astype(config.floatX),
+                ),
+                (
+                    pt.tensor("x1", shape=(None, None, 1)),
+                    rng.normal(size=(2, 3, 1)).astype(config.floatX),
+                ),
+            ),
+            1,
+        ),
     ],
 )
 def test_Join(vals, axis):
@@ -170,6 +245,14 @@ def test_Join(vals, axis):
         g,
         vals_test,
     )
+
+
+def test_Join_mismatched_shape_raises():
+    xs = [pt.matrix("x0"), pt.matrix("x1")]
+    fn = function(xs, pt.join(0, *xs), mode=get_mode("NUMBA"))
+    rng = np.random.default_rng(0)
+    with pytest.raises(ValueError, match="dimensions except for the concatenation"):
+        fn(rng.normal(size=(2, 3)), rng.normal(size=(2, 4)))
 
 
 @pytest.mark.parametrize(

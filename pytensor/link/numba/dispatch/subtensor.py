@@ -326,17 +326,18 @@ def vector_integer_advanced_indexing(
                 np.broadcast_to(idx2, adv_idx_shape),
             )
 
-            # Create output buffer
-            adv_idx_size = idx0.size
+            # Create output buffer, shaped like the advanced group
+            adv_idx_shape = idx0.shape
             basic_idx_shape = basic_indexed_x.shape[2:]
-            out_buffer = np.empty((adv_idx_size, *basic_idx_shape), dtype=x.dtype)
+            out_buffer = np.empty((*adv_idx_shape, *basic_idx_shape), dtype=x.dtype)
 
-            # Index over tuples of raveled advanced indices and write to output buffer
-            for i, scalar_idxs in enumerate(zip(idx0.ravel(), idx2.ravel())):
-                out_buffer[i] = basic_indexed_x[scalar_idxs]
-
-            # Unravel out_buffer (if needed)
-            out_buffer = out_buffer.reshape((*adv_idx_shape, *basic_idx_shape))
+            # Walk the broadcast advanced shape, reading each index view by position
+            for a0 in range(adv_idx_shape[0]):
+                for a1 in range(adv_idx_shape[1]):
+                    s0 = idx0[(a0, a1)]
+                    s1 = idx2[(a0, a1)]
+                    for j0 in range(out_buffer.shape[2]):
+                        out_buffer[(a0, a1, j0)] = basic_indexed_x[(s0, s1, j0)]
 
             # Move advanced output indexing group to its final position (if needed) and return
             return out_buffer
@@ -380,12 +381,10 @@ def vector_integer_advanced_indexing(
             basic_idx_shape = basic_indexed_x.shape[2:]
             y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
 
-            # Ravel the advanced dims (if needed)
-            y_bcast = y_bcast
-
-            # Index over tuples of raveled advanced indices and update buffer
+            # Index over tuples of advanced indices and update buffer
             for i, scalar_idxs in enumerate(zip(idx0, idx2)):
-                basic_indexed_x[scalar_idxs] = y_bcast[i]
+                for j0 in range(y_bcast.shape[1]):
+                    basic_indexed_x[(*scalar_idxs, j0)] = y_bcast[(i, j0)]
 
             # Return the original x, with the entries updated
             return x
@@ -429,13 +428,10 @@ def vector_integer_advanced_indexing(
             basic_idx_shape = basic_indexed_x.shape[2:]
             y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
 
-            # Ravel the advanced dims (if needed)
-            # Note that numba reshape only supports C-arrays, so we ravel before reshape
-            y_bcast = y_bcast
-
-            # Index over tuples of raveled advanced indices and update buffer
+            # Index over tuples of advanced indices and update buffer
             for i, scalar_idxs in enumerate(zip(idx1, idx2)):
-                basic_indexed_x[scalar_idxs] += y_bcast[i]
+                for j0 in range(y_bcast.shape[1]):
+                    basic_indexed_x[(*scalar_idxs, j0)] += y_bcast[(i, j0)]
 
             # Return the original x, with the entries updated
             return x
@@ -493,6 +489,26 @@ def vector_integer_advanced_indexing(
 
     to_tuple = create_tuple_string  # alias to make code more readable below
 
+    # Number of trailing dimensions carried along by each scalar-index step.
+    # Basic indices are always slices here, so `basic_indexed_x` keeps x's rank and the
+    # advanced group consumes `len(adv_indices_pos)` of its dimensions.
+    n_basic_dims = x.type.ndim - len(adv_indices_pos)
+    trailing_idxs = [f"j{k}" for k in range(n_basic_dims)]
+    buffer_idx = to_tuple(["i", *trailing_idxs])
+    indexed_idx = to_tuple(["*scalar_idxs", *trailing_idxs])
+
+    def trailing_loop_nest(assignment: str, extents_from: str) -> str:
+        # An index step written on whole subarrays goes through Numba's generic array
+        # machinery, and the `+=` form materialises a temporary. Spell it out as a scalar
+        # loop nest instead. The trailing rank is known here, the extents only at run time.
+        # Returned with relative indentation -- the caller places it.
+        lines = [
+            f"{'    ' * k}for {j} in range({extents_from}.shape[{k + 1}]):"
+            for k, j in enumerate(trailing_idxs)
+        ]
+        lines.append(f"{'    ' * n_basic_dims}{assignment}")
+        return "\n".join(lines)
+
     # Compute number of dimensions in advanced indices (after broadcasting)
     if len(adv_indices_pos) == 1:
         adv_idx = reconstructed_indices[adv_indices_pos[0]]
@@ -500,6 +516,36 @@ def vector_integer_advanced_indexing(
     else:
         # Multiple advanced indices - use max ndim (broadcast result ndim)
         adv_idx_ndim = max(reconstructed_indices[i].ndim for i in adv_indices_pos)  # type: ignore[union-attr]
+
+    adv_loop_idxs = [f"a{k}" for k in range(adv_idx_ndim)]
+    adv_pos = to_tuple(adv_loop_idxs)
+    adv_scalar_names = [f"s{k}" for k in range(len(adv_indices))]
+    nd_buffer_idx = to_tuple([*adv_loop_idxs, *trailing_idxs])
+    nd_indexed_idx = to_tuple([*adv_scalar_names, *trailing_idxs])
+
+    def advanced_loop_nest(assignment: str, extents_from: str) -> str:
+        """Nest over the broadcast advanced-index shape, then the trailing dims.
+
+        Each index view is read into a scalar at the advanced-position level, so the
+        trailing loop has a loop-invariant base address and vectorizes. LLVM cannot hoist
+        such a read on its own: Numba emits no TBAA, so it must assume the store aliases
+        the index buffer.
+        """
+        lines = [
+            f"{'    ' * k}for {a} in range(adv_idx_shape[{k}]):"
+            for k, a in enumerate(adv_loop_idxs)
+        ]
+        pad = "    " * adv_idx_ndim
+        lines += [
+            f"{pad}{s} = {idx}[{adv_pos}]"
+            for s, idx in zip(adv_scalar_names, adv_indices)
+        ]
+        lines += [
+            f"{'    ' * (adv_idx_ndim + k)}for {j} in range({extents_from}.shape[{adv_idx_ndim + k}]):"
+            for k, j in enumerate(trailing_idxs)
+        ]
+        lines.append(f"{'    ' * (adv_idx_ndim + n_basic_dims)}{assignment}")
+        return "\n".join(lines)
 
     # Determine output position of advanced indexed dimensions
     # If advanced indices are consecutive, they go in the first advanced index position
@@ -558,21 +604,31 @@ def vector_integer_advanced_indexing(
                 ),
                 " " * 4,
             )
-        codegen += indent(
-            dedent(
-                f"""
+        if adv_idx_ndim == 1:
+            gather_body = f"""
                 # Create output buffer
                 adv_idx_size = {adv_indices[0]}.size
                 basic_idx_shape = basic_indexed_x.shape[{len(adv_indices)}:]
                 out_buffer = np.empty((adv_idx_size, *basic_idx_shape), dtype=x.dtype)
 
-                # Index over tuples of raveled advanced indices and write to output buffer
-                for i, scalar_idxs in enumerate(zip{to_tuple([f"{idx}.ravel()" for idx in adv_indices] if adv_idx_ndim != 1 else adv_indices)}):
-                    out_buffer[i] = basic_indexed_x[scalar_idxs]
+                # Index over tuples of advanced indices and write to output buffer
+                for i, scalar_idxs in enumerate(zip{to_tuple(adv_indices)}):
+{indent(trailing_loop_nest(f"out_buffer[{buffer_idx}] = basic_indexed_x[{indexed_idx}]", "out_buffer"), " " * 20)}
+"""
+        else:
+            gather_body = f"""
+                # Create output buffer, shaped like the advanced group
+                adv_idx_shape = {adv_indices[0]}.shape
+                basic_idx_shape = basic_indexed_x.shape[{len(adv_indices)}:]
+                out_buffer = np.empty((*adv_idx_shape, *basic_idx_shape), dtype=x.dtype)
 
-                # Unravel out_buffer (if needed)
-                out_buffer = {f"out_buffer.reshape((*{adv_indices[0]}.shape, *basic_idx_shape))" if adv_idx_ndim != 1 else "out_buffer"}
-
+                # Walk the broadcast advanced shape, reading each index view by position
+{indent(advanced_loop_nest(f"out_buffer[{nd_buffer_idx}] = basic_indexed_x[{nd_indexed_idx}]", "out_buffer"), " " * 16)}
+"""
+        codegen += indent(
+            dedent(
+                gather_body
+                + f"""
                 # Move advanced output indexing group to its final position (if needed) and return
                 return {f"out_buffer.transpose({final_axis_order})" if final_axis_transpose_needed else "out_buffer"}
                 """
@@ -640,6 +696,18 @@ def vector_integer_advanced_indexing(
                 ),
                 " " * 4,
             )
+        update = "=" if op.set_instead_of_inc else "+="
+        if adv_idx_ndim == 1:
+            scatter_body = f"""
+                # Index over tuples of advanced indices and update buffer
+                for i, scalar_idxs in enumerate(zip{to_tuple(adv_indices)}):
+{indent(trailing_loop_nest(f"basic_indexed_x[{indexed_idx}] {update} y_bcast[{buffer_idx}]", "y_bcast"), " " * 20)}
+"""
+        else:
+            scatter_body = f"""
+                # Walk the broadcast advanced shape, reading each index view by position
+{indent(advanced_loop_nest(f"basic_indexed_x[{nd_indexed_idx}] {update} y_bcast[{nd_buffer_idx}]", "y_bcast"), " " * 16)}
+"""
         codegen += indent(
             dedent(
                 f"""
@@ -650,15 +718,9 @@ def vector_integer_advanced_indexing(
                 adv_idx_shape = {adv_indices[0]}.shape
                 basic_idx_shape = basic_indexed_x.shape[{len(adv_indices)}:]
                 y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
-
-                # Ravel the advanced dims (if needed)
-                # Note that numba reshape only supports C-arrays, so we ravel before reshape
-                y_bcast = {"y_bcast.ravel().reshape((-1, *basic_idx_shape))" if adv_idx_ndim != 1 else "y_bcast"}
-
-                # Index over tuples of raveled advanced indices and update buffer
-                for i, scalar_idxs in enumerate(zip{to_tuple([f"{idx}.ravel()" for idx in adv_indices] if adv_idx_ndim != 1 else adv_indices)}):
-                    basic_indexed_x[scalar_idxs] {"=" if op.set_instead_of_inc else "+="} y_bcast[i]
-
+"""
+                + scatter_body
+                + """
                 # Return the original x, with the entries updated
                 return x
                 """

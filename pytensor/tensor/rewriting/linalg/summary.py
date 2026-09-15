@@ -10,7 +10,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.scalar.basic import Abs, Exp, Log, Sign, Sqr
+from pytensor.scalar.basic import Abs, Log, Sign, Sqr
 from pytensor.tensor.basic import ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
@@ -27,13 +27,14 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
+from pytensor.tensor.subtensor import _is_provably_non_negative
 
 
 @register_stabilize
 @register_specialize
 @node_rewriter([log])
 def local_log_prod_to_sum_log(fgraph, node):
-    """Rewrite log(prod(x)) as sum(log(x)), when x is known to be positive."""
+    """Rewrite log(prod(x)) as sum(log(x)), when x is known to be non-negative."""
     [p] = node.inputs
     match p.owner_op_and_inputs:
         case (Prod(axis=axis), x):
@@ -41,11 +42,7 @@ def local_log_prod_to_sum_log(fgraph, node):
             # returns the sign of the prod multiplication.
 
             # TODO: The product of diagonals of a Cholesky(A) are also strictly positive
-            match x.owner_op:
-                case Elemwise(Abs() | Sqr() | Exp()):
-                    return [log(x).sum(axis=axis)]
-
-            if getattr(x.tag, "positive", False):
+            if _is_provably_non_negative(x):
                 return [log(x).sum(axis=axis)]
 
         # Special case for log(abs(prod(x))) -> sum(log(abs(x))) that shows up in slogdet

@@ -78,6 +78,37 @@ def test_blockwise_core_shape_simplified(mode, x_shape, k_shape):
         assert equal_computations([core_shape], [expected], in_xs=[x, k], in_ys=[x, k])
 
 
+def test_chained_blockwise_core_shape():
+    """A Blockwise consuming another Blockwise's output must still be lowered.
+
+    Its core shape legitimately reads ``Shape_i`` of that input; only core
+    shapes that depend on the node's own outputs are impossible to introduce.
+
+    Regression test for https://github.com/pymc-devs/pytensor/issues/2360
+    """
+    x = pt.tensor("x", shape=(3, None))
+    k = pt.tensor("k", shape=(3, None))
+    out = convolve1d(convolve1d(x, k, mode="full"), k, mode="full")
+
+    fg = rewrite_for_numba([x, k], [out])
+    assert count_ops(fg, Blockwise) == 0
+    assert count_ops(fg, BlockwiseWithCoreShape) == 2
+
+
+def test_self_referential_core_shape_not_introduced():
+    """When the core shape can only be obtained by evaluating the node itself
+    (here the boolean mode varies across batch dims), the rewrite must bail.
+    """
+    x = pt.tensor("x", shape=(5, None))
+    k = pt.tensor("k", shape=(5, None))
+    m = pt.tensor("m", shape=(5,), dtype=bool)
+    out = Blockwise(Convolve1d())(x, k, m)
+
+    fg = rewrite_for_numba([x, k, m], [out])
+    assert count_ops(fg, Blockwise) == 1
+    assert count_ops(fg, BlockwiseWithCoreShape) == 0
+
+
 def test_introduce_core_shape_aliasing():
     """Graphs whose shape arithmetic gets inplaced, destroying variables that
     recursive core shape derivations used to read; they must simply lower.
