@@ -170,8 +170,8 @@ def test_arange_dynamic_shape():
     # Shape-derived bounds are concrete under mx.compile even when the static
     # shape is unknown, so a genuinely dynamic length must work (regression: this
     # used to raise NotImplementedError because of an over-aggressive constant
-    # check). Exercises every position (start/stop/step) being shape-derived, an
-    # offset, and an empty result.
+    # check). Exercises every position (start/stop/step) being shape-derived,
+    # negative and static steps, and empty results.
     x = pt.vector("x")
     y = pt.vector("y")
     outs = [
@@ -179,7 +179,10 @@ def test_arange_dynamic_shape():
         arange(x.shape[0] + 2),  # shape-derived expression
         arange(x.shape[0], y.shape[0]),  # dynamic start and stop
         arange(0, y.shape[0], x.shape[0]),  # dynamic step
+        arange(y.shape[0], 0, -x.shape[0]),  # negative shape-derived step
+        arange(0, y.shape[0], 2),  # static step, dynamic stop
         arange(y.shape[0], x.shape[0]),  # start > stop -> empty
+        arange(x.shape[0], y.shape[0], -1),  # step sign vs bounds -> empty
     ]
     compare_mlx_and_py(
         [x, y],

@@ -211,10 +211,6 @@ def _arange_static_bound(arg):
         return None
 
 
-def _arange_runtime_bound(value):
-    return value.item() if hasattr(value, "item") else value
-
-
 @mlx_funcify.register(ARange)
 def mlx_funcify_ARange(op, node, **kwargs):
     # mx.arange only accepts Python int/float. Bake constant bounds and resolve
@@ -228,7 +224,9 @@ def mlx_funcify_ARange(op, node, **kwargs):
 
     def arange(*args):
         resolved = [
-            static if static is not None else _arange_runtime_bound(runtime)
+            static
+            if static is not None
+            else (runtime.item() if hasattr(runtime, "item") else runtime)
             for static, runtime in zip(static_args, args, strict=True)
         ]
         return mx.arange(*resolved, dtype=dtype)
