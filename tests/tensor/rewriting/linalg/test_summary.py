@@ -7,6 +7,7 @@ from pytensor import tensor as pt
 from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.linalg.summary import Det, SLogDet, det
@@ -160,70 +161,69 @@ def test_det_of_diag_incorrect_for_rectangle_eye():
         pt.linalg.det(x_diag)
 
 
-def test_slogdet_specialization():
-    x, a = pt.dmatrix("x"), np.random.rand(20, 20)
-    det_x, det_a = pt.linalg.det(x), np.linalg.det(a)
-    log_abs_det_x, log_abs_det_a = pt.log(pt.abs(det_x)), np.log(np.abs(det_a))
-    log_det_x, log_det_a = pt.log(det_x), np.log(det_a)
-    sign_det_x, sign_det_a = pt.sign(det_x), np.sign(det_a)
+@pytest.mark.parametrize("batch_dim", [(), (4,)])
+def test_slogdet_specialization(batch_dim):
+    shape = (*batch_dim, 20, 20)
+    x = pt.tensor("x", shape=shape, dtype=config.floatX)
+    a = np.random.rand(*shape)
+    det_x = pt.linalg.det(x)
+    log_abs_det_x = pt.log(pt.abs(det_x))
+    log_det_x = pt.log(det_x)
+    sign_det_x = pt.sign(det_x)
     exp_det_x = pt.exp(det_x)
 
     # REWRITE TESTS
     # sign(det(x))
-    f = function([x], [sign_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    rw_sign_det_a = f(a)
-    assert_allclose(
-        sign_det_a,
-        rw_sign_det_a,
-        atol=1e-3 if config.floatX == "float32" else 1e-8,
-        rtol=1e-3 if config.floatX == "float32" else 1e-8,
-    )
+    expected_sign_det_x, expected_log_abs_det_x = Blockwise(SLogDet())(x)
+
+    result = RewriteTester([x], [sign_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(expected_sign_det_x)
+    result.assert_eval(a)
 
     # log(abs(det(x)))
-    f = function([x], [log_abs_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    rw_log_abs_det_a = f(a)
-    assert_allclose(
-        log_abs_det_a,
-        rw_log_abs_det_a,
-        atol=1e-3 if config.floatX == "float32" else 1e-8,
-        rtol=1e-3 if config.floatX == "float32" else 1e-8,
-    )
+    result = RewriteTester([x], [log_abs_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(expected_log_abs_det_x)
+    result.assert_eval(a)
 
     # log(det(x))
-    f = function([x], [log_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    rw_log_det_a = f(a)
-    assert_allclose(
-        log_det_a,
-        rw_log_det_a,
-        atol=1e-3 if config.floatX == "float32" else 1e-8,
-        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    expected_sign_value = np.array([-1], dtype=np.int8) if batch_dim else -1
+    expected_nan_value = (
+        np.array([np.nan], dtype=config.floatX) if batch_dim else np.nan
     )
 
-    # More than 1 valid function
-    f = function([x], [sign_det_x, log_abs_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
+    expected_log_det_x = pt.where(
+        pt.eq(expected_sign_det_x, expected_sign_value),
+        expected_nan_value,
+        expected_log_abs_det_x,
+    )
 
-    # Other functions (rewrite shouldnt be applied to these)
+    result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(expected_log_det_x)
+    result.assert_eval(a)
+
+    # More than 1 valid function
+    result = RewriteTester(
+        [x],
+        [sign_det_x, log_abs_det_x],
+        include=["stabilize", "specialize"],
+    )
+    result.assert_graph(expected_sign_det_x, expected_log_abs_det_x)
+    result.assert_eval(a)
+
+    # Other functions (rewrite shouldn't be applied to these)
     # Only invalid functions
-    f = function([x], [exp_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, SLogDet) for node in nodes)
+    result = RewriteTester([x], [exp_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(exp_det_x)
+    result.assert_eval(a)
 
     # Invalid + Valid function
-    f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, SLogDet) for node in nodes)
+    result = RewriteTester(
+        [x],
+        [exp_det_x, sign_det_x],
+        include=["stabilize", "specialize"],
+    )
+    result.assert_graph(exp_det_x, sign_det_x)
+    result.assert_eval(a)
 
 
 @pytest.mark.parametrize(

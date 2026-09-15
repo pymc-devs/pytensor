@@ -245,7 +245,7 @@ def slogdet_specialization(fgraph, node):
         return None
 
     [x] = node.inputs
-    sign_det_x, log_abs_det_x = SLogDet()(x)
+    sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
     log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
     slogdet_specialization_map = {
         "sign": sign_det_x,
