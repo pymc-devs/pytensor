@@ -70,6 +70,16 @@ def _vectorize_node_perform(
     core_input_storage = [storage_map[inp] for inp in core_node.inputs]
     core_output_storage = [storage_map[out] for out in core_node.outputs]
     core_storage = core_input_storage + core_output_storage
+    # Indexing the batch dimensions of an argument yields a numpy scalar when the core
+    # input is 0d. ScalarType storage must hold exactly that (the C thunk rejects 0d
+    # arrays), while TensorType storage must hold an ndarray, so only those are coerced.
+    direct_inputs = []
+    scalar_arrays = []
+    for i, inp in enumerate(core_node.inputs):
+        if isinstance(inp.type, TensorType) and inp.type.ndim == 0:
+            scalar_arrays.append((core_input_storage[i], i))
+        else:
+            direct_inputs.append((core_input_storage[i], i))
 
     def vectorized_perform(
         *args,
@@ -77,7 +87,8 @@ def _vectorize_node_perform(
         batch_ndim=batch_ndim,
         single_in=single_in,
         core_thunk=core_thunk,
-        core_input_storage=core_input_storage,
+        direct_inputs=direct_inputs,
+        scalar_arrays=scalar_arrays,
         core_output_storage=core_output_storage,
         core_storage=core_storage,
     ):
@@ -101,8 +112,10 @@ def _vectorize_node_perform(
         except StopIteration:
             raise NotImplementedError("vectorize with zero size not implemented")
         else:
-            for core_input, arg in zip(core_input_storage, args):
-                core_input[0] = np.asarray(arg[index0])
+            for core_input, i in direct_inputs:
+                core_input[0] = args[i][index0]
+            for core_input, i in scalar_arrays:
+                core_input[0] = np.asarray(args[i][index0])
             core_thunk()
             outputs = tuple(
                 empty(batch_shape + core_output[0].shape, dtype=core_output[0].dtype)
@@ -112,8 +125,10 @@ def _vectorize_node_perform(
                 output[index0] = core_output[0]
 
         for index in ndindex_iterator:
-            for core_input, arg in zip(core_input_storage, args):
-                core_input[0] = np.asarray(arg[index])
+            for core_input, i in direct_inputs:
+                core_input[0] = args[i][index]
+            for core_input, i in scalar_arrays:
+                core_input[0] = np.asarray(args[i][index])
             core_thunk()
             for output, core_output in zip(outputs, core_output_storage):
                 output[index] = core_output[0]

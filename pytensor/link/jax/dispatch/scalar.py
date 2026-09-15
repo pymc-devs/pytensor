@@ -263,12 +263,27 @@ def jax_funcify_Erfinv(op, **kwargs):
 
 
 @jax_funcify.register(BetaIncInv)
-@jax_funcify.register(Erfcx)
-@jax_funcify.register(Erfcinv)
 def jax_funcify_from_tfp(op, **kwargs):
     tfp_jax_op = try_import_tfp_jax_op(op)
 
     return tfp_jax_op
+
+
+@jax_funcify.register(Erfcx)
+def jax_funcify_Erfcx(op, **kwargs):
+    if hasattr(jax.scipy.special, "erfcx"):
+        return jax.scipy.special.erfcx
+    # jax < 0.11 has no native erfcx
+    return try_import_tfp_jax_op(op)
+
+
+@jax_funcify.register(Erfcinv)
+def jax_funcify_Erfcinv(op, **kwargs):
+    def erfcinv(x):
+        # erfc(z) = 2 ndtr(-z * sqrt(2)), so z = -ndtri(x / 2) / sqrt(2)
+        return -jax.scipy.special.ndtri(x / 2) / jnp.sqrt(2)
+
+    return erfcinv
 
 
 @jax_funcify.register(NdtriExp)

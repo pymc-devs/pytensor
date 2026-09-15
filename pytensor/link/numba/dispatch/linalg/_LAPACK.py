@@ -139,50 +139,6 @@ class _LAPACK:
         ensure_lapack()
 
     @classmethod
-    def numba_xtrtrs(cls, dtype) -> CPUDispatcher:
-        """
-        Solve a triangular system of equations of the form A @ X = B or A.T @ X = B.
-
-        Called by scipy.linalg.solve_triangular
-        """
-
-        kind = get_blas_kind(dtype)
-        float_ptr = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"scipy.lapack.{kind}trtrs"
-
-        @numba_basic.numba_njit
-        def get_trtrs_pointer():
-            with numba.objmode(ptr=types.intp):
-                ptr = get_lapack_ptr(dtype, "trtrs")
-            return ptr
-
-        trtrs_function_type = types.FunctionType(
-            types.void(
-                nb_i32p,  # UPLO
-                nb_i32p,  # TRANS
-                nb_i32p,  # DIAG
-                nb_i32p,  # N
-                nb_i32p,  # NRHS
-                float_ptr,  # A
-                nb_i32p,  # LDA
-                float_ptr,  # B
-                nb_i32p,  # LDB
-                nb_i32p,  # INFO
-            )
-        )
-
-        @numba_basic.numba_njit
-        def trtrs(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO):
-            fn = _call_cached_ptr(
-                get_ptr_func=get_trtrs_pointer,
-                func_type_ref=trtrs_function_type,
-                unique_func_name_lit=unique_func_name,
-            )
-            fn(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO)
-
-        return trtrs
-
-    @classmethod
     def numba_xpotrf(cls, dtype) -> CPUDispatcher:
         """
         Compute the Cholesky factorization of a real symmetric positive definite matrix.

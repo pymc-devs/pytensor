@@ -8,10 +8,12 @@ import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
 from pytensor import config, function
 from pytensor.compile import get_mode
+from pytensor.compile.mode import Mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
 from pytensor.scalar import Composite, and_, float64, or_, xor
 from pytensor.scalar import add as scalar_add
+from pytensor.scalar import mul as scalar_mul
 from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
@@ -608,6 +610,75 @@ def test_elemwise_multiple_inplace_outs():
     assert out2 is y_test
     np.testing.assert_allclose(out1, [2, 3, 4])
     np.testing.assert_allclose(out2, [5, 6, 7])
+
+
+@pytest.mark.parametrize(
+    "op, x_range, y_range",
+    [
+        # x*y < 1, so the product is the smaller operand and `minimum` picks it
+        (pt.minimum, (0.02, 0.06), (0.2, 0.9)),
+        # x*y > 1, so the product is the larger operand and `maximum` picks it
+        (pt.maximum, (1.5, 3.0), (2.0, 4.0)),
+    ],
+    ids=["minimum", "maximum"],
+)
+def test_minimum_maximum_grad_ignores_operand_rounding(op, x_range, y_range):
+    # The mask must be decided by the inputs: an `eq(outputs[0], x)` mask needs x
+    # recomputed bit-for-bit, which fastmath reassoc breaks. `z * x * y` and
+    # `x * y * z` are the same product, but the operand order makes LLVM group
+    # them differently, so the forward value stops matching the rebuilt operand.
+    # `L_op` is called the way scan's gradient calls it: forward value from the
+    # loop, operand rebuilt outside it.
+    x = pt.vector("x")
+    y = pt.vector("y")
+    z = pt.vector("z")
+    out = op(z * x * y, z)
+    gx, gy = op.L_op([x * y * z, z], [out], [pt.ones_like(out)])
+
+    n = 10_000
+    x_test = rng.uniform(*x_range, n)
+    y_test = rng.uniform(*y_range, n)
+    z_test = rng.uniform(1e7, 4e7, n)
+
+    # the product wins by 20-250x, so the gradient belongs entirely to it
+    fn = function([x, y, z], [gx, gy], mode=Mode(linker="numba", optimizer=None))
+    gx_val, gy_val = fn(x_test, y_test, z_test)
+    np.testing.assert_array_equal(gx_val, np.ones(n))
+    np.testing.assert_array_equal(gy_val, np.zeros(n))
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="fastmath reassoc groups a Composite's products by argument "
+    "position, so two Composites over one expression disagree "
+    "(pymc-devs/pytensor#2187)",
+)
+def test_composite_product_independent_of_argument_order():
+    # LLVM ranks values by argument position and left-associates commutative
+    # chains, so signature (z, x, y) evaluates x*y*z as (x*z)*y while (x, y, z)
+    # gives (x*y)*z. Fusion assigns those signatures per Composite, so any two
+    # Composites over a shared subexpression can silently disagree.
+    x_ = float64("x")
+    y_ = float64("y")
+    z_ = float64("z")
+    prod = scalar_mul(x_, y_, z_)
+    op_zxy = Elemwise(Composite([z_, x_, y_], [prod]))
+    op_xyz = Elemwise(Composite([x_, y_, z_], [prod]))
+
+    x = pt.vector("x")
+    y = pt.vector("y")
+    z = pt.vector("z")
+    fn = function(
+        [x, y, z],
+        [op_zxy(z, x, y), op_xyz(x, y, z)],
+        mode=Mode(linker="numba", optimizer=None),
+    )
+
+    n = 10_000
+    x_test = rng.uniform(0.02, 0.06, n)
+    y_test = rng.uniform(0.2, 0.9, n)
+    z_test = rng.uniform(1e7, 4e7, n)
+    np.testing.assert_array_equal(*fn(x_test, y_test, z_test))
 
 
 def test_scalar_loop():

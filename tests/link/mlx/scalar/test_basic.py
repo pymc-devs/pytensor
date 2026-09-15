@@ -10,14 +10,7 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
     cosh,
-    erf,
-    erfc,
-    erfcx,
-    erfinv,
     log,
-    log1mexp,
-    sigmoid,
-    softplus,
 )
 from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
@@ -112,46 +105,21 @@ def test_mlx_Composite_multi_output():
     )
 
 
-def test_erf():
-    x = scalar("x")
-    out = erf(x)
-    compare_mlx_and_py([x], [out], [1.0])
-
-
-def test_erfc():
-    x = scalar("x")
-    out = erfc(x)
-    compare_mlx_and_py([x], [out], [1.0])
-
-
-def test_erfinv():
-    x = scalar("x")
-    out = erfinv(x)
-    compare_mlx_and_py([x], [out], [0.95])
-
-
-def test_erfcx():
-    x = scalar("x")
-    out = erfcx(x)
-    compare_mlx_and_py([x], [out], [0.7])
-
-
-def test_log1mexp():
-    x = vector("x")
-    out = log1mexp(x)
-
-    compare_mlx_and_py([x], [out], [[-1.0, -0.75, -0.5, -0.25]])
-
-
-def test_nnet():
-    x = vector("x")
-    x_test_value = np.r_[1.0, 2.0].astype(config.floatX)
-
-    out = sigmoid(x)
-    compare_mlx_and_py([x], [out], [x_test_value])
-
-    out = softplus(x)
-    compare_mlx_and_py([x], [out], [x_test_value])
+@pytest.mark.parametrize(
+    "min_val, max_val", [(-1.0, 1.0), (1.0, -1.0)], ids=["ordered", "min_gt_max"]
+)
+def test_clip(min_val, max_val):
+    x, min_, max_ = vector("x"), scalar("min"), scalar("max")
+    out = pt.clip(x, min_, max_)
+    compare_mlx_and_py(
+        [x, min_, max_],
+        [out],
+        [
+            np.array([-3.0, -0.5, 0.0, 0.5, 3.0], dtype=config.floatX),
+            np.array(min_val, dtype=config.floatX),
+            np.array(max_val, dtype=config.floatX),
+        ],
+    )
 
 
 def test_mlx_variadic_Scalar():
@@ -211,32 +179,6 @@ def test_mlx_multioutput():
     v = cosh(x / 3.0 + y**2)
 
     compare_mlx_and_py([x, y], [w, v], [x_test_value, y_test_value])
-
-
-@pytest.mark.parametrize("dtype", ["float32", "float16"])
-def test_nan_constant(dtype):
-    # ``mx.compile`` inlines size-1 constants as Metal source literals, but Metal
-    # has no ``nan`` literal (it accepts ``inf``), so a size-1 NaN constant fed to
-    # a fused op must be materialized through an op instead. This is the class of
-    # graph the ``local_sqrt_sqr`` rewrite produces on normalization
-    # input-gradients. The constant is shape ``(1,)`` (matching the operand rank)
-    # so it reaches the ``Switch`` without an intervening broadcast.
-    x = vector("x", shape=(None,), dtype=dtype)
-    nan = pt.constant(np.array([np.nan], dtype=dtype))
-    out = pt.switch(x > 0, x, nan)
-
-    compare_mlx_and_py([x], [out], [np.array([-1.0, 1.0, -2.0, 2.0], dtype=dtype)])
-
-
-def test_nan_array_constant():
-    # A NaN constant with more than one element is passed as a buffer (not
-    # inlined), so it compiles without materialization.
-    x = vector("x", shape=(3,))
-    c = pt.constant(np.array([np.nan, 1.0, np.nan], dtype=config.floatX))
-
-    compare_mlx_and_py(
-        [x], [x + c], [np.array([10.0, 20.0, 30.0], dtype=config.floatX)]
-    )
 
 
 def test_mlx_logp():

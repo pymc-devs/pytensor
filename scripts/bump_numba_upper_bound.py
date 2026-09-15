@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 """Bump the numba upper bound in pyproject.toml when a new numba release is out.
 
-Queries PyPI for the latest stable numba release and compares it against the
-current ``<=`` cap pinned in pyproject.toml. The pin is rewritten to the
-canonical ``"numba>=X.Y,<=A.B.C"`` form whenever:
+Queries conda-forge for the latest stable numba release and compares it against
+the current ``<=`` cap pinned in pyproject.toml. CI installs numba from
+conda-forge, so gating on conda-forge (rather than PyPI, which it typically
+leads by days) means the PR only opens once the version is actually installable
+in CI. The pin is rewritten to the canonical ``"numba>=X.Y,<=A.B.C"`` form
+whenever:
 
 * the latest release is newer than the cap; or
 * the existing pin is in a non-canonical shape (``<`` instead of ``<=``, or
@@ -33,22 +36,20 @@ PIN_RE = re.compile(r'"numba(?P<spec>(?:[<>=!~][^"]*)?)"')
 LOWER_RE = re.compile(r">=\d+\.\d+(?:\.\d+)?")
 UPPER_RE = re.compile(r"<(=?)(\d+\.\d+(?:\.\d+)?)")
 DEFAULT_LOWER = ">=0.58"
-PYPI_URL = "https://pypi.org/pypi/numba/json"
+CONDA_FORGE_URL = "https://api.anaconda.org/package/conda-forge/numba"
 
 
 def fetch_latest_numba() -> Version:
-    with urllib.request.urlopen(PYPI_URL, timeout=30) as resp:
+    with urllib.request.urlopen(CONDA_FORGE_URL, timeout=30) as resp:
         data = json.load(resp)
     candidates: list[Version] = []
-    for raw, files in data["releases"].items():
-        if not files:
-            continue
+    for raw in data["versions"]:
         v = Version(raw)
         if v.is_prerelease or v.is_devrelease:
             continue
         candidates.append(v)
     if not candidates:
-        raise RuntimeError("no stable numba release found on PyPI")
+        raise RuntimeError("no stable numba release found on conda-forge")
     return max(candidates)
 
 

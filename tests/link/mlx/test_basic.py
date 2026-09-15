@@ -2,6 +2,7 @@
 Basic tests for the MLX backend.
 """
 
+import warnings
 from collections.abc import Callable, Iterable
 from functools import partial
 
@@ -18,9 +19,12 @@ from pytensor.graph.basic import Variable
 from pytensor.ifelse import ifelse
 from pytensor.link.mlx import MLXLinker
 from pytensor.raise_op import assert_op
+from pytensor.tensor.type import vector
 
 
 mx = pytest.importorskip("mlx.core")
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_typify
+
 
 optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
 mlx_mode = Mode(linker=MLXLinker(), optimizer=optimizer)
@@ -189,62 +193,40 @@ def test_scalar_from_tensor_pytensor_integration():
     assert isinstance(result, mx.array)
 
 
-def test_mlx_float64_auto_casting():
-    """Test MLX automatic casting of float64 to float32 with warnings."""
-    import warnings
-
-    # Test 1: Direct Cast operation with warning
-    x = pt.scalar("x", dtype="float32")
-    y = pt.cast(x, "float64")
-
-    # Capture warnings
-    with warnings.catch_warnings(record=True) as warning_list:
+def test_mlx_float64_downcast_on_gpu_warns():
+    # Only the dtype resolution is exercised, not a kernel: the suite pins the CPU
+    # device (see conftest) because Metal aborts on some runners
+    with mx.stream(mx.gpu), warnings.catch_warnings(record=True) as warning_list:
         warnings.simplefilter("always")
+        dtype = convert_dtype_to_mlx("float64")
 
-        f = pytensor.function([x], y, mode=mlx_mode, allow_input_downcast=True)
-        result = f(3.14)
-
-        # Check that the operation succeeded
-        assert result.dtype == mx.float32  # Should be auto-cast to float32
-        assert abs(float(result) - 3.14) < 1e-6
-
-        # Check that a warning was issued
-        warning_messages = [str(w.message) for w in warning_list]
-        dtype_warnings = [
-            msg for msg in warning_messages if "float64" in msg and "float32" in msg
-        ]
-        assert len(dtype_warnings) > 0, (
-            f"Expected dtype warning, got warnings: {warning_messages}"
-        )
+    assert dtype == mx.float32
+    assert any(
+        "float64" in str(w.message) and "float32" in str(w.message)
+        for w in warning_list
+    )
 
 
-def test_mlx_float64_complex_operations():
-    """Test float64 casting in more complex operations."""
-    import warnings
+def test_mlx_float64_preserved_on_cpu():
+    x = pt.vector("x", dtype="float64")
+    # log and arithmetic are genuinely float64 in MLX; exp, sin, and cos are computed
+    # to float32 accuracy whatever the input dtype, and would mask the thing under test
+    out = pt.log(x) * 2.0 + x
 
-    # Test with vector operations
-    x = pt.vector("x", dtype="float32")
-    y = pt.cast(x, "float64")
-    z = pt.exp(y) + pt.sin(y)  # Multiple operations on float64
+    x_test_value = np.array([1.0, 2.0, 3.0], dtype="float64")
 
     with warnings.catch_warnings(record=True) as warning_list:
         warnings.simplefilter("always")
+        with mx.stream(mx.cpu):
+            f = function([x], out, mode=mlx_mode)
+            res = f(x_test_value)
 
-        f = pytensor.function([x], z, mode=mlx_mode, allow_input_downcast=True)
-        result = f([1.0, 2.0, 3.0])
-
-        # Should work and return float32 results
-        assert result.dtype == mx.float32
-        assert result.shape == (3,)
-
-        # Should have issued warnings
-        warning_messages = [str(w.message) for w in warning_list]
-        dtype_warnings = [
-            msg
-            for msg in warning_messages
-            if "float64" in msg or "MLX GPU limitation" in msg
-        ]
-        assert len(dtype_warnings) > 0
+    assert res.dtype == mx.float64
+    # Narrowing would cost about seven digits here, so this is a precision check too
+    np.testing.assert_allclose(
+        np.asarray(res), np.log(x_test_value) * 2.0 + x_test_value, rtol=1e-15
+    )
+    assert not any("float64" in str(w.message) for w in warning_list)
 
 
 def test_mlx_float64_no_warning_when_disabled():
@@ -347,3 +329,51 @@ def test_mlx_ifelse():
 
     a_test = np.array(0.8, dtype="float64")
     compare_mlx_and_py([a], [x], [a_test])
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_nan_constant(dtype):
+    # ``mx.compile`` inlines size-1 constants as Metal source literals, but Metal
+    # has no ``nan`` literal (it accepts ``inf``), so a size-1 NaN constant fed to
+    # a fused op must be materialized through an op instead. This is the class of
+    # graph the ``local_sqrt_sqr`` rewrite produces on normalization
+    # input-gradients. The constant is shape ``(1,)`` (matching the operand rank)
+    # so it reaches the ``Switch`` without an intervening broadcast.
+    x = vector("x", shape=(None,), dtype=dtype)
+    nan = pt.constant(np.array([np.nan], dtype=dtype))
+    out = pt.switch(x > 0, x, nan)
+
+    compare_mlx_and_py([x], [out], [np.array([-1.0, 1.0, -2.0, 2.0], dtype=dtype)])
+
+
+def test_nan_array_constant():
+    # A NaN constant with more than one element is passed as a buffer (not
+    # inlined), so it compiles without materialization.
+    x = vector("x", shape=(3,))
+    c = pt.constant(np.array([np.nan, 1.0, np.nan], dtype=config.floatX))
+
+    compare_mlx_and_py(
+        [x], [x + c], [np.array([10.0, 20.0, 30.0], dtype=config.floatX)]
+    )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        np.asfortranarray(np.arange(6, dtype="float32").reshape(2, 3)),
+        np.arange(6, dtype="float32").reshape(2, 3).T,
+        np.arange(6, dtype="float32").reshape(2, 3),
+        np.array(2.0, dtype="float32"),
+    ],
+    ids=["fortran_order", "transposed_view", "already_contiguous", "scalar"],
+)
+def test_mlx_typify_row_contiguous(data):
+    # MLX's elementwise kernels misread a non-contiguous buffer, and rewriting
+    # produces such arrays (``triu`` of a transpose, for one). Only the full LU
+    # pullback reproduces the wrong answer, so the invariant is pinned here.
+    result = mlx_typify(data)
+    as_numpy = np.asarray(result)
+
+    np.testing.assert_array_equal(as_numpy, data)
+    assert as_numpy.flags["C_CONTIGUOUS"]
+    assert result.shape == data.shape

@@ -17,4 +17,5 @@ import pytensor.link.mlx.dispatch.extra_ops
 import pytensor.link.mlx.dispatch.pad
 import pytensor.link.mlx.dispatch.sort
 import pytensor.link.mlx.dispatch.linalg
+import pytensor.link.mlx.dispatch.random
 # isort: on

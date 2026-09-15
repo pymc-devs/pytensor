@@ -307,7 +307,7 @@ def compute_itershape(
     broadcast_pattern: tuple[tuple[bool, ...], ...],
     size: list[ir.Instruction] | None,
 ):
-    one = ir.IntType(64)(1)
+    one = ctx.get_constant(types.intp, 1)
     batch_ndim = len(broadcast_pattern[0])
     shape = [None] * batch_ndim
     if size is not None:
@@ -417,7 +417,7 @@ def make_outputs(
     """
     output_arrays = []
     output_arry_types = []
-    one = ir.IntType(64)(1)
+    one = ctx.get_constant(types.intp, 1)
     inplace_dict = dict(inplace)
     for i, (core_shape, bc, dtype) in enumerate(
         zip(output_core_shapes, out_bc, dtypes, strict=True)
@@ -448,7 +448,7 @@ def make_outputs(
             # reduction identity.  A flat scan over every element is valid
             # regardless of which axes are reduced, and seeds each kept-axis
             # accumulator cell (size-1 reduced axes included).
-            nitems = ir.IntType(64)(1)
+            nitems = ctx.get_constant(types.intp, 1)
             for dim_len in shape:
                 nitems = builder.mul(nitems, dim_len)
             ident = ctx.get_constant(dtype, reduce_identities[i])
@@ -522,7 +522,7 @@ def make_loop_call(
     ]
     destroyed_inputs = {in_idx: out_idx for out_idx, in_idx in inplace}
 
-    zero = ir.Constant(ir.IntType(64), 0)
+    zero = context.get_constant(types.intp, 0)
 
     def _wrap_negative_index(idx_val, dim_size, signed):
         """Wrap a negative index by adding the dimension size: idx + size if idx < 0.
@@ -580,12 +580,7 @@ def make_loop_call(
             val = builder.load(ptr)
             val.set_metadata("alias.scope", input_scope_set)
             val.set_metadata("noalias", output_scope_set)
-            i64 = ir.IntType(64)
-            if val.type != i64:
-                if idx_arr_type.dtype.signed:
-                    val = builder.sext(val, i64)
-                else:
-                    val = builder.zext(val, i64)
+            val = context.cast(builder, val, idx_arr_type.dtype, types.intp)
             indirect_idxs.append(val)
 
     # Load values from input arrays
@@ -1076,7 +1071,7 @@ def _vectorized(
             cgutils.unpack_tuple(builder, idx_arrs[k].shape) for k in range(n_indices)
         ]
 
-        one = ir.IntType(64)(1)
+        one = ctx.get_constant(types.intp, 1)
         iter_shapes = list(in_shapes)
         iter_bc = list(input_bc_patterns)
 

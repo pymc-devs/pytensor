@@ -154,8 +154,6 @@ def test_ndtri_exp():
 @pytest.mark.parametrize(
     "op, test_values",
     [
-        (erfcx, (0.7,)),
-        (erfcinv, (0.7,)),
         (iv, (0.3, 0.7)),
         (kve, (-2.5, 2.0)),
     ],
@@ -166,6 +164,24 @@ def test_tfp_ops(op, test_values):
     output = op(*inputs)
 
     compare_jax_and_py(inputs, [output], test_values)
+
+
+@pytest.mark.skipif(
+    not (hasattr(jax.scipy.special, "erfcx") or TFP_INSTALLED),
+    reason="erfcx needs jax >= 0.11 or tensorflow-probability",
+)
+def test_erfcx():
+    x = scalar("x")
+    out = erfcx(x)
+
+    compare_jax_and_py([x], [out], [0.7])
+
+
+def test_erfcinv():
+    x = scalar("x")
+    out = erfcinv(x)
+
+    compare_jax_and_py([x], [out], [0.7])
 
 
 def test_betaincinv():

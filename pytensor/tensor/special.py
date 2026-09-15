@@ -1,21 +1,26 @@
-from numpy.lib.array_utils import normalize_axis_tuple
+from functools import reduce
 
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import (
+    add,
     eq,
     exp,
     gamma,
     gammaln,
+    isinf,
     log,
     log1p,
+    maximum,
     mul,
     sum,
     switch,
 )
 from pytensor.tensor.symbolic import TensorSymbolicOp
+from pytensor.tensor.utils import normalize_reduce_axis
 
 
 class Softmax(TensorSymbolicOp):
@@ -55,8 +60,7 @@ class Softmax(TensorSymbolicOp):
 
 def softmax(c, axis=None):
     c = as_tensor_variable(c)
-    if axis is not None:
-        axis = normalize_axis_tuple(axis, c.type.ndim)
+    axis = normalize_reduce_axis(axis, c.type.ndim, normalize_none=True)
     return Softmax(axis=axis)(c)
 
 
@@ -91,9 +95,101 @@ class LogSoftmax(TensorSymbolicOp):
 
 def log_softmax(c, axis=None):
     c = as_tensor_variable(c)
-    if axis is not None:
-        axis = normalize_axis_tuple(axis, c.type.ndim)
+    axis = normalize_reduce_axis(axis, c.type.ndim, normalize_none=True)
     return LogSoftmax(axis=axis)(c)
+
+
+class LogSumExp(TensorSymbolicOp):
+    r"""Log of the sum of exponentials.
+
+    :math:`\log \sum_k e^{x_k}`
+
+    Includes the numerical stabilization trick (subtracting the maximum), so unlike a
+    bare ``log(sum(exp(x)))`` the gradient taken from it is stable too.
+    """
+
+    __props__ = ("axis",)
+
+    # See the note on `XLogY.inline`.
+    inline = False
+
+    def __init__(self, *, axis, **kwargs):
+        self.axis = tuple(axis)
+        super().__init__(**kwargs)
+
+    def build_inner_graph(self, x):
+        x_max = x.max(axis=self.axis, keepdims=True)
+        # Do not offset when x_max = -inf, to avoid nan in the output
+        x_max = switch(isinf(x_max), 0.0, x_max)
+        out = log(exp(x - x_max).sum(axis=self.axis, keepdims=True)) + x_max
+        return [out.squeeze(axis=self.axis)]
+
+
+def logsumexp(x, axis=None, keepdims=False):
+    """Compute the log of the sum of exponentials of input elements.
+
+    See ``scipy.special.logsumexp``.
+
+    Parameters
+    ----------
+    x : symbolic tensor
+        Input
+
+    axis : None or int or tuple of ints, optional
+        Axis or axes over which the sum is taken. By default axis is None,
+        and all elements are summed.
+
+    keepdims : bool, optional
+        If this is set to True, the axes which are reduced are left in the
+        result as dimensions with size one. With this option, the result will
+        broadcast correctly against the original array.
+
+    Returns
+    -------
+    TensorVariable
+
+    """
+    x = as_tensor_variable(x)
+    axis = normalize_reduce_axis(axis, x.type.ndim, normalize_none=True)
+    out = LogSumExp(axis=axis)(x)
+    return expand_dims(out, axis) if keepdims else out
+
+
+class LogAddExp(TensorSymbolicOp):
+    r"""Log of the sum of exponentials of separate (broadcastable) inputs.
+
+    :math:`\log \sum_k e^{x_k}`, where the :math:`x_k` are the variadic inputs.
+
+    Includes the numerical stabilization trick (subtracting the maximum), so unlike a
+    bare ``log(exp(x) + exp(y))`` the gradient taken from it is stable too.
+    """
+
+    # See the note on `XLogY.inline`.
+    inline = False
+
+    def build_inner_graph(self, *xs):
+        x_max = reduce(maximum, xs)
+        # Do not offset when x_max = -inf, to avoid nan in the output
+        x_max = switch(isinf(x_max), 0.0, x_max)
+        return [log(add(*(exp(x - x_max) for x in xs))) + x_max]
+
+
+def logaddexp(*xs):
+    """Logarithm of the sum of exponentiations of the inputs.
+
+    See ``numpy.logaddexp``.
+
+    Parameters
+    ----------
+    xs : symbolic tensors
+        Input
+
+    Returns
+    -------
+    TensorVariable
+
+    """
+    return LogAddExp()(*xs)
 
 
 @_vectorize_node.register(Softmax)
@@ -230,7 +326,9 @@ __all__ = [
     "betaln",
     "factorial",
     "log_softmax",
+    "logaddexp",
     "logit",
+    "logsumexp",
     "poch",
     "softmax",
     "xlog1py",

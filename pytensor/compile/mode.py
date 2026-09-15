@@ -524,7 +524,9 @@ JAX = Mode(
 )
 PYTORCH = Mode(
     PytorchLinker(),
-    RewriteDatabaseQuery(include=["fast_run"]),
+    # `Composite` has no PyTorch dispatch (it has no `nfunc_spec` to look up in torch),
+    # and torch fuses its own kernels anyway.
+    RewriteDatabaseQuery(include=["fast_run"], exclude=["fusion"]),
 )
 
 MLX = Mode(
