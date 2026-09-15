@@ -9,6 +9,7 @@ class NumbaLinker(JITLinker):
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",
+        "blas_fusion",
         "local_careduce_fusion",
         "scan_reduce_trace_prealloc",
     )
