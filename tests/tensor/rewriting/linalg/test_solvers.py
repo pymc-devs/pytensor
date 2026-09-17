@@ -86,7 +86,7 @@ def test_psd_solve_with_chol():
 
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
-    L = cholesky(A_psd)
+    L = cholesky(A)
     expected = cho_solve((L, True), b, b_ndim=2)
 
     assert_equal_computations([rewritten], [expected])

@@ -13,6 +13,10 @@ from pytensor.assumptions import (
     FactState,
 )
 from pytensor.assumptions.specify import SpecifyAssumptions, assume
+from pytensor.tensor.rewriting.assumptions import (
+    DrainSpecifyAssumptions,
+    drain_specify_assumptions_node,
+)
 from tests.assumptions.conftest import make_fgraph
 
 
@@ -94,3 +98,32 @@ def test_assume_conflict_with_inferred_fact_raises():
     _, af = make_fgraph(e_not_diag)
     with pytest.raises(ConflictingAssumptionsError):
         af.get(e_not_diag, DIAGONAL)
+
+
+def test_whole_graph_drain_moves_the_fact_onto_the_input():
+    """Draining is not just node removal; the declaration has to land on ``x`` itself.
+
+    Consumers query ``x``, never the marker, so a drain that drops the node without
+    transferring the fact discards the assumption without any visible failure.
+    """
+    x = pt.matrix("x")
+    out = pt.linalg.det(assume(x, positive_definite=True))
+    fg, feature = make_fgraph(out)
+
+    DrainSpecifyAssumptions().apply(fg)
+
+    assert not any(isinstance(node.op, SpecifyAssumptions) for node in fg.apply_nodes)
+    assert feature.check(x, POSITIVE_DEFINITE)
+
+
+def test_local_drain_moves_the_fact_onto_the_input():
+    """The per-node drain owes the same guarantee as the whole-graph pass."""
+    x = pt.matrix("x")
+    marker = assume(x, positive_definite=True)
+    fg, feature = make_fgraph(pt.linalg.det(marker))
+
+    [replacement] = drain_specify_assumptions_node.transform(fg, marker.owner)
+    fg.replace(marker, replacement, reason="test")
+
+    assert replacement is x
+    assert feature.check(x, POSITIVE_DEFINITE)
