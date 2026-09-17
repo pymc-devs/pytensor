@@ -33,6 +33,9 @@ from pytensor.graph.rewriting.unify import (
     PatternVar,
     convert_strs_to_vars,
     match_pattern,
+    matches_op,
+    pattern_anchor_depths,
+    pattern_tokens,
     reify_pattern,
 )
 from pytensor.graph.traversal import (
@@ -1462,9 +1465,16 @@ class PatternNodeRewriter(NodeRewriter):
     place. The input pattern cannot just be a string but the output
     pattern can.
 
-    If you put a constant variable in the input pattern, there will be a
-    match iff a constant variable with the same value and the same type
-    is found in its place.
+    ``in_pattern`` may also be a list of alternative input patterns, tried in
+    order with the first match winning. All alternatives must use the same
+    variables, which they share with the single output pattern. This is useful
+    to cover equivalent spellings that different canonicalization stages
+    produce, e.g. ``1 - x``, ``1 + (-x)`` and ``1 + (-1) * x``.
+
+    If you put a constant variable (or a raw number) in the input pattern,
+    there will be a match iff a constant variable with the same value is found
+    in its place. The comparison is broadcast-tolerant and ignores dtype: a
+    literal ``1`` matches a float64 scalar ``1.0`` as well as a vector of ones.
 
     You can add a constraint to the match by using the ``dict(...)`` form
     described above with a ``'constraint'`` key. The constraint must be a
@@ -1553,12 +1563,11 @@ class PatternNodeRewriter(NodeRewriter):
 
     def __init__(
         self,
-        in_pattern: tuple,
+        in_pattern: tuple | list[tuple],
         out_pattern: tuple | Callable | str,
         allow_multiple_clients: bool = False,
         name: str | None = None,
         tracks=(),
-        get_nodes=None,
         values_eq_approx=None,
         allow_cast=True,
     ):
@@ -1567,7 +1576,9 @@ class PatternNodeRewriter(NodeRewriter):
         Parameters
         ----------
         in_pattern
-            The input pattern that we want to replace.
+            The input pattern that we want to replace, or a list of equivalent
+            input patterns tried in order (first match wins). All patterns in a
+            list must use the same variables.
         out_pattern
             The replacement pattern. Or a callable that takes (fgraph, node, subs_dict) as inputs,
             and returns the replacement variable (or None/False to reject the rewrite).
@@ -1577,11 +1588,10 @@ class PatternNodeRewriter(NodeRewriter):
         name
             Set the name of this rewriter.
         tracks
-            The values that :meth:`self.tracks` will return.
-        get_nodes
-            If you provide `tracks`, you must provide this parameter. It must be a
-            function that takes the tracked node and returns a list of nodes on
-            which we will try this rewrite.
+            Op instances that trigger this rewrite. Each tracked Op must appear
+            in the input pattern(s); when it appears below the root, candidate
+            root nodes are the tracked node's clients at the tracked op's depth
+            in the pattern.
         values_eq_approx
             If specified, this value will be assigned to the ``values_eq_approx``
             tag of the output variable. This is used by DebugMode to determine if rewrites are correct.
@@ -1590,63 +1600,139 @@ class PatternNodeRewriter(NodeRewriter):
 
         Notes
         -----
-        `tracks` and `get_nodes` can be used to make this rewrite track a less
-        frequent `Op`, which will prevent the rewrite from being tried as often.
+        `tracks` can be used to make this rewrite track a less frequent `Op`
+        inside the pattern, which will prevent the rewrite from being tried as
+        often.
 
         """
         var_map: dict[str, PatternVar] = {}
-        self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
+        in_patterns = in_pattern if isinstance(in_pattern, list) else [in_pattern]
+        self.in_patterns = [
+            convert_strs_to_vars(p, var_map=var_map) for p in in_patterns
+        ]
+        for pattern, orig in zip(self.in_patterns, in_patterns, strict=True):
+            if not isinstance(pattern, PatternNode):
+                raise TypeError(
+                    "Each in_pattern must be a tuple starting with an Op or OpPattern; "
+                    f"got {orig!r} of type {type(orig)}"
+                )
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
-        if not isinstance(self.in_pattern, PatternNode):
-            raise TypeError(
-                "The in_pattern must be a tuple starting with an Op or OpPattern; "
-                f"got {in_pattern!r} of type {type(in_pattern)}"
-            )
+        tokens = pattern_tokens(self.in_patterns[0])
+        for pattern, orig in zip(self.in_patterns[1:], in_patterns[1:], strict=True):
+            if pattern_tokens(pattern) != tokens:
+                raise ValueError(
+                    "All in_pattern alternatives must use the same variables; "
+                    f"{orig!r} uses {sorted(pattern_tokens(pattern))} "
+                    f"while {in_patterns[0]!r} uses {sorted(tokens)}"
+                )
         self.values_eq_approx = values_eq_approx
         self.allow_cast = allow_cast
         self.allow_multiple_clients = allow_multiple_clients
         if name:
             self.__name__ = name
-        self.get_nodes = get_nodes
-        if tracks != ():
-            if not get_nodes:
-                raise ValueError("Custom `tracks` requires `get_nodes` to be provided.")
+
+        tracks = list(tracks)
+        for track in tracks:
+            if not isinstance(track, Op):
+                raise TypeError(
+                    f"PatternNodeRewriter tracks entries must be Op instances; got {track!r}"
+                )
+        # Anchor each pattern at its root and at tracked sub-patterns; transform
+        # finds candidate roots by walking up an anchored node's clients to the
+        # anchor's depth in the pattern.
+        self._anchors = []
+        for pattern in self.in_patterns:
+            self._anchors.append(
+                [
+                    (head, depth)
+                    for head, depth in pattern_anchor_depths(pattern)
+                    if depth == 0 or any(matches_op(head, track) for track in tracks)
+                ]
+            )
+        if tracks:
+            for track in tracks:
+                if not any(
+                    matches_op(head, track)
+                    for anchors in self._anchors
+                    for head, _ in anchors
+                ):
+                    raise ValueError(
+                        f"Tracked op {track} does not appear in any in_pattern"
+                    )
             self._tracks = tracks
         else:
-            op = self.in_pattern.op_match
-            if isinstance(op, Op):
-                self._tracks = [op]
-            elif isinstance(op, OpPattern):
-                self._tracks = [op.op_type]
-            else:
-                raise ValueError(
-                    f"The in_pattern must start with a specific Op or an OpPattern instance. "
-                    f"Got {op!r}, with type {type(op)}."
-                )
+            roots = []
+            for pattern in self.in_patterns:
+                op = pattern.op_match
+                entry = op.op_type if isinstance(op, OpPattern) else op
+                if entry not in roots:
+                    roots.append(entry)
+            self._tracks = roots
 
     def tracks(self):
         return self._tracks
 
-    def transform(self, fgraph, node, enforce_tracks: bool = False, get_nodes=True):
-        """Check if the graph from node corresponds to ``in_pattern``.
+    def transform(self, fgraph, node, enforce_tracks: bool = False):
+        """Check if the graph from node corresponds to one of the ``in_patterns``.
 
         If it does, it constructs ``out_pattern`` and performs the replacement.
 
+        The match is anchored at ``node``: it must correspond to a pattern's
+        root or to a tracked sub-pattern. The node's clients are walked once up
+        to the deepest anchor; each pattern is then matched against its own
+        candidate roots (the levels at its anchored depths, deduplicated), in
+        pattern order.
         """
-        if get_nodes and self.get_nodes is not None:
-            for real_node in self.get_nodes(fgraph, node):
-                ret = self.transform(fgraph, real_node, get_nodes=False)
-                if ret is not False and ret is not None:
-                    return dict(zip(real_node.outputs, ret, strict=True))
-
-        if len(node.outputs) != 1:
-            # PatternNodeRewriter doesn't support replacing multi-output nodes
+        node_op = node.op
+        # For each pattern, the depths of its anchors that match the fired node
+        applicable = [
+            (pattern, {depth for head, depth in anchors if matches_op(head, node_op)})
+            for pattern, anchors in zip(self.in_patterns, self._anchors, strict=True)
+        ]
+        max_depth = max(
+            (max(depths) for _, depths in applicable if depths), default=None
+        )
+        if max_depth is None:
             return False
 
-        s = match_pattern(self.in_pattern, node)
-        if s is None:
-            return False
+        clients = fgraph.clients
+        levels = [(node,)]
+        for _ in range(max_depth):
+            level = {
+                client: None
+                for level_node in levels[-1]
+                for out in level_node.outputs
+                for client, _ in clients[out]
+                if not isinstance(client.op, Output)
+            }
+            if not level:
+                break
+            levels.append(level)
 
+        for pattern, depths in applicable:
+            candidates = {
+                root: None
+                for depth in sorted(depths)
+                if depth < len(levels)
+                for root in levels[depth]
+            }
+            for root in candidates:
+                if len(root.outputs) != 1:
+                    # PatternNodeRewriter doesn't support replacing multi-output nodes
+                    continue
+                s = match_pattern(pattern, root)
+                if s is None:
+                    continue
+                ret = self._rewrite_from_match(fgraph, root, s)
+                if ret is None:
+                    continue
+                if root is node:
+                    return [ret]
+                return {root.outputs[0]: ret}
+        return False
+
+    def _rewrite_from_match(self, fgraph, node, s):
+        """Build the replacement variable for a matched root ``node``, or None if rejected."""
         if not self.allow_multiple_clients:
             # The matched subgraph's internal nodes (those strictly between the
             # captured inputs and the root) must not be used elsewhere, or the
@@ -1663,14 +1749,14 @@ class PatternNodeRewriter(NodeRewriter):
                 for v in vars_between(input_vars, node.inputs)
                 if v not in input_vars
             ):
-                return False
+                return None
 
         if callable(self.out_pattern):
             # token is the variable name used in the original pattern
             ret = self.out_pattern(fgraph, node, {k.token: v for k, v in s.items()})
             if ret is None or ret is False:
                 # The output function is still allowed to reject the rewrite
-                return False
+                return None
             if not isinstance(ret, Variable):
                 raise ValueError(
                     f"The output of the PatternNodeRewriter callable must be a variable got {ret} of type {type(ret)}."
@@ -1691,15 +1777,15 @@ class PatternNodeRewriter(NodeRewriter):
                 and isinstance(old_out.type, TensorType)
                 and isinstance(ret.type, TensorType)
             ):
-                return False
+                return None
 
             # Try to cast tensors
             ret = ret.astype(old_out.type.dtype)
             if not old_out.type.is_super(ret.type):
                 # Still doesn't match
-                return False
+                return None
 
-        return [ret]
+        return ret
 
     def __str__(self):
         if getattr(self, "__name__", None):
@@ -1718,9 +1804,8 @@ class PatternNodeRewriter(NodeRewriter):
             else:
                 return str(pattern)
 
-        return (
-            f"{pattern_to_str(self.in_pattern)} -> {pattern_to_str(self.out_pattern)}"
-        )
+        in_str = " | ".join(pattern_to_str(p) for p in self.in_patterns)
+        return f"{in_str} -> {pattern_to_str(self.out_pattern)}"
 
     def __repr__(self):
         return str(self)
@@ -1728,7 +1813,7 @@ class PatternNodeRewriter(NodeRewriter):
     def print_summary(self, stream=sys.stdout, level=0, depth=-1):
         name = getattr(self, "__name__", getattr(self, "name", None))
         print(
-            f"{' ' * level}{self.__class__.__name__} {name}({self.in_pattern}, {self.out_pattern}) id={id(self)}",
+            f"{' ' * level}{self.__class__.__name__} {name}({self.in_patterns}, {self.out_pattern}) id={id(self)}",
             file=stream,
         )
 
