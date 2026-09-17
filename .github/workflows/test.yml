@@ -201,7 +201,7 @@ jobs:
           if [[ $FREE_THREADING == "1" ]]; then python -c 'import sysconfig; assert sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "Expected a free-threaded interpreter"'; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" && pip install "jax>=0.8,<0.9.1" jaxlib numpyro equinox tfp-nightly; fi
           if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" pytorch pytorch-cuda=12.1 "mkl<=2024.0" -c pytorch -c nvidia; fi
-          if [[ $INSTALL_MLX == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" "mlx>=0.30,<0.32"; fi
+          if [[ $INSTALL_MLX == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" "mlx>=0.30"; fi
           if [[ $INSTALL_XARRAY == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" xarray xarray-einstats; fi
 
           pip install -e ./
