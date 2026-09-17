@@ -49,6 +49,8 @@ def _filter_mode(val):
         "NUMBA",
         "PYTORCH",
         "MLX",
+        "MLIR",
+        "MLIR_METAL",
     ]
     if val in str_options:
         return val
