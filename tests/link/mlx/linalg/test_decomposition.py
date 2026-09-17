@@ -41,7 +41,14 @@ def test_mlx_eigh(lower):
     A = pt.matrix(name="A")
     outs = pt.linalg.eigh(A, lower=lower, driver="evd")
 
-    compare_mlx_and_py([A], outs, [A_val])
+    # Eigenvector signs are not unique, so align each column's sign before comparing.
+    def eigh_assert(mlx_out, py_out):
+        mlx_out = np.asarray(mlx_out)
+        if mlx_out.ndim == 2:
+            mlx_out = mlx_out * np.sign(np.sum(mlx_out * py_out, axis=0))
+        np.testing.assert_allclose(mlx_out, py_out, rtol=1e-4)
+
+    compare_mlx_and_py([A], outs, [A_val], assert_fn=eigh_assert)
 
 
 @pytest.mark.parametrize("compute_uv", [True, False])
