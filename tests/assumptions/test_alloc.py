@@ -10,6 +10,7 @@ from pytensor.assumptions import (
     PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    UNIQUE_INDICES,
     UPPER_TRIANGULAR,
     FactState,
 )
@@ -145,3 +146,19 @@ def test_alloc_broadcast_vector_value_is_unknown():
     y = pt.alloc(v, 4, 4)
     _, af = make_fgraph(y)
     assert af.get(y, SYMMETRIC) == FactState.UNKNOWN
+
+
+def test_unique_indices_survives_no_broadcast():
+    """Alloc repeats entries, so a uniqueness claim must not carry through it.
+
+    The matrix-property rules propagate anything whose trailing two axes are untouched,
+    which is wrong for a claim about the values themselves.
+    """
+    idx = pt.matrix("idx", shape=(2, 3), dtype="int64")
+    broadcast = pt.alloc(assume(idx, unique_indices=True), 4, 2, 3)
+
+    _, af = make_fgraph(broadcast)
+    assert af.get(broadcast, UNIQUE_INDICES) is not FactState.TRUE
+
+    repeated = broadcast.eval({idx: np.arange(6).reshape(2, 3)})
+    assert len(np.unique(repeated)) < repeated.size

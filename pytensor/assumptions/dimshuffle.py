@@ -1,4 +1,4 @@
-from pytensor.assumptions.core import ALL_KEYS, FactState, register_assumption
+from pytensor.assumptions.core import MATRIX_KEYS, FactState, register_assumption
 from pytensor.tensor.elemwise import DimShuffle
 
 
@@ -29,5 +29,5 @@ def dimshuffle_propagates_matrix_property(
     return [FactState.UNKNOWN]
 
 
-for _key in ALL_KEYS:
+for _key in MATRIX_KEYS:
     register_assumption(_key, DimShuffle)(dimshuffle_propagates_matrix_property)

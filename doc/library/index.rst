@@ -15,6 +15,7 @@ Modules
 .. toctree::
    :maxdepth: 1
 
+   assumptions
    compile/index
    config
    d3viz/index

@@ -65,6 +65,11 @@ coverage.xml
 # gallery notebook downloaded data
 doc/gallery/**/data/
 
+# written on every build by the generate_gallery sphinx extension; a custom
+# thumbnail that overrides extraction is committed with git add -f
+doc/gallery/gallery.rst
+doc/_thumbnails/
+
 # JupyterLab session artifacts
 .jupyter/
 .jupyter_ystore.db
