@@ -1,7 +1,5 @@
 from typing import Literal, cast
 
-import numpy as np
-
 from pytensor import ifelse
 from pytensor import tensor as pt
 from pytensor.gradient import DisconnectedType, disconnected_type
@@ -51,7 +49,7 @@ class QR(Op):
             case "r":
                 self.gufunc_signature = "(m,n)->(m,n)"
             case "raw":
-                self.gufunc_signature = "(m,n)->(n,m),(k),(m,n)"
+                self.gufunc_signature = "(m,n)->(m,n),(k),(k,n)"
             case _:
                 raise ValueError(
                     f"Invalid mode '{mode}'. Supported modes are 'full', 'economic', 'r', and 'raw'."
@@ -91,9 +89,9 @@ class QR(Op):
                 ]
             case "raw":
                 outputs = [
-                    tensor(shape=(M, M), dtype=out_dtype),
-                    tensor(shape=(K,), dtype=out_dtype),
                     tensor(shape=(M, N), dtype=out_dtype),
+                    tensor(shape=(K,), dtype=out_dtype),
+                    tensor(shape=(K, N), dtype=out_dtype),
                 ]
             case _:
                 raise NotImplementedError
@@ -124,9 +122,9 @@ class QR(Op):
             case "r":
                 R_shape = (M, N)
             case "raw":
-                Q_shape = (M, M)  # Actually this is H in this case
+                Q_shape = (M, N)  # Actually this is H in this case
                 tau_shape = (K,)
-                R_shape = (M, N)
+                R_shape = (K, N)
 
         if self.pivoting:
             P_shape = (N,)
@@ -153,72 +151,17 @@ class QR(Op):
 
     def perform(self, node, inputs, outputs):
         (x,) = inputs
-        M, N = x.shape
-
-        if self.pivoting:
-            (geqp3,) = scipy_linalg.get_lapack_funcs(("geqp3",), (x,))
-            qr, jpvt, tau, *_work_info = self._call_and_get_lwork(
-                geqp3, x, lwork=-1, overwrite_a=self.overwrite_a
-            )
-            jpvt -= 1  # geqp3 returns a 1-based index array, so subtract 1
+        result = scipy_linalg.qr(
+            x, mode=self.mode, pivoting=self.pivoting, overwrite_a=self.overwrite_a
+        )
+        if self.mode == "raw":
+            # scipy nests the Householder reflectors as ((qr, tau), R[, jpvt]).
+            (factor, tau), *rest = result
+            values = [factor, tau, *rest]
         else:
-            (geqrf,) = scipy_linalg.get_lapack_funcs(("geqrf",), (x,))
-            qr, tau, *_work_info = self._call_and_get_lwork(
-                geqrf, x, lwork=-1, overwrite_a=self.overwrite_a
-            )
-
-        if self.mode not in ["economic", "raw"] or M < N:
-            R = np.triu(qr)
-        else:
-            R = np.triu(qr[:N, :])
-
-        if self.mode == "r" and self.pivoting:
-            outputs[0][0] = R
-            outputs[1][0] = jpvt
-            return
-
-        elif self.mode == "r":
-            outputs[0][0] = R
-            return
-
-        elif self.mode == "raw" and self.pivoting:
-            outputs[0][0] = qr
-            outputs[1][0] = tau
-            outputs[2][0] = R
-            outputs[3][0] = jpvt
-            return
-
-        elif self.mode == "raw":
-            outputs[0][0] = qr
-            outputs[1][0] = tau
-            outputs[2][0] = R
-            return
-
-        (gor_un_gqr,) = scipy_linalg.get_lapack_funcs(("orgqr",), (qr,))
-
-        if M < N:
-            Q, _work, _info = self._call_and_get_lwork(
-                gor_un_gqr, qr[:, :M], tau, lwork=-1, overwrite_a=1
-            )
-        elif self.mode == "economic":
-            Q, _work, _info = self._call_and_get_lwork(
-                gor_un_gqr, qr, tau, lwork=-1, overwrite_a=1
-            )
-        else:
-            t = qr.dtype.char
-            qqr = np.empty((M, M), dtype=t)
-            qqr[:, :N] = qr
-
-            # Always overwite qqr -- it's a meaningless intermediate value
-            Q, _work, _info = self._call_and_get_lwork(
-                gor_un_gqr, qqr, tau, lwork=-1, overwrite_a=1
-            )
-
-        outputs[0][0] = Q
-        outputs[1][0] = R
-
-        if self.pivoting:
-            outputs[2][0] = jpvt
+            values = list(result)
+        for storage, value in zip(outputs, values):
+            storage[0] = value
 
     def pullback(self, inputs, outputs, output_grads):
         """
