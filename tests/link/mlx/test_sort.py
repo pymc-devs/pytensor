@@ -12,7 +12,8 @@ def test_sort(func, axis):
     x = tensor3("x", shape=(2, 3, 2), dtype="float64")
     out = func(x, axis=axis)
     arr = np.random.default_rng(0).permutation(np.arange(12.0)).reshape(2, 3, 2)
-    compare_mlx_and_py([x], [out], [arr])
+    _, res = compare_mlx_and_py([x], [out], [arr])
+    assert np.asarray(res).dtype == out.dtype
 
 
 @pytest.mark.parametrize("func", (sort, argsort))

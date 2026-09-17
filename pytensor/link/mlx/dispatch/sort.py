@@ -46,6 +46,6 @@ def mlx_funcify_ArgSort(op, node, **kwargs):
     static_axis = _static_axis(node)
 
     def argsort(x, axis):
-        return mx.argsort(x, axis=_resolve_axis(static_axis, axis))
+        return mx.argsort(x, axis=_resolve_axis(static_axis, axis)).astype(mx.int64)
 
     return argsort
