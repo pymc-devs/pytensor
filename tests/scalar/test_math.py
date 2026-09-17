@@ -8,6 +8,7 @@ import scipy.special as sp
 import pytensor.tensor as pt
 from pytensor import function
 from pytensor.compile.mode import Mode
+from pytensor.gradient import grad
 from pytensor.graph import ancestors
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import CLinker
@@ -19,6 +20,7 @@ from pytensor.scalar.math import (
     gammaincc,
     hyp2f1,
     psi,
+    sigmoid,
 )
 from tests.link.test_link import make_function
 
@@ -186,3 +188,27 @@ def test_psi(linker):
 
     np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test))
     np.testing.assert_allclose(fn(-x_test), scipy.special.psi(-x_test))
+
+
+def test_sigmoid_grad_precision():
+    x = float64("x")
+    grad_fn = function([x], grad(sigmoid(x), x))
+
+    # sigmoid'(z) == sigmoid'(-z) for all z (symmetric around 0).
+    # The naive form expit(z) * (1 - expit(z)) breaks this: at z=50,
+    # (1 - expit(50)) rounds to 0, giving sigmoid'(50) = 0 != sigmoid'(-50).
+    for z in [50.0, 100.0, 500.0]:
+        result = grad_fn(z)
+        assert result > 0.0
+        np.testing.assert_allclose(result, grad_fn(-z))
+
+
+def test_sigmoid_grad_at_zero():
+    x = float64("x")
+    # sigmoid^(n)(0) is (2 ** (n + 1) - 1) * bernoulli(n + 1) / (n + 1) for odd n, zero otherwise
+    expected_orders = [1 / 4, 0, -1 / 8, 0, 1 / 4]
+
+    grad_x = sigmoid(x)
+    for expected in expected_orders:
+        grad_x = grad(grad_x, wrt=x)
+        np.testing.assert_allclose(grad_x.eval({x: 0}), expected)
