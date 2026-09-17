@@ -11,6 +11,7 @@ def mlx_funcify_MatrixInverse(op, node, **kwargs):
     def inv(x):
         return mx.linalg.inv(x.astype(dtype=X_dtype, stream=mx.cpu), stream=mx.cpu)
 
+    inv.natively_batched = True
     return inv
 
 
@@ -21,4 +22,5 @@ def mlx_funcify_MatrixPinv(op, node, **kwargs):
     def pinv(x):
         return mx.linalg.pinv(x.astype(dtype=x_dtype, stream=mx.cpu), stream=mx.cpu)
 
+    pinv.natively_batched = True
     return pinv

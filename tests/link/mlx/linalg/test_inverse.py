@@ -8,14 +8,15 @@ from pytensor import config
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
 @pytest.mark.parametrize("op", [pt.linalg.inv, pt.linalg.pinv], ids=["inv", "pinv"])
-def test_mlx_inv(op):
+def test_mlx_inv(op, batch_shape):
     rng = np.random.default_rng(15)
     n = 3
 
-    A = pt.matrix(name="A")
-    A_val = rng.normal(size=(n, n))
-    A_val = (A_val @ A_val.T).astype(config.floatX)
+    A = pt.tensor("A", shape=(*batch_shape, n, n))
+    A_val = rng.normal(size=(*batch_shape, n, n))
+    A_val = (A_val @ np.swapaxes(A_val, -1, -2)).astype(config.floatX)
 
     out = op(A)
 
