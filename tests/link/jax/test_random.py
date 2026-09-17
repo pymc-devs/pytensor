@@ -963,3 +963,18 @@ class TestRandomShapeInputs:
         new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=False)
         assert new_x.type.shape == (2, 5)
         assert compile_random_function([], new_x)().shape == (2, 5)
+
+
+def test_reseed_rngs():
+    # JAX copies RNG shared variables at compile time, so the originals can't be reseeded
+    # via set_value; Function.reseed_rngs reseeds the function's own (typified) RNG storage.
+    rng = shared(np.random.default_rng(0))
+    rv = pt.random.normal(0, 1, size=3, rng=rng)
+    f = function([], rv, updates={rng: rv.owner.outputs[0]}, mode=jax_mode)
+
+    f.reseed_rngs(123)
+    draw = np.asarray(f())
+    f.reseed_rngs(123)
+    np.testing.assert_array_equal(draw, np.asarray(f()))  # same seed -> same draw
+    f.reseed_rngs(456)
+    assert not np.array_equal(draw, np.asarray(f()))  # different seed -> different draw
