@@ -7,6 +7,7 @@ from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
     indices_from_subtensor,
+    unflatten_index_variables,
 )
 
 
@@ -96,9 +97,18 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def mlx_fn(x, indices, y):
             return x.at[indices].add(y)
 
-    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
+    idx_list = op.idx_list
+
+    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=idx_list):
         op._check_runtime_broadcast_of_vector_index(node, x, y, ilist[0])
 
-        return mlx_fn(x, ilist, y)
+        # `idx_list` records where the index variables sit among plain slices,
+        # so the advanced indices are not necessarily anchored at axis 0. Using
+        # the flat `ilist` directly shifted every index left, which broke any
+        # graph whose destination carries leading batch axes (#2382, #2387).
+        # This mirrors `AdvancedIncSubtensor.perform`.
+        indices = unflatten_index_variables(ilist, idx_list)
+
+        return mlx_fn(x, indices, y)
 
     return advancedincsubtensor
