@@ -105,6 +105,20 @@ def test_blockwise_no_runtime_broadcast():
         mlx_fn(*values)
 
 
+def test_blockwise_native_no_runtime_broadcast():
+    rng = np.random.default_rng(7)
+    a = tensor("a", shape=(None, 3, 3))
+    b = tensor("b", shape=(5, 3, 2))
+    out = pt.linalg.solve(a, b)
+
+    assert isinstance(out.owner.op, Blockwise)
+    values = [rng.standard_normal((1, 3, 3)), rng.standard_normal((5, 3, 2))]
+
+    mlx_fn = pytensor.function([a, b], out, mode=mlx_mode)
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        mlx_fn(*values)
+
+
 @pytest.mark.parametrize("batch", [(), (5,)], ids=["no_batch", "single_batch"])
 def test_blockwise_fallback_signature(batch):
     rng = np.random.default_rng(7)

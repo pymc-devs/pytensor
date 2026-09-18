@@ -83,13 +83,14 @@ def test_mlx_cholesky(lower):
     )
 
 
-def test_mlx_LU():
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
+def test_mlx_LU(batch_shape):
     rng = np.random.default_rng(15)
 
-    A = pt.tensor("A", shape=(5, 5))
+    A = pt.tensor("A", shape=(*batch_shape, 5, 5))
     out = lu.lu(A, permute_l=False, p_indices=True)
 
-    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    A_val = rng.normal(size=(*batch_shape, 5, 5)).astype(config.floatX)
 
     compare_mlx_and_py(
         [A],
@@ -120,11 +121,12 @@ def test_mlx_eigvalsh(lower):
     compare_mlx_and_py([A], [out_no_b], [A_val])
 
 
-def test_mlx_lu_factor():
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
+def test_mlx_lu_factor(batch_shape):
     rng = np.random.default_rng(15)
 
-    A = pt.matrix(name="A")
-    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    A = pt.tensor("A", shape=(*batch_shape, 5, 5))
+    A_val = rng.normal(size=(*batch_shape, 5, 5)).astype(config.floatX)
 
     out = pt.linalg.lu_factor(A)
 
@@ -166,12 +168,13 @@ def test_mlx_pivot_to_permutations():
     compare_mlx_and_py([A], [out], [A_val])
 
 
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
 @pytest.mark.parametrize("mode", ["economic", "r"])
-def test_mlx_qr(mode):
+def test_mlx_qr(mode, batch_shape):
     rng = np.random.default_rng(15)
 
-    A = pt.matrix(name="A")
-    A_val = rng.normal(size=(5, 3)).astype(config.floatX)
+    A = pt.tensor("A", shape=(*batch_shape, 5, 3))
+    A_val = rng.normal(size=(*batch_shape, 5, 3)).astype(config.floatX)
 
     out = pt.linalg.qr(A, mode=mode)
 
