@@ -1,6 +1,8 @@
 import mlx.core as mx
 
+from pytensor.graph import Constant
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.tensor_basic import mlx_to_list_shape
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
@@ -37,8 +39,18 @@ def mlx_funcify_Shape_i(op, node, **kwargs):
 
 
 @mlx_funcify.register(Reshape)
-def mlx_funcify_Reshape(op, **kwargs):
-    def reshape(x, shp):
-        return mx.reshape(x, shp)
+def mlx_funcify_Reshape(op, node, **kwargs):
+    shape = node.inputs[1]
+
+    if isinstance(shape, Constant):
+        constant_shape = tuple(int(dim) for dim in shape.data)
+
+        def reshape(x, shp):
+            return mx.reshape(x, constant_shape)
+
+    else:
+
+        def reshape(x, shp):
+            return mx.reshape(x, mlx_to_list_shape(shp))
 
     return reshape

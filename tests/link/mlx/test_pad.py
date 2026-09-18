@@ -3,7 +3,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode_no_compile
 
 
 mx = pytest.importorskip("mlx.core")
@@ -29,6 +29,26 @@ def test_mlx_pad(mode, kwargs):
         [x_pt],
         [res],
         [x],
+        assert_fn=lambda x, y: np.testing.assert_allclose(x, y, rtol=RTOL, atol=ATOL),
+    )
+
+
+@pytest.mark.parametrize("mode", ["constant", "edge"])
+@pytest.mark.parametrize(
+    "pad_width", [2, (1, 2), ((1, 2), (3, 0))], ids=["scalar", "pair", "per_axis"]
+)
+def test_mlx_pad_symbolic_width(mode, pad_width):
+    # Regression #2392: pad_width reached mx.pad as an mx.array.
+    x_pt = pt.tensor("x", shape=(3, 4))
+    width_pt = pt.tensor("pad_width", shape=np.shape(pad_width), dtype="int64")
+    res = pt.pad(x_pt, mode=mode, pad_width=width_pt)
+    assert res.owner.op.static_pad_width is None
+
+    compare_mlx_and_py(
+        [x_pt, width_pt],
+        [res],
+        [np.random.default_rng(0).normal(size=(3, 4)), np.asarray(pad_width)],
+        mlx_mode=mlx_mode_no_compile,
         assert_fn=lambda x, y: np.testing.assert_allclose(x, y, rtol=RTOL, atol=ATOL),
     )
 
