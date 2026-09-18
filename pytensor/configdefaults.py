@@ -966,6 +966,17 @@ def add_numba_configvars():
         BoolParam(True),
         in_c_key=False,
     )
+    config.add(
+        "numba__veclib",
+        (
+            "EXPERIMENTAL. Your declaration that a vector math library ('libmvec', 'svml', "
+            "'amdlibm') is wired into LLVM, which takes unsanctioned llvmlite internals to do "
+            "(see scripts/check_numba_veclib.py). Enables Numba lowerings that rely on a "
+            "vectorizable exp/log, and keys the compile cache. '' (the default) means none."
+        ),
+        StrParam(""),
+        in_c_key=False,
+    )
 
 
 def _filter_base_compiledir(path: str | Path) -> Path:
