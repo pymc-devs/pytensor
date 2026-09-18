@@ -3,7 +3,7 @@ import pytest
 
 from pytensor import In, function
 from pytensor.tensor import dot, empty, matrix, outer, scalar, tensor, vector
-from pytensor.tensor.blas.blas_c import CGemv
+from pytensor.tensor.blas import Gemv
 
 
 @pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
@@ -62,7 +62,7 @@ def test_cgemv_vector_dot_benchmark(benchmark):
     a = vector("A", shape=(n,))
     b = vector("x", shape=(n,))
 
-    out = CGemv(inplace=True)(
+    out = Gemv(inplace=True)(
         empty((1,)),
         1.0,
         a[None],
@@ -97,7 +97,7 @@ def test_cgemv_negative_strides_benchmark(
     x = vector("x", shape=(A.type.shape[-1],))
     y = vector("y", shape=(A.type.shape[0],))
 
-    out = CGemv(inplace=False)(
+    out = Gemv(inplace=False)(
         y,
         1.0,
         A,

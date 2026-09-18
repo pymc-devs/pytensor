@@ -33,7 +33,6 @@ from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
-from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -4034,7 +4033,7 @@ def test_local_sumsqr2dot():
     assert any(
         isinstance(
             n.op,
-            Dot | Dot22 | Gemv | CGemv,
+            Dot | Dot22 | Gemv,
         )
         for n in f.maker.fgraph.toposort()
     )

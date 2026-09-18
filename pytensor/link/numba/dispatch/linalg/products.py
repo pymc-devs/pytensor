@@ -1,17 +1,23 @@
 import numpy as np
+from numba.core import types
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import _copy_to_fortran_order, ensure_blas, ensure_lapack
 from scipy import linalg
 
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
+from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,
     int_ptr_to_val,
+    val_to_cptr,
+    val_to_dptr,
     val_to_int_ptr,
+    val_to_sptr,
+    val_to_zptr,
 )
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 from pytensor.tensor.linalg.products import Expm
@@ -328,3 +334,219 @@ def numba_funcify_Expm(op, node, **kwargs):
 
     cache_version = 1
     return expm, cache_version
+
+
+def _gemm(A, B, C, transa=False, transb=False, alpha=1.0, beta=0.0):
+    r"""
+    Overwrite ``C`` with :math:`\alpha \, op(A) \, op(B) + \beta C`.
+
+    Parameters
+    ----------
+    A, B, C : ndarray
+        2-d arrays of one dtype. ``C`` is the output and is returned.
+    transa, transb : bool, optional
+        Read ``A`` or ``B`` transposed. Both default to False.
+    alpha, beta : scalar, optional
+        Default 1.0 and 0.0. With ``beta == 0`` the incoming ``C`` is not read.
+
+    Returns
+    -------
+    C : ndarray
+    """
+    op_a = A.T if transa else A
+    op_b = B.T if transb else B
+    product = alpha * (op_a @ op_b)
+    # An uninitialized C may hold inf or nan bytes, which beta * C would keep.
+    C[:] = product if beta == 0 else product + beta * C
+    return C
+
+
+@numba_basic.numba_njit(inline="always")
+def _leading_dim(unit_stride, other_stride, unit_extent, other_extent, itemsize):
+    """Leading dimension BLAS can walk the matrix with, or 0 when it cannot."""
+    if unit_extent != 1 and unit_stride != itemsize:
+        return 0
+    if other_extent == 1:
+        return max(1, unit_extent)
+    if other_stride <= 0 or other_stride % itemsize != 0:
+        return 0
+    ld = other_stride // itemsize
+    return ld if ld >= unit_extent else 0
+
+
+@numba_basic.numba_njit(inline="always")
+def _column_major_ld(X):
+    return _leading_dim(X.strides[0], X.strides[1], X.shape[0], X.shape[1], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _row_major_ld(X):
+    return _leading_dim(X.strides[1], X.strides[0], X.shape[1], X.shape[0], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _blas_operand(X, trans):
+    """Buffer, transpose flag and leading dimension for one gemm operand.
+
+    A row-major buffer is its own transpose to BLAS, so its flag flips. A layout
+    with no unit-stride axis is copied to C order.
+    """
+    ld = _column_major_ld(X)
+    if ld:
+        return X, trans, np.int32(ld)
+    ld = _row_major_ld(X)
+    if ld:
+        return X, not trans, np.int32(ld)
+    return np.ascontiguousarray(X), not trans, np.int32(max(1, X.shape[1]))
+
+
+# Stack slots; a one-element array would cost a heap allocation per call
+_SCALAR_PTR_INTRINSICS = {
+    types.float32: val_to_sptr,
+    types.float64: val_to_dptr,
+    types.complex64: val_to_cptr,
+    types.complex128: val_to_zptr,
+}
+
+
+@overload(_gemm)
+def _gemm_impl(A, B, C, transa, transb, alpha, beta):
+    ensure_blas()
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
+    _check_linalg_matrix(B, ndim=2, dtype=(Float, Complex), func_name="gemm")
+    _check_linalg_matrix(C, ndim=2, dtype=(Float, Complex), func_name="gemm")
+
+    numba_gemm = _BLAS().numba_xgemm(A.dtype)
+    dtype = A.dtype
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
+
+    def impl(A, B, C, transa, transb, alpha, beta):
+        A_work, A_trans, LDA = _blas_operand(A, transa)
+        B_work, B_trans, LDB = _blas_operand(B, transb)
+
+        # M, N and K describe the logical product, so they come from the caller's
+        # transposes rather than the layout-adjusted ones.
+        M = np.int32(A.shape[1] if transa else A.shape[0])
+        K = np.int32(A.shape[0] if transa else A.shape[1])
+        N = np.int32(B.shape[0] if transb else B.shape[1])
+
+        # BLAS trusts the extents it is handed, so a mismatch here reads past the end
+        # of an operand rather than failing.
+        if (B.shape[1] if transb else B.shape[0]) != K:
+            raise ValueError("gemm: operands have mismatched contraction dimensions")
+        if C.shape[0] != M or C.shape[1] != N:
+            raise ValueError("gemm: output shape does not match the product")
+
+        # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
+        # swap places and each flag flips. A C with no unit-stride axis goes through
+        # a copy.
+        LDC = _column_major_ld(C)
+        if LDC:
+            C_work = C
+            swap = False
+        else:
+            LDC = _row_major_ld(C)
+            swap = True
+            if LDC:
+                C_work = C
+            else:
+                C_work = np.ascontiguousarray(C)
+                LDC = max(1, C.shape[1])
+
+        if swap:
+            A_work, B_work = B_work, A_work
+            A_trans, B_trans = not B_trans, not A_trans
+            LDA, LDB = LDB, LDA
+            M, N = N, M
+
+        numba_gemm(
+            val_to_int_ptr(ord("T") if A_trans else ord("N")),
+            val_to_int_ptr(ord("T") if B_trans else ord("N")),
+            val_to_int_ptr(M),
+            val_to_int_ptr(N),
+            val_to_int_ptr(K),
+            scalar_ptr(alpha),
+            A_work.ctypes,
+            val_to_int_ptr(LDA),
+            B_work.ctypes,
+            val_to_int_ptr(LDB),
+            scalar_ptr(beta),
+            C_work.ctypes,
+            val_to_int_ptr(np.int32(LDC)),
+        )
+        if C_work is not C:
+            C[:] = C_work
+        return C
+
+    return impl
+
+
+def _ger(alpha, x, y, A):
+    r"""
+    Overwrite ``A`` with :math:`\alpha \, x \, y^T + A`.
+
+    Parameters
+    ----------
+    alpha : scalar
+    x, y : ndarray
+        1-d, of lengths matching the rows and columns of ``A``.
+    A : ndarray
+        The matrix updated in place and returned.
+
+    Returns
+    -------
+    A : ndarray
+    """
+    A[:] = alpha * np.outer(x, y) + A
+    return A
+
+
+@overload(_ger)
+def _ger_impl(alpha, x, y, A):
+    ensure_blas()
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="ger")
+
+    numba_ger = _BLAS().numba_xger(A.dtype)
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[A.dtype]
+
+    def impl(alpha, x, y, A):
+        # The vectors are O(m + n) against the update's O(m n), so a strided one is
+        # copied rather than carried through its own increment.
+        x_work = x if x.flags.c_contiguous else np.ascontiguousarray(x)
+        y_work = y if y.flags.c_contiguous else np.ascontiguousarray(y)
+
+        # A row-major A is A^T to BLAS, and A^T <- alpha y x^T + A^T is the same
+        # update with the vectors swapped. A with no unit-stride axis goes through a
+        # copy.
+        LDA = _column_major_ld(A)
+        if LDA:
+            A_work = A
+            u, v = x_work, y_work
+            rows, cols = A.shape[0], A.shape[1]
+        else:
+            LDA = _row_major_ld(A)
+            if LDA:
+                A_work = A
+            else:
+                A_work = np.ascontiguousarray(A)
+                LDA = max(1, A.shape[1])
+            u, v = y_work, x_work
+            rows, cols = A.shape[1], A.shape[0]
+
+        INC = val_to_int_ptr(np.int32(1))
+        numba_ger(
+            val_to_int_ptr(np.int32(rows)),
+            val_to_int_ptr(np.int32(cols)),
+            scalar_ptr(alpha),
+            u.ctypes,
+            INC,
+            v.ctypes,
+            INC,
+            A_work.ctypes,
+            val_to_int_ptr(np.int32(LDA)),
+        )
+        if A_work is not A:
+            A[:] = A_work
+        return A
+
+    return impl

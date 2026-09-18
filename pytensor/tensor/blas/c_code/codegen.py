@@ -12,6 +12,9 @@
 # silently get stale compiled binaries.
 
 
+from pytensor.tensor.blas._core import must_initialize_y_gemv
+
+
 # ##### ####### #######
 # GEMM family (Gemm, Dot22, Dot22Scalar)
 # ##### ####### #######
@@ -462,7 +465,7 @@ _DOT22SCALAR_CASE_DOUBLE_AB_CONSTANTS = """
 
 def _assemble_gemm_call(
     *, setup_z, check_ab, broadcast_xy, ab_constants_float, ab_constants_double
-):
+) -> str:
     """Concatenate the GEMM template fragments in execution order."""
     return "".join(
         (
@@ -488,7 +491,7 @@ def _assemble_gemm_call(
     )
 
 
-def gemm_c_code(node, name, inputs, outputs, sub):
+def gemm_c_code(node, name, inputs, outputs, sub) -> str:
     r"""C code for ``Gemm``: :math:`z \leftarrow b\,z + a\,xy` (in/out-of-place)."""
     _z, _a, _x, _y, _b = inputs
     (_zout,) = outputs
@@ -506,7 +509,7 @@ def gemm_c_code(node, name, inputs, outputs, sub):
     return code % dict(_z=_z, _a=_a, _x=_x, _y=_y, _b=_b, _zout=_zout, **sub)
 
 
-def dot22_c_code(node, name, inputs, outputs, sub):
+def dot22_c_code(node, name, inputs, outputs, sub) -> str:
     r"""C code for ``Dot22``: :math:`z \leftarrow xy`, allocating a fresh output."""
     _x, _y = inputs
     (_zout,) = outputs
@@ -539,15 +542,12 @@ def dot22scalar_c_code(node, name, inputs, outputs, sub):
 # ##### ####### #######
 
 
-def gemv_c_code(node, name, inputs, outputs, sub):
-    r"""C code for ``CGemv``: :math:`z \leftarrow \beta\,y + \alpha\,Ax`.
+def gemv_c_code(node, name, inputs, outputs, sub) -> str:
+    r"""C code for ``Gemv``: :math:`z \leftarrow \beta\,y + \alpha\,Ax`.
 
     ``z`` aliases ``y`` when inplace, otherwise a fresh copy; :math:`A` is a
     matrix and :math:`x`, :math:`y` are vectors.
     """
-    # Imported lazily to avoid an import cycle (blas_c imports this module).
-    from pytensor.tensor.blas.blas_c import must_initialize_y_gemv
-
     y, alpha, A, x, beta = inputs
     (z,) = outputs
     must_initialize_y = must_initialize_y_gemv()
@@ -804,8 +804,8 @@ def gemv_c_code(node, name, inputs, outputs, sub):
 # ##### ####### #######
 
 
-def ger_c_code(node, name, inputs, outputs, sub):
-    r"""C code for ``CGer``: rank-1 update :math:`Z = A + \alpha\,x y^{\top}`."""
+def ger_c_code(node, name, inputs, outputs, sub) -> str:
+    r"""C code for ``Ger``: rank-1 update :math:`Z = A + \alpha\,x y^{\top}`."""
     A, a, x, y = inputs
     (Z,) = outputs
     fail = sub["fail"]
@@ -845,12 +845,12 @@ def ger_c_code(node, name, inputs, outputs, sub):
     else if (PyArray_DESCR({A})->type_num == NPY_FLOAT) {{ elemsize = 4;}}
     else
     {{
-        PyErr_SetString(PyExc_NotImplementedError, "complex CGer");
+        PyErr_SetString(PyExc_NotImplementedError, "complex Ger");
         {fail};
     }}
 
-    // copy A if !self.destructive or A is fully strided
-    if (!{params}->destructive
+    // copy A if !self.inplace or A is fully strided
+    if (!{params}->inplace
         || (PyArray_STRIDES({A})[0] < 0)
         || (PyArray_STRIDES({A})[1] < 0)
         || ((PyArray_STRIDES({A})[0] != elemsize)
