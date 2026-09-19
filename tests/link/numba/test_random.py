@@ -819,7 +819,7 @@ def test_rv_float_params_cast_to_float64(floatX):
     with pytensor.config.change_flags(floatX=floatX):
         rng = shared(np.random.default_rng(123))
 
-        # Opt-in: the int8 literals 0, 1 become float64 regardless of floatX.
+        # Opt-in: the integer literals 0, 1 become float64 regardless of floatX.
         assert _compiled_rv_dist_param_dtypes(
             pt.random.normal(0, 1, size=(5,), rng=rng)
         ) == ["float64", "float64"]
@@ -847,9 +847,10 @@ def test_rv_float_params_cast_to_float64(floatX):
 
 def test_rv_float_params_cast_respects_warn_float64():
     # When the user asked to be warned/raised on float64, the rewrite must not silently
-    # introduce it; the int8 params are left as-is.
+    # introduce it; the integer params are left as-is.
+    int_dtype = "int8" if pytensor.config.cast_policy == "custom" else "int64"
     with pytensor.config.change_flags(floatX="float32", warn_float64="raise"):
         rng = shared(np.random.default_rng(123))
         assert _compiled_rv_dist_param_dtypes(
             pt.random.normal(0, 1, size=(5,), rng=rng)
-        ) == ["int8", "int8"]
+        ) == [int_dtype, int_dtype]
