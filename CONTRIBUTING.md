@@ -32,3 +32,19 @@ Most of these point to PyMC documentation, but are equally relevant for PyTensor
 * [Python style guide with pre-commit](https://docs.pymc.io/en/latest/contributing/python_style.html)
 * [Running the test suite](https://docs.pymc.io/en/latest/contributing/running_the_test_suite.html)
 * [Submitting a bug report or feature request](https://github.com/pymc-devs/pytensor/issues)
+
+## Running code style checks locally
+
+PyTensor uses [pre-commit](https://pre-commit.com/) to run the same code style
+checks as CI. After installing the development dependencies, set it up once:
+
+```bash
+pre-commit install
+```
+
+This runs the checks automatically on every commit. To run them across the
+whole codebase at any time (for example, before opening or updating a PR):
+
+```bash
+pre-commit run --all-files
+```
