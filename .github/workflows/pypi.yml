@@ -129,8 +129,8 @@ jobs:
           name: wheels-${{ matrix.platform }}
           path: ./wheelhouse/*.whl
 
-  build_universal_wheel:
-    name: Build universal wheel for Pyodide
+  build_pyodide_wheel:
+    name: Build Pyodide (WASM) wheel
     needs: check_changes
     # Run if it's a release or if relevant files changed on main
     if: |
@@ -150,24 +150,34 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
-        run: pip install --upgrade setuptools numpy versioneer wheel
-
-      - name: Build universal wheel
+      - name: Get Emscripten version for pyodide-build
+        id: emscripten
         run: |
-          PYODIDE=1 python setup.py bdist_wheel --universal
+          pip install pyodide-build>=0.29.2
+          echo "version=$(pyodide config get emscripten_version)" >> $GITHUB_OUTPUT
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        with:
+          version: ${{ steps.emscripten.outputs.version }}
+
+      - name: Install project with pyodide extra
+        run: pip install -e ".[pyodide]"
+
+      - name: Build Pyodide wheel
+        run: pyodide build
 
       - name: Attest GitHub build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         # Don't attest from forks
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
-          subject-path: dist/*.whl
+          subject-path: dist/*wasm32.whl
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: universal_wheel
-          path: dist/*.whl
+          name: pyodide_wheel
+          path: dist/*wasm32.whl
 
   check_dist:
     name: Check dist
@@ -203,6 +213,25 @@ jobs:
 
       - run: pipx run twine check --strict dist/*
 
+  upload_pyodide_to_release:
+    name: Upload Pyodide wheel to GitHub Release
+    needs: [build_pyodide_wheel]
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'pymc-devs' && github.event_name == 'release' && github.event.action == 'published'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: pyodide_wheel
+          path: dist
+
+      - name: Upload Pyodide wheel to Release
+        run: gh release upload "$RELEASE_TAG" dist/*.whl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
   upload_pypi:
     name: Upload to PyPI on release
     # Use the `release` GitHub environment to protect the Trusted Publishing (OIDC)
@@ -225,11 +254,6 @@ jobs:
           pattern: wheels-*
           path: dist
           merge-multiple: true
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: universal_wheel
-          path: dist
 
       - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         # Implicitly attests that the packages were uploaded in the context of this workflow.

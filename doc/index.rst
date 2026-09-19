@@ -41,6 +41,8 @@ directory, so that when you pull updates via Git, they will be
 automatically reflected the "installed" version. For more information about
 installation and configuration, see :ref:`installing PyTensor <install>`.
 
+For browser-based Python environments (Pyodide/JupyterLite), see :ref:`the Pyodide installation section <install-pyodide>`.
+
 .. _available on PyPI: http://pypi.python.org/pypi/pytensor
 .. _Related Projects: https://github.com/pymc-devs/pytensor/wiki/Related-projects
 
