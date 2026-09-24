@@ -47,6 +47,7 @@ def _filter_mode(val):
         "C",
         "JAX",
         "NUMBA",
+        "JS",
         "PYTORCH",
         "MLX",
     ]
