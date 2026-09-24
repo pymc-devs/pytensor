@@ -117,9 +117,19 @@ nine interleaved runs were:
 
 | Model | Data rows | PyTensor JS µs/eval | TyMC µs/eval |
 | --- | ---: | ---: | ---: |
-| Eight schools | 8 | 1.32 | 0.53 |
-| Binomial GLM | 30 | 3.42 | 1.07 |
-| Poisson GLM | 4,000 | 89.55 | 42.60 |
+| Eight schools | 8 | 1.02 | 0.50 |
+| Binomial GLM | 30 | 1.98 | 0.82 |
+| Poisson GLM | 4,000 | 64.84 | 40.68 |
+
+The JS-only rewrite now moves a scalar parameter check after the likelihood
+sum, so fusion can accumulate the log density without a row-sized temporary.
+The generated loop also holds reduction accumulators in JS locals and hoists
+singleton inputs. In an interleaved A/B run on the Poisson graph, moving the
+check reduced 81.78 to 72.45 µs/eval; accumulator and input changes reduced
+71.58 to 58.56 µs/eval. TyMC remains faster: its Poisson loop has fewer
+per-row checks and branch cases. A scratch experiment removing those branches
+at the reference point helped, but is not a valid general rewrite at boundary
+values and is not part of the backend.
 
 These are single points, not sampler throughput. The negative-binomial GLM
 still needs scalar indexing, indexed updates, `gammaln`, and `psi`; radon needs

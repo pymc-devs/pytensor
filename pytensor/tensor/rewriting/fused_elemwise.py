@@ -13,6 +13,7 @@ from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
+from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar.basic import (
     AND,
     OR,
@@ -102,6 +103,29 @@ fused_elemwise_optdb.register(
     "numba",
     "js",
     position=-0.5,
+)
+
+
+@node_rewriter([CAReduce])
+def local_reduce_checked_value(fgraph, node):
+    """Let JS fuse a likelihood reduction through a scalar parameter check.
+
+    The check conditions do not depend on the reduction. Moving a check on a
+    vector after its reduction lets the elementwise producer accumulate into a
+    scalar instead of materialising the full vector first.
+    """
+    [checked] = node.inputs
+    if checked.owner is None or not isinstance(checked.owner.op, CheckAndRaise):
+        return None
+    check_node = checked.owner
+    return [check_node.op(node.op(check_node.inputs[0]), *check_node.inputs[1:])]
+
+
+fused_elemwise_optdb.register(
+    "local_reduce_checked_value",
+    dfs_rewriter(local_reduce_checked_value),
+    "js",
+    position=-1,
 )
 
 
