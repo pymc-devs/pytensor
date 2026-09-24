@@ -207,13 +207,15 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     for index, (variable, record) in enumerate(
         zip(inner.inputs, operands, strict=True)
     ):
+        lines.append(f"const d{index} = {record}.d;")
         lines.extend(stride_setup(variable, record, f"st{index}_"))
     for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True)):
         lines.append(f"{name} = slot({slot + index}, {'[]' if spec else 'shape'});")
         if spec:
-            lines.append(f"{name}.d[0] = {1 if isinstance(spec[0], AND) else 0};")
+            lines.append(f"let acc{index} = {1 if isinstance(spec[0], AND) else 0};")
 
     reads = []
+    hoisted_reads = []
     for index, (variable, record, index_record) in enumerate(
         zip(inner.inputs, operands, indexed, strict=True)
     ):
@@ -223,19 +225,29 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
             else None
         )
         offset = address(record, rank, variable.ndim, coordinate, f"st{index}_")
-        reads.append(f"const a{index} = {record}.d[{offset}];")
+        read = f"const a{index} = d{index}[{offset}];"
+        if index_record is None and all(dim == 1 for dim in variable.type.shape):
+            hoisted_reads.append(f"const a{index} = d{index}[0];")
+        else:
+            reads.append(read)
     stores = []
-    for name, expression, spec, output in zip(
-        output_names, expressions, reduced, node.outputs, strict=True
+    for index, (name, expression, spec, output) in enumerate(
+        zip(output_names, expressions, reduced, node.outputs, strict=True)
     ):
         if output.type.dtype == "float32":
             expression = f"Math.fround({expression})"
         if spec:
             operator = "&&" if isinstance(spec[0], AND) else "+"
-            stores.append(f"{name}.d[0] {operator}= {expression};")
+            stores.append(f"acc{index} {operator}= {expression};")
         else:
             stores.append(f"{name}.d[k] = {expression};")
+    lines.extend(hoisted_reads)
     lines.extend(loop_lines(rank, [*reads, *statements, *stores, "k++; "]))
+    lines.extend(
+        f"{name}.d[0] = acc{index};"
+        for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True))
+        if spec
+    )
     lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), output_names)
 

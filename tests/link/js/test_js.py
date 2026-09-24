@@ -14,6 +14,8 @@ import pytensor.tensor as pt
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.link.js.dispatch.basic import js_typify
 from pytensor.link.js.linker import JSLinker, lower
+from pytensor.raise_op import CheckAndRaise
+from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
 
 def _evaluate_in_node(tmp_path, fgraph, calls):
@@ -98,6 +100,26 @@ def test_node_fused_indexed_reduction(tmp_path):
         np.testing.assert_allclose(actual, compiled(*arrays), atol=1e-12)
 
 
+def test_reduction_fuses_through_parameter_check():
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is required for the JS linker")
+    values = pt.vector("values")
+    valid = pt.scalar("valid", dtype="bool")
+    checked = CheckAndRaise(ValueError, "valid")(pt.exp(values), valid)
+    fn = pytensor.function([values, valid], pt.sum(checked), mode="JS")
+    assert any(
+        isinstance(node.op, FusedElemwise)
+        and any(spec is not None for spec in node.op.reduced_outputs)
+        for node in fn.maker.fgraph.toposort()
+    )
+    np.testing.assert_allclose(
+        fn(np.arange(7, dtype="float64"), True), np.exp(np.arange(7)).sum()
+    )
+    with pytest.raises(RuntimeError, match="parameter check failed"):
+        fn(np.arange(7, dtype="float64"), False)
+    fn.vm.jit_fn.close()
+
+
 def test_js_linker_dynamic_shapes():
     if shutil.which("node") is None:
         pytest.skip("Node.js is required for the JS linker")
@@ -170,6 +192,11 @@ def test_pymc_logp_gradient_with_checks_and_multiple_outputs(tmp_path):
         variables,
         [logp, *pt.grad(logp, variables)],
         mode=Mode(linker="py", optimizer=get_mode("JS").optimizer),
+    )
+    assert any(
+        isinstance(node.op, FusedElemwise)
+        and sum(spec is not None for spec in node.op.reduced_outputs) >= 3
+        for node in compiled.maker.fgraph.toposort()
     )
     points = [
         [np.array(0.2), np.array(-0.1)],
