@@ -6,6 +6,7 @@ import numpy as np
 
 from pytensor.graph.basic import Constant
 from pytensor.scalar.basic import (
+    AND,
     EQ,
     GE,
     GT,
@@ -68,6 +69,7 @@ def js_scalar_mul(op, args):
 
 
 for op_type, operator in {
+    AND: "&&",
     Sub: "-",
     TrueDiv: "/",
     Pow: "**",

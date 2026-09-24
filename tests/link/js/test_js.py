@@ -23,18 +23,22 @@ def _evaluate_in_node(tmp_path, fgraph, calls):
     values = tmp_path / "inputs.json"
     program = lower(fgraph)
     source.write_text(program.source)
+
+    def serialize(array):
+        return [
+            str(value) if not np.isfinite(value) else float(value)
+            for value in array.ravel()
+        ]
+
     values.write_text(
         json.dumps(
             {
                 "calls": [
-                    [
-                        {"shape": list(x.shape), "data": x.ravel().tolist()}
-                        for x in inputs
-                    ]
+                    [{"shape": list(x.shape), "data": serialize(x)} for x in inputs]
                     for inputs in calls
                 ],
                 "constants": [
-                    {"shape": list(x.shape), "data": x.ravel().tolist()}
+                    {"shape": list(x.shape), "data": serialize(x)}
                     for x in program.constants
                 ],
             }
@@ -147,6 +151,35 @@ def test_js_typify_refuses_inexact_int64():
     value = np.array([2**53], dtype="int64")
     with pytest.raises(ValueError, match="exact Number range"):
         js_typify(value, "int64")
+
+
+def test_pymc_logp_gradient_with_checks_and_multiple_outputs(tmp_path):
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is required to test the emitted JavaScript")
+    pm = pytest.importorskip("pymc")
+    with pm.Model() as model:
+        beta0 = pm.Normal("beta0", 0, 2)
+        beta1 = pm.Normal("beta1", 0, 2)
+        probability = pm.math.sigmoid(
+            beta0 + beta1 * np.arange(12, dtype="float64") / 12
+        )
+        pm.Binomial("y", n=5, p=probability, observed=np.arange(12) % 6)
+    logp = model.logp()
+    variables = model.value_vars
+    compiled = pytensor.function(
+        variables,
+        [logp, *pt.grad(logp, variables)],
+        mode=Mode(linker="py", optimizer=get_mode("JS").optimizer),
+    )
+    points = [
+        [np.array(0.2), np.array(-0.1)],
+        [np.array(-0.8), np.array(0.7)],
+    ]
+    for point, actual in zip(
+        points, _evaluate_in_node(tmp_path, compiled.maker.fgraph, points), strict=True
+    ):
+        for value, expected in zip(actual, compiled(*point), strict=True):
+            np.testing.assert_allclose(value, expected, atol=1e-11)
 
 
 def test_pymc_slice_sampler_in_node():

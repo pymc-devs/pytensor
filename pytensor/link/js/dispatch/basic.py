@@ -10,7 +10,7 @@ from pytensor.graph.basic import Constant
 from pytensor.link.string_codegen import CODE_TOKEN, build_source_code
 
 
-SUPPORTED_DTYPES = frozenset({"float64", "int32", "int64", "bool"})
+SUPPORTED_DTYPES = frozenset({"float32", "float64", "int32", "int64", "bool"})
 
 
 def check_dtype(var):
