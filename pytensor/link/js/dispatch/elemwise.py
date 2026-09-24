@@ -3,8 +3,11 @@
 from pytensor.link.js.dispatch.basic import JSCode, check_dtype, js_funcify
 from pytensor.link.js.dispatch.scalar import scalar_program
 from pytensor.link.string_codegen import CODE_TOKEN
-from pytensor.scalar.basic import Add
+from pytensor.raise_op import CheckAndRaise
+from pytensor.scalar.basic import AND, Add
+from pytensor.tensor.basic import MakeVector, ScalarFromTensor
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.math import All
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
 
@@ -53,23 +56,22 @@ def stride_setup(variable, record, prefix):
 
 @js_funcify.register(Elemwise)
 def js_funcify_elemwise(op, node, inputs, slot):
-    if len(node.outputs) != 1:
-        raise NotImplementedError("JS Elemwise with multiple outputs")
-    check_dtype(node.outputs[0])
+    for output in node.outputs:
+        check_dtype(output)
     rank = node.outputs[0].ndim
     statements, expressions = scalar_program(
         op.scalar_op, [f"a{index}" for index in range(len(inputs))]
     )
-    if len(expressions) != 1:
-        raise NotImplementedError("JS multi-output scalar Op")
+    if len(expressions) != len(node.outputs):
+        raise ValueError("JS scalar/output count mismatch")
 
-    name = f"v{slot}"
+    names = tuple(f"v{slot + index}" for index in range(len(node.outputs)))
     lines: list[str | CODE_TOKEN] = [
-        f"let {name};",
+        *(f"let {name};" for name in names),
         "{",
         CODE_TOKEN.INDENT,
         f"const shape = {shape_expr(inputs)};",
-        f"{name} = slot({slot}, shape);",
+        *(f"{name} = slot({slot + index}, shape);" for index, name in enumerate(names)),
         "let k = 0;",
     ]
     for index, (variable, record) in enumerate(zip(node.inputs, inputs, strict=True)):
@@ -81,14 +83,15 @@ def js_funcify_elemwise(op, node, inputs, slot):
             zip(node.inputs, inputs, strict=True)
         )
     ]
-    lines.extend(
-        loop_lines(
-            rank,
-            [*reads, *statements, f"{name}.d[k++] = {expressions[0]};"],
+    stores = [
+        f"{name}.d[k] = {'Math.fround(' + expression + ')' if output.type.dtype == 'float32' else expression};"
+        for name, expression, output in zip(
+            names, expressions, node.outputs, strict=True
         )
-    )
+    ]
+    lines.extend(loop_lines(rank, [*reads, *statements, *stores, "k++; "]))
     lines.extend([CODE_TOKEN.DEDENT, "}"])
-    return JSCode(tuple(lines), (name,))
+    return JSCode(tuple(lines), names)
 
 
 @js_funcify.register(CAReduce)
@@ -179,8 +182,10 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     reduced = op.reduced_outputs or (None,) * len(node.outputs)
     if len(reduced) != len(node.outputs):
         raise NotImplementedError("JS fused reduction/output count mismatch")
-    if any(spec is not None and not isinstance(spec[0], Add) for spec in reduced):
-        raise NotImplementedError("JS fused reduction supports sum")
+    if any(
+        spec is not None and not isinstance(spec[0], (Add, AND)) for spec in reduced
+    ):
+        raise NotImplementedError("JS fused reduction supports sum or all")
     rank = inner.outputs[0].ndim
     if rank != 1:
         raise NotImplementedError("JS FusedElemwise currently supports rank one")
@@ -206,7 +211,7 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True)):
         lines.append(f"{name} = slot({slot + index}, {'[]' if spec else 'shape'});")
         if spec:
-            lines.append(f"{name}.d[0] = 0;")
+            lines.append(f"{name}.d[0] = {1 if isinstance(spec[0], AND) else 0};")
 
     reads = []
     for index, (variable, record, index_record) in enumerate(
@@ -219,12 +224,61 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
         )
         offset = address(record, rank, variable.ndim, coordinate, f"st{index}_")
         reads.append(f"const a{index} = {record}.d[{offset}];")
-    stores = [
-        f"{name}.d[0] += {expression};" if spec else f"{name}.d[k] = {expression};"
-        for name, expression, spec in zip(
-            output_names, expressions, reduced, strict=True
-        )
-    ]
+    stores = []
+    for name, expression, spec, output in zip(
+        output_names, expressions, reduced, node.outputs, strict=True
+    ):
+        if output.type.dtype == "float32":
+            expression = f"Math.fround({expression})"
+        if spec:
+            operator = "&&" if isinstance(spec[0], AND) else "+"
+            stores.append(f"{name}.d[0] {operator}= {expression};")
+        else:
+            stores.append(f"{name}.d[k] = {expression};")
     lines.extend(loop_lines(rank, [*reads, *statements, *stores, "k++; "]))
     lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), output_names)
+
+
+@js_funcify.register(MakeVector)
+def js_funcify_make_vector(op, node, inputs, slot):
+    name = f"v{slot}"
+    lines = [
+        f"let {name};",
+        "{",
+        CODE_TOKEN.INDENT,
+        f"{name} = slot({slot}, [{len(inputs)}]);",
+    ]
+    lines.extend(f"{name}.d[{i}] = {value}.d[0];" for i, value in enumerate(inputs))
+    lines.extend([CODE_TOKEN.DEDENT, "}"])
+    return JSCode(tuple(lines), (name,))
+
+
+@js_funcify.register(All)
+def js_funcify_all(op, node, inputs, slot):
+    if op.axis is not None:
+        raise NotImplementedError("JS All only supports all axes")
+    name = f"v{slot}"
+    source = inputs[0]
+    return JSCode(
+        (
+            f"const {name} = slot({slot}, []);",
+            f"{name}.d[0] = 1;",
+            f"for (let j = 0; j < {source}.d.length; j++) {name}.d[0] &&= {source}.d[j];",
+        ),
+        (name,),
+    )
+
+
+@js_funcify.register(ScalarFromTensor)
+def js_funcify_scalar_from_tensor(op, node, inputs, slot):
+    return JSCode((), (inputs[0],))
+
+
+@js_funcify.register(CheckAndRaise)
+def js_funcify_check_and_raise(op, node, inputs, slot):
+    checks = " && ".join(f"{value}.d[0]" for value in inputs[1:])
+    return JSCode(
+        (f"if (!({checks})) throw Error('PyTensor parameter check failed');",),
+        (inputs[0],),
+    )

@@ -39,10 +39,12 @@ loaded inputs run repeatedly inside V8, excluding Python and transport.
 Call `fn.vm.jit_fn.close()` when finished to release the process promptly.
 
 The supported set is intentionally small: float64 elementary arithmetic and
-several transcendental scalar Ops, `Composite`, `DimShuffle`, sum reductions,
-and rank-one fused elementwise graphs with optional integer-vector gather and
-one or more sum outputs. Int32/int64/bool inputs are used for indexing and
-conditions; int64 values outside JavaScript's exact integer range are refused.
+several transcendental scalar Ops, `Composite`, `DimShuffle`, sum and boolean
+all reductions, and rank-one fused elementwise graphs with optional
+integer-vector gather and multiple outputs. Simple PyMC parameter checks,
+boolean vectors, and float32 constants/intermediates also lower. Int32/int64/bool
+inputs are used for indexing and conditions; int64 values outside JavaScript's
+exact integer range are refused.
 Unsupported Ops and scalar casts raise `NotImplementedError` during lowering.
 This backend is not yet a replacement for the C or Numba linker: it lacks
 general linear algebra, arbitrary indexed writes, `Scan`, many special
@@ -103,6 +105,25 @@ runtime, had medians of roughly 0.17, 4.38, and 41.54 µs respectively. Those
 are **in-engine** comparisons, not Python-call comparisons, and the two
 projects still generate different loop bodies. The stride change brought the
 larger examples close to TyMC; it did not erase the small-model difference.
+
+Three PyMC benchmark-suite twins were also checked at their stored reference
+points (2026-09-24, Ryzen 5 2400G, Node 22.21.1). Both paths were compiled and
+warmed before timing. The PyTensor JS timer calls the generated logp+gradient
+function directly inside Node; the TyMC timer calls `compiled.logp_and_grad`
+inside the same Node runtime. Neither timer includes model building,
+compilation, Python transport, or diagnostics. Log density and every gradient
+component matched the PyMC references to 1e-9 relative tolerance. Medians of
+nine interleaved runs were:
+
+| Model | Data rows | PyTensor JS µs/eval | TyMC µs/eval |
+| --- | ---: | ---: | ---: |
+| Eight schools | 8 | 1.32 | 0.53 |
+| Binomial GLM | 30 | 3.42 | 1.07 |
+| Poisson GLM | 4,000 | 89.55 | 42.60 |
+
+These are single points, not sampler throughput. The negative-binomial GLM
+still needs scalar indexing, indexed updates, `gammaln`, and `psi`; radon needs
+`Alloc` and additional tensor support. They were not timed.
 
 `bench_bridge.py` times the public `pytensor.function` call separately. In one
 run with observed data embedded as constants, warm calls took about 76, 106,
