@@ -37,8 +37,7 @@ from pytensor.tensor.variable import TensorVariable
 
 
 # CAReduce scalar ops whose reduction the Numba backend can fuse into the loop
-# (those for which the codegen has an in-place accumulation: see
-# ``accumulate_into_slice`` in the numba elemwise dispatch).
+# (those for which the Numba codegen has an in-place accumulation).
 _REDUCE_SCALAR_OPS = (Add, Mul, Maximum, Minimum, AND, OR, XOR)
 
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import base64
+import operator
 import pickle
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import numba
@@ -15,12 +16,9 @@ from numba.core.cgutils import get_item_pointer2
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
-from pytensor.link.numba.cache import compile_numba_function_src
-from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch._llvmlite_self_ref import (
     ensure_self_ref_metadata_support,
 )
-from pytensor.link.numba.dispatch.string_codegen import CODE_TOKEN, build_source_code
 
 
 ensure_self_ref_metadata_support()
@@ -28,81 +26,6 @@ ensure_self_ref_metadata_support()
 
 def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
-
-
-def store_core_outputs(
-    core_op_fn: Callable,
-    nin: int,
-    nout: int,
-    accum_fns: dict[int, Callable[[str, str], Sequence[str | CODE_TOKEN]]]
-    | None = None,
-    scalar_outputs: tuple[int, ...] = (),
-) -> Callable:
-    """Create a Numba function that wraps a core function and stores its vectorized outputs.
-
-    If ``core_op_fn`` has a ``handles_out=True`` attribute, it is assumed to
-    already accept ``(inputs..., outputs...) -> None`` and is returned as-is.
-
-    @njit
-    def store_core_outputs(i0, i1, ..., in, o0, o1, ..., on):
-        to0, to1, ..., ton = core_op_fn(i0, i1, ..., in)
-        o0[...] = to0      # direct outputs
-        o1[...] += to1     # accumulating outputs (reduce / indexed-inc)
-        ...
-
-    ``accum_fns`` maps an output index to a callable ``(out_sym, inner_sym) ->
-    lines`` producing the in-place accumulation code for that output (e.g.
-    ``["o1[...] += t1"]`` for a sum reduction, or the multi-line conditional for
-    a max reduction).  Outputs absent from ``accum_fns`` are stored with ``=``.
-    Both reductions and indexed ``inc`` writes go through this mechanism.
-    ``scalar_outputs`` are omitted from the output arguments and returned as
-    scalar values for accumulation by the vectorized loop.
-    """
-    if getattr(core_op_fn, "handles_out", False):
-        if scalar_outputs:
-            raise NotImplementedError("An output-handling core cannot return scalars")
-        return core_op_fn
-
-    accum_fns = accum_fns or {}
-
-    inputs = [f"i{i}" for i in range(nin)]
-    stored_outputs = tuple(i for i in range(nout) if i not in scalar_outputs)
-    outputs = [f"o{i}" for i in stored_outputs]
-    inner_outputs = [f"to{i}" for i in range(nout)]
-
-    inp_signature = ", ".join(inputs)
-    signature = ", ".join([*inputs, *outputs])
-    inner_out_signature = ", ".join(inner_outputs)
-
-    code: list[str | CODE_TOKEN] = [
-        f"def store_core_outputs({signature}):",
-        CODE_TOKEN.INDENT,
-        f"{inner_out_signature} = core_op_fn({inp_signature})",
-    ]
-    for i in stored_outputs:
-        output, inner_output = f"o{i}", f"to{i}"
-        if i in accum_fns:
-            code.extend(accum_fns[i](output, inner_output))
-        else:
-            code.append(f"{output}[...] = {inner_output}")
-    if scalar_outputs:
-        returned = tuple(f"to{i}" for i in scalar_outputs)
-        code.append(
-            f"return {returned[0]}"
-            if len(returned) == 1
-            else f"return {', '.join(returned)}"
-        )
-    code.append(CODE_TOKEN.DEDENT)
-
-    func_src = build_source_code(code)
-    global_env = {"core_op_fn": core_op_fn}
-
-    func = compile_numba_function_src(
-        func_src,
-        "store_core_outputs",
-        {**globals(), **global_env},
-    )
-    return numba_basic.numba_njit(func)
 
 
 _jit_options = {
@@ -481,13 +404,119 @@ def make_outputs(
     return output_arrays, output_arry_types
 
 
-class _ScalarReductionSink:
+class _OutputSlice:
+    """Emit stores for one output of the vectorized loop.
+
+    ``__init__`` selects this iteration's output cell or core slice. ``write``
+    emits ``out[...] = value`` or an in-place accumulation after the core call.
+    ``finish`` commits a scalar-core write to the output buffer with alias
+    metadata. Array-core writes reach the output directly. A 0-d view uses a
+    stack slot so a core that accepts an output can also read and update it.
+    The view has no MemInfo and is used only during that iteration. This is a
+    code-generation helper, not a runtime object.
+    """
+
+    def __init__(
+        self,
+        typingctx,
+        context,
+        builder,
+        output_type,
+        output_ptr,
+        core_shape,
+        core_strides,
+        size_type,
+        alias_scope,
+        noalias,
+        update_mode,
+    ):
+        self.typingctx = typingctx
+        self.context = context
+        self.builder = builder
+        self.output_ptr = output_ptr
+        self.alias_scope = alias_scope
+        self.noalias = noalias
+        self.update_mode = update_mode
+
+        core_ndim = len(core_shape)
+        view_type = types.Array(
+            dtype=output_type.dtype, ndim=core_ndim, layout=output_type.layout
+        )
+        self.view_type = view_type
+        view = context.make_array(view_type)(context, builder)
+        if core_ndim == 0:
+            self.scratch = cgutils.alloca_once(builder, output_ptr.type.pointee)
+            initial = builder.load(output_ptr)
+            initial.set_metadata("alias.scope", alias_scope)
+            initial.set_metadata("noalias", noalias)
+            builder.store(initial, self.scratch)
+            view_ptr = self.scratch
+        else:
+            self.scratch = None
+            view_ptr = output_ptr
+
+        itemsize = context.get_abi_sizeof(context.get_data_type(output_type.dtype))
+        context.populate_array(
+            view,
+            data=builder.bitcast(view_ptr, view.data.type),
+            shape=cgutils.pack_array(builder, core_shape, ty=size_type),
+            strides=cgutils.pack_array(builder, core_strides, ty=size_type),
+            itemsize=context.get_constant(types.intp, itemsize),
+            meminfo=None,
+        )
+        self.value = view._getvalue()
+
+    def write(self, value, value_type):
+        """Use Numba's typed array lowering to store or accumulate a core result."""
+        view_type = self.view_type
+        mode = self.update_mode
+        if mode is None:
+            op = operator.setitem
+            arg_types = (view_type, types.ellipsis, value_type)
+            args = (
+                self.value,
+                ir.Constant(self.context.get_value_type(types.ellipsis), None),
+                value,
+            )
+        elif mode in {"Maximum", "Minimum"}:
+            op = np.maximum if mode == "Maximum" else np.minimum
+            arg_types = (view_type, value_type, view_type)
+            args = (self.value, value, self.value)
+        else:
+            op = {
+                "Add": operator.iadd,
+                "Mul": operator.imul,
+                "AND": operator.iand,
+                "OR": operator.ior,
+                "XOR": operator.ixor,
+            }[mode]
+            arg_types = (view_type, value_type)
+            args = (self.value, value)
+
+        fn_type = self.typingctx.resolve_value_type(op)
+        call_sig = fn_type.get_call_type(self.typingctx, arg_types, {})
+        result = self.context.get_function(fn_type, call_sig)(self.builder, args)
+        if mode is not None:
+            # In-place lowerings return an array value; its result reference is
+            # no longer needed after the output view has been updated.
+            self.context.nrt.decref(self.builder, call_sig.return_type, result)
+
+    def finish(self):
+        """Copy a scalar core's scratch value to the output after the core call."""
+        if self.scratch is not None:
+            value = self.builder.load(self.scratch)
+            store = self.builder.store(value, self.output_ptr)
+            store.set_metadata("alias.scope", self.alias_scope)
+            store.set_metadata("noalias", self.noalias)
+
+
+class _ScalarReductionAccumulator:
     """Emit a one-cell reduction into the vectorized loop.
 
     This is a Python helper used while Numba compiles the intrinsic, not an
-    object created for each element at runtime. One sink is made per eligible
-    output. ``__init__`` emits the identity initialization before the loop,
-    ``accumulate`` emits the loop-body update, and ``finish`` emits the final
+    object created for each element at runtime. One accumulator is made per
+    eligible output. ``__init__`` emits the identity initialization before the loop,
+    ``write`` emits the loop-body update, and ``finish`` emits the final
     output store after the loop. Conceptually, the generated code is::
 
         acc = identity
@@ -528,7 +557,7 @@ class _ScalarReductionSink:
         )
         builder.store(context.get_constant(self.dtype, identity), self.accumulator)
 
-    def accumulate(self, value, value_type):
+    def write(self, value, value_type):
         """Emit one loop-body update from a scalar core result."""
         value = self.context.cast(self.builder, value, value_type, self.dtype)
         current = self.builder.load(self.accumulator)
@@ -548,12 +577,88 @@ class _ScalarReductionSink:
         store.set_metadata("noalias", self.noalias)
 
 
+class _CoreCall:
+    """Emit one core call and route its results to the output handlers.
+
+    This is a code-generation helper, so its methods run once while Numba
+    builds the loop body. A core either writes into the supplied output views
+    or returns values. For returned values, ``emit`` calls each handler's
+    ``write`` method and releases the core's owned array results after their
+    data has been stored. ``emit`` then commits any 0-d output scratch slots.
+    The handlers emit LLVM into the surrounding loop.
+    """
+
+    def __init__(
+        self,
+        context,
+        builder,
+        core_func,
+        core_signature,
+        handles_out,
+        output_handlers,
+    ):
+        self.context = context
+        self.builder = builder
+        self.core_signature = core_signature
+        self.handles_out = handles_out
+        self.codegen = context.get_function(core_func, core_signature)
+        self.output_handlers = output_handlers
+        if handles_out:
+            if any(
+                isinstance(out, _ScalarReductionAccumulator) for out in output_handlers
+            ):
+                raise TypingError("An output-handling core cannot return scalars")
+        else:
+            return_type = core_signature.return_type
+            if isinstance(return_type, types.List | types.ListType):
+                raise TypingError(
+                    "Vectorized cores must return a tuple of outputs instead of a list"
+                )
+            self.value_types = (
+                return_type.types
+                if isinstance(return_type, types.BaseTuple)
+                else (return_type,)
+            )
+            if len(self.value_types) != len(output_handlers):
+                raise TypingError("Core result count does not match vectorized outputs")
+
+    def emit(self, constant_inputs, input_vals):
+        """Emit the core call and any output writes in the current iteration."""
+        signature = self.core_signature
+        args = [*constant_inputs, *input_vals]
+        if self.handles_out:
+            args.extend(out.value for out in self.output_handlers)
+        for i, arg_type in enumerate(signature.args):
+            if isinstance(arg_type, types.StarArgTuple | types.StarArgUniTuple):
+                args[i:] = [self.context.make_tuple(self.builder, arg_type, args[i:])]
+                break
+
+        result = self.codegen(self.builder, args)
+        if not self.handles_out:
+            return_type = signature.return_type
+            values = (
+                cgutils.unpack_tuple(self.builder, result, len(self.value_types))
+                if isinstance(return_type, types.BaseTuple)
+                else (result,)
+            )
+            for writer, value, value_type in zip(
+                self.output_handlers, values, self.value_types, strict=True
+            ):
+                writer.write(value, value_type)
+            self.context.nrt.decref(self.builder, return_type, result)
+
+        for output in self.output_handlers:
+            if isinstance(output, _OutputSlice):
+                output.finish()
+
+
 def make_loop_call(
     typingctx,
     context: numba.core.base.BaseContext,
     builder: ir.IRBuilder,
     core_func: Any,
     core_signature: types.FunctionType,
+    core_handles_out: bool,
     iter_shape: tuple[ir.Instruction, ...],
     constant_inputs: tuple[ir.Instruction, ...],
     inputs: tuple[ir.Instruction, ...],
@@ -571,6 +676,7 @@ def make_loop_call(
     output_write_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
     inplace: tuple[tuple[int, int], ...] = (),
     scalar_reductions: dict[int, tuple[str, Any]] | None = None,
+    output_updates: dict[int, str] | None = None,
 ):
     safe = (False, False)
 
@@ -604,10 +710,10 @@ def make_loop_call(
 
     zero = context.get_constant(types.intp, 0)
 
-    # These sinks carry the reduced values in scalar slots while the common
+    # These accumulators carry reduced values in scalar slots while the common
     # loop below still handles input indexing and alias metadata.
-    scalar_sinks = {
-        i: _ScalarReductionSink(
+    scalar_accumulators = {
+        i: _ScalarReductionAccumulator(
             context,
             builder,
             outputs[i],
@@ -809,12 +915,11 @@ def make_loop_call(
         input_vals.append(read_val)
 
     # Create output slices to pass to inner func
-    output_slices = []
-    scratch_outputs = []
+    output_slices = {}
     for output_i, (out, out_type, out_bc) in enumerate(
         zip(outputs, output_types, output_bc, strict=True)
     ):
-        if output_i in scalar_sinks:
+        if output_i in scalar_accumulators:
             continue
         core_ndim = out_type.ndim - len(out_bc)
         size_type = out.shape.type.element  # pyright: ignore[reportAttributeAccessIssue]
@@ -868,78 +973,45 @@ def make_loop_call(
             write_idx,
             *safe,
         )
-        write_array_type = types.Array(
-            dtype=out_type.dtype, ndim=effective_core_ndim, layout=out_type.layout
-        )
-        write_array = context.make_array(write_array_type)(context, builder)
-        if effective_core_ndim == 0:
-            # Redirect the 0-d output slice through a stack slot so the store
-            # into the real output buffer happens below, after the core call,
-            # where it can carry the alias scope metadata. The slot is
-            # initialized from the output buffer to preserve read-modify-write
-            # semantics (`o += t` in `store_core_outputs`); SROA collapses the
-            # slot after inlining.
-            scratch = cgutils.alloca_once(builder, write_ptr.type.pointee)
-            init_val = builder.load(write_ptr)
-            init_val.set_metadata("alias.scope", out_alias_sets[output_i])
-            init_val.set_metadata("noalias", out_noalias_sets[output_i])
-            builder.store(init_val, scratch)
-            scratch_outputs.append((scratch, write_ptr, output_i))
-            write_ptr = scratch
         core_shape = (
             output_shape[-effective_core_ndim:] if effective_core_ndim > 0 else []
         )
         core_strides = (
             output_strides[-effective_core_ndim:] if effective_core_ndim > 0 else []
         )
-        itemsize = context.get_abi_sizeof(context.get_data_type(out_type.dtype))
-        context.populate_array(
-            write_array,
-            # TODO whey do we need to bitcast?
-            data=builder.bitcast(write_ptr, write_array.data.type),
-            shape=cgutils.pack_array(builder, core_shape, ty=size_type),
-            strides=cgutils.pack_array(builder, core_strides, ty=size_type),
-            itemsize=context.get_constant(types.intp, itemsize),
-            # TODO what is meminfo about?
-            meminfo=None,
+        output_slices[output_i] = _OutputSlice(
+            typingctx,
+            context,
+            builder,
+            out_type,
+            write_ptr,
+            core_shape,
+            core_strides,
+            size_type,
+            out_alias_sets[output_i],
+            out_noalias_sets[output_i],
+            output_updates.get(output_i) if output_updates else None,
         )
-        write_val = write_array._getvalue()
-        output_slices.append(write_val)
 
-    inner_codegen = context.get_function(core_func, core_signature)
-
-    if isinstance(core_signature.args[0], types.StarArgTuple | types.StarArgUniTuple):
-        input_vals = [context.make_tuple(builder, core_signature.args[0], input_vals)]
-
-    if not scalar_sinks:
-        inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
-    else:
-        result = inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
-        return_type = core_signature.return_type
-        if isinstance(return_type, types.BaseTuple):
-            values = cgutils.unpack_tuple(builder, result, len(return_type))
-            value_types = return_type.types
-        else:
-            values = [result]
-            value_types = [return_type]
-
-        for (_, sink), value, value_type in zip(
-            scalar_sinks.items(), values, value_types, strict=True
-        ):
-            sink.accumulate(value, value_type)
-
-    for scratch, write_ptr, output_i in scratch_outputs:
-        out_val = builder.load(scratch)
-        store = builder.store(out_val, write_ptr)
-        store.set_metadata("alias.scope", out_alias_sets[output_i])
-        store.set_metadata("noalias", out_noalias_sets[output_i])
+    output_handlers = [
+        scalar_accumulators[i] if i in scalar_accumulators else output_slices[i]
+        for i in range(n_outputs)
+    ]
+    _CoreCall(
+        context,
+        builder,
+        core_func,
+        core_signature,
+        core_handles_out,
+        output_handlers,
+    ).emit(constant_inputs, input_vals)
 
     # Close the loops
     for loop in loop_stack[::-1]:
         loop.__exit__(None, None, None)
 
-    for sink in scalar_sinks.values():
-        sink.finish()
+    for accumulator in scalar_accumulators.values():
+        accumulator.finish()
 
 
 def _supports_scalar_reduction(op_name: str, dtype: Any) -> bool:
@@ -1002,6 +1074,7 @@ def _vectorized(
     indexed_inputs,
     indexed_outputs,
     reduce_outputs,
+    core_handles_out,
 ):
     """Vectorized intrinsic with optional indirect indexing for reads and writes.
 
@@ -1014,16 +1087,19 @@ def _vectorized(
 
     ``indexed_outputs`` has one entry per index array (same length as
     ``indexed_inputs``).  ``None`` means that index is not used for updates.
-    ``((out_0, out_1), mode)`` means that index updates outputs out_0 and
-    out_1 with *mode* ``"set"`` or ``"inc"``.
+    ``((out_0, out_1), source_axis, mode)`` means that index updates outputs
+    out_0 and out_1 with *mode* ``"set"`` or ``"inc"``.
 
-    ``reduce_outputs`` lists ``(output_idx, identity)`` pairs for reduction
-    outputs. These outputs carry ``bc=True`` on reduced axes and are initialized
-    from their identities. Eligible one-cell reductions add a third reducer
-    name: their loop-carried scalar sinks replace the buffer initialization and
-    per-iteration array update.
+    ``reduce_outputs`` lists ``(output_idx, identity, reducer,
+    use_scalar_accumulator)`` entries. Reduction outputs carry ``bc=True`` on
+    reduced axes. Eligible one-cell reductions use a loop-carried scalar
+    accumulator; the others initialize an output buffer and update one cell
+    per iteration.
 
     For non-indexed/non-reducing calls, these are ``()``.
+
+    ``core_handles_out`` selects between a core that writes to supplied output
+    views and a core that returns values for the loop to store or accumulate.
     """
     arg_types = [
         core_func,
@@ -1039,6 +1115,7 @@ def _vectorized(
         indexed_inputs,
         indexed_outputs,
         reduce_outputs,
+        core_handles_out,
     ]
 
     input_bc_patterns = _decode_literal(input_bc_patterns, "input_bc_patterns")
@@ -1048,12 +1125,23 @@ def _vectorized(
     reduce_entries = _decode_literal(reduce_outputs, "reduce_outputs")
     reduce_identities = {entry[0]: entry[1] for entry in reduce_entries}
     scalar_reductions = {
-        entry[0]: (entry[2], entry[1]) for entry in reduce_entries if len(entry) > 2
+        entry[0]: (entry[2], entry[1])
+        for entry in reduce_entries
+        if len(entry) > 3 and entry[3]
     }
+    output_updates = {entry[0]: entry[2] for entry in reduce_entries if len(entry) > 2}
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
     indexed_outputs = _decode_literal(indexed_outputs, "indexed_outputs")
+
+    if not isinstance(core_handles_out, types.Literal):
+        raise TypingError("core_handles_out must be literal")
+    core_handles_out = core_handles_out.literal_value
+    for entry in indexed_outputs:
+        if entry is not None and entry[2] == "inc":
+            for out_idx in entry[0]:
+                output_updates[out_idx] = "Add"
 
     if not isinstance(allow_core_scalar, types.Literal):
         raise TypingError("allow_core_scalar must be literal.")
@@ -1212,6 +1300,7 @@ def _vectorized(
             _,
             _,
             _,
+            _,
         ] = args
 
         constant_inputs = cgutils.unpack_tuple(builder, constant_inputs)
@@ -1349,19 +1438,10 @@ def _vectorized(
             reduce_identities=remaining_reduce_identities or None,
         )
 
-        core_signature = typingctx.resolve_function_type(
-            core_func,
-            [
-                *constant_inputs_types,
-                *core_input_types,
-                *(
-                    out_type
-                    for i, out_type in enumerate(core_out_types)
-                    if i not in scalar_reductions
-                ),
-            ],
-            {},
-        )
+        core_arg_types = [*constant_inputs_types, *core_input_types]
+        if core_handles_out:
+            core_arg_types.extend(core_out_types)
+        core_signature = typingctx.resolve_function_type(core_func, core_arg_types, {})
 
         make_loop_call(
             typingctx,
@@ -1369,6 +1449,7 @@ def _vectorized(
             builder,
             core_func,
             core_signature,
+            core_handles_out,
             iter_shape,
             constant_inputs,
             inputs,
@@ -1386,6 +1467,7 @@ def _vectorized(
             output_write_spec=output_write_spec,
             inplace=inplace_pattern,
             scalar_reductions=scalar_reductions or None,
+            output_updates=output_updates or None,
         )
 
         return _codegen_return_outputs(
