@@ -36,6 +36,7 @@ def store_core_outputs(
     nout: int,
     accum_fns: dict[int, Callable[[str, str], Sequence[str | CODE_TOKEN]]]
     | None = None,
+    scalar_outputs: tuple[int, ...] = (),
 ) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
@@ -54,32 +55,43 @@ def store_core_outputs(
     ``["o1[...] += t1"]`` for a sum reduction, or the multi-line conditional for
     a max reduction).  Outputs absent from ``accum_fns`` are stored with ``=``.
     Both reductions and indexed ``inc`` writes go through this mechanism.
+    ``scalar_outputs`` are omitted from the output arguments and returned as
+    scalar values for accumulation by the vectorized loop.
     """
     if getattr(core_op_fn, "handles_out", False):
+        if scalar_outputs:
+            raise NotImplementedError("An output-handling core cannot return scalars")
         return core_op_fn
 
     accum_fns = accum_fns or {}
 
     inputs = [f"i{i}" for i in range(nin)]
-    outputs = [f"o{i}" for i in range(nout)]
-    inner_outputs = [f"t{output}" for output in outputs]
+    stored_outputs = tuple(i for i in range(nout) if i not in scalar_outputs)
+    outputs = [f"o{i}" for i in stored_outputs]
+    inner_outputs = [f"to{i}" for i in range(nout)]
 
     inp_signature = ", ".join(inputs)
-    out_signature = ", ".join(outputs)
+    signature = ", ".join([*inputs, *outputs])
     inner_out_signature = ", ".join(inner_outputs)
 
     code: list[str | CODE_TOKEN] = [
-        f"def store_core_outputs({inp_signature}, {out_signature}):",
+        f"def store_core_outputs({signature}):",
         CODE_TOKEN.INDENT,
         f"{inner_out_signature} = core_op_fn({inp_signature})",
     ]
-    for i, (output, inner_output) in enumerate(
-        zip(outputs, inner_outputs, strict=True)
-    ):
+    for i in stored_outputs:
+        output, inner_output = f"o{i}", f"to{i}"
         if i in accum_fns:
             code.extend(accum_fns[i](output, inner_output))
         else:
             code.append(f"{output}[...] = {inner_output}")
+    if scalar_outputs:
+        returned = tuple(f"to{i}" for i in scalar_outputs)
+        code.append(
+            f"return {returned[0]}"
+            if len(returned) == 1
+            else f"return {', '.join(returned)}"
+        )
     code.append(CODE_TOKEN.DEDENT)
 
     func_src = build_source_code(code)
@@ -469,6 +481,73 @@ def make_outputs(
     return output_arrays, output_arry_types
 
 
+class _ScalarReductionSink:
+    """Emit a one-cell reduction into the vectorized loop.
+
+    This is a Python helper used while Numba compiles the intrinsic, not an
+    object created for each element at runtime. One sink is made per eligible
+    output. ``__init__`` emits the identity initialization before the loop,
+    ``accumulate`` emits the loop-body update, and ``finish`` emits the final
+    output store after the loop. Conceptually, the generated code is::
+
+        acc = identity
+        for index in fused_iteration:
+            value = core_scalar(inputs_at(index))
+            acc = reduce(acc, cast(value, accumulator_dtype))
+        output.data[0] = acc
+
+    The accumulator is an LLVM stack slot, which optimization can promote to
+    a loop-carried scalar value. It does not own an NRT allocation.
+    """
+
+    def __init__(
+        self,
+        context,
+        builder,
+        output,
+        output_type,
+        op_name,
+        identity,
+        alias_scope,
+        noalias,
+    ):
+        """Emit the identity initialization before the fused loop."""
+        self.context = context
+        self.builder = builder
+        self.output = output
+        self.dtype = output_type.dtype
+        self.op_name = op_name
+        self.alias_scope = alias_scope
+        self.noalias = noalias
+        if not _supports_scalar_reduction(op_name, self.dtype):
+            raise NotImplementedError(
+                f"Scalar reduction codegen does not support {op_name} for {self.dtype}"
+            )
+        self.accumulator = cgutils.alloca_once(
+            builder, context.get_value_type(self.dtype)
+        )
+        builder.store(context.get_constant(self.dtype, identity), self.accumulator)
+
+    def accumulate(self, value, value_type):
+        """Emit one loop-body update from a scalar core result."""
+        value = self.context.cast(self.builder, value, value_type, self.dtype)
+        current = self.builder.load(self.accumulator)
+        updated = _combine_scalar_reduction(
+            self.builder, self.op_name, self.dtype, current, value
+        )
+        self.builder.store(updated, self.accumulator)
+
+    def finish(self):
+        """Emit the single post-loop store into the output array."""
+        value = self.builder.load(self.accumulator)
+        data_value = self.context.data_model_manager[self.dtype].as_data(
+            self.builder, value
+        )
+        store = self.builder.store(data_value, self.output.data)
+        store.set_metadata("alias.scope", self.alias_scope)
+        store.set_metadata("noalias", self.noalias)
+
+
 def make_loop_call(
     typingctx,
     context: numba.core.base.BaseContext,
@@ -491,6 +570,7 @@ def make_loop_call(
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
     output_write_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
     inplace: tuple[tuple[int, int], ...] = (),
+    scalar_reductions: dict[int, tuple[str, Any]] | None = None,
 ):
     safe = (False, False)
 
@@ -524,6 +604,22 @@ def make_loop_call(
 
     zero = context.get_constant(types.intp, 0)
 
+    # These sinks carry the reduced values in scalar slots while the common
+    # loop below still handles input indexing and alias metadata.
+    scalar_sinks = {
+        i: _ScalarReductionSink(
+            context,
+            builder,
+            outputs[i],
+            output_types[i],
+            op_name,
+            identity,
+            out_alias_sets[i],
+            out_noalias_sets[i],
+        )
+        for i, (op_name, identity) in (scalar_reductions or {}).items()
+    }
+
     def _wrap_negative_index(idx_val, dim_size, signed):
         """Wrap a negative index by adding the dimension size: idx + size if idx < 0.
 
@@ -536,10 +632,9 @@ def make_loop_call(
         wrapped = builder.add(idx_val, dim_size)
         return builder.select(is_neg, wrapped, idx_val)
 
-    # Open one loop per iteration dimension.  Reduction outputs need no special
-    # setup here: they carry ``bc=True`` on the reduced axes, so the write_idx
-    # logic below points every iteration over a reduced axis at memory index 0
-    # (the same cell), and the accumulating store reduces into it.
+    # Open one loop per iteration dimension. In the array-output path,
+    # reduction outputs carry ``bc=True`` on reduced axes, so all iterations
+    # update the same output cell.
     loop_stack = []
     loops = []
     for length in iter_shape:
@@ -719,6 +814,8 @@ def make_loop_call(
     for output_i, (out, out_type, out_bc) in enumerate(
         zip(outputs, output_types, output_bc, strict=True)
     ):
+        if output_i in scalar_sinks:
+            continue
         core_ndim = out_type.ndim - len(out_bc)
         size_type = out.shape.type.element  # pyright: ignore[reportAttributeAccessIssue]
         output_shape = cgutils.unpack_tuple(builder, out.shape)  # pyright: ignore[reportAttributeAccessIssue]
@@ -814,7 +911,22 @@ def make_loop_call(
     if isinstance(core_signature.args[0], types.StarArgTuple | types.StarArgUniTuple):
         input_vals = [context.make_tuple(builder, core_signature.args[0], input_vals)]
 
-    inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
+    if not scalar_sinks:
+        inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
+    else:
+        result = inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
+        return_type = core_signature.return_type
+        if isinstance(return_type, types.BaseTuple):
+            values = cgutils.unpack_tuple(builder, result, len(return_type))
+            value_types = return_type.types
+        else:
+            values = [result]
+            value_types = [return_type]
+
+        for (_, sink), value, value_type in zip(
+            scalar_sinks.items(), values, value_types, strict=True
+        ):
+            sink.accumulate(value, value_type)
 
     for scratch, write_ptr, output_i in scratch_outputs:
         out_val = builder.load(scratch)
@@ -825,6 +937,53 @@ def make_loop_call(
     # Close the loops
     for loop in loop_stack[::-1]:
         loop.__exit__(None, None, None)
+
+    for sink in scalar_sinks.values():
+        sink.finish()
+
+
+def _supports_scalar_reduction(op_name: str, dtype: Any) -> bool:
+    if op_name in {"AND", "OR", "XOR"}:
+        return isinstance(dtype, types.Integer | types.Boolean)
+    if op_name in {"Add", "Mul"}:
+        return isinstance(dtype, types.Integer | types.Float)
+    if op_name in {"Maximum", "Minimum"}:
+        return isinstance(dtype, types.Integer | types.Float)
+    return False
+
+
+def _combine_scalar_reduction(builder, op_name, dtype, left, right):
+    if op_name == "Add":
+        return (
+            builder.fadd(left, right)
+            if isinstance(dtype, types.Float)
+            else builder.add(left, right)
+        )
+    if op_name == "Mul":
+        return (
+            builder.fmul(left, right)
+            if isinstance(dtype, types.Float)
+            else builder.mul(left, right)
+        )
+    if op_name == "AND":
+        return builder.and_(left, right)
+    if op_name == "OR":
+        return builder.or_(left, right)
+    if op_name == "XOR":
+        return builder.xor(left, right)
+
+    if isinstance(dtype, types.Float):
+        comparison = "<" if op_name == "Maximum" else ">"
+        choose_right = builder.fcmp_ordered(comparison, left, right)
+        right_is_nan = builder.fcmp_unordered("uno", right, right)
+        choose_right = builder.or_(choose_right, right_is_nan)
+    else:
+        comparison = "<" if op_name == "Maximum" else ">"
+        if isinstance(dtype, types.Integer) and not dtype.signed:
+            choose_right = builder.icmp_unsigned(comparison, left, right)
+        else:
+            choose_right = builder.icmp_signed(comparison, left, right)
+    return builder.select(choose_right, right, left)
 
 
 @numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
@@ -859,9 +1018,10 @@ def _vectorized(
     out_1 with *mode* ``"set"`` or ``"inc"``.
 
     ``reduce_outputs`` lists ``(output_idx, identity)`` pairs for reduction
-    outputs.  Such an output carries ``bc=True`` on its reduced axes; the buffer
-    is allocated size 1 there, pre-filled with ``identity``, and the per-iteration
-    store (baked into ``core_func`` via ``store_core_outputs``) accumulates into it.
+    outputs. These outputs carry ``bc=True`` on reduced axes and are initialized
+    from their identities. Eligible one-cell reductions add a third reducer
+    name: their loop-carried scalar sinks replace the buffer initialization and
+    per-iteration array update.
 
     For non-indexed/non-reducing calls, these are ``()``.
     """
@@ -885,7 +1045,11 @@ def _vectorized(
     output_bc_patterns = _decode_literal(output_bc_patterns, "output_bc_patterns")
     output_dtypes = _decode_literal(output_dtypes, "output_dtypes")
     inplace_pattern = _decode_literal(inplace_pattern, "inplace_pattern")
-    reduce_identities = dict(_decode_literal(reduce_outputs, "reduce_outputs"))
+    reduce_entries = _decode_literal(reduce_outputs, "reduce_outputs")
+    reduce_identities = {entry[0]: entry[1] for entry in reduce_entries}
+    scalar_reductions = {
+        entry[0]: (entry[2], entry[1]) for entry in reduce_entries if len(entry) > 2
+    }
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -1011,6 +1175,20 @@ def _vectorized(
             ret_type = out_types[0]
         else:
             ret_type = types.Tuple(out_types)
+
+    if any(
+        not all(output_bc_patterns[i])
+        or i in write_out_idxs
+        or any(out_idx == i for out_idx, _ in inplace_pattern)
+        for i in scalar_reductions
+    ):
+        raise TypingError("Invalid scalar reduction output")
+
+    remaining_reduce_identities = {
+        i: identity
+        for i, identity in reduce_identities.items()
+        if i not in scalar_reductions
+    }
 
     sig = ret_type(*arg_types)
 
@@ -1168,7 +1346,7 @@ def _vectorized(
             source_input_types,
             output_core_shapes,
             update_outputs=update_outputs_dict,
-            reduce_identities=reduce_identities,
+            reduce_identities=remaining_reduce_identities or None,
         )
 
         core_signature = typingctx.resolve_function_type(
@@ -1176,7 +1354,11 @@ def _vectorized(
             [
                 *constant_inputs_types,
                 *core_input_types,
-                *core_out_types,
+                *(
+                    out_type
+                    for i, out_type in enumerate(core_out_types)
+                    if i not in scalar_reductions
+                ),
             ],
             {},
         )
@@ -1203,6 +1385,7 @@ def _vectorized(
             idx_bc=idx_broadcastable,
             output_write_spec=output_write_spec,
             inplace=inplace_pattern,
+            scalar_reductions=scalar_reductions or None,
         )
 
         return _codegen_return_outputs(
