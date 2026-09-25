@@ -1267,6 +1267,49 @@ def constant_fold_branches_of_add_mul(fgraph, node):
     return [new_out]
 
 
+@node_rewriter(tracks=[add, mul])
+def reassociate_broadcast_aware_add_mul(fgraph, node):
+    """Combine the ``add``/``mul`` terms that are broadcast along a shared axis first.
+
+    Terms broadcast along an axis of length K contribute the same value to all K
+    entries, so combining them at the lower rank costs K times fewer operations. Terms
+    group by being broadcast along the chosen axis, not by having identical broadcast
+    patterns: (N, 1, 1), (1, G, 1) and (N, G, 1) are all invariant along the last axis.
+    """
+    if len(node.inputs) <= 2:
+        return None
+
+    [out] = node.outputs
+
+    # Hoist along the axis that lets us combine the most terms. An axis that is
+    # broadcast in the output carries no repetition, so there is nothing to save there.
+    best_axis, best_count = None, 1
+    for axis, bcast_in_out in enumerate(out.type.broadcastable):
+        if bcast_in_out:
+            continue
+        count = sum(inp.type.broadcastable[axis] for inp in node.inputs)
+        # Static shapes can be refined to 1 without updating consumer types, so every
+        # term may be broadcast along an axis the output still reports as non-broadcast.
+        # Keeping a term outside the subgroup avoids rebuilding the node we fired on.
+        if best_count < count < len(node.inputs):
+            best_axis, best_count = axis, count
+    if best_axis is None:
+        return None
+
+    invariant = [inp for inp in node.inputs if inp.type.broadcastable[best_axis]]
+    rest = [inp for inp in node.inputs if not inp.type.broadcastable[best_axis]]
+
+    subgroup = node.op(*invariant)
+    if subgroup.type.dtype != out.type.dtype:
+        # The excluded terms may be the ones forcing the upcast, in which case the
+        # subgroup would be computed (and could overflow) in a narrower dtype.
+        return None
+    copy_stack_trace(out, subgroup)
+    new_out = node.op(subgroup, *rest)
+    copy_stack_trace(out, new_out)
+    return [new_out]
+
+
 add_mul_fusion_seqopt = SequenceDB()
 optdb.register(
     "add_mul_fusion",
@@ -1285,6 +1328,14 @@ add_mul_fusion_seqopt.register(
     in2out(constant_fold_branches_of_add_mul, ignore_newtrees=True),
     "fast_run",
     position=1,
+)
+add_mul_fusion_seqopt.register(
+    reassociate_broadcast_aware_add_mul.__name__,
+    # Each pass hoists one axis, so the subgroup and the node left behind have to be
+    # revisited to reach terms that are constant along a second axis.
+    out2in(reassociate_broadcast_aware_add_mul, ignore_newtrees=False),
+    "fast_run",
+    position=2,
 )
 
 # Register fusion database just before AddDestroyHandler(49.5) (inplace rewrites)
