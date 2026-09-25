@@ -839,6 +839,33 @@ def _build_reduce_impl_src(nout, post_specs):
     return build_source_code(code)
 
 
+def _single_cell_reduction_outputs(
+    node, elemwise_node, reduced_outputs, indexed_outputs
+):
+    """Find reductions whose output has one statically known accumulator cell."""
+    if len(reduced_outputs) != len(elemwise_node.outputs):
+        return ()
+
+    supported_reducers = (Add, Mul, AND, OR, XOR, Maximum, Minimum)
+    write_outputs = {
+        output_i
+        for entry in indexed_outputs
+        if entry is not None
+        for output_i in entry[0]
+    }
+    return tuple(
+        i
+        for i, (spec, out) in enumerate(zip(reduced_outputs, node.outputs, strict=True))
+        if spec is not None
+        and i not in write_outputs
+        and i not in elemwise_node.op.inplace_pattern
+        and all(out.type.broadcastable)
+        and type(spec[0]) in supported_reducers
+        and np.dtype(spec[3]).kind
+        in ("iuf" if type(spec[0]) in (Add, Mul, Maximum, Minimum) else "iub")
+    )
+
+
 @register_funcify_and_cache_key(FusedElemwise)
 def numba_funcify_FusedElemwise(op, node, **kwargs):
     """Generate fused Elemwise Numba code with indexed reads and updates.
@@ -865,6 +892,14 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     nout = len(elemwise_node.outputs)
     reduced_outputs = op.reduced_outputs or ((None,) * nout)
 
+    scalar_reduction_outputs = (
+        ()
+        if getattr(scalar_op_fn, "handles_out", False)
+        else _single_cell_reduction_outputs(
+            node, elemwise_node, reduced_outputs, indexed_outputs
+        )
+    )
+
     inc_outputs = frozenset(
         out_idx
         for entry in indexed_outputs
@@ -889,8 +924,16 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
             accumulate_into_slice(_op, out, inner)
         )
 
-    core_op_fn = store_core_outputs(
-        scalar_op_fn, nin=nin_elemwise, nout=nout, accum_fns=accum_fns
+    core_op_fn = (
+        scalar_op_fn
+        if len(scalar_reduction_outputs) == nout
+        else store_core_outputs(
+            scalar_op_fn,
+            nin=nin_elemwise,
+            nout=nout,
+            accum_fns=accum_fns,
+            scalar_outputs=scalar_reduction_outputs,
+        )
     )
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in elemwise_node.inputs)
@@ -937,7 +980,19 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     inplace_pattern_enc = encode_literals(inplace_pattern)
     indexed_inputs_enc = encode_literals((indexed_inputs, idx_broadcastable))
     indexed_outputs_enc = encode_literals(indexed_outputs)
-    reduce_outputs_enc = encode_literals(tuple(reduce_identities))
+    scalar_reduce_ops = {
+        i: type(spec[0]).__name__
+        for i, spec in enumerate(reduced_outputs)
+        if i in scalar_reduction_outputs
+    }
+    reduce_outputs_enc = encode_literals(
+        tuple(
+            (i, identity, scalar_reduce_ops[i])
+            if i in scalar_reduce_ops
+            else (i, identity)
+            for i, identity in reduce_identities
+        )
+    )
 
     def fused_elemwise_fn(*outer_inputs):
         # Python-mode fallback (e.g. Numba's ``eval_python_only`` path, which
@@ -994,7 +1049,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 4
+    cache_version = 7
     if scalar_cache_key is None:
         key = None
     else:
