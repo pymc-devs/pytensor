@@ -35,7 +35,6 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
-    store_core_outputs,
 )
 from pytensor.scalar.basic import (
     AND,
@@ -48,7 +47,6 @@ from pytensor.scalar.basic import (
     Mul,
     Sub,
     TrueDiv,
-    add,
 )
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -146,38 +144,6 @@ def scalar_in_place_fn_Minimum(op, idx, res, arr):
         f"{res}[{idx}] = {arr}",
         CODE_TOKEN.DEDENT,
     ]
-
-
-# Scalar reduce ops that ``accumulate_into_slice`` (and thus fused reductions /
-# indexed inc) supports, paired with the in-place form used on the output slice.
-# Augmented assignment is used where Numba supports it directly on 0-d arrays
-# (``out`` is the core output slice, which is 0-d for scalar cores); Maximum and
-# Minimum lack an augmented operator so they use a ufunc + ellipsis-set instead.
-_SLICE_ACCUMULATE = {
-    Add: "{out} += {inner}",
-    Mul: "{out} *= {inner}",
-    AND: "{out} &= {inner}",
-    OR: "{out} |= {inner}",
-    XOR: "{out} ^= {inner}",
-    Maximum: "{out}[...] = np.maximum({out}, {inner})",
-    Minimum: "{out}[...] = np.minimum({out}, {inner})",
-}
-
-
-def accumulate_into_slice(scalar_op, out: str, inner: str) -> list[str]:
-    """In-place accumulation lines for a (possibly 0-d) output slice ``out``.
-
-    Unlike ``scalar_in_place_fn`` (which indexes ``res[idx]`` and breaks on 0-d
-    cores), this operates on the whole slice so it is valid for both scalar
-    (0-d) and array cores.  Used by both fused reductions and indexed ``inc``.
-    """
-    try:
-        template = _SLICE_ACCUMULATE[type(scalar_op)]
-    except KeyError:
-        raise NotImplementedError(
-            f"No fused-reduction accumulation for scalar op {scalar_op}"
-        )
-    return [template.format(out=out, inner=inner)]
 
 
 @intrinsic
@@ -686,9 +652,9 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         **kwargs,
     )
 
-    nin = len(node.inputs)
     nout = len(node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    core_op_fn = scalar_op_fn
+    core_handles_out = getattr(core_op_fn, "handles_out", False)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
@@ -739,6 +705,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
+                core_handles_out,
             )
 
         return impl
@@ -750,6 +717,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         elemwise_key = str(
             (
                 type(op),
+                2,  # codegen cache version
                 tuple(op.inplace_pattern.items()),
                 input_bc_patterns,
                 scalar_cache_key,
@@ -801,6 +769,7 @@ def _build_reduce_impl_src(nout, post_specs):
         "indexed_inputs_enc,",
         "indexed_outputs_enc,",
         "reduce_outputs_enc,",
+        "core_handles_out,",
         CODE_TOKEN.DEDENT,
         ")",
     ]
@@ -912,29 +881,8 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         "An output cannot be both an indexed write and a reduction"
     )
 
-    # accum_fns bake per-output in-place accumulation into store_core_outputs:
-    # indexed `inc` writes accumulate with +=; reductions use their scalar op
-    # (Add/Mul/Maximum/...).  Both go through accumulate_into_slice so they are
-    # valid on 0-d (scalar core) slices.  Disjoint output indices.
-    accum_fns: dict = {}
-    for out_idx in inc_outputs:
-        accum_fns[out_idx] = lambda out, inner: accumulate_into_slice(add, out, inner)
-    for i in reduced_idxs:
-        accum_fns[i] = lambda out, inner, _op=reduced_outputs[i][0]: (
-            accumulate_into_slice(_op, out, inner)
-        )
-
-    core_op_fn = (
-        scalar_op_fn
-        if len(scalar_reduction_outputs) == nout
-        else store_core_outputs(
-            scalar_op_fn,
-            nin=nin_elemwise,
-            nout=nout,
-            accum_fns=accum_fns,
-            scalar_outputs=scalar_reduction_outputs,
-        )
-    )
+    core_op_fn = scalar_op_fn
+    core_handles_out = getattr(core_op_fn, "handles_out", False)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in elemwise_node.inputs)
 
@@ -980,16 +928,14 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     inplace_pattern_enc = encode_literals(inplace_pattern)
     indexed_inputs_enc = encode_literals((indexed_inputs, idx_broadcastable))
     indexed_outputs_enc = encode_literals(indexed_outputs)
-    scalar_reduce_ops = {
-        i: type(spec[0]).__name__
-        for i, spec in enumerate(reduced_outputs)
-        if i in scalar_reduction_outputs
-    }
     reduce_outputs_enc = encode_literals(
         tuple(
-            (i, identity, scalar_reduce_ops[i])
-            if i in scalar_reduce_ops
-            else (i, identity)
+            (
+                i,
+                identity,
+                type(reduced_outputs[i][0]).__name__,
+                i in scalar_reduction_outputs,
+            )
             for i, identity in reduce_identities
         )
     )
@@ -1023,6 +969,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                     indexed_inputs_enc,
                     indexed_outputs_enc,
                     reduce_outputs_enc,
+                    core_handles_out,
                 )
 
             return impl
@@ -1042,6 +989,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 "indexed_inputs_enc": indexed_inputs_enc,
                 "indexed_outputs_enc": indexed_outputs_enc,
                 "reduce_outputs_enc": reduce_outputs_enc,
+                "core_handles_out": core_handles_out,
             },
         )
 
@@ -1049,7 +997,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 7
+    cache_version = 8
     if scalar_cache_key is None:
         key = None
     else:
@@ -1381,8 +1329,7 @@ def numba_funcify_Dot(op, node, **kwargs):
         return dot, cache_version
 
     else:
-        # Output needs a dtype cast np.dot can't do in place, so fall back to
-        # the copying store_core_outputs wrapper.
+        # Output needs a dtype cast that np.dot cannot do in place.
         @numba_basic.numba_njit
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)

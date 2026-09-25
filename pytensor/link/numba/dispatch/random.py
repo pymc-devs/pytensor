@@ -28,7 +28,6 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
-    store_core_outputs,
 )
 from pytensor.link.utils import (
     compile_function_src,
@@ -450,8 +449,8 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    nin = 1 + len(dist_params)  # rng + params
-    core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
+    core_op_fn = core_rv_fn
+    core_handles_out = getattr(core_op_fn, "handles_out", False)
 
     batch_ndim = rv_op.batch_ndim(rv_node)
 
@@ -492,6 +491,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
+                core_handles_out,
             )
             return rng, draws
 
@@ -501,9 +501,11 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
         # If the core RV can't be cached, then the whole RV can't be cached
         random_rv_key = None
     else:
+        random_rv_cache_version = 1
         random_rv_key_contents = (
             type(op),
             type(rv_op),
+            random_rv_cache_version,
             tuple(rv_op._props_dict().items()),  # type: ignore[attr-defined]
             size_len,
             core_shape_len,
