@@ -10,7 +10,7 @@ from pytensor.compile.mode import Mode
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Op, Variable
 from pytensor.tensor.basic import as_tensor, infer_static_shape
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import TensorType, discrete_dtypes
 
 
 class JAXOp(Op):
@@ -135,6 +135,13 @@ class JAXOp(Op):
             return outputs[0]
         return outputs
 
+    def connection_pattern(self, node):
+        """Mark discrete inputs as disconnected from every output."""
+        return [
+            [input_type.dtype not in discrete_dtypes] * len(self.output_types)
+            for input_type in self.input_types
+        ]
+
     def pullback(self, inputs, outputs, output_gradients):
         """Compute gradients using JAX's vector-Jacobian product (VJP)."""
         import jax
@@ -146,6 +153,15 @@ class JAXOp(Op):
             if not isinstance(output_grad.type, DisconnectedType)
         ]
 
+        # Integer and boolean inputs are not differentiable. JAX gives them
+        # float0 cotangents, which have no PyTensor equivalent, so they are
+        # held constant in the VJP and reported as disconnected.
+        differentiable_input_indices = [
+            i
+            for i, input_type in enumerate(self.input_types)
+            if input_type.dtype not in discrete_dtypes
+        ]
+
         num_inputs = len(inputs)
 
         def vjp_operation(*args):
@@ -154,15 +170,23 @@ class JAXOp(Op):
             cotangent_vectors = args[num_inputs:]
             assert len(cotangent_vectors) == len(connected_output_indices)
 
-            def restricted_function(*input_values):
-                """Restricted function that only returns connected outputs."""
-                outputs = self.jax_func(*input_values)
+            def restricted_function(*differentiable_values):
+                """Restricted function of the differentiable inputs, returning connected outputs."""
+                all_input_values = list(input_values)
+                for i, value in zip(
+                    differentiable_input_indices, differentiable_values, strict=True
+                ):
+                    all_input_values[i] = value
+                outputs = self.jax_func(*all_input_values)
                 return [
                     outputs[i].astype(self.output_types[i].dtype)
                     for i in connected_output_indices
                 ]
 
-            _primals, vjp_function = jax.vjp(restricted_function, *input_values)
+            _primals, vjp_function = jax.vjp(
+                restricted_function,
+                *(input_values[i] for i in differentiable_input_indices),
+            )
             output_dtypes = [
                 self.output_types[i].dtype for i in connected_output_indices
             ]
@@ -184,15 +208,21 @@ class JAXOp(Op):
         vjp_op = JAXOp(
             self.input_types
             + tuple(self.output_types[i] for i in connected_output_indices),
-            [self.input_types[i] for i in range(num_inputs)],
+            [self.input_types[i] for i in differentiable_input_indices],
             vjp_operation,
             name=name,
         )
 
-        return vjp_op(
+        differentiable_input_gradients = vjp_op(
             *[*inputs, *[output_gradients[i] for i in connected_output_indices]],
             return_list=True,
         )
+        input_gradients = [DisconnectedType()() for _ in inputs]
+        for i, input_gradient in zip(
+            differentiable_input_indices, differentiable_input_gradients, strict=True
+        ):
+            input_gradients[i] = input_gradient
+        return input_gradients
 
 
 def wrap_jax(jax_function=None, *, allow_eval=True):
