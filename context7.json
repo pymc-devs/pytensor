@@ -1,0 +1,23 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "url": "https://context7.com/pymc-devs/pytensor",
+  "public_key": "pk_VEVKqL1O3R30z9IzEQkg4",
+  "projectTitle": "PyTensor",
+  "description": "Library for defining, optimizing and evaluating mathematical expressions on multi-dimensional arrays, with C, Numba and JAX backends.",
+  "excludeFolders": [".github", "scripts", "tests", "doc/_drafts", "doc/internal"],
+  "excludeFiles": [
+    "AGENTS.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "core_development_guide.rst",
+    "dev_start_guide.rst"
+  ],
+  "rules": [
+    "Use `import pytensor` and `import pytensor.tensor as pt`. PyTensor replaces Theano and Aesara; do not use `theano`, `aesara`, `tt` or `at`.",
+    "Expressions are symbolic until compiled with `pytensor.function` or evaluated with `.eval()`.",
+    "Variables are immutable: write `x[idx].set(y)` or `x[idx].inc(y)`, not `x[idx] = y`. `a == b` tests identity, not elementwise equality.",
+    "Broadcasting needs a static shape of 1, e.g. `pt.vector(\"x\", shape=(1,))`; a dynamic length that happens to be 1 does not broadcast.",
+    "Use `pushforward` and `pullback` from `pytensor.gradient`; `Rop` and `Lop` are deprecated."
+  ]
+}
