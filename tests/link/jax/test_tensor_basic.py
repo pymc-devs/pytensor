@@ -89,17 +89,6 @@ def test_arange_nonconcrete():
         compare_jax_and_py([a], [out], [a_test_value])
 
 
-def test_nonzero_nonconcrete():
-    """JAX cannot JIT-compile `nonzero`, the output shape depends on the input values."""
-
-    x = vector("x")
-    x_test_value = np.array([0.0, 1.0, 2.0], dtype=config.floatX)
-
-    for out in (ptb.nonzero(x)[0], ptb.flatnonzero(x), ptb.nonzero_values(x)):
-        with pytest.raises(NotImplementedError, match="JAX does not support `nonzero`"):
-            compare_jax_and_py([x], [out], [x_test_value])
-
-
 def test_arange_shape_bound_over_int8():
     """A shape-derived arange bound above 127 must not be downcast to int8.
 

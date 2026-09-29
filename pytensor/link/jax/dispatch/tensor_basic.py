@@ -33,15 +33,11 @@ An example of a graph that can be compiled to JAX:
 """
 
 
-NONZERO_ERROR = """JAX does not support `nonzero` (or `flatnonzero`/`nonzero_values`),
-because the number of nonzero entries, and so the output shape, depends on the input values.
-The graph that you defined thus cannot be JIT-compiled by JAX.
-"""
-
-
 @jax_funcify.register(Nonzero)
 def jax_funcify_Nonzero(op, **kwargs):
-    raise NotImplementedError(NONZERO_ERROR)
+    raise NotImplementedError(
+        "JAX does not support nonzero, its output shape is data-dependent"
+    )
 
 
 @jax_funcify.register(AllocEmpty)
