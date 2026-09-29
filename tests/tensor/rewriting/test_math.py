@@ -2989,6 +2989,17 @@ class TestReduceChain:
         [new_out] = local_reduce_chain.transform(fg, out.owner)
         assert equal_computations([new_out], [x.all(axis=(0, 2))])
 
+    def test_max_initial(self):
+        x = tensor3()
+        out = x.max(axis=-1, initial=-np.inf).max(axis=0)
+        fg = FunctionGraph([x], [out], clone=False)
+        assert local_reduce_chain.transform(fg, out.owner) is None
+
+        out = x.max(axis=-1, initial=-np.inf).max(axis=0, initial=-np.inf)
+        fg = FunctionGraph([x], [out], clone=False)
+        [new_out] = local_reduce_chain.transform(fg, out.owner)
+        assert equal_computations([new_out], [x.max(axis=(0, 2), initial=-np.inf)])
+
 
 class TestLocalSumProd:
     """Test sum/prod rewrites."""
@@ -3456,6 +3467,16 @@ class TestLocalSumProd:
         result = RewriteTester([v], [pt.alloc(v, 4, 6, 3).sum(axis=1)], **cfg)
         result.assert_graph(pt.alloc(v * np.array([6]), 4, 3))
         result.assert_eval(v_val)
+
+    def test_local_careduce_of_alloc_initial(self):
+        # The broadcast axis may be empty at runtime, where the result is `initial`
+        v = vector("v")
+        n = scalar("n", dtype="int64")
+        out = Max(axis=0, initial=-np.inf)(pt.alloc(v, n, 3))
+        f = function([v, n], out, mode=get_default_mode().including("specialize"))
+        np.testing.assert_array_equal(
+            f(np.ones(3, dtype=v.dtype), 0), np.full(3, -np.inf)
+        )
 
     @pytest.mark.parametrize("reduce_op", [Max, Min, All, Any])
     def test_local_careduce_of_alloc_idempotent(self, reduce_op):

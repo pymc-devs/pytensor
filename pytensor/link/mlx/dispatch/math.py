@@ -14,6 +14,9 @@ def mlx_funcify_Dot(op, node=None, **kwargs):
 
 @mlx_funcify.register(Max)
 def mlx_funcify_Max(op, node=None, **kwargs):
+    if op.initial is not None:
+        raise NotImplementedError("Max with initial is not supported in MLX")
+
     def max_fn(x):
         axes = op.axis
         if axes is None:

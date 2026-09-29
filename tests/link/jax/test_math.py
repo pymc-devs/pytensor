@@ -4,6 +4,7 @@ import pytest
 from pytensor.configdefaults import config
 from pytensor.tensor.math import Argmax, Max, maximum
 from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.type import dvector, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
@@ -19,6 +20,13 @@ def test_jax_max_and_argmax():
     amx = Argmax([0])(x)
     out = mx * amx
     compare_jax_and_py([x], [out], [np.r_[1, 2]])
+
+
+@pytest.mark.parametrize("dtype", ["float64", "int64"])
+def test_jax_max_min_initial(dtype):
+    x = matrix("x", dtype=dtype)
+    outs = [pt_max(x, axis=0, initial=-np.inf), pt_min(x, axis=0, initial=np.inf)]
+    compare_jax_and_py([x], outs, [np.zeros((0, 3), dtype=dtype)])
 
 
 def test_dot():

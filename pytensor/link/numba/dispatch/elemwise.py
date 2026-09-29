@@ -403,8 +403,10 @@ def create_multiaxis_reducer(
     acc_dtype_str = f"np.{acc_dtype.name}"
     careduce_fn_name = f"careduce_{scalar_op}"
 
-    if acc_dtype.kind in "ui" and not np.isfinite(identity):
-        if np.isposinf(identity):
+    if acc_dtype.kind in "uib" and not np.isfinite(identity):
+        if acc_dtype.kind == "b":
+            identity = bool(np.isposinf(identity))
+        elif np.isposinf(identity):
             identity = np.iinfo(acc_dtype).max
         else:
             identity = np.iinfo(acc_dtype).min
@@ -766,7 +768,9 @@ def _reduce_identity(identity, acc_dtype):
     integer accumulators, mirroring ``create_multiaxis_reducer``.
     """
     acc_dtype = np.dtype(acc_dtype)
-    if acc_dtype.kind in "ui" and not np.isfinite(identity):
+    if acc_dtype.kind == "b" and not np.isfinite(identity):
+        identity = bool(np.isposinf(identity))
+    elif acc_dtype.kind in "ui" and not np.isfinite(identity):
         identity = (
             np.iinfo(acc_dtype).max
             if np.isposinf(identity)
@@ -994,7 +998,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 4
+    cache_version = 5
     if scalar_cache_key is None:
         key = None
     else:
@@ -1045,7 +1049,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     )
     careduce_fn = numba_basic.numba_njit(careduce_py_fn, boundscheck=False)
 
-    cache_version = 4
+    cache_version = 5
     careduce_key = sha256(
         str(
             (

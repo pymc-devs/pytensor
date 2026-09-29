@@ -2116,6 +2116,10 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     if outer_op.scalar_op != inner_op.scalar_op:
         return None
 
+    # Merging would change what an empty inner or outer reduction returns
+    if getattr(outer_op, "initial", None) != getattr(inner_op, "initial", None):
+        return None
+
     outer_axis = outer_op.axis
     inner_axis = inner_op.axis
     [x] = inner_reduce.owner.inputs
@@ -2271,6 +2275,10 @@ def local_careduce_of_alloc(fgraph, node):
             pass
         case _:
             return None
+
+    # A broadcast axis may be empty at runtime, where the result is `initial`
+    if getattr(node.op, "initial", None) is not None:
+        return None
 
     ndim = len(shapes)
     axis = node.op.axis

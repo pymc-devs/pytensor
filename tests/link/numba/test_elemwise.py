@@ -408,6 +408,13 @@ def test_CAReduce_discrete_infinity_identity(axis):
     )
 
 
+@pytest.mark.parametrize("dtype", ["int8", "bool"])
+def test_CAReduce_discrete_empty_initial(dtype):
+    x = pt.matrix("x", dtype=dtype)
+    outs = [x.max(axis=0, initial=-np.inf), x.min(axis=0, initial=np.inf)]
+    compare_numba_and_py([x], outs, [np.zeros((0, 3), dtype=dtype)])
+
+
 def test_scalar_Elemwise_Clip():
     a = pt.scalar("a")
     b = pt.scalar("b")
