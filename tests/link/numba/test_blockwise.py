@@ -6,7 +6,7 @@ from pytensor.compile.mode import Mode
 from pytensor.graph import Apply
 from pytensor.scalar import ScalarOp
 from pytensor.tensor import TensorVariable, lvector, tensor, tensor3, vector
-from pytensor.tensor.basic import Alloc, ARange, constant
+from pytensor.tensor.basic import Alloc, ARange, Split, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -84,6 +84,18 @@ def test_blockwise_scalar_dimshuffle():
     )
     out = blockwise_scalar_ds(x)
     compare_numba_and_py([x], [out], [np.arange(9)], eval_obj_mode=False)
+
+
+@pytest.mark.parametrize("sizes", [[5], [2, 3]])
+def test_blockwise_split(sizes):
+    x = tensor("x", shape=(3, 5))
+    signature = "(n),(s)->" + ",".join(f"(o{i})" for i in range(len(sizes)))
+    outs = Blockwise(Split(len(sizes), axis=0), signature=signature)(
+        x, constant(sizes), return_list=True
+    )
+    compare_numba_and_py(
+        [x], outs, [np.arange(15.0).reshape(3, 5)], eval_obj_mode=False
+    )
 
 
 @pytest.mark.parametrize("signal_layout", ["C", "F", "strided"])
