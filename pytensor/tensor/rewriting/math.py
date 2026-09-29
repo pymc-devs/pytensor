@@ -2116,9 +2116,12 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     if outer_op.scalar_op != inner_op.scalar_op:
         return None
 
-    # Merging would change what an empty inner or outer reduction returns
-    if getattr(outer_op, "initial", None) != getattr(inner_op, "initial", None):
-        return None
+    # Keeping `initial` from either side only turns an empty-axis error into it
+    clone_kwargs = {}
+    if hasattr(outer_op, "initial"):
+        for op in (outer_op, inner_op):
+            if getattr(op, "initial", None) is not None:
+                clone_kwargs["initial"] = op.initial
 
     outer_axis = outer_op.axis
     inner_axis = inner_op.axis
@@ -2126,7 +2129,7 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     # check to see either the inner or outer prod is doing a
     # product over all axis, in which case we can remove it
     if outer_axis is None or inner_axis is None:
-        return [outer_op.clone(axis=None)(x)]
+        return [outer_op.clone(axis=None, **clone_kwargs)(x)]
 
     # Merge axis
     newaxis = list(inner_axis)
@@ -2139,7 +2142,7 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
         newaxis.append(new_i)
 
     assert len(newaxis) == len(inner_axis) + len(outer_axis)
-    return [outer_op.clone(axis=sorted(newaxis))(x)]
+    return [outer_op.clone(axis=sorted(newaxis), **clone_kwargs)(x)]
 
 
 @register_canonicalize

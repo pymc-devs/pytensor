@@ -20,16 +20,6 @@ def jax_funcify_Elemwise(op, node, **kwargs):
     return elemwise_fn
 
 
-def careduce_initial(initial, dtype):
-    """Cast the `initial` of a `Max`/`Min` to a value representable in `dtype`."""
-    if initial is None or jnp.issubdtype(dtype, jnp.floating):
-        return initial
-    if dtype == jnp.bool_:
-        return initial > 0
-    info = jnp.iinfo(dtype)
-    return info.max if initial > 0 else info.min
-
-
 @jax_funcify.register(CAReduce)
 def jax_funcify_CAReduce(op, **kwargs):
     axis = op.axis
@@ -58,9 +48,9 @@ def jax_funcify_CAReduce(op, **kwargs):
         if op_nfunc_spec:
             jax_op = getattr(jnp, op_nfunc_spec[0])
             if initial is not None:
-                return jax_op(
-                    x, axis=axis, initial=careduce_initial(initial, x.dtype)
-                ).astype(acc_dtype)
+                return jax_op(x, axis=axis, initial=op.initial_value(x.dtype)).astype(
+                    acc_dtype
+                )
             return jax_op(x, axis=axis).astype(acc_dtype)
 
         # The PyTensor `Op` didn't tell us which NumPy equivalent to use (or

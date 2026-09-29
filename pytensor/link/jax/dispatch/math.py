@@ -2,7 +2,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from pytensor.link.jax.dispatch import jax_funcify
-from pytensor.link.jax.dispatch.elemwise import careduce_initial
 from pytensor.tensor.math import Argmax, Dot, Max
 
 
@@ -22,7 +21,7 @@ def jax_funcify_Max(op, **kwargs):
     if initial is not None:
 
         def max(x):
-            return jnp.max(x, axis, initial=careduce_initial(initial, x.dtype))
+            return jnp.max(x, axis, initial=op.initial_value(x.dtype))
 
         return max
 

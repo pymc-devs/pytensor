@@ -105,9 +105,6 @@ def pytorch_funcify_any(op, **kwargs):
 
 @pytorch_funcify.register(Max)
 def pytorch_funcify_max(op, **kwargs):
-    if op.initial is not None:
-        raise NotImplementedError("Max with initial is not supported in PyTorch")
-
     def torch_max(x):
         if isinstance(op.axis, tuple):
             for d in sorted(op.axis, reverse=True):
@@ -121,9 +118,6 @@ def pytorch_funcify_max(op, **kwargs):
 
 @pytorch_funcify.register(Min)
 def pytorch_funcify_min(op, **kwargs):
-    if op.initial is not None:
-        raise NotImplementedError("Min with initial is not supported in PyTorch")
-
     def torch_min(x):
         if isinstance(op.axis, tuple):
             for d in sorted(op.axis, reverse=True):

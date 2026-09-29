@@ -443,20 +443,24 @@ class MaxAndMinCAReduce(NonZeroDimsCAReduce):
             return super().__str__()
         return f"{type(self).__name__}{{{self._axis_str()}, initial={self.initial}}}"
 
+    def initial_value(self, dtype):
+        """`initial` as a value of `dtype`: the dtype's bounds for ints and bools."""
+        dtype = np.dtype(dtype)
+        if self.initial is None or dtype.kind == "f":
+            return self.initial
+        if dtype.kind == "b":
+            return self.initial > 0
+        info = np.iinfo(dtype)
+        return info.max if self.initial > 0 else info.min
+
     def perform(self, node, inp, out):
         if self.initial is None:
             return super().perform(node, inp, out)
         [x] = inp
-        dtype = np.dtype(node.outputs[0].type.dtype)
-        if dtype.kind == "f":
-            initial = self.initial
-        elif dtype.kind == "b":
-            initial = self.initial > 0
-        else:
-            info = np.iinfo(dtype)
-            initial = info.max if self.initial > 0 else info.min
+        dtype = node.outputs[0].type.dtype
         out[0][0] = np.asarray(
-            self.ufunc.reduce(x, axis=self.axis, initial=initial), dtype=dtype
+            self.ufunc.reduce(x, axis=self.axis, initial=self.initial_value(dtype)),
+            dtype=dtype,
         )
 
     def pullback(self, inputs, outputs, output_grads):
