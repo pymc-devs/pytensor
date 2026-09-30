@@ -124,7 +124,9 @@ UNSET = object()
 
 class RandomGeneratorSharedVariable(SharedVariable, RandomGeneratorVariable):
     def __str__(self):
-        return self.name or f"RNG({self.container!r})"
+        # str(), not repr(): the repr of a Generator carries its memory address,
+        # which would make generated source differ between runs.
+        return self.name or f"RNG({self.container.storage[0]})"
 
     @staticmethod
     def _resolve_rng_value(new_value, *, seed=UNSET, borrow=False):
