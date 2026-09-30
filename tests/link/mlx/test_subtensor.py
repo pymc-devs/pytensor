@@ -78,6 +78,10 @@ def test_mlx_AdvancedSubtensor():
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
+    out_pt = x_pt[1:3, [2, 3]]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
+    compare_mlx_and_py([x_pt], [out_pt], [x_np])
+
 
 @pytest.mark.xfail(
     raises=ValueError, reason="MLX does not support boolean indexing yet"

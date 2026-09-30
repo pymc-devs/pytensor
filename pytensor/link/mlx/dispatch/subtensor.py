@@ -11,6 +11,21 @@ from pytensor.tensor.subtensor import (
 )
 
 
+def _with_int_slice_bounds(indices):
+    # Slice bounds arrive as 0-d arrays, which MLX slices reject.
+    return tuple(
+        slice(
+            *(
+                None if bound is None else int(bound)
+                for bound in (index.start, index.stop, index.step)
+            )
+        )
+        if isinstance(index, slice)
+        else index
+        for index in indices
+    )
+
+
 @mlx_funcify.register(Subtensor)
 def mlx_funcify_Subtensor(op, node, **kwargs):
     def subtensor(x, *ilists):
@@ -28,7 +43,7 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 @mlx_funcify.register(AdvancedSubtensor)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
     def advanced_subtensor(x, *ilists):
-        indices = indices_from_subtensor(ilists, op.idx_list)
+        indices = _with_int_slice_bounds(indices_from_subtensor(ilists, op.idx_list))
         if len(indices) == 1:
             indices = indices[0]
 
