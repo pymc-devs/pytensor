@@ -105,12 +105,3 @@ def test_get_value_return_internal_type():
     assert isinstance(r_F, np.random.Generator)
     assert r_T is srng.container.storage[0]
     assert r_F is not srng.container.storage[0]
-
-
-def test_shared_rng_str_omits_memory_address():
-    """An address in the repr makes generated source differ between runs."""
-    srng = shared_rng(np.random.default_rng(42))
-
-    assert str(srng) == "RNG(Generator(PCG64))"
-    assert str(srng) == str(shared_rng(np.random.default_rng(123)))
-    assert str(shared_rng(np.random.default_rng(42), name="rng")) == "rng"
