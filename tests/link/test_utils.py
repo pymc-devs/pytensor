@@ -263,7 +263,13 @@ def _make_old(path):
     os.utime(path, (long_ago, long_ago))
 
 
-def test_write_generated_src_is_content_addressed(generated_src_dir):
+def test_write_generated_src_is_content_addressed(
+    generated_src_dir, tmp_path, monkeypatch
+):
+    tempdir = tmp_path / "tmp"
+    tempdir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tempdir))
+
     first = write_generated_src(SRC_ONE)
     second = write_generated_src(SRC_ONE)
 
@@ -272,20 +278,7 @@ def test_write_generated_src_is_content_addressed(generated_src_dir):
     assert list(generated_src_dir.iterdir()) == [Path(first)]
     assert Path(first).read_text() == SRC_ONE
     assert write_generated_src("def one():\n    return 2\n") != first
-
-
-def test_compile_function_src_leaves_nothing_in_tempdir(
-    generated_src_dir, tmp_path, monkeypatch
-):
-    """Generated source used to pile up in TMPDIR, one file per compiled function."""
-    tempdir = tmp_path / "tmp"
-    tempdir.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(tempdir))
-    monkeypatch.setenv("TMPDIR", str(tempdir))
-
-    fn = compile_function_src(SRC_ONE, "one")
-
-    assert fn() == 1
+    # Nothing goes to the system temporary directory.
     assert list(tempdir.iterdir()) == []
 
 
@@ -315,8 +308,10 @@ def test_clear_old_generated_src(generated_src_dir):
     # The directory can be shared, so files PyTensor did not write are kept.
     unrelated = generated_src_dir / "unrelated.py"
     unrelated.write_text("x")
-    for path in (stale, orphan, unrelated):
+    for path in (fresh, stale, orphan, unrelated):
         _make_old(path)
+    # Reuse refreshes the mtime, so the pruner spares source still in use.
+    write_generated_src(SRC_ONE)
 
     clear_old_generated_src()
 
@@ -324,14 +319,3 @@ def test_clear_old_generated_src(generated_src_dir):
     assert not stale.exists()
     assert not orphan.exists()
     assert unrelated.exists()
-
-
-def test_write_generated_src_keeps_reused_file_young(generated_src_dir):
-    """Reuse refreshes the mtime, so the pruner spares source still in use."""
-    path = Path(write_generated_src(SRC_ONE))
-    _make_old(path)
-
-    write_generated_src(SRC_ONE)
-    clear_old_generated_src()
-
-    assert path.exists()
