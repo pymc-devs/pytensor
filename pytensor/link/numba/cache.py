@@ -2,7 +2,6 @@ import uuid
 from collections.abc import Callable
 from hashlib import sha256
 from pickle import dump
-from tempfile import NamedTemporaryFile
 from typing import Any
 from weakref import WeakKeyDictionary
 
@@ -13,6 +12,7 @@ from numba.core.bytecode import FunctionIdentity
 from numba.core.caching import CacheImpl, _CacheLocator
 
 from pytensor.configdefaults import config
+from pytensor.link.utils import write_generated_src
 
 
 NUMBA_CACHE_PATH = config.base_compiledir / "numba"
@@ -139,9 +139,7 @@ def compile_numba_function_src(
 
     """
     if write_to_disk:
-        with NamedTemporaryFile(delete=False) as f:
-            filename = f.name
-            f.write(src.encode())
+        filename = write_generated_src(src)
     else:
         filename = "<string>"
 
