@@ -157,6 +157,15 @@ def test_flag_detection():
     assert isinstance(res, bool)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Only applicable to macOS")
+def test_darwin_compiler_flags_do_not_use_ld64():
+    flags = GCC_compiler.compile_args(march_flags=False)
+
+    assert "-undefined" in flags
+    assert "dynamic_lookup" in flags
+    assert "-ld64" not in flags
+
+
 @pytest.fixture(
     scope="module",
     params=[
