@@ -1,5 +1,7 @@
 from functools import reduce
 
+import numpy as np
+
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import as_tensor_variable
@@ -118,7 +120,7 @@ class LogSumExp(TensorSymbolicOp):
         super().__init__(**kwargs)
 
     def build_inner_graph(self, x):
-        x_max = x.max(axis=self.axis, keepdims=True)
+        x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
         # Do not offset when x_max = -inf, to avoid nan in the output
         x_max = switch(isinf(x_max), 0.0, x_max)
         out = log(exp(x - x_max).sum(axis=self.axis, keepdims=True)) + x_max

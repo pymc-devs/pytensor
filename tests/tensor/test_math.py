@@ -1266,6 +1266,32 @@ class TestMinMax:
     def setup_method(self):
         Max.debug = 0
 
+    @pytest.mark.parametrize("dtype", ["float64", "int64", "uint8", "bool"])
+    def test_initial(self, dtype):
+        x = tensor("x", shape=(None, 3), dtype=dtype)
+        f = function(
+            [x], [max(x, axis=0, initial=-np.inf), min(x, axis=0, initial=np.inf)]
+        )
+        if dtype == "float64":
+            lo, hi = -np.inf, np.inf
+        elif dtype == "bool":
+            lo, hi = False, True
+        else:
+            lo, hi = np.iinfo(dtype).min, np.iinfo(dtype).max
+        empty_max, empty_min = f(np.zeros((0, 3), dtype=dtype))
+        assert_array_equal(empty_max, np.full(3, lo, dtype=dtype))
+        assert_array_equal(empty_min, np.full(3, hi, dtype=dtype))
+
+        data = np.array([[1, 0, 1], [0, 0, 1]], dtype=dtype)
+        res_max, res_min = f(data)
+        assert_array_equal(res_max, data.max(axis=0))
+        assert_array_equal(res_min, data.min(axis=0))
+
+        with pytest.raises(ValueError):
+            max(x, initial=0)
+        with pytest.raises(ValueError):
+            min(x, initial=-np.inf)
+
     def test_scalar(self):
         for fct in [max, min]:
             n = as_tensor_variable(5.0)
