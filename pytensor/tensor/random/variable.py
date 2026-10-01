@@ -124,7 +124,7 @@ UNSET = object()
 
 class RandomGeneratorSharedVariable(SharedVariable, RandomGeneratorVariable):
     def __str__(self):
-        # str(), not repr(), so the memory address of the Generator is not shown.
+        # Don't show the memory address of the Generator.
         return self.name or f"RNG({self.container.storage[0]})"
 
     @staticmethod
