@@ -258,11 +258,6 @@ def generated_src_dir(tmp_path):
         yield dirname
 
 
-def _make_old(path):
-    long_ago = time.time() - 60 * 60 * 24 * 365
-    os.utime(path, (long_ago, long_ago))
-
-
 def test_write_generated_src_is_content_addressed(
     generated_src_dir, tmp_path, monkeypatch
 ):
@@ -303,13 +298,14 @@ def test_write_generated_src_rewrites_truncated_file(generated_src_dir):
 def test_clear_old_generated_src(generated_src_dir):
     fresh = Path(write_generated_src(SRC_ONE))
     stale = Path(write_generated_src("def two():\n    return 2\n"))
-    orphan = generated_src_dir / f"{'0' * 32}.py.partial.tmp"
+    orphan = generated_src_dir / f"m{'0' * 64}.py.partial.tmp"
     orphan.write_text("partially written")
     # The directory can be shared, so files PyTensor did not write are kept.
     unrelated = generated_src_dir / "unrelated.py"
     unrelated.write_text("x")
     for path in (fresh, stale, orphan, unrelated):
-        _make_old(path)
+        long_ago = time.time() - 60 * 60 * 24 * 365
+        os.utime(path, (long_ago, long_ago))
     # Reuse refreshes the mtime, so the pruner spares source still in use.
     write_generated_src(SRC_ONE)
 

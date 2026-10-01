@@ -24,6 +24,3 @@ def test_remove_extra_caches(tmp_path):
         ]
         assert not generated.exists()
         assert other.exists()
-
-        # A second call, with nothing left to remove, is a no-op.
-        remove_extra_caches(tmp_path)

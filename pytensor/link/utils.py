@@ -1,6 +1,7 @@
 import atexit
 import builtins
 import contextlib
+import functools
 import io
 import re
 import sys
@@ -9,7 +10,6 @@ import traceback
 import warnings
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from hashlib import sha256
 from keyword import iskeyword
 from operator import itemgetter
 from pathlib import Path
@@ -595,7 +595,7 @@ register_thunk_trace_excepthook()
 
 # The content-addressed files and the ``.tmp`` files they are written through.
 # Cleanup only touches these, since `config.generated_src_dir` can be shared.
-_GENERATED_SRC_RE = re.compile(r"[0-9a-f]{32}\.py(\..+\.tmp)?")
+_GENERATED_SRC_RE = re.compile(r"m[0-9a-f]{64}\.py(\..+\.tmp)?")
 
 
 def clear_generated_src(older_than: float | None = None) -> None:
@@ -611,15 +611,11 @@ def clear_generated_src(older_than: float | None = None) -> None:
         return
 
     for entry in entries:
-        if not _GENERATED_SRC_RE.fullmatch(entry.name):
-            continue
-        try:
-            if older_than is None or entry.stat().st_mtime < older_than:
-                entry.unlink()
-        except OSError:
-            # The file is already gone, or another process is pruning the same
-            # directory.
-            continue
+        if _GENERATED_SRC_RE.fullmatch(entry.name):
+            # The file may already be gone, removed by another process.
+            with contextlib.suppress(OSError):
+                if older_than is None or entry.stat().st_mtime < older_than:
+                    entry.unlink()
 
 
 def clear_old_generated_src() -> None:
@@ -630,7 +626,10 @@ def clear_old_generated_src() -> None:
     )
 
 
-_generated_src_cleanup_registered = False
+@functools.cache
+def _register_generated_src_cleanup() -> None:
+    # Register lazily, so processes that never generate source skip the scan.
+    atexit.register(clear_old_generated_src)
 
 
 def write_generated_src(src: str) -> str:
@@ -641,20 +640,15 @@ def write_generated_src(src: str) -> str:
     If `config.generated_src_dir` is set, the file is content-addressed there.
     """
     encoded = src.encode()
-    if not config.generated_src_dir:
+    src_dir = config.generated_src_dir
+    if not src_dir:
         with NamedTemporaryFile(delete=False) as f:
             f.write(encoded)
         return f.name
 
-    global _generated_src_cleanup_registered
-    if not _generated_src_cleanup_registered:
-        # Register lazily, so processes that never generate source skip the scan.
-        atexit.register(clear_old_generated_src)
-        _generated_src_cleanup_registered = True
-
-    dirname = Path(config.generated_src_dir).expanduser()
-    dirname.mkdir(parents=True, exist_ok=True)
-    filename = dirname / f"{sha256(encoded).hexdigest()[:32]}.py"
+    _register_generated_src_cleanup()
+    dirname = Path(src_dir).expanduser()
+    filename = dirname / f"{utils.hash_from_code(encoded)}.py"
 
     try:
         # A file of the wrong size was truncated by an earlier crash. Reusing
@@ -673,6 +667,7 @@ def write_generated_src(src: str) -> str:
 
     # Write to a temporary name first, so that a concurrent process never sees
     # a partially written file under `filename`.
+    dirname.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(
         dir=dirname, prefix=f"{filename.name}.", suffix=".tmp", delete=False
     ) as f:
