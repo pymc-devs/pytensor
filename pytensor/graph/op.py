@@ -473,7 +473,6 @@ class Op(MetaObject):
             return [None if isinstance(r.type, DisconnectedType) else r for r in result]  # type: ignore[misc]
         raise NotImplementedError()
 
-    @abstractmethod
     def perform(
         self,
         node: Apply,
@@ -508,7 +507,21 @@ class Op(MetaObject):
         An `Op` is free to reuse `output_storage` as it sees fit, or to
         discard it and allocate new memory.
 
+        The default implementation runs the `Op`'s ``python_funcify`` dispatch:
+        it builds the callable, runs it on the inputs, and writes the results
+        into ``output_storage``. An `Op` only needs to override this to keep a
+        bespoke ``perform``; otherwise its numeric behaviour lives entirely in
+        the ``python_funcify`` registry.
         """
+        from pytensor.link.python.dispatch.basic import python_funcify
+
+        fn = python_funcify(self, node=node)
+        results = fn(*inputs)
+        if len(output_storage) == 1:
+            output_storage[0][0] = results
+        else:
+            for output, value in zip(output_storage, results, strict=True):
+                output[0] = value
 
     def do_constant_folding(self, fgraph: "FunctionGraph", node: Apply) -> bool:
         """Determine whether constant folding should be performed for the given node.
