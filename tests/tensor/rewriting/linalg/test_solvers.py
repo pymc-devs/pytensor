@@ -12,6 +12,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.traversal import applys_between
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -77,17 +78,18 @@ def test_generic_solve_to_solve_triangular():
         )
 
 
-def test_psd_solve_with_chol():
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+def test_psd_solve_with_chol(b_ndim):
     """Test that solve(A, b) with PSD A gets rewritten to cholesky + cho_solve."""
     A = matrix("A")
-    b = matrix("b")
+    b = pt.vector("b") if b_ndim == 1 else matrix("b")
     A_psd = assume(A, positive_definite=True)
-    out = pt.linalg.solve(A_psd, b)
+    out = pt.linalg.solve(A_psd, b, b_ndim=b_ndim)
 
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
     L = cholesky(A_psd)
-    expected = cho_solve((L, True), b, b_ndim=2)
+    expected = cho_solve((L, True), b, b_ndim=b_ndim)
 
     assert_equal_computations([rewritten], [expected])
 
@@ -561,6 +563,20 @@ def test_block_diag_solve_pushdown_both_sides_block_diag():
         scipy.linalg.block_diag(B1_v, B2_v),
     )
     assert_allclose(f(A1_v, A2_v, B1_v, B2_v), expected, atol=1e-10)
+
+
+def test_psd_solve_batched_vector_b_shares_cholesky():
+    A = pt.matrix("A", shape=(5, 5))
+    b = pt.matrix("b", shape=(3, 5))
+    logdet = 2 * pt.log(pt.diagonal(pt.linalg.cholesky(A))).sum()
+    x = pt.linalg.solve(A, b, assume_a="pos", b_ndim=1)
+
+    outs = rewrite_graph(
+        [logdet, x], include=("canonicalize", "stabilize", "specialize", "merge")
+    )
+    core_ops = [getattr(n.op, "core_op", n.op) for n in applys_between([A, b], outs)]
+    assert sum(isinstance(op, Cholesky) for op in core_ops) == 1
+    assert sum(isinstance(op, CholeskySolve) for op in core_ops) == 1
 
 
 class TestDiagonalSolveToDivision:
