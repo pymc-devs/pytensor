@@ -7,8 +7,9 @@ import scipy
 from scipy import special, stats
 
 from pytensor import function, grad
+from pytensor import scalar as ps
 from pytensor import tensor as pt
-from pytensor.compile.mode import get_default_mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, verify_grad
 from pytensor.scalar import ScalarLoop
@@ -579,6 +580,28 @@ class TestSoftplus:
         y_th = pt.softplus(x_test).eval()
         y_np = np.log1p(np.exp(x_test))
         np.testing.assert_allclose(y_th, y_np, rtol=10e-10)
+
+    @pytest.mark.parametrize("dtype", ["int8", "uint8", "float32"])
+    def test_python_output_precision(self, dtype):
+        x = vector("x", dtype=dtype)
+        outputs = [
+            pt.softplus(x),
+            Elemwise(ps.Softplus(ps.upgrade_to_float64))(x),
+        ]
+        fn = function([x], outputs, mode=Mode(linker="py", optimizer=None))
+        values = np.array([-127, -40, -1, 0, 1, 18, 32, 40])
+        if dtype == "uint8":
+            values = values[values >= 0]
+        values = values.astype(dtype)
+        expected = np.logaddexp(0.0, values.astype("float64"))
+        for result, output in zip(fn(values), outputs, strict=True):
+            assert result.dtype == output.dtype
+            np.testing.assert_allclose(
+                result,
+                expected.astype(output.dtype),
+                rtol=10 * np.finfo(output.dtype).eps,
+                atol=0,
+            )
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())

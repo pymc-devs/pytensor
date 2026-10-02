@@ -4882,9 +4882,11 @@ def test_logdiffexp_stabilization():
 
     y_test = rng.normal(size=(3, 2)).astype("float32")
     x_test = rng.normal(size=(3, 2)).astype("float32") + y_test.max()
-    np.testing.assert_almost_equal(
-        f(x_test, y_test), np.log(np.exp(x_test) - np.exp(y_test))
+    # Compute the reference in float64 to avoid float32 cancellation.
+    expected = np.log(
+        np.exp(x_test.astype("float64")) - np.exp(y_test.astype("float64"))
     )
+    np.testing.assert_almost_equal(f(x_test, y_test), expected)
     # Test edge cases
     np.testing.assert_array_equal(
         f([[-np.inf, -np.inf, -1]], [[-1, -np.inf, -np.inf]]),
