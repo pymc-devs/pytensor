@@ -1,9 +1,12 @@
 import inspect
 import os
+import subprocess
+import sys
 import tempfile
 import time
 from functools import singledispatch
 from pathlib import Path
+from textwrap import dedent
 
 import numpy as np
 import pytest
@@ -315,3 +318,29 @@ def test_clear_old_generated_src(generated_src_dir):
     assert not stale.exists()
     assert not orphan.exists()
     assert unrelated.exists()
+
+
+def test_old_generated_src_pruned_at_exit(tmp_path):
+    """Every directory used is pruned at exit, even one set only for a while."""
+    old_files = []
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        old = tmp_path / name / f"m{'0' * 64}.py"
+        old.write_text("x")
+        long_ago = time.time() - 60 * 60 * 24 * 365
+        os.utime(old, (long_ago, long_ago))
+        old_files.append(old)
+
+    code = dedent(
+        f"""
+        from pytensor import config
+        from pytensor.link.utils import write_generated_src
+
+        for name in ("a", "b"):
+            with config.change_flags(generated_src_dir={str(tmp_path)!r} + "/" + name):
+                write_generated_src("def one():\\n    return 1\\n")
+        """
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+    assert not any(old.exists() for old in old_files)

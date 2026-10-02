@@ -598,15 +598,18 @@ register_thunk_trace_excepthook()
 _GENERATED_SRC_RE = re.compile(r"m[0-9a-f]{64}\.py(\..+\.tmp)?")
 
 
-def clear_generated_src(older_than: float | None = None) -> None:
-    """Remove generated source files from `config.generated_src_dir`.
+def clear_generated_src(
+    dirname: str | Path | None = None, older_than: float | None = None
+) -> None:
+    """Remove generated source files from `dirname`, by default `config.generated_src_dir`.
 
     If `older_than` (a timestamp) is given, only remove files last used before it.
     """
-    if not config.generated_src_dir:
+    dirname = dirname or config.generated_src_dir
+    if not dirname:
         return
     try:
-        entries = list(Path(config.generated_src_dir).expanduser().iterdir())
+        entries = list(Path(dirname).expanduser().iterdir())
     except OSError:
         return
 
@@ -618,18 +621,19 @@ def clear_generated_src(older_than: float | None = None) -> None:
                     entry.unlink()
 
 
-def clear_old_generated_src() -> None:
+def clear_old_generated_src(dirname: str | Path | None = None) -> None:
     """Remove generated source files not used in a long time."""
     # Same threshold as `ModuleCache.age_thresh_del` for the C compiledir.
     clear_generated_src(
-        time.time() - (config.cmodule__age_thresh_use + 60 * 60 * 24 * 7)
+        dirname, time.time() - (config.cmodule__age_thresh_use + 60 * 60 * 24 * 7)
     )
 
 
 @functools.cache
-def _register_generated_src_cleanup() -> None:
-    # Register lazily, so processes that never generate source skip the scan.
-    atexit.register(clear_old_generated_src)
+def _register_generated_src_cleanup(dirname: Path) -> None:
+    # Register lazily and once per directory, so processes that never generate
+    # source skip the scan, and a directory set only for a while is still pruned.
+    atexit.register(clear_old_generated_src, dirname)
 
 
 def write_generated_src(src: str) -> str:
@@ -646,8 +650,8 @@ def write_generated_src(src: str) -> str:
             f.write(encoded)
         return f.name
 
-    _register_generated_src_cleanup()
     dirname = Path(src_dir).expanduser()
+    _register_generated_src_cleanup(dirname)
     filename = dirname / f"{utils.hash_from_code(encoded)}.py"
 
     try:
