@@ -1687,7 +1687,7 @@ class CAReduce(COp):
 
     def c_code_cache_version_apply(self, node):
         # the version corresponding to the c code in this Op
-        version = [11]
+        version = [12]
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(
