@@ -665,9 +665,10 @@ def ones_like(x, dtype=None):
     dtype : str or np.dtype, optional
         The data type of the new tensor. If None, uses the dtype of the input tensor.
 
-    Returns:
+    Returns
+    -------
     XTensorVariable
-        A new tensor with the same shape and dimensions as self, filled with ones.
+        A new tensor with the same shape and dimensions as the input, filled with ones.
 
     Examples
     --------
@@ -690,9 +691,10 @@ def zeros_like(x, dtype=None):
     dtype : str or np.dtype, optional
         The data type of the new tensor. If None, uses the dtype of the input tensor.
 
-    Returns:
+    Returns
+    -------
     XTensorVariable
-        A new tensor with the same shape and dimensions as self, filled with zeros.
+        A new tensor with the same shape and dimensions as the input, filled with zeros.
 
     Examples
     --------

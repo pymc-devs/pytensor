@@ -1874,7 +1874,7 @@ def broadcast_to(
 
     Parameters
     ----------
-    array
+    x
         The array to broadcast.
     shape
         The shape of the desired array.
