@@ -58,7 +58,7 @@ from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
 @singledispatch
 def scalar_in_place_fn(
-    op: Op, idx: str, res: str, arr: str
+    op: Op, idx: str, res: str, arr: str, *, invariant_acc: bool = False
 ) -> Sequence[CODE_TOKEN | str]:
     """Return code for an in-place update on an array using a binary scalar :class:`Op`.
 
@@ -72,6 +72,9 @@ def scalar_in_place_fn(
         The symbol name for the first input and results/output.
     arr
         The symbol name for the second input.
+    invariant_acc
+        Whether ``res[idx]`` is the same element on every step of the innermost
+        loop, as it is when that loop's axis is one of the reduced ones.
     """
     raise NotImplementedError(f"No scalar_in_place_fn implemented for {op}")
 
@@ -124,27 +127,37 @@ def scalar_in_place_fn_IntDiv(op, idx, res, arr):
 
 
 @scalar_in_place_fn.register(Maximum)
-def scalar_in_place_fn_Maximum(op, idx, res, arr):
-    # `arr != arr` catches NaN, which the comparison alone would drop; once the
-    # accumulator is NaN neither clause fires again, so NaN sticks (numpy
-    # semantics, matching the C backend). For integer dtypes LLVM folds the
-    # always-false clause away.
+def scalar_in_place_fn_Maximum(op, idx, res, arr, *, invariant_acc=False):
+    # `arr != arr` catches NaN.
+    # For integer dtypes LLVM folds the always-false clause away.
+    if invariant_acc:
+        # Store only on an actual update: an unconditional store to the same
+        # address every step serializes the loop on store-to-load forwarding.
+        return [
+            f"if {res}[{idx}] < {arr} or {arr} != {arr}:",
+            CODE_TOKEN.INDENT,
+            f"{res}[{idx}] = {arr}",
+            CODE_TOKEN.DEDENT,
+        ]
+    # A single select with non-short-circuiting `|` keeps code SIMD friendly,
+    # which `or` would split into two basic blocks.
     return [
-        f"if {res}[{idx}] < {arr} or {arr} != {arr}:",
-        CODE_TOKEN.INDENT,
-        f"{res}[{idx}] = {arr}",
-        CODE_TOKEN.DEDENT,
+        f"{res}[{idx}] = {arr} if ({arr} != {arr}) | ({res}[{idx}] < {arr}) else {res}[{idx}]"
     ]
 
 
 @scalar_in_place_fn.register(Minimum)
-def scalar_in_place_fn_Minimum(op, idx, res, arr):
-    # See NaN comment in scalar_in_place_fn_Maximum
+def scalar_in_place_fn_Minimum(op, idx, res, arr, *, invariant_acc=False):
+    # See comments in scalar_in_place_fn_Maximum
+    if invariant_acc:
+        return [
+            f"if {res}[{idx}] > {arr} or {arr} != {arr}:",
+            CODE_TOKEN.INDENT,
+            f"{res}[{idx}] = {arr}",
+            CODE_TOKEN.DEDENT,
+        ]
     return [
-        f"if {res}[{idx}] > {arr} or {arr} != {arr}:",
-        CODE_TOKEN.INDENT,
-        f"{res}[{idx}] = {arr}",
-        CODE_TOKEN.DEDENT,
+        f"{res}[{idx}] = {arr} if ({arr} != {arr}) | ({res}[{idx}] > {arr}) else {res}[{idx}]"
     ]
 
 
@@ -152,15 +165,15 @@ def scalar_in_place_fn_Minimum(op, idx, res, arr):
 # indexed inc) supports, paired with the in-place form used on the output slice.
 # Augmented assignment is used where Numba supports it directly on 0-d arrays
 # (``out`` is the core output slice, which is 0-d for scalar cores); Maximum and
-# Minimum lack an augmented operator so they use a ufunc + ellipsis-set instead.
+# Minimum lack one, so they select on the slice read back through ``[()]``.
 _SLICE_ACCUMULATE = {
     Add: "{out} += {inner}",
     Mul: "{out} *= {inner}",
     AND: "{out} &= {inner}",
     OR: "{out} |= {inner}",
     XOR: "{out} ^= {inner}",
-    Maximum: "{out}[...] = np.maximum({out}, {inner})",
-    Minimum: "{out}[...] = np.minimum({out}, {inner})",
+    Maximum: "{out}[...] = {inner} if ({inner} != {inner}) | ({out}[()] < {inner}) else {out}[()]",
+    Minimum: "{out}[...] = {inner} if ({inner} != {inner}) | ({out}[()] > {inner}) else {out}[()]",
 }
 
 
@@ -436,6 +449,47 @@ def create_multiaxis_reducer(
         # Helper to make code less verbose, and handle generators directly
         return create_tuple_string(tuple(x))
 
+    def _scalar_inplace(res_sym, arr_expr):
+        """``scalar_in_place_fn`` accumulating into the scalar local *res_sym*."""
+        return [
+            l if isinstance(l, CODE_TOKEN) else l.replace(f"{res_sym}[()]", res_sym)
+            for l in scalar_in_place_fn(scalar_op, "()", res_sym, arr_expr)
+        ]
+
+    # Only max/min take `invariant_acc`, and only they need lanes: LLVM already
+    # vectorizes the other reductions, which lanes would defeat.
+    is_minmax = isinstance(scalar_op, Maximum | Minimum)
+    # Same unroll numpy uses for its scalar minmax reduction.
+    n_lanes = 8
+
+    def _inplace(idx, arr_expr, invariant_acc):
+        extra = {"invariant_acc": invariant_acc} if is_minmax else {}
+        return scalar_in_place_fn(scalar_op, idx, "res", arr_expr, **extra)
+
+    def _emit_lane_reduce(code, run_len, elem_expr, res_sym):
+        """Emit a lane-blocked reduction of ``run_len`` elements into *res_sym*.
+
+        ``elem_expr`` maps an index expression to the element at that offset of
+        the run.  Lanes are held in scalar locals so they stay in registers, and
+        lane indices are cast to ``uint64`` so Numba skips the negative-index
+        wraparound arithmetic it would otherwise emit on every access.
+        """
+        code.append(f"_limit = {run_len} - ({run_len} % {n_lanes})")
+        for j in range(n_lanes):
+            code.append(f"_acc{j} = identity")
+        code.append(f"for _i in range(0, _limit, {n_lanes}):")
+        code.append(CODE_TOKEN.INDENT)
+        for j in range(n_lanes):
+            code.extend(_scalar_inplace(f"_acc{j}", elem_expr(f"np.uint64(_i + {j})")))
+        code.append(CODE_TOKEN.DEDENT)
+        code.append(f"{res_sym} = _acc0")
+        for j in range(1, n_lanes):
+            code.extend(_scalar_inplace(res_sym, f"_acc{j}"))
+        code.append(f"for _i in range(_limit, {run_len}):")
+        code.append(CODE_TOKEN.INDENT)
+        code.extend(_scalar_inplace(res_sym, elem_expr("_i")))
+        code.append(CODE_TOKEN.DEDENT)
+
     code: list[str | CODE_TOKEN] = [
         f"def {careduce_fn_name}(x):",
         CODE_TOKEN.INDENT,
@@ -450,23 +504,22 @@ def create_multiaxis_reducer(
         else:
             return_obj = f"np.array(res, dtype={out_dtype_str})"
 
-        def _scalar_inplace(arr_expr):
-            return [
-                l if isinstance(l, CODE_TOKEN) else l.replace("res[()]", "res")
-                for l in scalar_in_place_fn(scalar_op, "()", "res", arr_expr)
-            ]
-
         def _emit_flat_reduce(code):
             """Emit flat buffer iteration via _flat_view helper."""
+            code.append("y = _flat_view(x)")
+            if is_minmax:
+                code.append("_n = len(y)")
+                _emit_lane_reduce(code, "_n", lambda i: f"y[{i}]", "res")
+                code.append(f"return {return_obj}")
+                return
             code.extend(
                 [
-                    "y = _flat_view(x)",
                     "res = identity",
                     "for i in range(len(y)):",
                     CODE_TOKEN.INDENT,
                 ]
             )
-            code.extend(_scalar_inplace("y[i]"))
+            code.extend(_scalar_inplace("res", "y[i]"))
             code.extend(
                 [
                     CODE_TOKEN.DEDENT,
@@ -479,7 +532,7 @@ def create_multiaxis_reducer(
             code.append(CODE_TOKEN.EMPTY_LINE)
             code.append("res = identity")
             arr_indices = tpl(f"l{i}" for i in range(ndim))
-            _emit_loop_nest(code, ndim, _scalar_inplace(f"x_t[{arr_indices}]"))
+            _emit_loop_nest(code, ndim, _scalar_inplace("res", f"x_t[{arr_indices}]"))
             code.append(f"return {return_obj}")
         else:
             # C or F contiguous: iterate flat buffer directly
@@ -524,7 +577,7 @@ def create_multiaxis_reducer(
                 ]
             )
             arr_indices = tpl(f"l{i}" for i in range(ndim))
-            _emit_loop_nest(code, ndim, _scalar_inplace(f"x_t[{arr_indices}]"))
+            _emit_loop_nest(code, ndim, _scalar_inplace("res", f"x_t[{arr_indices}]"))
             code.append(f"return {return_obj}")
             code.extend(
                 [
@@ -548,8 +601,9 @@ def create_multiaxis_reducer(
         )
         c_res_idx = tpl(f"l{p}" for p in range(ndim) if p in kept_axes)
         c_arr_idx = tpl(f"l{i}" for i in range(ndim))
-        c_inplace_lines = scalar_in_place_fn(
-            scalar_op, c_res_idx, "res", f"x[{c_arr_idx}]"
+        # This path loops over ``x`` untransposed, so the innermost axis is the last
+        c_inplace_lines = _inplace(
+            c_res_idx, f"x[{c_arr_idx}]", ndim - 1 not in kept_axes
         )
         _emit_loop_nest(code, ndim, c_inplace_lines)
         code.append(CODE_TOKEN.DEDENT)
@@ -612,8 +666,10 @@ def create_multiaxis_reducer(
             code.append(f"res = np.full({kept_shape}, identity, dtype={acc_dtype_str})")
             arr_idx = tpl(f"l{i}" for i in range(ndim))
             res_idx = tpl(f"l{p}" for p in kept_pos)
-            inplace_lines = scalar_in_place_fn(
-                scalar_op, res_idx, "res", f"x_t[{arr_idx}]"
+            # ``x_t`` is in descending stride order, so the innermost loop walks
+            # its last axis, reduced exactly when it is absent from ``kept_pos``
+            inplace_lines = _inplace(
+                res_idx, f"x_t[{arr_idx}]", ndim - 1 not in kept_pos
             )
             _emit_loop_nest(code, ndim, inplace_lines)
             # kept_orig assignments (for un-transpose)
@@ -994,7 +1050,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 4
+    cache_version = 5
     if scalar_cache_key is None:
         key = None
     else:
@@ -1045,7 +1101,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     )
     careduce_fn = numba_basic.numba_njit(careduce_py_fn, boundscheck=False)
 
-    cache_version = 4
+    cache_version = 5
     careduce_key = sha256(
         str(
             (
