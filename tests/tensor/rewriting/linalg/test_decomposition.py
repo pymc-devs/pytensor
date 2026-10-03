@@ -642,7 +642,7 @@ def test_eig_to_eigh():
     rewrites = ("canonicalize", "ShapeOpt")
     w_r, v_r = rewrite_graph([w, v], include=rewrites)
 
-    w_expected, v_expected = eigh(x_sym)
+    w_expected, v_expected = eigh(x)
     w_expected = w_expected.astype("complex128")
     v_expected = v_expected.astype("complex128")
     assert_equal_computations([w_r, v_r], [w_expected, v_expected])
