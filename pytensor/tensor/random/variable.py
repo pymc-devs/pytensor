@@ -146,10 +146,10 @@ class RandomGeneratorSharedVariable(SharedVariable, RandomGeneratorVariable):
 
         Parameters
         ----------
-        value : numpy.random.Generator, optional
+        new_value : numpy.random.Generator, optional
             The initial RNG state. If None, a new ``numpy.random.default_rng(seed)`` is used.
         seed : optional
-            Seed for the default RNG. Only used when ``value`` is None. Must define one of value or seed.
+            Seed for the default RNG. Only used when ``new_value`` is None. Must define one of new_value or seed.
         borrow : bool
             If True, the shared variable will use the provided value directly without copying.
 
