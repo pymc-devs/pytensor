@@ -68,8 +68,8 @@ def test_assume_chained_combines_facts():
 
 
 def test_specify_assumptions_op_equal_for_same_facts():
-    a = SpecifyAssumptions({"diagonal": FactState.TRUE, "symmetric": FactState.FALSE})
-    b = SpecifyAssumptions({"symmetric": FactState.FALSE, "diagonal": FactState.TRUE})
+    a = SpecifyAssumptions({DIAGONAL: FactState.TRUE, SYMMETRIC: FactState.FALSE})
+    b = SpecifyAssumptions({SYMMETRIC: FactState.FALSE, DIAGONAL: FactState.TRUE})
     assert a == b
     assert hash(a) == hash(b)
 
