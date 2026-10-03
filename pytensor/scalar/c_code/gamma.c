@@ -148,9 +148,9 @@ DEVICE static double _series (double n, double x)
   sum = t = 1/n;                /* compute initial values */
   for (i = MAXITER; --i >= 0; ) {
     sum += t *= x/++n;          /* add one term of the series */
-    if (fabs(t) < fabs(sum) *EPSILON) break;
+    if (fabs(t) < fabs(sum) *EPSILON) return sum;
   }                             /* if term is small enough, abort */
-  return sum;                   /* return the computed factor */
+  return NPY_NAN;               /* do not return a partial sum */
 }  /* _series() */
 
 /*----------------------------------------------------------------------
@@ -179,9 +179,9 @@ DEVICE static double _cfrac (double n, double x)
     c = b +a/c;
     if (fabs(c) < TINY) c = TINY;
     d = 1/d; f *= e = d *c;
-    if (fabs(e-1) < EPSILON) break;
+    if (fabs(e-1) < EPSILON) return f;
   }                             /* if factor is small enough, abort */
-  return f;                     /* return the computed factor */
+  return NPY_NAN;               /* continued fraction did not converge */
 }  /* _cfrac() */
 
 /*----------------------------------------------------------------------
@@ -198,15 +198,113 @@ Source: W.H. Press, S.A. Teukolsky, W.T. Vetterling, and B.P. Flannery
 The factor exp(n *log(x) -x) is added in the functions below.
 ----------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------
+  The coefficients below are the first four rows of SciPy's Temme expansion:
+  https://github.com/scipy/xsf/blob/b3429e625ef366b5dd90d2097268a180075183e0/include/xsf/cephes/igam_asymp_coeff.h
+  They are used under the following license:
+
+BSD 3-Clause License
+
+Copyright (c) 2024, SciPy
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+----------------------------------------------------------------------*/
+DEVICE static const double _gamma_asymp_coeff[4][25] = {
+    {-3.3333333333333333e-1,  8.3333333333333333e-2,   -1.4814814814814815e-2,  1.1574074074074074e-3,
+     3.527336860670194e-4,    -1.7875514403292181e-4,  3.9192631785224378e-5,   -2.1854485106799922e-6,
+     -1.85406221071516e-6,    8.296711340953086e-7,    -1.7665952736826079e-7,  6.7078535434014986e-9,
+     1.0261809784240308e-8,   -4.3820360184533532e-9,  9.1476995822367902e-10,  -2.551419399494625e-11,
+     -5.8307721325504251e-11, 2.4361948020667416e-11,  -5.0276692801141756e-12, 1.1004392031956135e-13,
+     3.3717632624009854e-13,  -1.3923887224181621e-13, 2.8534893807047443e-14,  -5.1391118342425726e-16,
+     -1.9752288294349443e-15},
+    {-1.8518518518518519e-3,  -3.4722222222222222e-3,  2.6455026455026455e-3,   -9.9022633744855967e-4,
+     2.0576131687242798e-4,   -4.0187757201646091e-7,  -1.8098550334489978e-5,  7.6491609160811101e-6,
+     -1.6120900894563446e-6,  4.6471278028074343e-9,   1.378633446915721e-7,    -5.752545603517705e-8,
+     1.1951628599778147e-8,   -1.7543241719747648e-11, -1.0091543710600413e-9,  4.1627929918425826e-10,
+     -8.5639070264929806e-11, 6.0672151016047586e-14,  7.1624989648114854e-12,  -2.9331866437714371e-12,
+     5.9966963656836887e-13,  -2.1671786527323314e-16, -4.9783399723692616e-14, 2.0291628823713425e-14,
+     -4.13125571381061e-15},
+    {4.1335978835978836e-3,   -2.6813271604938272e-3,  7.7160493827160494e-4,  2.0093878600823045e-6,
+     -1.0736653226365161e-4,  5.2923448829120125e-5,   -1.2760635188618728e-5, 3.4235787340961381e-8,
+     1.3721957309062933e-6,   -6.298992138380055e-7,   1.4280614206064242e-7,  -2.0477098421990866e-10,
+     -1.4092529910867521e-8,  6.228974084922022e-9,    -1.3670488396617113e-9, 9.4283561590146782e-13,
+     1.2872252400089318e-10,  -5.5645956134363321e-11, 1.1975935546366981e-11, -4.1689782251838635e-15,
+     -1.0940640427884594e-12, 4.6622399463901357e-13,  -9.905105763906906e-14, 1.8931876768373515e-17,
+     8.8592218725911273e-15},
+    {6.4943415637860082e-4,   2.2947209362139918e-4,   -4.6918949439525571e-4,  2.6772063206283885e-4,
+     -7.5618016718839764e-5,  -2.3965051138672967e-7,  1.1082654115347302e-5,   -5.6749528269915966e-6,
+     1.4230900732435884e-6,   -2.7861080291528142e-11, -1.6958404091930277e-7,  8.0994649053880824e-8,
+     -1.9111168485973654e-8,  2.3928620439808118e-12,  2.0620131815488798e-9,   -9.4604966618551322e-10,
+     2.1541049775774908e-10,  -1.388823336813903e-14,  -2.1894761681963939e-11, 9.7909989511716851e-12,
+     -2.1782191880180962e-12, 6.2088195734079014e-17,  2.126978363279737e-13,   -9.3446887915174333e-14,
+     2.0453671226782849e-14}
+};
+
+/* DLMF 8.12.3, 8.12.4 and 8.12.7.  Four terms suffice for n >= 1000
+   and |(x-n)/n| <= 0.3.  Evaluate P and Q directly to retain small tails. */
+DEVICE static double _gamma_asymptotic (double n, double x, int upper)
+{
+  int i, k;
+  double sigma = (x-n)/n;
+  double term = -0.5*sigma*sigma;
+  double log1pmx = term;
+  double eta, z, coefficient, sum = 0;
+
+  /* log1p(sigma)-sigma loses precision near zero.  The series converges
+     geometrically throughout this branch, including sigma = 0. */
+  for (i = 3; i < MAXITER; i++) {
+    term *= -sigma*(i-1)/i;
+    log1pmx += term;
+    if (fabs(term) <= EPSILON*fabs(log1pmx)) break;
+  }
+  eta = copysign(sqrt(-2*log1pmx), sigma);
+  z = eta*sqrt(n/2);
+  for (k = 3; k >= 0; k--) {
+    coefficient = _gamma_asymp_coeff[k][24];
+    for (i = 23; i >= 0; i--)
+      coefficient = coefficient*eta +_gamma_asymp_coeff[k][i];
+    sum = sum/n +coefficient;
+  }
+  term = exp(-z*z)*sum/(sqrt(n)*2.5066282746310005024);
+  return upper ? 0.5*erfc(z) +term : 0.5*erfc(-z) -term;
+}
+
+/*--------------------------------------------------------------------*/
+
 DEVICE double GammaP (double n, double x)
 {                               /* --- regularized Gamma function P */
-  if ((n <= 0) || (x < 0)) return NPY_NAN;  /* check the function arguments */
+  if (isnan(n) || isnan(x) || (n <= 0) || (x < 0)) return NPY_NAN;
   if (x <=  0) return 0;        /* treat x = 0 as a special case */
   if (isinf(n)) {
     if (isinf(x)) return NPY_NAN;
     return 0;
   }
   if (isinf(x)) return 1;
+  if ((n >= 1000) && (fabs(x-n) <= 0.3*n))
+    return _gamma_asymptotic(n, x, 0);
   if (x < n+1) return _series(n, x) *exp(n *log(x) -x -logGamma(n));
   return 1 -_cfrac(n, x) *exp(n *log(x) -x -logGamma(n));
 }  /* GammaP() */
@@ -215,13 +313,15 @@ DEVICE double GammaP (double n, double x)
 
 DEVICE double GammaQ (double n, double x)
 {                               /* --- regularized Gamma function Q */
-  if ((n <= 0) || (x < 0)) return NPY_NAN;  /* check the function arguments */
+  if (isnan(n) || isnan(x) || (n <= 0) || (x < 0)) return NPY_NAN;
   if (x <=  0) return 1;        /* treat x = 0 as a special case */
   if (isinf(n)) {
     if (isinf(x)) return NPY_NAN;
     return 1;
   }
   if (isinf(x)) return 0;
+  if ((n >= 1000) && (fabs(x-n) <= 0.3*n))
+    return _gamma_asymptotic(n, x, 1);
   if (x < n+1) return 1 -_series(n, x) *exp(n *log(x) -x -logGamma(n));
   return _cfrac(n, x) *exp(n *log(x) -x -logGamma(n));
 }  /* GammaQ() */
