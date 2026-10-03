@@ -18,6 +18,14 @@ class XOp(Op):
     def do_constant_folding(self, fgraph, node):
         return False
 
+    def pullback(self, inputs, outputs, cotangents):
+        raise NotImplementedError(
+            f"xtensor operation {self} has no gradient of its own: xtensor graphs are "
+            "differentiated once lowered to tensor operations, which `pytensor.grad` "
+            "does not do. Use `pytensor.xtensor.gradient.grad` instead, or its "
+            "`pullback`/`pushforward`."
+        )
+
     def vectorize_node(
         self, node, *new_inputs, new_dim: str | None
     ) -> Sequence[Variable]:
@@ -120,7 +128,7 @@ class Rename(XTypeCastOp):
     def pullback(self, inputs, outs, g_outs):
         [x] = inputs
         [g_out] = g_outs
-        return [rename(g_out, dims=x.type.dims)]
+        return [Rename(x.type.dims)(g_out)]
 
     def vectorize_node(self, node, new_x, new_dim):
         [old_x] = node.inputs
