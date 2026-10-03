@@ -6,28 +6,36 @@ from pytensor.tensor.type import DenseTensorType
 
 
 class Ger(Op):
+    r"""Rank-1 update of a matrix.
+
+    .. math::
+
+        A \leftarrow A + \alpha x y^{\top}
+
+    for matrix :math:`A`, scalar :math:`\alpha` and vectors :math:`x` and :math:`y`.
+    Constructed with ``inplace=True``, the output aliases ``A``'s storage and the op
+    destroys it; otherwise ``A`` is left untouched.
     """
-    BLAS defines general rank-1 update GER as A <- A + alpha x y'
 
-    for matrix A, scalar alpha, vectors x and y.
+    __props__ = ("inplace",)
+    gufunc_signature = "(m,n),(),(m),(n)->(m,n)"
 
-    This interface to GER allows non-destructive operation on A via the
-    `destructive` argument to the constructor.
-
-    """
-
-    __props__ = ("destructive",)
-
-    def __init__(self, destructive):
-        self.destructive = destructive
-        if destructive:
+    def __init__(self, inplace):
+        self.inplace = inplace
+        if inplace:
             self.destroy_map = {0: [0]}
 
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> Op:
+        """``Ger`` updates ``A`` in place, so that is the only input it can destroy."""
+        if 0 in allowed_inplace_inputs:
+            return type(self)(inplace=True)
+        return self
+
     def __str__(self):
-        if self.destructive:
-            return f"{self.__class__.__name__}{{destructive}}"
+        if self.inplace:
+            return f"{self.__class__.__name__}{{inplace}}"
         else:
-            return f"{self.__class__.__name__}{{non-destructive}}"
+            return f"{self.__class__.__name__}{{no_inplace}}"
 
     def make_node(self, A, alpha, x, y):
         A = as_tensor_variable(A)
@@ -63,14 +71,10 @@ class Ger(Op):
             ger_func = scipy_linalg.get_blas_funcs("ger", dtype=A.dtype)
             if A.flags["C_CONTIGUOUS"]:
                 # Work on transposed system to avoid copying
-                A = ger_func(alpha, y, x, a=A.T, overwrite_a=self.destructive).T
+                A = ger_func(alpha, y, x, a=A.T, overwrite_a=self.inplace).T
             else:
-                A = ger_func(alpha, x, y, a=A, overwrite_a=self.destructive)
+                A = ger_func(alpha, x, y, a=A, overwrite_a=self.inplace)
         output_storage[0][0] = A
 
     def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
-
-
-ger = Ger(destructive=False)
-ger_destructive = Ger(destructive=True)

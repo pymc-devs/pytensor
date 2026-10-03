@@ -740,7 +740,7 @@ def cblas_header_text():
     """
 
 
-def blas_header_text():
+def blas_header_text() -> str:
     """C header for the fortran blas interface"""
 
     blas_code = ""
@@ -1054,9 +1054,9 @@ def openblas_threads_text():
     return header
 
 
-def blas_header_version():
+def blas_header_version() -> tuple[int, ...]:
     # Version for the base header
-    version = (10,)
+    version: tuple[int, ...] = (10,)
     if detect_macos_sdot_bug():
         if detect_macos_sdot_bug.fix_works:
             # Version with fix

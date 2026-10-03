@@ -845,3 +845,22 @@ def get_destroy_dependencies(fgraph: FunctionGraph) -> dict[Apply, list[Variable
         for prereq in order.get(node, []):
             destroy_dependencies[node].extend(prereq.outputs)
     return destroy_dependencies
+
+
+def get_static_scalar(node: Apply | None, input_index: int) -> float | None:
+    """Return ``node.inputs[input_index]`` as a float if it is constant, else None."""
+    from pytensor.tensor.basic import get_underlying_scalar_constant_value
+
+    if node is None:
+        return None
+
+    value = get_underlying_scalar_constant_value(
+        node.inputs[input_index], raise_not_constant=False
+    )
+    if not isinstance(value, np.ndarray):
+        return None
+    try:
+        return float(value)
+    except TypeError:
+        # a complex constant, which no caller can pass on as a float
+        return None

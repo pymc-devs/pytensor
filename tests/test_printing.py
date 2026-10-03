@@ -307,7 +307,7 @@ def test_debugprint():
         print_view_map=True,
     )
     s = s.getvalue()
-    Gemv_op_name = "CGemv" if pytensor.config.blas__ldflags else "Gemv"
+    Gemv_op_name = "Gemv"
     exp_res = dedent(
         r"""
         Composite{(i0 + (i1 - i2))} 4
