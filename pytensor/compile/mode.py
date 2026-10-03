@@ -28,6 +28,7 @@ from pytensor.graph.rewriting.db import (
 from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
+from pytensor.link.js.linker import JSLinker
 from pytensor.link.mlx.linker import MLXLinker
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.link.pytorch.linker import PytorchLinker
@@ -50,6 +51,7 @@ predefined_linkers = {
     "vm_nogc": VMLinker(allow_gc=False, use_cloop=False),
     "cvm_nogc": VMLinker(allow_gc=False, use_cloop=True),
     "jax": JAXLinker(),
+    "js": JSLinker(),
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
@@ -516,6 +518,11 @@ NUMBA = Mode(
     RewriteDatabaseQuery(include=["fast_run", "numba"]),
 )
 
+JS = Mode(
+    JSLinker(),
+    RewriteDatabaseQuery(include=["fast_run", "js"]),
+)
+
 JAX = Mode(
     JAXLinker(),
     # `fusion` is not incompatible with JAX (it can run `Composite`), just not desired:
@@ -551,6 +558,7 @@ predefined_modes = {
     "CVM": CVM,
     "JAX": JAX,
     "NUMBA": NUMBA,
+    "JS": JS,
     "PYTORCH": PYTORCH,
     "MLX": MLX,
 }
