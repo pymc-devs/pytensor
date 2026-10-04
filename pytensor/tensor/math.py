@@ -369,8 +369,8 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
         setup, alloc, loop, cast = super()._c_all(
             node, name, input_names, output_names, sub
         )
-        if getattr(self, "initial", None) is not None:
-            # Empty reductions return the scalar_op identity, which is `initial`
+        if getattr(self, "initial", False):
+            # Empty reductions return the scalar_op identity
             return setup, alloc, loop, cast
 
         # We add an additional check for zero-sized dimensions (This seems like
@@ -415,22 +415,16 @@ class MaxAndMinCAReduce(NonZeroDimsCAReduce):
     Subclasses only need to bind the appropriate scalar ``Op`` (``maximum`` or
     ``minimum``) in their ``__init__`` and set ``nfunc_spec``.
 
-    ``initial`` can be ``None`` (reducing an empty axis raises) or the identity of
-    the scalar ``Op`` (``-inf`` for ``Max``, ``inf`` for ``Min``), in which case an
-    empty reduction returns it, like NumPy's ``initial``. For integer and boolean
-    inputs the lowest/highest value of the dtype is used.
+    With ``initial=True`` an empty reduction returns the identity of the scalar
+    ``Op`` (``-inf`` for ``Max``, ``inf`` for ``Min``) instead of raising, like
+    NumPy's ``initial``. For integer and boolean inputs the lowest/highest value of
+    the dtype is used.
     """
 
     __props__ = (*NonZeroDimsCAReduce.__props__, "initial")
 
-    def __init__(self, scalar_op, axis, initial=None):
-        if initial is not None:
-            initial = float(initial)
-            if initial != scalar_op.identity:
-                raise ValueError(
-                    f"initial must be None or {scalar_op.identity} for {type(self).__name__}, got {initial}"
-                )
-        self.initial = initial
+    def __init__(self, scalar_op, axis, initial=False):
+        self.initial = bool(initial)
         super().__init__(scalar_op, axis)
 
     def clone(self, **kwargs):
@@ -439,22 +433,25 @@ class MaxAndMinCAReduce(NonZeroDimsCAReduce):
         return type(self)(axis=axis, initial=initial)
 
     def __str__(self):
-        if self.initial is None:
+        if not self.initial:
             return super().__str__()
-        return f"{type(self).__name__}{{{self._axis_str()}, initial={self.initial}}}"
+        return f"{type(self).__name__}{{{self._axis_str()}, initial}}"
 
     def initial_value(self, dtype):
-        """`initial` as a value of `dtype`: the dtype's bounds for ints and bools."""
+        """The identity as a value of `dtype` (its bounds for ints and bools), or None."""
+        if not self.initial:
+            return None
+        identity = self.scalar_op.identity
         dtype = np.dtype(dtype)
-        if self.initial is None or dtype.kind == "f":
-            return self.initial
+        if dtype.kind == "f":
+            return identity
         if dtype.kind == "b":
-            return self.initial > 0
+            return identity > 0
         info = np.iinfo(dtype)
-        return info.max if self.initial > 0 else info.min
+        return info.max if identity > 0 else info.min
 
     def perform(self, node, inp, out):
-        if self.initial is None:
+        if not self.initial:
             return super().perform(node, inp, out)
         [x] = inp
         dtype = node.outputs[0].type.dtype
@@ -514,14 +511,14 @@ class MaxAndMinCAReduce(NonZeroDimsCAReduce):
 class Max(MaxAndMinCAReduce):
     nfunc_spec = ("max", 1, 1)
 
-    def __init__(self, axis, initial=None):
+    def __init__(self, axis, initial=False):
         super().__init__(ps.maximum, axis, initial=initial)
 
 
 class Min(MaxAndMinCAReduce):
     nfunc_spec = ("min", 1, 1)
 
-    def __init__(self, axis, initial=None):
+    def __init__(self, axis, initial=False):
         super().__init__(ps.minimum, axis, initial=initial)
 
 
@@ -549,7 +546,9 @@ def max(x, axis=None, keepdims=False, initial=None):
     a shape of 0.
 
     """
-    out = Max(axis=axis, initial=initial)(x)
+    if initial is not None and float(initial) != -np.inf:
+        raise ValueError(f"initial must be None or -inf for max, got {initial}")
+    out = Max(axis=axis, initial=initial is not None)(x)
 
     if keepdims:
         out = makeKeepDims(x, out, axis)
@@ -582,7 +581,7 @@ def min(x, axis=None, keepdims=False, initial=None):
     str_x_type = str(x.dtype)
     if str_x_type in int_dtypes and initial is not None:
         # -max(-x) would overflow on the empty result
-        out = Min(axis=axis, initial=initial)(x)
+        out = Min(axis=axis, initial=True)(x)
         return makeKeepDims(x, out, axis) if keepdims else out
     if str_x_type.startswith("float") or str_x_type in int_dtypes:
         return -max(-x, axis=axis, keepdims=keepdims, initial=max_initial)

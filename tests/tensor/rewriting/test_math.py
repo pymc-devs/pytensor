@@ -3468,14 +3468,24 @@ class TestLocalSumProd:
         result.assert_eval(v_val)
 
     def test_local_careduce_of_alloc_initial(self):
-        # The broadcast axis may be empty at runtime, where the result is `initial`
+        # A broadcast axis may be empty at runtime, where the result is `initial`
         v = vector("v")
         n = scalar("n", dtype="int64")
-        out = Max(axis=0, initial=-np.inf)(pt.alloc(v, n, 3))
-        f = function([v, n], out, mode=get_default_mode().including("specialize"))
-        np.testing.assert_array_equal(
-            f(np.ones(3, dtype=v.dtype), 0), np.full(3, -np.inf)
-        )
+        alloc_v = pt.alloc(v, n, 3)
+        outs = [
+            Max(axis=0, initial=True)(alloc_v),
+            Max(axis=None, initial=True)(alloc_v),
+        ]
+        f = function([v, n], outs, mode=get_default_mode().including("specialize"))
+        assert not any(isinstance(node.op, Alloc) for node in f.maker.fgraph.toposort())
+
+        v_val = np.array([1.0, 3.0, 2.0], dtype=v.dtype)
+        dropped, reduced = f(v_val, 0)
+        np.testing.assert_array_equal(dropped, np.full(3, -np.inf))
+        assert reduced == -np.inf
+        dropped, reduced = f(v_val, 2)
+        np.testing.assert_array_equal(dropped, v_val)
+        assert reduced == 3.0
 
     @pytest.mark.parametrize("reduce_op", [Max, Min, All, Any])
     def test_local_careduce_of_alloc_idempotent(self, reduce_op):

@@ -23,7 +23,7 @@ def jax_funcify_Elemwise(op, node, **kwargs):
 @jax_funcify.register(CAReduce)
 def jax_funcify_CAReduce(op, **kwargs):
     axis = op.axis
-    initial = getattr(op, "initial", None)
+    initial = getattr(op, "initial", False)
     op_nfunc_spec = getattr(op, "nfunc_spec", None)
     scalar_nfunc_spec = getattr(op.scalar_op, "nfunc_spec", None)
     scalar_op_name = getattr(op.scalar_op, "name", None)
@@ -47,7 +47,7 @@ def jax_funcify_CAReduce(op, **kwargs):
 
         if op_nfunc_spec:
             jax_op = getattr(jnp, op_nfunc_spec[0])
-            if initial is not None:
+            if initial:
                 return jax_op(x, axis=axis, initial=op.initial_value(x.dtype)).astype(
                     acc_dtype
                 )

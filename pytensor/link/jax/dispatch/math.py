@@ -16,19 +16,9 @@ def jax_funcify_Dot(op, **kwargs):
 @jax_funcify.register(Max)
 def jax_funcify_Max(op, **kwargs):
     axis = op.axis
-    initial = op.initial
-
-    if initial is not None:
-
-        def max(x):
-            return jnp.max(x, axis, initial=op.initial_value(x.dtype))
-
-        return max
 
     def max(x):
-        max_res = jnp.max(x, axis)
-
-        return max_res
+        return jnp.max(x, axis, initial=op.initial_value(x.dtype))
 
     return max
 

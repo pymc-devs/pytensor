@@ -2118,10 +2118,10 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
 
     # Keeping `initial` from either side only turns an empty-axis error into it
     clone_kwargs = {}
-    if hasattr(outer_op, "initial"):
-        for op in (outer_op, inner_op):
-            if getattr(op, "initial", None) is not None:
-                clone_kwargs["initial"] = op.initial
+    if getattr(inner_op, "initial", False):
+        if not hasattr(outer_op, "initial"):
+            return None
+        clone_kwargs["initial"] = True
 
     outer_axis = outer_op.axis
     inner_axis = inner_op.axis
@@ -2279,10 +2279,6 @@ def local_careduce_of_alloc(fgraph, node):
         case _:
             return None
 
-    # A broadcast axis may be empty at runtime, where the result is `initial`
-    if getattr(node.op, "initial", None) is not None:
-        return None
-
     ndim = len(shapes)
     axis = node.op.axis
     axis = tuple(range(ndim)) if axis is None else axis
@@ -2321,6 +2317,19 @@ def local_careduce_of_alloc(fgraph, node):
                 # downcast); either would be amplified by the mul/pow below.
                 size = size.astype("float32")
             value = value * size if isinstance(node.op, Sum) else value**size
+
+    # With `initial`, a broadcast axis that is empty at runtime makes the result `initial`
+    if getattr(node.op, "initial", False):
+        broadcast_shapes = [
+            shapes[a] for a in axis if a < offset or value_bcast[a - offset]
+        ]
+        if broadcast_shapes:
+            dtype = node.outputs[0].dtype
+            value = switch(
+                eq(variadic_mul(*broadcast_shapes), 0),
+                np.asarray(node.op.initial_value(dtype), dtype=dtype),
+                value,
+            )
 
     # The reduction may change the dtype; a single elemwise has no accumulation
     # error, so ignore acc_dtype and just cast to the reduction's output dtype.
