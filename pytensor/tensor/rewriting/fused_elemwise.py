@@ -364,44 +364,32 @@ class FuseElemwise(GraphRewriter):
         return new_node, dup_map
 
     @staticmethod
-    def transpose_non_indexed_write_axes(node, write_targets):
-        """Move excess leading non-indexed dims to the right of the write target.
+    def transpose_non_indexed_write_axes(write_targets, leading_axes):
+        """Move leading target axes omitted by the Elemwise value to the right.
 
-        Only the leftmost non-indexed dims that aren't covered by the Elemwise
-        loop are moved. Loop dims and indexed axes keep their relative order so
-        the val's dim layout stays aligned with the write slice.
+        These axes are full slices, so indexed and covered non-indexed axes
+        keep their relative order.
 
         Returns a list of ``(old_out, new_out)`` replacement pairs, or an
         empty list if no write target needed transposing.
         """
         replacements = []
-        elemwise_batch_ndim = len(node.outputs[0].type.broadcastable)
-        for update_node in write_targets.values():
+        for out_idx, update_node in write_targets.items():
+            excess = leading_axes[out_idx]
+            if not excess:
+                continue
             op = update_node.op
             target, val, *idx_vars = update_node.inputs
-
-            idx_axes = [i for i, e in enumerate(op.idx_list) if e != slice(None)]
-            n_indexed_axes = len(idx_axes)
-            n_idx_dims = max(v.ndim for v in idx_vars)
-            source_batch = elemwise_batch_ndim + n_indexed_axes - n_idx_dims
-            if max(idx_axes) < source_batch:
-                # Indexed axes already within batch dims, no transpose needed
-                continue
-
-            # Move excess leading non-indexed axes to the right
-            non_idx_axes = [a for a in range(target.type.ndim) if a not in idx_axes]
-            excess = target.type.ndim - source_batch
-            excess_axes = non_idx_axes[:excess]
-            non_excess_axes = [
-                a for a in range(target.type.ndim) if a not in excess_axes
-            ]
-            perm = non_excess_axes + excess_axes
+            perm = [*range(excess, target.type.ndim), *range(excess)]
             target_t = target.dimshuffle(perm)
 
             # Pad val so it broadcasts with excess dims moved to the right.
-            # Non-indexed axes can't be between indexed axes (_extract_idx_axis_pairs rejects non-consecutive indexing).
             val = shape_padright(val, excess)
-            new_idx_list = [op.idx_list[perm[i]] for i in range(len(perm))]
+            new_idx_list = [
+                op.idx_list[i] if i < len(op.idx_list) else slice(None) for i in perm
+            ]
+            while new_idx_list[-1] == slice(None):
+                new_idx_list.pop()
 
             # Create new write node
             props = op._props_dict()
@@ -461,7 +449,7 @@ class FuseElemwise(GraphRewriter):
             # Our current vectorize codegen can't produce write only loops that don't force
             # the recomputation of the core function in every step.
             write_targets = {}  # out_idx -> update_node
-            must_transpose_write_axes = False
+            leading_write_axes = {}
             for out_idx, out in enumerate(node.outputs):
                 clients = fgraph.clients[out]
                 # Allow right expand_dims between elemwise and write
@@ -506,27 +494,34 @@ class FuseElemwise(GraphRewriter):
                 write_bcast = AdvancedSubtensor(idx_list=client_node.op.idx_list)(
                     target, *idx_vars
                 ).type.broadcastable
-                indexed_write_bcast = (
-                    write_bcast[: len(write_bcast) - right_pad]
-                    if right_pad
-                    else write_bcast
-                )
-                left_pad = min(a for _, a in idx_axis_pairs)
-                if out.type.ndim + left_pad < len(indexed_write_bcast):
-                    # out does not cover all indexed write dims
+                # The value's Elemwise axes align before its right padding and
+                # after any omitted leading target axes. Every advanced-index
+                # dimension must lie in that Elemwise span; the omitted leading
+                # axes can be moved to trailing output-slice axes below.
+                n_write_dims = len(write_bcast)
+                elemwise_ndim = out.type.ndim
+                leading_axes = n_write_dims - elemwise_ndim - right_pad
+                first_idx_axis = min(axis for _, axis in idx_axis_pairs)
+                index_ndim = max(idx.ndim for idx, _ in idx_axis_pairs)
+                if (
+                    leading_axes < 0
+                    or leading_axes > first_idx_axis
+                    or first_idx_axis + index_ndim > leading_axes + elemwise_ndim
+                ):
                     continue
 
                 if any(
                     ob and not iwb
                     for ob, iwb in zip(
-                        reversed(out.type.broadcastable), reversed(indexed_write_bcast)
+                        out.type.broadcastable,
+                        write_bcast[leading_axes : leading_axes + elemwise_ndim],
+                        strict=True,
                     )
                 ):
                     # TODO: support broadcast on non-indexed dims by squeezing them out of the Elemwise first
                     continue
 
-                if len(indexed_write_bcast) > out.type.ndim:
-                    must_transpose_write_axes = True
+                leading_write_axes[out_idx] = leading_axes
 
                 for idx_axis_pair in idx_axis_pairs:
                     if idx_axis_pair not in idx_groups:
@@ -579,9 +574,9 @@ class FuseElemwise(GraphRewriter):
             if not idx_groups and not reduced_outputs:
                 continue
 
-            if must_transpose_write_axes:
+            if any(leading_write_axes.values()):
                 replacements = self.transpose_non_indexed_write_axes(
-                    node, write_targets
+                    write_targets, leading_write_axes
                 )
                 assert replacements
                 fgraph.replace_all(

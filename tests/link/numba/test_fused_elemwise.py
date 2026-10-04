@@ -5,8 +5,9 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
+from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.elemwise import CAReduce, Elemwise
-from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise, FuseElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
@@ -263,6 +264,29 @@ class TestIndexedReadFusion:
 
 class TestIndexedWriteFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
+
+    def test_no_fusion_when_right_pad_covers_index(self):
+        s = pt.scalar("s")
+        idx = pt.lvector("idx")
+        out = pt.zeros(7)[idx].inc(pt.exp(s).dimshuffle("x"))
+        fgraph = FunctionGraph([s, idx], [out], clone=True)
+
+        FuseElemwise().apply(fgraph)
+
+        assert not any(isinstance(node.op, FusedElemwise) for node in fgraph.toposort())
+
+    def test_write_with_middle_index_and_leading_broadcast(self):
+        x = pt.matrix("x", shape=(2, 4))
+        idx = pt.lvector("idx")
+        target = pt.tensor3("target", shape=(3, 7, 4))
+        out = target[:, idx, :].inc(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, idx, target], out)
+        assert_fused(fn)
+
+        xv = np.arange(8.0).reshape(2, 4) / 3
+        tv = np.arange(84.0).reshape(3, 7, 4) / 10
+        for iv in (np.array([1, 5]), np.array([2, 2])):
+            np.testing.assert_allclose(fn(xv, iv, tv), fn_u(xv, iv, tv))
 
     def test_no_fusion_when_idx_axes_outside_elemwise_loop(self):
         """Don't fuse if the indexed axes are not within the Elemwise loop.
