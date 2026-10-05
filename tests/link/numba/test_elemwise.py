@@ -1,4 +1,5 @@
 import contextlib
+from math import comb
 
 import numpy as np
 import pytest
@@ -11,6 +12,7 @@ from pytensor.compile import get_mode
 from pytensor.compile.mode import Mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
+from pytensor.link.numba.dispatch.elemwise import MAX_CAREDUCE_LOOPS
 from pytensor.scalar import Composite, and_, float64, or_, xor
 from pytensor.scalar import add as scalar_add
 from pytensor.scalar import mul as scalar_mul
@@ -355,6 +357,22 @@ def test_CAReduce(careduce_fn, axis, v):
     # fn.dprint()
     [node] = fn.maker.fgraph.apply_nodes
     assert isinstance(node.op, CAReduce)
+
+
+@pytest.mark.parametrize(
+    "careduce_fn, numpy_fn", [(pt.prod, np.prod), (pt.max, np.max), (pt.min, np.min)]
+)
+def test_CAReduce_many_position_patterns(careduce_fn, numpy_fn):
+    # One layout per generic nest: innermost axis in stride order reduced / kept
+    axis = (0, 2)
+    x = pt.tensor("x", shape=(None,) * 6)
+    assert comb(x.ndim, len(axis)) * x.ndim > MAX_CAREDUCE_LOOPS
+    test_x = np.random.default_rng(5).normal(size=(2, 3, 4, 2, 3, 4))
+    test_x[0, 0, 0, 0, 0, 0] = np.nan
+    inner_reduced = np.asfortranarray(np.repeat(test_x, 2, axis=0))[::2]
+    inner_kept = np.repeat(test_x, 2, axis=-1)[..., ::2]
+    fn, _ = compare_numba_and_py([x], careduce_fn(x, axis=axis), [inner_reduced])
+    np.testing.assert_allclose(fn(inner_kept), numpy_fn(test_x, axis=axis))
 
 
 @pytest.mark.parametrize("axis", (-1, (0, -1), None))
