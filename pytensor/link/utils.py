@@ -650,7 +650,8 @@ def write_generated_src(src: str) -> str:
             f.write(encoded)
         return f.name
 
-    dirname = Path(src_dir).expanduser()
+    # Absolute, so the file stays readable after a change of working directory.
+    dirname = Path(src_dir).expanduser().absolute()
     _register_generated_src_cleanup(dirname)
     filename = dirname / f"{utils.hash_from_code(encoded)}.py"
 
