@@ -1,16 +1,27 @@
 import inspect
+import os
+import subprocess
+import sys
+import tempfile
+import time
 from functools import singledispatch
+from pathlib import Path
+from textwrap import dedent
 
 import numpy as np
+import pytest
 
 from pytensor import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.link.utils import (
+    clear_old_generated_src,
+    compile_function_src,
     fgraph_to_python,
     get_name_for_object,
     unique_name_generator,
+    write_generated_src,
 )
 from pytensor.scalar.basic import Add, float64
 from pytensor.tensor import constant
@@ -238,3 +249,98 @@ def test_unique_name_generator():
 
     r_name_3 = unique_names(r)
     assert r_name_2 == r_name_3
+
+
+SRC_ONE = "def one():\n    return 1\n"
+
+
+@pytest.fixture
+def generated_src_dir(tmp_path):
+    dirname = tmp_path / "generated_src"
+    with config.change_flags(generated_src_dir=str(dirname)):
+        yield dirname
+
+
+def test_write_generated_src_is_content_addressed(
+    generated_src_dir, tmp_path, monkeypatch
+):
+    tempdir = tmp_path / "tmp"
+    tempdir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tempdir))
+
+    first = write_generated_src(SRC_ONE)
+    second = write_generated_src(SRC_ONE)
+
+    assert first == second
+    # One file and no leftover .tmp from the atomic write.
+    assert list(generated_src_dir.iterdir()) == [Path(first)]
+    assert Path(first).read_text() == SRC_ONE
+    assert write_generated_src("def one():\n    return 2\n") != first
+    # Nothing goes to the system temporary directory.
+    assert list(tempdir.iterdir()) == []
+
+
+@pytest.mark.parametrize("src_dir", ["", "generated_src"])
+def test_compile_function_src_source_stays_readable(src_dir, tmp_path):
+    """Tracebacks and Numba's type inference read the source back from disk."""
+    with config.change_flags(generated_src_dir=src_dir and str(tmp_path / src_dir)):
+        fn = compile_function_src(SRC_ONE, "one")
+
+    assert inspect.getsource(fn) == SRC_ONE
+
+
+def test_write_generated_src_rewrites_truncated_file(generated_src_dir):
+    """A file truncated by an earlier crash must not be reused for good."""
+    path = Path(write_generated_src(SRC_ONE))
+    path.write_text("")
+
+    assert Path(write_generated_src(SRC_ONE)) == path
+    assert path.read_text() == SRC_ONE
+
+
+def test_clear_old_generated_src(generated_src_dir):
+    fresh = Path(write_generated_src(SRC_ONE))
+    stale = Path(write_generated_src("def two():\n    return 2\n"))
+    orphan = generated_src_dir / f"m{'0' * 64}.py.partial.tmp"
+    orphan.write_text("partially written")
+    # The directory can be shared, so files PyTensor did not write are kept.
+    unrelated = generated_src_dir / "unrelated.py"
+    unrelated.write_text("x")
+    for path in (fresh, stale, orphan, unrelated):
+        long_ago = time.time() - 60 * 60 * 24 * 365
+        os.utime(path, (long_ago, long_ago))
+    # Reuse refreshes the mtime, so the pruner spares source still in use.
+    write_generated_src(SRC_ONE)
+
+    clear_old_generated_src()
+
+    assert fresh.exists()
+    assert not stale.exists()
+    assert not orphan.exists()
+    assert unrelated.exists()
+
+
+def test_old_generated_src_pruned_at_exit(tmp_path):
+    """Every directory used is pruned at exit, even one set only for a while."""
+    old_files = []
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        old = tmp_path / name / f"m{'0' * 64}.py"
+        old.write_text("x")
+        long_ago = time.time() - 60 * 60 * 24 * 365
+        os.utime(old, (long_ago, long_ago))
+        old_files.append(old)
+
+    code = dedent(
+        f"""
+        from pytensor import config
+        from pytensor.link.utils import write_generated_src
+
+        for name in ("a", "b"):
+            with config.change_flags(generated_src_dir={str(tmp_path)!r} + "/" + name):
+                write_generated_src("def one():\\n    return 1\\n")
+        """
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+    assert not any(old.exists() for old in old_files)
