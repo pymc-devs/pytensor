@@ -3,15 +3,21 @@
 This is a proof of concept for lowering an ordinary PyTensor graph to JavaScript
 and running it in V8. PyTensor still builds and rewrites the graph and computes
 gradients. The linker consumes the existing scalar `Composite` and
-`FusedElemwise` representation, including vector indexed reads and sum
-reductions. It does not use TyMC.
+`FusedElemwise` representation, including indexed reads/writes and partial sum
+reductions. It uses PyTensor's graph and rewrites; the scalar gamma/digamma
+kernels are ported from TyMC (see `THIRD_PARTY_NOTICES`). TyMC is not a runtime
+dependency.
 
 `JS` mode selects `fast_run` and the `js` rewrite tag. The indexed/reduction
 fusion rewrites are shared with Numba but registered under both tags; JS does
 not select Numba-only rewrites. The linker delegates Op and scalar expression
 generation to `dispatch/`, using type-based dispatch and a shared indentation
 helper (`pytensor/link/string_codegen.py`). `js_typify` checks supported dtypes
-and converts values for the binary transport.
+and converts values for the binary transport. Each Op or fused cluster gets
+its own generated function, called by a topological driver. Tensor records
+carry data, shape, strides and an offset; basic slices and transposes are
+views. Complex indexed fusion patterns without a fused emitter lower their
+inner graph through ordinary Op dispatch.
 
 Install Node.js so `node` is on `PATH`, then:
 
@@ -24,8 +30,8 @@ x, y, beta = pt.vector("x"), pt.vector("y"), pt.scalar("beta")
 logp = pt.sum(-0.5 * (y - beta * x) ** 2)
 fn = pytensor.function([x, y, beta], [logp, pt.grad(logp, beta)], mode="JS")
 
-print(fn(np.arange(3.), np.ones(3), 0.2))
-print(fn(np.arange(11.), np.ones(11), 0.2))  # same graph, different shape
+print(fn(np.arange(3.0), np.ones(3), 0.2))
+print(fn(np.arange(11.0), np.ones(11), 0.2))  # same graph, different shape
 ```
 
 Input rank and dtype are set by PyTensor; axis lengths are read at runtime.
@@ -38,22 +44,22 @@ dispatch but still copies inputs and outputs across the process boundary.
 loaded inputs run repeatedly inside V8, excluding Python and transport.
 Call `fn.vm.jit_fn.close()` when finished to release the process promptly.
 
-The supported set is intentionally small: float64 elementary arithmetic and
-several transcendental scalar Ops, `Composite`, `DimShuffle`, sum and boolean
-all reductions, and rank-one fused elementwise graphs with optional
-integer-vector gather and multiple outputs. Simple PyMC parameter checks,
-boolean vectors, and float32 constants/intermediates also lower. Int32/int64/bool
-inputs are used for indexing and conditions; int64 values outside JavaScript's
-exact integer range are refused.
-Unsupported Ops and scalar casts raise `NotImplementedError` during lowering.
-This backend is not yet a replacement for the C or Numba linker: it lacks
-general linear algebra, arbitrary indexed writes, `Scan`, many special
-functions, and complete dtype semantics. It deliberately reports such gaps
-rather than silently falling back to Python.
+The supported set includes elementary arithmetic, `gammaln` and `psi`,
+`Composite`, `DimShuffle`, sum and boolean all reductions, multidimensional
+fused loops, integer scalar/vector indexing and indexed updates. Allocation,
+shape operations, reshape, concatenate, cumulative sum/product, vector/matrix
+dot, Cholesky and triangular solves also lower. Simple PyMC parameter checks,
+boolean arrays, and float32 constants/intermediates are supported. Int64
+inputs outside JavaScript's exact integer range are refused.
+Unsupported Ops and casts raise `NotImplementedError` during lowering. This
+backend is not yet a replacement for C or Numba: it lacks BLAS, `Scan`, many
+special functions, general advanced indexing and complete dtype semantics.
+The dense linear algebra kernels are straightforward compatibility loops.
 
-The included tests cover a single compiled graph called with changing vector
-lengths, matching log density and gradient to PyTensor, and a fused indexed
-sum with changing index lengths. They assert that PyTensor's fusion pass fired.
+The included tests cover changing shapes, strided views, indexed gradients
+with duplicate indices, partial reductions, special functions and small dense
+linear algebra, as well as PyMC log density and gradient. Fusion tests assert
+that PyTensor's fusion pass fired.
 They do not claim speed parity with Numba; bridge cost and warm-up need to be
 measured separately.
 
@@ -131,9 +137,9 @@ per-row checks and branch cases. A scratch experiment removing those branches
 at the reference point helped, but is not a valid general rewrite at boundary
 values and is not part of the backend.
 
-These are single points, not sampler throughput. The negative-binomial GLM
-still needs scalar indexing, indexed updates, `gammaln`, and `psi`; radon needs
-`Alloc` and additional tensor support. They were not timed.
+These historical measurements are single points, not sampler throughput.
+Negative-binomial and hierarchical models were unsupported in that run;
+the current prototype lowers their required Ops.
 
 `bench_bridge.py` times the public `pytensor.function` call separately. In one
 run with observed data embedded as constants, warm calls took about 76, 106,
@@ -144,3 +150,57 @@ times vary with process scheduling and include PyTensor input filtering,
 serialization, pipe transport, and output reconstruction. The binary bridge
 is useful for larger kernels but remains material below about 50 µs of
 in-engine work; `mode="JS"` is not a claim that Python-to-JS calls are free.
+
+
+## Expanded coverage, interleaved rerun (2026-10-06)
+
+The expanded prototype runs all 12 variants in the recovered benchmark grid,
+including both negative-binomial datasets, hierarchical beta-binomial,
+fitted covariance and matrix factorization. Representative results on the
+same Ryzen 5 2400G / Node 22.21.1 are below. These supersede the earlier
+single-point comparisons as a broader audit; they are not a controlled
+regression comparison against those historical runs.
+
+Each runtime cell is the median of 12 interleaved round means, averaging
+the same five saved unconstrained parameter points. Numba uses the committed
+`beat_js` tree (`50ad847`) and alchemize's native Rust `cfunc` timer. Both JS
+engines evaluate directly inside Node and copy the full gradient to the
+caller buffer; Python transport is excluded. PyMC's normal compile path
+converts parameter checks to switches for both PyTensor backends. All variants
+matched the saved C reference; maximum component-scaled error was 1.62e-9.
+
+Current TyMC is remote main `b1c0389`, with its default WASM/SIMD linear
+algebra enabled. The earlier local `38d0a20` snapshot is not used for these
+TyMC timings.
+
+| Model | Numba µs/eval | PyTensor JS µs/eval | Current TyMC µs/eval |
+| --- | ---: | ---: | ---: |
+| Eight schools | 1.20 | 1.12 | 0.38 |
+| Poisson GLM | 37.43 | 136.49 | 60.96 |
+| Catalogue negative binomial | 541.14 | 1012.94 | 465.86 |
+| Hierarchical beta-binomial | 8.35 | 12.65 | 4.86 |
+| LKJ multivariate Normal | 292.12 | 1350.86 | 251.22 |
+| Matrix factorization | 1322.22 | 18631.21 | 4723.79 |
+
+Compile starts from a built/frozen model and includes logp/gradient building,
+rewrites and lowering. Numba has one fresh native callback compile per model,
+with caches disabled. JS/TyMC include binding and elapsed evaluation warmup
+through the observed performance plateau; their cells are medians of two
+cold instances. Process startup and imports are excluded. The plateau uses
+a 200 ms observation window within 10% of the best later window, not the
+last JIT event. Runtime follows at least four seconds of evaluations.
+
+| Model | Numba cache off, s | PyTensor JS through plateau, s | Current TyMC through plateau, s |
+| --- | ---: | ---: | ---: |
+| Eight schools | 5.04 | 0.74 | 0.30 |
+| Poisson GLM | 6.71 | 0.62 | 0.68 |
+| Catalogue negative binomial | 9.28 | 0.73 | 0.52 |
+| Hierarchical beta-binomial | 9.03 | 0.82 | 0.89 |
+| LKJ multivariate Normal | 34.29 | 1.56 | 0.89 |
+| Matrix factorization | 6.69 | 0.86 | 0.76 |
+
+The machine was not otherwise isolated; the full report retains paired ratios,
+round ranges, CPU times, per-point timings and both cold warmup traces.
+These figures show the cold-compile advantage and remaining runtime gaps of
+this compatibility PoC. They do not establish general V8 versus LLVM speed,
+or sampling throughput. The focused JS suite passed 19 tests.

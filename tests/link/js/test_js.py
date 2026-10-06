@@ -159,7 +159,7 @@ def test_js_linker_recovers_from_evaluation_error():
 def test_js_linker_rejects_unsupported_op():
     x = pt.vector("x")
     with pytest.raises(NotImplementedError, match=r"JS (Op|scalar Op|FusedElemwise)"):
-        pytensor.function([x], pt.gammaln(x), mode="JS")
+        pytensor.function([x], pt.erf(x), mode="JS")
 
 
 def test_js_mode_uses_its_own_rewrites():
@@ -173,6 +173,168 @@ def test_js_typify_refuses_inexact_int64():
     value = np.array([2**53], dtype="int64")
     with pytest.raises(ValueError, match="exact Number range"):
         js_typify(value, "int64")
+
+
+def test_special_functions():
+    scipy = pytest.importorskip("scipy.special")
+    x = pt.vector("x")
+    fn = pytensor.function([x], [pt.gammaln(x), pt.psi(x)], mode="JS")
+    try:
+        values = np.array(
+            [
+                -40.5,
+                -5.25,
+                -1,
+                -0.5,
+                -0.0,
+                0.0,
+                1e-10,
+                0.1,
+                0.99,
+                1,
+                2,
+                3.7,
+                4,
+                10,
+                100,
+                1e4,
+                1e50,
+                np.inf,
+                -np.inf,
+                np.nan,
+            ]
+        )
+        for array in (values, values[:6], np.empty(0)):
+            for actual, expected in zip(
+                fn(array), (scipy.gammaln(array), scipy.digamma(array)), strict=True
+            ):
+                np.testing.assert_allclose(actual, expected, rtol=2e-13, atol=2e-13)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_tensor_shape_and_cumulative_ops():
+    x = pt.matrix("x")
+    view = x[:, ::-1]
+    outputs = [
+        pt.concatenate([view, view], axis=1),
+        pt.cumsum(view, axis=0),
+        pt.cumprod(view, axis=1),
+        pt.arange(x.shape[0], dtype="int64"),
+    ]
+    fn = pytensor.function([x], outputs, mode="JS")
+    try:
+        for shape in ((3, 4), (5, 2), (0, 3)):
+            values = np.arange(np.prod(shape), dtype="float64").reshape(shape) / 20
+            sliced = values[:, ::-1]
+            expected = [
+                np.concatenate([sliced, sliced], axis=1),
+                sliced.cumsum(axis=0),
+                sliced.cumprod(axis=1),
+                np.arange(shape[0]),
+            ]
+            for actual, wanted in zip(fn(values), expected, strict=True):
+                np.testing.assert_allclose(actual, wanted, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_scalar_casts():
+    x = pt.vector("x")
+    dtypes = ["bool", "int8", "int16", "int32", "uint8", "uint16", "uint32", "float32"]
+    fn = pytensor.function([x], [x.astype(dtype) for dtype in dtypes], mode="JS")
+    try:
+        values = np.array([-65537.25, -257.5, -0.5, 0, 0.5, 257.5, 65537.25])
+        for actual, dtype in zip(fn(values), dtypes, strict=True):
+            np.testing.assert_array_equal(actual, values.astype(dtype))
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_basic_indexing_views_and_gradient():
+    x = pt.matrix("x")
+    view = x[1::2, ::-1]
+    out = pt.exp(view)
+    outputs = [view, view.reshape((-1,)), out.sum(axis=0), pt.grad(out.sum(), x)]
+    fn = pytensor.function([x], outputs, mode="JS")
+    try:
+        for shape in ((4, 3), (7, 5), (0, 3)):
+            value = np.arange(np.prod(shape), dtype="float64").reshape(shape) / 20
+            sliced = value[1::2, ::-1]
+            gradient = np.zeros_like(value)
+            gradient[1::2, ::-1] = np.exp(sliced)
+            expected = [sliced, sliced.ravel(), np.exp(sliced).sum(axis=0), gradient]
+            for actual, wanted in zip(fn(value), expected, strict=True):
+                np.testing.assert_allclose(actual, wanted, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_fused_matrix_gather_partial_reduction_and_scatter():
+    x, indices = pt.matrix("x"), pt.ivector("indices")
+    out = pt.exp(x[indices]).sum(axis=1)
+    fn = pytensor.function([x, indices], [out, pt.grad(out.sum(), x)], mode="JS")
+    assert any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.toposort()
+    )
+    try:
+        for shape, take in [((4, 3), [1, 1, -1]), ((7, 5), [4, 0]), ((4, 3), [])]:
+            value = np.arange(np.prod(shape), dtype="float64").reshape(shape) / 20
+            take = np.asarray(take, dtype="int32")
+            gradient = np.zeros_like(value)
+            np.add.at(gradient, take, np.exp(value[take]))
+            expected = [np.exp(value[take]).sum(axis=1), gradient]
+            for actual, wanted in zip(fn(value, take), expected, strict=True):
+                np.testing.assert_allclose(actual, wanted, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_multiple_index_axes_and_duplicates():
+    x, rows, cols = pt.matrix("x"), pt.ivector("rows"), pt.ivector("cols")
+    selected = pt.exp(x[rows, cols])
+    fn = pytensor.function(
+        [x, rows, cols], [selected, pt.grad(selected.sum(), x)], mode="JS"
+    )
+    try:
+        values = np.arange(12, dtype="float64").reshape(3, 4) / 20
+        row = np.array([1, 1, -1], dtype="int32")
+        col = np.array([2, 2, 0], dtype="int32")
+        gradient = np.zeros_like(values)
+        np.add.at(gradient, (row, col), np.exp(values[row, col]))
+        actual, actual_gradient = fn(values, row, col)
+        np.testing.assert_allclose(actual, np.exp(values[row, col]), atol=1e-12)
+        np.testing.assert_allclose(actual_gradient, gradient, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+@pytest.mark.parametrize("lower", [True, False])
+def test_dense_linalg_and_gradient(lower):
+    from pytensor.tensor.linalg import cholesky, solve_triangular
+
+    x, rhs = pt.matrix("x"), pt.matrix("rhs")
+    factor = cholesky(x @ x.T, lower=lower)
+    solution = solve_triangular(factor, rhs, lower=lower)
+    outputs = [factor, solution, pt.grad(pt.log(pt.diagonal(factor)).sum(), x)]
+    reference = pytensor.function([x, rhs], outputs, mode="FAST_RUN")
+    fn = pytensor.function([x, rhs], outputs, mode="JS")
+    try:
+        rng = np.random.default_rng(458)
+        for n in (2, 3):
+            values, b = rng.normal(size=(n, n + 2)), rng.normal(size=(n, 4))
+            for actual, expected in zip(
+                fn(values, b), reference(values, b), strict=True
+            ):
+                np.testing.assert_allclose(actual, expected, rtol=1e-11, atol=1e-12)
+        for actual, expected in zip(
+            fn(np.zeros((2, 4)), np.zeros((2, 4))),
+            reference(np.zeros((2, 4)), np.zeros((2, 4))),
+            strict=True,
+        ):
+            np.testing.assert_allclose(actual, expected, equal_nan=True)
+    finally:
+        fn.vm.jit_fn.close()
 
 
 def test_pymc_logp_gradient_with_checks_and_multiple_outputs(tmp_path):

@@ -1,6 +1,11 @@
 """JavaScript loops for elementwise, reduced, and indexed tensor Ops."""
 
-from pytensor.link.js.dispatch.basic import JSCode, check_dtype, js_funcify
+from pytensor.link.js.dispatch.basic import (
+    JSCode,
+    check_dtype,
+    js_funcify,
+    lower_subgraph,
+)
 from pytensor.link.js.dispatch.scalar import scalar_program
 from pytensor.link.string_codegen import CODE_TOKEN
 from pytensor.raise_op import CheckAndRaise
@@ -44,11 +49,12 @@ def address(record, rank, own_rank=None, indexed=None, strides=None):
             )
         else:
             terms.append(f"{coordinate} * {strides}{axis}")
-    return " + ".join(terms) or "0"
+    offset = f"({record}.o || 0)" if strides is None else f"{strides}offset"
+    return " + ".join([offset, *terms])
 
 
 def stride_setup(variable, record, prefix):
-    return [
+    return [f"const {prefix}offset = {record}.o || 0;"] + [
         f"const {prefix}{axis} = ({record}.s[{axis}] === 1 ? 0 : {record}.t[{axis}]);"
         for axis in range(variable.ndim)
     ]
@@ -104,10 +110,7 @@ def js_funcify_reduce(op, node, inputs, slot):
     axes = tuple(axis % source_rank for axis in axes)
     kept = [axis for axis in range(source_rank) if axis not in axes]
     output_shape = "[" + ", ".join(f"{source}.s[{axis}]" for axis in kept) + "]"
-    source_address = (
-        " + ".join(f"i{axis} * {source}.t[{axis}]" for axis in range(source_rank))
-        or "0"
-    )
+    source_address = address(source, source_rank, strides="st")
     target_address = (
         " + ".join(f"i{axis} * v{slot}.t[{index}]" for index, axis in enumerate(kept))
         or "0"
@@ -120,6 +123,7 @@ def js_funcify_reduce(op, node, inputs, slot):
         f"{name} = slot({slot}, {output_shape});",
         f"{name}.d.fill(0);",
         f"const shape = {source}.s;",
+        *stride_setup(node.inputs[0], source, "st"),
         *loop_lines(
             source_rank,
             [f"{name}.d[{target_address}] += {source}.d[{source_address}];"],
@@ -149,7 +153,10 @@ def js_funcify_dimshuffle(op, node, inputs, slot):
     )
     name = f"v{slot}"
     return JSCode(
-        (f"const {name} = {{d: {source}.d, s: {shape}, t: {strides}}};",), (name,)
+        (
+            f"const {name} = {{d: {source}.d, s: {shape}, t: {strides}, o: {source}.o || 0}};",
+        ),
+        (name,),
     )
 
 
@@ -164,21 +171,30 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     scalar_input_count = len(inner.inputs)
     operands = inputs[:scalar_input_count]
     indices = inputs[scalar_input_count : scalar_input_count + len(op.indexed_inputs)]
-    indexed = [None] * scalar_input_count
+    indexed = [{} for _ in range(scalar_input_count)]
 
     for index_id, spec in enumerate(op.indexed_inputs):
         if spec is None:
             continue
         sources, axis = spec
-        if axis != 0 or node.inputs[scalar_input_count + index_id].ndim != 1:
-            raise NotImplementedError("JS fused gather supports vector index on axis 0")
+        if node.inputs[scalar_input_count + index_id].ndim != 1:
+            raise NotImplementedError("JS fused gather supports vector indices")
         for source_id in sources:
-            if indexed[source_id] is not None:
-                raise NotImplementedError("JS fused input with multiple index axes")
-            indexed[source_id] = indices[index_id]
+            indexed[source_id][axis] = indices[index_id]
+            if len(indexed[source_id]) > 1:
+                return lower_subgraph(op.fgraph, inputs, slot)
 
-    if any(spec is not None for spec in op.indexed_outputs):
-        raise NotImplementedError("JS fused indexed write")
+    writes = {}
+    target_position = scalar_input_count + len(op.indexed_inputs)
+    for index_id, spec in enumerate(op.indexed_outputs):
+        if spec is None:
+            continue
+        sources, axis, mode = spec
+        for output_id in sources:
+            if output_id in writes:
+                return lower_subgraph(op.fgraph, inputs, slot)
+            writes[output_id] = (inputs[target_position], indices[index_id], axis, mode)
+        target_position += 1
     reduced = op.reduced_outputs or (None,) * len(node.outputs)
     if len(reduced) != len(node.outputs):
         raise NotImplementedError("JS fused reduction/output count mismatch")
@@ -187,8 +203,8 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     ):
         raise NotImplementedError("JS fused reduction supports sum or all")
     rank = inner.outputs[0].ndim
-    if rank != 1:
-        raise NotImplementedError("JS FusedElemwise currently supports rank one")
+    if any(node.outputs[index].ndim != rank for index in writes):
+        return lower_subgraph(op.fgraph, inputs, slot)
 
     statements, expressions = scalar_program(
         inner.op.scalar_op, [f"a{index}" for index in range(scalar_input_count)]
@@ -196,7 +212,16 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     if len(expressions) != len(node.outputs):
         raise NotImplementedError("JS fused scalar/output count mismatch")
     output_names = tuple(f"v{slot + index}" for index in range(len(node.outputs)))
-    shape = f"{indices[0]}.s" if indices else shape_expr(operands)
+    shapes = []
+    for record, idx_axes in zip(operands, indexed, strict=True):
+        if idx_axes:
+            choices = " : ".join(
+                f"axis === {axis} ? {index}.s[0]" for axis, index in idx_axes.items()
+            )
+            shapes.append(f"{record}.s.map((length, axis) => {choices} : length)")
+        else:
+            shapes.append(f"{record}.s")
+    shape = f"broadcast([{', '.join(shapes)}])"
     lines: list[str | CODE_TOKEN] = [
         *(f"let {name};" for name in output_names),
         "{",
@@ -209,25 +234,41 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     ):
         lines.append(f"const d{index} = {record}.d;")
         lines.extend(stride_setup(variable, record, f"st{index}_"))
+    scalar_reductions = set()
+    kept_axes = {}
     for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True)):
-        lines.append(f"{name} = slot({slot + index}, {'[]' if spec else 'shape'});")
-        if spec:
-            lines.append(f"let acc{index} = {1 if isinstance(spec[0], AND) else 0};")
+        if index in writes:
+            target, _, _, _ = writes[index]
+            lines.append(
+                f"{name} = copyRecord(slot({slot + index}, {target}.s), {target});"
+            )
+        elif spec:
+            kept = tuple(axis for axis in range(rank) if axis not in spec[1])
+            kept_axes[index] = kept
+            output_shape = "[" + ", ".join(f"shape[{axis}]" for axis in kept) + "]"
+            lines.append(f"{name} = slot({slot + index}, {output_shape});")
+            identity = 1 if isinstance(spec[0], AND) else 0
+            if not kept:
+                scalar_reductions.add(index)
+                lines.append(f"let acc{index} = {identity};")
+            else:
+                lines.append(f"{name}.d.fill({identity});")
+        else:
+            lines.append(f"{name} = slot({slot + index}, shape);")
 
     reads = []
     hoisted_reads = []
-    for index, (variable, record, index_record) in enumerate(
+    for index, (variable, record, index_axes) in enumerate(
         zip(inner.inputs, operands, indexed, strict=True)
     ):
-        coordinate = (
-            {0: f"indexAt({index_record}, i0, {record}.s[0])"}
-            if index_record is not None
-            else None
-        )
+        coordinate = {
+            axis: f"indexAt({index_record}, i{rank - variable.ndim + axis}, {record}.s[{axis}])"
+            for axis, index_record in index_axes.items()
+        }
         offset = address(record, rank, variable.ndim, coordinate, f"st{index}_")
         read = f"const a{index} = d{index}[{offset}];"
-        if index_record is None and all(dim == 1 for dim in variable.type.shape):
-            hoisted_reads.append(f"const a{index} = d{index}[0];")
+        if not index_axes and all(dim == 1 for dim in variable.type.shape):
+            hoisted_reads.append(f"const a{index} = d{index}[st{index}_offset];")
         else:
             reads.append(read)
     stores = []
@@ -236,9 +277,25 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     ):
         if output.type.dtype == "float32":
             expression = f"Math.fround({expression})"
-        if spec:
+        if index in writes:
+            target, index_record, axis, mode = writes[index]
+            coordinate = {
+                axis: f"indexAt({index_record}, i{rank - output.ndim + axis}, {target}.s[{axis}])"
+            }
+            target_address = address(name, rank, output.ndim, coordinate)
+            operator = "+=" if mode == "inc" else "="
+            stores.append(f"{name}.d[{target_address}] {operator} {expression};")
+        elif spec:
             operator = "&&" if isinstance(spec[0], AND) else "+"
-            stores.append(f"acc{index} {operator}= {expression};")
+            if index in scalar_reductions:
+                target = f"acc{index}"
+            else:
+                offset = " + ".join(
+                    f"i{axis} * {name}.t[{position}]"
+                    for position, axis in enumerate(kept_axes[index])
+                )
+                target = f"{name}.d[{offset}]"
+            stores.append(f"{target} {operator}= {expression};")
         else:
             stores.append(f"{name}.d[k] = {expression};")
     lines.extend(hoisted_reads)
@@ -246,7 +303,7 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
     lines.extend(
         f"{name}.d[0] = acc{index};"
         for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True))
-        if spec
+        if index in scalar_reductions
     )
     lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), output_names)
@@ -261,7 +318,9 @@ def js_funcify_make_vector(op, node, inputs, slot):
         CODE_TOKEN.INDENT,
         f"{name} = slot({slot}, [{len(inputs)}]);",
     ]
-    lines.extend(f"{name}.d[{i}] = {value}.d[0];" for i, value in enumerate(inputs))
+    lines.extend(
+        f"{name}.d[{i}] = scalarValue({value});" for i, value in enumerate(inputs)
+    )
     lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), (name,))
 
@@ -276,7 +335,7 @@ def js_funcify_all(op, node, inputs, slot):
         (
             f"const {name} = slot({slot}, []);",
             f"{name}.d[0] = 1;",
-            f"for (let j = 0; j < {source}.d.length; j++) {name}.d[0] &&= {source}.d[j];",
+            f"for (let j = 0; j < size({source}.s); j++) {name}.d[0] &&= {source}.d[flatAddress({source}, j)];",
         ),
         (name,),
     )
@@ -289,7 +348,7 @@ def js_funcify_scalar_from_tensor(op, node, inputs, slot):
 
 @js_funcify.register(CheckAndRaise)
 def js_funcify_check_and_raise(op, node, inputs, slot):
-    checks = " && ".join(f"{value}.d[0]" for value in inputs[1:])
+    checks = " && ".join(f"scalarValue({value})" for value in inputs[1:])
     return JSCode(
         (f"if (!({checks})) throw Error('PyTensor parameter check failed');",),
         (inputs[0],),

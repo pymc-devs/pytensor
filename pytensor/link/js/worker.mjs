@@ -23,11 +23,12 @@ function strides(shape){
 }
 function packed(rec){
   const expected=strides(rec.s);
-  if(expected.every((v,k)=>v===rec.t[k]))return Buffer.from(rec.d.buffer,rec.d.byteOffset,rec.d.byteLength);
   const count=rec.s.reduce((a,b)=>a*b,1);
+  if(count===0)return Buffer.alloc(0);
+  if(expected.every((v,k)=>v===rec.t[k]))return Buffer.from(rec.d.buffer,rec.d.byteOffset+(rec.o||0)*8,count*8);
   const result=Buffer.allocUnsafe(count*8);
   for(let flat=0;flat<count;flat++){
-    let rest=flat,address=0;
+    let rest=flat,address=rec.o||0;
     for(let axis=0;axis<rec.s.length;axis++){
       const coordinate=Math.floor(rest/expected[axis]);
       rest-=coordinate*expected[axis];
@@ -54,7 +55,7 @@ try {
     const raw=Buffer.from(item.data,'base64');
     const data=new Float64Array(raw.length/8);
     Buffer.from(data.buffer).set(raw);
-    __ptjs.constants[k]={d:data,s:item.shape,t:strides(item.shape)};
+    __ptjs.constants[k]={d:data,s:item.shape,t:strides(item.shape),o:0};
   }
   write(Buffer.from([1]));
   const rankIn=spec.inputs;

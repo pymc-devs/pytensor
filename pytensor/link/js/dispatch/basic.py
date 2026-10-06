@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from functools import singledispatch
+from pathlib import Path
 
 import numpy as np
 
@@ -10,7 +11,20 @@ from pytensor.graph.basic import Constant
 from pytensor.link.string_codegen import CODE_TOKEN, build_source_code
 
 
-SUPPORTED_DTYPES = frozenset({"float32", "float64", "int32", "int64", "bool"})
+SUPPORTED_DTYPES = frozenset(
+    {
+        "float32",
+        "float64",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint8",
+        "uint16",
+        "uint32",
+        "bool",
+    }
+)
 
 
 def check_dtype(var):
@@ -39,6 +53,7 @@ def js_typify_ndarray(data, dtype):
 class JSCode:
     lines: tuple[str | CODE_TOKEN, ...]
     names: tuple[str, ...]
+    slots: int | None = None
 
 
 @singledispatch
@@ -87,7 +102,7 @@ function broadcast(shapes) {
     return out;
 }
 function indexAt(index, i, bound) {
-    const value = index.d[i];
+    const value = index.d[(index.o || 0) + (index.s[0] === 1 ? 0 : i) * index.t[0]];
     if (!Number.isSafeInteger(value)) throw Error('unsafe index');
     const coordinate = value < 0 ? value + bound : value;
     if (coordinate < 0 || coordinate >= bound) throw Error('index out of bounds');
@@ -98,7 +113,7 @@ function slot(id, shape) {
     const n = size(shape);
     let record = pool[id];
     if (!record || record.d.length !== n) {
-        record = {d: new Float64Array(n), s: shape, t: strides(shape)};
+        record = {d: new Float64Array(n), s: shape, t: strides(shape), o: 0};
         pool[id] = record;
     } else {
         record.s = shape;
@@ -117,27 +132,52 @@ def lower(fgraph):
     names = {}
     constants = []
     lines: list[str | CODE_TOKEN] = []
+    kernels: list[str | CODE_TOKEN] = []
     for index, variable in enumerate(fgraph.inputs):
         check_dtype(variable)
         names[variable] = f"inputs[{index}]"
 
     next_slot = 0
-    for node in fgraph.toposort():
+    for node_index, node in enumerate(fgraph.toposort()):
         for variable in node.inputs:
             if isinstance(variable, Constant) and variable not in names:
+                if variable.data is None:
+                    names[variable] = "null"
+                    continue
                 check_dtype(variable)
                 constant_id = len(constants)
                 constants.append(js_typify(variable.data, variable.type.dtype))
                 names[variable] = f"constants[{constant_id}]"
 
-        fragment = js_funcify(
-            node.op, node, [names[variable] for variable in node.inputs], next_slot
-        )
+        arguments = [f"arg{index}" for index in range(len(node.inputs))]
+        fragment = js_funcify(node.op, node, arguments, next_slot)
         if len(fragment.names) != len(node.outputs):
             raise ValueError("JS codegen returned the wrong number of outputs")
-        lines.extend(fragment.lines)
-        names.update(zip(node.outputs, fragment.names, strict=True))
-        next_slot += len(node.outputs)
+        function = f"kernel{node_index}"
+        if len(node.outputs) > 1:
+            kernels.append(f"const {function}Outputs = [];")
+        kernels.extend(
+            [
+                f"function {function}({', '.join(arguments)}) {{",
+                CODE_TOKEN.INDENT,
+                *fragment.lines,
+            ]
+        )
+        if len(node.outputs) == 1:
+            kernels.append(f"return {fragment.names[0]};")
+        else:
+            kernels.extend(
+                f"{function}Outputs[{i}] = {value};"
+                for i, value in enumerate(fragment.names)
+            )
+            kernels.append(f"return {function}Outputs;")
+        kernels.extend([CODE_TOKEN.DEDENT, "}"])
+        outputs = [f"v{node_index}_{index}" for index in range(len(node.outputs))]
+        assignment = outputs[0] if len(outputs) == 1 else f"[{', '.join(outputs)}]"
+        values = ", ".join(names[variable] for variable in node.inputs)
+        lines.append(f"const {assignment} = {function}({values});")
+        names.update(zip(node.outputs, outputs, strict=True))
+        next_slot += fragment.slots if fragment.slots is not None else len(node.outputs)
 
     for variable in fgraph.outputs:
         if isinstance(variable, Constant) and variable not in names:
@@ -150,7 +190,10 @@ def lower(fgraph):
     source = build_source_code(
         [
             _RUNTIME,
+            Path(__file__).parents[1].joinpath("special.js").read_text(),
+            Path(__file__).parents[1].joinpath("runtime.js").read_text(),
             "const constants = [];",
+            *kernels,
             "function execute() {",
             CODE_TOKEN.INDENT,
             *lines,
@@ -170,3 +213,33 @@ def lower(fgraph):
     return JSProgram(
         source, tuple(constants), tuple(fgraph.inputs), tuple(fgraph.outputs)
     )
+
+
+def lower_subgraph(fgraph, inputs, slot):
+    """Inline an inner graph when an indexed fusion pattern has no fused emitter."""
+    from pytensor.link.js.dispatch.scalar import literal
+
+    names = dict(zip(fgraph.inputs, inputs, strict=True))
+    start = slot
+    lines = []
+    for node in fgraph.toposort():
+        for variable in node.inputs:
+            if variable in names or not isinstance(variable, Constant):
+                continue
+            if variable.data is None:
+                names[variable] = "null"
+                continue
+            value = js_typify(variable.data, check_dtype(variable))
+            name = f"c{slot}_{len(names)}"
+            shape = list(value.shape)
+            strides = [int(step // value.itemsize) for step in value.strides]
+            data = ", ".join(literal(v) for v in value.ravel())
+            lines.append(
+                f"const {name} = {{d: new Float64Array([{data}]), s: {shape}, t: {strides}, o: 0}};"
+            )
+            names[variable] = name
+        fragment = js_funcify(node.op, node, [names[v] for v in node.inputs], slot)
+        lines.extend(fragment.lines)
+        names.update(zip(node.outputs, fragment.names, strict=True))
+        slot += fragment.slots if fragment.slots is not None else len(node.outputs)
+    return JSCode(tuple(lines), tuple(names[v] for v in fgraph.outputs), slot - start)

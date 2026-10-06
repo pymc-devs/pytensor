@@ -18,6 +18,9 @@ for (const call of spec.calls) {
     __ptjs.inputs[i].d.set(input.data);
   }
   const shapes=JSON.parse(__ptjs.run());
-  results.push(shapes.map((shape,i)=>({shape,data:Array.from(__ptjs.outputs()[i].d)})));
+  results.push(shapes.map((shape,i)=>{
+    const record=__ptjs.outputs()[i];
+    return {shape,data:Array.from({length:shape.reduce((a,b)=>a*b,1)},(_,flat)=>record.d[flatAddress(record,flat)])};
+  }));
 }
 console.log(JSON.stringify(results));
