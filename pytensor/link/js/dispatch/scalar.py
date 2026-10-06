@@ -39,7 +39,7 @@ from pytensor.scalar.basic import (
     Tanh,
     TrueDiv,
 )
-from pytensor.scalar.math import Sigmoid, Softplus
+from pytensor.scalar.math import GammaLn, Psi, Sigmoid, Softplus
 
 
 def literal(value):
@@ -110,9 +110,20 @@ def js_scalar_int_div(op, args):
 
 @js_scalar.register(Cast)
 def js_scalar_cast(op, args):
-    if op.o_type.dtype != "float64":
-        raise NotImplementedError(f"JS scalar cast to {op.o_type.dtype} is unsupported")
-    return args[0]
+    dtype = op.o_type.dtype
+    if dtype == "float64":
+        return args[0]
+    if dtype == "float32":
+        return f"Math.fround({args[0]})"
+    if dtype == "bool":
+        return f"Boolean({args[0]})"
+    if dtype in ("int8", "int16", "int32", "uint8", "uint16", "uint32"):
+        bits = int(dtype.lstrip("uint"))
+        if dtype.startswith("uint"):
+            return f"(({args[0]} >>> 0) {'& ' + str((1 << bits) - 1) if bits < 32 else ''})"
+        shift = 32 - bits
+        return f"(({args[0]} << {shift}) >> {shift})"
+    raise NotImplementedError(f"JS scalar cast to {dtype} is unsupported")
 
 
 @js_scalar.register(Neg)
@@ -138,6 +149,16 @@ def js_scalar_sigmoid(op, args):
 @js_scalar.register(Softplus)
 def js_scalar_softplus(op, args):
     return f"(Math.log1p(Math.exp(-Math.abs({args[0]}))) + Math.max({args[0]}, 0))"
+
+
+@js_scalar.register(GammaLn)
+def js_scalar_gamma_ln(op, args):
+    return f"scalar_lgamma({args[0]})"
+
+
+@js_scalar.register(Psi)
+def js_scalar_psi(op, args):
+    return f"scalar_digamma({args[0]})"
 
 
 @js_scalar.register(Switch)
