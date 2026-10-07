@@ -15,7 +15,7 @@ from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.basic import atleast_Nd, split
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -126,7 +126,7 @@ def psd_solve_to_chol_solve(fgraph, node):
         b_ndim = node.op.core_op.b_ndim
         a_bcast_batch_dims = A.type.broadcastable[:-2]
         if all(a_bcast_batch_dims) and a_bcast_batch_dims:
-            A = A.squeeze(axis=tuple(range(len(a_bcast_batch_dims))))
+            A = _squeeze_left(A, stop_at_dim=len(a_bcast_batch_dims))
         L = cholesky(A)
         Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
         x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=b_ndim)
