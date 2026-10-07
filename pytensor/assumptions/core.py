@@ -99,6 +99,8 @@ def register_constant_inference(key: AssumptionKey, fn: ConstantInferFn) -> None
 # is called as ``fn(key, op, node, input_index)`` and returns the state of that input.
 ClientInferFn = Callable[[AssumptionKey, Op, Apply, int], FactState]
 CLIENT_INFER_REGISTRY: dict[tuple[AssumptionKey, type], ClientInferFn] = {}
+# Keys with at least one client rule. Inference skips the client scan for every other key.
+CLIENT_INFER_KEYS: set[AssumptionKey] = set()
 
 
 def register_client_inference(
@@ -109,6 +111,7 @@ def register_client_inference(
     def decorator(fn: ClientInferFn) -> ClientInferFn:
         for op_type in op_types:
             CLIENT_INFER_REGISTRY[(key, op_type)] = fn
+        CLIENT_INFER_KEYS.add(key)
         return fn
 
     return decorator
@@ -118,6 +121,12 @@ def infer_assumption_from_client(
     key: AssumptionKey, op: Op, node: Apply, input_index: int
 ) -> FactState:
     """Return what *node* promises about its input at *input_index* for *key*."""
+    # Imported here because pytensor.tensor.rewriting loads this module before tensor.basic,
+    # and importing blockwise first trips the compile.builders <-> tensor.basic cycle.
+    from pytensor.tensor.blockwise import Blockwise
+
+    if isinstance(op, Blockwise):
+        op = op.core_op
     for cls in type(op).__mro__:
         fn = CLIENT_INFER_REGISTRY.get((key, cls))
         if fn is not None:
@@ -335,7 +344,7 @@ class AssumptionFeature(Feature):
             else:
                 state = FactState.UNKNOWN
 
-            if state is FactState.UNKNOWN:
+            if state is FactState.UNKNOWN and key in CLIENT_INFER_KEYS:
                 for client, input_index in self.fgraph.clients.get(v, ()):
                     state = infer_assumption_from_client(
                         key, client.op, client, input_index
