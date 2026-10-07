@@ -952,7 +952,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
 
     if not has_reductions:
 
-        @overload(fused_elemwise_fn, jit_options=_jit_options)
+        @overload(fused_elemwise_fn, jit_options=_jit_options())
         def ov_fused_elemwise_fn(*outer_inputs):
             def impl(*outer_inputs):
                 return _vectorized(
@@ -993,11 +993,11 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
             },
         )
 
-        @overload(fused_elemwise_fn, jit_options=_jit_options)
+        @overload(fused_elemwise_fn, jit_options=_jit_options())
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 8
+    cache_version = 9
     if scalar_cache_key is None:
         key = None
     else:
