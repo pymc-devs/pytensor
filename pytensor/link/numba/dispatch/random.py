@@ -473,7 +473,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
             "Numba implementation of RandomVariable cannot be evaluated in Python (non-JIT) mode"
         )
 
-    @overload(random, jit_options=_jit_options)
+    @overload(random, jit_options=_jit_options())
     def ov_random(core_shape, rng, size, *dist_params):
         def impl(core_shape, rng, size, *dist_params):
             if not inplace:
