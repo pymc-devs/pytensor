@@ -116,7 +116,6 @@ from pytensor.tensor.rewriting.math import (
     local_mul_switch_sink,
     local_neg_to_mul,
     local_reduce_chain,
-    local_reduce_join,
     local_sum_prod_of_mul_or_div,
     local_useless_abs,
     mul_canonizer,
@@ -3873,10 +3872,8 @@ class TestReduceJoin:
         x = vector("x")
         out = join(0, exp(x[None]), log(x[None])).sum(axis=0)
 
-        fg = FunctionGraph([x], [out], clone=False)
-        [rewritten_out] = local_reduce_join.transform(fg, out.owner)
-        expected_out = add(exp(x), log(x))
-        assert equal_computations([rewritten_out], [expected_out])
+        result = RewriteTester([x], [out])
+        result.assert_graph(add(exp(x), log(x)))
 
 
 def test_local_useless_adds():

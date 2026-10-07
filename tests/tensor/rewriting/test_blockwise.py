@@ -3,18 +3,19 @@ from functools import partial
 import numpy as np
 import pytest
 
-import pytensor
-from pytensor import Mode, config, function
+from pytensor import Mode, config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
 from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
-from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.inverse import MatrixPinv
 from pytensor.tensor.rewriting.blockwise import local_useless_blockwise
 from pytensor.tensor.shape import Reshape
+from tests.unittest_tools import RewriteTester
 
 
 def test_useless_blockwise_of_elemwise():
@@ -30,31 +31,26 @@ def test_useless_blockwise_of_elemwise():
 
 def test_useless_unbatched_blockwise():
     x = matrix("x")
-    blockwise_op = Blockwise(MatrixPinv(hermitian=False), signature="(m,n)->(n,m)")
+    core_op = MatrixPinv(hermitian=False)
+    blockwise_op = Blockwise(core_op, signature="(m,n)->(n,m)")
     out = blockwise_op(x)
 
-    assert isinstance(out.owner.op, Blockwise)
-    assert isinstance(out.owner.op.core_op, MatrixPinv)
-
-    fn = function([x], out, mode="FAST_COMPILE")
-    assert isinstance(fn.maker.fgraph.outputs[0].owner.op, MatrixPinv)
+    result = RewriteTester([x], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph(core_op(x))
 
     # Test that it's not removed when there are batched dims
     x = tensor3("x")
     out = blockwise_op(x)
-    fn = function([x], out, mode="FAST_COMPILE")
-    assert isinstance(
-        fn.maker.fgraph.outputs[0].owner.op, Blockwise | BlockwiseWithCoreShape
-    )
-    assert isinstance(fn.maker.fgraph.outputs[0].owner.op.core_op, MatrixPinv)
+    result = RewriteTester([x], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph(out)
 
     # Equivalent factorizations should share the same core computation.
     x = matrix("x")
-    out = [pytensor.tensor.linalg.cholesky(x), pytensor.tensor.linalg.cholesky(x[None])]
-    fn = function([x], out, mode="FAST_RUN")
-
-    nodes = list(apply_ancestors(fn.maker.fgraph.outputs))
-    assert sum(type(node.op).__name__ == "Cholesky" for node in nodes) == 1
+    result = RewriteTester([x], [cholesky(x), cholesky(x[None])], include="o3")
+    core_out = Cholesky()(x)
+    result.assert_graph(core_out, core_out[None])
+    unbatched_out, batched_out = result.rewr_fg.outputs
+    assert batched_out.owner.inputs[0] is unbatched_out
 
 
 def test_local_blockwise_alloc_inputs():

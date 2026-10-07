@@ -21,6 +21,13 @@ Emulate NumPy user-facing API as much as possible.
 
 **Uses pre-commit with ruff**. Code should pass pre-commit before being committed.
 
+Prefer `variable.owner_op` when inspecting an input's Op. It returns `None` for
+ownerless variables, so `isinstance(variable.owner_op, SomeOp)` needs no separate
+`variable.owner` guard.
+
+Use `variable.owner_op_and_inputs` in structural pattern matching to match the
+Op and unpack its inputs together. It returns `(None,)` for ownerless variables.
+
 **Performance**
 * Could should be performant
 * Avoid expensive work in hot loops
@@ -31,6 +38,10 @@ Emulate NumPy user-facing API as much as possible.
 
 **Testing**: Should be succinct
  - Prefer `tests.unittest_tools.assert_equal_computations` over numerical evaluation
+ - Use `tests.unittest_tools.RewriteTester` for new rewrite tests, with
+   `assert_graph` for structure and `assert_eval` for numerical equivalence
+ - When migrating existing tests to `RewriteTester`, preserve their scope;
+   do not add numerical evaluation to tests that only checked graph structure
  - Test multiple inputs on one compiled function vs multiple compilations
  - Minimize test conditions. Be smart, not fearful
  - Integrate with similar existing tests
