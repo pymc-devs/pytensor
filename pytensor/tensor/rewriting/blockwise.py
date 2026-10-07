@@ -1,7 +1,6 @@
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, Op, node_rewriter
 from pytensor.graph.destroyhandler import inplace_candidates
-from pytensor.graph.fg import Output
 from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
@@ -377,8 +376,7 @@ def local_split_alloc_clients(fgraph, node):
     destroyers = dict.fromkeys(
         client
         for client, input_index in clients[1:]
-        if not isinstance(client.op, Output)
-        and _accepts_inplace_on(client, input_index)
+        if _accepts_inplace_on(client, input_index)
     )
     if not destroyers:
         return None

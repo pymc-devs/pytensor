@@ -236,7 +236,7 @@ def test_split_alloc_empty_clients_leaves_readers_alone():
     buffer = AllocEmpty(config.floatX)(shape)
     out = add(buffer * 2, buffer * 3)
 
-    fg = FunctionGraph([shape], [out])
+    fg = FunctionGraph([shape], [out, buffer])
     rewrite_graph(fg, include=("fast_run", "inplace"))
     allocs = [n for n in fg.apply_nodes if isinstance(n.op, AllocEmpty)]
     assert len(allocs) == 1, allocs
