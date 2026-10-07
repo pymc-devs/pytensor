@@ -3,9 +3,6 @@ import warnings
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
-from pytensor.link.mlx.dispatch.tensor_basic import coerce_to_int
-from pytensor.tensor.basic import get_scalar_constant_value
-from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.sort import ArgSortOp, SortOp
 
 
@@ -18,24 +15,13 @@ def _warn_unsupported_kind(op, name):
         )
 
 
-def _static_axis(node):
-    try:
-        return int(get_scalar_constant_value(node.inputs[1]))
-    except NotScalarConstantError:
-        return None
-
-
-def _resolve_axis(static_axis, axis):
-    return coerce_to_int(axis) if static_axis is None else static_axis
-
-
 @mlx_funcify.register(SortOp)
 def mlx_funcify_Sort(op, node, **kwargs):
     _warn_unsupported_kind(op, "sort")
-    static_axis = _static_axis(node)
+    axis = op.axis
 
-    def sort(x, axis):
-        return mx.sort(x, axis=_resolve_axis(static_axis, axis))
+    def sort(x):
+        return mx.sort(x, axis=axis)
 
     return sort
 
@@ -43,10 +29,10 @@ def mlx_funcify_Sort(op, node, **kwargs):
 @mlx_funcify.register(ArgSortOp)
 def mlx_funcify_ArgSort(op, node, **kwargs):
     _warn_unsupported_kind(op, "argsort")
-    static_axis = _static_axis(node)
+    axis = op.axis
     out_dtype = convert_dtype_to_mlx(node.outputs[0].dtype)
 
-    def argsort(x, axis):
-        return mx.argsort(x, axis=_resolve_axis(static_axis, axis)).astype(out_dtype)
+    def argsort(x):
+        return mx.argsort(x, axis=axis).astype(out_dtype)
 
     return argsort
