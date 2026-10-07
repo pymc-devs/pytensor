@@ -764,6 +764,16 @@ def test_gammainc_wrt_k_grad():
                 rng.random(size=(4, 3, 2)).view("complex128").squeeze(-1),
             ),
         ),
+        # Column slice and transpose, read through the leading dimension
+        (
+            (pt.dmatrix(), rng.random(size=(3, 8))[:, :4]),
+            (pt.dmatrix(), rng.random(size=(5, 4)).T),
+        ),
+        # Empty contraction, where gemm must zero the output without reading it
+        (
+            (pt.dmatrix(), np.empty((3, 0))),
+            (pt.dmatrix(), np.empty((0, 4))),
+        ),
     ],
 )
 def test_Dot(x, y):

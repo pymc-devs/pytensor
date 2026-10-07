@@ -1286,53 +1286,48 @@ def numba_funcify_Dot(op, node, **kwargs):
             f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
         )
 
-    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
-
+    if numba_dot_dtype in _GEMM_DTYPES:
+        # Calling gemm directly reads transposed and column-sliced operands through
+        # their leading dimension, where `np.dot` would copy them first.
         @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y))
-            np.dot(x, y, out)
-            return out
-
-    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
-            np.dot(x, y.astype(numba_dot_dtype), out)
-            return out
-
-    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
-            np.dot(x.astype(numba_dot_dtype), y, out)
-            return out
+        def product(x, y, out):
+            return _gemm(x, y, out, False, False, 1.0, 0.0)
 
     else:
 
         @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(
-                    np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
-                )
-            np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype), out)
+        def product(x, y, out):
+            np.dot(x, y, out)
             return out
 
-    cache_version = 2
+    @numba_basic.numba_njit
+    def as_is(a):
+        return a
+
+    @numba_basic.numba_njit
+    def to_dot_dtype(a):
+        return a.astype(numba_dot_dtype)
+
+    cast_x = as_is if x_dtype == numba_dot_dtype else to_dot_dtype
+    cast_y = as_is if y_dtype == numba_dot_dtype else to_dot_dtype
+
+    @numba_basic.numba_njit
+    def dot(x, y, out=None):
+        if out is None:
+            out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+        return product(cast_x(x), cast_y(y), out)
+
+    # Bump whenever `_gemm` changes: it is inlined here, so its source is not part of
+    # this key.
+    cache_version = 3
 
     if out_dtype == numba_dot_dtype:
-        # np.dot can write straight into the pre-allocated batch output slice.
+        # The product writes straight into the pre-allocated batch output slice.
         dot.handles_out = True
         return dot, cache_version
 
     else:
-        # Output needs a dtype cast np.dot can't do in place, so fall back to
+        # Output needs a dtype cast the product can't do in place, so fall back to
         # the copying store_core_outputs wrapper.
         @numba_basic.numba_njit
         def dot_with_cast(x, y):
