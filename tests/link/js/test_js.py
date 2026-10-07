@@ -40,7 +40,11 @@ def _evaluate_in_node(tmp_path, fgraph, calls):
                     for inputs in calls
                 ],
                 "constants": [
-                    {"shape": list(x.shape), "data": serialize(x)}
+                    {
+                        "shape": list(x.shape),
+                        "dtype": str(x.dtype),
+                        "data": serialize(x),
+                    }
                     for x in program.constants
                 ],
             }
@@ -98,6 +102,58 @@ def test_node_fused_indexed_reduction(tmp_path):
         calls, _evaluate_in_node(tmp_path, graph, calls), strict=True
     ):
         np.testing.assert_allclose(actual, compiled(*arrays), atol=1e-12)
+
+
+def test_uniform_switch_preserves_branches_and_dynamic_shapes():
+    condition = pt.scalar("condition", dtype="bool")
+    x = pt.matrix("x")
+    value = pt.switch(condition, pt.log(x), pt.exp(x))
+    fn = pytensor.function(
+        [condition, x], [value.sum(), pt.grad(value.sum(), x)], mode="JS"
+    )
+    try:
+        assert "if (a" in fn.vm.jit_fn.program.source
+        for flag, array in [
+            (True, np.array([[1.0, 1000.0], [0.5, 4.0]])[:, ::-1]),
+            (False, np.array([[-1000.0, -40.0, 0.0]])),
+            (True, np.empty((0, 2))),
+            (False, np.array([[-2.0], [1.0]])),
+        ]:
+            actual, gradient = fn(flag, array)
+            expected = np.log(array) if flag else np.exp(array)
+            expected_gradient = 1 / array if flag else np.exp(array)
+            np.testing.assert_allclose(actual, expected.sum(), atol=1e-12)
+            np.testing.assert_allclose(gradient, expected_gradient, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_switch_numeric_nan_condition():
+    condition = pt.scalar("condition")
+    x = pt.vector("x")
+    fn = pytensor.function(
+        [condition, x], pt.switch(condition, x + 1, x - 1).sum(), mode="JS"
+    )
+    try:
+        for flag in [0.0, -0.0, 1.0, -1.0, np.nan]:
+            expected = np.arange(3.0) + (1 if bool(flag) else -1)
+            np.testing.assert_allclose(fn(flag, np.arange(3.0)), expected.sum())
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_shared_softplus_preserves_small_tail_values():
+    x = pt.vector("x")
+    positive, negative = pt.softplus(x), pt.softplus(-x)
+    fn = pytensor.function([x], [positive, negative], mode="JS")
+    try:
+        values = np.array([-1000.0, -100.0, -40.0, 0.0, 40.0, 100.0, 1000.0])
+        for actual, expected in zip(
+            fn(values), [np.logaddexp(0, values), np.logaddexp(0, -values)], strict=True
+        ):
+            np.testing.assert_allclose(actual, expected, rtol=2e-13, atol=0)
+    finally:
+        fn.vm.jit_fn.close()
 
 
 def test_reduction_fuses_through_parameter_check():
@@ -407,3 +463,172 @@ def test_pymc_slice_sampler_in_node():
     assert abs(summary["mean"] - summary["expected_mean"]) < 0.03
     assert abs(summary["sd"] - summary["expected_sd"]) < 0.03
     assert summary["evaluations"] > 11_000
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+def test_fused_partial_reduction_locals(axis):
+    x = pt.matrix("x")
+    view = x[:, ::-1]
+    fn = pytensor.function(
+        [x],
+        [pt.exp(view).sum(axis=axis), (pt.exp(view) ** 2).sum(axis=axis)],
+        mode="JS",
+    )
+    assert any(
+        isinstance(node.op, FusedElemwise)
+        and any(spec and len(spec[1]) == 1 for spec in node.op.reduced_outputs)
+        for node in fn.maker.fgraph.toposort()
+    )
+    try:
+        for shape in [(3, 4), (0, 4), (4, 0), (5, 2)]:
+            values = np.arange(np.prod(shape), dtype="float64").reshape(shape) / 20
+            exp = np.exp(values[:, ::-1])
+            for actual, expected in zip(
+                fn(values), [exp.sum(axis), (exp**2).sum(axis)], strict=True
+            ):
+                np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_compact_integer_constants_and_output_transport():
+    x = pt.vector("x")
+    indices = np.array([2, 0, -1], dtype="int64")
+    limits = np.array([-(2**31), 2**31 - 1], dtype="int64")
+    wide = np.array([2**31, 2**40], dtype="int64")
+    fn = pytensor.function(
+        [x],
+        [pt.exp(x[indices]).sum(), pt.constant(limits), pt.constant(wide)],
+        mode="JS",
+    )
+    constants = fn.vm.jit_fn.program.constants
+    assert any(
+        value.dtype == "int32" and np.array_equal(value, indices) for value in constants
+    )
+    assert any(
+        value.dtype == "float64" and np.array_equal(value, wide) for value in constants
+    )
+    try:
+        for n in [3, 7]:
+            values = np.arange(n, dtype="float64") / 10
+            actual = fn(values)
+            np.testing.assert_allclose(actual[0], np.exp(values[indices]).sum())
+            np.testing.assert_array_equal(actual[1], limits)
+            np.testing.assert_array_equal(actual[2], wide)
+            assert actual[1].dtype == actual[2].dtype == np.dtype("int64")
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_fused_index_bounds_for_single_element_target():
+    x, indices = pt.matrix("x"), pt.ivector("indices")
+    fn = pytensor.function(
+        [x, indices], pt.grad(pt.exp(x[indices]).sum(), x), mode="JS"
+    )
+    try:
+        value = np.ones((1, 3))
+        np.testing.assert_allclose(
+            fn(value, np.array([0, -1], dtype="int32")), 2 * np.exp(value)
+        )
+        with pytest.raises(RuntimeError, match="index out of bounds"):
+            fn(value, np.array([1], dtype="int32"))
+        np.testing.assert_allclose(
+            fn(value, np.array([0], dtype="int32")), np.exp(value)
+        )
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_inplace_elemwise_on_strided_copy():
+    from pytensor.compile.ops import deep_copy_op
+    from pytensor.scalar.basic import add
+    from pytensor.tensor.elemwise import Elemwise
+
+    x, y = pt.matrix("x"), pt.matrix("y")
+    view = deep_copy_op(x)[:, ::-1]
+    result = Elemwise(add, {0: 0})(view, y)
+    fn = pytensor.function(
+        [x, y],
+        [result, x],
+        mode=Mode(linker=JSLinker(), optimizer=None),
+        accept_inplace=True,
+    )
+    assert any(
+        isinstance(node.op, Elemwise) and node.op.inplace_pattern
+        for node in fn.maker.fgraph.toposort()
+    )
+    try:
+        for shape in [(3, 4), (5, 2), (0, 3)]:
+            values = np.arange(np.prod(shape), dtype="float64").reshape(shape)
+            addend = values / 10
+            out, original = fn(values, addend)
+            np.testing.assert_allclose(out, values[:, ::-1] + addend)
+            np.testing.assert_array_equal(original, values)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+@pytest.mark.parametrize("ignore_duplicates", [False, True])
+@pytest.mark.parametrize("set_instead", [False, True])
+def test_inplace_advanced_update_strided_target(ignore_duplicates, set_instead):
+    from pytensor.tensor.subtensor import AdvancedIncSubtensor
+
+    x, y, indices = pt.vector("x"), pt.vector("y"), pt.ivector("indices")
+    base = pt.exp(x)[::-1]
+    result = AdvancedIncSubtensor(
+        (0,),
+        inplace=True,
+        set_instead_of_inc=set_instead,
+        ignore_duplicates=ignore_duplicates,
+    )(base, y, indices)
+    fn = pytensor.function(
+        [x, y, indices],
+        result,
+        mode=Mode(linker=JSLinker(), optimizer=None),
+        accept_inplace=True,
+    )
+    assert any(
+        isinstance(node.op, AdvancedIncSubtensor) and node.op.inplace
+        for node in fn.maker.fgraph.toposort()
+    )
+    try:
+        for n, take in [(5, [1, 1, -1]), (3, [0, -1]), (0, [])]:
+            values = np.arange(n, dtype="float64") / 10
+            takes = np.array(take, dtype="int32")
+            addend = np.arange(len(take), dtype="float64") + 1
+            expected = np.exp(values)[::-1].copy()
+            if set_instead:
+                expected[takes] = addend
+            elif ignore_duplicates:
+                expected[takes] += addend
+            else:
+                np.add.at(expected, takes, addend)
+            np.testing.assert_allclose(fn(values, addend, takes), expected)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_inplace_basic_update_strided_value():
+    from pytensor.tensor.subtensor import IncSubtensor
+
+    x = pt.vector("x")
+    base = pt.exp(x)[::-1]
+    view = base[::2]
+    result = IncSubtensor(
+        view.owner.op.idx_list, inplace=True, destroyhandler_tolerate_aliased=((0, 1),)
+    )(base, base[1::2], *view.owner.inputs[1:])
+    fn = pytensor.function(
+        [x], result, mode=Mode(linker=JSLinker(), optimizer=None), accept_inplace=True
+    )
+    assert any(
+        isinstance(node.op, IncSubtensor) and node.op.inplace
+        for node in fn.maker.fgraph.toposort()
+    )
+    try:
+        for n in [6, 2, 0]:
+            values = np.arange(n, dtype="float64") / 10
+            expected = np.exp(values)[::-1].copy()
+            expected[::2] += expected[1::2].copy()
+            np.testing.assert_allclose(fn(values), expected)
+    finally:
+        fn.vm.jit_fn.close()

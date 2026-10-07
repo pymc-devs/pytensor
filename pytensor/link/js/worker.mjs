@@ -25,7 +25,7 @@ function packed(rec){
   const expected=strides(rec.s);
   const count=rec.s.reduce((a,b)=>a*b,1);
   if(count===0)return Buffer.alloc(0);
-  if(expected.every((v,k)=>v===rec.t[k]))return Buffer.from(rec.d.buffer,rec.d.byteOffset+(rec.o||0)*8,count*8);
+  if(rec.d.BYTES_PER_ELEMENT===8 && expected.every((v,k)=>v===rec.t[k]))return Buffer.from(rec.d.buffer,rec.d.byteOffset+(rec.o||0)*8,count*8);
   const result=Buffer.allocUnsafe(count*8);
   for(let flat=0;flat<count;flat++){
     let rest=flat,address=rec.o||0;
@@ -53,7 +53,8 @@ try {
   vm.runInThisContext(spec.source);
   for(const [k,item] of spec.constants.entries()){
     const raw=Buffer.from(item.data,'base64');
-    const data=new Float64Array(raw.length/8);
+    const Type=item.dtype==='int32'?Int32Array:Float64Array;
+    const data=new Type(raw.length/Type.BYTES_PER_ELEMENT);
     Buffer.from(data.buffer).set(raw);
     __ptjs.constants[k]={d:data,s:item.shape,t:strides(item.shape),o:0};
   }

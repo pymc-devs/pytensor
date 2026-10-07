@@ -33,6 +33,7 @@ class NodeJSFunction:
             "constants": [
                 {
                     "shape": list(v.shape),
+                    "dtype": str(v.dtype),
                     "data": base64.b64encode(v.tobytes()).decode("ascii"),
                 }
                 for v in program.constants

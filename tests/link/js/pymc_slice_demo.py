@@ -32,6 +32,7 @@ def sample_normal_mean(*, draws=10_000, tune=1_000, seed=12345):
                 "constants": [
                     {
                         "shape": list(value.shape),
+                        "dtype": str(value.dtype),
                         "data": base64.b64encode(value.tobytes()).decode("ascii"),
                     }
                     for value in program.constants
