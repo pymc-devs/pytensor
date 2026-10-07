@@ -12,11 +12,14 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.variable import TensorConstant
 
 
-def alloc_of_zero(key, op, feature, fgraph, node, input_states) -> list[FactState]:
+def alloc_has_zero_off_diagonal(
+    key, op, feature, fgraph, node, input_states
+) -> list[FactState]:
     """``Alloc`` rule for DIAGONAL / LOWER_TRIANGULAR / UPPER_TRIANGULAR: TRUE when
-    the fill value is the scalar 0 (an all-zero square matrix), FALSE when it is a
-    known non-zero scalar -- the off-diagonal entries are then non-zero, so none of
-    these properties holds.
+    the fill value is the scalar 0 (an all-zero square matrix) or the matrix is at
+    most 1x1 (no off-diagonal entries), FALSE when it is a known non-zero scalar
+    and the matrix is at least 2x2 -- the off-diagonal entries are then non-zero,
+    so none of these properties holds.
 
     Requires the trailing two output dims to be statically known and equal; these
     properties apply only to square matrices. SYMMETRIC uses :func:`alloc_is_symmetric`
@@ -28,6 +31,8 @@ def alloc_of_zero(key, op, feature, fgraph, node, input_states) -> list[FactStat
     m, n = out_shape[-2], out_shape[-1]
     if m is None or n is None or m != n:
         return [FactState.UNKNOWN]
+    if n <= 1:
+        return [FactState.TRUE]
     try:
         val = get_underlying_scalar_constant_value(node.inputs[0])
     except NotScalarConstantError:

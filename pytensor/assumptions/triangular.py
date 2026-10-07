@@ -1,4 +1,4 @@
-from pytensor.assumptions.alloc import alloc_of_zero
+from pytensor.assumptions.alloc import alloc_has_zero_off_diagonal
 from pytensor.assumptions.core import (
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
@@ -57,8 +57,8 @@ def _alloc_diag_upper(key, op, feature, fgraph, node, input_states):
     return true_if(op.offset >= 0, else_false=True)
 
 
-register_assumption(LOWER_TRIANGULAR, Alloc)(alloc_of_zero)
-register_assumption(UPPER_TRIANGULAR, Alloc)(alloc_of_zero)
+register_assumption(LOWER_TRIANGULAR, Alloc)(alloc_has_zero_off_diagonal)
+register_assumption(UPPER_TRIANGULAR, Alloc)(alloc_has_zero_off_diagonal)
 register_assumption(LOWER_TRIANGULAR, BlockDiagonal)(all_inputs_have_key)
 register_assumption(UPPER_TRIANGULAR, BlockDiagonal)(all_inputs_have_key)
 register_assumption(LOWER_TRIANGULAR, MatrixInverse)(propagate_first)

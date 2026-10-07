@@ -68,6 +68,15 @@ def test_empty_band_eye_merges_with_zero_constant_without_conflict():
     assert af.get(z, SYMMETRIC) == FactState.TRUE
 
 
+def test_one_by_one_alloc_merges_with_constant_without_conflict():
+    c = pt.constant(np.array([[7.0]]))
+    a = pt.alloc(c, 1, 1)
+    fg, af = make_fgraph(a.mT)
+    af.get(a, DIAGONAL)
+    fg.replace(a, c, reason="local_useless_alloc")
+    assert af.get(c, DIAGONAL) == FactState.TRUE
+
+
 def test_eye_symbolic_same_shape_is_identity():
     n = pt.iscalar("n")
     e = pt.eye(n, n, 0)
