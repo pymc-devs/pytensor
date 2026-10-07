@@ -280,14 +280,13 @@ def js_funcify_tensor_from_scalar(op, node, inputs, slot):
 
 @js_funcify.register(Join)
 def js_funcify_join(op, node, inputs, slot):
-    rank = node.outputs[0].ndim
     name = f"v{slot}"
-    arrays = inputs[1:]
+    arrays = inputs
     lines = [
         f"let {name};",
         "{",
         CODE_TOKEN.INDENT,
-        f"const axis = scalarIndex(scalarValue({inputs[0]}), {rank});",
+        f"const axis = {op.axis};",
         f"const shape = [...{arrays[0]}.s];",
         "shape[axis] = 0;",
         f"const arrays = [{', '.join(arrays)}];",
