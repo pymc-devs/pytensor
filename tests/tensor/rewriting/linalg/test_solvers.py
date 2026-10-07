@@ -34,7 +34,7 @@ from pytensor.tensor.rewriting.linalg.solvers import (
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_generic_solve_to_solve_triangular():
@@ -86,12 +86,15 @@ def test_psd_solve_with_chol(b_ndim):
     A_psd = assume(A, positive_definite=True)
     out = pt.linalg.solve(A_psd, b, b_ndim=b_ndim)
 
-    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
-
     L = cholesky(A_psd)
     expected = cho_solve((L, True), b, b_ndim=b_ndim)
 
-    assert_equal_computations([rewritten], [expected])
+    result = RewriteTester(
+        [A, b],
+        [out],
+        include=["canonicalize", "stabilize", "specialize"],
+    )
+    result.assert_graph(expected)
 
 
 def test_paired_triangular_solves_to_cho_solve():
