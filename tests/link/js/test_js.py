@@ -239,6 +239,28 @@ def test_tensor_shape_and_cumulative_ops():
         fn.vm.jit_fn.close()
 
 
+@pytest.mark.parametrize("axis", [0, 1])
+def test_join_distinct_inputs(axis):
+    from pytensor.tensor.basic import Join
+
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is required for the JS linker")
+    x, y = pt.matrix("x"), pt.matrix("y")
+    fn = pytensor.function([x, y], pt.concatenate([x, y], axis=axis), mode="JS")
+    assert any(isinstance(node.op, Join) for node in fn.maker.fgraph.toposort())
+    try:
+        for rows, cols in [(3, 2), (5, 4), (0, 2)]:
+            shape = (rows, cols) if axis == 0 else (cols, rows)
+            other = (2, shape[1]) if axis == 0 else (shape[0], 2)
+            left = np.arange(np.prod(shape), dtype="float64").reshape(shape)
+            right = -np.arange(np.prod(other), dtype="float64").reshape(other) - 1
+            np.testing.assert_array_equal(
+                fn(left, right), np.concatenate([left, right], axis=axis)
+            )
+    finally:
+        fn.vm.jit_fn.close()
+
+
 def test_scalar_casts():
     x = pt.vector("x")
     dtypes = ["bool", "int8", "int16", "int32", "uint8", "uint16", "uint32", "float32"]
