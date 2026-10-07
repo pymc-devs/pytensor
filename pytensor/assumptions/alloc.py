@@ -1,3 +1,5 @@
+import numpy as np
+
 from pytensor.assumptions.core import (
     ALL_KEYS,
     FactState,
@@ -114,13 +116,34 @@ def eye_zero_or_identity_rule(
     return [eye_band_is_empty(node, offset)]
 
 
-def alloc_diag_at_offset_zero(
+def alloc_diag_band_is_zero(node) -> FactState:
+    """Decide statically whether the vector an :class:`AllocDiag` places is zero."""
+    diag = node.inputs[0]
+    if 0 in diag.type.shape:
+        return FactState.TRUE
+    if isinstance(diag, TensorConstant):
+        return FactState.FALSE if np.any(diag.data) else FactState.TRUE
+    try:
+        val = get_underlying_scalar_constant_value(diag)
+    except NotScalarConstantError:
+        return FactState.UNKNOWN
+    if val == 0:
+        return FactState.TRUE
+    if None in diag.type.shape:
+        # A non-zero fill of unknown size may still be empty.
+        return FactState.UNKNOWN
+    return FactState.FALSE
+
+
+def alloc_diag_has_zero_off_diagonal(
     key, op, feature, fgraph, node, input_states
 ) -> list[FactState]:
-    """Rule body: TRUE when :class:`AllocDiag` places values on the main diagonal,
-    FALSE when it places them on any other diagonal (off-main entries break diagonal /
-    symmetric / PD structure regardless of the diagonal vector's values)."""
-    return [FactState.TRUE if op.offset == 0 else FactState.FALSE]
+    """Rule for DIAGONAL / SYMMETRIC: TRUE when :class:`AllocDiag` places values on
+    the main diagonal or places an all-zero vector, FALSE when it places a vector
+    with a non-zero entry on any other diagonal."""
+    if op.offset == 0:
+        return [FactState.TRUE]
+    return [alloc_diag_band_is_zero(node)]
 
 
 def alloc_propagates_matrix_property(

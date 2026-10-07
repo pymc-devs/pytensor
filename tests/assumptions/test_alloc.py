@@ -116,6 +116,18 @@ def test_alloc_diag_properties(key):
     assert af.check(d, key)
 
 
+def test_off_diagonal_alloc_diag_of_zeros_is_diagonal():
+    d = pt.diag(pt.zeros(3), k=1)
+    _, af = make_fgraph(d)
+    assert af.check(d, DIAGONAL)
+
+
+def test_off_diagonal_alloc_diag_of_symbolic_vector_is_unknown():
+    d = pt.diag(pt.vector("v", shape=(5,)), k=1)
+    _, af = make_fgraph(d)
+    assert af.get(d, DIAGONAL) == FactState.UNKNOWN
+
+
 def test_zeros_matrix_is_diagonal():
     z = pt.zeros((5, 5))
     _, af = make_fgraph(z)

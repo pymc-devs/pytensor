@@ -1,4 +1,8 @@
-from pytensor.assumptions.alloc import alloc_has_zero_off_diagonal, eye_band_is_empty
+from pytensor.assumptions.alloc import (
+    alloc_diag_band_is_zero,
+    alloc_has_zero_off_diagonal,
+    eye_band_is_empty,
+)
 from pytensor.assumptions.core import (
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
@@ -54,15 +58,21 @@ def _eye_upper(key, op, feature, fgraph, node, input_states):
 @register_assumption(LOWER_TRIANGULAR, AllocDiag)
 def _alloc_diag_lower(key, op, feature, fgraph, node, input_states):
     # offset <= 0 places values on or below the main diagonal; a positive
-    # offset puts them strictly above, so the result is not lower-triangular.
-    return true_if(op.offset <= 0, else_false=True)
+    # offset puts them strictly above, so the result is not lower-triangular
+    # unless the placed vector is all zeros.
+    if op.offset <= 0:
+        return [FactState.TRUE]
+    return [alloc_diag_band_is_zero(node)]
 
 
 @register_assumption(UPPER_TRIANGULAR, AllocDiag)
 def _alloc_diag_upper(key, op, feature, fgraph, node, input_states):
     # offset >= 0 places values on or above the main diagonal; a negative
-    # offset puts them strictly below, so the result is not upper-triangular.
-    return true_if(op.offset >= 0, else_false=True)
+    # offset puts them strictly below, so the result is not upper-triangular
+    # unless the placed vector is all zeros.
+    if op.offset >= 0:
+        return [FactState.TRUE]
+    return [alloc_diag_band_is_zero(node)]
 
 
 register_assumption(LOWER_TRIANGULAR, Alloc)(alloc_has_zero_off_diagonal)
