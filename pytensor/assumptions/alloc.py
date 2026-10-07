@@ -68,18 +68,20 @@ def _eye_is_square(n, m) -> FactState:
 
 def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[FactState]:
     """Rule for ORTHOGONAL / PERMUTATION / POSITIVE_DEFINITE: TRUE only when an
-    :class:`Eye` is the identity matrix (square, ``k == 0``). Every other Eye --
-    rectangular, off-main, or the all-zero matrix of an off-shape band -- lacks
-    all three properties, so it is FALSE once the shape is known and UNKNOWN
-    while it is still symbolic.
+    :class:`Eye` is the identity matrix (square with ``k == 0``, or 0x0). Every
+    other Eye -- rectangular, off-main, or the all-zero matrix of an off-shape
+    band -- lacks all three properties, so it is FALSE once the shape is known
+    and UNKNOWN while it is still symbolic.
     """
     n, m, k = node.inputs
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    if k.data.item() != 0:
-        # Identity requires the main diagonal; any off-main band rules it out.
-        return [FactState.FALSE]
-    return [_eye_is_square(n, m)]
+    if k.data.item() == 0:
+        return [_eye_is_square(n, m)]
+    rows, cols = node.outputs[0].type.shape
+    if rows is None or cols is None:
+        return [FactState.UNKNOWN]
+    return true_if(rows == cols == 0, else_false=True)
 
 
 def eye_band_is_empty(node, k: int) -> FactState:

@@ -100,6 +100,12 @@ def test_eye_symbolic_off_diagonal_is_unknown():
     assert af.get(e, LOWER_TRIANGULAR) == FactState.UNKNOWN
 
 
+def test_empty_eye_is_identity_for_any_k():
+    e = pt.eye(0, 0, 1)
+    _, af = make_fgraph(e)
+    assert af.check(e, ORTHOGONAL)
+
+
 @pytest.mark.parametrize(
     "key", [DIAGONAL, SYMMETRIC, LOWER_TRIANGULAR, UPPER_TRIANGULAR]
 )
