@@ -42,6 +42,7 @@ def test_eye_non_identity_is_false(eye_args):
     [
         (SYMMETRIC, FactState.TRUE),
         (DIAGONAL, FactState.TRUE),
+        (LOWER_TRIANGULAR, FactState.TRUE),
         (POSITIVE_DEFINITE, FactState.FALSE),
         (PERMUTATION, FactState.FALSE),
         (ORTHOGONAL, FactState.FALSE),
@@ -90,6 +91,13 @@ def test_eye_symbolic_different_shapes_is_unknown():
     e = pt.eye(n, m, 0)
     _, af = make_fgraph(e)
     assert af.get(e, DIAGONAL) == FactState.UNKNOWN
+
+
+def test_eye_symbolic_off_diagonal_is_unknown():
+    n = pt.iscalar("n")
+    e = pt.eye(n, n, 1)
+    _, af = make_fgraph(e)
+    assert af.get(e, LOWER_TRIANGULAR) == FactState.UNKNOWN
 
 
 @pytest.mark.parametrize(

@@ -82,6 +82,15 @@ def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[Fact
     return [_eye_is_square(n, m)]
 
 
+def eye_band_is_empty(node, k: int) -> FactState:
+    """Decide statically whether an :class:`Eye`'s ``k``-th diagonal is empty."""
+    rows, cols = node.outputs[0].type.shape
+    if rows is None or cols is None:
+        return FactState.UNKNOWN
+    band_is_empty = rows == 0 or cols == 0 or k <= -rows or k >= cols
+    return FactState.TRUE if band_is_empty else FactState.FALSE
+
+
 def eye_zero_or_identity_rule(
     key, op, feature, fgraph, node, input_states
 ) -> list[FactState]:
@@ -97,15 +106,10 @@ def eye_zero_or_identity_rule(
     square = _eye_is_square(n, m)
     if square is FactState.FALSE:
         return [FactState.FALSE]
-    if k.data.item() == 0:
+    offset = k.data.item()
+    if offset == 0:
         return [square]
-    # Off-main band: symmetric/diagonal only if the band misses the shape
-    # entirely, which needs the static sizes to decide.
-    if not (isinstance(n, TensorConstant) and isinstance(m, TensorConstant)):
-        return [FactState.UNKNOWN]
-    kval, nval, mval = k.data.item(), n.data.item(), m.data.item()
-    band_is_empty = kval <= -nval or kval >= mval
-    return true_if(band_is_empty, else_false=True)
+    return [eye_band_is_empty(node, offset)]
 
 
 def alloc_diag_at_offset_zero(

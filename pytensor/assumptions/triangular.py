@@ -1,4 +1,4 @@
-from pytensor.assumptions.alloc import alloc_has_zero_off_diagonal
+from pytensor.assumptions.alloc import alloc_has_zero_off_diagonal, eye_band_is_empty
 from pytensor.assumptions.core import (
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
@@ -27,20 +27,28 @@ from pytensor.tensor.variable import TensorConstant
 
 @register_assumption(LOWER_TRIANGULAR, Eye)
 def _eye_lower(key, op, feature, fgraph, node, input_states):
-    # Eye is lower triangular when its diagonal sits on or below the main one.
+    # Eye is lower triangular when its diagonal sits on or below the main one,
+    # or when a diagonal above it misses the shape, leaving all zeros.
     k = node.inputs[2]
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    return true_if(k.data.item() <= 0, else_false=True)
+    offset = k.data.item()
+    if offset <= 0:
+        return [FactState.TRUE]
+    return [eye_band_is_empty(node, offset)]
 
 
 @register_assumption(UPPER_TRIANGULAR, Eye)
 def _eye_upper(key, op, feature, fgraph, node, input_states):
-    # Eye is upper triangular when its diagonal sits on or above the main one.
+    # Eye is upper triangular when its diagonal sits on or above the main one,
+    # or when a diagonal below it misses the shape, leaving all zeros.
     k = node.inputs[2]
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    return true_if(k.data.item() >= 0, else_false=True)
+    offset = k.data.item()
+    if offset >= 0:
+        return [FactState.TRUE]
+    return [eye_band_is_empty(node, offset)]
 
 
 @register_assumption(LOWER_TRIANGULAR, AllocDiag)
