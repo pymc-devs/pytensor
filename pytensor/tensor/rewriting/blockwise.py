@@ -20,7 +20,10 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.elemwise import InplaceGraphOptimizer
+from pytensor.tensor.rewriting.elemwise import (
+    InplaceGraphOptimizer,
+    apply_local_dimshuffle_merge,
+)
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -62,17 +65,23 @@ def local_useless_unbatched_blockwise(fgraph, node):
     op = node.op
     inputs = node.inputs
 
-    batch_ndims = node.op.batch_ndim(node)
-    if all(all(inp.type.broadcastable[:batch_ndims]) for inp in inputs):
-        if batch_ndims:
-            # Remove dummy batch dims
-            axis = tuple(range(batch_ndims))
-            inputs = [inp.squeeze(axis) for inp in inputs]
-        new_outs = op.core_op.make_node(*inputs).outputs
-        if batch_ndims:
-            # Reintroduce dummy batch dims
-            new_outs = [shape_padleft(out, batch_ndims) for out in new_outs]
-        return copy_stack_trace(node.outputs, new_outs)
+    batch_ndims = op.batch_ndim(node)
+    if batch_ndims and not all(
+        all(inp.type.broadcastable[:batch_ndims]) for inp in inputs
+    ):
+        return None
+
+    if batch_ndims:
+        # Remove dummy batch dims
+        axis = tuple(range(batch_ndims))
+        inputs = [
+            apply_local_dimshuffle_merge(fgraph, inp.squeeze(axis)) for inp in inputs
+        ]
+    new_outs = op.core_op.make_node(*inputs).outputs
+    if batch_ndims:
+        # Reintroduce dummy batch dims
+        new_outs = [shape_padleft(out, batch_ndims) for out in new_outs]
+    return copy_stack_trace(node.outputs, new_outs)
 
 
 # We register this rewrite late, so that other rewrites need only target Blockwise Ops
