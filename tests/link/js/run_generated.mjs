@@ -9,7 +9,8 @@ for (const [i, input] of spec.constants.entries()) {
   let size = 1;
   const stride = Array(shape.length);
   for (let j=shape.length-1;j>=0;j--) {stride[j]=size;size*=shape[j]}
-  __ptjs.constants[i]={d:new Float64Array(input.data),s:shape,t:stride};
+  const Type = input.dtype === 'int32' ? Int32Array : Float64Array;
+  __ptjs.constants[i]={d:new Type(input.data),s:shape,t:stride};
 }
 const results=[];
 for (const call of spec.calls) {

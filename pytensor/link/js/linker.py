@@ -17,7 +17,6 @@ class JSLinker(JITLinker):
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",
-        "inplace",
         "scan_reduce_trace_prealloc",
     )
 

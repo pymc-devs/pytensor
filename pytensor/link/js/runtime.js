@@ -8,9 +8,25 @@ function flatAddress(record, flat) {
     return offset;
 }
 function scalarValue(record) { return record.d[record.o || 0]; }
+function contiguous(record) {
+    const expected = strides(record.s);
+    return expected.every((step, axis) => record.s[axis] === 1 || record.t[axis] === step);
+}
 function copyRecord(out, record) {
-    for (let i = 0; i < out.d.length; i++) out.d[i] = record.d[flatAddress(record, i)];
+    if (out === record) return out;
+    const count = size(record.s);
+    if (contiguous(out) && contiguous(record)) {
+        out.d.set(record.d.subarray(record.o || 0, (record.o || 0) + count), out.o || 0);
+    } else {
+        for (let i = 0; i < count; i++)
+            out.d[flatAddress(out, i)] = record.d[flatAddress(record, i)];
+    }
     return out;
+}
+function inplaceRecord(record, shape) {
+    if (record.s.length !== shape.length || record.s.some((n, axis) => n !== shape[axis]))
+        throw Error('inplace shape mismatch');
+    return record;
 }
 function scalarIndex(value, length) {
     if (!Number.isSafeInteger(value)) throw Error('unsafe index');
@@ -61,7 +77,8 @@ function coordinatesOf(flat, shape) {
     }
     return result;
 }
-function updateSubtensor(out, source, value, indices, set) {
+function updateSubtensor(out, source, value, indices, set, id) {
+    if (out.d === value.d) value = copyRecord(slot(id, value.s), value);
     copyRecord(out, source);
     const view = subtensorView(out, indices);
     const shape = broadcast([view.s, value.s]);
@@ -141,8 +158,11 @@ function advancedRead(source, requested, id) {
         out.d[i] = source.d[advancedAddress(source, plan, coordinatesOf(i, plan.shape))];
     return out;
 }
-function advancedUpdate(source, value, requested, id, set, ignoreDuplicates) {
-    const out = copyRecord(slot(id, source.s), source), plan = advancedPlan(out, requested);
+function advancedUpdate(source, value, requested, id, set, ignoreDuplicates, inplace) {
+    const temporary = !inplace || ignoreDuplicates;
+    const out = temporary ? copyRecord(slot(id, source.s), source) : source;
+    if (out.d === value.d) value = copyRecord(slot(id, value.s), value);
+    const plan = advancedPlan(out, requested);
     const shape = broadcast([plan.shape, value.s]);
     if (shape.length !== plan.shape.length || shape.some((n, axis) => n !== plan.shape[axis]))
         throw Error('advanced update broadcast mismatch');
@@ -154,5 +174,5 @@ function advancedUpdate(source, value, requested, id, set, ignoreDuplicates) {
         else if (ignoreDuplicates) out.d[target] = source.d[advancedAddress(source, plan, coordinates)] + input;
         else out.d[target] += input;
     }
-    return out;
+    return inplace && temporary ? copyRecord(source, out) : out;
 }

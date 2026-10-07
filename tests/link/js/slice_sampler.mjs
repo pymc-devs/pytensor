@@ -27,7 +27,8 @@ function strides(shape) {
 }
 for (const [index, constant] of program.constants.entries()) {
   const bytes = Buffer.from(constant.data, 'base64');
-  const values = new Float64Array(bytes.byteLength / 8);
+  const Type = constant.dtype === 'int32' ? Int32Array : Float64Array;
+  const values = new Type(bytes.byteLength / Type.BYTES_PER_ELEMENT);
   Buffer.from(values.buffer).set(bytes);
   __ptjs.constants[index] = {d: values, s: constant.shape, t: strides(constant.shape)};
 }

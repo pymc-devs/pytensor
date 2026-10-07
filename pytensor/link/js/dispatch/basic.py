@@ -49,6 +49,19 @@ def js_typify_ndarray(data, dtype):
     return np.asarray(data, dtype="float64", order="C")
 
 
+def js_constant(data, dtype):
+    """Use compact integer storage for constants without changing input transport."""
+    array = js_typify(data, dtype)
+    if (
+        array.ndim > 0
+        and np.dtype(dtype).kind in "iu"
+        and np.all(array >= -(2**31))
+        and np.all(array <= 2**31 - 1)
+    ):
+        return array.astype("int32")
+    return array
+
+
 @dataclass(frozen=True)
 class JSCode:
     lines: tuple[str | CODE_TOKEN, ...]
@@ -64,8 +77,12 @@ def js_funcify(op, node, inputs, slot):
 
 @js_funcify.register(DeepCopyOp)
 def js_funcify_deep_copy(op, node, inputs, slot):
-    # Node transport creates fresh output storage.
-    return JSCode((), (inputs[0],))
+    name = f"v{slot}"
+    source = inputs[0]
+    return JSCode(
+        (f"const {name} = copyRecord(slot({slot}, {source}.s), {source});",),
+        (name,),
+    )
 
 
 @dataclass(frozen=True)
@@ -146,7 +163,7 @@ def lower(fgraph):
                     continue
                 check_dtype(variable)
                 constant_id = len(constants)
-                constants.append(js_typify(variable.data, variable.type.dtype))
+                constants.append(js_constant(variable.data, variable.type.dtype))
                 names[variable] = f"constants[{constant_id}]"
 
         arguments = [f"arg{index}" for index in range(len(node.inputs))]
@@ -183,7 +200,7 @@ def lower(fgraph):
         if isinstance(variable, Constant) and variable not in names:
             check_dtype(variable)
             constant_id = len(constants)
-            constants.append(js_typify(variable.data, variable.type.dtype))
+            constants.append(js_constant(variable.data, variable.type.dtype))
             names[variable] = f"constants[{constant_id}]"
 
     output_names = ", ".join(names[variable] for variable in fgraph.outputs)
@@ -229,13 +246,14 @@ def lower_subgraph(fgraph, inputs, slot):
             if variable.data is None:
                 names[variable] = "null"
                 continue
-            value = js_typify(variable.data, check_dtype(variable))
+            value = js_constant(variable.data, check_dtype(variable))
             name = f"c{slot}_{len(names)}"
             shape = list(value.shape)
             strides = [int(step // value.itemsize) for step in value.strides]
             data = ", ".join(literal(v) for v in value.ravel())
+            constructor = "Int32Array" if value.dtype == "int32" else "Float64Array"
             lines.append(
-                f"const {name} = {{d: new Float64Array([{data}]), s: {shape}, t: {strides}, o: 0}};"
+                f"const {name} = {{d: new {constructor}([{data}]), s: {shape}, t: {strides}, o: 0}};"
             )
             names[variable] = name
         fragment = js_funcify(node.op, node, [names[v] for v in node.inputs], slot)

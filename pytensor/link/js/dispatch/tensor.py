@@ -62,9 +62,10 @@ def js_funcify_inc_subtensor(op, node, inputs, slot):
     name = f"v{slot}"
     source, value = inputs[:2]
     indices = index_expression(op, node, inputs, 2)
+    target = source if op.inplace else f"slot({slot}, {source}.s)"
     return JSCode(
         (
-            f"const {name} = updateSubtensor(slot({slot}, {source}.s), {source}, {value}, {indices}, {str(op.set_instead_of_inc).lower()});",
+            f"const {name} = updateSubtensor({target}, {source}, {value}, {indices}, {str(op.set_instead_of_inc).lower()}, {slot});",
         ),
         (name,),
     )
@@ -151,7 +152,7 @@ def js_funcify_advanced_subtensor(op, node, inputs, slot):
 def js_funcify_advanced_inc_subtensor(op, node, inputs, slot):
     name = f"v{slot}"
     indices = index_expression(op, node, inputs, 2, advanced=True)
-    flags = f"{str(op.set_instead_of_inc).lower()}, {str(op.ignore_duplicates).lower()}"
+    flags = f"{str(op.set_instead_of_inc).lower()}, {str(op.ignore_duplicates).lower()}, {str(op.inplace).lower()}"
     return JSCode(
         (
             f"const {name} = advancedUpdate({inputs[0]}, {inputs[1]}, {indices}, {slot}, {flags});",
