@@ -1429,21 +1429,21 @@ _structured_dot = StructuredDot()
 def structured_dot(x, y):
     """
     Structured Dot is like dot, except that only the gradient wrt non-zero elements of the sparse matrix
-    `a` are calculated and propagated.
+    `x` are calculated and propagated.
 
     The output is presumed to be a dense matrix, and is represented by a TensorType instance.
 
     Parameters
     ----------
-    a
+    x
         A sparse matrix.
-    b
+    y
         A sparse or dense matrix.
 
     Returns
     -------
     A sparse matrix
-        The dot product of `a` and `b`.
+        The dot product of `x` and `y`.
 
     Notes
     -----

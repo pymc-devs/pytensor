@@ -434,6 +434,22 @@ import ``pytensor`` and print the config variable, as in:
 
     This flag's value cannot be modified during program execution.
 
+.. attribute:: generated_src_dir
+
+    Default: ``""``
+
+    Directory for the generated Python source of compiled functions (for
+    example by the Numba backend). The source is kept on disk because tracebacks
+    and Numba read it back.
+
+    If empty, each function gets its own file in the system temporary
+    directory, and PyTensor never removes it. If set, the same source reuses one
+    file in this directory, and files not used for
+    ``config.cmodule__age_thresh_use`` plus 7 days are removed when the
+    interpreter exits. ``pytensor-cache clear`` and ``pytensor-cache purge``
+    remove all of them. Only files that PyTensor generated are removed, so the
+    directory can be shared.
+
 .. attribute:: config.blas__ldflags
 
     Default: ``'-lblas'``

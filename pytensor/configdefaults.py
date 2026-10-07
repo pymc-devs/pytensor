@@ -1122,6 +1122,17 @@ def add_caching_dir_configvars():
         in_c_key=False,
     )
 
+    config.add(
+        "generated_src_dir",
+        (
+            "Directory for the generated Python source of compiled functions. "
+            "If empty, each function gets its own file in the system temporary "
+            "directory, which PyTensor never removes."
+        ),
+        StrParam(""),
+        in_c_key=False,
+    )
+
 
 # Eventually, the instance of `PyTensorConfigParser` should be created right here,
 # where it is also populated with settings.

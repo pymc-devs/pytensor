@@ -56,7 +56,12 @@ from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.rewriting.elemwise import FusionOptimizer, local_dimshuffle_lift
+from pytensor.tensor.rewriting.elemwise import (
+    FusionOptimizer,
+    apply_local_dimshuffle_merge,
+    local_dimshuffle_lift,
+    local_dimshuffle_merge,
+)
 from pytensor.tensor.rewriting.shape import (
     local_fuse_squeeze_reshape,
     local_useless_expand_dims_in_reshape,
@@ -184,6 +189,39 @@ class TestDimshuffleLift:
         # Make sure rewrite doesn't apply in this case
         g = FunctionGraph([x], outs)
         assert not local_dimshuffle_lift.transform(g, g.outputs[0].owner)
+
+
+def test_eager_dimshuffle_merge():
+    x = matrix("x")
+    out = x.dimshuffle(0, "x", 1).dimshuffle(2, 0, "x", 1).dimshuffle(1, 0)
+    result = utt.RewriteTester([x], [out], include=None)
+    fgraph = result.rewr_fg
+    [old_out] = fgraph.outputs
+    fgraph.replace(old_out, apply_local_dimshuffle_merge(fgraph, old_out))
+    result.assert_graph(x)
+    result.assert_eval(np.arange(6, dtype=config.floatX).reshape(2, 3))
+
+
+def test_dimshuffle_merge():
+    x = matrix("x")
+    out = x.dimshuffle(1, "x", 0).dimshuffle(2, 0, "x", 1)
+    result = utt.RewriteTester(
+        [x], [out], include=None, custom_rewrite=local_dimshuffle_merge
+    )
+    result.assert_graph(x.dimshuffle(0, 1, "x", "x"))
+    result.assert_eval(np.arange(6, dtype=config.floatX).reshape(2, 3))
+    assert check_stack_trace(result.rewr_fg, ops_to_check="all")
+
+
+def test_dimshuffle_merge_stops_at_elemwise():
+    x = matrix("x")
+    inp = exp(x[None])
+    out = inp.dimshuffle(0, 2, 1).squeeze(0)
+    result = utt.RewriteTester(
+        [x], [out], include=None, custom_rewrite=local_dimshuffle_merge
+    )
+    result.assert_graph(inp.dimshuffle(2, 1))
+    result.assert_eval(np.arange(6, dtype=config.floatX).reshape(2, 3))
 
 
 def test_local_useless_expand_dims_in_reshape():

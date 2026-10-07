@@ -108,7 +108,7 @@ from pytensor.tensor.rewriting.basic import (
     register_useless,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
 from pytensor.tensor.subtensor import (
     Subtensor,
@@ -2187,7 +2187,7 @@ def local_reduce_join(fgraph, node):
         if not inp.type.broadcastable[join_axis]:
             return None
         # Most times inputs to join have an expand_dims, we eagerly clean up those here
-        new_input = apply_local_dimshuffle_lift(fgraph, inp.squeeze(join_axis))
+        new_input = apply_local_dimshuffle_merge(fgraph, inp.squeeze(join_axis))
         new_inputs.append(new_input)
 
     ret = Elemwise(node.op.scalar_op)(*new_inputs)

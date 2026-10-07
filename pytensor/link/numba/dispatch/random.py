@@ -20,6 +20,9 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
+from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
+from pytensor.link.numba.dispatch.linalg.decomposition.eigen import _eigh
+from pytensor.link.numba.dispatch.linalg.decomposition.svd import _svd_gesdd_full
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
@@ -28,7 +31,6 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
-    store_core_outputs,
 )
 from pytensor.link.utils import (
     compile_function_src,
@@ -202,15 +204,16 @@ def core_MultinomialRV(op, node):
 def core_MvNormalRV(op, node):
     method = op.method
 
+    # The LAPACK-backed helpers return NaN for a non-finite covariance, where np.linalg raises
     @numba_basic.numba_njit
     def random_fn(rng, mean, cov):
         if method == "cholesky":
-            A = np.linalg.cholesky(cov)
+            A = _cholesky(cov, lower=True)
         elif method == "svd":
-            A, s, _ = np.linalg.svd(cov)
+            A, s, _ = _svd_gesdd_full(cov)
             A *= np.sqrt(s)[None, :]
         else:
-            w, A = np.linalg.eigh(cov)
+            w, A = _eigh(cov, np.int32(0))
             A *= np.sqrt(w)[None, :]
 
         out = rng.normal(size=cov.shape[-1])
@@ -450,8 +453,8 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    nin = 1 + len(dist_params)  # rng + params
-    core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
+    core_op_fn = core_rv_fn
+    core_handles_out = getattr(core_op_fn, "handles_out", False)
 
     batch_ndim = rv_op.batch_ndim(rv_node)
 
@@ -470,7 +473,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
             "Numba implementation of RandomVariable cannot be evaluated in Python (non-JIT) mode"
         )
 
-    @overload(random, jit_options=_jit_options)
+    @overload(random, jit_options=_jit_options())
     def ov_random(core_shape, rng, size, *dist_params):
         def impl(core_shape, rng, size, *dist_params):
             if not inplace:
@@ -492,6 +495,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
+                core_handles_out,
             )
             return rng, draws
 
@@ -501,9 +505,11 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
         # If the core RV can't be cached, then the whole RV can't be cached
         random_rv_key = None
     else:
+        random_rv_cache_version = 1
         random_rv_key_contents = (
             type(op),
             type(rv_op),
+            random_rv_cache_version,
             tuple(rv_op._props_dict().items()),  # type: ignore[attr-defined]
             size_len,
             core_shape_len,
