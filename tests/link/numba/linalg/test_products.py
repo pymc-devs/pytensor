@@ -110,3 +110,36 @@ def test_gemm_ignores_C_when_beta_is_zero(poison):
     np.testing.assert_allclose(
         _gemm_jit(A, B, uninitialized.copy(), False, False, 1.0, 0.0), A @ B
     )
+
+
+def _matrix_views(rows, cols):
+    wide = rng.normal(size=(rows, 2 * cols))
+    full = np.ascontiguousarray(wide[:, :cols])
+    return {
+        "column_slice": wide[:, :cols],
+        "row_step": np.ascontiguousarray(np.vstack([full, full]))[::2],
+        "reversed_rows": full[::-1],
+        "reversed_columns": full[:, ::-1],
+        "reversed_both": full[::-1, ::-1],
+        "fortran_reversed_rows": np.asfortranarray(full)[::-1],
+    }
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "column_slice",
+        "row_step",
+        "reversed_rows",
+        "reversed_columns",
+        "reversed_both",
+        "fortran_reversed_rows",
+    ],
+)
+def test_gemm_reads_strided_operands(layout):
+    A = _matrix_views(6, 5)[layout]
+    B = _matrix_views(5, 4)[layout]
+    C = _matrix_views(6, 4)[layout]
+    expected = 0.5 * C + 2.0 * (A @ B)
+
+    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False, 2.0, 0.5), expected)
