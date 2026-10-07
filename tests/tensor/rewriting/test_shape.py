@@ -15,12 +15,13 @@ from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import check_stack_trace, node_rewriter, out2in
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.type import Type
-from pytensor.tensor.basic import alloc, as_tensor_variable
+from pytensor.tensor.basic import MakeVector, alloc, as_tensor_variable, constant
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import add, cos, exp, maximum, sin
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
+    local_reshape_shape_uncast,
     local_reshape_to_dimshuffle,
     local_useless_reshape,
     local_useless_specify_shape,
@@ -46,6 +47,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.unittest_tools import RewriteTester
 
 
 rewrite_mode = config.mode
@@ -522,6 +524,40 @@ def test_local_reshape_lift():
     assert isinstance(topo[-2].op, Reshape)
     assert isinstance(topo[-1].op, Elemwise)
     assert check_stack_trace(f, ops_to_check="last")
+
+
+def test_local_reshape_shape_uncast():
+    x = matrix("x")
+    v = tensor("v", shape=(2,), dtype="int32")
+    i32 = iscalar("i32")
+    i64 = lscalar("i64")
+    u32 = scalar("u32", dtype="uint32")
+    two = constant(2, dtype="int64")
+
+    # Entries that end up with different dtypes, and unsigned shapes, which
+    # Reshape doesn't accept, keep their casts
+    kept_mixed = x.reshape((i32.astype("int64"), i64))
+    kept_unsigned = x.reshape((u32.astype("int64"), two))
+    result = RewriteTester(
+        [x, v, i32, i64, u32],
+        [
+            x.reshape(v.astype("int64")),
+            x.reshape((i32.astype("int64"), two)),
+            kept_mixed,
+            kept_unsigned,
+        ],
+        include=None,
+        custom_rewrite=local_reshape_shape_uncast,
+    )
+    result.assert_graph(
+        x.reshape(v),
+        x.reshape(MakeVector("int32")(i32, constant(2, dtype="int32"))),
+        kept_mixed,
+        kept_unsigned,
+        strict_dtype=True,
+    )
+    x_val = np.arange(6, dtype=config.floatX).reshape(3, 2)
+    result.assert_eval(x_val, [2, 3], 3, 2, 3)
 
 
 class TestShapeI(utt.InferShapeTester):
