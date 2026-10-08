@@ -415,6 +415,42 @@ def test_dense_linalg_and_gradient(lower):
         fn.vm.jit_fn.close()
 
 
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+@pytest.mark.parametrize("lower", [True, False])
+@pytest.mark.parametrize("unit_diagonal", [True, False])
+def test_static_triangular_solve_strides_and_empty_rhs(n, lower, unit_diagonal):
+    from scipy.linalg import solve_triangular as scipy_solve
+
+    from pytensor.tensor.linalg import solve_triangular
+
+    a = pt.matrix("a", shape=(n, n))
+    b = pt.matrix("b", shape=(n, None))
+    solution = solve_triangular(
+        a.T, b[:, ::2], lower=lower, unit_diagonal=unit_diagonal
+    )
+    fn = pytensor.function([a, b], solution, mode="JS")
+    rng = np.random.default_rng(173)
+    matrix = rng.normal(size=(n, n)) + np.eye(n) * (n + 1)
+    if unit_diagonal:
+        np.fill_diagonal(matrix, 0)
+    try:
+        for cols in (0, 2, 18):
+            rhs = rng.normal(size=(n, cols))
+            expected = scipy_solve(
+                matrix.T, rhs[:, ::2], lower=lower, unit_diagonal=unit_diagonal
+            )
+            np.testing.assert_allclose(
+                fn(matrix, rhs), expected, rtol=1e-13, atol=1e-14
+            )
+        if not unit_diagonal:
+            matrix[-1, -1] = 0
+            # scalar_solve_to_division replaces the 1x1 solve before lowering.
+            expected = np.inf if n == 1 else np.nan
+            np.testing.assert_array_equal(fn(matrix, np.ones((n, 2))), [[expected]] * n)
+    finally:
+        fn.vm.jit_fn.close()
+
+
 def test_pymc_logp_gradient_with_checks_and_multiple_outputs(tmp_path):
     if shutil.which("node") is None:
         pytest.skip("Node.js is required to test the emitted JavaScript")
@@ -487,6 +523,46 @@ def test_fused_partial_reduction_locals(axis):
                 fn(values), [exp.sum(axis), (exp**2).sum(axis)], strict=True
             ):
                 np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_static_small_axes_with_strides_and_empty_reductions():
+    x = pt.tensor3("x", shape=(None, 2, 3))
+    view = x[:, :, ::-1]
+    squared = view * (view + 1)
+    fn = pytensor.function(
+        [x], [view.sum(0), squared.sum(0), squared.sum((1, 2))], mode="JS"
+    )
+    try:
+        for n in [0, 1, 7]:
+            values = np.arange(n * 6, dtype="float64").reshape(3, 2, n).T / 10
+            expected_view = values[:, :, ::-1]
+            expected_squared = expected_view * (expected_view + 1)
+            expected = [
+                expected_view.sum(0),
+                expected_squared.sum(0),
+                expected_squared.sum((1, 2)),
+            ]
+            for actual, reference in zip(fn(values), expected, strict=True):
+                np.testing.assert_allclose(actual, reference, rtol=1e-12, atol=1e-12)
+    finally:
+        fn.vm.jit_fn.close()
+
+
+def test_small_output_reduction_with_strided_operands():
+    x = pt.matrix("x", shape=(None, 2))
+    y = pt.matrix("y", shape=(None, 3))
+    result = (x[::-1, :, None] * y[::-1, None, ::-1]).sum(0)
+    fn = pytensor.function([x, y], result, mode="JS")
+    try:
+        for n in [0, 1, 7]:
+            left = np.arange(n * 2, dtype="float64").reshape(2, n).T / 10
+            right = np.arange(n * 3, dtype="float64").reshape(3, n).T / 10
+            expected = (left[::-1, :, None] * right[::-1, None, ::-1]).sum(0)
+            np.testing.assert_allclose(
+                fn(left, right), expected, rtol=1e-12, atol=1e-12
+            )
     finally:
         fn.vm.jit_fn.close()
 
