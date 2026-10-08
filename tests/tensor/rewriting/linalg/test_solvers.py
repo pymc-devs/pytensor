@@ -453,10 +453,12 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
 
 
+@pytest.mark.parametrize("batched", [False, True], ids=["unbatched", "batched"])
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
-def test_solve_of_inv_to_matmul(b_ndim):
+def test_solve_of_inv_to_matmul(b_ndim, batched):
     X = pt.dmatrix("X")
-    b = pt.dvector("b") if b_ndim == 1 else pt.dmatrix("b")
+    # A batched b makes Blockwise.make_node pad inv(X) with a left expand_dims
+    b = pt.tensor("b", shape=(None,) * (b_ndim + batched), dtype="float64")
     out = solve(pt.linalg.inv(X), b, b_ndim=b_ndim)
 
     # We include 'stabilize' because solve_of_inv_to_matmul is registered there.
@@ -465,7 +467,8 @@ def test_solve_of_inv_to_matmul(b_ndim):
 
     # Verify the rewrite against stabilized 'X @ b' to ensure structural equality.
     # stabilization lowers 'X @ b' (Matmul) to specific BLAS ops (like Dot).
-    expected = rewrite_graph(X @ b, include=["stabilize"])
+    expected = pt.matvec(X, b) if b_ndim == 1 else X @ b
+    expected = rewrite_graph(expected, include=["stabilize"])
     assert_equal_computations([rewritten_out], [expected])
 
 

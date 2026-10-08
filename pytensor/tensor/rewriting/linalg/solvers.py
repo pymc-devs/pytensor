@@ -249,11 +249,20 @@ def solve_of_inv_to_matmul(fgraph, node):
     i.e., inv(X) @ x = b, so x = X @ b.
     """
     A, b = node.inputs
+    [old_out] = node.outputs
 
-    match A.owner_op_and_inputs:
+    A_core, transposed = strip_left_expand_dims(A)
+    match A_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            new_out = X @ b
-            copy_stack_trace(node.outputs[0], new_out)
+            if transposed:
+                X = X.mT
+            # X @ b misbroadcasts when b is a batched stack of vectors
+            if node.op.core_op.b_ndim == 1:
+                new_out = pt.matvec(X, b)
+            else:
+                new_out = X @ b
+            new_out = rebroadcast_like(new_out, old_out)
+            copy_stack_trace(old_out, new_out)
             return [new_out]
 
 
