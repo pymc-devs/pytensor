@@ -24,6 +24,8 @@ from pytensor.tensor.rewriting.linalg.utils import (
     ASSUME_A_OF_TRANSPOSE,
     MATRIX_INVERSE_OPS,
     get_assume_a,
+    rebroadcast_like,
+    strip_left_expand_dims,
 )
 
 
@@ -42,18 +44,28 @@ def transpose_of_inv(fgraph, node):
 def inv_to_solve(fgraph, node):
     """Replace inv(X) @ b with solve(X, b) and b @ inv(X) with solve(X.T, b.T).T."""
     l, r = node.inputs
+    [out] = node.outputs
 
-    match l.owner_op_and_inputs:
+    l_core, l_transposed = strip_left_expand_dims(l)
+    match l_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            return [solve(X, r, assume_a=get_assume_a(fgraph, X))]
+            if l_transposed:
+                X = X.mT
+            new_out = solve(X, r, assume_a=get_assume_a(fgraph, X))
+            return [rebroadcast_like(new_out, out)]
 
-    match r.owner_op_and_inputs:
+    r_core, r_transposed = strip_left_expand_dims(r)
+    match r_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
+            if r_transposed:
+                X = X.mT
             assume_a = get_assume_a(fgraph, X)
             # X.mT == X for sym/pos, so reuse X and skip an unnecessary transpose.
             if assume_a in ("sym", "pos"):
-                return [solve(X, l.mT, assume_a=assume_a).mT]
-            return [solve(X.mT, l.mT, assume_a=ASSUME_A_OF_TRANSPOSE[assume_a]).mT]
+                new_out = solve(X, l.mT, assume_a=assume_a).mT
+            else:
+                new_out = solve(X.mT, l.mT, assume_a=ASSUME_A_OF_TRANSPOSE[assume_a]).mT
+            return [rebroadcast_like(new_out, out)]
 
     return None
 

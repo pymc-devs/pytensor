@@ -84,17 +84,30 @@ def test_transpose_of_inv():
                 assert node.inputs[0].name == "X"
 
 
-@pytest.mark.parametrize("batched", [False, True], ids=["unbatched", "batched"])
-def test_inv_to_solve(batched):
-    if batched:
-        A = pt.tensor("A", shape=(None, None, None), dtype="float64")
-        b = pt.tensor("b", shape=(None, None, None), dtype="float64")
-    else:
-        A = dmatrix("A")
-        b = dmatrix("b")
+@pytest.mark.parametrize(
+    "a_batched, b_batched",
+    [(False, False), (True, True), (False, True)],
+    ids=["unbatched", "batched", "padded"],
+)
+def test_inv_to_solve(a_batched, b_batched):
+    # In the "padded" case Blockwise.make_node pads inv(A) with a left expand_dims
+    A = pt.tensor("A", shape=(None,) * (2 + a_batched), dtype="float64")
+    b = pt.tensor("b", shape=(None,) * (2 + b_batched), dtype="float64")
     out = matrix_inverse(A) @ b
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
     assert_equal_computations([rewritten], [solve(A, b)])
+
+
+def test_inv_to_solve_right_operand_through_padding():
+    A = dmatrix("A")
+    b = pt.tensor("b", shape=(None, None, None), dtype="float64")
+
+    rewritten = rewrite_graph(
+        b @ matrix_inverse(A), include=("canonicalize", "stabilize")
+    )
+    # The padding around A.mT canonicalizes into a single fused DimShuffle
+    expected = solve(A.dimshuffle("x", 1, 0), b.mT).mT
+    assert_equal_computations([rewritten], [expected])
 
 
 @pytest.mark.parametrize("inv_op_1", [inv, pinv])
