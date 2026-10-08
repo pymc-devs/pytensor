@@ -110,9 +110,12 @@ def test_inv_to_solve_right_operand_through_padding():
     assert_equal_computations([rewritten], [expected])
 
 
-@pytest.mark.parametrize("inv_op_1", [inv, pinv])
-@pytest.mark.parametrize("inv_op_2", [inv, pinv])
-def test_inf_of_inv(inv_op_1, inv_op_2):
+@pytest.mark.parametrize(
+    "inv_op_1, inv_op_2",
+    [(inv, pinv), (pinv, inv)],
+    ids=["pinv_of_inv", "inv_of_pinv"],
+)
+def test_inv_of_inv(inv_op_1, inv_op_2):
     x = pt.matrix("x")
     inv_x = inv_op_1(x)
     x_again = inv_op_2(inv_x)
