@@ -1,3 +1,5 @@
+from itertools import chain
+
 import numpy as np
 
 from pytensor import tensor as pt
@@ -27,6 +29,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_padding,
     matrix_diagonal_product,
     rebroadcast_like,
     strip_left_expand_dims,
@@ -73,8 +76,15 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         for client, _ in fgraph.clients[det]
     )
 
+    # det(X.mT) == det(X), so factorizations hanging off x itself and off its
+    # stripped core are both usable
+    x_core, _ = strip_left_expand_dims(x)
+    factor_clients = clients_through_padding(fgraph, x)
+    if x_core is not x:
+        factor_clients = chain(factor_clients, clients_through_padding(fgraph, x_core))
+
     new_det = None
-    for client, _ in fgraph.clients[x]:
+    for client, _ in factor_clients:
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
@@ -110,6 +120,7 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         return None
 
     [det] = node.outputs
+    new_det = rebroadcast_like(new_det, det)
     copy_stack_trace(det, new_det)
     return [new_det]
 

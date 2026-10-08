@@ -466,6 +466,34 @@ def test_det_of_inv_through_padding():
     assert_equal_computations([rewritten], [expected])
 
 
+def test_det_of_matrix_factorized_elsewhere_through_padding():
+    x = pt.tensor("x", shape=(3, 3))
+
+    # The Cholesky hangs off a padded alias of x, the det off x itself
+    L = pt.linalg.cholesky(pt.expand_dims(x, 0))
+    d = det(x)
+
+    _, d_rewritten = rewrite_graph(
+        [L, d], include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = pt.sqr(pt.prod(pt.diagonal(L, axis1=-2, axis2=-1), axis=-1).squeeze(0))
+    assert_equal_computations([d_rewritten], [expected])
+
+
+def test_det_of_matrix_factorized_elsewhere_transposed_input():
+    x = pt.tensor("x", shape=(3, 3))
+
+    # Both the det and the Cholesky hang off the transpose itself
+    L = pt.linalg.cholesky(x.mT)
+    d = det(x.mT)
+
+    _, d_rewritten = rewrite_graph(
+        [L, d], include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = pt.sqr(pt.prod(pt.diag(L), axis=0))
+    assert_equal_computations([d_rewritten], [expected])
+
+
 def test_slogdet_of_inv():
     x = pt.dmatrix("x")
     # slogdet(inv(x)) -> (sign, logabsdet)
