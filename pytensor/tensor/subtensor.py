@@ -1940,80 +1940,173 @@ def as_tensor_index_variable(idx):
     return idx
 
 
+class _AdvIndexCGen:
+    """C loop-nest codegen for integer indices mixed with full slices (gather and scatter)."""
+
+    def __init__(self, idx_list, x_type, idx_types):
+        full = [*idx_list, *[slice(None)] * (x_type.ndim - len(idx_list))]
+        if (
+            not idx_types
+            or any(e != slice(None) for e in full if isinstance(e, slice))
+            or any(t.dtype not in integer_dtypes for t in idx_types)
+            or x_type.dtype in complex_dtypes
+        ):
+            raise NotImplementedError
+        # (x axis, index input position, index type) per advanced index
+        self.adv = [
+            (a, e, idx_types[e]) for a, e in enumerate(full) if isinstance(e, int)
+        ]
+        axes = [a for a, _, _ in self.adv]
+        basic = [a for a, e in enumerate(full) if isinstance(e, slice)]
+        consecutive = axes[-1] - axes[0] + 1 == len(axes)
+        self.before = [a for a in basic if a < axes[0]] if consecutive else []
+        self.after = [a for a in basic if a not in self.before]
+        self.x_ndim = x_type.ndim
+        self.K = max(t.ndim for t in idx_types)
+        self.ndim = len(self.before) + self.K + len(self.after)
+
+    def shape_code(self, g, idx, fail):
+        """Hoist dims/strides of `g` and the indices, broadcast the indices, build `ishape`."""
+        K, nb = self.K, len(self.before)
+        lines = [
+            f"if (PyArray_NDIM({g}) != {self.x_ndim}) {{ PyErr_Format(PyExc_ValueError, "
+            f'"Expected {self.x_ndim}-dimensional input, got %d", PyArray_NDIM({g})); {fail} }}',
+            *(
+                f"const npy_intp gd{a} = PyArray_DIMS({g})[{a}], gs{a} = PyArray_STRIDES({g})[{a}];"
+                for a in range(self.x_ndim)
+            ),
+            f"npy_intp adv_shape[{max(K, 1)}], ishape[{max(self.ndim, 1)}];",
+            *(f"adv_shape[{k}] = 1;" for k in range(K)),
+        ]
+        for _, e, t in self.adv:
+            for ka in range(t.ndim):
+                d, k = f"id{e}_{ka}", ka + K - t.ndim
+                lines += [
+                    f"const npy_intp {d} = PyArray_DIMS({idx[e]})[{ka}], is{e}_{ka} = {d} == 1 ? 0 : PyArray_STRIDES({idx[e]})[{ka}];",
+                    f"if ({d} != 1) {{ if (adv_shape[{k}] != 1 && adv_shape[{k}] != {d}) {{ "
+                    'PyErr_SetString(PyExc_IndexError, "shape mismatch: indexing arrays could not be broadcast together"); '
+                    f"{fail} }} adv_shape[{k}] = {d}; }}",
+                ]
+        lines += [f"ishape[{i}] = gd{a};" for i, a in enumerate(self.before)]
+        lines += [f"ishape[{nb + k}] = adv_shape[{k}];" for k in range(K)]
+        lines += [f"ishape[{nb + K + i}] = gd{a};" for i, a in enumerate(self.after)]
+        return "\n".join(lines)
+
+    def loops_code(self, g, s, idx, lhs_is_g, op, g_ctype, s_ctype, fail):
+        """Loops over the indexed shape in memory order; `g` is gathered via the indices, `s` walked with `ss`."""
+        K, nb = self.K, len(self.before)
+        # (loop bound, g stride or None for index dims, s stride) per nesting level
+        levels = [(f"gd{a}", f"gs{a}", f"ss[{i}]") for i, a in enumerate(self.before)]
+        levels += [(f"adv_shape[{k}]", None, f"ss[{nb + k}]") for k in range(K)]
+        levels += [
+            (f"gd{a}", f"gs{a}", f"ss[{nb + K + i}]") for i, a in enumerate(self.after)
+        ]
+        L = len(levels)
+
+        def gin(j):  # g pointer entering level j
+            return "ga" if K and j == nb + K else f"g{j}"
+
+        # With only 0-d indices the offset is constant and folded into the base pointer
+        ga = "ga" if K else "g0"
+        gather = [f"char *ga = g{nb};"] if K else []
+        for a, e, t in self.adv:
+            raw = f"(*({t.dtype_specs()[1]}*)ip{e}_{K})"
+            if t.dtype.startswith("uint"):
+                wrap, bad, fmt = "", f"(npy_uintp){raw} >= (npy_uintp)gd{a}", "%llu"
+            else:
+                wrap, bad, fmt = (
+                    f"if (v < 0) v += gd{a};",
+                    f"v < 0 || v >= gd{a}",
+                    "%lld",
+                )
+            gather.append(
+                f"{{ npy_intp v = (npy_intp){raw}; {wrap} if ({bad}) {{ "
+                f'PyErr_Format(PyExc_IndexError, "index {fmt} is out of bounds for axis {a} with size %lld", '
+                f"(long long){raw}, (long long)gd{a}); {fail} }} {ga} += v * gs{a}; }}"
+            )
+        gather = " ".join(gather)
+
+        lines = [f"char *g0 = PyArray_BYTES({g}), *s0 = PyArray_BYTES({s});"]
+        lines += [f"char *ip{e}_0 = PyArray_BYTES({idx[e]});" for _, e, _ in self.adv]
+        if K == 0:
+            lines.append(gather)
+        for j, (n, gs, ss) in enumerate(levels):
+            if j == L - 1 and gs is not None:
+                break
+            head = f"for (npy_intp c{j} = 0; c{j} < {n}; c{j}++) {{ char *s{j + 1} = s{j} + c{j} * {ss};"
+            if gs is not None:
+                head += f" char *g{j + 1} = {gin(j)} + c{j} * {gs};"
+            else:
+                k = j - nb
+                for _, e, t in self.adv:
+                    ka = k - K + t.ndim
+                    head += f" char *ip{e}_{k + 1} = ip{e}_{k}{f' + c{j} * is{e}_{ka}' if ka >= 0 else ''};"
+                if k == K - 1:
+                    head += " " + gather
+            lines.append(head)
+
+        to_bool = lhs_is_g and g_ctype == "npy_bool"
+
+        def body(gv, sv):
+            lhs, rhs = (gv, sv) if lhs_is_g else (sv, gv)
+            return f"{lhs} {op} {f'({rhs} != 0)' if to_bool else rhs};"
+
+        if L and levels[-1][1] is not None:
+            # Innermost basic axis: unit strides get a memcpy or a vectorizable loop
+            j, (n, gs, ss) = L - 1, levels[-1]
+            gj, sj = gin(j), f"s{j}"
+            dst, src = (gj, sj) if lhs_is_g else (sj, gj)
+            fast = (
+                f"memcpy({dst}, {src}, {n} * sizeof({g_ctype}));"
+                if op == "=" and g_ctype == s_ctype
+                else f"{{ {g_ctype} *ga_ = ({g_ctype}*){gj}; {s_ctype} *sa_ = ({s_ctype}*){sj}; "
+                f"for (npy_intp c = 0; c < {n}; c++) {body('ga_[c]', 'sa_[c]')} }}"
+            )
+            lines += [
+                f"if ({gs} == sizeof({g_ctype}) && {ss} == sizeof({s_ctype})) {fast} else "
+                f"for (npy_intp c = 0; c < {n}; c++) {body(f'*({g_ctype}*)({gj} + c * {gs})', f'*({s_ctype}*)({sj} + c * {ss})')}",
+                "}" * j,
+            ]
+        else:
+            lines += [body(f"*({g_ctype}*){gin(L)}", f"*({s_ctype}*)s{L}"), "}" * L]
+        return "\n".join(lines)
+
+
 class AdvancedSubtensor(BaseSubtensor, COp):
     """Implements NumPy's advanced indexing."""
 
     __props__ = ("idx_list",)
 
     def c_code_cache_version(self):
-        return (0,)
-
-    def _take_axis(self):
-        """Axis of a single integer-array index taken with all other axes in full.
-
-        Returns the axis for ``take(x, idx, axis)`` (``PyArray_TakeFrom``), or
-        ``None`` if this is any other advanced-indexing pattern.
-        """
-        int_axes = [
-            i for i, entry in enumerate(self.idx_list) if isinstance(entry, int)
-        ]
-        if len(int_axes) != 1:
-            return None
-        [axis] = int_axes
-        if any(
-            entry != slice(None) for i, entry in enumerate(self.idx_list) if i != axis
-        ):
-            return None
-        return axis
+        return (2,)
 
     def c_code(self, node, name, input_names, output_names, sub):
-        # A single integer-array index with every other axis taken in full is a
-        # `np.take` along that axis, which `PyArray_TakeFrom` implements directly
-        # (for an index of any dimensionality, on any axis). Every other pattern
-        # falls back to `perform`.
-        axis = self._take_axis()
-        if axis is None:
-            raise NotImplementedError
-        x, idx = node.inputs
-        if idx.type.dtype not in integer_dtypes:
-            raise NotImplementedError
-
-        if self._idx_may_be_invalid(x, idx, axis):
-            mode = "NPY_RAISE"
-        else:
-            # Indices are known valid ahead of time, so use a faster mode
-            mode = "NPY_WRAP"  # This seems to be faster than NPY_CLIP
-
-        a_name, i_name = input_names[0], input_names[1]
-        out = output_names[0]
+        # Integer indices + full slices are gathered in C, other patterns fall back to `perform`
+        x, *idx = input_names
+        [out] = output_names
         fail = sub["fail"]
-        return f"""
-            Py_XDECREF({out});
-            {out} = (PyArrayObject*)PyArray_TakeFrom(
-                        {a_name}, (PyObject*){i_name}, {axis}, NULL, {mode});
-            if ({out} == NULL) {fail};
-        """
-
-    @staticmethod
-    def _idx_may_be_invalid(x, idx, axis=0) -> bool:
-        """Whether ``take(x, idx, axis)`` may index out of bounds."""
-        if 0 in idx.type.shape:
-            # Empty index is always valid
-            return False
-
-        if x.type.shape[axis] is None:
-            # We can't know if the index is valid if we don't know x's length
-            return True
-
-        if not isinstance(idx, Constant):
-            # This is conservative, but we don't try to infer lower/upper bound symbolically
-            return True
-
-        shape_axis = x.type.shape[axis]
-        min_idx, max_idx = idx.data.min(), idx.data.max()
-        return not (min_idx >= 0 or min_idx >= -shape_axis) and (
-            max_idx < 0 or max_idx < shape_axis
+        cg = _AdvIndexCGen(
+            self.idx_list, node.inputs[0].type, [i.type for i in node.inputs[1:]]
         )
+        _, ctype, typenum = node.outputs[0].type.dtype_specs()
+        nd = cg.ndim
+        out_ok = " && ".join(
+            [out, f"PyArray_IS_C_CONTIGUOUS({out})", f"PyArray_NDIM({out}) == {nd}"]
+            + [f"PyArray_DIMS({out})[{d}] == ishape[{d}]" for d in range(nd)]
+        )
+        return f"""
+        {{
+        {cg.shape_code(x, idx, fail)}
+        if (!({out_ok})) {{
+            Py_XDECREF({out});
+            {out} = (PyArrayObject*)PyArray_EMPTY({nd}, ishape, {typenum}, 0);
+            if (!{out}) {fail}
+        }}
+        npy_intp ss[{max(nd, 1)}];
+        {" ".join(f"ss[{d}] = PyArray_STRIDES({out})[{d}];" for d in range(nd))}
+        {cg.loops_code(x, out, idx, False, "=", ctype, ctype, fail)}
+        }}
+        """
 
     def make_node(self, x, *index_variables):
         if len(index_variables) != self.n_index_vars:
@@ -2307,154 +2400,50 @@ class AdvancedIncSubtensor(BaseSubtensor, COp):
                 NPY_ARRAY_ENSURECOPY, NULL)"""
 
     def c_code(self, node, name, input_names, output_names, sub):
-        # The leading-axis integer-array update x[idx] (+)= y with 1-D x has a C
-        # impl for an index of any dimensionality (y must match idx element-wise);
-        # anything else falls back to `perform`.
-        if self.idx_list != (0,) or self.ignore_duplicates:
-            raise NotImplementedError
-        x_, y_, idx_ = node.inputs
-        y_bcast = y_.type.broadcastable != idx_.type.broadcastable
-        if not (
-            x_.type.ndim == 1
-            and not y_bcast
-            and idx_.type.ndim >= 1
-            and idx_.type.dtype in integer_dtypes
-            and x_.type.dtype not in complex_dtypes
-            and y_.type.dtype not in complex_dtypes
+        # Integer indices + full slices; `ignore_duplicates` needs numpy's last-write-wins, not a sequential scatter
+        x, y, *idx = input_names
+        [out] = output_names
+        fail = sub["fail"]
+        x_t, y_t = node.inputs[0].type, node.inputs[1].type
+        cg = _AdvIndexCGen(self.idx_list, x_t, [i.type for i in node.inputs[2:]])
+        if (
+            self.ignore_duplicates
+            or y_t.ndim > cg.ndim
+            or y_t.dtype in complex_dtypes
+            or (x_t.dtype == "bool" and not self.set_instead_of_inc)
         ):
             raise NotImplementedError
-
-        x, y, idx = input_names
-        [out] = output_names
-        copy_of_x = self.copy_of_x(x)
-        fail = sub["fail"]
-
-        y_cdtype = y_.type.dtype_specs()[1]
-        idx_cdtype = idx_.type.dtype_specs()[1]
-        out_cdtype = node.outputs[0].type.dtype_specs()[1]
-        idx_may_be_neg = not (
-            any(length == 0 for length in idx_.type.shape)
-            or (isinstance(idx_, Constant) and idx_.data.min() >= 0)
-        )
-        idx_may_be_invalid = AdvancedSubtensor._idx_may_be_invalid(x_, idx_)
-        shape0 = x_.type.shape[0]
-        unexpected_shape0 = (
-            f"PyArray_SHAPE({out})[0] != {shape0}" if shape0 is not None else "0"
+        nd = cg.ndim
+        ss = []
+        for d in range(nd):
+            yd = d - (nd - y_t.ndim)
+            if yd < 0 or y_t.broadcastable[yd]:
+                ss.append(f"ss[{d}] = 0;")
+                continue
+            ydim = f"PyArray_DIMS({y})[{yd}]"
+            ss.append(
+                f'if ({ydim} != ishape[{d}]) {{ PyErr_SetString(PyExc_ValueError, {ydim} == 1 ? "{self._runtime_broadcast_error_msg}" '
+                f': "AdvancedIncSubtensor: shape of second input (y) does not match the indexed shape"); {fail} }} '
+                f"ss[{d}] = PyArray_STRIDES({y})[{yd}];"
+            )
+        copy_x = (
+            f"if ({x} != {out}) {{ Py_XDECREF({out}); Py_INCREF({x}); {out} = {x}; }}"
+            if self.inplace
+            else f"Py_XDECREF({out}); {out} = {self.copy_of_x(x)}; if (!{out}) {fail}"
         )
         op = "=" if self.set_instead_of_inc else "+="
-
-        neg_and_bounds_check = f"""
-                if ({int(idx_may_be_neg)}){{
-                    if (idx < 0) {{
-                        idx += out_shape0;
-                    }}
-                }}
-                if ({int(idx_may_be_invalid)}){{
-                    if ((idx < 0) || (idx >= out_shape0)) {{
-                        PyErr_Format(PyExc_IndexError, "index %lld out of bounds for array with shape %lld", (long long)idx, (long long)out_shape0);
-        """
-        if idx_.type.ndim == 1:
-            # Tight contiguous-or-strided loop for the common vector index.
-            scatter = f"""
-        {{
-            {out_cdtype}* out_data = ({out_cdtype}*)PyArray_DATA({out});
-            {y_cdtype}* y_data = ({y_cdtype}*)PyArray_DATA({y});
-            {idx_cdtype}* idx_data = ({idx_cdtype}*)PyArray_DATA({idx});
-            npy_intp out_shape0 = PyArray_SHAPE({out})[0];
-            npy_intp n = PyArray_SHAPE({idx})[0];
-            npy_intp out_jump = PyArray_STRIDES({out})[0] / PyArray_ITEMSIZE({out});
-            npy_intp y_jump = PyArray_STRIDES({y})[0] / PyArray_ITEMSIZE({y});
-            npy_intp idx_jump = PyArray_STRIDES({idx})[0] / PyArray_ITEMSIZE({idx});
-
-            for(npy_intp i = 0; i < n; i++){{
-                {idx_cdtype} idx = idx_data[i * idx_jump];
-                {neg_and_bounds_check}
-                        {fail}
-                    }}
-                }}
-                out_data[idx * out_jump] {op} y_data[i * y_jump];
-            }}
-        }}
-        """
-        else:
-            # Multi-dimensional index: walk idx and y in lock-step (any strides).
-            scatter = f"""
-        {{
-            {out_cdtype}* out_data = ({out_cdtype}*)PyArray_DATA({out});
-            npy_intp out_shape0 = PyArray_SHAPE({out})[0];
-            npy_intp out_jump = PyArray_STRIDES({out})[0] / PyArray_ITEMSIZE({out});
-            PyArrayIterObject* idx_it = (PyArrayIterObject*)PyArray_IterNew((PyObject*){idx});
-            PyArrayIterObject* y_it = (PyArrayIterObject*)PyArray_IterNew((PyObject*){y});
-            if ((idx_it == NULL) || (y_it == NULL)) {{
-                Py_XDECREF(idx_it);
-                Py_XDECREF(y_it);
-                {fail}
-            }}
-            while (PyArray_ITER_NOTDONE(idx_it)) {{
-                {idx_cdtype} idx = *(({idx_cdtype}*)PyArray_ITER_DATA(idx_it));
-                {neg_and_bounds_check}
-                        Py_DECREF(idx_it);
-                        Py_DECREF(y_it);
-                        {fail}
-                    }}
-                }}
-                out_data[idx * out_jump] {op} *(({y_cdtype}*)PyArray_ITER_DATA(y_it));
-                PyArray_ITER_NEXT(idx_it);
-                PyArray_ITER_NEXT(y_it);
-            }}
-            Py_DECREF(idx_it);
-            Py_DECREF(y_it);
-        }}
-        """
-        inplace = int(self.inplace)
         return f"""
-        if ({inplace})
+        {copy_x}
         {{
-            if ({x} != {out})
-            {{
-                Py_XDECREF({out});
-                Py_INCREF({x});
-                {out} = {x};
-            }}
+        {cg.shape_code(out, idx, fail)}
+        npy_intp ss[{max(nd, 1)}];
+        {" ".join(ss)}
+        {cg.loops_code(out, y, idx, True, op, x_t.dtype_specs()[1], y_t.dtype_specs()[1], fail)}
         }}
-        else
-        {{
-            Py_XDECREF({out});
-            {out} = {copy_of_x};
-            if (!{out}) {{
-                {fail}
-            }}
-        }}
-
-        if (PyArray_NDIM({out}) != 1) {{
-            PyErr_Format(PyExc_ValueError, "AdvancedIncSubtensor: first input (x) ndim should be 1, got %d", PyArray_NDIM({out}));
-            {fail}
-        }}
-        if ({unexpected_shape0}) {{
-            PyErr_Format(PyExc_ValueError, "AdvancedIncSubtensor: first input (x) shape should be {shape0}, got %d", PyArray_SHAPE({out})[0]);
-            {fail}
-        }}
-        if (PyArray_NDIM({y}) != PyArray_NDIM({idx})) {{
-            PyErr_Format(PyExc_ValueError, "AdvancedIncSubtensor: second input (y) ndim should match indices ndim, got %d and %d", PyArray_NDIM({y}), PyArray_NDIM({idx}));
-            {fail}
-        }}
-        for (int _adv_axis = 0; _adv_axis < PyArray_NDIM({idx}); _adv_axis++) {{
-            if (PyArray_SHAPE({y})[_adv_axis] != PyArray_SHAPE({idx})[_adv_axis]) {{
-                if (PyArray_SHAPE({y})[_adv_axis] == 1){{
-                    PyErr_Format(PyExc_ValueError, "{self._runtime_broadcast_error_msg}");
-                }} else {{
-                    PyErr_Format(PyExc_ValueError,
-                    "AdvancedIncSubtensor: Shapes of second input (y) and indices do not match along axis %d: %d, %d",
-                    _adv_axis, PyArray_SHAPE({y})[_adv_axis], PyArray_SHAPE({idx})[_adv_axis]);
-                }}
-                {fail}
-            }}
-        }}
-        {scatter}
         """
 
     def c_code_cache_version(self):
-        return (2,)
+        return (4,)
 
     def _check_runtime_broadcast_of_vector_index(self, node, x, y, idx) -> None:
         """Raise if ``x[idx] (+)= y`` would broadcast ``y`` at runtime.

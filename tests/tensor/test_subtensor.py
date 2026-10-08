@@ -17,7 +17,8 @@ from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
-from pytensor.graph.basic import equal_computations
+from pytensor.graph.basic import Constant, equal_computations
+from pytensor.graph.traversal import graph_inputs
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
@@ -3303,3 +3304,139 @@ def test_subtensor_hash_and_eq():
     s_mix2 = Subtensor(idx_list=[0, slice(None), slice(None, 1)])
     assert s_mix1 == s_mix2
     assert hash(s_mix1) == hash(s_mix2)
+
+
+@pytest.mark.skipif(not config.cxx, reason="Needs a C compiler")
+class TestAdvancedIndexingCImpl:
+    """C gather/scatter kernels vs `perform` for integer indices mixed with full slices."""
+
+    x = tensor("x", dtype="float64", shape=(None, None, None))
+    i, j, im, ic, s = (
+        lvector("i"),
+        lvector("j"),
+        lmatrix("im"),
+        lmatrix("ic"),
+        lscalar("s"),
+    )
+    u = tensor("u", dtype="uint8", shape=(None,))
+    rng = np.random.default_rng(23)
+    vals = {
+        x: rng.normal(size=(4, 5, 6)),
+        i: rng.integers(-4, 4, 6),
+        j: rng.integers(-4, 4, 6),
+        im: rng.integers(0, 4, (2, 6)),
+        ic: rng.integers(0, 4, (2, 1)),
+        s: np.int64(-1),
+        u: rng.integers(0, 4, 6).astype("uint8"),
+    }
+    cases = [
+        (i,),
+        (slice(None), j),
+        (i, j),
+        (im, j),
+        (ic, j),
+        (i, slice(None), j),
+        (slice(None), i, j),
+        (slice(None), slice(None), i),
+        (s, j),
+        (i, s),
+        (u,),
+        (i[::2], j[::-2]),
+        (i[:0],),
+        (slice(None), s),
+        (s, slice(None), s),
+    ]
+
+    def _args(self, out, extra=None):
+        ins = [v for v in graph_inputs([out]) if not isinstance(v, Constant)]
+        vals = {**self.vals, **(extra or {})}
+        return ins, [vals[v] for v in ins]
+
+    def _check(self, out, extra=None, err=None):
+        node = out.owner
+        assert node.op.c_code(
+            node, "n", list(map(str, range(len(node.inputs)))), ["o"], {"fail": ""}
+        )
+        ins, args = self._args(out, extra)
+        f_c, f_py = (
+            function(ins, out, mode=Mode(linker=lnk, optimizer=None))
+            for lnk in ("cvm", "py")
+        )
+        if err is not None:
+            with pytest.raises(err[0], match=err[1]):
+                f_c(*args)
+            return
+        res_c, res_py = f_c(*args), f_py(*args)
+        assert res_c.dtype == res_py.dtype
+        np.testing.assert_allclose(res_c, res_py)
+
+    def _y(self, sub, static_bcast=(), extra=None, **kwargs):
+        ins, args = self._args(sub, extra)
+        shape = function(ins, sub, mode=Mode(linker="py", optimizer=None))(*args).shape
+        shape = tuple(1 if d in static_bcast else n for d, n in enumerate(shape))
+        y = tensor(
+            "y",
+            shape=tuple(1 if d in static_bcast else None for d in range(len(shape))),
+            **kwargs,
+        )
+        return y, self.rng.normal(size=shape)
+
+    @pytest.mark.parametrize("indices", cases, ids=str)
+    @pytest.mark.parametrize("order", ["C", "F"])
+    def test_gather(self, indices, order):
+        self._check(
+            advanced_subtensor(self.x, *indices),
+            {self.x: np.asarray(self.vals[self.x], order=order)},
+        )
+
+    @pytest.mark.parametrize("indices", cases, ids=str)
+    @pytest.mark.parametrize("op", [inc_subtensor, set_subtensor])
+    def test_scatter(self, indices, op):
+        sub = advanced_subtensor(self.x, *indices)
+        y, y_val = self._y(sub)
+        self._check(op(sub, y), {y: y_val})
+        # y broadcasts over static 1-dims and as a scalar
+        y, y_val = self._y(sub, static_bcast=(0,))
+        self._check(op(sub, y), {y: y_val})
+        self._check(op(sub, y_val.flat[0]))
+
+    @pytest.mark.parametrize(
+        "x_dtype, y_dtype, op",
+        [
+            ("float32", "float64", inc_subtensor),
+            ("int32", "float64", inc_subtensor),
+            ("bool", "float64", set_subtensor),
+        ],
+    )
+    def test_scatter_dtypes(self, x_dtype, y_dtype, op):
+        x = tensor("x", dtype=x_dtype, shape=(None, None, None))
+        x_val = {x: self.vals[self.x].astype(x_dtype)}
+        sub = x[self.i, self.j]
+        y, y_val = self._y(sub, extra=x_val, dtype=y_dtype)
+        self._check(op(sub, y), {y: y_val, **x_val})
+
+    def test_errors(self):
+        i, j = self.i, self.j
+        self._check(self.x[i], {i: np.array([0, 4])}, err=(IndexError, "out of bounds"))
+        self._check(
+            self.x[i], {i: np.array([0, -5])}, err=(IndexError, "out of bounds")
+        )
+        self._check(
+            self.x[i, j], {j: np.array([0, 1])}, err=(IndexError, "shape mismatch")
+        )
+        y, y_val = self._y(self.x[i])
+        self._check(
+            inc_subtensor(self.x[i], y),
+            {y: y_val, i: np.array([0] * 5 + [4])},
+            err=(IndexError, "out of bounds"),
+        )
+        self._check(
+            set_subtensor(self.x[i], y),
+            {y: y_val[:2]},
+            err=(ValueError, "does not match"),
+        )
+        self._check(
+            set_subtensor(self.x[i], y),
+            {y: y_val[:1]},
+            err=(ValueError, "Runtime broadcasting not allowed"),
+        )
