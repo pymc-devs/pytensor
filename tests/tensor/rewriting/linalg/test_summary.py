@@ -226,6 +226,23 @@ def test_slogdet_specialization(batch_dim):
     result.assert_eval(a)
 
 
+def test_slogdet_specialization_through_padding():
+    x = pt.tensor("x", shape=(3, 3), dtype=config.floatX)
+    log_det_x = pt.log(pt.expand_dims(det(x), 0))
+
+    # dimshuffle_lift pushes the padding inside the Switch
+    sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
+    expected = pt.where(
+        pt.eq(pt.expand_dims(sign_det_x, 0), np.array([-1], dtype=np.int8)),
+        np.array([np.nan], dtype=config.floatX),
+        pt.expand_dims(log_abs_det_x, 0),
+    )
+
+    result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(expected)
+    result.assert_eval(np.random.rand(3, 3))
+
+
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
     [
@@ -447,6 +464,18 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     expected = expected_fn(x)
     rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
     assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_factorized_matrix_through_padding():
+    # The batched Cholesky keeps the padded Blockwise(Det) from being eagerly
+    # unbatched, so only the look-through peel can reach the factor
+    x = pt.tensor("x", shape=(None, 3, 3))
+    L = pt.linalg.cholesky(x)
+    d = det(pt.expand_dims(L, 0))
+
+    d_rewritten = rewrite_graph(d, include=["stabilize"])
+    expected = pt.expand_dims(pt.prod(pt.diagonal(L, axis1=-2, axis2=-1), axis=-1), 0)
+    assert_equal_computations([d_rewritten], [expected])
 
 
 def test_det_of_inv():

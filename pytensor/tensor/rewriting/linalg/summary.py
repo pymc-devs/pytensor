@@ -142,6 +142,8 @@ def det_of_factorized_matrix(fgraph, node):
         for client, _ in fgraph.clients[det]
     )
 
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    x, _ = strip_left_expand_dims(x)
     x_node = x.owner
     if x_node is None:
         return None
@@ -184,6 +186,7 @@ def det_of_factorized_matrix(fgraph, node):
     if new_det is None:
         return None
 
+    new_det = rebroadcast_like(new_det, det)
     copy_stack_trace(det, new_det)
     return [new_det]
 
@@ -236,7 +239,7 @@ def slogdet_specialization(fgraph, node):
         Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
     """
     dummy_replacements = {}
-    for client, _ in fgraph.clients[node.outputs[0]]:
+    for client, _ in clients_through_padding(fgraph, node.outputs[0]):
         match (client.op, *client.outputs):
             # Check for sign(det)
             case (Elemwise(Sign()), sign):
@@ -244,7 +247,7 @@ def slogdet_specialization(fgraph, node):
 
             # Check for log(abs(det))
             case (Elemwise(Abs()), potential_log):
-                for client_2, _ in fgraph.clients[potential_log]:
+                for client_2, _ in clients_through_padding(fgraph, potential_log):
                     match (client_2.op, *client_2.outputs):
                         case (Elemwise(Log()), log_abs_det):
                             dummy_replacements[log_abs_det] = "log_abs_det"
@@ -269,4 +272,7 @@ def slogdet_specialization(fgraph, node):
         "log_abs_det": log_abs_det_x,
         "log_det": log_det_x,
     }
-    return {k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()}
+    return {
+        k: rebroadcast_like(slogdet_specialization_map[v], k)
+        for k, v in dummy_replacements.items()
+    }
