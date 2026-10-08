@@ -93,10 +93,13 @@ def inv_of_inv(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    # Check if inner op is blockwise and possible inv
-    match node.inputs[0].owner_op_and_inputs:
+    inner, transposed = strip_left_expand_dims(node.inputs[0])
+    match inner.owner_op_and_inputs:
         case (Blockwise(MatrixInverse() | MatrixPinv()), X):
-            return [X]
+            # inv(inv(X).mT) == inv(inv(X.mT)) == X.mT
+            if transposed:
+                X = X.mT
+            return [rebroadcast_like(X, node.outputs[0])]
 
 
 @register_canonicalize

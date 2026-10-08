@@ -120,6 +120,13 @@ def test_inf_of_inv(inv_op_1, inv_op_2):
     assert rewritten_out == x
 
 
+def test_inv_of_inv_through_padding():
+    x = pt.matrix("x")
+    out = inv(pt.expand_dims(pinv(x), 0))
+    rewritten = rewrite_graph(out)
+    assert_equal_computations([rewritten], [pt.expand_dims(x, 0)])
+
+
 @pytest.mark.parametrize("inv_op", [inv, pinv])
 def test_inv_of_diag_from_eye(inv_op):
     x = pt.eye(10)
