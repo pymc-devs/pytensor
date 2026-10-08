@@ -9,6 +9,7 @@ from pytensor.assumptions.core import (
     all_inputs_have_key,
     propagate_first,
     register_assumption,
+    register_client_inference,
     true_if,
 )
 from pytensor.assumptions.dimshuffle import left_expand_dims_propagates_matrix_property
@@ -19,6 +20,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
 )
@@ -53,6 +55,14 @@ register_assumption(SYMMETRIC, MatrixInverse)(propagate_first)
 register_assumption(SYMMETRIC, MatrixPinv)(propagate_first)
 register_assumption(SYMMETRIC, KroneckerProduct)(all_inputs_have_key)
 register_assumption(SYMMETRIC, Subtensor)(subtensor_propagates_matrix_property)
+
+
+@register_client_inference(SYMMETRIC, Solve)
+def _solve_promises_symmetric(key, op, node, input_index):
+    """``assume_a`` of "sym" promises a symmetric ``a``, and so does "her" for real dtypes."""
+    is_real = not node.inputs[0].type.dtype.startswith("complex")
+    promises_symmetric = op.assume_a == "sym" or (op.assume_a == "her" and is_real)
+    return true_if(input_index == 0 and promises_symmetric)[0]
 
 
 @register_assumption(SYMMETRIC, DimShuffle)

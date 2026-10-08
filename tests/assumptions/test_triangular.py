@@ -225,3 +225,12 @@ class TestMatrixTransposeFlipsTriangle:
         y = x_tagged.T.T
         _, af = make_fgraph(y)
         assert af.check(y, key)
+
+
+def test_lu_solve_factor_is_unknown_triangular():
+    # solve_triangular reads one triangle of the packed LU factor, so it promises nothing
+    a, b = pt.matrix("a"), pt.matrix("b")
+    lu, pivots = pt.linalg.lu_factor(a)
+    _, af = make_fgraph(pt.linalg.lu_solve((lu, pivots), b))
+    assert af.get(lu, LOWER_TRIANGULAR) == FactState.UNKNOWN
+    assert af.get(lu, UPPER_TRIANGULAR) == FactState.UNKNOWN

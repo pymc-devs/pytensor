@@ -94,6 +94,46 @@ def register_constant_inference(key: AssumptionKey, fn: ConstantInferFn) -> None
     CONSTANT_INFER_REGISTRY[key] = fn
 
 
+# Maps (key, Op type) to rules that read a fact about a variable off a node consuming it,
+# such as ``solve(a, b, assume_a="pos")`` promising that ``a`` is positive definite. A rule
+# is called as ``fn(key, op, node, input_index)`` and returns the state of that input.
+ClientInferFn = Callable[[AssumptionKey, Op, Apply, int], FactState]
+CLIENT_INFER_REGISTRY: dict[tuple[AssumptionKey, type], ClientInferFn] = {}
+# Keys with at least one client rule. Inference skips the client scan for every other key.
+CLIENT_INFER_KEYS: set[AssumptionKey] = set()
+
+
+def register_client_inference(
+    key: AssumptionKey, *op_types: type
+) -> Callable[[ClientInferFn], ClientInferFn]:
+    """Decorator that registers a client inference rule for ``(key, op_type)`` pairs."""
+
+    def decorator(fn: ClientInferFn) -> ClientInferFn:
+        for op_type in op_types:
+            CLIENT_INFER_REGISTRY[(key, op_type)] = fn
+        CLIENT_INFER_KEYS.add(key)
+        return fn
+
+    return decorator
+
+
+def infer_assumption_from_client(
+    key: AssumptionKey, op: Op, node: Apply, input_index: int
+) -> FactState:
+    """Return what *node* promises about its input at *input_index* for *key*."""
+    # Imported here because pytensor.tensor.rewriting loads this module before tensor.basic,
+    # and importing blockwise first trips the compile.builders <-> tensor.basic cycle.
+    from pytensor.tensor.blockwise import Blockwise
+
+    if isinstance(op, Blockwise):
+        op = op.core_op
+    for cls in type(op).__mro__:
+        fn = CLIENT_INFER_REGISTRY.get((key, cls))
+        if fn is not None:
+            return fn(key, op, node, input_index)
+    return FactState.UNKNOWN
+
+
 # The canonical structural-property keys
 DIAGONAL = AssumptionKey("diagonal", short_name="diag")
 LOWER_TRIANGULAR = AssumptionKey("lower_triangular", short_name="tril")
@@ -266,7 +306,8 @@ class AssumptionFeature(Feature):
     def _compute(self, var: Any, key: AssumptionKey) -> FactState:
         """Infer the fact state for ``(var, key)``, caching ancestors inputs-first.
 
-        After owner-based inference, walks the ``IMPLIES`` graph in both directions:
+        When the owner says nothing, asks the clients of ``var`` what they promise about it.
+        Then walks the ``IMPLIES`` graph in both directions:
           - Forward: a stronger key being TRUE makes this (weaker) key TRUE.
           - Contrapositive: a weaker key being FALSE makes this (stronger) key FALSE.
 
@@ -302,6 +343,14 @@ class AssumptionFeature(Feature):
                 state = CONSTANT_INFER_REGISTRY[key](v)
             else:
                 state = FactState.UNKNOWN
+
+            if state is FactState.UNKNOWN and key in CLIENT_INFER_KEYS:
+                for client, input_index in self.fgraph.clients.get(v, ()):
+                    state = infer_assumption_from_client(
+                        key, client.op, client, input_index
+                    )
+                    if state is not FactState.UNKNOWN:
+                        break
 
             if state is FactState.UNKNOWN:
                 for stronger, weaker_list in IMPLIES.items():
