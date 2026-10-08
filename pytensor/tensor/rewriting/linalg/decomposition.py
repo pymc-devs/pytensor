@@ -1,3 +1,5 @@
+from itertools import chain
+
 from pytensor import tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
@@ -24,6 +26,7 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_padding,
     rebroadcast_like,
     strip_left_expand_dims,
 )
@@ -97,6 +100,14 @@ def svd_uv_merge(fgraph, node):
     """
     [x] = node.inputs
 
+    # The sibling SVD may hang off a padded alias of x, or x may itself be the
+    # padded alias; scan clients of both forms. Transposes are not aliases of
+    # the same decomposition, so a transposed core is not scanned.
+    x_core, transposed = strip_left_expand_dims(x)
+    svd_clients = clients_through_padding(fgraph, x)
+    if x_core is not x and not transposed:
+        svd_clients = chain(svd_clients, clients_through_padding(fgraph, x_core))
+
     if node.op.core_op.compute_uv:
         # compute_uv=True returns [u, s, v].
         u, s, v = node.outputs
@@ -107,7 +118,7 @@ def svd_uv_merge(fgraph, node):
 
         # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
         # First, iterate to see if there is an SVD Op that can be reused.
-        for cl, _ in fgraph.clients[x]:
+        for cl, _ in svd_clients:
             if cl is node:
                 continue
             match (cl.op, *cl.outputs):
@@ -120,20 +131,20 @@ def svd_uv_merge(fgraph, node):
                 full_matrices=node.op.core_op.full_matrices,
                 compute_uv=False,
             )
-        return {s: replacement_s}
+        return {s: rebroadcast_like(replacement_s, s)}
 
     else:
         # compute_uv=False returns [s].
         # We want rewrite if there is another one with compute_uv=True.
         # For this case, just reuse the `s` from the one with compute_uv=True.
-        for cl, _ in fgraph.clients[x]:
+        for cl, _ in svd_clients:
             if cl is node:
                 continue
             match (cl.op, *cl.outputs):
                 case (Blockwise(SVD(compute_uv=True)), u, s, v) if (
                     fgraph.clients[u] or fgraph.clients[v]
                 ):
-                    return [s]
+                    return [rebroadcast_like(s, node.outputs[0])]
 
 
 @register_canonicalize

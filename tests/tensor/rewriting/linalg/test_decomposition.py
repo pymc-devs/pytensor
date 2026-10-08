@@ -11,6 +11,7 @@ from pytensor.assumptions.specify import assume
 from pytensor.compile import get_default_mode
 from pytensor.compile.mode import get_mode
 from pytensor.configdefaults import config
+from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.basic import alloc_diag
@@ -189,6 +190,36 @@ def test_svd_uv_merge():
             assert node.op.compute_uv
             svd_counter += 1
     assert svd_counter == 1
+
+
+@pytest.mark.parametrize("padded_node", ["compute_uv", "no_compute_uv"])
+def test_svd_uv_merge_through_padding(padded_node):
+    # The compute_uv=False SVD should reuse s from the compute_uv=True SVD of
+    # the same matrix (whose u is actually used), whichever of the two sees
+    # the padded alias
+    x = pt.dmatrix("x")
+    x_uv, x_s_only = (
+        (pt.expand_dims(x, 0), x)
+        if padded_node == "compute_uv"
+        else (x, pt.expand_dims(x, 0))
+    )
+
+    s_only = svd(x_s_only, full_matrices=False, compute_uv=False)
+    u, _s, _v = svd(x_uv, full_matrices=False, compute_uv=True)
+
+    rewritten_outs = rewrite_graph(
+        [s_only, u],
+        include=("canonicalize", "stabilize", "specialize"),
+        exclude=("local_eager_useless_unbatched_blockwise",),
+    )
+    svd_nodes = {
+        anc.owner
+        for anc in ancestors(rewritten_outs)
+        if anc.owner is not None
+        and isinstance(anc.owner.op, Blockwise)
+        and isinstance(anc.owner.op.core_op, SVD)
+    }
+    assert len(svd_nodes) == 1
 
 
 def test_cholesky_eye_rewrite():
