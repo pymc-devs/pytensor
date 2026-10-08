@@ -15,7 +15,7 @@ from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.basic import atleast_Nd, split
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -111,7 +111,9 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
+@node_rewriter(
+    [blockwise_of(OpPattern(Solve, b_ndim=1)), blockwise_of(OpPattern(Solve, b_ndim=2))]
+)
 def psd_solve_to_chol_solve(fgraph, node):
     """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
     assume_a = node.op.core_op.assume_a
@@ -121,9 +123,13 @@ def psd_solve_to_chol_solve(fgraph, node):
         or getattr(A.tag, "psd", None) is True
         or check_assumption(fgraph, A, POSITIVE_DEFINITE)
     ):
+        b_ndim = node.op.core_op.b_ndim
+        a_bcast_batch_dims = A.type.broadcastable[:-2]
+        if all(a_bcast_batch_dims) and a_bcast_batch_dims:
+            A = _squeeze_left(A, stop_at_dim=len(a_bcast_batch_dims))
         L = cholesky(A)
-        Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
-        x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=2)
+        Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
+        x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=b_ndim)
         return [x]
 
 
