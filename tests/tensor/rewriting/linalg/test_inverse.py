@@ -84,6 +84,13 @@ def test_transpose_of_inv():
                 assert node.inputs[0].name == "X"
 
 
+def test_transpose_of_inv_through_padding():
+    X = dmatrix("X")
+    out = pt.expand_dims(matrix_inverse(X), 0).mT
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert_equal_computations([rewritten], [pt.expand_dims(matrix_inverse(X.mT), 0)])
+
+
 @pytest.mark.parametrize(
     "a_batched, b_batched",
     [(False, False), (True, True), (False, True)],
@@ -271,6 +278,21 @@ def test_lift_linalg_of_expanded_matrices(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+def test_lift_linalg_through_padding():
+    a, b = dmatrix("a"), dmatrix("b")
+    out = matrix_inverse(pt.expand_dims(pt.linalg.block_diag(a, b), 0))
+
+    rewritten = rewrite_graph(
+        out,
+        include=("canonicalize", "stabilize", "specialize"),
+        exclude=("local_eager_useless_unbatched_blockwise",),
+    )
+    expected = pt.expand_dims(
+        pt.linalg.block_diag(matrix_inverse(a), matrix_inverse(b)), 0
+    )
+    assert_equal_computations([rewritten], [expected])
 
 
 def test_inv_of_orthogonal_to_transpose():

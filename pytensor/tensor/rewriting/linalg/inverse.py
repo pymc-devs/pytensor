@@ -34,9 +34,12 @@ from pytensor.tensor.rewriting.linalg.utils import (
 def transpose_of_inv(fgraph, node):
     # TODO: Transpose is much more frequent that MatrixInverse, flip the rewrite pattern matching.
     [A] = node.inputs
-    match A.owner_op_and_inputs:
+    core, transposed = strip_left_expand_dims(A)
+    match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()) as inv_op, X):
-            return [inv_op(node.op(X))]
+            # The node itself transposes once more on top of any peeled transposes
+            X_T = X if transposed else X.mT
+            return [rebroadcast_like(inv_op(X_T), node.outputs[0])]
 
 
 @register_stabilize
@@ -156,9 +159,18 @@ def lift_linalg_of_expanded_matrices(fgraph: FunctionGraph, node: Apply):
     # TODO: Simplify this if we end up Blockwising KroneckerProduct
     outer_op = node.op
     [y] = node.inputs
+    # block_diag(...).mT == block_diag(*m.mT) and kron(a, b).mT == kron(a.mT, b.mT),
+    # so a peeled transpose moves onto the component matrices
+    y_core, transposed = strip_left_expand_dims(y)  # type: ignore[arg-type]
 
-    match y.owner_op_and_inputs:
+    match y_core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *inner_matrices):
-            return [block_diag(*(outer_op(m) for m in inner_matrices))]
+            if transposed:
+                inner_matrices = [m.mT for m in inner_matrices]  # type: ignore[attr-defined]
+            new_out = block_diag(*(outer_op(m) for m in inner_matrices))
+            return [rebroadcast_like(new_out, node.outputs[0])]  # type: ignore[arg-type]
         case (KroneckerProduct(), *inner_matrices):  # type: ignore[unreachable, unused-ignore]
-            return [kron(*(outer_op(m) for m in inner_matrices))]  # type: ignore[unreachable, unused-ignore]
+            if transposed:  # type: ignore[unreachable, unused-ignore]
+                inner_matrices = [m.mT for m in inner_matrices]  # type: ignore[attr-defined]
+            new_out = kron(*(outer_op(m) for m in inner_matrices))
+            return [rebroadcast_like(new_out, node.outputs[0])]  # type: ignore[arg-type]
