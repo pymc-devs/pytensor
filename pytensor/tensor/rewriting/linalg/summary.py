@@ -26,7 +26,11 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
+from pytensor.tensor.rewriting.linalg.utils import (
+    matrix_diagonal_product,
+    rebroadcast_like,
+    strip_left_expand_dims,
+)
 from pytensor.tensor.subtensor import _is_provably_non_negative
 
 
@@ -195,9 +199,11 @@ def det_of_triangular(fgraph, node):
 @node_rewriter([det])
 def det_of_inv(fgraph, node):
     """Replace det(matrix_inverse(X)) with reciprocal(det(X))."""
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            return [1 / det(X)]
+            return [rebroadcast_like(1 / det(X), node.outputs[0])]
 
 
 @register_specialize

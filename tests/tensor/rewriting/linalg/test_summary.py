@@ -457,6 +457,15 @@ def test_det_of_inv():
     assert_equal_computations([rewritten], [expected])
 
 
+def test_det_of_inv_through_padding():
+    x = pt.tensor("x", shape=(3, 3))
+    out = det(pt.expand_dims(pt.linalg.inv(x), 0))
+    # dimshuffle_lift moves the padding inside the division
+    expected = pt.as_tensor([1.0], dtype="float64") / pt.expand_dims(det(x), 0)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
+    assert_equal_computations([rewritten], [expected])
+
+
 def test_slogdet_of_inv():
     x = pt.dmatrix("x")
     # slogdet(inv(x)) -> (sign, logabsdet)
