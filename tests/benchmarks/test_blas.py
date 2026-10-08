@@ -90,21 +90,20 @@ def test_cgemv_vector_dot_benchmark(benchmark):
     "neg_stride0", (True, False), ids=["neg_stride0", "pos_stride0"]
 )
 @pytest.mark.parametrize("F_layout", (True, False), ids=["F_layout", "C_layout"])
-def test_cgemv_negative_strides_benchmark(
-    neg_stride0, neg_stride1, F_layout, benchmark
+@pytest.mark.parametrize("mode", ("CVM", "NUMBA"))
+@pytest.mark.parametrize("transpose", (False, True), ids=["matvec", "vecmat"])
+def test_gemv_negative_strides_benchmark(
+    neg_stride0, neg_stride1, F_layout, mode, transpose, benchmark
 ):
     A = matrix("A", shape=(512, 512))
     x = vector("x", shape=(A.type.shape[-1],))
     y = vector("y", shape=(A.type.shape[0],))
 
-    out = Gemv(inplace=False)(
-        y,
-        1.0,
-        A,
-        x,
-        1.0,
-    )
-    fn = function([A, x, y], out, trust_input=True, mode="CVM")
+    if mode == "CVM":
+        out = Gemv(inplace=False)(y, 1.0, A.T if transpose else A, x, 1.0)
+    else:
+        out = y + (dot(x, A) if transpose else dot(A, x))
+    fn = function([A, x, y], out, trust_input=True, mode=mode)
 
     rng = np.random.default_rng(430)
     test_A = rng.normal(size=A.type.shape)

@@ -126,3 +126,72 @@ class _BLAS:
             fn(TRANSA, TRANSB, M, N, K, ALPHA, A, LDA, B, LDB, BETA, C, LDC)
 
         return gemm
+
+    @classmethod
+    def numba_xgemv(cls, dtype) -> CPUDispatcher:
+        """Matrix-vector product with signed increments for both vectors."""
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.blas.{kind}gemv"
+
+        @numba_basic.numba_njit
+        def get_gemv_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_blas_ptr(dtype, "gemv")
+            return ptr
+
+        gemv_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # TRANS
+                nb_i32p,  # M
+                nb_i32p,  # N
+                float_ptr,  # ALPHA
+                float_ptr,  # A
+                nb_i32p,  # LDA
+                float_ptr,  # X
+                nb_i32p,  # INCX
+                float_ptr,  # BETA
+                float_ptr,  # Y
+                nb_i32p,  # INCY
+            )
+        )
+
+        @numba_basic.numba_njit
+        def gemv(TRANS, M, N, ALPHA, A, LDA, X, INCX, BETA, Y, INCY):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_gemv_pointer,
+                func_type_ref=gemv_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(TRANS, M, N, ALPHA, A, LDA, X, INCX, BETA, Y, INCY)
+
+        return gemv
+
+    @classmethod
+    def numba_xdot(cls, dtype) -> CPUDispatcher:
+        """Real vector product with signed increments."""
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        scalar_type = _get_nb_float_from_dtype(kind, return_pointer=False)
+        unique_func_name = f"scipy.blas.{kind}dot"
+
+        @numba_basic.numba_njit
+        def get_dot_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_blas_ptr(dtype, "dot")
+            return ptr
+
+        dot_function_type = types.FunctionType(
+            scalar_type(nb_i32p, float_ptr, nb_i32p, float_ptr, nb_i32p)
+        )
+
+        @numba_basic.numba_njit
+        def dot(N, X, INCX, Y, INCY):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_dot_pointer,
+                func_type_ref=dot_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            return fn(N, X, INCX, Y, INCY)
+
+        return dot
