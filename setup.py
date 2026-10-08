@@ -13,12 +13,14 @@ dist.parse_config_files()
 
 NAME: str = dist.get_name()  # type: ignore
 
-# Check if building for Pyodide
-is_pyodide = os.getenv("PYODIDE", "0") == "1"
+# Build without optional compiled extensions. Keep PYODIDE as a compatibility
+# alias for existing downstream builds.
+is_pure_python = (
+    os.getenv("PYTENSOR_PURE_PYTHON", "0") == "1" or os.getenv("PYODIDE", "0") == "1"
+)
 
-if is_pyodide:
-    # For pyodide we build a universal wheel that must be pure-python
-    # so we must omit the cython-version of scan.
+if is_pure_python:
+    # Omit the optional Cython implementation of scan.
     ext_modules = []
 else:
     ext_modules = [
