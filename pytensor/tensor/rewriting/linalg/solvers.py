@@ -14,7 +14,7 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
-from pytensor.tensor.basic import atleast_Nd, split
+from pytensor.tensor.basic import split
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -40,8 +40,12 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg.utils import get_assume_a
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_padding,
+    get_assume_a,
+    rebroadcast_like,
+    strip_left_expand_dims,
+)
 
 
 @register_stabilize
@@ -469,32 +473,14 @@ def _split_decomp_and_solve_steps(
     if not isinstance(node.op.core_op, Solve):
         return None
 
-    def get_root_A(a: TensorVariable) -> tuple[TensorVariable, bool]:
-        # Find the root variable of the first input to Solve
-        # If `a` is a left expand_dims or matrix transpose (DimShuffle variants),
-        # the root variable is the pre-DimShuffled input.
-        # Otherwise, `a` is considered the root variable.
-        # We also return whether the root `a` is transposed.
-        root_a = a
-        transposed = False
-        match a.owner_op_and_inputs:
-            case (DimShuffle(is_left_expand_dims=True), root_a):  # type: ignore[misc]
-                transposed = False
-            case (DimShuffle(is_left_expanded_matrix_transpose=True), root_a):  # type: ignore[misc]
-                transposed = True  # type: ignore[unreachable, unused-ignore]
-
-        return root_a, transposed
-
     def find_solve_clients(var, assume_a):
         clients = []
-        for cl, idx in fgraph.clients[var]:
-            match (idx, cl.op, *cl.outputs):
-                case (0, Blockwise(Solve(assume_a=assume_a_var)), *_) if (
+        for cl, idx in clients_through_padding(fgraph, var):
+            match (idx, cl.op):
+                case (0, Blockwise(Solve(assume_a=assume_a_var))) if (
                     assume_a_var == assume_a
                 ):
                     clients.append(cl)
-                case (0, DimShuffle(is_left_expand_dims=True), cl_out):
-                    clients.extend(find_solve_clients(cl_out, assume_a))
         return clients
 
     assume_a = node.op.core_op.assume_a
@@ -502,7 +488,7 @@ def _split_decomp_and_solve_steps(
     if assume_a not in allowed_assume_a:
         return None
 
-    A, _ = get_root_A(node.inputs[0])
+    A, _ = strip_left_expand_dims(node.inputs[0])
 
     # Find Solve using A (or left expand_dims of A)
     # TODO: We could handle arbitrary shuffle of the batch dimensions, just need to propagate
@@ -549,7 +535,7 @@ def _split_decomp_and_solve_steps(
             core_solve_op=client.op.core_op,
         )
         [old_x] = client.outputs
-        new_x = atleast_Nd(new_x, n=old_x.type.ndim).astype(old_x.type.dtype)
+        new_x = rebroadcast_like(new_x, old_x)
         copy_stack_trace(old_x, new_x)
         replacements[old_x] = new_x
 
