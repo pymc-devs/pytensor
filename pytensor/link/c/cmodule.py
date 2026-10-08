@@ -2219,11 +2219,14 @@ class GCC_compiler(Compiler):
                                     # OK
                                     continue
                                 # Check the version of GCC
-                                version = config.gcc_version_str.split(".")
-                                if len(version) != 3:
+                                version = re.search(
+                                    r"(?:^|version |\) )(\d+)\.(\d+)\.(\d+)",
+                                    config.gcc_version_str,
+                                )
+                                if version is None:
                                     # Unexpected, but should not be a problem
                                     continue
-                                mj, mn, patch = (int(vp) for vp in version)
+                                mj, mn, patch = map(int, version.groups())
                                 if (
                                     ((mj, mn) == (4, 6) and patch < 4)
                                     or ((mj, mn) == (4, 7) and patch <= 3)
@@ -2337,13 +2340,11 @@ class GCC_compiler(Compiler):
         if sys.platform == "darwin":
             # Use the already-loaded python symbols.
             cxxflags.extend(["-undefined", "dynamic_lookup"])
-            # XCode15 introduced ld_prime linker. At the time of writing, this linker
-            # leads to multiple issues, so we supply a flag to use the older dynamic
-            # linker: ld64
-            if int(platform.mac_ver()[0].split(".")[0]) >= 15:
-                # This might be incorrect. We know that ld_prime was introduced in
-                # XCode15, but we don't know if the platform version is aligned with
-                # xcode's version.
+            # Apple Clang 15 introduced ld_prime; Apple Clang 21 removed ld64.
+            apple_clang_version = re.search(
+                r"Apple clang version (\d+)\.", config.gcc_version_str
+            )
+            if apple_clang_version and 15 <= int(apple_clang_version[1]) < 21:
                 cxxflags.append("-ld64")
 
         return cxxflags
