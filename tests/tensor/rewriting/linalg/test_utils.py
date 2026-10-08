@@ -1,5 +1,7 @@
 from pytensor import tensor as pt
+from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_padding,
     rebroadcast_like,
     strip_left_expand_dims,
 )
@@ -25,6 +27,22 @@ def test_strip_left_expand_dims():
 
     right_padded = pt.expand_dims(X, -1)
     assert strip_left_expand_dims(right_padded) == (right_padded, False)
+
+
+def test_clients_through_padding():
+    X = matrix("X")
+    y = tensor("y", shape=(None, None, None))
+
+    direct = pt.exp(X)
+    once = y - pt.expand_dims(X, 0)
+    twice = pt.sqrt(pt.expand_dims(pt.expand_dims(X, 0), 0))
+    right_padded = pt.expand_dims(X, -1)
+    fgraph = FunctionGraph(outputs=[direct, once, twice, right_padded], clone=False)
+
+    clients = {
+        (client.outputs[0], idx) for client, idx in clients_through_padding(fgraph, X)
+    }
+    assert clients == {(direct, 0), (once, 1), (twice, 0), (right_padded, 0)}
 
 
 def test_rebroadcast_like():

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterator
 
 from pytensor import tensor as pt
 from pytensor.assumptions import (
@@ -8,7 +9,8 @@ from pytensor.assumptions import (
     UPPER_TRIANGULAR,
     check_assumption,
 )
-from pytensor.graph import Constant
+from pytensor.graph import Apply, Constant
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Mul
@@ -90,6 +92,26 @@ def strip_left_expand_dims(x: TensorVariable) -> tuple[TensorVariable, bool]:
                 transposed = not transposed
             case _:
                 return x, transposed
+
+
+def clients_through_padding(
+    fgraph: FunctionGraph, var: TensorVariable
+) -> Iterator[tuple[Apply, int]]:
+    """Iterate over clients of ``var``, looking through left expand_dims clients.
+
+    Yields
+    ------
+    client : Apply
+        A client of ``var`` or of one of its left expand_dims aliases.
+    index : int
+        Index at which ``var`` (or its padded alias) enters ``client``.
+    """
+    for client, idx in fgraph.clients[var]:
+        match client.op:
+            case DimShuffle(is_left_expand_dims=True):
+                yield from clients_through_padding(fgraph, client.outputs[0])  # type: ignore[arg-type]
+            case _:
+                yield client, idx
 
 
 def rebroadcast_like(new: TensorVariable, old: TensorVariable) -> TensorVariable:
