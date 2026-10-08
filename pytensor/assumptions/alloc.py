@@ -1,7 +1,7 @@
 import numpy as np
 
 from pytensor.assumptions.core import (
-    ALL_KEYS,
+    MATRIX_KEYS,
     FactState,
     register_assumption,
     true_if,
@@ -158,5 +158,5 @@ def alloc_propagates_matrix_property(
     return [FactState.UNKNOWN]
 
 
-for _key in ALL_KEYS:
+for _key in MATRIX_KEYS:
     register_assumption(_key, Alloc)(alloc_propagates_matrix_property)

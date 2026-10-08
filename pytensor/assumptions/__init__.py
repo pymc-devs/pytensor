@@ -14,10 +14,12 @@ import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
 import pytensor.assumptions.symmetric
 import pytensor.assumptions.triangular
+from pytensor.assumptions.bundles import register_matrix_property_rules
 from pytensor.assumptions.core import (
     ALL_KEYS,
     DIAGONAL,
     IMPLIES,
+    KEY_REGISTRY,
     LOWER_TRIANGULAR,
     MATRIX_KEYS,
     ORTHOGONAL,
@@ -35,6 +37,7 @@ from pytensor.assumptions.core import (
     register_assumption,
     register_constant_inference,
     register_implies,
+    register_universal_assumption,
 )
 from pytensor.assumptions.specify import (
     SpecifyAssumptions,
