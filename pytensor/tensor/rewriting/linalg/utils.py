@@ -115,16 +115,20 @@ def clients_through_padding(
 
 
 def rebroadcast_like(new: TensorVariable, old: TensorVariable) -> TensorVariable:
-    """Pad and broadcast ``new`` so it is a valid replacement for ``old``.
+    """Match ``new``'s type to ``old``'s so it is a valid replacement for ``old``.
 
     The counterpart of `strip_left_expand_dims`: a rewrite that matched
     through padding builds its replacement from core variables, then restores
-    the original output type here.
+    the original output type here. Leading broadcastable dims are added or
+    squeezed as needed.
     """
     if new.type == old.type:
         return new
 
-    new = atleast_Nd(new, n=old.type.ndim)
+    if new.type.ndim > old.type.ndim:
+        new = new.squeeze(axis=tuple(range(new.type.ndim - old.type.ndim)))
+    else:
+        new = atleast_Nd(new, n=old.type.ndim)
     if new.type.dtype != old.type.dtype:
         new = new.astype(old.type.dtype)
     if not old.type.is_super(new.type):

@@ -52,6 +52,7 @@ def test_rebroadcast_like():
 
     padded = pt.expand_dims(X, 0)
     assert_equal_computations([rebroadcast_like(X, padded)], [padded])
+    assert_equal_computations([rebroadcast_like(padded, X)], [padded.squeeze(0)])
 
     batched = tensor("batched", shape=(5, None, None))
     recovered = rebroadcast_like(X, batched)
