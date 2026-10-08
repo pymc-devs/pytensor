@@ -68,15 +68,11 @@ def js_funcify_solve_triangular(op, node, inputs, slot):
     name = f"v{slot}"
     rank = node.inputs[1].ndim
     cols = f"{b}.s[1]" if rank == 2 else "1"
-    b_address = f"({b}.o || 0) + i * {b}.t[0]" + (
-        f" + j * {b}.t[1]" if rank == 2 else ""
-    )
+    b_address = "bo + i * bs0 + j * bs1"
     lower = op.lower
     i = "step" if lower else "n - 1 - step"
     range_k = "let k = 0; k < i; k++" if lower else "let k = i + 1; k < n; k++"
-    diagonal = (
-        "1" if op.unit_diagonal else f"{a}.d[({a}.o || 0) + i * ({a}.t[0] + {a}.t[1])]"
-    )
+    diagonal = "1" if op.unit_diagonal else "dataA[ao + i * (as0 + as1)]"
     lines = [
         f"let {name};",
         "{",
@@ -85,26 +81,68 @@ def js_funcify_solve_triangular(op, node, inputs, slot):
         f"if (n !== {a}.s[1] || n !== {b}.s[0]) throw Error('triangular solve shape mismatch');",
         f"{name} = slot({slot}, {b}.s);",
         f"const out = {name}.d;",
-        "for (let step = 0; step < n; step++) {",
-        CODE_TOKEN.INDENT,
-        f"const i = {i};",
-        "const row = i * cols;",
-        f"for (let j = 0; j < cols; j++) out[row + j] = {b}.d[{b_address}];",
-        f"for ({range_k}) {{",
-        CODE_TOKEN.INDENT,
-        f"const coefficient = {a}.d[({a}.o || 0) + i * {a}.t[0] + k * {a}.t[1]];",
-        "const previous = k * cols;",
-        "for (let j = 0; j < cols; j++) out[row + j] -= coefficient * out[previous + j];",
-        CODE_TOKEN.DEDENT,
-        "}",
-        f"const diagonal = {diagonal};",
-        "if (diagonal === 0) { out.fill(NaN); break; }",
-        "for (let j = 0; j < cols; j++) out[row + j] /= diagonal;",
-        CODE_TOKEN.DEDENT,
-        "}",
-        CODE_TOKEN.DEDENT,
-        "}",
+        f"const dataA = {a}.d, dataB = {b}.d;",
+        f"const ao = {a}.o || 0, bo = {b}.o || 0;",
+        f"const as0 = {a}.t[0], as1 = {a}.t[1], bs0 = {b}.t[0], bs1 = "
+        + (f"{b}.t[1];" if rank == 2 else "0;"),
     ]
+    static_n = node.inputs[0].type.shape[0]
+    if static_n is not None and 0 < static_n <= 4:
+        lines.extend([f"if (n === {static_n}) {{", CODE_TOKEN.INDENT])
+        for row in range(static_n):
+            value = "1" if op.unit_diagonal else f"dataA[ao + {row} * (as0 + as1)]"
+            lines.append(f"const diag{row} = {value};")
+        zeros = " || ".join(f"diag{row} === 0" for row in range(static_n))
+        lines.extend([f"if ({zeros}) {{ out.fill(NaN); }} else {{", CODE_TOKEN.INDENT])
+        order = range(static_n) if lower else reversed(range(static_n))
+        for row in order:
+            previous_rows = range(row) if lower else range(row + 1, static_n)
+            previous_rows = tuple(previous_rows)
+            lines.extend(
+                f"const c{row}_{previous} = dataA[ao + {row} * as0 + {previous} * as1];"
+                for previous in previous_rows
+            )
+            lines.extend(
+                [
+                    "for (let j = 0; j < cols; j++) {",
+                    CODE_TOKEN.INDENT,
+                    f"let value = dataB[bo + {row} * bs0 + j * bs1];",
+                ]
+            )
+            lines.extend(
+                f"value -= c{row}_{previous} * out[{previous} * cols + j];"
+                for previous in previous_rows
+            )
+            lines.extend(
+                [f"out[{row} * cols + j] = value / diag{row};", CODE_TOKEN.DEDENT, "}"]
+            )
+        lines.extend(
+            [CODE_TOKEN.DEDENT, "}", CODE_TOKEN.DEDENT, "} else {", CODE_TOKEN.INDENT]
+        )
+    lines.extend(
+        [
+            "for (let step = 0; step < n; step++) {",
+            CODE_TOKEN.INDENT,
+            f"const i = {i};",
+            "const row = i * cols;",
+            f"for (let j = 0; j < cols; j++) out[row + j] = dataB[{b_address}];",
+            f"for ({range_k}) {{",
+            CODE_TOKEN.INDENT,
+            "const coefficient = dataA[ao + i * as0 + k * as1];",
+            "const previous = k * cols;",
+            "for (let j = 0; j < cols; j++) out[row + j] -= coefficient * out[previous + j];",
+            CODE_TOKEN.DEDENT,
+            "}",
+            f"const diagonal = {diagonal};",
+            "if (diagonal === 0) { out.fill(NaN); break; }",
+            "for (let j = 0; j < cols; j++) out[row + j] /= diagonal;",
+            CODE_TOKEN.DEDENT,
+            "}",
+        ]
+    )
+    if static_n is not None and 0 < static_n <= 4:
+        lines.extend([CODE_TOKEN.DEDENT, "}"])
+    lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), (name,))
 
 

@@ -1,6 +1,8 @@
 """JavaScript loops for elementwise, reduced, and indexed tensor Ops."""
 
 from collections import Counter
+from itertools import product
+from math import prod
 
 from pytensor.link.js.dispatch.basic import (
     JSCode,
@@ -22,26 +24,55 @@ def shape_expr(inputs):
     return "broadcast([" + ", ".join(f"{value}.s" for value in inputs) + "])"
 
 
-def loop_lines(rank, body, setup=None, axes=None):
-    lines = []
+def loop_lines(rank, body, setup=None, axes=None, static_shape=None):
     axes = tuple(range(rank)) if axes is None else axes
-    for axis in axes:
-        lines.extend(
-            [
-                f"for (let i{axis} = 0; i{axis} < shape[{axis}]; i{axis}++) {{",
-                CODE_TOKEN.INDENT,
+    unrolled = {}
+    copies = 1
+    if static_shape is not None:
+        for axis in reversed(axes):
+            length = static_shape[axis]
+            if length is not None and 0 < length <= 4 and copies * length <= 16:
+                unrolled[axis] = length
+                copies *= length
+    lines = list(body)
+    for axis in reversed(axes):
+        inner = [*(setup.get(axis, ()) if setup else ()), *lines]
+        if axis in unrolled:
+            lines = [
+                line
+                for coordinate in range(unrolled[axis])
+                for line in (
+                    "{",
+                    CODE_TOKEN.INDENT,
+                    f"const i{axis} = {coordinate};",
+                    *inner,
+                    CODE_TOKEN.DEDENT,
+                    "}",
+                )
             ]
-        )
-        if setup:
-            lines.extend(setup.get(axis, ()))
-    lines.extend(body)
-    for _ in axes:
-        lines.extend([CODE_TOKEN.DEDENT, "}"])
+        else:
+            lines = [
+                f"const n{axis} = shape[{axis}];",
+                f"for (let i{axis} = 0; i{axis} < n{axis}; i{axis}++) {{",
+                CODE_TOKEN.INDENT,
+                *inner,
+                CODE_TOKEN.DEDENT,
+                "}",
+            ]
     return lines
 
 
 def fused_scalar_loop(
-    rank, scalar_op, variables, reads, stores, setup=None, axes=None, increment=True
+    rank,
+    scalar_op,
+    variables,
+    reads,
+    stores,
+    setup=None,
+    axes=None,
+    increment=True,
+    static_shape=None,
+    tiles=None,
 ):
     """Version a loop on one broadcast scalar condition, without changing its graph."""
     arguments = [f"a{index}" for index in range(len(variables))]
@@ -68,8 +99,45 @@ def fused_scalar_loop(
             template.replace("{value}", expression)
             for template, expression in zip(stores, expressions, strict=True)
         ]
+        if tiles is not None:
+            shared_reads = {}
+            tiled_body = []
+            for tile, coordinates in enumerate(tiles):
+                aliases = []
+                for identifier, expression in reads:
+                    for axis, coordinate in coordinates:
+                        expression = expression.replace(f"i{axis} *", f"{coordinate} *")
+                    if expression not in shared_reads:
+                        shared_reads[expression] = f"tileRead{len(shared_reads)}"
+                    aliases.append(f"const {identifier} = {shared_reads[expression]};")
+                tiled_body.extend(
+                    [
+                        "{",
+                        CODE_TOKEN.INDENT,
+                        *aliases,
+                        *statements,
+                        *(line.replace("{tile}", str(tile)) for line in writes),
+                        CODE_TOKEN.DEDENT,
+                        "}",
+                    ]
+                )
+            body = [
+                *(
+                    f"const {name} = {expression};"
+                    for expression, name in shared_reads.items()
+                ),
+                *tiled_body,
+            ]
+            return loop_lines(rank, body, setup, axes, static_shape)
         counter = ["k++; "] if increment else []
-        return loop_lines(rank, [*reads, *statements, *writes, *counter], setup, axes)
+        input_reads = [f"const {name} = {expression};" for name, expression in reads]
+        return loop_lines(
+            rank,
+            [*input_reads, *statements, *writes, *counter],
+            setup,
+            axes,
+            static_shape,
+        )
 
     if not choices:
         return emit()
@@ -87,12 +155,16 @@ def fused_scalar_loop(
     ]
 
 
-def address(record, rank, own_rank=None, indexed=None, strides=None):
+def address(
+    record, rank, own_rank=None, indexed=None, strides=None, broadcastable=None
+):
     if own_rank is None:
         own_rank = rank
     shift = rank - own_rank
     terms = []
     for axis in range(own_rank):
+        if broadcastable is not None and broadcastable[axis]:
+            continue
         loop_axis = axis + shift
         coordinate = indexed.get(axis, f"i{loop_axis}") if indexed else f"i{loop_axis}"
         if strides is None:
@@ -107,7 +179,12 @@ def address(record, rank, own_rank=None, indexed=None, strides=None):
 
 def stride_setup(variable, record, prefix):
     return [f"const {prefix}offset = {record}.o || 0;"] + [
-        f"const {prefix}{axis} = ({record}.s[{axis}] === 1 ? 0 : {record}.t[{axis}]);"
+        f"const {prefix}{axis} = "
+        + (
+            "0;"
+            if variable.type.broadcastable[axis]
+            else f"({record}.s[{axis}] === 1 ? 0 : {record}.t[{axis}]);"
+        )
         for axis in range(variable.ndim)
     ]
 
@@ -140,10 +217,11 @@ def js_funcify_elemwise(op, node, inputs, slot):
         "let k = 0;",
     ]
     for index, (variable, record) in enumerate(zip(node.inputs, inputs, strict=True)):
+        lines.append(f"const d{index} = {record}.d;")
         lines.extend(stride_setup(variable, record, f"st{index}_"))
 
     reads = [
-        f"const a{index} = {record}.d[{address(record, rank, variable.ndim, strides=f'st{index}_')}];"
+        f"const a{index} = d{index}[{address(record, rank, variable.ndim, strides=f'st{index}_', broadcastable=variable.type.broadcastable)}];"
         for index, (variable, record) in enumerate(
             zip(node.inputs, inputs, strict=True)
         )
@@ -152,6 +230,7 @@ def js_funcify_elemwise(op, node, inputs, slot):
     for index, (name, expression, output) in enumerate(
         zip(names, expressions, node.outputs, strict=True)
     ):
+        lines.append(f"const out{index} = {name}.d;")
         if output.type.dtype == "float32":
             expression = f"Math.fround({expression})"
         if index in op.inplace_pattern:
@@ -159,8 +238,14 @@ def js_funcify_elemwise(op, node, inputs, slot):
             offset = address(name, rank, strides=f"outst{index}_")
         else:
             offset = "k"
-        stores.append(f"{name}.d[{offset}] = {expression};")
-    lines.extend(loop_lines(rank, [*reads, *statements, *stores, "k++; "]))
+        stores.append(f"out{index}[{offset}] = {expression};")
+    lines.extend(
+        loop_lines(
+            rank,
+            [*reads, *statements, *stores, "k++; "],
+            static_shape=node.outputs[0].type.shape,
+        )
+    )
     lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), names)
 
@@ -173,25 +258,34 @@ def js_funcify_reduce(op, node, inputs, slot):
     source_rank = node.inputs[0].ndim
     axes = op.axis if op.axis is not None else tuple(range(source_rank))
     axes = tuple(axis % source_rank for axis in axes)
+    axes = tuple(axis for axis in range(source_rank) if axis in axes)
     kept = [axis for axis in range(source_rank) if axis not in axes]
     output_shape = "[" + ", ".join(f"{source}.s[{axis}]" for axis in kept) + "]"
     source_address = address(source, source_rank, strides="st")
-    target_address = (
-        " + ".join(f"i{axis} * v{slot}.t[{index}]" for index, axis in enumerate(kept))
-        or "0"
-    )
     name = f"v{slot}"
     lines = [
         f"let {name};",
         "{",
         CODE_TOKEN.INDENT,
         f"{name} = slot({slot}, {output_shape});",
-        f"{name}.d.fill(0);",
+        f"const out = {name}.d, data = {source}.d;",
         f"const shape = {source}.s;",
         *stride_setup(node.inputs[0], source, "st"),
+        "let k = 0;",
         *loop_lines(
             source_rank,
-            [f"{name}.d[{target_address}] += {source}.d[{source_address}];"],
+            [
+                "let acc = 0;",
+                *loop_lines(
+                    source_rank,
+                    [f"acc += data[{source_address}];"],
+                    axes=axes,
+                    static_shape=node.inputs[0].type.shape,
+                ),
+                "out[k++] = acc;",
+            ],
+            axes=kept,
+            static_shape=node.inputs[0].type.shape,
         ),
         CODE_TOKEN.DEDENT,
         "}",
@@ -303,6 +397,18 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
         axes = reduced[0][1]
         if 0 < len(axes) < rank and all(spec[1] == axes for spec in reduced):
             local_axes = axes
+    tiles = None
+    if local_axes is not None:
+        kept = tuple(axis for axis in range(rank) if axis not in local_axes)
+        dimensions = [inner.outputs[0].type.shape[axis] for axis in kept]
+        if (
+            all(length is not None and length > 0 for length in dimensions)
+            and prod(dimensions) <= 16
+        ):
+            tiles = [
+                tuple(zip(kept, coordinates, strict=True))
+                for coordinates in product(*(range(length) for length in dimensions))
+            ]
     local_initializers = []
     for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True)):
         if index in writes:
@@ -323,7 +429,13 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
                 scalar_reductions.add(index)
                 lines.append(f"let acc{index} = {identity};")
             elif local_axes is not None:
-                local_initializers.append(f"let acc{index} = {identity};")
+                if tiles is None:
+                    local_initializers.append(f"let acc{index} = {identity};")
+                else:
+                    lines.extend(
+                        f"let acc{index}_{tile} = {identity};"
+                        for tile in range(len(tiles))
+                    )
             else:
                 lines.append(f"{name}.d.fill({identity});")
         elif index in op.destroy_map:
@@ -361,13 +473,22 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
             )
             for axis, index_record in index_axes.items()
         }
-        offset = address(record, rank, variable.ndim, coordinate, f"st{index}_")
-        read = f"const a{index} = d{index}[{offset}];"
+        offset = address(
+            record,
+            rank,
+            variable.ndim,
+            coordinate,
+            f"st{index}_",
+            variable.type.broadcastable,
+        )
         if not index_axes and all(dim == 1 for dim in variable.type.shape):
             hoisted_reads.append(f"const a{index} = d{index}[st{index}_offset];")
         else:
-            reads.append(read)
+            reads.append((f"a{index}", f"d{index}[{offset}]"))
     stores = []
+    lines.extend(
+        f"const out{index} = {name}.d;" for index, name in enumerate(output_names)
+    )
     for index, (name, spec, output) in enumerate(
         zip(output_names, reduced, node.outputs, strict=True)
     ):
@@ -381,7 +502,6 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
                     index_record, rank - output.ndim + axis, f"{target}.s[{axis}]"
                 )
             }
-            lines.append(f"const out{index} = {name}.d;")
             lines.extend(stride_setup(output, name, f"outst{index}_"))
             target_address = address(
                 name, rank, output.ndim, coordinate, f"outst{index}_"
@@ -392,12 +512,14 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
             operator = "&&" if isinstance(spec[0], AND) else "+"
             if index in scalar_reductions or local_axes is not None:
                 target = f"acc{index}"
+                if tiles is not None:
+                    target += "_{tile}"
             else:
                 offset = " + ".join(
                     f"i{axis} * {name}.t[{position}]"
                     for position, axis in enumerate(kept_axes[index])
                 )
-                target = f"{name}.d[{offset}]"
+                target = f"out{index}[{offset}]"
             stores.append(f"{target} {operator}= {expression};")
         else:
             offset = (
@@ -405,13 +527,38 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
                 if index in op.destroy_map
                 else "k"
             )
-            stores.append(f"{name}.d[{offset}] = {expression};")
+            stores.append(f"out{index}[{offset}] = {expression};")
     lines.extend(hoisted_reads)
     if local_axes is None:
         lines.extend(
             fused_scalar_loop(
-                rank, inner.op.scalar_op, inner.inputs, reads, stores, loop_setup
+                rank,
+                inner.op.scalar_op,
+                inner.inputs,
+                reads,
+                stores,
+                loop_setup,
+                static_shape=inner.outputs[0].type.shape,
             )
+        )
+    elif tiles is not None:
+        lines.extend(
+            fused_scalar_loop(
+                rank,
+                inner.op.scalar_op,
+                inner.inputs,
+                reads,
+                stores,
+                axes=local_axes,
+                increment=False,
+                static_shape=inner.outputs[0].type.shape,
+                tiles=tiles,
+            )
+        )
+        lines.extend(
+            f"out{index}[{tile}] = acc{index}_{tile};"
+            for index in range(len(output_names))
+            for tile in range(len(tiles))
         )
     else:
         kept = tuple(axis for axis in range(rank) if axis not in local_axes)
@@ -420,7 +567,7 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
             offset = " + ".join(
                 f"i{axis} * {name}.t[{position}]" for position, axis in enumerate(kept)
             )
-            post.append(f"{name}.d[{offset}] = acc{index};")
+            post.append(f"out{index}[{offset}] = acc{index};")
         reduced_loop = fused_scalar_loop(
             rank,
             inner.op.scalar_op,
@@ -429,12 +576,18 @@ def js_funcify_fused_elemwise(op, node, inputs, slot):
             stores,
             axes=local_axes,
             increment=False,
+            static_shape=inner.outputs[0].type.shape,
         )
         lines.extend(
-            loop_lines(rank, [*local_initializers, *reduced_loop, *post], axes=kept)
+            loop_lines(
+                rank,
+                [*local_initializers, *reduced_loop, *post],
+                axes=kept,
+                static_shape=inner.outputs[0].type.shape,
+            )
         )
     lines.extend(
-        f"{name}.d[0] = acc{index};"
+        f"out{index}[0] = acc{index};"
         for index, (name, spec) in enumerate(zip(output_names, reduced, strict=True))
         if index in scalar_reductions
     )

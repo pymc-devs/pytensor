@@ -249,6 +249,8 @@ def scalar_program(op, inputs, switch_choices=None):
                     f"const {common} = Math.log1p(Math.exp(-Math.abs({operand(base)})));"
                 )
             expression = f"({shared_softplus[base]} + Math.max({arguments[0]}, 0))"
+        elif isinstance(node.op, Switch) and node.inputs[0].dtype == "bool":
+            expression = f"({arguments[0]} ? {arguments[1]} : {arguments[2]})"
         else:
             expression = js_scalar(node.op, arguments)
         statements.append(f"const {name} = {expression};")
