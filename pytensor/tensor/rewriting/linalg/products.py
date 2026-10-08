@@ -25,6 +25,10 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.linalg.utils import (
+    rebroadcast_like,
+    strip_left_expand_dims,
+)
 from pytensor.tensor.subtensor import AdvancedSubtensor
 from pytensor.tensor.variable import TensorConstant
 
@@ -75,10 +79,14 @@ def diag_of_blockdiag(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner block_diag operation
-    match node.inputs[0].owner_op_and_inputs:
+    core, transposed = strip_left_expand_dims(node.inputs[0])
+    if transposed:
+        return None
+    match core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *submatrices):
             submatrices_diag = [diag(m) for m in submatrices]
-            return [concatenate(submatrices_diag, axis=-1)]
+            new_out = concatenate(submatrices_diag, axis=-1)
+            return [rebroadcast_like(new_out, node.outputs[0])]
 
 
 @register_canonicalize
@@ -103,10 +111,13 @@ def det_of_blockdiag(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner block_diag operation
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *sub_matrices):
             det_sub_matrices = [det(m) for m in sub_matrices]
-            return [prod(det_sub_matrices, axis=-1)]
+            new_out = prod(det_sub_matrices, axis=-1)
+            return [rebroadcast_like(new_out, node.outputs[0])]
 
 
 @register_canonicalize
@@ -131,11 +142,14 @@ def diag_of_kronecker(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner kron operation
-    match node.inputs[0].owner_op_and_inputs:
+    core, transposed = strip_left_expand_dims(node.inputs[0])
+    if transposed:
+        return None
+    match core.owner_op_and_inputs:
         case (KroneckerProduct(), a, b):
             diag_a, diag_b = diag(a), diag(b)
             outer_prod_as_vector = outer(diag_a, diag_b).flatten()
-            return [outer_prod_as_vector]
+            return [rebroadcast_like(outer_prod_as_vector, node.outputs[0])]
 
 
 @register_canonicalize
@@ -158,7 +172,9 @@ def det_of_kronecker(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner kron operation
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (KroneckerProduct(), a, b):
             dets = [det(a), det(b)]
             sizes = [a.shape[-1], b.shape[-1]]
@@ -166,7 +182,7 @@ def det_of_kronecker(fgraph, node):
             det_final = prod(
                 [dets[i] ** (prod_sizes / sizes[i]) for i in range(2)], axis=-1
             )
-            return [det_final]
+            return [rebroadcast_like(det_final, node.outputs[0])]
 
 
 @register_canonicalize
