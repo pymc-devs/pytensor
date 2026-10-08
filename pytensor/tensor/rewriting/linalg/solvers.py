@@ -59,13 +59,12 @@ def generic_solve_to_solve_triangular(fgraph, node):
     """
     b_ndim = node.op.core_op.b_ndim
     A, b = node.inputs  # result is the solution to Ax=b
-    match A.owner_op_and_inputs:
-        case (Blockwise(Cholesky(lower=lower)), _):
+    A_core, transposed = strip_left_expand_dims(A)
+    match A_core.owner_op:
+        case Blockwise(Cholesky(lower=lower)):
+            if transposed:
+                lower = not lower
             return [solve_triangular(A, b, lower=lower, b_ndim=b_ndim)]
-        case (DimShuffle(is_left_expanded_matrix_transpose=True), A_T):
-            match A_T.owner_op:
-                case Blockwise(Cholesky(lower=lower)):
-                    return [solve_triangular(A, b, lower=not lower, b_ndim=b_ndim)]
 
 
 @register_specialize

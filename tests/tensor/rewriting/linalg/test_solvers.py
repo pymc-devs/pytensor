@@ -92,6 +92,16 @@ def test_psd_solve_with_chol():
     assert_equal_computations([rewritten], [expected])
 
 
+def test_generic_solve_to_solve_triangular_through_padding():
+    A = pt.dmatrix("A")
+    b = pt.tensor("b", shape=(None, None, None), dtype="float64")
+
+    # A batched b makes Blockwise.make_node pad cholesky(A) with a left expand_dims
+    L = cholesky(A, lower=True)
+    rewritten = rewrite_graph(solve(L, b), include=("canonicalize", "stabilize"))
+    assert_equal_computations([rewritten], [solve_triangular(L, b, lower=True)])
+
+
 def test_paired_triangular_solves_to_cho_solve():
     """Test that paired triangular solves from Cholesky get fused into cho_solve."""
     A = matrix("A")
