@@ -1,5 +1,5 @@
 from pytensor.assumptions.alloc import (
-    alloc_diag_at_offset_zero,
+    alloc_diag_has_zero_off_diagonal,
     alloc_is_symmetric,
     eye_zero_or_identity_rule,
 )
@@ -46,7 +46,7 @@ def _preserves_symmetry_under_broadcast(inp, feature) -> bool:
 
 
 register_assumption(SYMMETRIC, Eye)(eye_zero_or_identity_rule)
-register_assumption(SYMMETRIC, AllocDiag)(alloc_diag_at_offset_zero)
+register_assumption(SYMMETRIC, AllocDiag)(alloc_diag_has_zero_off_diagonal)
 register_assumption(SYMMETRIC, Alloc)(alloc_is_symmetric)
 register_assumption(SYMMETRIC, BlockDiagonal)(all_inputs_have_key)
 register_assumption(SYMMETRIC, MatrixInverse)(propagate_first)
