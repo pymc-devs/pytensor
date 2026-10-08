@@ -23,6 +23,10 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.linalg.utils import (
+    rebroadcast_like,
+    strip_left_expand_dims,
+)
 
 
 @register_canonicalize
@@ -35,7 +39,9 @@ def cholesky_ldotlt(fgraph, node):
 
     Also works with matmul.
     """
-    A = node.inputs[0]
+    # The matched products are symmetric, so the transposed flag is irrelevant
+    A, _ = strip_left_expand_dims(node.inputs[0])
+    [out] = node.outputs
     lower = node.op.core_op.lower
 
     match A.owner_op_and_inputs:
@@ -49,7 +55,7 @@ def cholesky_ldotlt(fgraph, node):
                         DimShuffle(is_left_expanded_matrix_transpose=True),
                         l_T,
                     ) if l_T == l:
-                        return [l] if lower else [r]
+                        return [rebroadcast_like(l if lower else r, out)]
 
             if getattr(r.tag, "upper_triangular", False) or check_assumption(
                 fgraph, r, UPPER_TRIANGULAR
@@ -60,7 +66,7 @@ def cholesky_ldotlt(fgraph, node):
                         DimShuffle(is_left_expanded_matrix_transpose=True),
                         r_T,
                     ) if r_T == r:
-                        return [l] if lower else [r]
+                        return [rebroadcast_like(l if lower else r, out)]
 
 
 @register_canonicalize

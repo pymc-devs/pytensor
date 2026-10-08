@@ -115,6 +115,18 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
         )
 
 
+def test_cholesky_ldotlt_through_padding():
+    # The batched product keeps the padded Blockwise(Cholesky) from being
+    # eagerly unbatched, so only the look-through peel can reach the Dot
+    L = tensor("L", shape=(None, None, None))
+    L_assumed = assume(L, lower_triangular=True)
+    M = pt.expand_dims(matmul(L_assumed, swapaxes(L_assumed, -1, -2)), 0)
+    C = cholesky(M, lower=True)
+
+    rewritten = rewrite_graph(C, include=("canonicalize", "stabilize"))
+    assert_equal_computations([rewritten], [pt.expand_dims(L_assumed, 0)])
+
+
 def test_svd_uv_merge():
     a = pt.matrix("a")
     s_1 = svd(a, full_matrices=False, compute_uv=False)
