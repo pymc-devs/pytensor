@@ -146,11 +146,9 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     L_T, inner_result = node.inputs
 
     # Check L.T is a matrix transpose of a Cholesky factor
-    match L_T.owner_op_and_inputs:
-        case (DimShuffle(is_left_expanded_matrix_transpose=True), L):
-            pass
-        case _:
-            return None
+    L, transposed = strip_left_expand_dims(L_T)
+    if not transposed:
+        return None
 
     # L must be output of a Cholesky(lower=True)
     match L.owner_op:
@@ -166,12 +164,14 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
         case _:
             return None
 
-    # inner_L must be the same Cholesky output as L
-    if inner_L is not L:
+    # inner_L must be the same Cholesky output as L, possibly behind padding
+    inner_L_core, inner_transposed = strip_left_expand_dims(inner_L)
+    if inner_L_core is not L or inner_transposed:
         return None
 
     b_ndim = core_op.b_ndim
     new_out = cho_solve((L, True), b, b_ndim=b_ndim)
+    new_out = rebroadcast_like(new_out, node.outputs[0])
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 

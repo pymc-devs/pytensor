@@ -102,10 +102,13 @@ def test_generic_solve_to_solve_triangular_through_padding():
     assert_equal_computations([rewritten], [solve_triangular(L, b, lower=True)])
 
 
-def test_paired_triangular_solves_to_cho_solve():
+@pytest.mark.parametrize("batched_b", [False, True], ids=["unbatched", "batched"])
+def test_paired_triangular_solves_to_cho_solve(batched_b):
     """Test that paired triangular solves from Cholesky get fused into cho_solve."""
     A = matrix("A")
-    b = matrix("b")
+    # A batched b makes Blockwise.make_node pad the Cholesky factor with a
+    # left expand_dims on both solves
+    b = tensor("b", shape=(None,) * (2 + batched_b))
 
     # Manually create the pattern: solve_triangular(L.T, solve_triangular(L, b))
     L = pt.linalg.cholesky(A, lower=True)
