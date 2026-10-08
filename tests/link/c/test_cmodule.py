@@ -157,6 +157,26 @@ def test_flag_detection():
     assert isinstance(res, bool)
 
 
+@pytest.mark.parametrize(
+    "version, use_ld64",
+    [
+        ("Apple clang version 20.0.0", True),
+        ("Apple clang version 21.0.0 (clang-2100.3.23.3)", False),
+        ("clang version 20.1.0", False),
+    ],
+)
+def test_macos_linker_flags(version, use_ld64):
+    with (
+        patch("sys.platform", "darwin"),
+        config.change_flags(cxx="clang++", gcc__cxxflags=""),
+        patch.object(
+            config._config_var_dict["gcc_version_str"], "val", version, create=True
+        ),
+    ):
+        flags = GCC_compiler.compile_args(march_flags=False)
+    assert ("-ld64" in flags) == use_ld64
+
+
 @pytest.fixture(
     scope="module",
     params=[
