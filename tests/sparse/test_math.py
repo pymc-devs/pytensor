@@ -784,6 +784,30 @@ class TestDots(utt.InferShapeTester):
 
 
 class TestUsmm:
+    @pytest.mark.parametrize("z_dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("product_shape", [(1, 3), (2, 1), (1, 1), (2, 3)])
+    def test_perform_broadcast(self, z_dtype, product_shape):
+        # Regression: matching dtypes used +=, which cannot expand the product's shape.
+        n_rows, n_cols = product_shape
+        alpha = scalar("alpha", dtype="float64")
+        x = csc_matrix("x", dtype="float64", shape=(n_rows, 2))
+        y = matrix("y", dtype="float64", shape=(2, n_cols))
+        z = matrix("z", dtype=z_dtype, shape=(2, 3))
+        f = pytensor.function(
+            [alpha, x, y, z],
+            psm.usmm(alpha, x, y, z),
+            mode=Mode(linker="py", optimizer=None),
+        )
+        x_value = scipy_sparse.csc_matrix(
+            np.arange(n_rows * 2, dtype="float64").reshape(n_rows, 2)
+        )
+        y_value = np.arange(2 * n_cols, dtype="float64").reshape(2, n_cols)
+        z_value = np.arange(6, dtype=z_dtype).reshape(2, 3)
+        expected = 0.5 * (x_value @ y_value) + z_value
+        np.testing.assert_allclose(
+            f(np.array(0.5), x_value, y_value, z_value), expected, strict=True
+        )
+
     @pytest.mark.parametrize("alpha_shape", [(), (1, 1), (1, 1, 1)])
     def test_scalar_alpha(self, alpha_shape):
         alpha = pytensor.tensor.tensor("alpha", shape=alpha_shape, dtype="float64")

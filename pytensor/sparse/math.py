@@ -2099,7 +2099,11 @@ class Usmm(Op):
             rval *= alpha  # Faster because operation is inplace
         else:
             rval = rval * alpha
-        if rval.dtype == z.dtype:
+        if (
+            rval.dtype == z.dtype
+            and z.shape[0] in (1, rval.shape[0])
+            and z.shape[1] in (1, rval.shape[1])
+        ):
             rval += z  # Faster because operation is inplace
         else:
             rval = rval + z
