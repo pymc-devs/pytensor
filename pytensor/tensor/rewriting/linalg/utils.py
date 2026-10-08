@@ -66,6 +66,50 @@ def get_assume_a(fgraph, A):
     return "gen"
 
 
+def strip_left_expand_dims(x: TensorVariable) -> tuple[TensorVariable, bool]:
+    """Peel left expand_dims and left-expanded matrix transposes off ``x``.
+
+    Batched graphs pad matrix operands with left ``expand_dims``
+    (``RandomVariable.make_node`` and ``Blockwise.make_node`` both do), hiding
+    the owner that structural matchers look for.
+
+    Returns
+    -------
+    core : TensorVariable
+        ``x`` with all left padding and left-expanded matrix transposes peeled.
+    transposed : bool
+        Whether ``core``'s last two axes are transposed relative to ``x``.
+    """
+    transposed = False
+    while True:
+        match x.owner_op_and_inputs:
+            case (DimShuffle(is_left_expand_dims=True), inner):
+                x = inner  # type: ignore[assignment]
+            case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+                x = inner  # type: ignore[assignment]
+                transposed = not transposed
+            case _:
+                return x, transposed
+
+
+def rebroadcast_like(new: TensorVariable, old: TensorVariable) -> TensorVariable:
+    """Pad and broadcast ``new`` so it is a valid replacement for ``old``.
+
+    The counterpart of `strip_left_expand_dims`: a rewrite that matched
+    through padding builds its replacement from core variables, then restores
+    the original output type here.
+    """
+    if new.type == old.type:
+        return new
+
+    new = atleast_Nd(new, n=old.type.ndim)
+    if new.type.dtype != old.type.dtype:
+        new = new.astype(old.type.dtype)
+    if not old.type.is_super(new.type):
+        new = pt.broadcast_to(new, old.shape)
+    return new
+
+
 def is_matrix_transpose(x: TensorVariable) -> bool:
     """Check if a variable corresponds to a transpose of the last two axes"""
     match x.owner_op:
