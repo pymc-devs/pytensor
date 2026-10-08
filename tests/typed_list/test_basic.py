@@ -9,6 +9,7 @@ import pytensor.typed_list
 from pytensor import sparse
 from pytensor.tensor.type import (
     TensorType,
+    dvector,
     integer_dtypes,
     matrix,
     scalar,
@@ -27,6 +28,7 @@ from pytensor.typed_list.basic import (
     Length,
     Remove,
     Reverse,
+    TypedListConstant,
     make_list,
 )
 from pytensor.typed_list.type import TypedListType
@@ -594,3 +596,23 @@ class TestMakeList:
             assert (m == n).all()
         for m, n in zip(fz(X, Y), [X, Y], strict=True):
             assert (m == n).all()
+
+
+class TestTypedListConstant:
+    def test_signature_is_hashable_and_comparable(self):
+        """A TypedListConstant signature must support == and hash().
+
+        The base ``Constant.signature`` returns ``(type, data)`` where ``data``
+        is a list of arrays, which raises on both operations.
+        """
+        list_type = TypedListType(dvector)
+        data = [np.array([1.0, 2.0]), np.array([3.0, 4.0])]
+        c1 = TypedListConstant(list_type, data)
+        c2 = TypedListConstant(list_type, [d.copy() for d in data])
+        c3 = TypedListConstant(list_type, [np.array([1.0, 2.0]), np.array([3.0, 5.0])])
+
+        assert c1.signature() == c2.signature()
+        assert hash(c1.signature()) == hash(c2.signature())
+        assert c1.signature() != c3.signature()
+        assert c1.equals(c2)
+        assert not c1.equals(c3)
