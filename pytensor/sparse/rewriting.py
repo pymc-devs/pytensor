@@ -923,6 +923,47 @@ def local_usmm_csx(fgraph, node):
 register_specialize(local_usmm_csx, "cxx_only")
 
 
+local_usmm_numba = PatternNodeRewriter(
+    (
+        sub,
+        "z",
+        (
+            mul,
+            {
+                "pattern": "alpha",
+                "constraint": lambda expr: all(s == 1 for s in expr.type.shape),
+            },
+            (spm._dot, "x", "y"),
+        ),
+    ),
+    (spm.usmm, (neg, "alpha"), "x", "y", "z"),
+)
+pytensor.compile.optdb["specialize"].register(
+    "local_usmm_numba", local_usmm_numba, "numba"
+)
+
+
+@node_rewriter([spm.usmm])
+def local_usmm_csx_numba(fgraph, node):
+    return local_usmm_csx.transform(fgraph, node)
+
+
+@node_rewriter([usmm_csc_dense])
+def local_usmm_csc_dense_inplace_numba(fgraph, node):
+    return local_usmm_csc_dense_inplace.transform(fgraph, node)
+
+
+pytensor.compile.optdb["specialize"].register(
+    "local_usmm_csx_numba", local_usmm_csx_numba, "numba"
+)
+pytensor.compile.optdb["specialize"].register(
+    "local_usmm_csc_dense_inplace_numba",
+    local_usmm_csc_dense_inplace_numba,
+    "numba",
+    "inplace",
+)
+
+
 class CSMGradC(_NoPythonCOp):
     __props__ = ()
 
