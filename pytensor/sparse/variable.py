@@ -17,6 +17,7 @@ from pytensor.sparse.basic import (
 )
 from pytensor.sparse.math import (
     add,
+    dot,
     ge,
     gt,
     le,
@@ -114,9 +115,14 @@ class _sparse_py_operators:
         return ge(self, other)
 
     def __dot__(left, right):
+        """Dot product, using an unstructured gradient for dense vector inputs."""
+        if right.ndim == 1:
+            return dot(left, right)
         return structured_dot(left, right)
 
     def __rdot__(right, left):
+        if left.ndim == 1:
+            return dot(left, right)
         return structured_dot(left, right)
 
     def sum(self, axis=None, sparse_grad=False):

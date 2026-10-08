@@ -2,6 +2,7 @@ from contextlib import ExitStack
 
 import numpy as np
 import pytest
+import scipy.sparse as scipy_sparse
 from scipy.sparse.csr import csr_matrix
 
 import pytensor
@@ -220,6 +221,31 @@ class TestSparseVariable:
             [[-1], [2], [1]],
         )
         assert isinstance(exp_res, csr_matrix)
+
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    @pytest.mark.parametrize("method", ["dot", "tensor_dot", "reflected_dot"])
+    def test_dot_vector(self, format, method):
+        x = SparseTensorType(format, dtype="float64")("x")
+        y = pt.dvector("y")
+        x_value = getattr(scipy_sparse, f"{format}_matrix")(
+            [[1.0, 0.0, 2.0], [-1.0, 0.0, 0.0]]
+        )
+        y_value = np.array([-1.0, 2.0, 1.0])
+        if method == "reflected_dot":
+            z = pt.dot(y, x)
+            x_value = x_value.T.asformat(format)
+            expected = y_value @ x_value
+            expected_grad = x_value.toarray().sum(axis=1)
+        else:
+            z = x.dot(y) if method == "dot" else pt.dot(x, y)
+            expected = x_value @ y_value
+            expected_grad = x_value.toarray().sum(axis=0)
+
+        assert z.ndim == 1
+        f = pytensor.function([x, y], [z, pt.grad(z.sum(), y)])
+        result, gradient = f(x_value, y_value)
+        np.testing.assert_allclose(result, expected)
+        np.testing.assert_allclose(gradient, expected_grad)
 
     def test_repeat(self):
         x = pt.dmatrix("x")
