@@ -329,7 +329,10 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
     """
     A, b = node.inputs
 
-    match A.owner_op_and_inputs:
+    A_core, transposed = strip_left_expand_dims(A)
+    if transposed:
+        return None
+    match A_core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *blocks):
             pass
         case _:
@@ -367,6 +370,7 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
             for sol in per_block_solutions:
                 copy_stack_trace(node.outputs[0], sol)
             new_out = pt.linalg.block_diag(*per_block_solutions)
+            new_out = rebroadcast_like(new_out, node.outputs[0])
             copy_stack_trace(node.outputs[0], new_out)
             return [new_out]
 
@@ -382,6 +386,7 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
         per_block_solutions.append(sol)
 
     new_out = pt.concatenate(per_block_solutions, axis=split_axis)
+    new_out = rebroadcast_like(new_out, node.outputs[0])
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 

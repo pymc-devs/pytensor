@@ -486,21 +486,26 @@ def test_solve_of_inv_to_matmul(b_ndim, batched):
 
 
 @pytest.mark.parametrize(
-    "b_ndim, solve_fn, expected_op, batch",
+    "b_ndim, solve_fn, expected_op, a_batch, b_batch",
     [
-        (1, pt.linalg.solve, Solve, 0),
-        (2, pt.linalg.solve, Solve, 4),
-        (1, lambda T, b: solve_triangular(T, b, lower=True), SolveTriangular, 0),
+        (1, pt.linalg.solve, Solve, 0, 0),
+        (2, pt.linalg.solve, Solve, 4, 4),
+        (1, lambda T, b: solve_triangular(T, b, lower=True), SolveTriangular, 0, 0),
+        # Batched b with core blocks: Blockwise.make_node pads the block_diag
+        # with a left expand_dims, which the rewrite must see through. The
+        # per-block solves are then eagerly split into LU factor + solve,
+        # since each core block is broadcast against the batched b
+        (2, pt.linalg.solve, LUFactor, 0, 4),
     ],
-    ids=["vector_b", "matrix_b_batched", "solve_triangular"],
+    ids=["vector_b", "matrix_b_batched", "solve_triangular", "padded_A"],
 )
-def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, batch):
-    A_shape = (batch, 3, 3) if batch else (3, 3)
-    B_shape = (batch, 2, 2) if batch else (2, 2)
+def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, a_batch, b_batch):
+    A_shape = (a_batch, 3, 3) if a_batch else (3, 3)
+    B_shape = (a_batch, 2, 2) if a_batch else (2, 2)
     if b_ndim == 1:
-        b_shape = (batch, 5) if batch else (5,)
+        b_shape = (b_batch, 5) if b_batch else (5,)
     else:
-        b_shape = (batch, 5, 4) if batch else (5, 4)
+        b_shape = (b_batch, 5, 4) if b_batch else (5, 4)
     A = pt.tensor("A", shape=A_shape)
     B = pt.tensor("B", shape=B_shape)
     b_var = pt.tensor("b", shape=b_shape)
@@ -520,13 +525,13 @@ def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, batch):
     )
     if expected_op is SolveTriangular:
         # Make A and B lower-triangular so the per-block solve_triangular is valid.
-        A_v = np.tril(A_v) if not batch else np.stack([np.tril(a) for a in A_v])
-        B_v = np.tril(B_v) if not batch else np.stack([np.tril(b) for b in B_v])
-    if batch:
+        A_v = np.tril(A_v) if not a_batch else np.stack([np.tril(a) for a in A_v])
+        B_v = np.tril(B_v) if not a_batch else np.stack([np.tril(b) for b in B_v])
+    if a_batch:
         expected = np.stack(
             [
                 np.linalg.solve(scipy.linalg.block_diag(A_v[i], B_v[i]), b_v[i])
-                for i in range(batch)
+                for i in range(a_batch)
             ]
         )
     else:
