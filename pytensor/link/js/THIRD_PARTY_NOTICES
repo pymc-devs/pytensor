@@ -1,0 +1,26 @@
+special.js contains gamma/digamma kernels from TyMC (Apache-2.0),
+Copyright 2026 Benjamin F. Maier / PyMC Labs.
+Source: https://github.com/pymc-labs/tymc/blob/b1c038979eb006b2d9ad1842a5b9ec2640688944/src/numerics/special_scalar.ts
+It includes the Cephes-derived kernels and TyMC's fitted Stirling correction.
+The Apache-2.0 license is supplied in special.LICENSE.
+
+TyMC — probabilistic programming in TypeScript
+Copyright 2026 Benjamin F. Maier and PyMC Labs
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes ports of algorithms from:
+- PyMC and PyTensor (Apache License 2.0) — model semantics, transforms, NUTS
+  adaptation, distribution log-densities; https://github.com/pymc-devs
+- ArviZ / arviz-stats / arviz-plots (Apache License 2.0) — diagnostics and
+  plot definitions; https://github.com/arviz-devs
+- Cephes Mathematical Library (S. Moshier), as redistributed by SciPy
+  (BSD 3-Clause) — special functions (ndtri, incbi);
+  https://github.com/scipy/scipy
+- Stan Math (BSD 3-Clause) — incomplete gamma gradients, warm-up schedule;
+  https://github.com/stan-dev/math
+- nuts-rs (Adrian Seyboldt, MIT) — nutpie's warm-up and U-turn test;
+  https://github.com/pymc-devs/nuts-rs
+- polyagamma (Zolisa Bleki, BSD 3-Clause) — Pólya-Gamma density, distribution
+  function and samplers; https://github.com/zoj613/polyagamma
+The `@source` tag on each function names the specific origin.

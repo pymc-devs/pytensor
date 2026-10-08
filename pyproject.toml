@@ -92,6 +92,7 @@ include = ["pytensor*"]
 [tool.setuptools.package-data]
 pytensor = ["py.typed"]
 "pytensor.d3viz" = ["html/*", "css/*", "js/*"]
+"pytensor.link.js" = ["*.js", "*.mjs", "special.LICENSE", "THIRD_PARTY_NOTICES"]
 
 [tool.coverage.run]
 omit = [

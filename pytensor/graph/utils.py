@@ -1,10 +1,16 @@
-import linecache
 import sys
-import traceback
 from abc import ABCMeta
 from collections.abc import Sequence
-from io import StringIO
 from typing import TYPE_CHECKING, Any, TypeVar, Union
+
+from pytensor.graph.trace import (
+    TRACEBACK_SKIP_PATHS,
+    TraceSet,
+    capture_stack,
+    format_trace_set,
+    get_trace_frame,
+    resolve_frame,
+)
 
 
 if TYPE_CHECKING:
@@ -16,61 +22,16 @@ T = TypeVar("T", bound=Union["Apply", "Variable"])
 def simple_extract_stack(
     f=None, limit: int | None = None, skips: Sequence[str] | None = None
 ) -> list[tuple[str | None, int, str, str | None]]:
-    """This is traceback.extract_stack from python 2.7 with this change:
-
-    - Comment the update of the cache.
-    - Skip internal stack trace level.
-
-    The update of the cache call os.stat to verify is the cache is up
-    to date.  This take too much time on cluster.
-
-    limit - The number of stack level we want to return. If None, mean
-    all what we can.
-
-    skips - partial path of stack level we don't want to keep and count.
-        When we find one level that isn't skipped, we stop skipping.
-
-    """
-    if skips is None:
-        skips = []
-
+    """Return source-filled stack tuples for callers of the legacy helper."""
     if f is None:
         f = sys._getframe().f_back
-
     if limit is None:
-        if hasattr(sys, "tracebacklimit"):
-            limit = sys.tracebacklimit
-    trace: list[tuple[str | None, int, str, str | None]] = []
-    n = 0
-    while f is not None and (limit is None or n < limit):
-        lineno = f.f_lineno
-        co = f.f_code
-        filename = co.co_filename
-        name = co.co_name
-        #        linecache.checkcache(filename)
-        line: str | None = linecache.getline(filename, lineno, f.f_globals)
-        if line:
-            line = line.strip()
-        else:
-            line = None
-        f = f.f_back
-
-        # Just skip inner level
-        if len(trace) == 0:
-            rm = False
-            for p in skips:
-                # The 'tests' exception was added; otherwise, we'd lose the
-                # stack trace during in our test cases. We're not sure this is
-                # the right way to do it, though.
-                if p in filename and "tests" not in filename:
-                    rm = True
-                    break
-            if rm:
-                continue
-        trace.append((filename, lineno, name, line))
-        n = n + 1
-    trace.reverse()
-    return trace
+        limit = getattr(sys, "tracebacklimit", None)
+    if skips is None:
+        skips = ()
+    return [
+        resolve_frame(frame) for frame in capture_stack(f=f, limit=limit, skips=skips)
+    ]
 
 
 def add_tag_trace[T: "Apply" | "Variable"](thing: T, user_line: int | None = None) -> T:
@@ -98,55 +59,19 @@ def add_tag_trace[T: "Apply" | "Variable"](thing: T, user_line: int | None = Non
 
     if user_line == -1:
         user_line = None
-    skips = [
-        "pytensor/tensor/",
-        "pytensor\\tensor\\",
-        "pytensor/compile/",
-        "pytensor\\compile\\",
-        "pytensor/graph/",
-        "pytensor\\graph\\",
-        "pytensor/scalar/basic.py",
-        "pytensor\\scalar\\basic.py",
-        "pytensor/scan/",
-        "pytensor\\scan\\",
-        "pytensor/sparse/",
-        "pytensor\\sparse\\",
-        "pytensor/typed_list/",
-        "pytensor\\typed_list\\",
-    ]
-
-    if config.traceback__compile_limit > 0:
-        skips = []
-
-    tr = simple_extract_stack(limit=user_line, skips=skips)
-    # Different python version use different semantic for
-    # limit. python 2.7 include the call to extrack_stack. The -1 get
-    # rid of it.
-
-    if tr:
-        thing.tag.trace = [tr]
-    else:
-        thing.tag.trace = tr
+    skips = () if config.traceback__compile_limit > 0 else TRACEBACK_SKIP_PATHS
+    stack = capture_stack(limit=user_line, skips=skips)
+    thing.tag.trace = TraceSet((stack,)) if stack else TraceSet()
     return thing
 
 
 def get_variable_trace_string(v):
-    sio = StringIO()
-    # For backward compatibility with old trace
-    tr = getattr(v.tag, "trace", [])
-    if isinstance(tr, list) and len(tr) > 0:
-        print(" \nBacktrace when that variable is created:\n", file=sio)
-        # The isinstance is needed to handle old pickled trace
-        if isinstance(tr[0], tuple):
-            traceback.print_list(v.tag.trace, sio)
-        else:
-            # Print separate message for each element in the list of
-            # backtraces
-            for idx, subtr in enumerate(tr):
-                if len(tr) > 1:
-                    print(f"trace {int(idx)}", file=sio)
-                traceback.print_list(subtr, sio)
-    return sio.getvalue()
+    return format_trace_set(getattr(v.tag, "trace", []))
+
+
+def get_variable_trace_frame(v, trace_index=0, frame_index=-1):
+    """Return a formatted source frame for graph visualizers."""
+    return get_trace_frame(getattr(v.tag, "trace", []), trace_index, frame_index)
 
 
 class InconsistencyError(Exception):
