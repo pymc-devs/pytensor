@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from pytensor import tensor as pt
-from pytensor.tensor.sort import ArgSortOp, SortOp
+from pytensor.tensor.sort import argsort, sort
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -28,10 +28,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
 )
 def test_Sort(x_test, axis, kind, exc):
     x = pt.as_tensor(x_test).type("x")
-    if axis:
-        g = SortOp(kind)(x, axis)
-    else:
-        g = SortOp(kind)(x)
+    g = sort(x, axis=axis, kind=kind)
 
     cm = contextlib.suppress() if not exc else pytest.warns(exc)
 
@@ -62,11 +59,7 @@ def test_ArgSort(x_test, axis, kind, exc):
         np.random.shuffle(x_test)
         x_test = np.reshape(x_test, (5, 5, 5, 5))
     x = pt.as_tensor(x_test).type("x")
-
-    if axis:
-        g = ArgSortOp(kind)(x, axis)
-    else:
-        g = ArgSortOp(kind)(x)
+    g = argsort(x, axis=axis, kind=kind)
 
     cm = contextlib.suppress() if not exc else pytest.warns(exc)
 
