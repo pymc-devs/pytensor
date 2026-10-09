@@ -15,18 +15,11 @@ def test_strip_left_expand_dims_and_transpose():
     assert strip_left_expand_dims_and_transpose(X) == (X, False)
     assert strip_left_expand_dims_and_transpose(pt.expand_dims(X, 0)) == (X, False)
     assert strip_left_expand_dims_and_transpose(pt.expand_dims(X, (0, 1))) == (X, False)
-    assert strip_left_expand_dims_and_transpose(
-        pt.expand_dims(pt.expand_dims(X, 0), 0)
-    ) == (X, False)
 
     assert strip_left_expand_dims_and_transpose(X.mT) == (X, True)
-    assert strip_left_expand_dims_and_transpose(pt.expand_dims(X.mT, 0)) == (X, True)
-    assert strip_left_expand_dims_and_transpose(pt.expand_dims(X, 0).mT) == (X, True)
-    assert strip_left_expand_dims_and_transpose(pt.expand_dims(X.mT, 0).mT) == (
-        X,
-        False,
-    )
 
+    # The single peel handles the fused expand_dims + transpose DimShuffle that
+    # local_dimshuffle_lift leaves behind after merging adjacent DimShuffles
     fused_expand_and_transpose = X.dimshuffle("x", 1, 0)
     assert strip_left_expand_dims_and_transpose(fused_expand_and_transpose) == (X, True)
 

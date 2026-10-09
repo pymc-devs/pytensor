@@ -71,29 +71,26 @@ def get_assume_a(fgraph, A):
 def strip_left_expand_dims_and_transpose(
     x: TensorVariable,
 ) -> tuple[TensorVariable, bool]:
-    """Peel left expand_dims and left-expanded matrix transposes off ``x``.
+    """Peel a left expand_dims or left-expanded matrix transpose off ``x``.
 
     Batched graphs insert dummy leading dims on matrix operands with left
     ``expand_dims`` (``RandomVariable.make_node`` and ``Blockwise.make_node``
-    both do), hiding the owner that structural matchers look for.
+    both do), hiding the owner that structural matchers look for. One peel
+    suffices: adjacent DimShuffles are merged by ``local_dimshuffle_lift``.
 
     Returns
     -------
     core : TensorVariable
-        ``x`` without the leading dummy dims and matrix transposes.
+        ``x`` without the leading dummy dims and matrix transpose, if any.
     transposed : bool
         Whether ``core``'s last two axes are transposed relative to ``x``.
     """
-    transposed = False
-    while True:
-        match x.owner_op_and_inputs:
-            case (DimShuffle(is_left_expand_dims=True), inner):
-                x = inner  # type: ignore[assignment]
-            case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
-                x = inner  # type: ignore[assignment]
-                transposed = not transposed
-            case _:
-                return x, transposed
+    match x.owner_op_and_inputs:
+        case (DimShuffle(is_left_expand_dims=True), inner):
+            return inner, False  # type: ignore[return-value]
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+            return inner, True  # type: ignore[return-value]
+    return x, False
 
 
 def clients_through_expand_dims(
