@@ -1522,6 +1522,36 @@ class EnsureSortedIndices(Op):
 ensure_sorted_indices = EnsureSortedIndices(inplace=False)
 
 
+class SumDuplicates(Op):
+    """Sort sparse indices and sum duplicate entries without removing explicit zeros.
+
+    The input matrix is not modified. The gradient is regular, not structured.
+    """
+
+    __props__ = ()
+
+    def make_node(self, x):
+        x = as_sparse_variable(x)
+        assert x.format in ("csr", "csc")
+        return Apply(self, [x], [x.type()])
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        result = x.copy()
+        result.sum_duplicates()
+        z[0] = result
+
+    def pullback(self, inputs, outputs, output_grad):
+        return [output_grad[0]]
+
+    def infer_shape(self, node, shapes):
+        return shapes
+
+
+sum_duplicates = SumDuplicates()
+
+
 def clean(x):
     """
     Remove explicit zeros from a sparse matrix, and re-sort indices.

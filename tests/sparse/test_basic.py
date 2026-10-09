@@ -999,6 +999,23 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
                 verify_grad_sparse(self.op, data, structured=False)
 
 
+class TestSumDuplicates(utt.InferShapeTester):
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    def test_infer_shape(self, format):
+        variable, data = sparse_random_inputs(format, shape=(3, 5))
+        self._compile_and_check(
+            variable, [sparse.sum_duplicates(*variable)], data, sparse.SumDuplicates
+        )
+
+    def test_grad(self):
+        x = sparse.csr_matrix("x")
+        gz = sparse.csr_matrix("gz")
+        summed = sparse.sum_duplicates(x)
+        utt.assert_equal_computations(
+            [pytensor.grad(cost=None, wrt=x, known_grads={summed: gz})], [gz]
+        )
+
+
 class TestClean(utt.InferShapeTester):
     def setup_method(self):
         super().setup_method()
