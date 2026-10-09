@@ -375,6 +375,35 @@ def overload_sparse_copy(matrix):
     return copy
 
 
+@overload_method(CSMatrixType, "sort_indices")
+def overload_sparse_sort_indices(matrix):
+    def sort_indices(matrix):
+        data = matrix.data
+        indices = matrix.indices.view(np.uint32)
+        indptr = matrix.indptr.view(np.uint32)
+        for major in range(len(indptr) - 1):
+            start, end = indptr[major], indptr[major + 1]
+            # Despite branching, checking first is faster than always calling argsort.
+            for ptr in range(start + 1, end):
+                if indices[ptr - 1] > indices[ptr]:
+                    order = np.argsort(indices[start:end])
+                    data[start:end] = data[start:end][order]
+                    indices[start:end] = indices[start:end][order]
+                    break
+
+    return sort_indices
+
+
+@overload_method(CSMatrixType, "sorted_indices")
+def overload_sparse_sorted_indices(matrix):
+    def sorted_indices(matrix):
+        result = matrix.copy()
+        result.sort_indices()
+        return result
+
+    return sorted_indices
+
+
 @overload_method(CSMatrixType, "astype")
 def overload_sparse_astype(matrix, dtype):
     match matrix:
