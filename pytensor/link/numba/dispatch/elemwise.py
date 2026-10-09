@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from functools import cache, singledispatch
 from hashlib import sha256
 from itertools import combinations
+from math import comb
 
 import numba
 import numpy as np
@@ -56,7 +57,7 @@ from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
 @singledispatch
 def scalar_in_place_fn(
-    op: Op, idx: str, res: str, arr: str
+    op: Op, idx: str, res: str, arr: str, *, invariant_acc: bool = False
 ) -> Sequence[CODE_TOKEN | str]:
     """Return code for an in-place update on an array using a binary scalar :class:`Op`.
 
@@ -70,6 +71,9 @@ def scalar_in_place_fn(
         The symbol name for the first input and results/output.
     arr
         The symbol name for the second input.
+    invariant_acc
+        Whether ``res[idx]`` is the same element on every step of the innermost
+        loop, as it is when that loop's axis is one of the reduced ones.
     """
     raise NotImplementedError(f"No scalar_in_place_fn implemented for {op}")
 
@@ -122,27 +126,37 @@ def scalar_in_place_fn_IntDiv(op, idx, res, arr):
 
 
 @scalar_in_place_fn.register(Maximum)
-def scalar_in_place_fn_Maximum(op, idx, res, arr):
-    # `arr != arr` catches NaN, which the comparison alone would drop; once the
-    # accumulator is NaN neither clause fires again, so NaN sticks (numpy
-    # semantics, matching the C backend). For integer dtypes LLVM folds the
-    # always-false clause away.
+def scalar_in_place_fn_Maximum(op, idx, res, arr, *, invariant_acc=False):
+    # `arr != arr` catches NaN.
+    # For integer dtypes LLVM folds the always-false clause away.
+    if invariant_acc:
+        # Store only on an actual update: an unconditional store to the same
+        # address every step serializes the loop on store-to-load forwarding.
+        return [
+            f"if {res}[{idx}] < {arr} or {arr} != {arr}:",
+            CODE_TOKEN.INDENT,
+            f"{res}[{idx}] = {arr}",
+            CODE_TOKEN.DEDENT,
+        ]
+    # A single select with non-short-circuiting `|` keeps code SIMD friendly,
+    # which `or` would split into two basic blocks.
     return [
-        f"if {res}[{idx}] < {arr} or {arr} != {arr}:",
-        CODE_TOKEN.INDENT,
-        f"{res}[{idx}] = {arr}",
-        CODE_TOKEN.DEDENT,
+        f"{res}[{idx}] = {arr} if ({arr} != {arr}) | ({res}[{idx}] < {arr}) else {res}[{idx}]"
     ]
 
 
 @scalar_in_place_fn.register(Minimum)
-def scalar_in_place_fn_Minimum(op, idx, res, arr):
-    # See NaN comment in scalar_in_place_fn_Maximum
+def scalar_in_place_fn_Minimum(op, idx, res, arr, *, invariant_acc=False):
+    # See comments in scalar_in_place_fn_Maximum
+    if invariant_acc:
+        return [
+            f"if {res}[{idx}] > {arr} or {arr} != {arr}:",
+            CODE_TOKEN.INDENT,
+            f"{res}[{idx}] = {arr}",
+            CODE_TOKEN.DEDENT,
+        ]
     return [
-        f"if {res}[{idx}] > {arr} or {arr} != {arr}:",
-        CODE_TOKEN.INDENT,
-        f"{res}[{idx}] = {arr}",
-        CODE_TOKEN.DEDENT,
+        f"{res}[{idx}] = {arr} if ({arr} != {arr}) | ({res}[{idx}] > {arr}) else {res}[{idx}]"
     ]
 
 
@@ -215,6 +229,10 @@ def _is_non_reversed_dense(shape, strides, itemsize, order):
     return res
 
 
+# Above this many loops (branches * ndim) the reducer stops specializing on the pattern
+MAX_CAREDUCE_LOOPS = 50
+
+
 def create_multiaxis_reducer(
     scalar_op,
     *,
@@ -232,6 +250,11 @@ def create_multiaxis_reducer(
     positions correspond to reduction axes (C(ndim, n_reduced) branches), with
     each branch having a fixed loop nest and result indexing pattern. An
     un-transpose step restores the result to the original axis order.
+
+    Past `MAX_CAREDUCE_LOOPS` loops (branches times `ndim`, which compile time is
+    proportional to) the branches are replaced by two loop nests (innermost position
+    reduced or kept) that write to the result through a view with zero strides at
+    the reduced positions.
 
     Parameters
     ==========
@@ -356,6 +379,34 @@ def create_multiaxis_reducer(
 
             return res
 
+    Past `MAX_CAREDUCE_LOOPS`, the code after ``s = x_t.shape`` is instead (shown for
+    the same sum(tensor3(), axis=-1), as if it exceeded the cap):
+
+    .. code-block:: python
+
+                kept = np.flatnonzero(np.array((True, True, False))[order])
+                res = np.full((s[kept[0]], s[kept[1]]), identity, dtype=np.float64)
+                res_strides = np.zeros(3, dtype=np.int64)
+                res_strides[kept] = np.array(res.strides)
+                if res_strides[2] == 0:
+                    res_outer = as_strided(res, shape=s[:-1], strides=(res_strides[0], res_strides[1]))
+                    for l0 in range(s[0]):
+                        for l1 in range(s[1]):
+                            acc = identity
+                            for l2 in range(s[2]):
+                                acc += x_t[(l0, l1, l2)]
+                            res_outer[(l0, l1)] += acc
+                else:
+                    res_t = as_strided(res, shape=s, strides=(res_strides[0], res_strides[1], res_strides[2]))
+                    for l0 in range(s[0]):
+                        for l1 in range(s[1]):
+                            for l2 in range(s[2]):
+                                res_t[(l0, l1, l2)] += x_t[(l0, l1, l2)]
+                inv = np.argsort(order[kept])
+                res = res.transpose((inv[0], inv[1]))
+
+            return res
+
     """
     if axes is None:
         axes = tuple(range(ndim))
@@ -404,6 +455,47 @@ def create_multiaxis_reducer(
         # Helper to make code less verbose, and handle generators directly
         return create_tuple_string(tuple(x))
 
+    def _scalar_inplace(res_sym, arr_expr):
+        """``scalar_in_place_fn`` accumulating into the scalar local *res_sym*."""
+        return [
+            l if isinstance(l, CODE_TOKEN) else l.replace(f"{res_sym}[()]", res_sym)
+            for l in scalar_in_place_fn(scalar_op, "()", res_sym, arr_expr)
+        ]
+
+    # Only max/min take `invariant_acc`, and only they need lanes: LLVM already
+    # vectorizes the other reductions, which lanes would defeat.
+    is_minmax = isinstance(scalar_op, Maximum | Minimum)
+    # Same unroll numpy uses for its scalar minmax reduction.
+    n_lanes = 8
+
+    def _inplace(idx, arr_expr, invariant_acc):
+        extra = {"invariant_acc": invariant_acc} if is_minmax else {}
+        return scalar_in_place_fn(scalar_op, idx, "res", arr_expr, **extra)
+
+    def _emit_lane_reduce(code, run_len, elem_expr, res_sym):
+        """Emit a lane-blocked reduction of ``run_len`` elements into *res_sym*.
+
+        ``elem_expr`` maps an index expression to the element at that offset of
+        the run.  Lanes are held in scalar locals so they stay in registers, and
+        lane indices are cast to ``uint64`` so Numba skips the negative-index
+        wraparound arithmetic it would otherwise emit on every access.
+        """
+        code.append(f"_limit = {run_len} - ({run_len} % {n_lanes})")
+        for j in range(n_lanes):
+            code.append(f"_acc{j} = identity")
+        code.append(f"for _i in range(0, _limit, {n_lanes}):")
+        code.append(CODE_TOKEN.INDENT)
+        for j in range(n_lanes):
+            code.extend(_scalar_inplace(f"_acc{j}", elem_expr(f"np.uint64(_i + {j})")))
+        code.append(CODE_TOKEN.DEDENT)
+        code.append(f"{res_sym} = _acc0")
+        for j in range(1, n_lanes):
+            code.extend(_scalar_inplace(res_sym, f"_acc{j}"))
+        code.append(f"for _i in range(_limit, {run_len}):")
+        code.append(CODE_TOKEN.INDENT)
+        code.extend(_scalar_inplace(res_sym, elem_expr("_i")))
+        code.append(CODE_TOKEN.DEDENT)
+
     code: list[str | CODE_TOKEN] = [
         f"def {careduce_fn_name}(x):",
         CODE_TOKEN.INDENT,
@@ -418,23 +510,22 @@ def create_multiaxis_reducer(
         else:
             return_obj = f"np.array(res, dtype={out_dtype_str})"
 
-        def _scalar_inplace(arr_expr):
-            return [
-                l if isinstance(l, CODE_TOKEN) else l.replace("res[()]", "res")
-                for l in scalar_in_place_fn(scalar_op, "()", "res", arr_expr)
-            ]
-
         def _emit_flat_reduce(code):
             """Emit flat buffer iteration via _flat_view helper."""
+            code.append("y = _flat_view(x)")
+            if is_minmax:
+                code.append("_n = len(y)")
+                _emit_lane_reduce(code, "_n", lambda i: f"y[{i}]", "res")
+                code.append(f"return {return_obj}")
+                return
             code.extend(
                 [
-                    "y = _flat_view(x)",
                     "res = identity",
                     "for i in range(len(y)):",
                     CODE_TOKEN.INDENT,
                 ]
             )
-            code.extend(_scalar_inplace("y[i]"))
+            code.extend(_scalar_inplace("res", "y[i]"))
             code.extend(
                 [
                     CODE_TOKEN.DEDENT,
@@ -447,7 +538,7 @@ def create_multiaxis_reducer(
             code.append(CODE_TOKEN.EMPTY_LINE)
             code.append("res = identity")
             arr_indices = tpl(f"l{i}" for i in range(ndim))
-            _emit_loop_nest(code, ndim, _scalar_inplace(f"x_t[{arr_indices}]"))
+            _emit_loop_nest(code, ndim, _scalar_inplace("res", f"x_t[{arr_indices}]"))
             code.append(f"return {return_obj}")
         else:
             # C or F contiguous: iterate flat buffer directly
@@ -492,7 +583,7 @@ def create_multiaxis_reducer(
                 ]
             )
             arr_indices = tpl(f"l{i}" for i in range(ndim))
-            _emit_loop_nest(code, ndim, _scalar_inplace(f"x_t[{arr_indices}]"))
+            _emit_loop_nest(code, ndim, _scalar_inplace("res", f"x_t[{arr_indices}]"))
             code.append(f"return {return_obj}")
             code.extend(
                 [
@@ -516,8 +607,9 @@ def create_multiaxis_reducer(
         )
         c_res_idx = tpl(f"l{p}" for p in range(ndim) if p in kept_axes)
         c_arr_idx = tpl(f"l{i}" for i in range(ndim))
-        c_inplace_lines = scalar_in_place_fn(
-            scalar_op, c_res_idx, "res", f"x[{c_arr_idx}]"
+        # This path loops over ``x`` untransposed, so the innermost axis is the last
+        c_inplace_lines = _inplace(
+            c_res_idx, f"x[{c_arr_idx}]", ndim - 1 not in kept_axes
         )
         _emit_loop_nest(code, ndim, c_inplace_lines)
         code.append(CODE_TOKEN.DEDENT)
@@ -540,67 +632,125 @@ def create_multiaxis_reducer(
             ]
         )
 
-        # Branch on which transposed positions are reduction axes
-        code.append("order_reduced_axes = 0")
-        if axes:
-            for i in range(ndim):
-                code.extend(
-                    [
-                        f"if {' or '.join(f'order[{i}] == {a}' for a in sorted(axes))}:",
-                        CODE_TOKEN.INDENT,
-                        f"order_reduced_axes += {1 << (ndim - 1 - i)}",
-                        CODE_TOKEN.DEDENT,
-                    ]
-                )
-        code.append(CODE_TOKEN.EMPTY_LINE)
-
-        # Generate C(ndim, n_reduced) branches
-        reduced_position_combos = list(
-            reversed(list(combinations(range(ndim), len(axes))))
-        )
-        for branch_idx, reduced_pos in enumerate(reduced_position_combos):
-            kept_pos = [p for p in range(ndim) if p not in reduced_pos]
-            pattern_value = sum(1 << (ndim - 1 - p) for p in reduced_pos)
-            pattern_comment = f"  # {pattern_value:0{ndim}b}"
-
-            # Use 'else' for the last branch so numba knows all paths define res
-            if branch_idx == 0:
-                code.append(
-                    f"if order_reduced_axes == {pattern_value}:{pattern_comment}"
-                )
-            elif branch_idx < len(reduced_position_combos) - 1:
-                code.append(
-                    f"elif order_reduced_axes == {pattern_value}:{pattern_comment}"
-                )
-            else:
-                code.append(f"else:{pattern_comment}")
-            code.append(CODE_TOKEN.INDENT)
-
-            kept_shape = tpl(f"s[{p}]" for p in kept_pos)
-            code.append(f"res = np.full({kept_shape}, identity, dtype={acc_dtype_str})")
-            arr_idx = tpl(f"l{i}" for i in range(ndim))
-            res_idx = tpl(f"l{p}" for p in kept_pos)
-            inplace_lines = scalar_in_place_fn(
-                scalar_op, res_idx, "res", f"x_t[{arr_idx}]"
-            )
-            _emit_loop_nest(code, ndim, inplace_lines)
-            # kept_orig assignments (for un-transpose)
-            if n_kept > 1:
-                for k, kp in enumerate(kept_pos):
-                    code.append(f"kept_orig_{k} = order[{kp}]")
-            code.append(CODE_TOKEN.DEDENT)
-
-        # Un-transpose result to original axis order
-        if n_kept > 1:
-            kept_orig_arr = tpl(f"kept_orig_{k}" for k in range(n_kept))
-            inv_args = tpl(f"inv[{k}]" for k in range(n_kept))
+        if comb(ndim, len(axes)) * ndim > MAX_CAREDUCE_LOOPS:
+            # Zero strides at the reduced positions let one loop nest serve every pattern;
+            # a second accumulates the innermost position in a scalar when it is reduced
+            is_kept = tpl(str(a in kept_axes) for a in range(ndim))
+            strides = [f"res_strides[{i}]" for i in range(ndim)]
+            x_t_item = f"x_t[{c_arr_idx}]"
             code.extend(
                 [
-                    CODE_TOKEN.EMPTY_LINE,
-                    f"inv = np.argsort(np.array({kept_orig_arr}))",
-                    f"res = res.transpose({inv_args})",
+                    f"kept = np.flatnonzero(np.array({is_kept})[order])",
+                    f"res = np.full({tpl(f's[kept[{k}]]' for k in range(n_kept))}, identity, dtype={acc_dtype_str})",
+                    f"res_strides = np.zeros({ndim}, dtype=np.int64)",
+                    "res_strides[kept] = np.array(res.strides)",
+                    f"if res_strides[{ndim - 1}] == 0:",
+                    CODE_TOKEN.INDENT,
+                    f"res_outer = as_strided(res, shape=s[:-1], strides={tpl(strides[:-1])})",
                 ]
             )
+            _emit_loop_nest(
+                code,
+                ndim - 1,
+                [
+                    "acc = identity",
+                    f"for l{ndim - 1} in range(s[{ndim - 1}]):",
+                    CODE_TOKEN.INDENT,
+                    *_scalar_inplace("acc", x_t_item),
+                    CODE_TOKEN.DEDENT,
+                    *scalar_in_place_fn(
+                        scalar_op,
+                        tpl(f"l{i}" for i in range(ndim - 1)),
+                        "res_outer",
+                        "acc",
+                    ),
+                ],
+            )
+            code.extend(
+                [
+                    CODE_TOKEN.DEDENT,
+                    "else:",
+                    CODE_TOKEN.INDENT,
+                    f"res_t = as_strided(res, shape=s, strides={tpl(strides)})",
+                ]
+            )
+            _emit_loop_nest(
+                code,
+                ndim,
+                scalar_in_place_fn(scalar_op, c_arr_idx, "res_t", x_t_item),
+            )
+            code.append(CODE_TOKEN.DEDENT)
+            code.extend(
+                [
+                    "inv = np.argsort(order[kept])",
+                    f"res = res.transpose({tpl(f'inv[{k}]' for k in range(n_kept))})",
+                ]
+            )
+        else:
+            # Branch on which transposed positions are reduction axes
+            code.append("order_reduced_axes = 0")
+            if axes:
+                for i in range(ndim):
+                    code.extend(
+                        [
+                            f"if {' or '.join(f'order[{i}] == {a}' for a in sorted(axes))}:",
+                            CODE_TOKEN.INDENT,
+                            f"order_reduced_axes += {1 << (ndim - 1 - i)}",
+                            CODE_TOKEN.DEDENT,
+                        ]
+                    )
+            code.append(CODE_TOKEN.EMPTY_LINE)
+
+            # Generate C(ndim, n_reduced) branches
+            reduced_position_combos = list(
+                reversed(list(combinations(range(ndim), len(axes))))
+            )
+            for branch_idx, reduced_pos in enumerate(reduced_position_combos):
+                kept_pos = [p for p in range(ndim) if p not in reduced_pos]
+                pattern_value = sum(1 << (ndim - 1 - p) for p in reduced_pos)
+                pattern_comment = f"  # {pattern_value:0{ndim}b}"
+
+                # Use 'else' for the last branch so numba knows all paths define res
+                if branch_idx == 0:
+                    code.append(
+                        f"if order_reduced_axes == {pattern_value}:{pattern_comment}"
+                    )
+                elif branch_idx < len(reduced_position_combos) - 1:
+                    code.append(
+                        f"elif order_reduced_axes == {pattern_value}:{pattern_comment}"
+                    )
+                else:
+                    code.append(f"else:{pattern_comment}")
+                code.append(CODE_TOKEN.INDENT)
+
+                kept_shape = tpl(f"s[{p}]" for p in kept_pos)
+                code.append(
+                    f"res = np.full({kept_shape}, identity, dtype={acc_dtype_str})"
+                )
+                arr_idx = tpl(f"l{i}" for i in range(ndim))
+                res_idx = tpl(f"l{p}" for p in kept_pos)
+                # The last axis in stride order is reduced when absent from kept_pos
+                inplace_lines = _inplace(
+                    res_idx, f"x_t[{arr_idx}]", ndim - 1 not in kept_pos
+                )
+                _emit_loop_nest(code, ndim, inplace_lines)
+                # kept_orig assignments (for un-transpose)
+                if n_kept > 1:
+                    for k, kp in enumerate(kept_pos):
+                        code.append(f"kept_orig_{k} = order[{kp}]")
+                code.append(CODE_TOKEN.DEDENT)
+
+            # Un-transpose result to original axis order
+            if n_kept > 1:
+                kept_orig_arr = tpl(f"kept_orig_{k}" for k in range(n_kept))
+                inv_args = tpl(f"inv[{k}]" for k in range(n_kept))
+                code.extend(
+                    [
+                        CODE_TOKEN.EMPTY_LINE,
+                        f"inv = np.argsort(np.array({kept_orig_arr}))",
+                        f"res = res.transpose({inv_args})",
+                    ]
+                )
 
         code.append(CODE_TOKEN.DEDENT)  # close else branch
 
@@ -1052,7 +1202,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     )
     careduce_fn = numba_basic.numba_njit(careduce_py_fn, boundscheck=False)
 
-    cache_version = 5
+    cache_version = 7
     careduce_key = sha256(
         str(
             (
@@ -1062,6 +1212,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
                 out_dtype,
                 acc_dtype,
                 op.scalar_op.identity,
+                MAX_CAREDUCE_LOOPS,
                 cache_version,
             )
         ).encode()

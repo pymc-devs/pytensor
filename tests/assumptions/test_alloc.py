@@ -10,6 +10,7 @@ from pytensor.assumptions import (
     PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    UNIQUE_INDICES,
     UPPER_TRIANGULAR,
     FactState,
 )
@@ -42,6 +43,7 @@ def test_eye_non_identity_is_false(eye_args):
     [
         (SYMMETRIC, FactState.TRUE),
         (DIAGONAL, FactState.TRUE),
+        (LOWER_TRIANGULAR, FactState.TRUE),
         (POSITIVE_DEFINITE, FactState.FALSE),
         (PERMUTATION, FactState.FALSE),
         (ORTHOGONAL, FactState.FALSE),
@@ -68,6 +70,15 @@ def test_empty_band_eye_merges_with_zero_constant_without_conflict():
     assert af.get(z, SYMMETRIC) == FactState.TRUE
 
 
+def test_one_by_one_alloc_merges_with_constant_without_conflict():
+    c = pt.constant(np.array([[7.0]]))
+    a = pt.alloc(c, 1, 1)
+    fg, af = make_fgraph(a.mT)
+    af.get(a, DIAGONAL)
+    fg.replace(a, c, reason="local_useless_alloc")
+    assert af.get(c, DIAGONAL) == FactState.TRUE
+
+
 def test_eye_symbolic_same_shape_is_identity():
     n = pt.iscalar("n")
     e = pt.eye(n, n, 0)
@@ -83,6 +94,19 @@ def test_eye_symbolic_different_shapes_is_unknown():
     assert af.get(e, DIAGONAL) == FactState.UNKNOWN
 
 
+def test_eye_symbolic_off_diagonal_is_unknown():
+    n = pt.iscalar("n")
+    e = pt.eye(n, n, 1)
+    _, af = make_fgraph(e)
+    assert af.get(e, LOWER_TRIANGULAR) == FactState.UNKNOWN
+
+
+def test_empty_eye_is_identity_for_any_k():
+    e = pt.eye(0, 0, 1)
+    _, af = make_fgraph(e)
+    assert af.check(e, ORTHOGONAL)
+
+
 @pytest.mark.parametrize(
     "key", [DIAGONAL, SYMMETRIC, LOWER_TRIANGULAR, UPPER_TRIANGULAR]
 )
@@ -91,6 +115,18 @@ def test_alloc_diag_properties(key):
     d = pt.diag(v)
     _, af = make_fgraph(d)
     assert af.check(d, key)
+
+
+def test_off_diagonal_alloc_diag_of_zeros_is_diagonal():
+    d = pt.diag(pt.zeros(3), k=1)
+    _, af = make_fgraph(d)
+    assert af.check(d, DIAGONAL)
+
+
+def test_off_diagonal_alloc_diag_of_symbolic_vector_is_unknown():
+    d = pt.diag(pt.vector("v", shape=(5,)), k=1)
+    _, af = make_fgraph(d)
+    assert af.get(d, DIAGONAL) == FactState.UNKNOWN
 
 
 def test_zeros_matrix_is_diagonal():
@@ -145,3 +181,19 @@ def test_alloc_broadcast_vector_value_is_unknown():
     y = pt.alloc(v, 4, 4)
     _, af = make_fgraph(y)
     assert af.get(y, SYMMETRIC) == FactState.UNKNOWN
+
+
+def test_unique_indices_survives_no_broadcast():
+    """Alloc repeats entries, so a uniqueness claim must not carry through it.
+
+    The matrix-property rules propagate anything whose trailing two axes are untouched,
+    which is wrong for a claim about the values themselves.
+    """
+    idx = pt.matrix("idx", shape=(2, 3), dtype="int64")
+    broadcast = pt.alloc(assume(idx, unique_indices=True), 4, 2, 3)
+
+    _, af = make_fgraph(broadcast)
+    assert af.get(broadcast, UNIQUE_INDICES) is not FactState.TRUE
+
+    repeated = broadcast.eval({idx: np.arange(6).reshape(2, 3)})
+    assert len(np.unique(repeated)) < repeated.size

@@ -78,21 +78,19 @@ def column_selection_index(op, node) -> Variable | None:
 
 @register_assumption(SELECTION, Eye)
 def _eye(key, op, feature, fgraph, node, input_states):
-    """``eye(n, m, k)`` is a selection iff ``k == 0`` (main diagonal) and ``n >= m``
-    (no trailing zero columns)."""
+    """``eye(n, m, k)`` is a selection iff every column holds its one: ``m == 0``, or
+    ``k <= 0`` and ``m - k <= n``."""
     n, m, k = node.inputs
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    if k.data.item() != 0:
-        return [FactState.FALSE]
-    if n is m:
+    offset = k.data.item()
+    if offset == 0 and n is m:
         return [FactState.TRUE]
-    if isinstance(n, TensorConstant) and isinstance(m, TensorConstant):
-        return true_if(n.data.item() >= m.data.item(), else_false=True)
-    rows, cols = node.outputs[0].type.shape[-2:]
-    if rows is not None and cols is not None:
-        return true_if(rows >= cols, else_false=True)
-    return [FactState.UNKNOWN]
+    rows, cols = node.outputs[0].type.shape
+    if rows is None or cols is None:
+        return [FactState.UNKNOWN]
+    every_column_filled = cols == 0 or (offset <= 0 and cols - offset <= rows)
+    return true_if(every_column_filled, else_false=True)
 
 
 register_assumption(SELECTION, BlockDiagonal)(all_inputs_have_key)
