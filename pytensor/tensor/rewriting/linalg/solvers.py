@@ -12,11 +12,12 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.unify import OpPattern
+from pytensor.scalar.basic import Mul
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.basic import atleast_Nd, split
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
@@ -34,6 +35,7 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
     tridiagonal_lu_factor,
     tridiagonal_lu_solve,
 )
+from pytensor.tensor.math import Sum
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -171,6 +173,97 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     new_out = cho_solve((L, True), b, b_ndim=b_ndim)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+@register_specialize
+@node_rewriter([blockwise_of(CholeskySolve)])
+def cho_solve_quadratic_form_to_whitened(fgraph, node):
+    """Rewrite ``sum(b * cho_solve((c, lower), b))`` as a whitened sum of squares.
+
+    The quadratic form ``b.T @ inv(A) @ b`` with ``A = c @ c.mT`` equals
+    ``|solve(c, b)| ** 2``, one triangular substitution instead of the two
+    inside ``cho_solve``. The ``b_ndim=2`` arm matches the matrix form this
+    pattern takes after ``batched_vector_b_solve_to_matrix_b_solve``:
+    ``sum(b * cho_solve((c, lower), b.mT).mT, axis=-1)``.
+    """
+    core_op = node.op.core_op
+    c, solve_b = node.inputs
+    [x] = node.outputs
+
+    # For complex inputs sum(b * x) is b.T @ x with no conjugation, which is
+    # not |solve(c, b)| ** 2
+    if x.type.dtype.startswith("complex"):
+        return None
+
+    # target is the solve output as the mul consumes it, expected_b the
+    # operand it is contracted with
+    if core_op.b_ndim == 1:
+        target, expected_b = x, solve_b
+    else:
+        if x.type.ndim != 2:
+            return None
+        match fgraph.clients[x]:
+            case [(transpose_client, _)] if (
+                isinstance(transpose_client.op, DimShuffle)
+                and transpose_client.op.is_matrix_transpose
+            ):
+                [target] = transpose_client.outputs
+            case _:
+                return None
+        match solve_b.owner_op_and_inputs:
+            case (DimShuffle(is_matrix_transpose=True), expected_b):
+                pass
+            case _:
+                return None
+
+    # The mul and sum must be the only consumers, so the replacement strands
+    # the cho_solve as dead code instead of duplicating solves
+    match fgraph.clients[target]:
+        case [(mul_client, target_idx)] if (
+            isinstance(mul_client.op, Elemwise)
+            and isinstance(mul_client.op.scalar_op, Mul)
+            and len(mul_client.inputs) == 2
+            and mul_client.inputs[1 - target_idx] is expected_b
+        ):
+            [mul_out] = mul_client.outputs
+        case _:
+            return None
+
+    match fgraph.clients[mul_out]:
+        case [(sum_client, _)] if isinstance(sum_client.op, Sum):
+            [sum_out] = sum_client.outputs
+        case _:
+            return None
+
+    # The core axis must be reduced, so the inner product over it can be
+    # re-expressed as the whitened sum of squares
+    ndim = mul_out.type.ndim
+    axes = (
+        tuple(range(ndim))
+        if sum_client.op.axis is None
+        else tuple(axis % ndim for axis in sum_client.op.axis)
+    )
+    if ndim - 1 not in axes:
+        return None
+
+    # A = c @ c.mT when lower, c.mT @ c when upper; trans=1 whitens the upper case
+    whitened = solve_triangular(
+        c,
+        solve_b,
+        lower=core_op.lower,
+        trans=0 if core_op.lower else 1,
+        b_ndim=core_op.b_ndim,
+    )
+    if core_op.b_ndim == 2:
+        # Align the whitened layout with the mul operands, which both sit on
+        # the transposed side
+        whitened = whitened.mT
+
+    # Reusing the matched Sum op preserves its axes, dtype and acc_dtype, so
+    # the replacement's type matches by construction
+    new_out = sum_client.op(whitened**2)
+    copy_stack_trace(sum_out, new_out)
+    return {sum_out: new_out}
 
 
 @register_stabilize
