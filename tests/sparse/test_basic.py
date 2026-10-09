@@ -1008,6 +1008,55 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
                 verify_grad_sparse(self.op, data, structured=False)
 
 
+class TestSumDuplicates(utt.InferShapeTester):
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize(
+        "format, constructor, shape",
+        [
+            ("csr", scipy_sparse.csr_matrix, (2, 3)),
+            ("csc", scipy_sparse.csc_matrix, (3, 2)),
+        ],
+    )
+    def test_op(self, format, constructor, shape, dtype):
+        x = sparse.matrix(format=format, name="x", dtype=dtype)
+        value = constructor(
+            (
+                np.array([2.0, 3.0, -2.0, 0.0], dtype=dtype),
+                np.array([2, 0, 2, 1], dtype="int32"),
+                np.array([0, 4, 4], dtype="int32"),
+            ),
+            shape=shape,
+        )
+        original = value.copy()
+        fn = pytensor.function([x], sparse.sum_duplicates(x))
+        result = fn(value)
+
+        assert result.shape == shape
+        assert result.format == format
+        assert result.dtype == dtype
+        np.testing.assert_array_equal(result.data, [3.0, 0.0, 0.0])
+        np.testing.assert_array_equal(result.indices, [0, 1, 2])
+        np.testing.assert_array_equal(result.indptr, [0, 3, 3])
+        np.testing.assert_array_equal(value.data, original.data)
+        np.testing.assert_array_equal(value.indices, original.indices)
+        np.testing.assert_array_equal(value.indptr, original.indptr)
+
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    def test_infer_shape(self, format):
+        variable, data = sparse_random_inputs(format, shape=(3, 5))
+        self._compile_and_check(
+            variable, [sparse.sum_duplicates(*variable)], data, sparse.SumDuplicates
+        )
+
+    def test_grad(self):
+        x = sparse.csr_matrix("x")
+        gz = sparse.csr_matrix("gz")
+        summed = sparse.sum_duplicates(x)
+        utt.assert_equal_computations(
+            [pytensor.grad(cost=None, wrt=x, known_grads={summed: gz})], [gz]
+        )
+
+
 class TestClean(utt.InferShapeTester):
     def setup_method(self):
         super().setup_method()
