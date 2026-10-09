@@ -18,6 +18,7 @@ numba = pytest.importorskip("numba")
 # Make sure the Numba customizations are loaded
 import pytensor.link.numba.dispatch.sparse  # noqa: F401
 from pytensor import config, function
+from pytensor.link.numba.dispatch.sparse.basic import make_sum_duplicates
 from pytensor.sparse import SparseTensorType
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -711,3 +712,48 @@ def test_sparse_sorted_indices(format, dtype, inplace):
         assert ps.SparseTensorType.may_share_memory(result, value) == inplace
 
 
+@pytest.mark.parametrize("out_format", ("csr", "csc"))
+@pytest.mark.parametrize("dtype", ("float64", "int32", "complex64"))
+def test_sparse_sum_duplicates(out_format, dtype):
+    sum_duplicates = make_sum_duplicates(out_format)
+
+    @numba.njit
+    def fn(x):
+        return sum_duplicates(x)
+
+    rng = np.random.default_rng(51)
+    x_test = sp.sparse.random(
+        8,
+        6,
+        density=0.5,
+        format=out_format,
+        dtype=dtype,
+        random_state=rng,
+        data_rvs=lambda size: rng.integers(1, 10, size=size),
+    )
+    original_nnz = x_test.nnz
+    x_test.data = np.repeat(x_test.data, 2)
+    x_test.indices = np.repeat(x_test.indices, 2)
+    x_test.indptr *= 2
+    x_test.data[:2] = [1, -1]
+    x_test.data[2:4] = 0
+    for start, end in zip(x_test.indptr[:-1], x_test.indptr[1:], strict=True):
+        x_test.indices[start:end] = x_test.indices[start:end][::-1]
+        x_test.data[start:end] = x_test.data[start:end][::-1]
+    x_test.has_sorted_indices = False
+    x_test.has_canonical_format = False
+
+    result = fn(x_test)
+    assert result.has_canonical_format
+    assert result.nnz == original_nnz
+    assert np.count_nonzero(result.data == 0) == 2
+
+    canonical = x_test.copy()
+    canonical.sum_duplicates()
+    for value in [x_test, canonical, x_test[:0, :].copy(), x_test[:, :0].copy()]:
+        expected = value.copy()
+        expected.sum_duplicates()
+        result = fn(value)
+        assert result.has_canonical_format
+        sparse_assert_fn(result, expected)
+        assert not ps.SparseTensorType.may_share_memory(result, value)
