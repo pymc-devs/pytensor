@@ -18,6 +18,7 @@ from pytensor.sparse import (
     CSMProperties,
     DenseFromSparse,
     Diag,
+    EnsureSortedIndices,
     GetItem2d,
     GetItem2Lists,
     GetItem2ListsGrad,
@@ -67,6 +68,21 @@ def numba_funcify_CSM(op, node, **kwargs):
             return sp.sparse.csc_matrix(constructor_arg, shape=shape_arg)
 
     return csm_constructor
+
+
+@register_funcify_default_op_cache_key(EnsureSortedIndices)
+def numba_funcify_EnsureSortedIndices(op, node, **kwargs):
+    inplace = op.inplace
+
+    @numba_basic.numba_njit
+    def ensure_sorted_indices(x):
+        if inplace:
+            x.sort_indices()
+            return x
+        return x.sorted_indices()
+
+    return ensure_sorted_indices
+
 
 
 @register_funcify_default_op_cache_key(Cast)
