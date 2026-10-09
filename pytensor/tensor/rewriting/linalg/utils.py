@@ -68,17 +68,19 @@ def get_assume_a(fgraph, A):
     return "gen"
 
 
-def strip_left_expand_dims(x: TensorVariable) -> tuple[TensorVariable, bool]:
+def strip_left_expand_dims_and_transpose(
+    x: TensorVariable,
+) -> tuple[TensorVariable, bool]:
     """Peel left expand_dims and left-expanded matrix transposes off ``x``.
 
-    Batched graphs pad matrix operands with left ``expand_dims``
-    (``RandomVariable.make_node`` and ``Blockwise.make_node`` both do), hiding
-    the owner that structural matchers look for.
+    Batched graphs insert dummy leading dims on matrix operands with left
+    ``expand_dims`` (``RandomVariable.make_node`` and ``Blockwise.make_node``
+    both do), hiding the owner that structural matchers look for.
 
     Returns
     -------
     core : TensorVariable
-        ``x`` with all left padding and left-expanded matrix transposes peeled.
+        ``x`` without the leading dummy dims and matrix transposes.
     transposed : bool
         Whether ``core``'s last two axes are transposed relative to ``x``.
     """
@@ -94,7 +96,7 @@ def strip_left_expand_dims(x: TensorVariable) -> tuple[TensorVariable, bool]:
                 return x, transposed
 
 
-def clients_through_padding(
+def clients_through_expand_dims(
     fgraph: FunctionGraph, var: TensorVariable
 ) -> Iterator[tuple[Apply, int]]:
     """Iterate over clients of ``var``, looking through left expand_dims clients.
@@ -104,12 +106,12 @@ def clients_through_padding(
     client : Apply
         A client of ``var`` or of one of its left expand_dims aliases.
     index : int
-        Index at which ``var`` (or its padded alias) enters ``client``.
+        Index at which ``var`` (or its expanded alias) enters ``client``.
     """
     for client, idx in fgraph.clients[var]:
         match client.op:
             case DimShuffle(is_left_expand_dims=True):
-                yield from clients_through_padding(fgraph, client.outputs[0])  # type: ignore[arg-type]
+                yield from clients_through_expand_dims(fgraph, client.outputs[0])  # type: ignore[arg-type]
             case _:
                 yield client, idx
 
@@ -117,10 +119,10 @@ def clients_through_padding(
 def rebroadcast_like(new: TensorVariable, old: TensorVariable) -> TensorVariable:
     """Match ``new``'s type to ``old``'s so it is a valid replacement for ``old``.
 
-    The counterpart of `strip_left_expand_dims`: a rewrite that matched
-    through padding builds its replacement from core variables, then restores
-    the original output type here. Leading broadcastable dims are added or
-    squeezed as needed.
+    The counterpart of `strip_left_expand_dims_and_transpose`: a rewrite that
+    matched through expanded aliases builds its replacement from core
+    variables, then restores the original output type here. Leading
+    broadcastable dims are added or squeezed as needed.
     """
     if new.type == old.type:
         return new

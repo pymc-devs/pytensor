@@ -84,7 +84,7 @@ def test_transpose_of_inv():
                 assert node.inputs[0].name == "X"
 
 
-def test_transpose_of_inv_through_padding():
+def test_transpose_of_inv_through_expand_dims():
     X = dmatrix("X")
     out = pt.expand_dims(matrix_inverse(X), 0).mT
     rewritten = rewrite_graph(out, include=("canonicalize",))
@@ -94,10 +94,10 @@ def test_transpose_of_inv_through_padding():
 @pytest.mark.parametrize(
     "a_batched, b_batched",
     [(False, False), (True, True), (False, True)],
-    ids=["unbatched", "batched", "padded"],
+    ids=["unbatched", "batched", "expanded"],
 )
 def test_inv_to_solve(a_batched, b_batched):
-    # In the "padded" case Blockwise.make_node pads inv(A) with a left expand_dims
+    # In the "expanded" case Blockwise.make_node wraps inv(A) in a left expand_dims
     A = pt.tensor("A", shape=(None,) * (2 + a_batched), dtype="float64")
     b = pt.tensor("b", shape=(None,) * (2 + b_batched), dtype="float64")
     out = matrix_inverse(A) @ b
@@ -105,14 +105,14 @@ def test_inv_to_solve(a_batched, b_batched):
     assert_equal_computations([rewritten], [solve(A, b)])
 
 
-def test_inv_to_solve_right_operand_through_padding():
+def test_inv_to_solve_right_operand_through_expand_dims():
     A = dmatrix("A")
     b = pt.tensor("b", shape=(None, None, None), dtype="float64")
 
     rewritten = rewrite_graph(
         b @ matrix_inverse(A), include=("canonicalize", "stabilize")
     )
-    # The padding around A.mT canonicalizes into a single fused DimShuffle
+    # The expand_dims around A.mT canonicalizes into a single fused DimShuffle
     expected = solve(A.dimshuffle("x", 1, 0), b.mT).mT
     assert_equal_computations([rewritten], [expected])
 
@@ -130,7 +130,7 @@ def test_inv_of_inv(inv_op_1, inv_op_2):
     assert rewritten_out == x
 
 
-def test_inv_of_inv_through_padding():
+def test_inv_of_inv_through_expand_dims():
     x = pt.matrix("x")
     out = inv(pt.expand_dims(pinv(x), 0))
     rewritten = rewrite_graph(out)
@@ -280,7 +280,7 @@ def test_lift_linalg_of_expanded_matrices(constructor, f_op, f, g_op, g):
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
 
 
-def test_lift_linalg_through_padding():
+def test_lift_linalg_through_expand_dims():
     a, b = dmatrix("a"), dmatrix("b")
     out = matrix_inverse(pt.expand_dims(pt.linalg.block_diag(a, b), 0))
 

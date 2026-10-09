@@ -225,13 +225,13 @@ def test_det_of_kronecker():
     [lambda x: pt.diagonal(x, axis1=-2, axis2=-1), pt.linalg.det],
     ids=["diag", "det"],
 )
-def test_reduction_of_structured_matrix_through_padding(
+def test_reduction_of_structured_matrix_through_expand_dims(
     build, structural_op, reduce_fn
 ):
     a, b = pt.dmatrices("a", "b")
     out = reduce_fn(pt.expand_dims(build(a, b), 0))
 
-    # Excluding the eager unbatch rewrite keeps the padding in place, so the
+    # Excluding the eager unbatch rewrite keeps the expand_dims in place, so the
     # look-through peel is what must find the structured matrix
     rewritten = rewrite_graph(
         out,

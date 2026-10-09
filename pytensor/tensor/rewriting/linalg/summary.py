@@ -29,10 +29,10 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.linalg.utils import (
-    clients_through_padding,
+    clients_through_expand_dims,
     matrix_diagonal_product,
     rebroadcast_like,
-    strip_left_expand_dims,
+    strip_left_expand_dims_and_transpose,
 )
 from pytensor.tensor.subtensor import _is_provably_non_negative
 
@@ -78,10 +78,12 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
 
     # det(X.mT) == det(X), so factorizations hanging off x itself and off its
     # stripped core are both usable
-    x_core, _ = strip_left_expand_dims(x)
-    factor_clients = clients_through_padding(fgraph, x)
+    x_core, _ = strip_left_expand_dims_and_transpose(x)
+    factor_clients = clients_through_expand_dims(fgraph, x)
     if x_core is not x:
-        factor_clients = chain(factor_clients, clients_through_padding(fgraph, x_core))
+        factor_clients = chain(
+            factor_clients, clients_through_expand_dims(fgraph, x_core)
+        )
 
     new_det = None
     for client, _ in factor_clients:
@@ -143,7 +145,7 @@ def det_of_factorized_matrix(fgraph, node):
     )
 
     # det(X.mT) == det(X), so the transposed flag is irrelevant
-    x, _ = strip_left_expand_dims(x)
+    x, _ = strip_left_expand_dims_and_transpose(x)
     x_node = x.owner
     if x_node is None:
         return None
@@ -214,7 +216,7 @@ def det_of_triangular(fgraph, node):
 def det_of_inv(fgraph, node):
     """Replace det(matrix_inverse(X)) with reciprocal(det(X))."""
     # det(X.mT) == det(X), so the transposed flag is irrelevant
-    core, _ = strip_left_expand_dims(node.inputs[0])
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
     match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
             return [rebroadcast_like(1 / det(X), node.outputs[0])]
@@ -239,7 +241,7 @@ def slogdet_specialization(fgraph, node):
         Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
     """
     dummy_replacements = {}
-    for client, _ in clients_through_padding(fgraph, node.outputs[0]):
+    for client, _ in clients_through_expand_dims(fgraph, node.outputs[0]):
         match (client.op, *client.outputs):
             # Check for sign(det)
             case (Elemwise(Sign()), sign):
@@ -247,7 +249,7 @@ def slogdet_specialization(fgraph, node):
 
             # Check for log(abs(det))
             case (Elemwise(Abs()), potential_log):
-                for client_2, _ in clients_through_padding(fgraph, potential_log):
+                for client_2, _ in clients_through_expand_dims(fgraph, potential_log):
                     match (client_2.op, *client_2.outputs):
                         case (Elemwise(Log()), log_abs_det):
                             dummy_replacements[log_abs_det] = "log_abs_det"

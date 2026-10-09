@@ -226,11 +226,11 @@ def test_slogdet_specialization(batch_dim):
     result.assert_eval(a)
 
 
-def test_slogdet_specialization_through_padding():
+def test_slogdet_specialization_through_expand_dims():
     x = pt.tensor("x", shape=(3, 3), dtype=config.floatX)
     log_det_x = pt.log(pt.expand_dims(det(x), 0))
 
-    # dimshuffle_lift pushes the padding inside the Switch
+    # dimshuffle_lift pushes the expand_dims inside the Switch
     sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
     expected = pt.where(
         pt.eq(pt.expand_dims(sign_det_x, 0), np.array([-1], dtype=np.int8)),
@@ -466,8 +466,8 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     assert_equal_computations([rewritten], [expected])
 
 
-def test_det_of_factorized_matrix_through_padding():
-    # The batched Cholesky keeps the padded Blockwise(Det) from being eagerly
+def test_det_of_factorized_matrix_through_expand_dims():
+    # The batched Cholesky keeps the expanded Blockwise(Det) from being eagerly
     # unbatched, so only the look-through peel can reach the factor
     x = pt.tensor("x", shape=(None, 3, 3))
     L = pt.linalg.cholesky(x)
@@ -486,19 +486,19 @@ def test_det_of_inv():
     assert_equal_computations([rewritten], [expected])
 
 
-def test_det_of_inv_through_padding():
+def test_det_of_inv_through_expand_dims():
     x = pt.tensor("x", shape=(3, 3))
     out = det(pt.expand_dims(pt.linalg.inv(x), 0))
-    # dimshuffle_lift moves the padding inside the division
+    # dimshuffle_lift moves the expand_dims inside the division
     expected = pt.as_tensor([1.0], dtype="float64") / pt.expand_dims(det(x), 0)
     rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
     assert_equal_computations([rewritten], [expected])
 
 
-def test_det_of_matrix_factorized_elsewhere_through_padding():
+def test_det_of_matrix_factorized_elsewhere_through_expand_dims():
     x = pt.tensor("x", shape=(3, 3))
 
-    # The Cholesky hangs off a padded alias of x, the det off x itself
+    # The Cholesky hangs off an expanded alias of x, the det off x itself
     L = pt.linalg.cholesky(pt.expand_dims(x, 0))
     d = det(x)
 

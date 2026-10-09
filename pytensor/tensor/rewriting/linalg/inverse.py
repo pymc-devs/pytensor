@@ -25,7 +25,7 @@ from pytensor.tensor.rewriting.linalg.utils import (
     MATRIX_INVERSE_OPS,
     get_assume_a,
     rebroadcast_like,
-    strip_left_expand_dims,
+    strip_left_expand_dims_and_transpose,
 )
 
 
@@ -34,7 +34,7 @@ from pytensor.tensor.rewriting.linalg.utils import (
 def transpose_of_inv(fgraph, node):
     # TODO: Transpose is much more frequent that MatrixInverse, flip the rewrite pattern matching.
     [A] = node.inputs
-    core, transposed = strip_left_expand_dims(A)
+    core, transposed = strip_left_expand_dims_and_transpose(A)
     match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()) as inv_op, X):
             # The node itself transposes once more on top of any peeled transposes
@@ -49,7 +49,7 @@ def inv_to_solve(fgraph, node):
     l, r = node.inputs
     [out] = node.outputs
 
-    l_core, l_transposed = strip_left_expand_dims(l)
+    l_core, l_transposed = strip_left_expand_dims_and_transpose(l)
     match l_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
             if l_transposed:
@@ -57,7 +57,7 @@ def inv_to_solve(fgraph, node):
             new_out = solve(X, r, assume_a=get_assume_a(fgraph, X))
             return [rebroadcast_like(new_out, out)]
 
-    r_core, r_transposed = strip_left_expand_dims(r)
+    r_core, r_transposed = strip_left_expand_dims_and_transpose(r)
     match r_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
             if r_transposed:
@@ -96,7 +96,7 @@ def inv_of_inv(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    inner, transposed = strip_left_expand_dims(node.inputs[0])
+    inner, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
     match inner.owner_op_and_inputs:
         case (Blockwise(MatrixInverse() | MatrixPinv()), X):
             # inv(inv(X).mT) == inv(inv(X.mT)) == X.mT
@@ -161,7 +161,7 @@ def lift_linalg_of_expanded_matrices(fgraph: FunctionGraph, node: Apply):
     [y] = node.inputs
     # block_diag(...).mT == block_diag(*m.mT) and kron(a, b).mT == kron(a.mT, b.mT),
     # so a peeled transpose moves onto the component matrices
-    y_core, transposed = strip_left_expand_dims(y)  # type: ignore[arg-type]
+    y_core, transposed = strip_left_expand_dims_and_transpose(y)  # type: ignore[arg-type]
 
     match y_core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *inner_matrices):

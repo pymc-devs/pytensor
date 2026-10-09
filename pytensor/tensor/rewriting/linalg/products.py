@@ -27,7 +27,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
     rebroadcast_like,
-    strip_left_expand_dims,
+    strip_left_expand_dims_and_transpose,
 )
 from pytensor.tensor.subtensor import AdvancedSubtensor
 from pytensor.tensor.variable import TensorConstant
@@ -79,7 +79,7 @@ def diag_of_blockdiag(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner block_diag operation
-    core, transposed = strip_left_expand_dims(node.inputs[0])
+    core, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
     if transposed:
         return None
     match core.owner_op_and_inputs:
@@ -112,7 +112,7 @@ def det_of_blockdiag(fgraph, node):
     """
     # Check for inner block_diag operation
     # det(X.mT) == det(X), so the transposed flag is irrelevant
-    core, _ = strip_left_expand_dims(node.inputs[0])
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
     match core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *sub_matrices):
             det_sub_matrices = [det(m) for m in sub_matrices]
@@ -142,7 +142,7 @@ def diag_of_kronecker(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner kron operation
-    core, transposed = strip_left_expand_dims(node.inputs[0])
+    core, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
     if transposed:
         return None
     match core.owner_op_and_inputs:
@@ -173,7 +173,7 @@ def det_of_kronecker(fgraph, node):
     """
     # Check for inner kron operation
     # det(X.mT) == det(X), so the transposed flag is irrelevant
-    core, _ = strip_left_expand_dims(node.inputs[0])
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
     match core.owner_op_and_inputs:
         case (KroneckerProduct(), a, b):
             dets = [det(a), det(b)]
@@ -272,9 +272,9 @@ def _selection_operand(fgraph, var):
             return pt.constant(np.argmax(S.data, axis=-2))
         return pt.argmax(S, axis=-2)
 
-    # A batched matmul left-expands a 2-D selection to batch rank; peel padding
-    # and matrix transposes to reach the underlying matrix.
-    core, transposed = strip_left_expand_dims(var)
+    # A batched matmul left-expands a 2-D selection to batch rank; peel the
+    # dummy dims and matrix transposes to reach the underlying matrix.
+    core, transposed = strip_left_expand_dims_and_transpose(var)
 
     if core.type.ndim != 2:
         return None
@@ -355,7 +355,7 @@ def det_of_permutation(fgraph, node):
     """
     # det(P.mT) == det(P): a permutation and its inverse have the same parity
     [x] = node.inputs
-    x_core, _ = strip_left_expand_dims(x)
+    x_core, _ = strip_left_expand_dims_and_transpose(x)
     if x_core.type.ndim != 2 or not check_assumption(fgraph, x_core, PERMUTATION):
         return None
     operand = _selection_operand(fgraph, x_core)

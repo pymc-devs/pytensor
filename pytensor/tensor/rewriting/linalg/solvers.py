@@ -41,10 +41,10 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
-    clients_through_padding,
+    clients_through_expand_dims,
     get_assume_a,
     rebroadcast_like,
-    strip_left_expand_dims,
+    strip_left_expand_dims_and_transpose,
 )
 
 
@@ -59,7 +59,7 @@ def generic_solve_to_solve_triangular(fgraph, node):
     """
     b_ndim = node.op.core_op.b_ndim
     A, b = node.inputs  # result is the solution to Ax=b
-    A_core, transposed = strip_left_expand_dims(A)
+    A_core, transposed = strip_left_expand_dims_and_transpose(A)
     match A_core.owner_op:
         case Blockwise(Cholesky(lower=lower)):
             if transposed:
@@ -146,7 +146,7 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     L_T, inner_result = node.inputs
 
     # Check L.T is a matrix transpose of a Cholesky factor
-    L, transposed = strip_left_expand_dims(L_T)
+    L, transposed = strip_left_expand_dims_and_transpose(L_T)
     if not transposed:
         return None
 
@@ -164,8 +164,8 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
         case _:
             return None
 
-    # inner_L must be the same Cholesky output as L, possibly behind padding
-    inner_L_core, inner_transposed = strip_left_expand_dims(inner_L)
+    # inner_L must be the same Cholesky output as L, possibly behind expand_dims
+    inner_L_core, inner_transposed = strip_left_expand_dims_and_transpose(inner_L)
     if inner_L_core is not L or inner_transposed:
         return None
 
@@ -250,7 +250,7 @@ def solve_of_inv_to_matmul(fgraph, node):
     A, b = node.inputs
     [old_out] = node.outputs
 
-    A_core, transposed = strip_left_expand_dims(A)
+    A_core, transposed = strip_left_expand_dims_and_transpose(A)
     match A_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
             if transposed:
@@ -329,7 +329,7 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
     """
     A, b = node.inputs
 
-    A_core, transposed = strip_left_expand_dims(A)
+    A_core, transposed = strip_left_expand_dims_and_transpose(A)
     if transposed:
         return None
     match A_core.owner_op_and_inputs:
@@ -488,7 +488,7 @@ def _split_decomp_and_solve_steps(
 
     def find_solve_clients(var, assume_a):
         clients = []
-        for cl, idx in clients_through_padding(fgraph, var):
+        for cl, idx in clients_through_expand_dims(fgraph, var):
             match (idx, cl.op):
                 case (0, Blockwise(Solve(assume_a=assume_a_var))) if (
                     assume_a_var == assume_a
@@ -501,7 +501,7 @@ def _split_decomp_and_solve_steps(
     if assume_a not in allowed_assume_a:
         return None
 
-    A, _ = strip_left_expand_dims(node.inputs[0])
+    A, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
 
     # Find Solve using A (or left expand_dims of A)
     # TODO: We could handle arbitrary shuffle of the batch dimensions, just need to propagate

@@ -26,9 +26,9 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
-    clients_through_padding,
+    clients_through_expand_dims,
     rebroadcast_like,
-    strip_left_expand_dims,
+    strip_left_expand_dims_and_transpose,
 )
 
 
@@ -43,7 +43,7 @@ def cholesky_ldotlt(fgraph, node):
     Also works with matmul.
     """
     # The matched products are symmetric, so the transposed flag is irrelevant
-    A, _ = strip_left_expand_dims(node.inputs[0])
+    A, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
     [out] = node.outputs
     lower = node.op.core_op.lower
 
@@ -100,13 +100,13 @@ def svd_uv_merge(fgraph, node):
     """
     [x] = node.inputs
 
-    # The sibling SVD may hang off a padded alias of x, or x may itself be the
-    # padded alias; scan clients of both forms. Transposes are not aliases of
+    # The sibling SVD may hang off an alias of x with dummy batch dims, or x may have
+    # such dims. Scan for clients of both forms. Transposes are not aliases of
     # the same decomposition, so a transposed core is not scanned.
-    x_core, transposed = strip_left_expand_dims(x)
-    svd_clients = clients_through_padding(fgraph, x)
+    x_core, transposed = strip_left_expand_dims_and_transpose(x)
+    svd_clients = clients_through_expand_dims(fgraph, x)
     if x_core is not x and not transposed:
-        svd_clients = chain(svd_clients, clients_through_padding(fgraph, x_core))
+        svd_clients = chain(svd_clients, clients_through_expand_dims(fgraph, x_core))
 
     if node.op.core_op.compute_uv:
         # compute_uv=True returns [u, s, v].

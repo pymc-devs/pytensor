@@ -116,8 +116,8 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
         )
 
 
-def test_cholesky_ldotlt_through_padding():
-    # The batched product keeps the padded Blockwise(Cholesky) from being
+def test_cholesky_ldotlt_through_expand_dims():
+    # The batched product keeps the expanded Blockwise(Cholesky) from being
     # eagerly unbatched, so only the look-through peel can reach the Dot
     L = tensor("L", shape=(None, None, None))
     L_assumed = assume(L, lower_triangular=True)
@@ -192,15 +192,15 @@ def test_svd_uv_merge():
     assert svd_counter == 1
 
 
-@pytest.mark.parametrize("padded_node", ["compute_uv", "no_compute_uv"])
-def test_svd_uv_merge_through_padding(padded_node):
+@pytest.mark.parametrize("expanded_node", ["compute_uv", "no_compute_uv"])
+def test_svd_uv_merge_through_expand_dims(expanded_node):
     # The compute_uv=False SVD should reuse s from the compute_uv=True SVD of
     # the same matrix (whose u is actually used), whichever of the two sees
-    # the padded alias
+    # the expanded alias
     x = pt.dmatrix("x")
     x_uv, x_s_only = (
         (pt.expand_dims(x, 0), x)
-        if padded_node == "compute_uv"
+        if expanded_node == "compute_uv"
         else (x, pt.expand_dims(x, 0))
     )
 

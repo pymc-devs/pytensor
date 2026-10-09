@@ -92,11 +92,11 @@ def test_psd_solve_with_chol():
     assert_equal_computations([rewritten], [expected])
 
 
-def test_generic_solve_to_solve_triangular_through_padding():
+def test_generic_solve_to_solve_triangular_through_expand_dims():
     A = pt.dmatrix("A")
     b = pt.tensor("b", shape=(None, None, None), dtype="float64")
 
-    # A batched b makes Blockwise.make_node pad cholesky(A) with a left expand_dims
+    # A batched b makes Blockwise.make_node wrap cholesky(A) in a left expand_dims
     L = cholesky(A, lower=True)
     rewritten = rewrite_graph(solve(L, b), include=("canonicalize", "stabilize"))
     assert_equal_computations([rewritten], [solve_triangular(L, b, lower=True)])
@@ -106,7 +106,7 @@ def test_generic_solve_to_solve_triangular_through_padding():
 def test_paired_triangular_solves_to_cho_solve(batched_b):
     """Test that paired triangular solves from Cholesky get fused into cho_solve."""
     A = matrix("A")
-    # A batched b makes Blockwise.make_node pad the Cholesky factor with a
+    # A batched b makes Blockwise.make_node wrap the Cholesky factor in a
     # left expand_dims on both solves
     b = tensor("b", shape=(None,) * (2 + batched_b))
 
@@ -470,7 +470,7 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
 def test_solve_of_inv_to_matmul(b_ndim, batched):
     X = pt.dmatrix("X")
-    # A batched b makes Blockwise.make_node pad inv(X) with a left expand_dims
+    # A batched b makes Blockwise.make_node wrap inv(X) in a left expand_dims
     b = pt.tensor("b", shape=(None,) * (b_ndim + batched), dtype="float64")
     out = solve(pt.linalg.inv(X), b, b_ndim=b_ndim)
 
@@ -491,13 +491,13 @@ def test_solve_of_inv_to_matmul(b_ndim, batched):
         (1, pt.linalg.solve, Solve, 0, 0),
         (2, pt.linalg.solve, Solve, 4, 4),
         (1, lambda T, b: solve_triangular(T, b, lower=True), SolveTriangular, 0, 0),
-        # Batched b with core blocks: Blockwise.make_node pads the block_diag
-        # with a left expand_dims, which the rewrite must see through. The
+        # Batched b with core blocks: Blockwise.make_node wraps the block_diag
+        # in a left expand_dims, which the rewrite must see through. The
         # per-block solves are then eagerly split into LU factor + solve,
         # since each core block is broadcast against the batched b
         (2, pt.linalg.solve, LUFactor, 0, 4),
     ],
-    ids=["vector_b", "matrix_b_batched", "solve_triangular", "padded_A"],
+    ids=["vector_b", "matrix_b_batched", "solve_triangular", "expanded_A"],
 )
 def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, a_batch, b_batch):
     A_shape = (a_batch, 3, 3) if a_batch else (3, 3)
@@ -509,7 +509,7 @@ def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, a_batch, b_bat
     A = pt.tensor("A", shape=A_shape)
     B = pt.tensor("B", shape=B_shape)
     b_var = pt.tensor("b", shape=b_shape)
-    # The padded_A case expects the eager LU split, which runs at specialize
+    # The expanded_A case expects the eager LU split, which runs at specialize
     f = function(
         [A, B, b_var],
         solve_fn(pt.linalg.block_diag(A, B), b_var),
