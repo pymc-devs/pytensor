@@ -33,7 +33,7 @@ from pytensor.tensor.rewriting.linalg.solvers import (
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_generic_solve_to_solve_triangular():
@@ -662,3 +662,73 @@ def test_orthogonal_solve_to_transpose_matmul():
     rewritten = rewrite_graph(out, include=rewrites)
     expected = rewrite_graph(Q_orth.mT @ b, include=rewrites)
     assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize("batched_b", [False, True], ids=["vector_b", "batched_b"])
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+def test_cho_solve_quadratic_form_to_whitened(lower, batched_b):
+    c = pt.dmatrix("c")
+    b = pt.tensor("b", shape=(None,) * (1 + batched_b), dtype="float64")
+
+    quad = (b * cho_solve((c, lower), b, b_ndim=1)).sum(axis=-1)
+
+    result = RewriteTester(
+        [c, b], [quad], include=["canonicalize", "stabilize", "specialize"]
+    )
+
+    rng = np.random.default_rng(81)
+    A = rng.normal(size=(4, 4))
+    A = A @ A.T + 4 * np.eye(4)
+    c_val = np.linalg.cholesky(A)
+    c_val = c_val if lower else c_val.T
+    b_val = rng.normal(size=(3, 4) if batched_b else (4,))
+    result.assert_eval(c_val, b_val)
+
+    toposort = result.rewr_fg.toposort()
+    core_ops = [getattr(node.op, "core_op", node.op) for node in toposort]
+    assert not any(isinstance(op, CholeskySolve) for op in core_ops)
+    assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
+
+
+def test_cho_solve_quadratic_form_from_triangular_pair():
+    A = pt.dmatrix("A")
+    b = pt.dvector("b")
+
+    # The emission form before specialize: two triangular solves against a
+    # Cholesky factor, contracted with b
+    L = cholesky(A, lower=True)
+    inner = solve_triangular(L, b, lower=True, b_ndim=1)
+    x = solve_triangular(L.mT, inner, lower=False, b_ndim=1)
+    quad = (b * x).sum()
+
+    rewritten = rewrite_graph(quad, include=("canonicalize", "stabilize", "specialize"))
+    expected = rewrite_graph(
+        (solve_triangular(L, b, lower=True, b_ndim=1) ** 2).sum(),
+        include=("canonicalize", "stabilize", "specialize"),
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_cho_solve_quadratic_form_keeps_sum_dtype():
+    c = pt.matrix("c", dtype="float32")
+    b = pt.vector("b", dtype="float32")
+
+    quad = (b * cho_solve((c, True), b, b_ndim=1)).sum(dtype="float64")
+    rewritten = rewrite_graph(quad, include=("canonicalize", "stabilize", "specialize"))
+
+    expected = rewrite_graph(
+        (solve_triangular(c, b, lower=True, b_ndim=1) ** 2).sum(dtype="float64"),
+        include=("canonicalize", "stabilize", "specialize"),
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_cho_solve_quadratic_form_with_reused_solve_not_whitened():
+    """A solve result with another consumer is left alone, so it is never computed twice."""
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    x = cho_solve((c, True), b, b_ndim=1)
+    quad = (b * x).sum()
+
+    result = RewriteTester([c, b], [quad, x], include=["specialize"])
+    result.assert_graph(quad, x)
