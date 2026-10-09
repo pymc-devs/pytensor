@@ -950,6 +950,38 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
         self.op_class = EnsureSortedIndices
         self.op = ensure_sorted_indices
 
+    @pytest.mark.parametrize(
+        "format, constructor, shape",
+        [
+            ("csr", scipy_sparse.csr_matrix, (2, 3)),
+            ("csc", scipy_sparse.csc_matrix, (3, 2)),
+        ],
+        ids=["csr", "csc"],
+    )
+    def test_inplace(self, format, constructor, shape):
+        x = sparse.matrix(format=format, name="x", dtype="float64")
+        value = constructor(
+            (
+                np.array([2.0, 3.0, 0.0]),
+                np.array([2, 0, 1], dtype="int32"),
+                np.array([0, 3, 3], dtype="int32"),
+            ),
+            shape=shape,
+        )
+        expected = value.sorted_indices()
+        fn = pytensor.function(
+            [In(x, mutable=True)],
+            self.op_class(inplace=True)(x),
+            accept_inplace=True,
+        )
+        result = fn(value)
+        # Also verify that the original input was mutated.
+        np.testing.assert_array_equal(value.data, expected.data)
+        np.testing.assert_array_equal(value.indices, expected.indices)
+        np.testing.assert_array_equal(result.data, expected.data)
+        np.testing.assert_array_equal(result.indices, expected.indices)
+        np.testing.assert_array_equal(result.indptr, expected.indptr)
+
     def test_op(self):
         for format in sparse.sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
