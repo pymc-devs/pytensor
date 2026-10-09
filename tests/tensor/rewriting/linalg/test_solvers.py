@@ -509,7 +509,12 @@ def test_block_diag_solve_pushdown(b_ndim, solve_fn, expected_op, a_batch, b_bat
     A = pt.tensor("A", shape=A_shape)
     B = pt.tensor("B", shape=B_shape)
     b_var = pt.tensor("b", shape=b_shape)
-    f = function([A, B, b_var], solve_fn(pt.linalg.block_diag(A, B), b_var))
+    # The padded_A case expects the eager LU split, which runs at specialize
+    f = function(
+        [A, B, b_var],
+        solve_fn(pt.linalg.block_diag(A, B), b_var),
+        mode=get_default_mode().including("specialize"),
+    )
 
     ops = [getattr(n.op, "core_op", n.op) for n in f.maker.fgraph.toposort()]
     assert not any(isinstance(op, BlockDiagonal) for op in ops)
