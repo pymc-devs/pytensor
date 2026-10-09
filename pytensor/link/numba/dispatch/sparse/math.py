@@ -12,8 +12,8 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.sparse import (
     Dot,
-    SparseDenseMultiply,
-    SparseDenseVectorMultiply,
+    MultiplySparseDense,
+    MultiplySparseDenseVector,
     SpSum,
     StructuredDot,
     StructuredDotGradCSC,
@@ -33,9 +33,9 @@ def numba_funcify_SpSum(op, node, **kwargs):
     return perform, cache_version
 
 
-@register_funcify_default_op_cache_key(SparseDenseMultiply)
-@register_funcify_default_op_cache_key(SparseDenseVectorMultiply)
-def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
+@register_funcify_default_op_cache_key(MultiplySparseDense)
+@register_funcify_default_op_cache_key(MultiplySparseDenseVector)
+def numba_funcify_MultiplySparseDense(op, node, **kwargs):
     x, y = node.inputs
     [z] = node.outputs
     out_dtype = z.type.dtype

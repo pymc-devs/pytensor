@@ -70,10 +70,10 @@ def eval_outputs(outputs):
 
 
 class TestAddMul:
-    def test_AddSS(self):
+    def test_AddSparseSparse(self):
         self._testSS(add)
 
-    def test_AddSD(self):
+    def test_AddSparseDense(self):
         self._testSD(add)
 
     def test_AddDS(self):
@@ -1128,7 +1128,7 @@ class TestMulSV:
                 utt.assert_allclose(spmat.toarray() * mat, out.toarray())
 
 
-class TestStructuredAddSV:
+class TestStructuredAddSparseDenseVector:
     def test_structured_add_s_v_grad(self):
         sp_types = {"csc": scipy_sparse.csc_matrix, "csr": scipy_sparse.csr_matrix}
         for format in ("csr", "csc"):
@@ -1156,13 +1156,13 @@ class TestStructuredAddSV:
                 )
 
 
-class TestAddSSData(utt.InferShapeTester):
+class TestAddSparseSparseData(utt.InferShapeTester):
     x = {}
     a = {}
 
     def setup_method(self):
         super().setup_method()
-        self.op_class = psm.AddSSData
+        self.op_class = psm.AddSparseSparseData
 
         for format in sparse_formats:
             variable = getattr(pytensor.sparse, format + "_matrix")
@@ -1560,8 +1560,8 @@ class TestVectorizeSparse:
     @pytest.mark.parametrize(
         "build",
         [
-            pytest.param(lambda a, d: add(a, d), id="AddSD"),
-            pytest.param(lambda a, d: multiply(a, d), id="SparseDenseMultiply"),
+            pytest.param(lambda a, d: add(a, d), id="AddSparseDense"),
+            pytest.param(lambda a, d: multiply(a, d), id="MultiplySparseDense"),
         ],
     )
     def test_sparse_dense_ops_batched_dense_raises(self, build):
