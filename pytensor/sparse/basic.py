@@ -1483,7 +1483,7 @@ class EnsureSortedIndices(Op):
     def __init__(self, inplace):
         self.inplace = inplace
         if self.inplace:
-            self.view_map = {0: [0]}
+            self.destroy_map = {0: [0]}
 
     def make_node(self, x):
         """
@@ -1501,7 +1501,8 @@ class EnsureSortedIndices(Op):
         (x,) = inputs
         (z,) = outputs
         if self.inplace:
-            z[0] = x.sort_indices()
+            x.sort_indices()
+            z[0] = x
         else:
             z[0] = x.sorted_indices()
 
