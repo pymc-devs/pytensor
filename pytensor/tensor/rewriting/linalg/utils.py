@@ -118,20 +118,14 @@ def rebroadcast_like(new: TensorVariable, old: TensorVariable) -> TensorVariable
 
     The counterpart of `strip_left_expand_dims_and_transpose`: a rewrite that
     matched through expanded aliases builds its replacement from core
-    variables, then restores the original output type here. Leading
-    broadcastable dims are added or squeezed as needed.
+    variables, then restores the original output type here.
     """
     if new.type == old.type:
         return new
 
-    if new.type.ndim > old.type.ndim:
-        new = new.squeeze(axis=tuple(range(new.type.ndim - old.type.ndim)))
-    else:
-        new = atleast_Nd(new, n=old.type.ndim)
+    new = atleast_Nd(new, n=old.type.ndim)
     if new.type.dtype != old.type.dtype:
         new = new.astype(old.type.dtype)
-    if not old.type.is_super(new.type):
-        new = pt.broadcast_to(new, old.shape)
     return new
 
 

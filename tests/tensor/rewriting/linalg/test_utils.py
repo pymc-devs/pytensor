@@ -54,12 +54,6 @@ def test_rebroadcast_like():
 
     expanded = pt.expand_dims(X, 0)
     assert_equal_computations([rebroadcast_like(X, expanded)], [expanded])
-    assert_equal_computations([rebroadcast_like(expanded, X)], [expanded.squeeze(0)])
-
-    batched = tensor("batched", shape=(5, None, None))
-    recovered = rebroadcast_like(X, batched)
-    assert recovered.type.ndim == 3
-    assert batched.type.is_super(recovered.type)
 
     int_X = matrix("int_X", dtype="int64")
     assert rebroadcast_like(int_X, X).type.dtype == X.type.dtype

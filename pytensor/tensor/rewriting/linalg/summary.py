@@ -122,6 +122,10 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         return None
 
     [det] = node.outputs
+    if new_det.type.ndim > det.type.ndim:
+        # A factorization found on an expanded alias of x carries the alias's
+        # dummy leading dims, which are broadcastable by construction
+        new_det = new_det.squeeze(axis=tuple(range(new_det.type.ndim - det.type.ndim)))
     new_det = rebroadcast_like(new_det, det)
     copy_stack_trace(det, new_det)
     return [new_det]

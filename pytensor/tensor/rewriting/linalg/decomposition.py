@@ -131,6 +131,13 @@ def svd_uv_merge(fgraph, node):
                 full_matrices=node.op.core_op.full_matrices,
                 compute_uv=False,
             )
+        if replacement_s.type.ndim > s.type.ndim:
+            # A sibling SVD found on an expanded alias of x carries the
+            # alias's dummy leading dims, which are broadcastable by
+            # construction
+            replacement_s = replacement_s.squeeze(
+                axis=tuple(range(replacement_s.type.ndim - s.type.ndim))
+            )
         return {s: rebroadcast_like(replacement_s, s)}
 
     else:
@@ -144,7 +151,13 @@ def svd_uv_merge(fgraph, node):
                 case (Blockwise(SVD(compute_uv=True)), u, s, v) if (
                     fgraph.clients[u] or fgraph.clients[v]
                 ):
-                    return [rebroadcast_like(s, node.outputs[0])]
+                    [own_s] = node.outputs
+                    if s.type.ndim > own_s.type.ndim:
+                        # A sibling SVD found on an expanded alias of x
+                        # carries the alias's dummy leading dims, which are
+                        # broadcastable by construction
+                        s = s.squeeze(axis=tuple(range(s.type.ndim - own_s.type.ndim)))
+                    return [rebroadcast_like(s, own_s)]
 
 
 @register_canonicalize
