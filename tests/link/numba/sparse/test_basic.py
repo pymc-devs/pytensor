@@ -676,3 +676,79 @@ def test_sparse_diag_not_square_raises(format):
 
     with pytest.raises(ValueError, match="Diag only apply on square matrix"):
         fn(x_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize("dtype", ("float64", "int32", "complex64"))
+@pytest.mark.parametrize("inplace", (False, True))
+def test_sparse_sorted_indices(format, dtype, inplace):
+    x = ps.matrix(format=format, name="x", dtype=dtype)
+    z = ps.EnsureSortedIndices(inplace=inplace)(x)
+    rng = np.random.default_rng(47)
+    x_test = sp.sparse.random(
+        8,
+        6,
+        density=0.5,
+        format=format,
+        dtype=dtype,
+        random_state=rng,
+        data_rvs=lambda size: rng.integers(1, 10, size=size),
+    )
+    for start, end in zip(x_test.indptr[:-1], x_test.indptr[1:], strict=True):
+        x_test.indices[start:end] = x_test.indices[start:end][::-1]
+        x_test.data[start:end] = x_test.data[start:end][::-1]
+    x_test.has_sorted_indices = False
+
+    fn, result = compare_numba_and_py_sparse([x], z, [x_test], inplace=inplace)
+    assert result.has_sorted_indices
+    assert result.nnz == x_test.nnz
+
+    for value in [x_test.sorted_indices(), x_test[:0, :].copy(), x_test[:, :0].copy()]:
+        expected = value.sorted_indices()
+        result = fn(value)
+        assert result.has_sorted_indices
+        sparse_assert_fn(result, expected)
+        assert ps.SparseTensorType.may_share_memory(result, value) == inplace
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize("dtype", ("float64", "int32", "complex64"))
+def test_sparse_sum_duplicates(format, dtype):
+    x = ps.matrix(format=format, name="x", dtype=dtype)
+    z = ps.sum_duplicates(x)
+    rng = np.random.default_rng(51)
+    x_test = sp.sparse.random(
+        8,
+        6,
+        density=0.5,
+        format=format,
+        dtype=dtype,
+        random_state=rng,
+        data_rvs=lambda size: rng.integers(1, 10, size=size),
+    )
+    original_nnz = x_test.nnz
+    x_test.data = np.repeat(x_test.data, 2)
+    x_test.indices = np.repeat(x_test.indices, 2)
+    x_test.indptr *= 2
+    x_test.data[:2] = [1, -1]
+    x_test.data[2:4] = 0
+    for start, end in zip(x_test.indptr[:-1], x_test.indptr[1:], strict=True):
+        x_test.indices[start:end] = x_test.indices[start:end][::-1]
+        x_test.data[start:end] = x_test.data[start:end][::-1]
+    x_test.has_sorted_indices = False
+    x_test.has_canonical_format = False
+
+    fn, result = compare_numba_and_py_sparse([x], z, [x_test])
+    assert result.has_canonical_format
+    assert result.nnz == original_nnz
+    assert np.count_nonzero(result.data == 0) == 2
+
+    canonical = x_test.copy()
+    canonical.sum_duplicates()
+    for value in [canonical, x_test[:0, :].copy(), x_test[:, :0].copy()]:
+        expected = value.copy()
+        expected.sum_duplicates()
+        result = fn(value)
+        assert result.has_canonical_format
+        sparse_assert_fn(result, expected)
+        assert not ps.SparseTensorType.may_share_memory(result, value)

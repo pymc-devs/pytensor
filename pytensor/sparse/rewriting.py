@@ -66,7 +66,7 @@ pytensor.compile.optdb.register(
 )
 
 
-class AddSD_ccode(_NoPythonCOp):
+class SparseDenseAddC(_NoPythonCOp):
     """
     Add a sparse and a dense matrix.
 
@@ -183,13 +183,13 @@ class AddSD_ccode(_NoPythonCOp):
         return (3,)
 
 
-@node_rewriter([spm.AddSD])
+@node_rewriter([spm.SparseDenseAdd])
 def local_inplace_addsd_ccode(fgraph, node):
-    """Rewrite to insert inplace versions of `AddSD`."""
+    """Rewrite to insert inplace versions of `SparseDenseAdd`."""
     out_dtype = ps.upcast(*[inp.type.dtype for inp in node.inputs])
     if out_dtype != node.inputs[1].dtype:
         return
-    new_node = AddSD_ccode(format=node.inputs[0].type.format, inplace=True)(
+    new_node = SparseDenseAddC(format=node.inputs[0].type.format, inplace=True)(
         *node.inputs
     )
     return [new_node]
@@ -216,13 +216,13 @@ def local_dense_from_sparse_sparse_from_dense(fgraph, node):
         return inp.owner.inputs
 
 
-@node_rewriter([spm.AddSD])
+@node_rewriter([spm.SparseDenseAdd])
 def local_addsd_ccode(fgraph, node):
     """
-    Convert AddSD to faster AddSD_ccode.
+    Convert SparseDenseAdd to faster SparseDenseAddC.
 
     """
-    new_node = AddSD_ccode(format=node.inputs[0].type.format)(*node.inputs)
+    new_node = SparseDenseAddC(format=node.inputs[0].type.format)(*node.inputs)
     return [new_node]
 
 
@@ -1595,7 +1595,7 @@ def local_mul_s_v(fgraph, node):
 register_specialize(local_mul_s_v, "cxx_only")
 
 
-class StructuredAddSVCSR(_NoPythonCOp):
+class StructuredSparseDenseVectorAddCSR(_NoPythonCOp):
     """Structured addition of a sparse matrix and a dense vector.
 
     The elements of the vector are are only added to the corresponding
@@ -1605,7 +1605,7 @@ class StructuredAddSVCSR(_NoPythonCOp):
     Notes
     -----
 
-    This `Op` is used as a rewritten form of `StructuredAddSV`.
+    This `Op` is used as a rewritten form of `StructuredSparseDenseVectorAdd`.
 
     """
 
@@ -1737,7 +1737,7 @@ class StructuredAddSVCSR(_NoPythonCOp):
         return self.__class__.__name__
 
 
-structured_add_s_v_csr = StructuredAddSVCSR()
+structured_add_s_v_csr = StructuredSparseDenseVectorAddCSR()
 
 
 # register a specialization to replace

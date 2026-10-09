@@ -376,7 +376,7 @@ def sp_sum(x, axis=None, sparse_grad=False):
     return SpSum(axis, sparse_grad)(x)
 
 
-class AddSS(Op):
+class SparseSparseAdd(Op):
     # add(sparse, sparse).
     # see the doc of add() for more detail.
     __props__ = ()
@@ -410,10 +410,10 @@ class AddSS(Op):
         return [shapes[0]]
 
 
-add_s_s = AddSS()
+add_s_s = SparseSparseAdd()
 
 
-class AddSSData(Op):
+class SparseSparseAddData(Op):
     """Add two sparse matrices assuming they have the same sparsity pattern.
 
     Notes
@@ -471,10 +471,10 @@ class AddSSData(Op):
         return [ins_shapes[0]]
 
 
-add_s_s_data = AddSSData()
+add_s_s_data = SparseSparseAddData()
 
 
-class AddSD(Op):
+class SparseDenseAdd(Op):
     # add(sparse, sparse).
     # see the doc of add() for more detail.
     __props__ = ()
@@ -513,10 +513,10 @@ class AddSD(Op):
         return [shapes[1]]
 
 
-add_s_d = AddSD()
+add_s_d = SparseDenseAdd()
 
 
-class StructuredAddSV(Op):
+class StructuredSparseDenseVectorAdd(Op):
     """Structured addition of a sparse matrix and a dense vector.
 
     The elements of the vector are only added to the corresponding
@@ -573,7 +573,7 @@ class StructuredAddSV(Op):
         return [ins_shapes[0]]
 
 
-structured_add_s_v = StructuredAddSV()
+structured_add_s_v = StructuredSparseDenseVectorAdd()
 
 
 def add(x, y):
@@ -950,7 +950,7 @@ def mul(x, y):
 mul.__doc__ = multiply.__doc__
 
 
-class __ComparisonOpSS(Op):
+class __SparseSparseComparisonOp(Op):
     """
     Used as a superclass for all comparisons between two sparses matrices.
 
@@ -1000,7 +1000,7 @@ class __ComparisonOpSS(Op):
         return [ins_shapes[0]]
 
 
-class __ComparisonOpSD(Op):
+class __SparseDenseComparisonOp(Op):
     """
     Used as a superclass for all comparisons between sparse and dense matrix.
 
@@ -1096,100 +1096,100 @@ def __ComparisonSwitch(SS, SD, DS):
     return helper
 
 
-class EqualSS(__ComparisonOpSS):
+class SparseSparseEqual(__SparseSparseComparisonOp):
     def comparison(self, x, y):
         return x == y
 
 
-equal_s_s = EqualSS()
+equal_s_s = SparseSparseEqual()
 
 
-class EqualSD(__ComparisonOpSD):
+class SparseDenseEqual(__SparseDenseComparisonOp):
     def comparison(self, x, y):
         return x == y
 
 
-equal_s_d = EqualSD()
+equal_s_d = SparseDenseEqual()
 
 
-class NotEqualSS(__ComparisonOpSS):
+class SparseSparseNotEqual(__SparseSparseComparisonOp):
     def comparison(self, x, y):
         return x != y
 
 
-not_equal_s_s = NotEqualSS()
+not_equal_s_s = SparseSparseNotEqual()
 
 
-class NotEqualSD(__ComparisonOpSD):
+class SparseDenseNotEqual(__SparseDenseComparisonOp):
     def comparison(self, x, y):
         return x != y
 
 
-not_equal_s_d = NotEqualSD()
+not_equal_s_d = SparseDenseNotEqual()
 
 
-class LessThanSS(__ComparisonOpSS):
+class SparseSparseLessThan(__SparseSparseComparisonOp):
     def comparison(self, x, y):
         return x < y
 
 
-less_than_s_s = LessThanSS()
+less_than_s_s = SparseSparseLessThan()
 
 
-class LessThanSD(__ComparisonOpSD):
+class SparseDenseLessThan(__SparseDenseComparisonOp):
     def comparison(self, x, y):
         return x < y
 
 
-less_than_s_d = LessThanSD()
+less_than_s_d = SparseDenseLessThan()
 
 
-class GreaterThanSS(__ComparisonOpSS):
+class SparseSparseGreaterThan(__SparseSparseComparisonOp):
     def comparison(self, x, y):
         return x > y
 
 
-greater_than_s_s = GreaterThanSS()
+greater_than_s_s = SparseSparseGreaterThan()
 
 
-class GreaterThanSD(__ComparisonOpSD):
+class SparseDenseGreaterThan(__SparseDenseComparisonOp):
     def comparison(self, x, y):
         return x > y
 
 
-greater_than_s_d = GreaterThanSD()
+greater_than_s_d = SparseDenseGreaterThan()
 
 
-class LessEqualSS(__ComparisonOpSS):
+class SparseSparseLessEqual(__SparseSparseComparisonOp):
     def comparison(self, x, y):
         return x <= y
 
 
-less_equal_s_s = LessEqualSS()
+less_equal_s_s = SparseSparseLessEqual()
 
 
-class LessEqualSD(__ComparisonOpSD):
+class SparseDenseLessEqual(__SparseDenseComparisonOp):
     def comparison(self, x, y):
         return x <= y
 
 
-less_equal_s_d = LessEqualSD()
+less_equal_s_d = SparseDenseLessEqual()
 
 
-class GreaterEqualSS(__ComparisonOpSS):
+class SparseSparseGreaterEqual(__SparseSparseComparisonOp):
     def comparison(self, x, y):
         return x >= y
 
 
-greater_equal_s_s = GreaterEqualSS()
+greater_equal_s_s = SparseSparseGreaterEqual()
 
 
-class GreaterEqualSD(__ComparisonOpSD):
+class SparseDenseGreaterEqual(__SparseDenseComparisonOp):
     def comparison(self, x, y):
         return x >= y
 
 
-greater_equal_s_d = GreaterEqualSD()
+greater_equal_s_d = SparseDenseGreaterEqual()
 
 eq = __ComparisonSwitch(equal_s_s, equal_s_d, equal_s_d)
 
@@ -2147,5 +2147,5 @@ def _vectorize_sparse_unsupported(op, node, *batched_inputs):
     )
 
 
-for _op_cls in (AddSD, SparseDenseMultiply):
+for _op_cls in (SparseDenseAdd, SparseDenseMultiply):
     _vectorize_node.register(_op_cls)(_vectorize_sparse_unsupported)
