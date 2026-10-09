@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterator
 
 from pytensor import tensor as pt
 from pytensor.assumptions import (
@@ -8,7 +9,8 @@ from pytensor.assumptions import (
     UPPER_TRIANGULAR,
     check_assumption,
 )
-from pytensor.graph import Constant
+from pytensor.graph import Apply, Constant
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Mul
@@ -64,6 +66,67 @@ def get_assume_a(fgraph, A):
     if getattr(A.tag, "symmetric", False) or check_assumption(fgraph, A, SYMMETRIC):
         return "sym"
     return "gen"
+
+
+def strip_left_expand_dims_and_transpose(
+    x: TensorVariable,
+) -> tuple[TensorVariable, bool]:
+    """Peel a left expand_dims or left-expanded matrix transpose off ``x``.
+
+    Batched graphs insert dummy leading dims on matrix operands with left
+    ``expand_dims`` (``RandomVariable.make_node`` and ``Blockwise.make_node``
+    both do), hiding the owner that structural matchers look for. One peel
+    suffices: adjacent DimShuffles are merged by ``local_dimshuffle_lift``.
+
+    Returns
+    -------
+    core : TensorVariable
+        ``x`` without the leading dummy dims and matrix transpose, if any.
+    transposed : bool
+        Whether ``core``'s last two axes are transposed relative to ``x``.
+    """
+    match x.owner_op_and_inputs:
+        case (DimShuffle(is_left_expand_dims=True), inner):
+            return inner, False  # type: ignore[return-value]
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+            return inner, True  # type: ignore[return-value]
+    return x, False
+
+
+def clients_through_expand_dims(
+    fgraph: FunctionGraph, var: TensorVariable
+) -> Iterator[tuple[Apply, int]]:
+    """Iterate over clients of ``var``, looking through left expand_dims clients.
+
+    Yields
+    ------
+    client : Apply
+        A client of ``var`` or of one of its left expand_dims aliases.
+    index : int
+        Index at which ``var`` (or its expanded alias) enters ``client``.
+    """
+    for client, idx in fgraph.clients[var]:
+        match client.op:
+            case DimShuffle(is_left_expand_dims=True):
+                yield from clients_through_expand_dims(fgraph, client.outputs[0])  # type: ignore[arg-type]
+            case _:
+                yield client, idx
+
+
+def rebroadcast_like(new: TensorVariable, old: TensorVariable) -> TensorVariable:
+    """Match ``new``'s type to ``old``'s so it is a valid replacement for ``old``.
+
+    The counterpart of `strip_left_expand_dims_and_transpose`: a rewrite that
+    matched through expanded aliases builds its replacement from core
+    variables, then restores the original output type here.
+    """
+    if new.type == old.type:
+        return new
+
+    new = atleast_Nd(new, n=old.type.ndim)
+    if new.type.dtype != old.type.dtype:
+        new = new.astype(old.type.dtype)
+    return new
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:

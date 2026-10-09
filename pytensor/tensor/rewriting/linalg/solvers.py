@@ -14,7 +14,7 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
-from pytensor.tensor.basic import atleast_Nd, split
+from pytensor.tensor.basic import split
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -40,8 +40,12 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg.utils import get_assume_a
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_expand_dims,
+    get_assume_a,
+    rebroadcast_like,
+    strip_left_expand_dims_and_transpose,
+)
 
 
 @register_stabilize
@@ -55,13 +59,12 @@ def generic_solve_to_solve_triangular(fgraph, node):
     """
     b_ndim = node.op.core_op.b_ndim
     A, b = node.inputs  # result is the solution to Ax=b
-    match A.owner_op_and_inputs:
-        case (Blockwise(Cholesky(lower=lower)), _):
+    A_core, transposed = strip_left_expand_dims_and_transpose(A)
+    match A_core.owner_op:
+        case Blockwise(Cholesky(lower=lower)):
+            if transposed:
+                lower = not lower
             return [solve_triangular(A, b, lower=lower, b_ndim=b_ndim)]
-        case (DimShuffle(is_left_expanded_matrix_transpose=True), A_T):
-            match A_T.owner_op:
-                case Blockwise(Cholesky(lower=lower)):
-                    return [solve_triangular(A, b, lower=not lower, b_ndim=b_ndim)]
 
 
 @register_specialize
@@ -143,11 +146,9 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     L_T, inner_result = node.inputs
 
     # Check L.T is a matrix transpose of a Cholesky factor
-    match L_T.owner_op_and_inputs:
-        case (DimShuffle(is_left_expanded_matrix_transpose=True), L):
-            pass
-        case _:
-            return None
+    L, transposed = strip_left_expand_dims_and_transpose(L_T)
+    if not transposed:
+        return None
 
     # L must be output of a Cholesky(lower=True)
     match L.owner_op:
@@ -163,12 +164,14 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
         case _:
             return None
 
-    # inner_L must be the same Cholesky output as L
-    if inner_L is not L:
+    # inner_L must be the same Cholesky output as L, possibly behind expand_dims
+    inner_L_core, inner_transposed = strip_left_expand_dims_and_transpose(inner_L)
+    if inner_L_core is not L or inner_transposed:
         return None
 
     b_ndim = core_op.b_ndim
     new_out = cho_solve((L, True), b, b_ndim=b_ndim)
+    new_out = rebroadcast_like(new_out, node.outputs[0])
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 
@@ -245,11 +248,20 @@ def solve_of_inv_to_matmul(fgraph, node):
     i.e., inv(X) @ x = b, so x = X @ b.
     """
     A, b = node.inputs
+    [old_out] = node.outputs
 
-    match A.owner_op_and_inputs:
+    A_core, transposed = strip_left_expand_dims_and_transpose(A)
+    match A_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            new_out = X @ b
-            copy_stack_trace(node.outputs[0], new_out)
+            if transposed:
+                X = X.mT
+            # X @ b misbroadcasts when b is a batched stack of vectors
+            if node.op.core_op.b_ndim == 1:
+                new_out = pt.matvec(X, b)
+            else:
+                new_out = X @ b
+            new_out = rebroadcast_like(new_out, old_out)
+            copy_stack_trace(old_out, new_out)
             return [new_out]
 
 
@@ -317,7 +329,10 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
     """
     A, b = node.inputs
 
-    match A.owner_op_and_inputs:
+    A_core, transposed = strip_left_expand_dims_and_transpose(A)
+    if transposed:
+        return None
+    match A_core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *blocks):
             pass
         case _:
@@ -355,6 +370,7 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
             for sol in per_block_solutions:
                 copy_stack_trace(node.outputs[0], sol)
             new_out = pt.linalg.block_diag(*per_block_solutions)
+            new_out = rebroadcast_like(new_out, node.outputs[0])
             copy_stack_trace(node.outputs[0], new_out)
             return [new_out]
 
@@ -370,6 +386,7 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
         per_block_solutions.append(sol)
 
     new_out = pt.concatenate(per_block_solutions, axis=split_axis)
+    new_out = rebroadcast_like(new_out, node.outputs[0])
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 
@@ -469,32 +486,14 @@ def _split_decomp_and_solve_steps(
     if not isinstance(node.op.core_op, Solve):
         return None
 
-    def get_root_A(a: TensorVariable) -> tuple[TensorVariable, bool]:
-        # Find the root variable of the first input to Solve
-        # If `a` is a left expand_dims or matrix transpose (DimShuffle variants),
-        # the root variable is the pre-DimShuffled input.
-        # Otherwise, `a` is considered the root variable.
-        # We also return whether the root `a` is transposed.
-        root_a = a
-        transposed = False
-        match a.owner_op_and_inputs:
-            case (DimShuffle(is_left_expand_dims=True), root_a):  # type: ignore[misc]
-                transposed = False
-            case (DimShuffle(is_left_expanded_matrix_transpose=True), root_a):  # type: ignore[misc]
-                transposed = True  # type: ignore[unreachable, unused-ignore]
-
-        return root_a, transposed
-
     def find_solve_clients(var, assume_a):
         clients = []
-        for cl, idx in fgraph.clients[var]:
-            match (idx, cl.op, *cl.outputs):
-                case (0, Blockwise(Solve(assume_a=assume_a_var)), *_) if (
+        for cl, idx in clients_through_expand_dims(fgraph, var):
+            match (idx, cl.op):
+                case (0, Blockwise(Solve(assume_a=assume_a_var))) if (
                     assume_a_var == assume_a
                 ):
                     clients.append(cl)
-                case (0, DimShuffle(is_left_expand_dims=True), cl_out):
-                    clients.extend(find_solve_clients(cl_out, assume_a))
         return clients
 
     assume_a = node.op.core_op.assume_a
@@ -502,7 +501,7 @@ def _split_decomp_and_solve_steps(
     if assume_a not in allowed_assume_a:
         return None
 
-    A, _ = get_root_A(node.inputs[0])
+    A, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
 
     # Find Solve using A (or left expand_dims of A)
     # TODO: We could handle arbitrary shuffle of the batch dimensions, just need to propagate
@@ -549,7 +548,7 @@ def _split_decomp_and_solve_steps(
             core_solve_op=client.op.core_op,
         )
         [old_x] = client.outputs
-        new_x = atleast_Nd(new_x, n=old_x.type.ndim).astype(old_x.type.dtype)
+        new_x = rebroadcast_like(new_x, old_x)
         copy_stack_trace(old_x, new_x)
         replacements[old_x] = new_x
 

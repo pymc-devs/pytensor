@@ -1,3 +1,5 @@
+from itertools import chain
+
 from pytensor import tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
@@ -23,6 +25,11 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_expand_dims,
+    rebroadcast_like,
+    strip_left_expand_dims_and_transpose,
+)
 
 
 @register_canonicalize
@@ -35,7 +42,9 @@ def cholesky_ldotlt(fgraph, node):
 
     Also works with matmul.
     """
-    A = node.inputs[0]
+    # The matched products are symmetric, so the transposed flag is irrelevant
+    A, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
+    [out] = node.outputs
     lower = node.op.core_op.lower
 
     match A.owner_op_and_inputs:
@@ -49,7 +58,7 @@ def cholesky_ldotlt(fgraph, node):
                         DimShuffle(is_left_expanded_matrix_transpose=True),
                         l_T,
                     ) if l_T == l:
-                        return [l] if lower else [r]
+                        return [rebroadcast_like(l if lower else r, out)]
 
             if getattr(r.tag, "upper_triangular", False) or check_assumption(
                 fgraph, r, UPPER_TRIANGULAR
@@ -60,7 +69,7 @@ def cholesky_ldotlt(fgraph, node):
                         DimShuffle(is_left_expanded_matrix_transpose=True),
                         r_T,
                     ) if r_T == r:
-                        return [l] if lower else [r]
+                        return [rebroadcast_like(l if lower else r, out)]
 
 
 @register_canonicalize
@@ -91,6 +100,14 @@ def svd_uv_merge(fgraph, node):
     """
     [x] = node.inputs
 
+    # The sibling SVD may hang off an alias of x with dummy batch dims, or x may have
+    # such dims. Scan for clients of both forms. Transposes are not aliases of
+    # the same decomposition, so a transposed core is not scanned.
+    x_core, transposed = strip_left_expand_dims_and_transpose(x)
+    svd_clients = clients_through_expand_dims(fgraph, x)
+    if x_core is not x and not transposed:
+        svd_clients = chain(svd_clients, clients_through_expand_dims(fgraph, x_core))
+
     if node.op.core_op.compute_uv:
         # compute_uv=True returns [u, s, v].
         u, s, v = node.outputs
@@ -101,7 +118,7 @@ def svd_uv_merge(fgraph, node):
 
         # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
         # First, iterate to see if there is an SVD Op that can be reused.
-        for cl, _ in fgraph.clients[x]:
+        for cl, _ in svd_clients:
             if cl is node:
                 continue
             match (cl.op, *cl.outputs):
@@ -114,20 +131,33 @@ def svd_uv_merge(fgraph, node):
                 full_matrices=node.op.core_op.full_matrices,
                 compute_uv=False,
             )
-        return {s: replacement_s}
+        if replacement_s.type.ndim > s.type.ndim:
+            # A sibling SVD found on an expanded alias of x carries the
+            # alias's dummy leading dims, which are broadcastable by
+            # construction
+            replacement_s = replacement_s.squeeze(
+                axis=tuple(range(replacement_s.type.ndim - s.type.ndim))
+            )
+        return {s: rebroadcast_like(replacement_s, s)}
 
     else:
         # compute_uv=False returns [s].
         # We want rewrite if there is another one with compute_uv=True.
         # For this case, just reuse the `s` from the one with compute_uv=True.
-        for cl, _ in fgraph.clients[x]:
+        for cl, _ in svd_clients:
             if cl is node:
                 continue
             match (cl.op, *cl.outputs):
                 case (Blockwise(SVD(compute_uv=True)), u, s, v) if (
                     fgraph.clients[u] or fgraph.clients[v]
                 ):
-                    return [s]
+                    [own_s] = node.outputs
+                    if s.type.ndim > own_s.type.ndim:
+                        # A sibling SVD found on an expanded alias of x
+                        # carries the alias's dummy leading dims, which are
+                        # broadcastable by construction
+                        s = s.squeeze(axis=tuple(range(s.type.ndim - own_s.type.ndim)))
+                    return [rebroadcast_like(s, own_s)]
 
 
 @register_canonicalize

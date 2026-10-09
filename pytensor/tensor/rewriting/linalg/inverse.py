@@ -24,6 +24,8 @@ from pytensor.tensor.rewriting.linalg.utils import (
     ASSUME_A_OF_TRANSPOSE,
     MATRIX_INVERSE_OPS,
     get_assume_a,
+    rebroadcast_like,
+    strip_left_expand_dims_and_transpose,
 )
 
 
@@ -32,9 +34,12 @@ from pytensor.tensor.rewriting.linalg.utils import (
 def transpose_of_inv(fgraph, node):
     # TODO: Transpose is much more frequent that MatrixInverse, flip the rewrite pattern matching.
     [A] = node.inputs
-    match A.owner_op_and_inputs:
+    core, transposed = strip_left_expand_dims_and_transpose(A)
+    match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()) as inv_op, X):
-            return [inv_op(node.op(X))]
+            # The node itself transposes once more on top of any peeled transposes
+            X_T = X if transposed else X.mT
+            return [rebroadcast_like(inv_op(X_T), node.outputs[0])]
 
 
 @register_stabilize
@@ -42,18 +47,28 @@ def transpose_of_inv(fgraph, node):
 def inv_to_solve(fgraph, node):
     """Replace inv(X) @ b with solve(X, b) and b @ inv(X) with solve(X.T, b.T).T."""
     l, r = node.inputs
+    [out] = node.outputs
 
-    match l.owner_op_and_inputs:
+    l_core, l_transposed = strip_left_expand_dims_and_transpose(l)
+    match l_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            return [solve(X, r, assume_a=get_assume_a(fgraph, X))]
+            if l_transposed:
+                X = X.mT
+            new_out = solve(X, r, assume_a=get_assume_a(fgraph, X))
+            return [rebroadcast_like(new_out, out)]
 
-    match r.owner_op_and_inputs:
+    r_core, r_transposed = strip_left_expand_dims_and_transpose(r)
+    match r_core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
+            if r_transposed:
+                X = X.mT
             assume_a = get_assume_a(fgraph, X)
             # X.mT == X for sym/pos, so reuse X and skip an unnecessary transpose.
             if assume_a in ("sym", "pos"):
-                return [solve(X, l.mT, assume_a=assume_a).mT]
-            return [solve(X.mT, l.mT, assume_a=ASSUME_A_OF_TRANSPOSE[assume_a]).mT]
+                new_out = solve(X, l.mT, assume_a=assume_a).mT
+            else:
+                new_out = solve(X.mT, l.mT, assume_a=ASSUME_A_OF_TRANSPOSE[assume_a]).mT
+            return [rebroadcast_like(new_out, out)]
 
     return None
 
@@ -81,10 +96,13 @@ def inv_of_inv(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    # Check if inner op is blockwise and possible inv
-    match node.inputs[0].owner_op_and_inputs:
+    inner, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
+    match inner.owner_op_and_inputs:
         case (Blockwise(MatrixInverse() | MatrixPinv()), X):
-            return [X]
+            # inv(inv(X).mT) == inv(inv(X.mT)) == X.mT
+            if transposed:
+                X = X.mT
+            return [rebroadcast_like(X, node.outputs[0])]
 
 
 @register_canonicalize
@@ -141,9 +159,18 @@ def lift_linalg_of_expanded_matrices(fgraph: FunctionGraph, node: Apply):
     # TODO: Simplify this if we end up Blockwising KroneckerProduct
     outer_op = node.op
     [y] = node.inputs
+    # block_diag(...).mT == block_diag(*m.mT) and kron(a, b).mT == kron(a.mT, b.mT),
+    # so a peeled transpose moves onto the component matrices
+    y_core, transposed = strip_left_expand_dims_and_transpose(y)  # type: ignore[arg-type]
 
-    match y.owner_op_and_inputs:
+    match y_core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *inner_matrices):
-            return [block_diag(*(outer_op(m) for m in inner_matrices))]
+            if transposed:
+                inner_matrices = [m.mT for m in inner_matrices]  # type: ignore[attr-defined]
+            new_out = block_diag(*(outer_op(m) for m in inner_matrices))
+            return [rebroadcast_like(new_out, node.outputs[0])]  # type: ignore[arg-type]
         case (KroneckerProduct(), *inner_matrices):  # type: ignore[unreachable, unused-ignore]
-            return [kron(*(outer_op(m) for m in inner_matrices))]  # type: ignore[unreachable, unused-ignore]
+            if transposed:  # type: ignore[unreachable, unused-ignore]
+                inner_matrices = [m.mT for m in inner_matrices]  # type: ignore[attr-defined]
+            new_out = kron(*(outer_op(m) for m in inner_matrices))
+            return [rebroadcast_like(new_out, node.outputs[0])]  # type: ignore[arg-type]

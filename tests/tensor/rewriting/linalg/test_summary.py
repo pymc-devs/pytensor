@@ -226,6 +226,23 @@ def test_slogdet_specialization(batch_dim):
     result.assert_eval(a)
 
 
+def test_slogdet_specialization_through_expand_dims():
+    x = pt.tensor("x", shape=(3, 3), dtype=config.floatX)
+    log_det_x = pt.log(pt.expand_dims(det(x), 0))
+
+    # dimshuffle_lift pushes the expand_dims inside the Switch
+    sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
+    expected = pt.where(
+        pt.eq(pt.expand_dims(sign_det_x, 0), np.array([-1], dtype=np.int8)),
+        np.array([np.nan], dtype=config.floatX),
+        pt.expand_dims(log_abs_det_x, 0),
+    )
+
+    result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
+    result.assert_graph(expected)
+    result.assert_eval(np.random.rand(3, 3))
+
+
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
     [
@@ -449,12 +466,61 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     assert_equal_computations([rewritten], [expected])
 
 
+def test_det_of_factorized_matrix_through_expand_dims():
+    # The batched Cholesky keeps the expanded Blockwise(Det) from being eagerly
+    # unbatched, so only the look-through peel can reach the factor
+    x = pt.tensor("x", shape=(None, 3, 3))
+    L = pt.linalg.cholesky(x)
+    d = det(pt.expand_dims(L, 0))
+
+    d_rewritten = rewrite_graph(d, include=["stabilize"])
+    expected = pt.expand_dims(pt.prod(pt.diagonal(L, axis1=-2, axis2=-1), axis=-1), 0)
+    assert_equal_computations([d_rewritten], [expected])
+
+
 def test_det_of_inv():
     x = pt.tensor("x", shape=(3, 3))
     out = det(pt.linalg.inv(x))
     expected = pt.as_tensor(1.0, dtype="float64") / det(x)
     rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
     assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_inv_through_expand_dims():
+    x = pt.tensor("x", shape=(3, 3))
+    out = det(pt.expand_dims(pt.linalg.inv(x), 0))
+    # dimshuffle_lift moves the expand_dims inside the division
+    expected = pt.as_tensor([1.0], dtype="float64") / pt.expand_dims(det(x), 0)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_matrix_factorized_elsewhere_through_expand_dims():
+    x = pt.tensor("x", shape=(3, 3))
+
+    # The Cholesky hangs off an expanded alias of x, the det off x itself
+    L = pt.linalg.cholesky(pt.expand_dims(x, 0))
+    d = det(x)
+
+    _, d_rewritten = rewrite_graph(
+        [L, d], include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = pt.sqr(pt.prod(pt.diagonal(L, axis1=-2, axis2=-1), axis=-1).squeeze(0))
+    assert_equal_computations([d_rewritten], [expected])
+
+
+def test_det_of_matrix_factorized_elsewhere_transposed_input():
+    x = pt.tensor("x", shape=(3, 3))
+
+    # Both the det and the Cholesky hang off the transpose itself
+    L = pt.linalg.cholesky(x.mT)
+    d = det(x.mT)
+
+    _, d_rewritten = rewrite_graph(
+        [L, d], include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = pt.sqr(pt.prod(pt.diag(L), axis=0))
+    assert_equal_computations([d_rewritten], [expected])
 
 
 def test_slogdet_of_inv():

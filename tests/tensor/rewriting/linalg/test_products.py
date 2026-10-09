@@ -215,6 +215,37 @@ def test_det_of_kronecker():
     )
 
 
+@pytest.mark.parametrize(
+    "build, structural_op",
+    [(pt.linalg.block_diag, BlockDiagonal), (pt.linalg.kron, KroneckerProduct)],
+    ids=["block_diag", "kron"],
+)
+@pytest.mark.parametrize(
+    "reduce_fn",
+    [lambda x: pt.diagonal(x, axis1=-2, axis2=-1), pt.linalg.det],
+    ids=["diag", "det"],
+)
+def test_reduction_of_structured_matrix_through_expand_dims(
+    build, structural_op, reduce_fn
+):
+    a, b = pt.dmatrices("a", "b")
+    out = reduce_fn(pt.expand_dims(build(a, b), 0))
+
+    # Excluding the eager unbatch rewrite keeps the expand_dims in place, so the
+    # look-through peel is what must find the structured matrix
+    rewritten = rewrite_graph(
+        out,
+        include=("canonicalize", "stabilize"),
+        exclude=("local_eager_useless_unbatched_blockwise",),
+    )
+    core_ops = {
+        anc.owner.op.core_op if isinstance(anc.owner.op, Blockwise) else anc.owner.op
+        for anc in ancestors([rewritten])
+        if anc.owner is not None
+    }
+    assert not any(isinstance(op, structural_op) for op in core_ops)
+
+
 def test_slogdet_kronecker_rewrite():
     a, b = pt.dmatrices("a", "b")
     kron_prod = pt.linalg.kron(a, b)

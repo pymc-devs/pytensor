@@ -25,6 +25,10 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.linalg.utils import (
+    rebroadcast_like,
+    strip_left_expand_dims_and_transpose,
+)
 from pytensor.tensor.subtensor import AdvancedSubtensor
 from pytensor.tensor.variable import TensorConstant
 
@@ -75,10 +79,14 @@ def diag_of_blockdiag(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner block_diag operation
-    match node.inputs[0].owner_op_and_inputs:
+    core, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
+    if transposed:
+        return None
+    match core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *submatrices):
             submatrices_diag = [diag(m) for m in submatrices]
-            return [concatenate(submatrices_diag, axis=-1)]
+            new_out = concatenate(submatrices_diag, axis=-1)
+            return [rebroadcast_like(new_out, node.outputs[0])]
 
 
 @register_canonicalize
@@ -103,10 +111,13 @@ def det_of_blockdiag(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner block_diag operation
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *sub_matrices):
             det_sub_matrices = [det(m) for m in sub_matrices]
-            return [prod(det_sub_matrices, axis=-1)]
+            new_out = prod(det_sub_matrices, axis=-1)
+            return [rebroadcast_like(new_out, node.outputs[0])]
 
 
 @register_canonicalize
@@ -131,11 +142,14 @@ def diag_of_kronecker(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner kron operation
-    match node.inputs[0].owner_op_and_inputs:
+    core, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
+    if transposed:
+        return None
+    match core.owner_op_and_inputs:
         case (KroneckerProduct(), a, b):
             diag_a, diag_b = diag(a), diag(b)
             outer_prod_as_vector = outer(diag_a, diag_b).flatten()
-            return [outer_prod_as_vector]
+            return [rebroadcast_like(outer_prod_as_vector, node.outputs[0])]
 
 
 @register_canonicalize
@@ -158,7 +172,9 @@ def det_of_kronecker(fgraph, node):
         List of optimized variables, or None if no optimization was performed
     """
     # Check for inner kron operation
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (KroneckerProduct(), a, b):
             dets = [det(a), det(b)]
             sizes = [a.shape[-1], b.shape[-1]]
@@ -166,7 +182,7 @@ def det_of_kronecker(fgraph, node):
             det_final = prod(
                 [dets[i] ** (prod_sizes / sizes[i]) for i in range(2)], axis=-1
             )
-            return [det_final]
+            return [rebroadcast_like(det_final, node.outputs[0])]
 
 
 @register_canonicalize
@@ -256,25 +272,15 @@ def _selection_operand(fgraph, var):
             return pt.constant(np.argmax(S.data, axis=-2))
         return pt.argmax(S, axis=-2)
 
-    # A batched matmul left-expands a 2-D selection to batch rank with a single
-    # broadcast DimShuffle; peel it to reach the underlying matrix.
-    match var.owner_op_and_inputs:
-        case (DimShuffle(is_left_expand_dims=True), inner):
-            core = inner
-        case _:
-            core = var
+    # A batched matmul left-expands a 2-D selection to batch rank; peel the
+    # dummy dims and matrix transposes to reach the underlying matrix.
+    core, transposed = strip_left_expand_dims_and_transpose(var)
 
     if core.type.ndim != 2:
         return None
 
     if check_assumption(fgraph, core, SELECTION):
-        return recover_index(core), False, core.shape[0]
-
-    match core.owner_op_and_inputs:
-        case (DimShuffle(is_matrix_transpose=True), s) if (
-            s.type.ndim == 2 and check_assumption(fgraph, s, SELECTION)
-        ):
-            return recover_index(s), True, s.shape[0]
+        return recover_index(core), transposed, core.shape[0]
 
     return None
 
@@ -347,15 +353,18 @@ def det_of_permutation(fgraph, node):
     out-of-order pairs (``i < j`` with ``idx[i] > idx[j]``) of the index that orders its
     columns, ``P = eye(n)[:, idx]``.
     """
+    # det(P.mT) == det(P): a permutation and its inverse have the same parity
     [x] = node.inputs
-    if x.type.ndim != 2 or not check_assumption(fgraph, x, PERMUTATION):
+    x_core, _ = strip_left_expand_dims_and_transpose(x)
+    if x_core.type.ndim != 2 or not check_assumption(fgraph, x_core, PERMUTATION):
         return None
-    operand = _selection_operand(fgraph, x)
+    operand = _selection_operand(fgraph, x_core)
     if operand is None:
         return None
 
     idx = operand[0]
     inversions = pt.triu((idx[:, None] > idx[None, :]).astype("int64"), k=1).sum()
     sign = (1 - 2 * (inversions % 2)).astype(node.outputs[0].type.dtype)
+    sign = rebroadcast_like(sign, node.outputs[0])
     copy_stack_trace(node.outputs[0], sign)
     return [sign]
