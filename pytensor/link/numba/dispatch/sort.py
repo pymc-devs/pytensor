@@ -50,7 +50,7 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
     axis = op.axis
 
     @numba_basic.numba_njit
-    def argort_f(X):
+    def argsort_f(X):
         Y = np.swapaxes(X, axis, 0)
         result = np.empty_like(Y, dtype="int64")
 
@@ -62,4 +62,4 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
         result = np.swapaxes(result, 0, axis)
         return result
 
-    return argort_f
+    return argsort_f

@@ -40,6 +40,8 @@ class TestSort:
             SortOp("quicksort", -1)
         with pytest.raises(np.exceptions.AxisError):
             SortOp("quicksort", 2)(dmatrix())
+        # A constant scalar is still accepted and normalized, as for join
+        assert sort(dmatrix(), constant(-1)).owner.op == SortOp("quicksort", 1)
 
     def test1(self):
         a = dmatrix()
@@ -50,7 +52,7 @@ class TestSort:
     def test2(self):
         a = dmatrix()
         for axis_val in 0, 1:
-            w = sort(a, constant(axis_val, dtype="int64"))
+            w = sort(a, axis_val)
             assert w.owner.op.axis == axis_val
             f = pytensor.function([a], w)
             gv = f(self.m_val)
@@ -193,7 +195,7 @@ def test_argsort():
     # Example 2
     a = dmatrix()
     for axis_val in 0, 1:
-        w = argsort(a, constant(axis_val, dtype="int64"))
+        w = argsort(a, axis_val)
         assert w.owner.op.axis == axis_val
         f = pytensor.function([a], w)
         gv = f(m_val)
@@ -233,11 +235,6 @@ def test_argsort():
     gv = f(m_val)
     gt = np.argsort(m_val, None)
     utt.assert_allclose(gv, gt)
-
-    with pytest.raises(TypeError, match="axis of argsort must be a constant integer"):
-        argsort(dmatrix(), lscalar())
-    with pytest.raises(ValueError, match="ArgSort axis must be non-negative"):
-        ArgSortOp("quicksort", -1)
 
 
 def test_argsort_grad():
