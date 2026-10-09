@@ -2027,6 +2027,7 @@ class Usmm(Op):
     Notes
     -----
     At least one of `x` or `y` must be a sparse matrix.
+    `z` follows NumPy broadcasting rules when added to the dense product.
 
     """
 
@@ -2055,14 +2056,18 @@ class Usmm(Op):
             # We should use Dot22 and Gemm in that case.
             raise TypeError(x)
 
+        # Accept alpha up to 2D, but only when it can be converted to scalar
+        alpha = ptb.as_tensor_variable(alpha)
+        if alpha.ndim > 2:
+            raise TypeError("Usmm alpha must have at most two dimensions")
+        alpha = ptb.as_tensor_variable(alpha, ndim=0)
+
         dtype_out = ps.upcast(
             alpha.type.dtype, x.type.dtype, y.type.dtype, z.type.dtype
         )
-        alpha = ptb.as_tensor_variable(alpha)
         z = ptb.as_tensor_variable(z)
 
         assert z.type.ndim == 2
-        assert alpha.type.shape == (1,) * alpha.type.ndim
         if not psb._is_sparse_variable(x):
             x = ptb.as_tensor_variable(x)
             assert y.format in ("csr", "csc")
@@ -2094,7 +2099,11 @@ class Usmm(Op):
             rval *= alpha  # Faster because operation is inplace
         else:
             rval = rval * alpha
-        if rval.dtype == z.dtype:
+        if (
+            rval.dtype == z.dtype
+            and z.shape[0] in (1, rval.shape[0])
+            and z.shape[1] in (1, rval.shape[1])
+        ):
             rval += z  # Faster because operation is inplace
         else:
             rval = rval + z
