@@ -721,3 +721,14 @@ def test_cho_solve_quadratic_form_keeps_sum_dtype():
         include=("canonicalize", "stabilize", "specialize"),
     )
     assert_equal_computations([rewritten], [expected])
+
+
+def test_cho_solve_quadratic_form_with_reused_solve_not_whitened():
+    """A solve result with another consumer is left alone, so it is never computed twice."""
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    x = cho_solve((c, True), b, b_ndim=1)
+    quad = (b * x).sum()
+
+    result = RewriteTester([c, b], [quad, x], include=["specialize"])
+    result.assert_graph(quad, x)
