@@ -390,7 +390,7 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
             for(int i=0;i<PyArray_NDIM({iname});i++){{
                 if(PyArray_DIMS({iname})[i]==0 && tosum[i]){{
                     PyErr_Format(PyExc_ValueError,
-                        "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %%d",i);
+                        "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %d",i);
                     {sub["fail"]};
                 }}
             }}
