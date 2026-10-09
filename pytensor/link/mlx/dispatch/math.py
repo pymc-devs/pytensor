@@ -23,6 +23,13 @@ def mlx_funcify_Max(op, node=None, **kwargs):
 
         keepdims = getattr(op, "keepdims", False)
 
+        if op.initial and x.size == 0:
+            # MLX shapes are concrete, so an empty reduction can be filled directly
+            reduced = range(x.ndim) if reduce_axes is None else reduce_axes
+            out_shape = [s for i, s in enumerate(x.shape) if i not in reduced]
+            fill = op.initial_value(node.outputs[0].type.dtype)
+            return mx.full(out_shape, fill, dtype=x.dtype)
+
         return mx.max(x, axis=reduce_axes, keepdims=keepdims)
 
     return max_fn

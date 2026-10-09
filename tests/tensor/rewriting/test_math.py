@@ -2988,6 +2988,16 @@ class TestReduceChain:
         [new_out] = local_reduce_chain.transform(fg, out.owner)
         assert equal_computations([new_out], [x.all(axis=(0, 2))])
 
+    @pytest.mark.parametrize("inner_initial", [None, -np.inf])
+    @pytest.mark.parametrize("outer_initial", [None, -np.inf])
+    def test_max_initial(self, inner_initial, outer_initial):
+        x = tensor3()
+        out = x.max(axis=-1, initial=inner_initial).max(axis=0, initial=outer_initial)
+        fg = FunctionGraph([x], [out], clone=False)
+        [new_out] = local_reduce_chain.transform(fg, out.owner)
+        initial = -np.inf if -np.inf in (inner_initial, outer_initial) else None
+        assert equal_computations([new_out], [x.max(axis=(0, 2), initial=initial)])
+
 
 class TestLocalSumProd:
     """Test sum/prod rewrites."""
@@ -3455,6 +3465,26 @@ class TestLocalSumProd:
         result = RewriteTester([v], [pt.alloc(v, 4, 6, 3).sum(axis=1)], **cfg)
         result.assert_graph(pt.alloc(v * np.array([6]), 4, 3))
         result.assert_eval(v_val)
+
+    def test_local_careduce_of_alloc_initial(self):
+        # A broadcast axis may be empty at runtime, where the result is `initial`
+        v = vector("v")
+        n = scalar("n", dtype="int64")
+        alloc_v = pt.alloc(v, n, 3)
+        outs = [
+            Max(axis=0, initial=True)(alloc_v),
+            Max(axis=None, initial=True)(alloc_v),
+        ]
+        f = function([v, n], outs, mode=get_default_mode().including("specialize"))
+        assert not any(isinstance(node.op, Alloc) for node in f.maker.fgraph.toposort())
+
+        v_val = np.array([1.0, 3.0, 2.0], dtype=v.dtype)
+        dropped, reduced = f(v_val, 0)
+        np.testing.assert_array_equal(dropped, np.full(3, -np.inf))
+        assert reduced == -np.inf
+        dropped, reduced = f(v_val, 2)
+        np.testing.assert_array_equal(dropped, v_val)
+        assert reduced == 3.0
 
     @pytest.mark.parametrize("reduce_op", [Max, Min, All, Any])
     def test_local_careduce_of_alloc_idempotent(self, reduce_op):

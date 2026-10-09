@@ -263,6 +263,13 @@ def test_logsumexp(shape, axis, keepdims):
     )
 
 
+def test_logsumexp_zero_size():
+    # https://github.com/pymc-devs/pytensor/issues/603
+    x = tensor("x", shape=(None, 2))
+    out = function([x], logsumexp(x))(np.zeros((0, 2), dtype=x.dtype))
+    assert out == -np.inf
+
+
 @pytest.mark.parametrize("mode", ["FAST_RUN", "FAST_COMPILE"])
 def test_logsumexp_logaddexp_stable_grad(mode):
     """Both helpers promise a stable forward, so their gradient must be stable too.

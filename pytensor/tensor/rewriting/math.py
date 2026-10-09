@@ -2116,13 +2116,20 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     if outer_op.scalar_op != inner_op.scalar_op:
         return None
 
+    # Keeping `initial` from either side only turns an empty-axis error into it
+    clone_kwargs = {}
+    if getattr(inner_op, "initial", False):
+        if not hasattr(outer_op, "initial"):
+            return None
+        clone_kwargs["initial"] = True
+
     outer_axis = outer_op.axis
     inner_axis = inner_op.axis
     [x] = inner_reduce.owner.inputs
     # check to see either the inner or outer prod is doing a
     # product over all axis, in which case we can remove it
     if outer_axis is None or inner_axis is None:
-        return [outer_op.clone(axis=None)(x)]
+        return [outer_op.clone(axis=None, **clone_kwargs)(x)]
 
     # Merge axis
     newaxis = list(inner_axis)
@@ -2135,7 +2142,7 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
         newaxis.append(new_i)
 
     assert len(newaxis) == len(inner_axis) + len(outer_axis)
-    return [outer_op.clone(axis=sorted(newaxis))(x)]
+    return [outer_op.clone(axis=sorted(newaxis), **clone_kwargs)(x)]
 
 
 @register_canonicalize
@@ -2310,6 +2317,19 @@ def local_careduce_of_alloc(fgraph, node):
                 # downcast); either would be amplified by the mul/pow below.
                 size = size.astype("float32")
             value = value * size if isinstance(node.op, Sum) else value**size
+
+    # With `initial`, a broadcast axis that is empty at runtime makes the result `initial`
+    if getattr(node.op, "initial", False):
+        broadcast_shapes = [
+            shapes[a] for a in axis if a < offset or value_bcast[a - offset]
+        ]
+        if broadcast_shapes:
+            dtype = node.outputs[0].dtype
+            value = switch(
+                eq(variadic_mul(*broadcast_shapes), 0),
+                np.asarray(node.op.initial_value(dtype), dtype=dtype),
+                value,
+            )
 
     # The reduction may change the dtype; a single elemwise has no accumulation
     # error, so ignore acc_dtype and just cast to the reduction's output dtype.

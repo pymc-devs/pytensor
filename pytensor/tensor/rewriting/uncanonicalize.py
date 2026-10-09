@@ -64,7 +64,9 @@ def local_max_to_min(fgraph, node):
         ):
             neg_node = max.owner.inputs[0]
             if neg_node.owner and neg_node.owner.op == neg:
-                new = Min(max.owner.op.axis)(neg_node.owner.inputs[0])
+                new = Min(
+                    max.owner.op.axis, initial=getattr(max.owner.op, "initial", False)
+                )(neg_node.owner.inputs[0])
                 return [copy_stack_trace(node.outputs[0], new)]
 
     return False

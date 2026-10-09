@@ -675,13 +675,13 @@ class _tensor_py_operators:
             self, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected
         )
 
-    def min(self, axis=None, keepdims=False):
+    def min(self, axis=None, keepdims=False, initial=None):
         """See :func:`pytensor.tensor.math.min`."""
-        return pt.math.min(self, axis, keepdims=keepdims)
+        return pt.math.min(self, axis, keepdims=keepdims, initial=initial)
 
-    def max(self, axis=None, keepdims=False):
+    def max(self, axis=None, keepdims=False, initial=None):
         """See :func:`pytensor.tensor.math.max`."""
-        return pt.math.max(self, axis, keepdims=keepdims)
+        return pt.math.max(self, axis, keepdims=keepdims, initial=initial)
 
     def argmin(self, axis=None, keepdims=False):
         """See :func:`pytensor.tensor.math.argmin`."""

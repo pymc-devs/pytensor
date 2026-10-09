@@ -369,6 +369,9 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
         setup, alloc, loop, cast = super()._c_all(
             node, name, input_names, output_names, sub
         )
+        if getattr(self, "initial", False):
+            # Empty reductions return the scalar_op identity
+            return setup, alloc, loop, cast
 
         # We add an additional check for zero-sized dimensions (This seems like
         # something that could enabled in `elemwise_cgen.make_checks`.)
@@ -411,11 +414,51 @@ class MaxAndMinCAReduce(NonZeroDimsCAReduce):
 
     Subclasses only need to bind the appropriate scalar ``Op`` (``maximum`` or
     ``minimum``) in their ``__init__`` and set ``nfunc_spec``.
+
+    With ``initial=True`` an empty reduction returns the identity of the scalar
+    ``Op`` (``-inf`` for ``Max``, ``inf`` for ``Min``) instead of raising, like
+    NumPy's ``initial``. For integer and boolean inputs the lowest/highest value of
+    the dtype is used.
     """
+
+    __props__ = (*NonZeroDimsCAReduce.__props__, "initial")
+
+    def __init__(self, scalar_op, axis, initial=False):
+        self.initial = bool(initial)
+        super().__init__(scalar_op, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
-        return type(self)(axis=axis)
+        initial = kwargs.get("initial", self.initial)
+        return type(self)(axis=axis, initial=initial)
+
+    def __str__(self):
+        if not self.initial:
+            return super().__str__()
+        return f"{type(self).__name__}{{{self._axis_str()}, initial}}"
+
+    def initial_value(self, dtype):
+        """The identity as a value of `dtype` (its bounds for ints and bools), or None."""
+        if not self.initial:
+            return None
+        identity = self.scalar_op.identity
+        dtype = np.dtype(dtype)
+        if dtype.kind == "f":
+            return identity
+        if dtype.kind == "b":
+            return identity > 0
+        info = np.iinfo(dtype)
+        return info.max if identity > 0 else info.min
+
+    def perform(self, node, inp, out):
+        if not self.initial:
+            return super().perform(node, inp, out)
+        [x] = inp
+        dtype = node.outputs[0].type.dtype
+        out[0][0] = np.asarray(
+            self.ufunc.reduce(x, axis=self.axis, initial=self.initial_value(dtype)),
+            dtype=dtype,
+        )
 
     def pullback(self, inputs, outputs, output_grads):
         # The strict-sense mathematical gradient of a maximum/minimum reduction
@@ -468,18 +511,18 @@ class MaxAndMinCAReduce(NonZeroDimsCAReduce):
 class Max(MaxAndMinCAReduce):
     nfunc_spec = ("max", 1, 1)
 
-    def __init__(self, axis):
-        super().__init__(ps.maximum, axis)
+    def __init__(self, axis, initial=False):
+        super().__init__(ps.maximum, axis, initial=initial)
 
 
 class Min(MaxAndMinCAReduce):
     nfunc_spec = ("min", 1, 1)
 
-    def __init__(self, axis):
-        super().__init__(ps.minimum, axis)
+    def __init__(self, axis, initial=False):
+        super().__init__(ps.minimum, axis, initial=initial)
 
 
-def max(x, axis=None, keepdims=False):
+def max(x, axis=None, keepdims=False, initial=None):
     """
     Returns maximum elements obtained by iterating over given axis.
 
@@ -492,20 +535,27 @@ def max(x, axis=None, keepdims=False):
         If this is set to True, the axes which are reduced are left in
         the result as dimensions with size one. With this option, the result
         will broadcast correctly against the original tensor.
+    initial: None or -inf
+        If ``-inf``, reducing an empty axis returns ``-inf`` (the lowest value
+        of the dtype for integer inputs) instead of raising. Other values are
+        not supported yet.
 
     Notes
     -----
-    We return an error as numpy when we reduce a dim with a shape of 0.
+    Without ``initial``, we return an error as numpy when we reduce a dim with
+    a shape of 0.
 
     """
-    out = Max(axis=axis)(x)
+    if initial is not None and float(initial) != -np.inf:
+        raise ValueError(f"initial must be None or -inf for max, got {initial}")
+    out = Max(axis=axis, initial=initial is not None)(x)
 
     if keepdims:
         out = makeKeepDims(x, out, axis)
     return out
 
 
-def min(x, axis=None, keepdims=False):
+def min(x, axis=None, keepdims=False, initial=None):
     """
     Returns minimum elements obtained by iterating over given axis.
 
@@ -518,18 +568,31 @@ def min(x, axis=None, keepdims=False):
         If this is set to True, the axes which are reduced are left in
         the result as dimensions with size one. With this option, the result
         will broadcast correctly against the original tensor.
+    initial: None or inf
+        If ``inf``, reducing an empty axis returns ``inf`` (the highest value
+        of the dtype for integer inputs) instead of raising. Other values are
+        not supported yet.
 
     """
     x = as_tensor_variable(x)
+    if initial is not None and float(initial) != np.inf:
+        raise ValueError(f"initial must be None or inf for min, got {initial}")
+    max_initial = None if initial is None else -np.inf
     str_x_type = str(x.dtype)
+    if str_x_type in int_dtypes and initial is not None:
+        # -max(-x) would overflow on the empty result
+        out = Min(axis=axis, initial=True)(x)
+        return makeKeepDims(x, out, axis) if keepdims else out
     if str_x_type.startswith("float") or str_x_type in int_dtypes:
-        return -max(-x, axis=axis, keepdims=keepdims)
+        return -max(-x, axis=axis, keepdims=keepdims, initial=max_initial)
     elif str_x_type in uint_dtypes:
         itype = np.iinfo(x.dtype)
         max_val = np.array(itype.max, dtype=itype.dtype)
-        return max_val - max(max_val - x, axis=axis, keepdims=keepdims)
+        return max_val - max(
+            max_val - x, axis=axis, keepdims=keepdims, initial=max_initial
+        )
     elif str_x_type == "bool":
-        return ~max(~x, axis=axis, keepdims=keepdims)
+        return ~max(~x, axis=axis, keepdims=keepdims, initial=max_initial)
     else:
         # Be careful about unsigned integers, complex
         raise NotImplementedError()
