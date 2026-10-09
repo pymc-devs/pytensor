@@ -28,6 +28,7 @@ from pytensor.sparse import (
     HStack,
     RowScaleCSC,
     SparseFromDense,
+    SumDuplicates,
     Transpose,
     VStack,
 )
@@ -83,6 +84,42 @@ def numba_funcify_EnsureSortedIndices(op, node, **kwargs):
 
     return ensure_sorted_indices
 
+
+@register_funcify_default_op_cache_key(SumDuplicates)
+def numba_funcify_SumDuplicates(op, node, **kwargs):
+    format = node.outputs[0].type.format
+
+    @numba_basic.numba_njit
+    def sum_duplicates(x):
+        result = x.sorted_indices()
+        data = result.data
+        indices = result.indices.view(np.uint32)
+        indptr = result.indptr.view(np.uint32)
+        new_indptr = np.empty_like(indptr)
+        new_indptr[0] = 0
+        nnz = 0
+        for major in range(len(indptr) - 1):
+            for ptr in range(indptr[major], indptr[major + 1]):
+                index = indices[ptr]
+                if nnz > new_indptr[major] and indices[nnz - 1] == index:
+                    data[nnz - 1] += data[ptr]
+                else:
+                    data[nnz] = data[ptr]
+                    indices[nnz] = index
+                    nnz += 1
+            new_indptr[major + 1] = nnz
+
+        components = (
+            data[:nnz],
+            indices[:nnz].view(np.int32),
+            new_indptr.view(np.int32),
+        )
+
+        if format == "csr":
+            return sp.sparse.csr_matrix(components, shape=x.shape)
+        return sp.sparse.csc_matrix(components, shape=x.shape)
+
+    return sum_duplicates
 
 
 @register_funcify_default_op_cache_key(Cast)
