@@ -96,7 +96,7 @@ You can extract the 4 fields with
 :func:`PyTensor.sparse.basic.csm_shape` to extract the individual
 fields.
 
-You can look at the `AddSD` sparse `Op` for an example with C code. It implements
+You can look at the `SparseDenseAdd` sparse `Op` for an example with C code. It implements
 the addition of a sparse matrix with a dense matrix.
 
 Sparse Tests

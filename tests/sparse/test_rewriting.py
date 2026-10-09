@@ -121,7 +121,7 @@ def test_local_structured_add_s_v():
         f = pytensor.function(inputs, smath.structured_add_s_v(*inputs), mode="CVM")
 
         assert not any(
-            isinstance(node.op, smath.StructuredAddSV)
+            isinstance(node.op, smath.StructuredSparseDenseVectorAdd)
             for node in f.maker.fgraph.toposort()
         )
 
