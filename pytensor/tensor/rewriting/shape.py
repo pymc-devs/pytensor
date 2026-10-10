@@ -33,6 +33,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
     register_useless,
+    uncast_integer,
 )
 from pytensor.tensor.shape import (
     Reshape,
@@ -46,7 +47,7 @@ from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
 )
-from pytensor.tensor.type import TensorType, integer_dtypes
+from pytensor.tensor.type import TensorType, int_dtypes, integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorVariable
 
@@ -686,6 +687,56 @@ def local_reshape_to_dimshuffle(fgraph, node):
     new_out = new_out.reshape(new_output_shape)
     new_out = expand_dims(new_out, expand_axes)
     copy_stack_trace(output, new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@node_rewriter([Reshape])
+def local_reshape_shape_uncast(fgraph, node):
+    """Remove lossless integer casts from the shape of a `Reshape`.
+
+    reshape(x, s.astype("int64")) -> reshape(x, s)
+    reshape(x, [s.astype("int64"), 2]) -> reshape(x, [s, 2])
+    """
+    x, shape = node.inputs
+
+    new_shape = uncast_integer(shape, int_dtypes)
+    # Casts of constants are left to constant folding
+    if isinstance(new_shape, Constant):
+        return None
+    if new_shape is shape:
+        if not (shape.owner and isinstance(shape.owner.op, MakeVector)):
+            return None
+        entries = shape.owner.inputs
+        new_entries = [uncast_integer(entry, int_dtypes) for entry in entries]
+        if all(
+            new is old or isinstance(new, Constant)
+            for new, old in zip(new_entries, entries, strict=True)
+        ):
+            return None
+        # The entries of a MakeVector share a dtype, constants can take the
+        # dtype of the others if they fit in it
+        dtypes = {
+            entry.type.dtype for entry in new_entries if not isinstance(entry, Constant)
+        }
+        if len(dtypes) != 1:
+            return None
+        [dtype] = dtypes
+        info = np.iinfo(dtype)
+        if not all(
+            info.min <= entry.data <= info.max
+            for entry in new_entries
+            if isinstance(entry, Constant)
+        ):
+            return None
+        new_entries = [
+            constant(entry.data, dtype=dtype) if isinstance(entry, Constant) else entry
+            for entry in new_entries
+        ]
+        new_shape = MakeVector(dtype)(*new_entries)
+
+    new_out = node.op(x, new_shape)
+    copy_stack_trace(node.outputs, new_out)
     return [new_out]
 
 
