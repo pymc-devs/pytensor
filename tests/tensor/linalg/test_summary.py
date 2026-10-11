@@ -53,6 +53,18 @@ def test_slogdet():
     assert_array_almost_equal(det_result.eval({x: [[1]]}), np.array(1.0))
 
 
+def test_slogdet_complex():
+    x = matrix(dtype="complex128")
+    f = pytensor.function([x], slogdet(x))
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    r = rng.standard_normal((4, 4)) + 1j * rng.standard_normal((4, 4))
+    sign, logdet = f(r)
+    ref_sign, ref_logdet = np.linalg.slogdet(r)
+    np.testing.assert_allclose(sign, ref_sign)
+    np.testing.assert_allclose(logdet, ref_logdet)
+
+
 def test_trace():
     rng = np.random.default_rng(utt.fetch_seed())
     x = matrix()

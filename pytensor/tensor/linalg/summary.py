@@ -138,6 +138,12 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     will be -inf. In all cases, the determinant is equal to
     ``sign * exp(logabsdet)``.
     """
+    x = as_tensor_variable(x)
+    if x.type.dtype.startswith("complex"):
+        # Sign does not support complex, so the naive form cannot be built
+        sign_det, logabsdet = Blockwise(SLogDet())(x)  # type: ignore[misc]
+        return sign_det, logabsdet  # type: ignore[return-value]
+
     det_val = det(x)
     return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 
