@@ -152,61 +152,111 @@ is useful for larger kernels but remains material below about 50 µs of
 in-engine work; `mode="JS"` is not a claim that Python-to-JS calls are free.
 
 
-## Expanded coverage, interleaved rerun (2026-10-06)
+## Expanded coverage, interleaved rerun (2026-10-08)
 
-The expanded prototype runs all 12 variants in the recovered benchmark grid,
-including both negative-binomial datasets, hierarchical beta-binomial,
-fitted covariance and matrix factorization. The grid below keeps models whose slowest backend took at least 50 µs/eval.
-Results use the same Ryzen 5 2400G / Node 22.21.1. These supersede the earlier
-single-point comparisons as a broader audit; they are not a controlled
-regression comparison against those historical runs.
+AMD Ryzen 5 2400G, x86 Linux, CPU3 pinned, one numerical thread. Node 22.21.1 /
+V8 12.4. TyMC base b1c038979eb006b2d9ad1842a5b9ec2640688944 with default
+WASM/SIMD; stable adds NB/softplus precision fixes, parameter guards and zero-
+mask/broadcast corrections. PyTensor js_backend commit 8c5317186. The grid keeps
+models whose slowest backend takes at least 50 microseconds per evaluation.
 
-Each runtime cell is the median of 12 interleaved round means, averaging
-the same five saved unconstrained parameter points. Numba uses the committed
-`beat_js` tree (`50ad847`) and alchemize's native Rust `cfunc` timer. Both JS
-engines evaluate directly inside Node and copy the full gradient to the
-caller buffer; Python transport is excluded. PyMC's normal compile path
-converts parameter checks to switches for both PyTensor backends. In Poisson,
-the resulting validity reduction blocks fusion across two observation passes
-in both JS and Numba; the old JS check rewrite does not remove that switch
-barrier. All variants
-matched the saved C reference; maximum component-scaled error was 1.62e-9.
+### Runtime: microseconds per full logp + gradient
 
-Current TyMC is remote main `b1c0389`, with its default WASM/SIMD linear
-algebra enabled. The earlier local `38d0a20` snapshot is not used for these
-TyMC timings.
+Python crossing excluded. Median of three independent V8 replicas, each with
+four seconds of all-point warmup and twelve rotating interleaved rounds over the
+same five C reference points.
 
-| Model | Numba µs/eval | PyTensor JS µs/eval | TyMC µs/eval |
-| --- | --- | --- | --- |
-| Poisson GLM | 37.43 | 136.49 | 60.96 |
-| Catalogue negative binomial | 541.14 | 1012.94 | 465.86 |
-| Corpus negative binomial | 693.61 | 1165.44 | 516.58 |
-| LKJ multivariate Normal | 292.12 | 1350.86 | 251.22 |
-| Matrix factorization | 1322.22 | 18631.21 | 4723.79 |
-| Gaussian, 10,000 observations | 5.10 | 63.90 | 24.82 |
+| Model | CVM | Numba | PyTensor JS | TyMC | TyMC-Stable |
+|---|---:|---:|---:|---:|---:|
+| Poisson GLM | 106.30 | 42.36 | 122.52 | 66.56 | 120.12 |
+| NB catalogue | 628.45 | 602.04 | 838.90 | 486.82 | 748.33 |
+| NB corpus | 660.25 | 598.20 | 893.35 | 515.00 | 772.47 |
+| LKJ covariance | 574.67 | 198.78 | 644.97 | 246.65 | 293.52 |
+| Matrix factorization | 19,073.19 | 1,390.83 | 7,253.71 | 5,211.04 | 5,216.61 |
 
-Compile starts from a built/frozen model and includes logp/gradient building,
-rewrites and lowering. Numba has one fresh native callback compile per model,
-with caches disabled. JS/TyMC include binding and elapsed evaluation warmup
-through the observed performance plateau; their cells are medians of two
-cold instances. Process startup and imports are excluded. The plateau uses
-a 200 ms observation window within 10% of the best later window, not the
-last JIT event. Runtime follows at least four seconds of evaluations.
+JS means PyTensor JS. TyMC-Stable is the precision-corrected TyMC branch. Numba
+uses the alchemize native cfunc harness; C uses CVM n_calls. JS/TyMC and Numba
+include the full caller-gradient copy; C writes its output buffer without an
+extra external copy.
 
-| Model | Numba cache off, s | PyTensor JS through plateau, s | TyMC through plateau, s |
-| --- | --- | --- | --- |
-| Poisson GLM | 6.71 | 0.62 | 0.68 |
-| Catalogue negative binomial | 9.28 | 0.73 | 0.52 |
-| Corpus negative binomial | 9.47 | 0.68 | 0.34 |
-| LKJ multivariate Normal | 34.29 | 1.56 | 0.89 |
-| Matrix factorization | 6.69 | 0.86 | 0.76 |
-| Gaussian, 10,000 observations | 3.63 | 0.48 | 0.29 |
+TyMC includes its default WASM/SIMD kernels. The LKJ profile confirms WASM
+triangular solves; this is not a pure-JS TyMC comparison. Gaussian 10,000 is
+omitted because the pinned current TyMC snapshot fails to compile its broadcast-
+lift graph.
 
-The machine was not otherwise isolated. Original raw scratch files expired
-overnight; these are preserved observed October 6 tables, not newly rerun
-measurements. They show a cold-compile advantage and remaining evaluator gaps
-in this compatibility PoC. They do not establish general V8-versus-LLVM speed
-or sampling throughput.
+### Compilation: seconds from a built model
+
+JS and TyMC include observed evaluation warmup through the plateau. Cold LLVM/C
+and reused-cache observations are shown separately.
+
+| Model | CVM cold | CVM cached | Numba cold | Numba cached | PyTensor JS | TyMC | TyMC-Stable |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Poisson GLM | 10.518 | 1.026 | 6.125 | 0.926 | ~2.562 | ~1.750 | ~1.161 |
+| NB catalogue | 16.204 | 1.359 | 9.318 | 1.296 | ~1.302 | ~0.341 | ~0.414 |
+| NB corpus | 18.373 | 1.289 | 6.971 | 1.343 | ~1.152 | ~0.351 | ~0.428 |
+| LKJ covariance | 44.924 | 1.654 | 32.862 | 2.185 | ~3.184 | ~1.101 | ~0.529 |
+| Matrix factorization | 13.072 | 0.859 | 5.335 | 0.617 | ~0.618 | ~0.691 | ~1.280 |
+
+Numba cold: caches disabled. Numba cached: graph and native wrapper caches
+reused (prototype, not stock nutpie). CVM cold/cached: fresh/reused C module
+cache.
+
+The JS estimate is graph-to-worker-ready plus the median observed plateau
+interval. TyMC/stable estimates are the median of each paired core-compile +
+plateau interval. Plateau means the first 200 ms window within 10% of the best
+later window of a four-second curve; first-call and parity preparation precede
+it. These are approximate active-work figures, not exact total-first-use
+measurements or proof JIT compilation has stopped. JS graph-to-ready includes
+Node startup; TyMC core compile excludes Node startup and module import. Model
+construction is outside every compile timer. The JS/TyMC startup timing scopes
+therefore differ.
+
+Cold Numba/CVM are saved 2026-10-07 observations: one uncached Numba compile and
+the mean of two C subprocesses with fresh cache directories. Model
+initialization can populate C helpers before the timed compile; module counts
+and cache paths are recorded. No fresh LLVM/C compile was repeated for this
+report update.
+
+Numba cached and CVM cached use fresh-process reloads measured 2026-10-08 in
+compile_cache_refresh_20261008. Every fully cached Numba prototype record has
+one observed adapter cache hit. This prototype is not stock nutpie; the C module
+counts do not grow on reload.
+
+### Evaluations where JS wins in projected wall time
+
+Each column compares JS with the named backend and cache state. A number is the
+estimated maximum evaluation count where JS wins; “any number” means JS wins at
+every count.
+
+Use T = compile_seconds + evaluations × runtime_us / 1e6. The count is
+logp/gradient evaluations, not posterior draws. “never” means JS does not win
+for any nonnegative count using these measured cells. All numbers are estimates;
+runtimes vary with parameter points and compile/warmup timings vary between
+runs.
+
+| Model | CVM cold | CVM cached | Numba cold | Numba cached |
+|---|---:|---:|---:|---:|
+| Poisson GLM | ~490,600 | never | ~44,400 | never |
+| NB catalogue | ~70,800 | ~269 | ~33,800 | never |
+| NB corpus | ~73,900 | ~589 | ~19,700 | ~648 |
+| LKJ covariance | ~593,800 | never | ~66,500 | never |
+| Matrix factorization | any number | any number | ~804 | never |
+
+These are arithmetic projections, not observed sampling-wall-time comparisons,
+holding the evaluation count equal across backends. They use the raw evaluator
+runtimes above; Python/Node crossing would lower the JS thresholds. The cache
+scenarios match the compilation table, and the cold/reused comparison uses
+explicitly dated observations. Very small compile-time savings may be
+measurement variation.
+
+Runtime and JS/TyMC compile row provenance: Poisson GLM: 20261008T140040; NB
+catalogue: 20261008T125014; NB corpus: 20261008T125014; LKJ covariance:
+20261008T130534; Matrix factorization: 20261008T125014.
+
+Only Poisson was remeasured after the final rate-check patch; the other four
+rows are the preceding observations on the earlier stable commit. Raw paths and
+commits remain in row_origins.json, commits.json and provenance/.
+
 
 ## Python crossing and a five-second sampling budget (2026-10-07)
 
