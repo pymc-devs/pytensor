@@ -20,11 +20,12 @@ import numpy as np
 from pytensor.basic import as_symbolic
 from pytensor.compile import optdb
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.op import _NoPythonOp
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op, _NoPythonOp
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
-from pytensor.graph.traversal import apply_depends_on
+from pytensor.graph.traversal import ancestors, apply_depends_on
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import Alloc, zeros_like
@@ -418,6 +419,156 @@ def ifelse(
         return list(rval)
     else:
         return tuple(rval)
+
+
+class LazyIfElse(Op):
+    """`IfElse` with its branches held as inner graphs.
+
+    The branches of an `IfElse` node live in the surrounding graph, so a linker
+    that evaluates the graph as straight-line code computes both branches
+    before the conditional picks one. Holding each branch as an inner
+    `FunctionGraph` removes the branch computations from the outer graph, so
+    only the taken branch runs regardless of how the node is evaluated.
+
+    Built by the `ifelse_to_lazy_ifelse` rewrite; not meant for direct use.
+    """
+
+    def __init__(self, then_fgraph, else_fgraph, output_types, name=None):
+        self.then_fgraph = then_fgraph
+        self.else_fgraph = else_fgraph
+        self.output_types = tuple(output_types)
+        self.name = name
+
+    def __str__(self):
+        return f"lazy_if{{{self.name}}}" if self.name else "lazy_if"
+
+    def make_node(self, condition, *inputs):
+        n_expected = len(self.then_fgraph.inputs) + len(self.else_fgraph.inputs)
+        if len(inputs) != n_expected:
+            raise ValueError(f"Expected {n_expected} branch inputs, got {len(inputs)}")
+        return Apply(
+            self,
+            [as_tensor_variable(condition), *inputs],
+            [output_type() for output_type in self.output_types],
+        )
+
+
+def _output_may_alias(output, fgraph):
+    """Whether a branch output may share memory beyond the branch's own call.
+
+    `LazyIfElse` declares no ``view_map``, so a branch result that aliases a
+    branch input, a constant, or another output must be copied before it is
+    returned: the surrounding graph is free to destroy or mutate the aliased
+    buffer afterwards. Fresh arrays allocated inside the branch are safe.
+    """
+    other_outputs = set(fgraph.outputs)
+    if fgraph.outputs.count(output) == 1:
+        other_outputs.discard(output)
+
+    var = output
+    while var.owner is not None:
+        op = var.owner.op
+        alias_map = {**op.view_map, **op.destroy_map}
+        aliased_inputs = alias_map.get(var.owner.outputs.index(var))
+        if aliased_inputs is None:
+            return False
+        if len(aliased_inputs) > 1:
+            return True
+        var = var.owner.inputs[aliased_inputs[0]]
+        if var in other_outputs:
+            return True
+    return True
+
+
+def _copy_value(value):
+    if isinstance(value, np.ndarray | np.memmap):
+        return value.copy()
+    return deepcopy(value)
+
+
+def _extract_branch(fgraph, node, branch_vars, branch_positions):
+    """Pull the subgraph feeding one `IfElse` branch into its own `FunctionGraph`.
+
+    A node moves into the branch when every client of every one of its outputs
+    is either this branch of the `IfElse` or another moved node, so nothing
+    outside the branch needs its value. Variables the moved nodes consume from
+    the rest of the graph become the inner graph's inputs and stay in the outer
+    graph, where they are computed once however many branches use them.
+    """
+    candidate_nodes = {
+        var.owner for var in ancestors(branch_vars) if var.owner is not None
+    }
+    order = [n for n in fgraph.toposort() if n in candidate_nodes]
+    clients = fgraph.clients
+
+    movable: set[Apply] = set()
+    for candidate in reversed(order):
+        if all(
+            (client is node and index in branch_positions) or client in movable
+            for out in candidate.outputs
+            for client, index in clients[out]
+        ):
+            movable.add(candidate)
+
+    boundary = []
+    seen = set()
+
+    def add_boundary(var):
+        if (
+            (var.owner is None or var.owner not in movable)
+            and not isinstance(var, Constant)
+            and var not in seen
+        ):
+            seen.add(var)
+            boundary.append(var)
+
+    for moved in order:
+        if moved in movable:
+            for inp in moved.inputs:
+                add_boundary(inp)
+    for var in branch_vars:
+        add_boundary(var)
+
+    replacements = {var: var.clone() for var in boundary}
+    inner_outputs = clone_replace(branch_vars, replace=replacements)
+    inner_fgraph = FunctionGraph(
+        inputs=[replacements[var] for var in boundary],
+        outputs=inner_outputs,
+        clone=False,
+    )
+    return inner_fgraph, boundary
+
+
+@node_rewriter([IfElse])
+def ifelse_to_lazy_ifelse(fgraph, node):
+    op = node.op
+    n_outs = op.n_outs
+    condition, *branch_values = node.inputs
+    then_values = branch_values[:n_outs]
+    else_values = branch_values[n_outs:]
+
+    then_fgraph, then_inputs = _extract_branch(
+        fgraph, node, then_values, set(range(1, 1 + n_outs))
+    )
+    else_fgraph, else_inputs = _extract_branch(
+        fgraph, node, else_values, set(range(1 + n_outs, 1 + 2 * n_outs))
+    )
+
+    lazy_op = LazyIfElse(
+        then_fgraph,
+        else_fgraph,
+        output_types=[out.type for out in node.outputs],
+        name=op.name,
+    )
+    return lazy_op(condition, *then_inputs, *else_inputs, return_list=True)
+
+
+optdb.register(
+    "ifelse_to_lazy_ifelse",
+    in2out(ifelse_to_lazy_ifelse, ignore_newtrees=True),
+    "lazy_ifelse",
+    position=49.2,
+)
 
 
 @node_rewriter([IfElse])
