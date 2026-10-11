@@ -6,6 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
+from pytensor.compile.aliasing import alias_root
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant
 from pytensor.link.string_codegen import CODE_TOKEN, build_source_code
@@ -103,9 +105,14 @@ function strides(shape) {
     }
     return result;
 }
-function size(shape) { return shape.reduce((a, b) => a * b, 1); }
+function size(shape) {
+    let count = 1;
+    for (let axis = 0; axis < shape.length; axis++) count *= shape[axis];
+    return count;
+}
 function broadcast(shapes) {
-    const rank = Math.max(...shapes.map(s => s.length));
+    let rank = 0;
+    for (let i = 0; i < shapes.length; i++) rank = Math.max(rank, shapes[i].length);
     const out = Array(rank).fill(1);
     for (const shape of shapes) {
         for (let axis = 0; axis < shape.length; axis++) {
@@ -126,15 +133,31 @@ function indexAt(index, i, bound) {
     return coordinate;
 }
 const pool = [];
+const views = [];
+function viewSlot(id, source, rank) {
+    let record = views[id];
+    if (!record) {
+        record = {d: source.d, s: Array(rank), t: Array(rank), o: 0};
+        views[id] = record;
+    }
+    record.d = source.d;
+    record.o = source.o || 0;
+    return record;
+}
 function slot(id, shape) {
     const n = size(shape);
     let record = pool[id];
     if (!record || record.d.length !== n) {
-        record = {d: new Float64Array(n), s: shape, t: strides(shape), o: 0};
+        record = {d: new Float64Array(n), s: shape.slice(), t: strides(shape), o: 0};
         pool[id] = record;
     } else {
-        record.s = shape;
-        record.t = strides(shape);
+        let changed = record.s.length !== shape.length;
+        for (let axis = 0; !changed && axis < shape.length; axis++)
+            changed = record.s[axis] !== shape[axis];
+        if (changed) {
+            record.s = shape.slice();
+            record.t = strides(shape);
+        }
     }
     return record;
 }
@@ -209,6 +232,8 @@ def lower(fgraph):
             _RUNTIME,
             Path(__file__).parents[1].joinpath("special.js").read_text(),
             Path(__file__).parents[1].joinpath("runtime.js").read_text(),
+            Path(__file__).parents[1].joinpath("wasm_kernels.js").read_text(),
+            Path(__file__).parents[1].joinpath("wasm_runtime.js").read_text(),
             "const constants = [];",
             *kernels,
             "function execute() {",
@@ -224,7 +249,7 @@ def lower(fgraph):
             "return outputs[0].d[0];",
             CODE_TOKEN.DEDENT,
             "}",
-            "globalThis.__ptjs = {inputs, constants, outputs: () => outputs, setInputShape, execute, run, repeat};",
+            "globalThis.__ptjs = {inputs, constants, outputs: () => outputs, setInputShape, execute, run, repeat, wasmKernelCount: ptWasm.kernelCount};",
         ]
     )
     return JSProgram(
@@ -261,3 +286,22 @@ def lower_subgraph(fgraph, inputs, slot):
         names.update(zip(node.outputs, fragment.names, strict=True))
         slot += fragment.slots if fragment.slots is not None else len(node.outputs)
     return JSCode(tuple(lines), tuple(names[v] for v in fgraph.outputs), slot - start)
+
+
+@js_funcify.register(OpFromGraph)
+def js_funcify_op_from_graph(op, node, inputs, slot):
+    fragment = lower_subgraph(op.fgraph, inputs, slot)
+    lines, names = list(fragment.lines), list(fragment.names)
+    next_slot = slot + fragment.slots
+    seen = set()
+    for i, output in enumerate(op.fgraph.outputs):
+        root = alias_root(output)
+        if root.owner is None or root in seen:
+            name = f"v{next_slot}"
+            lines.append(
+                f"const {name} = copyRecord(slot({next_slot}, {names[i]}.s), {names[i]});"
+            )
+            names[i] = name
+            next_slot += 1
+        seen.add(root)
+    return JSCode(tuple(lines), tuple(names), next_slot - slot)

@@ -1,10 +1,17 @@
 """Allocation, shape manipulation and indexing for JavaScript tensor records."""
 
-from pytensor.graph.basic import Variable
+from pytensor.graph.basic import Constant, Variable
 from pytensor.link.js.dispatch.basic import JSCode, js_funcify
 from pytensor.link.js.dispatch.elemwise import address, loop_lines, stride_setup
 from pytensor.link.string_codegen import CODE_TOKEN
-from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, TensorFromScalar
+from pytensor.tensor.basic import (
+    Alloc,
+    AllocEmpty,
+    ARange,
+    Join,
+    Split,
+    TensorFromScalar,
+)
 from pytensor.tensor.extra_ops import CumOp
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
@@ -25,9 +32,9 @@ def index_expression(op, node, inputs, start, advanced=False):
             return "null"
         if isinstance(index, Variable):
             if advanced:
-                if index.ndim > 1 or not index.type.dtype.startswith(("int", "uint")):
+                if not index.type.dtype.startswith(("int", "uint")):
                     raise NotImplementedError(
-                        "JS advanced indexing supports integer scalar/vector indices"
+                        "JS advanced indexing supports integer indices"
                     )
                 return f"{{index: {names[index]}}}"
             return f"scalarValue({names[index]})"
@@ -55,6 +62,32 @@ def js_funcify_subtensor(op, node, inputs, slot):
         ),
         (name,),
     )
+
+
+@js_funcify.register(Split)
+def js_funcify_split(op, node, inputs, slot):
+    source, lengths = inputs
+    names = tuple(f"v{slot + i}" for i in range(op.len_splits))
+    lines = [
+        *(f"let {name};" for name in names),
+        "{",
+        CODE_TOKEN.INDENT,
+        f"if ({lengths}.s[0] !== {op.len_splits}) throw Error('split count mismatch');",
+        f"const lengths = Array.from({{length: {op.len_splits}}}, (_, i) => {lengths}.d[({lengths}.o || 0) + i * {lengths}.t[0]]);",
+        "if (lengths.some(n => !Number.isSafeInteger(n) || n < 0)) throw Error('invalid split size');",
+        f"if (lengths.reduce((a, b) => a + b, 0) !== {source}.s[{op.axis}]) throw Error('split sizes do not match axis');",
+        "let offset = 0;",
+    ]
+    for i, name in enumerate(names):
+        lines.extend(
+            [
+                f"{name} = {{d: {source}.d, s: {source}.s.slice(), t: {source}.t, o: ({source}.o || 0) + offset * {source}.t[{op.axis}]}};",
+                f"{name}.s[{op.axis}] = lengths[{i}];",
+                f"offset += lengths[{i}];",
+            ]
+        )
+    lines.extend([CODE_TOKEN.DEDENT, "}"])
+    return JSCode(tuple(lines), names)
 
 
 @js_funcify.register(IncSubtensor)
@@ -151,6 +184,66 @@ def js_funcify_advanced_subtensor(op, node, inputs, slot):
 @js_funcify.register(AdvancedIncSubtensor)
 def js_funcify_advanced_inc_subtensor(op, node, inputs, slot):
     name = f"v{slot}"
+    reconstructed = indices_from_subtensor(node.inputs[2:], op.idx_list)
+    if (
+        len(reconstructed) == 1
+        and isinstance(reconstructed[0], Variable)
+        and reconstructed[0].ndim == 1
+        and reconstructed[0].dtype.startswith(("int", "uint"))
+    ):
+        source, value, index = inputs
+        rank = node.inputs[0].ndim
+        temporary = not op.inplace or op.ignore_duplicates
+        target = (
+            f"copyRecord(slot({slot}, {source}.s), {source})" if temporary else source
+        )
+        target_address = address(name, rank, indexed={0: "idx"}, strides="st")
+        value_address = address("value", rank, node.inputs[1].ndim, strides="bs")
+        if op.set_instead_of_inc:
+            store = f"out[{target_address}] = data[{value_address}];"
+        elif op.ignore_duplicates:
+            base_address = address(source, rank, indexed={0: "idx"}, strides="baseSt")
+            store = (
+                f"out[{target_address}] = base[{base_address}] + data[{value_address}];"
+            )
+        else:
+            store = f"out[{target_address}] += data[{value_address}];"
+        lines = [
+            f"let {name} = {target};",
+            "{",
+            CODE_TOKEN.INDENT,
+            f"let value = {value};",
+            f"if ({name}.d === value.d) value = copyRecord(slot({slot + 1}, value.s), value);",
+            f"const shape = {source}.s.slice();",
+            f"shape[0] = {index}.s[0];",
+            "const compatible = broadcast([shape, value.s]);",
+            "if (compatible.length !== shape.length || compatible.some((n, axis) => n !== shape[axis])) throw Error('advanced update broadcast mismatch');",
+            f"const out = {name}.d, data = value.d;",
+            *stride_setup(node.inputs[0], name, "st"),
+            *stride_setup(node.inputs[1], "value", "bs"),
+            *(
+                [
+                    f"const base = {source}.d;",
+                    *stride_setup(node.inputs[0], source, "baseSt"),
+                ]
+                if op.ignore_duplicates and not op.set_instead_of_inc
+                else []
+            ),
+            "if (size(shape) > 0) {",
+            CODE_TOKEN.INDENT,
+            *loop_lines(
+                rank,
+                [store],
+                setup={0: [f"const idx = indexAt({index}, i0, {source}.s[0]);"]},
+            ),
+            CODE_TOKEN.DEDENT,
+            "}",
+            CODE_TOKEN.DEDENT,
+            "}",
+        ]
+        if op.inplace and temporary:
+            lines.append(f"{name} = copyRecord({source}, {name});")
+        return JSCode(tuple(lines), (name,), slots=2)
     indices = index_expression(op, node, inputs, 2, advanced=True)
     flags = f"{str(op.set_instead_of_inc).lower()}, {str(op.ignore_duplicates).lower()}, {str(op.inplace).lower()}"
     return JSCode(
@@ -177,7 +270,11 @@ def js_funcify_alloc(op, node, inputs, slot):
         f"const compatible = broadcast([shape, {source}.s]);",
         "if (compatible.length !== shape.length || compatible.some((n, a) => n !== shape[a])) throw Error('allocation broadcast mismatch');",
         "let k = 0;",
-        *loop_lines(rank, [f"{name}.d[k++] = {source}.d[{source_address}];"]),
+        *(
+            [f"{name}.d.fill(scalarValue({source}));"]
+            if all(node.inputs[0].type.broadcastable)
+            else loop_lines(rank, [f"{name}.d[k++] = {source}.d[{source_address}];"])
+        ),
         CODE_TOKEN.DEDENT,
         "}",
     ]
@@ -301,11 +398,26 @@ def js_funcify_join(op, node, inputs, slot):
         "let axisOffset = 0;",
         "for (const source of arrays) {",
         CODE_TOKEN.INDENT,
+        "if (contiguous(source)) {",
+        CODE_TOKEN.INDENT,
+        "const inner = size(shape.slice(axis + 1));",
+        "const block = source.s[axis] * inner, outputBlock = shape[axis] * inner;",
+        "const count = size(source.s), offset = source.o || 0;",
+        f"const out = {name}.d;",
+        "if (block > 0) for (let start = 0, target = axisOffset * inner; start < count; start += block, target += outputBlock)",
+        CODE_TOKEN.INDENT,
+        "out.set(source.d.subarray(offset + start, offset + start + block), target);",
+        CODE_TOKEN.DEDENT,
+        CODE_TOKEN.DEDENT,
+        "} else {",
+        CODE_TOKEN.INDENT,
         "for (let i = 0; i < size(source.s); i++) {",
         CODE_TOKEN.INDENT,
         "const coordinates = coordinatesOf(i, source.s);",
         "coordinates[axis] += axisOffset;",
         f"{name}.d[broadcastAddress({name}, coordinates)] = source.d[flatAddress(source, i)];",
+        CODE_TOKEN.DEDENT,
+        "}",
         CODE_TOKEN.DEDENT,
         "}",
         "axisOffset += source.s[axis];",
@@ -334,37 +446,159 @@ def js_funcify_dot(op, node, inputs, slot):
         )
         + "]"
     )
-    left_address = (
-        f"({a}.o || 0) + "
-        + (f"i * {a}.t[0] + " if left_rank == 2 else "")
-        + f"k * {a}.t[{left_rank - 1}]"
-    )
-    right_address = f"({b}.o || 0) + k * {b}.t[0]" + (
-        f" + j * {b}.t[1]" if right_rank == 2 else ""
-    )
     lines = [
         f"let {name};",
         "{",
         CODE_TOKEN.INDENT,
         f"if ({extent} !== {b}.s[0]) throw Error('dot shape mismatch');",
         f"{name} = slot({slot}, {output_shape});",
+        *(
+            [
+                f"if (!ptWasm.dot({a}, {b}, {name}, {slot}, "
+                f"{str(isinstance(node.inputs[0], Constant)).lower()}, "
+                f"{str(isinstance(node.inputs[1], Constant)).lower()})) {{",
+                CODE_TOKEN.INDENT,
+            ]
+            if node.outputs[0].dtype == "float64"
+            else []
+        ),
+        f"const dataA = {a}.d, dataB = {b}.d, out = {name}.d;",
+        f"const rows = {rows}, cols = {cols}, extent = {extent};",
+        f"const ao = {a}.o || 0, bo = {b}.o || 0;",
+        "const as0 = " + (f"{a}.t[0];" if left_rank == 2 else "0;"),
+        f"const as1 = {a}.t[{left_rank - 1}], bs0 = {b}.t[0];",
+        "const bs1 = " + (f"{b}.t[1];" if right_rank == 2 else "0;"),
         "let position = 0;",
-        f"for (let i = 0; i < {rows}; i++) {{",
+        "let i = 0;",
+        "if (cols === 1) {",
         CODE_TOKEN.INDENT,
-        f"for (let j = 0; j < {cols}; j++) {{",
+        "for (; i + 3 < rows; i += 4) {",
         CODE_TOKEN.INDENT,
+        *(f"const left{r} = ao + (i + {r}) * as0;" for r in range(4)),
+        *(f"let acc{r} = 0;" for r in range(4)),
+        "for (let k = 0; k < extent; k++) {",
+        CODE_TOKEN.INDENT,
+        "const value = dataB[bo + k * bs0], offset = k * as1;",
+        *(f"acc{r} += dataA[left{r} + offset] * value;" for r in range(4)),
+        CODE_TOKEN.DEDENT,
+        "}",
+        *(f"out[i + {r}] = acc{r};" for r in range(4)),
+        CODE_TOKEN.DEDENT,
+        "}",
+        "for (; i < rows; i++) {",
+        CODE_TOKEN.INDENT,
+        "const left = ao + i * as0;",
         "let acc = 0;",
-        f"for (let k = 0; k < {extent}; k++) {{",
+        "for (let k = 0; k < extent; k++) acc += dataA[left + k * as1] * dataB[bo + k * bs0];",
+        "out[i] = acc;",
+        CODE_TOKEN.DEDENT,
+        "}",
+        CODE_TOKEN.DEDENT,
+        "} else if (extent === 1) {",
         CODE_TOKEN.INDENT,
-        f"acc += {a}.d[{left_address}] * {b}.d[{right_address}];",
+        "for (; i < rows; i++) {",
+        CODE_TOKEN.INDENT,
+        "const value = dataA[ao + i * as0];",
+        "let j = 0;",
+        "for (; j + 3 < cols; j += 4) {",
+        CODE_TOKEN.INDENT,
+        *(
+            f"out[position++] = 0 + value * dataB[bo + (j + {offset}) * bs1];"
+            for offset in range(4)
+        ),
         CODE_TOKEN.DEDENT,
         "}",
-        f"{name}.d[position++] = acc;",
+        "for (; j < cols; j++) out[position++] = 0 + value * dataB[bo + j * bs1];",
         CODE_TOKEN.DEDENT,
         "}",
         CODE_TOKEN.DEDENT,
-        "}",
-        CODE_TOKEN.DEDENT,
-        "}",
+        "} else {",
+        CODE_TOKEN.INDENT,
     ]
+    if left_rank == 2:
+        lines.extend(
+            [
+                "for (; i + 1 < rows; i += 2) {",
+                CODE_TOKEN.INDENT,
+                "const left = ao + i * as0;",
+                "let j = 0;",
+                "for (; j + 3 < cols; j += 4) {",
+                CODE_TOKEN.INDENT,
+                "const right = bo + j * bs1;",
+                *(f"let acc{r}{c} = 0;" for r in range(2) for c in range(4)),
+                "for (let k = 0; k < extent; k++) {",
+                CODE_TOKEN.INDENT,
+                "const a0 = dataA[left + k * as1], a1 = dataA[left + as0 + k * as1];",
+                "const rightK = right + k * bs0;",
+                *(f"const b{c} = dataB[rightK + {c} * bs1];" for c in range(4)),
+                *(f"acc{r}{c} += a{r} * b{c};" for r in range(2) for c in range(4)),
+                CODE_TOKEN.DEDENT,
+                "}",
+                *(
+                    f"out[(i + {r}) * cols + j + {c}] = acc{r}{c};"
+                    for r in range(2)
+                    for c in range(4)
+                ),
+                CODE_TOKEN.DEDENT,
+                "}",
+                "for (; j < cols; j++) {",
+                CODE_TOKEN.INDENT,
+                "const right = bo + j * bs1;",
+                "let acc0 = 0, acc1 = 0;",
+                "let k = 0;",
+                "for (; k + 3 < extent; k += 4) {",
+                CODE_TOKEN.INDENT,
+                *(
+                    line
+                    for offset in range(4)
+                    for line in (
+                        f"const b{offset} = dataB[right + (k + {offset}) * bs0];",
+                        f"acc0 += dataA[left + (k + {offset}) * as1] * b{offset};",
+                        f"acc1 += dataA[left + as0 + (k + {offset}) * as1] * b{offset};",
+                    )
+                ),
+                CODE_TOKEN.DEDENT,
+                "}",
+                "for (; k < extent; k++) {",
+                CODE_TOKEN.INDENT,
+                "const b = dataB[right + k * bs0];",
+                "acc0 += dataA[left + k * as1] * b;",
+                "acc1 += dataA[left + as0 + k * as1] * b;",
+                CODE_TOKEN.DEDENT,
+                "}",
+                "out[i * cols + j] = acc0;",
+                "out[(i + 1) * cols + j] = acc1;",
+                CODE_TOKEN.DEDENT,
+                "}",
+                CODE_TOKEN.DEDENT,
+                "}",
+                "position = i * cols;",
+            ]
+        )
+    lines.extend(
+        [
+            "for (; i < rows; i++) {",
+            CODE_TOKEN.INDENT,
+            "const left = ao + i * as0;",
+            "for (let j = 0; j < cols; j++) {",
+            CODE_TOKEN.INDENT,
+            "const right = bo + j * bs1;",
+            "let acc = 0;",
+            "for (let k = 0; k < extent; k++) {",
+            CODE_TOKEN.INDENT,
+            "acc += dataA[left + k * as1] * dataB[right + k * bs0];",
+            CODE_TOKEN.DEDENT,
+            "}",
+            "out[position++] = acc;",
+            CODE_TOKEN.DEDENT,
+            "}",
+            CODE_TOKEN.DEDENT,
+            "}",
+            *([CODE_TOKEN.DEDENT, "}"] if node.outputs[0].dtype == "float64" else []),
+            CODE_TOKEN.DEDENT,
+            "}",
+            CODE_TOKEN.DEDENT,
+            "}",
+        ]
+    )
     return JSCode(tuple(lines), (name,))

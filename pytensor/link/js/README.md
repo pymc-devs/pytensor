@@ -5,7 +5,8 @@ and running it in V8. PyTensor still builds and rewrites the graph and computes
 gradients. The linker consumes the existing scalar `Composite` and
 `FusedElemwise` representation, including indexed reads/writes and partial sum
 reductions. It uses PyTensor's graph and rewrites; the scalar gamma/digamma
-kernels are ported from TyMC (see `THIRD_PARTY_NOTICES`). TyMC is not a runtime
+kernels and numerical WASM/SIMD assemblers are ported from TyMC (see
+`THIRD_PARTY_NOTICES`). TyMC is not a runtime
 dependency.
 
 `JS` mode selects `fast_run` and the `js` rewrite tag. The indexed/reduction
@@ -54,11 +55,60 @@ inputs outside JavaScript's exact integer range are refused.
 Unsupported Ops and casts raise `NotImplementedError` during lowering. This
 backend is not yet a replacement for C or Numba: it lacks BLAS, `Scan`, many
 special functions, general advanced indexing and complete dtype semantics.
-The dense linear algebra kernels are straightforward compatibility loops.
+Dense float64 products, Cholesky factorizations and matrix triangular solves
+use embedded WASM/SIMD kernels when their per-node shapes justify staging the
+operands. Each compiled node keeps staging buffers and a kernel for its latest
+shape; shape changes rebuild that kernel. Float32, small operations and
+environments without WebAssembly/SIMD use generated JS loops. The emitted
+program contains the assemblers and needs no external module or toolchain.
+Constant Dot operands are staged once per node/shape. The kernel arithmetic
+retains each output's accumulation order. This dispatch
+uses only Op semantics, dtype and shape, and also applies inside inner graphs.
+Variable matrix-vector products that would require transposing and packing the
+matrix on every call use the direct JS path. Its blocked inner loop retains
+each output's accumulation order and supports dynamic dimensions and strides.
+Matrix sums and already-fused squared sums can also use a SIMD reduction
+kernel. Lanes span independent outputs and each output adds its terms in the
+original order. Eligibility uses runtime dimensions and strides, with JS
+fallback for other layouts, dtypes, small inputs or unavailable SIMD. It uses
+the existing per-node staging buffers.
+Basic float64 elementwise arithmetic also has a SIMD path for contiguous
+operands and scalar broadcasts. Constants are staged once per node and shape;
+incompatible layouts and small arrays use ordinary loops.
+A JS-only rewrite represents a singly consumed RHS negation followed by a
+triangular solve as `NegatedSolveTriangular`, an `OpFromGraph` containing those
+original operations. Its WASM lowering negates the staged RHS before solving,
+avoiding the separate intermediate and copies. Other cases use its inner graph.
+
+Fused nodes can use fixed strides behind runtime layout guards, fold uniform
+constants and omit repeated validation for valid constant indices. Reused view
+metadata and scalar allocation fills reduce per-call overhead. Scalar Composite
+graphs are rewritten with PyTensor: log-zero checks and boolean products are
+simplified, exactly representable comparison constants are normalized to allow
+common expressions to merge, and nested switches with the same condition are
+pruned. Outputs guarded by the same cheap boolean condition can share a branch.
+The additional MulLog rewrite applies to multiplication by a logarithm when
+the direct constant factor contains more than half zeros. Its emitted shortcut
+preserves signed zeros and falls back to the logarithm for nonpositive or
+nonfinite arguments. Tensor reads needed only in a
+shared scalar branch are emitted inside that branch; predicate reads are reused
+and predicate-only reads can remain in short-circuit expressions. All scalar
+outputs are computed before in-place stores, and index validation stays outside
+the branch. Broadcast reads can be hoisted out of inner loops when they do not
+alias a destroyed input. Single-use scalar
+expressions can stay inside lazy switches, and small expensive loops are
+unrolled without changing reduction order. Short arithmetic-only loops unroll
+when there are no floating-point running sums or scatter increments. Fused arithmetic
+reduction loops retain ordinary loops unless they contain expensive scalar work. Matrix-vector JS loops share each vector load across four rows
+while accumulating each row in the original inner-index order. These choices depend on Ops, types,
+layouts and constants; model names never enter lowering.
+Ordinary elementwise nodes use the same loop emitter. Broadcast-read hoisting follows
+the actual loop order when reduction axes are traversed after kept axes.
 
 The included tests cover changing shapes, strided views, indexed gradients
 with duplicate indices, partial reductions, special functions and small dense
-linear algebra, as well as PyMC log density and gradient. Fusion tests assert
+linear algebra, WASM execution and fallback, as well as PyMC log density and
+gradient. Fusion tests assert
 that PyTensor's fusion pass fired.
 They do not claim speed parity with Numba; bridge cost and warm-up need to be
 measured separately.

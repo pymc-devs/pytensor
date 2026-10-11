@@ -21,7 +21,12 @@ for (const call of spec.calls) {
   const shapes=JSON.parse(__ptjs.run());
   results.push(shapes.map((shape,i)=>{
     const record=__ptjs.outputs()[i];
-    return {shape,data:Array.from({length:shape.reduce((a,b)=>a*b,1)},(_,flat)=>record.d[flatAddress(record,flat)])};
+    return {shape,data:Array.from({length:shape.reduce((a,b)=>a*b,1)},(_,flat)=>{
+      const value=record.d[flatAddress(record,flat)];
+      return Object.is(value,-0) ? '-0' : Number.isFinite(value) ? value : String(value);
+    })};
   }));
 }
+if(spec.check_wasm && typeof WebAssembly==='object' && ptWasmKernels.can_run_wasm_simd() && __ptjs.wasmKernelCount()===0)
+  throw Error('Dense candidates did not execute WebAssembly kernels');
 console.log(JSON.stringify(results));

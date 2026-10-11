@@ -9,8 +9,12 @@ function flatAddress(record, flat) {
 }
 function scalarValue(record) { return record.d[record.o || 0]; }
 function contiguous(record) {
-    const expected = strides(record.s);
-    return expected.every((step, axis) => record.s[axis] === 1 || record.t[axis] === step);
+    let step = 1;
+    for (let axis = record.s.length - 1; axis >= 0; axis--) {
+        if (record.s[axis] !== 1 && record.t[axis] !== step) return false;
+        step *= record.s[axis];
+    }
+    return true;
 }
 function copyRecord(out, record) {
     if (out === record) return out;
@@ -126,14 +130,13 @@ function advancedPlan(source, requested) {
         }
     }
     const advancedShape = indexedAxes.length ? broadcast(indexedAxes.map(axis => indices[axis].index.s)) : [];
-    if (advancedShape.length > 1) throw Error('advanced indices must be scalars or vectors');
     const first = indexedAxes[0];
     const consecutive = indexedAxes.every((axis, k) => axis === first + k);
     const insertion = consecutive ? slices.filter(slice => slice.axis < first).length : 0;
     const shape = slices.map(slice => slice.count);
     shape.splice(insertion, 0, ...advancedShape);
     slices.forEach((slice, k) => { slice.outputAxis = k < insertion ? k : k + advancedShape.length; });
-    return {indices, slices, shape, advancedAxis: advancedShape.length ? insertion : -1};
+    return {indices, slices, shape, advancedRank: advancedShape.length, advancedAxis: advancedShape.length ? insertion : -1};
 }
 function advancedAddress(source, plan, coordinates) {
     let offset = source.o || 0;
@@ -142,8 +145,11 @@ function advancedAddress(source, plan, coordinates) {
         let coordinate;
         if (index && index.index) {
             const record = index.index;
-            const flat = record.s.length && record.s[0] !== 1 ? coordinates[plan.advancedAxis] : 0;
-            coordinate = scalarIndex(record.d[flatAddress(record, flat)], source.s[axis]);
+            let address = record.o || 0;
+            const start = plan.advancedAxis + plan.advancedRank - record.s.length;
+            for (let a = 0; a < record.s.length; a++)
+                address += (record.s[a] === 1 ? 0 : coordinates[start + a]) * record.t[a];
+            coordinate = scalarIndex(record.d[address], source.s[axis]);
         } else if (Array.isArray(index)) {
             const slice = plan.slices.find(slice => slice.axis === axis);
             coordinate = slice.start + coordinates[slice.outputAxis] * slice.step;

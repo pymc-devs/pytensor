@@ -1,10 +1,33 @@
 """Small dense linear algebra kernels for the JavaScript compatibility backend."""
 
-from pytensor.link.js.dispatch.basic import JSCode, js_funcify
+from pytensor.link.js.dispatch.basic import JSCode, js_funcify, lower_subgraph
 from pytensor.link.string_codegen import CODE_TOKEN
 from pytensor.tensor.basic import AllocDiag, ExtractDiag
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
+from pytensor.tensor.rewriting.js import NegatedSolveTriangular
+
+
+@js_funcify.register(NegatedSolveTriangular)
+def js_funcify_negated_solve(op, node, inputs, slot):
+    fallback = lower_subgraph(op.fgraph, inputs, slot)
+    name = f"v{slot + fallback.slots}"
+    a, b = inputs
+    return JSCode(
+        (
+            f"let {name};",
+            f"if ({a}.s[0] !== {a}.s[1] || {a}.s[0] !== {b}.s[0]) throw Error('triangular solve shape mismatch');",
+            f"{name} = slot({slot + fallback.slots}, {b}.s);",
+            f"if (!ptWasm.solve({a}, {b}, {name}, {slot + fallback.slots}, {str(op.solve_op.lower).lower()}, {str(op.solve_op.unit_diagonal).lower()}, true)) {{",
+            CODE_TOKEN.INDENT,
+            *fallback.lines,
+            f"{name} = {fallback.names[0]};",
+            CODE_TOKEN.DEDENT,
+            "}",
+        ),
+        (name,),
+        slots=fallback.slots + 1,
+    )
 
 
 @js_funcify.register(Cholesky)
@@ -30,6 +53,14 @@ def js_funcify_cholesky(op, node, inputs, slot):
         f"const n = {source}.s[0];",
         f"if (n !== {source}.s[1]) throw Error('Cholesky requires a square matrix');",
         f"{name} = slot({slot}, {source}.s);",
+        *(
+            [
+                f"if (!ptWasm.cholesky({source}, {name}, {slot}, {str(op.lower).lower()})) {{",
+                CODE_TOKEN.INDENT,
+            ]
+            if node.outputs[0].dtype == "float64"
+            else []
+        ),
         f"{name}.d.fill(0);",
         "let failed = false;",
         "for (let i = 0; i < n && !failed; i++) {",
@@ -48,6 +79,7 @@ def js_funcify_cholesky(op, node, inputs, slot):
         f"{out('i', 'j')} = value / {out('j', 'j')};",
         CODE_TOKEN.DEDENT,
         "}",
+        *([CODE_TOKEN.DEDENT, "}"] if node.outputs[0].dtype == "float64" else []),
         CODE_TOKEN.DEDENT,
         "}",
         CODE_TOKEN.DEDENT,
@@ -68,7 +100,6 @@ def js_funcify_solve_triangular(op, node, inputs, slot):
     name = f"v{slot}"
     rank = node.inputs[1].ndim
     cols = f"{b}.s[1]" if rank == 2 else "1"
-    b_address = "bo + i * bs0 + j * bs1"
     lower = op.lower
     i = "step" if lower else "n - 1 - step"
     range_k = "let k = 0; k < i; k++" if lower else "let k = i + 1; k < n; k++"
@@ -80,6 +111,14 @@ def js_funcify_solve_triangular(op, node, inputs, slot):
         f"const n = {a}.s[0], cols = {cols};",
         f"if (n !== {a}.s[1] || n !== {b}.s[0]) throw Error('triangular solve shape mismatch');",
         f"{name} = slot({slot}, {b}.s);",
+        *(
+            [
+                f"if (!ptWasm.solve({a}, {b}, {name}, {slot}, {str(op.lower).lower()}, {str(op.unit_diagonal).lower()})) {{",
+                CODE_TOKEN.INDENT,
+            ]
+            if rank == 2 and node.outputs[0].dtype == "float64"
+            else []
+        ),
         f"const out = {name}.d;",
         f"const dataA = {a}.d, dataB = {b}.d;",
         f"const ao = {a}.o || 0, bo = {b}.o || 0;",
@@ -125,22 +164,48 @@ def js_funcify_solve_triangular(op, node, inputs, slot):
             CODE_TOKEN.INDENT,
             f"const i = {i};",
             "const row = i * cols;",
-            f"for (let j = 0; j < cols; j++) out[row + j] = dataB[{b_address}];",
-            f"for ({range_k}) {{",
-            CODE_TOKEN.INDENT,
-            "const coefficient = dataA[ao + i * as0 + k * as1];",
-            "const previous = k * cols;",
-            "for (let j = 0; j < cols; j++) out[row + j] -= coefficient * out[previous + j];",
-            CODE_TOKEN.DEDENT,
-            "}",
             f"const diagonal = {diagonal};",
             "if (diagonal === 0) { out.fill(NaN); break; }",
-            "for (let j = 0; j < cols; j++) out[row + j] /= diagonal;",
+            "const aRow = ao + i * as0, bRow = bo + i * bs0;",
+            "let j = 0;",
+            *(
+                [
+                    "for (; j + 3 < cols; j += 4) {",
+                    CODE_TOKEN.INDENT,
+                    *(
+                        f"let value{c} = dataB[bRow + (j + {c}) * bs1];"
+                        for c in range(4)
+                    ),
+                    f"for ({range_k}) {{",
+                    CODE_TOKEN.INDENT,
+                    "const coefficient = dataA[aRow + k * as1], previous = k * cols + j;",
+                    *(
+                        f"value{c} -= coefficient * out[previous + {c}];"
+                        for c in range(4)
+                    ),
+                    CODE_TOKEN.DEDENT,
+                    "}",
+                    *(f"out[row + j + {c}] = value{c} / diagonal;" for c in range(4)),
+                    CODE_TOKEN.DEDENT,
+                    "}",
+                ]
+                if rank == 2
+                else []
+            ),
+            "for (; j < cols; j++) {",
+            CODE_TOKEN.INDENT,
+            "let value = dataB[bRow + j * bs1];",
+            f"for ({range_k}) value -= dataA[aRow + k * as1] * out[k * cols + j];",
+            "out[row + j] = value / diagonal;",
+            CODE_TOKEN.DEDENT,
+            "}",
             CODE_TOKEN.DEDENT,
             "}",
         ]
     )
     if static_n is not None and 0 < static_n <= 4:
+        lines.extend([CODE_TOKEN.DEDENT, "}"])
+    if rank == 2 and node.outputs[0].dtype == "float64":
         lines.extend([CODE_TOKEN.DEDENT, "}"])
     lines.extend([CODE_TOKEN.DEDENT, "}"])
     return JSCode(tuple(lines), (name,))
