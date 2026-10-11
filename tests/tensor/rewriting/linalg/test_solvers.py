@@ -93,6 +93,10 @@ def test_psd_solve_with_chol(b_ndim):
     assert_equal_computations([rewritten], [expected])
 
 
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="sharing needs stabilize plus a later merge pass",
+)
 def test_psd_vector_solve_shares_cholesky():
     A = matrix("A", shape=(5, 5))
     b = pt.vector("b", shape=(5,))
