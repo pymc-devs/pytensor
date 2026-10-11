@@ -16,6 +16,10 @@ from pytensor.tensor.type import matrix
 from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
+def core_op_names(nodes):
+    return [type(getattr(node.op, "core_op", node.op)).__name__ for node in nodes]
+
+
 def test_det_of_cholesky():
     X = matrix("X")
     L = cholesky(X)
@@ -291,13 +295,13 @@ def test_local_log_prod_to_sum_log_unknown_sign():
             id="cholesky",
         ),
         pytest.param(
-            lambda x: lu.lu(x)[-1],
-            lambda x: pt.prod(pt.extract_diag(lu.lu(x)[-1]), axis=0),
-            id="lu",
-        ),
-        pytest.param(
             lambda x: lu.lu_factor(x)[0],
-            lambda x: pt.prod(pt.extract_diag(lu.lu_factor(x)[0]), axis=0),
+            lambda x: (
+                (
+                    1 - 2 * (pt.neq(lu.lu_factor(x)[1], np.arange(3)).sum(axis=-1) % 2)
+                ).astype(x.dtype)
+                * pt.prod(pt.extract_diag(lu.lu_factor(x)[0]), axis=0)
+            ),
             id="lu_factor",
         ),
     ],
@@ -343,9 +347,41 @@ def test_slogdet_grad_when_cholesky_factored_det_underflows():
     assert_allclose(f_stab(point)[0], 2 * N)
 
 
+def test_det_shared_from_lu_factor_keeps_the_sign():
+    x = pt.tensor("x", shape=(3, 3))
+    d = det(x)
+    factor = lu.lu_factor(x)[0]
+    f = function([x], [d, factor], mode="FAST_RUN")
+
+    assert "Det" not in core_op_names(f.maker.fgraph.apply_nodes)
+
+    # An odd permutation makes the determinant negative
+    x_val = (np.eye(3)[[1, 0, 2]] * np.array([2.0, 3.0, 4.0])).astype(config.floatX)
+    assert_allclose(f(x_val)[0], np.linalg.det(x_val), rtol=1e-5)
+
+
+def test_signed_det_not_shared_from_lu():
+    """The permutation sign is not recoverable from lu outputs, so a signed
+    det must keep its own computation."""
+    x = pt.tensor("x", shape=(3, 3))
+    d = det(x)
+    u = lu.lu(x)[-1]
+
+    d_rewritten, _ = rewrite_graph(
+        [d, u], include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations([d_rewritten], [det(x)])
+
+
 @pytest.mark.parametrize(
     "decomp_fn, sign_op, expected_fn",
     [
+        pytest.param(
+            lambda x: lu.lu(x)[-1],
+            pt.abs,
+            lambda x: pt.prod(pt.diagonal(lu.lu(x)[-1], axis1=-2, axis2=-1), axis=-1),
+            id="lu_abs",
+        ),
         pytest.param(
             lambda x: svd.svd(x, compute_uv=True)[0],
             pt.abs,

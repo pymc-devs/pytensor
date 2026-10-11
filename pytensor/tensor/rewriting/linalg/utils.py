@@ -47,6 +47,13 @@ def matrix_diagonal_product(x):
     return pt.prod(diagonal(x, axis1=-2, axis2=-1), axis=-1)
 
 
+def lu_pivots_to_det_sign(pivots, n):
+    # Each pivot entry that differs from its own index records a row swap,
+    # and every swap flips the determinant's sign
+    n_swaps = pt.neq(pivots, pt.arange(n)).sum(axis=-1)
+    return 1 - 2 * (n_swaps % 2)
+
+
 def get_assume_a(fgraph, A):
     """Return the most-specific ``solve`` ``assume_a`` for ``A`` from tags and assumptions."""
     if getattr(A.tag, "lower_triangular", False) or check_assumption(

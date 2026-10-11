@@ -26,7 +26,10 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
+from pytensor.tensor.rewriting.linalg.utils import (
+    lu_pivots_to_det_sign,
+    matrix_diagonal_product,
+)
 from pytensor.tensor.subtensor import _is_provably_non_negative
 
 
@@ -78,16 +81,25 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
                 # split log(det) into a sum of logs before the product underflows
                 L = client.outputs[0]
                 new_det = sqr(matrix_diagonal_product(L))
-            case LU():
-                U = client.outputs[-1]
-                new_det = matrix_diagonal_product(U)
             case LUFactor():
-                LU_packed = client.outputs[0]
+                LU_packed, pivots = client.outputs
                 new_det = matrix_diagonal_product(LU_packed)
+                if not sign_not_needed:
+                    # Multiplying the sign in when it is later discarded would
+                    # block the log(abs(prod)) -> sum(log(abs)) stabilization
+                    permutation_sign = lu_pivots_to_det_sign(
+                        pivots, x.shape[-1]
+                    ).astype(LU_packed.dtype)
+                    new_det = permutation_sign * new_det
             case _:
                 if not sign_not_needed:
                     continue
                 match core_op:
+                    case LU():
+                        # The permutation sign is not recoverable from the LU
+                        # outputs, so det(X) is only known up to a sign change
+                        U = client.outputs[-1]
+                        new_det = matrix_diagonal_product(U)
                     case SVD():
                         lmbda = (
                             client.outputs[1]
