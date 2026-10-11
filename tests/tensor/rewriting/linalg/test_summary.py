@@ -648,6 +648,48 @@ def test_log_abs_det_factor_sharing_does_not_underflow(factor_fn):
 
 
 @pytest.mark.parametrize(
+    "factor_fn, factor_op",
+    [
+        pytest.param(lambda x: lu.lu(x)[-1], "LU", id="lu"),
+        pytest.param(lambda x: svd.svd(x, compute_uv=False), "SVD", id="svd"),
+        pytest.param(lambda x: qr.qr(x)[-1], "QR", id="qr"),
+    ],
+)
+def test_logabsdet_shared_from_sign_free_factor(factor_fn, factor_op):
+    """With no consumer of the sign, factors that cannot recover it can still
+    supply the log magnitude, stranding the SLogDet as dead code."""
+    x = pt.tensor("x", shape=(3, 3))
+    factor = factor_fn(x)
+    _sign_x, logabsdet_x = Blockwise(SLogDet())(x)
+
+    result = RewriteTester(
+        [x], [factor, logabsdet_x], include=["stabilize", "specialize"]
+    )
+
+    negative = np.eye(3, dtype=config.floatX)[[1, 0, 2]] * np.array(
+        [2.0, 3.0, 4.0], dtype=config.floatX
+    )
+    result.assert_eval(negative, rtol=1e-3 if config.floatX == "float32" else 1e-7)
+
+    core_ops = core_op_names(result.rewr_fg.toposort())
+    assert "SLogDet" not in core_ops
+    assert core_ops.count(factor_op) == 1
+
+
+def test_slogdet_sign_not_shared_from_sign_free_factor():
+    """The permutation sign is not recoverable from lu outputs, so a slogdet
+    whose sign is used must keep its own computation."""
+    x = pt.tensor("x", shape=(3, 3))
+    u = lu.lu(x)[-1]
+    sign_x, logabsdet_x = Blockwise(SLogDet())(x)
+
+    *slogdet_rewritten, _ = rewrite_graph(
+        [sign_x, logabsdet_x, u], include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations(slogdet_rewritten, [sign_x, logabsdet_x])
+
+
+@pytest.mark.parametrize(
     "logdet_first", [True, False], ids=["logdet_first", "logdet_last"]
 )
 def test_slogdet_factor_sharing_is_order_independent(logdet_first):

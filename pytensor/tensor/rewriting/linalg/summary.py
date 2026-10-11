@@ -281,6 +281,10 @@ def slogdet_of_matrix_factorized_elsewhere(fgraph, node):
     [x] = node.inputs
     sign_out, logabsdet_out = node.outputs
 
+    # With no consumer of the sign, factors that only determine the magnitude
+    # can be shared too; the logabsdet replacement then strands the SLogDet as
+    # dead code. With the sign in use, those factors must be declined, or the
+    # SLogDet would survive for the sign and the matrix be factored twice.
     sign_not_needed = not fgraph.clients[sign_out]
 
     sign = logabsdet = None
@@ -309,6 +313,28 @@ def slogdet_of_matrix_factorized_elsewhere(fgraph, node):
                     sign = (permutation_sign * u_unit.prod(axis=-1)).astype(
                         sign_out.dtype
                     )
+            case _:
+                if not sign_not_needed:
+                    continue
+                match core_op:
+                    case LU():
+                        U = client.outputs[-1]
+                        u_diag = pt.diagonal(U, axis1=-2, axis2=-1)
+                        logabsdet = log(abs(u_diag)).sum(axis=-1)
+                    case SVD():
+                        lmbda = (
+                            client.outputs[1]
+                            if core_op.compute_uv
+                            else client.outputs[0]
+                        )
+                        logabsdet = log(lmbda).sum(axis=-1)
+                    case QR():
+                        R = client.outputs[-1]
+                        # if mode == "economic", R may not be square and this rewrite could hide a shape error
+                        # That's why it's tagged as `shape_unsafe`
+                        r_diag = pt.diagonal(R, axis1=-2, axis2=-1)
+                        logabsdet = log(abs(r_diag)).sum(axis=-1)
+
         if logabsdet is not None:
             # found a match
             break
