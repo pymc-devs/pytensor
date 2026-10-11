@@ -7,7 +7,7 @@ import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.ifelse import IfElse
+from pytensor.ifelse import IfElse, LazyIfElse, _output_may_alias
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -138,6 +138,63 @@ def numba_funcify_IfElse(op, **kwargs):
 
     cache_version = 1
     return ifelse_func, cache_version
+
+
+@register_funcify_and_cache_key(LazyIfElse)
+def numba_funcify_LazyIfElse(op, node=None, **kwargs):
+    _ = kwargs.pop("storage_map", None)
+
+    then_fn, then_key = numba_funcify_and_cache_key(
+        op.then_fgraph, fgraph_name="numba_lazy_ifelse_then", **kwargs
+    )
+    else_fn, else_key = numba_funcify_and_cache_key(
+        op.else_fgraph, fgraph_name="numba_lazy_ifelse_else", **kwargs
+    )
+
+    n_outs = len(op.output_types)
+    then_args = [f"t{i}" for i in range(len(op.then_fgraph.inputs))]
+    else_args = [f"f{i}" for i in range(len(op.else_fgraph.inputs))]
+    signature = ", ".join(("cond", *then_args, *else_args))
+
+    def branch_returns(fgraph):
+        # A branch result that aliases a branch input, a constant, or another
+        # output must be copied; fresh arrays are returned as they are.
+        results = (
+            f"numba_deepcopy(res[{i}])"
+            if _output_may_alias(out, fgraph)
+            else f"res[{i}]"
+            for i, out in enumerate(fgraph.outputs)
+        )
+        return ", ".join(results)
+
+    func_src = dedent(
+        f"""
+            def lazy_ifelse({signature}):
+                if cond:
+                    res = then_fn({", ".join(then_args)})
+                    return {branch_returns(op.then_fgraph)}
+                else:
+                    res = else_fn({", ".join(else_args)})
+                    return {branch_returns(op.else_fgraph)}
+        """
+    )
+
+    lazy_ifelse_fn = numba_basic.numba_njit(
+        compile_numba_function_src(
+            func_src,
+            "lazy_ifelse",
+            globals() | {"then_fn": then_fn, "else_fn": else_fn},
+        )
+    )
+
+    if then_key is None or else_key is None:
+        cache_key = None
+    else:
+        cache_key = sha256(
+            str((type(op), n_outs, then_key, else_key, func_src)).encode()
+        ).hexdigest()
+
+    return lazy_ifelse_fn, cache_key
 
 
 @register_funcify_and_cache_key(CheckAndRaise)

@@ -3,9 +3,10 @@ import pytest
 
 from pytensor import In, Mode, OpFromGraph, Out, config, function, ifelse, scan
 from pytensor import tensor as pt
+from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import vectorize_graph
-from pytensor.ifelse import IfElse
+from pytensor.ifelse import IfElse, LazyIfElse
 from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.scan.op import Scan
@@ -105,6 +106,38 @@ def test_IfElse(inputs, cond_fn, true_vals, false_vals):
     inputs, test_values = zip(*inputs, strict=True) if inputs else ([], [])
     out = ifelse(cond_fn(*inputs), true_vals, false_vals)
     compare_numba_and_py(inputs, out, test_values)
+
+
+def test_lazy_ifelse():
+    mode = get_mode("NUMBA").including("lazy_ifelse")
+    cond = pt.scalar("cond")
+    x = pt.vector("x")
+    boom = assert_op(x * 3.0, pt.eq(x.sum(), -999.0))
+    f = function([cond, x], ifelse(cond > 0, x * 2.0, boom), mode=mode)
+
+    assert any(isinstance(n.op, LazyIfElse) for n in f.maker.fgraph.apply_nodes)
+    assert not any(isinstance(n.op, IfElse) for n in f.maker.fgraph.apply_nodes)
+    np.testing.assert_allclose(f(1.0, np.ones(3)), np.full(3, 2.0))
+    with pytest.raises(AssertionError):
+        f(0.0, np.ones(3))
+
+
+def test_lazy_ifelse_copies_aliased_branch_output():
+    # An identity branch returns its input's buffer. The dispatch must copy it,
+    # or a later inplace destruction of that buffer corrupts the result already
+    # returned by the conditional.
+    mode = get_mode("NUMBA").including("lazy_ifelse")
+    cond = pt.scalar("cond")
+    x = pt.vector("x")
+    y = x + 1.0
+    taken = ifelse(cond > 0, y, -y)
+    destroyed = pt.inc_subtensor(y[0], 100.0)
+    f = function([cond, x], [taken, destroyed], mode=mode)
+
+    assert any(node.op.destroy_map for node in f.maker.fgraph.apply_nodes)
+    r_taken, r_destroyed = f(1.0, np.zeros(3))
+    np.testing.assert_allclose(r_taken, np.ones(3))
+    np.testing.assert_allclose(r_destroyed, [101.0, 1.0, 1.0])
 
 
 def test_OpFromGraph():
