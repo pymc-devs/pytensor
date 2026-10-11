@@ -329,12 +329,14 @@ def test_slogdet_grad_when_cholesky_factored_det_underflows():
     _, logdet = pt.linalg.slogdet(K)
 
     # d(logdet)/d(log_sigma) = 2 * N exactly, for any log_sigma
-    f = function([log_sigma], [grad(logdet, log_sigma), L])
+    f = function([log_sigma], [grad(logdet, log_sigma), L], mode="FAST_RUN")
 
     logdet_stab, L_stab = rewrite_graph(
         [logdet, L], include=("canonicalize", "stabilize"), clone=True
     )
-    f_stab = function([log_sigma], [grad(logdet_stab, log_sigma), L_stab])
+    f_stab = function(
+        [log_sigma], [grad(logdet_stab, log_sigma), L_stab], mode="FAST_RUN"
+    )
 
     point = -5.0  # det(K) ~ exp(2 * N * point) underflows float64
     assert_allclose(f(point)[0], 2 * N)
