@@ -28,6 +28,7 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
     LUFactorTridiagonal,
     SolveLUFactorTridiagonal,
 )
+from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.linalg.solvers import (
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
@@ -859,3 +860,92 @@ def test_cho_solve_quadratic_form_with_reused_solve_not_whitened():
 
     result = RewriteTester([c, b], [quad, x], include=["specialize"])
     result.assert_graph(quad, x)
+
+
+def test_vector_quadratic_form_to_whitened():
+    A_raw = pt.dmatrix("A")
+    b = pt.dvector("b")
+    A = assume(A_raw, positive_definite=True)
+    quad = b @ pt.linalg.inv(A) @ b
+
+    result = RewriteTester(
+        [A_raw, b], [quad], include=["canonicalize", "stabilize", "specialize"]
+    )
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    A_val = M @ M.T + 4 * np.eye(4)
+    result.assert_eval(A_val, rng.normal(size=4))
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
+    ]
+    assert not any(isinstance(op, CholeskySolve | Dot) for op in core_ops)
+    assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
+
+
+@pytest.mark.parametrize("wrap", [lambda t: t, pt.log], ids=["plain", "under_log"])
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+def test_vector_quadratic_form_dot_to_whitened(lower, wrap):
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    col = b[:, None]
+    x = cho_solve((c, lower), col, b_ndim=2)
+    out = wrap(pt.squeeze(x.mT @ col))
+
+    result = RewriteTester([c, b], [out], include=["specialize"])
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    c_val = np.linalg.cholesky(M @ M.T + 4 * np.eye(4))
+    c_val = c_val if lower else c_val.T
+    result.assert_eval(c_val, rng.normal(size=4) ** 2)
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
+    ]
+    assert not any(isinstance(op, CholeskySolve | Dot) for op in core_ops)
+    assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(lambda x, col, d_col: [pt.squeeze(x.mT @ d_col)], id="bilinear"),
+        pytest.param(lambda x, col, d_col: [x.mT @ col], id="matrix_result"),
+        pytest.param(
+            lambda x, col, d_col: [pt.squeeze(x.mT @ col), x], id="reused_solve"
+        ),
+    ],
+)
+def test_vector_quadratic_form_dot_not_whitened(build):
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    d = pt.dvector("d")
+    col = b[:, None]
+    x = cho_solve((c, True), col, b_ndim=2)
+    outputs = build(x, col, d[:, None])
+
+    result = RewriteTester([c, b, d], outputs, include=["specialize"])
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    c_val = np.linalg.cholesky(M @ M.T + 4 * np.eye(4))
+    result.assert_eval(c_val, rng.normal(size=4), rng.normal(size=4))
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
+    ]
+    assert any(isinstance(op, CholeskySolve) for op in core_ops)
+
+
+def test_vector_quadratic_form_length_one():
+    A_raw = pt.dmatrix("A")
+    b = pt.dvector("b")
+    A = assume(A_raw, positive_definite=True)
+    quad = b @ pt.linalg.inv(A) @ b
+
+    result = RewriteTester(
+        [A_raw, b], [quad], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_eval(np.array([[2.5]]), np.array([3.0]))

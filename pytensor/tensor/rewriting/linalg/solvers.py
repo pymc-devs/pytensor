@@ -34,7 +34,7 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
     tridiagonal_lu_factor,
     tridiagonal_lu_solve,
 )
-from pytensor.tensor.math import Sum
+from pytensor.tensor.math import Dot, Sum
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -159,8 +159,10 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
 
     The quadratic form ``b.T @ inv(A) @ b`` with ``A = c @ c.mT`` equals
     ``|solve(c, b)| ** 2``, one triangular substitution instead of the two
-    inside ``cho_solve``. The ``b_ndim=2`` arm matches the matrix form this
-    pattern takes after ``batched_vector_b_solve_to_matrix_b_solve``:
+    inside ``cho_solve``. The ``b_ndim=2`` arms match the two forms this
+    pattern takes for vector ``b``: the inner-product Dot that matmul emits
+    for ``b @ inv(A) @ b``, and the matrix form left by
+    ``batched_vector_b_solve_to_matrix_b_solve``,
     ``sum(b * cho_solve((c, lower), b.mT).mT, axis=-1)``.
     """
     core_op = node.op.core_op
@@ -171,6 +173,55 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
     # not |solve(c, b)| ** 2
     if x.type.dtype.startswith("complex"):
         return None
+
+    def inner_product_scalar_client():
+        # matmul contracts b.T @ x for vector b as squeeze(Dot(x_as_row, b_as_column)),
+        # with the solve output x on the left because @ associates left.
+        # x is a (m, 1) column here, so any DimShuffle of it with (1, m) output
+        # is its transpose: the output's only non-unit dim can only be x's dim 0.
+        match fgraph.clients[x]:
+            case [(row_client, _)] if isinstance(
+                row_client.op, DimShuffle
+            ) and row_client.outputs[0].type.broadcastable == (True, False):
+                pass
+            case _:
+                return None
+        [x_row] = row_client.outputs
+
+        # The right operand must be the b fed to the solve itself; merge has
+        # already unified equal subgraphs, so identity is the sound check
+        match fgraph.clients[x_row]:
+            case [(dot_client, 0)] if (
+                isinstance(dot_client.op, Dot) and dot_client.inputs[1] is solve_b
+            ):
+                pass
+            case _:
+                return None
+        [dot_out] = dot_client.outputs
+
+        match fgraph.clients[dot_out]:
+            case [(squeeze_client, _)] if (
+                isinstance(squeeze_client.op, DimShuffle)
+                and squeeze_client.outputs[0].type.ndim == 0
+            ):
+                return squeeze_client.outputs[0]
+        return None
+
+    if core_op.b_ndim == 2 and solve_b.type.shape[-1] == 1:
+        scalar_out = inner_product_scalar_client()
+        if scalar_out is not None:
+            # A = c @ c.mT when lower, c.mT @ c when upper; trans=1 whitens
+            # the upper case
+            whitened = solve_triangular(
+                c,
+                solve_b,
+                lower=core_op.lower,
+                trans=0 if core_op.lower else 1,
+                b_ndim=2,
+            )
+            new_out = (whitened**2).sum()
+            copy_stack_trace(scalar_out, new_out)
+            return {scalar_out: new_out}
 
     # target is the solve output as the mul consumes it, expected_b the
     # operand it is contracted with
