@@ -4,6 +4,13 @@ Source: https://github.com/pymc-labs/tymc/blob/b1c038979eb006b2d9ad1842a5b9ec264
 It includes the Cephes-derived kernels and TyMC's fitted Stirling correction.
 The Apache-2.0 license is supplied in special.LICENSE.
 
+wasm_kernels.js adapts TyMC's numerical WASM/SIMD assemblers at the same
+revision, Copyright 2026 Benjamin F. Maier / PyMC Labs (Apache-2.0):
+https://github.com/pymc-labs/tymc/tree/b1c038979eb006b2d9ad1842a5b9ec2640688944/src/graph
+Sources: wasm_linalg.ts, wasm_trsm.ts and wasm_cholesky.ts. Assemblers are
+isolated in closures; TyMC graph/record adapters are omitted. PyTensor's
+staging adapters are in wasm_runtime.js. The license is in special.LICENSE.
+
 TyMC — probabilistic programming in TypeScript
 Copyright 2026 Benjamin F. Maier and PyMC Labs
 

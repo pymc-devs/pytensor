@@ -6,6 +6,8 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.graph.basic import Constant
+from pytensor.graph.traversal import ancestors
+from pytensor.link.js.rewriting import MulLog, switch_branch
 from pytensor.scalar.basic import (
     AND,
     EQ,
@@ -14,15 +16,20 @@ from pytensor.scalar.basic import (
     LE,
     LT,
     NEQ,
+    OR,
     Abs,
     Add,
     Cast,
+    Clip,
     Composite,
     Cos,
     Exp,
     Expm1,
     Identity,
     IntDiv,
+    Invert,
+    IsInf,
+    IsNan,
     Log,
     Log1p,
     Maximum,
@@ -32,6 +39,7 @@ from pytensor.scalar.basic import (
     Pow,
     Reciprocal,
     Second,
+    Sign,
     Sin,
     Sqr,
     Sqrt,
@@ -39,6 +47,7 @@ from pytensor.scalar.basic import (
     Switch,
     Tanh,
     TrueDiv,
+    identity,
 )
 from pytensor.scalar.math import GammaLn, Psi, Sigmoid, Softplus
 
@@ -67,6 +76,15 @@ def js_scalar_add(op, args):
 @js_scalar.register(Mul)
 def js_scalar_mul(op, args):
     return "(" + " * ".join(args) + ")"
+
+
+@js_scalar.register(MulLog)
+def js_scalar_mul_log(op, args):
+    x, y = args
+    return (
+        f"({x} === 0 && {y} > 0 && {y} < Infinity "
+        f"? {x} * ({y} < 1 ? -1 : 1) : {x} * Math.log({y}))"
+    )
 
 
 for op_type, operator in {
@@ -107,6 +125,38 @@ for op_type, function in {
 @js_scalar.register(IntDiv)
 def js_scalar_int_div(op, args):
     return f"Math.floor({args[0]} / {args[1]})"
+
+
+@js_scalar.register(Clip)
+def js_scalar_clip(op, args):
+    value, lower, upper = args
+    return f"({value} < {lower} ? {lower} : {value} > {upper} ? {upper} : {value})"
+
+
+@js_scalar.register(Sign)
+def js_scalar_sign(op, args):
+    value = args[0]
+    return f"({value} === 0 ? 0 : Math.sign({value}))"
+
+
+@js_scalar.register(IsInf)
+def js_scalar_isinf(op, args):
+    return f"(Math.abs({args[0]}) === Infinity)"
+
+
+@js_scalar.register(IsNan)
+def js_scalar_isnan(op, args):
+    return f"Number.isNaN({args[0]})"
+
+
+@js_scalar.register(OR)
+def js_scalar_or(op, args):
+    return f"Number(BigInt({args[0]}) | BigInt({args[1]}))"
+
+
+@js_scalar.register(Invert)
+def js_scalar_invert(op, args):
+    return f"Number(~BigInt({args[0]}))"
 
 
 @js_scalar.register(Cast)
@@ -177,10 +227,24 @@ def js_scalar_second(op, args):
     return args[1]
 
 
-def scalar_program(op, inputs, switch_choices=None):
+def scalar_program(
+    op, inputs, switch_choices=None, input_dtypes=None, _prefix="", input_loads=None
+):
     """Emit statements and expressions for a scalar Op or Composite."""
     if not isinstance(op, Composite):
-        return [], [js_scalar(op, inputs)]
+        loads = [
+            f"const {name} = {expression};"
+            for name, expression in (input_loads or {}).items()
+        ]
+        if isinstance(op, Invert) and input_dtypes == ["bool"]:
+            return loads, [f"(!{inputs[0]})"]
+        if (
+            isinstance(op, OR)
+            and input_dtypes
+            and all(dtype == "bool" for dtype in input_dtypes)
+        ):
+            return loads, [f"({inputs[0]} || {inputs[1]})"]
+        return loads, [js_scalar(op, inputs)]
 
     names = dict(zip(op.inputs, inputs, strict=True))
     nodes = op.fgraph.toposort()
@@ -203,6 +267,101 @@ def scalar_program(op, inputs, switch_choices=None):
             and literal(left.data) == literal(right.data)
         ):
             aliases[node.outputs[0]] = left
+
+    resolved_outputs = [resolve(output) for output in op.outputs]
+    conditions = Counter(
+        resolve(output.owner.inputs[0])
+        for output in resolved_outputs
+        if output.owner and isinstance(output.owner.op, Switch)
+    )
+    if conditions:
+        condition, count = conditions.most_common(1)[0]
+        cheap = all(
+            variable.owner is None or variable.dtype == "bool"
+            for variable in ancestors([condition])
+        )
+        if count >= 3 and condition.dtype == "bool" and cheap:
+
+            def composite(outputs):
+                return Composite(
+                    op.inputs,
+                    [
+                        identity(output) if output in op.inputs else output
+                        for output in outputs
+                    ],
+                )
+
+            def leaves(outputs):
+                visited = set()
+                pending = list(outputs)
+                result = set()
+                while pending:
+                    variable = resolve(pending.pop())
+                    if variable in visited:
+                        continue
+                    visited.add(variable)
+                    if variable.owner is None:
+                        result.add(variable)
+                    else:
+                        pending.extend(variable.owner.inputs)
+                return result
+
+            branches = [
+                [
+                    switch_branch(output, truth)
+                    if output.owner
+                    and isinstance(output.owner.op, Switch)
+                    and resolve(output.owner.inputs[0]) is condition
+                    else output
+                    for output in resolved_outputs
+                ]
+                for truth in (True, False)
+            ]
+            condition_inputs = leaves([condition])
+            only_condition = condition_inputs - leaves(
+                [output for branch in branches for output in branch]
+            )
+            condition_arguments = [
+                input_loads[name]
+                if variable in only_condition and input_loads and name in input_loads
+                else name
+                for variable, name in zip(op.inputs, inputs, strict=True)
+            ]
+            branch_inputs = [
+                f"{_prefix}c_{name}"
+                if variable in condition_inputs - only_condition
+                and input_loads
+                and name in input_loads
+                else name
+                for variable, name in zip(op.inputs, inputs, strict=True)
+            ]
+            statements, [predicate] = scalar_program(
+                composite([condition]),
+                condition_arguments,
+                switch_choices,
+                _prefix=f"{_prefix}c_",
+                input_loads=input_loads,
+            )
+            names = [f"{_prefix}branch{index}" for index in range(len(op.outputs))]
+            statements.append(f"let {', '.join(names)};")
+            for truth, label, selected in zip(
+                (True, False), ("t_", "f_"), branches, strict=True
+            ):
+                body, expressions = scalar_program(
+                    composite(selected),
+                    branch_inputs,
+                    switch_choices,
+                    _prefix=f"{_prefix}{label}",
+                    input_loads=input_loads,
+                )
+                statements.append(f"if ({predicate}) {{" if truth else "} else {")
+                statements.extend(f"    {statement}" for statement in body)
+                statements.extend(
+                    f"    {name} = {expression};"
+                    for name, expression in zip(names, expressions, strict=True)
+                )
+            statements.append("}")
+            return statements, names
 
     needed = set()
     pending = list(op.outputs)
@@ -233,17 +392,26 @@ def scalar_program(op, inputs, switch_choices=None):
         return names[variable]
 
     statements = []
+    used_inputs = {resolve(variable) for node in needed for variable in node.inputs}
+    used_inputs.update(resolved_outputs)
+    for variable, name in zip(op.inputs, inputs, strict=True):
+        if variable in used_inputs and input_loads and name in input_loads:
+            local = f"{_prefix}{name}"
+            statements.append(f"const {local} = {input_loads[name]};")
+            names[variable] = local
+    uses = Counter(resolve(variable) for node in needed for variable in node.inputs)
+    uses.update(resolve(variable) for variable in op.outputs)
     for index, node in enumerate(nodes):
         if node not in needed:
             continue
         if len(node.outputs) != 1:
             raise NotImplementedError("JS Composite scalar Ops with multiple outputs")
-        name = f"q{index}"
+        name = f"{_prefix}q{index}"
         arguments = [operand(arg) for arg in node.inputs]
         base = softplus_bases.get(node)
         if base is not None and counts[base] > 1:
             if base not in shared_softplus:
-                common = f"sp{len(shared_softplus)}"
+                common = f"{_prefix}sp{len(shared_softplus)}"
                 shared_softplus[base] = common
                 statements.append(
                     f"const {common} = Math.log1p(Math.exp(-Math.abs({operand(base)})));"
@@ -251,8 +419,15 @@ def scalar_program(op, inputs, switch_choices=None):
             expression = f"({shared_softplus[base]} + Math.max({arguments[0]}, 0))"
         elif isinstance(node.op, Switch) and node.inputs[0].dtype == "bool":
             expression = f"({arguments[0]} ? {arguments[1]} : {arguments[2]})"
+        elif isinstance(node.op, OR) and node.outputs[0].dtype == "bool":
+            expression = f"({arguments[0]} || {arguments[1]})"
+        elif isinstance(node.op, Invert) and node.outputs[0].dtype == "bool":
+            expression = f"(!{arguments[0]})"
         else:
             expression = js_scalar(node.op, arguments)
-        statements.append(f"const {name} = {expression};")
-        names[node.outputs[0]] = name
+        if uses[node.outputs[0]] == 1:
+            names[node.outputs[0]] = expression
+        else:
+            statements.append(f"const {name} = {expression};")
+            names[node.outputs[0]] = name
     return statements, [operand(output) for output in op.outputs]
