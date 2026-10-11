@@ -24,7 +24,8 @@ from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, constant, get_vector_length, ivector, vectorize
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import exp, isinf, lt, maximum, minimum, switch
+from pytensor.tensor.linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.math import exp, isinf, lt, maximum, minimum, prod, sqr, switch
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
@@ -164,6 +165,74 @@ class TestProvablyPositive:
     )
     def test_recurses_through_min_and_max(self, expr, strict, expected):
         assert _is_provably_positive(expr, strict=strict) is expected
+
+    @pytest.mark.parametrize(
+        "make_var, strict, expected",
+        [
+            pytest.param(
+                lambda: ptb.diagonal(cholesky(matrix("X"))),
+                True,
+                True,
+                id="diag-of-cholesky",
+            ),
+            pytest.param(
+                lambda: ptb.diagonal(constant(np.full((2, 2), 0.5))),
+                True,
+                True,
+                id="diag-recurses-to-matrix",
+            ),
+            pytest.param(
+                lambda: prod(constant(np.array([1.0, 2.0]))),
+                True,
+                True,
+                id="prod-positive",
+            ),
+            pytest.param(
+                lambda: prod(constant(np.array([0.0, 2.0]))),
+                True,
+                False,
+                id="prod-zero-fails-strict",
+            ),
+            pytest.param(
+                lambda: prod(constant(np.array([0.0, 2.0]))),
+                False,
+                True,
+                id="prod-zero-passes-loose",
+            ),
+            pytest.param(
+                lambda: sqr(constant(np.array([1.0, 2.0]))),
+                True,
+                True,
+                id="sqr-positive-strict",
+            ),
+            pytest.param(
+                lambda: sqr(vector("v")),
+                True,
+                False,
+                id="sqr-indefinite-fails-strict",
+            ),
+            pytest.param(
+                lambda: ptb.diagonal(cholesky(matrix("X")), offset=-1),
+                True,
+                False,
+                id="off-diagonal-of-cholesky",
+            ),
+            pytest.param(
+                lambda: ptb.diagonal(cholesky(tensor3("X")), axis1=0, axis2=1),
+                True,
+                False,
+                id="batch-axis-diag-of-cholesky",
+            ),
+            pytest.param(
+                lambda: prod(vector("v", dtype="uint8")),
+                True,
+                False,
+                id="uint-prod-can-wrap-to-zero",
+            ),
+        ],
+    )
+    def test_recurses_through_diag_prod_and_sqr(self, make_var, strict, expected):
+        assert _is_provably_positive(make_var(), strict=strict) is expected
 
 
 class TestGetCanonicalFormSlice:

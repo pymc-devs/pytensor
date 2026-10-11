@@ -22,6 +22,7 @@ from pytensor.scalar.basic import (
     ScalarMaximum,
     ScalarMinimum,
     ScalarVariable,
+    Sqr,
     UnaryScalarOp,
 )
 from pytensor.tensor import (
@@ -31,6 +32,7 @@ from pytensor.tensor import (
     get_vector_length,
 )
 from pytensor.tensor.basic import (
+    ExtractDiag,
     MakeVector,
     ScalarFromTensor,
     TensorFromScalar,
@@ -41,10 +43,10 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.basic import (
     constant as tensor_constant,
 )
-from pytensor.tensor.blockwise import vectorize_node_fallback
+from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.math import add, clip, minimum
+from pytensor.tensor.math import Prod, add, clip, minimum
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -253,6 +255,13 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
       ``TensorFromScalar``, ``DimShuffle`` — recurse to their input.
     - ``minimum(a, b)`` when both ``a`` and ``b`` are positive.
     - ``maximum(a, b)`` when at least one of ``a``, ``b`` is positive.
+    - ``ExtractDiag`` taking the main diagonal of a ``Cholesky`` factor along
+      its core matrix axes, which is positive whenever the factorization
+      succeeded (``on_error="nan"`` yields NaN instead); any other diagonal
+      recurses to the matrix.
+    - ``Prod`` of a positive input, restricted to float outputs because
+      integer products wrap on overflow (unsigned ones to values as low as 0).
+    - ``sqr`` of a strictly positive input, under the same restriction.
 
     Four further cases prove non-negativity but not strict positivity, so they
     are recognized only when ``strict=False``:
@@ -293,10 +302,31 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
         return all(_is_provably_positive(i, strict) for i in var.owner.inputs)
     if isinstance(op, Subtensor | ScalarFromTensor | TensorFromScalar | DimShuffle):
         return _is_provably_positive(var.owner.inputs[0], strict)
+    if isinstance(op, ExtractDiag):
+        # Imported here to avoid a circular import: the linalg modules import
+        # from this one at load time
+        from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+
+        [matrix] = var.owner.inputs
+        matrix_op = matrix.owner_op
+        core_op = matrix_op.core_op if isinstance(matrix_op, Blockwise) else matrix_op
+        diag_axes = {op.axis1 % matrix.ndim, op.axis2 % matrix.ndim}
+        core_matrix_axes = {matrix.ndim - 2, matrix.ndim - 1}
+        if (
+            isinstance(core_op, Cholesky)
+            and op.offset == 0
+            and diag_axes == core_matrix_axes
+        ):
+            return True
+        return _is_provably_positive(matrix, strict)
+    if isinstance(op, Prod) and var.type.dtype.startswith("float"):
+        return _is_provably_positive(var.owner.inputs[0], strict)
     if isinstance(op, Elemwise):
         scalar_op = op.scalar_op
         if not strict and isinstance(scalar_op, Cast):
             return _is_provably_positive(var.owner.inputs[0], strict)
+        if strict and isinstance(scalar_op, Sqr) and var.type.dtype.startswith("float"):
+            return _is_provably_positive(var.owner.inputs[0], strict=True)
         if (
             not strict
             and isinstance(scalar_op, UnaryScalarOp)
