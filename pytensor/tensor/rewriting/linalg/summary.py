@@ -77,10 +77,11 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
-                # sqr, not ** 2, so the stabilize-time log(sqr(x)) rewrite can
-                # split log(det) into a sum of logs before the product underflows
+                # Square each diagonal before the product so log(det) stabilizes
+                # directly, using sqr rather than waiting for ** 2 to specialize.
                 L = client.outputs[0]
-                new_det = sqr(matrix_diagonal_product(L))
+                L_diag = pt.diagonal(L, axis1=-2, axis2=-1)
+                new_det = prod(sqr(L_diag), axis=-1)
             case LUFactor():
                 LU_packed, pivots = client.outputs
                 new_det = matrix_diagonal_product(LU_packed)

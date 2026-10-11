@@ -291,7 +291,7 @@ def test_local_log_prod_to_sum_log_unknown_sign():
     [
         pytest.param(
             lambda x: cholesky(x),
-            lambda x: pt.sqr(pt.prod(pt.diag(cholesky(x)), axis=0)),
+            lambda x: pt.prod(pt.sqr(pt.diag(cholesky(x))), axis=0),
             id="cholesky",
         ),
         pytest.param(
@@ -547,3 +547,28 @@ def test_slogdet_of_inv():
 
     assert_equal_computations([rewritten_sign], [expected_sign_opt])
     assert_equal_computations([rewritten_logabsdet], [expected_logabsdet_opt])
+
+
+@pytest.mark.parametrize(
+    "factor_fn",
+    [
+        pytest.param(cholesky, id="cholesky"),
+        pytest.param(lambda x: lu.lu_factor(x)[0], id="lu_factor"),
+    ],
+)
+def test_log_abs_det_factor_sharing_does_not_underflow(factor_fn):
+    """Regression: the shared det must reach log as a product the
+    log(abs(prod)) -> sum(log(abs)) stabilization can rewrite, or it
+    underflows to -inf."""
+    n = 60
+    x = pt.tensor("x", shape=(n, n))
+    out = pt.log(pt.abs(det(x)))
+    f = function([x], [factor_fn(x), out], mode="FAST_RUN")
+
+    core_ops = core_op_names(f.maker.fgraph.toposort())
+    assert "Det" not in core_ops
+    assert "SLogDet" not in core_ops
+
+    x_val = np.diag(np.full(n, 1e-7)).astype(config.floatX)
+    assert np.linalg.det(x_val) == 0.0
+    assert_allclose(f(x_val)[1], n * np.log(1e-7), rtol=1e-5)
