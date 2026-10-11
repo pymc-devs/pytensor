@@ -783,6 +783,34 @@ def local_sign_div(fgraph, node):
 
 
 @register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_prod(fgraph, node):
+    """Rewrite sign(prod(x)) as prod(sign(x)), looking through one DimShuffle.
+
+    Distributing the sign inside the product keeps it exact when the product
+    itself under- or overflows, e.g. the determinant of a large matrix
+    computed from a factorization. The DimShuffle case covers the ExpandDims
+    that gradients insert between the sign and the prod.
+    """
+    [arg] = node.inputs
+    dimshuffle = None
+    match arg.owner_op_and_inputs:
+        case (DimShuffle() as dimshuffle, inner):
+            arg = inner
+    match arg.owner_op_and_inputs:
+        case (Prod(axis=axis), x):
+            new = sign(x).prod(axis=axis)
+            if dimshuffle is not None:
+                new = dimshuffle(new)
+            if new.dtype != node.outputs[0].dtype:
+                new = cast(new, dtype=node.outputs[0].dtype)
+            copy_stack_trace(node.outputs[0], new)
+            return [new]
+
+
+@register_canonicalize
 @register_specialize
 @node_rewriter([Sum])
 def local_sumsqr2dot(fgraph, node):

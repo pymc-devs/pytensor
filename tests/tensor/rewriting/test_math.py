@@ -5438,3 +5438,28 @@ def test_sign_div_non_constant_not_rewritten():
     assert any(
         isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
     )
+
+
+@pytest.mark.parametrize(
+    "build, expected_fn",
+    [
+        (
+            lambda x: pt.sign(pt.prod(x)),
+            lambda x: pt.prod(pt.sign(x)),
+        ),
+        (
+            lambda x: pt.sign(pt.expand_dims(pt.prod(x, axis=1), 1)),
+            lambda x: pt.expand_dims(pt.prod(pt.sign(x), axis=1), 1),
+        ),
+    ],
+    ids=["all_axes", "through_expand_dims"],
+)
+def test_sign_prod(build, expected_fn):
+    x = pt.dmatrix("x")
+    rewritten = rewrite_graph(
+        build(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = rewrite_graph(
+        expected_fn(x), include=["canonicalize", "stabilize", "specialize"]
+    )
+    assert_equal_computations([rewritten], [expected])
