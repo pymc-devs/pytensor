@@ -11,7 +11,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Log, Sign, Sqr
-from pytensor.tensor.basic import ones
+from pytensor.tensor.basic import diagonal, ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -20,7 +20,7 @@ from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet, det
-from pytensor.tensor.math import Prod, log, prod
+from pytensor.tensor.math import Prod, log, prod, sqr
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -74,8 +74,11 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
+                # Square inside the product so that log(det) can later be
+                # rewritten as a sum of logs, which survives underflow of the
+                # product for large matrices
                 L = client.outputs[0]
-                new_det = matrix_diagonal_product(L) ** 2
+                new_det = prod(sqr(diagonal(L, axis1=-2, axis2=-1)), axis=-1)
             case LU():
                 U = client.outputs[-1]
                 new_det = matrix_diagonal_product(U)

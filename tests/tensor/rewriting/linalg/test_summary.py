@@ -6,6 +6,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
+from pytensor.gradient import grad
 from pytensor.graph import rewrite_graph
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
@@ -286,7 +287,7 @@ def test_local_log_prod_to_sum_log_unknown_sign():
     [
         pytest.param(
             lambda x: cholesky(x),
-            lambda x: pt.sqr(pt.prod(pt.diag(cholesky(x)), axis=0)),
+            lambda x: pt.prod(pt.sqr(pt.diag(cholesky(x))), axis=0),
             id="cholesky",
         ),
         pytest.param(
@@ -312,6 +313,32 @@ def test_det_of_matrix_factorized_elsewhere(decomp_fn, expected_fn):
     )
     assert_equal_computations([decomp_var], [decomp_fn(x)])
     assert_equal_computations([d], [expected_fn(x)])
+
+
+def test_slogdet_grad_when_cholesky_factored_det_underflows():
+    """The slogdet gradient of a Cholesky-factored matrix must stay exact
+    after prod(diag(L)) underflows, in both rewrite orders (#2468)."""
+    N = 100
+    rng = np.random.default_rng(2468)
+    A = rng.normal(size=(N, N))
+    C = A @ A.T / N + np.eye(N)
+
+    log_sigma = pt.dscalar("log_sigma")
+    K = assume(pt.exp(2 * log_sigma) * C, symmetric=True, positive_definite=True)
+    L = pt.linalg.cholesky(K)
+    _, logdet = pt.linalg.slogdet(K)
+
+    # d(logdet)/d(log_sigma) = 2 * N exactly, for any log_sigma
+    f = function([log_sigma], [grad(logdet, log_sigma), L])
+
+    logdet_stab, L_stab = rewrite_graph(
+        [logdet, L], include=("canonicalize", "stabilize"), clone=True
+    )
+    f_stab = function([log_sigma], [grad(logdet_stab, log_sigma), L_stab])
+
+    point = -5.0  # det(K) ~ exp(2 * N * point) underflows float64
+    assert_allclose(f(point)[0], 2 * N)
+    assert_allclose(f_stab(point)[0], 2 * N)
 
 
 @pytest.mark.parametrize(
