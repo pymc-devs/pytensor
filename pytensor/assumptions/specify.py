@@ -87,6 +87,7 @@ def assume(
     lower_triangular: bool | None = None,
     upper_triangular: bool | None = None,
     symmetric: bool | None = None,
+    tridiagonal: bool | None = None,
     positive_definite: bool | None = None,
     orthogonal: bool | None = None,
     selection: bool | None = None,
@@ -112,6 +113,8 @@ def assume(
         Assert that *x* is (or is not) upper-triangular.
     symmetric : bool, optional
         Assert that *x* is (or is not) symmetric.
+    tridiagonal : bool, optional
+        Assert that *x* is (or is not) tridiagonal.
     positive_definite : bool, optional
         Assert that *x* is (or is not) positive-definite.
     orthogonal : bool, optional
@@ -153,6 +156,7 @@ def assume(
         "lower_triangular": lower_triangular,
         "upper_triangular": upper_triangular,
         "symmetric": symmetric,
+        "tridiagonal": tridiagonal,
         "positive_definite": positive_definite,
         "orthogonal": orthogonal,
         "selection": selection,
