@@ -2,7 +2,6 @@ from collections.abc import Container
 
 from pytensor import tensor as pt
 from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
-from pytensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.fg import FunctionGraph
@@ -98,12 +97,14 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 def psd_solve_to_chol_solve(fgraph, node):
     """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
     core_op = node.op.core_op
+    assume_a = core_op.assume_a
     A, b = node.inputs
-    if (
-        core_op.assume_a == "pos"
-        or getattr(A.tag, "psd", None) is True
-        or check_assumption(fgraph, A, POSITIVE_DEFINITE)
-    ):
+    # Facts only upgrade gen and sym solves; a declared structure like
+    # tridiagonal already has a cheaper path than a dense Cholesky, and
+    # get_assume_a ranks any tridiagonal fact above pos for the same reason
+    if assume_a in ("gen", "sym"):
+        assume_a = get_assume_a(fgraph, A)
+    if assume_a == "pos":
         b_ndim = core_op.b_ndim
         L = cholesky(A)
         Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
@@ -166,8 +167,9 @@ def generic_solve_to_structured_form(fgraph, node):
     Priority order (most specialized first):
     - LOWER_TRIANGULAR -> solve_triangular(lower=True)
     - UPPER_TRIANGULAR -> solve_triangular(lower=False)
+    - TRIDIAGONAL -> solve(assume_a='tridiagonal')
     - POSITIVE_DEFINITE -> solve(assume_a='pos')
-    - SYMMETRIC → solve(assume_a='sym')
+    - SYMMETRIC -> solve(assume_a='sym')
     """
     b_ndim = node.op.core_op.b_ndim
     A, b = node.inputs

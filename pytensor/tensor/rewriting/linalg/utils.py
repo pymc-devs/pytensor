@@ -6,6 +6,7 @@ from pytensor.assumptions import (
     LOWER_TRIANGULAR,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UPPER_TRIANGULAR,
     check_assumption,
 )
@@ -39,6 +40,7 @@ MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 ASSUME_A_OF_TRANSPOSE = {
     "lower triangular": "upper triangular",
     "upper triangular": "lower triangular",
+    "tridiagonal": "tridiagonal",
     "pos": "pos",
     "sym": "sym",
     "gen": "gen",
@@ -59,6 +61,8 @@ def get_assume_a(fgraph, A):
         fgraph, A, UPPER_TRIANGULAR
     ):
         return "upper triangular"
+    if check_assumption(fgraph, A, TRIDIAGONAL):
+        return "tridiagonal"
     if getattr(A.tag, "psd", None) is True or check_assumption(
         fgraph, A, POSITIVE_DEFINITE
     ):

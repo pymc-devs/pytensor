@@ -33,7 +33,7 @@ from pytensor.tensor.rewriting.linalg.solvers import (
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_cholesky_factor_solve_becomes_triangular():
@@ -77,13 +77,14 @@ def test_cholesky_factor_solve_becomes_triangular():
         )
 
 
+@pytest.mark.parametrize("declared", ["gen", "sym"])
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
-def test_psd_solve_with_chol(b_ndim):
+def test_psd_solve_with_chol(b_ndim, declared):
     """Test that solve(A, b) with PSD A gets rewritten to cholesky + cho_solve."""
     A = matrix("A")
     b = matrix("b") if b_ndim == 2 else pt.vector("b")
     A_psd = assume(A, positive_definite=True)
-    out = pt.linalg.solve(A_psd, b, b_ndim=b_ndim)
+    out = pt.linalg.solve(A_psd, b, assume_a=declared, b_ndim=b_ndim)
 
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
@@ -708,3 +709,33 @@ def test_orthogonal_solve_to_transpose_matmul():
     rewritten = rewrite_graph(out, include=rewrites)
     expected = rewrite_graph(Q_orth.mT @ b, include=rewrites)
     assert_equal_computations([rewritten], [expected])
+
+
+def test_psd_fact_does_not_override_tridiagonal_solve():
+    """A positive-definite fact must not replace an O(n) tridiagonal solve."""
+    A = assume(matrix("A"), positive_definite=True)
+    b = matrix("b")
+    out = pt.linalg.solve(A, b, assume_a="tridiagonal", b_ndim=2)
+
+    result = RewriteTester([A.owner.inputs[0], b], [out], include=["stabilize"])
+    result.assert_graph(out)
+
+
+def test_generic_solve_upgrades_to_tridiagonal():
+    """With both facts, the band outranks positive-definiteness: a tridiagonal
+    solve is O(n) while the Cholesky split is O(n^3)."""
+    A = assume(matrix("A"), tridiagonal=True, positive_definite=True)
+    b = matrix("b")
+    out = solve(A, b)
+
+    result = RewriteTester([A.owner.inputs[0], b], [out], include=["stabilize"])
+    result.assert_graph(solve(A, b, assume_a="tridiagonal"))
+
+    rng = np.random.default_rng(5)
+    A_val = (
+        2 * np.eye(6)
+        + np.diag(rng.uniform(0.1, 0.4, 5), 1)
+        + np.diag(rng.uniform(0.1, 0.4, 5), -1)
+    ).astype(config.floatX)
+    b_val = rng.normal(size=(6, 3)).astype(config.floatX)
+    result.assert_eval(A_val, b_val, rtol=1e-7 if config.floatX == "float64" else 1e-4)
