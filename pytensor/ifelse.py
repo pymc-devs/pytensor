@@ -486,7 +486,7 @@ def _copy_value(value):
     return deepcopy(value)
 
 
-def _extract_branch(fgraph, node, branch_vars, branch_positions):
+def _extract_branch(fgraph, toposort, node, branch_vars, branch_positions):
     """Pull the subgraph feeding one `IfElse` branch into its own `FunctionGraph`.
 
     A node moves into the branch when every client of every one of its outputs
@@ -498,7 +498,7 @@ def _extract_branch(fgraph, node, branch_vars, branch_positions):
     candidate_nodes = {
         var.owner for var in ancestors(branch_vars) if var.owner is not None
     }
-    order = [n for n in fgraph.toposort() if n in candidate_nodes]
+    order = [n for n in toposort if n in candidate_nodes]
     clients = fgraph.clients
 
     movable: set[Apply] = set()
@@ -547,11 +547,12 @@ def ifelse_to_lazy_ifelse(fgraph, node):
     then_values = branch_values[:n_outs]
     else_values = branch_values[n_outs:]
 
+    toposort = fgraph.toposort()
     then_fgraph, then_inputs = _extract_branch(
-        fgraph, node, then_values, set(range(1, 1 + n_outs))
+        fgraph, toposort, node, then_values, set(range(1, 1 + n_outs))
     )
     else_fgraph, else_inputs = _extract_branch(
-        fgraph, node, else_values, set(range(1 + n_outs, 1 + 2 * n_outs))
+        fgraph, toposort, node, else_values, set(range(1 + n_outs, 1 + 2 * n_outs))
     )
 
     lazy_op = LazyIfElse(
