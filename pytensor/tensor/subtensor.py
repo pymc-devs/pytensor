@@ -2011,9 +2011,9 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
         shape_axis = x.type.shape[axis]
         min_idx, max_idx = idx.data.min(), idx.data.max()
-        return not (min_idx >= 0 or min_idx >= -shape_axis) and (
-            max_idx < 0 or max_idx < shape_axis
-        )
+        # Valid indices lie in [-shape_axis, shape_axis - 1]; it may be
+        # invalid if either bound is violated.
+        return min_idx < -shape_axis or max_idx >= shape_axis
 
     def make_node(self, x, *index_variables):
         if len(index_variables) != self.n_index_vars:
