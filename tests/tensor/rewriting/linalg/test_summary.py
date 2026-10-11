@@ -550,6 +550,79 @@ def test_slogdet_of_inv():
 
 
 @pytest.mark.parametrize(
+    "factor_fn, factor_op",
+    [
+        pytest.param(cholesky, "Cholesky", id="cholesky"),
+        pytest.param(lambda x: lu.lu_factor(x)[0], "LUFactor", id="lu_factor"),
+    ],
+)
+@pytest.mark.parametrize("batched", [False, True], ids=["matrix", "batched"])
+def test_slogdet_of_matrix_factorized_elsewhere(factor_fn, factor_op, batched):
+    x = pt.tensor("x", shape=(None, 3, 3) if batched else (3, 3))
+    factor = factor_fn(x)
+    sign_x, logabsdet_x = Blockwise(SLogDet())(x)
+
+    result = RewriteTester(
+        [x], [factor, sign_x, logabsdet_x], include=["stabilize", "specialize"]
+    )
+
+    rng = np.random.default_rng(11)
+    M = rng.normal(size=(3, 3))
+    spd = (M @ M.T + 3 * np.eye(3)).astype(config.floatX)
+    # A permuted matrix with a negative determinant exercises the pivot parity
+    # in the shared sign
+    negative = np.eye(3, dtype=config.floatX)[[1, 0, 2]] * np.array(
+        [2.0, 3.0, 4.0], dtype=config.floatX
+    )
+    rtol = 1e-3 if config.floatX == "float32" else 1e-7
+    values = [spd] if factor_op == "Cholesky" else [spd, negative]
+    if batched:
+        result.assert_eval(np.stack(values), rtol=rtol)
+    else:
+        for value in values:
+            result.assert_eval(value, rtol=rtol)
+
+    core_ops = core_op_names(result.rewr_fg.toposort())
+    assert "SLogDet" not in core_ops
+    assert "Det" not in core_ops
+    assert core_ops.count(factor_op) == 1
+
+
+def test_slogdet_shared_from_cholesky_of_complex_matrix():
+    """Regression: the shared logabsdet must stay real for complex input."""
+    x = pt.tensor("x", shape=(3, 3), dtype="complex128")
+    L = cholesky(x)
+    sign_x, logabsdet_x = Blockwise(SLogDet())(x)
+
+    result = RewriteTester(
+        [x], [L, sign_x, logabsdet_x], include=["stabilize", "specialize"]
+    )
+
+    rng = np.random.default_rng(5)
+    M = rng.normal(size=(3, 3)) + 1j * rng.normal(size=(3, 3))
+    result.assert_eval(M @ M.conj().T + 3 * np.eye(3))
+
+    assert "SLogDet" not in core_op_names(result.rewr_fg.toposort())
+
+
+def test_slogdet_sign_shared_from_lu_factor_of_complex_matrix():
+    """Regression: the unit part of a complex factor is u / abs(u), because
+    Sign rejects complex input."""
+    x = pt.tensor("x", shape=(3, 3), dtype="complex128")
+    factor = lu.lu_factor(x)[0]
+    sign_x, logabsdet_x = Blockwise(SLogDet())(x)
+
+    result = RewriteTester(
+        [x], [factor, sign_x, logabsdet_x], include=["stabilize", "specialize"]
+    )
+
+    rng = np.random.default_rng(3)
+    result.assert_eval(rng.normal(size=(3, 3)) + 1j * rng.normal(size=(3, 3)))
+
+    assert "SLogDet" not in core_op_names(result.rewr_fg.toposort())
+
+
+@pytest.mark.parametrize(
     "factor_fn",
     [
         pytest.param(cholesky, id="cholesky"),
@@ -572,3 +645,27 @@ def test_log_abs_det_factor_sharing_does_not_underflow(factor_fn):
     x_val = np.diag(np.full(n, 1e-7)).astype(config.floatX)
     assert np.linalg.det(x_val) == 0.0
     assert_allclose(f(x_val)[1], n * np.log(1e-7), rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "logdet_first", [True, False], ids=["logdet_first", "logdet_last"]
+)
+def test_slogdet_factor_sharing_is_order_independent(logdet_first):
+    """Regression for pytensor#2477: node visit order decided whether the
+    determinant shared the LU factor or kept a second factorization."""
+    A = matrix("A")
+    b1 = pt.vector("b1")
+    b2 = pt.vector("b2")
+    logdet = pt.log(pt.abs(det(A)))
+    x1 = pt.linalg.solve(A, b1, b_ndim=1)
+    x2 = pt.linalg.solve(A, b2, b_ndim=1)
+
+    # Two solves of the same matrix make reuse_decomposition_multiple_solves
+    # introduce the shared LUFactor; a single solve stays a direct Solve
+    outputs = [logdet, x1, x2] if logdet_first else [x1, x2, logdet]
+    f = function([A, b1, b2], outputs, mode="FAST_RUN")
+
+    core_ops = core_op_names(f.maker.fgraph.toposort())
+    assert "SLogDet" not in core_ops
+    assert "Det" not in core_ops
+    assert core_ops.count("LUFactor") == 1

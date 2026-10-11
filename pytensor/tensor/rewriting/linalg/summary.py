@@ -26,6 +26,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
     lu_pivots_to_det_sign,
     matrix_diagonal_product,
@@ -268,3 +269,55 @@ def slogdet_specialization(fgraph, node):
         "log_det": log_det_x,
     }
     return {k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()}
+
+
+@register_specialize("shape_unsafe")
+@node_rewriter([blockwise_of(SLogDet)])
+def slogdet_of_matrix_factorized_elsewhere(fgraph, node):
+    """Compute slogdet(X) from a decomposition of X the graph already holds.
+
+    The counterpart of `det_of_matrix_factorized_elsewhere` for the `SLogDet` form.
+    """
+    [x] = node.inputs
+    sign_out, logabsdet_out = node.outputs
+
+    sign_not_needed = not fgraph.clients[sign_out]
+
+    sign = logabsdet = None
+    for client, _ in fgraph.clients[x]:
+        core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
+        match core_op:
+            case Cholesky():
+                # A = L @ L.mT is positive definite, so the sign is one and the
+                # Cholesky diagonal is positive. The abs keeps logabsdet real for
+                # complex input
+                L = client.outputs[0]
+                diag = pt.diagonal(L, axis1=-2, axis2=-1)
+                sign = ones(x.shape[:-2], dtype=sign_out.dtype)
+                logabsdet = 2 * log(abs(diag)).sum(axis=-1)
+            case LUFactor():
+                LU_packed, pivots = client.outputs
+                u_diag = pt.diagonal(LU_packed, axis1=-2, axis2=-1)
+                logabsdet = log(abs(u_diag)).sum(axis=-1)
+                if not sign_not_needed:
+                    permutation_sign = lu_pivots_to_det_sign(pivots, x.shape[-1])
+                    # Sign does not support complex, where the unit part is u/|u|
+                    if u_diag.type.dtype.startswith("complex"):
+                        u_unit = u_diag / abs(u_diag)
+                    else:
+                        u_unit = pt.sign(u_diag)
+                    sign = (permutation_sign * u_unit.prod(axis=-1)).astype(
+                        sign_out.dtype
+                    )
+        if logabsdet is not None:
+            # found a match
+            break
+    else:  # no-break (i.e., no-match)
+        return None
+
+    logabsdet = logabsdet.astype(logabsdet_out.dtype)
+    copy_stack_trace(logabsdet_out, logabsdet)
+    if sign is None:
+        return {logabsdet_out: logabsdet}
+    copy_stack_trace(sign_out, sign)
+    return {sign_out: sign, logabsdet_out: logabsdet}
