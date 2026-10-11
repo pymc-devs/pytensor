@@ -10,11 +10,15 @@ import pytensor.sparse
 import pytensor.tensor.basic as ptb
 from pytensor import function
 from pytensor.compile.mode import Mode, get_mode
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.op import Op
-from pytensor.ifelse import IfElse, ifelse
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.ifelse import IfElse, LazyIfElse, ifelse
 from pytensor.link.c.type import generic
-from pytensor.tensor.math import eq
+from pytensor.raise_op import Assert
+from pytensor.tensor.math import cos, eq, exp, log, sin
+from pytensor.tensor.subtensor import inc_subtensor
 from pytensor.tensor.type import (
     col,
     iscalar,
@@ -707,3 +711,124 @@ def test_nested():
     linker = pytensor.link.vm.VMLinker(lazy=True)
     f = function([c1, c2, x1, x2], t4, mode=Mode(linker=linker, optimizer="fast_run"))
     assert f(1, 0, np.array(10, dtype=x1.dtype), 0) == 20.5
+
+
+lazy_ifelse_mode = Mode(
+    linker="vm",
+    optimizer=RewriteDatabaseQuery(include=["fast_run", "lazy_ifelse"]),
+)
+
+
+def test_lazy_ifelse_branch_extraction():
+    # Example from gh-501: exp(x) feeds both branches, so it stays in the
+    # outer graph and each inner graph keeps only its exclusive ops.
+    cond = scalar("cond")
+    x = scalar("x")
+    y = exp(x)
+    out = ifelse(cond > 0, sin(y), cos(y) * x)
+
+    g = rewrite_graph(out, include=("lazy_ifelse",))
+    op = g.owner.op
+    assert isinstance(op, LazyIfElse)
+
+    [then_y] = op.then_fgraph.inputs
+    assert equal_computations(op.then_fgraph.outputs, [sin(then_y)])
+    else_y, else_x = op.else_fgraph.inputs
+    assert equal_computations(op.else_fgraph.outputs, [cos(else_y) * else_x])
+
+
+def test_lazy_ifelse_value_needed_outside_stays_outer():
+    # Example from gh-501: exp(x) is used by the true branch AND after the
+    # ifelse, so it must be computed once outside and passed in, not cloned
+    # into the branch.
+    x = scalar("x")
+    e = exp(x)
+    out = ifelse(x <= 0, x + e, x + log(x))
+    w = out + e
+
+    g = rewrite_graph(w, include=("lazy_ifelse",))
+    [lazy_var] = [v for v in g.owner.inputs if isinstance(v.owner_op, LazyIfElse)]
+    op = lazy_var.owner_op
+
+    then_x, then_e = op.then_fgraph.inputs
+    assert equal_computations(op.then_fgraph.outputs, [then_x + then_e])
+    [else_x] = op.else_fgraph.inputs
+    assert equal_computations(op.else_fgraph.outputs, [else_x + log(else_x)])
+
+
+def test_lazy_ifelse_runs_only_taken_branch():
+    cond = scalar("cond")
+    x = vector("x")
+    boom = Assert("unused branch must not run")(x * 3.0, eq(x.sum(), -999.0))
+    f = function([cond, x], ifelse(cond > 0, x * 2.0, boom), mode=lazy_ifelse_mode)
+
+    assert not any(isinstance(node.op, IfElse) for node in f.maker.fgraph.apply_nodes)
+    np.testing.assert_allclose(f(1.0, np.ones(3)), np.full(3, 2.0))
+    with pytest.raises(AssertionError, match="unused branch"):
+        f(0.0, np.ones(3))
+
+
+def test_lazy_ifelse_nested():
+    c1 = scalar("c1")
+    c2 = scalar("c2")
+    x = vector("x")
+    inner = ifelse(c2 > 0, x * 10.0, x * 20.0)
+    f = function([c1, c2, x], ifelse(c1 > 0, inner + 1.0, x), mode=lazy_ifelse_mode)
+
+    # The inner ifelse converts first (in2out order), so the outer branch holds
+    # a LazyIfElse, never a raw IfElse the funcify backends cannot run.
+    [outer] = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, LazyIfElse)]
+    inner_ops = [n.op for n in outer.op.then_fgraph.apply_nodes]
+    assert any(isinstance(op, LazyIfElse) for op in inner_ops)
+    assert not any(isinstance(op, IfElse) for op in inner_ops)
+
+    np.testing.assert_allclose(f(1.0, 1.0, np.ones(2)), np.full(2, 11.0))
+    np.testing.assert_allclose(f(1.0, -1.0, np.ones(2)), np.full(2, 21.0))
+    np.testing.assert_allclose(f(-1.0, 1.0, np.ones(2)), np.ones(2))
+
+
+def test_lazy_ifelse_multiple_outputs():
+    cond = scalar("cond")
+    x = vector("x")
+    y = vector("y")
+    outs = ifelse(cond > 0, (x + 1.0, y + 1.0), (x - 1.0, y - 1.0))
+    f = function([cond, x, y], outs, mode=lazy_ifelse_mode)
+
+    res = f(1.0, np.zeros(2), np.ones(2))
+    np.testing.assert_allclose(res[0], np.ones(2))
+    np.testing.assert_allclose(res[1], np.full(2, 2.0))
+    res = f(-1.0, np.zeros(2), np.ones(2))
+    np.testing.assert_allclose(res[0], -np.ones(2))
+    np.testing.assert_allclose(res[1], np.zeros(2))
+
+
+def test_lazy_ifelse_copies_aliased_branch_output():
+    # An identity branch returns its input's buffer. The op must copy it, or
+    # a later inplace destruction of that buffer corrupts the result already
+    # returned by the conditional.
+    cond = scalar("cond")
+    x = vector("x")
+    y = x + 1.0
+    taken = ifelse(cond > 0, y, -y)
+    destroyed = inc_subtensor(y[0], 100.0)
+    f = function([cond, x], [taken, destroyed], mode=lazy_ifelse_mode)
+
+    assert any(node.op.destroy_map for node in f.maker.fgraph.apply_nodes)
+    r_taken, r_destroyed = f(1.0, np.zeros(3))
+    np.testing.assert_allclose(r_taken, np.ones(3))
+    np.testing.assert_allclose(r_destroyed, [101.0, 1.0, 1.0])
+
+
+def test_lazy_ifelse_grad():
+    # The grad of ifelse is built symbolically on IfElse before the rewrite
+    # runs, so the backward graph carries its own conditionals on the same
+    # predicate. Its branches are constants, giving LazyIfElse nodes with no
+    # branch inputs.
+    cond = scalar("cond")
+    x = matrix("x")
+    g = pytensor.grad(ifelse(cond > 0, (x**2).sum(), (x**3).sum()), x)
+    f = function([cond, x], g, mode=lazy_ifelse_mode)
+
+    xv = np.full((2, 2), 3.0)
+    np.testing.assert_allclose(f(1.0, xv), 2.0 * xv)
+    np.testing.assert_allclose(f(-1.0, xv), 3.0 * xv**2)

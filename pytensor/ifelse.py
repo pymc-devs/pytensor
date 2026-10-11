@@ -19,6 +19,7 @@ import numpy as np
 
 from pytensor.basic import as_symbolic
 from pytensor.compile import optdb
+from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
@@ -438,9 +439,17 @@ class LazyIfElse(Op):
         self.else_fgraph = else_fgraph
         self.output_types = tuple(output_types)
         self.name = name
+        self._then_fn = None
+        self._else_fn = None
 
     def __str__(self):
         return f"lazy_if{{{self.name}}}" if self.name else "lazy_if"
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_then_fn"] = None
+        state["_else_fn"] = None
+        return state
 
     def make_node(self, condition, *inputs):
         n_expected = len(self.then_fgraph.inputs) + len(self.else_fgraph.inputs)
@@ -451,6 +460,28 @@ class LazyIfElse(Op):
             [as_tensor_variable(condition), *inputs],
             [output_type() for output_type in self.output_types],
         )
+
+    @staticmethod
+    def _compile_branch(fgraph):
+        # Rewrites inside the branch compile can orphan an input (e.g. mul by
+        # zero), which is not an error here.
+        return function(fgraph.inputs, fgraph.outputs, on_unused_input="ignore")
+
+    def perform(self, node, inputs, output_storage):
+        condition, *branch_inputs = inputs
+        n_then = len(self.then_fgraph.inputs)
+
+        if condition:
+            if self._then_fn is None:
+                self._then_fn = self._compile_branch(self.then_fgraph)
+            results = self._then_fn(*branch_inputs[:n_then])
+        else:
+            if self._else_fn is None:
+                self._else_fn = self._compile_branch(self.else_fgraph)
+            results = self._else_fn(*branch_inputs[n_then:])
+
+        for storage, value in zip(output_storage, results, strict=True):
+            storage[0] = value
 
 
 def _output_may_alias(output, fgraph):
