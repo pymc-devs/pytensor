@@ -17,6 +17,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.ifelse import IfElse, LazyIfElse, ifelse
 from pytensor.link.c.type import generic
 from pytensor.raise_op import Assert
+from pytensor.scalar.basic import TrueDiv
 from pytensor.tensor.math import cos, eq, exp, log, sin
 from pytensor.tensor.subtensor import inc_subtensor
 from pytensor.tensor.type import (
@@ -832,3 +833,23 @@ def test_lazy_ifelse_grad():
     xv = np.full((2, 2), 3.0)
     np.testing.assert_allclose(f(1.0, xv), 2.0 * xv)
     np.testing.assert_allclose(f(-1.0, xv), 3.0 * xv**2)
+
+
+def test_lazy_ifelse_extraction_precedes_fusion():
+    # The rewrite must run before elemwise fusion (optdb position 49), or
+    # fusion welds the branch computation into the condition's Composite and
+    # the "lazy" branch arrives precomputed. The division only being present
+    # in the inner graph is the proof it still runs lazily.
+    a = scalar("a")
+    x = scalar("x")
+    converged = abs(x * x - a) < 1e-12
+    out = ifelse(converged, x, 0.5 * (x + a / x))
+    f = function([a, x], out, mode=lazy_ifelse_mode)
+
+    [lazy_node] = [
+        n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, LazyIfElse)
+    ]
+    assert any(
+        isinstance(getattr(n.op, "scalar_op", None), TrueDiv)
+        for n in lazy_node.op.else_fgraph.apply_nodes
+    )

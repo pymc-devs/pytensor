@@ -595,11 +595,13 @@ def ifelse_to_lazy_ifelse(fgraph, node):
     return lazy_op(condition, *then_inputs, *else_inputs, return_list=True)
 
 
+# Before elemwise fusion (position 49): fusion would weld branch computations
+# into the condition's Composite, forcing them to run eagerly.
 optdb.register(
     "ifelse_to_lazy_ifelse",
     in2out(ifelse_to_lazy_ifelse, ignore_newtrees=True),
     "lazy_ifelse",
-    position=49.2,
+    position=48.9,
 )
 
 
