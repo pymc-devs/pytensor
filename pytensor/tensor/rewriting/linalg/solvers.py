@@ -111,9 +111,7 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter(
-    [blockwise_of(OpPattern(Solve, b_ndim=1)), blockwise_of(OpPattern(Solve, b_ndim=2))]
-)
+@node_rewriter([blockwise_of(OpPattern(Solve))])
 def psd_solve_to_chol_solve(fgraph, node):
     """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
     assume_a = node.op.core_op.assume_a

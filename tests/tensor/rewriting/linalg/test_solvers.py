@@ -571,13 +571,24 @@ def test_block_diag_solve_pushdown_both_sides_block_diag():
 def test_psd_solve_batched_vector_b_shares_cholesky():
     A = pt.matrix("A", shape=(5, 5))
     b = pt.matrix("b", shape=(3, 5))
-    logdet = 2 * pt.log(pt.diagonal(pt.linalg.cholesky(A))).sum()
+    logdet = 2 * pt.log(pt.diagonal(cholesky(A))).sum()
     x = pt.linalg.solve(A, b, assume_a="pos", b_ndim=1)
 
-    outs = rewrite_graph(
-        [logdet, x], include=("canonicalize", "stabilize", "specialize", "merge")
+    L = cholesky(A)
+    expected_logdet = 2 * pt.log(pt.diagonal(L)).sum()
+    expected_x = cho_solve((L, True), b.T, b_ndim=2).T
+
+    result = RewriteTester(
+        [A, b],
+        [logdet, x],
+        include=["canonicalize", "stabilize", "specialize", "merge"],
     )
-    core_ops = [getattr(n.op, "core_op", n.op) for n in applys_between([A, b], outs)]
+    result.assert_graph(expected_logdet, expected_x)
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op)
+        for node in applys_between(result.rewr_fg.inputs, result.rewr_fg.outputs)
+    ]
     assert sum(isinstance(op, Cholesky) for op in core_ops) == 1
     assert sum(isinstance(op, CholeskySolve) for op in core_ops) == 1
 
