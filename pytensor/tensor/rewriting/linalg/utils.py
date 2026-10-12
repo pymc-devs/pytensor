@@ -51,6 +51,15 @@ def matrix_diagonal_product(x):
     return pt.prod(diagonal(x, axis1=-2, axis2=-1), axis=-1)
 
 
+def permutation_indices_to_det_sign(indices):
+    """Permutation indices -> (-1) ** n_inversions."""
+    inversions = pt.triu(
+        (indices[..., :, None] > indices[..., None, :]).astype("int64"), k=1
+    ).sum(axis=(-2, -1))
+    sign = 1 - 2 * (inversions % 2)
+    return sign
+
+
 def get_assume_a(fgraph, A):
     """Return the most-specific ``solve`` ``assume_a`` for ``A`` from tags and assumptions."""
     if check_assumption(fgraph, A, TRIDIAGONAL):
