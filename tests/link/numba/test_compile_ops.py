@@ -4,8 +4,8 @@ import pytest
 from pytensor import In, Mode, OpFromGraph, Out, config, function, ifelse, scan
 from pytensor import tensor as pt
 from pytensor.compile.ops import ViewOp
+from pytensor.conditional.op import IfElse
 from pytensor.graph import vectorize_graph
-from pytensor.ifelse import IfElse
 from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.scan.op import Scan

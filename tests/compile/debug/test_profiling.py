@@ -8,8 +8,8 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.maker import function
+from pytensor.conditional.op import ifelse
 from pytensor.configdefaults import config
-from pytensor.ifelse import ifelse
 from pytensor.tensor.type import fvector, scalars
 
 
