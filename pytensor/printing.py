@@ -21,7 +21,7 @@ from pytensor.compile.io import In, Out
 from pytensor.configdefaults import config
 from pytensor.graph.basic import AbstractApply, Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import HasInnerGraph, Op, StorageMapType
+from pytensor.graph.op import HasMultipleInnerGraph, Op, StorageMapType
 from pytensor.graph.traversal import graph_inputs, toposort
 from pytensor.graph.utils import Scratchpad
 
@@ -328,6 +328,39 @@ def _build_label(
     return label
 
 
+def _get_inner_graph_op(op):
+    """Find the graph-owning Op, including scalar/core Ops of wrappers."""
+    if isinstance(op, HasMultipleInnerGraph):
+        return op
+    for attr in ("scalar_op", "core_op"):
+        inner_op = getattr(op, attr, None)
+        if isinstance(inner_op, HasMultipleInnerGraph):
+            return inner_op
+    return None
+
+
+def _get_inner_graphs(node):
+    """Yield graph boundaries and input mappings, preserving wrapper/core levels."""
+    from pytensor.tensor.blockwise import Blockwise
+
+    if isinstance(node.op, Blockwise):
+        core_node = node.op._create_dummy_core_node(node.inputs)
+        yield "", core_node.inputs, core_node.outputs, None
+        return
+
+    inner_op = _get_inner_graph_op(node.op)
+    for name, inner_fgraph in inner_op.inner_graphs.items():
+        inner_to_outer = None
+        if hasattr(inner_op, "get_oinp_iinp_iout_oout_mappings"):
+            inner_to_outer = {
+                inner_fgraph.inputs[i]: node.inputs[o]
+                for i, o in inner_op.get_oinp_iinp_iout_oout_mappings()[
+                    "outer_inp_from_inner_inp"
+                ].items()
+            }
+        yield name, inner_fgraph.inputs, inner_fgraph.outputs, inner_to_outer
+
+
 def iter_graph_nodes(
     var: Variable,
     depth: int = -1,
@@ -468,17 +501,10 @@ def iter_graph_nodes(
     # flag is captured above and used below to decide whether to recurse.
     done[node] = ""
 
-    # Collect this node itself if it owns an inner graph — needed when the
-    # HasInnerGraph op is a top-level output and never appears as an input.
+    # Collect graph-owning Ops even when they are top-level outputs.
     if (
         not is_inner_graph_header
-        and (
-            isinstance(node.op, HasInnerGraph)
-            or (
-                hasattr(node.op, "scalar_op")
-                and isinstance(node.op.scalar_op, HasInnerGraph)
-            )
-        )
+        and _get_inner_graph_op(node.op) is not None
         and var not in inner_graph_ops
     ):
         inner_graph_ops.append(var)
@@ -530,16 +556,12 @@ def iter_graph_nodes(
     for in_idx, in_var in enumerate(node.inputs):
         child_is_last = in_idx == len(node.inputs) - 1
 
-        # Collect inner-graph ops for the second pass
-        if hasattr(in_var, "owner") and hasattr(in_var.owner, "op"):
-            if (
-                isinstance(in_var.owner.op, HasInnerGraph)
-                or (
-                    hasattr(in_var.owner.op, "scalar_op")
-                    and isinstance(in_var.owner.op.scalar_op, HasInnerGraph)
-                )
-            ) and in_var not in inner_graph_ops:
-                inner_graph_ops.append(in_var)
+        # Collect inner-graph ops for the second pass.
+        if (
+            _get_inner_graph_op(in_var.owner_op) is not None
+            and in_var not in inner_graph_ops
+        ):
+            inner_graph_ops.append(in_var)
 
         yield from iter_graph_nodes(
             in_var,
@@ -577,7 +599,8 @@ class GraphModelNode:
     key
         Stable node key from the traversal stream (first-visit order).
     kind
-        ``"leaf"`` for graph inputs/constants, ``"node"`` otherwise.
+        ``"leaf"`` for graph inputs/constants, ``"node"`` for Op outputs,
+        or ``"branch"`` to group the outputs of a named inner graph.
     is_reference
         ``True`` when this record repeats an already-printed node. For
         ``kind="node"`` the subtree was omitted: input edges can be
@@ -842,22 +865,6 @@ def build_graph_model(
             continue
         printed.add(ig_var.owner)
 
-        if hasattr(ig_var.owner.op, "scalar_op"):
-            op = ig_var.owner.op.scalar_op
-        else:
-            op = ig_var.owner.op
-        inner_inputs, inner_outputs = op.inner_inputs, op.inner_outputs
-
-        if hasattr(op, "get_oinp_iinp_iout_oout_mappings"):
-            inner_to_outer = {
-                inner_inputs[i]: ig_var.owner.inputs[o]
-                for i, o in op.get_oinp_iinp_iout_oout_mappings()[
-                    "outer_inp_from_inner_inp"
-                ].items()
-            }
-        else:
-            inner_to_outer = None
-
         if print_op_info:
             op_information.update(op_debug_information(ig_var.owner.op, ig_var.owner))
 
@@ -885,33 +892,38 @@ def build_graph_model(
         )
         header.meta = {**header.meta, "outer_node": node_keys[ig_var]}
 
-        for out in inner_outputs:
-            if out.owner is not None and isinstance(out.owner.op, HasInnerGraph):
-                inner_graph_vars.append(out)
-            header.children.append(
-                _model_from_stream(
-                    out,
-                    depth=depth,
-                    id_type=id_type,
-                    print_type=print_type,
-                    print_shape=print_shape,
-                    print_destroy_map=print_destroy_map,
-                    print_view_map=print_view_map,
-                    print_op_info=print_op_info,
-                    stop_on_name=stop_on_name,
-                    done=done,
-                    used_ids=used_ids,
-                    op_information=op_information,
-                    inner_graph_vars=inner_graph_vars,
-                    node_keys=node_keys,
-                    owner_keys=owner_keys,
-                    with_meta=with_meta,
-                    inner_to_outer=inner_to_outer,
-                    parent_node=ig_var.owner,
-                    inner_graph_node=ig_var.owner,
-                    assumption_tags=assumption_tags,
+        for name, _, inner_outputs, inner_to_outer in _get_inner_graphs(ig_var.owner):
+            branch = header
+            if name:
+                branch = GraphModelNode(
+                    label=f"{name}:", key=f"{header.key}:{name}", kind="branch"
                 )
-            )
+                header.children.append(branch)
+            for out in inner_outputs:
+                branch.children.append(
+                    _model_from_stream(
+                        out,
+                        depth=depth,
+                        id_type=id_type,
+                        print_type=print_type,
+                        print_shape=print_shape,
+                        print_destroy_map=print_destroy_map,
+                        print_view_map=print_view_map,
+                        print_op_info=print_op_info,
+                        stop_on_name=stop_on_name,
+                        done=done,
+                        used_ids=used_ids,
+                        op_information=op_information,
+                        inner_graph_vars=inner_graph_vars,
+                        node_keys=node_keys,
+                        owner_keys=owner_keys,
+                        with_meta=with_meta,
+                        inner_to_outer=inner_to_outer,
+                        parent_node=ig_var.owner,
+                        inner_graph_node=ig_var.owner,
+                        assumption_tags=assumption_tags,
+                    )
+                )
         inner_graphs.append(header)
 
     return GraphModel(roots=roots, inner_graphs=inner_graphs)
@@ -1064,11 +1076,13 @@ def debugprint(
         from pytensor.compile.builders import SymbolicOp
 
         def _show_inner_graph(op):
-            return isinstance(op, HasInnerGraph) and not isinstance(op, SymbolicOp)
+            return isinstance(op, HasMultipleInnerGraph) and not isinstance(
+                op, SymbolicOp
+            )
     elif print_inner_graphs:
 
         def _show_inner_graph(op):
-            return isinstance(op, HasInnerGraph)
+            return isinstance(op, HasMultipleInnerGraph)
     else:
 
         def _show_inner_graph(op):
@@ -1205,17 +1219,14 @@ N.B.:
     for var, profile, storage_map, topo_order in zip(
         outputs_to_print, profile_list, storage_maps, topo_orders, strict=True
     ):
-        if hasattr(var.owner, "op"):
+        if var.owner is not None:
             if (
-                isinstance(var.owner.op, HasInnerGraph)
-                or (
-                    hasattr(var.owner.op, "scalar_op")
-                    and isinstance(var.owner.op.scalar_op, HasInnerGraph)
-                )
-            ) and var not in inner_graph_vars:
+                _get_inner_graph_op(var.owner_op) is not None
+                and var not in inner_graph_vars
+            ):
                 inner_graph_vars.append(var)
             if print_op_info:
-                op_information.update(op_debug_information(var.owner.op, var.owner))
+                op_information.update(op_debug_information(var.owner_op, var.owner))
 
         _debugprint(
             var,
@@ -1239,15 +1250,10 @@ N.B.:
             print_view_map=print_view_map,
         )
 
-    # Look at inner Op of Elemwise | Blockwise, as those don't document themselves as HasInnerGraph Ops
     inner_graph_vars = [
         v
         for v in inner_graph_vars
-        if _show_inner_graph(v.owner.op)
-        or (
-            hasattr(v.owner.op, "scalar_op") and _show_inner_graph(v.owner.op.scalar_op)
-        )
-        or (hasattr(v.owner.op, "core_op") and _show_inner_graph(v.owner.op.core_op))
+        if _show_inner_graph(_get_inner_graph_op(v.owner_op))
     ]
 
     if len(inner_graph_vars) > 0:
@@ -1263,27 +1269,6 @@ N.B.:
                 continue
             else:
                 printed_inner_graph_ops.add(ig_var.owner.op)
-            # ``Elemwise``/``Blockwise`` hold their inner graph on ``scalar_op``
-            # (a ``Composite``/``ScalarLoop``); other ops expose it directly.
-            if hasattr(ig_var.owner.op, "scalar_op"):
-                inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
-                inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
-            else:
-                inner_inputs = ig_var.owner.op.inner_inputs
-                inner_outputs = ig_var.owner.op.inner_outputs
-
-            outer_inputs = ig_var.owner.inputs
-
-            if hasattr(ig_var.owner.op, "get_oinp_iinp_iout_oout_mappings"):
-                inner_to_outer_inputs = {
-                    inner_inputs[i]: outer_inputs[o]
-                    for i, o in ig_var.owner.op.get_oinp_iinp_iout_oout_mappings()[
-                        "outer_inp_from_inner_inp"
-                    ].items()
-                }
-            else:
-                inner_to_outer_inputs = None
-
             if print_op_info:
                 op_information.update(
                     op_debug_information(ig_var.owner.op, ig_var.owner)
@@ -1317,11 +1302,51 @@ N.B.:
             view_map_str = f" v={op.view_map}" if print_view_map and op.view_map else ""
             print(f"{op}{ids_str}{destroy_map_str}{view_map_str}", file=_file)
 
-            if print_fgraph_inputs:
-                for inp in inner_inputs:
+            for (
+                name,
+                inner_inputs,
+                inner_outputs,
+                inner_to_outer_inputs,
+            ) in _get_inner_graphs(ig_var.owner):
+                branch_prefix = "   " if name else ""
+                if name:
+                    print(f" {name}:", file=_file)
+
+                if print_fgraph_inputs:
+                    for inp in inner_inputs:
+                        _debugprint(
+                            inp,
+                            prefix=branch_prefix + " → ",
+                            depth=depth,
+                            done=done,
+                            print_type=print_type,
+                            print_shape=print_shape,
+                            file=_file,
+                            id_type=id_type,
+                            stop_on_name=stop_on_name,
+                            inner_graph_ops=inner_graph_vars,
+                            inner_to_outer_inputs=inner_to_outer_inputs,
+                            used_ids=used_ids,
+                            op_information=op_information,
+                            assumption_tags=assumption_tags,
+                            parent_node=ig_var.owner,
+                            print_op_info=print_op_info,
+                            print_destroy_map=print_destroy_map,
+                            print_view_map=print_view_map,
+                            inner_graph_node=ig_var.owner,
+                        )
+                    inner_to_outer_inputs = None
+
+                for out in inner_outputs:
+                    if (
+                        _get_inner_graph_op(out.owner_op) is not None
+                        and out not in inner_graph_vars
+                    ):
+                        inner_graph_vars.append(out)
+
                     _debugprint(
-                        inp,
-                        prefix=" → ",
+                        out,
+                        prefix=branch_prefix + new_prefix,
                         depth=depth,
                         done=done,
                         print_type=print_type,
@@ -1329,6 +1354,7 @@ N.B.:
                         file=_file,
                         id_type=id_type,
                         stop_on_name=stop_on_name,
+                        prefix_child=branch_prefix + new_prefix_child,
                         inner_graph_ops=inner_graph_vars,
                         inner_to_outer_inputs=inner_to_outer_inputs,
                         used_ids=used_ids,
@@ -1340,43 +1366,6 @@ N.B.:
                         print_view_map=print_view_map,
                         inner_graph_node=ig_var.owner,
                     )
-                inner_to_outer_inputs = None
-
-            for out in inner_outputs:
-                if (
-                    out.owner is not None
-                    and (
-                        isinstance(out.owner.op, HasInnerGraph)
-                        or isinstance(
-                            getattr(out.owner.op, "scalar_op", None), HasInnerGraph
-                        )
-                    )
-                    and out not in inner_graph_vars
-                ):
-                    inner_graph_vars.append(out)
-
-                _debugprint(
-                    out,
-                    prefix=new_prefix,
-                    depth=depth,
-                    done=done,
-                    print_type=print_type,
-                    print_shape=print_shape,
-                    file=_file,
-                    id_type=id_type,
-                    stop_on_name=stop_on_name,
-                    prefix_child=new_prefix_child,
-                    inner_graph_ops=inner_graph_vars,
-                    inner_to_outer_inputs=inner_to_outer_inputs,
-                    used_ids=used_ids,
-                    op_information=op_information,
-                    assumption_tags=assumption_tags,
-                    parent_node=ig_var.owner,
-                    print_op_info=print_op_info,
-                    print_destroy_map=print_destroy_map,
-                    print_view_map=print_view_map,
-                    inner_graph_node=ig_var.owner,
-                )
 
     if file is _file:
         return file
