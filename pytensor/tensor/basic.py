@@ -2402,6 +2402,19 @@ class Split(COp):
         """
 
 
+@_vectorize_node.register(Split)
+def vectorize_split(op: Split, node, batch_x, batch_splits):
+    old_x, old_splits = node.inputs
+    # Batched split sizes would give ragged outputs across the batch
+    if batch_splits.type.ndim != old_splits.type.ndim:
+        return vectorize_node_fallback(op, node, batch_x, batch_splits)
+
+    batch_ndim = batch_x.type.ndim - old_x.type.ndim
+    return Split(len_splits=op.len_splits, axis=op.axis + batch_ndim).make_node(
+        batch_x, batch_splits
+    )
+
+
 class Join(COp):
     r"""
     Concatenate multiple `TensorVariable`\s along an axis.
