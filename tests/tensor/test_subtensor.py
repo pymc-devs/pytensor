@@ -1961,6 +1961,10 @@ class TestAdvancedSubtensor:
             ([3], False),
             ([-4], False),
             ([0, 1, 2, 3], False),
+            # Mixed signs: only one of the bounds is violated
+            ([-5, 2], True),
+            ([-1, 4], True),
+            ([-4, 3], False),
         ],
     )
     def test_constant_index_bounds_check(self, linker, idx, err):

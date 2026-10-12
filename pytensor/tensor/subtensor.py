@@ -1946,7 +1946,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
     __props__ = ("idx_list",)
 
     def c_code_cache_version(self):
-        return (0,)
+        return (1,)
 
     def _take_axis(self):
         """Axis of a single integer-array index taken with all other axes in full.
@@ -2454,7 +2454,7 @@ class AdvancedIncSubtensor(BaseSubtensor, COp):
         """
 
     def c_code_cache_version(self):
-        return (2,)
+        return (3,)
 
     def _check_runtime_broadcast_of_vector_index(self, node, x, y, idx) -> None:
         """Raise if ``x[idx] (+)= y`` would broadcast ``y`` at runtime.
