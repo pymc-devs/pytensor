@@ -31,6 +31,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.linalg.utils import (
     clients_through_expand_dims,
     matrix_diagonal_product,
+    permutation_indices_to_det_sign,
     strip_left_expand_dims_and_transpose,
 )
 from pytensor.tensor.subtensor import _is_provably_non_negative
@@ -62,10 +63,10 @@ def local_log_prod_to_sum_log(fgraph, node):
 @register_specialize("shape_unsafe")
 @node_rewriter([det])
 def det_of_matrix_factorized_elsewhere(fgraph, node):
-    """
-    If we have det(X) or abs(det(X)) and there is already a nice decomposition(X) floating around,
-    use it to compute it more cheaply
+    """det(X) -> p * prod(diag(U)), where p is the existing LU permutation's sign.
 
+    For an existing Cholesky factor L, det(X) -> sqr(prod(diag(L))).
+    Magnitude-only factorizations require consumers that discard the sign.
     """
     [det] = node.outputs
     [x] = node.inputs
@@ -89,32 +90,35 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
-                # sqr, not ** 2, so the stabilize-time log(sqr(x)) rewrite can
-                # split log(det) into a sum of logs before the product underflows
+                # sqr lets the logarithm rewrite avoid materializing the square.
                 L = client.outputs[0]
                 new_det = sqr(matrix_diagonal_product(L))
-            case LU():
+            case LU(permute_l=False, p_indices=p_indices):
+                P_or_indices, _, U = client.outputs
+                factor_diag = pt.diagonal(U, axis1=-2, axis2=-1)
+                indices = (
+                    P_or_indices if p_indices else pt.argmax(P_or_indices, axis=-1)
+                )
+                permutation_sign = permutation_indices_to_det_sign(indices).astype(
+                    U.dtype
+                )
+                new_det = permutation_sign * prod(factor_diag, axis=-1)
+            case LU() if sign_not_needed:
                 U = client.outputs[-1]
                 new_det = matrix_diagonal_product(U)
             case LUFactor():
-                LU_packed = client.outputs[0]
-                new_det = matrix_diagonal_product(LU_packed)
-            case _:
-                if not sign_not_needed:
-                    continue
-                match core_op:
-                    case SVD():
-                        lmbda = (
-                            client.outputs[1]
-                            if core_op.compute_uv
-                            else client.outputs[0]
-                        )
-                        new_det = prod(lmbda, axis=-1)
-                    case QR():
-                        R = client.outputs[-1]
-                        # if mode == "economic", R may not be square and this rewrite could hide a shape error
-                        # That's why it's tagged as `shape_unsafe`
-                        new_det = matrix_diagonal_product(R)
+                LU_packed, pivots = client.outputs
+                factor_diag = pt.diagonal(LU_packed, axis1=-2, axis2=-1)
+                n_swaps = pt.neq(pivots, pt.arange(x.shape[-1])).sum(axis=-1)
+                permutation_sign = (1 - 2 * (n_swaps % 2)).astype(LU_packed.dtype)
+                new_det = permutation_sign * prod(factor_diag, axis=-1)
+            case SVD() if sign_not_needed:
+                lmbda = client.outputs[1] if core_op.compute_uv else client.outputs[0]
+                new_det = prod(lmbda, axis=-1)
+            case QR() if sign_not_needed:
+                R = client.outputs[-1]
+                # Economic R may not be square; this rewrite is shape_unsafe.
+                new_det = matrix_diagonal_product(R)
 
         if new_det is not None:
             # found a match
@@ -122,7 +126,6 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
     else:  # no-break (i.e., no-match)
         return None
 
-    [det] = node.outputs
     if new_det.type.ndim > det.type.ndim:
         # A factorization found on an expanded alias of x carries the alias's
         # dummy leading dims, which are broadcastable by construction
@@ -163,7 +166,7 @@ def det_of_factorized_matrix(fgraph, node):
         case Cholesky():
             new_det = matrix_diagonal_product(x)
         case LU():
-            if x is x_node.outputs[-2]:
+            if not core_op.permute_l and x is x_node.outputs[-2]:
                 # x is L
                 new_det = ones(x.shape[:-2], dtype=det.dtype)
             elif x is x_node.outputs[-1]:
