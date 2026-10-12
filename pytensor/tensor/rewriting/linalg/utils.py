@@ -8,6 +8,7 @@ from pytensor.assumptions import (
     SYMMETRIC,
     TRIDIAGONAL,
     UPPER_TRIANGULAR,
+    assume,
     check_assumption,
 )
 from pytensor.graph import Apply, Constant
@@ -52,12 +53,12 @@ def matrix_diagonal_product(x):
 
 
 def permutation_indices_to_det_sign(indices):
-    """Permutation indices -> (-1) ** n_inversions."""
+    """Permutation indices -> (-1) ** n_inversions, declaring unit magnitude."""
     inversions = pt.triu(
         (indices[..., :, None] > indices[..., None, :]).astype("int64"), k=1
     ).sum(axis=(-2, -1))
     sign = 1 - 2 * (inversions % 2)
-    return sign
+    return assume(sign, unit_magnitude=True)
 
 
 def get_assume_a(fgraph, A):

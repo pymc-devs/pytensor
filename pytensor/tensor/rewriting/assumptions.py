@@ -1,50 +1,55 @@
 from pytensor.assumptions import AssumptionFeature
 from pytensor.assumptions.specify import SpecifyAssumptions
 from pytensor.compile.mode import optdb
-from pytensor.graph.rewriting.basic import GraphRewriter
+from pytensor.graph.rewriting.basic import GraphRewriter, node_rewriter
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_specialize,
+    register_stabilize,
+)
+
+
+@register_canonicalize
+@register_stabilize("fast_compile")
+@register_specialize("fast_compile")
+@node_rewriter([SpecifyAssumptions])
+def local_drain_specify_assumptions(fgraph, node):
+    """Drain markers introduced during rewriting.
+
+    The feature carries the resolved facts to the input during replacement.
+    """
+    feature = getattr(fgraph, "assumption_feature", None)
+    if feature is None:
+        feature = AssumptionFeature()
+        fgraph.attach_feature(feature)
+
+    for key, _ in node.op.assumptions:
+        feature.get(node.out, key)
+    return node.inputs
 
 
 class DrainSpecifyAssumptions(GraphRewriter):
-    """Drain ``SpecifyAssumptions`` declarations into the ``AssumptionFeature`` and
-    remove the marker nodes.
-
-    A ``SpecifyAssumptions`` node is an opaque view of its input, so it blocks any
-    rewrite that pattern-matches across it. Running before canonicalization, this
-    rewriter resolves every declared fact into the feature cache (where the
-    ``check_assumption`` consumers read it) and then drops the node.
-    """
+    """Drain initial markers before they obstruct canonicalization."""
 
     def apply(self, fgraph):
         if not any(
             isinstance(node.op, SpecifyAssumptions) for node in fgraph.apply_nodes
         ):
-            return None  # Fast bail out
+            return
 
-        nodes = [
-            node
-            for node in fgraph.toposort()
-            if isinstance(node.op, SpecifyAssumptions)
-        ]
-
-        assumption_feature = getattr(fgraph, "assumption_feature", None)
-        if assumption_feature is None:
-            assumption_feature = AssumptionFeature()
-            fgraph.attach_feature(assumption_feature)
+        feature = getattr(fgraph, "assumption_feature", None)
+        if feature is None:
+            feature = AssumptionFeature()
+            fgraph.attach_feature(feature)
 
         replacements = {}
-        for node in nodes:
-            [out] = node.outputs
-            # Resolve the asserted facts into the cache.
-            for key, _ in node.op.assumptions:
-                assumption_feature.get(out, key)
-            # Drain the marker: redirect its consumers to the raw input, peeling
-            # already-drained nested SpecifyAssumptions -- ``nodes`` is in toposort
-            # order, so a single replace_all collapses ``assume(assume(...))`` chains
-            # all the way down.
-            inp = node.inputs[0]
-            while inp in replacements:
-                inp = replacements[inp]
-            replacements[out] = inp
+        for node in fgraph.toposort():
+            if isinstance(node.op, SpecifyAssumptions):
+                for key, _ in node.op.assumptions:
+                    feature.get(node.out, key)
+                inp = node.inputs[0]
+                # Topological order lets nested markers collapse in one replacement.
+                replacements[node.out] = replacements.get(inp, inp)
 
         fgraph.replace_all(
             tuple(replacements.items()), reason="drain_specify_assumptions"

@@ -5,7 +5,9 @@ import numpy as np
 from pytensor import tensor as pt
 from pytensor.assumptions import (
     LOWER_TRIANGULAR,
+    UNIT_MAGNITUDE,
     UPPER_TRIANGULAR,
+    assume,
     check_assumption,
 )
 from pytensor.compile.mode import optdb
@@ -14,7 +16,7 @@ from pytensor.graph.rewriting.basic import (
     dfs_rewriter,
     node_rewriter,
 )
-from pytensor.scalar.basic import Abs, Log, Sign, Sqr
+from pytensor.scalar.basic import Abs, Log, Mul, Sign, Sqr
 from pytensor.tensor.basic import atleast_Nd, ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
@@ -43,7 +45,7 @@ from pytensor.tensor.subtensor import _is_provably_non_negative
 @register_specialize
 @node_rewriter([log])
 def local_log_prod_to_sum_log(fgraph, node):
-    """Rewrite log(prod(x)) as sum(log(x)), when x is known to be non-negative."""
+    """Stabilize product logarithms, preserving the sign or phase when needed."""
     [p] = node.inputs
     match p.owner_op_and_inputs:
         case (Prod(axis=axis), x):
@@ -59,6 +61,35 @@ def local_log_prod_to_sum_log(fgraph, node):
             match p.owner_op_and_inputs:
                 case (Prod(axis=axis), x):
                     return [log(abs(x)).sum(axis=axis)]
+
+        case (Elemwise(Mul()), *factors):
+            unit = [x for x in factors if check_assumption(fgraph, x, UNIT_MAGNITUDE)]
+            rest = [x for x in factors if x not in unit]
+            if not (unit and len(rest) == 1 and isinstance(rest[0].owner_op, Prod)):
+                return
+            [product] = rest
+            [product_input] = product.owner.inputs
+            input_kind = product_input.type.numpy_dtype.kind
+            output_kind = product.type.numpy_dtype.kind
+            if not (input_kind in "fc" and output_kind in "fc"):
+                return
+            if input_kind == "c" and output_kind == "f":
+                return
+            # The generated log(phase) contains this product of signs; stop there.
+            match product_input.owner_op:
+                case Elemwise(Sign()):
+                    return
+            phase = pt.sign(p)
+            magnitude = log(abs(product))
+            if p.type.numpy_dtype.kind == "c":
+                return [log(phase) + magnitude]
+            return [
+                pt.where(
+                    pt.eq(phase, -1),
+                    pt.constant(np.nan, dtype=node.out.dtype),
+                    magnitude,
+                )
+            ]
 
 
 @register_stabilize("shape_unsafe")
@@ -112,7 +143,9 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
                 LU_packed, pivots = client.outputs
                 factor_diag = pt.diagonal(LU_packed, axis1=-2, axis2=-1)
                 n_swaps = pt.neq(pivots, pt.arange(x.shape[-1])).sum(axis=-1)
-                permutation_sign = (1 - 2 * (n_swaps % 2)).astype(LU_packed.dtype)
+                permutation_sign = assume(
+                    1 - 2 * (n_swaps % 2), unit_magnitude=True
+                ).astype(LU_packed.dtype)
                 new_det = permutation_sign * prod(factor_diag, axis=-1)
             case SVD() if sign_not_needed:
                 lmbda = client.outputs[1] if core_op.compute_uv else client.outputs[0]

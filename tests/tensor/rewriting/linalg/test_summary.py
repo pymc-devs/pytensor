@@ -360,6 +360,12 @@ def test_slogdet_grad_when_cholesky_factored_det_underflows():
     "decomp_fn, sign_op, expected_fn",
     [
         pytest.param(
+            lambda x: lu.lu(x)[-1],
+            pt.abs,
+            lambda x: pt.prod(pt.diagonal(lu.lu(x)[-1], axis1=-2, axis2=-1), axis=-1),
+            id="lu_abs",
+        ),
+        pytest.param(
             lambda x: svd.svd(x, compute_uv=True)[0],
             pt.abs,
             lambda x: pt.prod(svd.svd(x, compute_uv=True)[1], axis=0),
@@ -581,17 +587,21 @@ def test_slogdet_of_inv():
     [(config.floatX, False), ("complex128", True)],
     ids=["real", "batched_complex"],
 )
-def test_det_factor_sharing(factor_kind, batched, dtype):
+def test_det_and_slogdet_factor_sharing(factor_kind, batched, dtype):
     x = pt.tensor("x", shape=(None, 3, 3) if batched else (3, 3), dtype=dtype)
     if factor_kind == "cholesky":
         factor = cholesky(x)
         diag = pt.diagonal(factor, axis1=-2, axis2=-1)
         expected_det = pt.sqr(diag.prod(axis=-1))
+        expected_sign = pt.sqr(pt.sign(diag).prod(axis=-1))
+        expected_logabsdet = pt.constant(2, dtype=diag.real.dtype) * pt.log(
+            pt.abs(diag)
+        ).sum(axis=-1)
     else:
         if factor_kind == "lu_factor":
             factor, pivots = lu.lu_factor(x)
             n_swaps = pt.neq(pivots, pt.arange(3)).sum(axis=-1)
-            permutation_sign = 1 - 2 * (n_swaps % 2)
+            permutation_sign = assume(1 - 2 * (n_swaps % 2), unit_magnitude=True)
         else:
             p, _, factor = lu.lu(x, p_indices=factor_kind == "lu_indices")
             indices = p if factor_kind == "lu_indices" else pt.argmax(p, axis=-1)
@@ -599,14 +609,17 @@ def test_det_factor_sharing(factor_kind, batched, dtype):
         permutation_sign = permutation_sign.astype(dtype)
         diag = pt.diagonal(factor, axis1=-2, axis2=-1)
         expected_det = permutation_sign * diag.prod(axis=-1)
+        expected_sign = permutation_sign * pt.sign(diag).prod(axis=-1)
+        expected_logabsdet = pt.log(pt.abs(diag)).sum(axis=-1)
+    sign_x, logabsdet_x = slogdet(x)
     result = RewriteTester(
         [x],
-        [factor, det(x)],
+        [factor, det(x), sign_x, logabsdet_x],
         include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
     )
     result.assert_graph(
         *rewrite_graph(
-            [factor, expected_det],
+            [factor, expected_det, expected_sign, expected_logabsdet],
             include=["stabilize", "specialize"],
         )
     )
@@ -627,6 +640,30 @@ def test_det_factor_sharing(factor_kind, batched, dtype):
     else:
         for value in values:
             result.assert_eval(value, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "factor_kind, dtype", [("cholesky", "float64"), ("lu_factor", "complex128")]
+)
+def test_slogdet_factor_sharing_underflow(factor_kind, dtype):
+    n = 60
+    x = pt.matrix(shape=(n, n), dtype=dtype)
+    factor = cholesky(x) if factor_kind == "cholesky" else lu.lu_factor(x)[0]
+    phase, logabsdet = slogdet(x)
+    f = function(
+        [x],
+        [det(x), factor, phase, logabsdet],
+        mode="FAST_RUN",
+    )
+    value = np.eye(n, dtype=dtype) * 1e-7
+    if dtype.startswith("complex"):
+        value[[0, 1]] = value[[1, 0]]
+        value *= 3 + 4j
+    det_value, _, phase_value, logabsdet_value = f(value)
+    assert det_value == 0
+    expected_phase, expected_logabsdet = np.linalg.slogdet(value)
+    assert_allclose(phase_value, expected_phase)
+    assert_allclose(logabsdet_value, expected_logabsdet)
 
 
 @pytest.mark.parametrize("factor_kind", ["permuted_lu", "svd", "qr"])
@@ -687,11 +724,7 @@ def test_slogdet_factor_sharing_is_order_independent(logdet_first):
         include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
     )
     factor = lu.lu_factor(a)
-    n_swaps = pt.neq(factor[1], pt.arange(a.shape[-1])).sum(axis=-1)
-    permutation_sign = (1 - 2 * (n_swaps % 2)).astype(a.dtype)
-    expected_logdet = pt.log(
-        pt.abs(permutation_sign * pt.diagonal(factor[0]).prod(axis=-1))
-    )
+    expected_logdet = pt.log(pt.abs(pt.diagonal(factor[0]))).sum(axis=-1)
     expected_x1 = lu_solve(factor, b1, b_ndim=1)
     expected_x2 = lu_solve(factor, b2, b_ndim=1)
     expected = [expected_logdet, expected_x1, expected_x2]

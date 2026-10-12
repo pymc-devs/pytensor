@@ -10,7 +10,7 @@ from pytensor.assumptions import (
 from pytensor.assumptions.specify import assume
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.rewriting.assumptions import DrainSpecifyAssumptions
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def _drain(*outputs):
@@ -25,6 +25,20 @@ def test_unshared_marker_is_drained():
     fgraph = _drain(pt.linalg.inv(assume(x, diagonal=True)))
     assert_equal_computations(fgraph.outputs, [pt.linalg.inv(x)])
     assert fgraph.assumption_feature.check(x, DIAGONAL)
+
+
+@pytest.mark.parametrize(
+    "phase", ["drain_specify_assumptions", "canonicalize", "stabilize", "specialize"]
+)
+def test_drain_in_each_pass(phase):
+    x = pt.matrix("x")
+    out = assume(assume(x, diagonal=True), positive_definite=True)
+    result = RewriteTester([x], [out], include=[phase])
+    result.assert_graph(x)
+    feature = result.rewr_fg.assumption_feature
+    [rewritten_x] = result.rewr_fg.inputs
+    assert feature.check(rewritten_x, DIAGONAL)
+    assert feature.check(rewritten_x, POSITIVE_DEFINITE)
 
 
 def test_marker_with_multiple_clients_is_drained():

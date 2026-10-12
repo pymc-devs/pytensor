@@ -10,6 +10,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import shared
+from pytensor.assumptions import assume
 from pytensor.compile import optdb
 from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.maker import function
@@ -2203,6 +2204,67 @@ def test_sign_prod_real_and_complex(dtype):
     if dtype.startswith("complex"):
         values *= 3 + 4j
     result.assert_eval(values)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_unit_magnitude_consumers(dtype):
+    x = pt.matrix("x", dtype=dtype)
+    p = pt.vector("p", dtype=dtype)
+    unit = assume(p, unit_magnitude=True)
+    phase = p * sign(x).prod(axis=-1)
+    magnitude = log(pt_abs(x)).sum(axis=-1)
+    expected_log = (
+        log(phase) + magnitude
+        if dtype.startswith("complex")
+        else pt.where(pt.eq(phase, -1), pt.constant(np.nan, dtype=dtype), magnitude)
+    )
+    result = RewriteTester(
+        [x, p],
+        [
+            sign(unit * x.prod(axis=-1)),
+            log(pt_abs(unit * x.prod(axis=-1))),
+            log(unit * x.prod(axis=-1)),
+        ],
+        include=[
+            "canonicalize",
+            "stabilize",
+            "specialize",
+        ],
+    )
+    result.assert_graph(
+        *rewrite_graph(
+            [phase, magnitude, expected_log], include=["stabilize", "specialize"]
+        )
+    )
+    values = np.array([[1, -2, 3], [-1, 2, 0], [1, np.nan, 0]], dtype=dtype)
+    units = np.array([-1, 1, 1], dtype=dtype)
+    if dtype.startswith("complex"):
+        values *= 3 + 4j
+        units *= 1j
+    result.assert_eval(values, units)
+
+
+def test_abs_of_all_unit_factors():
+    p = pt.dvector("p")
+    q = pt.dvector("q")
+    unit_product = assume(p, unit_magnitude=True) * assume(q, unit_magnitude=True)
+    result = RewriteTester(
+        [p, q],
+        [pt_abs(unit_product)],
+        include=[
+            "drain_specify_assumptions",
+            "canonicalize",
+            "stabilize",
+            "specialize",
+        ],
+    )
+    result.assert_graph(
+        rewrite_graph(
+            pt.alloc(pt.constant(1.0, dtype="float64"), (p * q).shape[0]),
+            include=["canonicalize", "specialize"],
+        )
+    )
+    result.assert_eval(np.array([1.0, -1.0]), np.array([-1.0, -1.0]))
 
 
 def test_log_sqr_extreme_magnitudes():
