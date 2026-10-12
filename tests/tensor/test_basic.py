@@ -2367,6 +2367,11 @@ def test_flatten_broadcastable():
     out = flatten(inp, ndim=3)
     assert out.type.shape == (1, None, 1)
 
+    # Statically known leading extents give a fully static output shape
+    inp = tensor(dtype="float64", shape=(32, 24, 24, 16))
+    out = flatten(inp, ndim=2)
+    assert out.type.shape == (32, 9216)
+
 
 def test_flatten_ndim_invalid():
     a = dmatrix()

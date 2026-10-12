@@ -2991,7 +2991,10 @@ def flatten(x, ndim=1):
         raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
 
     if ndim > 1:
-        dims = (*_x.shape[: ndim - 1], -1)
+        # Index per-axis (`Shape_i` folds to a constant for static shapes)
+        # rather than slicing the shape vector
+        x_shape = _x.shape
+        dims = (*(x_shape[i] for i in range(ndim - 1)), -1)
     else:
         dims = (-1,)
 
