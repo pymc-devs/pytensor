@@ -289,6 +289,7 @@ ORTHOGONAL = AssumptionKey("orthogonal", short_name="orth")
 SELECTION = AssumptionKey("selection", short_name="sel")
 PERMUTATION = AssumptionKey("permutation", short_name="perm")
 UNIQUE_INDICES = AssumptionKey("unique_indices", short_name="uniq")
+UNIT_MAGNITUDE = AssumptionKey("unit_magnitude", short_name="unit")
 
 MATRIX_KEYS = (
     DIAGONAL,

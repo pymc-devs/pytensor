@@ -51,7 +51,6 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.rewriting.assumptions import DrainSpecifyAssumptions
 from pytensor.tensor.rewriting.subtensor import (
     local_adv_idx_to_diagonal,
 )
@@ -231,13 +230,10 @@ class TestLocalSubtensorOfBatchDims:
         idx = pt.lvector("idx")
         idx_unique = assume(idx, unique_indices=True)
         out = (x + y)[idx_unique]
-        # Canonicalize lifts the index (reading the unique_indices assumption off
-        # the SpecifyAssumptions wrapper), then Drain strips the now-redundant wrapper.
         result = RewriteTester(
             [x, y, idx],
             [out],
             include="canonicalize",
-            custom_rewrite=DrainSpecifyAssumptions(),
         )
         result.assert_graph(x[idx] + y[idx])
 
@@ -1549,7 +1545,6 @@ class TestAdvancedSubtensorOfDot:
             [A, B, i, j],
             [(A @ B)[i_unique, j_unique]],
             **self.rewrite_kw,
-            custom_rewrite=DrainSpecifyAssumptions(),
         )
         result.assert_graph((A[i] * B.mT[j]).sum(-1))
         result.assert_eval(

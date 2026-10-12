@@ -93,6 +93,7 @@ def assume(
     permutation: bool | None = None,
     unique_indices: bool | None = None,
     tridiagonal: bool | None = None,
+    unit_magnitude: bool | None = None,
     **assumptions: bool | None,
 ):
     """Attach structural assumptions to a symbolic tensor.
@@ -129,6 +130,8 @@ def assume(
         operations without risk of duplicating computation.
     tridiagonal : bool, optional
         Assert that *x* is (or is not) tridiagonal.
+    unit_magnitude : bool, optional
+        Assert that every element of *x* has absolute value one.
     **assumptions : bool, optional
         Assumptions registered by downstream libraries, passed by key name, e.g.
         ``time_varying=True``.
@@ -162,6 +165,7 @@ def assume(
         "permutation": permutation,
         "unique_indices": unique_indices,
         "tridiagonal": tridiagonal,
+        "unit_magnitude": unit_magnitude,
     }
 
     unknown = [name for name in assumptions if name not in KEY_REGISTRY]

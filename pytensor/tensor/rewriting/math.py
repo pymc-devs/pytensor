@@ -8,7 +8,7 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as ps_math
-from pytensor.assumptions import DIAGONAL, check_assumption
+from pytensor.assumptions import DIAGONAL, UNIT_MAGNITUDE, check_assumption
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -610,6 +610,42 @@ def local_useless_abs(fgraph, node):
         return
 
     return [x]
+
+
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([pt_abs])
+def local_abs_mul_unit(fgraph, node):
+    """abs(u * x) -> abs(x), when every element of u has unit magnitude."""
+    [inp] = node.inputs
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            rest = [
+                x for x in factors if not check_assumption(fgraph, x, UNIT_MAGNITUDE)
+            ]
+            if len(rest) == len(factors):
+                return
+            magnitude = pt_abs(variadic_mul(*rest).astype(inp.dtype))
+            return [broadcast_like_elemwise(magnitude, node, fgraph=fgraph)]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_unit(fgraph, node):
+    """sign(u) -> u and sign(u * x) -> u * sign(x), when abs(u) == 1."""
+    [inp] = node.inputs
+    if check_assumption(fgraph, inp, UNIT_MAGNITUDE):
+        return [inp]
+    if inp.type.numpy_dtype.kind not in "fc":
+        return
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            unit = [x for x in factors if check_assumption(fgraph, x, UNIT_MAGNITUDE)]
+            if not unit:
+                return
+            rest = [x for x in factors if x not in unit]
+            return [variadic_mul(*unit) * sign(variadic_mul(*rest).astype(inp.dtype))]
 
 
 @register_stabilize

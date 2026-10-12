@@ -88,7 +88,7 @@ def test_psd_solve_with_chol(b_ndim, declared):
 
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
-    L = cholesky(A_psd)
+    L = cholesky(A)
     expected = cho_solve((L, True), b, b_ndim=b_ndim)
 
     assert_equal_computations([rewritten], [expected])
@@ -719,7 +719,7 @@ def test_psd_fact_does_not_override_tridiagonal_solve():
     out = pt.linalg.solve(A_pd, b, assume_a="tridiagonal", b_ndim=2)
 
     result = RewriteTester([A, b], [out], include=["stabilize"])
-    result.assert_graph(out)
+    result.assert_graph(pt.linalg.solve(A, b, assume_a="tridiagonal", b_ndim=2))
 
 
 def test_tridiagonal_fact_does_not_override_declared_pos_solve():
@@ -729,7 +729,7 @@ def test_tridiagonal_fact_does_not_override_declared_pos_solve():
     out = pt.linalg.solve(A_banded, b, assume_a="pos", b_ndim=2)
 
     result = RewriteTester([A, b], [out], include=["stabilize"])
-    L = cholesky(A_banded)
+    L = cholesky(A)
     Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
     result.assert_graph(solve_triangular(L.mT, Li_b, lower=False, b_ndim=2))
 
@@ -742,7 +742,7 @@ def test_symmetric_fact_leaves_sym_and_her_solves_alone(declared):
     out = solve(A_sym, b, assume_a=declared)
 
     result = RewriteTester([A, b], [out], include=["stabilize"])
-    result.assert_graph(out)
+    result.assert_graph(solve(A, b, assume_a=declared))
 
 
 @pytest.mark.parametrize("transposed", [False, True])
@@ -754,7 +754,9 @@ def test_bidiagonal_cholesky_factor_solves_as_tridiagonal(transposed):
     out = solve(factor, b)
 
     result = RewriteTester([A, b], [out], include=["stabilize"])
-    result.assert_graph(solve(factor, b, assume_a="tridiagonal"))
+    L_raw = cholesky(A)
+    factor_raw = L_raw.mT if transposed else L_raw
+    result.assert_graph(solve(factor_raw, b, assume_a="tridiagonal"))
 
 
 def test_bidiagonal_solve_prefers_tridiagonal_over_triangular():
@@ -766,7 +768,7 @@ def test_bidiagonal_solve_prefers_tridiagonal_over_triangular():
     out = solve(A_bidiagonal, b)
 
     result = RewriteTester([A, b], [out], include=["stabilize"])
-    result.assert_graph(solve(A_bidiagonal, b, assume_a="tridiagonal"))
+    result.assert_graph(solve(A, b, assume_a="tridiagonal"))
 
 
 @pytest.mark.parametrize("declared", ["gen", "sym", "her"])
@@ -779,7 +781,7 @@ def test_solve_upgrades_to_tridiagonal(declared):
     out = solve(A_banded_pd, b, assume_a=declared)
 
     result = RewriteTester([A, b], [out], include=["stabilize"])
-    result.assert_graph(solve(A_banded_pd, b, assume_a="tridiagonal"))
+    result.assert_graph(solve(A, b, assume_a="tridiagonal"))
 
     rng = np.random.default_rng(5)
     off_diagonal = rng.uniform(0.1, 0.4, 5)

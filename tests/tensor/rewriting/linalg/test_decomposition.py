@@ -125,7 +125,7 @@ def test_cholesky_ldotlt_through_expand_dims():
     C = cholesky(M, lower=True)
 
     rewritten = rewrite_graph(C, include=("canonicalize", "stabilize"))
-    assert_equal_computations([rewritten], [pt.expand_dims(L_assumed, 0)])
+    assert_equal_computations([rewritten], [pt.expand_dims(L, 0)])
 
 
 def test_svd_uv_merge():
@@ -685,7 +685,7 @@ def test_eig_to_eigh():
     rewrites = ("canonicalize", "ShapeOpt")
     w_r, v_r = rewrite_graph([w, v], include=rewrites)
 
-    w_expected, v_expected = eigh(x_sym)
+    w_expected, v_expected = eigh(x)
     w_expected = w_expected.astype("complex128")
     v_expected = v_expected.astype("complex128")
     assert_equal_computations([w_r, v_r], [w_expected, v_expected])
