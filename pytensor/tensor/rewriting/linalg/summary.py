@@ -20,7 +20,7 @@ from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet, det
-from pytensor.tensor.math import Prod, log, prod
+from pytensor.tensor.math import Prod, log, prod, sqr
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -74,8 +74,10 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
+                # sqr, not ** 2, so the stabilize-time log(sqr(x)) rewrite can
+                # split log(det) into a sum of logs before the product underflows
                 L = client.outputs[0]
-                new_det = matrix_diagonal_product(L) ** 2
+                new_det = sqr(matrix_diagonal_product(L))
             case LU():
                 U = client.outputs[-1]
                 new_det = matrix_diagonal_product(U)
