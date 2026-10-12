@@ -30,6 +30,7 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
 )
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.linalg.solvers import (
+    cho_solve_quadratic_form_to_whitened,
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
 )
@@ -794,11 +795,15 @@ def test_solve_upgrades_to_tridiagonal(declared):
 
 @pytest.mark.parametrize("batched_b", [False, True], ids=["vector_b", "batched_b"])
 @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
-def test_cho_solve_quadratic_form_to_whitened(lower, batched_b):
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
+def test_cho_solve_quadratic_form_to_whitened(lower, batched_b, b_ndim):
     c = pt.dmatrix("c")
     b = pt.tensor("b", shape=(None,) * (1 + batched_b), dtype="float64")
 
-    quad = (b * cho_solve((c, lower), b, b_ndim=1)).sum(axis=-1)
+    rhs = b if b_ndim == 1 else b[..., None]
+    quad = (rhs * cho_solve((c, lower), rhs, b_ndim=b_ndim)).sum(axis=-b_ndim)
+    if b_ndim == 2:
+        quad = quad.squeeze(-1)
 
     result = RewriteTester(
         [c, b], [quad], include=["canonicalize", "stabilize", "specialize"]
@@ -862,20 +867,33 @@ def test_cho_solve_quadratic_form_with_reused_solve_not_whitened():
     result.assert_graph(quad, x)
 
 
-def test_vector_quadratic_form_to_whitened():
-    A_raw = pt.dmatrix("A")
-    b = pt.dvector("b")
+@pytest.mark.parametrize(
+    "a_batch_shape, b_batch_shape",
+    [
+        pytest.param((), (), id="unbatched"),
+        pytest.param((), (3,), id="shared_factor"),
+        pytest.param((2, 3), (2, 3), id="two_batch_axes"),
+    ],
+)
+def test_vector_quadratic_form_to_whitened(a_batch_shape, b_batch_shape):
+    A_raw = pt.tensor("A", shape=(None,) * (len(a_batch_shape) + 2), dtype="float64")
+    b = pt.tensor("b", shape=(None,) * (len(b_batch_shape) + 1), dtype="float64")
     A = assume(A_raw, positive_definite=True)
-    quad = b @ pt.linalg.inv(A) @ b
+    quad = (
+        pt.squeeze(b[..., None, :] @ pt.linalg.inv(A) @ b[..., :, None], axis=(-2, -1))
+        if b_batch_shape
+        else b @ pt.linalg.inv(A) @ b
+    )
 
+    # RewriteTester evaluates with the Python linker, so skip C-only reduction fusion.
     result = RewriteTester(
-        [A_raw, b], [quad], include=["canonicalize", "stabilize", "specialize"]
+        [A_raw, b], [quad], include="o3", exclude=["local_careduce_fusion"]
     )
 
     rng = np.random.default_rng(81)
-    M = rng.normal(size=(4, 4))
-    A_val = M @ M.T + 4 * np.eye(4)
-    result.assert_eval(A_val, rng.normal(size=4))
+    M = rng.normal(size=(*a_batch_shape, 4, 4))
+    A_val = M @ M.swapaxes(-2, -1) + 4 * np.eye(4)
+    result.assert_eval(A_val, rng.normal(size=(*b_batch_shape, 4)))
 
     core_ops = [
         getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
@@ -911,8 +929,9 @@ def test_vector_quadratic_form_dot_to_whitened(lower, wrap, b_ndim, build):
     whitened = solve_triangular(
         c, rhs, lower=lower, trans=0 if lower else 1, b_ndim=b_ndim
     )
+    expected = (whitened**2).sum(axis=-b_ndim)
     result.assert_graph(
-        rewrite_graph(wrap((whitened**2).sum()), include=["specialize"])
+        rewrite_graph(wrap(pt.squeeze(expected)), include=["specialize"])
     )
 
     rng = np.random.default_rng(81)
@@ -920,6 +939,90 @@ def test_vector_quadratic_form_dot_to_whitened(lower, wrap, b_ndim, build):
     c_val = np.linalg.cholesky(M @ M.T + 4 * np.eye(4))
     c_val = c_val if lower else c_val.T
     result.assert_eval(c_val, rng.normal(size=4) ** 2)
+
+
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
+@pytest.mark.parametrize(
+    "c_batch_shape, b_batch_shape",
+    [
+        pytest.param((), (3,), id="shared_factor"),
+        pytest.param((2, 3), (2, 3), id="two_batch_axes"),
+        pytest.param((2, 1), (3,), id="broadcast_batches"),
+    ],
+)
+def test_batched_quadratic_form_matmul_to_whitened(
+    lower, b_ndim, c_batch_shape, b_batch_shape
+):
+    c = pt.tensor(
+        "c",
+        shape=(*(1 if n == 1 else None for n in c_batch_shape), None, None),
+        dtype="float64",
+    )
+    b = pt.tensor("b", shape=(None,) * (len(b_batch_shape) + 1), dtype="float64")
+    rhs = b if b_ndim == 1 else b[..., None]
+    x = cho_solve((c, lower), rhs, b_ndim=b_ndim)
+    out = pt.vecdot(b, x) if b_ndim == 1 else pt.squeeze(x.mT @ rhs, axis=(-2, -1))
+    passes = ["canonicalize", "stabilize", "specialize"]
+    result = RewriteTester([c, b], [out], include=passes)
+
+    whitened = solve_triangular(
+        c, rhs, lower=lower, trans=0 if lower else 1, b_ndim=b_ndim
+    )
+    expected = (whitened**2).sum(axis=-b_ndim)
+    if b_ndim == 2:
+        expected = expected.squeeze(-1)
+    result.assert_graph(rewrite_graph(expected, include=passes))
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(*c_batch_shape, 4, 4)).astype(c.dtype)
+    c_val = np.linalg.cholesky(M @ M.swapaxes(-2, -1) + 4 * np.eye(4))
+    if not lower:
+        c_val = c_val.swapaxes(-2, -1)
+    b_val = rng.normal(size=(*b_batch_shape, 4)).astype(b.dtype)
+    result.assert_eval(c_val, b_val)
+
+
+@pytest.mark.parametrize(
+    "x_order, b_order, whiten",
+    [
+        pytest.param((1, 0, 2, "x"), (1, 0, "x", 2), True, id="permuted_batches"),
+        pytest.param((0, 1, 2, "x"), (1, 0, "x", 2), False, id="mismatched_batches"),
+        pytest.param(
+            (0, 2, 1, "x"), (0, 2, "x", 1), False, id="wrong_contraction_axis"
+        ),
+    ],
+)
+def test_batched_quadratic_form_matmul_batch_axes(x_order, b_order, whiten):
+    c = pt.tensor4("c")
+    b = pt.tensor3("b")
+    x = cho_solve((c, True), b, b_ndim=1)
+    out = pt.squeeze(b.dimshuffle(b_order) @ x.dimshuffle(x_order), axis=(-2, -1))
+    result = RewriteTester(
+        [c, b], [out], include=None, custom_rewrite=cho_solve_quadratic_form_to_whitened
+    )
+    expected = (
+        (solve_triangular(c, b, lower=True, b_ndim=1) ** 2).sum(axis=-1).mT
+        if whiten
+        else out
+    )
+    result.assert_graph(expected)
+
+
+@pytest.mark.parametrize("axis", [-2, 0], ids=["vector_axis", "batch_axis"])
+def test_batched_quadratic_form_sum_axis(axis):
+    c = pt.dtensor4("c")
+    b = pt.tensor("b", shape=(None, None, None, 1), dtype="float64")
+    out = (b * cho_solve((c, True), b, b_ndim=2)).sum(axis=axis)
+    result = RewriteTester(
+        [c, b], [out], include=None, custom_rewrite=cho_solve_quadratic_form_to_whitened
+    )
+    expected = (
+        (solve_triangular(c, b, lower=True, b_ndim=2) ** 2).sum(axis=axis)
+        if axis == -2
+        else out
+    )
+    result.assert_graph(expected)
 
 
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])

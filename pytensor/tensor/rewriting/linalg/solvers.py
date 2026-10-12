@@ -106,6 +106,7 @@ def psd_solve_to_chol_solve(fgraph, node):
     return [x]
 
 
+@register_stabilize
 @register_specialize
 @node_rewriter([blockwise_of(SolveTriangular)])
 def paired_triangular_solves_to_cho_solve(fgraph, node):
@@ -152,12 +153,13 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     return [new_out]
 
 
+@register_stabilize
 @register_specialize
 @node_rewriter([blockwise_of(CholeskySolve)])
 def cho_solve_quadratic_form_to_whitened(fgraph, node):
     """Replace a Cholesky-solve quadratic form with one triangular solve.
 
-    Match multiply-and-sum or scalar dot products, with vector or column RHS.
+    Match multiply-and-sum or vector inner products, including batched Matmul.
     Also handle the transposed matrix RHS used for batched vectors.
     """
     core_op = node.op.core_op
@@ -190,50 +192,70 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
         return None
     other = client.inputs[1 - target_idx]
     transpose = False
+    output_order = None
 
     match client.op:
-        case Dot():
-            if core_op.b_ndim == 1:
-                if solve_b.ndim != 1:
-                    return None
-            elif solve_b.ndim != 2 or solve_b.type.shape[-1] != 1:
+        case Dot() | Blockwise(Dot()):
+            if other.type.shape[-2 if target_idx == 1 else -1] != 1:
                 return None
 
-            # Singleton-axis views must refer to the same vector.
-            expected_b = solve_b
-            match solve_b.owner_op_and_inputs:
-                case (DimShuffle(), expected_b):
-                    pass
-            match other.owner_op_and_inputs:
-                case (DimShuffle(), other):
-                    pass
-            if other is not expected_b:
+            vector_axis = x.ndim - core_op.b_ndim
+            x_order = x_shuffle.new_order if x_shuffle else tuple(range(x.ndim))
+            if x_order[-1 if target_idx == 0 else -2] != vector_axis:
                 return None
+
+            def dimshuffle_view(var, order):
+                while isinstance(var.owner_op, DimShuffle):
+                    op, var = var.owner_op_and_inputs
+                    order = tuple(
+                        "x" if axis == "x" else op.new_order[axis] for axis in order
+                    )
+                return var, tuple(
+                    "x" if axis == "x" or var.type.shape[axis] == 1 else axis
+                    for axis in order
+                )
+
+            # Compare both vector and batch-axis mappings, allowing singleton views.
+            rhs_base, rhs_order = dimshuffle_view(
+                solve_b, (*x_order[:-2], x_order[-1], x_order[-2])
+            )
+            other_base, other_order = dimshuffle_view(other, range(other.ndim))
+            if rhs_base is not other_base or rhs_order != other_order:
+                return None
+
             match fgraph.clients[client.out]:
-                case [(squeeze_client, _)] if (
-                    isinstance(squeeze_client.op, DimShuffle)
-                    and squeeze_client.out.ndim == 0
-                ):
+                case [(squeeze_client, _)] if isinstance(squeeze_client.op, DimShuffle):
                     old_out = squeeze_client.out
                 case _:
                     return None
-            sum_op = Sum()
+            sum_op = Sum(axis=(vector_axis,))
+            # Replace the contracted vector axis by its singleton Matmul slot.
+            reduced_order = tuple(
+                "x"
+                if axis == "x" or axis == vector_axis
+                else axis - (axis > vector_axis)
+                for axis in x_order
+            )
+            output_order = tuple(
+                "x" if axis == "x" else reduced_order[axis]
+                for axis in squeeze_client.op.new_order
+            )
 
         case Elemwise(scalar_op=Mul()):
-            if core_op.b_ndim == 1:
-                if x_shuffle is not None:
-                    return None
+            reduction_axis = x.ndim - core_op.b_ndim
+            if x_shuffle is None:
                 expected_b = solve_b
             else:
                 if (
-                    x.ndim != 2
-                    or x_shuffle is None
+                    core_op.b_ndim != 2
+                    or x.ndim != 2
                     or not x_shuffle.is_matrix_transpose
                 ):
                     return None
                 match solve_b.owner_op_and_inputs:
                     case (DimShuffle(is_matrix_transpose=True), expected_b):
                         transpose = True
+                        reduction_axis = target.ndim - 1
                     case _:
                         return None
             if other is not expected_b:
@@ -244,7 +266,7 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
                     old_out = sum_client.out
                 case _:
                     return None
-            if sum_op.axis is not None and target.ndim - 1 not in sum_op.axis:
+            if sum_op.axis is not None and reduction_axis not in sum_op.axis:
                 return None
 
         case _:
@@ -263,6 +285,8 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
 
     # Reuse the matched Sum's axes, dtype and acc_dtype.
     new_out = sum_op(whitened**2)
+    if output_order is not None:
+        new_out = new_out.dimshuffle(output_order)
     copy_stack_trace(old_out, new_out)
     return {old_out: new_out}
 
