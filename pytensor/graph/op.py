@@ -1,7 +1,7 @@
 import inspect
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -19,7 +19,6 @@ from pytensor.graph.utils import (
 
 
 if TYPE_CHECKING:
-    from pytensor.compile.executor import Function
     from pytensor.graph.fg import AbstractFunctionGraph, FunctionGraph
     from pytensor.graph.type import Type
 
@@ -684,30 +683,34 @@ class _NoPythonOp(Op):
         raise NotImplementedError("No Python implementation is provided by this Op.")
 
 
-class HasInnerGraph(ABC):
-    r"""A mixin for an `Op` that contain an inner graph."""
+class HasMultipleInnerGraph(ABC):
+    """An `Op` exposing named inner graphs for inspection and traversal."""
+
+    @property
+    @abstractmethod
+    def inner_graphs(self) -> Mapping[str, "AbstractFunctionGraph"]:
+        """Inner graphs in display order; an empty name denotes an unlabeled graph."""
+
+
+class HasInnerGraph(HasMultipleInnerGraph):
+    """An `Op` exposing one inner graph and its input/output boundaries."""
 
     fgraph: "AbstractFunctionGraph"
     """The inner function graph (FunctionGraph or FrozenFunctionGraph)."""
 
     @property
-    @abstractmethod
-    def fn(self) -> "Function":
-        """The compiled inner-graph function."""
+    def inner_graphs(self):
+        return {"": self.fgraph}
 
     @property
-    @abstractmethod
     def inner_inputs(self) -> list[Variable]:
-        """The inner function's inputs."""
+        """The inner graph's inputs, as a list for compatibility with callers."""
+        return list(self.fgraph.inputs)
 
     @property
-    @abstractmethod
     def inner_outputs(self) -> list[Variable]:
-        """The inner function's outputs."""
-
-    @abstractmethod
-    def clone(self) -> Op:
-        """Clone the `Op` and its inner-graph."""
+        """The inner graph's outputs."""
+        return list(self.fgraph.outputs)
 
 
 def io_connection_pattern(inputs, outputs):
