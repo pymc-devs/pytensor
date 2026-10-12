@@ -8,6 +8,7 @@ from pytensor.conditional import rewriting as _rewriting
 
 _MOVED_NAMES = {
     "IfElse": _op,
+    "LazyIfElse": _op,
     "ifelse": _op,
     "cond_make_inplace": _rewriting,
     "ifelse_lift_single_if_through_acceptable_ops": _rewriting,

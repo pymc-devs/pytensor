@@ -1,15 +1,22 @@
 """Rewrites for conditional graph evaluation."""
 
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import optdb
-from pytensor.conditional.op import IfElse, ifelse
+from pytensor.compile.rewriting import rewrite_ofg_inner_graph
+from pytensor.conditional.op import IfElse, LazyIfElse, ifelse
+from pytensor.graph.basic import Constant
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
+    copy_stack_trace,
+    get_active_mode,
     in2out,
     node_rewriter,
+    out2in,
 )
-from pytensor.graph.traversal import apply_depends_on
+from pytensor.graph.rewriting.db import EquilibriumDB
+from pytensor.graph.traversal import apply_ancestors, apply_depends_on
 from pytensor.tensor.basic import Alloc
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -437,3 +444,205 @@ def cond_merge_random_op(fgraph, main_node):
 #                        in2out(cond_remove_identical,
 #                                   ignore_newtrees=True),
 #                        'fast_run', 'ifelse', position=7)
+
+
+@node_rewriter(None)
+def merge_sibling_ifelse(fgraph, node):
+    """Merge conditionals with one predicate and the same sole eager consumer.
+
+    Pattern::
+
+        left = ifelse(c, a, b)
+        right = ifelse(c, x, y)
+        consume(left, right)
+
+    Replacement::
+
+        left, right = ifelse(c, [a, x], [b, y])
+        consume(left, right)
+
+    Both results are needed whenever the consumer runs, so combining their
+    outputs lets branch extraction retain shared work under their predicate.
+    An IfElse consumer may need only one sibling, and extra clients may use a
+    sibling under a different condition. Merging either case could execute an
+    unused branch. Dependent siblings cannot be merged without creating a cycle.
+    """
+    if isinstance(node.op, IfElse):
+        return False
+
+    siblings = list(
+        dict.fromkeys(
+            inp.owner for inp in node.inputs if isinstance(inp.owner_op, IfElse)
+        )
+    )
+    for left_index, left in enumerate(siblings):
+        if any(
+            client is not node
+            for out in left.outputs
+            for client, _ in fgraph.clients[out]
+        ):
+            continue
+        for right in siblings[left_index + 1 :]:
+            if (
+                left.inputs[0] is not right.inputs[0]
+                or any(
+                    client is not node
+                    for out in right.outputs
+                    for client, _ in fgraph.clients[out]
+                )
+                or apply_depends_on(left, right)
+                or apply_depends_on(right, left)
+            ):
+                continue
+
+            n_left, n_right = left.op.n_outs, right.op.n_outs
+            merged = IfElse(n_left + n_right)(
+                left.inputs[0],
+                *left.inputs[1 : 1 + n_left],
+                *right.inputs[1 : 1 + n_right],
+                *left.inputs[1 + n_left :],
+                *right.inputs[1 + n_right :],
+                return_list=True,
+            )
+            replacements = dict(
+                zip([*left.outputs, *right.outputs], merged, strict=True)
+            )
+            new_outputs = node.op(
+                *(replacements.get(inp, inp) for inp in node.inputs), return_list=True
+            )
+            copy_stack_trace(node.outputs, new_outputs)
+            return new_outputs
+    return False
+
+
+ifelse_simplify_db = EquilibriumDB()
+for rewrite in (cond_merge_ifs_true, cond_merge_ifs_false, merge_sibling_ifelse):
+    ifelse_simplify_db.register(
+        rewrite.__name__, rewrite, "numba", "jax", "lazy_ifelse"
+    )
+
+optdb.register(
+    "ifelse_simplify",
+    ifelse_simplify_db,
+    "numba",
+    "jax",
+    "lazy_ifelse",
+    position=48.8,
+)
+
+
+@node_rewriter([IfElse])
+def introduce_lazy_ifelse(fgraph, node):
+    """Extract conditional computations into two compiled branch OpFromGraphs.
+
+    Pattern::
+
+        ifelse(c, T(xs), F(xs))
+
+    Replacement::
+
+        true_branch = optimize(OpFromGraph(xs, [T(xs)]))
+        false_branch = optimize(OpFromGraph(xs, [F(xs)]))
+        LazyIfElse(true_branch, false_branch, output_types)(c, *xs)
+
+    Here ``xs`` are the shared boundary inputs, and ``T`` and ``F`` denote
+    computations inside the extracted true and false regions.
+
+    A node can move when all its clients belong to either branch of this IfElse
+    or to other moved nodes. Work reached eagerly from both branch outputs stays
+    outside, as does work used by the condition or any external client.
+
+    The region includes both branches before they are copied into separate OFGs.
+    For example, in ``ifelse(a, ifelse(b, checked, x), ifelse(c, checked, y))``,
+    ``checked`` is shared but is unnecessary when both b and c are false.
+    Extracting the inner conditionals first would leave checked outside them,
+    making it an eager input to the outer conditional. Extracting the outer
+    region first puts a copy in each branch, where its inner condition guards it.
+
+    Each branch uses the surrounding compilation mode and the existing OFG
+    compiler, which optimizes its graph and protects inputs and output buffers.
+    """
+
+    def eager_ancestors(outputs):
+        """Find work required without selecting any nested conditional branch.
+
+        An inner IfElse requires its condition eagerly; visiting its branch
+        inputs would incorrectly classify their conditional work as eager.
+        """
+        nodes = set()
+        pending = list(outputs)
+        while pending:
+            owner = pending.pop().owner
+            if owner is None or owner in nodes:
+                continue
+            nodes.add(owner)
+            pending.extend(
+                owner.inputs[:1] if isinstance(owner.op, IfElse) else owner.inputs
+            )
+        return nodes
+
+    n_outs = node.op.n_outs
+    true_values = node.inputs[1 : 1 + n_outs]
+    false_values = node.inputs[1 + n_outs :]
+    shared_eager = eager_ancestors(true_values) & eager_ancestors(false_values)
+    candidates = set(apply_ancestors([*true_values, *false_values]))
+    order = [candidate for candidate in fgraph.toposort() if candidate in candidates]
+
+    movable = set()
+    for candidate in reversed(order):
+        if candidate not in shared_eager and all(
+            (client is node and index > 0) or client in movable
+            for out in candidate.outputs
+            for client, index in fgraph.clients[out]
+        ):
+            movable.add(candidate)
+    if not movable:
+        return False
+
+    boundary = {}
+    for candidate in order:
+        if candidate in movable:
+            for inp in candidate.inputs:
+                if inp.owner not in movable and not isinstance(inp, Constant):
+                    boundary[inp] = None
+    for out in [*true_values, *false_values]:
+        if out.owner not in movable and not isinstance(out, Constant):
+            boundary[out] = None
+
+    inputs = list(boundary)
+    mode = get_active_mode(fgraph)
+
+    def compile_branch(outputs, name):
+        """Optimize and freeze a branch with the normal OFG buffer contract.
+
+        Exposing the outer mode also lets nested conditionals be extracted
+        recursively before this branch is linked or funcified.
+        """
+        branch = OpFromGraph(inputs, outputs, name=name, on_unused_input="ignore")
+        inner = branch.fgraph.unfreeze()
+        inner._compile_mode = mode
+        try:
+            rewrite_ofg_inner_graph(
+                mode.linker, branch, branch.make_node(*inputs), inner, mode=mode
+            )
+        finally:
+            del inner._compile_mode
+        return branch.clone_with_inner_graph(inner)
+
+    true_branch = compile_branch(true_values, "true_branch")
+    false_branch = compile_branch(false_values, "false_branch")
+    lazy = LazyIfElse(true_branch, false_branch, [out.type for out in node.outputs])
+    outputs = lazy(node.inputs[0], *inputs, return_list=True)
+    copy_stack_trace(node.outputs, outputs)
+    return outputs
+
+
+# Extract outer branches before fusion can combine their work with the condition.
+optdb.register(
+    "introduce_lazy_ifelse",
+    out2in(introduce_lazy_ifelse, ignore_newtrees=True),
+    "numba",
+    "jax",
+    "lazy_ifelse",
+    position=48.9,
+)

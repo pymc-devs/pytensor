@@ -11,6 +11,7 @@ from pytensor.conditional import op, rewriting
     [
         ("ifelse", op),
         ("IfElse", op),
+        ("LazyIfElse", op),
         ("cond_make_inplace", rewriting),
     ],
 )

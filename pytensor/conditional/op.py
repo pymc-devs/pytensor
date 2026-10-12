@@ -20,7 +20,7 @@ import numpy as np
 from pytensor.basic import as_symbolic
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.op import _NoPythonOp
+from pytensor.graph.op import HasMultipleInnerGraph, Op, _NoPythonOp
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import zeros_like
@@ -340,6 +340,50 @@ class IfElse(_NoPythonOp):
         thunk.inputs = [storage_map[v] for v in node.inputs]
         thunk.outputs = [storage_map[v] for v in node.outputs]
         return thunk
+
+
+class LazyIfElse(Op, HasMultipleInnerGraph):
+    """An internal conditional whose branches are compiled `OpFromGraph`s.
+
+    Both branches take the same boundary inputs and own their output buffers,
+    following the usual `OpFromGraph` aliasing contract.
+    """
+
+    __props__ = ("true_branch", "false_branch", "output_types")
+
+    def __init__(self, true_branch, false_branch, output_types):
+        self.true_branch = true_branch
+        self.false_branch = false_branch
+        self.output_types = tuple(output_types)
+
+    @property
+    def inner_graphs(self):
+        return {
+            "true_branch": self.true_branch.fgraph,
+            "false_branch": self.false_branch.fgraph,
+        }
+
+    def __str__(self):
+        return "LazyIfElse"
+
+    def make_node(self, condition, *inputs):
+        condition = as_tensor_variable(condition, ndim=0)
+        inputs = self.true_branch.make_node(*inputs).inputs
+        return Apply(self, [condition, *inputs], [t() for t in self.output_types])
+
+    def perform(self, node, inputs, outputs):
+        condition, *args = inputs
+        branch = self.true_branch if condition else self.false_branch
+        branch.perform(None, args, outputs)
+
+    def infer_shape(self, node, shapes):
+        branch_shapes = [
+            branch.infer_shape(branch.make_node(*node.inputs[1:]), shapes[1:])
+            for branch in (self.true_branch, self.false_branch)
+        ]
+        return IfElse(len(node.outputs)).infer_shape(
+            node, [shapes[0], *branch_shapes[0], *branch_shapes[1]]
+        )
 
 
 def ifelse(

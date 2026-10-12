@@ -8,10 +8,11 @@ import pytensor.sparse
 import pytensor.tensor.basic as ptb
 from pytensor import function
 from pytensor.compile.mode import Mode
-from pytensor.conditional.op import IfElse, ifelse
+from pytensor.conditional.op import IfElse, LazyIfElse, ifelse
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.c.type import generic
+from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse import matrix as sparse_matrix
 from pytensor.tensor.math import eq
 from pytensor.tensor.type import (
@@ -25,6 +26,31 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.conditional.utils import IfElseCompatibilityTests
+
+
+@pytest.mark.parametrize("views", [False, True])
+def test_lazy_ifelse_output_aliases(views):
+    mode = Mode("py", "fast_run").including("lazy_ifelse")
+    IfElseCompatibilityTests.check_output_aliases(mode, views)
+
+
+def test_lazy_ifelse_perform_and_shape():
+    c, x, y = iscalar("c"), vector("x"), vector("y")
+    checked = CheckAndRaise(ValueError, "selected invalid branch")(x, (x > 0).all())
+    mode = Mode("py", "fast_run").including("lazy_ifelse")
+    fn = function([c, x, y], ifelse(c, checked, y * 2), mode=mode)
+    [node] = fn.maker.fgraph.toposort()
+    assert isinstance(node.op, LazyIfElse)
+    shape_fn = function(fn.maker.fgraph.inputs, node.outputs[0].shape, mode=mode)
+    xv, yv = np.array([-1.0, 2.0], dtype=x.dtype), np.ones(3, dtype=y.dtype)
+    np.testing.assert_array_equal(fn(False, xv, yv), yv * 2)
+    with pytest.raises(ValueError, match="selected invalid branch"):
+        fn(True, xv, yv)
+    for condition in (False, True):
+        np.testing.assert_array_equal(
+            shape_fn(condition, xv, yv), [2 if condition else 3]
+        )
 
 
 class TestIfelse(utt.OptimizationTestMixin):
@@ -122,7 +148,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         f = function(
             [c, x, y], [self.cast_output(gx), self.cast_output(gy)], mode=self.mode
         )
-        self.assertFunctionContains(f, self.get_ifelse(1), min=2, max=3)
+        self.assertFunctionContainsClass(f, (IfElse, LazyIfElse), min=2, max=3)
         rng = np.random.default_rng(utt.fetch_seed())
 
         xlen = rng.integers(200)
@@ -245,7 +271,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         f = function(
             [ften0, fmat1, ften2, fmat3], [], updates=new_updates, mode=self.mode
         )
-        self.assertFunctionContains1(f, self.get_ifelse(4))
+        self.assertFunctionContainsClassN(f, (IfElse, LazyIfElse), 1)
 
         i1 = np.asarray(np.random.random([19, 4, 8]), dtype=self.dtype)
         i2 = np.asarray(np.random.random([19, 8]), dtype=self.dtype)

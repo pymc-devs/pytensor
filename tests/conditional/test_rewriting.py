@@ -4,9 +4,46 @@ import pytest
 import pytensor
 from pytensor import function
 from pytensor.conditional.op import IfElse, ifelse
-from pytensor.conditional.rewriting import cond_make_inplace
+from pytensor.conditional.rewriting import cond_make_inplace, ifelse_simplify_db
 from pytensor.tensor.type import iscalar, scalar, vector
 from tests import unittest_tools as utt
+
+
+@pytest.mark.parametrize("true_branch", [True, False])
+def test_simplify_nested_ifelse(true_branch):
+    c = iscalar("c")
+    x, y, z = (vector(name) for name in "xyz")
+    inner = ifelse(c, x, y)
+    out = ifelse(c, inner, z) if true_branch else ifelse(c, z, inner)
+    expected = ifelse(c, x, z) if true_branch else ifelse(c, z, y)
+    result = utt.RewriteTester(
+        [c, x, y, z],
+        [out],
+        include=None,
+        custom_rewrite=ifelse_simplify_db.query("+numba"),
+    )
+    result.assert_graph(expected)
+
+
+@pytest.mark.parametrize("extra_client", [False, True])
+def test_merge_sibling_ifelse(extra_client):
+    c = iscalar("c")
+    x, y = vector("x"), vector("y")
+    left, right = ifelse(c, x, y), ifelse(c, x * 2, y * 3)
+    outputs = [left + right]
+    if extra_client:
+        outputs.append(left)
+    result = utt.RewriteTester(
+        [c, x, y],
+        outputs,
+        include=None,
+        custom_rewrite=ifelse_simplify_db.query("+numba"),
+    )
+    if extra_client:
+        result.assert_graph(*outputs)
+    else:
+        merged = ifelse(c, [x, x * 2], [y, y * 3])
+        result.assert_graph(merged[0] + merged[1])
 
 
 @pytest.mark.parametrize("large_graph", [False, True])
