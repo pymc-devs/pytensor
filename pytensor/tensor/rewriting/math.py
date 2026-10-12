@@ -599,14 +599,13 @@ def local_sqrt_sqr(fgraph, node):
 
 
 @register_canonicalize
-@register_stabilize
 @register_specialize
 @node_rewriter([pt_abs])
 def local_useless_abs(fgraph, node):
     # Case for abs(x) -> x, when x is already non-negative
     [x] = node.inputs
 
-    if x.dtype.startswith("complex") or not _is_provably_non_negative(x):
+    if not _is_provably_non_negative(x):
         return
 
     return [x]
@@ -781,56 +780,6 @@ def local_sign_div(fgraph, node):
     for side, other in ((num, den), (den, num)):
         if isinstance(side, Constant) and np.all(np.asarray(side.data) < 0):
             return [neg(sign(other))]
-
-
-@register_canonicalize
-@register_stabilize
-@register_specialize
-@node_rewriter([sign])
-def local_useless_sign(fgraph, node):
-    """sign(x) -> ones_like(x), when x is provably strictly positive.
-
-    A failed Cholesky factorization yields NaN, which this rewrite replaces
-    with 1 when the proof runs through a Cholesky diagonal; the
-    log-determinant path still propagates the NaN.
-    """
-    [x] = node.inputs
-    if _is_provably_positive(x, strict=True):
-        new = ones_like(x, dtype=node.outputs[0].dtype)
-        copy_stack_trace(node.outputs[0], new)
-        return [new]
-
-
-@register_canonicalize
-@register_stabilize
-@register_specialize
-@node_rewriter([sign])
-def local_sign_prod(fgraph, node):
-    """sign(prod(x)) -> prod(sign(x)), also through one DimShuffle.
-
-    Preserve the sign when the product underflows or overflows. Require float
-    accumulation and output to avoid integer overflow and complex projections.
-    Exclude boolean inputs, whose sign is undefined. The DimShuffle case
-    handles ExpandDims inserted by gradients.
-    """
-    [arg] = node.inputs
-    dimshuffle = None
-    match arg.owner_op_and_inputs:
-        case (DimShuffle() as dimshuffle, inner):
-            arg = inner
-    match arg.owner_op_and_inputs:
-        case (Prod(axis=axis, acc_dtype=acc_dtype), x) if (
-            arg.dtype.startswith("float")
-            and acc_dtype.startswith("float")
-            and x.dtype != "bool"
-        ):
-            new = sign(x).prod(axis=axis)
-            if dimshuffle is not None:
-                new = dimshuffle(new)
-            if new.dtype != node.outputs[0].dtype:
-                new = cast(new, dtype=node.outputs[0].dtype)
-            copy_stack_trace(node.outputs[0], new)
-            return [new]
 
 
 @register_canonicalize
