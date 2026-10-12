@@ -2030,6 +2030,35 @@ class TestAdvancedSubtensor:
         self.ix2 = lmatrix()
         self.ixr = lrow()
 
+    @pytest.mark.parametrize("linker", ["py", "c"])
+    @pytest.mark.parametrize(
+        "idx, err",
+        [
+            ([4], True),  # https://github.com/pymc-devs/pytensor/issues/2470
+            ([-5], True),
+            ([3], False),
+            ([-4], False),
+            ([0, 1, 2, 3], False),
+            # Mixed signs: only one of the bounds is violated
+            ([-5, 2], True),
+            ([-1, 4], True),
+            ([-4, 3], False),
+        ],
+    )
+    def test_constant_index_bounds_check(self, linker, idx, err):
+        # Regression test for the off-by-one in `_idx_may_be_invalid`: a
+        # constant out-of-bounds index must raise on both the Python and C
+        # implementations, not silently wrap on the C backend.
+        x = vector("x", shape=(4,))
+        y = x[np.array(idx, dtype="int64")]
+        values = np.array([10.0, 20.0, 30.0, 40.0])
+        f = pytensor.function([x], y, mode=Mode(linker=linker, optimizer=None))
+        if err:
+            with pytest.raises(IndexError):
+                f(values)
+        else:
+            np.testing.assert_array_equal(f(values), values[idx])
+
     def test_static_shape(self):
         x = tensor("x", shape=(None, None))
         y = tensor("y", shape=(4, 5, 6))
