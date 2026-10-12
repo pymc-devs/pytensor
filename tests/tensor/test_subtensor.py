@@ -229,6 +229,15 @@ class TestProvablyPositive:
                 False,
                 id="uint-prod-can-wrap-to-zero",
             ),
+            pytest.param(
+                lambda: prod(
+                    constant(np.array([2**32, 2**32], dtype="uint64")),
+                    dtype="float64",
+                ),
+                True,
+                False,
+                id="uint-accumulator-with-float-output-can-wrap-to-zero",
+            ),
         ],
     )
     def test_recurses_through_diag_prod_and_sqr(self, make_var, strict, expected):

@@ -2198,6 +2198,16 @@ def test_useless_abs():
     result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
 
 
+def test_useless_abs_complex_cholesky():
+    # The positive diagonal is complex-typed; abs must still return a real dtype.
+    x = pt.zmatrix("x")
+    out = pt_abs(pt.diagonal(pt.linalg.cholesky(x)))
+    result = RewriteTester(
+        [x], [out], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(out)
+
+
 def test_useless_abs_keeps_signed_zero():
     # sqrt(-0.0) is -0.0, which abs() normalizes to +0.0, so dropping the abs would flip
     # the sign of any downstream division
@@ -5444,9 +5454,8 @@ def test_useless_sign():
     X = pt.dmatrix("X")
     diag_L = pt.diagonal(pt.linalg.cholesky(X))
     out = pt.sign(pt.sqr(diag_L))
-    rewritten = rewrite_graph(out, include=["canonicalize"])
-    expected = rewrite_graph(pt.ones_like(pt.sqr(diag_L)), include=["canonicalize"])
-    assert_equal_computations([rewritten], [expected])
+    result = RewriteTester([X], [out])
+    result.assert_graph(pt.fill(pt.sqr(diag_L), pt.constant([1.0], dtype=X.dtype)))
 
 
 @pytest.mark.parametrize(
@@ -5465,18 +5474,31 @@ def test_useless_sign():
 )
 def test_sign_prod(build, expected_fn):
     x = pt.dmatrix("x")
-    rewritten = rewrite_graph(
-        build(x), include=["canonicalize", "stabilize", "specialize"]
+    result = RewriteTester(
+        [x], [build(x)], include=["canonicalize", "stabilize", "specialize"]
     )
-    expected = rewrite_graph(
-        expected_fn(x), include=["canonicalize", "stabilize", "specialize"]
-    )
-    assert_equal_computations([rewritten], [expected])
+    result.assert_graph(expected_fn(x))
 
 
-def test_sign_prod_integer_not_rewritten():
-    """Integer products wrap on overflow, so the sign cannot distribute."""
-    x = pt.imatrix("x")
-    out = pt.sign(pt.prod(x))
-    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize", "specialize"])
-    assert_equal_computations([rewritten], [out])
+@pytest.mark.parametrize(
+    "dtype, prod_dtype, acc_dtype",
+    [
+        ("int32", None, None),
+        ("int32", "float64", None),
+        ("complex128", "float64", None),
+        ("bool", "float64", "float64"),
+    ],
+    ids=[
+        "integer_product",
+        "integer_accumulator",
+        "complex_projection",
+        "boolean_sign",
+    ],
+)
+def test_sign_prod_unsafe_dtype(dtype, prod_dtype, acc_dtype):
+    x = pt.matrix("x", dtype=dtype)
+    out = pt.sign(pt.prod(x, dtype=prod_dtype, acc_dtype=acc_dtype))
+    result = RewriteTester(
+        [x], [out], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(out)

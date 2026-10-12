@@ -606,7 +606,7 @@ def local_useless_abs(fgraph, node):
     # Case for abs(x) -> x, when x is already non-negative
     [x] = node.inputs
 
-    if not _is_provably_non_negative(x):
+    if x.dtype.startswith("complex") or not _is_provably_non_negative(x):
         return
 
     return [x]
@@ -788,7 +788,7 @@ def local_sign_div(fgraph, node):
 @register_specialize
 @node_rewriter([sign])
 def local_useless_sign(fgraph, node):
-    """Rewrite sign(x) as 1 when x is provably positive.
+    """sign(x) -> ones_like(x), when x is provably strictly positive.
 
     A failed Cholesky factorization yields NaN, which this rewrite replaces
     with 1 when the proof runs through a Cholesky diagonal; the
@@ -806,14 +806,12 @@ def local_useless_sign(fgraph, node):
 @register_specialize
 @node_rewriter([sign])
 def local_sign_prod(fgraph, node):
-    """Rewrite sign(prod(x)) as prod(sign(x)), looking through one DimShuffle.
+    """sign(prod(x)) -> prod(sign(x)), also through one DimShuffle.
 
-    Distributing the sign inside the product keeps it exact when the product
-    itself under- or overflows, e.g. the determinant of a large matrix
-    computed from a factorization. The DimShuffle case covers the ExpandDims
-    that gradients insert between the sign and the prod. Restricted to float
-    products: integer products wrap on overflow (unsigned ones to values as
-    low as 0), where the identity does not hold.
+    Preserve the sign when the product underflows or overflows. Require float
+    accumulation and output to avoid integer overflow and complex projections.
+    Exclude boolean inputs, whose sign is undefined. The DimShuffle case
+    handles ExpandDims inserted by gradients.
     """
     [arg] = node.inputs
     dimshuffle = None
@@ -821,7 +819,11 @@ def local_sign_prod(fgraph, node):
         case (DimShuffle() as dimshuffle, inner):
             arg = inner
     match arg.owner_op_and_inputs:
-        case (Prod(axis=axis), x) if arg.type.dtype.startswith("float"):
+        case (Prod(axis=axis, acc_dtype=acc_dtype), x) if (
+            arg.dtype.startswith("float")
+            and acc_dtype.startswith("float")
+            and x.dtype != "bool"
+        ):
             new = sign(x).prod(axis=axis)
             if dimshuffle is not None:
                 new = dimshuffle(new)

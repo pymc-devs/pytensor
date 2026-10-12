@@ -243,7 +243,8 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
     """``True`` when ``var`` can be statically shown to be positive.
 
     With ``strict=True`` this proves :math:`var > 0`; with ``strict=False`` it
-    proves :math:`var \\geq 0`.
+    proves :math:`var \\geq 0`. Proofs through ``Prod`` and ``sqr`` use exact
+    arithmetic; floating-point evaluation can underflow to zero.
 
     Recognized cases:
 
@@ -259,9 +260,9 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
       its core matrix axes, which is positive whenever the factorization
       succeeded (``on_error="nan"`` yields NaN instead); any other diagonal
       recurses to the matrix.
-    - ``Prod`` of a positive input, restricted to float outputs because
-      integer products wrap on overflow (unsigned ones to values as low as 0).
-    - ``sqr`` of a strictly positive input, under the same restriction.
+    - ``Prod`` of a positive input, with float output and accumulation:
+      integer accumulators can overflow even when the output dtype is float.
+    - ``sqr`` of a strictly positive input, restricted to float outputs.
 
     Four further cases prove non-negativity but not strict positivity, so they
     are recognized only when ``strict=False``:
@@ -319,7 +320,11 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
         ):
             return True
         return _is_provably_positive(matrix, strict)
-    if isinstance(op, Prod) and var.type.dtype.startswith("float"):
+    if (
+        isinstance(op, Prod)
+        and var.dtype.startswith("float")
+        and op.acc_dtype.startswith("float")
+    ):
         return _is_provably_positive(var.owner.inputs[0], strict)
     if isinstance(op, Elemwise):
         scalar_op = op.scalar_op
