@@ -14,9 +14,9 @@ from pytensor import config
 from pytensor import tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import MLX, Mode
+from pytensor.conditional.op import ifelse
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable
-from pytensor.ifelse import ifelse
 from pytensor.link.mlx import MLXLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor.type import vector

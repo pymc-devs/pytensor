@@ -21,7 +21,7 @@ IfElse vs Switch
 .. testcode::
 
    from pytensor import tensor as pt
-   from pytensor.ifelse import ifelse
+   from pytensor.conditional import ifelse
    import pytensor, time, numpy
 
    a,b = pt.scalars('a', 'b')

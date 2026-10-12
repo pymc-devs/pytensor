@@ -8,10 +8,10 @@ import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
+from pytensor.conditional.op import IfElse
 from pytensor.configdefaults import config
 from pytensor.graph import Constant
 from pytensor.graph.fg import AbstractFunctionGraph
-from pytensor.ifelse import IfElse
 from pytensor.link.jax.ops import JAXOp
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise

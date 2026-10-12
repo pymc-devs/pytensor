@@ -29,7 +29,9 @@ from pytensor.compile.mode import get_mode
 from pytensor.gradient import Lop, Rop, grad, pullback, pushforward
 from pytensor.printing import debugprint as dprint
 
-from pytensor.ifelse import ifelse
+# Preload the deprecated module before binding the helper with the same name.
+import pytensor.ifelse
+from pytensor.conditional import ifelse
 from pytensor.scan.basic import scan
 from pytensor.scan.views import map
 from pytensor.compile.builders import OpFromGraph

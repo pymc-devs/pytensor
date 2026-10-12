@@ -7,7 +7,7 @@ import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.ifelse import IfElse
+from pytensor.conditional.op import IfElse
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
