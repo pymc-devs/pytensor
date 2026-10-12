@@ -109,6 +109,7 @@ from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
     local_add_canonizer,
+    local_careduce_of_dimshuffle,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
@@ -3933,6 +3934,78 @@ class TestLocalReduce:
         )
         result.assert_graph(pt_max(x.squeeze(0), axis=0, initial=-np.inf))
         result.assert_eval(np.zeros((1, 0)))
+
+
+class TestLocalCAReduceOfDimShuffle:
+    rewrite_kwargs = {
+        "include": None,
+        "custom_rewrite": local_careduce_of_dimshuffle,
+    }
+
+    @pytest.mark.parametrize(
+        "op, dtype",
+        [
+            (Sum, "int64"),
+            (Prod, "int64"),
+            (Max, "int64"),
+            (Min, "int64"),
+            (All, "bool"),
+            (Any, "bool"),
+        ],
+    )
+    def test_removes_dimshuffle(self, op, dtype):
+        x = pt.tensor3("x", dtype=dtype)
+        out = op(axis=None)(x.dimshuffle(2, "x", 0, 1))
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(op(axis=(0, 1, 2))(x), strict_dtype=True)
+        x_test = np.random.default_rng(1).integers(0, 3, size=(2, 3, 4)).astype(dtype)
+        result.assert_eval(x_test)
+
+    @pytest.mark.parametrize(
+        "shuffle, axis, new_axis",
+        [
+            ((2, 1, 0), (0, 1), (1, 2)),
+            ((0, "x", 2, 1), (1, 3), (1,)),
+            ((2, 0, "x", 1), (0, 2), (2,)),
+        ],
+    )
+    def test_removes_dimshuffle_when_kept_dims_in_order(self, shuffle, axis, new_axis):
+        x = pt.tensor3("x")
+        out = pt_sum(x.dimshuffle(*shuffle), axis=axis)
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(pt_sum(x, axis=new_axis))
+        x_test = np.random.default_rng(2).normal(size=(2, 3, 4))
+        result.assert_eval(x_test)
+
+    def test_generic_careduce(self):
+        x = pt.matrix("x", dtype="int8")
+        out = CAReduce(ps.add, axis=None, upcast_discrete_output=True)(
+            x.dimshuffle("x", 1, 0)
+        )
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        expected = CAReduce(ps.add, axis=(0, 1), upcast_discrete_output=True)(x)
+        result.assert_graph(expected, strict_dtype=True)
+        result.assert_eval(np.full((2, 3), 100, dtype="int8"))
+
+    @pytest.mark.parametrize(
+        "shuffle, axis",
+        [
+            ((1, 0, 2), 2),  # kept dims are transposed
+            ((2, 1, 0), 1),  # kept dims are transposed
+            ((0, "x", 1, 2), (0, 2)),  # kept new broadcastable dimension
+        ],
+    )
+    def test_kept_when_dimshuffle_changes_output(self, shuffle, axis):
+        x = pt.tensor3("x")
+        out = pt_sum(x.dimshuffle(*shuffle), axis=axis)
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(out)
+
+    def test_kept_when_dimshuffle_drops_dims(self):
+        x = pt.tensor("x", shape=(1, None, None))
+        out = pt_sum(x.dimshuffle(2, 1))
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(out)
 
 
 class TestReduceJoin:
