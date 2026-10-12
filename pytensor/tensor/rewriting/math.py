@@ -2360,7 +2360,13 @@ def local_careduce_of_alloc(fgraph, node):
                 # Avoid a float64 upcast from the int64 shapes (or a float16
                 # downcast); either would be amplified by the mul/pow below.
                 size = size.astype("float32")
-            value = value * size if isinstance(node.op, Sum) else value**size
+            if isinstance(node.op, Sum):
+                value = value * size
+            elif isinstance(node.op, Prod):
+                value = value**size
+            else:
+                # An empty ProdWithoutZeros reduction is 0, not 1
+                value = switch(eq(size, 0), 0, value**size)
 
     # The reduction may change the dtype; a single elemwise has no accumulation
     # error, so ignore acc_dtype and just cast to the reduction's output dtype.
