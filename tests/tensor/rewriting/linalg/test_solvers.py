@@ -886,14 +886,34 @@ def test_vector_quadratic_form_to_whitened():
 
 @pytest.mark.parametrize("wrap", [lambda t: t, pt.log], ids=["plain", "under_log"])
 @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
-def test_vector_quadratic_form_dot_to_whitened(lower, wrap):
+@pytest.mark.parametrize(
+    "b_ndim, build",
+    [
+        pytest.param(1, lambda x, b: pt.dot(x, b), id="vector_dot"),
+        pytest.param(1, lambda x, b: b @ x, id="vector_matmul"),
+        pytest.param(2, lambda x, b: x.mT @ b, id="column_matmul"),
+        pytest.param(2, lambda x, b: pt.dot(b.mT, x), id="column_dot"),
+        pytest.param(
+            2,
+            lambda x, b: pt.expand_dims(pt.squeeze(x, axis=-1), axis=0) @ b,
+            id="squeeze_expand",
+        ),
+    ],
+)
+def test_vector_quadratic_form_dot_to_whitened(lower, wrap, b_ndim, build):
     c = pt.dmatrix("c")
     b = pt.dvector("b")
-    col = b[:, None]
-    x = cho_solve((c, lower), col, b_ndim=2)
-    out = wrap(pt.squeeze(x.mT @ col))
+    rhs = b if b_ndim == 1 else b[:, None]
+    x = cho_solve((c, lower), rhs, b_ndim=b_ndim)
+    out = wrap(pt.squeeze(build(x, rhs)))
 
     result = RewriteTester([c, b], [out], include=["specialize"])
+    whitened = solve_triangular(
+        c, rhs, lower=lower, trans=0 if lower else 1, b_ndim=b_ndim
+    )
+    result.assert_graph(
+        rewrite_graph(wrap((whitened**2).sum()), include=["specialize"])
+    )
 
     rng = np.random.default_rng(81)
     M = rng.normal(size=(4, 4))
@@ -901,13 +921,8 @@ def test_vector_quadratic_form_dot_to_whitened(lower, wrap):
     c_val = c_val if lower else c_val.T
     result.assert_eval(c_val, rng.normal(size=4) ** 2)
 
-    core_ops = [
-        getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
-    ]
-    assert not any(isinstance(op, CholeskySolve | Dot) for op in core_ops)
-    assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
 
-
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
 @pytest.mark.parametrize(
     "build",
     [
@@ -918,13 +933,13 @@ def test_vector_quadratic_form_dot_to_whitened(lower, wrap):
         ),
     ],
 )
-def test_vector_quadratic_form_dot_not_whitened(build):
+def test_vector_quadratic_form_dot_not_whitened(build, b_ndim):
     c = pt.dmatrix("c")
     b = pt.dvector("b")
     d = pt.dvector("d")
     col = b[:, None]
-    x = cho_solve((c, True), col, b_ndim=2)
-    outputs = build(x, col, d[:, None])
+    x = cho_solve((c, True), b if b_ndim == 1 else col, b_ndim=b_ndim)
+    outputs = build(x[:, None] if b_ndim == 1 else x, col, d[:, None])
 
     result = RewriteTester([c, b, d], outputs, include=["specialize"])
 

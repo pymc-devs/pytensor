@@ -155,15 +155,10 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
 @register_specialize
 @node_rewriter([blockwise_of(CholeskySolve)])
 def cho_solve_quadratic_form_to_whitened(fgraph, node):
-    """Rewrite ``sum(b * cho_solve((c, lower), b))`` as a whitened sum of squares.
+    """Replace a Cholesky-solve quadratic form with one triangular solve.
 
-    The quadratic form ``b.T @ inv(A) @ b`` with ``A = c @ c.mT`` equals
-    ``|solve(c, b)| ** 2``, one triangular substitution instead of the two
-    inside ``cho_solve``. The ``b_ndim=2`` arms match the two forms this
-    pattern takes for vector ``b``: the inner-product Dot that matmul emits
-    for ``b @ inv(A) @ b``, and the matrix form left by
-    ``batched_vector_b_solve_to_matrix_b_solve``,
-    ``sum(b * cho_solve((c, lower), b.mT).mT, axis=-1)``.
+    Match multiply-and-sum or scalar dot products, with vector or column RHS.
+    Also handle the transposed matrix RHS used for batched vectors.
     """
     core_op = node.op.core_op
     c, solve_b = node.inputs
@@ -174,105 +169,86 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
     if x.type.dtype.startswith("complex"):
         return None
 
-    def inner_product_scalar_client():
-        # matmul contracts b.T @ x for vector b as squeeze(Dot(x_as_row, b_as_column)),
-        # with the solve output x on the left because @ associates left.
-        # x is a (m, 1) column here, so any DimShuffle of it with (1, m) output
-        # is its transpose: the output's only non-unit dim can only be x's dim 0.
-        match fgraph.clients[x]:
-            case [(row_client, _)] if isinstance(
-                row_client.op, DimShuffle
-            ) and row_client.outputs[0].type.broadcastable == (True, False):
-                pass
-            case _:
-                return None
-        [x_row] = row_client.outputs
-
-        # The right operand must be the b fed to the solve itself; merge has
-        # already unified equal subgraphs, so identity is the sound check
-        match fgraph.clients[x_row]:
-            case [(dot_client, 0)] if (
-                isinstance(dot_client.op, Dot) and dot_client.inputs[1] is solve_b
-            ):
-                pass
-            case _:
-                return None
-        [dot_out] = dot_client.outputs
-
-        match fgraph.clients[dot_out]:
-            case [(squeeze_client, _)] if (
-                isinstance(squeeze_client.op, DimShuffle)
-                and squeeze_client.outputs[0].type.ndim == 0
-            ):
-                return squeeze_client.outputs[0]
-        return None
-
-    if core_op.b_ndim == 2 and solve_b.type.shape[-1] == 1:
-        scalar_out = inner_product_scalar_client()
-        if scalar_out is not None:
-            # A = c @ c.mT when lower, c.mT @ c when upper; trans=1 whitens
-            # the upper case
-            whitened = solve_triangular(
-                c,
-                solve_b,
-                lower=core_op.lower,
-                trans=0 if core_op.lower else 1,
-                b_ndim=2,
-            )
-            new_out = (whitened**2).sum()
-            copy_stack_trace(scalar_out, new_out)
-            return {scalar_out: new_out}
-
-    # target is the solve output as the mul consumes it, expected_b the
-    # operand it is contracted with
-    if core_op.b_ndim == 1:
-        target, expected_b = x, solve_b
-    else:
-        if x.type.ndim != 2:
-            return None
-        match fgraph.clients[x]:
-            case [(transpose_client, _)] if (
-                isinstance(transpose_client.op, DimShuffle)
-                and transpose_client.op.is_matrix_transpose
-            ):
-                [target] = transpose_client.outputs
-            case _:
-                return None
-        match solve_b.owner_op_and_inputs:
-            case (DimShuffle(is_matrix_transpose=True), expected_b):
-                pass
-            case _:
-                return None
-
-    # The mul and sum must be the only consumers, so the replacement strands
-    # the cho_solve as dead code instead of duplicating solves
-    match fgraph.clients[target]:
-        case [(mul_client, target_idx)] if (
-            isinstance(mul_client.op, Elemwise)
-            and isinstance(mul_client.op.scalar_op, Mul)
-            and len(mul_client.inputs) == 2
-            and mul_client.inputs[1 - target_idx] is expected_b
-        ):
-            [mul_out] = mul_client.outputs
+    # Exclusive consumers let the replacement remove the original solve.
+    match fgraph.clients[x]:
+        case [(client, target_idx)]:
+            pass
         case _:
             return None
+    target = x
+    x_shuffle = None
+    if isinstance(client.op, DimShuffle):
+        x_shuffle = client.op
+        [target] = client.outputs
+        match fgraph.clients[target]:
+            case [(client, target_idx)]:
+                pass
+            case _:
+                return None
 
-    match fgraph.clients[mul_out]:
-        case [(sum_client, _)] if isinstance(sum_client.op, Sum):
-            [sum_out] = sum_client.outputs
+    if len(client.inputs) != 2:
+        return None
+    other = client.inputs[1 - target_idx]
+    transpose = False
+
+    match client.op:
+        case Dot():
+            if core_op.b_ndim == 1:
+                if solve_b.ndim != 1:
+                    return None
+            elif solve_b.ndim != 2 or solve_b.type.shape[-1] != 1:
+                return None
+
+            # Singleton-axis views must refer to the same vector.
+            expected_b = solve_b
+            match solve_b.owner_op_and_inputs:
+                case (DimShuffle(), expected_b):
+                    pass
+            match other.owner_op_and_inputs:
+                case (DimShuffle(), other):
+                    pass
+            if other is not expected_b:
+                return None
+            match fgraph.clients[client.out]:
+                case [(squeeze_client, _)] if (
+                    isinstance(squeeze_client.op, DimShuffle)
+                    and squeeze_client.out.ndim == 0
+                ):
+                    old_out = squeeze_client.out
+                case _:
+                    return None
+            sum_op = Sum()
+
+        case Elemwise(scalar_op=Mul()):
+            if core_op.b_ndim == 1:
+                if x_shuffle is not None:
+                    return None
+                expected_b = solve_b
+            else:
+                if (
+                    x.ndim != 2
+                    or x_shuffle is None
+                    or not x_shuffle.is_matrix_transpose
+                ):
+                    return None
+                match solve_b.owner_op_and_inputs:
+                    case (DimShuffle(is_matrix_transpose=True), expected_b):
+                        transpose = True
+                    case _:
+                        return None
+            if other is not expected_b:
+                return None
+            match fgraph.clients[client.out]:
+                case [(sum_client, _)] if isinstance(sum_client.op, Sum):
+                    sum_op = sum_client.op
+                    old_out = sum_client.out
+                case _:
+                    return None
+            if sum_op.axis is not None and target.ndim - 1 not in sum_op.axis:
+                return None
+
         case _:
             return None
-
-    # The core axis must be reduced, so the inner product over it can be
-    # re-expressed as the whitened sum of squares
-    ndim = mul_out.type.ndim
-    axes = (
-        tuple(range(ndim))
-        if sum_client.op.axis is None
-        else tuple(axis % ndim for axis in sum_client.op.axis)
-    )
-    if ndim - 1 not in axes:
-        return None
 
     # A = c @ c.mT when lower, c.mT @ c when upper; trans=1 whitens the upper case
     whitened = solve_triangular(
@@ -282,16 +258,13 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
         trans=0 if core_op.lower else 1,
         b_ndim=core_op.b_ndim,
     )
-    if core_op.b_ndim == 2:
-        # Align the whitened layout with the mul operands, which both sit on
-        # the transposed side
+    if transpose:
         whitened = whitened.mT
 
-    # Reusing the matched Sum op preserves its axes, dtype and acc_dtype, so
-    # the replacement's type matches by construction
-    new_out = sum_client.op(whitened**2)
-    copy_stack_trace(sum_out, new_out)
-    return {sum_out: new_out}
+    # Reuse the matched Sum's axes, dtype and acc_dtype.
+    new_out = sum_op(whitened**2)
+    copy_stack_trace(old_out, new_out)
+    return {old_out: new_out}
 
 
 @register_stabilize
