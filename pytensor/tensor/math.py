@@ -390,7 +390,7 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
             return None
         identity = self.scalar_op.identity
         dtype = np.dtype(dtype)
-        if dtype.kind == "f":
+        if dtype.kind in "fc":
             return identity
         if dtype.kind == "b":
             return identity > 0
