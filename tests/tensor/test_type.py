@@ -495,3 +495,13 @@ def test_shape_of_predefined_dtype_tensor():
     # Invalid: Known shapes can't be lost
     with pytest.raises(ValueError):
         drow(shape=(None, None))
+
+
+def test_shape_required():
+    msg = "TensorType requires a `shape`"
+    with pytest.raises(TypeError, match=msg):
+        TensorType("float64")
+    with pytest.raises(TypeError, match=msg):
+        pt.tensor("x")
+    with pytest.raises(TypeError, match=msg):
+        pt.tensor("x", dtype="int64")
