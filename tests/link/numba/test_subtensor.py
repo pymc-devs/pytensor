@@ -3,6 +3,7 @@ import contextlib
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
@@ -67,6 +68,27 @@ def test_AdvancedSubtensor1_out_of_bounds():
     assert isinstance(out_pt.owner.op, AdvancedSubtensor)
     with pytest.raises(IndexError):
         compare_numba_and_py([], [out_pt], [])
+
+
+@pytest.mark.parametrize(
+    "idx_val",
+    [np.iinfo(np.int64).min, 20, -20],
+    ids=["int64_min", "oob_positive", "oob_negative"],
+)
+def test_AdvancedIncSubtensor_out_of_bounds(idx_val):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2442
+    # An out-of-range integer index must raise IndexError, not silently
+    # read/write outside the array (undefined behavior that can corrupt
+    # memory past the end of the buffer).
+    x = pt.vector("x")
+    idx = pt.lvector("idx")
+    y_pt = inc_subtensor(x[idx], 7.0)
+    assert isinstance(y_pt.owner.op, AdvancedIncSubtensor)
+
+    fn = pytensor.function([pytensor.In(x, mutable=True), idx], y_pt, mode=numba_mode)
+    backing = np.zeros(12)
+    with pytest.raises(IndexError):
+        fn(backing[:11], np.array([idx_val], dtype="int64"))
 
 
 @pytest.mark.parametrize(

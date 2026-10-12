@@ -738,6 +738,7 @@ def vector_integer_advanced_indexing(
             codegen,
             function_name=func_name,
             global_env=globals(),
-        )
+        ),
+        boundscheck=True,
     )
     return ret_func, cache_key
