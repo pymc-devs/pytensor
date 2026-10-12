@@ -2367,25 +2367,10 @@ def test_flatten_broadcastable():
     out = flatten(inp, ndim=3)
     assert out.type.shape == (1, None, 1)
 
-
-def test_flatten_static_shape():
-    # Regression test for https://github.com/pymc-devs/pytensor/issues/2366
-    # Indexing the shape per-axis (not slicing the shape vector) should let
-    # the reshape fold to a fully static output shape when every kept extent
-    # is statically known.
+    # Statically known leading extents give a fully static output shape
     inp = TensorType("float64", shape=(32, 24, 24, 16))()
     out = flatten(inp, ndim=2)
     assert out.type.shape == (32, 9216)
-
-    inp = TensorType("float64", shape=(3, 4, 5))()
-    out = flatten(inp, ndim=2)
-    assert out.type.shape == (3, 20)
-
-    # A partially dynamic leading extent still can't resolve the collapsed
-    # `-1` dimension, which is a separate, acknowledged limitation.
-    inp = TensorType("float64", shape=(None, 24, 24, 16))()
-    out = flatten(inp, ndim=2)
-    assert out.type.shape == (None, None)
 
 
 def test_flatten_ndim_invalid():

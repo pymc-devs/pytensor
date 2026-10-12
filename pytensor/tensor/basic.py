@@ -2991,11 +2991,10 @@ def flatten(x, ndim=1):
         raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
 
     if ndim > 1:
-        # Index the shape per-axis (yields `Shape_i`, which folds to a constant
-        # when the extent is statically known) rather than slicing the shape
-        # vector (yields a `Subtensor` that does not constant-fold), so the
-        # reshape below can infer a fully static output shape when possible.
-        dims = (*(_x.shape[i] for i in range(ndim - 1)), -1)
+        # Index per-axis (`Shape_i` folds to a constant for static shapes)
+        # rather than slicing the shape vector
+        x_shape = _x.shape
+        dims = (*(x_shape[i] for i in range(ndim - 1)), -1)
     else:
         dims = (-1,)
 
