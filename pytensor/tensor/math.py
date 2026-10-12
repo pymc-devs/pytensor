@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
 
+import pytensor
 from pytensor import config, printing
 from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, disconnected_type
@@ -2786,8 +2787,6 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
         Compute the median along this axis of the tensor.
         None means all axes (like numpy).
     """
-    from pytensor.ifelse import ifelse
-
     x = as_tensor_variable(x)
     x_ndim = x.type.ndim
     if axis is None:
@@ -2813,7 +2812,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
     even_median = (k_values + km1_values) / 2.0
     odd_median = k_values.astype(even_median.type.dtype)
     even_k = eq(mod(raveled_size, 2), 0)
-    return ifelse(even_k, even_median, odd_median, name="median")
+    return pytensor.ifelse(even_k, even_median, odd_median, name="median")
 
 
 @scalar_elemwise
