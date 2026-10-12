@@ -36,15 +36,20 @@ def test_det_shape():
     assert det(x).type.shape == ()
 
 
-def test_slogdet():
+@pytest.mark.parametrize(
+    "dtype", [config.floatX, "complex128"], ids=["real", "complex"]
+)
+def test_slogdet(dtype):
     rng = np.random.default_rng(utt.fetch_seed())
 
-    r = rng.standard_normal((5, 5)).astype(config.floatX)
-    x = matrix()
+    r = rng.standard_normal((5, 5)).astype(dtype)
+    if dtype.startswith("complex"):
+        r += 1j * rng.standard_normal((5, 5))
+    x = matrix(dtype=dtype)
     f = pytensor.function([x], slogdet(x))
     f_sign, f_det = f(r)
     sign, det_val = np.linalg.slogdet(r)
-    assert np.equal(sign, f_sign)
+    np.testing.assert_allclose(sign, f_sign)
     assert np.allclose(det_val, f_det)
     # check numpy array types is returned
     # see https://github.com/pymc-devs/pytensor/issues/799

@@ -1535,8 +1535,8 @@ def sign(a):
 
     Notes
     -----
-    For complex inputs, this function
-    returns the sign of the magnitude.
+    For complex inputs, returns ``a / abs(a)`` when ``a != 0``, and zero
+    otherwise. The result gives the phase of each nonzero element.
     """
 
 
@@ -4316,7 +4316,6 @@ __all__ = [
     "sqr",
     "sqrt",
     "square",
-    "std",
     "std",
     "sub",
     "sum",

@@ -234,20 +234,10 @@ def det_of_inv(fgraph, node):
 
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
-    """
-    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites them using the SLogDet operation.
+    """sign(det(X)), log(abs(det(X))) -> the two outputs of SLogDet(X).
 
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    dictionary of Variables, optional
-        Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
+    Also replace log(det(X)) using sign/phase and logabsdet. Requires all
+    determinant consumers to match, avoiding an additional factorization.
     """
     dummy_replacements = {}
     for client, _ in clients_through_expand_dims(fgraph, node.outputs[0]):
@@ -277,7 +267,10 @@ def slogdet_specialization(fgraph, node):
 
     [x] = node.inputs
     sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
-    log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
+    if x.type.numpy_dtype.kind == "c":
+        log_det_x = log(sign_det_x) + log_abs_det_x
+    else:
+        log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
     slogdet_specialization_map = {
         "sign": sign_det_x,
         "log_abs_det": log_abs_det_x,

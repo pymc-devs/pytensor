@@ -616,21 +616,23 @@ def local_useless_abs(fgraph, node):
 @register_specialize
 @node_rewriter([log])
 def local_log_sqrt_sqr(fgraph, node):
+    """log(sqrt(x)) -> 0.5 * log(x); log(abs(sqr(x))) -> 2 * log(abs(x))."""
     [x] = node.inputs
+    with_abs = False
+    match x.owner_op_and_inputs:
+        case (Elemwise(ps.Abs()), inner):
+            x = inner
+            with_abs = True
 
     match x.owner_op_and_inputs:
-        # Case for log(sqrt(x)) -> 0.5 * log(x)
-        case (Elemwise(ps.Sqrt()), inner):
+        case (Elemwise(ps.Sqrt()), inner) if not with_abs:
             factor, inner_out = 0.5, log(inner)
-
-        # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square,
-        # so a value that would over- or underflow when squared survives the log.
         case (Elemwise(ps.Sqr()), inner):
-            # abs() of a complex input is real and would drop the imaginary part
-            if inner.dtype.startswith("complex"):
+            if not with_abs and inner.type.numpy_dtype.kind == "c":
+                if isinstance(inner.owner_op, Prod):
+                    return [log(sign(x)) + 2 * log(pt_abs(inner))]
                 return
             factor, inner_out = 2.0, log(pt_abs(inner))
-
         case _:
             return
 
@@ -733,6 +735,8 @@ def local_log_div(fgraph, node):
     constant operand is involved, so its log folds and the op count stays flat.
     """
     (inp,) = node.inputs
+    if inp.type.numpy_dtype.kind == "c":
+        return None
     if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
     scalar_op = inp.owner.op.scalar_op
@@ -761,6 +765,8 @@ def local_sign_div(fgraph, node):
     otherwise.
     """
     (inp,) = node.inputs
+    if inp.type.numpy_dtype.kind == "c":
+        return
     if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
     scalar_op = inp.owner.op.scalar_op
@@ -806,31 +812,37 @@ def local_useless_sign(fgraph, node):
 @register_specialize
 @node_rewriter([sign])
 def local_sign_prod(fgraph, node):
-    """sign(prod(x)) -> prod(sign(x)), also through one DimShuffle.
+    """sign(prod(x)) -> prod(sign(x)); sign(sqr(x)) -> sqr(sign(x)).
 
-    Preserve the sign when the product underflows or overflows. Require float
-    accumulation and output to avoid integer overflow and complex projections.
-    Exclude boolean inputs, whose sign is undefined. The DimShuffle case
-    handles ExpandDims inserted by gradients.
+    Stabilize floating-point signs/phases without forming the magnitude first.
+    Look through one DimShuffle, preserving accumulation and output dtype guards.
     """
     [arg] = node.inputs
     dimshuffle = None
     match arg.owner_op_and_inputs:
         case (DimShuffle() as dimshuffle, inner):
             arg = inner
+    if arg.type.numpy_dtype.kind not in "fc":
+        return
     match arg.owner_op_and_inputs:
-        case (Prod(axis=axis, acc_dtype=acc_dtype), x) if (
-            arg.dtype.startswith("float")
-            and acc_dtype.startswith("float")
-            and x.dtype != "bool"
+        case (Prod(axis=axis, acc_dtype=acc_dtype), inner) if (
+            np.dtype(acc_dtype).kind in "fc" and inner.type.numpy_dtype.kind != "b"
         ):
-            new = sign(x).prod(axis=axis)
-            if dimshuffle is not None:
-                new = dimshuffle(new)
-            if new.dtype != node.outputs[0].dtype:
-                new = cast(new, dtype=node.outputs[0].dtype)
-            copy_stack_trace(node.outputs[0], new)
-            return [new]
+            if inner.type.numpy_dtype.kind == "c" and arg.type.numpy_dtype.kind == "f":
+                return
+            new = prod(sign(inner), axis=axis, dtype=arg.dtype)
+        case (Elemwise(ps.Sqr()), inner):
+            if inner.type.numpy_dtype.kind not in "fc":
+                return
+            new = sqr(sign(inner))
+        case _:
+            return
+    if dimshuffle is not None:
+        new = dimshuffle(new)
+    if new.dtype != node.out.dtype:
+        new = cast(new, dtype=node.out.dtype)
+    copy_stack_trace(node.out, new)
+    return [new]
 
 
 @register_canonicalize

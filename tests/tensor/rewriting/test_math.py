@@ -2163,14 +2163,46 @@ def test_log_sqrt_integer_input():
     result.assert_eval(np.array([2, 3, 4], dtype="int32"))
 
 
-def test_log_sqr():
-    x = pt.tensor("x", shape=(None, None))
+@pytest.mark.parametrize(
+    "dtype, with_abs",
+    [(config.floatX, False), (config.floatX, True), ("complex128", True)],
+    ids=["real", "real_abs", "complex_abs"],
+)
+def test_log_sqr(dtype, with_abs):
+    x = pt.matrix("x", dtype=dtype)
+    squared = pt_abs(sqr(x)) if with_abs else sqr(x)
     result = RewriteTester(
-        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+        [x], [log(squared)], include=None, custom_rewrite=local_log_sqrt_sqr
     )
 
     result.assert_graph(2.0 * log(pt_abs(x)))
-    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+    values = np.array([[1.0, -2.0], [3.0, -4.0]], dtype=dtype)
+    if dtype.startswith("complex"):
+        values += 2j
+    result.assert_eval(values)
+
+
+def test_sign_prod_output_cast():
+    x = pt.dvector()
+    z = pt.zvector()
+    outputs = [sign(prod(x, dtype="int8")), sign(prod(z, dtype="float64"))]
+    result = RewriteTester([x, z], outputs, include=["stabilize", "specialize"])
+    result.assert_graph(*outputs)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_sign_prod_real_and_complex(dtype):
+    x = pt.matrix(dtype=dtype)
+    result = RewriteTester(
+        [x],
+        [sign(prod(x, axis=-1))],
+        include=["stabilize", "specialize"],
+    )
+    result.assert_graph(prod(sign(x), axis=-1))
+    values = np.array([[1, -2, 3], [-1, 0, 3], [1, np.nan, 0]], dtype=dtype)
+    if dtype.startswith("complex"):
+        values *= 3 + 4j
+    result.assert_eval(values)
 
 
 def test_log_sqr_extreme_magnitudes():
@@ -5388,6 +5420,16 @@ def test_sign_reciprocal():
     assert_equal_computations([rewritten], [expected])
 
 
+def test_sign_complex_reciprocal():
+    x = pt.zvector()
+    out = sign(reciprocal(x))
+    result = RewriteTester(
+        [x], [out], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(out)
+    result.assert_eval(np.array([1 + 2j, 2j]))
+
+
 @pytest.mark.parametrize(
     "build, expected_fn",
     [
@@ -5464,6 +5506,15 @@ def test_useless_sign():
     out = pt.sign(pt.sqr(diag_L))
     result = RewriteTester([X], [out])
     result.assert_graph(pt.fill(pt.sqr(diag_L), pt.constant([1.0], dtype=X.dtype)))
+
+
+def test_useless_sign_of_failed_cholesky():
+    X = pt.dmatrix("X")
+    L = pt.linalg.cholesky(X, on_error="nan")
+    f = function([X], [pt.sign(pt.diagonal(L)), L], mode="FAST_RUN")
+    sign_diag, L_val = f(np.array([[1.0, 2.0], [2.0, 1.0]]))
+    assert np.isnan(L_val).all()
+    np.testing.assert_array_equal(sign_diag, [1.0, 1.0])
 
 
 @pytest.mark.parametrize(

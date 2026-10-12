@@ -260,6 +260,19 @@ def test_slogdet_specialization_through_expand_dims():
     result.assert_eval(np.random.rand(3, 3))
 
 
+def test_complex_log_det_specialization():
+    x = pt.zmatrix()
+    result = RewriteTester(
+        [x],
+        [pt.log(det(x))],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
+    phase, logabsdet = Blockwise(SLogDet())(x)
+    result.assert_graph(pt.log(phase) + logabsdet)
+    for phase in (1j, -1, 1 + 2j):
+        result.assert_eval(np.diag([phase, 2]).astype("complex128"))
+
+
 @pytest.mark.parametrize(
     "original_fn, expected_fn",
     [
