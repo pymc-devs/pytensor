@@ -1,19 +1,24 @@
+from collections import Counter
+
 import numpy as np
 import pytest
 
 from pytensor import In, Mode, OpFromGraph, Out, config, function, ifelse, scan
 from pytensor import tensor as pt
+from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import ViewOp
 from pytensor.conditional.op import IfElse
 from pytensor.graph import vectorize_graph
+from pytensor.link.numba.dispatch import compile_ops
 from pytensor.raise_op import assert_op
-from pytensor.scalar import Add
+from pytensor.scalar import Add, Composite, Cos, Sin
 from pytensor.scan.op import Scan
 from pytensor.tensor import dmatrix, dtensor3, matrix
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from tests import unittest_tools as utt
+from tests.conditional.utils import IfElseCompatibilityTests
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -107,6 +112,30 @@ def test_IfElse(inputs, cond_fn, true_vals, false_vals):
     compare_numba_and_py(inputs, out, test_values)
 
 
+class TestLazyIfElse(IfElseCompatibilityTests):
+    mode = "NUMBA"
+
+
+@pytest.mark.parametrize("fusion", [True, False])
+def test_lazy_ifelse_branch_optimization(fusion):
+    cond = pt.scalar("cond", dtype="bool")
+    x = pt.vector("x")
+    mode = get_mode("NUMBA")
+    if not fusion:
+        mode = mode.excluding("fusion")
+    fn = function([cond, x], ifelse(cond, pt.sin(x) + pt.cos(x), x), mode=mode)
+    [node] = fn.maker.fgraph.toposort()
+    branch_ops = [n.op for n in node.op.true_branch.fgraph.toposort()]
+    assert all(isinstance(op, Elemwise) for op in branch_ops)
+    expected_scalar_ops = [Composite] if fusion else [Sin, Cos, Add]
+    assert Counter(type(op.scalar_op) for op in branch_ops) == Counter(
+        expected_scalar_ops
+    )
+    value = np.array([0.0, 1.0], dtype=x.dtype)
+    np.testing.assert_allclose(fn(True, value), np.sin(value) + np.cos(value))
+    np.testing.assert_array_equal(fn(False, value), value)
+
+
 def test_OpFromGraph():
     x, y, z = pt.matrices("xyz")
     ofg_1 = OpFromGraph([x, y], [x + y], inline=False)
@@ -123,8 +152,6 @@ def test_OpFromGraph():
 
 
 def test_ofg_inner_compilation_reused(monkeypatch):
-    from pytensor.link.numba.dispatch import compile_ops
-
     n_inner_compiles = 0
     inner_funcify = compile_ops.numba_funcify_and_cache_key
 

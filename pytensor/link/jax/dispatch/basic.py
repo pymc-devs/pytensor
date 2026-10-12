@@ -8,7 +8,7 @@ import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.conditional.op import IfElse
+from pytensor.conditional.op import IfElse, LazyIfElse
 from pytensor.configdefaults import config
 from pytensor.graph import Constant
 from pytensor.graph.fg import AbstractFunctionGraph
@@ -72,6 +72,18 @@ def jax_funcify_IfElse(op, **kwargs):
         return res if n_outs > 1 else res[0]
 
     return ifelse
+
+
+@jax_funcify.register(LazyIfElse)
+def jax_funcify_LazyIfElse(op, **kwargs):
+    """Keep branch computations inside the callables passed to ``lax.cond``."""
+    true_fn = jax_funcify(op.true_branch, **kwargs)
+    false_fn = jax_funcify(op.false_branch, **kwargs)
+
+    def lazy_ifelse(cond, *args):
+        return jax.lax.cond(cond, true_fn, false_fn, *args)
+
+    return lazy_ifelse
 
 
 @jax_funcify.register(CheckAndRaise)
