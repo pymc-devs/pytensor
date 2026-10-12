@@ -3781,6 +3781,50 @@ class TestLocalReduce:
             )
 
 
+class TestLocalCAReduceOfDimShuffle:
+    mode = get_default_mode().including("canonicalize", "specialize")
+
+    @pytest.mark.parametrize(
+        "op, np_fn, dtype",
+        [
+            (Sum, np.sum, "int64"),
+            (Prod, np.prod, "int64"),
+            (Max, np.max, "int64"),
+            (Min, np.min, "int64"),
+            (All, np.all, "bool"),
+            (Any, np.any, "bool"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "ndim, shuffle",
+        [
+            (2, (1, 0)),
+            (1, ("x", 0)),
+            (2, ("x", 1, 0)),
+            (3, (2, "x", 0, 1)),
+        ],
+    )
+    def test_removes_dimshuffle(self, op, np_fn, dtype, ndim, shuffle):
+        x = TensorType(dtype, shape=(None,) * ndim)()
+        f = function([x], op(axis=None)(x.dimshuffle(*shuffle)), mode=self.mode)
+
+        nodes = f.maker.fgraph.toposort()
+        assert not any(isinstance(node.op, DimShuffle) for node in nodes)
+        assert sum(isinstance(node.op, CAReduce) for node in nodes) == 1
+
+        x_test = np.random.default_rng(1).integers(0, 3, size=(2, 3, 4)[:ndim])
+        x_test = x_test.astype(dtype)
+        np.testing.assert_array_equal(f(x_test), np_fn(x_test))
+
+    def test_kept_when_reducing_a_subset_of_axes(self):
+        # The axis passed to the reduction refers to the shuffled dimensions
+        x = pt.matrix("x")
+        f = function([x], pt_sum(x.T, axis=0), mode=self.mode)
+        assert any(
+            isinstance(node.op, DimShuffle) for node in f.maker.fgraph.toposort()
+        )
+
+
 class TestReduceJoin:
     def setup_method(self):
         self.mode = get_default_mode().including(

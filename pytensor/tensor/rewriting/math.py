@@ -2298,6 +2298,28 @@ def local_reduce_broadcastable(fgraph, node):
                 return [new_reduced.astype(odtype)]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([CAReduce])
+def local_careduce_of_dimshuffle(fgraph, node):
+    """Remove a `DimShuffle` feeding a reduction over every axis.
+
+    ``CAReduce{axis=None}(DimShuffle(x)) -> CAReduce{axis=None}(x)``
+
+    A full reduction combines all the elements of its input, so it doesn't matter
+    how the `DimShuffle` transposed them or which broadcastable dimensions it
+    added or dropped.
+    """
+    if node.op.axis is not None:
+        return None
+
+    match node.inputs[0].owner_op_and_inputs:
+        case (DimShuffle(), x):
+            return [node.op(x)]
+        case _:
+            return None
+
+
 @register_specialize
 @node_rewriter([Sum, Prod, ProdWithoutZeros, Max, Min, All, Any])
 def local_careduce_of_alloc(fgraph, node):
