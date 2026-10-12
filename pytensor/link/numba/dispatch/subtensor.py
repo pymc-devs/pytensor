@@ -728,10 +728,8 @@ def vector_integer_advanced_indexing(
             " " * 4,
         )
 
-    cache_key = subtensor_op_cache_key(
-        op,
-        codegen=codegen,
-    )
+    # `boundscheck` is part of the key so that functions compiled (and cached) without it are not reused
+    cache_key = subtensor_op_cache_key(op, codegen=codegen, boundscheck=True)
 
     ret_func = numba_basic.numba_njit(
         compile_numba_function_src(
