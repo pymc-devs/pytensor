@@ -8,7 +8,7 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as ps_math
-from pytensor.assumptions import DIAGONAL, check_assumption
+from pytensor.assumptions import DIAGONAL, UNIT_MAGNITUDE, check_assumption
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -612,25 +612,140 @@ def local_useless_abs(fgraph, node):
     return [x]
 
 
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([pt_abs])
+def local_abs_mul_unit(fgraph, node):
+    """abs(u * x) -> abs(x), when every element of u has unit magnitude."""
+    [inp] = node.inputs
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            rest = [
+                x for x in factors if not check_assumption(fgraph, x, UNIT_MAGNITUDE)
+            ]
+            if len(rest) == len(factors):
+                return
+            magnitude = pt_abs(variadic_mul(*rest).astype(inp.dtype))
+            return [broadcast_like_elemwise(magnitude, node, fgraph=fgraph)]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_unit(fgraph, node):
+    """sign(u) -> u and sign(u * x) -> u * sign(x), when abs(u) == 1."""
+    [inp] = node.inputs
+    if check_assumption(fgraph, inp, UNIT_MAGNITUDE):
+        return [inp]
+    if not inp.dtype.startswith(("float", "complex")):
+        return
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            unit = [x for x in factors if check_assumption(fgraph, x, UNIT_MAGNITUDE)]
+            if not unit:
+                return
+            rest = [x for x in factors if x not in unit]
+            return [variadic_mul(*unit) * sign(variadic_mul(*rest).astype(inp.dtype))]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_prod(fgraph, node):
+    """sign(prod(x)) -> prod(sign(x)); sign(sqr(x)) -> sqr(sign(x)).
+
+    Stabilize floating-point signs/phases without forming the magnitude first.
+    Look through one DimShuffle, preserving accumulation and output dtype guards.
+    """
+    [arg] = node.inputs
+    dimshuffle = None
+    match arg.owner_op_and_inputs:
+        case (DimShuffle() as dimshuffle, inner):
+            arg = inner
+    if not arg.dtype.startswith(("float", "complex")):
+        return
+    match arg.owner_op_and_inputs:
+        case (Prod(axis=axis, acc_dtype=acc_dtype), inner) if (
+            acc_dtype.startswith(("float", "complex"))
+            and inner.dtype != "bool"
+            and (
+                not inner.dtype.startswith("complex") or arg.dtype.startswith("complex")
+            )
+        ):
+            new = prod(sign(inner), axis=axis, dtype=arg.dtype)
+        case (Elemwise(ps.Sqr()), inner):
+            if not inner.dtype.startswith(("float", "complex")):
+                return
+            new = sqr(sign(inner))
+        case _:
+            return
+    if dimshuffle is not None:
+        new = dimshuffle(new)
+    if new.dtype != node.out.dtype:
+        new = cast(new, dtype=node.out.dtype)
+    copy_stack_trace(node.out, new)
+    return [new]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_unit_mul_prod(fgraph, node):
+    """log(u * prod(x)) -> logabsprod(x) with its sign/phase restored, if abs(u) == 1.
+
+    Let s = u * prod(sign(x)), l = sum(log(abs(x))). Return log(s) + l for
+    complex inputs, or switch(s == -1, nan, l) for real inputs.
+    """
+    [inp] = node.inputs
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            unit = [x for x in factors if check_assumption(fgraph, x, UNIT_MAGNITUDE)]
+            rest = [x for x in factors if x not in unit]
+            if not unit or len(rest) != 1 or not isinstance(rest[0].owner_op, Prod):
+                return
+            product_input = rest[0].owner.inputs[0]
+            if not product_input.dtype.startswith(("float", "complex")):
+                return
+            if not rest[0].dtype.startswith(("float", "complex")) or (
+                product_input.dtype.startswith("complex")
+                and not rest[0].dtype.startswith("complex")
+            ):
+                return
+            if isinstance(product_input.owner_op, Elemwise) and isinstance(
+                product_input.owner_op.scalar_op, ps.Sign
+            ):
+                return
+            phase = sign(inp)
+            magnitude = log(pt_abs(rest[0]))
+            if inp.dtype.startswith("complex"):
+                return [log(phase) + magnitude]
+            return [
+                switch(eq(phase, -1), constant(np.nan, dtype=node.out.dtype), magnitude)
+            ]
+
+
 @register_stabilize
 @register_specialize
 @node_rewriter([log])
 def local_log_sqrt_sqr(fgraph, node):
+    """log(sqrt(x)) -> 0.5 * log(x); log(abs(sqr(x))) -> 2 * log(abs(x))."""
     [x] = node.inputs
+    with_abs = False
+    match x.owner_op_and_inputs:
+        case (Elemwise(ps.Abs()), inner):
+            x = inner
+            with_abs = True
 
     match x.owner_op_and_inputs:
-        # Case for log(sqrt(x)) -> 0.5 * log(x)
-        case (Elemwise(ps.Sqrt()), inner):
+        case (Elemwise(ps.Sqrt()), inner) if not with_abs:
             factor, inner_out = 0.5, log(inner)
-
-        # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square,
-        # so a value that would over- or underflow when squared survives the log.
         case (Elemwise(ps.Sqr()), inner):
-            # abs() of a complex input is real and would drop the imaginary part
-            if inner.dtype.startswith("complex"):
+            if not with_abs and inner.dtype.startswith("complex"):
+                if isinstance(inner.owner_op, Prod):
+                    return [log(sign(x)) + 2 * log(pt_abs(inner))]
                 return
             factor, inner_out = 2.0, log(pt_abs(inner))
-
         case _:
             return
 
@@ -733,6 +848,8 @@ def local_log_div(fgraph, node):
     constant operand is involved, so its log folds and the op count stays flat.
     """
     (inp,) = node.inputs
+    if inp.dtype.startswith("complex"):
+        return None
     if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
     scalar_op = inp.owner.op.scalar_op
@@ -761,6 +878,8 @@ def local_sign_div(fgraph, node):
     otherwise.
     """
     (inp,) = node.inputs
+    if inp.dtype.startswith("complex"):
+        return
     if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
     scalar_op = inp.owner.op.scalar_op
@@ -799,38 +918,6 @@ def local_useless_sign(fgraph, node):
         new = ones_like(x, dtype=node.outputs[0].dtype)
         copy_stack_trace(node.outputs[0], new)
         return [new]
-
-
-@register_canonicalize
-@register_stabilize
-@register_specialize
-@node_rewriter([sign])
-def local_sign_prod(fgraph, node):
-    """sign(prod(x)) -> prod(sign(x)), also through one DimShuffle.
-
-    Preserve the sign when the product underflows or overflows. Require float
-    accumulation and output to avoid integer overflow and complex projections.
-    Exclude boolean inputs, whose sign is undefined. The DimShuffle case
-    handles ExpandDims inserted by gradients.
-    """
-    [arg] = node.inputs
-    dimshuffle = None
-    match arg.owner_op_and_inputs:
-        case (DimShuffle() as dimshuffle, inner):
-            arg = inner
-    match arg.owner_op_and_inputs:
-        case (Prod(axis=axis, acc_dtype=acc_dtype), x) if (
-            arg.dtype.startswith("float")
-            and acc_dtype.startswith("float")
-            and x.dtype != "bool"
-        ):
-            new = sign(x).prod(axis=axis)
-            if dimshuffle is not None:
-                new = dimshuffle(new)
-            if new.dtype != node.outputs[0].dtype:
-                new = cast(new, dtype=node.outputs[0].dtype)
-            copy_stack_trace(node.outputs[0], new)
-            return [new]
 
 
 @register_canonicalize

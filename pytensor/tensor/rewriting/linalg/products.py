@@ -25,6 +25,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.linalg.utils import permutation_indices_to_det_sign
 from pytensor.tensor.subtensor import AdvancedSubtensor
 from pytensor.tensor.variable import TensorConstant
 
@@ -355,7 +356,6 @@ def det_of_permutation(fgraph, node):
         return None
 
     idx = operand[0]
-    inversions = pt.triu((idx[:, None] > idx[None, :]).astype("int64"), k=1).sum()
-    sign = (1 - 2 * (inversions % 2)).astype(node.outputs[0].type.dtype)
+    sign = permutation_indices_to_det_sign(idx).astype(node.outputs[0].type.dtype)
     copy_stack_trace(node.outputs[0], sign)
     return [sign]

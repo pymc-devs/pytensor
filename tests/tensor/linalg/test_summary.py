@@ -36,33 +36,26 @@ def test_det_shape():
     assert det(x).type.shape == ()
 
 
-def test_slogdet():
+@pytest.mark.parametrize(
+    "dtype", [config.floatX, "complex128"], ids=["real", "complex"]
+)
+def test_slogdet(dtype):
     rng = np.random.default_rng(utt.fetch_seed())
 
-    r = rng.standard_normal((5, 5)).astype(config.floatX)
-    x = matrix()
+    r = rng.standard_normal((5, 5)).astype(dtype)
+    if dtype.startswith("complex"):
+        r += 1j * rng.standard_normal((5, 5))
+    x = matrix(dtype=dtype)
     f = pytensor.function([x], slogdet(x))
     f_sign, f_det = f(r)
     sign, det_val = np.linalg.slogdet(r)
-    assert np.equal(sign, f_sign)
+    np.testing.assert_allclose(sign, f_sign)
     assert np.allclose(det_val, f_det)
     # check numpy array types is returned
     # see https://github.com/pymc-devs/pytensor/issues/799
     sign, logdet = slogdet(x)
     det_result = sign * pytensor.tensor.exp(logdet)
     assert_array_almost_equal(det_result.eval({x: [[1]]}), np.array(1.0))
-
-
-def test_slogdet_complex():
-    x = matrix(dtype="complex128")
-    f = pytensor.function([x], slogdet(x))
-
-    rng = np.random.default_rng(utt.fetch_seed())
-    r = rng.standard_normal((4, 4)) + 1j * rng.standard_normal((4, 4))
-    sign, logdet = f(r)
-    ref_sign, ref_logdet = np.linalg.slogdet(r)
-    np.testing.assert_allclose(sign, ref_sign)
-    np.testing.assert_allclose(logdet, ref_logdet)
 
 
 def test_trace():

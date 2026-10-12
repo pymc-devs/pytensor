@@ -85,6 +85,14 @@ def compare_pytorch_and_py(
     return pytensor_torch_fn, pytorch_res
 
 
+@pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+def test_complex_sign(dtype):
+    x = vector(dtype=dtype)
+    compare_pytorch_and_py(
+        [x], pt.sign(x), [np.array([0, 3 + 4j, -2j, -1], dtype=dtype)]
+    )
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_pytorch_FunctionGraph_once(device):
     if device == "cuda" and not torch.cuda.is_available():

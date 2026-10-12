@@ -2588,7 +2588,7 @@ class Sign(UnaryScalarOp):
     def _output_types_preference(x):
         if x == bool:
             raise TypeError(x)
-        return same_out_nocomplex(x)
+        return same_out(x)
 
     def impl(self, x):
         # casting to output type is handled by filter
@@ -2616,12 +2616,41 @@ class Sign(UnaryScalarOp):
             )
         if type in int_types:
             return f"{z} = ({x} >= 0) ? ({x} == 0) ? 0 : 1 : -1;"
-        raise ComplexError("complex has no sign")
+        if type in complex_types:
+            real_type = real_out(type)[0].dtype_specs()[1]
+            hypot = "hypotf" if type == complex64 else "hypot"
+            return f"""
+                {real_type} real = get_real({x});
+                {real_type} imag = get_imag({x});
+                {real_type} magnitude = {hypot}(real, imag);
+                if (isnan(magnitude)) {{
+                    set_real(&{z}, NAN);
+                    set_imag(&{z}, NAN);
+                }} else if (isinf(magnitude)) {{
+                    if (isinf(real) && isinf(imag)) {{
+                        set_real(&{z}, NAN);
+                        set_imag(&{z}, NAN);
+                    }} else if (isinf(real)) {{
+                        set_real(&{z}, real > 0 ? 1. : -1.);
+                        set_imag(&{z}, 0.);
+                    }} else {{
+                        set_real(&{z}, 0.);
+                        set_imag(&{z}, imag > 0 ? 1. : -1.);
+                    }}
+                }} else if (magnitude == 0) {{
+                    set_real(&{z}, 0.);
+                    set_imag(&{z}, 0.);
+                }} else {{
+                    set_real(&{z}, real / magnitude);
+                    set_imag(&{z}, imag / magnitude);
+                }}
+            """
+        raise NotImplementedError("type not supported", type)
 
     def c_code_cache_version(self):
         s = super().c_code_cache_version()
         if s:
-            return (4, *s)
+            return (5, *s)
         else:  # if parent is unversioned, we are too
             return s
 

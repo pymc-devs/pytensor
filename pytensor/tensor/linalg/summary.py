@@ -130,7 +130,8 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
 
     sign : (...) tensor_like
         A number representing the sign of the determinant. For a real matrix,
-        this is 1, 0, or -1.
+        this is 1, 0, or -1. For a complex matrix, it is the determinant's phase
+        on the unit circle, or zero when the determinant is zero.
     logabsdet : (...) tensor_like
         The natural log of the absolute value of the determinant.
 
@@ -139,11 +140,6 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     ``sign * exp(logabsdet)``.
     """
     x = as_tensor_variable(x)
-    if x.type.dtype.startswith("complex"):
-        # Sign does not support complex, so the naive form cannot be built
-        sign_det, logabsdet = Blockwise(SLogDet())(x)  # type: ignore[misc]
-        return sign_det, logabsdet  # type: ignore[return-value]
-
     det_val = det(x)
     return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 

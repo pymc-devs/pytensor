@@ -10,6 +10,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import shared
+from pytensor.assumptions import assume
 from pytensor.compile import optdb
 from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.maker import function
@@ -2163,14 +2164,84 @@ def test_log_sqrt_integer_input():
     result.assert_eval(np.array([2, 3, 4], dtype="int32"))
 
 
-def test_log_sqr():
-    x = pt.tensor("x", shape=(None, None))
+@pytest.mark.parametrize(
+    "dtype, with_abs",
+    [(config.floatX, False), (config.floatX, True), ("complex128", True)],
+    ids=["real", "real_abs", "complex_abs"],
+)
+def test_log_sqr(dtype, with_abs):
+    x = pt.matrix("x", dtype=dtype)
+    squared = pt_abs(sqr(x)) if with_abs else sqr(x)
     result = RewriteTester(
-        [x], [log(sqr(x))], include=None, custom_rewrite=local_log_sqrt_sqr
+        [x], [log(squared)], include=None, custom_rewrite=local_log_sqrt_sqr
     )
 
     result.assert_graph(2.0 * log(pt_abs(x)))
-    result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
+    values = np.array([[1.0, -2.0], [3.0, -4.0]], dtype=dtype)
+    if dtype.startswith("complex"):
+        values += 2j
+    result.assert_eval(values)
+
+
+def test_sign_prod_output_cast():
+    x = pt.dvector()
+    z = pt.zvector()
+    outputs = [sign(prod(x, dtype="int8")), sign(prod(z, dtype="float64"))]
+    result = RewriteTester([x, z], outputs, include=["stabilize", "specialize"])
+    result.assert_graph(*outputs)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_sign_prod_real_and_complex(dtype):
+    x = pt.matrix(dtype=dtype)
+    result = RewriteTester(
+        [x],
+        [sign(prod(x, axis=-1))],
+        include=["stabilize", "specialize"],
+    )
+    result.assert_graph(prod(sign(x), axis=-1))
+    values = np.array([[1, -2, 3], [-1, 0, 3], [1, np.nan, 0]], dtype=dtype)
+    if dtype.startswith("complex"):
+        values *= 3 + 4j
+    result.assert_eval(values)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_unit_magnitude_consumers(dtype):
+    x = pt.matrix("x", dtype=dtype)
+    p = pt.vector("p", dtype=dtype)
+    unit = assume(p, unit_magnitude=True)
+    phase = p * sign(x).prod(axis=-1)
+    magnitude = log(pt_abs(x)).sum(axis=-1)
+    expected_log = (
+        log(phase) + magnitude
+        if dtype.startswith("complex")
+        else pt.where(pt.eq(phase, -1), pt.constant(np.nan, dtype=dtype), magnitude)
+    )
+    result = RewriteTester(
+        [x, p],
+        [
+            sign(unit * x.prod(axis=-1)),
+            log(pt_abs(unit * x.prod(axis=-1))),
+            log(unit * x.prod(axis=-1)),
+        ],
+        include=[
+            "canonicalize",
+            "stabilize",
+            "specialize",
+        ],
+    )
+    result.assert_graph(
+        *rewrite_graph(
+            [phase, magnitude, expected_log], include=["stabilize", "specialize"]
+        )
+    )
+    values = np.array([[1, -2, 3], [-1, 2, 0], [1, np.nan, 0]], dtype=dtype)
+    units = np.array([-1, 1, 1], dtype=dtype)
+    if dtype.startswith("complex"):
+        values *= 3 + 4j
+        units *= 1j
+    result.assert_eval(values, units)
 
 
 def test_log_sqr_extreme_magnitudes():
@@ -5380,6 +5451,16 @@ def test_sign_reciprocal():
     assert_equal_computations([rewritten], [expected])
 
 
+def test_sign_complex_reciprocal():
+    x = pt.zvector()
+    out = sign(reciprocal(x))
+    result = RewriteTester(
+        [x], [out], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(out)
+    result.assert_eval(np.array([1 + 2j, 2j]))
+
+
 @pytest.mark.parametrize(
     "build, expected_fn",
     [
@@ -5455,7 +5536,7 @@ def test_useless_sign():
     diag_L = pt.diagonal(pt.linalg.cholesky(X))
     out = pt.sign(pt.sqr(diag_L))
     result = RewriteTester([X], [out])
-    result.assert_graph(pt.fill(pt.sqr(diag_L), pt.constant([1.0], dtype=X.dtype)))
+    result.assert_graph(pt.fill(diag_L, pt.constant([1.0], dtype=X.dtype)))
 
 
 @pytest.mark.parametrize(

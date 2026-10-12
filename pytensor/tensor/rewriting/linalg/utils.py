@@ -6,6 +6,7 @@ from pytensor.assumptions import (
     POSITIVE_DEFINITE,
     SYMMETRIC,
     UPPER_TRIANGULAR,
+    assume,
     check_assumption,
 )
 from pytensor.graph import Constant
@@ -48,10 +49,19 @@ def matrix_diagonal_product(x):
 
 
 def lu_pivots_to_det_sign(pivots, n):
-    # Each pivot entry that differs from its own index records a row swap,
-    # and every swap flips the determinant's sign
+    """LU swap pivots -> (-1) ** n_swaps, declaring unit magnitude."""
     n_swaps = pt.neq(pivots, pt.arange(n)).sum(axis=-1)
-    return 1 - 2 * (n_swaps % 2)
+    sign = 1 - 2 * (n_swaps % 2)
+    return assume(sign, unit_magnitude=True)
+
+
+def permutation_indices_to_det_sign(indices):
+    """Permutation indices -> (-1) ** n_inversions, declaring unit magnitude."""
+    inversions = pt.triu(
+        (indices[..., :, None] > indices[..., None, :]).astype("int64"), k=1
+    ).sum(axis=(-2, -1))
+    sign = 1 - 2 * (inversions % 2)
+    return assume(sign, unit_magnitude=True)
 
 
 def get_assume_a(fgraph, A):

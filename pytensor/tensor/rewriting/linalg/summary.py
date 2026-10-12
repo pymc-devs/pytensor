@@ -6,8 +6,10 @@ from pytensor.assumptions import (
     UPPER_TRIANGULAR,
     check_assumption,
 )
+from pytensor.compile.mode import optdb
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
+    dfs_rewriter,
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Log, Sign, Sqr
@@ -26,10 +28,10 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
     lu_pivots_to_det_sign,
     matrix_diagonal_product,
+    permutation_indices_to_det_sign,
 )
 from pytensor.tensor.subtensor import _is_provably_non_negative
 
@@ -38,7 +40,10 @@ from pytensor.tensor.subtensor import _is_provably_non_negative
 @register_specialize
 @node_rewriter([log])
 def local_log_prod_to_sum_log(fgraph, node):
-    """Rewrite log(prod(x)) as sum(log(x)), when x is known to be non-negative."""
+    """log(prod(x)) -> sum(log(x)), if x >= 0.
+
+    Also log(abs(prod(x))) -> sum(log(abs(x))).
+    """
     [p] = node.inputs
     match p.owner_op_and_inputs:
         case (Prod(axis=axis), x):
@@ -60,10 +65,10 @@ def local_log_prod_to_sum_log(fgraph, node):
 @register_specialize("shape_unsafe")
 @node_rewriter([det])
 def det_of_matrix_factorized_elsewhere(fgraph, node):
-    """
-    If we have det(X) or abs(det(X)) and there is already a nice decomposition(X) floating around,
-    use it to compute it more cheaply
+    """det(X) -> p * prod(diag(U)), where p is the existing LU permutation's sign.
 
+    For an existing Cholesky factor L, det(X) -> sqr(prod(diag(L))).
+    Magnitude-only factorizations require consumers that discard the sign.
     """
     [det] = node.outputs
     [x] = node.inputs
@@ -78,28 +83,31 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
-                # Square each diagonal before the product so log(det) stabilizes
-                # directly, using sqr rather than waiting for ** 2 to specialize.
                 L = client.outputs[0]
-                L_diag = pt.diagonal(L, axis1=-2, axis2=-1)
-                new_det = prod(sqr(L_diag), axis=-1)
+                factor_diag = pt.diagonal(L, axis1=-2, axis2=-1)
+                new_det = sqr(prod(factor_diag, axis=-1))
             case LUFactor():
                 LU_packed, pivots = client.outputs
-                new_det = matrix_diagonal_product(LU_packed)
-                if not sign_not_needed:
-                    # Multiplying the sign in when it is later discarded would
-                    # block the log(abs(prod)) -> sum(log(abs)) stabilization
-                    permutation_sign = lu_pivots_to_det_sign(
-                        pivots, x.shape[-1]
-                    ).astype(LU_packed.dtype)
-                    new_det = permutation_sign * new_det
+                factor_diag = pt.diagonal(LU_packed, axis1=-2, axis2=-1)
+                permutation_sign = lu_pivots_to_det_sign(pivots, x.shape[-1]).astype(
+                    LU_packed.dtype
+                )
+                new_det = permutation_sign * prod(factor_diag, axis=-1)
+            case LU(permute_l=False, p_indices=p_indices):
+                P_or_indices, _, U = client.outputs
+                factor_diag = pt.diagonal(U, axis1=-2, axis2=-1)
+                indices = (
+                    P_or_indices if p_indices else pt.argmax(P_or_indices, axis=-1)
+                )
+                permutation_sign = permutation_indices_to_det_sign(indices).astype(
+                    U.dtype
+                )
+                new_det = permutation_sign * prod(factor_diag, axis=-1)
             case _:
                 if not sign_not_needed:
                     continue
                 match core_op:
                     case LU():
-                        # The permutation sign is not recoverable from the LU
-                        # outputs, so det(X) is only known up to a sign change
                         U = client.outputs[-1]
                         new_det = matrix_diagonal_product(U)
                     case SVD():
@@ -121,7 +129,6 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
     else:  # no-break (i.e., no-match)
         return None
 
-    [det] = node.outputs
     copy_stack_trace(det, new_det)
     return [new_det]
 
@@ -155,7 +162,7 @@ def det_of_factorized_matrix(fgraph, node):
         case Cholesky():
             new_det = matrix_diagonal_product(x)
         case LU():
-            if x is x_node.outputs[-2]:
+            if not core_op.permute_l and x is x_node.outputs[-2]:
                 # x is L
                 new_det = ones(x.shape[:-2], dtype=det.dtype)
             elif x is x_node.outputs[-1]:
@@ -216,23 +223,12 @@ def det_of_inv(fgraph, node):
             return [1 / det(X)]
 
 
-@register_specialize
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
-    """
-    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites them using the SLogDet operation.
+    """sign(det(X)), log(abs(det(X))) -> the two outputs of SLogDet(X).
 
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    dictionary of Variables, optional
-        Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
+    Also replace log(det(X)) using sign/phase and logabsdet. Requires all
+    determinant consumers to match, avoiding an additional factorization.
     """
     dummy_replacements = {}
     for client, _ in fgraph.clients[node.outputs[0]]:
@@ -262,7 +258,10 @@ def slogdet_specialization(fgraph, node):
 
     [x] = node.inputs
     sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
-    log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
+    if x.dtype.startswith("complex"):
+        log_det_x = log(sign_det_x) + log_abs_det_x
+    else:
+        log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
     slogdet_specialization_map = {
         "sign": sign_det_x,
         "log_abs_det": log_abs_det_x,
@@ -271,79 +270,10 @@ def slogdet_specialization(fgraph, node):
     return {k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()}
 
 
-@register_specialize("shape_unsafe")
-@node_rewriter([blockwise_of(SLogDet)])
-def slogdet_of_matrix_factorized_elsewhere(fgraph, node):
-    """Compute slogdet(X) from a decomposition of X the graph already holds.
-
-    The counterpart of `det_of_matrix_factorized_elsewhere` for the `SLogDet` form.
-    """
-    [x] = node.inputs
-    sign_out, logabsdet_out = node.outputs
-
-    # With no consumer of the sign, factors that only determine the magnitude
-    # can be shared too; the logabsdet replacement then strands the SLogDet as
-    # dead code. With the sign in use, those factors must be declined, or the
-    # SLogDet would survive for the sign and the matrix be factored twice.
-    sign_not_needed = not fgraph.clients[sign_out]
-
-    sign = logabsdet = None
-    for client, _ in fgraph.clients[x]:
-        core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
-        match core_op:
-            case Cholesky():
-                # A = L @ L.mT is positive definite, so the sign is one and the
-                # Cholesky diagonal is positive. The abs keeps logabsdet real for
-                # complex input
-                L = client.outputs[0]
-                diag = pt.diagonal(L, axis1=-2, axis2=-1)
-                sign = ones(x.shape[:-2], dtype=sign_out.dtype)
-                logabsdet = 2 * log(abs(diag)).sum(axis=-1)
-            case LUFactor():
-                LU_packed, pivots = client.outputs
-                u_diag = pt.diagonal(LU_packed, axis1=-2, axis2=-1)
-                logabsdet = log(abs(u_diag)).sum(axis=-1)
-                if not sign_not_needed:
-                    permutation_sign = lu_pivots_to_det_sign(pivots, x.shape[-1])
-                    # Sign does not support complex, where the unit part is u/|u|
-                    if u_diag.type.dtype.startswith("complex"):
-                        u_unit = u_diag / abs(u_diag)
-                    else:
-                        u_unit = pt.sign(u_diag)
-                    sign = (permutation_sign * u_unit.prod(axis=-1)).astype(
-                        sign_out.dtype
-                    )
-            case _:
-                if not sign_not_needed:
-                    continue
-                match core_op:
-                    case LU():
-                        U = client.outputs[-1]
-                        u_diag = pt.diagonal(U, axis1=-2, axis2=-1)
-                        logabsdet = log(abs(u_diag)).sum(axis=-1)
-                    case SVD():
-                        lmbda = (
-                            client.outputs[1]
-                            if core_op.compute_uv
-                            else client.outputs[0]
-                        )
-                        logabsdet = log(lmbda).sum(axis=-1)
-                    case QR():
-                        R = client.outputs[-1]
-                        # if mode == "economic", R may not be square and this rewrite could hide a shape error
-                        # That's why it's tagged as `shape_unsafe`
-                        r_diag = pt.diagonal(R, axis1=-2, axis2=-1)
-                        logabsdet = log(abs(r_diag)).sum(axis=-1)
-
-        if logabsdet is not None:
-            # found a match
-            break
-    else:  # no-break (i.e., no-match)
-        return None
-
-    logabsdet = logabsdet.astype(logabsdet_out.dtype)
-    copy_stack_trace(logabsdet_out, logabsdet)
-    if sign is None:
-        return {logabsdet_out: logabsdet}
-    copy_stack_trace(sign_out, sign)
-    return {sign_out: sign, logabsdet_out: logabsdet}
+# Keep the naive determinant graph available to all specialization rewrites.
+optdb.register(
+    "slogdet_specialization",
+    dfs_rewriter(slogdet_specialization),
+    "fast_run",
+    position=2.1,
+)
