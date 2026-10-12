@@ -2310,6 +2310,49 @@ def local_reduce_broadcastable(fgraph, node):
             return [new_reduced.astype(odtype)]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([CAReduce])
+def local_careduce_of_dimshuffle(fgraph, node):
+    """Remove a `DimShuffle` feeding a reduction, when it does nothing to the output.
+
+    ``CAReduce{axis}(DimShuffle(x)) -> CAReduce{new_axis}(x)``
+
+    The reduced dimensions can be in any order, and `DimShuffle` can add
+    broadcastable dimensions among them, because the reduction combines all their
+    elements anyway. The dimensions that are kept must reach the output in the same
+    relative order as in ``x``, and must not be new broadcastable dimensions.
+    """
+    x_ds = node.inputs[0]
+    # Reject dropped dimensions to avoid undoing `local_reduce_broadcastable`
+    # and creating a rewrite loop.
+    match x_ds.owner_op_and_inputs:
+        case (DimShuffle(drop=()) as dimshuffle, x):
+            pass
+        case _:
+            return None
+
+    axis = node.op.axis
+    reduced = set(range(x_ds.ndim)) if axis is None else set(axis)
+    # Remap reduced axes; kept axes must be original dimensions in their original order.
+    new_axis = []
+    kept = []
+    for out_dim, in_dim in enumerate(dimshuffle.new_order):
+        if out_dim in reduced:
+            if in_dim != "x":
+                new_axis.append(in_dim)
+        elif in_dim == "x":
+            # TODO: Keep required expansions while removing permutations of reduced axes.
+            return None
+        else:
+            kept.append(in_dim)
+
+    if kept != sorted(kept):
+        return None
+
+    return [node.op.clone(axis=new_axis)(x)]
+
+
 @register_specialize
 @node_rewriter([Sum, Prod, ProdWithoutZeros, Max, Min, All, Any])
 def local_careduce_of_alloc(fgraph, node):
