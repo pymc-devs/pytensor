@@ -8,8 +8,10 @@ from pytensor.assumptions import (
     UPPER_TRIANGULAR,
     check_assumption,
 )
+from pytensor.compile.mode import optdb
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
+    dfs_rewriter,
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Log, Sign, Sqr
@@ -230,7 +232,6 @@ def det_of_inv(fgraph, node):
             return [atleast_Nd(1 / det(X), n=node.outputs[0].type.ndim)]
 
 
-@register_specialize
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
     """
@@ -286,3 +287,12 @@ def slogdet_specialization(fgraph, node):
         k: atleast_Nd(slogdet_specialization_map[v], n=k.type.ndim).astype(k.type.dtype)
         for k, v in dummy_replacements.items()
     }
+
+
+# Keep the naive determinant graph available to all specialization rewrites.
+optdb.register(
+    "slogdet_specialization",
+    dfs_rewriter(slogdet_specialization),
+    "fast_run",
+    position=2.1,
+)

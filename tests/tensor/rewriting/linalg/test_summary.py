@@ -11,6 +11,7 @@ from pytensor.graph import rewrite_graph
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg.solvers.general import lu_solve
 from pytensor.tensor.linalg.summary import Det, SLogDet, det, slogdet
 from pytensor.tensor.rewriting.linalg.utils import permutation_indices_to_det_sign
 from pytensor.tensor.type import matrix
@@ -178,20 +179,24 @@ def test_slogdet_specialization(batch_dim):
     # sign(det(x))
     expected_sign_det_x, expected_log_abs_det_x = Blockwise(SLogDet())(x)
 
-    result = RewriteTester([x], [sign_det_x], include=["stabilize", "specialize"])
+    result = RewriteTester(
+        [x], [sign_det_x], include=["stabilize", "specialize", "slogdet_specialization"]
+    )
     result.assert_graph(expected_sign_det_x)
     result.assert_eval(a)
 
     # log(abs(det(x)))
-    result = RewriteTester([x], [log_abs_det_x], include=["stabilize", "specialize"])
+    result = RewriteTester(
+        [x],
+        [log_abs_det_x],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
     result.assert_graph(expected_log_abs_det_x)
     result.assert_eval(a)
 
     # log(det(x))
-    expected_sign_value = np.array([-1], dtype=np.int8) if batch_dim else -1
-    expected_nan_value = (
-        np.array([np.nan], dtype=config.floatX) if batch_dim else np.nan
-    )
+    expected_sign_value = -1
+    expected_nan_value = pt.constant(np.nan, dtype=config.floatX)
 
     expected_log_det_x = pt.where(
         pt.eq(expected_sign_det_x, expected_sign_value),
@@ -199,7 +204,9 @@ def test_slogdet_specialization(batch_dim):
         expected_log_abs_det_x,
     )
 
-    result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
+    result = RewriteTester(
+        [x], [log_det_x], include=["stabilize", "specialize", "slogdet_specialization"]
+    )
     result.assert_graph(expected_log_det_x)
     result.assert_eval(a)
 
@@ -207,14 +214,16 @@ def test_slogdet_specialization(batch_dim):
     result = RewriteTester(
         [x],
         [sign_det_x, log_abs_det_x],
-        include=["stabilize", "specialize"],
+        include=["stabilize", "specialize", "slogdet_specialization"],
     )
     result.assert_graph(expected_sign_det_x, expected_log_abs_det_x)
     result.assert_eval(a)
 
     # Other functions (rewrite shouldn't be applied to these)
     # Only invalid functions
-    result = RewriteTester([x], [exp_det_x], include=["stabilize", "specialize"])
+    result = RewriteTester(
+        [x], [exp_det_x], include=["stabilize", "specialize", "slogdet_specialization"]
+    )
     result.assert_graph(exp_det_x)
     result.assert_eval(a)
 
@@ -222,7 +231,7 @@ def test_slogdet_specialization(batch_dim):
     result = RewriteTester(
         [x],
         [exp_det_x, sign_det_x],
-        include=["stabilize", "specialize"],
+        include=["stabilize", "specialize", "slogdet_specialization"],
     )
     result.assert_graph(exp_det_x, sign_det_x)
     result.assert_eval(a)
@@ -232,15 +241,21 @@ def test_slogdet_specialization_through_expand_dims():
     x = pt.tensor("x", shape=(3, 3), dtype=config.floatX)
     log_det_x = pt.log(pt.expand_dims(det(x), 0))
 
-    # dimshuffle_lift pushes the expand_dims inside the Switch
     sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
-    expected = pt.where(
-        pt.eq(pt.expand_dims(sign_det_x, 0), np.array([-1], dtype=np.int8)),
-        np.array([np.nan], dtype=config.floatX),
-        pt.expand_dims(log_abs_det_x, 0),
+    expected = pt.expand_dims(
+        pt.where(
+            pt.eq(sign_det_x, np.array(-1, dtype=np.int8)),
+            np.array(np.nan, dtype=config.floatX),
+            log_abs_det_x,
+        ),
+        0,
     )
 
-    result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
+    result = RewriteTester(
+        [x],
+        [log_det_x],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
     result.assert_graph(expected)
     result.assert_eval(np.random.rand(3, 3))
 
@@ -640,3 +655,33 @@ def test_permuted_lu_determinant_fallback(summary):
     )
     expected = [det(x)] if summary is det else list(Blockwise(SLogDet())(x))
     result.assert_graph(*expected, u)
+
+
+@pytest.mark.parametrize(
+    "logdet_first", [True, False], ids=["logdet_first", "logdet_last"]
+)
+def test_slogdet_factor_sharing_is_order_independent(logdet_first):
+    a = matrix("a")
+    b1 = pt.vector("b1")
+    b2 = pt.vector("b2")
+    logdet = pt.log(pt.abs(det(a)))
+    x1 = pt.linalg.solve(a, b1, b_ndim=1)
+    x2 = pt.linalg.solve(a, b2, b_ndim=1)
+    outputs = [logdet, x1, x2] if logdet_first else [x1, x2, logdet]
+    result = RewriteTester(
+        [a, b1, b2],
+        outputs,
+        include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
+    )
+    factor = lu.lu_factor(a)
+    n_swaps = pt.neq(factor[1], pt.arange(a.shape[-1])).sum(axis=-1)
+    permutation_sign = (1 - 2 * (n_swaps % 2)).astype(a.dtype)
+    expected_logdet = pt.log(
+        pt.abs(permutation_sign * pt.diagonal(factor[0]).prod(axis=-1))
+    )
+    expected_x1 = lu_solve(factor, b1, b_ndim=1)
+    expected_x2 = lu_solve(factor, b2, b_ndim=1)
+    expected = [expected_logdet, expected_x1, expected_x2]
+    if not logdet_first:
+        expected = [expected_x1, expected_x2, expected_logdet]
+    result.assert_graph(*rewrite_graph(expected, include=["stabilize", "specialize"]))
