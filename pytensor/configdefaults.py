@@ -403,16 +403,13 @@ def _warn_cxx(val):
 
 
 def _default_gcc_version_str():
-    if config.cxx != "":
-        try:
-            p_out = output_subprocess_Popen([config.cxx, "-dumpversion"])
-            gcc_version_str = p_out[0].strip().decode()
-        except OSError:
-            # Typically means gcc cannot be found.
-            gcc_version_str = "GCC_NOT_FOUND"
-    else:
-        gcc_version_str = "GCC_NOT_FOUND"
-    return gcc_version_str
+    if not config.cxx:
+        return "GCC_NOT_FOUND"
+    try:
+        stdout, _, status = output_subprocess_Popen([config.cxx, "--version"])
+    except OSError:
+        return "GCC_NOT_FOUND"
+    return stdout.decode().strip().split("\n", 1)[0] if status == 0 else "GCC_NOT_FOUND"
 
 
 def add_c_compile_configvars():
@@ -428,7 +425,7 @@ def add_c_compile_configvars():
 
     config.add(
         "gcc_version_str",
-        "",
+        "Version banner reported by the selected C++ compiler.",
         StrParam(_default_gcc_version_str, mutable=False),
         in_c_key=False,
     )
