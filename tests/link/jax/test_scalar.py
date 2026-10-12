@@ -46,6 +46,12 @@ except ModuleNotFoundError:
     TFP_INSTALLED = False
 
 
+@pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+def test_complex_sign(dtype):
+    x = vector("x", dtype=dtype)
+    compare_jax_and_py([x], [pt.sign(x)], [np.array([0, 3 + 4j, -2j, -1], dtype=dtype)])
+
+
 def test_second():
     a0 = scalar("a0")
     b = scalar("b")

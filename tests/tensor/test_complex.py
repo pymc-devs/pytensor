@@ -2,12 +2,39 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.tensor as pt
+from pytensor.compile.mode import Mode
 from pytensor.gradient import GradientError
 from pytensor.tensor.basic import cast
 from pytensor.tensor.math import complex as pt_complex
 from pytensor.tensor.math import complex_from_polar, imag, real
 from pytensor.tensor.type import cvector, dvector, fmatrix, fvector, imatrix, zvector
 from tests import unittest_tools as utt
+
+
+@pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+@pytest.mark.parametrize("linker", ["c", "numba"])
+def test_sign(dtype, linker):
+    x = pt.vector(dtype=dtype)
+    f = pytensor.function([x], pt.sign(x), mode=Mode(linker=linker, optimizer=None))
+    finfo = np.finfo(np.empty((), dtype=dtype).real.dtype)
+    values = np.array(
+        [
+            0,
+            3 + 4j,
+            -2j,
+            -2,
+            finfo.tiny * (1 + 1j),
+            finfo.max / 2 * (1 + 1j),
+            complex(np.inf, 1),
+            complex(1, -np.inf),
+            complex(np.inf, np.inf),
+            complex(np.inf, np.nan),
+            complex(np.nan, 1),
+        ],
+        dtype=dtype,
+    )
+    np.testing.assert_allclose(f(values), np.sign(values), rtol=1e-6)
 
 
 class TestRealImag:

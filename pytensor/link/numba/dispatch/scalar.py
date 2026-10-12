@@ -30,6 +30,7 @@ from pytensor.scalar.basic import (
     Reciprocal,
     ScalarOp,
     Second,
+    Sign,
     Switch,
 )
 from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
@@ -169,6 +170,42 @@ def {scalar_op_fn_name}({input_signature}):
     else:
         cache_key = scalar_op_cache_key(op)
     return numba_basic.numba_njit(scalar_op_fn), cache_key
+
+
+@register_funcify_and_cache_key(Sign)
+def numba_funcify_Sign(op, node, **kwargs):
+    dtype = node.inputs[0].type.dtype
+    if dtype.startswith("uint"):
+        scalar_dtype = np.dtype(dtype).type
+
+        @numba_basic.numba_njit
+        def unsigned_sign(x):
+            return scalar_dtype(x != 0)
+
+        return unsigned_sign, scalar_op_cache_key(op, unsigned_dtype=dtype)
+    if not node.inputs[0].type.dtype.startswith("complex"):
+        return numba_funcify_ScalarOp(op, node, **kwargs)
+
+    complex_dtype = np.dtype(node.outputs[0].type.dtype).type
+
+    @numba_basic.numba_njit(fastmath=False)
+    def complex_sign(x):
+        magnitude = abs(x)
+        if np.isnan(magnitude):
+            return complex_dtype(complex(np.nan, np.nan))
+        if np.isinf(magnitude):
+            if np.isinf(x.real):
+                if np.isinf(x.imag):
+                    return complex_dtype(complex(np.nan, np.nan))
+                return complex_dtype(complex(1.0 if x.real > 0 else -1.0, 0.0))
+            return complex_dtype(complex(0.0, 1.0 if x.imag > 0 else -1.0))
+        if magnitude == 0:
+            return complex_dtype(0j)
+        return complex_dtype(complex(x.real / magnitude, x.imag / magnitude))
+
+    return complex_sign, scalar_op_cache_key(
+        op, complex_dtype=node.outputs[0].type.dtype
+    )
 
 
 @register_funcify_and_cache_key(Switch)

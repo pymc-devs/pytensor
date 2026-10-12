@@ -9,9 +9,15 @@ from pytensor.scalar.basic import (
     Clip,
     Invert,
     ScalarOp,
+    Sign,
 )
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.scalar.math import Softplus
+
+
+@pytorch_funcify.register(Sign)
+def pytorch_funcify_Sign(op, node, **kwargs):
+    return torch.sgn
 
 
 @pytorch_funcify.register(Invert)
