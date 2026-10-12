@@ -1,7 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch import mlx_funcify
-from pytensor.tensor.math import Argmax, Dot, Max
+from pytensor.tensor.math import Argmax, Dot, Max, Min
 
 
 @mlx_funcify.register(Dot)
@@ -12,9 +12,8 @@ def mlx_funcify_Dot(op, node=None, **kwargs):
     return dot
 
 
-@mlx_funcify.register(Max)
-def mlx_funcify_Max(op, node=None, **kwargs):
-    def max_fn(x):
+def _mlx_funcify_max_min(op, node, reduce_fn):
+    def max_min_fn(x):
         axes = op.axis
         if axes is None:
             reduce_axes = None
@@ -30,9 +29,19 @@ def mlx_funcify_Max(op, node=None, **kwargs):
             fill = op.initial_value(node.outputs[0].type.dtype)
             return mx.full(out_shape, fill, dtype=x.dtype)
 
-        return mx.max(x, axis=reduce_axes, keepdims=keepdims)
+        return reduce_fn(x, axis=reduce_axes, keepdims=keepdims)
 
-    return max_fn
+    return max_min_fn
+
+
+@mlx_funcify.register(Max)
+def mlx_funcify_Max(op, node=None, **kwargs):
+    return _mlx_funcify_max_min(op, node, mx.max)
+
+
+@mlx_funcify.register(Min)
+def mlx_funcify_Min(op, node=None, **kwargs):
+    return _mlx_funcify_max_min(op, node, mx.min)
 
 
 @mlx_funcify.register(Argmax)
