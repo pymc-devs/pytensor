@@ -115,6 +115,7 @@ from pytensor.tensor.rewriting.math import (
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
+    local_reduce_broadcastable,
     local_reduce_chain,
     local_sum_prod_of_mul_or_div,
     local_useless_abs,
@@ -3806,6 +3807,17 @@ class TestLocalReduce:
             assert not any(
                 isinstance(node.op, CAReduce) for node in f.maker.fgraph.toposort()
             )
+
+    def test_local_reduce_broadcast_some_initial(self):
+        # Dropping the broadcastable axis must keep `initial`, the other axis can be empty
+        x = TensorType("float64", shape=(1, None))()
+        out = pt_max(x, axis=[0, 1], initial=-np.inf)
+        fg = FunctionGraph([x], [out], clone=False)
+        [new_out] = local_reduce_broadcastable.transform(fg, out.owner)
+        assert new_out.owner.op == Max(axis=(0,), initial=True)
+
+        f = function([x], out, mode="FAST_COMPILE")
+        assert f(np.zeros((1, 0))) == -np.inf
 
 
 class TestReduceJoin:
