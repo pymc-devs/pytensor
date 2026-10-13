@@ -610,13 +610,6 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
         if M == 1:
             _gemv(B.T, A[0], C[0], alpha, beta)
             return out
-        if K == 1:
-            for i in range(M):
-                scaled = alpha * A[i, 0]
-                for j in range(N):
-                    value = scaled * B[0, j]
-                    C[i, j] = value if beta == 0 else value + beta * C[i, j]
-            return out
 
         A, B, C = _normalize_gemm_strides(A, B, C, beta)
         A_work, A_trans, LDA = _blas_operand(A, False)
