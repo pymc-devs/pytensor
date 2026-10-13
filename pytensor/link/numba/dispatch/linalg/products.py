@@ -422,43 +422,75 @@ def _blas_abs_layout(X):
 
 
 @numba_basic.numba_njit(inline="always")
+def _is_reversed(X, axis):
+    return X.shape[axis] > 1 and X.strides[axis] < 0
+
+
+@numba_basic.numba_njit(inline="always")
+def _cheapest_copies(rows, inner, cols, cost_a, cost_b, cost_c):
+    """Choose the cheapest of A, B and C to copy so every conflicting pair has a copy."""
+    # `rows`, `inner` and `cols` flag conflicts between A and C, A and B, and B and C,
+    # so this is a minimum-weight vertex cover of a triangle.
+    if rows and inner and cols:
+        if cost_a >= cost_b and cost_a >= cost_c:
+            return False, True, True
+        if cost_b >= cost_c:
+            return True, False, True
+        return True, True, False
+    if rows and inner:
+        copy_a = cost_a <= cost_b + cost_c
+        return copy_a, not copy_a, not copy_a
+    if inner and cols:
+        copy_b = cost_b <= cost_a + cost_c
+        return not copy_b, copy_b, not copy_b
+    if rows and cols:
+        copy_c = cost_c <= cost_a + cost_b
+        return not copy_c, not copy_c, copy_c
+    if rows:
+        return cost_a <= cost_c, False, cost_a > cost_c
+    if inner:
+        return cost_a <= cost_b, cost_a > cost_b, False
+    if cols:
+        return False, cost_b <= cost_c, cost_b > cost_c
+    return False, False, False
+
+
+@numba_basic.numba_njit(inline="always")
 def _normalize_gemm_strides(A, B, C, beta):
-    ar, ak = A.strides[0] < 0, A.strides[1] < 0
-    bk, bc = B.strides[0] < 0, B.strides[1] < 0
-    cr, cc = C.strides[0] < 0, C.strides[1] < 0
+    """Reverse paired axes of A, B and C so the fewest elements need a BLAS copy."""
+    ar, ak = _is_reversed(A, 0), _is_reversed(A, 1)
+    bk, bc = _is_reversed(B, 0), _is_reversed(B, 1)
+    cr, cc = _is_reversed(C, 0), _is_reversed(C, 1)
     if not (ar or ak or bk or bc or cr or cc):
         return A, B, C
 
-    a_layout, b_layout, c_layout = (
-        _blas_abs_layout(A),
-        _blas_abs_layout(B),
-        _blas_abs_layout(C),
+    # Operands with no unit-stride axis are copied whatever their direction.
+    forced_a = not _blas_abs_layout(A)
+    forced_b = not _blas_abs_layout(B)
+    forced_c = not _blas_abs_layout(C)
+    copy_a, copy_b, copy_c = _cheapest_copies(
+        ar != cr and not (forced_a or forced_c),
+        ak != bk and not (forced_a or forced_b),
+        bc != cc and not (forced_b or forced_c),
+        A.size,
+        B.size,
+        # C is also written back, and read first unless beta is zero
+        C.size * (1 if beta == 0 else 2),
     )
-    # A contraction reversal cancels against B; free axes cancel against C.
-    # Prefer cancelling pairs on ties, then minimize the elements copied. C
-    # needs a writeback too, but its incoming contents are unused with beta=0.
-    best = int(ar and cr) | (int(ak and bk) << 1) | (int(bc and cc) << 2)
-    best_cost = A.size + B.size + 2 * C.size + 1
-    for candidate in range(9):
-        flips = best if candidate == 0 else candidate - 1
-        r, k, c = bool(flips & 1), bool(flips & 2), bool(flips & 4)
-        cost = (
-            A.size * (not a_layout or ar != r or ak != k)
-            + B.size * (not b_layout or bk != k or bc != c)
-            + C.size * (1 if beta == 0 else 2) * (not c_layout or cr != r or cc != c)
-        )
-        if cost < best_cost:
-            best, best_cost = flips, cost
-            if cost == 0:
-                break
+    copied_a = forced_a or copy_a
+    copied_b = forced_b or copy_b
+    copied_c = forced_c or copy_c
 
-    if best & 1:
+    # Reversing the rows of A and C, the contraction axis of A and B, or the columns
+    # of B and C together leaves the product unchanged. Each pair follows the side
+    # read in place, and `_blas_operand` or the C writeback copies the other.
+    if (ar and not copied_a) or (cr and not copied_c):
         A = A[::-1]
         C = C[::-1]
-    if best & 2:
+    if (ak and not copied_a) or (bk and not copied_b):
         A = A[:, ::-1]
         B = B[::-1]
-    if best & 4:
+    if (bc and not copied_b) or (cc and not copied_c):
         B = B[:, ::-1]
         C = C[:, ::-1]
     return A, B, C

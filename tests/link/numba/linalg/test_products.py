@@ -254,28 +254,43 @@ def test_gemm_cancels_reversals():
                     np.testing.assert_allclose(result, expected)
 
 
-def test_gemm_moves_copy_to_smaller_operand():
-    # Move an unmatched contraction reversal from the large A to the small B.
-    A = rng.normal(size=(20, 3))[:, ::-1]
-    B = rng.normal(size=(3, 2))
-    C = rng.normal(size=(20, 2))
-    work_a, work_b, work_c = _gemm_buffers_jit(A, B, C)
-    assert np.shares_memory(work_a, A)
-    assert not np.shares_memory(work_b, B)
-    assert np.shares_memory(work_c, C)
-    expected = 1.7 * (A @ B) + 0.3 * C
-    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False, 1.7, 0.3), expected)
+@pytest.mark.parametrize(
+    "a_shape, a_view, b_shape, b_view, c_shape, c_view, read_in_place",
+    [
+        ((20, 3), np.s_[:, ::-1], (3, 2), np.s_[:], (20, 2), np.s_[:], (1, 0, 1)),
+        (
+            (3, 20),
+            np.s_[::-1, ::-1],
+            (20, 2),
+            np.s_[::-1, ::-1],
+            (3, 2),
+            np.s_[:],
+            (1, 1, 0),
+        ),
+        ((20, 3), np.s_[::-1, ::-1], (3, 2), np.s_[:], (20, 2), np.s_[:], (1, 0, 0)),
+        ((20, 3), np.s_[::-1], (3, 2), np.s_[::-1, ::-1], (20, 2), np.s_[:], (1, 0, 0)),
+        ((40, 6), np.s_[::2, ::2], (3, 2), np.s_[:], (20, 2), np.s_[::-1], (0, 1, 1)),
+    ],
+    ids=[
+        "inner_conflict_copies_smaller_B",
+        "free_axis_conflicts_copy_shared_C",
+        "shared_A_kept_when_others_are_cheaper",
+        "three_conflicts_keep_largest",
+        "forced_copy_of_A_absorbs_C_reversal",
+    ],
+)
+def test_gemm_copies_cheapest_operands(
+    a_shape, a_view, b_shape, b_view, c_shape, c_view, read_in_place
+):
+    A = rng.normal(size=a_shape)[a_view]
+    B = rng.normal(size=b_shape)[b_view]
+    C = rng.normal(size=c_shape)[c_view]
 
-    # Both matrices can be read forwards when a smaller output is reversed.
-    A = rng.normal(size=(3, 20))[::-1, ::-1]
-    B = rng.normal(size=(20, 2))[::-1, ::-1]
-    C = rng.normal(size=(3, 2))
-    work_a, work_b, work_c = _gemm_buffers_jit(A, B, C)
-    assert np.shares_memory(work_a, A)
-    assert np.shares_memory(work_b, B)
-    assert not np.shares_memory(work_c, C)
-    expected = 1.7 * (A @ B) + 0.3 * C
-    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False, 1.7, 0.3), expected)
+    works = _gemm_buffers_jit(A, B, C, 0.0)
+
+    for work, original, in_place in zip(works, (A, B, C), read_in_place, strict=True):
+        assert np.shares_memory(work, original) == bool(in_place)
+    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False, 1.0, 0.0), A @ B)
 
 
 @pytest.mark.parametrize(
