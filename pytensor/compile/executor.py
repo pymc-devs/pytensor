@@ -4,6 +4,7 @@ import copy
 import copyreg
 import time
 import warnings
+from functools import singledispatch
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -35,6 +36,18 @@ class AliasedMemoryError(Exception):
 
 # A sentinel for duplicate entries
 DUPLICATE = object()
+
+
+@singledispatch
+def reseeded_rng_value(current, generator: np.random.Generator):
+    """Return ``generator`` in the storage representation of ``current``.
+
+    Used by :meth:`Function.reseed_rngs`. Most backends store a NumPy ``Generator``
+    directly, so the default returns it unchanged. Backends that store RNGs in another
+    representation register a conversion keyed on that representation (e.g. the JAX backend
+    stores a state ``dict``).
+    """
+    return generator
 
 
 class Function:
@@ -809,6 +822,31 @@ class Function:
         Return the shared variable read or updated by by this function.
         """
         return [i.variable for i in self.maker.inputs if i.implicit]
+
+    def reseed_rngs(self, seed=None) -> None:
+        """Reseed the random generators used by this function.
+
+        Each random input is set to a fresh stream spawned from ``seed`` (an ``int``,
+        sequence of ints, or ``SeedSequence``; ``None`` draws fresh entropy). This works
+        for every backend, including JAX, whose compiled functions copy their RNGs at
+        compile time and so cannot be reseeded through the original shared variables.
+        """
+        from pytensor.tensor.random.type import RandomType
+
+        rng_containers = [
+            container
+            for inp, container in zip(
+                self.maker.expanded_inputs, self.input_storage, strict=True
+            )
+            if isinstance(inp.variable.type, RandomType)
+        ]
+        if not rng_containers:
+            return
+
+        seed_seqs = np.random.SeedSequence(seed).spawn(len(rng_containers))
+        for container, seed_seq in zip(rng_containers, seed_seqs, strict=True):
+            generator = np.random.Generator(np.random.PCG64(seed_seq))
+            container.storage[0] = reseeded_rng_value(container.storage[0], generator)
 
     def dprint(self, **kwargs):
         """Debug print itself

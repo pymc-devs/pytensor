@@ -1111,3 +1111,20 @@ class TestPicklefunction:
 
         blah.f2(5, 1)
         assert blah.f1._finder[blah.s].value != blah2.f1._finder[blah2.s].value
+
+
+def test_reseed_rngs():
+    rng = shared(np.random.default_rng(0))
+    rv = pt.random.normal(0, 1, size=3, rng=rng)
+    f = function([], rv, updates={rng: rv.owner.outputs[0]})
+
+    f.reseed_rngs(123)
+    draw = f()
+    f.reseed_rngs(123)
+    np.testing.assert_array_equal(draw, f())  # same seed -> same draw
+    f.reseed_rngs(456)
+    assert not np.array_equal(draw, f())  # different seed -> different draw
+
+    # A function without random inputs is a no-op.
+    x = scalar("x")
+    function([x], x * 2).reseed_rngs(0)
