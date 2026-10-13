@@ -6,6 +6,7 @@ import pytest
 from pytensor import config
 from pytensor.tensor.basic import switch
 from pytensor.tensor.math import (
+    ProdWithoutZeros,
     add,
     cos,
     eq,
@@ -77,6 +78,13 @@ def test_mlx_CAReduce():
     x = pt_all(a_pt)
 
     compare_mlx_and_py([a_pt], [x], [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
+
+
+def test_prod_without_zeros():
+    x = matrix("x")
+    outs = [ProdWithoutZeros(axis=None)(x), ProdWithoutZeros(axis=(1,))(x)]
+    x_test = np.array([[-1, 0, 3], [2, 4, 5], [0, 0, 0]], dtype=config.floatX)
+    compare_mlx_and_py([x], outs, [x_test])
 
 
 @pytest.mark.parametrize("axis", [None, 0, 1])

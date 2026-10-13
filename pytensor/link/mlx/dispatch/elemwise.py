@@ -14,6 +14,7 @@ from pytensor.scalar.basic import (
     Mul,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.math import MulWithoutZeros
 from pytensor.tensor.special import LogSoftmax, Softmax
 
 
@@ -61,6 +62,17 @@ def mlx_funcify_CAReduce_scalar_Mul(scalar_op, axis):
         return mx.prod(x, axis=axis)
 
     return prod_reduce
+
+
+@mlx_funcify_CAReduce_scalar_op.register(MulWithoutZeros)
+def mlx_funcify_CAReduce_scalar_MulWithoutZeros(scalar_op, axis):
+    def prod_without_zeros_reduce(x):
+        nonzero = x != 0
+        prod = mx.prod(mx.where(nonzero, x, 1), axis=axis)
+        # All-zero and empty slices reduce to 0, not 1
+        return mx.where(mx.any(nonzero, axis=axis), prod, 0)
+
+    return prod_without_zeros_reduce
 
 
 @mlx_funcify_CAReduce_scalar_op.register(AND)

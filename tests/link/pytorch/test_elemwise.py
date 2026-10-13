@@ -7,6 +7,7 @@ import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
 from pytensor.scalar.basic import ScalarOp, get_scalar_type
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import ProdWithoutZeros
 from pytensor.tensor.special import log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, tensor3, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
@@ -85,6 +86,13 @@ def test_pytorch_careduce(fn, axis):
     x = fn(a_pt, axis=axis)
 
     compare_pytorch_and_py([a_pt], [x], [test_value])
+
+
+def test_prod_without_zeros():
+    x = matrix("x")
+    outs = [ProdWithoutZeros(axis=None)(x), ProdWithoutZeros(axis=(1,))(x)]
+    x_test = np.array([[-1, 0, 3], [2, 4, 5], [0, 0, 0]], dtype=config.floatX)
+    compare_pytorch_and_py([x], outs, [x_test])
 
 
 @pytest.mark.parametrize("fn", [ptm.any, ptm.all])

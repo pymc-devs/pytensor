@@ -3511,6 +3511,14 @@ class TestLocalSumProd:
         )
         result.assert_eval(m_val)
 
+        x = dscalar("x")
+        n = lscalar("n")
+        result = RewriteTester(
+            [x, n], [ProdWithoutZeros(axis=None)(pt.alloc(x, n))], **cfg
+        )
+        result.assert_graph(pt.switch(pt.eq(n, 0), 0, x**n))
+        result.assert_eval(np.float64(2.0), np.int64(0))
+
     def test_local_sum_prod_mul_by_scalar_stack_trace(self):
         """Test that stack trace is copied over correctly for `local_sum_prod_mul_by_scalar`."""
         m0 = (
