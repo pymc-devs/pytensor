@@ -27,9 +27,9 @@ from pytensor.scalar.basic import (
 )
 from pytensor.tensor import (
     TensorLike,
-    _get_vector_length,
+    _get_first_dim_length,
     as_tensor_variable,
-    get_vector_length,
+    get_first_dim_length,
 )
 from pytensor.tensor.basic import (
     ExtractDiag,
@@ -1396,32 +1396,22 @@ def basic_subtensor(x, *index_variables):
     return Subtensor(idx_list)(x, *flat_index_vars)
 
 
-@_get_vector_length.register(Subtensor)  # type: ignore
-def _get_vector_length_Subtensor(op, var):
-    # If we take a slice, we know how many elements it will result in
+@_get_first_dim_length.register(Subtensor)  # type: ignore
+def _get_first_dim_length_Subtensor(op, var):
+    # If we take a slice of the first axis, we know how many elements it will result in
     # TODO: We can cover more `*Subtensor` cases.
+    idx = get_idx_list(var.owner.inputs, var.owner.op.idx_list)[0]
+    if not isinstance(idx, slice):
+        raise ValueError(f"Length of {var} cannot be determined")
     try:
-        indices = get_idx_list(var.owner.inputs, var.owner.op.idx_list)
-        start = (
-            None
-            if indices[0].start is None
-            else get_scalar_constant_value(indices[0].start)
-        )
-        stop = (
-            None
-            if indices[0].stop is None
-            else get_scalar_constant_value(indices[0].stop)
-        )
-        step = (
-            None
-            if indices[0].step is None
-            else get_scalar_constant_value(indices[0].step)
-        )
+        start = None if idx.start is None else get_scalar_constant_value(idx.start)
+        stop = None if idx.stop is None else get_scalar_constant_value(idx.stop)
+        step = None if idx.step is None else get_scalar_constant_value(idx.step)
 
         if start == stop:
             return 0
 
-        arg_len = get_vector_length(var.owner.inputs[0])
+        arg_len = get_first_dim_length(var.owner.inputs[0])
         return len(range(*slice(start, stop, step).indices(arg_len)))
     except (ValueError, NotScalarConstantError):
         raise ValueError(f"Length of {var} cannot be determined")
