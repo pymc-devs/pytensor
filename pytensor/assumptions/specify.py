@@ -92,6 +92,7 @@ def assume(
     selection: bool | None = None,
     permutation: bool | None = None,
     unique_indices: bool | None = None,
+    tridiagonal: bool | None = None,
     **assumptions: bool | None,
 ):
     """Attach structural assumptions to a symbolic tensor.
@@ -126,6 +127,8 @@ def assume(
         aliases a non-negative one (e.g. ``-1`` and ``n-1``). Such an index can
         never enlarge the axis it indexes, so it can be lifted earlier through
         operations without risk of duplicating computation.
+    tridiagonal : bool, optional
+        Assert that *x* is (or is not) tridiagonal.
     **assumptions : bool, optional
         Assumptions registered by downstream libraries, passed by key name, e.g.
         ``time_varying=True``.
@@ -158,6 +161,7 @@ def assume(
         "selection": selection,
         "permutation": permutation,
         "unique_indices": unique_indices,
+        "tridiagonal": tridiagonal,
     }
 
     unknown = [name for name in assumptions if name not in KEY_REGISTRY]

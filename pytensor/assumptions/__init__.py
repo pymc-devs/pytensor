@@ -14,6 +14,7 @@ import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
 import pytensor.assumptions.symmetric
 import pytensor.assumptions.triangular
+import pytensor.assumptions.tridiagonal
 from pytensor.assumptions.bundles import register_matrix_property_rules
 from pytensor.assumptions.core import (
     ALL_KEYS,
@@ -27,6 +28,7 @@ from pytensor.assumptions.core import (
     POSITIVE_DEFINITE,
     SELECTION,
     SYMMETRIC,
+    TRIDIAGONAL,
     UNIQUE_INDICES,
     UPPER_TRIANGULAR,
     AssumptionFeature,

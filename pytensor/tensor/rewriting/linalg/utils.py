@@ -6,6 +6,7 @@ from pytensor.assumptions import (
     LOWER_TRIANGULAR,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UPPER_TRIANGULAR,
     check_assumption,
 )
@@ -39,6 +40,7 @@ MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 ASSUME_A_OF_TRANSPOSE = {
     "lower triangular": "upper triangular",
     "upper triangular": "lower triangular",
+    "tridiagonal": "tridiagonal",
     "pos": "pos",
     "sym": "sym",
     "gen": "gen",
@@ -51,6 +53,8 @@ def matrix_diagonal_product(x):
 
 def get_assume_a(fgraph, A):
     """Return the most-specific ``solve`` ``assume_a`` for ``A`` from tags and assumptions."""
+    if check_assumption(fgraph, A, TRIDIAGONAL):
+        return "tridiagonal"
     if getattr(A.tag, "lower_triangular", False) or check_assumption(
         fgraph, A, LOWER_TRIANGULAR
     ):

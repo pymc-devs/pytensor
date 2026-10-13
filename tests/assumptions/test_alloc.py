@@ -10,6 +10,7 @@ from pytensor.assumptions import (
     PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UNIQUE_INDICES,
     UPPER_TRIANGULAR,
     FactState,
@@ -136,6 +137,7 @@ ALLOC_DIAG_KEYS = [
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
     POSITIVE_DEFINITE,
+    TRIDIAGONAL,
 ]
 
 
