@@ -690,6 +690,10 @@ def test_get_vector_length():
     x = specify_shape(ivector(), (10,))
     assert get_vector_length(x) == 10
 
+    x = specify_shape(matrix(), (None, 3))
+    with pytest.raises(ValueError, match=r"^Length of .*"):
+        get_vector_length(x)
+
 
 def test_shape_tuple():
     x = Variable(MyType2(), None, None)

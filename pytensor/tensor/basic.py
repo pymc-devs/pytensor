@@ -1815,7 +1815,7 @@ pprint.assign(alloc, printing.FunctionPrinter(["alloc"]))
 @_get_vector_length.register(Alloc)
 def _get_vector_length_Alloc(var_inst, var):
     try:
-        return get_scalar_constant_value(var.owner.inputs[1])
+        return int(get_scalar_constant_value(var.owner.inputs[1]))
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -2691,9 +2691,8 @@ pprint.assign(Join, printing.FunctionPrinter(["join"]))
 
 @_get_vector_length.register(Join)
 def _get_vector_length_Join(op, var):
-    arrays = var.owner.inputs
-    if op.axis == 0 and builtins.all(a.ndim == 1 for a in arrays):
-        return builtins.sum(get_vector_length(a) for a in arrays)
+    if op.axis == 0:
+        return builtins.sum(get_vector_length(a) for a in var.owner.inputs)
     raise ValueError(f"Length of {var} cannot be determined")
 
 

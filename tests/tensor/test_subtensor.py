@@ -3105,6 +3105,13 @@ def test_get_vector_length():
     with pytest.raises(ValueError, match=r"^Length of .*"):
         get_vector_length(x[lscalar() :])
 
+    # Slices of the first axis of nd inputs
+    x = ptb.as_tensor_variable(np.zeros((4, 3)))
+    assert get_vector_length(x[1:-1]) == 2
+    # Indexing the first axis removes it
+    with pytest.raises(ValueError, match=r"^Length of .*"):
+        get_vector_length(matrix()[0])
+
 
 @pytest.mark.parametrize(
     "indices, exp_res",

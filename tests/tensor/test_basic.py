@@ -1311,6 +1311,8 @@ def test_get_vector_length():
     x = as_tensor_variable((1, 2, 3))
     assert 3 == get_vector_length(x)
 
+    assert 2 == get_vector_length(as_tensor_variable(np.zeros((2, 3))))
+
     # Test `Join`s
     z = join(0, as_tensor_variable(1, ndim=1), as_tensor_variable(x.shape[0], ndim=1))
     assert isinstance(z.owner.op, Join)
@@ -1347,6 +1349,12 @@ def test_get_vector_length():
 
     # Test `Alloc`s
     assert 3 == get_vector_length(alloc(0, 3))
+    assert 3 == get_vector_length(alloc(0, 3, lscalar()))
+
+    # Only the first axis matters for nd inputs
+    n = lscalar("n")
+    assert 5 == get_vector_length(join(0, alloc(0, 2, n), alloc(0, 3, n)))
+    assert 2 == get_vector_length(join(1, alloc(0, 2, n), alloc(0, 2, n)))
 
     assert 5 == get_vector_length(tensor(dtype=np.float64, shape=(5,)))
 

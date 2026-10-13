@@ -12,7 +12,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.traversal import io_toposort
 from pytensor.tensor import get_vector_length
-from pytensor.tensor.basic import constant
+from pytensor.tensor.basic import alloc, as_tensor, constant, join
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, eq, matmul
 from pytensor.tensor.shape import Shape
@@ -302,9 +302,41 @@ def test_get_vector_length():
     res = get_vector_length(x)
     assert res == 4
 
+    x = TensorVariable(TensorType("int64", shape=(4, None)), None)
+    assert get_vector_length(x) == 4
+
     x = TensorVariable(TensorType("int64", shape=(None,)), None)
     with pytest.raises(ValueError):
         get_vector_length(x)
+
+    with pytest.raises(TypeError, match="at least one dimension"):
+        get_vector_length(iscalar())
+
+
+def test_len_and_iter():
+    x = constant(np.array([[1, 2], [3, 2], [5, 4]]))
+    assert len(x) == 3
+    assert equal_computations(list(x), [x[0], x[1], x[2]])
+
+    n = iscalar("n")
+    m = matrix("m", shape=(3, None))
+    assert len(m) == 3
+    assert len(tensor3().shape) == 3
+    assert len(as_tensor([n, n])) == 2
+    assert len(alloc(0, 4, n)) == 4
+    assert len(join(0, alloc(0, 2, n), m)) == 5
+    assert len(join(1, m, matrix())) == 3
+    assert len(m[1:]) == 2
+
+    with pytest.raises(TypeError, match="unsized"):
+        len(n)
+    with pytest.raises(TypeError, match="does not support iteration"):
+        list(n)
+    for x in (ivector(), matrix(), matrix()[1:], matrix()[0]):
+        with pytest.raises(TypeError, match="cannot be determined"):
+            len(x)
+        with pytest.raises(ValueError, match="cannot be determined"):
+            list(x)
 
 
 def test_dense_types():

@@ -576,9 +576,13 @@ def specify_shape(
 @_get_vector_length.register(SpecifyShape)  # type: ignore
 def _get_vector_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
     try:
-        return int(ptb.get_scalar_constant_value(var.owner.inputs[1]).item())
+        length = ptb.get_scalar_constant_value(var.owner.inputs[1])
     except NotScalarConstantError:
+        length = None
+    if length is None:
+        # The first dimension may be left unspecified (None) for nd inputs
         raise ValueError(f"Length of {var} cannot be determined")
+    return int(length)
 
 
 @_vectorize_node.register(SpecifyShape)

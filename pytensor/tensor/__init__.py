@@ -57,12 +57,15 @@ def _as_tensor_variable(
 
 
 def get_vector_length(v: TensorLike) -> int:
-    """Return the run-time length of a symbolic vector, when possible.
+    """Return the run-time length of the first axis of a symbolic tensor, when possible.
+
+    Despite the name, this works for tensors with any number of dimensions
+    greater than zero, returning the length of the first axis.
 
     Parameters
     ----------
     v
-        A rank-1 `TensorType` variable.
+        A `TensorType` variable with at least one dimension.
 
     Raises
     ------
@@ -77,8 +80,8 @@ def get_vector_length(v: TensorLike) -> int:
     """
     v = as_tensor_variable(v)
 
-    if v.type.ndim != 1:
-        raise TypeError(f"Argument must be a vector; got {v.type}")
+    if v.type.ndim == 0:
+        raise TypeError(f"Argument must have at least one dimension; got {v.type}")
 
     static_shape: int | None = v.type.shape[0]
     if static_shape is not None:
