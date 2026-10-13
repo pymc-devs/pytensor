@@ -12,7 +12,11 @@ def mlx_funcify_Dot(op, node=None, **kwargs):
     return dot
 
 
-def _mlx_funcify_max_min(op, node, reduce_fn):
+@mlx_funcify.register(Max)
+@mlx_funcify.register(Min)
+def mlx_funcify_Max_Min(op, node=None, **kwargs):
+    reduce_fn = mx.max if isinstance(op, Max) else mx.min
+
     def max_min_fn(x):
         axes = op.axis
         if axes is None:
@@ -32,16 +36,6 @@ def _mlx_funcify_max_min(op, node, reduce_fn):
         return reduce_fn(x, axis=reduce_axes, keepdims=keepdims)
 
     return max_min_fn
-
-
-@mlx_funcify.register(Max)
-def mlx_funcify_Max(op, node=None, **kwargs):
-    return _mlx_funcify_max_min(op, node, mx.max)
-
-
-@mlx_funcify.register(Min)
-def mlx_funcify_Min(op, node=None, **kwargs):
-    return _mlx_funcify_max_min(op, node, mx.min)
 
 
 @mlx_funcify.register(Argmax)
