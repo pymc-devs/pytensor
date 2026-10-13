@@ -1,3 +1,5 @@
+from functools import wraps
+
 import numpy as np
 
 from pytensor.assumptions.core import (
@@ -11,6 +13,7 @@ from pytensor.tensor.basic import (
     NotScalarConstantError,
     get_underlying_scalar_constant_value,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.variable import TensorConstant
 
 
@@ -116,6 +119,21 @@ def eye_zero_or_identity_rule(
     return [eye_band_is_empty(node, offset)]
 
 
+def alloc_diag_rule(rule):
+    """Restrict an :class:`AllocDiag` rule to diagonals on the trailing two axes."""
+
+    @wraps(rule)
+    def guarded_rule(key, op, feature, fgraph, node, input_states):
+        core_out_ndim = node.outputs[0].type.ndim
+        if isinstance(node.op, Blockwise):
+            core_out_ndim -= node.op.batch_ndim(node)
+        if (op.axis1, op.axis2) != (core_out_ndim - 2, core_out_ndim - 1):
+            return [FactState.UNKNOWN]
+        return rule(key, op, feature, fgraph, node, input_states)
+
+    return guarded_rule
+
+
 def alloc_diag_band_is_zero(node) -> FactState:
     """Decide statically whether the vector an :class:`AllocDiag` places is zero."""
     diag = node.inputs[0]
@@ -135,6 +153,7 @@ def alloc_diag_band_is_zero(node) -> FactState:
     return FactState.FALSE
 
 
+@alloc_diag_rule
 def alloc_diag_has_zero_off_diagonal(
     key, op, feature, fgraph, node, input_states
 ) -> list[FactState]:
