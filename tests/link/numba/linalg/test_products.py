@@ -95,13 +95,13 @@ class TestExpm:
 
 
 @numba_njit(final_function=True)
-def _gemm_jit(A, B, C, transa, transb, alpha, beta):
-    return _gemm(A, B, C, transa, transb, alpha, beta)
+def _gemm_jit(A, B, C, transa, transb):
+    return _gemm(A, B, C, transa, transb)
 
 
 @numba_njit(final_function=True)
-def _gemm_buffers_jit(A, B, C, beta=0.3):
-    A, B, C = _normalize_gemm_strides(A, B, C, beta)
+def _gemm_buffers_jit(A, B, C):
+    A, B, C = _normalize_gemm_strides(A, B, C)
     A, _, _ = _blas_operand(A, False)
     B, _, _ = _blas_operand(B, False)
     C, _, _ = _blas_operand(C, False)
@@ -112,20 +112,18 @@ def _gemm_buffers_jit(A, B, C, beta=0.3):
 @pytest.mark.parametrize(
     "shape", [(3, 2, 4), (3, 2, 1), (1, 2, 4), (1, 2, 1), (3, 1, 4)]
 )
-def test_gemm_ignores_C_when_beta_is_zero(poison, shape):
-    """`BatchedDot` allocates C with `np.empty` and passes beta=0, so C holds whatever the
-    allocator returned. BLAS does not read C in that case and neither may the reference, or stray
-    non-finite bytes would multiply by zero into nan."""
+def test_gemm_ignores_incoming_C(poison, shape):
+    """`Dot` and `BatchedDot` allocate C with `np.empty`, so C holds whatever the allocator
+    returned. Neither BLAS nor the reference may read it, or stray non-finite bytes would
+    multiply by zero into nan."""
     m, k, n = shape
     A = np.ascontiguousarray(rng.normal(size=(m, k)))
     B = np.ascontiguousarray(rng.normal(size=(k, n)))
     uninitialized = np.full((m, n), poison)
 
+    np.testing.assert_allclose(_gemm(A, B, uninitialized.copy(), False, False), A @ B)
     np.testing.assert_allclose(
-        _gemm(A, B, uninitialized.copy(), False, False, 1.0, 0.0), A @ B
-    )
-    np.testing.assert_allclose(
-        _gemm_jit(A, B, uninitialized.copy(), False, False, 1.0, 0.0), A @ B
+        _gemm_jit(A, B, uninitialized.copy(), False, False), A @ B
     )
 
 
@@ -157,9 +155,7 @@ def test_gemm_reads_strided_operands(layout):
     A = _matrix_views(6, 5)[layout]
     B = _matrix_views(5, 4)[layout]
     C = _matrix_views(6, 4)[layout]
-    expected = 0.5 * C + 2.0 * (A @ B)
-
-    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False, 2.0, 0.5), expected)
+    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False), A @ B)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64", "complex64", "complex128"])
@@ -167,14 +163,11 @@ def test_gemm_reads_strided_operands(layout):
 def test_gemm_vector_strides(dtype, transpose):
     matrix = rng.normal(size=(4, 3))
     x_storage = rng.normal(size=6)
-    y_storage = rng.normal(size=8)
     if np.dtype(dtype).kind == "c":
         matrix = matrix + 1j * rng.normal(size=matrix.shape)
         x_storage = x_storage + 1j * rng.normal(size=x_storage.shape)
-        y_storage = y_storage + 1j * rng.normal(size=y_storage.shape)
     matrix = matrix.astype(dtype)
     x_storage = x_storage.astype(dtype)
-    y_storage = y_storage.astype(dtype)
     rtol = 1e-5 if np.dtype(dtype).char in "fF" else 1e-10
 
     for order in ["C", "F"]:
@@ -186,26 +179,20 @@ def test_gemm_vector_strides(dtype, transpose):
             A = padded[::row_step, ::col_step]
             for step in [2, -2]:
                 x = x_storage[::step]
-                y = y_storage.copy()[::step]
-                expected = 1.7 * (A @ x) + 0.3 * y
+                y = np.full(8, np.nan, dtype=dtype)[::step]
                 if transpose:
-                    result = _gemm_jit(x[None], A, y[None], False, True, 1.7, 0.3)
-                    assert np.shares_memory(result, y)
-                    result = result[0]
+                    _gemm_jit(x[None], A, y[None], False, True)
                 else:
-                    result = _gemm_jit(
-                        A, x[:, None], y[:, None], False, False, 1.7, 0.3
-                    )[:, 0]
-                    assert np.shares_memory(result, y)
-                np.testing.assert_allclose(result, expected, rtol=rtol, atol=1e-6)
+                    _gemm_jit(A, x[:, None], y[:, None], False, False)
+                np.testing.assert_allclose(y, A @ x, rtol=rtol, atol=1e-6)
 
     # Dot is unconjugated, including when both vectors have non-unit strides.
     a = x_storage[::2][None]
     b = x_storage[::-2][:, None]
     out = np.full((1, 1), np.nan, dtype=dtype)
-    expected = 1.7 * (a @ b)
+    expected = a @ b
     np.testing.assert_allclose(
-        _gemm_jit(a, b, out, False, False, 1.7, 0.0),
+        _gemm_jit(a, b, out, False, False),
         expected,
         rtol=rtol,
         atol=1e-6,
@@ -213,8 +200,8 @@ def test_gemm_vector_strides(dtype, transpose):
     a, b = b, a
     out = np.full((6, 6), np.nan, dtype=dtype)[::-2, ::2]
     np.testing.assert_allclose(
-        _gemm_jit(a, b, out, False, False, 1.7, 0.0),
-        1.7 * (a @ b),
+        _gemm_jit(a, b, out, False, False),
+        a @ b,
         rtol=rtol,
         atol=1e-6,
     )
@@ -240,15 +227,13 @@ def test_gemm_cancels_reversals():
                     (False, True),
                     (True, True),
                 ]:
-                    expected = 1.7 * (A @ B) + 0.3 * C
+                    expected = A @ B
                     result = _gemm_jit(
                         A.T if transa else A,
                         B.T if transb else B,
                         C,
                         transa,
                         transb,
-                        1.7,
-                        0.3,
                     )
                     assert np.shares_memory(result, C)
                     np.testing.assert_allclose(result, expected)
@@ -286,11 +271,11 @@ def test_gemm_copies_cheapest_operands(
     B = rng.normal(size=b_shape)[b_view]
     C = rng.normal(size=c_shape)[c_view]
 
-    works = _gemm_buffers_jit(A, B, C, 0.0)
+    works = _gemm_buffers_jit(A, B, C)
 
     for work, original, in_place in zip(works, (A, B, C), read_in_place, strict=True):
         assert np.shares_memory(work, original) == bool(in_place)
-    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False, 1.0, 0.0), A @ B)
+    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False), A @ B)
 
 
 @pytest.mark.parametrize(
@@ -301,9 +286,7 @@ def test_gemm_empty(shape):
     A = np.empty((m, k))
     B = np.empty((k, n))
     C = np.full((m, n), np.nan)
-    np.testing.assert_array_equal(
-        _gemm_jit(A, B, C, False, False, 1.0, 0.0), np.zeros((m, n))
-    )
+    np.testing.assert_array_equal(_gemm_jit(A, B, C, False, False), np.zeros((m, n)))
 
 
 @pytest.mark.parametrize("operand", [1, 2], ids=["B", "C"])
@@ -311,7 +294,7 @@ def test_gemm_requires_matching_dtypes(operand):
     arrays = [np.ones((3, 2)), np.ones((2, 4)), np.ones((3, 4))]
     arrays[operand] = arrays[operand].astype("float32")
     with pytest.raises(numba.TypingError, match="gemm only supported for float64"):
-        _gemm_jit(*arrays, False, False, 1.0, 0.0)
+        _gemm_jit(*arrays, False, False)
 
 
 @pytest.mark.parametrize("batched", [False, True])

@@ -336,18 +336,17 @@ def numba_funcify_Expm(op, node, **kwargs):
     return expm, cache_version
 
 
-def _gemm(A, B, C, transa=False, transb=False, alpha=1.0, beta=0.0):
+def _gemm(A, B, C, transa=False, transb=False):
     r"""
-    Overwrite ``C`` with :math:`\alpha \, op(A) \, op(B) + \beta C`.
+    Overwrite ``C`` with :math:`op(A) \, op(B)`.
 
     Parameters
     ----------
     A, B, C : ndarray
-        2-d arrays of one dtype. ``C`` is the output and is returned.
+        2-d arrays of one dtype. ``C`` is the output and is returned. Its incoming
+        contents are never read.
     transa, transb : bool, optional
         Read ``A`` or ``B`` transposed. Both default to False.
-    alpha, beta : scalar, optional
-        Default 1.0 and 0.0. With ``beta == 0`` the incoming ``C`` is not read.
 
     Returns
     -------
@@ -355,9 +354,7 @@ def _gemm(A, B, C, transa=False, transb=False, alpha=1.0, beta=0.0):
     """
     op_a = A.T if transa else A
     op_b = B.T if transb else B
-    product = alpha * (op_a @ op_b)
-    # An uninitialized C may hold inf or nan bytes, which beta * C would keep.
-    C[:] = product if beta == 0 else product + beta * C
+    C[:] = op_a @ op_b
     return C
 
 
@@ -456,7 +453,7 @@ def _cheapest_copies(rows, inner, cols, cost_a, cost_b, cost_c):
 
 
 @numba_basic.numba_njit(inline="always")
-def _normalize_gemm_strides(A, B, C, beta):
+def _normalize_gemm_strides(A, B, C):
     """Reverse paired axes of A, B and C so the fewest elements need a BLAS copy."""
     ar, ak = _is_reversed(A, 0), _is_reversed(A, 1)
     bk, bc = _is_reversed(B, 0), _is_reversed(B, 1)
@@ -474,8 +471,7 @@ def _normalize_gemm_strides(A, B, C, beta):
         bc != cc and not (forced_b or forced_c),
         A.size,
         B.size,
-        # C is also written back, and read first unless beta is zero
-        C.size * (1 if beta == 0 else 2),
+        C.size,
     )
     copied_a = forced_a or copy_a
     copied_b = forced_b or copy_b
@@ -497,7 +493,7 @@ def _normalize_gemm_strides(A, B, C, beta):
 
 
 @overload(_gemm)
-def _gemm_impl(A, B, C, transa, transb, alpha, beta):
+def _gemm_impl(A, B, C, transa, transb):
     ensure_blas()
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
     _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
@@ -507,7 +503,7 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
     dtype = A.dtype
     scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
 
-    def impl(A, B, C, transa, transb, alpha, beta):
+    def impl(A, B, C, transa, transb):
         out = C
         if transa:
             A = A.T
@@ -526,13 +522,11 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
 
         if M == 0 or N == 0:
             return out
-        if K == 0 or alpha == 0:
-            for i in range(M):
-                for j in range(N):
-                    C[i, j] = 0 if beta == 0 else beta * C[i, j]
+        if K == 0:
+            C[:] = 0
             return out
 
-        A, B, C = _normalize_gemm_strides(A, B, C, beta)
+        A, B, C = _normalize_gemm_strides(A, B, C)
         A_work, A_trans, LDA = _blas_operand(A, False)
         B_work, B_trans, LDB = _blas_operand(B, False)
 
@@ -549,11 +543,7 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
             if LDC:
                 C_work = C
             else:
-                C_work = (
-                    np.empty(C.shape, dtype=dtype)
-                    if beta == 0
-                    else np.ascontiguousarray(C)
-                )
+                C_work = np.empty(C.shape, dtype=dtype)
                 LDC = max(1, C.shape[1])
 
         if swap:
@@ -568,12 +558,12 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
             val_to_int_ptr(M),
             val_to_int_ptr(N),
             val_to_int_ptr(K),
-            scalar_ptr(alpha),
+            scalar_ptr(1.0),
             A_work.ctypes,
             val_to_int_ptr(LDA),
             B_work.ctypes,
             val_to_int_ptr(LDB),
-            scalar_ptr(beta),
+            scalar_ptr(0.0),
             C_work.ctypes,
             val_to_int_ptr(np.int32(LDC)),
         )
