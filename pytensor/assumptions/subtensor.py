@@ -4,6 +4,7 @@ from pytensor.assumptions.core import (
     MATRIX_KEYS,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UPPER_TRIANGULAR,
     FactState,
     register_assumption,
@@ -77,6 +78,7 @@ def incsubtensor_propagates_matrix_property(
         UPPER_TRIANGULAR,
         SYMMETRIC,
         POSITIVE_DEFINITE,
+        TRIDIAGONAL,
     ):
         return [FactState.UNKNOWN]
     return true_if(base_state is FactState.TRUE and value_state is FactState.TRUE)

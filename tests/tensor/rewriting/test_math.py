@@ -2199,6 +2199,16 @@ def test_useless_abs():
     result.assert_eval(np.array([[1.0, -2.0], [3.0, -4.0]]))
 
 
+def test_useless_abs_complex_cholesky():
+    # The positive diagonal is complex-typed; abs must still return a real dtype.
+    x = pt.zmatrix("x")
+    out = pt_abs(pt.diagonal(pt.linalg.cholesky(x)))
+    result = RewriteTester(
+        [x], [out], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(out)
+
+
 def test_useless_abs_keeps_signed_zero():
     # sqrt(-0.0) is -0.0, which abs() normalizes to +0.0, so dropping the abs would flip
     # the sign of any downstream division
@@ -3538,6 +3548,14 @@ class TestLocalSumProd:
             pt.specify_shape(ProdWithoutZeros(axis=0)(m), 3) ** np.array([4])
         )
         result.assert_eval(m_val)
+
+        x = dscalar("x")
+        n = lscalar("n")
+        result = RewriteTester(
+            [x, n], [ProdWithoutZeros(axis=None)(pt.alloc(x, n))], **cfg
+        )
+        result.assert_graph(pt.switch(pt.eq(n, 0), 0, x**n))
+        result.assert_eval(np.float64(2.0), np.int64(0))
 
     def test_local_sum_prod_mul_by_scalar_stack_trace(self):
         """Test that stack trace is copied over correctly for `local_sum_prod_mul_by_scalar`."""
@@ -5488,3 +5506,57 @@ def test_sign_div_non_constant_not_rewritten():
     assert any(
         isinstance(getattr(node.op, "scalar_op", None), ps.TrueDiv) for node in nodes
     )
+
+
+def test_useless_sign():
+    X = pt.dmatrix("X")
+    diag_L = pt.diagonal(pt.linalg.cholesky(X))
+    out = pt.sign(pt.sqr(diag_L))
+    result = RewriteTester([X], [out])
+    result.assert_graph(pt.fill(pt.sqr(diag_L), pt.constant([1.0], dtype=X.dtype)))
+
+
+@pytest.mark.parametrize(
+    "build, expected_fn",
+    [
+        (
+            lambda x: pt.sign(pt.prod(x)),
+            lambda x: pt.prod(pt.sign(x)),
+        ),
+        (
+            lambda x: pt.sign(pt.expand_dims(pt.prod(x, axis=1), 1)),
+            lambda x: pt.expand_dims(pt.prod(pt.sign(x), axis=1), 1),
+        ),
+    ],
+    ids=["all_axes", "through_expand_dims"],
+)
+def test_sign_prod(build, expected_fn):
+    x = pt.dmatrix("x")
+    result = RewriteTester(
+        [x], [build(x)], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(expected_fn(x))
+
+
+@pytest.mark.parametrize(
+    "dtype, prod_dtype, acc_dtype",
+    [
+        ("int32", None, None),
+        ("int32", "float64", None),
+        ("complex128", "float64", None),
+        ("bool", "float64", "float64"),
+    ],
+    ids=[
+        "integer_product",
+        "integer_accumulator",
+        "complex_projection",
+        "boolean_sign",
+    ],
+)
+def test_sign_prod_unsafe_dtype(dtype, prod_dtype, acc_dtype):
+    x = pt.matrix("x", dtype=dtype)
+    out = pt.sign(pt.prod(x, dtype=prod_dtype, acc_dtype=acc_dtype))
+    result = RewriteTester(
+        [x], [out], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_graph(out)

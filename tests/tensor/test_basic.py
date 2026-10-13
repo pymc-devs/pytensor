@@ -118,6 +118,7 @@ from pytensor.tensor.type import (
     iscalars,
     itensor3,
     ivector,
+    lmatrix,
     lscalar,
     lvector,
     matrix,
@@ -2367,6 +2368,11 @@ def test_flatten_broadcastable():
     out = flatten(inp, ndim=3)
     assert out.type.shape == (1, None, 1)
 
+    # Statically known leading extents give a fully static output shape
+    inp = tensor(dtype="float64", shape=(32, 24, 24, 16))
+    out = flatten(inp, ndim=2)
+    assert out.type.shape == (32, 9216)
+
 
 def test_flatten_ndim_invalid():
     a = dmatrix()
@@ -4563,6 +4569,22 @@ def test_vectorize_join(axis, broadcasting_y):
         vectorize_pt(x_test, y_test),
         vectorize_np(x_test, y_test),
     )
+
+
+def test_vectorize_split():
+    x = tensor("x", shape=(3, 5))
+    splits = lvector("splits")
+    outs = split(x, splits, n_splits=2, axis=1)
+
+    batch_x = tensor("batch_x", shape=(4, 3, 5))
+    batch_outs = vectorize_graph(outs, replace={x: batch_x})
+    utt.assert_equal_computations(
+        batch_outs, Split(len_splits=2, axis=2)(batch_x, splits)
+    )
+
+    batch_splits = lmatrix("batch_splits")
+    batch_outs = vectorize_graph(outs, replace={splits: batch_splits})
+    assert isinstance(batch_outs[0].owner.op, Blockwise)
 
 
 @pytest.mark.parametrize("implicit_dims", [True, False])

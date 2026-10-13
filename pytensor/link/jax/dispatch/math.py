@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from pytensor.link.jax.dispatch import jax_funcify
-from pytensor.tensor.math import Argmax, Dot, Max
+from pytensor.tensor.math import Argmax, Dot, Max, ProdWithoutZeros
 
 
 @jax_funcify.register(Dot)
@@ -21,6 +21,21 @@ def jax_funcify_Max(op, **kwargs):
         return jnp.max(x, axis, initial=op.initial_value(x.dtype))
 
     return max
+
+
+@jax_funcify.register(ProdWithoutZeros)
+def jax_funcify_ProdWithoutZeros(op, **kwargs):
+    axis = op.axis
+    acc_dtype = op.acc_dtype
+    dtype = op.dtype
+
+    def prod_without_zeros(x):
+        nonzero = x != 0
+        prod = jnp.prod(x, axis=axis, dtype=acc_dtype, where=nonzero)
+        # All-zero and empty slices reduce to 0, not 1
+        return jnp.where(jnp.any(nonzero, axis=axis), prod, 0).astype(dtype)
+
+    return prod_without_zeros
 
 
 @jax_funcify.register(Argmax)

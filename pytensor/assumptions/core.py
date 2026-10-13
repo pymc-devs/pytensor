@@ -283,6 +283,7 @@ DIAGONAL = AssumptionKey("diagonal", short_name="diag")
 LOWER_TRIANGULAR = AssumptionKey("lower_triangular", short_name="tril")
 UPPER_TRIANGULAR = AssumptionKey("upper_triangular", short_name="triu")
 SYMMETRIC = AssumptionKey("symmetric", short_name="sym")
+TRIDIAGONAL = AssumptionKey("tridiagonal", short_name="tridiag")
 POSITIVE_DEFINITE = AssumptionKey("positive_definite", short_name="pd")
 ORTHOGONAL = AssumptionKey("orthogonal", short_name="orth")
 SELECTION = AssumptionKey("selection", short_name="sel")
@@ -294,6 +295,7 @@ MATRIX_KEYS = (
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
     SYMMETRIC,
+    TRIDIAGONAL,
     POSITIVE_DEFINITE,
     ORTHOGONAL,
     SELECTION,
@@ -306,7 +308,7 @@ MATRIX_KEYS = (
 ALL_KEYS = KeyRegistryView()
 
 # Implications about structural properties derivably from other structural properties
-register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC)
+register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC, TRIDIAGONAL)
 register_implies(POSITIVE_DEFINITE, SYMMETRIC)
 register_implies(PERMUTATION, SELECTION, ORTHOGONAL)
 

@@ -10,11 +10,13 @@ from pytensor.assumptions import (
     PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UNIQUE_INDICES,
     UPPER_TRIANGULAR,
     FactState,
 )
 from pytensor.assumptions.specify import assume
+from pytensor.tensor.basic import alloc_diag
 from tests.assumptions.conftest import make_fgraph
 
 
@@ -127,6 +129,32 @@ def test_off_diagonal_alloc_diag_of_symbolic_vector_is_unknown():
     d = pt.diag(pt.vector("v", shape=(5,)), k=1)
     _, af = make_fgraph(d)
     assert af.get(d, DIAGONAL) == FactState.UNKNOWN
+
+
+ALLOC_DIAG_KEYS = [
+    DIAGONAL,
+    SYMMETRIC,
+    LOWER_TRIANGULAR,
+    UPPER_TRIANGULAR,
+    POSITIVE_DEFINITE,
+    TRIDIAGONAL,
+]
+
+
+@pytest.mark.parametrize("key", ALLOC_DIAG_KEYS)
+def test_alloc_diag_across_batch_axis_is_unknown(key):
+    # Default axes place the diagonal across axes (0, 1) of a 3d output, so each
+    # trailing matrix holds a dense column of the input
+    d = alloc_diag(pt.as_tensor(np.full((3, 3), 2.0)))
+    _, af = make_fgraph(d)
+    assert af.get(d, key) == FactState.UNKNOWN
+
+
+@pytest.mark.parametrize("key", ALLOC_DIAG_KEYS)
+def test_alloc_diag_on_trailing_axes_of_batch_has_property(key):
+    d = alloc_diag(pt.as_tensor(np.full((3, 3), 2.0)), axis1=1, axis2=2)
+    _, af = make_fgraph(d)
+    assert af.check(d, key)
 
 
 def test_zeros_matrix_is_diagonal():

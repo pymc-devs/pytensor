@@ -1,3 +1,5 @@
+from itertools import chain
+
 import numpy as np
 
 from pytensor import tensor as pt
@@ -11,7 +13,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Log, Sign, Sqr
-from pytensor.tensor.basic import ones
+from pytensor.tensor.basic import atleast_Nd, ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -20,13 +22,17 @@ from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet, det
-from pytensor.tensor.math import Prod, log, prod
+from pytensor.tensor.math import Prod, log, prod, sqr
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
+from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_expand_dims,
+    matrix_diagonal_product,
+    strip_left_expand_dims_and_transpose,
+)
 from pytensor.tensor.subtensor import _is_provably_non_negative
 
 
@@ -69,13 +75,24 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         for client, _ in fgraph.clients[det]
     )
 
+    # det(X.mT) == det(X), so factorizations hanging off x itself and off its
+    # stripped core are both usable
+    x_core, _ = strip_left_expand_dims_and_transpose(x)
+    factor_clients = clients_through_expand_dims(fgraph, x)
+    if x_core is not x:
+        factor_clients = chain(
+            factor_clients, clients_through_expand_dims(fgraph, x_core)
+        )
+
     new_det = None
-    for client, _ in fgraph.clients[x]:
+    for client, _ in factor_clients:
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
+                # sqr, not ** 2, so the stabilize-time log(sqr(x)) rewrite can
+                # split log(det) into a sum of logs before the product underflows
                 L = client.outputs[0]
-                new_det = matrix_diagonal_product(L) ** 2
+                new_det = sqr(matrix_diagonal_product(L))
             case LU():
                 U = client.outputs[-1]
                 new_det = matrix_diagonal_product(U)
@@ -106,6 +123,11 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         return None
 
     [det] = node.outputs
+    if new_det.type.ndim > det.type.ndim:
+        # A factorization found on an expanded alias of x carries the alias's
+        # dummy leading dims, which are broadcastable by construction
+        new_det = new_det.squeeze(axis=tuple(range(new_det.type.ndim - det.type.ndim)))
+    new_det = atleast_Nd(new_det, n=det.type.ndim).astype(det.type.dtype)
     copy_stack_trace(det, new_det)
     return [new_det]
 
@@ -127,6 +149,8 @@ def det_of_factorized_matrix(fgraph, node):
         for client, _ in fgraph.clients[det]
     )
 
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    x, _ = strip_left_expand_dims_and_transpose(x)
     x_node = x.owner
     if x_node is None:
         return None
@@ -169,6 +193,7 @@ def det_of_factorized_matrix(fgraph, node):
     if new_det is None:
         return None
 
+    new_det = atleast_Nd(new_det, n=det.type.ndim)
     copy_stack_trace(det, new_det)
     return [new_det]
 
@@ -195,9 +220,11 @@ def det_of_triangular(fgraph, node):
 @node_rewriter([det])
 def det_of_inv(fgraph, node):
     """Replace det(matrix_inverse(X)) with reciprocal(det(X))."""
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            return [1 / det(X)]
+            return [atleast_Nd(1 / det(X), n=node.outputs[0].type.ndim)]
 
 
 @register_specialize
@@ -219,7 +246,7 @@ def slogdet_specialization(fgraph, node):
         Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
     """
     dummy_replacements = {}
-    for client, _ in fgraph.clients[node.outputs[0]]:
+    for client, _ in clients_through_expand_dims(fgraph, node.outputs[0]):
         match (client.op, *client.outputs):
             # Check for sign(det)
             case (Elemwise(Sign()), sign):
@@ -227,7 +254,7 @@ def slogdet_specialization(fgraph, node):
 
             # Check for log(abs(det))
             case (Elemwise(Abs()), potential_log):
-                for client_2, _ in fgraph.clients[potential_log]:
+                for client_2, _ in clients_through_expand_dims(fgraph, potential_log):
                     match (client_2.op, *client_2.outputs):
                         case (Elemwise(Log()), log_abs_det):
                             dummy_replacements[log_abs_det] = "log_abs_det"
@@ -252,4 +279,7 @@ def slogdet_specialization(fgraph, node):
         "log_abs_det": log_abs_det_x,
         "log_det": log_det_x,
     }
-    return {k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()}
+    return {
+        k: atleast_Nd(slogdet_specialization_map[v], n=k.type.ndim).astype(k.type.dtype)
+        for k, v in dummy_replacements.items()
+    }

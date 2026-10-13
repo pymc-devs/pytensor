@@ -1,12 +1,11 @@
 import typing
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index
 
-from pytensor.gradient import grad_undefined
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.tensor.basic import arange, as_tensor_variable, switch
-from pytensor.tensor.math import eq, ge
+from pytensor.tensor.basic import _validate_axis_argument, arange, as_tensor_variable
 from pytensor.tensor.type import TensorType
 
 
@@ -28,51 +27,46 @@ def _parse_sort_args(kind: KIND | None, order, stable: bool | None) -> KIND:
     return kind
 
 
+def _validate_sort_axis(axis, op_name: str) -> int:
+    int_axis: int = _validate_axis_argument(axis, op_name)
+    if int_axis < 0:
+        raise ValueError(f"{op_name} axis must be non-negative, got {int_axis}.")
+    return int_axis
+
+
 class SortOp(Op):
     """
     This class is a wrapper for numpy sort function.
 
     """
 
-    __props__ = ("kind",)
+    __props__ = ("kind", "axis")
 
-    def __init__(self, kind: KIND):
+    def __init__(self, kind: KIND, axis: int):
         self.kind = kind
+        self.axis = _validate_sort_axis(axis, "Sort")
 
-    def make_node(self, input, axis=-1):
+    def make_node(self, input):
         input = as_tensor_variable(input)
-        axis = as_tensor_variable(axis, ndim=0, dtype=int)
-        if axis.type.numpy_dtype.kind != "i":
-            raise ValueError(
-                f"Sort axis must have an integer dtype, got {axis.type.dtype}"
-            )
+        if self.axis >= input.type.ndim:
+            raise np.exceptions.AxisError(self.axis, input.type.ndim)
         out_type = input.type()
-        return Apply(self, [input, axis], [out_type])
+        return Apply(self, [input], [out_type])
 
     def perform(self, node, inputs, output_storage):
-        a, axis = inputs
+        [a] = inputs
         z = output_storage[0]
-        z[0] = np.sort(a, axis, self.kind)
+        z[0] = np.sort(a, self.axis, self.kind)
 
     def infer_shape(self, node, inputs_shapes):
-        assert node.inputs[0].ndim == node.outputs[0].ndim
-        assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
 
     def pullback(self, inputs, outputs, output_grads):
-        a, axis = inputs
-        indices = self.__get_argsort_indices(a, axis)
-        inp_grad = output_grads[0][tuple(indices)]
-        axis_grad = grad_undefined(
-            self,
-            1,
-            axis,
-            "The gradient of sort is not defined "
-            "with respect to the integer axes itself",
-        )
-        return [inp_grad, axis_grad]
+        [a] = inputs
+        indices = self.__get_argsort_indices(a)
+        return [output_grads[0][tuple(indices)]]
 
-    def __get_expanded_dim(self, a, axis, i):
+    def __get_expanded_dim(self, a, i):
         index_shape = [1] * a.ndim
         index_shape[i] = a.shape[i]
         # it's a way to emulate
@@ -80,7 +74,7 @@ class SortOp(Op):
         index_val = arange(a.shape[i]).reshape(index_shape)
         return index_val
 
-    def __get_argsort_indices(self, a, axis):
+    def __get_argsort_indices(self, a):
         """
         Calculates indices which can be used to reverse sorting operation of
         "a" tensor along "axis".
@@ -94,19 +88,13 @@ class SortOp(Op):
 
         # The goal is to get gradient wrt input from gradient
         # wrt sort(input, axis)
-        idx = argsort(a, axis, kind=self.kind)
+        idx = argsort(a, self.axis, kind=self.kind)
         # rev_idx is the reverse of previous argsort operation
-        rev_idx = argsort(idx, axis, kind=self.kind)
-        indices = []
-        axis_data = switch(ge(axis.data, 0), axis.data, a.ndim + axis.data)
-        for i in range(a.ndim):
-            index_val = switch(
-                eq(i, axis_data),
-                rev_idx,
-                self.__get_expanded_dim(a, axis, i),
-            )
-            indices.append(index_val)
-        return indices
+        rev_idx = argsort(idx, self.axis, kind=self.kind)
+        return [
+            rev_idx if i == self.axis else self.__get_expanded_dim(a, i)
+            for i in range(a.ndim)
+        ]
 
     """
     def pushforward(self, inputs, outputs, eval_points):
@@ -129,9 +117,9 @@ def sort(
     ----------
     a: TensorVariable
         Tensor to be sorted
-    axis: TensorVariable
+    axis: int, optional
         Axis along which to sort. If None, the array is flattened before
-        sorting.
+        sorting. Must be a constant.
     kind: {'quicksort', 'mergesort', 'heapsort' 'stable'}, optional
         Sorting algorithm. Default is 'quicksort' unless stable is defined.
     order: list, optional
@@ -146,11 +134,12 @@ def sort(
 
     """
     kind = _parse_sort_args(kind, order, stable)
-
+    a = as_tensor_variable(a)
     if axis is None:
         a = a.flatten()
         axis = 0
-    return SortOp(kind)(a, axis)
+    axis = normalize_axis_index(_validate_axis_argument(axis, "sort"), a.type.ndim)
+    return SortOp(kind, axis)(a)
 
 
 class ArgSortOp(Op):
@@ -159,49 +148,37 @@ class ArgSortOp(Op):
 
     """
 
-    __props__ = ("kind",)
+    __props__ = ("kind", "axis")
 
-    def __init__(self, kind: KIND):
+    def __init__(self, kind: KIND, axis: int):
         self.kind = kind
+        self.axis = _validate_sort_axis(axis, "ArgSort")
 
-    def make_node(self, input, axis=-1):
+    def make_node(self, input):
         input = as_tensor_variable(input)
-        axis = as_tensor_variable(axis, ndim=0, dtype=int)
-        if axis.type.numpy_dtype.kind != "i":
-            raise ValueError(
-                f"ArgSort axis must have an integer dtype, got {axis.type.dtype}"
-            )
+        if self.axis >= input.type.ndim:
+            raise np.exceptions.AxisError(self.axis, input.type.ndim)
         return Apply(
             self,
-            [input, axis],
+            [input],
             [TensorType(dtype="int64", shape=input.type.shape)()],
         )
 
     def perform(self, node, inputs, output_storage):
-        a, axis = inputs
+        [a] = inputs
         z = output_storage[0]
         z[0] = np.asarray(
-            np.argsort(a, axis, self.kind),
+            np.argsort(a, self.axis, self.kind),
             dtype=node.outputs[0].dtype,
         )
 
     def infer_shape(self, node, inputs_shapes):
-        assert node.inputs[0].ndim == node.outputs[0].ndim
-        assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
 
     def pullback(self, inputs, outputs, output_grads):
         # No grad defined for integers.
-        inp, axis = inputs
-        inp_grad = inp.zeros_like()
-        axis_grad = grad_undefined(
-            self,
-            1,
-            axis,
-            "argsort is not defined for non-integer axes so"
-            " argsort(x, axis+eps) is undefined",
-        )
-        return [inp_grad, axis_grad]
+        [inp] = inputs
+        return [inp.zeros_like()]
 
     """
     def pushforward(self, inputs, outputs, eval_points):
@@ -228,7 +205,9 @@ def argsort(
 
     """
     kind = _parse_sort_args(kind, order, stable)
+    a = as_tensor_variable(a)
     if axis is None:
         a = a.flatten()
         axis = 0
-    return ArgSortOp(kind)(a, axis)
+    axis = normalize_axis_index(_validate_axis_argument(axis, "argsort"), a.type.ndim)
+    return ArgSortOp(kind, axis)(a)

@@ -1,4 +1,4 @@
-from pytensor.assumptions.alloc import eye_identity_rule
+from pytensor.assumptions.alloc import alloc_diag_rule, eye_identity_rule
 from pytensor.assumptions.core import (
     POSITIVE_DEFINITE,
     FactState,
@@ -27,6 +27,7 @@ register_assumption(POSITIVE_DEFINITE, Eye)(eye_identity_rule)
 
 
 @register_assumption(POSITIVE_DEFINITE, AllocDiag)
+@alloc_diag_rule
 def _alloc_diag(key, op, feature, fgraph, node, input_states):
     """``diag(v)`` is positive definite iff it lies on the main diagonal and every
     element of ``v`` is provably positive."""

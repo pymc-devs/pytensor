@@ -20,10 +20,10 @@ def numba_funcify_SortOp(op, node, **kwargs):
             UserWarning,
         )
 
-    @numba_basic.numba_njit
-    def sort_f(a, axis):
-        axis = axis.item()
+    axis = op.axis
 
+    @numba_basic.numba_njit
+    def sort_f(a):
         a_swapped = np.swapaxes(a, axis, -1)
         a_sorted = np.sort(a_swapped)
         a_sorted_swapped = np.swapaxes(a_sorted, -1, axis)
@@ -47,10 +47,10 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             UserWarning,
         )
 
-    @numba_basic.numba_njit
-    def argort_f(X, axis):
-        axis = axis.item()
+    axis = op.axis
 
+    @numba_basic.numba_njit
+    def argsort_f(X):
         Y = np.swapaxes(X, axis, 0)
         result = np.empty_like(Y, dtype="int64")
 
@@ -62,4 +62,4 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
         result = np.swapaxes(result, 0, axis)
         return result
 
-    return argort_f
+    return argsort_f
