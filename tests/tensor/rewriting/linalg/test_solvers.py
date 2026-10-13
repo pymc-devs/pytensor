@@ -36,7 +36,7 @@ from pytensor.tensor.type import matrix, tensor
 from tests.unittest_tools import assert_equal_computations
 
 
-def test_generic_solve_to_solve_triangular():
+def test_cholesky_factor_solve_becomes_triangular():
     A = matrix("A")
     x = matrix("x")
 
