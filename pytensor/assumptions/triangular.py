@@ -1,5 +1,6 @@
 from pytensor.assumptions.alloc import (
     alloc_diag_band_is_zero,
+    alloc_diag_rule,
     alloc_has_zero_off_diagonal,
     eye_band_is_empty,
 )
@@ -56,6 +57,7 @@ def _eye_upper(key, op, feature, fgraph, node, input_states):
 
 
 @register_assumption(LOWER_TRIANGULAR, AllocDiag)
+@alloc_diag_rule
 def _alloc_diag_lower(key, op, feature, fgraph, node, input_states):
     # offset <= 0 places values on or below the main diagonal; a positive
     # offset puts them strictly above, so the result is not lower-triangular
@@ -66,6 +68,7 @@ def _alloc_diag_lower(key, op, feature, fgraph, node, input_states):
 
 
 @register_assumption(UPPER_TRIANGULAR, AllocDiag)
+@alloc_diag_rule
 def _alloc_diag_upper(key, op, feature, fgraph, node, input_states):
     # offset >= 0 places values on or above the main diagonal; a negative
     # offset puts them strictly below, so the result is not upper-triangular
