@@ -1210,4 +1210,3 @@ def test_perform_raises_with_too_many_operands():
 
     with pytest.raises(NotImplementedError, match="more than 32 operands"):
         op.perform(node, [np.ones(3) for _ in range(40)], [[None]])
-
