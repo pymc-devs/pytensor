@@ -97,5 +97,6 @@ module_functions
 math
 linalg
 random
+gradient
 type
 :::
