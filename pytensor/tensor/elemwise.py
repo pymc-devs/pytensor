@@ -19,8 +19,8 @@ from pytensor.link.c.op import COp, OpenMPOp
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
+from pytensor.scalar.basic import Add, Mul, upcast
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -706,11 +706,7 @@ class Elemwise(OpenMPOp):
 
         # Variadic Add/Mul can fold their binary NumPy ufunc instead of using `np.frompyfunc`
         folds_binary_nfunc = (
-            self.scalar_op.nin == -1
-            and len(node.inputs) > 2
-            and getattr(self, "nfunc_spec", None) is not None
-            and self.nfunc_spec[1] == 2
-            and self.nfunc_spec[2] == 1
+            isinstance(self.scalar_op, Add | Mul) and len(node.inputs) > 2
         )
 
         if (
@@ -791,12 +787,7 @@ class Elemwise(OpenMPOp):
             # since it sometimes requires resizing. Doing this
             # optimization is probably not worth the effort, since we
             # should normally run the C version of the Op.
-        elif (
-            self.nfunc
-            and self.scalar_op.nin == -1
-            and self.nfunc_spec[1] == 2
-            and self.nfunc_spec[2] == 1
-        ):
+        elif self.nfunc and isinstance(self.scalar_op, Add | Mul):
             # Variadic Add/Mul: much faster than `np.frompyfunc` on the scalar op's Python `impl`
             nfunc = self.nfunc
 
