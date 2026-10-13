@@ -93,23 +93,15 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([blockwise_of(Solve)])
+@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="pos"))])
 def psd_solve_to_chol_solve(fgraph, node):
-    """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
-    core_op = node.op.core_op
-    assume_a = core_op.assume_a
+    """Rewrite solve(A, b, assume_a='pos') -> triangular solves via Cholesky."""
+    b_ndim = node.op.core_op.b_ndim
     A, b = node.inputs
-    # Facts only upgrade gen and sym solves; a declared structure like
-    # tridiagonal already has a cheaper path than a dense Cholesky, and
-    # get_assume_a ranks any tridiagonal fact above pos for the same reason
-    if assume_a in ("gen", "sym"):
-        assume_a = get_assume_a(fgraph, A)
-    if assume_a == "pos":
-        b_ndim = core_op.b_ndim
-        L = cholesky(A)
-        Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
-        x = solve_triangular(L.mT, Li_b, lower=False, b_ndim=b_ndim)
-        return [x]
+    L = cholesky(A)
+    Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
+    x = solve_triangular(L.mT, Li_b, lower=False, b_ndim=b_ndim)
+    return [x]
 
 
 @register_specialize
@@ -160,25 +152,29 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
 
 @register_stabilize
 @register_canonicalize
-@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="gen"))])
+@node_rewriter([blockwise_of(Solve)])
 def generic_solve_to_structured_form(fgraph, node):
-    """Upgrade solve(A, b, assume_a='gen') based on known structure of A.
+    """Upgrade a gen, sym or her solve(A, b) based on known structure of A.
 
     Priority order (most specialized first):
+    - TRIDIAGONAL -> solve(assume_a='tridiagonal')
     - LOWER_TRIANGULAR -> solve_triangular(lower=True)
     - UPPER_TRIANGULAR -> solve_triangular(lower=False)
-    - TRIDIAGONAL -> solve(assume_a='tridiagonal')
     - POSITIVE_DEFINITE -> solve(assume_a='pos')
     - SYMMETRIC -> solve(assume_a='sym')
     """
-    b_ndim = node.op.core_op.b_ndim
-    A, b = node.inputs
-
-    assume_a = get_assume_a(fgraph, A)
-    if assume_a == "gen":
+    core_op = node.op.core_op
+    declared = core_op.assume_a
+    if declared not in ("gen", "sym", "her"):
         return None
 
-    return [solve(A, b, assume_a=assume_a, b_ndim=b_ndim)]
+    A, b = node.inputs
+    assume_a = get_assume_a(fgraph, A)
+    # sym and her solves cost the same, so a symmetric fact only refines gen
+    if assume_a == "gen" or (assume_a == "sym" and declared != "gen"):
+        return None
+
+    return [solve(A, b, assume_a=assume_a, b_ndim=core_op.b_ndim)]
 
 
 @register_stabilize

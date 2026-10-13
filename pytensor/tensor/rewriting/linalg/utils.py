@@ -53,6 +53,8 @@ def matrix_diagonal_product(x):
 
 def get_assume_a(fgraph, A):
     """Return the most-specific ``solve`` ``assume_a`` for ``A`` from tags and assumptions."""
+    if check_assumption(fgraph, A, TRIDIAGONAL):
+        return "tridiagonal"
     if getattr(A.tag, "lower_triangular", False) or check_assumption(
         fgraph, A, LOWER_TRIANGULAR
     ):
@@ -61,8 +63,6 @@ def get_assume_a(fgraph, A):
         fgraph, A, UPPER_TRIANGULAR
     ):
         return "upper triangular"
-    if check_assumption(fgraph, A, TRIDIAGONAL):
-        return "tridiagonal"
     if getattr(A.tag, "psd", None) is True or check_assumption(
         fgraph, A, POSITIVE_DEFINITE
     ):
