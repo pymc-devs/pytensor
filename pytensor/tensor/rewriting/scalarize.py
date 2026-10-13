@@ -34,6 +34,7 @@ from pytensor.graph.utils import InconsistencyError
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Join,
+    ScalarFromTensor,
     TensorFromScalar,
     join,
     scalar_from_tensor,
@@ -82,7 +83,7 @@ _SCALAR_CONSUMERS = (Join, Elemwise, ScalarizedElemwise)
 
 def _scalar_behind(var):
     """The scalar behind a ``TensorFromScalar`` (through free views), or None."""
-    if var.owner is not None and isinstance(var.owner.op, DimShuffle):
+    while var.owner is not None and isinstance(var.owner.op, DimShuffle):
         var = var.owner.inputs[0]
     if var.owner is not None and isinstance(var.owner.op, TensorFromScalar):
         return var.owner.inputs[0]
@@ -121,6 +122,10 @@ class Scalarize(GraphRewriter):
                 replacement = self._swallow_join(node)
             elif isinstance(op, Subtensor) and node.outputs[0].type.ndim == 0:
                 replacement = self._emit_producer(fgraph, node, ScalarSubtensor)
+            elif isinstance(op, ScalarFromTensor):
+                scalar = _scalar_behind(node.inputs[0])
+                if scalar is not None:
+                    replacement = [(node.outputs[0], scalar)]
             elif isinstance(op, Elemwise):
                 scalars = [_scalar_behind(inp) for inp in node.inputs]
                 single = len(node.outputs) == 1
@@ -230,6 +235,18 @@ class Scalarize(GraphRewriter):
         # array op but carry the scalar inputs as ScalarType, so their 0-d boxes
         # vanish. The inner graph re-boxes each scalar with tensor_from_scalar so
         # it stays a faithful Elemwise; only Numba passes them as constant_inputs.
+        if all(all(out.type.broadcastable) for out in node.outputs) and all(
+            all(inp.type.broadcastable) for inp in node.inputs
+        ):
+            # A size-one slice or tensor input can be read directly; it does not
+            # require an array-valued loop or boxed intermediate outputs.
+            values = [
+                scalar_from_tensor(inp.squeeze()) if scalar is None else scalar
+                for inp, scalar in zip(node.inputs, scalars, strict=True)
+            ]
+            return Scalarize._emit_scalar_elemwise(
+                node.op.scalar_op, node.outputs, values
+            )
         sources = [
             (inp, False) if scalar is None else (scalar, True)
             for inp, scalar in zip(node.inputs, scalars, strict=True)
@@ -257,19 +274,21 @@ class Scalarize(GraphRewriter):
             else:
                 sources.append((scalar, True))
                 found = True
-        if not found:
-            return None
-        if all(is_scalar for _, is_scalar in sources):
-            # Nothing is an array any more, so there is no vectorized loop left to
-            # run: this is a pure scalar computation and only its outputs get boxed.
-            # (A wider output would have no array to take its shape from.)
-            if not all(all(out.type.broadcastable) for out in node.outputs):
-                return None
+        if all(all(out.type.broadcastable) for out in node.outputs) and all(
+            is_scalar or all(source.type.broadcastable) for source, is_scalar in sources
+        ):
+            # Scalar values and statically size-one arrays need no vectorized
+            # loop; only the outputs get boxed.
             return Scalarize._emit_scalar_elemwise(
                 elemwise_node.op.scalar_op,
                 node.outputs,
-                [source for source, _ in sources],
+                [
+                    source if is_scalar else scalar_from_tensor(source.squeeze())
+                    for source, is_scalar in sources
+                ],
             )
+        if not found or all(is_scalar for _, is_scalar in sources):
+            return None
         ndims = [inp.type.ndim for inp in elemwise_node.inputs]
         return Scalarize._build_scalarized(
             elemwise_node.op, node.outputs, sources, ndims
