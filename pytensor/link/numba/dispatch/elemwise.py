@@ -1445,7 +1445,7 @@ def numba_funcify_Dot(op, node, **kwargs):
         # their leading dimension, where `np.dot` would copy them first.
         @numba_basic.numba_njit
         def product(x, y, out):
-            return _gemm(x, y, out, False, False)
+            return _gemm(x, y, out)
 
     else:
 
@@ -1505,7 +1505,7 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
                 out = np.empty(shape, dtype=dtype)
             for i in range(out.shape[0]):
                 # Writes into out[i] directly and reads an F-ordered slice without a copy
-                _gemm(x[i], y[i], out[i], False, False)
+                _gemm(x[i], y[i], out[i])
 
             return out
 

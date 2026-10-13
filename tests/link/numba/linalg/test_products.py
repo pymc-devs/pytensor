@@ -95,16 +95,16 @@ class TestExpm:
 
 
 @numba_njit(final_function=True)
-def _gemm_jit(A, B, C, transa, transb):
-    return _gemm(A, B, C, transa, transb)
+def _gemm_jit(A, B, C):
+    return _gemm(A, B, C)
 
 
 @numba_njit(final_function=True)
 def _gemm_buffers_jit(A, B, C):
     A, B, C = _normalize_gemm_strides(A, B, C)
-    A, _, _ = _blas_operand(A, False)
-    B, _, _ = _blas_operand(B, False)
-    C, _, _ = _blas_operand(C, False)
+    A, _, _ = _blas_operand(A)
+    B, _, _ = _blas_operand(B)
+    C, _, _ = _blas_operand(C)
     return A, B, C
 
 
@@ -121,10 +121,8 @@ def test_gemm_ignores_incoming_C(poison, shape):
     B = np.ascontiguousarray(rng.normal(size=(k, n)))
     uninitialized = np.full((m, n), poison)
 
-    np.testing.assert_allclose(_gemm(A, B, uninitialized.copy(), False, False), A @ B)
-    np.testing.assert_allclose(
-        _gemm_jit(A, B, uninitialized.copy(), False, False), A @ B
-    )
+    np.testing.assert_allclose(_gemm(A, B, uninitialized.copy()), A @ B)
+    np.testing.assert_allclose(_gemm_jit(A, B, uninitialized.copy()), A @ B)
 
 
 def _matrix_views(rows, cols):
@@ -155,7 +153,7 @@ def test_gemm_reads_strided_operands(layout):
     A = _matrix_views(6, 5)[layout]
     B = _matrix_views(5, 4)[layout]
     C = _matrix_views(6, 4)[layout]
-    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False), A @ B)
+    np.testing.assert_allclose(_gemm_jit(A, B, C), A @ B)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64", "complex64", "complex128"])
@@ -181,9 +179,9 @@ def test_gemm_vector_strides(dtype, transpose):
                 x = x_storage[::step]
                 y = np.full(8, np.nan, dtype=dtype)[::step]
                 if transpose:
-                    _gemm_jit(x[None], A, y[None], False, True)
+                    _gemm_jit(x[None], A.T, y[None])
                 else:
-                    _gemm_jit(A, x[:, None], y[:, None], False, False)
+                    _gemm_jit(A, x[:, None], y[:, None])
                 np.testing.assert_allclose(y, A @ x, rtol=rtol, atol=1e-6)
 
     # Dot is unconjugated, including when both vectors have non-unit strides.
@@ -192,7 +190,7 @@ def test_gemm_vector_strides(dtype, transpose):
     out = np.full((1, 1), np.nan, dtype=dtype)
     expected = a @ b
     np.testing.assert_allclose(
-        _gemm_jit(a, b, out, False, False),
+        _gemm_jit(a, b, out),
         expected,
         rtol=rtol,
         atol=1e-6,
@@ -200,17 +198,18 @@ def test_gemm_vector_strides(dtype, transpose):
     a, b = b, a
     out = np.full((6, 6), np.nan, dtype=dtype)[::-2, ::2]
     np.testing.assert_allclose(
-        _gemm_jit(a, b, out, False, False),
+        _gemm_jit(a, b, out),
         a @ b,
         rtol=rtol,
         atol=1e-6,
     )
 
 
-def test_gemm_cancels_reversals():
-    A_base = rng.normal(size=(4, 3))
-    B_base = rng.normal(size=(3, 5))
-    C_base = rng.normal(size=(4, 5))
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_gemm_cancels_reversals(order):
+    A_base = np.asarray(rng.normal(size=(4, 3)), order=order)
+    B_base = np.asarray(rng.normal(size=(3, 5)), order=order)
+    C_base = np.asarray(rng.normal(size=(4, 5)), order=order)
     for row_step in [1, -1]:
         for inner_step in [1, -1]:
             for col_step in [1, -1]:
@@ -221,22 +220,8 @@ def test_gemm_cancels_reversals():
                     _gemm_buffers_jit(A, B, C), (A, B, C), strict=True
                 ):
                     assert np.shares_memory(work, original)
-                for transa, transb in [
-                    (False, False),
-                    (True, False),
-                    (False, True),
-                    (True, True),
-                ]:
-                    expected = A @ B
-                    result = _gemm_jit(
-                        A.T if transa else A,
-                        B.T if transb else B,
-                        C,
-                        transa,
-                        transb,
-                    )
-                    assert np.shares_memory(result, C)
-                    np.testing.assert_allclose(result, expected)
+                _gemm_jit(A, B, C)
+                np.testing.assert_allclose(C, A @ B)
 
 
 @pytest.mark.parametrize(
@@ -275,7 +260,7 @@ def test_gemm_copies_cheapest_operands(
 
     for work, original, in_place in zip(works, (A, B, C), read_in_place, strict=True):
         assert np.shares_memory(work, original) == bool(in_place)
-    np.testing.assert_allclose(_gemm_jit(A, B, C, False, False), A @ B)
+    np.testing.assert_allclose(_gemm_jit(A, B, C), A @ B)
 
 
 @pytest.mark.parametrize(
@@ -286,7 +271,7 @@ def test_gemm_empty(shape):
     A = np.empty((m, k))
     B = np.empty((k, n))
     C = np.full((m, n), np.nan)
-    np.testing.assert_array_equal(_gemm_jit(A, B, C, False, False), np.zeros((m, n)))
+    np.testing.assert_array_equal(_gemm_jit(A, B, C), np.zeros((m, n)))
 
 
 @pytest.mark.parametrize("operand", [1, 2], ids=["B", "C"])
@@ -294,7 +279,7 @@ def test_gemm_requires_matching_dtypes(operand):
     arrays = [np.ones((3, 2)), np.ones((2, 4)), np.ones((3, 4))]
     arrays[operand] = arrays[operand].astype("float32")
     with pytest.raises(numba.TypingError, match="gemm only supported for float64"):
-        _gemm_jit(*arrays, False, False)
+        _gemm_jit(*arrays)
 
 
 @pytest.mark.parametrize("batched", [False, True])

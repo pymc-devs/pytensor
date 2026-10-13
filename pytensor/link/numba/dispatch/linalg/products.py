@@ -336,25 +336,21 @@ def numba_funcify_Expm(op, node, **kwargs):
     return expm, cache_version
 
 
-def _gemm(A, B, C, transa=False, transb=False):
-    r"""
-    Overwrite ``C`` with :math:`op(A) \, op(B)`.
+def _gemm(A, B, C):
+    """
+    Overwrite ``C`` with the matrix product of ``A`` and ``B``.
 
     Parameters
     ----------
     A, B, C : ndarray
         2-d arrays of one dtype. ``C`` is the output and is returned. Its incoming
         contents are never read.
-    transa, transb : bool, optional
-        Read ``A`` or ``B`` transposed. Both default to False.
 
     Returns
     -------
     C : ndarray
     """
-    op_a = A.T if transa else A
-    op_b = B.T if transb else B
-    C[:] = op_a @ op_b
+    C[:] = A @ B
     return C
 
 
@@ -382,19 +378,16 @@ def _row_major_ld(X):
 
 
 @numba_basic.numba_njit(inline="always")
-def _blas_operand(X, trans):
-    """Buffer, transpose flag and leading dimension for one gemm operand.
-
-    A row-major buffer is its own transpose to BLAS, so its flag flips. A layout
-    with no unit-stride axis is copied to C order.
-    """
+def _blas_operand(X):
+    """Return the buffer, BLAS transpose flag and leading dimension that read ``X``."""
     ld = _column_major_ld(X)
     if ld:
-        return X, trans, np.int32(ld)
+        return X, False, np.int32(ld)
+    # A row-major buffer is its own transpose to BLAS
     ld = _row_major_ld(X)
     if ld:
-        return X, not trans, np.int32(ld)
-    return np.ascontiguousarray(X), not trans, np.int32(max(1, X.shape[1]))
+        return X, True, np.int32(ld)
+    return np.ascontiguousarray(X), True, np.int32(max(1, X.shape[1]))
 
 
 # Stack slots; a one-element array would cost a heap allocation per call
@@ -493,7 +486,7 @@ def _normalize_gemm_strides(A, B, C):
 
 
 @overload(_gemm)
-def _gemm_impl(A, B, C, transa, transb):
+def _gemm_impl(A, B, C):
     ensure_blas()
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
     _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
@@ -503,12 +496,8 @@ def _gemm_impl(A, B, C, transa, transb):
     dtype = A.dtype
     scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
 
-    def impl(A, B, C, transa, transb):
+    def impl(A, B, C):
         out = C
-        if transa:
-            A = A.T
-        if transb:
-            B = B.T
         M = np.int32(A.shape[0])
         K = np.int32(A.shape[1])
         N = np.int32(B.shape[1])
@@ -527,8 +516,8 @@ def _gemm_impl(A, B, C, transa, transb):
             return out
 
         A, B, C = _normalize_gemm_strides(A, B, C)
-        A_work, A_trans, LDA = _blas_operand(A, False)
-        B_work, B_trans, LDB = _blas_operand(B, False)
+        A_work, A_trans, LDA = _blas_operand(A)
+        B_work, B_trans, LDB = _blas_operand(B)
 
         # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
         # swap places and each flag flips. A C with no unit-stride axis goes through
