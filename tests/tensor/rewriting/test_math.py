@@ -3825,7 +3825,7 @@ class TestLocalCAReduceOfDimShuffle:
             ((2, 0, 1), (0, 2)),
             ((0, "x", 2, 1), (1, 3)),
             ((2, 0, "x", 1), (0, 2)),
-            ((2, "x", 1, 0), (1, 3)),
+            ((2, "x", 1, 0), (0, 1, 2)),
         ],
     )
     def test_removes_dimshuffle_when_kept_dims_in_order(self, shuffle, axis):

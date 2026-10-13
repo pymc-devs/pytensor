@@ -2306,7 +2306,7 @@ def local_careduce_of_dimshuffle(fgraph, node):
 
     ``CAReduce{axis}(DimShuffle(x)) -> CAReduce{new_axis}(x)``
 
-    The reduced dimensions can be in any order, and `DimShuffle` can add or drop
+    The reduced dimensions can be in any order, and `DimShuffle` can add
     broadcastable dimensions among them, because the reduction combines all their
     elements anyway. The dimensions that are kept must reach the output in the same
     relative order as in ``x``, and must not be new broadcastable dimensions.
@@ -2322,8 +2322,13 @@ def local_careduce_of_dimshuffle(fgraph, node):
     reduced = set(range(shuffled_ndim)) if axis is None else set(axis)
     new_order = dimshuffle.new_order
 
-    # Dimensions dropped by the `DimShuffle` are broadcastable, reducing them is a no-op
-    new_axis = set(range(x.type.ndim)) - set(dimshuffle.shuffle)
+    if len(dimshuffle.shuffle) != x.type.ndim:
+        # Dropping dimensions is left to `local_reduce_broadcastable`, which cuts
+        # reductions over broadcastable dimensions by dropping them with a `DimShuffle`.
+        # Reducing over the dropped dimensions here would undo that and loop.
+        return None
+
+    new_axis = set()
     kept = []
     for out_dim, in_dim in enumerate(new_order):
         if out_dim in reduced:
