@@ -3810,14 +3810,15 @@ class TestLocalReduce:
 
     def test_local_reduce_broadcast_some_initial(self):
         # Dropping the broadcastable axis must keep `initial`, the other axis can be empty
-        x = TensorType("float64", shape=(1, None))()
-        out = pt_max(x, axis=[0, 1], initial=-np.inf)
-        fg = FunctionGraph([x], [out], clone=False)
-        [new_out] = local_reduce_broadcastable.transform(fg, out.owner)
-        assert new_out.owner.op == Max(axis=(0,), initial=True)
-
-        f = function([x], out, mode="FAST_COMPILE")
-        assert f(np.zeros((1, 0))) == -np.inf
+        x = TensorType("float64", shape=(1, None))("x")
+        result = RewriteTester(
+            [x],
+            [pt_max(x, axis=[0, 1], initial=-np.inf)],
+            include=None,
+            custom_rewrite=local_reduce_broadcastable,
+        )
+        result.assert_graph(pt_max(x.dimshuffle(1), axis=0, initial=-np.inf))
+        result.assert_eval(np.zeros((1, 0)))
 
 
 class TestReduceJoin:
