@@ -36,7 +36,7 @@ from pytensor.tensor.type import matrix, tensor
 from tests.unittest_tools import assert_equal_computations
 
 
-def test_generic_solve_to_solve_triangular():
+def test_cholesky_factor_solve_becomes_triangular():
     A = matrix("A")
     x = matrix("x")
 
@@ -77,19 +77,39 @@ def test_generic_solve_to_solve_triangular():
         )
 
 
-def test_psd_solve_with_chol():
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+def test_psd_solve_with_chol(b_ndim):
     """Test that solve(A, b) with PSD A gets rewritten to cholesky + cho_solve."""
     A = matrix("A")
-    b = matrix("b")
+    b = matrix("b") if b_ndim == 2 else pt.vector("b")
     A_psd = assume(A, positive_definite=True)
-    out = pt.linalg.solve(A_psd, b)
+    out = pt.linalg.solve(A_psd, b, b_ndim=b_ndim)
 
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
     L = cholesky(A_psd)
-    expected = cho_solve((L, True), b, b_ndim=2)
+    expected = cho_solve((L, True), b, b_ndim=b_ndim)
 
     assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="sharing needs stabilize plus a later merge pass",
+)
+def test_psd_vector_solve_shares_cholesky():
+    A = matrix("A", shape=(5, 5))
+    b = pt.vector("b", shape=(5,))
+
+    logdet = 2 * pt.log(pt.diagonal(cholesky(A))).sum()
+    quad = b @ pt.linalg.solve(A, b, assume_a="pos", b_ndim=1)
+    f = pytensor.function([A, b], logdet + quad)
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op) for node in f.maker.fgraph.apply_nodes
+    ]
+    assert not any(isinstance(op, Solve) for op in core_ops)
+    assert sum(isinstance(op, Cholesky) for op in core_ops) == 1
 
 
 def test_paired_triangular_solves_to_cho_solve():

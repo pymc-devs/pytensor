@@ -16,6 +16,7 @@ from numba.core.cgutils import get_item_pointer2
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
+from pytensor import config
 from pytensor.link.numba.dispatch._llvmlite_self_ref import (
     ensure_self_ref_metadata_support,
 )
@@ -28,17 +29,25 @@ def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
-_jit_options = {
-    "fastmath": {
-        "arcp",  # Allow Reciprocal
-        "contract",  # Allow floating-point contraction
-        "afn",  # Approximate functions
-        "reassoc",
-        "nsz",  # TODO Do we want this one?
-    },
-    "no_cpython_wrapper": True,
-    "no_cfunc_wrapper": True,
-}
+def _jit_options() -> dict[str, Any]:
+    """Jit options for the overloads that call `_vectorized`.
+
+    A function, not a constant, so that `fastmath` follows `config.numba__fastmath`
+    when the overload is defined, as in `numba_njit`.
+    """
+    return {
+        "fastmath": {
+            "arcp",  # Allow Reciprocal
+            "contract",  # Allow floating-point contraction
+            "afn",  # Approximate functions
+            "reassoc",
+            "nsz",  # TODO Do we want this one?
+        }
+        if config.numba__fastmath
+        else False,
+        "no_cpython_wrapper": True,
+        "no_cfunc_wrapper": True,
+    }
 
 
 def _decode_literal(val, name):
@@ -1058,7 +1067,7 @@ def _combine_scalar_reduction(builder, op_name, dtype, left, right):
     return builder.select(choose_right, right, left)
 
 
-@numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
+@numba.extending.intrinsic(prefer_literal=True)
 def _vectorized(
     typingctx,
     core_func,

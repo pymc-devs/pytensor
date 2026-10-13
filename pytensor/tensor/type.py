@@ -99,6 +99,13 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             )
             shape = broadcastable
 
+        if shape is None:
+            raise TypeError(
+                "TensorType requires a `shape`, for example `shape=(None, 3)` for a "
+                "matrix with an unknown number of rows and 3 columns, or `shape=()` "
+                "for a scalar."
+            )
+
         if dtype == "floatX":
             self.dtype = config.floatX
         else:

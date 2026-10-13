@@ -1,12 +1,14 @@
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import IntFlag, auto
 from typing import Any
 
 from pytensor.graph import Apply, FunctionGraph, Op
+from pytensor.graph.basic import Variable
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.traversal import walk_toposort
+from pytensor.tensor import TensorLike
 from pytensor.tensor.variable import TensorConstant
 
 
@@ -41,15 +43,130 @@ class FactState(IntFlag):
 class AssumptionKey:
     """Identifies a named structural property (e.g. "diagonal" or "triangular").
 
-    ``short_name`` is an abbreviated label used by ``debugprint(print_assumptions=True)``;
-    it falls back to ``name`` when empty.
+    Constructing a key registers it in :data:`KEY_REGISTRY` and installs every rule
+    declared with :func:`register_universal_assumption` for it, which is all a
+    downstream library must do to add a property of its own.
+
+    ``name`` is the key's identity: it is what :func:`assume` accepts as a keyword and
+    what two keys may not share unless they are identical in every field.
+
+    Parameters
+    ----------
+    name : str
+        Unique identifier for the property, also the keyword :func:`assume` accepts.
+    short_name : str, optional
+        Abbreviated label used by ``debugprint(print_assumptions=True)``. Falls back
+        to ``name`` when empty.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import pytensor.tensor as pt
+        from pytensor.assumptions import AssumptionKey, FactState, register_assumption
+        from pytensor.tensor.elemwise import Elemwise
+
+        TOEPLITZ = AssumptionKey("toeplitz", short_name="toep")
+
+        x = TOEPLITZ.assume(pt.matrix("x"))
+        TOEPLITZ.holds(x)  # True
+        TOEPLITZ.holds(pt.exp(x))  # False -- no rule teaches it about Elemwise yet
+
+    A key answers only what its rules can derive, so teach it the Ops it should see
+    through. Constant diagonals survive an entrywise op, unless an input broadcasts
+    along one of the last two axes while varying along the other:
+
+    .. code-block:: python
+
+        @register_assumption(TOEPLITZ, Elemwise)
+        def _elemwise_is_toeplitz(key, op, feature, fgraph, node, input_states):
+            entrywise = all(
+                feature.check(inp, key)  # the operand is itself Toeplitz
+                or all(inp.type.broadcastable[-2:])  # or broadcasts a single value
+                for inp in node.inputs
+            )
+            return [FactState.TRUE if entrywise else FactState.UNKNOWN]
+
+
+        TOEPLITZ.holds(pt.exp(x))  # True
+        TOEPLITZ.holds(x + x)  # True
+        TOEPLITZ.holds(x + pt.vector("v"))  # False -- the row varies along one axis
+
+    See :func:`register_matrix_property_rules` for the rules a property of the
+    trailing two axes needs to survive transposes, reshapes, and indexing.
     """
 
     name: str
     short_name: str = ""
 
+    def __post_init__(self) -> None:
+        registered = KEY_REGISTRY.get(self.name)
+        if registered is not None:
+            if registered != self:
+                raise ValueError(
+                    f"An assumption named {self.name!r} is already registered as "
+                    f"{registered!r} with different metadata. Assumption names are "
+                    f"global identifiers; pick a distinct one."
+                )
+            # Re-creating an identical key (a module imported twice) is a no-op:
+            # equal keys hash alike, so the installed rules already apply to it.
+            return
+
+        KEY_REGISTRY[self.name] = self
+        for op_types, fn in UNIVERSAL_RULES:
+            _install_rule(self, op_types, fn)
+
+    def __reduce__(self):
+        # Unpickle through the constructor: the default dataclass path skips __init__,
+        # leaving a key that is in no registry and has no rules installed -- not even
+        # the one that reads declarations back off SpecifyAssumptions.
+        return type(self), (self.name, self.short_name)
+
     def __repr__(self) -> str:
         return self.name
+
+    def assume(self, x: TensorLike, *, state: bool = True):
+        """Return a view of *x* declaring this assumption.
+
+        Parameters
+        ----------
+        x : tensor-like
+            The input to annotate.
+        state : bool, optional
+            Whether to assert the property holds or that it does not. Default True.
+
+        Returns
+        -------
+        out : TensorVariable
+            A view of *x* with the assumption attached.
+        """
+        from pytensor.assumptions.specify import SpecifyAssumptions
+
+        fact = FactState.TRUE if state else FactState.FALSE
+        return SpecifyAssumptions({self: fact})(x)
+
+    def holds(self, var: Variable, fgraph: FunctionGraph | None = None) -> bool:
+        """Return True iff this assumption is provably TRUE for *var*.
+
+        Parameters
+        ----------
+        var : Variable
+            The variable to ask about.
+        fgraph : FunctionGraph, optional
+            Graph to resolve the question in. Pass one when asking about several
+            variables of the same graph: without it a throwaway ``FunctionGraph`` is
+            built per call, which walks the ancestors of *var* and discards the
+            inference cache afterwards.
+
+        Returns
+        -------
+        holds : bool
+            True when the property is known to hold, False when it is known not to
+            hold or is simply unknown.
+        """
+        if fgraph is None:
+            fgraph = FunctionGraph(outputs=[var], clone=False)
+        return check_assumption(fgraph, var, self)
 
 
 class ConflictingAssumptionsError(ValueError):
@@ -71,6 +188,73 @@ InferFactFn = Callable[
 # The global inference registry maps (AssumptionKey, Op type) pairs to lists of inference functions.
 # Rules are tried in registration order; the first to return TRUE wins.
 ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], list[InferFactFn]] = {}
+
+# Every AssumptionKey ever constructed, by name. Downstream libraries join the system
+# by constructing a key; nothing else is required of them. This resolves the names
+# :func:`assume` takes as keywords -- graphs themselves carry keys, not names, so
+# nothing downstream of graph construction needs to look anything up here.
+KEY_REGISTRY: dict[str, AssumptionKey] = {}
+
+# Rules that hold for every key regardless of what the key means, as (op_types, fn)
+# pairs. Kept separately from ASSUMPTION_INFER_REGISTRY so that keys created *after*
+# the rule is declared still receive it -- see AssumptionKey.__post_init__.
+UNIVERSAL_RULES: list[tuple[tuple[type, ...], InferFactFn]] = []
+
+
+def _install_rule(
+    key: AssumptionKey, op_types: tuple[type, ...], fn: InferFactFn
+) -> None:
+    for op_type in op_types:
+        ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), []).append(fn)
+
+
+def register_universal_assumption(
+    *op_types: type,
+) -> Callable[[InferFactFn], InferFactFn]:
+    """Decorator registering an inference rule that applies to *every* assumption key.
+
+    Use this for rules that are indifferent to what the property means -- an Op that
+    forwards its input unchanged, or one that delegates to another Op. The rule is
+    installed for keys that already exist and for every key created later.
+
+    Parameters
+    ----------
+    *op_types : type
+        Op classes the rule applies to.
+    """
+
+    def decorator(fn: InferFactFn) -> InferFactFn:
+        UNIVERSAL_RULES.append((op_types, fn))
+        for key in KEY_REGISTRY.values():
+            _install_rule(key, op_types, fn)
+        return fn
+
+    return decorator
+
+
+class KeyRegistryView:
+    """Live, read-only view of every registered :class:`AssumptionKey`."""
+
+    __slots__ = ()
+
+    def __iter__(self) -> Iterator[AssumptionKey]:
+        # Snapshot: a rule that constructs a key would otherwise resize the registry
+        # mid-iteration.
+        return iter(tuple(KEY_REGISTRY.values()))
+
+    def __contains__(self, value: object) -> bool:
+        # Only a key can be registered, so the isinstance both guards the ``name``
+        # access and lets the lookup be a hit rather than a scan.
+        return (
+            isinstance(value, AssumptionKey) and KEY_REGISTRY.get(value.name) == value
+        )
+
+    def __len__(self) -> int:
+        return len(KEY_REGISTRY)
+
+    def __repr__(self) -> str:
+        return f"({', '.join(KEY_REGISTRY)})"
+
 
 # Registry mapping assumptions to other assumptions they imply.  For example, a "diagonal" matrix is also "symmetric"
 # and "triangular".  This is consulted after all other inference rules to derive additional facts.
@@ -116,7 +300,10 @@ MATRIX_KEYS = (
     PERMUTATION,
 )
 
-ALL_KEYS = (*MATRIX_KEYS, UNIQUE_INDICES)
+# Live view rather than a tuple: a key registered by a downstream library shows up here
+# too, so anything that iterates the keys at call time (debugprint, the drain rewrite)
+# covers it without further registration.
+ALL_KEYS = KeyRegistryView()
 
 # Implications about structural properties derivably from other structural properties
 register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC)
@@ -125,17 +312,32 @@ register_implies(PERMUTATION, SELECTION, ORTHOGONAL)
 
 
 def register_assumption(
-    key: AssumptionKey, *op_types: type
+    key: AssumptionKey, *op_types: type, prepend: bool = False
 ) -> Callable[[InferFactFn], InferFactFn]:
     """Decorator that registers an inference rule for ``(key, op_type)`` pairs.
 
     The decorated function is called as ``fn(key, op, feature, fgraph, node, input_states)``
     and must return a list of :class:`FactState` with one entry per node output.
+
+    Parameters
+    ----------
+    key : AssumptionKey
+        The property the rule infers.
+    *op_types : type
+        Op classes the rule applies to.
+    prepend : bool, optional
+        Run this rule ahead of those already registered for the same pair rather than
+        after them. Rules are tried in order until one returns a non-UNKNOWN state, so
+        this is how a key overrides a rule it inherited from a bundle. Default False.
     """
 
     def decorator(fn: InferFactFn) -> InferFactFn:
         for op_type in op_types:
-            ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), []).append(fn)
+            rules = ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), [])
+            if prepend:
+                rules.insert(0, fn)
+            else:
+                rules.append(fn)
         return fn
 
     return decorator

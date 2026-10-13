@@ -366,6 +366,16 @@ def apply_local_dimshuffle_lift(fgraph, var):
     return var
 
 
+def apply_local_dimshuffle_merge(fgraph, var):
+    """Clean up DimShuffles without lifting through other Ops."""
+    if var.owner is None:
+        return var
+    new = local_dimshuffle_merge.transform(fgraph, var.owner)
+    if new:
+        return new[0]
+    return var
+
+
 def is_dimshuffle_useless(new_order, input):
     """
     Checks for two types of useless dimshuffles:
@@ -390,6 +400,25 @@ def is_dimshuffle_useless(new_order, input):
     else:
         is_useless = False
     return is_useless
+
+
+@node_rewriter([DimShuffle])
+def local_dimshuffle_merge(fgraph, node):
+    """Merge consecutive DimShuffles and remove useless ones without lifting."""
+    inp = node.inputs[0]
+    new_order = node.op.new_order
+
+    while isinstance(inp.owner_op, DimShuffle):
+        inner_node = inp.owner
+        new_order = [
+            "x" if dim == "x" else inner_node.op.new_order[dim] for dim in new_order
+        ]
+        inp = inner_node.inputs[0]
+
+    if is_dimshuffle_useless(new_order, inp):
+        return [inp]
+    if inp is not node.inputs[0]:
+        return [copy_stack_trace(node.outputs[0], inp.dimshuffle(new_order))]
 
 
 @register_canonicalize

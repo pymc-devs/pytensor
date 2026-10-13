@@ -151,6 +151,21 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
 )
 
 
+@pytest.mark.parametrize("method", ["cholesky", "svd", "eigh"])
+def test_multivariate_normal_non_finite_cov(method):
+    # A non-finite covariance gives a NaN draw instead of failing the whole batch
+    cov = pt.tensor3("cov")
+    x = pt.random.multivariate_normal(
+        np.zeros(2), cov, method=method, rng=shared(np.random.default_rng(0))
+    )
+    fn = function([cov], x, mode="NUMBA")
+
+    covs = np.stack([np.eye(2), np.full((2, 2), np.nan), np.eye(2)])
+    draws = fn(covs)
+    assert np.isnan(draws[1]).all()
+    assert np.isfinite(draws[[0, 2]]).all()
+
+
 @pytest.mark.parametrize(
     "rv_op, dist_args, size",
     [

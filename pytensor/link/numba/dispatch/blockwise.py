@@ -75,7 +75,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
             "Numba implementation of Blockwise cannot be evaluated in Python (non-JIT) mode."
         )
 
-    @overload(blockwise, jit_options=_jit_options)
+    @overload(blockwise, jit_options=_jit_options())
     def ov_blockwise(*inputs_and_core_shapes):
         def impl(*inputs_and_core_shapes):
             inputs, core_shapes = (

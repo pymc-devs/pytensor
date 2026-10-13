@@ -152,6 +152,7 @@ class PyTensorConfigParser:
     compiledir_format: str
     base_compiledir: Path
     compiledir: Path
+    generated_src_dir: str
     # add_blas_configvars
     blas__ldflags: str
     blas__check_openmp: bool

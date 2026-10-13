@@ -45,7 +45,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.rewriting.subtensor import (
     _index_provably_unique,
     _indices_jointly_unique,
@@ -827,7 +827,7 @@ def local_subtensor_of_transpose(fgraph, node):
 
     # Cleanup consecutive expand_dims / transpose / squeeze (if any)
     if dims_dropped_by_new_idx:
-        [new_out] = local_dimshuffle_lift.transform(fgraph, new_out.owner)
+        new_out = apply_local_dimshuffle_merge(fgraph, new_out)
 
     return [new_out]
 

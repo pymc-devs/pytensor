@@ -44,26 +44,6 @@ from pytensor.tensor.rewriting.linalg.utils import get_assume_a
 from pytensor.tensor.variable import TensorVariable
 
 
-@register_stabilize
-@register_canonicalize
-@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="gen"))])
-def generic_solve_to_solve_triangular(fgraph, node):
-    """
-    If any solve() is applied to the output of a cholesky op, then
-    replace it with a triangular solve.
-
-    """
-    b_ndim = node.op.core_op.b_ndim
-    A, b = node.inputs  # result is the solution to Ax=b
-    match A.owner_op_and_inputs:
-        case (Blockwise(Cholesky(lower=lower)), _):
-            return [solve_triangular(A, b, lower=lower, b_ndim=b_ndim)]
-        case (DimShuffle(is_left_expanded_matrix_transpose=True), A_T):
-            match A_T.owner_op:
-                case Blockwise(Cholesky(lower=lower)):
-                    return [solve_triangular(A, b, lower=not lower, b_ndim=b_ndim)]
-
-
 @register_specialize
 @node_rewriter([blockwise_of(OpPattern(SolveBase, b_ndim=1))])
 def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
@@ -111,19 +91,20 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
+@node_rewriter([blockwise_of(Solve)])
 def psd_solve_to_chol_solve(fgraph, node):
     """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
-    assume_a = node.op.core_op.assume_a
+    core_op = node.op.core_op
     A, b = node.inputs
     if (
-        assume_a == "pos"
+        core_op.assume_a == "pos"
         or getattr(A.tag, "psd", None) is True
         or check_assumption(fgraph, A, POSITIVE_DEFINITE)
     ):
+        b_ndim = core_op.b_ndim
         L = cholesky(A)
-        Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
-        x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=2)
+        Li_b = solve_triangular(L, b, lower=True, b_ndim=b_ndim)
+        x = solve_triangular(L.mT, Li_b, lower=False, b_ndim=b_ndim)
         return [x]
 
 

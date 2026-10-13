@@ -2,16 +2,15 @@ import numpy as np
 import pytest
 
 import pytensor
+from pytensor.tensor.basic import constant
 from pytensor.tensor.sort import ArgSortOp, SortOp, argsort, sort
 from pytensor.tensor.type import (
     dmatrix,
     dvector,
     float_dtypes,
-    fscalar,
     integer_dtypes,
     lscalar,
     matrix,
-    scalar,
 )
 from tests import unittest_tools as utt
 
@@ -32,11 +31,17 @@ class TestSort:
         self.m_val = self.rng.random((3, 2))
         self.v_val = self.rng.random(4)
 
-    def test_invalid_axis_dtype(self):
-        with pytest.raises(
-            ValueError, match="Sort axis must have an integer dtype, got float32"
-        ):
-            sort(dmatrix(), fscalar())
+    def test_invalid_axis(self):
+        with pytest.raises(TypeError, match="axis of sort must be a constant integer"):
+            sort(dmatrix(), lscalar())
+        with pytest.raises(np.exceptions.AxisError):
+            sort(dmatrix(), 2)
+        with pytest.raises(ValueError, match="Sort axis must be non-negative"):
+            SortOp("quicksort", -1)
+        with pytest.raises(np.exceptions.AxisError):
+            SortOp("quicksort", 2)(dmatrix())
+        # A constant scalar is still accepted and normalized, as for join
+        assert sort(dmatrix(), constant(-1)).owner.op == SortOp("quicksort", 1)
 
     def test1(self):
         a = dmatrix()
@@ -46,11 +51,11 @@ class TestSort:
 
     def test2(self):
         a = dmatrix()
-        axis = scalar(dtype="int64")
-        w = sort(a, axis)
-        f = pytensor.function([a, axis], w)
         for axis_val in 0, 1:
-            gv = f(self.m_val, axis_val)
+            w = sort(a, axis_val)
+            assert w.owner.op.axis == axis_val
+            f = pytensor.function([a], w)
+            gv = f(self.m_val)
             gt = np.sort(self.m_val, axis_val)
             utt.assert_allclose(gv, gt)
 
@@ -64,21 +69,22 @@ class TestSort:
 
     def test4(self):
         a = dmatrix()
-        axis = scalar(dtype="int8")
-        l = sort(a, axis, "mergesort")
-        f = pytensor.function([a, axis], l)
-        for axis_val in 0, 1:
-            gv = f(self.m_val, np.array(axis_val, dtype="int8"))
-            gt = np.sort(self.m_val, np.array(axis_val, dtype="int8"))
+        for axis_val in -2, -1:
+            l = sort(a, np.int8(axis_val), "mergesort")
+            assert l.owner.op.axis == axis_val + 2
+            f = pytensor.function([a], l)
+            gv = f(self.m_val)
+            gt = np.sort(self.m_val, axis_val)
             utt.assert_allclose(gv, gt)
 
     def test5(self):
-        a1 = SortOp("mergesort")
-        a2 = SortOp("quicksort")
+        a1 = SortOp("mergesort", 0)
+        a2 = SortOp("quicksort", 0)
 
         assert a1 != a2
-        assert a1 == SortOp("mergesort")
-        assert a2 == SortOp("quicksort")
+        assert a1 == SortOp("mergesort", 0)
+        assert a2 == SortOp("quicksort", 0)
+        assert a1 != SortOp("mergesort", 1)
 
     def test_None(self):
         a = dmatrix()
@@ -188,11 +194,11 @@ def test_argsort():
 
     # Example 2
     a = dmatrix()
-    axis = lscalar()
-    w = argsort(a, axis)
-    f = pytensor.function([a, axis], w)
     for axis_val in 0, 1:
-        gv = f(m_val, axis_val)
+        w = argsort(a, axis_val)
+        assert w.owner.op.axis == axis_val
+        f = pytensor.function([a], w)
+        gv = f(m_val)
         gt = np.argsort(m_val, axis_val)
         utt.assert_allclose(gv, gt)
 
@@ -206,20 +212,21 @@ def test_argsort():
 
     # Example 4
     a = dmatrix()
-    axis = scalar(dtype="int8")
-    l = argsort(a, axis, "mergesort")
-    f = pytensor.function([a, axis], l)
-    for axis_val in 0, 1:
-        gv = f(m_val, np.array(axis_val, dtype="int8"))
-        gt = np.argsort(m_val, np.array(axis_val, dtype="int8"))
+    for axis_val in -2, -1:
+        l = argsort(a, np.int8(axis_val), "mergesort")
+        assert l.owner.op.axis == axis_val + 2
+        f = pytensor.function([a], l)
+        gv = f(m_val)
+        gt = np.argsort(m_val, axis_val)
         utt.assert_allclose(gv, gt)
 
     # Example 5
-    a1 = ArgSortOp("mergesort")
-    a2 = ArgSortOp("quicksort")
+    a1 = ArgSortOp("mergesort", 0)
+    a2 = ArgSortOp("quicksort", 0)
     assert a1 != a2
-    assert a1 == ArgSortOp("mergesort")
-    assert a2 == ArgSortOp("quicksort")
+    assert a1 == ArgSortOp("mergesort", 0)
+    assert a2 == ArgSortOp("quicksort", 0)
+    assert a1 != ArgSortOp("mergesort", 1)
 
     # Example 6: Testing axis=None
     a = dmatrix()
@@ -228,11 +235,6 @@ def test_argsort():
     gv = f(m_val)
     gt = np.argsort(m_val, None)
     utt.assert_allclose(gv, gt)
-
-    with pytest.raises(
-        ValueError, match="ArgSort axis must have an integer dtype, got float32"
-    ):
-        argsort(dmatrix(), fscalar())
 
 
 def test_argsort_grad():
