@@ -15,8 +15,17 @@ from tests.assumptions.conftest import make_fgraph
         (np.eye(4, k=-1), FactState.TRUE),
         (np.eye(4, k=2), FactState.FALSE),
         (np.ones((4, 5)), FactState.FALSE),
+        (np.stack([np.eye(4), np.eye(4, k=1)]), FactState.TRUE),
+        (np.stack([np.eye(4), np.eye(4, k=2)]), FactState.FALSE),
     ],
-    ids=["banded", "subdiagonal", "superdiagonal_2", "nonsquare"],
+    ids=[
+        "banded",
+        "subdiagonal",
+        "superdiagonal_2",
+        "nonsquare",
+        "batch_banded",
+        "batch_one_outside_band",
+    ],
 )
 def test_constant_tridiagonality(data, expected):
     c = pt.constant(data)
@@ -25,15 +34,34 @@ def test_constant_tridiagonality(data, expected):
 
 
 @pytest.mark.parametrize(
-    "offset, expected",
-    [(1, FactState.TRUE), (-1, FactState.TRUE), (2, FactState.UNKNOWN)],
+    "n, offset, expected",
+    [
+        (5, 1, FactState.TRUE),
+        (5, -1, FactState.TRUE),
+        (5, 2, FactState.FALSE),
+        (2, -3, FactState.TRUE),
+    ],
+    ids=["superdiagonal", "subdiagonal", "outside_band", "band_misses_shape"],
 )
-def test_eye_and_alloc_diag_follow_offset(offset, expected):
-    # A large offset is UNKNOWN, not FALSE: a small matrix's offset band is empty
-    eye = pt.eye(5, k=offset)
-    banded = alloc_diag(pt.dvector("d"), offset=offset)
-    _, af = make_fgraph(eye, banded)
+def test_eye_follows_offset(n, offset, expected):
+    eye = pt.eye(n, k=offset)
+    _, af = make_fgraph(eye)
     assert af.get(eye, TRIDIAGONAL) is expected
+
+
+@pytest.mark.parametrize(
+    "diag, offset, expected",
+    [
+        (pt.dvector("d"), 1, FactState.TRUE),
+        (pt.dvector("d"), 2, FactState.UNKNOWN),
+        (pt.constant(np.zeros(3)), 2, FactState.TRUE),
+        (pt.constant(np.ones(3)), 2, FactState.FALSE),
+    ],
+    ids=["superdiagonal", "symbolic_outside_band", "zeros", "ones_outside_band"],
+)
+def test_alloc_diag_follows_offset(diag, offset, expected):
+    banded = alloc_diag(diag, offset=offset)
+    _, af = make_fgraph(banded)
     assert af.get(banded, TRIDIAGONAL) is expected
 
 
@@ -86,3 +114,11 @@ def test_sum_and_block_diag_preserve_the_band():
     assert af.check(scaled, TRIDIAGONAL)
     assert af.check(blocked, TRIDIAGONAL)
     assert not af.check(dense, TRIDIAGONAL)
+
+
+def test_batch_inc_subtensor_preserves_the_band():
+    base = assume(pt.tensor3("base", shape=(5, 4, 4)), tridiagonal=True)
+    value = assume(pt.tensor3("value", shape=(2, 4, 4)), tridiagonal=True)
+    y = pt.inc_subtensor(base[1:3], value)
+    _, af = make_fgraph(y)
+    assert af.check(y, TRIDIAGONAL)

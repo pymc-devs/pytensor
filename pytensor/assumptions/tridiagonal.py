@@ -1,6 +1,12 @@
 import numpy as np
 
-from pytensor.assumptions.alloc import alloc_has_zero_off_diagonal, eye_is_square
+from pytensor.assumptions.alloc import (
+    alloc_diag_band_is_zero,
+    alloc_diag_rule,
+    alloc_has_zero_off_diagonal,
+    eye_band_is_empty,
+    eye_is_square,
+)
 from pytensor.assumptions.core import (
     TRIDIAGONAL,
     FactState,
@@ -8,7 +14,6 @@ from pytensor.assumptions.core import (
     propagate_first,
     register_assumption,
     register_constant_inference,
-    true_if,
 )
 from pytensor.assumptions.elemwise import elemwise_preserves_zero_pattern
 from pytensor.assumptions.subtensor import subtensor_propagates_matrix_property
@@ -50,21 +55,26 @@ register_constant_inference(TRIDIAGONAL, _tridiagonal_from_constant)
 
 @register_assumption(TRIDIAGONAL, Eye)
 def _eye_tridiagonal(key, op, feature, fgraph, node, input_states):
-    # Eye is tridiagonal when it is square with its nonzero diagonal within one
-    # of the main one. A larger offset is UNKNOWN, not FALSE: for small enough
-    # matrices the offset diagonal is empty and the all-zero result is still banded
+    # Eye is tridiagonal when it is square with its diagonal within one of the
+    # main one, or when a farther diagonal misses the shape, leaving all zeros.
     n, m, k = node.inputs
     square = eye_is_square(n, m)
     if square is not FactState.TRUE:
         return [square]
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    return true_if(abs(k.data.item()) <= 1)
+    offset = k.data.item()
+    if abs(offset) <= 1:
+        return [FactState.TRUE]
+    return [eye_band_is_empty(node, offset)]
 
 
 @register_assumption(TRIDIAGONAL, AllocDiag)
+@alloc_diag_rule
 def _alloc_diag_tridiagonal(key, op, feature, fgraph, node, input_states):
-    return true_if(abs(op.offset) <= 1)
+    if abs(op.offset) <= 1:
+        return [FactState.TRUE]
+    return [alloc_diag_band_is_zero(node)]
 
 
 @register_assumption(TRIDIAGONAL, Alloc)
