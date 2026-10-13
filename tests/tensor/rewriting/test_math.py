@@ -3816,13 +3816,42 @@ class TestLocalCAReduceOfDimShuffle:
         x_test = x_test.astype(dtype)
         np.testing.assert_array_equal(f(x_test), np_fn(x_test))
 
-    def test_kept_when_reducing_a_subset_of_axes(self):
-        # The axis passed to the reduction refers to the shuffled dimensions
-        x = pt.matrix("x")
-        f = function([x], pt_sum(x.T, axis=0), mode=self.mode)
-        assert any(
-            isinstance(node.op, DimShuffle) for node in f.maker.fgraph.toposort()
+    @pytest.mark.parametrize(
+        "shuffle, axis",
+        [
+            ((1, 0, 2), (0, 1)),
+            ((2, 1, 0), (0, 1)),
+            ((2, 1, 0), (1, 2)),
+            ((2, 0, 1), (0, 2)),
+            ((0, "x", 2, 1), (1, 3)),
+            ((2, 0, "x", 1), (0, 2)),
+            ((2, "x", 1, 0), (1, 3)),
+        ],
+    )
+    def test_removes_dimshuffle_when_kept_dims_in_order(self, shuffle, axis):
+        x = pt.tensor3("x")
+        out = pt_sum(x.dimshuffle(*shuffle), axis=axis)
+        f = function([x], out, mode=self.mode)
+        assert not any(isinstance(n.op, DimShuffle) for n in f.maker.fgraph.toposort())
+
+        f_ref = function(
+            [x], out, mode=get_default_mode().excluding("local_careduce_of_dimshuffle")
         )
+        x_test = np.random.default_rng(2).normal(size=(2, 3, 4))
+        np.testing.assert_allclose(f(x_test), f_ref(x_test))
+
+    @pytest.mark.parametrize(
+        "shuffle, axis",
+        [
+            ((1, 0, 2), 2),  # kept dims are transposed
+            ((2, 1, 0), 1),  # kept dims are transposed
+            ((0, "x", 1, 2), (0, 2)),  # kept new broadcastable dimension
+        ],
+    )
+    def test_kept_when_dimshuffle_changes_output(self, shuffle, axis):
+        x = pt.tensor3("x")
+        f = function([x], pt_sum(x.dimshuffle(*shuffle), axis=axis), mode=self.mode)
+        assert any(isinstance(n.op, DimShuffle) for n in f.maker.fgraph.toposort())
 
 
 class TestReduceJoin:
