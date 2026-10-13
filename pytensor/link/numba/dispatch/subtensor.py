@@ -21,6 +21,7 @@ from pytensor.link.numba.dispatch.basic import (
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.tensor import TensorType, TensorVariable
+from pytensor.tensor.rewriting.scalarize import ScalarSubtensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
@@ -140,8 +141,13 @@ def subtensor_op_cache_key(op, **extra_fields):
 
 @register_funcify_and_cache_key(Subtensor)
 @register_funcify_and_cache_key(IncSubtensor)
-def numba_funcify_default_subtensor(op, node, **kwargs):
-    """Create a Python function that assembles and uses an index on an array."""
+def numba_funcify_default_subtensor(op, node, scalar_out=False, **kwargs):
+    """Create a Python function that assembles and uses an index on an array.
+
+    With ``scalar_out`` the result is returned as-is rather than through
+    ``np.asarray``. Every index is then a scalar, so the indexing already yields
+    a scalar and the wrap would only put that single value on the heap.
+    """
 
     def convert_indices(indices_iterator, entry):
         if isinstance(entry, int):
@@ -203,12 +209,13 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
         index_prologue = ""
         index_body = f"z = {input_names[0]}[indices]"
 
+    return_src = "z" if scalar_out else "np.asarray(z)"
     subtensor_def_src = f"""
 def {function_name}({", ".join(input_names)}):
     {index_prologue}
     {indices_creation_src}
     {index_body}
-    return np.asarray(z)
+    return {return_src}
     """
 
     func = compile_numba_function_src(
@@ -217,9 +224,21 @@ def {function_name}({", ".join(input_names)}):
         global_env=globals() | {"np": np},
     )
     cache_key = subtensor_op_cache_key(
-        op, func="numba_funcify_default_subtensor", version=1
+        op,
+        func="numba_funcify_default_subtensor",
+        version=2,
+        # Selects a register value vs a 0-d array in the generated source.
+        scalar_out=scalar_out,
     )
     return numba_basic.numba_njit(func, boundscheck=True), cache_key
+
+
+@register_funcify_and_cache_key(ScalarSubtensor)
+def numba_funcify_ScalarSubtensor(op, node, **kwargs):
+    [subtensor_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, Subtensor)]
+    return numba_funcify_default_subtensor(
+        subtensor_node.op, subtensor_node, scalar_out=True, **kwargs
+    )
 
 
 @register_funcify_and_cache_key(AdvancedSubtensor)
