@@ -1,6 +1,6 @@
 import numpy as np
 
-from pytensor.assumptions.alloc import _eye_is_square, alloc_has_zero_off_diagonal
+from pytensor.assumptions.alloc import alloc_has_zero_off_diagonal, eye_is_square
 from pytensor.assumptions.core import (
     TRIDIAGONAL,
     FactState,
@@ -54,7 +54,7 @@ def _eye_tridiagonal(key, op, feature, fgraph, node, input_states):
     # of the main one. A larger offset is UNKNOWN, not FALSE: for small enough
     # matrices the offset diagonal is empty and the all-zero result is still banded
     n, m, k = node.inputs
-    square = _eye_is_square(n, m)
+    square = eye_is_square(n, m)
     if square is not FactState.TRUE:
         return [square]
     if not isinstance(k, TensorConstant):

@@ -60,7 +60,7 @@ def alloc_is_symmetric(key, op, feature, fgraph, node, input_states) -> list[Fac
     return true_if(node.inputs[0].type.ndim == 0)
 
 
-def _eye_is_square(n, m) -> FactState:
+def eye_is_square(n, m) -> FactState:
     """Static squareness of an :class:`Eye` from its row/column size inputs:
     TRUE when the two sizes are provably equal, FALSE when provably unequal,
     UNKNOWN while either remains symbolic."""
@@ -82,7 +82,7 @@ def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[Fact
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
     if k.data.item() == 0:
-        return [_eye_is_square(n, m)]
+        return [eye_is_square(n, m)]
     rows, cols = node.outputs[0].type.shape
     if rows is None or cols is None:
         return [FactState.UNKNOWN]
@@ -110,7 +110,7 @@ def eye_zero_or_identity_rule(
     n, m, k = node.inputs
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    square = _eye_is_square(n, m)
+    square = eye_is_square(n, m)
     if square is FactState.FALSE:
         return [FactState.FALSE]
     offset = k.data.item()
