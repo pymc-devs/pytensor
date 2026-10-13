@@ -889,7 +889,7 @@ def minimize(
     optimizer_kwargs: dict | None = None,
 ) -> tuple[TensorVariable | tuple[TensorVariable, ...], TensorVariable]:
     """
-    Minimize a scalar objective function using scipy.optimize.minimize.
+    Minimize a scalar objective function.
 
     Parameters
     ----------
@@ -922,6 +922,13 @@ def minimize(
     success: TensorVariable
         Symbolic boolean flag indicating whether the minimization routine reported convergence to a minimum
         value, based on the requested convergence criteria.
+
+    Notes
+    -----
+    The Numba backend compiles BFGS (``jac=True``, ``hess=False``) directly for float32 and float64 inputs.
+    It supports ``tol`` and the ``gtol``, ``maxiter``, ``norm``, ``xrtol``, ``c1``, and ``c2`` options.
+    Other methods or options use SciPy. The native line search can take different steps from SciPy,
+    so intermediate iterates and convergence results need not be identical.
     """
     objective = as_tensor_variable(objective)
 
