@@ -48,6 +48,34 @@ class TestIndexedReadFusion:
         xv, yv = rng.normal(size=(85,)), rng.normal(size=(919,))
         np.testing.assert_allclose(fn(xv, yv), fn_u(xv, yv), rtol=1e-10)
 
+    @pytest.mark.parametrize("index_shape", [(4,), (2, 4)])
+    def test_indexed_read_with_implicit_leading_axes(self, index_shape):
+        x = pt.vector("x", shape=(7,))
+        idx = pt.tensor("idx", dtype="int64", shape=index_shape)
+        y = pt.tensor("y", shape=(3, *index_shape))
+        out = x[idx] + y
+        fn, fn_u = fused_and_unfused([x, idx, y], out)
+        assert_fused(fn)
+        xv = np.arange(7.0)
+        iv = np.arange(np.prod(index_shape)).reshape(index_shape) % 7
+        yv = np.arange(np.prod(y.type.shape), dtype="float64").reshape(y.type.shape)
+        expected = xv[iv] + yv
+        np.testing.assert_array_equal(fn(xv, iv, yv), expected)
+        np.testing.assert_array_equal(fn_u(xv, iv, yv), expected)
+
+    def test_shared_index_at_different_loop_axes(self):
+        x = pt.vector("x", shape=(7,))
+        z = pt.matrix("z", shape=(7, 4))
+        idx = pt.vector("idx", dtype="int64", shape=(4,))
+        fn, fn_u = fused_and_unfused([x, z, idx], x[idx] + z[idx])
+        assert_fused(fn)
+        xv = np.arange(7.0)
+        zv = np.arange(28.0).reshape(7, 4)
+        iv = np.array([5, 1, 3, 0])
+        expected = xv[iv] + zv[iv]
+        np.testing.assert_array_equal(fn(xv, zv, iv), expected)
+        np.testing.assert_array_equal(fn_u(xv, zv, iv), expected)
+
     def test_multiple_read_sources(self):
         rng = np.random.default_rng(42)
         idx = rng.integers(85, size=919).astype(np.int64)

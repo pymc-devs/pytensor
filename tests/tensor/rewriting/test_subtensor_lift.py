@@ -123,11 +123,10 @@ class TestLocalSubtensorOfBatchDims:
         # assert check_stack_trace(f, ops_to_check=Subtensor)
 
         prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, DimShuffle)
-        assert isinstance(prog[1].op.scalar_op, ps.Composite)  # Composite{add,exp}
+        assert isinstance(prog[0].op.scalar_op, ps.Composite)  # Composite{add,exp}
         # first subtensor
-        assert isinstance(prog[2].op, Subtensor)
-        assert len(prog) == 3
+        assert isinstance(prog[1].op, Subtensor)
+        assert len(prog) == 2
 
         x_test = np.array([[0, 1], [2, 3]]).astype(x.dtype)
         y_test = np.array([4, 5]).astype(y.dtype)
@@ -147,7 +146,7 @@ class TestLocalSubtensorOfBatchDims:
             # Unary integer indexing
             (lambda x, y: exp(x)[0], lambda x, y: exp(x[0])),
             # Unary integer with expand_dims
-            (lambda x, y: exp(x[:, None])[0], lambda x, y: exp(x[0][None])),
+            (lambda x, y: exp(x[:, None])[0], lambda x, y: exp(x[0])[None]),
             # Integer indexing on non-broadcastable dimension
             (lambda x, y: add(x, y)[0], lambda x, y: add(x[0], y[0])),
             # Slice indexing on non-broadcastable dimension
@@ -157,20 +156,20 @@ class TestLocalSubtensorOfBatchDims:
             (lambda x, y: add(x[None], y[None])[0, 1], lambda x, y: add(x[1], y[1])),
             (
                 lambda x, y: add(x[None, :], y[:, None])[2],
-                lambda x, y: add(x, y[2][None]),
+                lambda x, y: add(x, y[2]),
             ),
             (
                 lambda x, y: add(x[:, None], y[None, :])[:, 2],
-                lambda x, y: add(x, y[2][None]),
+                lambda x, y: add(x, y[2]),
             ),
             # Slice indexing on broadcastable dimension
             (
                 lambda x, y: add(x[None], y[None])[1:],
-                lambda x, y: pt.alloc(pt.add(x[None], y[None]), 0, *x.type.shape),
+                lambda x, y: pt.alloc(pt.add(x, y)[None], 0, *x.type.shape),
             ),
             (
                 lambda x, y: add(x[None, :], y[:, None])[1:],
-                lambda x, y: add(x[None, :], y[1:][:, None]),
+                lambda x, y: add(x, y[1:][:, None]),
             ),
         ],
     )
@@ -189,6 +188,26 @@ class TestLocalSubtensorOfBatchDims:
         np.testing.assert_allclose(
             opt_out.eval({x: x_test, y: y_test}, **eval_kwargs),
             out.eval({x: x_test, y: y_test}, **eval_kwargs),
+        )
+
+    def test_elemwise_mixed_ndim(self):
+        """Test local_subtensor_of_batch_dims with mixed-ndim Elemwise inputs."""
+        rng = np.random.default_rng(258)
+        x = pt.matrix("x", shape=(5, 3))
+        y = pt.vector("y", shape=(3,))
+        x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+        y_test = rng.normal(size=y.type.shape).astype(y.dtype)
+
+        # Index into (matrix + vector) — vector has implicit leading dim
+        out = add(x, y)[2]
+        expected_out = add(x[2], y)
+        opt_out = rewrite_graph(out)
+        assert equal_computations([opt_out], [expected_out]), debugprint(
+            [expected_out, opt_out], print_type=True
+        )
+        np.testing.assert_allclose(
+            opt_out.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
+            out.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
         )
 
     def test_elemwise_multiple_clients(self):
@@ -252,7 +271,9 @@ class TestLocalSubtensorOfBatchDims:
         # ``local_add_canonizer`` simplifies the ``n - 0`` inside ``tril_indices``,
         # which then lets the duplicate ``arange`` merge -- noise for this test.
         result = RewriteTester(
-            [n, x], [pt.exp(x)[rows, cols]], exclude=("local_add_canonizer",)
+            [n, x],
+            [pt.exp(x)[rows, cols]],
+            exclude=("local_add_canonizer", "local_elemwise_sink_left_expand_dims"),
         )
         result.assert_graph(pt.exp(x[rows, cols]))
         result.assert_eval(3, np.arange(9.0).reshape(3, 3))
@@ -1355,7 +1376,7 @@ class TestExtractDiagLiftPass:
         s = pt.scalar("s")
         out = pt.diagonal(pt.eye(5) * s)
         rewritten = rewrite_graph(out, **self.rewrite_kw)
-        expected = pt.alloc(s[None], 5)
+        expected = pt.alloc(s, 5)
         assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
     def test_extract_diag_of_eye_mul_row(self):

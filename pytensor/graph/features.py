@@ -522,7 +522,7 @@ class FullHistory(Feature):
         history.start()
         pytensor.dprint(fg)
         with pytensor.config.change_flags(optimizer_verbose = True):
-            for i in range(3):
+            for i in range(4):
                 print(">> ", end="")
                 pytensor.dprint(history.next())
 
@@ -544,6 +544,14 @@ class FullHistory(Feature):
                └─ Sum{axes=None} [id F] 1
                   └─ Exp [id C] 0
                      └─ ···
+        >> local_elemwise_sink_left_expand_dims
+        Log [id A] 3
+         └─ True_div [id B] 2
+            ├─ Exp [id C] 0
+            │  └─ x [id D]
+            └─ Sum{axes=None} [id E] 1
+               └─ Exp [id C] 0
+                  └─ ···
         >> local_softmax_stabilize
         Log [id A] 1
          └─ Softmax{axis=(0,)} [id B] 0
@@ -556,7 +564,7 @@ class FullHistory(Feature):
     .. testcode::
         # Or in reverse
         with pytensor.config.change_flags(optimizer_verbose=True):
-            for i in range(3):
+            for i in range(4):
                 print(">> ", end="")
                 pytensor.dprint(history.prev())
 
@@ -566,6 +574,14 @@ class FullHistory(Feature):
          └─ Softmax{axis=(0,)} [id B] 0
             └─ x [id C]
         >> local_softmax_stabilize
+        Log [id A] 3
+         └─ True_div [id B] 2
+            ├─ Exp [id C] 0
+            │  └─ x [id D]
+            └─ Sum{axes=None} [id E] 1
+               └─ Exp [id C] 0
+                  └─ ···
+        >> local_elemwise_sink_left_expand_dims
         Log [id A] 4
          └─ True_div [id B] 3
             ├─ Exp [id C] 0
@@ -587,7 +603,7 @@ class FullHistory(Feature):
 
     .. testcode::
         # Or go to any step
-        pytensor.dprint(history.goto(2))
+        pytensor.dprint(history.goto(3))
 
     .. testoutput::
         Log [id A] 1

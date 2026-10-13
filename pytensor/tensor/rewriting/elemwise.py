@@ -45,7 +45,7 @@ from pytensor.scalar import (
 from pytensor.scalar import cast as scalar_cast
 from pytensor.scalar import constant as scalar_constant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
-from pytensor.tensor.basic import MakeVector
+from pytensor.tensor.basic import MakeVector, atleast_Nd
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import add, exp, mul
@@ -435,8 +435,8 @@ def local_dimshuffle_lift(fgraph, node):
     DimShuffle(DimShuffle(x)) => DimShuffle(x)
     DimShuffle{0,1,...}(x) => x (when the dimshuffle do nothing)
 
-    After this transform, clusters of Elemwise operations are
-    void of DimShuffle operations.
+    Leading dimension expansions stay after Elemwise operations, whose inputs
+    can broadcast implicitly.
 
     """
     op = node.op
@@ -450,9 +450,35 @@ def local_dimshuffle_lift(fgraph, node):
         and len(inode.outputs) == 1
         and (len(fgraph.clients[inp]) == 1)
     ):
+        if op.is_left_expand_dims:
+            # Cancel leading expansions with input squeezes across Elemwise.
+            n_expand = len(new_order) - op.input_ndim
+            if not all(
+                ipt.ndim == op.input_ndim
+                and isinstance(ipt.owner_op, DimShuffle)
+                and ipt.owner_op.new_order
+                == tuple(range(n_expand, ipt.owner_op.input_ndim))
+                for ipt in inode.inputs
+            ):
+                return
+        out_ndim = inode.outputs[0].type.ndim
         new_inputs = []
         for inp in inode.inputs:
-            new_inp = inp.dimshuffle(op.new_order)
+            ipt_offset = out_ndim - inp.ndim
+            if ipt_offset == 0:
+                inp_new_order = op.new_order
+            else:
+                # Align entries with the input's explicit axes.
+                inp_new_order = []
+                for entry in op.new_order:
+                    if entry == "x":
+                        inp_new_order.append("x")
+                    elif entry < ipt_offset:
+                        inp_new_order.append("x")
+                    else:
+                        inp_new_order.append(entry - ipt_offset)
+                inp_new_order = tuple(inp_new_order)
+            new_inp = inp.dimshuffle(inp_new_order)
             new_inputs.append(apply_local_dimshuffle_lift(fgraph, new_inp))
         copy_stack_trace(node.outputs[0], new_inputs)
         ret = inode.op(*new_inputs, return_list=True)
@@ -468,6 +494,36 @@ def local_dimshuffle_lift(fgraph, node):
         ret = apply_local_dimshuffle_lift(fgraph, ret)
         copy_stack_trace(node.outputs[0], ret)
         return [ret]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([OpPattern(DimShuffle, is_left_expand_dims=True)])
+def local_elemwise_sink_left_expand_dims(fgraph, node):
+    """Move leading dimension expansions through Elemwise clients."""
+    replacements = {}
+    for client, _ in fgraph.clients[node.outputs[0]]:
+        if (
+            not isinstance(client.op, Elemwise)
+            or client.op.inplace_pattern
+            or client.outputs[0] in replacements
+        ):
+            continue
+
+        new_inputs = [
+            inp.owner.inputs[0]
+            if isinstance(inp.owner_op, DimShuffle) and inp.owner_op.is_left_expand_dims
+            else inp
+            for inp in client.inputs
+        ]
+        new_outputs = client.op(*new_inputs, return_list=True)
+        copy_stack_trace(client.outputs, new_outputs)
+        for old_out, new_out in zip(client.outputs, new_outputs, strict=True):
+            replacements[old_out] = copy_stack_trace(
+                old_out, atleast_Nd(new_out, n=old_out.ndim)
+            )
+    return replacements or None
 
 
 @register_canonicalize

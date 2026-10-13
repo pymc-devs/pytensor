@@ -328,6 +328,17 @@ def scan_push_out_seq(fgraph, node):
 
             to_remove_set.add(nd)
 
+            # Preserve the time axis when lower-rank sequence inputs broadcast
+            # against higher-rank core inputs inside the Scan.
+            inner_ndim = nd.outputs[0].ndim
+            for i, x in enumerate(nd.inputs):
+                if x in inner_seqs_set or x in to_replace_set:
+                    n_expand = inner_ndim - x.ndim
+                    if n_expand:
+                        outside_ins[i] = pt.expand_dims(
+                            outside_ins[i], axis=tuple(range(1, 1 + n_expand))
+                        )
+
             nw_outer_node = nd.op.make_node(*outside_ins)
 
             # Step 2. Create variables for replacements

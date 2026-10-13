@@ -867,9 +867,10 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         elemwise_key = str(
             (
                 type(op),
-                2,  # codegen cache version
+                3,  # codegen cache version
                 tuple(op.inplace_pattern.items()),
                 input_bc_patterns,
+                output_bc_patterns,
                 scalar_cache_key,
             )
         )
@@ -1147,7 +1148,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 9
+    cache_version = 10
     if scalar_cache_key is None:
         key = None
     else:
@@ -1162,6 +1163,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 cache_version,
                 inplace_pattern,
                 input_bc_patterns,
+                output_bc_patterns,
                 indexed_inputs,
                 idx_broadcastable,
                 indexed_outputs,

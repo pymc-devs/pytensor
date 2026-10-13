@@ -411,7 +411,7 @@ def _match_arange_0_to_d_plus_offset(idx):
             and int(inp.owner.inputs[2].data) == 1
         ):
             arange_node = inp
-        elif inp.type.shape == (1,):
+        elif inp.type.shape in ((), (1,)):
             offset_terms.append(inp)
         else:
             return None

@@ -86,21 +86,29 @@ local_exp_log_softmax = PatternNodeRewriter(
 register_stabilize(local_exp_log_softmax)
 
 
-# x - logsumexp(x, axis, keepdims=True) -> LogSoftmax(x)
-# The shared "axis" makes the DimShuffle match only when it re-expands the reduced axes
-local_log_softmax_from_logsumexp = PatternNodeRewriter(
-    (
-        sub,
-        "x",
-        (
-            OpPattern(DimShuffle, is_expand_dims=True, augment="axis"),
-            (OpPattern(LogSumExp, axis="axis"), "x"),
-        ),
-    ),
-    (OpPattern(LogSoftmax, axis="axis"), "x"),
-    name="local_log_softmax_from_logsumexp",
-)
-register_stabilize(local_log_softmax_from_logsumexp)
+@register_stabilize
+@node_rewriter([sub])
+def local_log_softmax_from_logsumexp(fgraph, node):
+    """Replace x - logsumexp(x) with LogSoftmax when reduced axes align."""
+    x, lse = node.inputs
+    if len(fgraph.clients[lse]) > 1:
+        return
+
+    if isinstance(lse.owner_op, DimShuffle):
+        if not lse.owner_op.is_expand_dims:
+            return
+        expanded_axes = lse.owner_op.augment
+        lse = lse.owner.inputs[0]
+        if len(fgraph.clients[lse]) > 1:
+            return
+    else:
+        expanded_axes = tuple(range(x.ndim - lse.ndim))
+
+    match lse.owner_op_and_inputs:
+        case (LogSumExp(axis=axis), lse_x) if lse_x is x and axis == expanded_axes:
+            ret = log_softmax(x, axis=axis)
+            copy_stack_trace(node.outputs, ret)
+            return [ret]
 
 
 @register_stabilize("symbolic_op_recognition", "fast_compile")
