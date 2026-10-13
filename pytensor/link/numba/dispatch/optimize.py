@@ -145,8 +145,89 @@ def _can_use_native_bfgs(op):
     )
 
 
+def _can_use_native_lbfgsb(op):
+    options = op.optimizer_kwargs.get("options") or {}
+    return (
+        op.optimizer_kwargs.get("bounds") is None
+        and isinstance(op.method, str)
+        and op.method.lower() == "l-bfgs-b"
+        and op.jac
+        and not (op.hess or op.hessp)
+        and op.inner_inputs[0].dtype in ("float32", "float64")
+        and op.optimizer_kwargs.keys() <= {"tol", "options", "bounds"}
+        and options.keys() <= {"ftol", "gtol", "maxcor", "maxiter", "maxfun", "maxls"}
+        and all(
+            isinstance(options.get(name, default), int | np.integer)
+            for name, default in (
+                ("maxcor", 10),
+                ("maxiter", 15000),
+                ("maxfun", 15000),
+                ("maxls", 20),
+            )
+        )
+    )
+
+
+def numba_funcify_lbfgsb(op, **kwargs):
+    from pytensor.link.numba.dispatch._lbfgs import _lbfgs
+
+    options = op.optimizer_kwargs.get("options") or {}
+    tol = op.optimizer_kwargs.get("tol")
+    ftol = float(
+        options.get("ftol", np.finfo(np.float64).eps * 1e7 if tol is None else tol)
+    )
+    gtol = float(options.get("gtol", 1e-5 if tol is None else tol))
+    maxcor = int(options.get("maxcor", 10))
+    maxiter = int(options.get("maxiter", 15000))
+    maxfun = int(options.get("maxfun", 15000))
+    maxls = int(options.get("maxls", 20))
+    kwargs.pop("storage_map", None)
+    inner_fn, inner_key = numba_funcify_and_cache_key(op.fgraph, **kwargs)
+    x_dtype = op.inner_inputs[0].dtype
+    scalar_x = op.inner_inputs[0].ndim == 0
+
+    @numba_njit(fastmath=False)
+    def evaluate(x, *args):
+        inner_x = x.reshape(()) if scalar_x else x
+        if x_dtype != "float64":
+            inner_x = inner_x.astype(x_dtype)
+        value, gradient = inner_fn(inner_x, *args)
+        return value.item(), gradient.astype(np.float64).reshape((-1,))
+
+    @numba_njit(fastmath=False)
+    def minimize_lbfgsb(x0, *args):
+        x = x0.flatten().astype(np.float64)
+        solution, success = _lbfgs(
+            evaluate, x, args, maxcor, ftol, gtol, maxiter, maxfun, maxls
+        )
+        return solution.reshape(x0.shape).astype(x_dtype), success
+
+    cache_key = None
+    if inner_key is not None:
+        cache_key = sha256(
+            str(
+                (
+                    type(op),
+                    "lbfgsb-4-native-unbounded",
+                    inner_key,
+                    scalar_x,
+                    x_dtype,
+                    maxcor,
+                    ftol,
+                    gtol,
+                    maxiter,
+                    maxfun,
+                    maxls,
+                )
+            ).encode()
+        ).hexdigest()
+    return minimize_lbfgsb, cache_key
+
+
 @register_funcify_and_cache_key(MinimizeOp)
 def numba_funcify_MinimizeOp(op, node, **kwargs):
+    if _can_use_native_lbfgsb(op):
+        return numba_funcify_lbfgsb(op, **kwargs)
     if not _can_use_native_bfgs(op):
         return generate_fallback_impl(op, node, **kwargs), None
 
