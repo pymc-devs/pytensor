@@ -410,111 +410,6 @@ _SCALAR_PTR_INTRINSICS = {
 
 
 @numba_basic.numba_njit(inline="always")
-def _blas_vector(x):
-    """Logical vector, lowest-address view and signed BLAS increment."""
-    if x.size == 1:
-        return x, x, np.int32(1)
-    if x.strides[0] == 0 or x.strides[0] % x.itemsize:
-        x = x.copy()
-    inc = np.int32(x.strides[0] // x.itemsize)
-    base = x[::-1] if inc < 0 else x
-    return x, base, inc
-
-
-@numba_basic.numba_njit(inline="always")
-def _gemv_operands(A, x, y):
-    # Reversing a matrix axis also reverses its corresponding vector.
-    if A.strides[0] < 0:
-        A = A[::-1]
-        y = y[::-1]
-    if A.strides[1] < 0:
-        A = A[:, ::-1]
-        x = x[::-1]
-    A, trans, ld = _blas_operand(A, False)
-    return A, x, y, trans, ld
-
-
-def _gemv(A, x, y, alpha, beta):
-    product = alpha * (A @ x)
-    y[:] = product if beta == 0 else product + beta * y
-    return y
-
-
-@overload(_gemv)
-def _gemv_impl(A, x, y, alpha, beta):
-    ensure_blas()
-    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemv")
-    _check_linalg_matrix(x, ndim=1, dtype=A.dtype, func_name="gemv")
-    _check_linalg_matrix(y, ndim=1, dtype=A.dtype, func_name="gemv")
-    numba_gemv = _BLAS().numba_xgemv(A.dtype)
-    scalar_ptr = _SCALAR_PTR_INTRINSICS[A.dtype]
-
-    if isinstance(A.dtype, Complex):
-
-        @numba_basic.numba_njit(inline="always")
-        def vector_dot(a, x):
-            # Cython's complex return ABI varies by platform; stay in Numba.
-            value = 0j
-            for i in range(x.size):
-                value += a[i] * x[i]
-            return value
-
-    else:
-        numba_dot = _BLAS().numba_xdot(A.dtype)
-
-        @numba_basic.numba_njit(inline="always")
-        def vector_dot(a, x):
-            _, a_base, inca = _blas_vector(a)
-            _, x_base, incx = _blas_vector(x)
-            return numba_dot(
-                val_to_int_ptr(np.int32(x.size)),
-                a_base.ctypes,
-                val_to_int_ptr(inca),
-                x_base.ctypes,
-                val_to_int_ptr(incx),
-            )
-
-    def impl(A, x, y, alpha, beta):
-        if A.shape[1] != x.size or A.shape[0] != y.size:
-            raise ValueError("gemv: operands have mismatched dimensions")
-        if y.size == 0:
-            return y
-        if x.size == 0 or alpha == 0:
-            for i in range(y.size):
-                y[i] = 0 if beta == 0 else beta * y[i]
-            return y
-
-        if y.size == 1:
-            value = alpha * vector_dot(A[0], x)
-            y[0] = value if beta == 0 else value + beta * y[0]
-            return y
-
-        A_work, x, y_view, trans, ld = _gemv_operands(A, x, y)
-        _, x_base, incx = _blas_vector(x)
-        y_work, y_base, incy = _blas_vector(y_view)
-        m = np.int32(A_work.shape[1] if trans else A_work.shape[0])
-        n = np.int32(A_work.shape[0] if trans else A_work.shape[1])
-        numba_gemv(
-            val_to_int_ptr(ord("T") if trans else ord("N")),
-            val_to_int_ptr(m),
-            val_to_int_ptr(n),
-            scalar_ptr(alpha),
-            A_work.ctypes,
-            val_to_int_ptr(ld),
-            x_base.ctypes,
-            val_to_int_ptr(incx),
-            scalar_ptr(beta),
-            y_base.ctypes,
-            val_to_int_ptr(incy),
-        )
-        if y_work is not y_view:
-            y_view[:] = y_work
-        return y
-
-    return impl
-
-
-@numba_basic.numba_njit(inline="always")
 def _blas_abs_layout(X):
     return bool(
         _leading_dim(
@@ -603,12 +498,6 @@ def _gemm_impl(A, B, C, transa, transb, alpha, beta):
             for i in range(M):
                 for j in range(N):
                     C[i, j] = 0 if beta == 0 else beta * C[i, j]
-            return out
-        if N == 1:
-            _gemv(A, B[:, 0], C[:, 0], alpha, beta)
-            return out
-        if M == 1:
-            _gemv(B.T, A[0], C[0], alpha, beta)
             return out
 
         A, B, C = _normalize_gemm_strides(A, B, C, beta)
