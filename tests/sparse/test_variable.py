@@ -223,29 +223,67 @@ class TestSparseVariable:
         assert isinstance(exp_res, csr_matrix)
 
     @pytest.mark.parametrize("format", ["csr", "csc"])
-    @pytest.mark.parametrize("method", ["dot", "tensor_dot", "reflected_dot"])
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "dot",
+            "tensor_dot",
+            "reflected_dot",
+            "structured_dot",
+            "reflected_structured_dot",
+        ],
+    )
     def test_dot_vector(self, format, method):
         x = SparseTensorType(format, dtype="float64")("x")
         y = pt.dvector("y")
-        x_value = getattr(scipy_sparse, f"{format}_matrix")(
-            [[1.0, 0.0, 2.0], [-1.0, 0.0, 0.0]]
-        )
-        y_value = np.array([-1.0, 2.0, 1.0])
-        if method == "reflected_dot":
-            z = pt.dot(y, x)
-            x_value = x_value.T.asformat(format)
-            expected = y_value @ x_value
-            expected_grad = x_value.toarray().sum(axis=1)
+        weights = pt.dvector("weights")
+        reflected = method.startswith("reflected")
+        if method == "dot":
+            z = x.dot(y)
+        elif "structured_dot" in method:
+            z = (
+                sparse.structured_dot(y, x)
+                if reflected
+                else sparse.structured_dot(x, y)
+            )
         else:
-            z = x.dot(y) if method == "dot" else pt.dot(x, y)
-            expected = x_value @ y_value
-            expected_grad = x_value.toarray().sum(axis=0)
+            z = pt.dot(y, x) if reflected else pt.dot(x, y)
 
         assert z.ndim == 1
-        f = pytensor.function([x, y], [z, pt.grad(z.sum(), y)])
-        result, gradient = f(x_value, y_value)
-        np.testing.assert_allclose(result, expected)
-        np.testing.assert_allclose(gradient, expected_grad)
+        sparse_grad, dense_grad = pt.grad(pt.dot(z, weights), [x, y])
+        assert sparse_grad.type == x.type
+        f = pytensor.function([x, y, weights], [z, sparse_grad, dense_grad])
+
+        matrix = scipy_sparse.csr_matrix(
+            ([1.0, 0.0, 2.0, -1.0], [0, 1, 2, 0], [0, 3, 4]), shape=(2, 3)
+        )
+        singleton = scipy_sparse.csr_matrix(([0.0], [0], [0, 1]), shape=(1, 1))
+        for matrix_value, y_value, weights_value in [
+            (matrix, np.array([-1.0, 2.0, 1.0]), np.array([2.0, -3.0])),
+            (singleton, np.array([2.0]), np.array([3.0])),
+        ]:
+            x_value = (matrix_value.T if reflected else matrix_value).asformat(format)
+            coordinates = x_value.tocoo()
+            if reflected:
+                expected = y_value @ x_value
+                expected_dense_grad = x_value @ weights_value
+                expected_sparse_data = (
+                    y_value[coordinates.row] * weights_value[coordinates.col]
+                )
+            else:
+                expected = x_value @ y_value
+                expected_dense_grad = x_value.T @ weights_value
+                expected_sparse_data = (
+                    weights_value[coordinates.row] * y_value[coordinates.col]
+                )
+
+            result, sparse_gradient, dense_gradient = f(x_value, y_value, weights_value)
+            np.testing.assert_allclose(result, expected)
+            np.testing.assert_allclose(dense_gradient, expected_dense_grad)
+            assert sparse_gradient.shape == x_value.shape
+            np.testing.assert_array_equal(sparse_gradient.indices, x_value.indices)
+            np.testing.assert_array_equal(sparse_gradient.indptr, x_value.indptr)
+            np.testing.assert_allclose(sparse_gradient.data, expected_sparse_data)
 
     def test_repeat(self):
         x = pt.dmatrix("x")
