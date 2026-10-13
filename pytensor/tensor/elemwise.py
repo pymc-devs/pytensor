@@ -704,10 +704,19 @@ class Elemwise(OpenMPOp):
         if getattr(self, "nfunc_spec", None) and impl != "c":
             self.nfunc = import_func_from_string(self.nfunc_spec[0])
 
+        # Variadic Add/Mul can fold their binary NumPy ufunc instead of using `np.frompyfunc`
+        folds_binary_nfunc = (
+            self.scalar_op.nin == -1
+            and len(node.inputs) > 2
+            and getattr(self, "nfunc_spec", None) is not None
+            and self.nfunc_spec[1] == 2
+            and self.nfunc_spec[2] == 1
+        )
+
         if (
             (len(node.inputs) + len(node.outputs)) <= 32
             and (self.nfunc is None or self.scalar_op.nin != len(node.inputs))
-            and not self._reduces_binary_nfunc(node)
+            and not folds_binary_nfunc
             and self.ufunc is None
             and impl == "py"
         ):
@@ -754,16 +763,6 @@ class Elemwise(OpenMPOp):
 
         self.scalar_op.prepare_node(node.tag.fake_node, None, None, impl)
 
-    def _reduces_binary_nfunc(self, node) -> bool:
-        """Whether a variadic scalar op (Add, Mul) can be evaluated by folding its binary NumPy ufunc."""
-        return (
-            self.scalar_op.nin == -1
-            and len(node.inputs) > 2
-            and getattr(self, "nfunc_spec", None) is not None
-            and self.nfunc_spec[1] == 2
-            and self.nfunc_spec[2] == 1
-        )
-
     def perform(self, node, inputs, output_storage):
         if (len(node.inputs) + len(node.outputs)) > 32:
             # Some versions of NumPy will segfault, others will raise a
@@ -782,15 +781,7 @@ class Elemwise(OpenMPOp):
         # To keep that support we need to sometimes call self.prepare_node
         if self.nfunc is None and self.ufunc is None:
             self.prepare_node(node, None, None, "py")
-        if self._reduces_binary_nfunc(node):
-            # Much faster than `np.frompyfunc` on the scalar op's Python `impl`
-            nfunc = self.nfunc
-
-            def ufunc(*args):
-                return reduce(nfunc, args)
-
-            nout = 1
-        elif self.nfunc and len(inputs) == self.nfunc_spec[1]:
+        if self.nfunc and len(inputs) == self.nfunc_spec[1]:
             ufunc = self.nfunc
             nout = self.nfunc_spec[2]
             if hasattr(node.tag, "sig"):
@@ -800,6 +791,19 @@ class Elemwise(OpenMPOp):
             # since it sometimes requires resizing. Doing this
             # optimization is probably not worth the effort, since we
             # should normally run the C version of the Op.
+        elif (
+            self.nfunc
+            and self.scalar_op.nin == -1
+            and self.nfunc_spec[1] == 2
+            and self.nfunc_spec[2] == 1
+        ):
+            # Variadic Add/Mul: much faster than `np.frompyfunc` on the scalar op's Python `impl`
+            nfunc = self.nfunc
+
+            def ufunc(*args):
+                return reduce(nfunc, args)
+
+            nout = 1
         else:
             # the second calling form is used because in certain versions of
             # numpy the first (faster) version leads to segfaults

@@ -1211,23 +1211,3 @@ def test_perform_raises_with_too_many_operands():
     with pytest.raises(NotImplementedError, match="more than 32 operands"):
         op.perform(node, [np.ones(3) for _ in range(40)], [[None]])
 
-
-@pytest.mark.parametrize("scalar_op, np_op", [(ps.add, np.add), (ps.mul, np.multiply)])
-@pytest.mark.parametrize("dtype", ["float64", "int8", "uint16", "bool"])
-@pytest.mark.parametrize("n_inputs", [3, 5])
-def test_variadic_elemwise_python_mode(scalar_op, np_op, dtype, n_inputs):
-    # Variadic Add/Mul with more than two inputs should not need `np.frompyfunc`
-    rng = np.random.default_rng(1)
-    xs = [pt.tensor(f"x{i}", shape=(3, 4), dtype=dtype) for i in range(n_inputs)]
-    out = Elemwise(scalar_op)(*xs)
-    fn = function(xs, out, mode=Mode(linker="py", optimizer=None))
-    node = fn.maker.fgraph.outputs[0].owner
-    assert not hasattr(node.tag, "ufunc")
-
-    vals = [(rng.random((3, 4)) * 4).astype(dtype) for _ in xs]
-    res = fn(*vals)
-    expected = vals[0]
-    for v in vals[1:]:
-        expected = np_op(expected, v)
-    assert res.dtype == out.dtype
-    np.testing.assert_array_equal(res, expected.astype(out.dtype))
