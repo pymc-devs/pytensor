@@ -11,7 +11,7 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.traversal import io_toposort
-from pytensor.tensor import get_vector_length
+from pytensor.tensor import get_first_dim_length, get_vector_length
 from pytensor.tensor.basic import alloc, as_tensor, constant, join
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, eq, matmul
@@ -302,15 +302,31 @@ def test_get_vector_length():
     res = get_vector_length(x)
     assert res == 4
 
-    x = TensorVariable(TensorType("int64", shape=(4, None)), None)
-    assert get_vector_length(x) == 4
-
     x = TensorVariable(TensorType("int64", shape=(None,)), None)
     with pytest.raises(ValueError):
         get_vector_length(x)
 
-    with pytest.raises(TypeError, match="at least one dimension"):
+    x = TensorVariable(TensorType("int64", shape=(4, None)), None)
+    with pytest.raises(TypeError, match="must be a vector"):
+        get_vector_length(x)
+
+    with pytest.raises(TypeError, match="must be a vector"):
         get_vector_length(iscalar())
+
+
+def test_get_first_dim_length():
+    x = TensorVariable(TensorType("int64", shape=(4,)), None)
+    assert get_first_dim_length(x) == 4
+
+    x = TensorVariable(TensorType("int64", shape=(4, None)), None)
+    assert get_first_dim_length(x) == 4
+
+    x = TensorVariable(TensorType("int64", shape=(None, 4)), None)
+    with pytest.raises(ValueError):
+        get_first_dim_length(x)
+
+    with pytest.raises(TypeError, match="at least one dimension"):
+        get_first_dim_length(iscalar())
 
 
 def test_len_and_iter():

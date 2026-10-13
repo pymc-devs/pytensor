@@ -21,8 +21,8 @@ from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import identity as scalar_identity
 from pytensor.scalar.basic import upcast
 from pytensor.tensor import elemwise_cgen as cgen
-from pytensor.tensor import get_vector_length
-from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
+from pytensor.tensor import get_first_dim_length
+from pytensor.tensor.basic import _get_first_dim_length, as_tensor_variable
 from pytensor.tensor.type import (
     TensorType,
     continuous_dtypes,
@@ -1754,10 +1754,10 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
         return construct
 
 
-@_get_vector_length.register(Elemwise)
-def _get_vector_length_Elemwise(op, var):
+@_get_first_dim_length.register(Elemwise)
+def _get_first_dim_length_Elemwise(op, var):
     if len(var.owner.inputs) == 1 and len(var.owner.outputs) == 1:
-        return get_vector_length(var.owner.inputs[0])
+        return get_first_dim_length(var.owner.inputs[0])
 
     raise ValueError(f"Length of {var} cannot be determined")
 

@@ -14,7 +14,7 @@ from pytensor.graph.utils import MetaType
 from pytensor.scalar import (
     ComplexError,
 )
-from pytensor.tensor import _get_vector_length
+from pytensor.tensor import _get_first_dim_length
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import hash_from_ndarray
@@ -578,7 +578,7 @@ class _tensor_py_operators:
         if self.type.ndim == 0:
             raise TypeError("len() of unsized object")
         try:
-            return pt.basic.get_vector_length(self)
+            return pt.basic.get_first_dim_length(self)
         except ValueError:
             # Raise TypeError, not ValueError, so that `list`, `operator.length_hint`
             # and NumPy treat the variable as unsized instead of failing
@@ -589,7 +589,7 @@ class _tensor_py_operators:
 
     def __iter__(self):
         try:
-            length = pt.basic.get_vector_length(self)
+            length = pt.basic.get_first_dim_length(self)
         except TypeError:
             # This prevents accidental iteration via sum(self)
             raise TypeError(
@@ -892,8 +892,8 @@ class TensorVariable(
                 pdb.set_trace()
 
 
-@_get_vector_length.register(TensorVariable)
-def _get_vector_length_TensorVariable(op_or_var, var):
+@_get_first_dim_length.register(TensorVariable)
+def _get_first_dim_length_TensorVariable(op_or_var, var):
     if var.type.shape[0] is None:
         raise ValueError(f"Length of {var} cannot be determined")
     return var.type.shape[0]

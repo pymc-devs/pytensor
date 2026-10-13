@@ -21,7 +21,14 @@ from pytensor.graph.basic import equal_computations
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
-from pytensor.tensor import as_tensor, constant, get_vector_length, ivector, vectorize
+from pytensor.tensor import (
+    as_tensor,
+    constant,
+    get_first_dim_length,
+    get_vector_length,
+    ivector,
+    vectorize,
+)
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
@@ -3105,12 +3112,15 @@ def test_get_vector_length():
     with pytest.raises(ValueError, match=r"^Length of .*"):
         get_vector_length(x[lscalar() :])
 
+
+def test_get_first_dim_length():
     # Slices of the first axis of nd inputs
     x = ptb.as_tensor_variable(np.zeros((4, 3)))
-    assert get_vector_length(x[1:-1]) == 2
+    assert get_first_dim_length(x[1:-1]) == 2
+    assert get_first_dim_length(x[::2, 1:]) == 2
     # Indexing the first axis removes it
     with pytest.raises(ValueError, match=r"^Length of .*"):
-        get_vector_length(matrix()[0])
+        get_first_dim_length(matrix()[0])
 
 
 @pytest.mark.parametrize(

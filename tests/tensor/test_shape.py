@@ -10,7 +10,13 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.replace import clone_replace, vectorize_graph
 from pytensor.scalar.basic import ScalarConstant
-from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
+from pytensor.tensor import (
+    as_tensor_variable,
+    broadcast_to,
+    get_first_dim_length,
+    get_vector_length,
+    row,
+)
 from pytensor.tensor.basic import MakeVector, arange, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.shape import (
@@ -690,9 +696,14 @@ def test_get_vector_length():
     x = specify_shape(ivector(), (10,))
     assert get_vector_length(x) == 10
 
+
+def test_get_first_dim_length():
+    x = specify_shape(matrix(), (2, None))
+    assert get_first_dim_length(x) == 2
+
     x = specify_shape(matrix(), (None, 3))
     with pytest.raises(ValueError, match=r"^Length of .*"):
-        get_vector_length(x)
+        get_first_dim_length(x)
 
 
 def test_shape_tuple():

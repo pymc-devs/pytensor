@@ -56,11 +56,8 @@ def _as_tensor_variable(
     raise NotImplementedError(f"Cannot convert {x!r} to a tensor variable.")
 
 
-def get_vector_length(v: TensorLike) -> int:
+def get_first_dim_length(v: TensorLike) -> int:
     """Return the run-time length of the first axis of a symbolic tensor, when possible.
-
-    Despite the name, this works for tensors with any number of dimensions
-    greater than zero, returning the length of the first axis.
 
     Parameters
     ----------
@@ -87,17 +84,46 @@ def get_vector_length(v: TensorLike) -> int:
     if static_shape is not None:
         return static_shape
 
-    return _get_vector_length(getattr(v.owner, "op", v), v)
+    return _get_first_dim_length(getattr(v.owner, "op", v), v)
+
+
+def get_vector_length(v: TensorLike) -> int:
+    """Return the run-time length of a symbolic vector, when possible.
+
+    This is a version of `get_first_dim_length` restricted to vectors.
+
+    Parameters
+    ----------
+    v
+        A rank-1 `TensorType` variable.
+
+    Raises
+    ------
+    TypeError
+        `v` hasn't the proper type.
+    ValueError
+        No special case applies, the length is not known.
+        In general this is not possible, but for a number of special cases
+        the length can be determined at compile / graph-construction time.
+        See `get_first_dim_length`.
+
+    """
+    v = as_tensor_variable(v)
+
+    if v.type.ndim != 1:
+        raise TypeError(f"Argument must be a vector; got {v.type}")
+
+    return get_first_dim_length(v)
 
 
 @singledispatch
-def _get_vector_length(op: Op | Variable, var: Variable) -> int:
-    """`Op`-based dispatch for `get_vector_length`."""
+def _get_first_dim_length(op: Op | Variable, var: Variable) -> int:
+    """`Op`-based dispatch for `get_first_dim_length`."""
     raise ValueError(f"Length of {var} cannot be determined")
 
 
-@_get_vector_length.register(Constant)
-def _get_vector_length_Constant(op: Op | Variable, var: Constant) -> int:
+@_get_first_dim_length.register(Constant)
+def _get_first_dim_length_Constant(op: Op | Variable, var: Constant) -> int:
     return len(var.data)
 
 

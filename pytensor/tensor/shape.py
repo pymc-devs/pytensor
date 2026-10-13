@@ -17,7 +17,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
+from pytensor.tensor import _get_first_dim_length, as_tensor_variable, get_vector_length
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
@@ -152,8 +152,8 @@ def shape(x: np.ndarray | Number | Variable) -> TensorVariable:
     return cast(TensorVariable, _shape(x))
 
 
-@_get_vector_length.register(Shape)  # type: ignore
-def _get_vector_length_Shape(op: Op, var: TensorVariable) -> int:
+@_get_first_dim_length.register(Shape)  # type: ignore
+def _get_first_dim_length_Shape(op: Op, var: TensorVariable) -> int:
     return cast(int, var.owner.inputs[0].type.ndim)
 
 
@@ -573,8 +573,8 @@ def specify_shape(
     return _specify_shape(x, *shape)
 
 
-@_get_vector_length.register(SpecifyShape)  # type: ignore
-def _get_vector_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
+@_get_first_dim_length.register(SpecifyShape)  # type: ignore
+def _get_first_dim_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
     try:
         length = ptb.get_scalar_constant_value(var.owner.inputs[1])
     except NotScalarConstantError:
