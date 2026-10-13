@@ -17,6 +17,8 @@ from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
 from pytensor import config
+from pytensor.link.numba.cache import compile_numba_function_src
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch._llvmlite_self_ref import (
     ensure_self_ref_metadata_support,
 )
@@ -29,7 +31,7 @@ def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
-def store_core_outputs(core_op_fn, nin, nout, accum_fns=None, const_positions=()):
+def reorder_scalar_inputs(core_op_fn, nin, const_positions=()):
     """Reorder loop-invariant scalar arguments before array arguments."""
     if not const_positions:
         return core_op_fn
@@ -355,12 +357,11 @@ def compute_itershape(
 def _make_stack_array(ctx, builder, arrtype, shape):
     """Build a single-element array struct backed by a stack slot.
 
-    Used for full-reduction accumulators, whose buffer is statically one element
-    and never escapes the caller (the value is read straight back out as a
-    scalar).  ``_empty_nd_impl`` would put those on the heap, costing an NRT
-    allocation, an identity memset and a free to carry one register's worth of
-    data.  An ``alloca`` costs nothing and, not escaping, is promoted to a
-    register by LLVM.  ``meminfo`` is NULL, which numba's incref/decref already
+    The vectorizer returns arrays even when its enclosing reduction epilogue
+    returns a scalar. This one-cell result buffer preserves that interface
+    without an NRT allocation; the epilogue reads it before returning, so the
+    array never escapes. Supported reductions still use the separate scalar
+    accumulator below. ``meminfo`` is NULL, which Numba's incref/decref already
     tolerate (``numba.carray`` views are built the same way).
     """
     ll_dtype = ctx.get_data_type(arrtype.dtype)
@@ -1189,7 +1190,9 @@ def _vectorized(
         if len(entry) > 3 and entry[3]
     }
     output_updates = {entry[0]: entry[2] for entry in reduce_entries if len(entry) > 2}
-    stack_outputs = frozenset(entry[0] for entry in reduce_entries if len(entry) > 4 and entry[4])
+    stack_outputs = frozenset(
+        entry[0] for entry in reduce_entries if len(entry) > 4 and entry[4]
+    )
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )

@@ -36,6 +36,7 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
+    reorder_scalar_inputs,
 )
 from pytensor.scalar.basic import (
     AND,
@@ -841,8 +842,8 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     nout = len(node.outputs)
     nin = len(node.inputs)
     array_positions = [p for p in range(nin) if p not in frozenset(const_positions)]
-    core_op_fn = store_core_outputs(
-        scalar_op_fn, nin=nin, nout=nout, const_positions=const_positions
+    core_op_fn = reorder_scalar_inputs(
+        scalar_op_fn, nin=nin, const_positions=const_positions
     )
     core_handles_out = getattr(core_op_fn, "handles_out", False)
 
@@ -1157,10 +1158,9 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     array_positions = [p for p in range(nin_elemwise) if p not in const_set]
     array_pos_map = {p: new_p for new_p, p in enumerate(array_positions)}
 
-    core_op_fn = store_core_outputs(
+    core_op_fn = reorder_scalar_inputs(
         scalar_op_fn,
         nin=nin_elemwise,
-        nout=nout,
         const_positions=const_positions,
     )
     core_handles_out = getattr(core_op_fn, "handles_out", False)
@@ -1196,8 +1196,8 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         # A ScalarType fused output is a full reduction handed out as a scalar
         # (FuseElemwise wraps it in scalar_from_tensor) rather than a 0-d box.
         scalar_out = isinstance(node.outputs[i].type, ScalarType)
-        # With every axis reduced the accumulator is a single element and, being a
-        # scalar output, never escapes -- so its buffer can live on the stack.
+        # The full-reduction result buffer is read as a scalar by the epilogue,
+        # so it never escapes and can live on the stack.
         on_stack = scalar_out and not kept_axes
         reduce_identities.append((i, _reduce_identity(identity, acc_dtype), on_stack))
         post_specs.append((kept_axes, out_dtype, cast_needed, scalar_out))
