@@ -87,12 +87,12 @@ def assume(
     lower_triangular: bool | None = None,
     upper_triangular: bool | None = None,
     symmetric: bool | None = None,
-    tridiagonal: bool | None = None,
     positive_definite: bool | None = None,
     orthogonal: bool | None = None,
     selection: bool | None = None,
     permutation: bool | None = None,
     unique_indices: bool | None = None,
+    tridiagonal: bool | None = None,
     **assumptions: bool | None,
 ):
     """Attach structural assumptions to a symbolic tensor.
@@ -113,8 +113,6 @@ def assume(
         Assert that *x* is (or is not) upper-triangular.
     symmetric : bool, optional
         Assert that *x* is (or is not) symmetric.
-    tridiagonal : bool, optional
-        Assert that *x* is (or is not) tridiagonal.
     positive_definite : bool, optional
         Assert that *x* is (or is not) positive-definite.
     orthogonal : bool, optional
@@ -129,6 +127,8 @@ def assume(
         aliases a non-negative one (e.g. ``-1`` and ``n-1``). Such an index can
         never enlarge the axis it indexes, so it can be lifted earlier through
         operations without risk of duplicating computation.
+    tridiagonal : bool, optional
+        Assert that *x* is (or is not) tridiagonal.
     **assumptions : bool, optional
         Assumptions registered by downstream libraries, passed by key name, e.g.
         ``time_varying=True``.
@@ -156,12 +156,12 @@ def assume(
         "lower_triangular": lower_triangular,
         "upper_triangular": upper_triangular,
         "symmetric": symmetric,
-        "tridiagonal": tridiagonal,
         "positive_definite": positive_definite,
         "orthogonal": orthogonal,
         "selection": selection,
         "permutation": permutation,
         "unique_indices": unique_indices,
+        "tridiagonal": tridiagonal,
     }
 
     unknown = [name for name in assumptions if name not in KEY_REGISTRY]
