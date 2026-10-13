@@ -862,6 +862,9 @@ def minimize(
     -----
     The Numba backend compiles BFGS (``jac=True``, ``hess=False``) directly for float32 and float64 inputs.
     It supports ``tol`` and the ``gtol``, ``maxiter``, ``norm``, ``xrtol``, ``c1``, and ``c2`` options.
+    Unbounded ``L-BFGS-B`` also runs natively, with ``tol`` and the ``ftol``, ``gtol``,
+    ``maxcor``, ``maxiter``, ``maxfun``, and ``maxls`` options. Bounded ``L-BFGS-B``
+    uses SciPy.
     Other methods or options use SciPy. The native line search can take different steps from SciPy,
     so intermediate iterates and convergence results need not be identical.
     """
