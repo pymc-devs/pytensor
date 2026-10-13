@@ -1477,7 +1477,7 @@ def structured_dot(x, y):
     else:
         assert y_is_sparse_variable
         if x.ndim == 1:
-            return _structured_dot(y.T, x[None, :].T).T.squeeze(axis=0)
+            return structured_dot(x[None, :], y).squeeze(axis=0)
         return _structured_dot(y.T, x.T).T
 
 
