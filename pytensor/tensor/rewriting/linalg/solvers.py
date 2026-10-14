@@ -193,13 +193,12 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
     core_op = node.op.core_op
     [x] = node.outputs
 
-    # For complex inputs sum(b * x) is b.T @ x with no conjugation, which is
-    # not |solve(c, b)| ** 2
-    if x.type.dtype.startswith("complex"):
-        return None
-
     if isinstance(core_op, CholeskySolve):
-        solve_b = node.inputs[1]
+        factor, solve_b = node.inputs
+        # cho_solve reads A as factor @ factor.conj().mT, which the unconjugated
+        # b.T @ x only undoes into sum(whitened ** 2) for a real factor
+        if factor.type.dtype.startswith("complex"):
+            return None
         whitened = None
     else:
         whitened = _inner_of_triangular_solve_pair(node)

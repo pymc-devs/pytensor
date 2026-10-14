@@ -822,20 +822,31 @@ def test_cho_solve_quadratic_form_to_whitened(lower, batched_b, b_ndim):
     assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
 
 
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
 @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
-def test_triangular_solve_pair_quadratic_form_to_whitened(lower):
-    M = pt.dmatrix("M")
-    b = pt.dvector("b")
+def test_triangular_solve_pair_quadratic_form_to_whitened(lower, dtype):
+    """Both transposes are unconjugated, so complex pairs whiten too. The inner
+    solve is reused, so its other consumers do not block the rewrite."""
+    M = pt.matrix("M", dtype=dtype)
+    b = pt.vector("b", dtype=dtype)
     inner = solve_triangular(M, b, lower=lower, b_ndim=1)
     quad = (b * solve_triangular(M.mT, inner, lower=not lower, b_ndim=1)).sum()
 
     result = RewriteTester(
         [M, b],
-        [quad],
+        [quad, pt.exp(inner)],
         include=None,
         custom_rewrite=cho_solve_quadratic_form_to_whitened,
     )
-    result.assert_graph((inner**2).sum())
+    result.assert_graph((inner**2).sum(), pt.exp(inner))
+
+    rng = np.random.default_rng(7)
+    M_val = rng.normal(size=(6, 6)) + 6 * np.eye(6)
+    b_val = rng.normal(size=6)
+    if dtype == "complex128":
+        M_val = M_val + 1j * rng.normal(size=(6, 6))
+        b_val = b_val + 1j * rng.normal(size=6)
+    result.assert_eval(np.tril(M_val) if lower else np.triu(M_val), b_val)
 
 
 @pytest.mark.parametrize(
@@ -1085,6 +1096,30 @@ def test_vector_quadratic_form_dot_not_whitened(build, b_ndim):
         getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
     ]
     assert any(isinstance(op, CholeskySolve) for op in core_ops)
+
+
+@pytest.mark.parametrize("factor_dtype", ["float64", "complex128"])
+def test_complex_cho_solve_quadratic_form(factor_dtype):
+    """cho_solve reads A as c @ c.conj().mT, which the unconjugated b.T @ x undoes
+    only for a real factor."""
+    c = pt.matrix("c", dtype=factor_dtype)
+    b = pt.zvector("b")
+    out = b @ cho_solve((c, True), b, b_ndim=1)
+
+    result = RewriteTester(
+        [c, b], [out], include=None, custom_rewrite=cho_solve_quadratic_form_to_whitened
+    )
+    if factor_dtype == "complex128":
+        result.assert_graph(out)
+        return
+
+    result.assert_graph((solve_triangular(c, b, lower=True, b_ndim=1) ** 2).sum(axis=0))
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    result.assert_eval(
+        np.linalg.cholesky(M @ M.T + 4 * np.eye(4)),
+        rng.normal(size=4) + 1j * rng.normal(size=4),
+    )
 
 
 def test_vector_quadratic_form_length_one():
