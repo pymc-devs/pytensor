@@ -3,6 +3,7 @@ import pytest
 
 from pytensor import config, grad, wrap_jax
 from pytensor.compile.sharedvalue import shared
+from pytensor.gradient import DisconnectedInputError
 from pytensor.link.jax.ops import JAXOp
 from pytensor.scalar import all_types
 from pytensor.tensor import TensorType, tensor
@@ -349,6 +350,62 @@ def test_unused_matrix_product():
     out = jax_op(x, y)
     grad_out = grad(out[1].sum(), [x])
     compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
+
+
+def test_discrete_input():
+    # Integer inputs are not differentiable, so they must be reported as
+    # disconnected instead of getting an integer gradient. Regression test for #2072.
+    rng = np.random.default_rng(12)
+    x = tensor("x", shape=(5,))
+    idx = tensor("idx", shape=(3,), dtype="int32")
+    test_values = [
+        rng.normal(size=x.type.shape).astype(config.floatX),
+        np.array([0, 2, 2], dtype="int32"),
+    ]
+
+    def f(x, idx):
+        return jax.numpy.sum(x[idx])
+
+    out = wrap_jax(f)(x, idx)
+    [grad_out] = grad(out, [x])
+    compare_jax_and_py([x, idx], [out, grad_out], test_values)
+
+    with pytest.raises(DisconnectedInputError):
+        grad(out, [idx])
+
+
+def test_mixed_input_types():
+    # Discrete inputs must stay disconnected when they are interleaved with
+    # differentiable ones, and the gradients of the latter must be unaffected.
+    rng = np.random.default_rng(13)
+    x = tensor("x", shape=(5,))
+    idx = tensor("idx", shape=(3,), dtype="int32")
+    y = tensor("y", shape=(3,))
+    mask = tensor("mask", shape=(3,), dtype="bool")
+    test_values = [
+        rng.normal(size=x.type.shape).astype(config.floatX),
+        np.array([0, 2, 2], dtype="int32"),
+        rng.normal(size=y.type.shape).astype(config.floatX),
+        np.array([True, False, True]),
+    ]
+
+    def f(x, idx, y, mask):
+        return jax.numpy.sum(x[idx] * y * mask)
+
+    out = wrap_jax(f)(x, idx, y, mask)
+    assert out.owner.op.connection_pattern(out.owner) == [
+        [True],
+        [False],
+        [True],
+        [False],
+    ]
+
+    grad_x, grad_y = grad(out, [x, y])
+    compare_jax_and_py([x, idx, y, mask], [out, grad_x, grad_y], test_values)
+
+    for discrete_input in (idx, mask):
+        with pytest.raises(DisconnectedInputError):
+            grad(out, [discrete_input])
 
 
 def test_unknown_static_shape():

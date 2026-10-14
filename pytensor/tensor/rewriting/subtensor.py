@@ -2044,7 +2044,9 @@ def local_read_of_write_same_indices(fgraph, node):
     if inner.owner.op.set_instead_of_inc:
         r = cast(v, out.dtype)
         if not r.type.is_super(out.type):
-            r = alloc(r, *out.shape)
+            # Reading out.shape would retain the read being replaced and loop.
+            shape = get_simplified_shape(node.op(x, *outer_idx_vars), fgraph=fgraph)
+            r = alloc(r, *shape)
         copy_stack_trace(out, r)
         return [r]
     else:

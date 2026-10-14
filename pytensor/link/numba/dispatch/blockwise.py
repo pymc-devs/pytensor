@@ -18,7 +18,6 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
-    store_core_outputs,
 )
 from pytensor.tensor import TensorVariable, get_vector_length
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
@@ -42,7 +41,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         node=core_node,
         **kwargs,
     )
-    core_op_fn = store_core_outputs(core_op_fn, nin=nin, nout=nout)
+    core_handles_out = getattr(core_op_fn, "handles_out", False)
 
     batch_ndim = blockwise_op.batch_ndim(node)
 
@@ -76,7 +75,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
             "Numba implementation of Blockwise cannot be evaluated in Python (non-JIT) mode."
         )
 
-    @overload(blockwise, jit_options=_jit_options)
+    @overload(blockwise, jit_options=_jit_options())
     def ov_blockwise(*inputs_and_core_shapes):
         def impl(*inputs_and_core_shapes):
             inputs, core_shapes = (
@@ -98,6 +97,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
+                core_handles_out,
             )
 
         return impl
@@ -106,7 +106,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         # If the core op cannot be cached, the Blockwise wrapper cannot be cached either
         blockwise_key = None
     else:
-        blockwise_cache_version = 2
+        blockwise_cache_version = 3
         blockwise_key = "_".join(
             map(
                 str,

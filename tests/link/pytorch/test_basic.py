@@ -85,6 +85,14 @@ def compare_pytorch_and_py(
     return pytensor_torch_fn, pytorch_res
 
 
+@pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+def test_complex_sign(dtype):
+    x = vector(dtype=dtype)
+    compare_pytorch_and_py(
+        [x], pt.sign(x), [np.array([0, 3 + 4j, -2j, -1], dtype=dtype)]
+    )
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_pytorch_FunctionGraph_once(device):
     if device == "cuda" and not torch.cuda.is_available():
@@ -377,6 +385,16 @@ def test_pytorch_link_references():
     f = function([x], out, mode="PYTORCH")
     f(torch.ones(3))
     assert "inner_fn" not in dir(m), "function call reference leaked"
+
+
+@pytest.mark.filterwarnings("error")
+def test_read_only_constant_does_not_warn():
+    # https://github.com/pymc-devs/pytensor/issues/2365
+    x = vector("x")
+    # The gradient graph contains a constant backed by a read-only array
+    out = pt.grad((x**2).sum(), x)
+    f = function([x], out, mode="PYTORCH")
+    np.testing.assert_allclose(f(np.ones(3)), 2)
 
 
 def test_pytorch_scipy():

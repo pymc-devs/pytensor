@@ -19,14 +19,14 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.exceptions import NotScalarConstantError
 
 
-MLX_DYNAMIC_SHAPE_ERROR = (
-    "MLX compilation limitation: Alloc operations with dynamic shapes "
-    "cannot be used inside compiled functions. This is because MLX "
-    "compilation forbids evaluating arrays to extract shape values. "
+MLX_DYNAMIC_VALUE_ERROR = (
+    "MLX compilation limitation: integer arguments (shapes, axes, pad widths) "
+    "computed from symbolic inputs cannot be used inside compiled functions. "
+    "This is because MLX compilation forbids evaluating arrays to extract "
+    "their values. "
     "\n\nWorkarounds:"
-    "\n1. Avoid using Alloc with dynamic shapes in compiled contexts"
-    "\n2. Use static shapes when possible"
-    "\n3. Move Alloc operations outside compiled functions"
+    "\n1. Use constant values for these arguments when possible"
+    "\n2. Compile with `MLXLinker(use_compile=False)`"
 )
 
 
@@ -147,7 +147,7 @@ def mlx_funcify_AllocEmpty(op, node, **kwargs):
         resolved_shape = (
             _resolve_shape(static_dims, shape)
             if static_dims is not None
-            else tuple(_coerce_to_int(dim) for dim in shape)
+            else tuple(mlx_to_list_shape(shape))
         )
         return mx.zeros(resolved_shape, dtype=dtype)
 
@@ -167,7 +167,7 @@ def mlx_funcify_Alloc(op, node, **kwargs):
         resolved_shape = (
             _resolve_shape(static_dims, shape)
             if static_dims is not None
-            else tuple(_coerce_to_int(dim) for dim in shape)
+            else tuple(mlx_to_list_shape(shape))
         )
         result = mx.broadcast_to(x, resolved_shape)
         if node_inputs is not None:
@@ -222,12 +222,12 @@ def _resolve_shape(static_dims, runtime_shape):
 
     resolved = []
     for const_dim, dim in zip(static_dims, runtime_shape, strict=True):
-        resolved.append(const_dim if const_dim is not None else _coerce_to_int(dim))
+        resolved.append(const_dim if const_dim is not None else coerce_to_int(dim))
 
     return tuple(resolved)
 
 
-def _coerce_to_int(value):
+def coerce_to_int(value):
     if isinstance(value, np.integer | int):
         return int(value)
     try:
@@ -235,21 +235,22 @@ def _coerce_to_int(value):
             return int(value.item())
         return int(value)
     except (ValueError, TypeError) as exc:
-        _rethrow_dynamic_shape_error(exc)
+        _rethrow_dynamic_value_error(exc)
         raise
 
 
 def mlx_to_list_shape(size) -> list[int]:
-    """Convert a size value (mx.array, np.ndarray, or sequence) to a plain Python list of ints.
+    """Convert a shape given as an ``mx.array``, ``np.ndarray`` or sequence to a list of Python ints."""
+    if isinstance(size, mx.array):
+        try:
+            return [int(dim) for dim in size.tolist()]
+        except (ValueError, TypeError) as exc:
+            _rethrow_dynamic_value_error(exc)
+            raise
+    return [coerce_to_int(x) for x in size]
 
-    Used by random variable dispatch to normalise the ``size`` argument, which
-    PyTensor may pass as an ``mx.array`` or ``np.ndarray`` rather than a plain
-    Python list.
-    """
-    return [_coerce_to_int(x) for x in size]
 
-
-def _rethrow_dynamic_shape_error(exc):
+def _rethrow_dynamic_value_error(exc):
     msg = str(exc)
     if "[eval] Attempting to eval an array during function transformations" in msg:
-        raise ValueError(f"{MLX_DYNAMIC_SHAPE_ERROR}\n\nOriginal error: {msg}") from exc
+        raise ValueError(f"{MLX_DYNAMIC_VALUE_ERROR}\n\nOriginal error: {msg}") from exc

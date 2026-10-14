@@ -1,5 +1,5 @@
 from hashlib import sha256
-from textwrap import indent
+from textwrap import dedent, indent
 
 import numpy as np
 
@@ -315,21 +315,29 @@ def numba_funcify_Join(op, node, **kwargs):
 
 @register_funcify_default_op_cache_key(Split)
 def numba_funcify_Split(op, **kwargs):
-    axis = op.axis
+    outputs = create_tuple_string([f"outputs[{i}]" for i in range(op.len_splits)])
+    split_src = dedent(
+        f"""
+        def split(x, sizes):
+            if len(sizes) != n_splits:
+                raise ValueError("Length of splits is not equal to n_splits")
+            if (sizes < 0).any():
+                raise ValueError("Split sizes cannot be negative")
+            split_indices = np.cumsum(sizes)
+            if split_indices[-1] != x.shape[axis]:
+                raise ValueError(
+                    f"Split sizes sum to {{split_indices[-1]}}; expected {{x.shape[axis]}}"
+                )
+            outputs = np.split(x, split_indices[:-1], axis=axis)
+            return {outputs}
+        """
+    )
+    split_fn = compile_numba_function_src(
+        split_src, "split", {"np": np, "axis": op.axis, "n_splits": op.len_splits}
+    )
 
-    @numba_basic.numba_njit
-    def split(x, sizes):
-        if (sizes < 0).any():
-            raise ValueError("Split sizes cannot be negative")
-        split_indices = np.cumsum(sizes)
-        if split_indices[-1] != x.shape[axis]:
-            raise ValueError(
-                f"Split sizes sum to {split_indices[-1]}; expected {x.shape[axis]}"
-            )
-        return np.split(x, split_indices[:-1], axis=axis)
-
-    cache_version = 2
-    return split, cache_version
+    cache_version = 3
+    return numba_basic.numba_njit(split_fn), cache_version
 
 
 @register_funcify_default_op_cache_key(ExtractDiag)

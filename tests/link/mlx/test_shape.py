@@ -6,7 +6,7 @@ from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
 from pytensor.tensor.shape import Shape, Shape_i, reshape
 from pytensor.tensor.type import iscalar, vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode_no_compile
 
 
 def test_mlx_shape_ops():
@@ -97,6 +97,18 @@ def test_mlx_Reshape_concrete_shape():
 
     x = reshape(a, (a.shape[0] // 2, a.shape[0] // 2))
     compare_mlx_and_py([a], [x], [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX)])
+
+
+def test_mlx_Reshape_shape_graph_input_no_compile():
+    a = vector("a")
+    shape_pt = iscalar("b")
+    x = reshape(a, (shape_pt, shape_pt))
+    compare_mlx_and_py(
+        [a, shape_pt],
+        [x],
+        [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX), 2],
+        mlx_mode=mlx_mode_no_compile,
+    )
 
 
 @pytest.mark.xfail(reason="`shape_pt` should be specified as a static argument")

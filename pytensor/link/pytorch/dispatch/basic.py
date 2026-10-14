@@ -1,3 +1,4 @@
+import warnings
 from functools import singledispatch
 from types import NoneType
 
@@ -32,7 +33,12 @@ def pytorch_typify(data, **kwargs):
 @pytorch_typify.register(np.ndarray)
 @pytorch_typify.register(torch.Tensor)
 def pytorch_typify_tensor(data, dtype=None, **kwargs):
-    return torch.as_tensor(data, dtype=dtype)
+    with warnings.catch_warnings():
+        # The PyTorch backend never writes to its inputs or constants in place
+        warnings.filterwarnings(
+            "ignore", "The given NumPy array is not writable", UserWarning
+        )
+        return torch.as_tensor(data, dtype=dtype)
 
 
 @pytorch_typify.register(slice)

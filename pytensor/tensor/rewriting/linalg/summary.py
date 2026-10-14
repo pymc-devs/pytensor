@@ -1,17 +1,23 @@
+from itertools import chain
+
 import numpy as np
 
 from pytensor import tensor as pt
 from pytensor.assumptions import (
     LOWER_TRIANGULAR,
+    UNIT_MAGNITUDE,
     UPPER_TRIANGULAR,
+    assume,
     check_assumption,
 )
+from pytensor.compile.mode import optdb
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
+    dfs_rewriter,
     node_rewriter,
 )
-from pytensor.scalar.basic import Abs, Log, Sign, Sqr
-from pytensor.tensor.basic import ones
+from pytensor.scalar.basic import Abs, Log, Mul, Sign, Sqr
+from pytensor.tensor.basic import atleast_Nd, ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -20,13 +26,18 @@ from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet, det
-from pytensor.tensor.math import Prod, log, prod
+from pytensor.tensor.math import Prod, log, prod, sqr
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
+from pytensor.tensor.rewriting.linalg.utils import (
+    clients_through_expand_dims,
+    matrix_diagonal_product,
+    permutation_indices_to_det_sign,
+    strip_left_expand_dims_and_transpose,
+)
 from pytensor.tensor.subtensor import _is_provably_non_negative
 
 
@@ -34,7 +45,7 @@ from pytensor.tensor.subtensor import _is_provably_non_negative
 @register_specialize
 @node_rewriter([log])
 def local_log_prod_to_sum_log(fgraph, node):
-    """Rewrite log(prod(x)) as sum(log(x)), when x is known to be non-negative."""
+    """Stabilize product logarithms, preserving the sign or phase when needed."""
     [p] = node.inputs
     match p.owner_op_and_inputs:
         case (Prod(axis=axis), x):
@@ -51,15 +62,44 @@ def local_log_prod_to_sum_log(fgraph, node):
                 case (Prod(axis=axis), x):
                     return [log(abs(x)).sum(axis=axis)]
 
+        case (Elemwise(Mul()), *factors):
+            unit = [x for x in factors if check_assumption(fgraph, x, UNIT_MAGNITUDE)]
+            rest = [x for x in factors if x not in unit]
+            if not (unit and len(rest) == 1 and isinstance(rest[0].owner_op, Prod)):
+                return
+            [product] = rest
+            [product_input] = product.owner.inputs
+            input_kind = product_input.type.numpy_dtype.kind
+            output_kind = product.type.numpy_dtype.kind
+            if not (input_kind in "fc" and output_kind in "fc"):
+                return
+            if input_kind == "c" and output_kind == "f":
+                return
+            # The generated log(phase) contains this product of signs; stop there.
+            match product_input.owner_op:
+                case Elemwise(Sign()):
+                    return
+            phase = pt.sign(p)
+            magnitude = log(abs(product))
+            if p.type.numpy_dtype.kind == "c":
+                return [log(phase) + magnitude]
+            return [
+                pt.where(
+                    pt.eq(phase, -1),
+                    pt.constant(np.nan, dtype=node.out.dtype),
+                    magnitude,
+                )
+            ]
+
 
 @register_stabilize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([det])
 def det_of_matrix_factorized_elsewhere(fgraph, node):
-    """
-    If we have det(X) or abs(det(X)) and there is already a nice decomposition(X) floating around,
-    use it to compute it more cheaply
+    """det(X) -> p * prod(diag(U)), where p is the existing LU permutation's sign.
 
+    For an existing Cholesky factor L, det(X) -> sqr(prod(diag(L))).
+    Magnitude-only factorizations require consumers that discard the sign.
     """
     [det] = node.outputs
     [x] = node.inputs
@@ -69,35 +109,51 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
         for client, _ in fgraph.clients[det]
     )
 
+    # det(X.mT) == det(X), so factorizations hanging off x itself and off its
+    # stripped core are both usable
+    x_core, _ = strip_left_expand_dims_and_transpose(x)
+    factor_clients = clients_through_expand_dims(fgraph, x)
+    if x_core is not x:
+        factor_clients = chain(
+            factor_clients, clients_through_expand_dims(fgraph, x_core)
+        )
+
     new_det = None
-    for client, _ in fgraph.clients[x]:
+    for client, _ in factor_clients:
         core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
         match core_op:
             case Cholesky():
+                # sqr lets the logarithm rewrite avoid materializing the square.
                 L = client.outputs[0]
-                new_det = matrix_diagonal_product(L) ** 2
-            case LU():
+                new_det = sqr(matrix_diagonal_product(L))
+            case LU(permute_l=False, p_indices=p_indices):
+                P_or_indices, _, U = client.outputs
+                factor_diag = pt.diagonal(U, axis1=-2, axis2=-1)
+                indices = (
+                    P_or_indices if p_indices else pt.argmax(P_or_indices, axis=-1)
+                )
+                permutation_sign = permutation_indices_to_det_sign(indices).astype(
+                    U.dtype
+                )
+                new_det = permutation_sign * prod(factor_diag, axis=-1)
+            case LU() if sign_not_needed:
                 U = client.outputs[-1]
                 new_det = matrix_diagonal_product(U)
             case LUFactor():
-                LU_packed = client.outputs[0]
-                new_det = matrix_diagonal_product(LU_packed)
-            case _:
-                if not sign_not_needed:
-                    continue
-                match core_op:
-                    case SVD():
-                        lmbda = (
-                            client.outputs[1]
-                            if core_op.compute_uv
-                            else client.outputs[0]
-                        )
-                        new_det = prod(lmbda, axis=-1)
-                    case QR():
-                        R = client.outputs[-1]
-                        # if mode == "economic", R may not be square and this rewrite could hide a shape error
-                        # That's why it's tagged as `shape_unsafe`
-                        new_det = matrix_diagonal_product(R)
+                LU_packed, pivots = client.outputs
+                factor_diag = pt.diagonal(LU_packed, axis1=-2, axis2=-1)
+                n_swaps = pt.neq(pivots, pt.arange(x.shape[-1])).sum(axis=-1)
+                permutation_sign = assume(
+                    1 - 2 * (n_swaps % 2), unit_magnitude=True
+                ).astype(LU_packed.dtype)
+                new_det = permutation_sign * prod(factor_diag, axis=-1)
+            case SVD() if sign_not_needed:
+                lmbda = client.outputs[1] if core_op.compute_uv else client.outputs[0]
+                new_det = prod(lmbda, axis=-1)
+            case QR() if sign_not_needed:
+                R = client.outputs[-1]
+                # Economic R may not be square; this rewrite is shape_unsafe.
+                new_det = matrix_diagonal_product(R)
 
         if new_det is not None:
             # found a match
@@ -105,7 +161,11 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
     else:  # no-break (i.e., no-match)
         return None
 
-    [det] = node.outputs
+    if new_det.type.ndim > det.type.ndim:
+        # A factorization found on an expanded alias of x carries the alias's
+        # dummy leading dims, which are broadcastable by construction
+        new_det = new_det.squeeze(axis=tuple(range(new_det.type.ndim - det.type.ndim)))
+    new_det = atleast_Nd(new_det, n=det.type.ndim).astype(det.type.dtype)
     copy_stack_trace(det, new_det)
     return [new_det]
 
@@ -127,6 +187,8 @@ def det_of_factorized_matrix(fgraph, node):
         for client, _ in fgraph.clients[det]
     )
 
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    x, _ = strip_left_expand_dims_and_transpose(x)
     x_node = x.owner
     if x_node is None:
         return None
@@ -139,7 +201,7 @@ def det_of_factorized_matrix(fgraph, node):
         case Cholesky():
             new_det = matrix_diagonal_product(x)
         case LU():
-            if x is x_node.outputs[-2]:
+            if not core_op.permute_l and x is x_node.outputs[-2]:
                 # x is L
                 new_det = ones(x.shape[:-2], dtype=det.dtype)
             elif x is x_node.outputs[-1]:
@@ -169,6 +231,7 @@ def det_of_factorized_matrix(fgraph, node):
     if new_det is None:
         return None
 
+    new_det = atleast_Nd(new_det, n=det.type.ndim)
     copy_stack_trace(det, new_det)
     return [new_det]
 
@@ -195,31 +258,22 @@ def det_of_triangular(fgraph, node):
 @node_rewriter([det])
 def det_of_inv(fgraph, node):
     """Replace det(matrix_inverse(X)) with reciprocal(det(X))."""
-    match node.inputs[0].owner_op_and_inputs:
+    # det(X.mT) == det(X), so the transposed flag is irrelevant
+    core, _ = strip_left_expand_dims_and_transpose(node.inputs[0])
+    match core.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            return [1 / det(X)]
+            return [atleast_Nd(1 / det(X), n=node.outputs[0].type.ndim)]
 
 
-@register_specialize
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
-    """
-    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites them using the SLogDet operation.
+    """sign(det(X)), log(abs(det(X))) -> the two outputs of SLogDet(X).
 
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    dictionary of Variables, optional
-        Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
+    Also replace log(det(X)) using sign/phase and logabsdet. Requires all
+    determinant consumers to match, avoiding an additional factorization.
     """
     dummy_replacements = {}
-    for client, _ in fgraph.clients[node.outputs[0]]:
+    for client, _ in clients_through_expand_dims(fgraph, node.outputs[0]):
         match (client.op, *client.outputs):
             # Check for sign(det)
             case (Elemwise(Sign()), sign):
@@ -227,7 +281,7 @@ def slogdet_specialization(fgraph, node):
 
             # Check for log(abs(det))
             case (Elemwise(Abs()), potential_log):
-                for client_2, _ in fgraph.clients[potential_log]:
+                for client_2, _ in clients_through_expand_dims(fgraph, potential_log):
                     match (client_2.op, *client_2.outputs):
                         case (Elemwise(Log()), log_abs_det):
                             dummy_replacements[log_abs_det] = "log_abs_det"
@@ -245,11 +299,26 @@ def slogdet_specialization(fgraph, node):
         return None
 
     [x] = node.inputs
-    sign_det_x, log_abs_det_x = SLogDet()(x)
-    log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
+    sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
+    if x.type.numpy_dtype.kind == "c":
+        log_det_x = log(sign_det_x) + log_abs_det_x
+    else:
+        log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
     slogdet_specialization_map = {
         "sign": sign_det_x,
         "log_abs_det": log_abs_det_x,
         "log_det": log_det_x,
     }
-    return {k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()}
+    return {
+        k: atleast_Nd(slogdet_specialization_map[v], n=k.type.ndim).astype(k.type.dtype)
+        for k, v in dummy_replacements.items()
+    }
+
+
+# Keep the naive determinant graph available to all specialization rewrites.
+optdb.register(
+    "slogdet_specialization",
+    dfs_rewriter(slogdet_specialization),
+    "fast_run",
+    position=2.1,
+)

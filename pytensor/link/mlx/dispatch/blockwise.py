@@ -1,4 +1,5 @@
 import mlx.core as mx
+import numpy as np
 
 from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.tensor.blockwise import Blockwise, _check_runtime_broadcast_core
@@ -18,6 +19,29 @@ def funcify_Blockwise(op: Blockwise, node, **kwargs):
 
     # Hoisted out of the per-call path, unlike Blockwise._check_runtime_broadcast.
     batch_bcast = [inp.type.broadcastable[:batch_ndim] for inp in node.inputs]
+
+    # A core function that sets `natively_batched` runs directly on inputs
+    # broadcast to the common batch shape. MLX's linalg functions take leading
+    # batch dims themselves, and mx.vmap has no rule for LUF or QRF and drops the
+    # triangular flags of solve_triangular.
+    if getattr(core_f, "natively_batched", False):
+
+        def blockwise_native(*args):
+            _check_runtime_broadcast_core(args, batch_bcast, batch_ndim)
+
+            batch_shapes = [
+                arg.shape[: arg.ndim - n_core] for arg, n_core in zip(args, core_ndims)
+            ]
+            batch_shape = np.broadcast_shapes(*batch_shapes)
+            args = [
+                mx.broadcast_to(arg, (*batch_shape, *arg.shape[arg.ndim - n_core :]))
+                for arg, n_core in zip(args, core_ndims)
+            ]
+
+            out = core_f(*args)
+            return tuple(out) if multi_output else out
+
+        return blockwise_native
 
     # Decide batching purely from static shapes so a graph batches identically
     # here and in every other backend: a batch axis broadcasts (is never mapped)

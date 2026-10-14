@@ -48,7 +48,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
             x = pt.random.dirichlet(alphas=[1, 2, 3], size=(5,))
             pytensor.dprint(x, print_type=True)
             # dirichlet_rv{"(a)->(a)"}.1 [id A] <Matrix(float64, shape=(5, 3))>
-            #  ├─ RNG(<Generator(PCG64) at 0x7F09E59C18C0>) [id B] <RandomGeneratorType>
+            #  ├─ RNG(Generator(PCG64)) [id B] <RandomGeneratorType>
             #  ├─ [5] [id C] <Vector(int64, shape=(1,))>
             #  └─ ExpandDims{axis=0} [id D] <Matrix(int64, shape=(1, 3))>
             #     └─ [1 2 3] [id E] <Vector(int64, shape=(3,))>
@@ -58,7 +58,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
             pytensor.dprint(fn.maker.fgraph)
             # [dirichlet_rv{"(a)->(a)"}].1 [id A] 0
             #  ├─ [3] [id B]
-            #  ├─ RNG(<Generator(PCG64) at 0x7F15B8E844A0>) [id C]
+            #  ├─ RNG(Generator(PCG64)) [id C]
             #  ├─ [5] [id D]
             #  └─ [[1 2 3]] [id E]
             # Inner graphs:

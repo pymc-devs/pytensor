@@ -118,7 +118,7 @@ def rng(name=None) -> XRandomGeneratorVariable:
 
 class XRandomGeneratorSharedVariable(SharedVariable, XRandomGeneratorVariable):
     def __str__(self):
-        return self.name or f"XRNG({self.container!r})"
+        return self.name or f"XRNG({self.container.storage[0]})"
 
     def set_value(self, new_value=None, *, seed=UNSET, borrow=False):
         new_value, borrow = RandomGeneratorSharedVariable._resolve_rng_value(

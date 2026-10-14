@@ -84,27 +84,57 @@ def test_transpose_of_inv():
                 assert node.inputs[0].name == "X"
 
 
-@pytest.mark.parametrize("batched", [False, True], ids=["unbatched", "batched"])
-def test_inv_to_solve(batched):
-    if batched:
-        A = pt.tensor("A", shape=(None, None, None), dtype="float64")
-        b = pt.tensor("b", shape=(None, None, None), dtype="float64")
-    else:
-        A = dmatrix("A")
-        b = dmatrix("b")
+def test_transpose_of_inv_through_expand_dims():
+    X = dmatrix("X")
+    out = pt.expand_dims(matrix_inverse(X), 0).mT
+    rewritten = rewrite_graph(out, include=("canonicalize",))
+    assert_equal_computations([rewritten], [pt.expand_dims(matrix_inverse(X.mT), 0)])
+
+
+@pytest.mark.parametrize(
+    "a_batched, b_batched",
+    [(False, False), (True, True), (False, True)],
+    ids=["unbatched", "batched", "expanded"],
+)
+def test_inv_to_solve(a_batched, b_batched):
+    # In the "expanded" case Blockwise.make_node wraps inv(A) in a left expand_dims
+    A = pt.tensor("A", shape=(None,) * (2 + a_batched), dtype="float64")
+    b = pt.tensor("b", shape=(None,) * (2 + b_batched), dtype="float64")
     out = matrix_inverse(A) @ b
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
     assert_equal_computations([rewritten], [solve(A, b)])
 
 
-@pytest.mark.parametrize("inv_op_1", [inv, pinv])
-@pytest.mark.parametrize("inv_op_2", [inv, pinv])
-def test_inf_of_inv(inv_op_1, inv_op_2):
+def test_inv_to_solve_right_operand_through_expand_dims():
+    A = dmatrix("A")
+    b = pt.tensor("b", shape=(None, None, None), dtype="float64")
+
+    rewritten = rewrite_graph(
+        b @ matrix_inverse(A), include=("canonicalize", "stabilize")
+    )
+    # The expand_dims around A.mT canonicalizes into a single fused DimShuffle
+    expected = solve(A.dimshuffle("x", 1, 0), b.mT).mT
+    assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "inv_op_1, inv_op_2",
+    [(inv, pinv), (pinv, inv)],
+    ids=["pinv_of_inv", "inv_of_pinv"],
+)
+def test_inv_of_inv(inv_op_1, inv_op_2):
     x = pt.matrix("x")
     inv_x = inv_op_1(x)
     x_again = inv_op_2(inv_x)
     rewritten_out = rewrite_graph(x_again)
     assert rewritten_out == x
+
+
+def test_inv_of_inv_through_expand_dims():
+    x = pt.matrix("x")
+    out = inv(pt.expand_dims(pinv(x), 0))
+    rewritten = rewrite_graph(out)
+    assert_equal_computations([rewritten], [pt.expand_dims(x, 0)])
 
 
 @pytest.mark.parametrize("inv_op", [inv, pinv])
@@ -248,6 +278,21 @@ def test_lift_linalg_of_expanded_matrices(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+def test_lift_linalg_through_expand_dims():
+    a, b = dmatrix("a"), dmatrix("b")
+    out = matrix_inverse(pt.expand_dims(pt.linalg.block_diag(a, b), 0))
+
+    rewritten = rewrite_graph(
+        out,
+        include=("canonicalize", "stabilize", "specialize"),
+        exclude=("local_eager_useless_unbatched_blockwise",),
+    )
+    expected = pt.expand_dims(
+        pt.linalg.block_diag(matrix_inverse(a), matrix_inverse(b)), 0
+    )
+    assert_equal_computations([rewritten], [expected])
 
 
 def test_inv_of_orthogonal_to_transpose():

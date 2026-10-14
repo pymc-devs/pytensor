@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from pytensor.configdefaults import config
-from pytensor.tensor.math import Argmax, Max, maximum
+from pytensor.tensor.math import Argmax, Max, ProdWithoutZeros, maximum
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.type import dvector, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -19,6 +19,13 @@ def test_jax_max_and_argmax():
     amx = Argmax([0])(x)
     out = mx * amx
     compare_jax_and_py([x], [out], [np.r_[1, 2]])
+
+
+def test_prod_without_zeros():
+    x = matrix("x")
+    outs = [ProdWithoutZeros(axis=None)(x), ProdWithoutZeros(axis=(1,))(x)]
+    x_test = np.array([[-1, 0, 3], [2, 4, 5], [0, 0, 0]], dtype=config.floatX)
+    compare_jax_and_py([x], outs, [x_test])
 
 
 def test_dot():

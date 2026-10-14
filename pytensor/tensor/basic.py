@@ -2402,6 +2402,19 @@ class Split(COp):
         """
 
 
+@_vectorize_node.register(Split)
+def vectorize_split(op: Split, node, batch_x, batch_splits):
+    old_x, old_splits = node.inputs
+    # Batched split sizes would give ragged outputs across the batch
+    if batch_splits.type.ndim != old_splits.type.ndim:
+        return vectorize_node_fallback(op, node, batch_x, batch_splits)
+
+    batch_ndim = batch_x.type.ndim - old_x.type.ndim
+    return Split(len_splits=op.len_splits, axis=op.axis + batch_ndim).make_node(
+        batch_x, batch_splits
+    )
+
+
 class Join(COp):
     r"""
     Concatenate multiple `TensorVariable`\s along an axis.
@@ -2991,7 +3004,10 @@ def flatten(x, ndim=1):
         raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
 
     if ndim > 1:
-        dims = (*_x.shape[: ndim - 1], -1)
+        # Index per-axis (`Shape_i` folds to a constant for static shapes)
+        # rather than slicing the shape vector
+        x_shape = _x.shape
+        dims = (*(x_shape[i] for i in range(ndim - 1)), -1)
     else:
         dims = (-1,)
 

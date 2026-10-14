@@ -1,14 +1,18 @@
 import logging
+from collections.abc import Iterator
 
 from pytensor import tensor as pt
 from pytensor.assumptions import (
     LOWER_TRIANGULAR,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UPPER_TRIANGULAR,
+    assume,
     check_assumption,
 )
-from pytensor.graph import Constant
+from pytensor.graph import Apply, Constant
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Mul
@@ -37,6 +41,7 @@ MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 ASSUME_A_OF_TRANSPOSE = {
     "lower triangular": "upper triangular",
     "upper triangular": "lower triangular",
+    "tridiagonal": "tridiagonal",
     "pos": "pos",
     "sym": "sym",
     "gen": "gen",
@@ -47,8 +52,19 @@ def matrix_diagonal_product(x):
     return pt.prod(diagonal(x, axis1=-2, axis2=-1), axis=-1)
 
 
+def permutation_indices_to_det_sign(indices):
+    """Permutation indices -> (-1) ** n_inversions, declaring unit magnitude."""
+    inversions = pt.triu(
+        (indices[..., :, None] > indices[..., None, :]).astype("int64"), k=1
+    ).sum(axis=(-2, -1))
+    sign = 1 - 2 * (inversions % 2)
+    return assume(sign, unit_magnitude=True)
+
+
 def get_assume_a(fgraph, A):
     """Return the most-specific ``solve`` ``assume_a`` for ``A`` from tags and assumptions."""
+    if check_assumption(fgraph, A, TRIDIAGONAL):
+        return "tridiagonal"
     if getattr(A.tag, "lower_triangular", False) or check_assumption(
         fgraph, A, LOWER_TRIANGULAR
     ):
@@ -64,6 +80,51 @@ def get_assume_a(fgraph, A):
     if getattr(A.tag, "symmetric", False) or check_assumption(fgraph, A, SYMMETRIC):
         return "sym"
     return "gen"
+
+
+def strip_left_expand_dims_and_transpose(
+    x: TensorVariable,
+) -> tuple[TensorVariable, bool]:
+    """Peel a left expand_dims or left-expanded matrix transpose off ``x``.
+
+    Batched graphs insert dummy leading dims on matrix operands with left
+    ``expand_dims`` (``RandomVariable.make_node`` and ``Blockwise.make_node``
+    both do), hiding the owner that structural matchers look for. One peel
+    suffices: adjacent DimShuffles are merged by ``local_dimshuffle_lift``.
+
+    Returns
+    -------
+    core : TensorVariable
+        ``x`` without the leading dummy dims and matrix transpose, if any.
+    transposed : bool
+        Whether ``core``'s last two axes are transposed relative to ``x``.
+    """
+    match x.owner_op_and_inputs:
+        case (DimShuffle(is_left_expand_dims=True), inner):
+            return inner, False  # type: ignore[return-value]
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+            return inner, True  # type: ignore[return-value]
+    return x, False
+
+
+def clients_through_expand_dims(
+    fgraph: FunctionGraph, var: TensorVariable
+) -> Iterator[tuple[Apply, int]]:
+    """Iterate over clients of ``var``, looking through left expand_dims clients.
+
+    Yields
+    ------
+    client : Apply
+        A client of ``var`` or of one of its left expand_dims aliases.
+    index : int
+        Index at which ``var`` (or its expanded alias) enters ``client``.
+    """
+    for client, idx in fgraph.clients[var]:
+        match client.op:
+            case DimShuffle(is_left_expand_dims=True):
+                yield from clients_through_expand_dims(fgraph, client.outputs[0])  # type: ignore[arg-type]
+            case _:
+                yield client, idx
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:

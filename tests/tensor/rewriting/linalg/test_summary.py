@@ -6,10 +6,14 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.assumptions.specify import assume
 from pytensor.configdefaults import config
+from pytensor.gradient import grad
 from pytensor.graph import rewrite_graph
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition import lu, qr, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
-from pytensor.tensor.linalg.summary import Det, SLogDet, det
+from pytensor.tensor.linalg.solvers.general import lu_solve
+from pytensor.tensor.linalg.summary import Det, SLogDet, det, slogdet
+from pytensor.tensor.rewriting.linalg.utils import permutation_indices_to_det_sign
 from pytensor.tensor.type import matrix
 from tests.unittest_tools import RewriteTester, assert_equal_computations
 
@@ -160,70 +164,113 @@ def test_det_of_diag_incorrect_for_rectangle_eye():
         pt.linalg.det(x_diag)
 
 
-def test_slogdet_specialization():
-    x, a = pt.dmatrix("x"), np.random.rand(20, 20)
-    det_x, det_a = pt.linalg.det(x), np.linalg.det(a)
-    log_abs_det_x, log_abs_det_a = pt.log(pt.abs(det_x)), np.log(np.abs(det_a))
-    log_det_x, log_det_a = pt.log(det_x), np.log(det_a)
-    sign_det_x, sign_det_a = pt.sign(det_x), np.sign(det_a)
+@pytest.mark.parametrize("batch_dim", [(), (4,)])
+def test_slogdet_specialization(batch_dim):
+    shape = (*batch_dim, 20, 20)
+    x = pt.tensor("x", shape=shape, dtype=config.floatX)
+    a = np.random.rand(*shape)
+    det_x = pt.linalg.det(x)
+    log_abs_det_x = pt.log(pt.abs(det_x))
+    log_det_x = pt.log(det_x)
+    sign_det_x = pt.sign(det_x)
     exp_det_x = pt.exp(det_x)
 
     # REWRITE TESTS
     # sign(det(x))
-    f = function([x], [sign_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    rw_sign_det_a = f(a)
-    assert_allclose(
-        sign_det_a,
-        rw_sign_det_a,
-        atol=1e-3 if config.floatX == "float32" else 1e-8,
-        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    expected_sign_det_x, expected_log_abs_det_x = Blockwise(SLogDet())(x)
+
+    result = RewriteTester(
+        [x], [sign_det_x], include=["stabilize", "specialize", "slogdet_specialization"]
     )
+    result.assert_graph(expected_sign_det_x)
+    result.assert_eval(a)
 
     # log(abs(det(x)))
-    f = function([x], [log_abs_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    rw_log_abs_det_a = f(a)
-    assert_allclose(
-        log_abs_det_a,
-        rw_log_abs_det_a,
-        atol=1e-3 if config.floatX == "float32" else 1e-8,
-        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    result = RewriteTester(
+        [x],
+        [log_abs_det_x],
+        include=["stabilize", "specialize", "slogdet_specialization"],
     )
+    result.assert_graph(expected_log_abs_det_x)
+    result.assert_eval(a)
 
     # log(det(x))
-    f = function([x], [log_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    rw_log_det_a = f(a)
-    assert_allclose(
-        log_det_a,
-        rw_log_det_a,
-        atol=1e-3 if config.floatX == "float32" else 1e-8,
-        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    expected_sign_value = -1
+    expected_nan_value = pt.constant(np.nan, dtype=config.floatX)
+
+    expected_log_det_x = pt.where(
+        pt.eq(expected_sign_det_x, expected_sign_value),
+        expected_nan_value,
+        expected_log_abs_det_x,
     )
 
-    # More than 1 valid function
-    f = function([x], [sign_det_x, log_abs_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
-    assert not any(isinstance(node.op, Det) for node in nodes)
+    result = RewriteTester(
+        [x], [log_det_x], include=["stabilize", "specialize", "slogdet_specialization"]
+    )
+    result.assert_graph(expected_log_det_x)
+    result.assert_eval(a)
 
-    # Other functions (rewrite shouldnt be applied to these)
+    # More than 1 valid function
+    result = RewriteTester(
+        [x],
+        [sign_det_x, log_abs_det_x],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
+    result.assert_graph(expected_sign_det_x, expected_log_abs_det_x)
+    result.assert_eval(a)
+
+    # Other functions (rewrite shouldn't be applied to these)
     # Only invalid functions
-    f = function([x], [exp_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, SLogDet) for node in nodes)
+    result = RewriteTester(
+        [x], [exp_det_x], include=["stabilize", "specialize", "slogdet_specialization"]
+    )
+    result.assert_graph(exp_det_x)
+    result.assert_eval(a)
 
     # Invalid + Valid function
-    f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, SLogDet) for node in nodes)
+    result = RewriteTester(
+        [x],
+        [exp_det_x, sign_det_x],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
+    result.assert_graph(exp_det_x, sign_det_x)
+    result.assert_eval(a)
+
+
+def test_slogdet_specialization_through_expand_dims():
+    x = pt.tensor("x", shape=(3, 3), dtype=config.floatX)
+    log_det_x = pt.log(pt.expand_dims(det(x), 0))
+
+    sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
+    expected = pt.expand_dims(
+        pt.where(
+            pt.eq(sign_det_x, np.array(-1, dtype=np.int8)),
+            np.array(np.nan, dtype=config.floatX),
+            log_abs_det_x,
+        ),
+        0,
+    )
+
+    result = RewriteTester(
+        [x],
+        [log_det_x],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
+    result.assert_graph(expected)
+    result.assert_eval(np.random.rand(3, 3))
+
+
+def test_complex_log_det_specialization():
+    x = pt.zmatrix()
+    result = RewriteTester(
+        [x],
+        [pt.log(det(x))],
+        include=["stabilize", "specialize", "slogdet_specialization"],
+    )
+    phase, logabsdet = Blockwise(SLogDet())(x)
+    result.assert_graph(pt.log(phase) + logabsdet)
+    for phase in (1j, -1, 1 + 2j):
+        result.assert_eval(np.diag([phase, 2]).astype("complex128"))
 
 
 @pytest.mark.parametrize(
@@ -281,42 +328,43 @@ def test_local_log_prod_to_sum_log_unknown_sign():
     result.assert_graph(out)
 
 
-@pytest.mark.parametrize(
-    "decomp_fn, expected_fn",
-    [
-        pytest.param(
-            lambda x: cholesky(x),
-            lambda x: pt.sqr(pt.prod(pt.diag(cholesky(x)), axis=0)),
-            id="cholesky",
-        ),
-        pytest.param(
-            lambda x: lu.lu(x)[-1],
-            lambda x: pt.prod(pt.extract_diag(lu.lu(x)[-1]), axis=0),
-            id="lu",
-        ),
-        pytest.param(
-            lambda x: lu.lu_factor(x)[0],
-            lambda x: pt.prod(pt.extract_diag(lu.lu_factor(x)[0]), axis=0),
-            id="lu_factor",
-        ),
-    ],
-)
-def test_det_of_matrix_factorized_elsewhere(decomp_fn, expected_fn):
-    x = pt.tensor("x", shape=(3, 3))
+def test_slogdet_grad_when_cholesky_factored_det_underflows():
+    """The slogdet gradient of a Cholesky-factored matrix must stay exact
+    after prod(diag(L)) underflows, in both rewrite orders (#2468)."""
+    N = 100
+    rng = np.random.default_rng(2468)
+    A = rng.normal(size=(N, N))
+    C = A @ A.T / N + np.eye(N)
 
-    decomp_var = decomp_fn(x)
-    d = det(x)
+    log_sigma = pt.dscalar("log_sigma")
+    K = assume(pt.exp(2 * log_sigma) * C, symmetric=True, positive_definite=True)
+    L = pt.linalg.cholesky(K)
+    _, logdet = pt.linalg.slogdet(K)
 
-    decomp_var, d = rewrite_graph(
-        [decomp_var, d], include=["canonicalize", "stabilize", "specialize"]
+    # d(logdet)/d(log_sigma) = 2 * N exactly, for any log_sigma
+    f = function([log_sigma], [grad(logdet, log_sigma), L], mode="FAST_RUN")
+
+    logdet_stab, L_stab = rewrite_graph(
+        [logdet, L], include=("canonicalize", "stabilize"), clone=True
     )
-    assert_equal_computations([decomp_var], [decomp_fn(x)])
-    assert_equal_computations([d], [expected_fn(x)])
+    f_stab = function(
+        [log_sigma], [grad(logdet_stab, log_sigma), L_stab], mode="FAST_RUN"
+    )
+
+    point = -5.0  # det(K) ~ exp(2 * N * point) underflows float64
+    assert_allclose(f(point)[0], 2 * N)
+    assert_allclose(f_stab(point)[0], 2 * N)
 
 
 @pytest.mark.parametrize(
     "decomp_fn, sign_op, expected_fn",
     [
+        pytest.param(
+            lambda x: lu.lu(x)[-1],
+            pt.abs,
+            lambda x: pt.prod(pt.diagonal(lu.lu(x)[-1], axis1=-2, axis2=-1), axis=-1),
+            id="lu_abs",
+        ),
         pytest.param(
             lambda x: svd.svd(x, compute_uv=True)[0],
             pt.abs,
@@ -449,12 +497,61 @@ def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
     assert_equal_computations([rewritten], [expected])
 
 
+def test_det_of_factorized_matrix_through_expand_dims():
+    # The batched Cholesky keeps the expanded Blockwise(Det) from being eagerly
+    # unbatched, so only the look-through peel can reach the factor
+    x = pt.tensor("x", shape=(None, 3, 3))
+    L = pt.linalg.cholesky(x)
+    d = det(pt.expand_dims(L, 0))
+
+    d_rewritten = rewrite_graph(d, include=["stabilize"])
+    expected = pt.expand_dims(pt.prod(pt.diagonal(L, axis1=-2, axis2=-1), axis=-1), 0)
+    assert_equal_computations([d_rewritten], [expected])
+
+
 def test_det_of_inv():
     x = pt.tensor("x", shape=(3, 3))
     out = det(pt.linalg.inv(x))
     expected = pt.as_tensor(1.0, dtype="float64") / det(x)
     rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
     assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_inv_through_expand_dims():
+    x = pt.tensor("x", shape=(3, 3))
+    out = det(pt.expand_dims(pt.linalg.inv(x), 0))
+    # dimshuffle_lift moves the expand_dims inside the division
+    expected = pt.as_tensor([1.0], dtype="float64") / pt.expand_dims(det(x), 0)
+    rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_matrix_factorized_elsewhere_through_expand_dims():
+    x = pt.tensor("x", shape=(3, 3))
+
+    # The Cholesky hangs off an expanded alias of x, the det off x itself
+    L = pt.linalg.cholesky(pt.expand_dims(x, 0))
+    d = det(x)
+
+    _, d_rewritten = rewrite_graph(
+        [L, d], include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = pt.sqr(pt.prod(pt.diagonal(L, axis1=-2, axis2=-1), axis=-1).squeeze(0))
+    assert_equal_computations([d_rewritten], [expected])
+
+
+def test_det_of_matrix_factorized_elsewhere_transposed_input():
+    x = pt.tensor("x", shape=(3, 3))
+
+    # Both the det and the Cholesky hang off the transpose itself
+    L = pt.linalg.cholesky(x.mT)
+    d = det(x.mT)
+
+    _, d_rewritten = rewrite_graph(
+        [L, d], include=["canonicalize", "stabilize", "specialize"]
+    )
+    expected = pt.sqr(pt.prod(pt.diag(L), axis=0))
+    assert_equal_computations([d_rewritten], [expected])
 
 
 def test_slogdet_of_inv():
@@ -482,3 +579,155 @@ def test_slogdet_of_inv():
 
     assert_equal_computations([rewritten_sign], [expected_sign_opt])
     assert_equal_computations([rewritten_logabsdet], [expected_logabsdet_opt])
+
+
+@pytest.mark.parametrize("factor_kind", ["cholesky", "lu_factor", "lu", "lu_indices"])
+@pytest.mark.parametrize(
+    "dtype, batched",
+    [(config.floatX, False), ("complex128", True)],
+    ids=["real", "batched_complex"],
+)
+def test_det_and_slogdet_factor_sharing(factor_kind, batched, dtype):
+    x = pt.tensor("x", shape=(None, 3, 3) if batched else (3, 3), dtype=dtype)
+    if factor_kind == "cholesky":
+        factor = cholesky(x)
+        diag = pt.diagonal(factor, axis1=-2, axis2=-1)
+        expected_det = pt.sqr(diag.prod(axis=-1))
+        expected_sign = pt.sqr(pt.sign(diag).prod(axis=-1))
+        expected_logabsdet = pt.constant(2, dtype=diag.real.dtype) * pt.log(
+            pt.abs(diag)
+        ).sum(axis=-1)
+    else:
+        if factor_kind == "lu_factor":
+            factor, pivots = lu.lu_factor(x)
+            n_swaps = pt.neq(pivots, pt.arange(3)).sum(axis=-1)
+            permutation_sign = assume(1 - 2 * (n_swaps % 2), unit_magnitude=True)
+        else:
+            p, _, factor = lu.lu(x, p_indices=factor_kind == "lu_indices")
+            indices = p if factor_kind == "lu_indices" else pt.argmax(p, axis=-1)
+            permutation_sign = permutation_indices_to_det_sign(indices)
+        permutation_sign = permutation_sign.astype(dtype)
+        diag = pt.diagonal(factor, axis1=-2, axis2=-1)
+        expected_det = permutation_sign * diag.prod(axis=-1)
+        expected_sign = permutation_sign * pt.sign(diag).prod(axis=-1)
+        expected_logabsdet = pt.log(pt.abs(diag)).sum(axis=-1)
+    sign_x, logabsdet_x = slogdet(x)
+    result = RewriteTester(
+        [x],
+        [factor, det(x), sign_x, logabsdet_x],
+        include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
+    )
+    result.assert_graph(
+        *rewrite_graph(
+            [factor, expected_det, expected_sign, expected_logabsdet],
+            include=["stabilize", "specialize"],
+        )
+    )
+
+    rng = np.random.default_rng(11)
+    m = rng.normal(size=(3, 3))
+    if dtype.startswith("complex"):
+        m = m + 1j * rng.normal(size=(3, 3))
+    spd = (m @ m.conj().T + 3 * np.eye(3)).astype(dtype)
+    # A swap is odd; a three-cycle is even despite moving every index.
+    permutations = [
+        (np.eye(3)[perm] * [2, 3, 4]).astype(dtype) for perm in ([1, 0, 2], [1, 2, 0])
+    ]
+    values = [spd] if factor_kind == "cholesky" else [*permutations, m.astype(dtype)]
+    rtol = 1e-5 if dtype == "float32" else 1e-7
+    if batched:
+        result.assert_eval(np.stack(values), rtol=rtol)
+    else:
+        for value in values:
+            result.assert_eval(value, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "factor_kind, dtype", [("cholesky", "float64"), ("lu_factor", "complex128")]
+)
+def test_slogdet_factor_sharing_underflow(factor_kind, dtype):
+    n = 60
+    x = pt.matrix(shape=(n, n), dtype=dtype)
+    factor = cholesky(x) if factor_kind == "cholesky" else lu.lu_factor(x)[0]
+    phase, logabsdet = slogdet(x)
+    f = function(
+        [x],
+        [det(x), factor, phase, logabsdet],
+        mode="FAST_RUN",
+    )
+    value = np.eye(n, dtype=dtype) * 1e-7
+    if dtype.startswith("complex"):
+        value[[0, 1]] = value[[1, 0]]
+        value *= 3 + 4j
+    det_value, _, phase_value, logabsdet_value = f(value)
+    assert det_value == 0
+    expected_phase, expected_logabsdet = np.linalg.slogdet(value)
+    assert_allclose(phase_value, expected_phase)
+    assert_allclose(logabsdet_value, expected_logabsdet)
+
+
+@pytest.mark.parametrize("factor_kind", ["permuted_lu", "svd", "qr"])
+def test_logabsdet_shared_from_sign_free_factor(factor_kind):
+    x = pt.tensor("x", shape=(3, 3))
+    if factor_kind == "svd":
+        factor = svd.svd(x, compute_uv=False)
+        expected = pt.log(pt.abs(factor)).sum(axis=-1)
+    else:
+        if factor_kind == "qr":
+            factor = qr.qr(x)[-1]
+        else:
+            factor = lu.lu(x, permute_l=True)[-1]
+        expected = pt.log(pt.abs(pt.diagonal(factor))).sum(axis=-1)
+    _, logabsdet = slogdet(x)
+    result = RewriteTester(
+        [x],
+        [factor, logabsdet],
+        include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
+    )
+    result.assert_graph(
+        *rewrite_graph([factor, expected], include=["stabilize", "specialize"])
+    )
+    negative = np.eye(3, dtype=config.floatX)[[1, 0, 2]] * np.array(
+        [2.0, 3.0, 4.0], dtype=config.floatX
+    )
+    result.assert_eval(negative, rtol=1e-3 if config.floatX == "float32" else 1e-7)
+
+
+@pytest.mark.parametrize("summary", [det, slogdet])
+def test_permuted_lu_determinant_fallback(summary):
+    x = pt.tensor("x", shape=(3, 3))
+    u = lu.lu(x, permute_l=True)[-1]
+    outputs = [det(x)] if summary is det else list(slogdet(x))
+    result = RewriteTester(
+        [x],
+        [*outputs, u],
+        include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
+    )
+    expected = [det(x)] if summary is det else list(Blockwise(SLogDet())(x))
+    result.assert_graph(*expected, u)
+
+
+@pytest.mark.parametrize(
+    "logdet_first", [True, False], ids=["logdet_first", "logdet_last"]
+)
+def test_slogdet_factor_sharing_is_order_independent(logdet_first):
+    a = matrix("a")
+    b1 = pt.vector("b1")
+    b2 = pt.vector("b2")
+    logdet = pt.log(pt.abs(det(a)))
+    x1 = pt.linalg.solve(a, b1, b_ndim=1)
+    x2 = pt.linalg.solve(a, b2, b_ndim=1)
+    outputs = [logdet, x1, x2] if logdet_first else [x1, x2, logdet]
+    result = RewriteTester(
+        [a, b1, b2],
+        outputs,
+        include=["canonicalize", "stabilize", "specialize", "slogdet_specialization"],
+    )
+    factor = lu.lu_factor(a)
+    expected_logdet = pt.log(pt.abs(pt.diagonal(factor[0]))).sum(axis=-1)
+    expected_x1 = lu_solve(factor, b1, b_ndim=1)
+    expected_x2 = lu_solve(factor, b2, b_ndim=1)
+    expected = [expected_logdet, expected_x1, expected_x2]
+    if not logdet_first:
+        expected = [expected_x1, expected_x2, expected_logdet]
+    result.assert_graph(*rewrite_graph(expected, include=["stabilize", "specialize"]))

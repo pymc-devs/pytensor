@@ -85,8 +85,7 @@ def test_alloc_compilation_limitation():
 
     with pytest.raises(
         ValueError,
-        match="MLX compilation limitation: Alloc operations with dynamic shapes cannot be "
-        "used inside compiled functions",
+        match="MLX compilation limitation: integer arguments",
     ):
         compiled_f(5.0, 3, 4)
 
@@ -138,8 +137,7 @@ def test_empty_dynamic_shape():
     f_compiled = pytensor.function([s1, s2], result, mode=compile_mode)
     with pytest.raises(
         ValueError,
-        match="MLX compilation limitation: Alloc operations with dynamic shapes cannot be "
-        "used inside compiled functions",
+        match="MLX compilation limitation: integer arguments",
     ):
         f_compiled(3, 4)
 

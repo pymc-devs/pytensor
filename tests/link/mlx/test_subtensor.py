@@ -78,6 +78,10 @@ def test_mlx_AdvancedSubtensor():
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
+    out_pt = x_pt[1:3, [2, 3]]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
+    compare_mlx_and_py([x_pt], [out_pt], [x_np])
+
 
 @pytest.mark.xfail(
     raises=ValueError, reason="MLX does not support boolean indexing yet"
@@ -347,3 +351,29 @@ def test_mlx_AdvancedIncSubtensor_ignore_duplicates():
     assert out.owner.op.ignore_duplicates
 
     compare_mlx_and_py([x], [out], [np.zeros(3, dtype=np.float32)])
+
+
+@pytest.mark.parametrize(
+    "func",
+    (pt_subtensor.inc_subtensor, pt_subtensor.set_subtensor),
+    ids=("inc", "set"),
+)
+@pytest.mark.parametrize(
+    "index",
+    [
+        (slice(None), [0, 2]),
+        (Ellipsis, [0, 2], [0, 2]),
+        ([0, 2], slice(None)),
+        (slice(1, 4), [0, 2]),
+    ],
+    ids=("leading_slice", "leading_ellipsis", "trailing_slice", "bounded_slice"),
+)
+def test_mlx_AdvancedIncSubtensor_index_forms(func, index):
+    x = tensor("x", shape=(5, 3, 3), dtype="float32")
+    x_np = np.arange(45, dtype=np.float32).reshape(5, 3, 3)
+    y_np = -np.arange(x_np[index].size, dtype=np.float32).reshape(x_np[index].shape)
+    y = tensor("y", shape=y_np.shape, dtype="float32")
+    out = func(x[index], y)
+    assert isinstance(out.owner.op, pt_subtensor.AdvancedIncSubtensor)
+
+    compare_mlx_and_py([x, y], [out], [x_np, y_np])

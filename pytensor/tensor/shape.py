@@ -984,7 +984,7 @@ def specify_broadcastable(x, *axes):
     ----------
     x : tensor_like
         Input pytensor tensor.
-    axis : an int or an iterable object such as list or tuple of int values
+    axes : an int or an iterable object such as list or tuple of int values
         The dimension along which the tensor x should be broadcastable.
         If the length of x along these dimensions is not 1, a ValueError will
         be raised.

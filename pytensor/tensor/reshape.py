@@ -364,7 +364,7 @@ def pack(
     ----------
     *tensors : TensorLike
         Input tensors to be packed.
-    axes : int, sequence of int, or None, optional
+    keep_axes : int, sequence of int, or None, optional
         Axes to preserve during packing. If None, all axes are raveled. See the Notes section for the rules.
 
     Returns
@@ -376,9 +376,9 @@ def pack(
 
     Notes
     -----
-    The `axes` parameter determines which axes are preserved during packing. Axes can be specified using positive or
+    The `keep_axes` parameter determines which axes are preserved during packing. Axes can be specified using positive or
     negative indices, but must follow these rules:
-        - If axes is None, all axes are raveled.
+        - If keep_axes is None, all axes are raveled.
         - If a single integer is provided, it can be positive or negative, and can take any value up to the smallest
             number of dimensions among the input tensors.
         - If a list is provided, it can be all positive, all negative, or a combination of positive and negative.

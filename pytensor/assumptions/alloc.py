@@ -1,5 +1,9 @@
+from functools import wraps
+
+import numpy as np
+
 from pytensor.assumptions.core import (
-    ALL_KEYS,
+    MATRIX_KEYS,
     FactState,
     register_assumption,
     true_if,
@@ -9,14 +13,18 @@ from pytensor.tensor.basic import (
     NotScalarConstantError,
     get_underlying_scalar_constant_value,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.variable import TensorConstant
 
 
-def alloc_of_zero(key, op, feature, fgraph, node, input_states) -> list[FactState]:
+def alloc_has_zero_off_diagonal(
+    key, op, feature, fgraph, node, input_states
+) -> list[FactState]:
     """``Alloc`` rule for DIAGONAL / LOWER_TRIANGULAR / UPPER_TRIANGULAR: TRUE when
-    the fill value is the scalar 0 (an all-zero square matrix), FALSE when it is a
-    known non-zero scalar -- the off-diagonal entries are then non-zero, so none of
-    these properties holds.
+    the fill value is the scalar 0 (an all-zero square matrix) or the matrix is at
+    most 1x1 (no off-diagonal entries), FALSE when it is a known non-zero scalar
+    and the matrix is at least 2x2 -- the off-diagonal entries are then non-zero,
+    so none of these properties holds.
 
     Requires the trailing two output dims to be statically known and equal; these
     properties apply only to square matrices. SYMMETRIC uses :func:`alloc_is_symmetric`
@@ -28,6 +36,8 @@ def alloc_of_zero(key, op, feature, fgraph, node, input_states) -> list[FactStat
     m, n = out_shape[-2], out_shape[-1]
     if m is None or n is None or m != n:
         return [FactState.UNKNOWN]
+    if n <= 1:
+        return [FactState.TRUE]
     try:
         val = get_underlying_scalar_constant_value(node.inputs[0])
     except NotScalarConstantError:
@@ -50,7 +60,7 @@ def alloc_is_symmetric(key, op, feature, fgraph, node, input_states) -> list[Fac
     return true_if(node.inputs[0].type.ndim == 0)
 
 
-def _eye_is_square(n, m) -> FactState:
+def eye_is_square(n, m) -> FactState:
     """Static squareness of an :class:`Eye` from its row/column size inputs:
     TRUE when the two sizes are provably equal, FALSE when provably unequal,
     UNKNOWN while either remains symbolic."""
@@ -63,18 +73,29 @@ def _eye_is_square(n, m) -> FactState:
 
 def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[FactState]:
     """Rule for ORTHOGONAL / PERMUTATION / POSITIVE_DEFINITE: TRUE only when an
-    :class:`Eye` is the identity matrix (square, ``k == 0``). Every other Eye --
-    rectangular, off-main, or the all-zero matrix of an off-shape band -- lacks
-    all three properties, so it is FALSE once the shape is known and UNKNOWN
-    while it is still symbolic.
+    :class:`Eye` is the identity matrix (square with ``k == 0``, or 0x0). Every
+    other Eye -- rectangular, off-main, or the all-zero matrix of an off-shape
+    band -- lacks all three properties, so it is FALSE once the shape is known
+    and UNKNOWN while it is still symbolic.
     """
     n, m, k = node.inputs
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    if k.data.item() != 0:
-        # Identity requires the main diagonal; any off-main band rules it out.
-        return [FactState.FALSE]
-    return [_eye_is_square(n, m)]
+    if k.data.item() == 0:
+        return [eye_is_square(n, m)]
+    rows, cols = node.outputs[0].type.shape
+    if rows is None or cols is None:
+        return [FactState.UNKNOWN]
+    return true_if(rows == cols == 0, else_false=True)
+
+
+def eye_band_is_empty(node, k: int) -> FactState:
+    """Decide statically whether an :class:`Eye`'s ``k``-th diagonal is empty."""
+    rows, cols = node.outputs[0].type.shape
+    if rows is None or cols is None:
+        return FactState.UNKNOWN
+    band_is_empty = rows == 0 or cols == 0 or k <= -rows or k >= cols
+    return FactState.TRUE if band_is_empty else FactState.FALSE
 
 
 def eye_zero_or_identity_rule(
@@ -89,27 +110,59 @@ def eye_zero_or_identity_rule(
     n, m, k = node.inputs
     if not isinstance(k, TensorConstant):
         return [FactState.UNKNOWN]
-    square = _eye_is_square(n, m)
+    square = eye_is_square(n, m)
     if square is FactState.FALSE:
         return [FactState.FALSE]
-    if k.data.item() == 0:
+    offset = k.data.item()
+    if offset == 0:
         return [square]
-    # Off-main band: symmetric/diagonal only if the band misses the shape
-    # entirely, which needs the static sizes to decide.
-    if not (isinstance(n, TensorConstant) and isinstance(m, TensorConstant)):
-        return [FactState.UNKNOWN]
-    kval, nval, mval = k.data.item(), n.data.item(), m.data.item()
-    band_is_empty = kval <= -nval or kval >= mval
-    return true_if(band_is_empty, else_false=True)
+    return [eye_band_is_empty(node, offset)]
 
 
-def alloc_diag_at_offset_zero(
+def alloc_diag_rule(rule):
+    """Restrict an :class:`AllocDiag` rule to diagonals on the trailing two axes."""
+
+    @wraps(rule)
+    def guarded_rule(key, op, feature, fgraph, node, input_states):
+        core_out_ndim = node.outputs[0].type.ndim
+        if isinstance(node.op, Blockwise):
+            core_out_ndim -= node.op.batch_ndim(node)
+        if (op.axis1, op.axis2) != (core_out_ndim - 2, core_out_ndim - 1):
+            return [FactState.UNKNOWN]
+        return rule(key, op, feature, fgraph, node, input_states)
+
+    return guarded_rule
+
+
+def alloc_diag_band_is_zero(node) -> FactState:
+    """Decide statically whether the vector an :class:`AllocDiag` places is zero."""
+    diag = node.inputs[0]
+    if 0 in diag.type.shape:
+        return FactState.TRUE
+    if isinstance(diag, TensorConstant):
+        return FactState.FALSE if np.any(diag.data) else FactState.TRUE
+    try:
+        val = get_underlying_scalar_constant_value(diag)
+    except NotScalarConstantError:
+        return FactState.UNKNOWN
+    if val == 0:
+        return FactState.TRUE
+    if None in diag.type.shape:
+        # A non-zero fill of unknown size may still be empty.
+        return FactState.UNKNOWN
+    return FactState.FALSE
+
+
+@alloc_diag_rule
+def alloc_diag_has_zero_off_diagonal(
     key, op, feature, fgraph, node, input_states
 ) -> list[FactState]:
-    """Rule body: TRUE when :class:`AllocDiag` places values on the main diagonal,
-    FALSE when it places them on any other diagonal (off-main entries break diagonal /
-    symmetric / PD structure regardless of the diagonal vector's values)."""
-    return [FactState.TRUE if op.offset == 0 else FactState.FALSE]
+    """Rule for DIAGONAL / SYMMETRIC: TRUE when :class:`AllocDiag` places values on
+    the main diagonal or places an all-zero vector, FALSE when it places a vector
+    with a non-zero entry on any other diagonal."""
+    if op.offset == 0:
+        return [FactState.TRUE]
+    return [alloc_diag_band_is_zero(node)]
 
 
 def alloc_propagates_matrix_property(
@@ -124,5 +177,5 @@ def alloc_propagates_matrix_property(
     return [FactState.UNKNOWN]
 
 
-for _key in ALL_KEYS:
+for _key in MATRIX_KEYS:
     register_assumption(_key, Alloc)(alloc_propagates_matrix_property)

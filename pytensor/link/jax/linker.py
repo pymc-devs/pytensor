@@ -21,8 +21,8 @@ class JAXLinker(JITLinker):
         # JAX does it his own inplace optimization
         "inplace",
         # There are specific variants for the LU decompositions supported by JAX
-        "reuse_lu_decomposition_multiple_solves",
-        "scan_split_non_sequence_lu_decomposition_solve",
+        "reuse_decomposition_multiple_solves",
+        "scan_split_non_sequence_decomposition_and_solve",
     )
 
     scalar_shape_inputs: tuple[int, ...]

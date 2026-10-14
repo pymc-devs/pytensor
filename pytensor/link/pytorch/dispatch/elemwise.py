@@ -5,7 +5,7 @@ import torch
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar import ScalarLoop
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import All, Any, Max, Min, Prod, Sum
+from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax
 
 
@@ -93,6 +93,24 @@ def pytorch_funcify_prod(op, **kwargs):
             return torch.prod(x.flatten(), dim=0)
 
     return torch_prod
+
+
+@pytorch_funcify.register(ProdWithoutZeros)
+def pytorch_funcify_ProdWithoutZeros(op, **kwargs):
+    axis = op.axis
+
+    def prod_without_zeros(x):
+        nonzero = x != 0
+        prod = torch.where(nonzero, x, 1)
+        if axis is None:
+            prod = torch.prod(prod.flatten(), dim=0)
+        else:
+            for d in sorted(axis, reverse=True):
+                prod = torch.prod(prod, dim=d)
+        # All-zero and empty slices reduce to 0, not 1
+        return torch.where(torch.any(nonzero, dim=axis), prod, 0)
+
+    return prod_without_zeros
 
 
 @pytorch_funcify.register(Any)

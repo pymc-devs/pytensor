@@ -23,7 +23,7 @@ from tests.assumptions.conftest import make_fgraph
     ],
 )
 def test_alloc_diag_offset_triangular(offset, lower, upper, diagonal):
-    v = pt.vector("v", shape=(5,))
+    v = pt.ones(5)
     d = alloc_diag(v, offset=offset, axis1=0, axis2=1)
     _, af = make_fgraph(d)
     assert af.get(d, LOWER_TRIANGULAR) == lower

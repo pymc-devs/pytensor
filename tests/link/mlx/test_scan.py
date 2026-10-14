@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from packaging.version import parse as V
 
 import pytensor.tensor as pt
 from pytensor import function
@@ -262,22 +261,7 @@ def test_higher_order_derivatives():
     ScanCompatibilityTests.check_higher_order_derivative(mode="MLX")
 
 
-@pytest.mark.parametrize(
-    "static_shape",
-    [
-        True,
-        pytest.param(
-            False,
-            marks=pytest.mark.xfail(
-                V(mx.__version__) >= V("0.32"),
-                raises=TypeError,
-                strict=True,
-                reason="MLX Reshape receives an mx.array shape: "
-                "https://github.com/pymc-devs/pytensor/pull/2395",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("static_shape", [True, False])
 def test_aliased_inner_outputs(static_shape):
     ScanCompatibilityTests.check_aliased_inner_outputs(
         static_shape=static_shape, mode="MLX"

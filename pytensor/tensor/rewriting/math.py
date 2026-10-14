@@ -8,7 +8,7 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as ps_math
-from pytensor.assumptions import DIAGONAL, check_assumption
+from pytensor.assumptions import DIAGONAL, UNIT_MAGNITUDE, check_assumption
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -108,7 +108,7 @@ from pytensor.tensor.rewriting.basic import (
     register_useless,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
 from pytensor.tensor.subtensor import (
     Subtensor,
@@ -599,37 +599,76 @@ def local_sqrt_sqr(fgraph, node):
 
 
 @register_canonicalize
+@register_stabilize
 @register_specialize
 @node_rewriter([pt_abs])
 def local_useless_abs(fgraph, node):
     # Case for abs(x) -> x, when x is already non-negative
     [x] = node.inputs
 
-    if not _is_provably_non_negative(x):
+    if x.dtype.startswith("complex") or not _is_provably_non_negative(x):
         return
 
     return [x]
+
+
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([pt_abs])
+def local_abs_mul_unit(fgraph, node):
+    """abs(u * x) -> abs(x), when every element of u has unit magnitude."""
+    [inp] = node.inputs
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            rest = [
+                x for x in factors if not check_assumption(fgraph, x, UNIT_MAGNITUDE)
+            ]
+            if len(rest) == len(factors):
+                return
+            magnitude = pt_abs(variadic_mul(*rest).astype(inp.dtype))
+            return [broadcast_like_elemwise(magnitude, node, fgraph=fgraph)]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_unit(fgraph, node):
+    """sign(u) -> u and sign(u * x) -> u * sign(x), when abs(u) == 1."""
+    [inp] = node.inputs
+    if check_assumption(fgraph, inp, UNIT_MAGNITUDE):
+        return [inp]
+    if inp.type.numpy_dtype.kind not in "fc":
+        return
+    match inp.owner_op_and_inputs:
+        case (Elemwise(ps.Mul()), *factors):
+            unit = [x for x in factors if check_assumption(fgraph, x, UNIT_MAGNITUDE)]
+            if not unit:
+                return
+            rest = [x for x in factors if x not in unit]
+            return [variadic_mul(*unit) * sign(variadic_mul(*rest).astype(inp.dtype))]
 
 
 @register_stabilize
 @register_specialize
 @node_rewriter([log])
 def local_log_sqrt_sqr(fgraph, node):
+    """log(sqrt(x)) -> 0.5 * log(x); log(abs(sqr(x))) -> 2 * log(abs(x))."""
     [x] = node.inputs
+    with_abs = False
+    match x.owner_op_and_inputs:
+        case (Elemwise(ps.Abs()), inner):
+            x = inner
+            with_abs = True
 
     match x.owner_op_and_inputs:
-        # Case for log(sqrt(x)) -> 0.5 * log(x)
-        case (Elemwise(ps.Sqrt()), inner):
+        case (Elemwise(ps.Sqrt()), inner) if not with_abs:
             factor, inner_out = 0.5, log(inner)
-
-        # Case for log(sqr(x)) -> 2 * log(abs(x)), which never materializes the square,
-        # so a value that would over- or underflow when squared survives the log.
         case (Elemwise(ps.Sqr()), inner):
-            # abs() of a complex input is real and would drop the imaginary part
-            if inner.dtype.startswith("complex"):
+            if not with_abs and inner.type.numpy_dtype.kind == "c":
+                if isinstance(inner.owner_op, Prod):
+                    return [log(sign(x)) + 2 * log(pt_abs(inner))]
                 return
             factor, inner_out = 2.0, log(pt_abs(inner))
-
         case _:
             return
 
@@ -732,6 +771,8 @@ def local_log_div(fgraph, node):
     constant operand is involved, so its log folds and the op count stays flat.
     """
     (inp,) = node.inputs
+    if inp.type.numpy_dtype.kind == "c":
+        return None
     if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
     scalar_op = inp.owner.op.scalar_op
@@ -760,6 +801,8 @@ def local_sign_div(fgraph, node):
     otherwise.
     """
     (inp,) = node.inputs
+    if inp.type.numpy_dtype.kind == "c":
+        return
     if not (inp.owner and isinstance(inp.owner.op, Elemwise)):
         return None
     scalar_op = inp.owner.op.scalar_op
@@ -780,6 +823,62 @@ def local_sign_div(fgraph, node):
     for side, other in ((num, den), (den, num)):
         if isinstance(side, Constant) and np.all(np.asarray(side.data) < 0):
             return [neg(sign(other))]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_useless_sign(fgraph, node):
+    """sign(x) -> ones_like(x), when x is provably strictly positive.
+
+    A failed Cholesky factorization yields NaN, which this rewrite replaces
+    with 1 when the proof runs through a Cholesky diagonal; the
+    log-determinant path still propagates the NaN.
+    """
+    [x] = node.inputs
+    if _is_provably_positive(x, strict=True):
+        new = ones_like(x, dtype=node.outputs[0].dtype)
+        copy_stack_trace(node.outputs[0], new)
+        return [new]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sign])
+def local_sign_prod(fgraph, node):
+    """sign(prod(x)) -> prod(sign(x)); sign(sqr(x)) -> sqr(sign(x)).
+
+    Stabilize floating-point signs/phases without forming the magnitude first.
+    Look through one DimShuffle, preserving accumulation and output dtype guards.
+    """
+    [arg] = node.inputs
+    dimshuffle = None
+    match arg.owner_op_and_inputs:
+        case (DimShuffle() as dimshuffle, inner):
+            arg = inner
+    if arg.type.numpy_dtype.kind not in "fc":
+        return
+    match arg.owner_op_and_inputs:
+        case (Prod(axis=axis, acc_dtype=acc_dtype), inner) if (
+            np.dtype(acc_dtype).kind in "fc" and inner.type.numpy_dtype.kind != "b"
+        ):
+            if inner.type.numpy_dtype.kind == "c" and arg.type.numpy_dtype.kind == "f":
+                return
+            new = prod(sign(inner), axis=axis, dtype=arg.dtype)
+        case (Elemwise(ps.Sqr()), inner):
+            if inner.type.numpy_dtype.kind not in "fc":
+                return
+            new = sqr(sign(inner))
+        case _:
+            return
+    if dimshuffle is not None:
+        new = dimshuffle(new)
+    if new.dtype != node.out.dtype:
+        new = cast(new, dtype=node.out.dtype)
+    copy_stack_trace(node.out, new)
+    return [new]
 
 
 @register_canonicalize
@@ -2180,7 +2279,7 @@ def local_reduce_join(fgraph, node):
         if not inp.type.broadcastable[join_axis]:
             return None
         # Most times inputs to join have an expand_dims, we eagerly clean up those here
-        new_input = apply_local_dimshuffle_lift(fgraph, inp.squeeze(join_axis))
+        new_input = apply_local_dimshuffle_merge(fgraph, inp.squeeze(join_axis))
         new_inputs.append(new_input)
 
     ret = Elemwise(node.op.scalar_op)(*new_inputs)
@@ -2309,7 +2408,13 @@ def local_careduce_of_alloc(fgraph, node):
                 # Avoid a float64 upcast from the int64 shapes (or a float16
                 # downcast); either would be amplified by the mul/pow below.
                 size = size.astype("float32")
-            value = value * size if isinstance(node.op, Sum) else value**size
+            if isinstance(node.op, Sum):
+                value = value * size
+            elif isinstance(node.op, Prod):
+                value = value**size
+            else:
+                # An empty ProdWithoutZeros reduction is 0, not 1
+                value = switch(eq(size, 0), 0, value**size)
 
     # The reduction may change the dtype; a single elemwise has no accumulation
     # error, so ignore acc_dtype and just cast to the reduction's output dtype.

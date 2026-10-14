@@ -29,10 +29,9 @@ def mlx_funcify_SVD(op, node, **kwargs):
         )
         return outputs
 
-    if compute_uv:
-        return svd_full
-    else:
-        return svd_S_only
+    svd = svd_full if compute_uv else svd_S_only
+    svd.natively_batched = True
+    return svd
 
 
 @mlx_funcify.register(Cholesky)
@@ -45,6 +44,7 @@ def mlx_funcify_Cholesky(op, node, **kwargs):
             a.astype(dtype=a_dtype, stream=mx.cpu), upper=not lower, stream=mx.cpu
         )
 
+    cholesky.natively_batched = True
     return cholesky
 
 
@@ -70,6 +70,7 @@ def mlx_funcify_LU(op, node, **kwargs):
             U,
         )
 
+    lu.natively_batched = True
     return lu
 
 
@@ -80,6 +81,7 @@ def mlx_funcify_Eig(op, node, **kwargs):
     def eig(x):
         return mx.linalg.eig(x.astype(dtype=X_dtype, stream=mx.cpu), stream=mx.cpu)
 
+    eig.natively_batched = True
     return eig
 
 
@@ -99,6 +101,7 @@ def mlx_funcify_Eigh(op, node, **kwargs):
             a.astype(dtype=X_dtype, stream=mx.cpu), UPLO=UPLO, stream=mx.cpu
         )
 
+    eigh.natively_batched = True
     return eigh
 
 
@@ -118,6 +121,7 @@ def mlx_funcify_Eigvalsh(op, node, **kwargs):
             a.astype(dtype=X_dtype, stream=mx.cpu), UPLO=UPLO, stream=mx.cpu
         )
 
+    eigvalsh.natively_batched = True
     return eigvalsh
 
 
@@ -131,6 +135,7 @@ def mlx_funcify_LUFactor(op, node, **kwargs):
         )
         return lu, pivots.astype(mx.int32, stream=mx.cpu)
 
+    lu_factor.natively_batched = True
     return lu_factor
 
 
@@ -174,4 +179,5 @@ def mlx_funcify_QR(op, node, **kwargs):
             return R
         return Q, R
 
+    qr.natively_batched = True
     return qr

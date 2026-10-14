@@ -454,6 +454,18 @@ def test_config_options_fastmath():
         assert fn_nofast.targetoptions["fastmath"] is False
 
 
+@pytest.mark.parametrize("fastmath", [True, False])
+def test_config_options_fastmath_vectorized(fastmath):
+    # The loop of a fused reduction is an overload compiled with `_jit_options`
+    x = pt.matrix("x")
+    with config.change_flags(numba__fastmath=fastmath, numba__cache=False):
+        fn = function([x], pt.exp(x).sum(axis=0), mode="NUMBA")
+        fn(np.ones((2, 3), dtype=config.floatX))
+    [llvm_ir] = fn.vm.jit_fn.inspect_llvm().values()
+    reassoc_lines = [line for line in llvm_ir.splitlines() if "reassoc" in line]
+    assert bool(reassoc_lines) == fastmath
+
+
 def test_config_options_cached():
     with config.change_flags(numba__cache=True):
 

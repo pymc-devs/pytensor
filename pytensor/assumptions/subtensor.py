@@ -1,9 +1,10 @@
 from pytensor.assumptions.core import (
-    ALL_KEYS,
     DIAGONAL,
     LOWER_TRIANGULAR,
+    MATRIX_KEYS,
     POSITIVE_DEFINITE,
     SYMMETRIC,
+    TRIDIAGONAL,
     UPPER_TRIANGULAR,
     FactState,
     register_assumption,
@@ -77,10 +78,11 @@ def incsubtensor_propagates_matrix_property(
         UPPER_TRIANGULAR,
         SYMMETRIC,
         POSITIVE_DEFINITE,
+        TRIDIAGONAL,
     ):
         return [FactState.UNKNOWN]
     return true_if(base_state is FactState.TRUE and value_state is FactState.TRUE)
 
 
-for _key in ALL_KEYS:
+for _key in MATRIX_KEYS:
     register_assumption(_key, IncSubtensor)(incsubtensor_propagates_matrix_property)

@@ -5,8 +5,9 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
+from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.elemwise import CAReduce, Elemwise
-from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise, FuseElemwise
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
@@ -14,6 +15,7 @@ from pytensor.tensor.subtensor import (
 
 
 numba = pytest.importorskip("numba")
+
 
 NUMBA_MODE = get_mode("NUMBA")
 NUMBA_NO_FUSION = NUMBA_MODE.excluding("fuse_indexed_into_elemwise")
@@ -262,6 +264,29 @@ class TestIndexedReadFusion:
 
 class TestIndexedWriteFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
+
+    def test_no_fusion_when_right_pad_covers_index(self):
+        s = pt.scalar("s")
+        idx = pt.lvector("idx")
+        out = pt.zeros(7)[idx].inc(pt.exp(s).dimshuffle("x"))
+        fgraph = FunctionGraph([s, idx], [out], clone=True)
+
+        FuseElemwise().apply(fgraph)
+
+        assert not any(isinstance(node.op, FusedElemwise) for node in fgraph.toposort())
+
+    def test_write_with_middle_index_and_leading_broadcast(self):
+        x = pt.matrix("x", shape=(2, 4))
+        idx = pt.lvector("idx")
+        target = pt.tensor3("target", shape=(3, 7, 4))
+        out = target[:, idx, :].inc(pt.exp(x))
+        fn, fn_u = fused_and_unfused([x, idx, target], out)
+        assert_fused(fn)
+
+        xv = np.arange(8.0).reshape(2, 4) / 3
+        tv = np.arange(84.0).reshape(3, 7, 4) / 10
+        for iv in (np.array([1, 5]), np.array([2, 2])):
+            np.testing.assert_allclose(fn(xv, iv, tv), fn_u(xv, iv, tv))
 
     def test_no_fusion_when_idx_axes_outside_elemwise_loop(self):
         """Don't fuse if the indexed axes are not within the Elemwise loop.
@@ -804,6 +829,17 @@ class TestReductionFusion:
         assert_reduce_fused(fn)
         xv, yv = rng.normal(size=(6, 7)), rng.normal(size=(6, 7))
         np.testing.assert_allclose(fn(xv, yv), fn_u(xv, yv), rtol=1e-10)
+        if axis is None:
+            for xv, yv in (
+                (np.array([[0.0, -0.0]]), np.array([[-0.0, -0.0]])),
+                (np.array([[np.nan, 1.0]]), np.array([[0.0, 0.0]])),
+            ):
+                actual, expected = fn(xv, yv), fn_u(xv, yv)
+                if np.isnan(expected):
+                    assert np.isnan(actual)
+                else:
+                    np.testing.assert_array_equal(actual, expected)
+                    assert np.signbit(actual) == np.signbit(expected)
 
     @pytest.mark.parametrize("reduce_fn", [pt.all, pt.any], ids=["all", "any"])
     @pytest.mark.parametrize("axis", [None, 0, 1], ids=str)
@@ -841,6 +877,27 @@ class TestReductionFusion:
         assert_reduce_fused(fn)
         xv = rng.normal(size=(17,))
         np.testing.assert_allclose(fn(xv), fn_u(xv), rtol=1e-10)
+
+    def test_multi_output_full_sum(self):
+        rng = np.random.default_rng(9)
+        x, y = pt.vector("x"), pt.vector("y")
+        scale = pt.vector("scale", shape=(1,))
+        out = [
+            pt.sum(pt.exp(x * scale) + y),
+            pt.sum(x - y * scale),
+        ]
+        fn, fn_u = fused_and_unfused([x, y, scale], out)
+        assert_reduce_fused(fn)
+
+        scale_value = np.array([0.7])
+        for xv, yv in (
+            (rng.normal(size=17), rng.normal(size=17)),
+            (np.empty(0), np.empty(0)),
+        ):
+            for actual, expected in zip(
+                fn(xv, yv, scale_value), fn_u(xv, yv, scale_value), strict=True
+            ):
+                np.testing.assert_allclose(actual, expected, rtol=1e-10)
 
     def test_non_c_contiguous_input(self):
         """Reduction over a transposed (non-C-contiguous) intermediate."""

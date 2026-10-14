@@ -2046,18 +2046,8 @@ def local_sampling_dot_csr(fgraph, node):
             z_data, z_ind, z_ptr = sampling_dot_csr(
                 x, y, p_data, p_ind, p_ptr, p_shape[1]
             )
-            # This is a hack that works around some missing `Type`-related
-            # static shape narrowing.  More specifically,
-            # `TensorType.convert_variable` currently won't combine the static
-            # shape information from `old_out.type` and `new_out.type`, only
-            # the broadcast patterns, and, since `CSR.make_node` doesn't do
-            # that either, we use `specify_shape` to produce an output `Type`
-            # with the same level of static shape information as the original
-            # `old_out`.
-            old_out = node.outputs[0]
-            new_out = specify_shape(
-                sparse.CSR(z_data, z_ind, z_ptr, p_shape), shape(old_out)
-            )
+            # Preserve static shape information from the sampling pattern.
+            new_out = specify_shape(sparse.CSR(z_data, z_ind, z_ptr, p_shape), shape(p))
             return [new_out]
     return False
 

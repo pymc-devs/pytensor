@@ -5,7 +5,9 @@ from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
     ORTHOGONAL,
+    PERMUTATION,
     POSITIVE_DEFINITE,
+    SELECTION,
     SYMMETRIC,
     UNIQUE_INDICES,
     UPPER_TRIANGULAR,
@@ -68,8 +70,8 @@ def test_assume_chained_combines_facts():
 
 
 def test_specify_assumptions_op_equal_for_same_facts():
-    a = SpecifyAssumptions({"diagonal": FactState.TRUE, "symmetric": FactState.FALSE})
-    b = SpecifyAssumptions({"symmetric": FactState.FALSE, "diagonal": FactState.TRUE})
+    a = SpecifyAssumptions({DIAGONAL: FactState.TRUE, SYMMETRIC: FactState.FALSE})
+    b = SpecifyAssumptions({SYMMETRIC: FactState.FALSE, DIAGONAL: FactState.TRUE})
     assert a == b
     assert hash(a) == hash(b)
 
@@ -81,6 +83,30 @@ def test_assume_none_kwarg_passes_through():
     assert af.check(x_diag, DIAGONAL)
     # SYMMETRIC is recovered via the DIAGONAL -> SYMMETRIC implication, not asserted directly.
     assert af.check(x_diag, SYMMETRIC)
+
+
+@pytest.mark.parametrize(
+    "position, key",
+    enumerate(
+        [
+            DIAGONAL,
+            LOWER_TRIANGULAR,
+            UPPER_TRIANGULAR,
+            SYMMETRIC,
+            POSITIVE_DEFINITE,
+            ORTHOGONAL,
+            SELECTION,
+            PERMUTATION,
+            UNIQUE_INDICES,
+        ]
+    ),
+    ids=lambda p: getattr(p, "name", p),
+)
+def test_assume_keeps_released_positional_order(position, key):
+    flags = [None] * position + [True]
+    x = assume(pt.matrix("x", shape=(3, 3)), *flags)
+    _, af = make_fgraph(x)
+    assert af.get(x, key) is FactState.TRUE
 
 
 def test_assume_no_kwargs_returns_input_unchanged():

@@ -410,7 +410,7 @@ TestNegBroadcast = makeBroadcastTester(
 TestSgnBroadcast = makeBroadcastTester(
     op=sign,
     expected=np.sign,
-    good=_good_broadcast_unary_normal_no_complex,
+    good=_good_broadcast_unary_normal,
     grad=_grad_broadcast_unary_normal,
 )
 

@@ -14,15 +14,17 @@ def test_identity_eye_is_selection():
 
 
 @pytest.mark.parametrize(
-    "n, m, expected",
+    "n, m, k, expected",
     [
-        (5, 3, FactState.TRUE),  # tall: columns are distinct unit vectors
-        (3, 5, FactState.FALSE),  # wide: trailing columns are all zero
+        (5, 3, 0, FactState.TRUE),  # tall: columns are distinct unit vectors
+        (3, 5, 0, FactState.FALSE),  # wide: trailing columns are all zero
+        (3, 1, -1, FactState.TRUE),  # band below the diagonal still fills each column
+        (0, 0, 1, FactState.TRUE),  # no columns to fill
     ],
-    ids=["tall", "wide"],
+    ids=["tall", "wide", "tall_lower_band", "empty"],
 )
-def test_nonsquare_eye_selection(n, m, expected):
-    e = pt.eye(n, m)
+def test_eye_selection(n, m, k, expected):
+    e = pt.eye(n, m, k)
     _, af = make_fgraph(e)
     assert af.get(e, SELECTION) == expected
 

@@ -9,20 +9,21 @@ from pytensor import config
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
 @pytest.mark.parametrize("assume_a", ["gen", "pos"])
-def test_mlx_solve(assume_a):
+def test_mlx_solve(assume_a, batch_shape):
     rng = np.random.default_rng(15)
     n = 3
 
-    A = pt.tensor("A", shape=(n, n))
-    b = pt.tensor("B", shape=(n, n))
+    A = pt.tensor("A", shape=(*batch_shape, n, n))
+    b = pt.tensor("B", shape=(*batch_shape, n, n))
 
     out = pt.linalg.solve(A, b, b_ndim=2, assume_a=assume_a)
 
-    A_val = rng.normal(size=(n, n)).astype(config.floatX)
-    A_val = A_val @ A_val.T
+    A_val = rng.normal(size=(*batch_shape, n, n)).astype(config.floatX)
+    A_val = A_val @ np.swapaxes(A_val, -1, -2)
 
-    b_val = rng.normal(size=(n, n)).astype(config.floatX)
+    b_val = rng.normal(size=(*batch_shape, n, n)).astype(config.floatX)
 
     context = (
         contextlib.suppress()
@@ -44,20 +45,24 @@ def test_mlx_solve(assume_a):
         )
 
 
+@pytest.mark.parametrize("batch_shape", [(), (3,)], ids=["core", "batched"])
 @pytest.mark.parametrize(
     "unit_diagonal", [False, True], ids=["full_diagonal", "unit_diagonal"]
 )
 @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
-def test_mlx_SolveTriangular(lower, unit_diagonal):
+def test_mlx_SolveTriangular(lower, unit_diagonal, batch_shape):
     rng = np.random.default_rng(15)
 
-    A = pt.tensor("A", shape=(5, 5))
-    b = pt.tensor("B", shape=(5, 5))
+    A = pt.tensor("A", shape=(*batch_shape, 5, 5))
+    b = pt.tensor("B", shape=(*batch_shape, 5, 5))
 
-    # A diagonal far from one, so ignoring `unit_diagonal` gives a different answer
-    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
-    A_val[np.diag_indices(5)] = rng.uniform(3, 4, size=5).astype(config.floatX)
-    b_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    # A dense matrix with a diagonal far from one, so both ignoring the
+    # triangle and ignoring `unit_diagonal` give a different answer
+    A_val = rng.normal(size=(*batch_shape, 5, 5)).astype(config.floatX)
+    A_val[..., np.arange(5), np.arange(5)] = rng.uniform(
+        3, 4, size=(*batch_shape, 5)
+    ).astype(config.floatX)
+    b_val = rng.normal(size=(*batch_shape, 5, 5)).astype(config.floatX)
 
     out = pt.linalg.solve_triangular(
         A,
@@ -102,6 +107,34 @@ def test_mlx_CholeskySolve(batch_shape, lower, b_ndim):
         [C, b],
         [out],
         [C_val, b_val],
+        mlx_mode=mlx_mode,
+        assert_fn=partial(
+            np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "a_batch, b_batch",
+    [((4,), ()), ((2, 1), (1, 3))],
+    ids=["unbatched_rhs", "cross_broadcast"],
+)
+def test_mlx_solve_batch_broadcasting(a_batch, b_batch):
+    rng = np.random.default_rng(15)
+    n = 3
+
+    A = pt.tensor("A", shape=(*a_batch, n, n))
+    b = pt.tensor("b", shape=(*b_batch, n))
+    out = pt.linalg.solve(A, b, b_ndim=1)
+
+    A_val = rng.normal(size=(*a_batch, n, n)).astype(config.floatX)
+    A_val = A_val @ np.swapaxes(A_val, -1, -2) + n * np.eye(n, dtype=config.floatX)
+    b_val = rng.normal(size=(*b_batch, n)).astype(config.floatX)
+
+    compare_mlx_and_py(
+        [A, b],
+        [out],
+        [A_val, b_val],
         mlx_mode=mlx_mode,
         assert_fn=partial(
             np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True

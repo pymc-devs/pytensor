@@ -8,7 +8,7 @@ import scipy.stats as stats
 
 import pytensor.tensor as pt
 from pytensor import function, shared
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
@@ -16,6 +16,8 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.traversal import graph_inputs
+from pytensor.link.jax import JAXLinker
+from pytensor.link.numba import NumbaLinker
 from pytensor.tensor import ones, stack
 from pytensor.tensor.random.basic import (
     ChoiceWithoutReplacement,
@@ -711,11 +713,10 @@ def create_mvnormal_cov_decomposition_method_test(mode):
         draws = multivariate_normal(mean, cov, method=method, size=(10_000,), rng=rng)
         assert draws.owner.op.method == method
 
-        # JAX doesn't raise errors at runtime
         if not psd and method == "cholesky":
-            if mode == "JAX":
-                # JAX doesn't raise errors at runtime, instead it returns nan
-                np.isnan(draws.eval(mode=mode)).all()
+            if isinstance(get_mode(mode).linker, NumbaLinker | JAXLinker):
+                # JAX and Numba don't raise errors at runtime, instead they return nan
+                assert np.isnan(draws.eval(mode=mode)).all()
             else:
                 with pytest.raises(np.linalg.LinAlgError):
                     draws.eval(mode=mode)

@@ -568,7 +568,7 @@ In general, update rules are still respected, but they won't update/rely on the 
 >>> jax_fn = pytensor.function([], [x], updates={rng: next_rng}, mode="JAX")
 >>> _ = pytensor.dprint(jax_fn, print_type=True) # doctest: +ELLIPSIS
 uniform_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
- ├─ RNG(<Generator(PCG64) at 0x...>) [id B] <RandomGeneratorType>
+ ├─ RNG(Generator(PCG64)) [id B] <RandomGeneratorType>
  ├─ NoneConst{None} [id C] <NoneTypeT>
  ├─ 0.0 [id D] <Scalar(float32, shape=())>
  └─ 1.0 [id E] <Scalar(float32, shape=())>
