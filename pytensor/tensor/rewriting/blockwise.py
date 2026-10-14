@@ -10,10 +10,12 @@ from pytensor.tensor.basic import (
     AllocEmpty,
     ARange,
     alloc,
+    constant,
     expand_dims,
     shape_padleft,
 )
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
+from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -23,6 +25,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.elemwise import (
     InplaceGraphOptimizer,
     apply_local_dimshuffle_merge,
+    local_useless_dimshuffle_makevector,
 )
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
@@ -74,9 +77,24 @@ def local_useless_unbatched_blockwise(fgraph, node):
     if batch_ndims:
         # Remove dummy batch dims
         axis = tuple(range(batch_ndims))
-        inputs = [
-            apply_local_dimshuffle_merge(fgraph, inp.squeeze(axis)) for inp in inputs
-        ]
+        core_inputs = []
+        for inp in inputs:
+            if isinstance(inp, Constant):
+                core_inputs.append(
+                    constant(inp.data.squeeze(axis), dtype=inp.type.dtype)
+                )
+                continue
+            squeezed = apply_local_dimshuffle_merge(fgraph, inp.squeeze(axis))
+            # Recover the scalar that Blockwise.make_node padded into a MakeVector,
+            # so the core op receives the scalar itself
+            if isinstance(squeezed.owner_op, DimShuffle):
+                unpadded = local_useless_dimshuffle_makevector.transform(
+                    fgraph, squeezed.owner
+                )
+                if unpadded:
+                    [squeezed] = unpadded
+            core_inputs.append(squeezed)
+        inputs = core_inputs
     new_outs = op.core_op.make_node(*inputs).outputs
     if batch_ndims:
         # Reintroduce dummy batch dims
