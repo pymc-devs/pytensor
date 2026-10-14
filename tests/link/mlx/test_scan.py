@@ -1,7 +1,9 @@
 import numpy as np
 import pytest
+from packaging.version import parse as V
 
 import pytensor.tensor as pt
+from pytensor import function
 from pytensor.scan import until
 from pytensor.scan.basic import scan
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
@@ -9,6 +11,7 @@ from tests.scan.test_basic import ScanCompatibilityTests
 
 
 mx = pytest.importorskip("mlx.core")
+from pytensor.link.mlx.dispatch.scan import _functional_set
 
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-2, None, None)])
@@ -127,16 +130,72 @@ def test_scan_int_dtype_preserved():
     compare_mlx_and_py([x0], [xs], [np.int32(0)], assert_fn=assert_int)
 
 
-def test_scan_zero_steps():
-    # Degenerate ``n_steps == 0``: matches the empty output of the reference.
-    x0 = pt.scalar("x0", dtype="float32")
+@pytest.mark.parametrize("dtype", ["float32", "int64"])
+def test_scan_zero_steps(dtype):
+    x0 = pt.scalar("x0", dtype=dtype)
     xs = scan(
         lambda xtm1: xtm1 + 1,
         outputs_info=[x0],
         n_steps=0,
         return_updates=False,
     )
-    compare_mlx_and_py([x0], [xs], [np.float32(3.0)])
+
+    def assert_empty(mlx_res, py_res):
+        np.testing.assert_array_equal(mlx_res, py_res)
+        assert mlx_res.shape == py_res.shape == (0,)
+        assert np.asarray(mlx_res).dtype == py_res.dtype == np.dtype(dtype)
+
+    compare_mlx_and_py([x0], [xs], [np.asarray(3, dtype=dtype)], assert_fn=assert_empty)
+
+
+@pytest.mark.parametrize("n_steps, static_shape", [(0, True), (0, False), (3, False)])
+def test_scan_nit_sot_shape(n_steps, static_shape):
+    w = pt.vector("w", dtype="float32", shape=(3,) if static_shape else (None,))
+    ys = scan(
+        lambda w: w * 2,
+        outputs_info=[None],
+        non_sequences=[w],
+        n_steps=n_steps,
+        return_updates=False,
+    )
+    w_val = np.arange(3, dtype="float32")
+    if n_steps == 0 and not static_shape:
+        with pytest.raises(
+            NotImplementedError, match=r"static trailing shape.*zero-step NIT-SOT"
+        ):
+            function([w], ys, mode=mlx_mode)(w_val)
+        return
+
+    if n_steps == 0:
+        # The Python reference incorrectly gives vector NIT-SOTs shape (0, 0).
+        result = function([w], ys, mode=mlx_mode)(w_val)
+    else:
+        _, [result] = compare_mlx_and_py([w], [ys], [w_val])
+    assert result.shape == (n_steps, 3)
+    assert result.dtype == mx.float32
+
+
+def test_functional_set_exact():
+    buffer_np = np.array(
+        [
+            [2**100, np.nan, np.inf, -np.inf],
+            [1.0, -2.0, 3.0, -4.0],
+            [-np.inf, 2**100, np.nan, np.inf],
+        ],
+        dtype="float32",
+    )
+    vals_np = np.array(
+        [[1.0, -2.0, 0.0, -0.0], [-0.0, 0.0, 3.0, -4.0]], dtype="float32"
+    )
+    buffer, vals = mx.array(buffer_np), mx.array(vals_np)
+    set_rows = mx.compile(lambda buffer, vals: _functional_set(buffer, [0, 2], vals))
+    result = np.asarray(set_rows(buffer, vals))
+    expected = buffer_np.copy()
+    expected[[0, 2]] = vals_np
+    np.testing.assert_array_equal(result, expected)
+    np.testing.assert_array_equal(np.signbit(result), np.signbit(expected))
+    np.testing.assert_array_equal(buffer, buffer_np)
+    np.testing.assert_array_equal(vals, vals_np)
 
 
 def test_scan_while_not_implemented():
@@ -147,9 +206,7 @@ def test_scan_while_not_implemented():
         n_steps=100,
         return_updates=False,
     )
-    with pytest.raises(NotImplementedError):
-        from pytensor import function
-
+    with pytest.raises(NotImplementedError, match="While Scan"):
         function([x0], xs, mode=mlx_mode)
 
 
@@ -205,7 +262,22 @@ def test_higher_order_derivatives():
     ScanCompatibilityTests.check_higher_order_derivative(mode="MLX")
 
 
-@pytest.mark.parametrize("static_shape", [True, False])
+@pytest.mark.parametrize(
+    "static_shape",
+    [
+        True,
+        pytest.param(
+            False,
+            marks=pytest.mark.xfail(
+                V(mx.__version__) >= V("0.32"),
+                raises=TypeError,
+                strict=True,
+                reason="MLX Reshape receives an mx.array shape: "
+                "https://github.com/pymc-devs/pytensor/pull/2395",
+            ),
+        ),
+    ],
+)
 def test_aliased_inner_outputs(static_shape):
     ScanCompatibilityTests.check_aliased_inner_outputs(
         static_shape=static_shape, mode="MLX"

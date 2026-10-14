@@ -1,8 +1,9 @@
 from itertools import chain
 
 import mlx.core as mx
+import numpy as np
 
-from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -33,6 +34,13 @@ def mlx_funcify_Scan(op: Scan, node, **kwargs):
     nitsot_static_sizes = [
         out.type.shape[0] for out in op.outer_nitsot_outs(node.outputs)
     ]
+    traced_outputs = (
+        op.outer_mitsot_outs(node.outputs)
+        + op.outer_sitsot_outs(node.outputs)
+        + op.outer_nitsot_outs(node.outputs)
+    )
+    traced_dtypes = [convert_dtype_to_mlx(out.type.dtype) for out in traced_outputs]
+    traced_trailing_shapes = [out.type.shape[1:] for out in traced_outputs]
 
     # A constant ``n_steps`` is authoritative (and the only inference source for
     # scans without recurring buffers or sequences, e.g. a pure NIT-SOT map).
@@ -128,21 +136,34 @@ def mlx_funcify_Scan(op: Scan, node, **kwargs):
             for trace, val in zip(traces, step_traced, strict=True):
                 trace.append(val)
 
-        # Per-step shape of each traced output (for synthesizing empty traces
-        # when ``n_steps == 0``): MIT-SOT/SIT-SOT match their state shape.
-        traced_trailing = (
-            [tuple(init.shape[1:]) for init in mit_sot_init]
-            + [tuple(init.shape) for init in sit_sot_init]
-            + [() for _ in range(info.n_nit_sot)]
-        )
-        stacked_traces = [
-            mx.stack(trace, axis=0) if trace else mx.zeros((0, *trailing))
-            for trace, trailing in zip(traces, traced_trailing, strict=True)
-        ]
+        init_states = mit_sot_init + sit_sot_init + [None] * info.n_nit_sot
+        stacked_traces = []
+        for trace, trailing, dtype, init_state in zip(
+            traces, traced_trailing_shapes, traced_dtypes, init_states, strict=True
+        ):
+            if trace:
+                stacked_traces.append(mx.stack(trace, axis=0))
+            else:
+                if None in trailing:
+                    if init_state is None:
+                        raise NotImplementedError(
+                            "MLX Scan requires a static trailing shape for zero-step "
+                            "NIT-SOT outputs."
+                        )
+                    # Unknown recurrent dimensions come from the initial buffer.
+                    init_shape = (
+                        init_state.shape[1:]
+                        if init_state.ndim > len(trailing)
+                        else init_state.shape
+                    )
+                    trailing = tuple(
+                        dim if dim is not None else init_dim
+                        for dim, init_dim in zip(trailing, init_shape, strict=True)
+                    )
+                stacked_traces.append(mx.zeros((0, *trailing), dtype=dtype))
 
         def get_partial_traces(traces):
             """Prepend initial states and slice traces down to buffer sizes."""
-            init_states = mit_sot_init + sit_sot_init + [None] * info.n_nit_sot
             buffer_sizes = (
                 [buff.shape[0] for buff in op.outer_mitsot(outer_inputs)]
                 + [buff.shape[0] for buff in op.outer_sitsot(outer_inputs)]
@@ -213,13 +234,6 @@ def _infer_n_steps(op, outer_inputs, nitsot_static_sizes, static_n_steps):
         return buff.shape[0] + min(taps)
     for seq in op.outer_seqs(outer_inputs):
         return seq.shape[0]
-    for buff, in_taps, out_taps in zip(
-        op.outer_mitmot(outer_inputs),
-        info.normalized_mit_mot_in_slices,
-        info.normalized_mit_mot_out_slices,
-        strict=True,
-    ):
-        return buff.shape[0] - (max(*in_taps, *out_taps) - min(*in_taps, *out_taps))
     for size in nitsot_static_sizes:
         if size is not None:
             return size
@@ -230,10 +244,17 @@ def _infer_n_steps(op, outer_inputs, nitsot_static_sizes, static_n_steps):
 
 
 def _functional_set(buffer, idx, vals):
-    """Return ``buffer`` with rows ``idx`` set to ``vals``.
+    """Return ``buffer`` with distinct rows ``idx`` set to ``vals``.
 
     MLX has no ``.at[].set`` and in-place item assignment aliases buffers under
-    ``mx.compile``, so a functional scatter-add of the delta is used instead.
+    ``mx.compile``. A static row mask selects replacements without arithmetic.
     """
-    idx = mx.array(idx)
-    return buffer.at[idx].add(vals - buffer[idx])
+    if not idx:
+        return buffer
+    mask = np.zeros(buffer.shape[0], dtype=bool)
+    mask[idx] = True
+    row_selector = np.zeros(buffer.shape[0], dtype=np.int32)
+    row_selector[idx] = np.arange(len(idx), dtype=np.int32)
+    mask = mx.array(mask).reshape((buffer.shape[0],) + (1,) * (buffer.ndim - 1))
+    vals = vals.astype(buffer.dtype)
+    return mx.where(mask, vals[mx.array(row_selector)], buffer)
