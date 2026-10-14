@@ -181,3 +181,9 @@ class TestPSDElemwiseAssumptions:
         z = pt.constant(2.0) * pt.constant(3.0)
         _, af = make_fgraph(z)
         assert not af.check(z, POSITIVE_DEFINITE)
+
+
+def test_solve_assume_a_pos_is_positive_definite():
+    a, b = pt.matrix("a"), pt.matrix("b")
+    _, af = make_fgraph(pt.linalg.solve(a, b, assume_a="pos"))
+    assert af.check(a, POSITIVE_DEFINITE)
