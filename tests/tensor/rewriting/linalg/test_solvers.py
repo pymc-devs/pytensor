@@ -1071,7 +1071,6 @@ def test_batched_quadratic_form_sum_axis(axis):
     "build",
     [
         pytest.param(lambda x, col, d_col: [pt.squeeze(x.mT @ d_col)], id="bilinear"),
-        pytest.param(lambda x, col, d_col: [x.mT @ col], id="matrix_result"),
         pytest.param(
             lambda x, col, d_col: [pt.squeeze(x.mT @ col), x], id="reused_solve"
         ),
@@ -1096,6 +1095,34 @@ def test_vector_quadratic_form_dot_not_whitened(build, b_ndim):
         getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
     ]
     assert any(isinstance(op, CholeskySolve) for op in core_ops)
+
+
+@pytest.mark.parametrize(
+    "build, output_order",
+    [
+        pytest.param(lambda x, col: col.mT @ x, ("x", 0), id="solve_on_right"),
+        pytest.param(lambda x, col: x.mT @ col, (0, "x"), id="solve_on_left"),
+    ],
+)
+def test_unsqueezed_matmul_quadratic_form_to_whitened(build, output_order):
+    c = pt.dmatrix("c")
+    col = pt.tensor("col", shape=(None, 1), dtype="float64")
+    out = build(cho_solve((c, True), col, b_ndim=2), col)
+
+    result = RewriteTester(
+        [c, col],
+        [out],
+        include=None,
+        custom_rewrite=cho_solve_quadratic_form_to_whitened,
+    )
+    whitened = solve_triangular(c, col, lower=True, b_ndim=2)
+    result.assert_graph((whitened**2).sum(axis=0).dimshuffle(output_order))
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    result.assert_eval(
+        np.linalg.cholesky(M @ M.T + 4 * np.eye(4)), rng.normal(size=(4, 1))
+    )
 
 
 @pytest.mark.parametrize("factor_dtype", ["float64", "complex128"])

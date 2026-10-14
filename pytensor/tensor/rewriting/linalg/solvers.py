@@ -258,11 +258,6 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
             if rhs_base is not other_base or rhs_order != other_order:
                 return None
 
-            match fgraph.clients[client.out]:
-                case [(squeeze_client, _)] if isinstance(squeeze_client.op, DimShuffle):
-                    old_out = squeeze_client.out
-                case _:
-                    return None
             sum_op = Sum(axis=(vector_axis,))
             # Replace the contracted vector axis by its singleton Matmul slot.
             reduced_order = tuple(
@@ -271,10 +266,16 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
                 else axis - (axis > vector_axis)
                 for axis in x_order
             )
-            output_order = tuple(
-                "x" if axis == "x" else reduced_order[axis]
-                for axis in squeeze_client.op.new_order
-            )
+            match fgraph.clients[client.out]:
+                case [(squeeze_client, _)] if isinstance(squeeze_client.op, DimShuffle):
+                    old_out = squeeze_client.out
+                    output_order = tuple(
+                        "x" if axis == "x" else reduced_order[axis]
+                        for axis in squeeze_client.op.new_order
+                    )
+                case _:
+                    old_out = client.out
+                    output_order = reduced_order
 
         case Elemwise(scalar_op=Mul()):
             reduction_axis = x.ndim - core_op.b_ndim
