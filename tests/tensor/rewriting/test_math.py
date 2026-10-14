@@ -3002,12 +3002,14 @@ class TestReduceChain:
     @pytest.mark.parametrize("inner_initial", [None, -np.inf])
     @pytest.mark.parametrize("outer_initial", [None, -np.inf])
     def test_max_initial(self, inner_initial, outer_initial):
-        x = tensor3()
+        x = tensor3("x")
         out = x.max(axis=-1, initial=inner_initial).max(axis=0, initial=outer_initial)
-        fg = FunctionGraph([x], [out], clone=False)
-        [new_out] = local_reduce_chain.transform(fg, out.owner)
+        result = RewriteTester(
+            [x], [out], include=None, custom_rewrite=local_reduce_chain
+        )
         initial = -np.inf if -np.inf in (inner_initial, outer_initial) else None
-        assert equal_computations([new_out], [x.max(axis=(0, 2), initial=initial)])
+        result.assert_graph(x.max(axis=(0, 2), initial=initial))
+        result.assert_eval(np.random.default_rng(0).normal(size=(2, 3, 4)))
 
 
 class TestLocalSumProd:
