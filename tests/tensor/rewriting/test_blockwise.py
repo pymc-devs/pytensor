@@ -8,7 +8,18 @@ from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
-from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
+from pytensor.tensor import (
+    add,
+    alloc,
+    as_tensor,
+    constant,
+    iscalar,
+    matrix,
+    scalar,
+    shape_padleft,
+    tensor,
+    tensor3,
+)
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -43,6 +54,13 @@ def test_useless_unbatched_blockwise():
     out = blockwise_op(x)
     result = RewriteTester([x], [out], include="local_useless_unbatched_blockwise")
     result.assert_graph(out)
+
+    # Scalars padded into a MakeVector or a constant are recovered, not squeezed
+    s = scalar("s")
+    scalar_add = Blockwise(add, signature="(),()->()")
+    out = scalar_add(as_tensor([s]), constant([2.0], dtype=s.type.dtype))
+    result = RewriteTester([s], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph(shape_padleft(add(s, constant(2.0, dtype=s.type.dtype)), 1))
 
     # Equivalent factorizations should share the same core computation.
     x = matrix("x")

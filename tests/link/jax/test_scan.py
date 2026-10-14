@@ -7,7 +7,7 @@ import pytensor.tensor as pt
 from pytensor import function, shared
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
-from pytensor.graph import Apply, Op
+from pytensor.graph import Apply, Op, vectorize_graph
 from pytensor.scan import until
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan, ScanInfo
@@ -390,6 +390,32 @@ def test_dynamic_sequence_length():
     f2 = function([x], out2, mode=get_mode("JAX").excluding("scan"))
     np.testing.assert_allclose(f2([[1, 2, 3]]), np.array([[2, 3, 4]]))
     np.testing.assert_allclose(f2(np.zeros((0, 3))), np.empty((0, 3)))
+
+
+@pytest.mark.parametrize("batch_shape", [(3,), (1,), (2, 3)])
+@pytest.mark.parametrize(
+    "x_shape, n_steps",
+    [((None,), None), ((5,), None), ((None,), 4)],
+    ids=["dynamic_length", "static_length", "constant_n_steps"],
+)
+def test_blockwise_scan(x_shape, n_steps, batch_shape):
+    x = pt.tensor("x", shape=x_shape)
+    a = pt.scalar("a")
+    ys = scan(
+        lambda x_t, a: x_t * a,
+        sequences=[x],
+        non_sequences=[a],
+        n_steps=n_steps,
+        return_updates=False,
+    )
+    a_vec = pt.tensor("a_vec", shape=batch_shape)
+    ys_vec = vectorize_graph(ys, {a: a_vec})
+
+    test_input_vals = [
+        np.arange(5, dtype=config.floatX),
+        np.arange(np.prod(batch_shape), dtype=config.floatX).reshape(batch_shape),
+    ]
+    compare_jax_and_py([x, a_vec], [ys_vec], test_input_vals, jax_mode="JAX")
 
 
 def test_higher_order_derivatives():
