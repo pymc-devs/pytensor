@@ -106,7 +106,6 @@ def psd_solve_to_chol_solve(fgraph, node):
     return [x]
 
 
-@register_stabilize
 @register_specialize
 @node_rewriter([blockwise_of(SolveTriangular)])
 def paired_triangular_solves_to_cho_solve(fgraph, node):
@@ -153,23 +152,60 @@ def paired_triangular_solves_to_cho_solve(fgraph, node):
     return [new_out]
 
 
+def _inner_of_triangular_solve_pair(node):
+    """Return ``y`` if ``node`` is ``solve_triangular(M.mT, y)`` with
+    ``y = solve_triangular(M, b)``, else None.
+
+    The pair solves ``(M @ M.mT) x = b``, so ``b.T @ x == sum(y ** 2)`` for any
+    triangular ``M``.
+    """
+    core_op = node.op.core_op
+    outer_M, y = node.inputs
+    match y.owner_op_and_inputs:
+        case (Blockwise(SolveTriangular() as inner_op), inner_M, _):
+            pass
+        case _:
+            return None
+    if (
+        inner_op.lower == core_op.lower
+        or inner_op.unit_diagonal != core_op.unit_diagonal
+        or inner_op.b_ndim != core_op.b_ndim
+    ):
+        return None
+
+    outer_core, outer_transposed = strip_left_expand_dims_and_transpose(outer_M)
+    inner_core, inner_transposed = strip_left_expand_dims_and_transpose(inner_M)
+    if outer_core is not inner_core or not outer_transposed or inner_transposed:
+        return None
+    return y
+
+
 @register_stabilize
 @register_specialize
-@node_rewriter([blockwise_of(CholeskySolve)])
+@node_rewriter([blockwise_of(CholeskySolve), blockwise_of(SolveTriangular)])
 def cho_solve_quadratic_form_to_whitened(fgraph, node):
     """Replace a Cholesky-solve quadratic form with one triangular solve.
 
     Match multiply-and-sum or vector inner products, including batched Matmul.
-    Also handle the transposed matrix RHS used for batched vectors.
+    Also handle the transposed matrix RHS used for batched vectors. The solve is
+    either a ``cho_solve`` or the pair of triangular solves it lowers to.
     """
     core_op = node.op.core_op
-    c, solve_b = node.inputs
     [x] = node.outputs
 
     # For complex inputs sum(b * x) is b.T @ x with no conjugation, which is
     # not |solve(c, b)| ** 2
     if x.type.dtype.startswith("complex"):
         return None
+
+    if isinstance(core_op, CholeskySolve):
+        solve_b = node.inputs[1]
+        whitened = None
+    else:
+        whitened = _inner_of_triangular_solve_pair(node)
+        if whitened is None:
+            return None
+        solve_b = whitened.owner.inputs[1]
 
     # Exclusive consumers let the replacement remove the original solve.
     match fgraph.clients[x]:
@@ -272,14 +308,16 @@ def cho_solve_quadratic_form_to_whitened(fgraph, node):
         case _:
             return None
 
-    # A = c @ c.mT when lower, c.mT @ c when upper; trans=1 whitens the upper case
-    whitened = solve_triangular(
-        c,
-        solve_b,
-        lower=core_op.lower,
-        trans=0 if core_op.lower else 1,
-        b_ndim=core_op.b_ndim,
-    )
+    if whitened is None:
+        # A = c @ c.mT when lower, c.mT @ c when upper; trans=1 whitens the upper case
+        c = node.inputs[0]
+        whitened = solve_triangular(
+            c,
+            solve_b,
+            lower=core_op.lower,
+            trans=0 if core_op.lower else 1,
+            b_ndim=core_op.b_ndim,
+        )
     if transpose:
         whitened = whitened.mT
 

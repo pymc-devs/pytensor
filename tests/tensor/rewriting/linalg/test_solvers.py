@@ -792,7 +792,6 @@ def test_solve_upgrades_to_tridiagonal(declared):
     result.assert_eval(A_val, b_val, rtol=1e-7 if config.floatX == "float64" else 1e-4)
 
 
-
 @pytest.mark.parametrize("batched_b", [False, True], ids=["vector_b", "batched_b"])
 @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
@@ -823,23 +822,54 @@ def test_cho_solve_quadratic_form_to_whitened(lower, batched_b, b_ndim):
     assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
 
 
-def test_cho_solve_quadratic_form_from_triangular_pair():
-    A = pt.dmatrix("A")
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+def test_triangular_solve_pair_quadratic_form_to_whitened(lower):
+    M = pt.dmatrix("M")
     b = pt.dvector("b")
+    inner = solve_triangular(M, b, lower=lower, b_ndim=1)
+    quad = (b * solve_triangular(M.mT, inner, lower=not lower, b_ndim=1)).sum()
 
-    # The emission form before specialize: two triangular solves against a
-    # Cholesky factor, contracted with b
-    L = cholesky(A, lower=True)
-    inner = solve_triangular(L, b, lower=True, b_ndim=1)
-    x = solve_triangular(L.mT, inner, lower=False, b_ndim=1)
+    result = RewriteTester(
+        [M, b],
+        [quad],
+        include=None,
+        custom_rewrite=cho_solve_quadratic_form_to_whitened,
+    )
+    result.assert_graph((inner**2).sum())
+
+
+@pytest.mark.parametrize(
+    "outer_factor, outer_lower, outer_unit_diagonal",
+    [
+        pytest.param(lambda M, N: N.mT, False, False, id="different_factor"),
+        pytest.param(lambda M, N: M.mT, True, False, id="same_triangle"),
+        pytest.param(lambda M, N: M, False, False, id="not_transposed"),
+        pytest.param(lambda M, N: M.mT, False, True, id="unit_diagonal_mismatch"),
+    ],
+)
+def test_triangular_solve_pair_quadratic_form_not_whitened(
+    outer_factor, outer_lower, outer_unit_diagonal
+):
+    M = pt.dmatrix("M")
+    N = pt.dmatrix("N")
+    b = pt.dvector("b")
+    inner = solve_triangular(M, b, lower=True, b_ndim=1)
+    x = solve_triangular(
+        outer_factor(M, N),
+        inner,
+        lower=outer_lower,
+        unit_diagonal=outer_unit_diagonal,
+        b_ndim=1,
+    )
     quad = (b * x).sum()
 
-    rewritten = rewrite_graph(quad, include=("canonicalize", "stabilize", "specialize"))
-    expected = rewrite_graph(
-        (solve_triangular(L, b, lower=True, b_ndim=1) ** 2).sum(),
-        include=("canonicalize", "stabilize", "specialize"),
+    result = RewriteTester(
+        [M, N, b],
+        [quad],
+        include=None,
+        custom_rewrite=cho_solve_quadratic_form_to_whitened,
     )
-    assert_equal_computations([rewritten], [expected])
+    result.assert_graph(quad)
 
 
 def test_cho_solve_quadratic_form_keeps_sum_dtype():
