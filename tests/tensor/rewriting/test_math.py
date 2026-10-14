@@ -3835,7 +3835,7 @@ class TestLocalReduce:
             include=None,
             custom_rewrite=local_reduce_broadcastable,
         )
-        result.assert_graph(pt_max(x.dimshuffle(1), axis=0, initial=-np.inf))
+        result.assert_graph(pt_max(x.squeeze(0), axis=0, initial=-np.inf))
         result.assert_eval(np.zeros((1, 0)))
 
 
