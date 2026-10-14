@@ -2689,15 +2689,12 @@ def var(input, axis=None, ddof=0, keepdims=False, corrected=False):
                           axis=None, ddof=0, keepdims=False, corrected=False)"
         )
 
+    input = as_tensor_variable(input)
     input_ndim = input.type.ndim
     if axis is None:
         axis = list(range(input_ndim))
-    elif isinstance(axis, int | np.integer):
-        axis = [axis]
-    elif isinstance(axis, np.ndarray) and axis.ndim == 0:
-        axis = [int(axis)]
     else:
-        axis = [int(a) for a in axis]
+        axis = list(normalize_axis_tuple(axis, input_ndim))
 
     # compute the axis-wise mean
     mean_input = mean(input, axis, keepdims=True)
@@ -2708,23 +2705,23 @@ def var(input, axis=None, ddof=0, keepdims=False, corrected=False):
     # return the mean sqr
     two = constant(2, dtype=centered_input.dtype)
     if ddof == 0:
-        v = mean((centered_input**two), axis, keepdims=keepdims)
+        v = mean((centered_input**two), axis=axis, keepdims=keepdims)
     else:
-        shp = shape(input) - ddof
+        shp = shape(input)
+        reduced_dims = [shp[i] for i in axis]
+        n_elems = variadic_mul(*reduced_dims)
+        div = (n_elems - ddof).astype(centered_input.dtype)
         v = sum((centered_input**two), axis=axis, keepdims=keepdims)
-        for i in axis:
-            v = true_div(v, shp[i])
+        v = true_div(v, div)
 
     # use 'corrected_two_pass' algorithm
     if corrected:
         if ddof == 0:
-            error = mean(centered_input, axis, keepdims=keepdims) ** 2
+            error = mean(centered_input, axis=axis, keepdims=keepdims) ** 2
         else:
-            shp = shape(input) - ddof
-            shp_inp = shape(input)
+            denom = ((n_elems - ddof) * n_elems).astype(centered_input.dtype)
             error = sum(centered_input, axis=axis, keepdims=keepdims) ** 2
-            for i in axis:
-                error = true_div(error, shp[i] * shp_inp[i])
+            error = true_div(error, denom)
         v = v - error
 
     v.name = "var"
