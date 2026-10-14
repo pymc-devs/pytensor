@@ -6,7 +6,9 @@ from pytensor import In, config, function
 from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg.products import (
     _blas_operand,
+    _blas_vector,
     _gemm,
+    _gemv_operands,
     _normalize_gemm_strides,
 )
 from pytensor.tensor.linalg.products import Expm, expm
@@ -97,6 +99,14 @@ class TestExpm:
 @numba_njit(final_function=True)
 def _gemm_jit(A, B, C):
     return _gemm(A, B, C)
+
+
+@numba_njit(final_function=True)
+def _gemv_buffers_jit(A, x, y):
+    A, x, y, _, _ = _gemv_operands(A, x, y)
+    x, x_base, incx = _blas_vector(x)
+    y, y_base, incy = _blas_vector(y)
+    return A, x, x_base, y, y_base, incx, incy
 
 
 @numba_njit(final_function=True)
@@ -203,6 +213,32 @@ def test_gemm_vector_strides(dtype, transpose):
         rtol=rtol,
         atol=1e-6,
     )
+
+
+def test_gemv_keeps_operand_buffers():
+    matrix = rng.normal(size=(4, 3))
+    x = rng.normal(size=6)[::-2]
+    y = rng.normal(size=8)[::-2]
+    layouts = [
+        np.array(matrix, order="C"),
+        np.array(matrix, order="F"),
+        np.repeat(matrix, 2, axis=0)[::2],
+        np.asfortranarray(np.repeat(matrix, 2, axis=1))[:, ::2],
+    ]
+    for A in layouts:
+        for row_step, col_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
+            view = A[::row_step, ::col_step]
+            work, x_view, x_base, y_view, y_base, incx, incy = _gemv_buffers_jit(
+                view, x, y
+            )
+            assert np.shares_memory(work, A)
+            for logical, base, inc, original in [
+                (x_view, x_base, incx, x),
+                (y_view, y_base, incy, y),
+            ]:
+                assert np.shares_memory(logical, original)
+                assert np.shares_memory(base, original)
+                assert abs(inc) == 2
 
 
 @pytest.mark.parametrize("order", ["C", "F"])
