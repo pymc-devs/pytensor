@@ -2,14 +2,18 @@ import numpy as np
 import pytest
 
 from pytensor import config
-from pytensor.tensor import tensor
+from pytensor.tensor import add, as_tensor, constant, iscalar, lmatrix, tensor
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import Dot, matmul
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_blockwise import check_blockwise_runtime_broadcasting
+from tests.unittest_tools import RewriteTester
 
 
 jax = pytest.importorskip("jax")
+
+from pytensor.link.jax.dispatch.blockwise import JAXUnbatchedScalar
+from pytensor.tensor.rewriting.jax import blockwise_unbatched_scalar_inputs
 
 
 def test_runtime_broadcasting():
@@ -38,3 +42,27 @@ def test_matmul(matmul_op):
     jaxpr = jaxpr.replace("name=jax_funcified_fgraph", "name=matmul")
     expected_jaxpr = str(jax.make_jaxpr(jax.jit(jax.numpy.matmul))(*test_values))
     assert jaxpr == expected_jaxpr
+
+
+def test_unbatched_scalar_inputs_rewrite():
+    x = lmatrix("x")
+    n, m = iscalar("n"), iscalar("m")
+    two = constant(2, dtype="int32")
+    scalar_add = Blockwise(add, signature="(),(),(),()->()")
+    # n is padded by a DimShuffle, m by a DimShuffle of a MakeVector
+    out = scalar_add(x, n, as_tensor([m]), two)
+
+    result = RewriteTester(
+        [x, n, m],
+        [out],
+        include=None,
+        custom_rewrite=blockwise_unbatched_scalar_inputs,
+    )
+    result.assert_graph(
+        scalar_add(
+            x,
+            JAXUnbatchedScalar(2)(n),
+            JAXUnbatchedScalar(2)(m),
+            two[None, None],
+        )
+    )
