@@ -787,7 +787,7 @@ class Elemwise(OpenMPOp):
             # since it sometimes requires resizing. Doing this
             # optimization is probably not worth the effort, since we
             # should normally run the C version of the Op.
-        elif isinstance(self.scalar_op, Add | Mul):
+        elif isinstance(self.scalar_op, Add | Mul) and len(inputs) > 2:
             # Variadic Add/Mul: much faster than `np.frompyfunc` on the scalar op's Python `impl`
             nfunc = self.nfunc
 
