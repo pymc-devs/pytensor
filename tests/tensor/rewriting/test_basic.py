@@ -66,7 +66,9 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,
+    local_join_of_split,
     local_merge_alloc,
+    local_split_of_join,
     local_useless_alloc,
     local_useless_elemwise,
     topo_constant_folding,
@@ -113,7 +115,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -1475,6 +1477,41 @@ def test_local_scalar_tensor_scalar(dtype):
     assert not any(
         n for n in e if isinstance(n.op, TensorFromScalar | ScalarFromTensor)
     )
+
+
+@pytest.mark.parametrize("sizes", ["constant", "static_shapes", "dynamic_shapes"])
+def test_local_split_of_join(sizes):
+    a = tensor("a", shape=(None, 5) if sizes == "dynamic_shapes" else (3, 5))
+    b = tensor("b", shape=(None, 5) if sizes == "dynamic_shapes" else (4, 5))
+    splits = [3, 4] if sizes == "constant" else [a.shape[0], b.shape[0]]
+    outs = pt.split(pt.concatenate([a, b]), splits, n_splits=2)
+
+    result = RewriteTester([a, b], outs, include=("canonicalize",))
+    result.assert_graph(a, b)
+
+
+@pytest.mark.parametrize("splits", [[2, 5], [3, 4, 0]], ids=["sizes", "length"])
+def test_local_split_of_join_mismatched_splits(splits):
+    a = tensor("a", shape=(3, 5))
+    b = tensor("b", shape=(4, 5))
+    outs = pt.split(pt.concatenate([a, b]), splits, n_splits=2)
+
+    fgraph = FunctionGraph(outputs=outs, clone=False)
+    assert not local_split_of_join.transform(fgraph, outs[0].owner)
+
+
+def test_local_join_of_split():
+    x = matrix("x")
+    splits = ivector("splits")
+    first, second = pt.split(x, splits, n_splits=2)
+
+    result = RewriteTester(
+        [x, splits],
+        [pt.concatenate([first, second]), pt.concatenate([second, first])],
+        include=None,
+        custom_rewrite=local_join_of_split,
+    )
+    result.assert_graph(x, pt.concatenate([second, first]))
 
 
 def test_local_useless_split():
