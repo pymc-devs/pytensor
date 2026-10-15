@@ -18,7 +18,9 @@ from pytensor.sparse import (
     StructuredDot,
     StructuredDotGradCSC,
     StructuredDotGradCSR,
+    Usmm,
 )
+from pytensor.sparse.rewriting import UsmmCscDense
 
 
 @register_funcify_default_op_cache_key(SpSum)
@@ -649,3 +651,294 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
             return output
 
         return grad_spmspm_csc, cache_key
+
+
+@register_funcify_and_cache_key(Usmm)
+def numba_funcify_Usmm(op, node, **kwargs):
+    """Computes the dense matrix resulting from `alpha * x @ y + z`.
+
+    `alpha` is scalar, at least one of `x` and `y` is a sparse matrix, and `z` is a dense matrix.
+    """
+    _, x, y, z = node.inputs
+    [out] = node.outputs
+    out_dtype = out.type.dtype
+    out_type = np.dtype(out_dtype).type
+
+    x_is_sparse = psb._is_sparse_variable(x)
+    y_is_sparse = psb._is_sparse_variable(y)
+    x_format = x.type.format if x_is_sparse else None
+    y_format = y.type.format if y_is_sparse else None
+    z_same_dtype = z.type.dtype == out_dtype
+
+    # Used in the wrapper's fallback, when alpha is nonfinite.
+    dot_node = Dot().make_node(x, y)
+    dot, dot_cache_key = numba_funcify_SparseDot(dot_node.op, dot_node, **kwargs)
+    cache_version = 5
+
+    cache_key = sha256(
+        str(
+            (
+                type(op),
+                tuple(inp.type for inp in node.inputs),
+                tuple(out.type for out in node.outputs),
+                dot_cache_key,
+                cache_version,
+            )
+        ).encode()
+    ).hexdigest()
+
+    def wrap_fused_kernel(kernel):
+        # `fastmath=False` to preserve nonfinite results in the fallback expression.
+        @numba_basic.numba_njit(fastmath=False)
+        def usmm(alpha, x, y, z):
+            n_row, n_inner = x.shape
+            y_n_row, n_col = y.shape
+            assert n_inner == y_n_row
+            shape = (n_row, n_col)
+
+            if (
+                not np.isfinite(alpha.item())
+                or (z.shape[0] != 1 and z.shape[0] != n_row)
+                or (z.shape[1] != 1 and z.shape[1] != n_col)
+            ):
+                # Alpha is nonfinite or z can't broadcast to x @ y.
+                # The original expression will resolve the broadcasting.
+                return (dot(x, y) * alpha.item() + z).astype(out_dtype)
+
+            # Initialize `out` from `z`, casting or broadcasting as needed, before accumulating.
+            if z.shape == shape:
+                if z_same_dtype:
+                    out = z.copy()
+                else:
+                    out = z.astype(out_dtype)
+            else:
+                out = np.empty(shape, dtype=out_dtype)
+                out[:, :] = z
+
+            return kernel(alpha, x, y, out, n_row, n_inner, n_col)
+
+        return usmm, cache_key
+
+    # NOTE: It's more performant to apply `out_type` at the element level rather than converting
+    # the entire array at once. When the actual type the same than the output type, numba
+    # does an optimization that eliminates unnecessary type conversions.
+    if x_is_sparse and not y_is_sparse:
+
+        @numba_basic.numba_njit
+        def usmm_sparse_dense(alpha, x, y, out, n_row, n_inner, n_col):
+            alpha_val = alpha.item()
+
+            x_indices = x.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+
+            x_data = x.data
+
+            # CSR completes each row with one write using a scalar accumulator.
+            # CSC revisits output rows across columns, so it accumulates directly in out.
+            if n_col == 1:
+                # Y is a dense vector.
+                if x_format == "csr":
+                    for i in range(n_row):
+                        acc = out[i, 0]
+                        for x_idx in range(x_indptr[i], x_indptr[i + 1]):
+                            k = x_indices[x_idx]
+                            x_val = alpha_val * out_type(x_data[x_idx])
+                            acc += x_val * out_type(y[k, 0])
+                        out[i, 0] = acc
+                else:
+                    for k in range(n_inner):
+                        y_val = out_type(y[k, 0])
+                        for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                            i = x_indices[x_idx]
+                            x_val = alpha_val * out_type(x_data[x_idx])
+                            out[i, 0] += x_val * y_val
+                return out
+
+            if x_format == "csr":
+                for i in range(n_row):
+                    for x_idx in range(x_indptr[i], x_indptr[i + 1]):
+                        k = x_indices[x_idx]
+                        x_val = alpha_val * out_type(x_data[x_idx])
+                        for j in range(n_col):
+                            out[i, j] += x_val * out_type(y[k, j])
+            else:
+                for k in range(n_inner):
+                    for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                        i = x_indices[x_idx]
+                        x_val = alpha_val * out_type(x_data[x_idx])
+                        for j in range(n_col):
+                            out[i, j] += x_val * out_type(y[k, j])
+
+            return out
+
+        return wrap_fused_kernel(usmm_sparse_dense)
+
+    if not x_is_sparse and y_is_sparse:
+
+        @numba_basic.numba_njit
+        def usmm_dense_sparse(alpha, x, y, out, n_row, n_inner, n_col):
+            alpha_val = alpha.item()
+            indices = y.indices.view(np.uint32)
+            indptr = y.indptr.view(np.uint32)
+            y_data = y.data
+
+            # CSC completes each column with one write using a scalar accumulator.
+            # CSR revisits output columns across rows, so it accumulates directly in out.
+            if n_row == 1:
+                # X is a dense vector.
+                if y_format == "csc":
+                    for j in range(n_col):
+                        acc = out[0, j]
+                        for pos in range(indptr[j], indptr[j + 1]):
+                            k = indices[pos]
+                            value = alpha_val * out_type(y_data[pos])
+                            acc += out_type(x[0, k]) * value
+                        out[0, j] = acc
+                else:
+                    for k in range(n_inner):
+                        x_val = out_type(x[0, k])
+                        for pos in range(indptr[k], indptr[k + 1]):
+                            j = indices[pos]
+                            value = alpha_val * out_type(y_data[pos])
+                            out[0, j] += x_val * value
+                return out
+
+            if y_format == "csc":
+                for j in range(n_col):
+                    for pos in range(indptr[j], indptr[j + 1]):
+                        k = indices[pos]
+                        value = alpha_val * out_type(y_data[pos])
+                        for i in range(n_row):
+                            out[i, j] += out_type(x[i, k]) * value
+            else:
+                for k in range(n_inner):
+                    for pos in range(indptr[k], indptr[k + 1]):
+                        j = indices[pos]
+                        value = alpha_val * out_type(y_data[pos])
+                        for i in range(n_row):
+                            out[i, j] += out_type(x[i, k]) * value
+            return out
+
+        return wrap_fused_kernel(usmm_dense_sparse)
+
+    @numba_basic.numba_njit
+    def usmm_sparse_sparse(alpha, x, y, out, n_row, n_inner, n_col):
+        alpha_val = alpha.item()
+
+        if x_format == "csr" and y_format == "csc":
+            y = y.tocsr()
+
+        x_indices = x.indices.view(np.uint32)
+        x_indptr = x.indptr.view(np.uint32)
+        y_indices = y.indices.view(np.uint32)
+        y_indptr = y.indptr.view(np.uint32)
+
+        x_data = x.data
+        y_data = y.data
+
+        if x_format == "csr":
+            for i in range(n_row):
+                for x_idx in range(x_indptr[i], x_indptr[i + 1]):
+                    k = x_indices[x_idx]
+                    x_val = alpha_val * out_type(x_data[x_idx])
+                    for y_idx in range(y_indptr[k], y_indptr[k + 1]):
+                        out[i, y_indices[y_idx]] += x_val * out_type(y_data[y_idx])
+        elif y_format == "csc":
+            for j in range(n_col):
+                for y_idx in range(y_indptr[j], y_indptr[j + 1]):
+                    k = y_indices[y_idx]
+                    y_val = alpha_val * out_type(y_data[y_idx])
+                    for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                        out[x_indices[x_idx], j] += out_type(x_data[x_idx]) * y_val
+        else:
+            for k in range(n_inner):
+                for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                    i = x_indices[x_idx]
+                    x_val = alpha_val * out_type(x_data[x_idx])
+                    for y_idx in range(y_indptr[k], y_indptr[k + 1]):
+                        out[i, y_indices[y_idx]] += x_val * out_type(y_data[y_idx])
+
+        return out
+
+    return wrap_fused_kernel(usmm_sparse_sparse)
+
+
+@register_funcify_and_cache_key(UsmmCscDense)
+def numba_funcify_UsmmCscDense(op, node, **kwargs):
+    inplace = op.inplace
+    out_dtype = node.outputs[0].dtype
+    out_type = np.dtype(out_dtype).type
+
+    cache_version = 4
+    cache_key = sha256(
+        str(
+            (
+                type(op),
+                inplace,
+                tuple(inp.type for inp in node.inputs),
+                tuple(out.type for out in node.outputs),
+                cache_version,
+            )
+        ).encode()
+    ).hexdigest()
+
+    @numba_basic.numba_njit
+    def accumulate(scale, values, indices, indptr, y, out, n_cols):
+        indices = indices.view(np.uint32)
+        indptr = indptr.view(np.uint32)
+
+        if n_cols == 1:
+            for k in range(len(indptr) - 1):
+                y_value = y[k, 0]
+                for pos in range(indptr[k], indptr[k + 1]):
+                    row = indices[pos]
+                    value = scale * values[pos]
+                    out[row, 0] += value * y_value
+            return out
+
+        for k in range(len(indptr) - 1):
+            for pos in range(indptr[k], indptr[k + 1]):
+                row = indices[pos]
+                value = scale * values[pos]
+                for col in range(n_cols):
+                    out[row, col] += value * y[k, col]
+
+        return out
+
+    # Preserve nonfinite results in the final scaling and addition.
+    @numba_basic.numba_njit(fastmath=False)
+    def usmm_csc_dense(alpha, values, indices, indptr, n_rows, y, z):
+        assert len(indptr) - 1 == y.shape[0]
+        n_cols = y.shape[1]
+        shape = (n_rows.item(), n_cols)
+        if (z.shape[0] != 1 and z.shape[0] != shape[0]) or (
+            z.shape[1] != 1 and z.shape[1] != shape[1]
+        ):
+            raise ValueError("z must broadcast to the shape of x @ y")
+
+        reuse_z = inplace and z.shape == shape
+        scale = alpha.item()
+        nonfinite_alpha = not np.isfinite(scale)
+
+        if nonfinite_alpha:
+            out = np.zeros(shape, dtype=out_dtype)
+            scale = out_type(1)
+        elif reuse_z:
+            out = z
+        elif z.shape == shape:
+            out = z.copy()
+        else:
+            out = np.empty(shape, dtype=out_dtype)
+            out[:, :] = z
+
+        out = accumulate(scale, values, indices, indptr, y, out, n_cols)
+
+        if nonfinite_alpha:
+            out *= alpha.item()
+            out += z
+            if reuse_z:
+                z[:, :] = out
+                return z
+        return out
+
+    return usmm_csc_dense, cache_key
