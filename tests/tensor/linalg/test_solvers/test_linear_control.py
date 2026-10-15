@@ -17,6 +17,9 @@ from pytensor.tensor.linalg import (
 from tests import unittest_tools as utt
 
 
+pytestmark = pytest.mark.filterwarnings("error:matrix_dot is deprecated:FutureWarning")
+
+
 @pytest.mark.parametrize(
     "shape, use_complex",
     [((5, 5), False), ((5, 5), True), ((5, 5, 5), False)],
