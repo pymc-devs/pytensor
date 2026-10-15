@@ -19,6 +19,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import deep_copy_op
+from pytensor.conditional.op import LazyIfElse
 from pytensor.printing import (
     PatternPrinter,
     PPrinter,
@@ -37,7 +38,7 @@ from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg import inv
 from pytensor.tensor.math import maximum
-from pytensor.tensor.type import dmatrix, dvector, matrix
+from pytensor.tensor.type import dmatrix, dvector, iscalar, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
 
 
@@ -502,6 +503,36 @@ MyInnerGraphOp [id C]
         assert exp_line.strip() == res_line.strip()
 
 
+def test_debugprint_lazy_ifelse():
+    c, x = iscalar("c"), dvector("x")
+    true_branch = OpFromGraph([x], [x * 2])
+    false_branch = OpFromGraph([x], [x * 3])
+    op = LazyIfElse(true_branch, false_branch, [x.type])
+    # Both branch graphs render directly, without a synthetic selection graph.
+    output = debugprint(op(c, x), file="str")
+    assert output == dedent(
+        """\
+        LazyIfElse [id A]
+         ├─ c [id B]
+         └─ x [id C]
+
+        Inner graphs:
+
+        LazyIfElse [id A]
+         true_branch:
+            ← Mul [id D]
+               ├─ i0 [id E]
+               └─ ExpandDims{axis=0} [id F]
+                  └─ 2 [id G]
+         false_branch:
+            ← Mul [id H]
+               ├─ i0 [id E]
+               └─ ExpandDims{axis=0} [id I]
+                  └─ 3 [id J]
+        """
+    )
+
+
 def test_debugprint_inner_graph_shared():
     """Inner-graph `Op`s that compare equal share a single printed body, whose
     header lists every node id it applies to (deduped, instead of one body per
@@ -815,6 +846,22 @@ class TestDebugprintRich:
         assert len(tree.children) == 2
         inner_section = tree.children[1]
         assert len(inner_section.children) >= 1
+
+    def test_lazy_ifelse_expands_both_branches(self):
+        c, x = iscalar("c"), dvector("x")
+        nested = OpFromGraph([x], [x * 2], name="nested")
+        true_branch = OpFromGraph([x], [nested(x)])
+        false_branch = OpFromGraph([x], [x * 3])
+        op = LazyIfElse(true_branch, false_branch, [x.type])
+        tree = debugprint(op(c, x), file="rich")
+        inner_section = tree.children[1]
+        lazy_tree = inner_section.children[0]
+        assert [str(child.label) for child in lazy_tree.children] == [
+            "true_branch:",
+            "false_branch:",
+        ]
+        # An OFG nested inside the true graph still gets its own inner body.
+        assert any("nested" in str(child.label) for child in inner_section.children[1:])
 
     def test_inner_graph_header_is_bold(self):
         # The "Inner graphs:" header should be bold.

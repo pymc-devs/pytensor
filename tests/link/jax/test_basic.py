@@ -4,19 +4,21 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor.tensor as pt
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.maker import function
 from pytensor.compile.mode import JAX, Mode
 from pytensor.compile.sharedvalue import shared
+from pytensor.conditional.op import ifelse
 from pytensor.configdefaults import config
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.ifelse import ifelse
 from pytensor.link.jax import JAXLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor.type import dscalar, matrices, scalar, vector
+from tests.conditional.utils import IfElseCompatibilityTests
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -26,6 +28,8 @@ def set_pytensor_flags():
 
 
 jax = pytest.importorskip("jax")
+
+from pytensor.link.jax.dispatch import jax_funcify
 
 
 optimizer = RewriteDatabaseQuery(include=["jax"], exclude=JAX._optimizer.exclude)
@@ -97,8 +101,6 @@ def compare_jax_and_py(
 
 def test_jax_FunctionGraph_once():
     """Make sure that an output is only computed once when it's referenced multiple times."""
-    from pytensor.link.jax.dispatch import jax_funcify
-
     x = vector("x")
     y = vector("y")
 
@@ -200,6 +202,27 @@ def test_jax_ifelse():
     x = ifelse(a < 0.5, true_vals, false_vals)
 
     compare_jax_and_py([a], [x], [a_test])
+
+
+class TestLazyIfElse(IfElseCompatibilityTests):
+    mode = "JAX"
+    check_aliasing = False  # JAX arrays are immutable and can safely share buffers.
+
+    @staticmethod
+    def check(x, message):
+        # sqrt gives invalid inputs NaN derivatives, exposing eager execution of
+        # unused branches through contamination of the selected branch's gradient.
+        return pt.switch(pt.all(x > 0), x, pt.sqrt(x))
+
+    @staticmethod
+    def assert_invalid(fn, *args, message):
+        assert np.isnan(fn(*args)).any()
+
+    @staticmethod
+    def gradient(fn, argnums):
+        return jax.jit(
+            jax.grad(lambda *args: fn.vm.jit_fn(*args)[0].sum(), argnums=argnums)
+        )
 
 
 def test_jax_checkandraise():

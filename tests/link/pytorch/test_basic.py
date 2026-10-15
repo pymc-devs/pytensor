@@ -10,12 +10,12 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.maker import function
 from pytensor.compile.mode import PYTORCH, Mode
 from pytensor.compile.sharedvalue import shared
+from pytensor.conditional.op import ifelse
 from pytensor.configdefaults import config
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.ifelse import ifelse
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar import float64, int64
