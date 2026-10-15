@@ -53,6 +53,25 @@ def test_mlx_Subtensor_basic():
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
 
+def test_mlx_Subtensor_symbolic_int_index():
+    """Regression test for https://github.com/pymc-devs/pytensor/issues/2422
+
+    A symbolic (non-constant) integer index must not be eagerly coerced to a
+    Python ``int`` -- under ``mx.compile`` it is a traced ``mx.array``, and
+    ``int()`` on a traced array raises.
+    """
+    x_pt = pt.matrix("x", dtype="float32")
+    i_pt = pt.iscalar("i")
+
+    out_pt = x_pt[i_pt]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    compare_mlx_and_py(
+        [x_pt, i_pt],
+        [out_pt],
+        [np.eye(3, dtype=np.float32), np.int32(1)],
+    )
+
+
 def test_mlx_AdvancedSubtensor():
     """Test advanced subtensor operations."""
     shape = (3, 4, 5)
@@ -111,6 +130,25 @@ def test_mlx_IncSubtensor_set():
     assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
     assert out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
+
+
+def test_mlx_IncSubtensor_symbolic_int_index():
+    """Regression test for https://github.com/pymc-devs/pytensor/issues/2422
+
+    Same as test_mlx_Subtensor_symbolic_int_index, for the IncSubtensor
+    (set_subtensor) path.
+    """
+    x_pt = pt.matrix("x", dtype="float32")
+    i_pt = pt.iscalar("i")
+    st_pt = pt.as_tensor_variable(np.array(-10.0, dtype=np.float32))
+
+    out_pt = pt_subtensor.set_subtensor(x_pt[i_pt, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    compare_mlx_and_py(
+        [x_pt, i_pt],
+        [out_pt],
+        [np.eye(3, dtype=np.float32), np.int32(1)],
+    )
 
 
 def test_mlx_IncSubtensor_increment():
