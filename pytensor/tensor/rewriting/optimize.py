@@ -36,10 +36,8 @@ def c_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
 @rewrite_optimize_inner_graph.register(PytorchLinker)
 @rewrite_optimize_inner_graph.register(MLXLinker)
 def jit_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
-    # JIT backends manage memory themselves, so leave the inner graph functional.
-    # (Unlike ``OpFromGraph`` under numba, no deepcopies are baked in either: a
-    # scipy op is never funcified -- it always perform-links via ``compile_fn``,
-    # whose ``FunctionMaker`` pass inserts the boundary deepcopies.)
+    # Native solvers call the inner graph directly, so keep callback inputs
+    # immutable. Perform-linked fallbacks get boundary copies from FunctionMaker.
     mode.excluding("inplace").optimizer.rewrite(inner)
 
 
