@@ -21,6 +21,7 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.utils import get_clients_at_depth
 from pytensor.tensor.basic import (
     Alloc,
+    Eye,
     Join,
     MakeVector,
     alloc,
@@ -32,6 +33,7 @@ from pytensor.tensor.basic import (
     diagonal,
     expand_dims,
     get_underlying_scalar_constant_value,
+    join,
     moveaxis,
     ones_like,
     register_infer_shape,
@@ -45,6 +47,7 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import (
     broadcast_arrays,
+    broadcast_shape,
     concat_with_broadcast,
 )
 from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
@@ -256,6 +259,200 @@ def _is_static_zero(var):
         )
     except NotScalarConstantError:
         return False
+
+
+def _is_static_identity(var):
+    """``True`` if ``var`` is statically a square identity ``I_n``.
+
+    A symbolic ``Eye(n, m)`` counts as square only when ``n`` and ``m`` are the same
+    variable.
+    """
+    if var.type.ndim != 2:
+        return False
+    owner = var.owner
+    if owner is not None and isinstance(owner.op, Eye):
+        n, m, k = owner.inputs
+        try:
+            k_val = int(
+                get_underlying_scalar_constant_value(k, raise_not_constant=True)
+            )
+        except NotScalarConstantError:
+            return False
+        if k_val != 0:
+            return False
+        try:
+            n_val = int(
+                get_underlying_scalar_constant_value(n, raise_not_constant=True)
+            )
+            m_val = int(
+                get_underlying_scalar_constant_value(m, raise_not_constant=True)
+            )
+        except NotScalarConstantError:
+            return n is m
+        return n_val == m_val
+    if isinstance(var, Constant):
+        arr = np.asarray(var.data)
+        return (
+            arr.ndim == 2
+            and arr.shape[0] == arr.shape[1]
+            and np.array_equal(arr, np.eye(arr.shape[0], dtype=arr.dtype))
+        )
+    return False
+
+
+def _block_kind(var):
+    """Classify a matmul block as ``"zero"``, ``"identity"``, ``"structured_join"``, or ``"dense"``.
+
+    A ``"structured_join"`` is itself a matrix-axis :class:`Join` with a non-dense
+    block somewhere below it.
+    """
+    if _is_static_zero(var):
+        return "zero"
+    if _is_static_identity(var):
+        return "identity"
+    if _join_matmul_axis(var) is not None and any(
+        _block_kind(leaf) != "dense" for leaf in var.owner.inputs
+    ):
+        return "structured_join"
+    return "dense"
+
+
+def _shape(var):
+    """Return the shape of ``var``, with static lengths as ints."""
+    return tuple(
+        var.shape[i] if length is None else length
+        for i, length in enumerate(var.type.shape)
+    )
+
+
+def _zero_product(left, right, dtype):
+    """Return zeros shaped like ``left @ right`` without building the product."""
+    left_shape, right_shape = _shape(left), _shape(right)
+    batch_shape = broadcast_shape(
+        left_shape[:-2], right_shape[:-2], arrays_are_shapes=True
+    )
+    return zeros((*batch_shape, left_shape[-2], right_shape[-1]), dtype=dtype)
+
+
+def _decompose_contracted(kinds, leaves, other, dot_op, join_is_left, out_dtype):
+    """Decompose ``dot`` over a contracted-axis ``Join`` by splitting ``other`` per leaf.
+
+    Zero leaves drop out, identity leaves contribute their chunk of ``other``, and
+    structured joins get their own product so they can decompose further. The dense
+    leaves are re-joined into one GEMM, which is smaller than the parent because at
+    least one leaf is not dense.
+    """
+    size_axis = -1 if join_is_left else -2
+    sizes = [_shape(leaf)[size_axis] for leaf in leaves]
+    chunks = split(
+        other,
+        splits_size=sizes,
+        n_splits=len(leaves),
+        axis=-2 if join_is_left else -1,
+    )
+
+    def sided(leaf, chunk):
+        return dot_op(leaf, chunk) if join_is_left else dot_op(chunk, leaf)
+
+    terms = []
+    dense_leaves = []
+    dense_chunks = []
+    for kind, leaf, chunk in zip(kinds, leaves, chunks, strict=True):
+        match kind:
+            case "zero":
+                continue
+            case "identity":
+                terms.append(chunk)
+            case "structured_join":
+                terms.append(sided(leaf, chunk))
+            case "dense":
+                dense_leaves.append(leaf)
+                dense_chunks.append(chunk)
+
+    if dense_leaves:
+        dense_leaf = join(size_axis, *dense_leaves)
+        dense_chunk = join(-2 if join_is_left else -1, *dense_chunks)
+        terms.append(sided(dense_leaf, dense_chunk))
+
+    if not terms:
+        left, right = (leaves[0], chunks[0]) if join_is_left else (chunks[0], leaves[0])
+        return _zero_product(left, right, out_dtype)
+    result = terms[0] if len(terms) == 1 else add(*terms)
+    return result.astype(out_dtype)
+
+
+def _decompose_output(kinds, leaves, other, dot_op, join_is_left, out_dtype):
+    """Decompose ``dot`` over an output-axis ``Join`` into one block per leaf."""
+    blocks = []
+    for kind, leaf in zip(kinds, leaves, strict=True):
+        left, right = (leaf, other) if join_is_left else (other, leaf)
+        match kind:
+            case "zero":
+                blocks.append(_zero_product(left, right, out_dtype))
+            case "identity":
+                blocks.append(other.astype(out_dtype))
+            case _:
+                blocks.append(dot_op(left, right).astype(out_dtype))
+    return concat_with_broadcast(blocks, axis=-2 if join_is_left else -1)
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([Join])
+def local_dot_of_join(fgraph, node):
+    r"""Push ``dot`` inside a :class:`Join` that has a zero or identity block.
+
+    Fires per matmul client when some input of the ``Join`` is a static zero, the
+    identity, or itself a ``Join`` containing one. Zero blocks drop out or become
+    zeros, identity blocks fold to the matching part of the other operand, and
+    all-dense block matmuls keep their single GEMM. Walks through left-``expand_dims``
+    ``DimShuffle`` chains between the ``Join`` and the matmul, which ``Blockwise``
+    pads this way.
+
+    A square grid with zero off-diagonal blocks is canonicalized to
+    :func:`block_diag` first, and the ``BlockDiagonal`` matmul rewrite handles it.
+    """
+    join_out = node.outputs[0]
+    matmul_axis = _join_matmul_axis(join_out)
+    if matmul_axis is None or len(node.inputs) < 2:
+        return None
+
+    def matmul_clients(var):
+        for client, input_idx in fgraph.clients[var]:
+            if isinstance(client, str):
+                continue
+            if client.op in (_dot, _matmul):
+                yield client, input_idx
+            elif isinstance(client.op, DimShuffle) and client.op.is_left_expand_dims:
+                yield from matmul_clients(client.outputs[0])
+
+    clients = dict(matmul_clients(join_out))
+    if not clients:
+        return None
+
+    leaves = node.inputs
+    kinds = [_block_kind(leaf) for leaf in leaves]
+    if all(kind == "dense" for kind in kinds):
+        return None
+
+    replacements = {}
+    for client, client_idx in clients.items():
+        old_out = client.outputs[0]
+        join_is_left = client_idx == 0
+        other = client.inputs[1 - client_idx]
+        out_dtype = old_out.type.dtype
+        contracted_axis = -1 if join_is_left else -2
+        if matmul_axis == contracted_axis:
+            new_output = _decompose_contracted(
+                kinds, leaves, other, client.op, join_is_left, out_dtype
+            )
+        else:
+            new_output = _decompose_output(
+                kinds, leaves, other, client.op, join_is_left, out_dtype
+            )
+        copy_stack_trace(old_out, new_output)
+        replacements[old_out] = new_output
+
+    return replacements
 
 
 @register_canonicalize
