@@ -23,6 +23,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.link.numba.dispatch.linalg.products import _gemm
 from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
@@ -1414,6 +1415,11 @@ def numba_funcify_Argmax(op, node, **kwargs):
     return argmax, cache_version
 
 
+_GEMM_DTYPES = frozenset(
+    np.dtype(name) for name in ("float32", "float64", "complex64", "complex128")
+)
+
+
 @register_funcify_default_op_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
     # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
@@ -1438,53 +1444,49 @@ def numba_funcify_Dot(op, node, **kwargs):
             f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
         )
 
-    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
-
+    if numba_dot_dtype in _GEMM_DTYPES:
+        # Calling gemm directly reads transposed and column-sliced operands through
+        # their leading dimension, where `np.dot` would copy them first.
         @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y))
-            np.dot(x, y, out)
-            return out
-
-    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
-            np.dot(x, y.astype(numba_dot_dtype), out)
-            return out
-
-    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
-            np.dot(x.astype(numba_dot_dtype), y, out)
-            return out
+        def product(x, y, out):
+            return _gemm(x, y, out)
 
     else:
 
         @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(
-                    np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
-                )
-            np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype), out)
+        def product(x, y, out):
+            np.dot(x, y, out)
             return out
 
-    cache_version = 2
+    @numba_basic.numba_njit
+    def as_is(a):
+        return a
+
+    @numba_basic.numba_njit
+    def to_dot_dtype(a):
+        return a.astype(numba_dot_dtype)
+
+    cast_x = as_is if x_dtype == numba_dot_dtype else to_dot_dtype
+    cast_y = as_is if y_dtype == numba_dot_dtype else to_dot_dtype
+
+    @numba_basic.numba_njit
+    def dot(x, y, out=None):
+        if out is None:
+            out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+        return product(cast_x(x), cast_y(y), out)
+
+    # Bump whenever `_gemm` changes: it is inlined here, so its source is not part of
+    # this key.
+    cache_version = 6
 
     if out_dtype == numba_dot_dtype:
-        # np.dot can write straight into the pre-allocated batch output slice.
+        # The product writes straight into the pre-allocated batch output slice.
         dot.handles_out = True
         return dot, cache_version
 
     else:
-        # Output needs a dtype cast that np.dot cannot do in place.
+        # Output needs a dtype cast the product can't do in place, so fall back to
+        # the copying store_core_outputs wrapper.
         @numba_basic.numba_njit
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)
@@ -1495,18 +1497,33 @@ def numba_funcify_Dot(op, node, **kwargs):
 @register_funcify_default_op_cache_key(BatchedDot)
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
+    x, y = node.inputs
 
-    @numba_basic.numba_njit
-    def batched_dot(x, y, out=None):
-        # Numba does not support 3D matmul
-        # https://github.com/numba/numba/issues/3804
-        if out is None:
-            shape = x.shape[:-1] + y.shape[2:]
-            out = np.empty(shape, dtype=dtype)
-        for i in range(out.shape[0]):
-            out[i] = np.dot(x[i], y[i])
+    # Numba does not support 3D matmul (numba#3804), so either path loops over the batch.
+    if x.type.numpy_dtype == y.type.numpy_dtype == dtype and dtype in _GEMM_DTYPES:
 
-        return out
+        @numba_basic.numba_njit
+        def batched_dot(x, y, out=None):
+            if out is None:
+                shape = x.shape[:-1] + y.shape[2:]
+                out = np.empty(shape, dtype=dtype)
+            for i in range(out.shape[0]):
+                # Writes into out[i] directly and reads an F-ordered slice without a copy
+                _gemm(x[i], y[i], out[i])
+
+            return out
+
+    else:
+
+        @numba_basic.numba_njit
+        def batched_dot(x, y, out=None):
+            if out is None:
+                shape = x.shape[:-1] + y.shape[2:]
+                out = np.empty(shape, dtype=dtype)
+            for i in range(out.shape[0]):
+                out[i] = np.dot(x[i], y[i])
+
+            return out
 
     batched_dot.handles_out = True
-    return batched_dot, 1
+    return batched_dot, 6

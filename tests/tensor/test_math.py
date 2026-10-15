@@ -2866,7 +2866,7 @@ class TestInferShape(utt.InferShapeTester):
             [advec, bdvec],
             [dot(advec, bdvec)],
             [advec_val, bdvec_val],
-            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
+            (Dot, blas.Dot22, blas.Gemv),
         )
 
         # mat/mat
@@ -2887,7 +2887,7 @@ class TestInferShape(utt.InferShapeTester):
             [advec, bdmat],
             [dot(advec, bdmat)],
             [advec_val, bdmat_val],
-            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
+            (Dot, blas.Dot22, blas.Gemv),
         )
 
         # mat/vec
@@ -2896,7 +2896,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, bdvec],
             [dot(admat, bdvec)],
             [admat_val, bdvec_val],
-            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
+            (Dot, blas.Dot22, blas.Gemv),
         )
 
 

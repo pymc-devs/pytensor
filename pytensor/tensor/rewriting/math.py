@@ -9,6 +9,7 @@ import numpy as np
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as ps_math
 from pytensor.assumptions import DIAGONAL, UNIT_MAGNITUDE, check_assumption
+from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -481,6 +482,32 @@ def local_dot_to_mul(fgraph, node):
         a_static_shape[-2] == 1 or b_static_shape[-1] == 1
     ):
         return None
+
+    return _dot_as_mul(node)
+
+
+@node_rewriter([Dot])
+def local_outer_dot_to_mul(fgraph, node):
+    """Rewrite the core outer-product `Dot` that `local_dot_to_mul` keeps for GER."""
+    a, b = node.inputs
+    if not (a.type.shape[-1] == 1 or b.type.shape[-2] == 1):
+        return None
+
+    return _dot_as_mul(node)
+
+
+# Numba has no GER lowering, and BLAS gemm with a contraction length of 1 is slower
+# than the fused multiplication.
+optdb["specialize"].register(
+    local_outer_dot_to_mul.__name__,
+    local_outer_dot_to_mul,
+    "numba",
+    use_db_name_as_tag=False,
+)
+
+
+def _dot_as_mul(node):
+    a, b = node.inputs
 
     # Add specify_shape for unknown dimensions that must be 1
     # To avoid runtime broadcast error by multiply

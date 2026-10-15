@@ -34,7 +34,6 @@ from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
-from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -4195,7 +4194,7 @@ def test_local_sumsqr2dot():
     assert any(
         isinstance(
             n.op,
-            Dot | Dot22 | Gemv | CGemv,
+            Dot | Dot22 | Gemv,
         )
         for n in f.maker.fgraph.toposort()
     )
@@ -5279,7 +5278,7 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
         == 1
     )
 
-    # For now we do not rewrite only the case of unbatched outer
+    # The unbatched outer product is kept for GER, except in numba which has none
     core_outer = (not batched) and (a_shape == (3, 1)) and (b_shape == (1, 3))
     rewritten_out = rewrite_graph(out)
     assert rewritten_out.type.shape == out.type.shape
@@ -5288,6 +5287,13 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
         for var in ancestors([rewritten_out])
         if var.owner
     ) == (1 if core_outer else 0)
+
+    numba_out = rewrite_graph(out, include=("canonicalize", "specialize", "numba"))
+    assert not any(
+        isinstance(var.owner.op, (Blockwise | Dot))
+        for var in ancestors([numba_out])
+        if var.owner
+    )
 
     a_test = np.random.normal(size=a.type.shape).astype(a.type.dtype)
     b_test = np.random.normal(size=b.type.shape).astype(b.type.dtype)

@@ -1210,6 +1210,8 @@ class VMLinker(LocalLinker):
         output_storage=None,
         storage_map=None,
     ):
+        from pytensor.link.c.dispatch.basic import make_node_thunk_with_c_dispatch
+
         fgraph = self.fgraph
         order = self.schedule(fgraph)
 
@@ -1227,6 +1229,7 @@ class VMLinker(LocalLinker):
         impl = None
         if self.c_thunks is False:
             impl = "py"
+        use_c_dispatch = self.c_thunks is not False and bool(config.cxx)
         for node in order:
             try:
                 thunk_start = time.perf_counter()
@@ -1234,7 +1237,14 @@ class VMLinker(LocalLinker):
                 # no need to cause duplicate c code by passing
                 # no_recycling here.
                 thunks.append(
-                    node.op.make_thunk(node, storage_map, compute_map, [], impl=impl)
+                    make_node_thunk_with_c_dispatch(
+                        node,
+                        storage_map,
+                        compute_map,
+                        [],
+                        try_c=use_c_dispatch,
+                        fallback_impl=impl,
+                    )
                 )
                 linker_make_thunk_time[node] = time.perf_counter() - thunk_start
                 if not hasattr(thunks[-1], "lazy"):
