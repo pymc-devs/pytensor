@@ -2946,6 +2946,80 @@ def vertical_stack(*args):
     return concatenate(_args, axis=0)
 
 
+def block(arrays):
+    """Assemble a tensor from nested lists of blocks, like ``numpy.block``.
+
+    Parameters
+    ----------
+    arrays : nested list of array_like
+        Tensors at the leaves, lists at the interior. Every leaf must sit at
+        the same nesting depth ``d``; the concatenation spans the last ``d``
+        axes.
+
+    Returns
+    -------
+    result : TensorVariable
+        Assembled block tensor. A bare tensor (no list wrapping) returns as
+        ``atleast_1d(arrays)``.
+
+    Examples
+    --------
+    .. testcode::
+
+        import numpy as np
+        import pytensor.tensor as pt
+
+        A = pt.as_tensor_variable(np.array([[1, 2], [3, 4]]))
+        B = pt.as_tensor_variable(np.array([[5], [6]]))
+        C = pt.as_tensor_variable(np.array([[7, 8]]))
+        D = pt.as_tensor_variable(np.array([[9]]))
+        M = pt.block([[A, B], [C, D]])
+        print(M.eval())
+
+    .. testoutput::
+
+        [[1 2 5]
+         [3 4 6]
+         [7 8 9]]
+    """
+    leaves = []
+
+    def list_depth(node, index):
+        if isinstance(node, tuple):
+            raise TypeError(
+                "Block: tuples are not allowed as nested containers; use lists"
+            )
+        if not isinstance(node, list):
+            leaves.append(as_tensor_variable(node))
+            return len(index)
+        if not node:
+            raise ValueError("Block: empty list is not allowed")
+        depths = [list_depth(child, (*index, i)) for i, child in enumerate(node)]
+        for i, depth in enumerate(depths):
+            if depth != depths[0]:
+                raise ValueError(
+                    "Block: all leaves must be at the same nesting depth "
+                    f"(got depth {depth} at index {(*index, i)}, expected {depths[0]})"
+                )
+        return depths[0]
+
+    list_ndim = list_depth(arrays, ())
+    if list_ndim == 0:
+        return atleast_Nd(leaves[0], n=1)
+
+    result_ndim = builtins.max(list_ndim, *(leaf.type.ndim for leaf in leaves))
+    remaining = iter(leaves)
+
+    def assemble(node, depth):
+        if depth == list_ndim:
+            return atleast_Nd(next(remaining), n=result_ndim)
+        return concatenate(
+            [assemble(child, depth + 1) for child in node], axis=depth - list_ndim
+        )
+
+    return assemble(arrays, 0)
+
+
 def is_flat(var, ndim=1):
     """
     Verifies the dimensionality of the var is equal to
@@ -4485,6 +4559,7 @@ __all__ = [
     "atleast_2d",
     "atleast_3d",
     "atleast_Nd",
+    "block",
     "cast",
     "choose",
     "concatenate",
