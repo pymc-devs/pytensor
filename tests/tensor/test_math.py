@@ -14,7 +14,7 @@ import pytensor
 import pytensor.scalar as ps
 from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.maker import function
-from pytensor.compile.mode import get_default_mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
@@ -807,6 +807,15 @@ class TestMaxAndArgmax:
         assert len(v) == 0
         v = eval_outputs(max_and_argmax(n)[1].shape)
         assert len(v) == 0
+
+    @pytest.mark.skipif(
+        not config.cxx, reason="G++ not available, so we need to skip this test."
+    )
+    def test_zero_size_axis_error_c(self):
+        x = matrix("x")
+        f = function([x], max(x, axis=1), mode=Mode(linker="c"))
+        with pytest.raises(ValueError, match="zero-size on axis 1"):
+            f(np.zeros((3, 0), dtype=config.floatX))
 
     def test_empty_axis_tensor(self):
         x = np.random.normal(size=(2, 3, 5, 7))
