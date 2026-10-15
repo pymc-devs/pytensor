@@ -28,7 +28,9 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
     LUFactorTridiagonal,
     SolveLUFactorTridiagonal,
 )
+from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.linalg.solvers import (
+    cho_solve_quadratic_form_to_whitened,
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
 )
@@ -790,3 +792,372 @@ def test_solve_upgrades_to_tridiagonal(declared):
     ).astype(config.floatX)
     b_val = rng.normal(size=(6, 3)).astype(config.floatX)
     result.assert_eval(A_val, b_val, rtol=1e-7 if config.floatX == "float64" else 1e-4)
+
+
+@pytest.mark.parametrize("batched_b", [False, True], ids=["vector_b", "batched_b"])
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
+def test_cho_solve_quadratic_form_to_whitened(lower, batched_b, b_ndim):
+    c = pt.dmatrix("c")
+    b = pt.tensor("b", shape=(None,) * (1 + batched_b), dtype="float64")
+
+    rhs = b if b_ndim == 1 else b[..., None]
+    quad = (rhs * cho_solve((c, lower), rhs, b_ndim=b_ndim)).sum(axis=-b_ndim)
+    if b_ndim == 2:
+        quad = quad.squeeze(-1)
+
+    result = RewriteTester(
+        [c, b], [quad], include=["canonicalize", "stabilize", "specialize"]
+    )
+
+    rng = np.random.default_rng(81)
+    A = rng.normal(size=(4, 4))
+    A = A @ A.T + 4 * np.eye(4)
+    c_val = np.linalg.cholesky(A)
+    c_val = c_val if lower else c_val.T
+    b_val = rng.normal(size=(3, 4) if batched_b else (4,))
+    result.assert_eval(c_val, b_val)
+
+    toposort = result.rewr_fg.toposort()
+    core_ops = [getattr(node.op, "core_op", node.op) for node in toposort]
+    assert not any(isinstance(op, CholeskySolve) for op in core_ops)
+    assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+def test_triangular_solve_pair_quadratic_form_to_whitened(lower, dtype):
+    """Both transposes are unconjugated, so complex pairs whiten too. The inner
+    solve is reused, so its other consumers do not block the rewrite."""
+    M = pt.matrix("M", dtype=dtype)
+    b = pt.vector("b", dtype=dtype)
+    inner = solve_triangular(M, b, lower=lower, b_ndim=1)
+    quad = (b * solve_triangular(M.mT, inner, lower=not lower, b_ndim=1)).sum()
+
+    result = RewriteTester(
+        [M, b],
+        [quad, pt.exp(inner)],
+        include=None,
+        custom_rewrite=cho_solve_quadratic_form_to_whitened,
+    )
+    result.assert_graph((inner**2).sum(), pt.exp(inner))
+
+    rng = np.random.default_rng(7)
+    M_val = rng.normal(size=(6, 6)) + 6 * np.eye(6)
+    b_val = rng.normal(size=6)
+    if dtype == "complex128":
+        M_val = M_val + 1j * rng.normal(size=(6, 6))
+        b_val = b_val + 1j * rng.normal(size=6)
+    result.assert_eval(np.tril(M_val) if lower else np.triu(M_val), b_val)
+
+
+@pytest.mark.parametrize(
+    "outer_factor, outer_lower, outer_unit_diagonal",
+    [
+        pytest.param(lambda M, N: N.mT, False, False, id="different_factor"),
+        pytest.param(lambda M, N: M.mT, True, False, id="same_triangle"),
+        pytest.param(lambda M, N: M, False, False, id="not_transposed"),
+        pytest.param(lambda M, N: M.mT, False, True, id="unit_diagonal_mismatch"),
+    ],
+)
+def test_triangular_solve_pair_quadratic_form_not_whitened(
+    outer_factor, outer_lower, outer_unit_diagonal
+):
+    M = pt.dmatrix("M")
+    N = pt.dmatrix("N")
+    b = pt.dvector("b")
+    inner = solve_triangular(M, b, lower=True, b_ndim=1)
+    x = solve_triangular(
+        outer_factor(M, N),
+        inner,
+        lower=outer_lower,
+        unit_diagonal=outer_unit_diagonal,
+        b_ndim=1,
+    )
+    quad = (b * x).sum()
+
+    result = RewriteTester(
+        [M, N, b],
+        [quad],
+        include=None,
+        custom_rewrite=cho_solve_quadratic_form_to_whitened,
+    )
+    result.assert_graph(quad)
+
+
+def test_cho_solve_quadratic_form_keeps_sum_dtype():
+    c = pt.matrix("c", dtype="float32")
+    b = pt.vector("b", dtype="float32")
+
+    quad = (b * cho_solve((c, True), b, b_ndim=1)).sum(dtype="float64")
+    rewritten = rewrite_graph(quad, include=("canonicalize", "stabilize", "specialize"))
+
+    expected = rewrite_graph(
+        (solve_triangular(c, b, lower=True, b_ndim=1) ** 2).sum(dtype="float64"),
+        include=("canonicalize", "stabilize", "specialize"),
+    )
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_cho_solve_quadratic_form_with_reused_solve_not_whitened():
+    """A solve result with another consumer is left alone, so it is never computed twice."""
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    x = cho_solve((c, True), b, b_ndim=1)
+    quad = (b * x).sum()
+
+    result = RewriteTester([c, b], [quad, x], include=["specialize"])
+    result.assert_graph(quad, x)
+
+
+@pytest.mark.parametrize(
+    "a_batch_shape, b_batch_shape",
+    [
+        pytest.param((), (), id="unbatched"),
+        pytest.param((), (3,), id="shared_factor"),
+        pytest.param((2, 3), (2, 3), id="two_batch_axes"),
+    ],
+)
+def test_vector_quadratic_form_to_whitened(a_batch_shape, b_batch_shape):
+    A_raw = pt.tensor("A", shape=(None,) * (len(a_batch_shape) + 2), dtype="float64")
+    b = pt.tensor("b", shape=(None,) * (len(b_batch_shape) + 1), dtype="float64")
+    A = assume(A_raw, positive_definite=True)
+    quad = (
+        pt.squeeze(b[..., None, :] @ pt.linalg.inv(A) @ b[..., :, None], axis=(-2, -1))
+        if b_batch_shape
+        else b @ pt.linalg.inv(A) @ b
+    )
+
+    # RewriteTester evaluates with the Python linker, so skip C-only reduction fusion.
+    result = RewriteTester(
+        [A_raw, b], [quad], include="o3", exclude=["local_careduce_fusion"]
+    )
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(*a_batch_shape, 4, 4))
+    A_val = M @ M.swapaxes(-2, -1) + 4 * np.eye(4)
+    result.assert_eval(A_val, rng.normal(size=(*b_batch_shape, 4)))
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
+    ]
+    assert not any(isinstance(op, CholeskySolve | Dot) for op in core_ops)
+    assert sum(isinstance(op, SolveTriangular) for op in core_ops) == 1
+
+
+@pytest.mark.parametrize("wrap", [lambda t: t, pt.log], ids=["plain", "under_log"])
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+@pytest.mark.parametrize(
+    "b_ndim, build",
+    [
+        pytest.param(1, lambda x, b: pt.dot(x, b), id="vector_dot"),
+        pytest.param(1, lambda x, b: b @ x, id="vector_matmul"),
+        pytest.param(2, lambda x, b: x.mT @ b, id="column_matmul"),
+        pytest.param(2, lambda x, b: pt.dot(b.mT, x), id="column_dot"),
+        pytest.param(
+            2,
+            lambda x, b: pt.expand_dims(pt.squeeze(x, axis=-1), axis=0) @ b,
+            id="squeeze_expand",
+        ),
+    ],
+)
+def test_vector_quadratic_form_dot_to_whitened(lower, wrap, b_ndim, build):
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    rhs = b if b_ndim == 1 else b[:, None]
+    x = cho_solve((c, lower), rhs, b_ndim=b_ndim)
+    out = wrap(pt.squeeze(build(x, rhs)))
+
+    result = RewriteTester([c, b], [out], include=["specialize"])
+    whitened = solve_triangular(
+        c, rhs, lower=lower, trans=0 if lower else 1, b_ndim=b_ndim
+    )
+    expected = (whitened**2).sum(axis=-b_ndim)
+    result.assert_graph(
+        rewrite_graph(wrap(pt.squeeze(expected)), include=["specialize"])
+    )
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    c_val = np.linalg.cholesky(M @ M.T + 4 * np.eye(4))
+    c_val = c_val if lower else c_val.T
+    result.assert_eval(c_val, rng.normal(size=4) ** 2)
+
+
+@pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
+@pytest.mark.parametrize(
+    "c_batch_shape, b_batch_shape",
+    [
+        pytest.param((), (3,), id="shared_factor"),
+        pytest.param((2, 3), (2, 3), id="two_batch_axes"),
+        pytest.param((2, 1), (3,), id="broadcast_batches"),
+    ],
+)
+def test_batched_quadratic_form_matmul_to_whitened(
+    lower, b_ndim, c_batch_shape, b_batch_shape
+):
+    c = pt.tensor(
+        "c",
+        shape=(*(1 if n == 1 else None for n in c_batch_shape), None, None),
+        dtype="float64",
+    )
+    b = pt.tensor("b", shape=(None,) * (len(b_batch_shape) + 1), dtype="float64")
+    rhs = b if b_ndim == 1 else b[..., None]
+    x = cho_solve((c, lower), rhs, b_ndim=b_ndim)
+    out = pt.vecdot(b, x) if b_ndim == 1 else pt.squeeze(x.mT @ rhs, axis=(-2, -1))
+    passes = ["canonicalize", "stabilize", "specialize"]
+    result = RewriteTester([c, b], [out], include=passes)
+
+    whitened = solve_triangular(
+        c, rhs, lower=lower, trans=0 if lower else 1, b_ndim=b_ndim
+    )
+    expected = (whitened**2).sum(axis=-b_ndim)
+    if b_ndim == 2:
+        expected = expected.squeeze(-1)
+    result.assert_graph(rewrite_graph(expected, include=passes))
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(*c_batch_shape, 4, 4)).astype(c.dtype)
+    c_val = np.linalg.cholesky(M @ M.swapaxes(-2, -1) + 4 * np.eye(4))
+    if not lower:
+        c_val = c_val.swapaxes(-2, -1)
+    b_val = rng.normal(size=(*b_batch_shape, 4)).astype(b.dtype)
+    result.assert_eval(c_val, b_val)
+
+
+@pytest.mark.parametrize(
+    "x_order, b_order, whiten",
+    [
+        pytest.param((1, 0, 2, "x"), (1, 0, "x", 2), True, id="permuted_batches"),
+        pytest.param((0, 1, 2, "x"), (1, 0, "x", 2), False, id="mismatched_batches"),
+        pytest.param(
+            (0, 2, 1, "x"), (0, 2, "x", 1), False, id="wrong_contraction_axis"
+        ),
+    ],
+)
+def test_batched_quadratic_form_matmul_batch_axes(x_order, b_order, whiten):
+    c = pt.tensor4("c")
+    b = pt.tensor3("b")
+    x = cho_solve((c, True), b, b_ndim=1)
+    out = pt.squeeze(b.dimshuffle(b_order) @ x.dimshuffle(x_order), axis=(-2, -1))
+    result = RewriteTester(
+        [c, b], [out], include=None, custom_rewrite=cho_solve_quadratic_form_to_whitened
+    )
+    expected = (
+        (solve_triangular(c, b, lower=True, b_ndim=1) ** 2).sum(axis=-1).mT
+        if whiten
+        else out
+    )
+    result.assert_graph(expected)
+
+
+@pytest.mark.parametrize("axis", [-2, 0], ids=["vector_axis", "batch_axis"])
+def test_batched_quadratic_form_sum_axis(axis):
+    c = pt.dtensor4("c")
+    b = pt.tensor("b", shape=(None, None, None, 1), dtype="float64")
+    out = (b * cho_solve((c, True), b, b_ndim=2)).sum(axis=axis)
+    result = RewriteTester(
+        [c, b], [out], include=None, custom_rewrite=cho_solve_quadratic_form_to_whitened
+    )
+    expected = (
+        (solve_triangular(c, b, lower=True, b_ndim=2) ** 2).sum(axis=axis)
+        if axis == -2
+        else out
+    )
+    result.assert_graph(expected)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector", "column"])
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(lambda x, col, d_col: [pt.squeeze(x.mT @ d_col)], id="bilinear"),
+        pytest.param(
+            lambda x, col, d_col: [pt.squeeze(x.mT @ col), x], id="reused_solve"
+        ),
+    ],
+)
+def test_vector_quadratic_form_dot_not_whitened(build, b_ndim):
+    c = pt.dmatrix("c")
+    b = pt.dvector("b")
+    d = pt.dvector("d")
+    col = b[:, None]
+    x = cho_solve((c, True), b if b_ndim == 1 else col, b_ndim=b_ndim)
+    outputs = build(x[:, None] if b_ndim == 1 else x, col, d[:, None])
+
+    result = RewriteTester([c, b, d], outputs, include=["specialize"])
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    c_val = np.linalg.cholesky(M @ M.T + 4 * np.eye(4))
+    result.assert_eval(c_val, rng.normal(size=4), rng.normal(size=4))
+
+    core_ops = [
+        getattr(node.op, "core_op", node.op) for node in result.rewr_fg.toposort()
+    ]
+    assert any(isinstance(op, CholeskySolve) for op in core_ops)
+
+
+@pytest.mark.parametrize(
+    "build, output_order",
+    [
+        pytest.param(lambda x, col: col.mT @ x, ("x", 0), id="solve_on_right"),
+        pytest.param(lambda x, col: x.mT @ col, (0, "x"), id="solve_on_left"),
+    ],
+)
+def test_unsqueezed_matmul_quadratic_form_to_whitened(build, output_order):
+    c = pt.dmatrix("c")
+    col = pt.tensor("col", shape=(None, 1), dtype="float64")
+    out = build(cho_solve((c, True), col, b_ndim=2), col)
+
+    result = RewriteTester(
+        [c, col],
+        [out],
+        include=None,
+        custom_rewrite=cho_solve_quadratic_form_to_whitened,
+    )
+    whitened = solve_triangular(c, col, lower=True, b_ndim=2)
+    result.assert_graph((whitened**2).sum(axis=0).dimshuffle(output_order))
+
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    result.assert_eval(
+        np.linalg.cholesky(M @ M.T + 4 * np.eye(4)), rng.normal(size=(4, 1))
+    )
+
+
+@pytest.mark.parametrize("factor_dtype", ["float64", "complex128"])
+def test_complex_cho_solve_quadratic_form(factor_dtype):
+    """cho_solve reads A as c @ c.conj().mT, which the unconjugated b.T @ x undoes
+    only for a real factor."""
+    c = pt.matrix("c", dtype=factor_dtype)
+    b = pt.zvector("b")
+    out = b @ cho_solve((c, True), b, b_ndim=1)
+
+    result = RewriteTester(
+        [c, b], [out], include=None, custom_rewrite=cho_solve_quadratic_form_to_whitened
+    )
+    if factor_dtype == "complex128":
+        result.assert_graph(out)
+        return
+
+    result.assert_graph((solve_triangular(c, b, lower=True, b_ndim=1) ** 2).sum(axis=0))
+    rng = np.random.default_rng(81)
+    M = rng.normal(size=(4, 4))
+    result.assert_eval(
+        np.linalg.cholesky(M @ M.T + 4 * np.eye(4)),
+        rng.normal(size=4) + 1j * rng.normal(size=4),
+    )
+
+
+def test_vector_quadratic_form_length_one():
+    A_raw = pt.dmatrix("A")
+    b = pt.dvector("b")
+    A = assume(A_raw, positive_definite=True)
+    quad = b @ pt.linalg.inv(A) @ b
+
+    result = RewriteTester(
+        [A_raw, b], [quad], include=["canonicalize", "stabilize", "specialize"]
+    )
+    result.assert_eval(np.array([[2.5]]), np.array([3.0]))
