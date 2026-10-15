@@ -1,4 +1,8 @@
 import contextlib
+import os
+import subprocess
+import sys
+from textwrap import dedent
 
 import numpy as np
 import pytest
@@ -67,6 +71,48 @@ def test_AdvancedSubtensor1_out_of_bounds():
     assert isinstance(out_pt.owner.op, AdvancedSubtensor)
     with pytest.raises(IndexError):
         compare_numba_and_py([], [out_pt], [])
+
+
+@pytest.mark.parametrize(
+    "idx_val",
+    [np.iinfo(np.int64).min, 20, -20],
+    ids=["int64_min", "oob_positive", "oob_negative"],
+)
+def test_AdvancedIncSubtensor_out_of_bounds(idx_val, tmp_path):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2442
+    # An out-of-range integer index must raise IndexError, not silently
+    # write outside the array (undefined behavior that can corrupt memory).
+    #
+    # The test suite sets NUMBA_BOUNDSCHECK=1 globally (see conftest.py), which
+    # hides a missing `boundscheck=True` on the compiled function, so the graph
+    # is run in a subprocess without it, and with its own compile cache.
+    code = dedent(
+        f"""
+        import numpy as np
+        import pytensor
+        import pytensor.tensor as pt
+
+        x, idx = pt.vector("x"), pt.lvector("idx")
+        y = pt.inc_subtensor(x[idx], 7.0)
+        fn = pytensor.function([pytensor.In(x, mutable=True), idx], y, mode="NUMBA")
+        try:
+            fn(np.zeros(12)[:11], np.array([{idx_val}], dtype="int64"))
+        except IndexError:
+            print("IndexError")
+        """
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("NUMBA_BOUNDSCHECK", "PYTENSOR_FLAGS")
+    }
+    env["PYTENSOR_FLAGS"] = f"base_compiledir={tmp_path}"
+    env["NUMBA_CACHE_DIR"] = str(tmp_path / "numba")
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "IndexError"
 
 
 @pytest.mark.parametrize(
