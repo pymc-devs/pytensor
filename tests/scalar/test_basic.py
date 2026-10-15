@@ -402,6 +402,17 @@ class TestUpgradeToFloat:
             self._test_binary(binary_op, x_range, y_range)
 
 
+@pytest.mark.parametrize(
+    ("scalar_type", "value"),
+    [(float32, np.float32(0.657)), (float64, np.float64(0.657))],
+    ids=["float32", "float64"],
+)
+def test_reciprocal_python_linker_precision(scalar_type, value):
+    x = scalar_type("x")
+    fn = pytensor.function([x], reciprocal(x), mode=Mode(linker="py", optimizer=None))
+    np.testing.assert_array_equal(fn(value), 1.0 / value)
+
+
 def test_mod_complex_fail():
     # Make sure % fails on complex numbers.
     x = complex64()
