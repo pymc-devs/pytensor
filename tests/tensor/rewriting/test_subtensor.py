@@ -1764,6 +1764,22 @@ def test_slice_read_of_write():
     rewritten = rewrite_graph(out, **rw_kw)
     utt.assert_equal_computations([rewritten], [out])
 
+    # Multi-axis advanced write: slicing 2+ advanced axes must not convert
+    # to pointwise 1D aranges (which would collapse Cartesian rank from Matrix to Vector).
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2496
+    buf3 = pt.matrix("buf3", shape=(4, 4))
+    v = pt.vector("v", shape=(2,))
+    out = buf3[[2, 3], [2, 3]].set(v)[:2, :2]
+    rewritten = rewrite_graph(out, **rw_kw)
+    utt.assert_equal_computations([rewritten], [out])
+
+    # 3D case: 2 advanced axes, 1 slice axis
+    buf4 = pt.tensor3("buf4", shape=(4, 4, 3))
+    v3 = pt.matrix("v3", shape=(2, 3))
+    out3 = buf4[[2, 3], [2, 3], :].set(v3)[:2, :2]
+    rewritten3 = rewrite_graph(out3, **rw_kw)
+    utt.assert_equal_computations([rewritten3], [out3])
+
 
 class TestReadOfWriteConstantIndices:
     def setup_method(self):
