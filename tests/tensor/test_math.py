@@ -117,6 +117,7 @@ from pytensor.tensor.math import (
     smallest,
     sqr,
     sqrt,
+    std,
     sub,
     tan,
     tanh,
@@ -2593,8 +2594,38 @@ def test_var():
     v = v - error
     assert np.allclose(v, f(a_val))
 
-    # Test that we don't upcast float16 computation
+    # Test that we don't upcast float16/float32 computation
     assert vector(dtype="float16").var().dtype == "float16"
+    assert vector(dtype="float16").var(ddof=1).dtype == "float16"
+    assert vector(dtype="float32").var(ddof=1).dtype == "float32"
+
+
+@pytest.mark.parametrize(
+    "axis",
+    [None, 0, (0, 1), (1, 2), (-2, -1), (0, 1, 2)],
+)
+@pytest.mark.parametrize("ddof", [0, 1])
+@pytest.mark.parametrize("corrected", [False, True])
+@pytest.mark.parametrize("keepdims", [False, True])
+def test_var_std_multi_axis_ddof(axis, ddof, corrected, keepdims):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2493
+    # Multi-axis sample variance and standard deviation must compute the divisor
+    # as (N - ddof) where N is the total number of reduced elements across all axes,
+    # rather than subtracting ddof from each dimension separately.
+    x = tensor3("x", dtype="float64")
+    f_var = function(
+        [x], var(x, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected)
+    )
+    f_std = function(
+        [x], std(x, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected)
+    )
+
+    val = np.arange(24, dtype="float64").reshape(2, 3, 4)
+    np_var = np.var(val, axis=axis, ddof=ddof, keepdims=keepdims)
+    np_std = np.std(val, axis=axis, ddof=ddof, keepdims=keepdims)
+
+    np.testing.assert_allclose(f_var(val), np_var)
+    np.testing.assert_allclose(f_std(val), np_std)
 
 
 class TestSum:
