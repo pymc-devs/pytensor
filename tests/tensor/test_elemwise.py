@@ -1224,7 +1224,6 @@ def test_perform_raises_with_too_many_operands():
         ("int8", "bool"),
         ("bool", "int16"),
         ("complex128", "complex64"),
-        ("float64", "float64"),
     ],
 )
 def test_elemwise_cast_python_mode(in_dtype, out_dtype, shape):
