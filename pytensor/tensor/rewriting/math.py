@@ -43,8 +43,11 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
-from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.extra_ops import (
+    broadcast_arrays,
+    concat_with_broadcast,
+)
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor.math import (
     All,
     Any,
@@ -231,6 +234,63 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
 
         copy_stack_trace(node.outputs[0], new_output)
         return {client.outputs[0]: new_output}
+
+
+def _join_matmul_axis(var):
+    """Return ``-1`` or ``-2`` if ``var`` is a :class:`Join` along a matrix axis, else ``None``."""
+    owner = var.owner
+    if owner is None or not isinstance(owner.op, Join) or var.type.ndim < 2:
+        return None
+    axis = owner.op.axis - var.type.ndim
+    return axis if axis >= -2 else None
+
+
+def _is_static_zero(var):
+    """``True`` if ``var`` folds to scalar zero (sees through ``Alloc`` and ``DimShuffle``)."""
+    try:
+        return (
+            get_underlying_scalar_constant_value(
+                var, only_process_constants=False, raise_not_constant=True
+            )
+            == 0
+        )
+    except NotScalarConstantError:
+        return False
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Join])
+def local_nested_join_to_block_diagonal(fgraph, node):
+    r"""Rewrite a square grid of nested ``Join``\s with zero off-diagonals to :func:`block_diag`.
+
+    Matches a ``Join`` along one matrix axis whose every input is a ``Join`` along the
+    other, which covers both rows of column-concatenations (what :func:`block`
+    builds) and columns of row-concatenations.
+    """
+    out = node.outputs[0]
+    outer_axis = _join_matmul_axis(out)
+    if outer_axis is None or len(node.inputs) < 2:
+        return None
+
+    inner_axis = -3 - outer_axis
+    grid = []
+    for line in node.inputs:
+        if _join_matmul_axis(line) != inner_axis:
+            return None
+        grid.append(line.owner.inputs)
+
+    n = len(grid)
+    if any(len(line) != n for line in grid):
+        return None
+    if not all(
+        _is_static_zero(grid[i][j]) for i in range(n) for j in range(n) if i != j
+    ):
+        return None
+
+    new_out = block_diag(*(grid[i][i] for i in range(n))).astype(out.type.dtype)
+    copy_stack_trace(out, new_out)
+    return [new_out]
 
 
 @register_canonicalize
