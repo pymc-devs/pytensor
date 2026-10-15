@@ -704,15 +704,23 @@ class Elemwise(OpenMPOp):
         if getattr(self, "nfunc_spec", None) and impl != "c":
             self.nfunc = import_func_from_string(self.nfunc_spec[0])
 
-        # Variadic Add/Mul can fold their binary NumPy ufunc instead of using `np.frompyfunc`
-        folds_binary_nfunc = (
-            isinstance(self.scalar_op, Add | Mul) and len(node.inputs) > 2
-        )
-
         if (
+            impl == "py"
+            and isinstance(self.scalar_op, Add | Mul)
+            and len(node.inputs) > 2
+        ):
+            # Variadic Add/Mul fold their binary NumPy ufunc, much faster than
+            # `np.frompyfunc` on the scalar op's Python `impl`
+            nfunc = self.nfunc
+
+            def ufunc(*args):
+                return reduce(nfunc, args)
+
+            ufunc.nout = 1
+            node.tag.ufunc = ufunc
+        elif (
             (len(node.inputs) + len(node.outputs)) <= 32
             and (self.nfunc is None or self.scalar_op.nin != len(node.inputs))
-            and not folds_binary_nfunc
             and self.ufunc is None
             and impl == "py"
         ):
@@ -787,14 +795,6 @@ class Elemwise(OpenMPOp):
             # since it sometimes requires resizing. Doing this
             # optimization is probably not worth the effort, since we
             # should normally run the C version of the Op.
-        elif isinstance(self.scalar_op, Add | Mul) and len(inputs) > 2:
-            # Variadic Add/Mul: much faster than `np.frompyfunc` on the scalar op's Python `impl`
-            nfunc = self.nfunc
-
-            def ufunc(*args):
-                return reduce(nfunc, args)
-
-            nout = 1
         else:
             # the second calling form is used because in certain versions of
             # numpy the first (faster) version leads to segfaults
