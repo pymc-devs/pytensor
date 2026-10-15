@@ -2128,22 +2128,34 @@ def local_slice_read_of_write(fgraph, node):
 
     buffer_shape = tuple(write_node.inputs[0].shape)
     new_indices: list = []
+    converted = False
     for axis, (read_idx, write_idx) in enumerate(
         zip_longest(read_indices, write_indices, fillvalue=slice(None))
     ):
         read_is_slice = isinstance(read_idx, slice)
         write_is_slice = isinstance(write_idx, slice)
         if read_is_slice and not write_is_slice:
+            if converted:
+                # Slicing multiple advanced-indexed axes cannot be represented as 1D
+                # aranges without collapsing Cartesian rank (to diagonal indexing).
+                # While slices can be represented by broadcasted aranges (e.g., [None, :]),
+                # local_advanced_read_of_write_constant_indices requires 1D
+                # non-broadcasted vectors (broadcastable == (False,)) and rejects them anyway.
+                return None
             arange_index = _slice_to_arange(read_idx, buffer_shape[axis])
             if arange_index is None:
                 return None
             else:
                 new_indices.append(arange_index)
+                converted = True
                 continue
         elif read_is_slice != write_is_slice:
             return None
         else:
             new_indices.append(read_idx)
+
+    if not converted:
+        return None
 
     new_read = write_node.out[tuple(new_indices)].owner
     return local_advanced_read_of_write_constant_indices.fn(fgraph, new_read)
