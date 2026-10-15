@@ -30,7 +30,7 @@ import numpy as np
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.basic import Apply, Constant, equal_computations
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -1162,6 +1162,65 @@ def local_useless_split(fgraph, node):
         copy_stack_trace(out, out2)
 
         return [out2]
+
+
+def _splits_match_inputs(splits, inputs, axis):
+    """``True`` if each entry of ``splits`` is the length of the matching input along ``axis``."""
+    if isinstance(splits, TensorConstant):
+        return list(splits.data) == [inp.type.shape[axis] for inp in inputs]
+    if not isinstance(splits.owner_op, MakeVector):
+        return False
+    if len(splits.owner.inputs) != len(inputs):
+        return False
+
+    def is_length(entry, inp):
+        if inp.type.shape[axis] is not None:
+            try:
+                return get_scalar_constant_value(entry) == inp.type.shape[axis]
+            except NotScalarConstantError:
+                return False
+        match entry.owner_op_and_inputs:
+            case (Shape_i(i=i), x):
+                return x is inp and i == axis
+        return equal_computations([entry], [inp.shape[axis]])
+
+    return all(
+        is_length(entry, inp)
+        for entry, inp in zip(splits.owner.inputs, inputs, strict=True)
+    )
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Split])
+def local_split_of_join(fgraph, node):
+    """Split(Join(x_1, ..., x_n), [|x_1|, ..., |x_n|]) -> x_1, ..., x_n along the same axis."""
+    x, splits = node.inputs
+    if not isinstance(x.owner_op, Join) or x.owner.op.axis != node.op.axis:
+        return None
+    inputs = x.owner.inputs
+    if len(inputs) != node.op.len_splits:
+        return None
+    if not _splits_match_inputs(splits, inputs, node.op.axis):
+        return None
+    return list(inputs)
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Join])
+def local_join_of_split(fgraph, node):
+    """Join(*Split(x)) -> x when the Join reassembles every Split output in order."""
+    first = node.inputs[0]
+    split_node = first.owner
+    if not isinstance(first.owner_op, Split) or split_node.op.axis != node.op.axis:
+        return None
+    if list(node.inputs) != split_node.outputs:
+        return None
+    [x, _] = split_node.inputs
+    return [x]
 
 
 @node_rewriter(None)

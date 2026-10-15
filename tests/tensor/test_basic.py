@@ -43,6 +43,7 @@ from pytensor.tensor.basic import (
     arange,
     as_tensor_variable,
     atleast_Nd,
+    block,
     cast,
     choose,
     constant,
@@ -3663,6 +3664,67 @@ class TestExtractDiag:
         rng = np.random.default_rng(utt.fetch_seed())
         x = rng.random((5, 4, 3))
         utt.verify_grad(diag_fn, [x], rng=rng)
+
+
+class TestBlock:
+    @pytest.mark.parametrize(
+        "arrays, expected_ndim",
+        [
+            ([np.arange(3.0), np.arange(4.0)], 1),
+            (
+                [
+                    [np.ones((2, 3)), np.ones((2, 4))],
+                    [np.ones((5, 3)), np.ones((5, 4))],
+                ],
+                2,
+            ),
+            ([[[np.ones((2, 3, 4)), np.ones((2, 3, 4))], [np.ones((2, 3, 4))] * 2]], 3),
+            ([[1.0, 2.0], [3.0, 4.0]], 2),
+            ([[np.arange(3.0)], [np.ones((2, 3))]], 2),
+            (
+                [
+                    [np.ones((2, 1)), np.ones((2, 2)), np.ones((2, 3))],
+                    [np.ones((3, 6))],
+                ],
+                2,
+            ),
+            (5.0, 1),
+        ],
+        ids=[
+            "depth_1",
+            "depth_2",
+            "depth_3",
+            "scalar_leaves",
+            "mixed_rank",
+            "ragged_widths",
+            "bare_leaf",
+        ],
+    )
+    def test_matches_numpy(self, arrays, expected_ndim):
+        out = block(arrays)
+        assert out.ndim == expected_ndim
+        np.testing.assert_allclose(out.eval(), np.block(arrays))
+
+    @pytest.mark.parametrize(
+        "arrays, error, match",
+        [
+            ([[np.ones((2, 2))], np.ones((2, 2))], ValueError, "same nesting depth"),
+            ((np.ones((2, 2)), np.ones((2, 2))), TypeError, "tuples are not allowed"),
+            ([], ValueError, "empty list"),
+        ],
+        ids=["depth_mismatch", "tuple", "empty_list"],
+    )
+    def test_invalid_nesting_raises(self, arrays, error, match):
+        with pytest.raises(error, match=match):
+            block(arrays)
+
+    def test_builds_nested_join(self):
+        A = pytensor.tensor.matrix("A")
+        B = pytensor.tensor.matrix("B")
+        out = block([[A, B], [B, A]])
+        assert equal_computations(
+            [out], [ptb.join(0, ptb.join(1, A, B), ptb.join(1, B, A))]
+        )
 
 
 class TestAllocDiag:
