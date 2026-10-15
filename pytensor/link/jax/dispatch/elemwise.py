@@ -23,6 +23,7 @@ def jax_funcify_Elemwise(op, node, **kwargs):
 @jax_funcify.register(CAReduce)
 def jax_funcify_CAReduce(op, **kwargs):
     axis = op.axis
+    initial = getattr(op, "initial", False)
     op_nfunc_spec = getattr(op, "nfunc_spec", None)
     scalar_nfunc_spec = getattr(op.scalar_op, "nfunc_spec", None)
     scalar_op_name = getattr(op.scalar_op, "name", None)
@@ -46,7 +47,9 @@ def jax_funcify_CAReduce(op, **kwargs):
 
         if op_nfunc_spec:
             jax_op = getattr(jnp, op_nfunc_spec[0])
-            return jax_op(x, axis=axis).astype(acc_dtype)
+            # jnp.all/jnp.any don't take `initial`, so only pass it when set
+            kwargs = {"initial": op.initial_value(x.dtype)} if initial else {}
+            return jax_op(x, axis=axis, **kwargs).astype(acc_dtype)
 
         # The PyTensor `Op` didn't tell us which NumPy equivalent to use (or
         # there isn't one), so we use this fallback approach

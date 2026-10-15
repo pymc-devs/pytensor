@@ -1,7 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch import mlx_funcify
-from pytensor.tensor.math import Argmax, Dot, Max
+from pytensor.tensor.math import Argmax, Dot, Max, Min
 
 
 @mlx_funcify.register(Dot)
@@ -13,8 +13,11 @@ def mlx_funcify_Dot(op, node=None, **kwargs):
 
 
 @mlx_funcify.register(Max)
-def mlx_funcify_Max(op, node=None, **kwargs):
-    def max_fn(x):
+@mlx_funcify.register(Min)
+def mlx_funcify_Max_Min(op, node=None, **kwargs):
+    reduce_fn = mx.max if isinstance(op, Max) else mx.min
+
+    def max_min_fn(x):
         axes = op.axis
         if axes is None:
             reduce_axes = None
@@ -23,9 +26,16 @@ def mlx_funcify_Max(op, node=None, **kwargs):
 
         keepdims = getattr(op, "keepdims", False)
 
-        return mx.max(x, axis=reduce_axes, keepdims=keepdims)
+        if op.initial and x.size == 0:
+            # MLX shapes are concrete, so an empty reduction can be filled directly
+            reduced = range(x.ndim) if reduce_axes is None else reduce_axes
+            out_shape = [s for i, s in enumerate(x.shape) if i not in reduced]
+            fill = op.initial_value(node.outputs[0].type.dtype)
+            return mx.full(out_shape, fill, dtype=x.dtype)
 
-    return max_fn
+        return reduce_fn(x, axis=reduce_axes, keepdims=keepdims)
+
+    return max_min_fn
 
 
 @mlx_funcify.register(Argmax)

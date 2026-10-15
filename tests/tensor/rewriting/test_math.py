@@ -116,6 +116,7 @@ from pytensor.tensor.rewriting.math import (
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
+    local_reduce_broadcastable,
     local_reduce_chain,
     local_sum_prod_of_mul_or_div,
     local_useless_abs,
@@ -3092,6 +3093,18 @@ class TestReduceChain:
         [new_out] = local_reduce_chain.transform(fg, out.owner)
         assert equal_computations([new_out], [x.all(axis=(0, 2))])
 
+    @pytest.mark.parametrize("inner_initial", [None, -np.inf])
+    @pytest.mark.parametrize("outer_initial", [None, -np.inf])
+    def test_max_initial(self, inner_initial, outer_initial):
+        x = tensor3("x")
+        out = x.max(axis=-1, initial=inner_initial).max(axis=0, initial=outer_initial)
+        result = RewriteTester(
+            [x], [out], include=None, custom_rewrite=local_reduce_chain
+        )
+        initial = -np.inf if -np.inf in (inner_initial, outer_initial) else None
+        result.assert_graph(x.max(axis=(0, 2), initial=initial))
+        result.assert_eval(np.random.default_rng(0).normal(size=(2, 3, 4)))
+
 
 class TestLocalSumProd:
     """Test sum/prod rewrites."""
@@ -3560,6 +3573,33 @@ class TestLocalSumProd:
         result.assert_graph(pt.alloc(v * np.array([6]), 4, 3))
         result.assert_eval(v_val)
 
+    def test_local_careduce_of_alloc_initial(self):
+        # A broadcast axis may be empty at runtime, where the result is `initial`
+        v = vector("v")
+        n = scalar("n", dtype="int64")
+        alloc_v = pt.alloc(v, n, 3)
+        outs = [
+            pt.max(alloc_v, axis=0, initial=-np.inf),
+            pt.max(alloc_v, axis=None, initial=-np.inf),
+            pt.max(alloc_v, axis=1, initial=-np.inf),
+        ]
+        f = function([v, n], outs, mode=get_default_mode().including("specialize"))
+        # Only the 1d alloc of the axis=1 result may remain
+        assert not any(
+            isinstance(node.op, Alloc) and node.outputs[0].type.ndim == 2
+            for node in f.maker.fgraph.toposort()
+        )
+
+        v_val = np.array([1.0, 3.0, 2.0], dtype=v.dtype)
+        dropped, reduced, kept = f(v_val, 0)
+        np.testing.assert_array_equal(dropped, np.full(3, -np.inf))
+        assert reduced == -np.inf
+        assert kept.shape == (0,)
+        dropped, reduced, kept = f(v_val, 2)
+        np.testing.assert_array_equal(dropped, v_val)
+        assert reduced == 3.0
+        np.testing.assert_array_equal(kept, [3.0, 3.0])
+
     @pytest.mark.parametrize("reduce_op", [Max, Min, All, Any])
     def test_local_careduce_of_alloc_idempotent(self, reduce_op):
         # Idempotent reductions (max/min/all/any) over the alloc's broadcast axes
@@ -3881,6 +3921,18 @@ class TestLocalReduce:
             assert not any(
                 isinstance(node.op, CAReduce) for node in f.maker.fgraph.toposort()
             )
+
+    def test_local_reduce_broadcast_some_initial(self):
+        # Dropping the broadcastable axis must keep `initial`, the other axis can be empty
+        x = TensorType("float64", shape=(1, None))("x")
+        result = RewriteTester(
+            [x],
+            [pt_max(x, axis=[0, 1], initial=-np.inf)],
+            include=None,
+            custom_rewrite=local_reduce_broadcastable,
+        )
+        result.assert_graph(pt_max(x.squeeze(0), axis=0, initial=-np.inf))
+        result.assert_eval(np.zeros((1, 0)))
 
 
 class TestReduceJoin:
