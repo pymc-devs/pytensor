@@ -2344,6 +2344,59 @@ def local_reduce_broadcastable(fgraph, node):
                 return [new_reduced.astype(odtype)]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([CAReduce])
+def local_careduce_of_dimshuffle(fgraph, node):
+    """Remove a `DimShuffle` feeding a reduction, when it does nothing to the output.
+
+    ``CAReduce{axis}(DimShuffle(x)) -> CAReduce{new_axis}(x)``
+
+    The reduced dimensions can be in any order, and `DimShuffle` can add
+    broadcastable dimensions among them, because the reduction combines all their
+    elements anyway. The dimensions that are kept must reach the output in the same
+    relative order as in ``x``, and must not be new broadcastable dimensions.
+    """
+    match node.inputs[0].owner_op_and_inputs:
+        case (DimShuffle() as dimshuffle, x):
+            pass
+        case _:
+            return None
+
+    shuffled_ndim = node.inputs[0].type.ndim
+    axis = node.op.axis
+    reduced = set(range(shuffled_ndim)) if axis is None else set(axis)
+    new_order = dimshuffle.new_order
+
+    if len(dimshuffle.shuffle) != x.type.ndim:
+        # Dropping dimensions is left to `local_reduce_broadcastable`, which cuts
+        # reductions over broadcastable dimensions by dropping them with a `DimShuffle`.
+        # Reducing over the dropped dimensions here would undo that and loop.
+        return None
+
+    new_axis = set()
+    kept = []
+    for out_dim, in_dim in enumerate(new_order):
+        if out_dim in reduced:
+            if in_dim != "x":
+                new_axis.add(in_dim)
+        elif in_dim == "x":
+            # A kept new broadcastable dimension is something only the `DimShuffle` creates
+            return None
+        else:
+            kept.append(in_dim)
+
+    if kept != sorted(kept):
+        # The `DimShuffle` transposes the kept dimensions
+        return None
+
+    if len(new_axis) == x.type.ndim:
+        new_axis = None
+    else:
+        new_axis = tuple(sorted(new_axis))
+    return [node.op.clone(axis=new_axis)(x)]
+
+
 @register_specialize
 @node_rewriter([Sum, Prod, ProdWithoutZeros, Max, Min, All, Any])
 def local_careduce_of_alloc(fgraph, node):
