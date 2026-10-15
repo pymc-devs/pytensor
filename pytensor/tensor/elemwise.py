@@ -1185,6 +1185,9 @@ class Elemwise(OpenMPOp):
     def c_header_dirs(self, **kwargs):
         return self.scalar_op.c_header_dirs(**kwargs)
 
+    def c_init_code(self, **kwargs):
+        return self.scalar_op.c_init_code(**kwargs)
+
     def c_support_code(self, **kwargs):
         return self.scalar_op.c_support_code(**kwargs)
 
@@ -1193,7 +1196,7 @@ class Elemwise(OpenMPOp):
         return support_code
 
     def c_code_cache_version_apply(self, node):
-        version = [17]  # the version corresponding to the c code in this Op
+        version = [18]  # the version corresponding to the c code in this Op
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(

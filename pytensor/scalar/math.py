@@ -42,6 +42,7 @@ from pytensor.scalar.basic import (
 )
 from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.loop import ScalarLoop
+from pytensor.scalar.scipy import SciPyScalarOp
 from pytensor.utils import lazy_scipy_module
 
 
@@ -625,7 +626,7 @@ class PolyGamma(BinaryScalarOp):
 polygamma = PolyGamma(name="polygamma")
 
 
-class GammaInc(BinaryScalarOp):
+class GammaInc(SciPyScalarOp, BinaryScalarOp):
     """
     Compute the regularized lower gamma function (P).
     """
@@ -643,36 +644,17 @@ class GammaInc(BinaryScalarOp):
             gz * exp(-x + (k - 1) * log(x) - gammaln(k)),
         ]
 
-    def c_support_code(self, **kwargs):
-        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
-
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
-        if node.inputs[0].type in float_types:
-            dtype = "npy_" + node.outputs[0].dtype
-            return f"""{z} =
-                ({dtype}) GammaP({k}, {x});"""
-        raise NotImplementedError("only floatingpoint is implemented")
-
     def __eq__(self, other):
         return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
 
-    def c_code_cache_version(self):
-        v = super().c_code_cache_version()
-        if v:
-            return (2, *v)
-        else:
-            return v
-
 
 gammainc = GammaInc(upgrade_to_float, name="gammainc")
 
 
-class GammaIncC(BinaryScalarOp):
+class GammaIncC(SciPyScalarOp, BinaryScalarOp):
     """
     Compute the regularized upper gamma function (Q).
     """
@@ -690,30 +672,11 @@ class GammaIncC(BinaryScalarOp):
             gz * -exp(-x + (k - 1) * log(x) - gammaln(k)),
         ]
 
-    def c_support_code(self, **kwargs):
-        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
-
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
-        if node.inputs[0].type in float_types:
-            dtype = "npy_" + node.outputs[0].dtype
-            return f"""{z} =
-                ({dtype}) GammaQ({k}, {x});"""
-        raise NotImplementedError("only floatingpoint is implemented")
-
     def __eq__(self, other):
         return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
-
-    def c_code_cache_version(self):
-        v = super().c_code_cache_version()
-        if v:
-            return (2, *v)
-        else:
-            return v
 
 
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")

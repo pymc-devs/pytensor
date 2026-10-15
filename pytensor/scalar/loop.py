@@ -317,4 +317,4 @@ class ScalarLoop(ScalarInnerGraphOp):
         return res
 
     def c_code_cache_version_outer(self):
-        return (4,)
+        return (5,)
