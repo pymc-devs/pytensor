@@ -723,7 +723,7 @@ class Elemwise(OpenMPOp):
             out_dtype = np.dtype(self.scalar_op.o_type.dtype)
 
             def ufunc(x):
-                return np.asarray(x).astype(out_dtype, copy=False)
+                return np.asarray(x).astype(out_dtype, copy=True)
 
             ufunc.nout = 1
             node.tag.ufunc = ufunc

@@ -1224,6 +1224,7 @@ def test_perform_raises_with_too_many_operands():
         ("int8", "bool"),
         ("bool", "int16"),
         ("complex128", "complex64"),
+        ("float64", "float64"),
     ],
 )
 def test_elemwise_cast_python_mode(in_dtype, out_dtype, shape):
@@ -1239,5 +1240,6 @@ def test_elemwise_cast_python_mode(in_dtype, out_dtype, shape):
     res = fn(x_val)
     assert res.dtype == np.dtype(out_dtype)
     assert res.shape == x_val.shape
+    assert not np.shares_memory(res, x_val)
     expected = np.vectorize(out.owner.op.scalar_op.impl, otypes=[out_dtype])(x_val)
     np.testing.assert_array_equal(res, expected)
