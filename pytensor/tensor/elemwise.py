@@ -19,7 +19,7 @@ from pytensor.link.c.op import COp, OpenMPOp
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
-from pytensor.scalar.basic import Add, Mul, upcast
+from pytensor.scalar.basic import Add, Cast, Mul, upcast
 from pytensor.scalar.basic import identity as scalar_identity
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
@@ -715,6 +715,15 @@ class Elemwise(OpenMPOp):
 
             def ufunc(*args):
                 return reduce(nfunc, args)
+
+            ufunc.nout = 1
+            node.tag.ufunc = ufunc
+        elif impl == "py" and isinstance(self.scalar_op, Cast):
+            # `astype` is much faster than `np.frompyfunc` on `Cast.impl`
+            out_dtype = np.dtype(self.scalar_op.o_type.dtype)
+
+            def ufunc(x):
+                return np.asarray(x).astype(out_dtype, copy=False)
 
             ufunc.nout = 1
             node.tag.ufunc = ufunc
