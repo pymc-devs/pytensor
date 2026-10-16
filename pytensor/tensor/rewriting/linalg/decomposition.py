@@ -292,6 +292,60 @@ def svd_of_orthogonal(fgraph, node):
     return new_outputs
 
 
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SVD)])
+def svd_of_orthogonal_product(fgraph, node):
+    """svd(Q @ X) -> (Q @ U, s, Vh) and svd(X @ Q) -> (U, s, Vh @ Q), Q orthogonal.
+
+    Q is unitary for complex Q. Each application peels one orthogonal factor, so
+    Q1 @ X @ Q2 is handled in two.
+    """
+    [Y] = node.inputs
+    product_op = Y.owner_op
+    is_matmul = isinstance(product_op, Dot) or (
+        isinstance(product_op, Blockwise) and isinstance(product_op.core_op, Dot)
+    )
+    if not is_matmul:
+        return None
+    left, right = Y.owner.inputs
+
+    if check_assumption(fgraph, left, ORTHOGONAL):
+        Q, X, Q_on_left = left, right, True
+    elif check_assumption(fgraph, right, ORTHOGONAL):
+        Q, X, Q_on_left = right, left, False
+    else:
+        return None
+
+    def broadcast_batch(var, core_ndim):
+        if var.type.broadcastable[:-core_ndim] == Y.type.broadcastable[:-2]:
+            return var
+        return pt.broadcast_to(var, (*Y.shape[:-2], *var.shape[-core_ndim:]))
+
+    op = node.op.core_op
+    if not op.compute_uv:
+        [s] = node.outputs
+        new_s = broadcast_batch(svd(X, compute_uv=False), core_ndim=1)
+        new_s = new_s.astype(s.type.dtype)
+        copy_stack_trace(s, new_s)
+        return [new_s]
+
+    U, s_X, Vh = svd(X, full_matrices=op.full_matrices)
+    if Q_on_left:
+        U, Vh = Q @ U, broadcast_batch(Vh, core_ndim=2)
+    else:
+        U, Vh = broadcast_batch(U, core_ndim=2), Vh @ Q
+
+    new_outputs = [
+        new.astype(old.type.dtype)
+        for new, old in zip(
+            (U, broadcast_batch(s_X, core_ndim=1), Vh), node.outputs, strict=True
+        )
+    ]
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
+
+
 def _complete_permutation(first, size):
     """Order ``arange(size)`` as ``first``, then the unused positions ascending."""
     p = first.shape[-1]

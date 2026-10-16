@@ -543,6 +543,51 @@ def test_svd_of_orthogonal(dtype, compute_uv):
         result.assert_eval(q)
 
 
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_svd_of_orthogonal_product(side, compute_uv):
+    q = pt.dmatrix("q", shape=(4, 4))
+    x = pt.dmatrix("x", shape=(4, 4))
+    q_orth = assume(q, orthogonal=True)
+    y = q_orth @ x if side == "left" else x @ q_orth
+
+    if compute_uv:
+        out = svd(y)
+        U, s, Vh = svd(x)
+        expected = [q @ U, s, Vh] if side == "left" else [U, s, Vh @ q]
+    else:
+        out = [svd(y, compute_uv=False)]
+        expected = [svd(x, compute_uv=False)]
+
+    result = RewriteTester([q, x], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_svd_of_orthogonal_product_broadcasts_batch(dtype):
+    """With a batched Q and an unbatched X, the factors without Q are broadcast."""
+    q = pt.tensor("q", shape=(2, 4, 4), dtype=dtype)
+    x = pt.tensor("x", shape=(4, 3), dtype=dtype)
+    u, s, vh = svd(assume(q, orthogonal=True) @ x, full_matrices=False)
+
+    U, s_x, Vh = svd(pt.expand_dims(x, 0), full_matrices=False)
+    expected = [q @ U, pt.broadcast_to(s_x, (2, 3)), pt.broadcast_to(Vh, (2, 3, 3))]
+
+    passes = ("canonicalize", "ShapeOpt")
+    result = RewriteTester([q, x], [u, s, vh], include=passes)
+    result.assert_graph(*rewrite_graph(expected, include=passes))
+
+    rng = np.random.default_rng(0)
+    q_val = rng.normal(size=(2, 4, 4)).astype(dtype)
+    x_val = rng.normal(size=(4, 3)).astype(dtype)
+    if dtype == "complex128":
+        q_val += 1j * rng.normal(size=(2, 4, 4))
+        x_val += 1j * rng.normal(size=(4, 3))
+    q_val, _ = np.linalg.qr(q_val)
+    result = RewriteTester([q, x], [s, (u * s[..., None, :]) @ vh])
+    result.assert_eval(q_val, x_val)
+
+
 def test_svd_of_symmetric_skips_complex():
     x = pt.tensor("x", shape=(4, 4), dtype="complex128")
     s = svd(assume(x, symmetric=True), compute_uv=False)
