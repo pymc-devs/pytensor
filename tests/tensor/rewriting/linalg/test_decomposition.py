@@ -470,6 +470,50 @@ def test_svd_of_diag_values(shape, dtype, full_matrices):
 
 
 @pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize("assumption", ["symmetric", "positive_definite"])
+def test_svd_of_symmetric(assumption, compute_uv):
+    x = pt.tensor("x", shape=(3, 4, 4))
+    x_assumed = assume(x, **{assumption: True})
+
+    if compute_uv:
+        u, s, vh = svd(x_assumed)
+        out = [s, (u * s[..., None, :]) @ vh]
+        w, v = eigh(x)
+        abs_w = pt.abs(w)
+        idx = pt.argsort(abs_w, axis=-1)[..., ::-1]
+        column_idx = pt.expand_dims(idx, -2)
+        signs = pt.where(w < 0, -1, 1).astype(w.dtype)
+        expected_s = pt.take_along_axis(abs_w, idx, axis=-1)
+        expected_u = pt.take_along_axis(v, column_idx, axis=-1)
+        expected_vh = pt.take_along_axis(
+            v * pt.expand_dims(signs, -2), column_idx, axis=-1
+        ).mT
+        expected = [expected_s, (expected_u * expected_s[..., None, :]) @ expected_vh]
+    else:
+        out = [svd(x_assumed, compute_uv=False)]
+        expected = [pt.sort(pt.abs(pt.linalg.eigvalsh(x)), axis=-1)[..., ::-1]]
+
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=(3, 4, 4))
+    a = a + a.mT
+    if assumption == "positive_definite":
+        a = a @ a.mT + np.eye(4)
+
+    result = RewriteTester([x], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+    result.assert_eval(a)
+
+
+def test_svd_of_rank_deficient_gram_is_nonnegative():
+    """x @ x.T is assumed positive definite but is singular for a tall x, so roundoff
+    can give it tiny negative eigenvalues. Singular values must still be >= 0."""
+    x = pt.dmatrix("x", shape=(6, 2))
+    result = RewriteTester([x], [svd(x @ x.T, compute_uv=False)])
+    [s] = result.rewr_fn(np.random.default_rng(0).normal(size=(6, 2)))
+    assert (s >= 0).all()
+
+
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_svd_of_orthogonal(dtype, compute_uv):
     x = pt.tensor("x", shape=(3, 4, 4), dtype=dtype)
@@ -497,6 +541,14 @@ def test_svd_of_orthogonal(dtype, compute_uv):
     result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
     if not compute_uv:
         result.assert_eval(q)
+
+
+def test_svd_of_symmetric_skips_complex():
+    x = pt.tensor("x", shape=(4, 4), dtype="complex128")
+    s = svd(assume(x, symmetric=True), compute_uv=False)
+
+    result = RewriteTester([x], [s])
+    result.assert_graph(svd(x, compute_uv=False))
 
 
 @pytest.mark.parametrize(
