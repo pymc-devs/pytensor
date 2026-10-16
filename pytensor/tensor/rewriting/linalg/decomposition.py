@@ -19,6 +19,7 @@ from pytensor.tensor.linalg.decomposition.eigen import (
     Eigh,
     Eigvalsh,
     eigh,
+    eigvalsh,
 )
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
@@ -215,6 +216,49 @@ def svd_of_diag(fgraph, node):
     new_Vh = pt.eye(n, dtype=vh.type.dtype)[vh_order] * pt.expand_dims(phases, -1)
 
     new_outputs = [new_U, new_s.astype(s.type.dtype), new_Vh.astype(vh.type.dtype)]
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SVD)])
+def svd_of_symmetric(fgraph, node):
+    """Replace svd(X) with eigh(X) when X is real symmetric.
+
+    For X = V @ diag(w) @ V.T, the singular values are abs(w) and the singular vectors
+    are U = V, Vh = (V * sign(w)).T, all sorted by descending abs(w).
+    """
+    [X] = node.inputs
+
+    if X.type.dtype.startswith("complex") or not check_assumption(fgraph, X, SYMMETRIC):
+        return None
+    # svd_of_diag and svd_of_orthogonal give these inputs cheaper closed forms
+    if check_assumption(fgraph, X, DIAGONAL) or check_assumption(fgraph, X, ORTHOGONAL):
+        return None
+
+    if not node.op.core_op.compute_uv:
+        [s] = node.outputs
+        new_s = pt.sort(pt.abs(eigvalsh(X)), axis=-1)[..., ::-1].astype(s.type.dtype)
+        copy_stack_trace(s, new_s)
+        return [new_s]
+
+    w, V = eigh(X)
+    abs_w = pt.abs(w)
+    idx = pt.argsort(abs_w, axis=-1)[..., ::-1]
+    column_idx = pt.expand_dims(idx, -2)
+    signs = pt.where(w < 0, -1, 1).astype(w.dtype)
+
+    new_s = pt.take_along_axis(abs_w, idx, axis=-1)
+    new_U = pt.take_along_axis(V, column_idx, axis=-1)
+    new_Vh = pt.take_along_axis(V * pt.expand_dims(signs, -2), column_idx, axis=-1).mT
+
+    u, s, vh = node.outputs
+    new_outputs = [
+        new_U.astype(u.type.dtype),
+        new_s.astype(s.type.dtype),
+        new_Vh.astype(vh.type.dtype),
+    ]
     copy_stack_trace(node.outputs, new_outputs)
     return new_outputs
 
