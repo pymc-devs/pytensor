@@ -2959,8 +2959,8 @@ def block(arrays):
     Returns
     -------
     result : TensorVariable
-        Assembled block tensor. A bare tensor (no list wrapping) returns as
-        ``atleast_1d(arrays)``.
+        Assembled block tensor. A bare tensor (no list wrapping) is returned
+        unchanged.
 
     Examples
     --------
@@ -3005,7 +3005,7 @@ def block(arrays):
 
     list_ndim = list_depth(arrays, ())
     if list_ndim == 0:
-        return atleast_Nd(leaves[0], n=1)
+        return leaves[0]
 
     result_ndim = builtins.max(list_ndim, *(leaf.type.ndim for leaf in leaves))
     remaining = iter(leaves)
