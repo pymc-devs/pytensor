@@ -33,6 +33,7 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
+    is_identity,
     permutation_indices_to_det_sign,
     strip_left_expand_dims_and_transpose,
 )
@@ -292,6 +293,21 @@ def _selection_operand(fgraph, var):
         return recover_index(core), transposed, core.shape[0]
 
     return None
+
+
+# Must stay registered before selection_dot_to_indexing, which would otherwise turn
+# the identity (a selection) into a gather.
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([Dot, blockwise_of(Dot)])
+def local_dot_identity(fgraph, node):
+    """Replace ``I @ x`` and ``x @ I`` by ``x``."""
+    a, b = node.inputs
+    for operand, other in ((a, b), (b, a)):
+        if is_identity(fgraph, operand):
+            out = other.astype(node.outputs[0].type.dtype)
+            copy_stack_trace(node.outputs[0], out)
+            return [out]
 
 
 @register_canonicalize
