@@ -469,6 +469,36 @@ def test_svd_of_diag_values(shape, dtype, full_matrices):
     result.assert_eval(a, atol=1e-12)
 
 
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_svd_of_orthogonal(dtype, compute_uv):
+    x = pt.tensor("x", shape=(3, 4, 4), dtype=dtype)
+    x_orthogonal = assume(x, orthogonal=True)
+
+    if compute_uv:
+        u, s, vh = svd(x_orthogonal)
+        out = [u, s, vh]
+        expected = [
+            x,
+            pt.ones(x.shape[:-1]),
+            pt.broadcast_to(pt.eye(x.shape[-1]), x.shape).astype(dtype),
+        ]
+    else:
+        out = [svd(x_orthogonal, compute_uv=False)]
+        expected = [pt.ones(x.shape[:-1])]
+
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=(3, 4, 4))
+    if dtype == "complex128":
+        a = a + 1j * rng.normal(size=(3, 4, 4))
+    q, _ = np.linalg.qr(a)
+
+    result = RewriteTester([x], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+    if not compute_uv:
+        result.assert_eval(q)
+
+
 @pytest.mark.parametrize(
     "make_diag, permute_l, p_indices",
     [
