@@ -87,7 +87,7 @@ def test_local_mul_s_d():
         f = pytensor.function(inputs, smath.mul_s_d(*inputs), mode="CVM")
 
         assert not any(
-            isinstance(node.op, smath.SparseDenseMultiply)
+            isinstance(node.op, smath.MultiplySparseDense)
             for node in f.maker.fgraph.toposort()
         )
 
@@ -109,7 +109,7 @@ def test_local_mul_s_v():
         f = pytensor.function(inputs, smath.mul_s_v(*inputs), mode="CVM")
 
         assert not any(
-            isinstance(node.op, smath.SparseDenseVectorMultiply)
+            isinstance(node.op, smath.MultiplySparseDenseVector)
             for node in f.maker.fgraph.toposort()
         )
 
@@ -128,7 +128,7 @@ def test_local_structured_add_s_v():
         f = pytensor.function(inputs, smath.structured_add_s_v(*inputs), mode="CVM")
 
         assert not any(
-            isinstance(node.op, smath.StructuredAddSV)
+            isinstance(node.op, smath.StructuredAddSparseDenseVector)
             for node in f.maker.fgraph.toposort()
         )
 

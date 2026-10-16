@@ -1483,7 +1483,7 @@ class EnsureSortedIndices(Op):
     def __init__(self, inplace):
         self.inplace = inplace
         if self.inplace:
-            self.view_map = {0: [0]}
+            self.destroy_map = {0: [0]}
 
     def make_node(self, x):
         """
@@ -1501,7 +1501,8 @@ class EnsureSortedIndices(Op):
         (x,) = inputs
         (z,) = outputs
         if self.inplace:
-            z[0] = x.sort_indices()
+            x.sort_indices()
+            z[0] = x
         else:
             z[0] = x.sorted_indices()
 
@@ -1519,6 +1520,66 @@ class EnsureSortedIndices(Op):
 
 
 ensure_sorted_indices = EnsureSortedIndices(inplace=False)
+
+
+class HasCanonicalFormat(Op):
+    """Read whether a sparse matrix has sorted indices and no duplicates.
+
+    Uses SciPy's cached property without modifying the sparse components.
+    """
+
+    __props__ = ()
+
+    def make_node(self, x):
+        x = as_sparse_variable(x)
+        return Apply(self, [x], [scalar(dtype="bool")])
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        z[0] = np.asarray(x.has_canonical_format, dtype="bool")
+
+    def connection_pattern(self, node):
+        return [[False]]
+
+    def pullback(self, inputs, outputs, output_grad):
+        return [disconnected_type()]
+
+    def infer_shape(self, node, shapes):
+        return [()]
+
+
+has_canonical_format = HasCanonicalFormat()
+
+
+class SumDuplicates(Op):
+    """Sort sparse indices and sum duplicate entries without removing explicit zeros.
+
+    The input matrix is not modified. The gradient is regular, not structured.
+    """
+
+    __props__ = ()
+
+    def make_node(self, x):
+        x = as_sparse_variable(x)
+        assert x.format in ("csr", "csc")
+        return Apply(self, [x], [x.type()])
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        result = x.copy()
+        result.sum_duplicates()
+        z[0] = result
+
+    def pullback(self, inputs, outputs, output_grad):
+        return [output_grad[0]]
+
+    def infer_shape(self, node, shapes):
+        return shapes
+
+
+sum_duplicates = SumDuplicates()
 
 
 def clean(x):

@@ -376,7 +376,7 @@ def sp_sum(x, axis=None, sparse_grad=False):
     return SpSum(axis, sparse_grad)(x)
 
 
-class AddSS(Op):
+class AddSparseSparse(Op):
     # add(sparse, sparse).
     # see the doc of add() for more detail.
     __props__ = ()
@@ -410,10 +410,10 @@ class AddSS(Op):
         return [shapes[0]]
 
 
-add_s_s = AddSS()
+add_s_s = AddSparseSparse()
 
 
-class AddSSData(Op):
+class AddSparseSparseData(Op):
     """Add two sparse matrices assuming they have the same sparsity pattern.
 
     Notes
@@ -471,10 +471,10 @@ class AddSSData(Op):
         return [ins_shapes[0]]
 
 
-add_s_s_data = AddSSData()
+add_s_s_data = AddSparseSparseData()
 
 
-class AddSD(Op):
+class AddSparseDense(Op):
     # add(sparse, sparse).
     # see the doc of add() for more detail.
     __props__ = ()
@@ -513,10 +513,10 @@ class AddSD(Op):
         return [shapes[1]]
 
 
-add_s_d = AddSD()
+add_s_d = AddSparseDense()
 
 
-class StructuredAddSV(Op):
+class StructuredAddSparseDenseVector(Op):
     """Structured addition of a sparse matrix and a dense vector.
 
     The elements of the vector are only added to the corresponding
@@ -573,7 +573,7 @@ class StructuredAddSV(Op):
         return [ins_shapes[0]]
 
 
-structured_add_s_v = StructuredAddSV()
+structured_add_s_v = StructuredAddSparseDenseVector()
 
 
 def add(x, y):
@@ -668,7 +668,7 @@ def sub(x, y):
 sub.__doc__ = subtract.__doc__
 
 
-class SparseSparseMultiply(Op):
+class MultiplySparseSparse(Op):
     # mul(sparse, sparse)
     # See the doc of mul() for more detail
     __props__ = ()
@@ -703,10 +703,10 @@ class SparseSparseMultiply(Op):
         return [shapes[0]]
 
 
-mul_s_s = SparseSparseMultiply()
+mul_s_s = MultiplySparseSparse()
 
 
-class SparseDenseMultiply(Op):
+class MultiplySparseDense(Op):
     # mul(sparse, dense)
     # See the doc of mul() for more detail
     __props__ = ()
@@ -799,10 +799,10 @@ class SparseDenseMultiply(Op):
         return [shapes[0]]
 
 
-mul_s_d = SparseDenseMultiply()
+mul_s_d = MultiplySparseDense()
 
 
-class SparseDenseVectorMultiply(Op):
+class MultiplySparseDenseVector(Op):
     """Element-wise multiplication of sparse matrix by a broadcasted dense vector element wise.
 
     Notes
@@ -811,7 +811,7 @@ class SparseDenseVectorMultiply(Op):
 
     """
 
-    # TODO: Merge with the SparseDenseMultiply Op
+    # TODO: Merge with the MultiplySparseDense Op
 
     __props__ = ()
 
@@ -882,7 +882,7 @@ class SparseDenseVectorMultiply(Op):
         return [ins_shapes[0]]
 
 
-mul_s_v = SparseDenseVectorMultiply()
+mul_s_v = MultiplySparseDenseVector()
 
 
 def multiply(x, y):
@@ -950,7 +950,7 @@ def mul(x, y):
 mul.__doc__ = multiply.__doc__
 
 
-class __ComparisonOpSS(Op):
+class __ComparisonOpSparseSparse(Op):
     """
     Used as a superclass for all comparisons between two sparses matrices.
 
@@ -1000,7 +1000,7 @@ class __ComparisonOpSS(Op):
         return [ins_shapes[0]]
 
 
-class __ComparisonOpSD(Op):
+class __ComparisonOpSparseDense(Op):
     """
     Used as a superclass for all comparisons between sparse and dense matrix.
 
@@ -1096,100 +1096,100 @@ def __ComparisonSwitch(SS, SD, DS):
     return helper
 
 
-class EqualSS(__ComparisonOpSS):
+class EqualSparseSparse(__ComparisonOpSparseSparse):
     def comparison(self, x, y):
         return x == y
 
 
-equal_s_s = EqualSS()
+equal_s_s = EqualSparseSparse()
 
 
-class EqualSD(__ComparisonOpSD):
+class EqualSparseDense(__ComparisonOpSparseDense):
     def comparison(self, x, y):
         return x == y
 
 
-equal_s_d = EqualSD()
+equal_s_d = EqualSparseDense()
 
 
-class NotEqualSS(__ComparisonOpSS):
+class NotEqualSparseSparse(__ComparisonOpSparseSparse):
     def comparison(self, x, y):
         return x != y
 
 
-not_equal_s_s = NotEqualSS()
+not_equal_s_s = NotEqualSparseSparse()
 
 
-class NotEqualSD(__ComparisonOpSD):
+class NotEqualSparseDense(__ComparisonOpSparseDense):
     def comparison(self, x, y):
         return x != y
 
 
-not_equal_s_d = NotEqualSD()
+not_equal_s_d = NotEqualSparseDense()
 
 
-class LessThanSS(__ComparisonOpSS):
+class LessThanSparseSparse(__ComparisonOpSparseSparse):
     def comparison(self, x, y):
         return x < y
 
 
-less_than_s_s = LessThanSS()
+less_than_s_s = LessThanSparseSparse()
 
 
-class LessThanSD(__ComparisonOpSD):
+class LessThanSparseDense(__ComparisonOpSparseDense):
     def comparison(self, x, y):
         return x < y
 
 
-less_than_s_d = LessThanSD()
+less_than_s_d = LessThanSparseDense()
 
 
-class GreaterThanSS(__ComparisonOpSS):
+class GreaterThanSparseSparse(__ComparisonOpSparseSparse):
     def comparison(self, x, y):
         return x > y
 
 
-greater_than_s_s = GreaterThanSS()
+greater_than_s_s = GreaterThanSparseSparse()
 
 
-class GreaterThanSD(__ComparisonOpSD):
+class GreaterThanSparseDense(__ComparisonOpSparseDense):
     def comparison(self, x, y):
         return x > y
 
 
-greater_than_s_d = GreaterThanSD()
+greater_than_s_d = GreaterThanSparseDense()
 
 
-class LessEqualSS(__ComparisonOpSS):
+class LessEqualSparseSparse(__ComparisonOpSparseSparse):
     def comparison(self, x, y):
         return x <= y
 
 
-less_equal_s_s = LessEqualSS()
+less_equal_s_s = LessEqualSparseSparse()
 
 
-class LessEqualSD(__ComparisonOpSD):
+class LessEqualSparseDense(__ComparisonOpSparseDense):
     def comparison(self, x, y):
         return x <= y
 
 
-less_equal_s_d = LessEqualSD()
+less_equal_s_d = LessEqualSparseDense()
 
 
-class GreaterEqualSS(__ComparisonOpSS):
+class GreaterEqualSparseSparse(__ComparisonOpSparseSparse):
     def comparison(self, x, y):
         return x >= y
 
 
-greater_equal_s_s = GreaterEqualSS()
+greater_equal_s_s = GreaterEqualSparseSparse()
 
 
-class GreaterEqualSD(__ComparisonOpSD):
+class GreaterEqualSparseDense(__ComparisonOpSparseDense):
     def comparison(self, x, y):
         return x >= y
 
 
-greater_equal_s_d = GreaterEqualSD()
+greater_equal_s_d = GreaterEqualSparseDense()
 
 eq = __ComparisonSwitch(equal_s_s, equal_s_d, equal_s_d)
 
@@ -2147,5 +2147,5 @@ def _vectorize_sparse_unsupported(op, node, *batched_inputs):
     )
 
 
-for _op_cls in (AddSD, SparseDenseMultiply):
+for _op_cls in (AddSparseDense, MultiplySparseDense):
     _vectorize_node.register(_op_cls)(_vectorize_sparse_unsupported)

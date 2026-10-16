@@ -11,6 +11,7 @@ from pytensor.sparse.basic import (
     get_item_2lists,
     get_item_list,
     get_item_scalar,
+    has_canonical_format,
     sp_ones_like,
     sp_zeros_like,
     transpose,
@@ -138,6 +139,11 @@ class _sparse_py_operators:
 
     ndim = property(lambda self: self.type.ndim)
     dtype = property(lambda self: self.type.dtype)
+
+    @property
+    def has_canonical_format(self):
+        """Indicates if the matrix has sorted indices without duplicates."""
+        return has_canonical_format(self)
 
     # Note that the `size` attribute of sparse matrices behaves differently
     # from dense matrices: it is the number of elements stored in the matrix

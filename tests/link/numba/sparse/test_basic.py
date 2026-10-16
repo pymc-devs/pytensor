@@ -80,20 +80,21 @@ def test_sparse_creation_refcount():
 
     x_data = x.data
     x_indptr = x.indptr
-    assert getrefcount(x_data) == 3
-    assert getrefcount(x_indptr) == 3
+    # Python 3.14+ can use borrowed references, changing the initial refcount.
+    data_refcount = getrefcount(x_data)
+    indptr_refcount = getrefcount(x_indptr)
 
     for i in range(5):
         a = create_csr_matrix(x.data, x.indices, x.indptr)
 
     # a.data is a view of the underlying data under x.data, but doesn't reference it directly
-    assert getrefcount(x_data) == 3
+    assert getrefcount(x_data) == data_refcount
     # x_indptr is reused directly
-    assert getrefcount(x_indptr) == 4
+    assert getrefcount(x_indptr) == indptr_refcount + 1
 
     del a
-    assert getrefcount(x_data) == 3
-    assert getrefcount(x_indptr) == 3
+    assert getrefcount(x_data) == data_refcount
+    assert getrefcount(x_indptr) == indptr_refcount
 
 
 def test_sparse_passthrough_refcount():
@@ -104,12 +105,13 @@ def test_sparse_passthrough_refcount():
     x = sp.sparse.random(5, 5, density=0.5, format="csr")
 
     x_data = x.data
-    assert getrefcount(x_data) == 3
+    # Python 3.14+ can use borrowed references, changing the initial refcount.
+    data_refcount = getrefcount(x_data)
 
     for i in range(5):
         identity(x)
 
-    assert getrefcount(x_data) == 3
+    assert getrefcount(x_data) == data_refcount
 
 
 def test_sparse_shape():
@@ -676,3 +678,79 @@ def test_sparse_diag_not_square_raises(format):
 
     with pytest.raises(ValueError, match="Diag only apply on square matrix"):
         fn(x_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize("dtype", ("float64", "int32", "complex64"))
+@pytest.mark.parametrize("inplace", (False, True))
+def test_sparse_sorted_indices(format, dtype, inplace):
+    x = ps.matrix(format=format, name="x", dtype=dtype)
+    z = ps.EnsureSortedIndices(inplace=inplace)(x)
+    rng = np.random.default_rng(47)
+    x_test = sp.sparse.random(
+        8,
+        6,
+        density=0.5,
+        format=format,
+        dtype=dtype,
+        random_state=rng,
+        data_rvs=lambda size: rng.integers(1, 10, size=size),
+    )
+    for start, end in zip(x_test.indptr[:-1], x_test.indptr[1:], strict=True):
+        x_test.indices[start:end] = x_test.indices[start:end][::-1]
+        x_test.data[start:end] = x_test.data[start:end][::-1]
+    x_test.has_sorted_indices = False
+
+    fn, result = compare_numba_and_py_sparse([x], z, [x_test], inplace=inplace)
+    assert result.has_sorted_indices
+    assert result.nnz == x_test.nnz
+
+    for value in [x_test.sorted_indices(), x_test[:0, :].copy(), x_test[:, :0].copy()]:
+        expected = value.sorted_indices()
+        result = fn(value)
+        assert result.has_sorted_indices
+        sparse_assert_fn(result, expected)
+        assert ps.SparseTensorType.may_share_memory(result, value) == inplace
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize("dtype", ("float64", "int32", "complex64"))
+def test_sparse_sum_duplicates(format, dtype):
+    x = ps.matrix(format=format, name="x", dtype=dtype)
+    z = ps.sum_duplicates(x)
+    rng = np.random.default_rng(51)
+    x_test = sp.sparse.random(
+        8,
+        6,
+        density=0.5,
+        format=format,
+        dtype=dtype,
+        random_state=rng,
+        data_rvs=lambda size: rng.integers(1, 10, size=size),
+    )
+    original_nnz = x_test.nnz
+    x_test.data = np.repeat(x_test.data, 2)
+    x_test.indices = np.repeat(x_test.indices, 2)
+    x_test.indptr *= 2
+    x_test.data[:2] = [1, -1]
+    x_test.data[2:4] = 0
+    for start, end in zip(x_test.indptr[:-1], x_test.indptr[1:], strict=True):
+        x_test.indices[start:end] = x_test.indices[start:end][::-1]
+        x_test.data[start:end] = x_test.data[start:end][::-1]
+    x_test.has_sorted_indices = False
+    x_test.has_canonical_format = False
+
+    fn, result = compare_numba_and_py_sparse([x], z, [x_test])
+    assert result.has_canonical_format
+    assert result.nnz == original_nnz
+    assert np.count_nonzero(result.data == 0) == 2
+
+    canonical = x_test.copy()
+    canonical.sum_duplicates()
+    for value in [canonical, x_test[:0, :].copy(), x_test[:, :0].copy()]:
+        expected = value.copy()
+        expected.sum_duplicates()
+        result = fn(value)
+        assert result.has_canonical_format
+        sparse_assert_fn(result, expected)
+        assert not ps.SparseTensorType.may_share_memory(result, value)
