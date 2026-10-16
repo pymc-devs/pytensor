@@ -4,6 +4,7 @@ from pytensor import tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
+    ORTHOGONAL,
     SYMMETRIC,
     UPPER_TRIANGULAR,
     check_assumption,
@@ -214,6 +215,35 @@ def svd_of_diag(fgraph, node):
     new_Vh = pt.eye(n, dtype=vh.type.dtype)[vh_order] * pt.expand_dims(phases, -1)
 
     new_outputs = [new_U, new_s.astype(s.type.dtype), new_Vh.astype(vh.type.dtype)]
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SVD)])
+def svd_of_orthogonal(fgraph, node):
+    """svd(Q) -> (Q, ones, I) when Q is orthogonal (unitary, for complex Q)."""
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, ORTHOGONAL):
+        return None
+
+    new_s = pt.ones(X.shape[:-1])
+
+    if not node.op.core_op.compute_uv:
+        [s] = node.outputs
+        new_s = new_s.astype(s.type.dtype)
+        copy_stack_trace(s, new_s)
+        return [new_s]
+
+    u, s, vh = node.outputs
+    new_Vh = pt.broadcast_to(pt.eye(X.shape[-1]), X.shape)
+    new_outputs = [
+        X.astype(u.type.dtype),
+        new_s.astype(s.type.dtype),
+        new_Vh.astype(vh.type.dtype),
+    ]
     copy_stack_trace(node.outputs, new_outputs)
     return new_outputs
 
