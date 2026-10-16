@@ -13,6 +13,7 @@ from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import alloc_diag, atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import (
     Eig,
@@ -25,6 +26,7 @@ from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
+from pytensor.tensor.linalg.products import KroneckerProduct, kron
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -353,6 +355,122 @@ def _complete_permutation(first, size):
     is_at = pt.eq(positions[:, None], pt.expand_dims(first, -2))
     key = pt.where(pt.any(is_at, axis=-1), pt.argmax(is_at, axis=-1), p + positions)
     return pt.argsort(key, axis=-1)
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SVD)])
+def svd_of_kron_or_block_diag(fgraph, node):
+    """svd(kron(A, B)) and svd(block_diag(A_1, ..., A_p)) from the svd of each factor.
+
+    Both matrices are U_big @ S @ Vh_big, where U_big and Vh_big are the kron (or
+    block_diag) of the factors' U and Vh. S holds the factors' singular values, combined
+    (pairwise products for kron, concatenated for block_diag), at most one per row and
+    column. Rectangular factors make S rectangular and add zero singular values.
+    """
+    core, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
+    match core.owner_op_and_inputs:
+        case (KroneckerProduct(), a, b) if a.type.ndim == 2 and b.type.ndim == 2:
+            is_kron, factors = True, [a, b]
+        case (Blockwise(BlockDiagonal()), *factors):
+            is_kron = False
+        case _:
+            return None
+
+    op = node.op.core_op
+    factor_shapes = [factor.type.shape[-2:] for factor in factors]
+    shapes_known = all(dim is not None for shape in factor_shapes for dim in shape)
+    all_square = shapes_known and all(m == n for m, n in factor_shapes)
+    same_orientation = shapes_known and (
+        all(m >= n for m, n in factor_shapes) or all(m <= n for m, n in factor_shapes)
+    )
+
+    # A reduced svd from reduced factor svds is only diagonal when the factors share an
+    # orientation. Otherwise the zero singular values need full factor bases.
+    if op.compute_uv and not (op.full_matrices or same_orientation):
+        return None
+
+    # Positions (rows, cols) of the singular values in S, needed only when S is not the
+    # square diagonal matrix diag(s_vals)
+    needs_positions = op.compute_uv and op.full_matrices and not all_square
+    if is_kron:
+        a, b = factors
+        if op.compute_uv:
+            U_a, s_a, Vh_a = svd(a, full_matrices=op.full_matrices)
+            U_b, s_b, Vh_b = svd(b, full_matrices=op.full_matrices)
+            U_big, Vh_big = kron(U_a, U_b), kron(Vh_a, Vh_b)
+        else:
+            s_a, s_b = svd(a, compute_uv=False), svd(b, compute_uv=False)
+        s_vals = pt.outer(s_a, s_b).ravel()
+        if needs_positions:
+            a_idx = pt.arange(s_a.shape[-1])[:, None]
+            b_idx = pt.arange(s_b.shape[-1])[None, :]
+            rows = (a_idx * b.shape[-2] + b_idx).ravel()
+            cols = (a_idx * b.shape[-1] + b_idx).ravel()
+    else:
+        if op.compute_uv:
+            block_svds = [
+                svd(block, full_matrices=op.full_matrices) for block in factors
+            ]
+            U_big = block_diag(*[U for U, _, _ in block_svds])
+            Vh_big = block_diag(*[Vh for _, _, Vh in block_svds])
+            s_blocks = [s for _, s, _ in block_svds]
+        else:
+            s_blocks = [svd(block, compute_uv=False) for block in factors]
+        batch_shape = tuple(core.shape[:-2])
+        if batch_shape:
+            s_blocks = [
+                pt.broadcast_to(s, (*batch_shape, s.shape[-1])) for s in s_blocks
+            ]
+        s_vals = pt.concatenate(s_blocks, axis=-1)
+        if needs_positions:
+            row_offset = col_offset = 0
+            block_rows, block_cols = [], []
+            for block, s in zip(factors, s_blocks, strict=True):
+                positions = pt.arange(s.shape[-1])
+                block_rows.append(row_offset + positions)
+                block_cols.append(col_offset + positions)
+                row_offset = row_offset + block.shape[-2]
+                col_offset = col_offset + block.shape[-1]
+            rows = pt.concatenate(block_rows)
+            cols = pt.concatenate(block_cols)
+
+    M, N = core.shape[-2], core.shape[-1]
+
+    def pad_with_zeros(values):
+        n_zeros = pt.minimum(M, N) - values.shape[-1]
+        zeros = pt.zeros((*values.shape[:-1], n_zeros), dtype=values.dtype)
+        return pt.concatenate([values, zeros], axis=-1)
+
+    if not op.compute_uv:
+        [s] = node.outputs
+        s_vals = atleast_Nd(s_vals, n=s.type.ndim)
+        if not all_square:
+            s_vals = pad_with_zeros(s_vals)
+        new_s = pt.sort(s_vals, axis=-1)[..., ::-1].astype(s.type.dtype)
+        copy_stack_trace(s, new_s)
+        return [new_s]
+
+    order = pt.argsort(s_vals, axis=-1)[..., ::-1]
+    new_s = pt.take_along_axis(s_vals, order, axis=-1)
+    if needs_positions:
+        new_s = pad_with_zeros(new_s)
+        row_perm = _complete_permutation(rows[order], size=M)
+        col_perm = _complete_permutation(cols[order], size=N)
+    else:
+        row_perm = col_perm = order
+
+    new_U = pt.take_along_axis(U_big, pt.expand_dims(row_perm, -2), axis=-1)
+    new_Vh = pt.take_along_axis(Vh_big, pt.expand_dims(col_perm, -1), axis=-2)
+    if transposed:
+        new_U, new_Vh = new_Vh.mT, new_U.mT
+
+    new_outputs = [
+        atleast_Nd(new, n=old.type.ndim).astype(old.type.dtype)
+        for new, old in zip((new_U, new_s, new_Vh), node.outputs, strict=True)
+    ]
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
 
 
 @register_canonicalize
