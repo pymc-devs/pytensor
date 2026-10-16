@@ -375,6 +375,22 @@ def overload_sparse_copy(matrix):
     return copy
 
 
+@overload_attribute(CSMatrixType, "has_canonical_format")
+def overload_sparse_has_canonical_format(matrix):
+    def has_canonical_format(matrix):
+        indices = matrix.indices.view(np.uint32)
+        indptr = matrix.indptr.view(np.uint32)
+        for major in range(len(indptr) - 1):
+            start = indptr[major]
+            end = indptr[major + 1]
+            for ptr in range(start + np.uint64(1), end):
+                if indices[ptr - np.uint64(1)] >= indices[ptr]:
+                    return False
+        return True
+
+    return has_canonical_format
+
+
 @overload_method(CSMatrixType, "sort_indices")
 def overload_sparse_sort_indices(matrix):
     def sort_indices(matrix):
