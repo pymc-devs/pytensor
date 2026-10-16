@@ -5248,6 +5248,21 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
     )
 
 
+@pytest.mark.parametrize("zero_side", ["left", "right"])
+def test_local_0_dot_x_batched(zero_side):
+    x = tensor("x", shape=(None, 1, 3, 4))
+    zero = pt.zeros((5, 4, 3))
+    out = zero @ x if zero_side == "left" else x @ zero
+    expected_shape = (
+        (x.shape[0], 5, 4, 4) if zero_side == "left" else (x.shape[0], 5, 3, 3)
+    )
+
+    result = RewriteTester([x], [out], include=("canonicalize", "specialize"))
+    result.assert_graph(
+        rewrite_graph(pt.zeros(expected_shape), include=("canonicalize", "specialize"))
+    )
+
+
 def test_local_dot_to_mul_unspecified_length_1():
     # Regression test for https://github.com/pymc-devs/pytensor/issues/1782
     x = matrix("x", shape=(5, 1), dtype="float64")
@@ -5630,6 +5645,7 @@ def test_sign_prod_unsafe_dtype(dtype, prod_dtype, acc_dtype):
 class TestNestedJoinToBlockDiagonal:
     @pytest.mark.parametrize("order", ["rows_of_columns", "columns_of_rows"])
     def test_zero_off_diagonal(self, order):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(3, 3))
         d = pt.tensor("d", shape=(4, 4))
         if order == "rows_of_columns":
@@ -5650,7 +5666,7 @@ class TestNestedJoinToBlockDiagonal:
             custom_rewrite=local_nested_join_to_block_diagonal,
         )
         result.assert_graph(block_diag(a, d))
-        result.assert_eval(np.eye(3), np.ones((4, 4)))
+        result.assert_eval(rng.normal(size=(3, 3)), rng.normal(size=(4, 4)))
 
     def test_mixed_dtypes(self):
         a = pt.tensor("a", shape=(3, 3), dtype="float32")
@@ -5671,6 +5687,7 @@ class TestNestedJoinToBlockDiagonal:
         result.assert_graph(block_diag(a, d).astype("float64"))
 
     def test_batched(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(2, 3, 3))
         d = pt.tensor("d", shape=(2, 4, 4))
         M = pt.block([[a, pt.zeros((2, 3, 4))], [pt.zeros((2, 4, 3)), d]])
@@ -5682,7 +5699,7 @@ class TestNestedJoinToBlockDiagonal:
             custom_rewrite=local_nested_join_to_block_diagonal,
         )
         result.assert_graph(block_diag(a, d))
-        result.assert_eval(np.ones((2, 3, 3)), np.ones((2, 4, 4)))
+        result.assert_eval(rng.normal(size=(2, 3, 3)), rng.normal(size=(2, 4, 4)))
 
     @pytest.mark.parametrize("structure", ["nonzero_off_diagonal", "non_square_grid"])
     def test_not_rewritten(self, structure):
@@ -5704,7 +5721,7 @@ class TestNestedJoinToBlockDiagonal:
 
 
 class TestDotOfJoin:
-    include = ("canonicalize", "stabilize")
+    include = ("canonicalize", "stabilize", "specialize")
 
     @pytest.mark.parametrize(
         "side, axis, a_shape, b_shape, y_shape",
@@ -5738,6 +5755,7 @@ class TestDotOfJoin:
         ids=["lhs_axis-1", "rhs_axis-2"],
     )
     def test_zero_block_contracted(self, side, axis, a_shape, zero_shape, y_shape):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=a_shape)
         y = pt.tensor("y", shape=y_shape)
         M = pt.concatenate([a, pt.zeros(zero_shape)], axis=axis)
@@ -5754,7 +5772,7 @@ class TestDotOfJoin:
 
         result = RewriteTester([a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
-        result.assert_eval(np.ones(a_shape), np.ones(y_shape))
+        result.assert_eval(rng.normal(size=a_shape), rng.normal(size=y_shape))
 
     @pytest.mark.parametrize(
         "side, axis, a_shape, zero_shape, y_shape",
@@ -5765,30 +5783,92 @@ class TestDotOfJoin:
         ids=["lhs_axis-2", "rhs_axis-1"],
     )
     def test_zero_block_output(self, side, axis, a_shape, zero_shape, y_shape):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=a_shape)
         y = pt.tensor("y", shape=y_shape)
         M = pt.concatenate([a, pt.zeros(zero_shape)], axis=axis)
         if side == "lhs":
             out = M @ y
-            expected = pt.concatenate([a @ y, pt.zeros((2, 6))], axis=axis)
+            expected = pt.concatenate(
+                [a @ y, pt.zeros((zero_shape[0], y_shape[1]))], axis=axis
+            )
         else:
             out = y @ M
-            expected = pt.concatenate([y @ a, pt.zeros((7, 5))], axis=axis)
+            expected = pt.concatenate(
+                [y @ a, pt.zeros((y_shape[0], zero_shape[1]))], axis=axis
+            )
 
         result = RewriteTester([a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
-        result.assert_eval(np.ones(a_shape), np.ones(y_shape))
+        result.assert_eval(rng.normal(size=a_shape), rng.normal(size=y_shape))
+
+    def test_dense_run_output(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = pt.tensor("a", shape=(3, 4))
+        b = pt.tensor("b", shape=(2, 4))
+        y = pt.tensor("y", shape=(4, 6))
+        out = pt.concatenate([a, b, pt.zeros((2, 4))]) @ y
+        expected = pt.concatenate([pt.concatenate([a, b]) @ y, pt.zeros((2, 6))])
+
+        result = RewriteTester([a, b, y], [out], include=self.include)
+        result.assert_graph(rewrite_graph(expected, include=self.include))
+        result.assert_eval(
+            rng.normal(size=(3, 4)), rng.normal(size=(2, 4)), rng.normal(size=(4, 6))
+        )
+
+    def test_matching_join_operand(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = pt.tensor("a", shape=(4, 3))
+        y_0 = pt.tensor("y_0", shape=(3, 6))
+        y_1 = pt.tensor("y_1", shape=(4, 6))
+        out = pt.join(-1, a, pt.eye(4)) @ pt.concatenate([y_0, y_1])
+        expected = y_1 + a @ y_0
+
+        result = RewriteTester([a, y_0, y_1], [out], include=self.include)
+        result.assert_graph(rewrite_graph(expected, include=self.include))
+        result.assert_eval(
+            rng.normal(size=(4, 3)), rng.normal(size=(3, 6)), rng.normal(size=(4, 6))
+        )
+
+    def test_block_diagonal_grid(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = pt.tensor("a", shape=(3, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        y = pt.tensor("y", shape=(7, 6))
+        out = pt.block([[a, pt.zeros((3, 4))], [pt.zeros((4, 3)), d]]) @ y
+        y_0, y_1 = pt.split(y, [3, 4], n_splits=2)
+        expected = pt.concatenate([a @ y_0, d @ y_1])
+
+        result = RewriteTester([a, d, y], [out], include=self.include)
+        result.assert_graph(rewrite_graph(expected, include=self.include))
+        result.assert_eval(
+            rng.normal(size=(3, 3)), rng.normal(size=(4, 4)), rng.normal(size=(7, 6))
+        )
+
+    def test_multiple_matmul_clients(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = pt.tensor("a", shape=(3, 4))
+        y = pt.tensor("y", shape=(4, 6))
+        w = pt.tensor("w", shape=(6, 5))
+        M = pt.concatenate([a, pt.zeros((2, 4))])
+        w_0, _ = pt.split(w, [3, 2], n_splits=2, axis=-1)
+        expected = [pt.concatenate([a @ y, pt.zeros((2, 6))]), w_0 @ a]
+
+        result = RewriteTester([a, y, w], [M @ y, w @ M], include=self.include)
+        result.assert_graph(*rewrite_graph(expected, include=self.include))
+        result.assert_eval(
+            rng.normal(size=(3, 4)), rng.normal(size=(4, 6)), rng.normal(size=(6, 5))
+        )
 
     def test_all_zero_blocks(self):
         y = pt.tensor("y", shape=(9, 6))
         out = pt.join(-1, pt.zeros((3, 4)), pt.zeros((3, 5))) @ y
 
-        result = RewriteTester(
-            [y], [out], include=None, custom_rewrite=local_dot_of_join
-        )
-        result.assert_graph(pt.zeros((3, 6)))
+        result = RewriteTester([y], [out], include=self.include)
+        result.assert_graph(rewrite_graph(pt.zeros((3, 6)), include=self.include))
 
     def test_identity_block_contracted(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(4, 3))
         y = pt.tensor("y", shape=(7, 6))
         out = pt.join(-1, a, pt.eye(4)) @ y
@@ -5797,21 +5877,23 @@ class TestDotOfJoin:
 
         result = RewriteTester([a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
-        result.assert_eval(np.ones((4, 3)), np.ones((7, 6)))
+        result.assert_eval(rng.normal(size=(4, 3)), rng.normal(size=(7, 6)))
 
     def test_symbolic_identity_block(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         n = pt.iscalar("n")
         a = pt.matrix("a")
         y = pt.matrix("y")
         out = pt.join(-1, a, pt.eye(n)) @ y
-        y_0, y_1 = pt.split(y, [a.shape[1], pt.eye(n).shape[1]], n_splits=2)
+        y_0, y_1 = pt.split(y, [a.shape[-1], pt.eye(n).shape[-1]], n_splits=2)
         expected = y_1 + a @ y_0
 
         result = RewriteTester([n, a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
-        result.assert_eval(2, np.ones((2, 3)), np.ones((5, 4)))
+        result.assert_eval(2, rng.normal(size=(2, 3)), rng.normal(size=(5, 4)))
 
     def test_identity_block_output(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(3, 5))
         y = pt.tensor("y", shape=(5, 6))
         out = pt.concatenate([a, pt.eye(5)], axis=-2) @ y
@@ -5819,9 +5901,10 @@ class TestDotOfJoin:
 
         result = RewriteTester([a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
-        result.assert_eval(np.ones((3, 5)), np.ones((5, 6)))
+        result.assert_eval(rng.normal(size=(3, 5)), rng.normal(size=(5, 6)))
 
-    def test_block_triangular(self):
+    def test_block_triangular_lhs(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(3, 3))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
@@ -5833,10 +5916,14 @@ class TestDotOfJoin:
         result = RewriteTester([a, c, d, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
         result.assert_eval(
-            np.ones((3, 3)), np.ones((4, 3)), np.ones((4, 4)), np.ones((7, 6))
+            rng.normal(size=(3, 3)),
+            rng.normal(size=(4, 3)),
+            rng.normal(size=(4, 4)),
+            rng.normal(size=(7, 6)),
         )
 
-    def test_block_triangular_on_the_right(self):
+    def test_block_triangular_rhs(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(3, 3))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
@@ -5850,10 +5937,14 @@ class TestDotOfJoin:
         result = RewriteTester([a, c, d, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
         result.assert_eval(
-            np.ones((3, 3)), np.ones((4, 3)), np.ones((4, 4)), np.ones((6, 7))
+            rng.normal(size=(3, 3)),
+            rng.normal(size=(4, 3)),
+            rng.normal(size=(4, 4)),
+            rng.normal(size=(6, 7)),
         )
 
     def test_block_with_identity(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         b = pt.tensor("b", shape=(3, 4))
         c = pt.tensor("c", shape=(4, 3))
         d = pt.tensor("d", shape=(4, 4))
@@ -5865,10 +5956,14 @@ class TestDotOfJoin:
         result = RewriteTester([b, c, d, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
         result.assert_eval(
-            np.ones((3, 4)), np.ones((4, 3)), np.ones((4, 4)), np.ones((7, 6))
+            rng.normal(size=(3, 4)),
+            rng.normal(size=(4, 3)),
+            rng.normal(size=(4, 4)),
+            rng.normal(size=(7, 6)),
         )
 
     def test_batched_other(self):
+        rng = np.random.default_rng(utt.fetch_seed())
         a = pt.tensor("a", shape=(3, 4))
         y = pt.tensor("y", shape=(2, 9, 6))
         out = pt.join(-1, a, pt.zeros((3, 5))) @ y
@@ -5877,7 +5972,7 @@ class TestDotOfJoin:
 
         result = RewriteTester([a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
-        result.assert_eval(np.ones((3, 4)), np.ones((2, 9, 6)))
+        result.assert_eval(rng.normal(size=(3, 4)), rng.normal(size=(2, 9, 6)))
 
     @pytest.mark.parametrize("structure", ["contracted", "output"])
     def test_mixed_dtypes(self, structure):
@@ -5886,12 +5981,10 @@ class TestDotOfJoin:
         if structure == "contracted":
             out = pt.join(-1, a, pt.eye(4, dtype="float64")) @ y
             y_0, y_1 = pt.split(y, [3, 4], n_splits=2)
-            expected = (y_1 + a @ y_0).astype("float64")
+            expected = y_1.astype("float64") + a @ y_0
         else:
             out = y @ pt.join(-1, a.mT, pt.zeros((3, 2), dtype="float64"))
-            expected = pt.concatenate(
-                [(y @ a.mT).astype("float64"), pt.zeros((7, 2))], axis=-1
-            )
+            expected = pt.concatenate([y @ a.mT, pt.zeros((7, 2))], axis=-1)
 
         result = RewriteTester([a, y], [out], include=self.include)
         result.assert_graph(rewrite_graph(expected, include=self.include))
