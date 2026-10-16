@@ -80,20 +80,21 @@ def test_sparse_creation_refcount():
 
     x_data = x.data
     x_indptr = x.indptr
-    assert getrefcount(x_data) == 3
-    assert getrefcount(x_indptr) == 3
+    # Python 3.14+ can use borrowed references, changing the initial refcount.
+    data_refcount = getrefcount(x_data)
+    indptr_refcount = getrefcount(x_indptr)
 
     for i in range(5):
         a = create_csr_matrix(x.data, x.indices, x.indptr)
 
     # a.data is a view of the underlying data under x.data, but doesn't reference it directly
-    assert getrefcount(x_data) == 3
+    assert getrefcount(x_data) == data_refcount
     # x_indptr is reused directly
-    assert getrefcount(x_indptr) == 4
+    assert getrefcount(x_indptr) == indptr_refcount + 1
 
     del a
-    assert getrefcount(x_data) == 3
-    assert getrefcount(x_indptr) == 3
+    assert getrefcount(x_data) == data_refcount
+    assert getrefcount(x_indptr) == indptr_refcount
 
 
 def test_sparse_passthrough_refcount():
@@ -104,12 +105,13 @@ def test_sparse_passthrough_refcount():
     x = sp.sparse.random(5, 5, density=0.5, format="csr")
 
     x_data = x.data
-    assert getrefcount(x_data) == 3
+    # Python 3.14+ can use borrowed references, changing the initial refcount.
+    data_refcount = getrefcount(x_data)
 
     for i in range(5):
         identity(x)
 
-    assert getrefcount(x_data) == 3
+    assert getrefcount(x_data) == data_refcount
 
 
 def test_sparse_shape():
