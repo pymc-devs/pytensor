@@ -13,7 +13,12 @@ from pytensor.tensor.basic import alloc_diag, atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh, eigh
+from pytensor.tensor.linalg.decomposition.eigen import (
+    Eig,
+    Eigh,
+    Eigvalsh,
+    eigh,
+)
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
@@ -165,14 +170,13 @@ def svd_uv_merge(fgraph, node):
 @register_stabilize
 @node_rewriter([blockwise_of(SVD)])
 def svd_of_diag(fgraph, node):
-    """
-    svd(D) has three return values:
-        - S = diag(sort(abs(d)))
-        - U = I
-        - V = diag(sign(sort(d)))
+    """Closed-form svd of an m x n diagonal matrix D with diagonal d.
 
-    Where d is the diagonal of D and sort is in descending order. U and V are also permuted to match the sorted order
-    of the diagonal of D.
+    The singular values are abs(d) sorted descending. Column j of U is the standard
+    basis vector e_{idx[j]}, where idx is that sort order, and row j of Vh is the same
+    vector scaled by the phase d / abs(d) of the matching diagonal entry (1 where it is
+    zero). With full_matrices, the remaining columns of U and rows of Vh are the unused
+    basis vectors, in order.
     """
     [X] = node.inputs
 
@@ -180,29 +184,47 @@ def svd_of_diag(fgraph, node):
         return None
 
     diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
-
-    # Singular values are abs of diagonal, sorted descending
     abs_diag = pt.abs(diag_vals)
-    idx = pt.argsort(-abs_diag)
-    new_s = abs_diag[idx]
 
     if not node.op.core_op.compute_uv:
         [s] = node.outputs
+        new_s = pt.sort(abs_diag, axis=-1)[..., ::-1].astype(s.type.dtype)
         copy_stack_trace(s, new_s)
         return [new_s]
 
-    n = X.shape[-1]
-    new_U = pt.eye(n)[:, idx]
-    # Vh = diag(sign(d_sorted)) @ P, where P = I[idx, :]
-    sorted_signs = pt.sign(diag_vals[idx])
-    new_Vh = alloc_diag(sorted_signs, axis1=-1, axis2=-2)[:, idx]
     u, s, vh = node.outputs
+    m, n = X.shape[-2], X.shape[-1]
 
-    copy_stack_trace(u, new_U)
-    copy_stack_trace(s, new_s)
-    copy_stack_trace(vh, new_Vh)
+    idx = pt.argsort(abs_diag, axis=-1)[..., ::-1]
+    sorted_diag = pt.take_along_axis(diag_vals, idx, axis=-1)
+    new_s = pt.take_along_axis(abs_diag, idx, axis=-1)
+    phases = pt.where(pt.eq(sorted_diag, 0), 1, pt.sign(sorted_diag))
 
-    return [new_U, new_s, new_Vh]
+    if node.op.core_op.full_matrices:
+        u_order = _complete_permutation(idx, size=m)
+        vh_order = _complete_permutation(idx, size=n)
+        padding = pt.ones(
+            (*phases.shape[:-1], n - phases.shape[-1]), dtype=phases.dtype
+        )
+        phases = pt.concatenate([phases, padding], axis=-1)
+    else:
+        u_order = vh_order = idx
+
+    new_U = pt.eye(m, dtype=u.type.dtype)[u_order].mT
+    new_Vh = pt.eye(n, dtype=vh.type.dtype)[vh_order] * pt.expand_dims(phases, -1)
+
+    new_outputs = [new_U, new_s.astype(s.type.dtype), new_Vh.astype(vh.type.dtype)]
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
+
+
+def _complete_permutation(first, size):
+    """Order ``arange(size)`` as ``first``, then the unused positions ascending."""
+    p = first.shape[-1]
+    positions = pt.arange(size)
+    is_at = pt.eq(positions[:, None], pt.expand_dims(first, -2))
+    key = pt.where(pt.any(is_at, axis=-1), pt.argmax(is_at, axis=-1), p + positions)
+    return pt.argsort(key, axis=-1)
 
 
 @register_canonicalize
@@ -246,9 +268,9 @@ def eigh_of_diag(fgraph, node):
         if not check_assumption(fgraph, X, DIAGONAL):
             return None
         diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
-        sort_idx = pt.argsort(diag_vals)
-        new_w = diag_vals[sort_idx]
-        new_v = pt.eye(X.shape[-1])[:, sort_idx]
+        sort_idx = pt.argsort(diag_vals, axis=-1)
+        new_w = pt.take_along_axis(diag_vals, sort_idx, axis=-1)
+        new_v = pt.eye(X.shape[-1])[sort_idx].mT
     elif len(node.inputs) == 2:
         A, B = node.inputs
         if not check_assumption(fgraph, A, DIAGONAL):
@@ -258,10 +280,11 @@ def eigh_of_diag(fgraph, node):
         diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
         diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
         eigvals = diag_a / diag_b
-        sort_idx = pt.argsort(eigvals)
-        new_w = eigvals[sort_idx]
+        sort_idx = pt.argsort(eigvals, axis=-1)
+        new_w = pt.take_along_axis(eigvals, sort_idx, axis=-1)
         # B-orthonormal eigenvectors: column j is e_{sort_idx[j]} / sqrt(b[sort_idx[j]]).
-        new_v = pt.eye(A.shape[-1])[:, sort_idx] / pt.sqrt(diag_b[sort_idx])
+        sorted_b = pt.take_along_axis(diag_b, sort_idx, axis=-1)
+        new_v = pt.eye(A.shape[-1])[sort_idx].mT / pt.expand_dims(pt.sqrt(sorted_b), -2)
     else:
         return None
 

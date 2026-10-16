@@ -14,18 +14,17 @@ from pytensor.configdefaults import config
 from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
-from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor.linalg.decomposition.eigen import eigh
+from pytensor.tensor.linalg.decomposition.eigen import Eigh, eigh
 from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor
 from pytensor.tensor.linalg.decomposition.qr import qr
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur, qz, schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 @pytest.mark.parametrize("tag", ("lower", "upper", None))
@@ -335,11 +334,25 @@ def test_eigh_of_diag(make_diag):
     rewritten = rewrite_graph([w, v], include=passes)
 
     idx = pt.argsort(d)
-    expected_w = d[idx]
-    expected_v = pt.as_tensor(np.eye(5))[:, idx]
+    expected_w = pt.take_along_axis(d, idx, axis=-1)
+    expected_v = pt.eye(5)[idx].mT
     expected = rewrite_graph([expected_w, expected_v], include=passes)
 
     assert_equal_computations(rewritten, expected)
+
+
+def test_eigh_of_batched_diag():
+    x = pt.dtensor3("x", shape=(2, 3, 3))
+    w, v = pt.linalg.eigh(assume(x, diagonal=True))
+
+    result = RewriteTester([x], [w, (v * w[..., None, :]) @ v.mT])
+    assert not any(
+        isinstance(getattr(node.op, "core_op", None), Eigh)
+        for node in result.rewr_fg.apply_nodes
+    )
+    a = np.zeros((2, 3, 3))
+    a[:, range(3), range(3)] = [[3.0, 1.0, 2.0], [0.0, 5.0, -1.0]]
+    result.assert_eval(a)
 
 
 def test_eigh_generalized_of_diag_correctness():
@@ -388,34 +401,72 @@ def test_eigvalsh_of_diag(make_diag, include_b):
     assert_equal_computations([rewritten], [expected])
 
 
-@pytest.mark.parametrize(
-    "make_diag, compute_uv",
-    [(lambda d: pt.diag(d), True), (lambda d: pt.eye(5) * d, False)],
-    ids=["alloc_diag_with_uv", "eye_mul_no_uv"],
-)
-def test_svd_of_diag(make_diag, compute_uv):
+def test_svd_of_diag_singular_values():
     d = pt.dvector("d", shape=(5,))
-    D = make_diag(d)
-    out = svd(D, compute_uv=compute_uv)
-    if not compute_uv:
-        out = [out]
+    s = svd(pt.eye(5) * d, compute_uv=False)
 
     passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
-    rewritten = rewrite_graph(out, include=passes)
+    result = RewriteTester([d], [s], include=passes)
+    result.assert_graph(*rewrite_graph([pt.sort(pt.abs(d))[::-1]], include=passes))
+    result.assert_eval(np.array([1.0, -3.0, 0.0, 2.0, -0.5]))
 
-    abs_d = pt.abs(d)
-    idx = pt.argsort(-abs_d)
 
-    if compute_uv:
-        expected_s = abs_d[idx]
-        expected_u = pt.as_tensor(np.eye(5))[:, idx]
-        sorted_signs = pt.sign(d[idx])
-        expected_vh = alloc_diag(sorted_signs, axis1=-1, axis2=-2)[:, idx]
-        expected = rewrite_graph([expected_u, expected_s, expected_vh], include=passes)
-    else:
-        expected = rewrite_graph([abs_d[idx]], include=passes)
+def test_svd_of_diag():
+    x = pt.dtensor3("x", shape=(2, 5, 3))
+    u, s, vh = svd(assume(x, diagonal=True), full_matrices=False)
 
-    assert_equal_computations(rewritten, expected)
+    d = pt.diagonal(x, axis1=-2, axis2=-1)
+    idx = pt.argsort(pt.abs(d), axis=-1)[..., ::-1]
+    sorted_d = pt.take_along_axis(d, idx, axis=-1)
+    phases = pt.where(pt.eq(sorted_d, 0), 1, pt.sign(sorted_d))
+    expected = [
+        pt.eye(x.shape[-2])[idx].mT,
+        pt.take_along_axis(pt.abs(d), idx, axis=-1),
+        pt.eye(x.shape[-1])[idx] * phases[..., None],
+    ]
+
+    passes = ("canonicalize", "ShapeOpt")
+    result = RewriteTester([x], [u, s, vh], include=passes)
+    result.assert_graph(*rewrite_graph(expected, include=passes))
+
+
+@pytest.mark.parametrize("full_matrices", [True, False], ids=["full", "reduced"])
+@pytest.mark.parametrize(
+    "shape, dtype",
+    [
+        ((5, 5), "float64"),
+        ((2, 5, 3), "float64"),
+        ((2, 3, 5), "float64"),
+        ((2, 3, 5), "complex128"),
+    ],
+    ids=["square", "tall", "wide", "wide_complex"],
+)
+def test_svd_of_diag_values(shape, dtype, full_matrices):
+    """U and Vh are unique only up to phases and the basis of the unused columns, so
+    values are compared through the reconstruction and orthogonality."""
+    *batch, m, n = shape
+    k = min(m, n)
+    x = pt.tensor("x", shape=shape, dtype=dtype)
+    u, s, vh = svd(assume(x, diagonal=True), full_matrices=full_matrices)
+    reconstruction = (u[..., :k] * s[..., None, :]) @ vh[..., :k, :]
+
+    rng = np.random.default_rng(0)
+    diag_vals = rng.normal(size=(*batch, k)).astype(dtype)
+    if dtype == "complex128":
+        diag_vals += 1j * rng.normal(size=(*batch, k))
+    diag_vals[..., 0] = 0.0
+    a = np.zeros(shape, dtype=dtype)
+    a[..., range(k), range(k)] = diag_vals
+    result = RewriteTester(
+        [x],
+        [s, reconstruction, u.conj().mT @ u, vh @ vh.conj().mT],
+        include=("canonicalize",),
+    )
+    assert not any(
+        isinstance(getattr(node.op, "core_op", None), SVD)
+        for node in result.rewr_fg.apply_nodes
+    )
+    result.assert_eval(a, atol=1e-12)
 
 
 @pytest.mark.parametrize(
