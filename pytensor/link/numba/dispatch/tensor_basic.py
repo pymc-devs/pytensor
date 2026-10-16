@@ -406,7 +406,7 @@ def numba_funcify_MakeVector(op, node, **kwargs):
     input_names = [f"x{i}" for i in range(len(node.inputs))]
 
     def create_list_string(x):
-        args = ", ".join([f"{i}.item()" for i in x] + ([""] if len(x) == 1 else []))
+        args = ", ".join([f"{i}[()]" for i in x] + ([""] if len(x) == 1 else []))
         return f"[{args}]"
 
     makevector_def_src = f"""
