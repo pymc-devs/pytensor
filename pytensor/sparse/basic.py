@@ -1522,6 +1522,36 @@ class EnsureSortedIndices(Op):
 ensure_sorted_indices = EnsureSortedIndices(inplace=False)
 
 
+class HasCanonicalFormat(Op):
+    """Read whether a sparse matrix has sorted indices and no duplicates.
+
+    Uses SciPy's cached property without modifying the sparse components.
+    """
+
+    __props__ = ()
+
+    def make_node(self, x):
+        x = as_sparse_variable(x)
+        return Apply(self, [x], [scalar(dtype="bool")])
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        z[0] = np.asarray(x.has_canonical_format, dtype="bool")
+
+    def connection_pattern(self, node):
+        return [[False]]
+
+    def pullback(self, inputs, outputs, output_grad):
+        return [disconnected_type()]
+
+    def infer_shape(self, node, shapes):
+        return [()]
+
+
+has_canonical_format = HasCanonicalFormat()
+
+
 class SumDuplicates(Op):
     """Sort sparse indices and sum duplicate entries without removing explicit zeros.
 

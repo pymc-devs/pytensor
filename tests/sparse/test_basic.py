@@ -10,7 +10,7 @@ import pytensor.tensor as pt
 from pytensor import sparse
 from pytensor.compile.io import In
 from pytensor.configdefaults import config
-from pytensor.gradient import GradientError
+from pytensor.gradient import DisconnectedType, GradientError
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.replace import vectorize_graph
@@ -1006,6 +1006,56 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 _variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
+
+
+class TestHasCanonicalFormat(utt.InferShapeTester):
+    @pytest.mark.parametrize(
+        "format, constructor, shape",
+        [
+            ("csr", scipy_sparse.csr_matrix, (2, 3)),
+            ("csc", scipy_sparse.csc_matrix, (3, 2)),
+        ],
+    )
+    def test_op(self, format, constructor, shape):
+        x = sparse.matrix(format, name="x")
+        result = x.has_canonical_format
+        utt.assert_equal_computations([result], [sparse.has_canonical_format(x)])
+        fn = pytensor.function([x], result)
+
+        # The output is 0d boolean
+        assert result.type == pt.scalar(dtype="bool").type
+
+        data = np.array([0, 2, 3], dtype=x.dtype)
+        indptr = np.array([0, 3, 3], dtype="int32")
+        indices_seq = [
+            np.array(value, dtype="int32")
+            for value in (
+                [0, 1, 2],  # Unique and sorted
+                [2, 0, 1],  # Unique but not sorted
+                [0, 0, 2],  # Not unique
+            )
+        ]
+        bools_seq = (True, False, False)
+
+        for indices, expected in zip(indices_seq, bools_seq):
+            value = constructor((data, indices, indptr), shape=shape, copy=True)
+            assert fn(value) == expected
+            np.testing.assert_array_equal(value.indices, indices)
+            np.testing.assert_array_equal(value.data, data)
+            np.testing.assert_array_equal(value.indptr, indptr)
+
+        # An empty matrix has canonical format
+        assert fn(constructor(shape, dtype=x.dtype))
+
+    def test_grad(self):
+        x = sparse.csr_matrix("x")
+        grad = pytensor.grad(
+            x.has_canonical_format,
+            x,
+            disconnected_inputs="ignore",
+            return_disconnected="disconnected",
+        )
+        assert isinstance(grad.type, DisconnectedType)
 
 
 class TestSumDuplicates(utt.InferShapeTester):
