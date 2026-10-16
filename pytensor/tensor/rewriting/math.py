@@ -385,7 +385,6 @@ def local_dot_of_join(fgraph, node):
     return replacements
 
 
-@register_canonicalize
 @register_stabilize
 @node_rewriter([Join])
 def local_nested_join_to_block_diagonal(fgraph, node):
