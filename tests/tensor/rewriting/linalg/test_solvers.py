@@ -746,16 +746,17 @@ def test_solve_sylvester_both_diag(make_diag):
     assert_equal_computations([rewritten], [expected])
 
 
-def test_orthogonal_solve_to_transpose_matmul():
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_orthogonal_solve_to_transpose_matmul(dtype):
     n = 5
     rewrites = ("canonicalize", "stabilize", "ShapeOpt")
 
-    Q = pt.dmatrix("Q", shape=(n, n))
+    Q = pt.matrix("Q", shape=(n, n), dtype=dtype)
     Q_orth = assume(Q, orthogonal=True)
-    b = pt.dmatrix("b", shape=(n, 3))
+    b = pt.matrix("b", shape=(n, 3), dtype=dtype)
     out = solve(Q_orth, b)
     rewritten = rewrite_graph(out, include=rewrites)
-    expected = rewrite_graph(Q_orth.mT @ b, include=rewrites)
+    expected = rewrite_graph(Q_orth.conj().mT @ b, include=rewrites)
     assert_equal_computations([rewritten], [expected])
 
 
