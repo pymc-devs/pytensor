@@ -595,12 +595,15 @@ def local_split_of_join(fgraph, node):
                 return inputs
 
 
-@register_canonicalize
-@register_stabilize
-@register_specialize
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
 @node_rewriter([Join])
 def local_join_of_split(fgraph, node):
-    """Join(*Split(x)) -> x when the Join reassembles every Split output in order."""
+    """Join(*Split(x)) -> x when the Join reassembles every Split output in order.
+
+    Drops the check that the split sizes sum to the length of ``x``.
+    """
     first = node.inputs[0]
     match first.owner_op_and_inputs:
         case (Split(axis=axis), x, _) if (

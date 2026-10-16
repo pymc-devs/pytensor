@@ -827,3 +827,12 @@ def test_local_join_of_split():
         custom_rewrite=local_join_of_split,
     )
     result.assert_graph(x, reordered, other_axis)
+
+
+def test_local_join_of_split_is_shape_unsafe():
+    x = matrix("x")
+    splits = ivector("splits")
+    out = pt.concatenate(pt.split(x, splits, n_splits=2))
+
+    result = utt.RewriteTester([x, splits], [out], exclude=("shape_unsafe",))
+    result.assert_graph(out)
