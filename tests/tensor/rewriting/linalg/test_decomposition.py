@@ -588,6 +588,116 @@ def test_svd_of_orthogonal_product_broadcasts_batch(dtype):
     result.assert_eval(q_val, x_val)
 
 
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize(
+    "make_structured, combine_singular_values",
+    [
+        (pt.linalg.kron, lambda s_a, s_b: pt.outer(s_a, s_b).ravel()),
+        (pt.linalg.block_diag, lambda s_a, s_b: pt.concatenate([s_a, s_b])),
+    ],
+    ids=["kron", "block_diag"],
+)
+def test_svd_of_square_structured(make_structured, combine_singular_values, compute_uv):
+    a = pt.dmatrix("a", shape=(2, 2))
+    b = pt.dmatrix("b", shape=(3, 3))
+
+    if compute_uv:
+        out = svd(make_structured(a, b))
+        (U_a, s_a, Vh_a), (U_b, s_b, Vh_b) = svd(a), svd(b)
+        s_vals = combine_singular_values(s_a, s_b)
+        order = pt.argsort(s_vals, axis=-1)[..., ::-1]
+        expected = [
+            pt.take_along_axis(
+                make_structured(U_a, U_b), pt.expand_dims(order, -2), axis=-1
+            ),
+            pt.take_along_axis(s_vals, order, axis=-1),
+            pt.take_along_axis(
+                make_structured(Vh_a, Vh_b), pt.expand_dims(order, -1), axis=-2
+            ),
+        ]
+    else:
+        out = [svd(make_structured(a, b), compute_uv=False)]
+        s_vals = combine_singular_values(
+            svd(a, compute_uv=False), svd(b, compute_uv=False)
+        )
+        expected = [pt.sort(s_vals)[::-1]]
+
+    result = RewriteTester([a, b], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+
+
+@pytest.mark.parametrize("transposed", [False, True], ids=["", "transposed"])
+@pytest.mark.parametrize(
+    "combine, shapes, full_matrices, dtype",
+    [
+        (pt.linalg.kron, [(2, 2), (3, 3)], False, "float64"),
+        (pt.linalg.kron, [(3, 2), (4, 1)], False, "complex128"),
+        (pt.linalg.kron, [(3, 2), (2, 4)], True, "float64"),
+        (pt.linalg.kron, [(1, 3), (3, 1)], True, "complex128"),
+        (lambda a, b: pt.linalg.kron(a, b)[None], [(2, 3), (2, 2)], True, "float64"),
+        (pt.linalg.block_diag, [(3, 2), (4, 1), (2, 2)], False, "complex128"),
+        (pt.linalg.block_diag, [(3, 2), (1, 4), (2, 2)], True, "float64"),
+        (pt.linalg.block_diag, [(4, 3, 2), (4, 1, 3)], True, "complex128"),
+    ],
+    ids=[
+        "kron_square",
+        "kron_tall_reduced",
+        "kron_mixed",
+        "kron_rank_deficient",
+        "kron_expanded",
+        "block_diag_tall_reduced",
+        "block_diag_mixed",
+        "block_diag_batched",
+    ],
+)
+def test_svd_of_structured_values(combine, shapes, full_matrices, dtype, transposed):
+    """U and Vh are unique only up to phases and the basis of the zero singular values,
+    so values are compared through the reconstruction and orthogonality."""
+    factors = [
+        pt.tensor(f"x{i}", shape=shape, dtype=dtype) for i, shape in enumerate(shapes)
+    ]
+    X = combine(*factors)
+    if transposed:
+        X = X.mT
+    u, s, vh = svd(X, full_matrices=full_matrices)
+    k = min(X.type.shape[-2:])
+    reconstruction = (u[..., :k] * s[..., None, :]) @ vh[..., :k, :]
+    outs = [
+        s,
+        svd(X, compute_uv=False),
+        reconstruction,
+        u.conj().mT @ u,
+        vh @ vh.conj().mT,
+    ]
+
+    result = RewriteTester(factors, outs)
+    svd_inputs = sorted(
+        node.inputs[0].name
+        for node in result.rewr_fg.apply_nodes
+        if isinstance(getattr(node.op, "core_op", node.op), SVD)
+    )
+    assert svd_inputs == sorted(factor.name for factor in factors)
+
+    rng = np.random.default_rng(0)
+    values = [rng.normal(size=shape).astype(dtype) for shape in shapes]
+    if dtype == "complex128":
+        for value in values:
+            value += 1j * rng.normal(size=value.shape)
+    result.assert_eval(*values, atol=1e-10)
+
+
+@pytest.mark.parametrize("combine", [pt.linalg.kron, pt.linalg.block_diag])
+def test_reduced_svd_of_mixed_orientation_structured_is_not_rewritten(combine):
+    """A reduced svd needs full factor bases when tall and wide factors mix, which can
+    be far larger than the requested output, so the rewrite does not apply."""
+    a = pt.dmatrix("a", shape=(300, 2))
+    b = pt.dmatrix("b", shape=(2, 4))
+    out = svd(combine(a, b), full_matrices=False)
+
+    result = RewriteTester([a, b], out)
+    result.assert_graph(*svd(combine(a, b), full_matrices=False))
+
+
 def test_svd_of_symmetric_skips_complex():
     x = pt.tensor("x", shape=(4, 4), dtype="complex128")
     s = svd(assume(x, symmetric=True), compute_uv=False)
