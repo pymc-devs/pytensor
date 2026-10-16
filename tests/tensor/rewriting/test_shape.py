@@ -21,7 +21,9 @@ from pytensor.tensor.math import add, cos, exp, maximum, sin
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
+    local_join_of_split,
     local_reshape_to_dimshuffle,
+    local_split_of_join,
     local_useless_reshape,
     local_useless_specify_shape,
 )
@@ -37,6 +39,7 @@ from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.type import (
     fmatrix,
     iscalar,
+    ivector,
     lscalar,
     matrix,
     scalar,
@@ -786,3 +789,41 @@ def test_Shape_i_canonicalize():
     assert isinstance(y_rewritten.owner.op, Shape_i)
     assert y_rewritten.owner.op.i == 0
     assert y_rewritten.owner.inputs[0] == x
+
+
+@pytest.mark.parametrize("sizes", ["constant", "static_shapes", "dynamic_shapes"])
+def test_local_split_of_join(sizes):
+    a = tensor("a", shape=(None, 5) if sizes == "dynamic_shapes" else (3, 5))
+    b = tensor("b", shape=(None, 5) if sizes == "dynamic_shapes" else (4, 5))
+    splits = [3, 4] if sizes == "constant" else [a.shape[0], b.shape[0]]
+    outs = pt.split(pt.concatenate([a, b]), splits, n_splits=2)
+
+    result = utt.RewriteTester([a, b], outs, include=("canonicalize",))
+    result.assert_graph(a, b)
+
+
+@pytest.mark.parametrize("splits", [[2, 5], [3, 4, 0]], ids=["sizes", "length"])
+def test_local_split_of_join_mismatched_splits(splits):
+    a = tensor("a", shape=(3, 5))
+    b = tensor("b", shape=(4, 5))
+    outs = pt.split(pt.concatenate([a, b]), splits, n_splits=2)
+
+    fgraph = FunctionGraph(outputs=outs, clone=False)
+    assert not local_split_of_join.transform(fgraph, outs[0].owner)
+
+
+def test_local_join_of_split():
+    x = matrix("x")
+    splits = ivector("splits")
+    first, second = pt.split(x, splits, n_splits=2)
+
+    reordered = pt.concatenate([second, first])
+    other_axis = pt.concatenate([first, second], axis=1)
+
+    result = utt.RewriteTester(
+        [x, splits],
+        [pt.concatenate([first, second]), reordered, other_axis],
+        include=None,
+        custom_rewrite=local_join_of_split,
+    )
+    result.assert_graph(x, reordered, other_axis)

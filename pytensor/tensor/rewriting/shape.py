@@ -16,7 +16,9 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.type import HasShape
 from pytensor.tensor.basic import (
     Alloc,
+    Join,
     MakeVector,
+    Split,
     alloc,
     as_tensor_variable,
     cast,
@@ -570,6 +572,41 @@ def _unpack_shape_vector(shape: TensorVariable) -> tuple[TensorVariable, ...]:
         return tuple(shape.owner.inputs)
     else:
         return tuple(shape)
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Split])
+def local_split_of_join(fgraph, node):
+    """Split(Join(x_1, ..., x_n), [|x_1|, ..., |x_n|]) -> x_1, ..., x_n along the same axis."""
+    x, splits = node.inputs
+    match x.owner_op_and_inputs:
+        case (Join(axis=axis), *inputs) if (
+            axis == node.op.axis
+            and node.op.len_splits == len(inputs)
+            and splits.type.shape == (len(inputs),)
+        ):
+            shape_feature = getattr(fgraph, "shape_feature", None)
+            if all(
+                _is_shape_i_of_x(size, inp, axis, shape_feature=shape_feature)
+                for size, inp in zip(_unpack_shape_vector(splits), inputs, strict=True)
+            ):
+                return inputs
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Join])
+def local_join_of_split(fgraph, node):
+    """Join(*Split(x)) -> x when the Join reassembles every Split output in order."""
+    first = node.inputs[0]
+    match first.owner_op_and_inputs:
+        case (Split(axis=axis), x, _) if (
+            axis == node.op.axis and node.inputs == first.owner.outputs
+        ):
+            return [x]
 
 
 @register_useless("shape_unsafe")
