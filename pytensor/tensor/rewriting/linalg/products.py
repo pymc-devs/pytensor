@@ -8,6 +8,7 @@ from pytensor.assumptions import (
     SELECTION,
     check_assumption,
 )
+from pytensor.assumptions.dimshuffle import conjugate_transpose_input
 from pytensor.assumptions.selection import column_selection_index
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
@@ -22,7 +23,6 @@ from pytensor.tensor.basic import (
     diag,
 )
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import Expm, KroneckerProduct
 from pytensor.tensor.linalg.summary import det
@@ -236,30 +236,29 @@ def expm_of_diag(fgraph, node):
 @register_stabilize
 @node_rewriter([Dot, blockwise_of(Dot)])
 def orthogonal_dot_transpose_to_eye(fgraph, node):
-    """Replace X @ X.T -> eye and X.T @ X -> eye when X is orthogonal."""
+    """Replace X @ X.H -> eye and X.H @ X -> eye when X is orthogonal.
+
+    X is unitary for complex X. For real X, X.H is X.T.
+    """
     a, b = node.inputs
-    if not check_assumption(fgraph, a, ORTHOGONAL) or not check_assumption(
-        fgraph, b, ORTHOGONAL
-    ):
+
+    if conjugate_transpose_input(b) is a:
+        X, size = a, a.shape[-2]
+    elif conjugate_transpose_input(a) is b:
+        X, size = b, b.shape[-1]
+    else:
         return None
 
-    # X @ X.T case
-    match b.owner_op_and_inputs:
-        case (DimShuffle(is_matrix_transpose=True), b_inner) if b_inner is a:
-            result = pt.eye(a.shape[-2], dtype=a.type.dtype)
-            if a.type.ndim > 2:
-                result = pt.broadcast_to(result, (*a.shape[:-2], *result.shape[-2:]))
-            copy_stack_trace(node.outputs[0], result)
-            return [result]
+    if not check_assumption(fgraph, X, ORTHOGONAL):
+        return None
 
-    # X.T @ X case
-    match a.owner_op_and_inputs:
-        case (DimShuffle(is_matrix_transpose=True), a_inner) if a_inner is b:
-            result = pt.eye(b.shape[-1], dtype=b.type.dtype)
-            if b.type.ndim > 2:
-                result = pt.broadcast_to(result, (*b.shape[:-2], *result.shape[-2:]))
-            copy_stack_trace(node.outputs[0], result)
-            return [result]
+    [out] = node.outputs
+    result = pt.eye(size, dtype=out.type.dtype)
+    if X.type.ndim > 2:
+        result = pt.broadcast_to(result, (*X.shape[:-2], size, size))
+    result = atleast_Nd(result, n=out.type.ndim)
+    copy_stack_trace(out, result)
+    return [result]
 
 
 def _selection_operand(fgraph, var):
