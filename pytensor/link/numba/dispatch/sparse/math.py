@@ -476,8 +476,10 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
     g_xy_format = g_xy.type.format if g_xy_is_sparse else None
 
     x_format = "csc" if isinstance(op, StructuredDotGradCSC) else "csr"
-    out_dtype = g_xy_dtype
+    out_dtype = node.outputs[0].type.dtype
+    out_type = np.result_type(y_dtype, g_xy_dtype).type
 
+    cache_version = 2
     cache_key = sha256(
         str(
             (
@@ -486,8 +488,10 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
                 y_format,
                 y_dtype,
                 g_xy_format,
+                g_xy_dtype,
                 out_dtype,
                 y.type.shape,
+                cache_version,
             )
         ).encode()
     ).hexdigest()
@@ -506,7 +510,9 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
                     x_ptr = x_ptr.view(np.uint32)
                     for row_idx in range(size):
                         for value_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                            output[value_idx] = g_xy[row_idx] * y[x_indices[value_idx]]
+                            output[value_idx] = out_type(g_xy[row_idx]) * out_type(
+                                y[x_indices[value_idx]]
+                            )
                     return output
 
                 @numba_basic.numba_njit
@@ -515,32 +521,32 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
 
                 return grad_spmdv_csr, cache_key
             else:
-                # Y is a matrix
-                if config.compiler_verbose and y_dtype != out_dtype:
+                if config.compiler_verbose and y_dtype != g_xy_dtype:
                     print(  # noqa: T201
-                        "Numba StructuredDotGrad requires a type casting of inputs: "
+                        "Numba StructuredDotGrad uses scalar input casts: "
                         f"{y_dtype=}, {g_xy_dtype=}."
                     )
 
                 @numba_basic.numba_njit
                 def grad_spmdm_csr(x_indices, x_ptr, y, g_xy):
+                    if y.shape[1] != g_xy.shape[1]:
+                        raise ValueError("shapes not aligned")
+
                     size = len(x_ptr) - 1
                     x_indices = x_indices.view(np.uint32)
                     x_ptr = x_ptr.view(np.uint32)
 
-                    if y_dtype != out_dtype:
-                        new_out_dtype = np.result_type(y, g_xy)
-                        output = np.zeros(len(x_indices), dtype=new_out_dtype)
-                        y = y.astype(out_dtype)
-                        g_xy = g_xy.astype(out_dtype)
-                    else:
-                        output = np.zeros(len(x_indices), dtype=out_dtype)
+                    output = np.empty(len(x_indices), dtype=out_dtype)
 
                     for row_idx in range(size):
                         for value_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                            output[value_idx] = np.dot(
-                                g_xy[row_idx], y[x_indices[value_idx]]
-                            )
+                            col_idx = x_indices[value_idx]
+                            acc = out_type(0)
+                            for j in range(y.shape[1]):
+                                acc += out_type(g_xy[row_idx, j]) * out_type(
+                                    y[col_idx, j]
+                                )
+                            output[value_idx] = acc
                     return output
 
                 return grad_spmdm_csr, cache_key
@@ -548,17 +554,21 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
             # X is CSC
             @numba_basic.numba_njit
             def grad_spmdm_csc(x_indices, x_ptr, y, g_xy):
+                if y.shape[1] != g_xy.shape[1]:
+                    raise ValueError("shapes not aligned")
                 # len(x_indices) gives the number of non-zero elements in X.
-                output = np.zeros(len(x_indices), dtype=out_dtype)
+                output = np.empty(len(x_indices), dtype=out_dtype)
                 size = len(x_ptr) - 1
                 x_indices = x_indices.view(np.uint32)
                 x_ptr = x_ptr.view(np.uint32)
 
                 for col_idx in range(size):
                     for value_idx in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
-                        output[value_idx] = np.dot(
-                            g_xy[x_indices[value_idx]], y[col_idx]
-                        )
+                        row_idx = x_indices[value_idx]
+                        acc = out_type(0)
+                        for j in range(y.shape[1]):
+                            acc += out_type(g_xy[row_idx, j]) * out_type(y[col_idx, j])
+                        output[value_idx] = acc
                 return output
 
             return grad_spmdm_csc, cache_key
@@ -566,23 +576,25 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
     # Y is sparse. In either case we need 'dot_csr_rows'
     @numba_basic.numba_njit
     def dot_csr_rows(x_ptr, x_indices, x_data, x_row, y_ptr, y_indices, y_data, y_row):
-        x_p = x_ptr[x_row]
-        x_end = x_ptr[x_row + 1]
-        y_p = y_ptr[y_row]
-        y_end = y_ptr[y_row + 1]
+        x_row = np.uint64(x_row)
+        y_row = np.uint64(y_row)
+        x_p = np.uint64(x_ptr[x_row])
+        x_end = np.uint64(x_ptr[x_row + np.uint64(1)])
+        y_p = np.uint64(y_ptr[y_row])
+        y_end = np.uint64(y_ptr[y_row + np.uint64(1)])
 
-        acc = 0.0
+        acc = out_type(0)
         while x_p < x_end and y_p < y_end:
             x_col = x_indices[x_p]
             y_col = y_indices[y_p]
             if x_col == y_col:
-                acc += x_data[x_p] * y_data[y_p]
-                x_p += 1
-                y_p += 1
+                acc += out_type(x_data[x_p]) * out_type(y_data[y_p])
+                x_p += np.uint64(1)
+                y_p += np.uint64(1)
             elif x_col < y_col:
-                x_p += 1
+                x_p += np.uint64(1)
             else:
-                y_p += 1
+                y_p += np.uint64(1)
 
         return acc
 
@@ -592,6 +604,8 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def grad_spmspm_csr(x_indices, x_ptr, y, g_xy):
+            x_indices = x_indices.view(np.uint32)
+            x_ptr = x_ptr.view(np.uint32)
             if y_format == "csc":
                 y = y.tocsr()
 
@@ -604,7 +618,7 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
             y_ptr = y.indptr.view(np.uint32)
 
             n_row = len(x_ptr) - 1
-            output = np.zeros(len(x_indices), dtype=out_dtype)
+            output = np.empty(len(x_indices), dtype=out_dtype)
 
             for x_row in range(n_row):
                 for data_idx in range(x_ptr[x_row], x_ptr[x_row + 1]):
@@ -628,6 +642,8 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def grad_spmspm_csc(x_indices, x_ptr, y, g_xy):
+            x_indices = x_indices.view(np.uint32)
+            x_ptr = x_ptr.view(np.uint32)
             if y_format == "csc":
                 y = y.tocsr()
 
