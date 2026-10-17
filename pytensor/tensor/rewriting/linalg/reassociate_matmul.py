@@ -29,8 +29,8 @@ class CostExpr:
     Stores its monomials as ``{sorted_(symbol,exp)_tuple: int_coef}``. The FLOP cost
     of a matmul is (approximately) the product of all unique dim lengths. Given
     inputs A of shape ``(a, b)`` and B of shape ``(b, c)``, computing ``A @ B``
-    costs ``a * b * c``. We call such a product a "monomial". A chain of matmuls
-    sums these monomials to give the total cost.
+    costs ``a * b * c``, a single monomial. The cost of a chain of matmuls is the sum
+    of its monomials.
     """
 
     __slots__ = ("monomials",)
@@ -174,7 +174,7 @@ def _provably_cheaper(a: CostExpr, b: CostExpr) -> bool:
 
 
 def _operand_shape_raw(var: Variable, fgraph: FunctionGraph) -> Shape:
-    """Shape of ``var``, with static lengths as ints and the rest as ShapeFeature symbols."""
+    """Shape of ``var``: static lengths as ints, the rest as ShapeFeature symbols."""
     symbolic = fgraph.shape_feature.shape_tuple(var)
     return tuple(
         symbolic[i] if length is None else int(length)
@@ -230,13 +230,11 @@ def _dimshuffle_lift(op: DimShuffle) -> tuple[bool, bool]:
 
 
 def _is_chain_link(node: Apply) -> bool:
-    """True iff `node` is a 2-operand matmul we can rebuild via ``matmul()``."""
+    """True iff `node` is a 2-operand matmul that ``matmul()`` can rebuild."""
     op = node.op
-    if isinstance(op, Dot):
-        return True
-    if isinstance(op, Blockwise) and isinstance(op.core_op, Dot):
-        return True
-    return False
+    return isinstance(op, Dot) or (
+        isinstance(op, Blockwise) and isinstance(op.core_op, Dot)
+    )
 
 
 def _next_link(node: Apply, fgraph: FunctionGraph) -> Apply | None:
@@ -249,11 +247,6 @@ def _next_link(node: Apply, fgraph: FunctionGraph) -> Apply | None:
     if len(clients) != 1:
         return None
     client_node, _ = clients[0]
-    # `client_node` may be the literal "output" sentinel for fgraph outputs;
-    # the type stub is too narrow to express this.
-    if not isinstance(client_node, Apply):
-        return None  # type: ignore[unreachable]
-
     if _is_chain_link(client_node):
         return client_node
 
@@ -262,7 +255,7 @@ def _next_link(node: Apply, fgraph: FunctionGraph) -> Apply | None:
         and len(fgraph.clients[client_node.outputs[0]]) == 1
     ):
         ds_consumer, _ = fgraph.clients[client_node.outputs[0]][0]
-        if isinstance(ds_consumer, Apply) and _is_chain_link(ds_consumer):
+        if _is_chain_link(ds_consumer):
             liftable, _ = _dimshuffle_lift(client_node.op)
             if liftable:
                 return ds_consumer
@@ -286,9 +279,7 @@ def _decompose_operand(
     """Iteratively decompose `root` into chain leaves.
 
     Each leaf is ``(base_var, lifts)`` where `lifts` is a tuple of DimShuffle Ops to
-    apply at materialization time (outermost first). Replace recursion with an
-    explicit work stack to keep the Python stack bounded for deep matmul chains
-    (autodiff-generated graphs can produce hundreds of links).
+    apply at materialization time (outermost first).
 
     Two descent paths grow the chain:
 
@@ -301,7 +292,7 @@ def _decompose_operand(
     Matmul operands share the matmul's output ndim (``Blockwise`` pads them), so an
     inherited lift always indexes in bounds.
 
-    Append each chain-link Apply we descend into to `consumed` and add to `visited`.
+    Append each chain-link Apply descended into to `consumed` and add it to `visited`.
     """
     out: list[tuple[Variable, tuple[DimShuffle, ...]]] = []
     # Push children right-then-left so the leftmost leaf comes out first (preserving
@@ -399,9 +390,6 @@ def _build_unification(
     for i in range(len(chain_shapes) - 1):
         union(chain_shapes[i][-1], chain_shapes[i + 1][-2])
 
-    # Batch broadcast: at each right-aligned position across the whole chain, all
-    # non-literal-1 entries must be equal. Unioning them as one class catches
-    # transitive equalities a literal-1 in the middle would otherwise mask.
     max_batch = max((len(s) - 2 for s in chain_shapes), default=0)
     for pos in range(max_batch):
         anchor: DimEntry | None = None
@@ -489,14 +477,11 @@ def _existing_cost(
     fgraph: FunctionGraph,
     canonicalize: Callable[[Shape], Shape],
 ) -> CostExpr:
-    """Total FLOPs of the user's existing chain.
+    """Total FLOPs of the user's existing chain, comparable to ``_tree_cost``.
 
-    Walks consumed matmul nodes in topological order (reversed insertion order). Each step looks up its input shapes
-    in the running ``var_shape`` table. The chain leaves take shapes from ``_operand_shape_raw + canonicalize`` while
-    intermediate matmul outputs come from ``_matmul_result_shape``.
-
-    Lifted DimShuffles preserve FLOPs (they only touch size-1 batch dims or swap core dims), so the canonicalized
-    raw-shape sum compares directly to ``_tree_cost``.
+    Visits `consumed` in reverse, which is a topological order. Chain leaves take their
+    canonicalized raw shapes, and intermediate matmul outputs take
+    ``_matmul_result_shape`` of their inputs.
     """
     var_shape: dict[Variable, Shape] = {}
     total = CostExpr.zero()
@@ -516,16 +501,11 @@ def _existing_cost(
 def _build_tree(
     operands: list[tuple[Variable, tuple[DimShuffle, ...]]],
     dp: dict,
-    i_top: int,
-    j_top: int,
 ) -> Variable:
-    """Materialize the optimal matmul tree from the DP table.
-
-    Walks the DP split tree in post-order using an explicit work stack. Like ``_decompose_operand``, this function
-    avoids recursion because deep chains can blow the Python stack.
-    """
+    """Materialize the matmul tree recorded in the DP table over `operands`."""
+    top = (0, len(operands) - 1)
     materialized: dict[tuple[int, int], Variable] = {}
-    work: list[tuple[int, int, bool]] = [(i_top, j_top, False)]
+    work: list[tuple[int, int, bool]] = [(*top, False)]
 
     while work:
         i, j, ready = work.pop()
@@ -550,7 +530,7 @@ def _build_tree(
             else:
                 materialized[(i, j)] = matmul(left, right)  # type: ignore[arg-type]
 
-    return materialized[(i_top, j_top)]
+    return materialized[top]
 
 
 class ReassociateMatmulChain(GraphRewriter):
@@ -581,12 +561,6 @@ class ReassociateMatmulChain(GraphRewriter):
             fgraph.attach_feature(ShapeFeature())
 
     def apply(self, fgraph: FunctionGraph) -> None:
-        # `visited` only tracks nodes consumed by *committed* rewrites. Toposort
-        # visits leaves before consumers, so a leaf later absorbed into a longer
-        # chain (via the consumer) must remain decomposable when the consumer is
-        # reached. Without this, processing `C @ D` first in `(A @ B) @ (C @ D)`
-        # would mark it visited and block the outer matmul from seeing the full
-        # 4-element chain.
         # A chain needs one matmul feeding another. Most graphs have none, so check
         # that with a linear scan before paying for a toposort.
         if not any(
@@ -595,6 +569,9 @@ class ReassociateMatmulChain(GraphRewriter):
         ):
             return
 
+        # Only nodes consumed by committed rewrites. Toposort reaches `C @ D` before
+        # the outer matmul of `(A @ B) @ (C @ D)`, and marking it on a failed attempt
+        # would hide it from the full four-operand chain.
         visited: set[Apply] = set()
         # Every link of a chain climbs to the same top, so a top whose attempt failed
         # would otherwise be decomposed and solved again once per link
@@ -609,9 +586,8 @@ class ReassociateMatmulChain(GraphRewriter):
                 continue
             attempted.add(top)
 
-            # Local snapshot so the recursive decomposition can avoid re-entering
-            # the same chain link within this attempt without polluting `visited`
-            # until we commit.
+            # Snapshot so this attempt does not re-enter its own links, while
+            # `visited` stays untouched until the rewrite commits
             local_visited = set(visited)
             local_visited.add(top)
             consumed: list[Apply] = [top]
@@ -626,10 +602,7 @@ class ReassociateMatmulChain(GraphRewriter):
             if len(operands) < 3:
                 continue
 
-            # Compute each operand's shape after applying its pending lifts. `lifts`
-            # is outermost-first; apply in reverse so the innermost transformation
-            # touches the raw shape first. Matmul operands share the matmul's ndim, so
-            # indexing into ``shape`` by ``lift.new_order`` is in bounds.
+            # `lifts` is outermost-first, so the innermost lift applies to the raw shape
             op_shapes: list[Shape] = []
             for base, lifts in operands:
                 shape: Shape = _operand_shape_raw(base, fgraph)
@@ -671,7 +644,7 @@ class ReassociateMatmulChain(GraphRewriter):
 
             visited.update(consumed)
 
-            new_out = _build_tree(operands, dp, 0, len(operands) - 1)
+            new_out = _build_tree(operands, dp)
             old_out = top.outputs[0]
             copy_stack_trace(old_out, new_out)
             fgraph.replace(old_out, new_out, reason="reassociate_matmul")
