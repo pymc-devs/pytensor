@@ -37,10 +37,10 @@ def register_shape_c_code(type, code, version=()):
 
     Parameters
     ----------
-    typ : PyTensor type
+    type : PyTensor type
         It must be the PyTensor class itself and not an instance of the class.
     code : C code
-        Returns a vector representing the shape for the PyTensor type 'typ'.
+        Returns a vector representing the shape for the PyTensor type 'type'.
         Use %(iname)s and %(oname)s for the input and output C variable names
         respectively.
     version

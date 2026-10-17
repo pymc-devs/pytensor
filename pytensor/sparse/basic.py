@@ -920,9 +920,10 @@ class GetItem2Lists(Op):
         ----------
         x
             Sparse matrix.
-        index
-            List of two lists, first list indicating the row of each element and second
-            list indicating its column.
+        ind1
+            Indices of the rows of the elements to take.
+        ind2
+            Indices of the columns of the elements to take.
 
         """
         x = as_sparse_variable(x)
