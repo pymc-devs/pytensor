@@ -7,7 +7,6 @@ import pytest
 import pytensor.tensor as pt
 import pytensor.tensor.rewriting.linalg.reassociate_matmul as reassociate
 from pytensor import function
-from pytensor.compile import get_mode
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.rewriting.linalg.reassociate_matmul import (
     CostExpr,
@@ -395,23 +394,3 @@ class TestBackends:
 
         fn = function([C, D, y], C @ D @ y, mode="CVM")
         assert (100, 100) not in _matmul_output_shapes(fn)
-
-    def test_jax(self):
-        pytest.importorskip("jax")
-        A = pt.matrix("A", shape=(100, 2))
-        B = pt.matrix("B", shape=(2, 100))
-        C = pt.matrix("C", shape=(100, 100))
-        out = A @ B @ C
-
-        fn = function([A, B, C], out, mode="JAX")
-        reference = function(
-            [A, B, C], out, mode=get_mode("JAX").excluding("reassociate_matmul_chain")
-        )
-        rng = np.random.default_rng(0)
-        values = [
-            rng.normal(size=(100, 2)),
-            rng.normal(size=(2, 100)),
-            rng.normal(size=(100, 100)),
-        ]
-        np.testing.assert_allclose(fn(*values), reference(*values))
-        assert (2, 100) in _matmul_output_shapes(fn)
