@@ -51,6 +51,20 @@ class TestCholeskySolve(utt.InferShapeTester):
             warn=False,
         )
 
+    def test_check_finite_accepted(self):
+        # `check_finite` is documented and accepted by the other linalg
+        # solvers for scipy compatibility, and is ignored by PyTensor.
+        rng = np.random.default_rng(utt.fetch_seed())
+        A = matrix()
+        b = matrix()
+        A_val = np.tril(np.asarray(rng.random((5, 5)), dtype=config.floatX))
+        b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
+
+        expected = function([A, b], cho_solve((A, True), b, b_ndim=2))(A_val, b_val)
+        for check_finite in (True, False):
+            y = cho_solve((A, True), b, check_finite=check_finite, b_ndim=2)
+            assert np.allclose(function([A, b], y)(A_val, b_val), expected)
+
     def test_solve_correctness(self):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
