@@ -132,11 +132,11 @@ def matrix_dot(*args):
     :math:`A_0 \cdot A_1 \cdot A_2 \cdot .. \cdot A_N`.
 
     .. deprecated::
-        Use the ``@`` operator instead.
+        Use the ``@`` operator or ``pt.matmul`` instead.
 
     """
     warnings.warn(
-        "matrix_dot is deprecated. Use the @ operator instead.",
+        "matrix_dot is deprecated. Use the @ operator or pt.matmul instead.",
         FutureWarning,
         stacklevel=2,
     )
