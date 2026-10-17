@@ -38,9 +38,10 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
     x, y = node.inputs
     [z] = node.outputs
     out_dtype = z.type.dtype
-    format = z.type.format
+    out_format = z.type.format
     same_dtype = x.type.dtype == out_dtype
 
+    cache_version = 2
     if y.ndim == 0:
 
         @numba_basic.numba_njit
@@ -55,7 +56,7 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
             z_data *= y
             return z
 
-        return sparse_multiply_scalar
+        return sparse_multiply_scalar, cache_version
 
     elif y.ndim == 1:
 
@@ -68,10 +69,10 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
                 z = x.astype(out_dtype)
 
             M, N = x.shape
-            indices = x.indices
-            indptr = x.indptr
+            indices = x.indices.view(np.uint32)
+            indptr = x.indptr.view(np.uint32)
             z_data = z.data
-            if format == "csc":
+            if out_format == "csc":
                 for j in range(0, N):
                     for i_idx in range(indptr[j], indptr[j + 1]):
                         z_data[i_idx] *= y[j]
@@ -85,7 +86,7 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
 
             return z
 
-        return sparse_dense_multiply
+        return sparse_dense_multiply, cache_version
 
     else:  # y.ndim == 2
 
@@ -98,10 +99,10 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
                 z = x.astype(out_dtype)
 
             M, N = x.shape
-            indices = x.indices
-            indptr = x.indptr
+            indices = x.indices.view(np.uint32)
+            indptr = x.indptr.view(np.uint32)
             z_data = z.data
-            if format == "csc":
+            if out_format == "csc":
                 for j in range(0, N):
                     for i_idx in range(indptr[j], indptr[j + 1]):
                         i = indices[i_idx]
@@ -116,7 +117,7 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
 
             return z
 
-        return sparse_dense_multiply
+        return sparse_dense_multiply, cache_version
 
 
 @register_funcify_and_cache_key(Dot)
