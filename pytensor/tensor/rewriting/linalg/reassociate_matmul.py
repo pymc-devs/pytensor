@@ -628,7 +628,9 @@ class ReassociateMatmulChain(GraphRewriter):
             # A provable win is strictly cheaper at such a generic point, so a
             # candidate that is not cheaper there ends the attempt before any
             # polynomial work. Otherwise its symbolic cost is proven once.
-            symbols = {d for shape in unified for d in shape if not isinstance(d, int)}
+            symbols = dict.fromkeys(
+                d for shape in unified for d in shape if not isinstance(d, int)
+            )
             point = {sym: 1009 + 7919 * i for i, sym in enumerate(symbols)}
             numeric = [
                 tuple(d if isinstance(d, int) else point[d] for d in shape)

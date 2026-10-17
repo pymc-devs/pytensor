@@ -224,6 +224,21 @@ class TestReassociateChain:
             rng.normal(size=(4, 3)), rng.normal(size=(3, 1)), rng.normal(size=(1, 3))
         )
 
+    def test_incomparable_candidates_resolved_by_operand_order(self):
+        # B @ (C @ D) costs 2pn + 4p and (B @ C) @ D costs 2pn + 4n. Both provably beat
+        # the user's order, so the pick must depend on operand order, never on hashes
+        n, p = pt.lscalar("n"), pt.lscalar("p")
+        A = pt.matrix("A", shape=(3, 2))
+        B = pt.specify_shape(pt.matrix("B", shape=(2, None)), (2, p))
+        C = pt.specify_shape(pt.matrix("C"), (p, n))
+        D = pt.specify_shape(pt.matrix("D", shape=(None, 2)), (n, 2))
+        E = pt.matrix("E", shape=(2, 2))
+
+        inputs = [A, B.owner.inputs[0], C.owner.inputs[0], D.owner.inputs[0], E, n, p]
+        for _ in range(5):
+            result = _reassociate(inputs, [A @ B @ C @ D @ E])
+            result.assert_graph(*_canonical(A @ ((B @ (C @ D)) @ E)))
+
     @pytest.mark.parametrize(
         "shapes, build",
         [
