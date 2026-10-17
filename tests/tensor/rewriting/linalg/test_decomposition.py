@@ -14,18 +14,17 @@ from pytensor.configdefaults import config
 from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
-from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor.linalg.decomposition.eigen import eigh
+from pytensor.tensor.linalg.decomposition.eigen import Eigh, eigh
 from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor
 from pytensor.tensor.linalg.decomposition.qr import qr
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur, qz, schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 @pytest.mark.parametrize("tag", ("lower", "upper", None))
@@ -335,11 +334,25 @@ def test_eigh_of_diag(make_diag):
     rewritten = rewrite_graph([w, v], include=passes)
 
     idx = pt.argsort(d)
-    expected_w = d[idx]
-    expected_v = pt.as_tensor(np.eye(5))[:, idx]
+    expected_w = pt.take_along_axis(d, idx, axis=-1)
+    expected_v = pt.eye(5)[idx].mT
     expected = rewrite_graph([expected_w, expected_v], include=passes)
 
     assert_equal_computations(rewritten, expected)
+
+
+def test_eigh_of_batched_diag():
+    x = pt.dtensor3("x", shape=(2, 3, 3))
+    w, v = pt.linalg.eigh(assume(x, diagonal=True))
+
+    result = RewriteTester([x], [w, (v * w[..., None, :]) @ v.mT])
+    assert not any(
+        isinstance(getattr(node.op, "core_op", None), Eigh)
+        for node in result.rewr_fg.apply_nodes
+    )
+    a = np.zeros((2, 3, 3))
+    a[:, range(3), range(3)] = [[3.0, 1.0, 2.0], [0.0, 5.0, -1.0]]
+    result.assert_eval(a)
 
 
 def test_eigh_generalized_of_diag_correctness():
@@ -388,34 +401,309 @@ def test_eigvalsh_of_diag(make_diag, include_b):
     assert_equal_computations([rewritten], [expected])
 
 
-@pytest.mark.parametrize(
-    "make_diag, compute_uv",
-    [(lambda d: pt.diag(d), True), (lambda d: pt.eye(5) * d, False)],
-    ids=["alloc_diag_with_uv", "eye_mul_no_uv"],
-)
-def test_svd_of_diag(make_diag, compute_uv):
+def test_svd_of_diag_singular_values():
     d = pt.dvector("d", shape=(5,))
-    D = make_diag(d)
-    out = svd(D, compute_uv=compute_uv)
-    if not compute_uv:
-        out = [out]
+    s = svd(pt.eye(5) * d, compute_uv=False)
 
     passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
-    rewritten = rewrite_graph(out, include=passes)
+    result = RewriteTester([d], [s], include=passes)
+    result.assert_graph(*rewrite_graph([pt.sort(pt.abs(d))[::-1]], include=passes))
+    result.assert_eval(np.array([1.0, -3.0, 0.0, 2.0, -0.5]))
 
-    abs_d = pt.abs(d)
-    idx = pt.argsort(-abs_d)
+
+def test_svd_of_diag():
+    x = pt.dtensor3("x", shape=(2, 5, 3))
+    u, s, vh = svd(assume(x, diagonal=True), full_matrices=False)
+
+    d = pt.diagonal(x, axis1=-2, axis2=-1)
+    idx = pt.argsort(pt.abs(d), axis=-1)[..., ::-1]
+    sorted_d = pt.take_along_axis(d, idx, axis=-1)
+    phases = pt.where(pt.eq(sorted_d, 0), 1, pt.sign(sorted_d))
+    expected = [
+        pt.eye(x.shape[-2])[idx].mT,
+        pt.take_along_axis(pt.abs(d), idx, axis=-1),
+        pt.eye(x.shape[-1])[idx] * phases[..., None],
+    ]
+
+    passes = ("canonicalize", "ShapeOpt")
+    result = RewriteTester([x], [u, s, vh], include=passes)
+    result.assert_graph(*rewrite_graph(expected, include=passes))
+
+
+@pytest.mark.parametrize("full_matrices", [True, False], ids=["full", "reduced"])
+@pytest.mark.parametrize(
+    "shape, dtype",
+    [
+        ((5, 5), "float64"),
+        ((2, 5, 3), "float64"),
+        ((2, 3, 5), "float64"),
+        ((2, 3, 5), "complex128"),
+    ],
+    ids=["square", "tall", "wide", "wide_complex"],
+)
+def test_svd_of_diag_values(shape, dtype, full_matrices):
+    """U and Vh are unique only up to phases and the basis of the unused columns, so
+    values are compared through the reconstruction and orthogonality."""
+    *batch, m, n = shape
+    k = min(m, n)
+    x = pt.tensor("x", shape=shape, dtype=dtype)
+    u, s, vh = svd(assume(x, diagonal=True), full_matrices=full_matrices)
+    reconstruction = (u[..., :k] * s[..., None, :]) @ vh[..., :k, :]
+
+    rng = np.random.default_rng(0)
+    diag_vals = rng.normal(size=(*batch, k)).astype(dtype)
+    if dtype == "complex128":
+        diag_vals += 1j * rng.normal(size=(*batch, k))
+    diag_vals[..., 0] = 0.0
+    a = np.zeros(shape, dtype=dtype)
+    a[..., range(k), range(k)] = diag_vals
+    result = RewriteTester(
+        [x],
+        [s, reconstruction, u.conj().mT @ u, vh @ vh.conj().mT],
+        include=("canonicalize",),
+    )
+    assert not any(
+        isinstance(getattr(node.op, "core_op", None), SVD)
+        for node in result.rewr_fg.apply_nodes
+    )
+    result.assert_eval(a, atol=1e-12)
+
+
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize("assumption", ["symmetric", "positive_definite"])
+def test_svd_of_symmetric(assumption, compute_uv):
+    x = pt.tensor("x", shape=(3, 4, 4))
+    x_assumed = assume(x, **{assumption: True})
 
     if compute_uv:
-        expected_s = abs_d[idx]
-        expected_u = pt.as_tensor(np.eye(5))[:, idx]
-        sorted_signs = pt.sign(d[idx])
-        expected_vh = alloc_diag(sorted_signs, axis1=-1, axis2=-2)[:, idx]
-        expected = rewrite_graph([expected_u, expected_s, expected_vh], include=passes)
+        u, s, vh = svd(x_assumed)
+        out = [s, (u * s[..., None, :]) @ vh]
+        w, v = eigh(x)
+        abs_w = pt.abs(w)
+        idx = pt.argsort(abs_w, axis=-1)[..., ::-1]
+        column_idx = pt.expand_dims(idx, -2)
+        signs = pt.where(w < 0, -1, 1).astype(w.dtype)
+        expected_s = pt.take_along_axis(abs_w, idx, axis=-1)
+        expected_u = pt.take_along_axis(v, column_idx, axis=-1)
+        expected_vh = pt.take_along_axis(
+            v * pt.expand_dims(signs, -2), column_idx, axis=-1
+        ).mT
+        expected = [expected_s, (expected_u * expected_s[..., None, :]) @ expected_vh]
     else:
-        expected = rewrite_graph([abs_d[idx]], include=passes)
+        out = [svd(x_assumed, compute_uv=False)]
+        expected = [pt.sort(pt.abs(pt.linalg.eigvalsh(x)), axis=-1)[..., ::-1]]
 
-    assert_equal_computations(rewritten, expected)
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=(3, 4, 4))
+    a = a + a.mT
+    if assumption == "positive_definite":
+        a = a @ a.mT + np.eye(4)
+
+    result = RewriteTester([x], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+    result.assert_eval(a)
+
+
+def test_svd_of_rank_deficient_gram_is_nonnegative():
+    """x @ x.T is assumed positive definite but is singular for a tall x, so roundoff
+    can give it tiny negative eigenvalues. Singular values must still be >= 0."""
+    x = pt.dmatrix("x", shape=(6, 2))
+    result = RewriteTester([x], [svd(x @ x.T, compute_uv=False)])
+    [s] = result.rewr_fn(np.random.default_rng(0).normal(size=(6, 2)))
+    assert (s >= 0).all()
+
+
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_svd_of_orthogonal(dtype, compute_uv):
+    x = pt.tensor("x", shape=(3, 4, 4), dtype=dtype)
+    x_orthogonal = assume(x, orthogonal=True)
+
+    if compute_uv:
+        u, s, vh = svd(x_orthogonal)
+        out = [u, s, vh]
+        expected = [
+            x,
+            pt.ones(x.shape[:-1]),
+            pt.broadcast_to(pt.eye(x.shape[-1]), x.shape).astype(dtype),
+        ]
+    else:
+        out = [svd(x_orthogonal, compute_uv=False)]
+        expected = [pt.ones(x.shape[:-1])]
+
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=(3, 4, 4))
+    if dtype == "complex128":
+        a = a + 1j * rng.normal(size=(3, 4, 4))
+    q, _ = np.linalg.qr(a)
+
+    result = RewriteTester([x], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+    if not compute_uv:
+        result.assert_eval(q)
+
+
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_svd_of_orthogonal_product(side, compute_uv):
+    q = pt.dmatrix("q", shape=(4, 4))
+    x = pt.dmatrix("x", shape=(4, 4))
+    q_orth = assume(q, orthogonal=True)
+    y = q_orth @ x if side == "left" else x @ q_orth
+
+    if compute_uv:
+        out = svd(y)
+        U, s, Vh = svd(x)
+        expected = [q @ U, s, Vh] if side == "left" else [U, s, Vh @ q]
+    else:
+        out = [svd(y, compute_uv=False)]
+        expected = [svd(x, compute_uv=False)]
+
+    result = RewriteTester([q, x], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_svd_of_orthogonal_product_broadcasts_batch(dtype):
+    """With a batched Q and an unbatched X, the factors without Q are broadcast."""
+    q = pt.tensor("q", shape=(2, 4, 4), dtype=dtype)
+    x = pt.tensor("x", shape=(4, 3), dtype=dtype)
+    u, s, vh = svd(assume(q, orthogonal=True) @ x, full_matrices=False)
+
+    U, s_x, Vh = svd(pt.expand_dims(x, 0), full_matrices=False)
+    expected = [q @ U, pt.broadcast_to(s_x, (2, 3)), pt.broadcast_to(Vh, (2, 3, 3))]
+
+    passes = ("canonicalize", "ShapeOpt")
+    result = RewriteTester([q, x], [u, s, vh], include=passes)
+    result.assert_graph(*rewrite_graph(expected, include=passes))
+
+    rng = np.random.default_rng(0)
+    q_val = rng.normal(size=(2, 4, 4)).astype(dtype)
+    x_val = rng.normal(size=(4, 3)).astype(dtype)
+    if dtype == "complex128":
+        q_val += 1j * rng.normal(size=(2, 4, 4))
+        x_val += 1j * rng.normal(size=(4, 3))
+    q_val, _ = np.linalg.qr(q_val)
+    result = RewriteTester([q, x], [s, (u * s[..., None, :]) @ vh])
+    result.assert_eval(q_val, x_val)
+
+
+@pytest.mark.parametrize("compute_uv", [False, True], ids=["s_only", "uv"])
+@pytest.mark.parametrize(
+    "make_structured, combine_singular_values",
+    [
+        (pt.linalg.kron, lambda s_a, s_b: pt.outer(s_a, s_b).ravel()),
+        (pt.linalg.block_diag, lambda s_a, s_b: pt.concatenate([s_a, s_b])),
+    ],
+    ids=["kron", "block_diag"],
+)
+def test_svd_of_square_structured(make_structured, combine_singular_values, compute_uv):
+    a = pt.dmatrix("a", shape=(2, 2))
+    b = pt.dmatrix("b", shape=(3, 3))
+
+    if compute_uv:
+        out = svd(make_structured(a, b))
+        (U_a, s_a, Vh_a), (U_b, s_b, Vh_b) = svd(a), svd(b)
+        s_vals = combine_singular_values(s_a, s_b)
+        order = pt.argsort(s_vals, axis=-1)[..., ::-1]
+        expected = [
+            pt.take_along_axis(
+                make_structured(U_a, U_b), pt.expand_dims(order, -2), axis=-1
+            ),
+            pt.take_along_axis(s_vals, order, axis=-1),
+            pt.take_along_axis(
+                make_structured(Vh_a, Vh_b), pt.expand_dims(order, -1), axis=-2
+            ),
+        ]
+    else:
+        out = [svd(make_structured(a, b), compute_uv=False)]
+        s_vals = combine_singular_values(
+            svd(a, compute_uv=False), svd(b, compute_uv=False)
+        )
+        expected = [pt.sort(s_vals)[::-1]]
+
+    result = RewriteTester([a, b], out)
+    result.assert_graph(*rewrite_graph(expected, include=("canonicalize",)))
+
+
+@pytest.mark.parametrize("transposed", [False, True], ids=["", "transposed"])
+@pytest.mark.parametrize(
+    "combine, shapes, full_matrices, dtype",
+    [
+        (pt.linalg.kron, [(2, 2), (3, 3)], False, "float64"),
+        (pt.linalg.kron, [(3, 2), (4, 1)], False, "complex128"),
+        (pt.linalg.kron, [(3, 2), (2, 4)], True, "float64"),
+        (pt.linalg.kron, [(1, 3), (3, 1)], True, "complex128"),
+        (lambda a, b: pt.linalg.kron(a, b)[None], [(2, 3), (2, 2)], True, "float64"),
+        (pt.linalg.block_diag, [(3, 2), (4, 1), (2, 2)], False, "complex128"),
+        (pt.linalg.block_diag, [(3, 2), (1, 4), (2, 2)], True, "float64"),
+        (pt.linalg.block_diag, [(4, 3, 2), (4, 1, 3)], True, "complex128"),
+    ],
+    ids=[
+        "kron_square",
+        "kron_tall_reduced",
+        "kron_mixed",
+        "kron_rank_deficient",
+        "kron_expanded",
+        "block_diag_tall_reduced",
+        "block_diag_mixed",
+        "block_diag_batched",
+    ],
+)
+def test_svd_of_structured_values(combine, shapes, full_matrices, dtype, transposed):
+    """U and Vh are unique only up to phases and the basis of the zero singular values,
+    so values are compared through the reconstruction and orthogonality."""
+    factors = [
+        pt.tensor(f"x{i}", shape=shape, dtype=dtype) for i, shape in enumerate(shapes)
+    ]
+    X = combine(*factors)
+    if transposed:
+        X = X.mT
+    u, s, vh = svd(X, full_matrices=full_matrices)
+    k = min(X.type.shape[-2:])
+    reconstruction = (u[..., :k] * s[..., None, :]) @ vh[..., :k, :]
+    outs = [
+        s,
+        svd(X, compute_uv=False),
+        reconstruction,
+        u.conj().mT @ u,
+        vh @ vh.conj().mT,
+    ]
+
+    result = RewriteTester(factors, outs)
+    svd_inputs = sorted(
+        node.inputs[0].name
+        for node in result.rewr_fg.apply_nodes
+        if isinstance(getattr(node.op, "core_op", node.op), SVD)
+    )
+    assert svd_inputs == sorted(factor.name for factor in factors)
+
+    rng = np.random.default_rng(0)
+    values = [rng.normal(size=shape).astype(dtype) for shape in shapes]
+    if dtype == "complex128":
+        for value in values:
+            value += 1j * rng.normal(size=value.shape)
+    result.assert_eval(*values, atol=1e-10)
+
+
+@pytest.mark.parametrize("combine", [pt.linalg.kron, pt.linalg.block_diag])
+def test_reduced_svd_of_mixed_orientation_structured_is_not_rewritten(combine):
+    """A reduced svd needs full factor bases when tall and wide factors mix, which can
+    be far larger than the requested output, so the rewrite does not apply."""
+    a = pt.dmatrix("a", shape=(300, 2))
+    b = pt.dmatrix("b", shape=(2, 4))
+    out = svd(combine(a, b), full_matrices=False)
+
+    result = RewriteTester([a, b], out)
+    result.assert_graph(*svd(combine(a, b), full_matrices=False))
+
+
+def test_svd_of_symmetric_skips_complex():
+    x = pt.tensor("x", shape=(4, 4), dtype="complex128")
+    s = svd(assume(x, symmetric=True), compute_uv=False)
+
+    result = RewriteTester([x], [s])
+    result.assert_graph(svd(x, compute_uv=False))
 
 
 @pytest.mark.parametrize(

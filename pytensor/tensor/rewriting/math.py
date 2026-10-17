@@ -110,10 +110,12 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
+from pytensor.tensor.sort import SortOp
 from pytensor.tensor.subtensor import (
     Subtensor,
     _is_provably_non_negative,
     _is_provably_positive,
+    get_constant_idx,
 )
 from pytensor.tensor.type import (
     complex_dtypes,
@@ -2242,6 +2244,69 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
 
     assert len(newaxis) == len(inner_axis) + len(outer_axis)
     return [outer_op.clone(axis=sorted(newaxis), **clone_kwargs)(x)]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([CAReduce])
+def local_reduce_of_permutation(fgraph, node):
+    """reduce(permute(x)) -> reduce(x) when x is only permuted along reduced axes.
+
+    Every ``CAReduce`` is commutative, so a sort along a reduced axis or a reversal of
+    reduced axes cannot change its result. The permutation may sit under ``Elemwise``
+    ops whose other inputs are broadcast along the reduced axes, which commute with it.
+    """
+    [x] = node.inputs
+    axes = set(range(x.type.ndim)) if node.op.axis is None else set(node.op.axis)
+
+    # Walk down from x, recording the commuting Elemwise nodes passed on the way. An
+    # Elemwise with other clients would have to be computed twice, so it ends the walk.
+    elemwise_path = []
+    var = x
+    unpermuted = None
+    while True:
+        match var.owner_op_and_inputs:
+            case (SortOp(axis=axis), inner) if axis in axes:
+                var = unpermuted = inner
+                n_rebuilt = len(elemwise_path)
+            case (Subtensor(idx_list=idx_list), inner, *_) if all(
+                isinstance(index, slice)
+                and index.start is None
+                and index.stop is None
+                and (index.step is None or (index.step == -1 and axis in axes))
+                for axis, index in enumerate(
+                    get_constant_idx(idx_list, var.owner.inputs, allow_partial=True)
+                )
+            ):
+                var = unpermuted = inner
+                n_rebuilt = len(elemwise_path)
+            case (Elemwise(), *inputs) if (
+                len(var.owner.outputs) == 1 and len(fgraph.clients[var]) == 1
+            ):
+                varying = [
+                    i
+                    for i, inp in enumerate(inputs)
+                    if not all(inp.type.broadcastable[axis] for axis in axes)
+                ]
+                if len(varying) != 1:
+                    break
+                elemwise_path.append((var.owner, varying[0]))
+                var = inputs[varying[0]]
+            case _:
+                break
+
+    if unpermuted is None:
+        return None
+
+    new_x = unpermuted
+    for elemwise_node, permuted_input in reversed(elemwise_path[:n_rebuilt]):
+        new_inputs = list(elemwise_node.inputs)
+        new_inputs[permuted_input] = new_x
+        new_x = elemwise_node.op(*new_inputs)
+
+    new_out = node.op(new_x)
+    copy_stack_trace(node.outputs, new_out)
+    return [new_out]
 
 
 @register_canonicalize

@@ -117,7 +117,7 @@ def assume(
     positive_definite : bool, optional
         Assert that *x* is (or is not) positive-definite.
     orthogonal : bool, optional
-        Assert that *x* is (or is not) orthogonal.
+        Assert that *x* is (or is not) orthogonal. For complex *x* this means unitary.
     selection : bool, optional
         Assert that *x* is (or is not) a selection matrix
     permutation : bool, optional

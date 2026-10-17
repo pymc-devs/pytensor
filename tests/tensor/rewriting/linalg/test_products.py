@@ -14,7 +14,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.math import Dot
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_nested_blockdiag_fusion():
@@ -361,6 +361,19 @@ def test_orthogonal_dot_transpose_to_eye():
     expected_batch = pt.alloc(np.eye(n, dtype=config.floatX), b64, n64, n64)
 
     assert_equal_computations([rewritten_batch], [expected_batch])
+
+
+def test_unitary_dot_conjugate_transpose_to_eye():
+    """For complex X, only the conjugate transpose gives the identity."""
+    n = 5
+    x = pt.matrix("x", shape=(n, n), dtype="complex128")
+    x_orth = assume(x, orthogonal=True)
+    outs = [x_orth @ x_orth.conj().mT, x_orth.mT.conj() @ x_orth, x_orth @ x_orth.mT]
+
+    eye = pt.eye(n, dtype="complex128")
+    passes = ("canonicalize", "ShapeOpt")
+    result = RewriteTester([x], outs, include=passes)
+    result.assert_graph(*rewrite_graph([eye, eye, x @ x.mT], include=passes))
 
 
 class TestSelectionDotToIndexing:
