@@ -24,12 +24,13 @@ from pytensor.sparse import (
 @register_funcify_default_op_cache_key(SpSum)
 def numba_funcify_SpSum(op, node, **kwargs):
     axis = op.axis
+    cache_version = 2
 
     @numba_basic.numba_njit
     def perform(x):
         return x.sum(axis)
 
-    return perform
+    return perform, cache_version
 
 
 @register_funcify_default_op_cache_key(SparseDenseMultiply)
