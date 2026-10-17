@@ -8,6 +8,7 @@ import pytensor.tensor as pt
 import pytensor.tensor.rewriting.linalg.reassociate_matmul as reassociate
 from pytensor import function
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.tensor.blas import Dot22, Dot22Scalar, Gemm, Gemv
 from pytensor.tensor.rewriting.linalg.reassociate_matmul import (
     CostExpr,
     _provably_cheaper,
@@ -358,25 +359,25 @@ class TestLifting:
         result.assert_graph(*_canonical(*outs))
 
 
-def _matmul_output_shapes(fn):
-    return {
-        node.outputs[0].type.shape
+def _blas_nodes(fn):
+    return sorted(
+        (type(node.op).__name__, node.outputs[0].type.shape)
         for node in fn.maker.fgraph.apply_nodes
-        if "Dot" in type(node.op).__name__ or "Gem" in type(node.op).__name__
-    }
+        if isinstance(node.op, Dot22 | Dot22Scalar | Gemm | Gemv)
+    )
 
 
 class TestBackends:
     @pytest.mark.parametrize(
-        "build",
+        "build, outer_op",
         [
-            lambda A, B, C, D: A @ B @ C,
-            lambda A, B, C, D: A @ B @ C + D,
-            lambda A, B, C, D: 2 * (A @ B @ C),
+            (lambda A, B, C, D: A @ B @ C, "Dot22"),
+            (lambda A, B, C, D: A @ B @ C + D, "Gemm"),
+            (lambda A, B, C, D: 2 * (A @ B @ C), "Dot22Scalar"),
         ],
         ids=["dot22", "gemm", "dot22scalar"],
     )
-    def test_cvm_blas_chain(self, build):
+    def test_cvm_blas_chain(self, build, outer_op):
         inputs = [
             pt.matrix("A", shape=(100, 2)),
             pt.matrix("B", shape=(2, 100)),
@@ -385,7 +386,7 @@ class TestBackends:
         ]
 
         fn = function(inputs, build(*inputs), mode="CVM", on_unused_input="ignore")
-        assert (2, 100) in _matmul_output_shapes(fn)
+        assert _blas_nodes(fn) == [("Dot22", (2, 100)), (outer_op, (100, 100))]
 
     def test_cvm_gemv_chain(self):
         C = pt.matrix("C", shape=(100, 100))
@@ -393,4 +394,4 @@ class TestBackends:
         y = pt.vector("y", shape=(100,))
 
         fn = function([C, D, y], C @ D @ y, mode="CVM")
-        assert (100, 100) not in _matmul_output_shapes(fn)
+        assert _blas_nodes(fn) == [("CGemv", (100,)), ("CGemv", (100,))]
