@@ -55,7 +55,7 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
             z_data *= y
             return z
 
-        return sparse_multiply_scalar
+        return sparse_multiply_scalar, 2
 
     elif y.ndim == 1:
 
@@ -68,8 +68,8 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
                 z = x.astype(out_dtype)
 
             M, N = x.shape
-            indices = x.indices
-            indptr = x.indptr
+            indices = x.indices.view(np.uint32)
+            indptr = x.indptr.view(np.uint32)
             z_data = z.data
             if format == "csc":
                 for j in range(0, N):
@@ -85,7 +85,7 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
 
             return z
 
-        return sparse_dense_multiply
+        return sparse_dense_multiply, 2
 
     else:  # y.ndim == 2
 
@@ -98,8 +98,8 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
                 z = x.astype(out_dtype)
 
             M, N = x.shape
-            indices = x.indices
-            indptr = x.indptr
+            indices = x.indices.view(np.uint32)
+            indptr = x.indptr.view(np.uint32)
             z_data = z.data
             if format == "csc":
                 for j in range(0, N):
@@ -116,7 +116,7 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
 
             return z
 
-        return sparse_dense_multiply
+        return sparse_dense_multiply, 2
 
 
 @register_funcify_and_cache_key(Dot)
