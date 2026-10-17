@@ -551,6 +551,8 @@ def overload_sum(matrix, axis):
 
         return sum_scalar
 
+    out_type = np.dtype(str(matrix.data.dtype)).type
+
     match matrix:
         case CSRMatrixType():
 
@@ -567,9 +569,12 @@ def overload_sum(matrix, axis):
                         col_sums[indices[i]] += data[i]
                     return col_sums
                 else:
-                    row_sums = np.zeros(n_row, dtype=data.dtype)
+                    row_sums = np.empty(n_row, dtype=data.dtype)
                     for i in range(n_row):
-                        row_sums[i] = np.sum(data[indptr[i] : indptr[i + 1]])
+                        acc = out_type(0)
+                        for k in range(indptr[i], indptr[i + 1]):
+                            acc += data[k]
+                        row_sums[i] = acc
                     return row_sums
 
             return sum_csr
@@ -583,9 +588,12 @@ def overload_sum(matrix, axis):
                 n_col = matrix.shape[1]
 
                 if axis == 0:
-                    col_sums = np.zeros(n_col, dtype=data.dtype)
+                    col_sums = np.empty(n_col, dtype=data.dtype)
                     for j in range(n_col):
-                        col_sums[j] = np.sum(data[indptr[j] : indptr[j + 1]])
+                        acc = out_type(0)
+                        for k in range(indptr[j], indptr[j + 1]):
+                            acc += data[k]
+                        col_sums[j] = acc
                     return col_sums
                 else:
                     row_sums = np.zeros(n_row, dtype=data.dtype)
