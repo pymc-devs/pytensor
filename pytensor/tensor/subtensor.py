@@ -74,18 +74,31 @@ T = TypeVar("T")
 def flatten_index_variables[T](
     idx_vars: Sequence[T | None | slice],
 ) -> tuple[list[int | slice], list[T]]:
+
+    def is_reverse_step(entry) -> bool:
+        try:
+            value = get_scalar_constant_value(entry, only_process_constants=True)
+        except NotScalarConstantError:
+            return False
+        return bool(value.dtype.kind == "i" and value == -1)
+
     counter = 0
     idx_list: list[int | slice] = []
     flat_vars = []
+
     for idx_var in idx_vars:
         if isinstance(idx_var, slice):
-            slice_idx_list: list[None | int] = []
-            for arg_entry in (idx_var.start, idx_var.stop, idx_var.step):
+            slice_idx_list: list[int | None] = []
+            for slot, arg_entry in enumerate(
+                (idx_var.start, idx_var.stop, idx_var.step)
+            ):
                 if arg_entry is None or (
                     isinstance(arg_entry, Variable)
                     and isinstance(arg_entry.type, NoneTypeT)
                 ):
                     slice_idx_list.append(None)
+                elif slot == 2 and is_reverse_step(arg_entry):
+                    slice_idx_list.append(-1)
                 else:
                     flat_vars.append(arg_entry)
                     slice_idx_list.append(counter)
@@ -111,9 +124,9 @@ def unflatten_index_variables[T](
             start, stop, step = idx_entry.start, idx_entry.stop, idx_entry.step
             indices.append(
                 slice(
-                    None if idx_entry.start is None else flat_indices[start],
-                    None if idx_entry.stop is None else flat_indices[stop],
-                    None if idx_entry.step is None else flat_indices[step],
+                    None if start is None else flat_indices[start],
+                    None if stop is None else flat_indices[stop],
+                    step if step in (None, -1) else flat_indices[step],
                 )
             )
         else:
@@ -875,7 +888,11 @@ def slice_static_length(slc, dim_length):
 
 
 class BaseSubtensor:
-    """Base class for Subtensor operations that handles idx_list."""
+    """Base class for Subtensor operations that handles idx_list.
+
+    Non-negative integers in ``idx_list`` are positions into the flat index inputs. A
+    constant ``-1`` slice step is stored directly as the literal ``-1``.
+    """
 
     def __init__(self, idx_list: Sequence[int | slice]):
         index_counter = -1
@@ -887,10 +904,11 @@ class BaseSubtensor:
                     )
                 index_counter = idx_entry
             elif isinstance(idx_entry, slice):
+                step = idx_entry.step
                 for slice_idx_entry in (
                     idx_entry.start,
                     idx_entry.stop,
-                    idx_entry.step,
+                    None if step == -1 else step,
                 ):
                     if slice_idx_entry is not None:
                         if not isinstance(slice_idx_entry, int):
@@ -983,11 +1001,7 @@ class Subtensor(BaseSubtensor, COp):
                     and (idx.step is None or _is_constant(idx.step, 1))
                 ):
                     outshp.append(xl)
-                elif (
-                    (idx.start is None)
-                    and (idx.stop is None)
-                    and _is_constant(idx.step, -1)
-                ):
+                elif idx == slice(None, None, -1):
                     # Reverse slice
                     outshp.append(xl)
                 else:
@@ -1032,7 +1046,7 @@ class Subtensor(BaseSubtensor, COp):
                 (
                     "start" if entry.start is not None else "",
                     "stop" if entry.stop is not None else "",
-                    "step",
+                    "-1" if entry.step == -1 else "step",
                 )
             )
         if entry.stop is not None:
@@ -1120,7 +1134,10 @@ class Subtensor(BaseSubtensor, COp):
             return pos[1]
 
         def init_entry(entry, depth=0):
-            if isinstance(entry, int):
+            if depth > 0 and entry == -1:
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = -1;")
+                inc_spec_pos(1)
+            elif isinstance(entry, int):
                 init_cmds.append(
                     f"subtensor_spec[{spec_pos()}] = {inputs[input_pos()]};"
                 )
@@ -1313,7 +1330,7 @@ class Subtensor(BaseSubtensor, COp):
 
     @staticmethod
     def helper_c_code_cache_version():
-        return (9,)
+        return (10,)
 
     def c_code(self, node, name, inputs, outputs, sub):  # DEBUG
         if not isinstance(node.inputs[0].type, TensorType):
@@ -1451,6 +1468,8 @@ class SubtensorPrinter(Printer):
             """Process a slice component, returning string representation."""
             if comp is None:
                 return ""
+            elif comp == -1:
+                return "-1"
             elif isinstance(comp, int):
                 with set_precedence(pstate):
                     return pstate.pprinter.process(inputs.pop(0))

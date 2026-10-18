@@ -553,6 +553,8 @@ def local_useless_slice(fgraph, node):
 
         if step is None:
             positive_step = True
+        elif isinstance(step, int):
+            positive_step = step > 0
         elif isinstance(step, Constant):
             step_value = step.data
             positive_step = step.data > 0
@@ -1102,22 +1104,8 @@ def local_useless_inc_subtensor(fgraph, node):
 
     x, y, *index_vars = node.inputs
 
-    indices = indices_from_subtensor(index_vars, node.op.idx_list)
-
-    # Check that all indices are full slices or full reversals
-    if not all(
-        isinstance(e, slice)
-        and e.start is None
-        and e.stop is None
-        and (
-            e.step is None
-            or get_scalar_constant_value(
-                e.step, only_process_constants=True, raise_not_constant=False
-            )
-            == -1
-        )
-        for e in indices
-    ):
+    full_slices = (slice(None), slice(None, None, -1))
+    if not all(entry in full_slices for entry in node.op.idx_list):
         return
 
     is_inc = not node.op.set_instead_of_inc
@@ -2800,8 +2788,8 @@ def local_blockwise_inc_subtensor(fgraph, node):
             for i, slice_idx_entry in enumerate(
                 (idx_entry.start, idx_entry.stop, idx_entry.step)
             ):
-                if slice_idx_entry is None:
-                    continue
+                if slice_idx_entry in (None, -1):
+                    new_entries[i] = slice_idx_entry
                 else:
                     new_entries[i] = new_entry = idxs[slice_idx_entry].squeeze()
                     if new_entry.ndim > 0:

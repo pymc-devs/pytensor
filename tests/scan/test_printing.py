@@ -532,76 +532,74 @@ def test_debugprint_mitmot():
      │  │  │  └─ 0 [id V]
      │  │  └─ 1 [id W]
      │  ├─ Subtensor{:stop} [id X] (outer_in_seqs-0)
-     │  │  ├─ Subtensor{::step} [id Y]
-     │  │  │  ├─ Subtensor{:stop} [id Z]
-     │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
-     │  │  │  │  │  └─ ···
-     │  │  │  │  └─ -1 [id BA]
-     │  │  │  └─ -1 [id BB]
-     │  │  └─ ScalarFromTensor [id BC]
+     │  │  ├─ Subtensor{::-1} [id Y]
+     │  │  │  └─ Subtensor{:stop} [id Z]
+     │  │  │     ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
+     │  │  │     │  └─ ···
+     │  │  │     └─ -1 [id BA]
+     │  │  └─ ScalarFromTensor [id BB]
      │  │     └─ Sub [id C]
      │  │        └─ ···
-     │  ├─ Subtensor{::step} [id BD] (outer_in_mit_mot-0)
-     │  │  ├─ IncSubtensor{start:} [id BE]
-     │  │  │  ├─ Second [id BF]
-     │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
-     │  │  │  │  │  └─ ···
-     │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BG]
-     │  │  │  │     └─ 0.0 [id BH]
-     │  │  │  ├─ IncSubtensor{i} [id BI]
-     │  │  │  │  ├─ Second [id BJ]
-     │  │  │  │  │  ├─ Subtensor{start:} [id BK]
-     │  │  │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
-     │  │  │  │  │  │  │  └─ ···
-     │  │  │  │  │  │  └─ 1 [id BL]
-     │  │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BM]
-     │  │  │  │  │     └─ 0.0 [id BN]
-     │  │  │  │  ├─ Second [id BO]
-     │  │  │  │  │  ├─ Subtensor{i} [id BP]
-     │  │  │  │  │  │  ├─ Subtensor{start:} [id BK]
-     │  │  │  │  │  │  │  └─ ···
-     │  │  │  │  │  │  └─ -1 [id BQ]
-     │  │  │  │  │  └─ ExpandDims{axis=0} [id BR]
-     │  │  │  │  │     └─ Second [id BS]
-     │  │  │  │  │        ├─ Sum{axes=None} [id BT]
-     │  │  │  │  │        │  └─ Subtensor{i} [id BP]
-     │  │  │  │  │        │     └─ ···
-     │  │  │  │  │        └─ 1.0 [id BU]
-     │  │  │  │  └─ -1 [id BQ]
-     │  │  │  └─ 1 [id BL]
-     │  │  └─ -1 [id BV]
-     │  ├─ Alloc [id BW] (outer_in_sit_sot-0)
-     │  │  ├─ 0.0 [id BX]
-     │  │  ├─ Add [id BY]
+     │  ├─ Subtensor{::-1} [id BC] (outer_in_mit_mot-0)
+     │  │  └─ IncSubtensor{start:} [id BD]
+     │  │     ├─ Second [id BE]
+     │  │     │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
+     │  │     │  │  └─ ···
+     │  │     │  └─ ExpandDims{axes=(0, 1)} [id BF]
+     │  │     │     └─ 0.0 [id BG]
+     │  │     ├─ IncSubtensor{i} [id BH]
+     │  │     │  ├─ Second [id BI]
+     │  │     │  │  ├─ Subtensor{start:} [id BJ]
+     │  │     │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
+     │  │     │  │  │  │  └─ ···
+     │  │     │  │  │  └─ 1 [id BK]
+     │  │     │  │  └─ ExpandDims{axes=(0, 1)} [id BL]
+     │  │     │  │     └─ 0.0 [id BM]
+     │  │     │  ├─ Second [id BN]
+     │  │     │  │  ├─ Subtensor{i} [id BO]
+     │  │     │  │  │  ├─ Subtensor{start:} [id BJ]
+     │  │     │  │  │  │  └─ ···
+     │  │     │  │  │  └─ -1 [id BP]
+     │  │     │  │  └─ ExpandDims{axis=0} [id BQ]
+     │  │     │  │     └─ Second [id BR]
+     │  │     │  │        ├─ Sum{axes=None} [id BS]
+     │  │     │  │        │  └─ Subtensor{i} [id BO]
+     │  │     │  │        │     └─ ···
+     │  │     │  │        └─ 1.0 [id BT]
+     │  │     │  └─ -1 [id BP]
+     │  │     └─ 1 [id BK]
+     │  ├─ Alloc [id BU] (outer_in_sit_sot-0)
+     │  │  ├─ 0.0 [id BV]
+     │  │  ├─ Add [id BW]
      │  │  │  ├─ Sub [id C]
      │  │  │  │  └─ ···
-     │  │  │  └─ 1 [id BZ]
-     │  │  └─ Subtensor{i} [id CA]
-     │  │     ├─ Shape [id CB]
+     │  │  │  └─ 1 [id BX]
+     │  │  └─ Subtensor{i} [id BY]
+     │  │     ├─ Shape [id BZ]
      │  │     │  └─ A [id O]
-     │  │     └─ 0 [id CC]
+     │  │     └─ 0 [id CA]
      │  └─ A [id O] (outer_in_non_seqs-0)
-     └─ -1 [id CD]
+     └─ -1 [id CB]
 
     Inner graphs:
 
     Scan{grad_of_scan_fn, while_loop=False, inplace=none} [id B]
-     ← Add [id CE] (inner_out_mit_mot-0-0)
-        ├─ Mul [id CF]
-        │  ├─ i1 [id CG] -> [id BD] (inner_in_mit_mot-0-0)
-        │  └─ i4 [id CH] -> [id O] (inner_in_non_seqs-0)
-        └─ i2 [id CI] -> [id BD] (inner_in_mit_mot-0-1)
-     ← Add [id CJ] (inner_out_sit_sot-0)
-        ├─ Mul [id CK]
-        │  ├─ i1 [id CG] -> [id BD] (inner_in_mit_mot-0-0)
-        │  └─ i0 [id CL] -> [id X] (inner_in_seqs-0)
-        └─ i3 [id CM] -> [id BW] (inner_in_sit_sot-0)
+     ← Add [id CC] (inner_out_mit_mot-0-0)
+        ├─ Mul [id CD]
+        │  ├─ i1 [id CE] -> [id BC] (inner_in_mit_mot-0-0)
+        │  └─ i4 [id CF] -> [id O] (inner_in_non_seqs-0)
+        └─ i2 [id CG] -> [id BC] (inner_in_mit_mot-0-1)
+     ← Add [id CH] (inner_out_sit_sot-0)
+        ├─ Mul [id CI]
+        │  ├─ i1 [id CE] -> [id BC] (inner_in_mit_mot-0-0)
+        │  └─ i0 [id CJ] -> [id X] (inner_in_seqs-0)
+        └─ i3 [id CK] -> [id BU] (inner_in_sit_sot-0)
 
     Scan{scan_fn, while_loop=False, inplace=none} [id F]
-     ← Mul [id CN] (inner_out_sit_sot-0)
-        ├─ i0 [id CL] -> [id H] (inner_in_sit_sot-0)
-        └─ i1 [id CG] -> [id O] (inner_in_non_seqs-0)
-    """
+     ← Mul [id CL] (inner_out_sit_sot-0)
+        ├─ i0 [id CJ] -> [id H] (inner_in_sit_sot-0)
+        └─ i1 [id CE] -> [id O] (inner_in_non_seqs-0)
+"""
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()

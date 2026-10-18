@@ -2727,7 +2727,7 @@ class TestBlockwiseIncSubtensor:
         core_y_shape = () if core_y_implicitly_batched else (3,)
         core_x = tensor("x", shape=(6, 6))
         core_y = tensor("y", shape=core_y_shape, dtype=int)
-        core_idxs = (-1, slice(None, 3)) if basic_idx else (-1, [0, 2, 4])
+        core_idxs = (-1, slice(4, 1, -1)) if basic_idx else (-1, [0, 2, 4])
         if set_instead_of_inc:
             core_graph = set_subtensor(core_x[core_idxs], core_y)
         else:
