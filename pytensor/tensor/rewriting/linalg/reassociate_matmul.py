@@ -290,7 +290,8 @@ def _solve_chain(shapes: list[tuple[int, ...]]) -> tuple[int, dict]:
                 lc, _, ls = dp[(i, k)]
                 rc, _, rs = dp[(k + 1, j)]
                 result = cast(tuple[int, ...], _matmul_result_shape(ls, rs))
-                total = lc + rc + math.prod((*result[:-2], ls[-2], ls[-1], rs[-1]))
+                flops = FLOPS_PER_MULTIPLY_ADD * math.prod(result) * ls[-1]
+                total = lc + rc + flops
                 if best is None or total < best[0]:
                     best = (total, k, result)
 
