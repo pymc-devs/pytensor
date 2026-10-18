@@ -55,6 +55,10 @@ from pytensor.tensor.math import (
     or_,
     variadic_add,
 )
+from pytensor.tensor.predicate import (
+    is_provably_non_negative,
+    is_provably_positive,
+)
 from pytensor.tensor.rewriting.basic import (
     get_simplified_shape,
     register_canonicalize,
@@ -74,8 +78,6 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     IncSubtensor,
     Subtensor,
-    _is_provably_non_negative,
-    _is_provably_positive,
     _non_consecutive_adv_indexing,
     as_index_literal,
     flatten_index_variables,
@@ -157,19 +159,19 @@ def _arange_provably_unique(start, stop, step) -> bool:
 
     # Both endpoints non-negative -> every entry lies between them -> all >= 0,
     # whatever the step direction (covers symbolic ``arange(x.shape[0])``).
-    if _is_provably_non_negative(start) and _is_provably_non_negative(stop):
+    if is_provably_non_negative(start) and is_provably_non_negative(stop):
         return True
 
     # With a known direction only one endpoint binds each sign. Ascending entries
     # span ``[start, stop)`` (min is ``start``, max ``< stop``); descending entries
     # span ``(stop, start]`` (max is ``start``, min ``> stop``).
-    if _is_provably_positive(step):  # ascending
-        if _is_provably_non_negative(start):  # all >= 0
+    if is_provably_positive(step):  # ascending
+        if is_provably_non_negative(start):  # all >= 0
             return True
         if stop_c is not None and stop_c <= 0:  # all <= -1
             return True
     elif step_c is not None and step_c < 0:  # descending
-        if _is_provably_non_negative(stop):  # all >= 0  (e.g. arange(k, 5, -1))
+        if is_provably_non_negative(stop):  # all >= 0  (e.g. arange(k, 5, -1))
             return True
         if start_c is not None and start_c < 0:  # all <= -1  (e.g. arange(-1, k, -1))
             return True
@@ -837,7 +839,7 @@ def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
     def _eager_lt_0(x):
         """Return ``True``/``False`` (Python bool) when the sign of *x* is
         known, otherwise return the ``lt(x, 0)`` graph node."""
-        if _is_provably_non_negative(x):
+        if is_provably_non_negative(x):
             return False
         if isinstance(x, Constant):
             return int(x.data) < 0
@@ -855,9 +857,9 @@ def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
     def _eager_minimum(a, b):
         if a is b:
             return a
-        if _eager_lt_0(a) is True and _is_provably_non_negative(b):
+        if _eager_lt_0(a) is True and is_provably_non_negative(b):
             return a
-        if _eager_lt_0(b) is True and _is_provably_non_negative(a):
+        if _eager_lt_0(b) is True and is_provably_non_negative(a):
             return b
         return minimum(a, b)
 
@@ -1470,9 +1472,9 @@ def _arange_index_to_slice(idx):
     if isinstance(arange_stop, TensorVariable) and arange_stop.type.dtype != "int64":
         arange_stop = arange_stop.astype("int64")
     offset = _eager_scalar(offset)
-    if not _is_provably_non_negative(offset):
+    if not is_provably_non_negative(offset):
         return None
-    if not _is_provably_non_negative(arange_stop):
+    if not is_provably_non_negative(arange_stop):
         return None
     stop = eager_add_zero(arange_stop, offset)
     return slice(offset, stop)
@@ -2097,7 +2099,7 @@ def _slice_to_arange(sl, dim_length):
             return None
     if sl.stop is None:
         return arange(dim_length)
-    if not _is_provably_non_negative(sl.stop):
+    if not is_provably_non_negative(sl.stop):
         return None
     return arange(minimum(sl.stop, dim_length))
 

@@ -23,7 +23,8 @@ from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
 )
 from pytensor.tensor.math import Dot
-from pytensor.tensor.subtensor import Subtensor, _is_provably_positive
+from pytensor.tensor.predicate import is_provably_positive
+from pytensor.tensor.subtensor import Subtensor
 
 
 register_assumption(POSITIVE_DEFINITE, Eye)(eye_identity_rule)
@@ -38,7 +39,7 @@ def _alloc_diag(key, op, feature, fgraph, node, input_states):
         return [FactState.FALSE]
 
     [diag_values] = node.inputs
-    return true_if(_is_provably_positive(diag_values))
+    return true_if(is_provably_positive(diag_values))
 
 
 register_assumption(POSITIVE_DEFINITE, BlockDiagonal)(all_inputs_have_key)
@@ -78,7 +79,7 @@ def _elemwise(key, op, feature, fgraph, node, input_states):
             # Scaling a PD matrix by a positive scalar keeps it PD. The factor
             # must be constant across the matrix axes (both broadcastable);
             # per-batch variation is fine since every batch slice stays PD.
-            if not (all(inp.type.broadcastable[-2:]) and _is_provably_positive(inp)):
+            if not (all(inp.type.broadcastable[-2:]) and is_provably_positive(inp)):
                 continue
             other_inputs = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
             if other_inputs and all(
