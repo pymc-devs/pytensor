@@ -1,11 +1,20 @@
+from collections.abc import Sequence
+from functools import singledispatch
+from weakref import WeakKeyDictionary
+
+import numpy as np
+
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.graph.cost import Cost, DimEntry, op_cost
+from pytensor.graph.cost import Bound, Cost, CostExpr, DimEntry, op_cost
 from pytensor.graph.traversal import walk_toposort
 from pytensor.graph.type import HasShape
+from pytensor.scalar.basic import Add, Composite, Mul, ScalarOp
 from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
 )
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
@@ -83,4 +92,87 @@ def node_cost(node: Apply, shape_feature: ShapeFeature, symbols: ShapeSymbols) -
         node,
         [dims_of(inp, shape_feature, symbols) for inp in node.inputs],
         [dims_of(out, shape_feature, symbols) for out in node.outputs],
+    )
+
+
+def _does_float_work(node: Apply) -> bool:
+    """Whether `node` reads or writes a float or complex value, and so costs FLOPs."""
+    return any(
+        np.dtype(var.type.dtype).kind in "fc"
+        for var in (*node.inputs, *node.outputs)
+        if hasattr(var.type, "dtype")
+    )
+
+
+def _bytes_read_and_written(
+    node: Apply,
+    input_dims: Sequence[tuple[DimEntry, ...]],
+    output_dims: Sequence[tuple[DimEntry, ...]],
+) -> CostExpr:
+    """Each input position counts once, so an input passed twice is read twice."""
+    return CostExpr.sum(
+        CostExpr.from_dim_product([np.dtype(var.type.dtype).itemsize, *dims])
+        for var, dims in zip(
+            (*node.inputs, *node.outputs), (*input_dims, *output_dims), strict=True
+        )
+        if hasattr(var.type, "dtype")
+    )
+
+
+@singledispatch
+def scalar_flops(scalar_op: ScalarOp, n_inputs: int) -> int:
+    """FLOPs per element of `scalar_op` applied to `n_inputs` inputs.
+
+    One per operation unless a rule says otherwise. The weights are a convention, not a
+    measurement of any backend. Callers charge them only for operations that read or
+    write a float or complex value.
+    """
+    return 1
+
+
+@scalar_flops.register(Add)
+@scalar_flops.register(Mul)
+def scalar_flops_variadic(scalar_op: ScalarOp, n_inputs: int) -> int:
+    return max(1, n_inputs - 1)
+
+
+# A Composite's inner graph never changes, so its count is computed once. A
+# scalar_flops rule registered after a Composite was first costed does not reach it.
+_COMPOSITE_FLOPS: WeakKeyDictionary[Composite, int] = WeakKeyDictionary()
+
+
+@scalar_flops.register(Composite)
+def scalar_flops_Composite(scalar_op: Composite, n_inputs: int) -> int:
+    flops = _COMPOSITE_FLOPS.get(scalar_op)
+    if flops is None:
+        flops = _COMPOSITE_FLOPS[scalar_op] = sum(
+            scalar_flops(node.op, len(node.inputs))
+            for node in scalar_op.fgraph.apply_nodes
+            if _does_float_work(node)
+        )
+    return flops
+
+
+@op_cost.register(Elemwise)
+def op_cost_Elemwise(op: Elemwise, node: Apply, input_dims, output_dims) -> Cost:
+    flops = CostExpr.zero()
+    if _does_float_work(node):
+        flops = CostExpr.from_dim_product(output_dims[0]) * scalar_flops(
+            op.scalar_op, len(node.inputs)
+        )
+    return Cost(
+        Bound.exact(flops),
+        Bound.exact(_bytes_read_and_written(node, input_dims, output_dims)),
+    )
+
+
+@op_cost.register(Dot)
+def op_cost_Dot(op: Dot, node: Apply, input_dims, output_dims) -> Cost:
+    """Two FLOPs per multiply-add: ``2 * m * n * p`` for ``(m, p) @ (p, n)``."""
+    flops = CostExpr.zero()
+    if _does_float_work(node):
+        flops = CostExpr.from_dim_product([2, *output_dims[0], input_dims[0][-1]])
+    return Cost(
+        Bound.exact(flops),
+        Bound.exact(_bytes_read_and_written(node, input_dims, output_dims)),
     )
