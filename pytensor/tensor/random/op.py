@@ -7,7 +7,7 @@ import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable, equal_computations
+from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
@@ -26,7 +26,8 @@ from pytensor.tensor.random.utils import (
     explicit_expand_dims,
     normalize_size_param,
 )
-from pytensor.tensor.shape import shape_tuple
+from pytensor.tensor.shape import Shape, Shape_i, shape_tuple
+from pytensor.tensor.shape import shape as tensor_shape
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
@@ -508,6 +509,53 @@ class DefaultGeneratorMakerOp(AbstractRNGConstructor):
 default_rng = DefaultGeneratorMakerOp()
 
 
+def _size_depends_on_values(size: Variable) -> bool:
+    # Shape ops stop the walk, so a shape of a batched array is not a value.
+    # A free input is the batched value itself. Those entries can differ, and
+    # a rectangular draw has no single size.
+    seen: set[Variable] = set()
+    pending = [size]
+    while pending:
+        var = pending.pop()
+        if var in seen:
+            continue
+        seen.add(var)
+        owner = var.owner
+        if owner is None:
+            if isinstance(var, Constant):
+                continue
+            return True
+        if isinstance(owner.op, (Shape, Shape_i)):
+            continue
+        pending.extend(owner.inputs)
+    return False
+
+
+def _shape_vector_items(shape_vec: Variable) -> tuple[Variable, ...]:
+    length = get_vector_length(shape_vec)
+    return tuple(shape_vec[i] for i in range(length))
+
+
+def _broadcast_shape_vectors(*shape_vectors: Variable) -> Variable | None:
+    from pytensor.tensor.basic import stack
+    from pytensor.tensor.extra_ops import broadcast_shape
+
+    nonempty = [
+        items for items in (_shape_vector_items(v) for v in shape_vectors) if items
+    ]
+    if not nonempty:
+        return None
+    if len(nonempty) == 1:
+        return stack(nonempty[0])
+    return stack(
+        broadcast_shape(
+            *nonempty,
+            arrays_are_shapes=True,
+            allow_runtime_broadcast=True,
+        )
+    )
+
+
 @_vectorize_node.register(RandomVariable)
 def vectorize_random_variable(
     op: RandomVariable, node: Apply, rng, size, *dist_params
@@ -530,6 +578,30 @@ def vectorize_random_variable(
             new_size = compute_batch_shape(dist_params, ndims_params=op.ndims_params)
             new_size_dims = new_size[:new_ndim]
             size = concatenate([new_size_dims, size])
+    elif (
+        not isinstance(old_size.type, NoneTypeT) and size.type.ndim > old_size.type.ndim
+    ):
+        batch_ndim = size.type.ndim - old_size.type.ndim
+        if _size_depends_on_values(size):
+            raise NotImplementedError(
+                "vectorize_graph cannot expand a random variable whose size "
+                "depends on batched values"
+            )
+        if isinstance(size, Constant):
+            values = np.asarray(size.data)
+            core = values[(0,) * batch_ndim]
+            if not np.array_equal(values, np.broadcast_to(core, values.shape)):
+                raise NotImplementedError(
+                    "vectorize_graph cannot expand a random variable whose size "
+                    "depends on batched values"
+                )
+        # A shape-only size is broadcast across the batch, so one slice is the core.
+        core_size = size[(0,) * batch_ndim]
+        new_ndim = dist_params[0].type.ndim - original_dist_params[0].type.ndim
+        param_batch = compute_batch_shape(dist_params, ndims_params=op.ndims_params)
+        param_new = param_batch[:new_ndim] if new_ndim > 0 else param_batch[:0]
+        merged = _broadcast_shape_vectors(tensor_shape(size)[:batch_ndim], param_new)
+        size = core_size if merged is None else concatenate([merged, core_size])
 
     return op.make_node(rng, size, *dist_params)
 
