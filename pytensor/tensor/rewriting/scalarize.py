@@ -8,7 +8,7 @@ Every op has one rule -- *what happens when a ``TensorFromScalar`` meets me?*:
 
 * a **producer** (``Subtensor`` scalar-index, ``CAReduce`` full-reduction) creates
   a boundary -- a scalar with a ``TensorFromScalar`` just below it;
-* a **consumer** (``Join``, and downstream Elemwise/fusion) swallows it;
+* a **consumer** (``Join``, ``MakeVector``, and downstream Elemwise/fusion) swallows it;
 * ``Elemwise``/``Composite`` is **both**: it swallows its scalar inputs, and if
   it ends up all-scalar it re-emits the ``scalar_op`` -- but only if a client will
   swallow that too, else it keeps the array;
@@ -34,6 +34,7 @@ from pytensor.graph.utils import InconsistencyError
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Join,
+    MakeVector,
     ScalarFromTensor,
     TensorFromScalar,
     join,
@@ -78,7 +79,7 @@ class ScalarizedElemwise(OpFromGraph):
 
 # Op types that can swallow a scalar input (so a producer feeding one is worth
 # scalarizing). Elemwise swallows via its scalar_op / the mixed-Elemwise op.
-_SCALAR_CONSUMERS = (Join, Elemwise, ScalarizedElemwise)
+_SCALAR_CONSUMERS = (Join, MakeVector, Elemwise, ScalarizedElemwise)
 
 
 def _scalar_behind(var):
@@ -119,7 +120,12 @@ class Scalarize(GraphRewriter):
             elif (
                 isinstance(op, Join) and op.axis == 0 and node.outputs[0].type.ndim == 1
             ):
-                replacement = self._swallow_join(node)
+                replacement = self._swallow_join(node.outputs[0], node.inputs)
+            elif isinstance(op, MakeVector):
+                # Each 0-d entry is a length-1 piece of a 1-d join.
+                replacement = self._swallow_join(
+                    node.outputs[0], [inp.dimshuffle("x") for inp in node.inputs]
+                )
             elif isinstance(op, Subtensor) and node.outputs[0].type.ndim == 0:
                 replacement = self._emit_producer(fgraph, node, ScalarSubtensor)
             elif isinstance(op, ScalarFromTensor):
@@ -295,10 +301,10 @@ class Scalarize(GraphRewriter):
         )
 
     @staticmethod
-    def _swallow_join(node):
+    def _swallow_join(out, inputs):
         outer, inner, entries = [], [], []
         found = False
-        for inp in node.inputs:
+        for inp in inputs:
             scalar = _scalar_behind(inp)
             if scalar is None:
                 v = inp.type()
@@ -312,7 +318,7 @@ class Scalarize(GraphRewriter):
             inner.append(v)
         if not found:
             return None
-        return [(node.outputs[0], ScalarJoin(inner, [join(0, *entries)])(*outer))]
+        return [(out, ScalarJoin(inner, [join(0, *entries)])(*outer))]
 
 
 optdb.register(
