@@ -18,6 +18,9 @@ from pytensor.graph.op import Op
 DimEntry = int | Variable
 
 
+FLOPS_PER_MULTIPLY_ADD = 2
+
+
 def _symbol_order(pair: tuple[Variable, int]) -> tuple[str, int]:
     """Sort key putting a monomial's ``(symbol, exponent)`` pairs in canonical order."""
     return (pair[0].name or "", id(pair[0]))

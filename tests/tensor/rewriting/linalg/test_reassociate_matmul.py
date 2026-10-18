@@ -179,6 +179,16 @@ class TestReassociateChain:
         result = _reassociate([A, B], [out])
         result.assert_graph(*_canonical(out))
 
+    def test_tie_with_different_intermediates_kept(self):
+        # Both orders take 168 multiply-adds, though A @ B has 24 elements and B @ C 12
+        A = pt.matrix("A", shape=(2, 3))
+        B = pt.matrix("B", shape=(3, 12))
+        C = pt.matrix("C", shape=(12, 4))
+        out = (A @ B) @ C
+
+        result = _reassociate([A, B, C], [out])
+        result.assert_graph(*_canonical(out))
+
     def test_multi_client_intermediate_is_a_leaf(self):
         A = pt.matrix("A", shape=(100, 2))
         B = pt.matrix("B", shape=(2, 100))

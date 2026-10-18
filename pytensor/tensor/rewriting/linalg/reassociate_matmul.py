@@ -4,7 +4,12 @@ from typing import cast
 
 from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.cost import CostExpr, DimEntry, _polynomial_le
+from pytensor.graph.cost import (
+    FLOPS_PER_MULTIPLY_ADD,
+    CostExpr,
+    DimEntry,
+    _polynomial_le,
+)
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace
 from pytensor.tensor.blockwise import Blockwise
@@ -40,9 +45,10 @@ def _matmul_result_shape(left: Shape, right: Shape) -> Shape:
 
 
 def _contract_cost(left: Shape, right: Shape) -> CostExpr:
-    """FLOPs of ``left @ right``: ``prod(broadcast_batch) * m * k * n``."""
-    result = _matmul_result_shape(left, right)
-    return CostExpr.from_dim_product([*result[:-2], left[-2], left[-1], right[-1]])
+    """FLOPs of ``left @ right``."""
+    return CostExpr.from_dim_product(
+        [FLOPS_PER_MULTIPLY_ADD, *_matmul_result_shape(left, right), left[-1]]
+    )
 
 
 def _dimshuffle_lift(op: DimShuffle) -> tuple[bool, bool]:

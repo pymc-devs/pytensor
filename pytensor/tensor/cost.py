@@ -7,7 +7,14 @@ import numpy as np
 
 from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.graph.cost import Bound, Cost, CostExpr, DimEntry, op_cost
+from pytensor.graph.cost import (
+    FLOPS_PER_MULTIPLY_ADD,
+    Bound,
+    Cost,
+    CostExpr,
+    DimEntry,
+    op_cost,
+)
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.traversal import walk_toposort
@@ -236,7 +243,9 @@ def op_cost_Dot(op: Dot, node: Apply, input_dims, output_dims) -> Cost:
     """Two FLOPs per multiply-add: ``2 * m * n * p`` for ``(m, p) @ (p, n)``."""
     flops = CostExpr.zero()
     if _does_float_work(node):
-        flops = CostExpr.from_dim_product([2, *output_dims[0], input_dims[0][-1]])
+        flops = CostExpr.from_dim_product(
+            [FLOPS_PER_MULTIPLY_ADD, *output_dims[0], input_dims[0][-1]]
+        )
     return Cost(
         Bound.exact(flops),
         Bound.exact(_bytes_read_and_written(node, input_dims, output_dims)),
