@@ -2,15 +2,18 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor.graph.basic import Apply
 from pytensor.graph.cost import (
     Bound,
     Cost,
     CostExpr,
     _polynomial_le,
     is_zero,
+    op_cost,
     provably_cheaper,
     provably_le,
 )
+from pytensor.graph.op import Op
 
 
 class TestCostExpr:
@@ -270,3 +273,30 @@ class TestQueries:
         assert provably_cheaper(a, b)
         assert not provably_le(a, b, zero_able=frozenset({p}))
         assert not provably_cheaper(a, b, zero_able=frozenset({p}))
+
+
+class _OpWithoutRule(Op):
+    def make_node(self, *inputs):
+        return Apply(self, list(inputs), [inputs[0].type()])
+
+    def perform(self, node, inputs, outputs):
+        raise NotImplementedError
+
+
+class TestOpCost:
+    def test_unknown_without_rule(self):
+        node = _OpWithoutRule().make_node(pt.matrix("x", shape=(2, 3)))
+        assert op_cost(node.op, node, [(2, 3)], [(2, 3)]) == Cost.unknown()
+
+    def test_rule_dispatches_by_mro(self):
+        class Base(_OpWithoutRule):
+            pass
+
+        class Derived(Base):
+            pass
+
+        rule_cost = Cost(Bound.exact(CostExpr.from_dim_product([6])), Bound.unknown())
+        op_cost.register(Base)(lambda op, node, input_dims, output_dims: rule_cost)
+
+        node = Derived().make_node(pt.matrix("x", shape=(2, 3)))
+        assert op_cost(node.op, node, [(2, 3)], [(2, 3)]) == rule_cost

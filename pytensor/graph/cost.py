@@ -3,9 +3,11 @@ import operator
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from functools import singledispatch
 from itertools import pairwise
 
-from pytensor.graph.basic import Variable
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
 
 
 # A "dim entry" is an int (statically known size) or a Variable, an opaque symbol for an
@@ -350,3 +352,21 @@ def provably_cheaper(
     return provably_le(a, b, zero_able) and (
         a.flops.hi != b.flops.lo or a.bytes.hi != b.bytes.lo
     )
+
+
+@singledispatch
+def op_cost(
+    op: Op,
+    node: Apply,
+    input_dims: Sequence[tuple[DimEntry, ...]],
+    output_dims: Sequence[tuple[DimEntry, ...]],
+) -> Cost:
+    """Cost of `node`, an application of `op`, given its inputs' and outputs' dims.
+
+    Rules register with ``op_cost.register(OpType)`` and resolve by MRO. As in
+    ``Op.infer_shape``, a rule reads types from `node` and dimensions from the lists,
+    which run parallel to ``node.inputs`` and ``node.outputs``, so an operation absent
+    from any graph is costed through a node built for the purpose. An Op with no rule
+    costs ``Cost.unknown()``.
+    """
+    return Cost.unknown()
