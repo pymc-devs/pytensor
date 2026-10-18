@@ -1,5 +1,6 @@
 from collections.abc import Sequence
-from functools import lru_cache, singledispatch
+from functools import lru_cache, reduce, singledispatch
+from operator import add
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -16,6 +17,7 @@ from pytensor.tensor.basic import (
     MakeVector,
     ScalarFromTensor,
     TensorFromScalar,
+    as_tensor_variable,
     get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.blockwise import Blockwise
@@ -26,6 +28,7 @@ from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import TensorType
+from pytensor.tensor.variable import TensorVariable
 
 
 class ShapeSymbols:
@@ -139,6 +142,22 @@ def graph_cost(
     finally:
         if attached:
             fgraph.remove_feature(shape_feature)
+
+
+def to_graph(expr: CostExpr) -> TensorVariable:
+    """A scalar ``float64`` expression equal to `expr`, over its shape symbols.
+
+    A cost too large for ``int64`` loses precision instead of wrapping around.
+    """
+    terms = []
+    for monomial, coef in expr.monomials.items():
+        term = as_tensor_variable(np.float64(coef))
+        for symbol, exponent in monomial:
+            term = term * as_tensor_variable(symbol).astype("float64") ** exponent
+        terms.append(term)
+    if not terms:
+        return as_tensor_variable(np.float64(0))
+    return reduce(add, terms)
 
 
 def _does_float_work(node: Apply) -> bool:

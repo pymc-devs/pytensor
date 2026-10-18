@@ -1,5 +1,6 @@
 import sys
 
+import numpy as np
 import pytest
 
 import pytensor.scalar as ps
@@ -11,10 +12,17 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.printing import pprint
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.cost import ShapeSymbols, dims_of, graph_cost, node_cost
+from pytensor.tensor.cost import (
+    ShapeSymbols,
+    dims_of,
+    graph_cost,
+    node_cost,
+    to_graph,
+)
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import Shape_i
+from tests import unittest_tools as utt
 
 
 def _shape_feature(*outputs):
@@ -277,3 +285,24 @@ class TestBlockwise:
         assert _node_cost(out) == Cost(
             Bound.unknown(), Bound.exact(CostExpr.from_dim_product([8 * 2 * 7 * 3 * 3]))
         )
+
+
+class TestToGraph:
+    def test_evaluates_like_the_polynomial(self):
+        x, y = pt.matrix("x", dtype="float64"), pt.matrix("y", dtype="float64")
+        out = pt.dot(x, y)
+        shape_feature, symbols = _shape_feature(out), ShapeSymbols()
+        m, p = dims_of(x, shape_feature, symbols)
+        _, n = dims_of(y, shape_feature, symbols)
+        flops = node_cost(out.owner, shape_feature, symbols).flops.hi
+        squared = flops * CostExpr.from_dim_product([m])
+
+        rng = np.random.default_rng(utt.fetch_seed())
+        x_val, y_val = rng.normal(size=(3, 4)), rng.normal(size=(4, 5))
+        assert to_graph(squared).eval({x: x_val, y: y_val}) == squared.evaluate(
+            {m: 3, p: 4, n: 5}
+        )
+
+    def test_zero_and_beyond_int64(self):
+        assert to_graph(CostExpr.zero()).eval() == 0
+        assert to_graph(CostExpr.from_dim_product([2**70])).eval() == 2.0**70
