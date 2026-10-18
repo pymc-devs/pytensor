@@ -14,6 +14,7 @@ from pytensor.compile.executor import Function
 from pytensor.graph.basic import AbstractApply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.traversal import graph_inputs
+from pytensor.graph.utils import get_variable_trace_frame
 from pytensor.printing import _try_pydot_import
 
 
@@ -275,20 +276,15 @@ def var_label(var, precision=3):
 
 
 def var_tag(var):
-    """Parse tag attribute of variable node."""
-    tag = var.tag
-    if hasattr(tag, "trace") and len(tag.trace) and len(tag.trace[0]) == 4:
-        if isinstance(tag.trace[0][0], tuple | list):
-            path, line, _, src = tag.trace[0][-1]
-        else:
-            path, line, _, src = tag.trace[0]
-        path = Path(path).name
-        path = path.replace("<", "")
-        path = path.replace(">", "")
-        src = src.encode()
-        return [path, line, src]
-    else:
+    """Parse source-location annotations from a variable's provenance."""
+    frame = get_variable_trace_frame(var)
+    if frame is None:
         return None
+    path, line, _, src = frame
+    path = Path(path).name
+    path = path.replace("<", "")
+    path = path.replace(">", "")
+    return [path, line, (src or "").encode()]
 
 
 def apply_label(node):
