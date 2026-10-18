@@ -67,6 +67,12 @@ class CostExpr:
             for key, coef in self.monomials.items()
         )
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, CostExpr) and self.monomials == other.monomials
+
+    def __hash__(self) -> int:
+        return hash(frozenset(self.monomials.items()))
+
     def __add__(self, other: "CostExpr") -> "CostExpr":
         result = dict(self.monomials)
         for k, v in other.monomials.items():

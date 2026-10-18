@@ -14,6 +14,14 @@ class TestCostExpr:
         with pytest.raises(ValueError, match="non-negative"):
             CostExpr({((n, 1),): -1})
 
+    def test_equal_polynomials_compare_equal(self):
+        m, n = pt.scalar("m"), pt.scalar("n")
+        left = CostExpr.from_dim_product([m, n]) + CostExpr.from_dim_product([2, m])
+        right = CostExpr.from_dim_product([2, m]) + CostExpr.from_dim_product([n, m])
+        assert left == right
+        assert hash(left) == hash(right)
+        assert left != CostExpr.from_dim_product([m, n])
+
 
 class TestProvablyCheaper:
     def test_int_dominance(self):
