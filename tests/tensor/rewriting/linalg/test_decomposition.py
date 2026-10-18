@@ -707,6 +707,36 @@ def test_svd_of_symmetric_skips_complex():
 
 
 @pytest.mark.parametrize(
+    "assumptions, make_expected",
+    [
+        (dict(orthogonal=True, diagonal=True), lambda x: pt.ones(x.shape[:-1])),
+        (
+            dict(diagonal=True, symmetric=True),
+            lambda x: pt.sort(pt.abs(pt.diagonal(x)), axis=-1)[..., ::-1],
+        ),
+    ],
+    ids=["orthogonal_over_diagonal", "diagonal_over_symmetric"],
+)
+def test_svd_of_structured_prefers_cheapest_form(assumptions, make_expected):
+    x = pt.dmatrix("x", shape=(4, 4))
+    s = svd(assume(x, **assumptions), compute_uv=False)
+
+    result = RewriteTester([x], [s])
+    result.assert_graph(*rewrite_graph([make_expected(x)], include=("canonicalize",)))
+
+
+def test_svd_of_transposed_orthogonal_product():
+    q = pt.dmatrix("q", shape=(4, 4))
+    x = pt.dmatrix("x", shape=(4, 3))
+    u, s, vh = svd((assume(q, orthogonal=True) @ x).mT, full_matrices=False)
+
+    rng = np.random.default_rng(0)
+    q_val, _ = np.linalg.qr(rng.normal(size=(4, 4)))
+    result = RewriteTester([q, x], [s, (u * s[..., None, :]) @ vh])
+    result.assert_eval(q_val, rng.normal(size=(4, 3)))
+
+
+@pytest.mark.parametrize(
     "make_diag, permute_l, p_indices",
     [
         pytest.param(lambda d: pt.diag(d), False, False, id="alloc_diag_default"),
