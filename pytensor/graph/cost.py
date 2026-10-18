@@ -254,14 +254,17 @@ def _polynomial_le(
 
     a_terms = list(a.monomials.items())
     b_terms = list(b.monomials.items())
+    b_exps = [dict(b_key) for b_key, _ in b_terms]
     covers = []
     for a_key, _ in a_terms:
         a_exp = dict(a_key)
         row = [
             j
-            for j, (b_key, _) in enumerate(b_terms)
-            if all(dict(b_key).get(sym, 0) >= exp for sym, exp in a_exp.items())
-            and all(sym in a_exp for sym, _ in b_key if sym in zero_able)
+            for j, b_exp in enumerate(b_exps)
+            if all(b_exp.get(sym, 0) >= exp for sym, exp in a_key)
+            and (
+                not zero_able or all(sym in a_exp for sym in b_exp if sym in zero_able)
+            )
         ]
         if not row:
             return False
@@ -322,10 +325,6 @@ def is_zero(cost: Cost) -> bool:
     return all(bound.hi == CostExpr.zero() for bound in (cost.flops, cost.bytes))
 
 
-def _bound_le(smaller: Bound, larger: Bound, zero_able: frozenset[Variable]) -> bool:
-    return smaller.hi is not None and _polynomial_le(smaller.hi, larger.lo, zero_able)
-
-
 def provably_le(a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()) -> bool:
     """Whether `a` is no more than `b` in every component, for every symbol assignment.
 
@@ -333,8 +332,9 @@ def provably_le(a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()) 
     component of `b`. Symbols are integers >= 1, except those in `zero_able`, which are
     integers >= 0. False means "not provable", never that `b` is smaller.
     """
-    return _bound_le(a.flops, b.flops, zero_able) and _bound_le(
-        a.bytes, b.bytes, zero_able
+    return all(
+        smaller.hi is not None and _polynomial_le(smaller.hi, larger.lo, zero_able)
+        for smaller, larger in ((a.flops, b.flops), (a.bytes, b.bytes))
     )
 
 
