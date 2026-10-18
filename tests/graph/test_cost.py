@@ -236,6 +236,17 @@ class TestQueries:
         assert not provably_cheaper(small, small)
         assert not provably_le(large, small)
 
+    def test_cheaper_needs_a_worst_case_gain(self):
+        # a might cost less than b, but in its worst case it costs exactly as much
+        m = pt.scalar("m")
+        a = Cost(
+            Bound(CostExpr.zero(), CostExpr.from_dim_product([m])),
+            Bound.exact(CostExpr.zero()),
+        )
+        b = _exact(CostExpr.from_dim_product([m]), CostExpr.zero())
+        assert provably_le(a, b)
+        assert not provably_cheaper(a, b)
+
     def test_pareto_order(self):
         # Cheaper in FLOPs but dearer in bytes: neither side is provably cheaper.
         m, k = pt.scalar("m"), pt.scalar("k")
@@ -256,4 +267,6 @@ class TestQueries:
         a = _exact(CostExpr.from_dim_product([m, k]), CostExpr.zero())
         b = _exact(CostExpr.from_dim_product([m, k, p]), CostExpr.zero())
         assert provably_le(a, b)
+        assert provably_cheaper(a, b)
         assert not provably_le(a, b, zero_able=frozenset({p}))
+        assert not provably_cheaper(a, b, zero_able=frozenset({p}))

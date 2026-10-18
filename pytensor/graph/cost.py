@@ -341,5 +341,12 @@ def provably_le(a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()) 
 def provably_cheaper(
     a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()
 ) -> bool:
-    """Whether `a` is provably no more than `b` in every component, and they differ."""
-    return a != b and provably_le(a, b, zero_able)
+    """Whether `a` is never more than `b`, and less for some symbol assignment.
+
+    Holds when `provably_le` does and, in some component, the upper bound of `a` differs
+    from the lower bound of `b`. A nonzero polynomial difference that is never negative
+    is positive somewhere, so `a` is then strictly cheaper even in its worst case.
+    """
+    return provably_le(a, b, zero_able) and (
+        a.flops.hi != b.flops.lo or a.bytes.hi != b.bytes.lo
+    )
