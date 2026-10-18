@@ -6,9 +6,9 @@ from itertools import pairwise
 from pytensor.graph.basic import Variable
 
 
-# A "dim entry" is an int (statically known size) or a Variable (a scalar shape var
-# from ShapeFeature, treated as an opaque positive symbol >= 1). A CostExpr is a sum
-# of monomials in those symbols, with literal-int factors folded into each monomial's
+# A "dim entry" is an int (statically known size) or a Variable, an opaque symbol for an
+# integer >= 1 unless a caller declares it zero-able (>= 0). A CostExpr is a sum of
+# monomials in those symbols, with literal-int factors folded into each monomial's
 # coefficient.
 
 DimEntry = int | Variable
@@ -110,11 +110,15 @@ class CostExpr:
         return "CostExpr(" + " + ".join(terms) + ")"
 
 
-def _provably_cheaper(a: CostExpr, b: CostExpr) -> bool:
-    """True iff a <= b for every assignment of the dim symbols to integers >= 1, and
-    the two polynomials differ.
+def _provably_cheaper(
+    a: CostExpr, b: CostExpr, zero_able: frozenset[Variable] = frozenset()
+) -> bool:
+    """True iff a <= b for every assignment of the dim symbols, and the two differ.
 
-    A monomial of `b` whose exponents dominate a monomial of `a` is at least as large
+    Symbols range over integers >= 1, except those in `zero_able`, which range over
+    integers >= 0. A monomial of `b` dominates a monomial of `a` when its exponents are
+    at least `a`'s and every zero-able symbol in it also appears in `a`'s, so that
+    zeroing that symbol zeroes both. A dominating monomial is at least as large
     everywhere, so ``a <= b`` holds when every unit of coefficient in `a` can be paid
     for by a unit of coefficient on a dominating monomial of `b`, each unit of `b` used
     once. That assignment is a transportation problem, solved as a max flow from the
@@ -135,6 +139,7 @@ def _provably_cheaper(a: CostExpr, b: CostExpr) -> bool:
             j
             for j, (b_key, _) in enumerate(b_terms)
             if all(dict(b_key).get(sym, 0) >= exp for sym, exp in a_exp.items())
+            and all(sym in a_exp for sym, _ in b_key if sym in zero_able)
         ]
         if not row:
             return False

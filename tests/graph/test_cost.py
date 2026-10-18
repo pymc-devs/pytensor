@@ -81,6 +81,20 @@ class TestProvablyCheaper:
         assert _provably_cheaper(a, b)
         assert not _provably_cheaper(b, a)
 
+    def test_zero_able_symbol_breaks_dominance(self):
+        # m*k <= m*k*p fails at p = 0
+        m, k, p = (pt.scalar(name) for name in "mkp")
+        a = CostExpr.from_dim_product([m, k])
+        b = CostExpr.from_dim_product([m, k, p])
+        assert not _provably_cheaper(a, b, zero_able=frozenset({p}))
+
+    def test_zero_able_symbol_on_both_sides(self):
+        # m*p <= m*k*p: both sides vanish at p = 0
+        m, k, p = (pt.scalar(name) for name in "mkp")
+        a = CostExpr.from_dim_product([m, p])
+        b = CostExpr.from_dim_product([m, k, p])
+        assert _provably_cheaper(a, b, zero_able=frozenset({p}))
+
     def test_split_coefficient(self):
         # 2*n^2 <= n^3 + n^2 needs one unit of a's coefficient on each b monomial
         n = pt.scalar("n")
