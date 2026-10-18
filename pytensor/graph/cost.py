@@ -1,7 +1,7 @@
 import math
 import operator
 from collections import defaultdict, deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -135,17 +135,26 @@ class CostExpr:
 
     __rmul__ = __mul__
 
-    def __repr__(self) -> str:
-        if not self.monomials:
-            return "CostExpr(0)"
+    def format(
+        self, label: Callable[[Variable], str] = lambda sym: sym.name or "<unnamed>"
+    ) -> str:
+        """`self` as a sum of products, with each symbol shown as ``label(symbol)``.
+
+        Factors and terms are sorted, so the string depends only on the labels. The
+        default label is the symbol's name. ``label=pytensor.printing.pprint`` shows an
+        unnamed shape symbol as the expression it stands for, such as ``Shape_i{0}(x)``.
+        """
         terms = []
-        for sym_exps, coef in self.monomials.items():
-            parts = [str(coef)] if coef != 1 or not sym_exps else []
-            for sym, exp in sym_exps:
-                name = getattr(sym, "name", None) or "<unnamed>"
-                parts.append(f"{name}^{exp}" if exp != 1 else name)
-            terms.append("*".join(parts) if parts else "1")
-        return "CostExpr(" + " + ".join(terms) + ")"
+        for key, coef in self.monomials.items():
+            factors = sorted(
+                label(sym) if exp == 1 else f"{label(sym)}^{exp}" for sym, exp in key
+            )
+            coefficient = [str(coef)] if coef != 1 or not key else []
+            terms.append("*".join(coefficient + factors))
+        return " + ".join(sorted(terms)) or "0"
+
+    def __repr__(self) -> str:
+        return f"CostExpr({self.format()})"
 
 
 @dataclass(frozen=True)
