@@ -164,7 +164,11 @@ class CostExpr:
 
 @dataclass(frozen=True)
 class Bound:
-    """An interval ``[lo, hi]`` of costs, with ``hi`` None when it is unbounded."""
+    """An interval ``[lo, hi]`` of costs, with ``hi`` None when it is unbounded.
+
+    A bound whose ``lo`` and ``hi`` are the same object, as ``Bound.exact`` builds, is
+    summed and scaled once instead of twice.
+    """
 
     lo: CostExpr
     hi: CostExpr | None

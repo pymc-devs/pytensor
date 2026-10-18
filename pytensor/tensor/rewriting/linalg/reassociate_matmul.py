@@ -390,7 +390,8 @@ class ReassociateMatmulChain(GraphRewriter):
     rebuilt chain. For each maximal chain of matmul links in the fgraph, runs a
     matrix-chain DP over the operand shapes and replaces the chain only when the new
     total cost provably beats the user's existing parenthesization (under "every dim
-    symbol is positive").
+    symbol is positive"). Costs are polynomials over the chain's own unified shape
+    symbols, so they compare with each other but not with ``graph_cost`` results.
 
     Decomposes liftable single-client ``DimShuffle(matmul(L, R))`` patterns into
     ``DimShuffle(L) @ DimShuffle(R)`` (swapping operand order for matrix-transpose)

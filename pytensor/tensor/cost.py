@@ -43,8 +43,9 @@ class ShapeSymbols:
 
     A dimension is a static int when its value is a constant. Otherwise it is a symbol,
     shared by every structurally equal expression this instance has seen. Costs are
-    comparable only when their symbols come from the same instance. The instance keeps
-    every expression it has seen alive, so it should live no longer than the
+    comparable only when their symbols come from the same instance: the prover treats
+    symbols from anywhere else as unrelated, so it reports "not provable". The instance
+    keeps every expression it has seen alive, so it should live no longer than the
     comparisons it serves.
     """
 
@@ -124,8 +125,9 @@ def graph_cost(
     Parameters
     ----------
     graph : FunctionGraph or sequence of Variable
-        The graph, or its outputs. A FunctionGraph without a ShapeFeature gets one for
-        the duration of the call.
+        The graph, or its outputs. Outputs get a new FunctionGraph and shape inference
+        on every call. A FunctionGraph reuses the shapes its ShapeFeature holds, or gets
+        a ShapeFeature for the duration of the call.
     symbols : ShapeSymbols, optional
         The symbol table for symbolic dimensions. Pass the same instance to every call
         whose results are compared. Defaults to a fresh table.
@@ -155,6 +157,8 @@ def to_graph(expr: CostExpr) -> TensorVariable:
     """A scalar ``float64`` expression equal to `expr`, over its shape symbols.
 
     A cost too large for ``int64`` loses precision instead of wrapping around.
+    Evaluating the expression computes whatever its symbols depend on, so a dimension
+    that shape inference can only read off an Op's output runs that Op.
     """
     terms = []
     for monomial, coef in expr.monomials.items():
