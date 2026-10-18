@@ -19,6 +19,9 @@ from tests import unittest_tools as utt
 from tests.test_rop import break_op
 
 
+pytestmark = pytest.mark.filterwarnings("error:matrix_dot is deprecated:FutureWarning")
+
+
 def test_pseudoinverse_correctness():
     rng = np.random.default_rng(utt.fetch_seed())
     d1 = rng.integers(4) + 2

@@ -1,3 +1,5 @@
+import warnings
+
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
@@ -129,7 +131,16 @@ def matrix_dot(*args):
     generate the matrix product between all in the given order, namely
     :math:`A_0 \cdot A_1 \cdot A_2 \cdot .. \cdot A_N`.
 
+    .. deprecated::
+        Use the ``@`` operator or ``pt.matmul`` instead.
+
     """
+    warnings.warn(
+        "matrix_dot is deprecated. Use the @ operator or pt.matmul instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
     rval = args[0]
     for a in args[1:]:
         rval = ptm.dot(rval, a)

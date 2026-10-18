@@ -15,7 +15,7 @@ from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.decomposition.lu import lu
 from pytensor.tensor.linalg.decomposition.qr import qr
 from pytensor.tensor.linalg.decomposition.schur import qz, schur
-from pytensor.tensor.linalg.products import kron, matrix_dot
+from pytensor.tensor.linalg.products import kron
 from pytensor.tensor.linalg.solvers.general import solve
 from pytensor.tensor.linalg.solvers.triangular import solve_triangular
 from pytensor.tensor.linalg.summary import norm
@@ -276,21 +276,21 @@ def _lop_solve_discrete_are(inputs, outputs, output_grads):
     (dX,) = output_grads
     X = solve_discrete_are(A, B, Q, R)
 
-    K_inner = R + matrix_dot(B.T, X, B)
+    K_inner = R + B.T @ X @ B
 
     # K_inner is guaranteed to be symmetric, because X and R are symmetric
     K_inner_inv_BT = solve(K_inner, B.T, assume_a="sym")
-    K = matrix_dot(K_inner_inv_BT, X, A)
+    K = K_inner_inv_BT @ X @ A
 
     A_tilde = A - B.dot(K)
 
     dX_symm = 0.5 * (dX + dX.T)
     S = solve_discrete_lyapunov(A_tilde, dX_symm)
 
-    A_bar = 2 * matrix_dot(X, A_tilde, S)
-    B_bar = -2 * matrix_dot(X, A_tilde, S, K.T)
+    A_bar = 2 * X @ A_tilde @ S
+    B_bar = -2 * X @ A_tilde @ S @ K.T
     Q_bar = S
-    R_bar = matrix_dot(K, S, K.T)
+    R_bar = K @ S @ K.T
 
     return [A_bar, B_bar, Q_bar, R_bar]
 

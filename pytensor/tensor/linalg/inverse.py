@@ -4,7 +4,6 @@ from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
-from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
@@ -49,15 +48,13 @@ class MatrixPinv(Op):
         (z,) = outputs
         (gz,) = g_outputs
 
-        from pytensor.tensor.linalg.products import matrix_dot
-
-        x_dot_z = ptm.dot(x, z)
-        z_dot_x = ptm.dot(z, x)
+        x_dot_z = x @ z
+        z_dot_x = z @ x
 
         grad = (
-            -matrix_dot(z, gz.T, z)
-            + matrix_dot(z, z.T, gz, (ptb.identity_like(x_dot_z) - x_dot_z))
-            + matrix_dot((ptb.identity_like(z_dot_x) - z_dot_x), gz, z.T, z)
+            -z @ gz.T @ z
+            + z @ z.T @ gz @ (ptb.identity_like(x_dot_z) - x_dot_z)
+            + (ptb.identity_like(z_dot_x) - z_dot_x) @ gz @ z.T @ z
         ).T
         return [grad]
 
@@ -132,10 +129,7 @@ class MatrixInverse(Op):
         (x,) = inputs
         xi = self(x)
         (gz,) = g_outputs
-        from pytensor.tensor.linalg.products import matrix_dot
-
-        # ptm.dot(gz.T,xi)
-        return [-matrix_dot(xi, gz.T, xi).T]
+        return [-(xi @ gz.T @ xi).T]
 
     def pushforward(self, inputs, outputs, eval_points):
         r"""The gradient function should return
@@ -155,9 +149,7 @@ class MatrixInverse(Op):
         (ev,) = eval_points
         if isinstance(ev.type, DisconnectedType):
             return [disconnected_type()]
-        from pytensor.tensor.linalg.products import matrix_dot
-
-        return [-matrix_dot(xi, ev, xi)]
+        return [-(xi @ ev @ xi)]
 
     def infer_shape(self, node, shapes):
         return shapes
