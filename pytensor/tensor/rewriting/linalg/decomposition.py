@@ -170,10 +170,17 @@ def svd_uv_merge(fgraph, node):
                     return [atleast_Nd(s, n=own_s.type.ndim)]
 
 
-@register_canonicalize
-@register_stabilize
-@node_rewriter([blockwise_of(SVD)])
-def svd_of_diag(fgraph, node):
+def _svd_of_orthogonal(X, op):
+    """svd(Q) -> (Q, ones, I) for orthogonal Q (unitary, for complex Q)."""
+    new_s = pt.ones(X.shape[:-1])
+    if not op.compute_uv:
+        return [new_s]
+
+    new_Vh = pt.broadcast_to(pt.eye(X.shape[-1]), X.shape)
+    return [X, new_s, new_Vh]
+
+
+def _svd_of_diag(X, op):
     """Closed-form svd of an m x n diagonal matrix D with diagonal d.
 
     The singular values are abs(d) sorted descending. Column j of U is the standard
@@ -182,21 +189,12 @@ def svd_of_diag(fgraph, node):
     zero). With full_matrices, the remaining columns of U and rows of Vh are the unused
     basis vectors, in order.
     """
-    [X] = node.inputs
-
-    if not check_assumption(fgraph, X, DIAGONAL):
-        return None
-
     diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
     abs_diag = pt.abs(diag_vals)
 
-    if not node.op.core_op.compute_uv:
-        [s] = node.outputs
-        new_s = pt.sort(abs_diag, axis=-1)[..., ::-1].astype(s.type.dtype)
-        copy_stack_trace(s, new_s)
-        return [new_s]
+    if not op.compute_uv:
+        return [pt.sort(abs_diag, axis=-1)[..., ::-1]]
 
-    u, s, vh = node.outputs
     m, n = X.shape[-2], X.shape[-1]
 
     idx = pt.argsort(abs_diag, axis=-1)[..., ::-1]
@@ -204,7 +202,7 @@ def svd_of_diag(fgraph, node):
     new_s = pt.take_along_axis(abs_diag, idx, axis=-1)
     phases = pt.where(pt.eq(sorted_diag, 0), 1, pt.sign(sorted_diag))
 
-    if node.op.core_op.full_matrices:
+    if op.full_matrices:
         u_order = _complete_permutation(idx, size=m)
         vh_order = _complete_permutation(idx, size=n)
         padding = pt.ones(
@@ -214,36 +212,19 @@ def svd_of_diag(fgraph, node):
     else:
         u_order = vh_order = idx
 
-    new_U = pt.eye(m, dtype=u.type.dtype)[u_order].mT
-    new_Vh = pt.eye(n, dtype=vh.type.dtype)[vh_order] * pt.expand_dims(phases, -1)
-
-    new_outputs = [new_U, new_s.astype(s.type.dtype), new_Vh.astype(vh.type.dtype)]
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    new_U = pt.eye(m)[u_order].mT
+    new_Vh = pt.eye(n)[vh_order] * pt.expand_dims(phases, -1)
+    return [new_U, new_s, new_Vh]
 
 
-@register_canonicalize
-@register_stabilize
-@node_rewriter([blockwise_of(SVD)])
-def svd_of_symmetric(fgraph, node):
-    """Replace svd(X) with eigh(X) when X is real symmetric.
+def _svd_of_symmetric(X, op):
+    """svd(X) from eigh(X) for real symmetric X.
 
     For X = V @ diag(w) @ V.T, the singular values are abs(w) and the singular vectors
     are U = V, Vh = (V * sign(w)).T, all sorted by descending abs(w).
     """
-    [X] = node.inputs
-
-    if X.type.dtype.startswith("complex") or not check_assumption(fgraph, X, SYMMETRIC):
-        return None
-    # svd_of_diag and svd_of_orthogonal give these inputs cheaper closed forms
-    if check_assumption(fgraph, X, DIAGONAL) or check_assumption(fgraph, X, ORTHOGONAL):
-        return None
-
-    if not node.op.core_op.compute_uv:
-        [s] = node.outputs
-        new_s = pt.sort(pt.abs(eigvalsh(X)), axis=-1)[..., ::-1].astype(s.type.dtype)
-        copy_stack_trace(s, new_s)
-        return [new_s]
+    if not op.compute_uv:
+        return [pt.sort(pt.abs(eigvalsh(X)), axis=-1)[..., ::-1]]
 
     w, V = eigh(X)
     abs_w = pt.abs(w)
@@ -254,98 +235,30 @@ def svd_of_symmetric(fgraph, node):
     new_s = pt.take_along_axis(abs_w, idx, axis=-1)
     new_U = pt.take_along_axis(V, column_idx, axis=-1)
     new_Vh = pt.take_along_axis(V * pt.expand_dims(signs, -2), column_idx, axis=-1).mT
-
-    u, s, vh = node.outputs
-    new_outputs = [
-        new_U.astype(u.type.dtype),
-        new_s.astype(s.type.dtype),
-        new_Vh.astype(vh.type.dtype),
-    ]
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    return [new_U, new_s, new_Vh]
 
 
-@register_canonicalize
-@register_stabilize
-@node_rewriter([blockwise_of(SVD)])
-def svd_of_orthogonal(fgraph, node):
-    """svd(Q) -> (Q, ones, I) when Q is orthogonal (unitary, for complex Q)."""
-    [X] = node.inputs
-
-    if not check_assumption(fgraph, X, ORTHOGONAL):
-        return None
-
-    new_s = pt.ones(X.shape[:-1])
-
-    if not node.op.core_op.compute_uv:
-        [s] = node.outputs
-        new_s = new_s.astype(s.type.dtype)
-        copy_stack_trace(s, new_s)
-        return [new_s]
-
-    u, s, vh = node.outputs
-    new_Vh = pt.broadcast_to(pt.eye(X.shape[-1]), X.shape)
-    new_outputs = [
-        X.astype(u.type.dtype),
-        new_s.astype(s.type.dtype),
-        new_Vh.astype(vh.type.dtype),
-    ]
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
-
-
-@register_canonicalize
-@register_stabilize
-@node_rewriter([blockwise_of(SVD)])
-def svd_of_orthogonal_product(fgraph, node):
+def _svd_of_orthogonal_product(product, Q, other, op, *, q_on_left):
     """svd(Q @ X) -> (Q @ U, s, Vh) and svd(X @ Q) -> (U, s, Vh @ Q), Q orthogonal.
 
     Q is unitary for complex Q. Each application peels one orthogonal factor, so
     Q1 @ X @ Q2 is handled in two.
     """
-    [Y] = node.inputs
-    product_op = Y.owner_op
-    is_matmul = isinstance(product_op, Dot) or (
-        isinstance(product_op, Blockwise) and isinstance(product_op.core_op, Dot)
-    )
-    if not is_matmul:
-        return None
-    left, right = Y.owner.inputs
-
-    if check_assumption(fgraph, left, ORTHOGONAL):
-        Q, X, Q_on_left = left, right, True
-    elif check_assumption(fgraph, right, ORTHOGONAL):
-        Q, X, Q_on_left = right, left, False
-    else:
-        return None
 
     def broadcast_batch(var, core_ndim):
-        if var.type.broadcastable[:-core_ndim] == Y.type.broadcastable[:-2]:
+        if var.type.broadcastable[:-core_ndim] == product.type.broadcastable[:-2]:
             return var
-        return pt.broadcast_to(var, (*Y.shape[:-2], *var.shape[-core_ndim:]))
+        return pt.broadcast_to(var, (*product.shape[:-2], *var.shape[-core_ndim:]))
 
-    op = node.op.core_op
     if not op.compute_uv:
-        [s] = node.outputs
-        new_s = broadcast_batch(svd(X, compute_uv=False), core_ndim=1)
-        new_s = new_s.astype(s.type.dtype)
-        copy_stack_trace(s, new_s)
-        return [new_s]
+        return [broadcast_batch(svd(other, compute_uv=False), core_ndim=1)]
 
-    U, s_X, Vh = svd(X, full_matrices=op.full_matrices)
-    if Q_on_left:
+    U, s, Vh = svd(other, full_matrices=op.full_matrices)
+    if q_on_left:
         U, Vh = Q @ U, broadcast_batch(Vh, core_ndim=2)
     else:
         U, Vh = broadcast_batch(U, core_ndim=2), Vh @ Q
-
-    new_outputs = [
-        new.astype(old.type.dtype)
-        for new, old in zip(
-            (U, broadcast_batch(s_X, core_ndim=1), Vh), node.outputs, strict=True
-        )
-    ]
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    return [U, broadcast_batch(s, core_ndim=1), Vh]
 
 
 def _complete_permutation(first, size):
@@ -357,10 +270,7 @@ def _complete_permutation(first, size):
     return pt.argsort(key, axis=-1)
 
 
-@register_canonicalize
-@register_stabilize
-@node_rewriter([blockwise_of(SVD)])
-def svd_of_kron_or_block_diag(fgraph, node):
+def _svd_of_kron_or_block_diag(core, factors, op, *, transposed, is_kron):
     """svd(kron(A, B)) and svd(block_diag(A_1, ..., A_p)) from the svd of each factor.
 
     Both matrices are U_big @ S @ Vh_big, where U_big and Vh_big are the kron (or
@@ -368,16 +278,6 @@ def svd_of_kron_or_block_diag(fgraph, node):
     (pairwise products for kron, concatenated for block_diag), at most one per row and
     column. Rectangular factors make S rectangular and add zero singular values.
     """
-    core, transposed = strip_left_expand_dims_and_transpose(node.inputs[0])
-    match core.owner_op_and_inputs:
-        case (KroneckerProduct(), a, b) if a.type.ndim == 2 and b.type.ndim == 2:
-            is_kron, factors = True, [a, b]
-        case (Blockwise(BlockDiagonal()), *factors):
-            is_kron = False
-        case _:
-            return None
-
-    op = node.op.core_op
     factor_shapes = [factor.type.shape[-2:] for factor in factors]
     shapes_known = all(dim is not None for shape in factor_shapes for dim in shape)
     all_square = shapes_known and all(m == n for m, n in factor_shapes)
@@ -443,13 +343,9 @@ def svd_of_kron_or_block_diag(fgraph, node):
         return pt.concatenate([values, zeros], axis=-1)
 
     if not op.compute_uv:
-        [s] = node.outputs
-        s_vals = atleast_Nd(s_vals, n=s.type.ndim)
         if not all_square:
             s_vals = pad_with_zeros(s_vals)
-        new_s = pt.sort(s_vals, axis=-1)[..., ::-1].astype(s.type.dtype)
-        copy_stack_trace(s, new_s)
-        return [new_s]
+        return [pt.sort(s_vals, axis=-1)[..., ::-1]]
 
     order = pt.argsort(s_vals, axis=-1)[..., ::-1]
     new_s = pt.take_along_axis(s_vals, order, axis=-1)
@@ -465,9 +361,58 @@ def svd_of_kron_or_block_diag(fgraph, node):
     if transposed:
         new_U, new_Vh = new_Vh.mT, new_U.mT
 
+    return [new_U, new_s, new_Vh]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SVD)])
+def svd_of_structured(fgraph, node):
+    """Rewrite svd(X) of structured X as a closed form or as cheaper decompositions.
+
+    X may be orthogonal, diagonal, real symmetric, a product with an orthogonal factor,
+    a kron or a block_diag.
+    """
+    [X] = node.inputs
+    op = node.op.core_op
+    core, transposed = strip_left_expand_dims_and_transpose(X)
+
+    # Assumption arms are ordered cheapest first: an orthogonal diagonal matrix needs no
+    # sort, and a diagonal symmetric matrix needs no eigh
+    match core.owner_op_and_inputs:
+        case _ if check_assumption(fgraph, X, ORTHOGONAL):
+            new_outputs = _svd_of_orthogonal(X, op)
+        case _ if check_assumption(fgraph, X, DIAGONAL):
+            new_outputs = _svd_of_diag(X, op)
+        case _ if not X.type.dtype.startswith("complex") and check_assumption(
+            fgraph, X, SYMMETRIC
+        ):
+            new_outputs = _svd_of_symmetric(X, op)
+        case (Blockwise(Dot()) | Dot(), Q, rest) if core is X and check_assumption(
+            fgraph, Q, ORTHOGONAL
+        ):
+            new_outputs = _svd_of_orthogonal_product(X, Q, rest, op, q_on_left=True)
+        case (Blockwise(Dot()) | Dot(), rest, Q) if core is X and check_assumption(
+            fgraph, Q, ORTHOGONAL
+        ):
+            new_outputs = _svd_of_orthogonal_product(X, Q, rest, op, q_on_left=False)
+        case (KroneckerProduct(), a, b) if a.type.ndim == 2 and b.type.ndim == 2:
+            new_outputs = _svd_of_kron_or_block_diag(
+                core, [a, b], op, transposed=transposed, is_kron=True
+            )
+        case (Blockwise(BlockDiagonal()), *blocks):
+            new_outputs = _svd_of_kron_or_block_diag(
+                core, blocks, op, transposed=transposed, is_kron=False
+            )
+        case _:
+            return None
+
+    if new_outputs is None:
+        return None
+
     new_outputs = [
         atleast_Nd(new, n=old.type.ndim).astype(old.type.dtype)
-        for new, old in zip((new_U, new_s, new_Vh), node.outputs, strict=True)
+        for new, old in zip(new_outputs, node.outputs, strict=True)
     ]
     copy_stack_trace(node.outputs, new_outputs)
     return new_outputs
