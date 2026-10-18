@@ -166,10 +166,10 @@ class Cost:
     __rmul__ = __mul__
 
 
-def _provably_cheaper(
+def _polynomial_le(
     a: CostExpr, b: CostExpr, zero_able: frozenset[Variable] = frozenset()
 ) -> bool:
-    """True iff a <= b for every assignment of the dim symbols, and the two differ.
+    """True iff a <= b for every assignment of the dim symbols.
 
     Symbols range over integers >= 1, except those in `zero_able`, which range over
     integers >= 0. A monomial of `b` dominates a monomial of `a` when its exponents are
@@ -182,7 +182,7 @@ def _provably_cheaper(
     ``b <= a``.
     """
     if a.monomials == b.monomials:
-        return False
+        return True
     if not a.monomials:
         return True
 
@@ -257,11 +257,7 @@ def is_zero(cost: Cost) -> bool:
 
 
 def _bound_le(smaller: Bound, larger: Bound, zero_able: frozenset[Variable]) -> bool:
-    if smaller.hi is None:
-        return False
-    return smaller.hi == larger.lo or _provably_cheaper(
-        smaller.hi, larger.lo, zero_able
-    )
+    return smaller.hi is not None and _polynomial_le(smaller.hi, larger.lo, zero_able)
 
 
 def provably_le(a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()) -> bool:

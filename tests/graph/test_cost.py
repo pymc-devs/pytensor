@@ -5,7 +5,7 @@ from pytensor.graph.cost import (
     Bound,
     Cost,
     CostExpr,
-    _provably_cheaper,
+    _polynomial_le,
     is_zero,
     provably_cheaper,
     provably_le,
@@ -48,68 +48,68 @@ class TestCostExpr:
             CostExpr.from_dim_product([pt.scalar("n")]) * -1
 
 
-class TestProvablyCheaper:
+class TestPolynomialLe:
     def test_int_dominance(self):
         a = CostExpr.from_dim_product([10, 20, 5])  # 1000
         b = CostExpr.from_dim_product([10, 20, 5]) + CostExpr.from_dim_product(
             [1, 2, 3]
         )  # 1006
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-        assert not _provably_cheaper(a, a)
+        assert _polynomial_le(a, b)
+        assert not _polynomial_le(b, a)
+        assert _polynomial_le(a, a)
 
     def test_zero_vs_positive(self):
         a = CostExpr.zero()
         b = CostExpr.from_dim_product([7])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-        assert not _provably_cheaper(a, a)
+        assert _polynomial_le(a, b)
+        assert not _polynomial_le(b, a)
+        assert _polynomial_le(a, a)
 
     def test_symbolic_no_proof(self):
         # m*k*n vs k*n*p: different monomials, no dominance either way.
         m, k, n, p = (pt.scalar(name) for name in "mknp")
         a = CostExpr.from_dim_product([m, k, n])
         b = CostExpr.from_dim_product([k, n, p])
-        assert not _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
+        assert not _polynomial_le(a, b)
+        assert not _polynomial_le(b, a)
 
     def test_extra_unmatched_b_monomial(self):
         # a = m*k, b = m*k + p: b strictly larger under p >= 1.
         m, k, p = (pt.scalar(name) for name in "mkp")
         a = CostExpr.from_dim_product([m, k])
         b = CostExpr.from_dim_product([m, k]) + CostExpr.from_dim_product([p])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
+        assert _polynomial_le(a, b)
+        assert not _polynomial_le(b, a)
 
     def test_tie_at_ones_is_cheaper(self):
         # a = m*k, b = m*k*p: equal at p == 1, so a is never worse and better for p > 1
         m, k, p = (pt.scalar(name) for name in "mkp")
         a = CostExpr.from_dim_product([m, k])
         b = CostExpr.from_dim_product([m, k, p])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
+        assert _polynomial_le(a, b)
+        assert not _polynomial_le(b, a)
 
     def test_zero_able_symbol_breaks_dominance(self):
         # m*k <= m*k*p fails at p = 0
         m, k, p = (pt.scalar(name) for name in "mkp")
         a = CostExpr.from_dim_product([m, k])
         b = CostExpr.from_dim_product([m, k, p])
-        assert not _provably_cheaper(a, b, zero_able=frozenset({p}))
+        assert not _polynomial_le(a, b, zero_able=frozenset({p}))
 
     def test_zero_able_symbol_on_both_sides(self):
         # m*p <= m*k*p: both sides vanish at p = 0
         m, k, p = (pt.scalar(name) for name in "mkp")
         a = CostExpr.from_dim_product([m, p])
         b = CostExpr.from_dim_product([m, k, p])
-        assert _provably_cheaper(a, b, zero_able=frozenset({p}))
+        assert _polynomial_le(a, b, zero_able=frozenset({p}))
 
     def test_split_coefficient(self):
         # 2*n^2 <= n^3 + n^2 needs one unit of a's coefficient on each b monomial
         n = pt.scalar("n")
         a = CostExpr.from_dim_product([2, n, n])
         b = CostExpr.from_dim_product([n, n, n]) + CostExpr.from_dim_product([n, n])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
+        assert _polynomial_le(a, b)
+        assert not _polynomial_le(b, a)
 
     @pytest.mark.parametrize(
         "build",
@@ -131,7 +131,7 @@ class TestProvablyCheaper:
     )
     def test_false_for_some_sizes(self, build):
         a, b = build(pt.scalar("n"), pt.scalar("k"))
-        assert not _provably_cheaper(a, b)
+        assert not _polynomial_le(a, b)
 
     def test_assignment_needs_rerouting(self):
         # Assigning a's x to b's first dominator (x*y) leaves a's x*y uncovered. The
@@ -143,7 +143,7 @@ class TestProvablyCheaper:
             + CostExpr.from_dim_product([x, z])
             + CostExpr.from_dim_product([w])
         )
-        assert _provably_cheaper(a, b)
+        assert _polynomial_le(a, b)
 
 
 class TestBound:

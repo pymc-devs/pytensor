@@ -4,7 +4,7 @@ from typing import cast
 
 from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.cost import CostExpr, DimEntry, _provably_cheaper
+from pytensor.graph.cost import CostExpr, DimEntry, _polynomial_le
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace
 from pytensor.tensor.blockwise import Blockwise
@@ -389,8 +389,9 @@ class ReassociateMatmulChain(GraphRewriter):
     Decomposes liftable single-client ``DimShuffle(matmul(L, R))`` patterns into
     ``DimShuffle(L) @ DimShuffle(R)`` (swapping operand order for matrix-transpose)
     to expose longer chains. The lift commits atomically with the reassociation:
-    ``_build_tree`` constructs the lifted vars and runs only when ``_provably_cheaper``
-    fires, so unsuccessful attempts add no graph nodes.
+    ``_build_tree`` constructs the lifted vars and runs only when the new cost is
+    provably no more than the old one and differs from it, so unsuccessful attempts
+    add no graph nodes.
 
     The pass walks a snapshot toposort once: replacements inside the loop create new
     chain-link nodes that this pass does not re-examine. For matrix chain
@@ -484,7 +485,7 @@ class ReassociateMatmulChain(GraphRewriter):
                 continue
             new_cost = _tree_cost(unified, dp)
 
-            if not _provably_cheaper(new_cost, old_cost):
+            if new_cost == old_cost or not _polynomial_le(new_cost, old_cost):
                 continue
 
             visited.update(consumed)
