@@ -10,6 +10,7 @@ from pytensor.graph.cost import Bound, Cost, CostExpr, _polynomial_le, provably_
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.printing import pprint
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.cost import ShapeSymbols, dims_of, graph_cost, node_cost
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
@@ -229,3 +230,50 @@ class TestFreeOps:
     )
     def test_views_markers_and_shape_ops_cost_nothing(self, build):
         assert _node_cost(build(pt.matrix("x"))) == Cost.zero()
+
+
+class TestBlockwise:
+    def test_core_cost_once_per_batch_element(self):
+        out = pt.tensor("a", shape=(7, 5, 3), dtype="float64") @ pt.tensor(
+            "b", shape=(7, 3, 4), dtype="float64"
+        )
+        assert _node_cost(out).flops == Bound.exact(
+            CostExpr.from_dim_product([7 * 2 * 5 * 4 * 3])
+        )
+
+    def test_core_cost_follows_the_input_dtype(self):
+        def batched_dot(dtype):
+            return pt.tensor("a", shape=(7, 5, 3), dtype=dtype) @ pt.tensor(
+                "b", shape=(7, 3, 4), dtype=dtype
+            )
+
+        float_flops = CostExpr.from_dim_product([7 * 2 * 5 * 4 * 3])
+        assert _node_cost(batched_dot("float64")).flops == Bound.exact(float_flops)
+        assert _node_cost(batched_dot("int64")).flops == Bound.exact(CostExpr.zero())
+
+    def test_broadcast_input_read_once(self):
+        out = pt.tensor("a", shape=(1, 5, 3), dtype="float64") @ pt.tensor(
+            "b", shape=(7, 3, 4), dtype="float64"
+        )
+        expected_bytes = 8 * (5 * 3 + 7 * 3 * 4 + 7 * 5 * 4)
+        assert _node_cost(out).bytes == Bound.exact(
+            CostExpr.from_dim_product([expected_bytes])
+        )
+
+    def test_symbolic_batch_scales_the_core_cost(self):
+        out = pt.tensor("a", shape=(None, 5, 3), dtype="float64") @ pt.tensor(
+            "b", shape=(None, 3, 4), dtype="float64"
+        )
+        shape_feature, symbols = _shape_feature(out), ShapeSymbols()
+        batch, _, _ = dims_of(out, shape_feature, symbols)
+        cost = node_cost(out.owner, shape_feature, symbols)
+        assert cost.flops == Bound.exact(
+            CostExpr.from_dim_product([2 * 5 * 4 * 3, batch])
+        )
+
+    def test_unknown_core_stays_unknown(self):
+        core = Blockwise(_OpWithoutRule(), signature="(m,n)->(m,n)")
+        out = core(pt.tensor("a", shape=(7, 3, 3), dtype="float64"))
+        assert _node_cost(out) == Cost(
+            Bound.unknown(), Bound.exact(CostExpr.from_dim_product([8 * 2 * 7 * 3 * 3]))
+        )

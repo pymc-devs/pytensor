@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from functools import singledispatch
+from functools import lru_cache, singledispatch
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -18,12 +18,14 @@ from pytensor.tensor.basic import (
     TensorFromScalar,
     get_underlying_scalar_constant_value,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.type import TensorType
 
 
 class ShapeSymbols:
@@ -220,6 +222,39 @@ def op_cost_Dot(op: Dot, node: Apply, input_dims, output_dims) -> Cost:
         Bound.exact(flops),
         Bound.exact(_bytes_read_and_written(node, input_dims, output_dims)),
     )
+
+
+@lru_cache(maxsize=1024)
+def _core_node(op: Blockwise, input_types: tuple[TensorType, ...]) -> Apply:
+    """A core node of `op` for inputs of `input_types`, built once per pair."""
+    return op._create_dummy_core_node([t() for t in input_types])
+
+
+@op_cost.register(Blockwise)
+def op_cost_Blockwise(op: Blockwise, node: Apply, input_dims, output_dims) -> Cost:
+    """The core Op's FLOPs once per batch element; bytes of the batched values."""
+    bytes_ = Bound.exact(_bytes_read_and_written(node, input_dims, output_dims))
+    if op_cost.dispatch(type(op.core_op)) is op_cost.dispatch(object):
+        return Cost(Bound.unknown(), bytes_)
+
+    core_node = _core_node(op, tuple(inp.type for inp in node.inputs))
+    core_cost = op_cost(
+        core_node.op,
+        core_node,
+        [
+            dims[len(dims) - len(sig) :]
+            for dims, sig in zip(input_dims, op.inputs_sig, strict=True)
+        ],
+        [
+            dims[len(dims) - len(sig) :]
+            for dims, sig in zip(output_dims, op.outputs_sig, strict=True)
+        ],
+    )
+    out_dims = output_dims[0]
+    batch = CostExpr.from_dim_product(
+        out_dims[: len(out_dims) - len(op.outputs_sig[0])]
+    )
+    return Cost(core_cost.flops * batch, bytes_)
 
 
 @op_cost.register(DimShuffle)
