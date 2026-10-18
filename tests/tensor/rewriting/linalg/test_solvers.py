@@ -489,6 +489,52 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
 
 
+@pytest.mark.parametrize(
+    "x0_shape, step, numpy_step",
+    [
+        ((3, 4), lambda x, A: solve(A, x), lambda x, A: np.linalg.solve(A, x)),
+        (
+            (4, 3),
+            lambda x, A: solve(A.T, x.T).T,
+            lambda x, A: np.linalg.solve(A.T, x.T).T,
+        ),
+    ],
+    ids=["left_solve", "right_solve"],
+)
+def test_scan_split_uses_assumed_structure(x0_shape, step, numpy_step):
+    rewrite_name = scan_split_non_sequence_decomposition_and_solve.__name__
+    A = tensor("A", shape=(3, 3))
+    x0 = tensor("x0", shape=x0_shape)
+
+    xs = scan(
+        lambda xtm1, A: step(xtm1, assume(A, positive_definite=True)),
+        outputs_info=[x0],
+        non_sequences=[A],
+        n_steps=10,
+        return_updates=False,
+    )
+    fn = function(
+        [A, x0], [xs], mode=get_default_mode().including("scan", rewrite_name)
+    )
+
+    [scan_node] = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+    outer_nodes = fn.maker.fgraph.apply_nodes
+    inner_nodes = scan_node.op.fgraph.apply_nodes
+    assert CholeskyOpCounter.count_decomp_nodes(outer_nodes) == 1
+    assert CholeskyOpCounter.count_solve_nodes(inner_nodes) == 1
+    assert LUOpCounter.count_decomp_nodes(outer_nodes) == 0
+
+    rng = np.random.default_rng(171)
+    A_test = rng.random(A.type.shape, dtype=A.type.dtype)
+    A_test = A_test @ A_test.T + np.eye(3)
+    x0_test = rng.random(x0.type.shape, dtype=x0.type.dtype)
+    expected = [x0_test]
+    for _ in range(10):
+        expected.append(numpy_step(expected[-1], A_test))
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
+    np.testing.assert_allclose(fn(A_test, x0_test)[0], expected[1:], rtol=rtol)
+
+
 @pytest.mark.parametrize("batched", [False, True], ids=["unbatched", "batched"])
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
 def test_solve_of_inv_to_matmul(b_ndim, batched):

@@ -750,6 +750,26 @@ def _scan_split_non_sequence_decomposition_and_solve(
                             non_sequences = {equiv[v] for v in non_sequences}
                             inner_node = equiv[inner_node]
 
+                        # Factor with the most specific decomposition the inner
+                        # graph's assumptions allow, not the one the Solve declares
+                        inner_A, inner_b = inner_node.inputs
+                        known_assume_a = get_assume_a(new_scan_fgraph, inner_A)
+                        if (
+                            assume_a_var == "gen"
+                            and known_assume_a != "gen"
+                            and known_assume_a in allowed_assume_a
+                        ):
+                            core_op = inner_node.op.core_op
+                            upgraded = solve(
+                                inner_A,
+                                inner_b,
+                                assume_a=known_assume_a,
+                                lower=core_op.lower,
+                                b_ndim=core_op.b_ndim,
+                            )
+                            new_scan_fgraph.replace(inner_node.outputs[0], upgraded)
+                            break  # Start over so the upgraded Solve is split
+
                         replace_dict = _split_decomp_and_solve_steps(
                             new_scan_fgraph,
                             inner_node,
