@@ -6,6 +6,7 @@ import numpy as np
 
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.cost import Bound, Cost, CostExpr, DimEntry, op_cost
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.traversal import walk_toposort
 from pytensor.graph.type import HasShape
 from pytensor.scalar.basic import Add, Composite, Mul, ScalarOp
@@ -19,11 +20,12 @@ from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
 class ShapeSymbols:
-    """Canonical shape symbols for one costing pass.
+    """Canonical shape symbols, shared by every cost read through one instance.
 
     A dimension is a static int when its value is a constant. Otherwise it is a symbol,
-    shared by every structurally equal expression seen in the same pass. The instance
-    keeps every expression it has seen alive, so it should live no longer than the
+    shared by every structurally equal expression this instance has seen. Costs are
+    comparable only when their symbols come from the same instance. The instance keeps
+    every expression it has seen alive, so it should live no longer than the
     comparisons it serves.
     """
 
@@ -93,6 +95,41 @@ def node_cost(node: Apply, shape_feature: ShapeFeature, symbols: ShapeSymbols) -
         [dims_of(inp, shape_feature, symbols) for inp in node.inputs],
         [dims_of(out, shape_feature, symbols) for out in node.outputs],
     )
+
+
+def graph_cost(
+    graph: FunctionGraph | Sequence[Variable], symbols: ShapeSymbols | None = None
+) -> Cost:
+    """Cost of `graph`, the sum over its Apply nodes with each node counted once.
+
+    Parameters
+    ----------
+    graph : FunctionGraph or sequence of Variable
+        The graph, or its outputs. A FunctionGraph without a ShapeFeature gets one for
+        the duration of the call.
+    symbols : ShapeSymbols, optional
+        The symbol table for symbolic dimensions. Pass the same instance to every call
+        whose results are compared. Defaults to a fresh table.
+    """
+    fgraph = (
+        graph
+        if isinstance(graph, FunctionGraph)
+        else FunctionGraph(outputs=list(graph), clone=False)
+    )
+    if symbols is None:
+        symbols = ShapeSymbols()
+    shape_feature = getattr(fgraph, "shape_feature", None)
+    attached = shape_feature is None
+    if shape_feature is None:
+        shape_feature = ShapeFeature()
+        fgraph.attach_feature(shape_feature)
+    try:
+        return Cost.sum(
+            node_cost(node, shape_feature, symbols) for node in fgraph.apply_nodes
+        )
+    finally:
+        if attached:
+            fgraph.remove_feature(shape_feature)
 
 
 def _does_float_work(node: Apply) -> bool:

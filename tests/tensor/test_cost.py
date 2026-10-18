@@ -3,10 +3,11 @@ import sys
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.cost import Bound, Cost, CostExpr
+from pytensor.graph.cost import Bound, Cost, CostExpr, _polynomial_le, provably_cheaper
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.tensor.cost import ShapeSymbols, dims_of, node_cost
+from pytensor.printing import pprint
+from pytensor.tensor.cost import ShapeSymbols, dims_of, graph_cost, node_cost
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import Shape_i
@@ -132,3 +133,63 @@ class TestElemwiseAndDot:
         assert _node_cost(float_comparison).flops == Bound.exact(
             CostExpr.from_dim_product([10])
         )
+
+
+class TestGraphCost:
+    def test_shared_node_counted_once(self):
+        x = pt.matrix("x", shape=(4, 3), dtype="float64")
+        y = pt.matrix("y", shape=(3, 5), dtype="float64")
+        shared_dot = pt.dot(x, y)
+        shared = shared_dot + pt.exp(shared_dot)
+        duplicated = pt.dot(x, y) + pt.exp(pt.dot(x, y))
+
+        dot_flops, elemwise_flops = 2 * 4 * 5 * 3, 4 * 5
+        shared_cost = graph_cost([shared])
+        assert shared_cost.flops == Bound.exact(
+            CostExpr.from_dim_product([dot_flops + 2 * elemwise_flops])
+        )
+        assert graph_cost([duplicated]).flops == Bound.exact(
+            CostExpr.from_dim_product([2 * dot_flops + 2 * elemwise_flops])
+        )
+        assert provably_cheaper(shared_cost, graph_cost([duplicated]))
+
+    def test_unknown_node_leaves_the_upper_bound_open(self):
+        x = pt.matrix("x", shape=(4, 3), dtype="float64")
+        out = pt.exp(_OpWithoutRule()(x))
+        assert graph_cost([out]).flops == Bound(CostExpr.from_dim_product([12]), None)
+
+    def test_leaves_the_graphs_features_as_found(self):
+        x = pt.matrix("x", shape=(4, 3), dtype="float64")
+        expected = graph_cost([pt.exp(x)])
+
+        bare = FunctionGraph(outputs=[pt.exp(x)], clone=False)
+        assert graph_cost(bare) == expected
+        assert not hasattr(bare, "shape_feature")
+
+        shape_feature = ShapeFeature()
+        with_feature = FunctionGraph(
+            outputs=[pt.exp(x)], features=[shape_feature], clone=False
+        )
+        assert graph_cost(with_feature) == expected
+        assert with_feature.shape_feature is shape_feature
+
+    def test_shape_symbols_format_as_their_expressions(self):
+        x = pt.matrix("x", dtype="float64")
+        flops = graph_cost([pt.exp(x)]).flops.hi
+        assert flops.format(label=pprint) == "Shape_i{0}(x)*Shape_i{1}(x)"
+
+    def test_minted_symbols_allow_empty_dims(self):
+        # m*k <= 2*m*k*p holds for p >= 1 but fails at p = 0
+        x, y = pt.matrix("x"), pt.matrix("y")
+        symbols = ShapeSymbols()
+        exp_flops = graph_cost([pt.exp(x)], symbols=symbols).flops.hi
+        dot_flops = graph_cost([pt.dot(x, y)], symbols=symbols).flops.hi
+        assert _polynomial_le(exp_flops, dot_flops)
+        assert not _polynomial_le(exp_flops, dot_flops, zero_able=symbols.symbols)
+
+    def test_symbolic_graphs_compare_through_shared_symbols(self):
+        x = pt.matrix("x")
+        symbols = ShapeSymbols()
+        once = graph_cost([pt.exp(x)], symbols=symbols)
+        twice = graph_cost([pt.exp(pt.exp(x))], symbols=symbols)
+        assert provably_cheaper(once, twice)
