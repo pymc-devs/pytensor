@@ -6,11 +6,13 @@ import pytest
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.compile.ops import view_op
+from pytensor.gradient import grad_clip
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.cost import Bound, Cost, CostExpr, _polynomial_le, provably_cheaper
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.printing import pprint
+from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.cost import (
     ShapeSymbols,
@@ -127,6 +129,13 @@ class TestElemwiseAndDot:
         out = Elemwise(mixed)(pt.vector("x", shape=(10,)), pt.lvector("j", shape=(10,)))
         assert _node_cost(out).flops == Bound.exact(CostExpr.from_dim_product([20]))
 
+    def test_nested_composite_counts_its_inner_operations(self):
+        a = ps.float64("a")
+        inner = ps.Composite([a], [ps.exp(a) + a])
+        outer = ps.Composite([a], [inner(a) * a])
+        out = Elemwise(outer)(pt.vector("x", shape=(10,)))
+        assert _node_cost(out).flops == Bound.exact(CostExpr.from_dim_product([30]))
+
     def test_variadic_add_counts_one_flop_per_extra_input(self):
         x = pt.vector("x", shape=(10,), dtype="float64")
         out = pt.add(x, x, x, x)
@@ -225,6 +234,9 @@ class TestFreeOps:
             lambda x: Shape_i(0)(x),
             lambda x: pt.as_tensor([Shape_i(0)(x), Shape_i(1)(x)]),
             view_op,
+            lambda x: grad_clip(x, -1, 1),
+            lambda x: scalar_from_tensor(x[0, 0]),
+            lambda x: tensor_from_scalar(scalar_from_tensor(x[0, 0])),
         ],
         ids=[
             "dimshuffle",
@@ -234,6 +246,9 @@ class TestFreeOps:
             "shape_i",
             "make_vector",
             "view_op",
+            "view_op_subclass",
+            "scalar_from_tensor",
+            "tensor_from_scalar",
         ],
     )
     def test_views_markers_and_shape_ops_cost_nothing(self, build):
