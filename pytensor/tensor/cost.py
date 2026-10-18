@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from functools import lru_cache, reduce, singledispatch
+from functools import reduce, singledispatch
 from operator import add
 from weakref import WeakKeyDictionary
 
@@ -252,10 +252,17 @@ def op_cost_Dot(op: Dot, node: Apply, input_dims, output_dims) -> Cost:
     )
 
 
-@lru_cache(maxsize=1024)
+_CORE_NODES: WeakKeyDictionary[Blockwise, dict[tuple[TensorType, ...], Apply]] = (
+    WeakKeyDictionary()
+)
+
+
 def _core_node(op: Blockwise, input_types: tuple[TensorType, ...]) -> Apply:
     """A core node of `op` for inputs of `input_types`, built once per pair."""
-    return op._create_dummy_core_node([t() for t in input_types])
+    nodes = _CORE_NODES.setdefault(op, {})
+    if input_types not in nodes:
+        nodes[input_types] = op._create_dummy_core_node([t() for t in input_types])
+    return nodes[input_types]
 
 
 @op_cost.register(Blockwise)
