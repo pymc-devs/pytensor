@@ -44,13 +44,6 @@ def _matmul_result_shape(left: Shape, right: Shape) -> Shape:
     return (*batch, left[-2], right[-1])
 
 
-def _contract_cost(left: Shape, right: Shape) -> CostExpr:
-    """FLOPs of ``left @ right``."""
-    return CostExpr.from_dim_product(
-        [FLOPS_PER_MULTIPLY_ADD, *_matmul_result_shape(left, right), left[-1]]
-    )
-
-
 def _dimshuffle_lift(op: DimShuffle) -> tuple[bool, bool]:
     """Classify lifting the DimShuffle `op` through the matmul it wraps.
 
@@ -304,7 +297,7 @@ def _solve_chain(shapes: list[tuple[int, ...]]) -> tuple[int, dict]:
 
 def _tree_cost(shapes: list[Shape], dp: dict) -> CostExpr:
     """Symbolic cost of the parenthesization recorded in `dp`, over `shapes`."""
-    total = CostExpr.zero()
+    contractions = []
     result_shape: dict[tuple[int, int], Shape] = {}
     work = [(0, len(shapes) - 1, False)]
     while work:
@@ -317,9 +310,12 @@ def _tree_cost(shapes: list[Shape], dp: dict) -> CostExpr:
             work.extend([(i, j, True), (split + 1, j, False), (i, split, False)])
             continue
         left, right = result_shape[(i, split)], result_shape[(split + 1, j)]
-        total = total + _contract_cost(left, right)
-        result_shape[(i, j)] = _matmul_result_shape(left, right)
-    return total
+        out_shape = _matmul_result_shape(left, right)
+        result_shape[(i, j)] = out_shape
+        contractions.append(
+            CostExpr.from_dim_product([FLOPS_PER_MULTIPLY_ADD, *out_shape, left[-1]])
+        )
+    return CostExpr.sum(contractions)
 
 
 def _existing_cost(
@@ -334,7 +330,7 @@ def _existing_cost(
     ``_matmul_result_shape`` of their inputs.
     """
     var_shape: dict[Variable, Shape] = {}
-    total = CostExpr.zero()
+    contractions = []
     for node in reversed(consumed):
         l_input, r_input = node.inputs
         if l_input not in var_shape:
@@ -343,9 +339,12 @@ def _existing_cost(
             var_shape[r_input] = canonicalize(_operand_shape_raw(r_input, fgraph))
         l_shape = var_shape[l_input]
         r_shape = var_shape[r_input]
-        total = total + _contract_cost(l_shape, r_shape)
-        var_shape[node.outputs[0]] = _matmul_result_shape(l_shape, r_shape)
-    return total
+        out_shape = _matmul_result_shape(l_shape, r_shape)
+        var_shape[node.outputs[0]] = out_shape
+        contractions.append(
+            CostExpr.from_dim_product([FLOPS_PER_MULTIPLY_ADD, *out_shape, l_shape[-1]])
+        )
+    return CostExpr.sum(contractions)
 
 
 def _build_tree(
