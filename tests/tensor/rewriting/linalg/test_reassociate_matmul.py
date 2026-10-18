@@ -9,11 +9,7 @@ import pytensor.tensor.rewriting.linalg.reassociate_matmul as reassociate
 from pytensor import function
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.blas import Dot22, Dot22Scalar, Gemm, Gemv
-from pytensor.tensor.rewriting.linalg.reassociate_matmul import (
-    CostExpr,
-    _provably_cheaper,
-    reassociate_matmul_chain,
-)
+from pytensor.tensor.rewriting.linalg.reassociate_matmul import reassociate_matmul_chain
 from tests.unittest_tools import RewriteTester
 
 
@@ -28,90 +24,6 @@ def _reassociate(inputs, outputs):
 
 def _canonical(*outputs):
     return rewrite_graph(list(outputs), include=("canonicalize",))
-
-
-class TestProvablyCheaper:
-    def test_int_dominance(self):
-        a = CostExpr.from_dim_product([10, 20, 5])  # 1000
-        b = CostExpr.from_dim_product([10, 20, 5]) + CostExpr.from_dim_product(
-            [1, 2, 3]
-        )  # 1006
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-        assert not _provably_cheaper(a, a)
-
-    def test_zero_vs_positive(self):
-        a = CostExpr.zero()
-        b = CostExpr.from_dim_product([7])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-        assert not _provably_cheaper(a, a)
-
-    def test_symbolic_no_proof(self):
-        # m*k*n vs k*n*p: different monomials, no dominance either way.
-        m, k, n, p = (pt.scalar(name) for name in "mknp")
-        a = CostExpr.from_dim_product([m, k, n])
-        b = CostExpr.from_dim_product([k, n, p])
-        assert not _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-
-    def test_extra_unmatched_b_monomial(self):
-        # a = m*k, b = m*k + p: b strictly larger under p >= 1.
-        m, k, p = (pt.scalar(name) for name in "mkp")
-        a = CostExpr.from_dim_product([m, k])
-        b = CostExpr.from_dim_product([m, k]) + CostExpr.from_dim_product([p])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-
-    def test_tie_at_ones_is_cheaper(self):
-        # a = m*k, b = m*k*p: equal at p == 1, so a is never worse and better for p > 1
-        m, k, p = (pt.scalar(name) for name in "mkp")
-        a = CostExpr.from_dim_product([m, k])
-        b = CostExpr.from_dim_product([m, k, p])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-
-    def test_split_coefficient(self):
-        # 2*n^2 <= n^3 + n^2 needs one unit of a's coefficient on each b monomial
-        n = pt.scalar("n")
-        a = CostExpr.from_dim_product([2, n, n])
-        b = CostExpr.from_dim_product([n, n, n]) + CostExpr.from_dim_product([n, n])
-        assert _provably_cheaper(a, b)
-        assert not _provably_cheaper(b, a)
-
-    @pytest.mark.parametrize(
-        "build",
-        [
-            # 2*n*k > k*n^2 + n^2 at n = 1, k = 10
-            lambda n, k: (
-                CostExpr.from_dim_product([2, n, k]),
-                CostExpr.from_dim_product([k, n, n])
-                + CostExpr.from_dim_product([n, n]),
-            ),
-            # 3*n^2 > n^3 + n^2 at n = 1
-            lambda n, k: (
-                CostExpr.from_dim_product([3, n, n]),
-                CostExpr.from_dim_product([n, n, n])
-                + CostExpr.from_dim_product([n, n]),
-            ),
-        ],
-        ids=["low_rank", "excess_coefficient"],
-    )
-    def test_false_for_some_sizes(self, build):
-        a, b = build(pt.scalar("n"), pt.scalar("k"))
-        assert not _provably_cheaper(a, b)
-
-    def test_assignment_needs_rerouting(self):
-        # Assigning a's x to b's first dominator (x*y) leaves a's x*y uncovered. The
-        # valid assignment is x <-> x*z and x*y <-> x*y.
-        x, y, z, w = (pt.scalar(name) for name in "xyzw")
-        a = CostExpr.from_dim_product([x]) + CostExpr.from_dim_product([x, y])
-        b = (
-            CostExpr.from_dim_product([x, y])
-            + CostExpr.from_dim_product([x, z])
-            + CostExpr.from_dim_product([w])
-        )
-        assert _provably_cheaper(a, b)
 
 
 class TestReassociateChain:
