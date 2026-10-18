@@ -34,6 +34,7 @@ from pytensor.tensor.basic import (
     atleast_Nd,
 )
 from pytensor.tensor.basic import switch as pt_switch
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import ge, maximum, minimum
 from pytensor.tensor.rewriting.basic import broadcasted_by
 from pytensor.tensor.shape import Shape, Shape_i
@@ -41,6 +42,7 @@ from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
     as_index_constant,
+    as_index_literal,
     basic_subtensor,
     get_idx_list,
 )
@@ -54,9 +56,10 @@ def _maybe_constant_int(v) -> int | None:
     Callers dealing with slice components that may be ``None`` (= omitted)
     must check for that case themselves before calling.
     """
-    if isinstance(v, Constant):
-        return int(v.data)
-    return None
+    try:
+        return int(as_index_literal(v))
+    except NotScalarConstantError:
+        return None
 
 
 def _init_l_per_output(op_info) -> list[int]:

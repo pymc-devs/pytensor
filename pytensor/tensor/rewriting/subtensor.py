@@ -674,9 +674,10 @@ def _merge_slice_into_slice_no_shape_ref(slice1, slice2):
     def _const_int_or_none(v):
         if v is None:
             return None
-        if isinstance(v, Constant):
-            return int(v.data)
-        return "unknown"
+        try:
+            return int(as_index_literal(v))
+        except NotScalarConstantError:
+            return "unknown"
 
     s1_step = _const_int_or_none(slice1.step)
     s2_step = _const_int_or_none(slice2.step)
@@ -862,9 +863,13 @@ def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
         return minimum(a, b)
 
     step = inner_slice.step
-    step_val = (
-        1 if step is None else int(step.data) if isinstance(step, Constant) else None
-    )
+    if step is None:
+        step_val = 1
+    else:
+        try:
+            step_val = int(as_index_literal(step))
+        except NotScalarConstantError:
+            step_val = None
 
     start = inner_slice.start
     stop = inner_slice.stop
