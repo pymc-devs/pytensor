@@ -171,6 +171,7 @@ class TestBound:
         )
         expected = CostExpr.from_dim_product([m]) + CostExpr.from_dim_product([n])
         assert total == Bound.exact(expected)
+        assert total.lo is total.hi
 
     def test_unknown_keeps_lower_bound(self):
         m = pt.scalar("m")
@@ -184,6 +185,8 @@ class TestBound:
         assert body * steps == Bound(CostExpr.zero(), CostExpr.from_dim_product([m, n]))
         assert Bound.unknown() * steps == Bound.unknown()
         assert Bound.unknown() * 0 == Bound.exact(CostExpr.zero())
+        scaled = Bound.exact(CostExpr.from_dim_product([m])) * steps
+        assert scaled.lo is scaled.hi
 
 
 class TestCost:

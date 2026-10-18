@@ -1,7 +1,7 @@
 import math
 import operator
 from collections import defaultdict, deque
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -75,6 +75,20 @@ class CostExpr:
             expr.monomials[tuple(sorted(exps.items(), key=_symbol_order))] = coef
         return expr
 
+    @classmethod
+    def sum(cls, exprs: Iterable["CostExpr"]) -> "CostExpr":
+        """The sum of `exprs`, in time linear in their total number of monomials."""
+        # Every operand is canonical, so merge without re-canonicalizing each key
+        exprs = iter(exprs)
+        result = cls()
+        first = next(exprs, None)
+        if first is not None:
+            result.monomials = dict(first.monomials)
+        for expr in exprs:
+            for key, coef in expr.monomials.items():
+                result.monomials[key] = result.monomials.get(key, 0) + coef
+        return result
+
     def evaluate(self, values: dict[Variable, int]) -> int:
         """Value of the polynomial with each symbol replaced by ``values[symbol]``."""
         return sum(
@@ -89,10 +103,7 @@ class CostExpr:
         return hash(frozenset(self.monomials.items()))
 
     def __add__(self, other: "CostExpr") -> "CostExpr":
-        result = dict(self.monomials)
-        for k, v in other.monomials.items():
-            result[k] = result.get(k, 0) + v
-        return CostExpr(result)
+        return CostExpr.sum((self, other))
 
     def __mul__(self, other: "CostExpr | int") -> "CostExpr":
         if not isinstance(other, CostExpr):
@@ -142,14 +153,26 @@ class Bound:
     def unknown(cls) -> "Bound":
         return cls(CostExpr.zero(), None)
 
+    @classmethod
+    def sum(cls, bounds: Iterable["Bound"]) -> "Bound":
+        bounds = list(bounds)
+        lo = CostExpr.sum(bound.lo for bound in bounds)
+        if all(bound.lo is bound.hi for bound in bounds):
+            return cls.exact(lo)
+        his = [bound.hi for bound in bounds if bound.hi is not None]
+        hi = CostExpr.sum(his) if len(his) == len(bounds) else None
+        return cls(lo, hi)
+
     def __add__(self, other: "Bound") -> "Bound":
-        hi = None if self.hi is None or other.hi is None else self.hi + other.hi
-        return Bound(self.lo + other.lo, hi)
+        return Bound.sum((self, other))
 
     def __mul__(self, factor: CostExpr | int) -> "Bound":
-        if factor == 0 or factor == CostExpr.zero():
+        if factor == 0 or (isinstance(factor, CostExpr) and not factor.monomials):
             return Bound.exact(CostExpr.zero())
-        return Bound(self.lo * factor, None if self.hi is None else self.hi * factor)
+        lo = self.lo * factor
+        if self.hi is self.lo:
+            return Bound.exact(lo)
+        return Bound(lo, None if self.hi is None else self.hi * factor)
 
     __rmul__ = __mul__
 
@@ -173,8 +196,16 @@ class Cost:
     def unknown(cls) -> "Cost":
         return cls(Bound.unknown(), Bound.unknown())
 
+    @classmethod
+    def sum(cls, costs: Iterable["Cost"]) -> "Cost":
+        costs = list(costs)
+        return cls(
+            Bound.sum(cost.flops for cost in costs),
+            Bound.sum(cost.bytes for cost in costs),
+        )
+
     def __add__(self, other: "Cost") -> "Cost":
-        return Cost(self.flops + other.flops, self.bytes + other.bytes)
+        return Cost.sum((self, other))
 
     def __mul__(self, factor: CostExpr | int) -> "Cost":
         return Cost(self.flops * factor, self.bytes * factor)
