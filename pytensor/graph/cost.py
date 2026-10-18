@@ -1,6 +1,7 @@
 import math
 from collections import defaultdict, deque
 from collections.abc import Sequence
+from dataclasses import dataclass
 from itertools import pairwise
 
 from pytensor.graph.basic import Variable
@@ -108,6 +109,33 @@ class CostExpr:
                 parts.append(f"{name}^{exp}" if exp != 1 else name)
             terms.append("*".join(parts) if parts else "1")
         return "CostExpr(" + " + ".join(terms) + ")"
+
+
+@dataclass(frozen=True)
+class Bound:
+    """An interval ``[lo, hi]`` of costs, with ``hi`` None when it is unbounded."""
+
+    lo: CostExpr
+    hi: CostExpr | None
+
+    @classmethod
+    def exact(cls, cost: CostExpr) -> "Bound":
+        return cls(cost, cost)
+
+    @classmethod
+    def unknown(cls) -> "Bound":
+        return cls(CostExpr.zero(), None)
+
+    def __add__(self, other: "Bound") -> "Bound":
+        hi = None if self.hi is None or other.hi is None else self.hi + other.hi
+        return Bound(self.lo + other.lo, hi)
+
+    def __mul__(self, factor: CostExpr | int) -> "Bound":
+        if factor == 0 or factor == CostExpr.zero():
+            return Bound.exact(CostExpr.zero())
+        return Bound(self.lo * factor, None if self.hi is None else self.hi * factor)
+
+    __rmul__ = __mul__
 
 
 def _provably_cheaper(

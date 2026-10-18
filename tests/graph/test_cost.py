@@ -1,7 +1,7 @@
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.graph.cost import CostExpr, _provably_cheaper
+from pytensor.graph.cost import Bound, CostExpr, _provably_cheaper
 
 
 class TestCostExpr:
@@ -136,3 +136,26 @@ class TestProvablyCheaper:
             + CostExpr.from_dim_product([w])
         )
         assert _provably_cheaper(a, b)
+
+
+class TestBound:
+    def test_sum_of_exact_bounds(self):
+        m, n = pt.scalar("m"), pt.scalar("n")
+        total = Bound.exact(CostExpr.from_dim_product([m])) + Bound.exact(
+            CostExpr.from_dim_product([n])
+        )
+        expected = CostExpr.from_dim_product([m]) + CostExpr.from_dim_product([n])
+        assert total == Bound.exact(expected)
+
+    def test_unknown_keeps_lower_bound(self):
+        m = pt.scalar("m")
+        total = Bound.exact(CostExpr.from_dim_product([m])) + Bound.unknown()
+        assert total == Bound(CostExpr.from_dim_product([m]), None)
+
+    def test_scaling(self):
+        m, n = pt.scalar("m"), pt.scalar("n")
+        steps = CostExpr.from_dim_product([n])
+        body = Bound(CostExpr.zero(), CostExpr.from_dim_product([m]))
+        assert body * steps == Bound(CostExpr.zero(), CostExpr.from_dim_product([m, n]))
+        assert Bound.unknown() * steps == Bound.unknown()
+        assert Bound.unknown() * 0 == Bound.exact(CostExpr.zero())
