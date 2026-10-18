@@ -1,7 +1,10 @@
 import sys
 
+import pytest
+
 import pytensor.scalar as ps
 import pytensor.tensor as pt
+from pytensor.compile.ops import view_op
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.cost import Bound, Cost, CostExpr, _polynomial_le, provably_cheaper
 from pytensor.graph.fg import FunctionGraph
@@ -193,3 +196,36 @@ class TestGraphCost:
         once = graph_cost([pt.exp(x)], symbols=symbols)
         twice = graph_cost([pt.exp(pt.exp(x))], symbols=symbols)
         assert provably_cheaper(once, twice)
+
+
+class TestFreeOps:
+    def test_indexing_costs_nothing_but_shrinks_downstream_cost(self):
+        x = pt.matrix("x", shape=(6, 4), dtype="float64")
+        out = pt.cos(pt.exp(x)[0:1])
+        assert graph_cost([out]).flops == Bound.exact(
+            CostExpr.from_dim_product([6 * 4 + 4])
+        )
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda x: x.T,
+            lambda x: x[1:, :2],
+            lambda x: pt.specify_shape(x, (None, 3)),
+            lambda x: x.shape,
+            lambda x: Shape_i(0)(x),
+            lambda x: pt.as_tensor([Shape_i(0)(x), Shape_i(1)(x)]),
+            view_op,
+        ],
+        ids=[
+            "dimshuffle",
+            "subtensor",
+            "specify_shape",
+            "shape",
+            "shape_i",
+            "make_vector",
+            "view_op",
+        ],
+    )
+    def test_views_markers_and_shape_ops_cost_nothing(self, build):
+        assert _node_cost(build(pt.matrix("x"))) == Cost.zero()

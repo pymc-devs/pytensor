@@ -4,19 +4,26 @@ from weakref import WeakKeyDictionary
 
 import numpy as np
 
+from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.cost import Bound, Cost, CostExpr, DimEntry, op_cost
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
 from pytensor.graph.traversal import walk_toposort
 from pytensor.graph.type import HasShape
 from pytensor.scalar.basic import Add, Composite, Mul, ScalarOp
 from pytensor.tensor.basic import (
+    MakeVector,
+    ScalarFromTensor,
+    TensorFromScalar,
     get_underlying_scalar_constant_value,
 )
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
+from pytensor.tensor.subtensor import Subtensor
 
 
 class ShapeSymbols:
@@ -213,3 +220,17 @@ def op_cost_Dot(op: Dot, node: Apply, input_dims, output_dims) -> Cost:
         Bound.exact(flops),
         Bound.exact(_bytes_read_and_written(node, input_dims, output_dims)),
     )
+
+
+@op_cost.register(DimShuffle)
+@op_cost.register(Subtensor)
+@op_cost.register(TypeCastingOp)
+@op_cost.register(SpecifyShape)
+@op_cost.register(Shape)
+@op_cost.register(Shape_i)
+@op_cost.register(MakeVector)
+@op_cost.register(ScalarFromTensor)
+@op_cost.register(TensorFromScalar)
+def op_cost_free(op: Op, node: Apply, input_dims, output_dims) -> Cost:
+    """Views, markers, and shape bookkeeping touch no tensor data."""
+    return Cost.zero()
