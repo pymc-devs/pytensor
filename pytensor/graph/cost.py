@@ -1,4 +1,5 @@
 import math
+import operator
 from collections import defaultdict, deque
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,36 +16,43 @@ from pytensor.graph.basic import Variable
 DimEntry = int | Variable
 
 
-def _monomial_key(sym_exps: dict[Variable, int]) -> tuple:
-    """Canonical key of a monomial: its ``(symbol, exponent)`` pairs, ordered."""
-    return tuple(
-        sorted(
-            sym_exps.items(),
-            key=lambda kv: (getattr(kv[0], "name", None) or "", id(kv[0])),
-        )
-    )
+def _symbol_order(pair: tuple[Variable, int]) -> tuple[str, int]:
+    """Sort key putting a monomial's ``(symbol, exponent)`` pairs in canonical order."""
+    return (pair[0].name or "", id(pair[0]))
 
 
 class CostExpr:
     """Polynomial in dimension symbols with non-negative integer coefficients.
 
-    Stores its monomials as ``{sorted_(symbol,exp)_tuple: int_coef}``. Monomials with a
-    zero coefficient are dropped, so equal polynomials have equal ``monomials``. A
-    negative coefficient raises ``ValueError``: the dominance prover is sound only for
-    non-negative coefficients.
+    Built from ``{((symbol, exponent), ...): coefficient}``. The constructor merges
+    repeated symbols, orders each monomial's pairs, and drops zero exponents and zero
+    coefficients, so equal polynomials have equal ``monomials``. A negative coefficient
+    raises ``ValueError``: the dominance prover is sound only for non-negative
+    coefficients.
     """
 
     __slots__ = ("monomials",)
 
-    def __init__(self, monomials=None):
+    def __init__(self, monomials: dict[tuple, int] | None = None):
         self.monomials: dict[tuple, int] = {}
         for key, coef in (monomials or {}).items():
+            coef = operator.index(coef)
             if coef < 0:
                 raise ValueError(
                     f"CostExpr coefficients must be non-negative, got {coef} for {key}"
                 )
-            if coef:
-                self.monomials[key] = coef
+            if not coef:
+                continue
+            sym_exps: dict[Variable, int] = defaultdict(int)
+            for sym, exp in key:
+                sym_exps[sym] += exp
+            canonical = tuple(
+                sorted(
+                    ((sym, exp) for sym, exp in sym_exps.items() if exp),
+                    key=_symbol_order,
+                )
+            )
+            self.monomials[canonical] = self.monomials.get(canonical, 0) + coef
 
     @classmethod
     def zero(cls) -> "CostExpr":
@@ -52,18 +60,20 @@ class CostExpr:
 
     @classmethod
     def from_dim_product(cls, dims: Sequence[DimEntry]) -> "CostExpr":
-        """Build a single monomial from the product of `dims`.
-
-        Symbols are sorted so that equal products map to the same monomial key.
-        """
+        """Build a single monomial from the product of `dims`."""
         coef = 1
-        sym_exps: dict[Variable, int] = defaultdict(int)
+        exps: dict[Variable, int] = {}
         for d in dims:
-            if isinstance(d, int):
-                coef *= d
+            if isinstance(d, Variable):
+                exps[d] = exps.get(d, 0) + 1
             else:
-                sym_exps[d] += 1
-        return cls({_monomial_key(sym_exps): coef})
+                coef *= operator.index(d)
+        if coef < 0:
+            raise ValueError(f"CostExpr coefficients must be non-negative, got {coef}")
+        expr = cls()
+        if coef:
+            expr.monomials[tuple(sorted(exps.items(), key=_symbol_order))] = coef
+        return expr
 
     def evaluate(self, values: dict[Variable, int]) -> int:
         """Value of the polynomial with each symbol replaced by ``values[symbol]``."""
@@ -85,15 +95,21 @@ class CostExpr:
         return CostExpr(result)
 
     def __mul__(self, other: "CostExpr | int") -> "CostExpr":
-        if isinstance(other, int):
-            return CostExpr({k: v * other for k, v in self.monomials.items()})
+        if not isinstance(other, CostExpr):
+            scale = operator.index(other)
+            if scale < 0:
+                raise ValueError(
+                    f"CostExpr coefficients must be non-negative, got scale {scale}"
+                )
+            # Scaling by a positive integer keeps every key canonical
+            scaled = CostExpr()
+            if scale:
+                scaled.monomials = {k: v * scale for k, v in self.monomials.items()}
+            return scaled
         result: dict[tuple, int] = defaultdict(int)
         for left_key, left_coef in self.monomials.items():
             for right_key, right_coef in other.monomials.items():
-                sym_exps: dict[Variable, int] = defaultdict(int)
-                for sym, exp in (*left_key, *right_key):
-                    sym_exps[sym] += exp
-                result[_monomial_key(sym_exps)] += left_coef * right_coef
+                result[(*left_key, *right_key)] += left_coef * right_coef
         return CostExpr(result)
 
     __rmul__ = __mul__

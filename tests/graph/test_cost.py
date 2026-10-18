@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 import pytensor.tensor as pt
@@ -22,6 +23,13 @@ class TestCostExpr:
         with pytest.raises(ValueError, match="non-negative"):
             CostExpr({((n, 1),): -1})
 
+    def test_raw_monomials_are_canonicalized(self):
+        m, n = pt.scalar("m"), pt.scalar("n")
+        raw = CostExpr({((n, 1), (m, 1)): 1, ((m, 1), (n, 0), (n, 1)): 2, ((n, 0),): 3})
+        assert raw == CostExpr.from_dim_product([3, m, n]) + CostExpr.from_dim_product(
+            [3]
+        )
+
     def test_equal_polynomials_compare_equal(self):
         m, n = pt.scalar("m"), pt.scalar("n")
         left = CostExpr.from_dim_product([m, n]) + CostExpr.from_dim_product([2, m])
@@ -42,6 +50,15 @@ class TestCostExpr:
         assert CostExpr.from_dim_product([p]) * total == CostExpr.from_dim_product(
             [p, m]
         ) + CostExpr.from_dim_product([p, n])
+
+    def test_numpy_integers_are_coefficients(self):
+        n = pt.scalar("n")
+        assert CostExpr.from_dim_product([np.int64(3), n]) == CostExpr.from_dim_product(
+            [3, n]
+        )
+        assert CostExpr.from_dim_product([n]) * np.int64(
+            3
+        ) == CostExpr.from_dim_product([3, n])
 
     def test_negative_scale_rejected(self):
         with pytest.raises(ValueError, match="non-negative"):
