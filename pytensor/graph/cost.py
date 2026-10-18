@@ -138,6 +138,34 @@ class Bound:
     __rmul__ = __mul__
 
 
+@dataclass(frozen=True)
+class Cost:
+    """The cost of a computation as independent FLOP and byte bounds.
+
+    The two components are never combined into one number, so comparisons between
+    costs hold on every backend.
+    """
+
+    flops: Bound
+    bytes: Bound
+
+    @classmethod
+    def zero(cls) -> "Cost":
+        return cls(Bound.exact(CostExpr.zero()), Bound.exact(CostExpr.zero()))
+
+    @classmethod
+    def unknown(cls) -> "Cost":
+        return cls(Bound.unknown(), Bound.unknown())
+
+    def __add__(self, other: "Cost") -> "Cost":
+        return Cost(self.flops + other.flops, self.bytes + other.bytes)
+
+    def __mul__(self, factor: CostExpr | int) -> "Cost":
+        return Cost(self.flops * factor, self.bytes * factor)
+
+    __rmul__ = __mul__
+
+
 def _provably_cheaper(
     a: CostExpr, b: CostExpr, zero_able: frozenset[Variable] = frozenset()
 ) -> bool:

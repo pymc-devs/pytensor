@@ -1,7 +1,7 @@
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.graph.cost import Bound, CostExpr, _provably_cheaper
+from pytensor.graph.cost import Bound, Cost, CostExpr, _provably_cheaper
 
 
 class TestCostExpr:
@@ -159,3 +159,27 @@ class TestBound:
         assert body * steps == Bound(CostExpr.zero(), CostExpr.from_dim_product([m, n]))
         assert Bound.unknown() * steps == Bound.unknown()
         assert Bound.unknown() * 0 == Bound.exact(CostExpr.zero())
+
+
+class TestCost:
+    def test_componentwise_sum_and_scaling(self):
+        m, n = pt.scalar("m"), pt.scalar("n")
+        node = Cost(
+            Bound.exact(CostExpr.from_dim_product([2, m])),
+            Bound.exact(CostExpr.from_dim_product([8, m])),
+        )
+        steps = CostExpr.from_dim_product([n])
+        assert (node + node) * steps == Cost(
+            Bound.exact(CostExpr.from_dim_product([4, m, n])),
+            Bound.exact(CostExpr.from_dim_product([16, m, n])),
+        )
+
+    def test_zero_and_unknown(self):
+        node = Cost(
+            Bound.exact(CostExpr.from_dim_product([3])),
+            Bound.exact(CostExpr.from_dim_product([5])),
+        )
+        assert node + Cost.zero() == node
+        assert (node + Cost.unknown()).flops == Bound(
+            CostExpr.from_dim_product([3]), None
+        )
