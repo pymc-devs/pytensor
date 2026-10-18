@@ -935,11 +935,7 @@ class Subtensor(BaseSubtensor, COp):
         if len(idx_list) > x.type.ndim:
             raise IndexError("too many indices for array")
 
-        input_positions = get_slice_elements(
-            idx_list, lambda entry: isinstance(entry, int)
-        )
-
-        assert len(inputs) == len(input_positions)
+        assert len(inputs) == self.n_index_vars
 
         padded = [
             *indices_from_subtensor(inputs, self.idx_list),
@@ -1568,20 +1564,7 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def perform(self, node, inputs, output_storage):
         x, y, *flat_indices = inputs
-
-        flat_indices_iterator = iter(flat_indices)
-        indices = tuple(
-            (
-                next(flat_indices_iterator)
-                if isinstance(entry, int)
-                else slice(
-                    None if entry.start is None else next(flat_indices_iterator),
-                    None if entry.stop is None else next(flat_indices_iterator),
-                    None if entry.step is None else next(flat_indices_iterator),
-                )
-            )
-            for entry in self.idx_list
-        )
+        indices = unflatten_index_variables(flat_indices, self.idx_list)
 
         if not self.inplace:
             x = x.copy()
