@@ -14,6 +14,16 @@ from pytensor.graph.basic import Variable
 DimEntry = int | Variable
 
 
+def _monomial_key(sym_exps: dict[Variable, int]) -> tuple:
+    """Canonical key of a monomial: its ``(symbol, exponent)`` pairs, ordered."""
+    return tuple(
+        sorted(
+            sym_exps.items(),
+            key=lambda kv: (getattr(kv[0], "name", None) or "", id(kv[0])),
+        )
+    )
+
+
 class CostExpr:
     """Polynomial in dimension symbols with non-negative integer coefficients.
 
@@ -52,13 +62,7 @@ class CostExpr:
                 coef *= d
             else:
                 sym_exps[d] += 1
-        key = tuple(
-            sorted(
-                sym_exps.items(),
-                key=lambda kv: (getattr(kv[0], "name", None) or "", id(kv[0])),
-            )
-        )
-        return cls({key: coef})
+        return cls({_monomial_key(sym_exps): coef})
 
     def evaluate(self, values: dict[Variable, int]) -> int:
         """Value of the polynomial with each symbol replaced by ``values[symbol]``."""
@@ -78,6 +82,20 @@ class CostExpr:
         for k, v in other.monomials.items():
             result[k] = result.get(k, 0) + v
         return CostExpr(result)
+
+    def __mul__(self, other: "CostExpr | int") -> "CostExpr":
+        if isinstance(other, int):
+            return CostExpr({k: v * other for k, v in self.monomials.items()})
+        result: dict[tuple, int] = defaultdict(int)
+        for left_key, left_coef in self.monomials.items():
+            for right_key, right_coef in other.monomials.items():
+                sym_exps: dict[Variable, int] = defaultdict(int)
+                for sym, exp in (*left_key, *right_key):
+                    sym_exps[sym] += exp
+                result[_monomial_key(sym_exps)] += left_coef * right_coef
+        return CostExpr(result)
+
+    __rmul__ = __mul__
 
     def __repr__(self) -> str:
         if not self.monomials:

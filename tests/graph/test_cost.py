@@ -22,6 +22,23 @@ class TestCostExpr:
         assert hash(left) == hash(right)
         assert left != CostExpr.from_dim_product([m, n])
 
+    def test_multiplication(self):
+        m, n, p = (pt.scalar(name) for name in "mnp")
+        mn = CostExpr.from_dim_product([m, n])
+        assert 3 * mn == CostExpr.from_dim_product([3, m, n])
+        assert mn * 0 == CostExpr.zero()
+        assert mn * CostExpr.from_dim_product([2, n]) == CostExpr.from_dim_product(
+            [2, m, n, n]
+        )
+        total = CostExpr.from_dim_product([m]) + CostExpr.from_dim_product([n])
+        assert CostExpr.from_dim_product([p]) * total == CostExpr.from_dim_product(
+            [p, m]
+        ) + CostExpr.from_dim_product([p, n])
+
+    def test_negative_scale_rejected(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            CostExpr.from_dim_product([pt.scalar("n")]) * -1
+
 
 class TestProvablyCheaper:
     def test_int_dominance(self):
