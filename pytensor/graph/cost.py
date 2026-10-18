@@ -117,11 +117,21 @@ class CostExpr:
             if scale:
                 scaled.monomials = {k: v * scale for k, v in self.monomials.items()}
             return scaled
-        result: dict[tuple, int] = defaultdict(int)
+        # Both operands are canonical, so only merged keys need sorting
+        product = CostExpr()
         for left_key, left_coef in self.monomials.items():
             for right_key, right_coef in other.monomials.items():
-                result[(*left_key, *right_key)] += left_coef * right_coef
-        return CostExpr(result)
+                if not left_key or not right_key:
+                    key = left_key or right_key
+                else:
+                    exps = dict(left_key)
+                    for sym, exp in right_key:
+                        exps[sym] = exps.get(sym, 0) + exp
+                    key = tuple(sorted(exps.items(), key=_symbol_order))
+                product.monomials[key] = (
+                    product.monomials.get(key, 0) + left_coef * right_coef
+                )
+        return product
 
     __rmul__ = __mul__
 
