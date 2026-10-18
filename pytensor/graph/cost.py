@@ -15,21 +15,25 @@ DimEntry = int | Variable
 
 
 class CostExpr:
-    """Polynomial in positive dim symbols.
+    """Polynomial in dimension symbols with non-negative integer coefficients.
 
-    Stores its monomials as ``{sorted_(symbol,exp)_tuple: int_coef}``. The FLOP cost
-    of a matmul is (approximately) the product of all unique dim lengths. Given
-    inputs A of shape ``(a, b)`` and B of shape ``(b, c)``, computing ``A @ B``
-    costs ``a * b * c``, a single monomial. The cost of a chain of matmuls is the sum
-    of its monomials.
+    Stores its monomials as ``{sorted_(symbol,exp)_tuple: int_coef}``. Monomials with a
+    zero coefficient are dropped, so equal polynomials have equal ``monomials``. A
+    negative coefficient raises ``ValueError``: the dominance prover is sound only for
+    non-negative coefficients.
     """
 
     __slots__ = ("monomials",)
 
     def __init__(self, monomials=None):
-        self.monomials: dict[tuple, int] = (
-            dict(monomials) if monomials is not None else {}
-        )
+        self.monomials: dict[tuple, int] = {}
+        for key, coef in (monomials or {}).items():
+            if coef < 0:
+                raise ValueError(
+                    f"CostExpr coefficients must be non-negative, got {coef} for {key}"
+                )
+            if coef:
+                self.monomials[key] = coef
 
     @classmethod
     def zero(cls) -> "CostExpr":
@@ -67,8 +71,6 @@ class CostExpr:
         result = dict(self.monomials)
         for k, v in other.monomials.items():
             result[k] = result.get(k, 0) + v
-            if result[k] == 0:
-                del result[k]
         return CostExpr(result)
 
     def __repr__(self) -> str:

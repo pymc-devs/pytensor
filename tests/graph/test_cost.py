@@ -4,6 +4,17 @@ import pytensor.tensor as pt
 from pytensor.graph.cost import CostExpr, _provably_cheaper
 
 
+class TestCostExpr:
+    def test_zero_coefficients_dropped(self):
+        n = pt.scalar("n")
+        assert CostExpr.from_dim_product([0, n]).monomials == {}
+
+    def test_negative_coefficient_rejected(self):
+        n = pt.scalar("n")
+        with pytest.raises(ValueError, match="non-negative"):
+            CostExpr({((n, 1),): -1})
+
+
 class TestProvablyCheaper:
     def test_int_dominance(self):
         a = CostExpr.from_dim_product([10, 20, 5])  # 1000
