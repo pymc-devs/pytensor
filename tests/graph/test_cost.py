@@ -1,7 +1,15 @@
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.graph.cost import Bound, Cost, CostExpr, _provably_cheaper
+from pytensor.graph.cost import (
+    Bound,
+    Cost,
+    CostExpr,
+    _provably_cheaper,
+    is_zero,
+    provably_cheaper,
+    provably_le,
+)
 
 
 class TestCostExpr:
@@ -183,3 +191,49 @@ class TestCost:
         assert (node + Cost.unknown()).flops == Bound(
             CostExpr.from_dim_product([3]), None
         )
+
+
+def _exact(flops, bytes_):
+    return Cost(Bound.exact(flops), Bound.exact(bytes_))
+
+
+class TestQueries:
+    def test_is_zero(self):
+        m = pt.scalar("m")
+        assert is_zero(Cost.zero())
+        assert not is_zero(Cost.unknown())
+        assert not is_zero(_exact(CostExpr.zero(), CostExpr.from_dim_product([m])))
+
+    def test_le_and_cheaper(self):
+        m, k = pt.scalar("m"), pt.scalar("k")
+        small = _exact(CostExpr.from_dim_product([m]), CostExpr.from_dim_product([m]))
+        large = _exact(
+            CostExpr.from_dim_product([m, k]), CostExpr.from_dim_product([m, k])
+        )
+        assert provably_le(small, large)
+        assert provably_cheaper(small, large)
+        assert provably_le(small, small)
+        assert not provably_cheaper(small, small)
+        assert not provably_le(large, small)
+
+    def test_pareto_order(self):
+        # Cheaper in FLOPs but dearer in bytes: neither side is provably cheaper.
+        m, k = pt.scalar("m"), pt.scalar("k")
+        a = _exact(CostExpr.from_dim_product([m]), CostExpr.from_dim_product([m, k]))
+        b = _exact(CostExpr.from_dim_product([m, k]), CostExpr.from_dim_product([m]))
+        assert not provably_le(a, b)
+        assert not provably_le(b, a)
+
+    def test_unknown_upper_end_never_provable(self):
+        m = pt.scalar("m")
+        known = _exact(CostExpr.from_dim_product([m]), CostExpr.from_dim_product([m]))
+        assert not provably_le(known + Cost.unknown(), known)
+        # An unknown on the larger side only lowers its lower end.
+        assert provably_le(known, known + Cost.unknown())
+
+    def test_zero_able_passes_through(self):
+        m, k, p = (pt.scalar(name) for name in "mkp")
+        a = _exact(CostExpr.from_dim_product([m, k]), CostExpr.zero())
+        b = _exact(CostExpr.from_dim_product([m, k, p]), CostExpr.zero())
+        assert provably_le(a, b)
+        assert not provably_le(a, b, zero_able=frozenset({p}))

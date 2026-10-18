@@ -249,3 +249,35 @@ def _provably_cheaper(
         remaining_b[end] -= amount
 
     return not any(remaining_a)
+
+
+def is_zero(cost: Cost) -> bool:
+    """Whether `cost` is exactly zero in every component, whatever the symbols."""
+    return all(bound.hi == CostExpr.zero() for bound in (cost.flops, cost.bytes))
+
+
+def _bound_le(smaller: Bound, larger: Bound, zero_able: frozenset[Variable]) -> bool:
+    if smaller.hi is None:
+        return False
+    return smaller.hi == larger.lo or _provably_cheaper(
+        smaller.hi, larger.lo, zero_able
+    )
+
+
+def provably_le(a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()) -> bool:
+    """Whether `a` is no more than `b` in every component, for every symbol assignment.
+
+    Compares the upper bound of each component of `a` with the lower bound of the same
+    component of `b`. Symbols are integers >= 1, except those in `zero_able`, which are
+    integers >= 0. False means "not provable", never that `b` is smaller.
+    """
+    return _bound_le(a.flops, b.flops, zero_able) and _bound_le(
+        a.bytes, b.bytes, zero_able
+    )
+
+
+def provably_cheaper(
+    a: Cost, b: Cost, zero_able: frozenset[Variable] = frozenset()
+) -> bool:
+    """Whether `a` is provably no more than `b` in every component, and they differ."""
+    return a != b and provably_le(a, b, zero_able)
