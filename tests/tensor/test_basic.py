@@ -53,6 +53,7 @@ from pytensor.tensor.basic import (
     flatnonzero,
     flatten,
     full_like,
+    get_first_dim_length,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     get_vector_length,
@@ -1349,6 +1350,34 @@ def test_get_vector_length():
     assert 3 == get_vector_length(alloc(0, 3))
 
     assert 5 == get_vector_length(tensor(dtype=np.float64, shape=(5,)))
+
+    # Only vectors are accepted
+    with pytest.raises(TypeError, match="must be a vector"):
+        get_vector_length(lscalar())
+    with pytest.raises(TypeError, match="must be a vector"):
+        get_vector_length(as_tensor_variable(np.zeros((2, 3))))
+    with pytest.raises(TypeError, match="must be a vector"):
+        get_vector_length(alloc(0, 3, lscalar()))
+
+
+def test_get_first_dim_length():
+    # Vectors behave like in `get_vector_length`
+    assert 3 == get_first_dim_length(as_tensor_variable((1, 2, 3)))
+    assert 3 == get_first_dim_length(alloc(0, 3))
+
+    # Only the first axis matters for nd inputs
+    assert 2 == get_first_dim_length(as_tensor_variable(np.zeros((2, 3))))
+    n = lscalar("n")
+    assert 3 == get_first_dim_length(alloc(0, 3, n))
+    assert 5 == get_first_dim_length(join(0, alloc(0, 2, n), alloc(0, 3, n)))
+    assert 2 == get_first_dim_length(join(1, alloc(0, 2, n), alloc(0, 2, n)))
+    assert 4 == get_first_dim_length(tensor(dtype=np.float64, shape=(4, None)))
+
+    with pytest.raises(ValueError, match=r"^Length of .*"):
+        get_first_dim_length(join(0, alloc(0, n, n), alloc(0, 3, n)))
+
+    with pytest.raises(TypeError, match="at least one dimension"):
+        get_first_dim_length(lscalar())
 
 
 class TestJoinAndSplit:
