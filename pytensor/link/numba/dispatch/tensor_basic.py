@@ -420,7 +420,8 @@ def makevector({", ".join(input_names)}):
         globals() | {"np": np, "dtype": dtype},
     )
 
-    return numba_basic.numba_njit(makevector_fn)
+    cache_version = 1
+    return numba_basic.numba_njit(makevector_fn), cache_version
 
 
 @register_funcify_default_op_cache_key(TensorFromScalar)
