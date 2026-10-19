@@ -26,8 +26,8 @@ from pytensor.tensor.random.utils import (
     explicit_expand_dims,
     normalize_size_param,
 )
-from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.shape import shape as tensor_shape
+from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
