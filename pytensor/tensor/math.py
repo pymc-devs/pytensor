@@ -618,12 +618,10 @@ def argmin(x, axis=None, keepdims=False):
     """
     x = as_tensor_variable(x)
     str_x_type = str(x.dtype)
-    if str_x_type.startswith("float") or str_x_type in int_dtypes:
+    if str_x_type.startswith("float"):
         return argmax(-x, axis=axis, keepdims=keepdims)
-    elif str_x_type in uint_dtypes:
-        itype = np.iinfo(x.dtype)
-        return argmax(itype.max - x, axis=axis, keepdims=keepdims)
-    elif str_x_type == "bool":
+    elif str_x_type in discrete_dtypes:
+        # -x wraps on the lowest signed value; itype.max - x makes uint64 float64
         return argmax(~x, axis=axis, keepdims=keepdims)
     else:
         # Be careful about unsigned integers, complex

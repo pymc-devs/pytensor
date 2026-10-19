@@ -1254,6 +1254,20 @@ class TestArgminArgmax:
             i = eval_outputs(argmax(n))
             assert i == 3
 
+    @pytest.mark.parametrize("dtype", ["int8", "int16", "int32", "int64"])
+    def test_iinfo_min(self, dtype):
+        # -itype.min overflows back to itype.min
+        itype = np.iinfo(dtype)
+        data = np.array([itype.min + 3, itype.min, itype.max - 5, itype.max], dtype)
+        n = as_tensor_variable(data)
+        assert eval_outputs(argmin(n)) == 1
+
+    def test_uint64_large(self):
+        # Neighbours above 2**53 are not told apart in float64
+        data = np.array([2**64 - 1, 2**64 - 6], dtype="uint64")
+        n = as_tensor_variable(data)
+        assert eval_outputs(argmin(n)) == 1
+
     def test_bool(self):
         data = np.array([True, False], "bool")
         n = as_tensor_variable(data)
