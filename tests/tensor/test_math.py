@@ -1307,6 +1307,17 @@ class TestMinMax:
         with pytest.raises(ValueError):
             min(x, initial=-np.inf)
 
+    @pytest.mark.parametrize("dtype", ["int8", "int16", "int32", "int64"])
+    def test_iinfo_min(self, dtype):
+        # -itype.min overflows back to itype.min
+        itype = np.iinfo(dtype)
+        data = np.array(
+            [itype.min + 3, itype.min, itype.max - 5, itype.max], dtype=dtype
+        )
+        n = vector("n", shape=(None,), dtype=dtype)
+        f = function([n], min(n, keepdims=True))
+        assert_array_equal(f(data), [itype.min])
+
     def test_scalar(self):
         for fct in [max, min]:
             n = as_tensor_variable(5.0)
