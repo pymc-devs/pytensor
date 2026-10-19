@@ -302,6 +302,19 @@ class TestBinCount(utt.InferShapeTester):
             with pytest.raises(AssertionError):
                 f5(a)
 
+    @pytest.mark.parametrize(
+        "dtype, mode", [("int8", None), ("uint8", None), ("int8", "FAST_COMPILE")]
+    )
+    def test_small_int_dtypes(self, dtype, mode):
+        # More occurrences than the dtype can count, of the largest value it holds
+        info = np.iinfo(dtype)
+        a = np.full(info.max + 5, info.max, dtype=dtype)
+
+        x = vector("x", dtype=dtype)
+        res = pytensor.function([x], bincount(x), mode=mode)(a)
+        np.testing.assert_array_equal(res, np.bincount(a))
+        assert res.dtype == np.bincount(a).dtype
+
 
 class TestDiff(utt.InferShapeTester):
     def test_basic(self):
