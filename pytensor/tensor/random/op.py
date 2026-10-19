@@ -26,7 +26,7 @@ from pytensor.tensor.random.utils import (
     explicit_expand_dims,
     normalize_size_param,
 )
-from pytensor.tensor.shape import Shape, Shape_i, shape_tuple
+from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.shape import shape as tensor_shape
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
@@ -509,26 +509,93 @@ class DefaultGeneratorMakerOp(AbstractRNGConstructor):
 default_rng = DefaultGeneratorMakerOp()
 
 
-def _size_depends_on_values(size: Variable) -> bool:
-    # Shape ops stop the walk, so a shape of a batched array is not a value.
-    # A free input is the batched value itself. Those entries can differ, and
-    # a rectangular draw has no single size.
-    seen: set[Variable] = set()
-    pending = [size]
-    while pending:
-        var = pending.pop()
-        if var in seen:
-            continue
-        seen.add(var)
-        owner = var.owner
-        if owner is None:
-            if isinstance(var, Constant):
-                continue
+def _axis_is_broadcast(var: Variable, axis: int) -> bool:
+    """Return whether every index along `axis` holds the same value."""
+    ndim = getattr(var.type, "ndim", None)
+    if not isinstance(ndim, int) or axis < 0 or axis >= ndim:
+        return True
+    if var.type.shape[axis] == 1:
+        return True
+    if isinstance(var, Constant):
+        data = np.asarray(var.data)
+        if data.shape[axis] <= 1:
             return True
-        if isinstance(owner.op, (Shape, Shape_i)):
-            continue
-        pending.extend(owner.inputs)
+        indexer = [slice(None)] * data.ndim
+        indexer[axis] = 0
+        core = data[tuple(indexer)]
+        return bool(np.array_equal(data, np.broadcast_to(core, data.shape)))
+
+    owner = var.owner
+    if owner is None:
+        return False
+
+    from pytensor.tensor.basic import Alloc, Join
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.elemwise import DimShuffle, Elemwise
+    from pytensor.tensor.shape import SpecifyShape
+    from pytensor.tensor.subtensor import Subtensor
+
+    op = owner.op
+    if isinstance(op, Alloc):
+        value = owner.inputs[0]
+        new_dims = var.type.ndim - value.type.ndim
+        if axis < new_dims:
+            return True
+        return _axis_is_broadcast(value, axis - new_dims)
+    if isinstance(op, DimShuffle):
+        source = op.new_order[axis]
+        if source == "x":
+            return True
+        return _axis_is_broadcast(owner.inputs[0], source)
+    if isinstance(op, Elemwise):
+        for inp in owner.inputs:
+            inp_axis = axis - (var.type.ndim - inp.type.ndim)
+            if inp_axis < 0:
+                continue
+            if not _axis_is_broadcast(inp, inp_axis):
+                return False
+        return True
+    if isinstance(op, SpecifyShape):
+        return _axis_is_broadcast(owner.inputs[0], axis)
+    if isinstance(op, Blockwise) and axis < op.batch_ndim(owner):
+        return all(_axis_is_broadcast(inp, axis) for inp in owner.inputs)
+    if isinstance(op, Subtensor):
+        return _subtensor_axis_is_broadcast(owner, axis)
+    if isinstance(op, Join) and axis != op.axis:
+        for inp in owner.inputs:
+            inp_axis = axis - (var.type.ndim - inp.type.ndim)
+            if inp_axis < 0:
+                continue
+            if not _axis_is_broadcast(inp, inp_axis):
+                return False
+        return True
     return False
+
+
+def _subtensor_axis_is_broadcast(node: Apply, axis: int) -> bool:
+    tensor = node.inputs[0]
+    idx_list = list(node.op.idx_list)
+    missing = tensor.type.ndim - len(idx_list)
+    if missing > 0:
+        idx_list.extend([slice(None)] * missing)
+    out_axis = 0
+    for inp_axis, entry in enumerate(idx_list):
+        if isinstance(entry, slice):
+            if out_axis == axis:
+                return _axis_is_broadcast(tensor, inp_axis)
+            out_axis += 1
+        elif isinstance(entry, int):
+            continue
+        else:
+            return False
+    return False
+
+
+def _size_is_rectangular(size: Variable, batch_ndim: int) -> bool:
+    # A shape-only expression can still ask for a different length at each
+    # batch index, as in arange(x.shape[0]). Only a broadcast batch axis has
+    # one core size.
+    return all(_axis_is_broadcast(size, axis) for axis in range(batch_ndim))
 
 
 def _shape_vector_items(shape_vec: Variable) -> tuple[Variable, ...]:
@@ -582,20 +649,11 @@ def vectorize_random_variable(
         not isinstance(old_size.type, NoneTypeT) and size.type.ndim > old_size.type.ndim
     ):
         batch_ndim = size.type.ndim - old_size.type.ndim
-        if _size_depends_on_values(size):
+        if not _size_is_rectangular(size, batch_ndim):
             raise NotImplementedError(
                 "vectorize_graph cannot expand a random variable whose size "
-                "depends on batched values"
+                "is not rectangular across the batch"
             )
-        if isinstance(size, Constant):
-            values = np.asarray(size.data)
-            core = values[(0,) * batch_ndim]
-            if not np.array_equal(values, np.broadcast_to(core, values.shape)):
-                raise NotImplementedError(
-                    "vectorize_graph cannot expand a random variable whose size "
-                    "depends on batched values"
-                )
-        # A shape-only size is broadcast across the batch, so one slice is the core.
         core_size = size[(0,) * batch_ndim]
         new_ndim = dist_params[0].type.ndim - original_dist_params[0].type.ndim
         param_batch = compute_batch_shape(dist_params, ndims_params=op.ndims_params)

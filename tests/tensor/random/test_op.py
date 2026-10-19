@@ -312,14 +312,14 @@ def test_vectorize_size_from_batched_shape():
     )
 
     sizes = pt.vector("sizes", shape=(1,), dtype="int64")
-    with pytest.raises(NotImplementedError, match="batched values"):
+    with pytest.raises(NotImplementedError, match="not rectangular"):
         vectorize_graph(
             normal(0, size=sizes),
             {sizes: pt.matrix("sizes_b", dtype="int64")},
         )
 
     core = pt.vector("core", shape=(2,), dtype="int64")
-    with pytest.raises(NotImplementedError, match="batched values"):
+    with pytest.raises(NotImplementedError, match="not rectangular"):
         vectorize_graph(
             normal(0, size=core),
             {core: pt.as_tensor([[2, 3], [4, 5]])},
