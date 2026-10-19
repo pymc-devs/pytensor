@@ -325,6 +325,13 @@ def test_vectorize_size_from_batched_shape():
             {core: pt.as_tensor([[2, 3], [4, 5]])},
         )
 
+    # arange(x.shape[0]) is built only from a shape, but each batch entry
+    # asks for a different length. That is not one rectangular draw.
+    x = pt.vector("x")
+    n = pt.lscalar("n")
+    with pytest.raises(NotImplementedError, match="not rectangular"):
+        vectorize_graph(normal(0, size=(n,)), {n: pt.arange(x.shape[0]) + 1})
+
 
 def test_vectorize_empty_size():
     scalar_mu = pt.scalar("scalar_mu")
