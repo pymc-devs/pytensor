@@ -5,6 +5,7 @@ from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
 from pytensor.tensor.variable import TensorVariable
@@ -155,10 +156,11 @@ optdb.register(
 def blockwise_unbatched_scalar_inputs(fgraph, node):
     """Keep scalar ``Blockwise`` inputs without batch dims out of ``jnp.vectorize``.
 
-    ``Blockwise.make_node`` pads such inputs into a ``MakeVector`` or an
-    ``expand_dims``, whose JAX implementations return traced arrays. Replacing the
-    padding by ``JAXUnbatchedScalar`` hands the core function the scalar itself, so
-    a static value like ``Scan``'s ``n_steps`` stays static.
+    Under ``jax.jit``, a ``Shape_i`` output is a Python int, and any jnp operation on
+    it returns a traced array. ``Blockwise.make_node`` pads unbatched scalar inputs
+    with a ``MakeVector`` or an ``expand_dims``, which hands the core function a
+    tracer. ``JAXUnbatchedScalar`` replaces that padding and hands the core function a
+    static scalar.
     """
     from pytensor.link.jax.dispatch.blockwise import (
         JAXUnbatchedScalar,
@@ -167,24 +169,19 @@ def blockwise_unbatched_scalar_inputs(fgraph, node):
 
     new_inputs = list(node.inputs)
     for i, (inp, sig) in enumerate(zip(node.inputs, node.op.inputs_sig, strict=True)):
-        if sig or not all(inp.type.broadcastable):
+        if (
+            sig
+            or not all(inp.type.broadcastable)
+            or isinstance(inp.owner_op, JAXUnbatchedScalar)
+        ):
             continue
-        # The Blockwise dispatch passes constants as static values itself, and core
+        # The Blockwise dispatch passes constants as static values, and core
         # dispatches like Convolve1d read them from the graph
         if unbatched_scalar_constant(inp, sig) is not None:
             continue
-        # Peel the padding down to the scalar. Every layer is all-broadcastable,
-        # because a DimShuffle cannot drop a non-broadcastable dim
-        scalar = inp
-        while scalar.type.ndim:
-            match scalar.owner_op_and_inputs:
-                case (MakeVector() | DimShuffle(), inner):
-                    scalar = inner
-                case _:
-                    break
-        if scalar.type.ndim or scalar is inp:
-            continue
-        new_inputs[i] = JAXUnbatchedScalar(inp.type.ndim)(scalar)
+        new_inputs[i] = JAXUnbatchedScalar(inp.type.ndim)(
+            apply_local_dimshuffle_merge(fgraph, inp.squeeze())
+        )
 
     if new_inputs == node.inputs:
         return None
