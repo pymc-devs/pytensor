@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import numpy as np
@@ -14,6 +15,7 @@ from tests.link.mlx.test_basic import compare_mlx_and_py
 
 mlx = pytest.importorskip("mlx.core")
 from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.link.mlx.dispatch.scalar.math import _metal_math_call
 
 
 # float32 and float64 take deliberately different paths through both dispatches, so
@@ -173,6 +175,57 @@ def test_psi_float64_precision(low, high):
     np.testing.assert_allclose(
         res, scipy.special.psi(x_test_value), rtol=1e-12, atol=1e-14
     )
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize(
+    "scalar_op, name, reference",
+    [
+        (GammaLn, "gammaln", scipy.special.gammaln),
+        (Psi, "psi", scipy.special.digamma),
+    ],
+    ids=["gammaln", "psi"],
+)
+def test_gammaln_psi_metal_kernel(scalar_op, name, reference):
+    # Both functions run as a Metal kernel for float32 on the GPU stream and as the
+    # vectorized graph everywhere else, and only the latter runs on CI. The kernel is
+    # checked against scipy rather than the fallback because it is the more accurate of
+    # the two on negative arguments, where sinpi spares it the half-angle detour. The
+    # uniform sample never lands near a pole, so points within 1e-1 and 1e-3 of the
+    # first few are added. The edge values are checked against the fallback instead.
+    poles = -np.array([1.0, 2.0, 5.0])
+    offsets = np.array([1e-1, 1e-3])
+    near_poles = np.concatenate(
+        [(poles[:, None] + offsets).ravel(), (poles[:, None] - offsets).ravel()]
+    )
+    x_test_value = np.concatenate(
+        [np.random.default_rng(43).uniform(-9.9, 30.0, 1001), near_poles]
+    ).astype("float32")
+    edges = np.array(
+        [0.0, -0.0, -1.0, -2.0, np.inf, -np.inf, np.nan, 0.5, 4.0, -1.5, 1e-30],
+        dtype="float32",
+    )
+
+    with mlx.stream(mlx.gpu):
+        assert _metal_math_call(name, mlx.array(x_test_value)) is not None, (
+            "the Metal kernel did not engage, so this comparison proves nothing"
+        )
+        metal = np.asarray(mlx_funcify(scalar_op())(mlx.array(x_test_value)))
+        metal_edges = np.asarray(mlx_funcify(scalar_op())(mlx.array(edges)))
+        # the kernel flattens its input, which a 0-d array has to survive
+        metal_scalar = np.asarray(mlx_funcify(scalar_op())(mlx.array(np.float32(2.5))))
+    with mlx.stream(mlx.cpu):
+        vectorized_edges = np.asarray(mlx_funcify(scalar_op())(mlx.array(edges)))
+
+    np.testing.assert_allclose(
+        metal, reference(x_test_value.astype("float64")), rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_allclose(metal_edges, vectorized_edges, rtol=1e-5)
+    assert metal_scalar.shape == ()
+    np.testing.assert_allclose(metal_scalar, reference(2.5), rtol=1e-5)
 
 
 def test_log1mexp():

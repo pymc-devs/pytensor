@@ -2,7 +2,11 @@ import mlx.core as mx
 import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.helpers import _working_precision
+from pytensor.link.mlx.dispatch.scalar.helpers import (
+    _metal_constants,
+    _metal_unary_call,
+    _working_precision,
+)
 from pytensor.scalar.math import (
     GammaLn,
     Log1mexp,
@@ -40,6 +44,90 @@ _PSI_COEFFS = (
 _PSI_SHIFTS = 10
 _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
 _PSI_SHIFTS_SINGLE = 6
+
+
+# Both functions are a chain of elementwise ops on the vectorized path, long enough that
+# mx.compile splits it into several kernel launches. A kernel is one launch, and it can
+# branch: small positive arguments shift up rather than reflect, and the psi recurrence
+# stops once the argument is large enough for the asymptotic series. Metal's sinpi and
+# tanpi reduce the argument themselves, so the reflections need no half-angle detour.
+_METAL_HEADER = (
+    _metal_constants(
+        LANCZOS_C=_LANCZOS_COEFFS,
+        PSI_C=_PSI_COEFFS_SINGLE,
+        MATH_CONSTS=(
+            _LANCZOS_G + 0.5,
+            0.5 * float(np.log(2.0 * np.pi)),
+            float(np.log(np.pi)),
+        ),
+    )
+    + f"""
+#define LANCZOS_G_HALF  MATH_CONSTS[0]
+#define HALF_LOG_2PI    MATH_CONSTS[1]
+#define LOG_PI          MATH_CONSTS[2]
+#define PSI_TERMS       {len(_PSI_COEFFS_SINGLE)}
+#define PSI_MIN         {float(_PSI_SHIFTS_SINGLE)}f
+
+// log Gamma(w + 1) for w >= -0.5
+static inline float lanczos_log_gamma(float w) {{
+    float series = LANCZOS_C[0];
+    for (int i = 1; i < {len(_LANCZOS_COEFFS)}; ++i) series += LANCZOS_C[i] / (w + (float)i);
+    float t = w + LANCZOS_G_HALF;
+    return HALF_LOG_2PI + (w + 0.5f) * log(t) - t + log(series);
+}}
+"""
+)
+
+
+_METAL_GAMMALN_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float z = (float)x[i];
+    float res;
+    if (isinf(z)) {
+        // the series forms inf - inf at either end, where both limits are +inf
+        res = INFINITY;
+    } else if (z >= 0.5f) {
+        res = lanczos_log_gamma(z - 1.0f);
+    } else if (z > 0.0f) {
+        res = lanczos_log_gamma(z) - log(z);
+    } else {
+        // log|sin(pi z)| is -inf at the poles, which makes the result +inf there
+        float log_sin = log(fabs(sinpi(z - floor(z))));
+        res = LOG_PI - log_sin - lanczos_log_gamma(-z);
+    }
+    out[i] = (T)res;
+"""
+
+
+_METAL_PSI_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float z = (float)x[i];
+    float y = (z < 0.0f) ? 1.0f - z : z;
+    float res = 0.0f;
+    while (y < PSI_MIN) {
+        res -= 1.0f / y;
+        y += 1.0f;
+    }
+    float r2 = 1.0f / (y * y);
+    float series = PSI_C[PSI_TERMS - 1];
+    for (int k = PSI_TERMS - 2; k >= 0; --k) series = PSI_C[k] + series * r2;
+    res += log(y) - 0.5f / y - series * r2;
+    if (z < 0.0f) {
+        // the tangent lands on a true zero at every pole, so those come back infinite
+        res -= M_PI_F / tanpi(z - rint(z));
+    }
+    out[i] = (T)res;
+"""
+
+
+_METAL_SOURCES = {"gammaln": _METAL_GAMMALN_SOURCE, "psi": _METAL_PSI_SOURCE}
+
+
+def _metal_math_call(name, x):
+    """Evaluate ``name`` through its Metal kernel, or return None to fall back."""
+    return _metal_unary_call(
+        x, name=name, header=_METAL_HEADER, source=_METAL_SOURCES[name]
+    )
 
 
 def _lanczos_log_gamma(w, const):
@@ -94,6 +182,9 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
 def mlx_funcify_GammaLn(op, **kwargs):
     def gammaln(x):
         z, const, out_dtype = _working_precision(x)
+        fast = _metal_math_call("gammaln", z)
+        if fast is not None:
+            return fast.astype(out_dtype)
 
         double = z.dtype == mx.float64
         half = const(0.5)
@@ -134,6 +225,9 @@ def mlx_funcify_GammaLn(op, **kwargs):
 def mlx_funcify_Psi(op, **kwargs):
     def psi(x):
         z, const, out_dtype = _working_precision(x)
+        fast = _metal_math_call("psi", z)
+        if fast is not None:
+            return fast.astype(out_dtype)
 
         double = z.dtype == mx.float64
         n_shifts = _PSI_SHIFTS if double else _PSI_SHIFTS_SINGLE
