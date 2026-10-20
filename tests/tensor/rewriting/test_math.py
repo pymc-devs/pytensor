@@ -1397,9 +1397,7 @@ class TestLocalUselessElemwiseComparison:
         values = np.array([1.0, np.nan])
 
         # The default optimizer enables nan_unsafe rewrites.
-        optimized = function(
-            [x], expr, mode=get_default_mode().excluding("fusion")
-        )
+        optimized = function([x], expr, mode=get_default_mode().excluding("fusion"))
         np.testing.assert_array_equal(optimized(values), [True, True])
 
         # Excluding nan_unsafe preserves the original NaN comparison.
