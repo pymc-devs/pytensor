@@ -138,23 +138,25 @@ static inline float log1p_deficit(float z, float one_plus_z) {{
 )
 
 
-_METAL_UNARY_KERNELS: dict[str, Callable | None] = {}
+_METAL_UNARY_KERNELS: dict[tuple[str, str, str], Callable] = {}
 
 
 def _metal_unary_kernel(name, header, source):
-    """Build and cache the one-input Metal kernel ``name``, or None if it cannot be built."""
-    if name not in _METAL_UNARY_KERNELS:
-        try:
-            _METAL_UNARY_KERNELS[name] = mx.fast.metal_kernel(
-                name=f"pytensor_{name}",
-                input_names=["x"],
-                output_names=["out"],
-                header=header,
-                source=source,
-            )
-        except Exception:
-            _METAL_UNARY_KERNELS[name] = None
-    return _METAL_UNARY_KERNELS[name]
+    """Build and cache the one-input Metal kernel ``name``.
+
+    Metal compiles the source lazily, so a malformed source fails when the kernel is
+    first evaluated rather than here.
+    """
+    key = (name, header, source)
+    if key not in _METAL_UNARY_KERNELS:
+        _METAL_UNARY_KERNELS[key] = mx.fast.metal_kernel(
+            name=f"pytensor_{name}",
+            input_names=["x"],
+            output_names=["out"],
+            header=header,
+            source=source,
+        )
+    return _METAL_UNARY_KERNELS[key]
 
 
 def _metal_unary_call(x, *, name, header, source):
@@ -169,7 +171,7 @@ def _metal_unary_call(x, *, name, header, source):
     x : mx.array
         Input, of any rank.
     name : str
-        Kernel name, unique across modules. It keys the kernel cache.
+        Kernel name.
     header : str
         Metal source placed ahead of the kernel body.
     source : str
@@ -188,8 +190,6 @@ def _metal_unary_call(x, *, name, header, source):
     ):
         return None
     kernel = _metal_unary_kernel(name, header, source)
-    if kernel is None:
-        return None
     # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
     # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
     # it fails to compile. Reshaping covers every rank at once
