@@ -704,12 +704,15 @@ def _model_from_stream(
             meta = {
                 "name": getattr(var, "name", None),
                 "type": str(var.type),
+                "dtype": getattr(var.type, "dtype", None),
                 "output_idx": int(gnode.output_idx[1:]) if gnode.output_idx else 0,
             }
             if hasattr(var.type, "shape"):
                 meta["shape"] = list(var.type.shape)
             if not gnode.is_leaf:
-                meta["op"] = str(var.owner.op)
+                op = var.owner.op
+                meta["op"] = str(op)
+                meta["op_type"] = type(op).__name__
                 meta["owner_key"] = gnode.owner_key
 
         node = GraphModelNode(

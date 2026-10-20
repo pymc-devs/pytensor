@@ -1105,3 +1105,24 @@ def test_graph_model_depth():
     model = build_graph_model(x * x + x, depth=1)
     (root,) = model.roots
     assert root.children == []
+
+
+def test_graph_model_structured_meta():
+    """Consumers can group by op type and dtype without parsing reprs."""
+    x = dvector("x")
+    sign, _ = slogdet(matrix("m"))
+    model = build_graph_model([x * x + x, sign])
+
+    nodes = model.flattened()
+    by_op_type = {}
+    by_op = {}
+    for entry in nodes.values():
+        if entry["kind"] == "node":
+            by_op_type.setdefault(entry["op_type"], []).append(entry)
+            by_op.setdefault(entry["op"], []).append(entry)
+            assert entry["dtype"] == "float64"
+
+    # Coarse families: Elemwise for the vector ops, Blockwise for Det
+    assert {"Elemwise", "Blockwise"} == set(by_op_type)
+    # Specific ops, without parsing the repr
+    assert {"Add", "Mul"} <= set(by_op)
