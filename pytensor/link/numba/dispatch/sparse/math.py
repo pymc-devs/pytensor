@@ -146,7 +146,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
     out_type = np.dtype(out_dtype).type
 
-    cache_version = 4
+    cache_version = 5
     cache_key = sha256(
         str(
             (
@@ -160,6 +160,47 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             )
         ).encode()
     ).hexdigest()
+
+    if x_is_sparse and y_is_sparse and not z_is_sparse:
+
+        @numba_basic.numba_njit
+        def spmspm_dense(x, y):
+            # It accumulates directly into the dense output matrix, which is more efficient than
+            # constructing the corresponding sparse matrix and then converting it to dense.
+            assert x.shape[1] == y.shape[0]
+            n_row = np.uint32(x.shape[0])
+            n_col = np.uint32(y.shape[1])
+            if x_format != y_format:
+                if x_format == "csr":
+                    y = y.tocsr()
+                else:
+                    y = y.tocsc()
+
+            out = np.zeros((n_row, n_col), dtype=out_dtype)
+            x_ind = x.indices.view(np.uint32)
+            x_ptr = x.indptr.view(np.uint32)
+            y_ind = y.indices.view(np.uint32)
+            y_ptr = y.indptr.view(np.uint32)
+            x_data = x.data
+            y_data = y.data
+
+            if x_format == "csr":
+                for row in range(n_row):
+                    for x_pos in range(x_ptr[row], x_ptr[row + 1]):
+                        inner = x_ind[x_pos]
+                        value = out_type(x_data[x_pos])
+                        for y_pos in range(y_ptr[inner], y_ptr[inner + 1]):
+                            out[row, y_ind[y_pos]] += value * out_type(y_data[y_pos])
+            else:
+                for col in range(n_col):
+                    for y_pos in range(y_ptr[col], y_ptr[col + 1]):
+                        inner = y_ind[y_pos]
+                        value = out_type(y_data[y_pos])
+                        for x_pos in range(x_ptr[inner], x_ptr[inner + 1]):
+                            out[x_ind[x_pos], col] += out_type(x_data[x_pos]) * value
+            return out
+
+        return spmspm_dense, cache_key
 
     if x_is_sparse and y_is_sparse:
         # General spmspm algorithm in CSR format
@@ -238,15 +279,13 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
         formats = (x_format, y_format)
         if formats == ("csc", "csc"):
-            # In all cases, the output is dense when the op is Dot.
+
             @numba_basic.numba_njit
             def spmspm_csc_csc(x, y):
                 # Swap inputs
                 n_row, n_col = x.shape[0], y.shape[1]
                 z_ptr, z_ind, z_data = _spmspm_csr(x=y, y=x, n_row=n_col, n_col=n_row)
                 output = sp.csc_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
-                if not z_is_sparse:
-                    return output.toarray()
                 return output
 
             return spmspm_csc_csc, cache_key
@@ -260,8 +299,6 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                     x=y.tocsc(), y=x, n_row=n_col, n_col=n_row
                 )
                 output = sp.csc_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
-                if not z_is_sparse:
-                    return output.toarray()
                 return output
 
             return spmspm_csc_csr, cache_key
@@ -275,8 +312,6 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                     x=x, y=y.tocsr(), n_row=n_row, n_col=n_col
                 )
                 output = sp.csr_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
-                if not z_is_sparse:
-                    return output.toarray()
                 return output
 
             return spmspm_csr_csc, cache_key
@@ -288,8 +323,6 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                 n_row, n_col = x.shape[0], y.shape[1]
                 z_ptr, z_ind, z_data = _spmspm_csr(x=x, y=y, n_row=n_row, n_col=n_col)
                 output = sp.csr_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
-                if not z_is_sparse:
-                    return output.toarray()
                 return output
 
             return spmspm_csr_csr, cache_key
