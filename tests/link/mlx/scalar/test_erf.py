@@ -14,6 +14,7 @@ from tests.link.mlx.test_basic import compare_mlx_and_py
 
 mlx = pytest.importorskip("mlx.core")
 from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.link.mlx.dispatch.scalar.erf import _metal_erf_call
 
 
 # erf keeps the native mx.erf. It is a float32 kernel whatever dtype it is handed, so
@@ -179,8 +180,10 @@ def test_erfc_float32_subnormal_tail():
     [("float32", 1e-5), ("float16", 1e-3), ("bfloat16", 8e-3)],
     ids=["float32", "float16", "bfloat16"],
 )
-@pytest.mark.parametrize("op", [Erfc, Erfcx], ids=["erfc", "erfcx"])
-def test_erf_family_paths_agree(op, dtype, rtol):
+@pytest.mark.parametrize(
+    "op, name", [(Erfc, "erfc"), (Erfcx, "erfcx")], ids=["erfc", "erfcx"]
+)
+def test_erf_family_paths_agree(op, name, dtype, rtol):
     # erfc and erfcx are implemented twice: a Metal kernel, taken for single and half
     # precision on the GPU stream, and the vectorized fallback taken everywhere else.
     # Both compute half precision in float32 and round once. The two share generated
@@ -199,6 +202,11 @@ def test_erf_family_paths_agree(op, dtype, rtol):
     x_mlx = mlx.array(x_test_value).astype(getattr(mlx, dtype))
 
     with mlx.stream(mlx.gpu):
+        # Without this the test compares the fallback against itself and passes whatever
+        # the kernel does
+        assert _metal_erf_call(name, x_mlx) is not None, (
+            "the Metal kernel did not engage, so this comparison proves nothing"
+        )
         metal = np.asarray(mlx_funcify(op())(x_mlx).astype(mlx.float32))
     with mlx.stream(mlx.cpu):
         vectorized = np.asarray(mlx_funcify(op())(x_mlx).astype(mlx.float32))
