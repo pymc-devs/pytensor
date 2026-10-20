@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 
 from pytensor import tensor as pt
+from pytensor.assumptions.specify import assume
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import diagonal
 from pytensor.tensor.blockwise import Blockwise
@@ -169,6 +170,8 @@ def solve(
     b_ndim = _default_b_ndim(b, b_ndim)
 
     if assume_a == "diagonal":
+        # The division leaves no Solve node to read the promise off, so record it on ``a``.
+        a = assume(a, diagonal=True)
         a_diagonal = diagonal(a, axis1=-2, axis2=-1)
         b_transposed = b[None, :] if b_ndim == 1 else b.mT
         x = (b_transposed / pt.expand_dims(a_diagonal, -2)).mT

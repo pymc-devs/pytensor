@@ -125,6 +125,36 @@ def test_generic_solve_to_solve_triangular_through_expand_dims():
     assert_equal_computations([rewritten], [solve_triangular(L, b, lower=True)])
 
 
+def test_assume_a_pos_reaches_a_general_solve():
+    A, b, c = matrix("A"), matrix("b"), matrix("c")
+    outs = [solve(A, b, assume_a="pos"), solve(A, c)]
+
+    rewritten = rewrite_graph(outs, include=("canonicalize", "stabilize", "specialize"))
+
+    L = cholesky(A)
+    expected = [cho_solve((L, True), b, b_ndim=2), cho_solve((L, True), c, b_ndim=2)]
+
+    assert_equal_computations(rewritten, expected)
+
+
+def test_assume_a_diagonal_reaches_det():
+    A, b = matrix("A"), matrix("b")
+    outs = [solve(A, b, assume_a="diagonal"), pt.linalg.det(A)]
+
+    rewritten = rewrite_graph(
+        outs,
+        include=(
+            "drain_specify_assumptions",
+            "canonicalize",
+            "stabilize",
+            "specialize",
+        ),
+    )
+
+    d = pt.diagonal(A)
+    assert_equal_computations(rewritten, [b / d[:, None], pt.prod(d)])
+
+
 @pytest.mark.parametrize("batched_b", [False, True], ids=["unbatched", "batched"])
 def test_paired_triangular_solves_to_cho_solve(batched_b):
     """Test that paired triangular solves from Cholesky get fused into cho_solve."""
