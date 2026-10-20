@@ -91,6 +91,81 @@ def test_specialize_matmul_to_batched_dot(aligned):
     )
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_batched_matmul_empty_dimensions(dtype):
+    x, y = [tensor(shape=(None,) * 4, dtype=dtype) for _ in range(2)]
+    fn = function([x, y], x @ y, mode=get_default_mode().including("specialize"))
+    assert any(isinstance(node.op, BatchedDot) for node in fn.maker.fgraph.toposort())
+
+    rng = np.random.default_rng(2517)
+    for batch, rows, contracted, cols in [
+        ((2, 3), 3, 4, 5),
+        ((2, 3), 0, 4, 5),
+        ((2, 3), 3, 0, 5),
+        ((2, 3), 3, 4, 0),
+        ((0, 3), 3, 4, 5),
+        ((2, 0), 3, 0, 5),
+        ((2, 3), 0, 0, 0),
+    ]:
+        a = rng.normal(size=(*batch, rows, contracted)).astype(dtype)
+        b = rng.normal(size=(*batch, contracted, cols)).astype(dtype)
+        actual = fn(a, b)
+        assert actual.dtype == dtype
+        np.testing.assert_allclose(actual, a @ b, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("core_shape", [(3, 4, 5), (0, 4, 5), (3, 0, 5)])
+def test_batched_matmul_incompatible_batch_dimensions(core_shape):
+    x, y = [tensor(shape=(None,) * 4) for _ in range(2)]
+    fn = function([x, y], x @ y, mode=get_default_mode().including("specialize"))
+    rows, contracted, cols = core_shape
+    for x_batch, y_batch in [
+        ((2, 3), (3, 2)),
+        ((0, 3), (3, 0)),
+        ((1, 6), (2, 3)),
+    ]:
+        a = np.ones((*x_batch, rows, contracted), dtype=x.dtype)
+        b = np.ones((*y_batch, contracted, cols), dtype=y.dtype)
+        with pytest.raises(ValueError, match="Incompatible batch dimensions"):
+            fn(a, b)
+
+
+@pytest.mark.parametrize("broadcast", [False, True])
+def test_batched_matmul_empty_gradients(broadcast):
+    if broadcast:
+        x = tensor(shape=(None, 1, None, None), dtype="float64")
+        y = tensor(shape=(1, None, None, None), dtype="float64")
+    else:
+        x, y = [tensor(shape=(None,) * 4, dtype="float64") for _ in range(2)]
+    out = x @ y
+    fn = function(
+        [x, y],
+        pt.grad(pt.sum(out**2), [x, y]),
+        mode=get_default_mode().including("specialize"),
+    )
+    rng = np.random.default_rng(2517)
+    for batch, rows, contracted, cols in [
+        (2, 3, 4, 5),
+        (2, 0, 4, 5),
+        (2, 3, 0, 5),
+        (2, 3, 4, 0),
+        (0, 3, 4, 5),
+    ]:
+        x_batch = (batch, 1 if broadcast else batch)
+        y_batch = (1 if broadcast else batch, batch)
+        a = rng.normal(size=(*x_batch, rows, contracted))
+        b = rng.normal(size=(*y_batch, contracted, cols))
+        gz = 2 * (a @ b)
+        gx = gz @ b.swapaxes(-1, -2)
+        gy = a.swapaxes(-1, -2) @ gz
+        if broadcast:
+            gx = gx.sum(axis=1, keepdims=True)
+            gy = gy.sum(axis=0, keepdims=True)
+        actual_gx, actual_gy = fn(a, b)
+        np.testing.assert_allclose(actual_gx, gx, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(actual_gy, gy, rtol=1e-5, atol=1e-6)
+
+
 def test_gemm_factor():
     X, Y = matrix("X"), matrix("Y")
 

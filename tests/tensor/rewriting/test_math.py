@@ -5120,6 +5120,54 @@ def test_local_batched_matmul_to_core_matmul():
 
 
 @pytest.mark.parametrize(
+    "x_batch, y_batch",
+    [
+        ((None,), (1,)),
+        ((1,), (None,)),
+        ((None, 1), (1, None)),
+        ((None, None, 1), (None, 1, None)),
+        ((None, None), (1, 1)),
+        ((1, 1), (None, None)),
+    ],
+)
+@pytest.mark.parametrize(
+    "x_is_row, y_is_col", [(False, False), (True, True), (False, True), (True, False)]
+)
+def test_batched_matmul_to_core_empty_dimensions(x_batch, y_batch, x_is_row, y_is_col):
+    x = pt.tensor(shape=(*x_batch, 1 if x_is_row else None, None))
+    y = pt.tensor(shape=(*y_batch, None, 1 if y_is_col else None))
+    fn = pytensor.function(
+        [x, y], x @ y, mode=get_default_mode().including("specialize")
+    )
+    rng = np.random.default_rng(2517)
+    for batch_size, rows, contracted, cols in [
+        (2, 3, 4, 5),
+        (2, 3, 0, 5),
+        (2, 0, 4, 5),
+        (2, 3, 4, 0),
+        (0, 3, 4, 5),
+        (0, 3, 0, 5),
+    ]:
+        a = rng.normal(
+            size=(
+                *(1 if dim == 1 else batch_size for dim in x_batch),
+                1 if x_is_row else rows,
+                contracted,
+            )
+        ).astype(x.dtype)
+        b = rng.normal(
+            size=(
+                *(1 if dim == 1 else batch_size for dim in y_batch),
+                contracted,
+                1 if y_is_col else cols,
+            )
+        ).astype(y.dtype)
+        actual = fn(a, b)
+        assert actual.dtype == x.dtype
+        np.testing.assert_allclose(actual, a @ b, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize(
     "mat_shape, vec_shape",
     [
         [(1, 2, 2), (5, 2)],

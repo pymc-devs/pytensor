@@ -82,6 +82,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
+from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import (
     Dot22,
@@ -101,8 +102,10 @@ from pytensor.tensor.math import (
     Dot,
     _matmul,
     add,
+    eq,
     mul,
     neg,
+    prod,
     sub,
     variadic_add,
 )
@@ -910,10 +913,14 @@ def specialize_matmul_to_batched_dot(fgraph, node):
     x_shape = tuple(x.shape)
     y_shape = tuple(y.shape)
     if len(x_shape) > 3:
-        # If we have more than one batch dim, ravel it
-        x = x.reshape((-1, x_shape[-2], x_shape[-1]))
+        # Check individual batch dimensions before flattening them.
+        y = CheckAndRaise(ValueError, "Incompatible batch dimensions")(
+            y, *(eq(x_dim, y_dim) for x_dim, y_dim in zip(x_shape[:-2], y_shape[:-2]))
+        )
+        # Explicit batch sizes also work when a matrix dimension is zero.
+        x = x.reshape((prod(x_shape[:-2]), x_shape[-2], x_shape[-1]))
     if len(y_shape) > 3:
-        y = y.reshape((-1, y_shape[-2], y_shape[-1]))
+        y = y.reshape((prod(y_shape[:-2]), y_shape[-2], y_shape[-1]))
 
     new_out = _batched_dot(x, y)
 

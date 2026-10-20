@@ -2482,6 +2482,38 @@ TestBatchedDot = makeTester(
 )
 
 
+@pytest.mark.skipif(
+    not config.cxx or not config.blas__ldflags, reason="Requires C and BLAS"
+)
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_batched_dot_empty_dimensions(dtype):
+    x, y = [tensor3(dtype=dtype) for _ in range(2)]
+    fn = function([x, y], _batched_dot(x, y), mode=Mode(linker="c", optimizer=None))
+    for batch, rows, contracted, cols in [
+        (2, 3, 4, 5),
+        (2, 3, 0, 5),
+        (2, 3, 4, 5),
+        (2, 0, 4, 5),
+        (2, 3, 4, 0),
+        (0, 3, 4, 5),
+        (0, 3, 0, 5),
+    ]:
+        a = np.ones((batch, rows, contracted), dtype=dtype)
+        b = np.ones((batch, contracted, cols), dtype=dtype)
+        actual = fn(a, b)
+        assert actual.dtype == dtype
+        np.testing.assert_array_equal(actual, a @ b)
+
+    # Empty outputs must not bypass checks on the inputs.
+    for x_shape, y_shape in [
+        ((0, 3, 4), (1, 4, 5)),
+        ((2, 0, 3), (2, 4, 5)),
+        ((0, 3, 0), (0, 4, 5)),
+    ]:
+        with pytest.raises(ValueError, match="Shape mismatch"):
+            fn(np.ones(x_shape, dtype=dtype), np.ones(y_shape, dtype=dtype))
+
+
 def test_batched_dot_not_contiguous():
     def np_genarray(*_shape):
         size = 1

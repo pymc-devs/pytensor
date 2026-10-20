@@ -366,7 +366,11 @@ def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
             # Ravel moved batch dims together with (m) if needed
             x_stacked_shape = tuple(x_stacked.shape)
             x_stacked = x_stacked.reshape(
-                (*x_stacked_shape[: batch_ndim - n_x_axis_to_merge], -1, x_shape[-1])
+                (
+                    *x_stacked_shape[: batch_ndim - n_x_axis_to_merge],
+                    prod(x_stacked_shape[batch_ndim - n_x_axis_to_merge : -1]),
+                    x_shape[-1],
+                )
             )
             dims_were_merged = True
 
@@ -385,7 +389,11 @@ def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
             # Ravel moved batch dims together with (n) if needed
             y_stacked_shape = tuple(y_stacked.shape)
             y_stacked = y_stacked.reshape(
-                (*y_stacked_shape[: batch_ndim - n_y_axis_to_merge], y_shape[-2], -1)
+                (
+                    *y_stacked_shape[: batch_ndim - n_y_axis_to_merge],
+                    y_shape[-2],
+                    prod(y_stacked_shape[batch_ndim - n_y_axis_to_merge + 1 :]),
+                )
             )
             dims_were_merged = True
 
