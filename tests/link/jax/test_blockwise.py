@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -65,4 +67,20 @@ def test_unbatched_scalar_inputs_rewrite():
             JAXUnbatchedScalar(2)(m),
             two[None, None],
         )
+    )
+
+
+def test_unbatched_scalar_inputs():
+    x = tensor("x", dtype="int32", shape=(2, 3))
+    n = iscalar("n")
+    v = tensor("v", shape=(None,))
+    scalar_add = Blockwise(add, signature="(),(),(),()->()")
+    out = scalar_add(x, n, v.shape[0], constant(2, dtype="int32"))
+
+    compare_jax_and_py(
+        [x, n, v],
+        [out],
+        [np.ones((2, 3), dtype="int32"), np.int32(3), np.zeros(4)],
+        assert_fn=partial(np.testing.assert_array_equal, strict=True),
+        jax_mode="JAX",
     )

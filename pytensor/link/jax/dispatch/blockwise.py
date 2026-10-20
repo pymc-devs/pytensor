@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -16,10 +17,10 @@ from pytensor.tensor.type import tensor
 class JAXUnbatchedScalar(Op):
     """Dummy Op that pads a scalar ``Blockwise`` input with broadcastable batch dims.
 
-    Its JAX implementation returns the scalar itself, which the ``Blockwise``
-    dispatch passes to the core function outside ``jnp.vectorize``. The scalar stays
-    untraced, so core functions that need a static value (like ``Scan``'s
-    ``n_steps``) can use it.
+    Its JAX implementation returns the scalar as a NumPy scalar of the input dtype,
+    which the ``Blockwise`` dispatch passes to the core function outside
+    ``jnp.vectorize``. A ``Shape_i`` output stays static, so ``Scan``'s ``n_steps``
+    can use it.
     """
 
     __props__ = ("ndim",)
@@ -41,9 +42,14 @@ class JAXUnbatchedScalar(Op):
 
 
 @jax_funcify.register(JAXUnbatchedScalar)
-def jax_funcify_JAXUnbatchedScalar(op, **kwargs):
+def jax_funcify_JAXUnbatchedScalar(op, node, **kwargs):
+    dtype = node.inputs[0].type.dtype
+
     def unbatched_scalar(x):
-        return x
+        # JAX weakly types Python scalars. A NumPy scalar is static and keeps its dtype
+        if isinstance(x, jax.Array):
+            return x
+        return np.asarray(x, dtype=dtype)
 
     return unbatched_scalar
 
