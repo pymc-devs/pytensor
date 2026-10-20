@@ -504,18 +504,20 @@ def test_mlx_runtime_boolean_mask(index_fn, y_shape):
     mask_np = np.array([True, False, True, False, True, False])
     y_np = np.arange(np.prod(y_shape), dtype="float32").reshape(y_shape)
 
-    compare_mlx_and_py(
-        [x, mask],
-        [index_fn(x, mask)],
-        [x_np, mask_np],
-        mlx_mode=bool_idx_mode,
-    )
-    compare_mlx_and_py(
-        [x, mask, y],
-        [pt_subtensor.set_subtensor(index_fn(x, mask), y)],
-        [x_np, mask_np, y_np],
-        mlx_mode=bool_idx_mode,
-    )
+    with pytest.warns(UserWarning, match="output shape depends"):
+        compare_mlx_and_py(
+            [x, mask],
+            [index_fn(x, mask)],
+            [x_np, mask_np],
+            mlx_mode=bool_idx_mode,
+        )
+    with pytest.warns(UserWarning, match="output shape depends"):
+        compare_mlx_and_py(
+            [x, mask, y],
+            [pt_subtensor.set_subtensor(index_fn(x, mask), y)],
+            [x_np, mask_np, y_np],
+            mlx_mode=bool_idx_mode,
+        )
 
 
 def test_mlx_runtime_boolean_mask_grad():
@@ -524,15 +526,16 @@ def test_mlx_runtime_boolean_mask_grad():
     mask = pt.matrix("mask", shape=(6, 6), dtype="bool")
     grad = pytensor.grad((x[mask] ** 2).sum(), x)
 
-    compare_mlx_and_py(
-        [x, mask],
-        [grad],
-        [
-            np.arange(36, dtype="float32").reshape(6, 6),
-            np.arange(36).reshape(6, 6) % 3 == 0,
-        ],
-        mlx_mode=bool_idx_mode,
-    )
+    with pytest.warns(UserWarning, match="output shape depends"):
+        compare_mlx_and_py(
+            [x, mask],
+            [grad],
+            [
+                np.arange(36, dtype="float32").reshape(6, 6),
+                np.arange(36).reshape(6, 6) % 3 == 0,
+            ],
+            mlx_mode=bool_idx_mode,
+        )
 
 
 @pytest.mark.filterwarnings("error")  # The eager fallback warns; the rewrite avoids it
