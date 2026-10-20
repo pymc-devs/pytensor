@@ -367,12 +367,18 @@ def apply_local_dimshuffle_lift(fgraph, var):
 
 
 def apply_local_dimshuffle_merge(fgraph, var):
-    """Clean up DimShuffles without lifting through other Ops."""
+    """Clean up DimShuffles without lifting through other Ops.
+
+    A DimShuffle that drops a single-element `MakeVector` is replaced by its scalar.
+    """
     if var.owner is None:
         return var
-    new = local_dimshuffle_merge.transform(fgraph, var.owner)
-    if new:
-        return new[0]
+    if new := local_dimshuffle_merge.transform(fgraph, var.owner):
+        [var] = new
+    if isinstance(var.owner_op, DimShuffle) and (
+        new := local_useless_dimshuffle_makevector.transform(fgraph, var.owner)
+    ):
+        [var] = new
     return var
 
 

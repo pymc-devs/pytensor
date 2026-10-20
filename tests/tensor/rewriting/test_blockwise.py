@@ -55,7 +55,7 @@ def test_useless_unbatched_blockwise():
     result = RewriteTester([x], [out], include="local_useless_unbatched_blockwise")
     result.assert_graph(out)
 
-    # Scalars padded into a MakeVector or a constant are recovered, not squeezed
+    # A MakeVector-padded scalar and a padded constant reach the core op as scalars
     s = scalar("s")
     scalar_add = Blockwise(add, signature="(),()->()")
     out = scalar_add(as_tensor([s]), constant([2.0], dtype=s.type.dtype))
