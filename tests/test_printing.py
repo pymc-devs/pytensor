@@ -1003,33 +1003,15 @@ def test_iter_graph_nodes_owner_key_multi_output():
     assert logabsdet_rec.owner_key == sign_rec.owner_key
 
 
-def test_graph_model_keys_and_references():
-    """Model references repeat occurrences and stays resolvable."""
-    x, y = dvector("x"), dvector("y")
-    u = x * y
-    model = build_graph_model(u + u, print_type=True)
-
-    (root,) = model.roots
-    assert root.label.startswith("Add")
-    # Second occurrence of Mul is a reference to the same key
-    _canonical, mul_ref = root.children
-    assert mul_ref.key == root.children[0].key
-    assert mul_ref.is_reference
-
-    nodes = model.flattened()
-    assert set(nodes) == {root.key, mul_ref.key, "n2", "n3"}
-    # Canonical (first) record won: it has the expanded children
-    assert nodes[mul_ref.key]["children"]
-
-
 def test_graph_model_reconstructs_dag():
-    """The flattened model's edge set matches the ground-truth graph."""
+    """Reference resolution reproduces the exact DAG edge set."""
     x, y = dvector("x"), dvector("y")
     u = x * y
     sign, _ = slogdet(matrix("m"))
     outputs = [u + u, sign]
 
     model = build_graph_model(outputs)
+    nodes = model.flattened()
     key2var = {}
     node_keys: dict = {}
     owner_keys: dict = {}
@@ -1037,21 +1019,28 @@ def test_graph_model_reconstructs_dag():
         for r in iter_graph_nodes(out, node_keys=node_keys, owner_keys=owner_keys):
             key2var[r.key] = r.var
 
+    # Repeat occurrences share the key of the canonical occurrence, which
+    # keeps its expanded children in the flattened table
+    diamond_root = model.roots[0]
+    canonical, mul_ref = diamond_root.children
+    assert mul_ref.key == canonical.key
+    assert mul_ref.is_reference
+    assert nodes[mul_ref.key]["children"]
+
     def resolve(entry):
         if entry.get("reference") and entry["kind"] == "node":
             # Resolve to the canonical expansion of the same owner
             owner = entry["owner_key"]
-            flattened = model.flattened()
-            canonical = next(
+            canonical_entry = next(
                 e
-                for e in flattened.values()
+                for e in nodes.values()
                 if not e.get("reference") and e["owner_key"] == owner
             )
-            return canonical["children"]
+            return canonical_entry["children"]
         return entry["children"]
 
     edges = set()
-    for key, entry in model.flattened().items():
+    for key, entry in nodes.items():
         for child in resolve(entry):
             edges.add((id(key2var[key]), id(key2var[child])))
 
@@ -1081,8 +1070,8 @@ def test_graph_model_deterministic():
     assert dumps[0] == dumps[1]
 
 
-def test_graph_model_inner_graphs():
-    """Inner graphs are linked to their outer node in both directions."""
+def test_graph_model_multi_output_and_inner_graphs():
+    """Outputs of one Apply share owner_key; inner graphs back-link to them."""
     x = dvector("x")
     a, b = scalars("a", "b")
     ofg = OpFromGraph([a, b], [a + b, a * b])
@@ -1090,10 +1079,19 @@ def test_graph_model_inner_graphs():
     graph = z0 + z1
 
     model = build_graph_model(graph)
+    nodes = model.flattened()
+
+    # Both outputs of the OpFromGraph Apply share their owner_key
+    ofg_entries = [e for e in nodes.values() if e.get("op_type") == "OpFromGraph"]
+    assert len(ofg_entries) == 2
+    z0_entry = next(e for e in ofg_entries if not e.get("reference"))
+    z1_entry = next(e for e in ofg_entries if e.get("reference"))
+    assert z0_entry["owner_key"] == z1_entry["owner_key"]
+
+    # The inner graph links back to the outer node
     assert len(model.inner_graphs) == 1
     (header,) = model.inner_graphs
-    outer_key = header.meta["outer_node"]
-    assert outer_key in {r.key for r in iter_graph_nodes(graph)}
+    assert header.meta["outer_node"] == z0_entry["key"]
     # Inner outputs appear as children of the header
     assert len(header.children) == 2
     assert header.children[0].label.startswith("Add")
