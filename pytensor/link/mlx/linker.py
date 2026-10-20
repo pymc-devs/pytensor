@@ -29,10 +29,10 @@ def _has_data_dependent_shape(fgraph):
         if isinstance(node.op, Nonzero):
             return True
 
-        if isinstance(node.op, HasInnerGraph):
-            inner_fgraph = getattr(node.op, "fgraph", None)
-            if inner_fgraph is not None and _has_data_dependent_shape(inner_fgraph):
-                return True
+        if isinstance(node.op, HasInnerGraph) and _has_data_dependent_shape(
+            node.op.fgraph
+        ):
+            return True
 
     return False
 
