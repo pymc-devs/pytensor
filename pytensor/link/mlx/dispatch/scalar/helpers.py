@@ -164,7 +164,8 @@ def _metal_unary_call(x, *, name, header, source):
 
     Metal has no float64 and the kernel needs the GPU stream, which between them leave
     exactly the case the vectorized path handles least well and float64 needs least: the
-    default device at single precision.
+    default device at single or half precision. The kernel reads half precision directly
+    and computes in float32, so a half-precision input is rounded once, on the way out.
 
     Parameters
     ----------
@@ -175,7 +176,8 @@ def _metal_unary_call(x, *, name, header, source):
     header : str
         Metal source placed ahead of the kernel body.
     source : str
-        Kernel body. It reads ``x[i]`` and writes ``out[i]`` for the thread index ``i``.
+        Kernel body. It reads ``x[i]`` and writes ``out[i]`` for the thread index ``i``,
+        computing in ``float`` and casting the result to ``T``, the dtype of ``x``.
 
     Returns
     -------
@@ -184,7 +186,7 @@ def _metal_unary_call(x, *, name, header, source):
         apply.
     """
     if (
-        x.dtype != mx.float32
+        x.dtype not in (mx.float32, mx.float16, mx.bfloat16)
         or not mx.metal.is_available()
         or mx.default_device() != mx.gpu
     ):

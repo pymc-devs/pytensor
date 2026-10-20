@@ -185,9 +185,14 @@ def test_psi_float64_precision(low, high):
     reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
 )
 @pytest.mark.parametrize(
+    "dtype, tolerance",
+    [("float32", 1e-5), ("float16", 1e-3), ("bfloat16", 8e-3)],
+    ids=["float32", "float16", "bfloat16"],
+)
+@pytest.mark.parametrize(
     "scalar_op, name", [(GammaLn, "gammaln"), (Psi, "psi")], ids=["gammaln", "psi"]
 )
-def test_gammaln_psi_paths_agree(scalar_op, name):
+def test_gammaln_psi_paths_agree(scalar_op, name, dtype, tolerance):
     # Both functions are implemented twice: a Metal kernel, taken for float32 on the GPU
     # stream, and the vectorized fallback taken everywhere else -- which is every float64
     # graph, since Metal has no float64 at all. Only the fallback runs on CI, so this is
@@ -215,28 +220,36 @@ def test_gammaln_psi_paths_agree(scalar_op, name):
     )
     scalar_value = np.float32(2.5)
 
+    # NumPy has no bfloat16, so inputs are cast in MLX and results come back as float32
+    def as_input(value):
+        return mlx.array(value).astype(getattr(mlx, dtype))
+
+    def as_result(value):
+        return np.asarray(value.astype(mlx.float32))
+
     with mlx.stream(mlx.gpu):
         # Without this the test compares the fallback against itself and passes whatever
         # the kernel does
-        kernel = _metal_math_call(name, mlx.array(x_test_value))
+        kernel = _metal_math_call(name, as_input(x_test_value))
         assert kernel is not None, (
             "the Metal kernel did not engage, so this comparison proves nothing"
         )
-        metal = np.asarray(kernel)
-        metal_edges = np.asarray(_metal_math_call(name, mlx.array(edges)))
-        metal_scalar = np.asarray(_metal_math_call(name, mlx.array(scalar_value)))
+        metal = as_result(kernel)
+        metal_edges = as_result(_metal_math_call(name, as_input(edges)))
+        metal_scalar = as_result(_metal_math_call(name, as_input(scalar_value)))
     with mlx.stream(mlx.cpu):
         fallback = mlx_funcify(scalar_op())
-        vectorized = np.asarray(fallback(mlx.array(x_test_value)))
-        vectorized_edges = np.asarray(fallback(mlx.array(edges)))
-        vectorized_scalar = np.asarray(fallback(mlx.array(scalar_value)))
+        vectorized = as_result(fallback(as_input(x_test_value)))
+        vectorized_edges = as_result(fallback(as_input(edges)))
+        vectorized_scalar = as_result(fallback(as_input(scalar_value)))
 
-    # Both are float32 and disagree by 1.6e-6 at worst, so the bound sits a little above
-    # that spread. The absolute term carries the zeros of both functions
-    np.testing.assert_allclose(metal, vectorized, rtol=1e-5, atol=1e-5)
-    np.testing.assert_allclose(metal_edges, vectorized_edges, rtol=1e-5)
+    # Both compute in float32 and round once to the dtype. At float32 they disagree by
+    # 1.6e-6 at worst, and at half precision by at most one unit in the last place, so
+    # each bound sits a little above that spread. The absolute term carries the zeros
+    np.testing.assert_allclose(metal, vectorized, rtol=tolerance, atol=tolerance)
+    np.testing.assert_allclose(metal_edges, vectorized_edges, rtol=tolerance)
     assert metal_scalar.shape == ()
-    np.testing.assert_allclose(metal_scalar, vectorized_scalar, rtol=1e-5)
+    np.testing.assert_allclose(metal_scalar, vectorized_scalar, rtol=tolerance)
 
 
 def test_log1mexp():

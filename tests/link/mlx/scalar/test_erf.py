@@ -174,10 +174,16 @@ def test_erfc_float32_subnormal_tail():
     not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
     reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
 )
+@pytest.mark.parametrize(
+    "dtype, rtol",
+    [("float32", 1e-5), ("float16", 1e-3), ("bfloat16", 8e-3)],
+    ids=["float32", "float16", "bfloat16"],
+)
 @pytest.mark.parametrize("op", [Erfc, Erfcx], ids=["erfc", "erfcx"])
-def test_erf_family_paths_agree(op):
-    # erfc and erfcx are implemented twice: a Metal kernel, taken for float32 on the GPU
-    # stream, and the vectorized fallback taken everywhere else. The two share generated
+def test_erf_family_paths_agree(op, dtype, rtol):
+    # erfc and erfcx are implemented twice: a Metal kernel, taken for single and half
+    # precision on the GPU stream, and the vectorized fallback taken everywhere else.
+    # Both compute half precision in float32 and round once. The two share generated
     # coefficients but not their branch structure or their negative-argument reflection,
     # so this is what keeps them from drifting apart. The range spans every branch of
     # both, stopping short of where float32 underflows and the comparison goes trivial.
@@ -188,12 +194,16 @@ def test_erf_family_paths_agree(op):
     # running a kernel on it. CI sets PYTENSOR_MLX_SKIP_GPU; a developer machine runs it.
     x_test_value = np.random.default_rng(41).uniform(-4.0, 9.0, 1001).astype("float32")
 
-    with mlx.stream(mlx.gpu):
-        metal = np.asarray(mlx_funcify(op())(mlx.array(x_test_value)))
-    with mlx.stream(mlx.cpu):
-        vectorized = np.asarray(mlx_funcify(op())(mlx.array(x_test_value)))
+    # NumPy has no bfloat16, so the input is cast in MLX and the results come back as
+    # float32
+    x_mlx = mlx.array(x_test_value).astype(getattr(mlx, dtype))
 
-    np.testing.assert_allclose(metal, vectorized, rtol=1e-5, atol=0.0)
+    with mlx.stream(mlx.gpu):
+        metal = np.asarray(mlx_funcify(op())(x_mlx).astype(mlx.float32))
+    with mlx.stream(mlx.cpu):
+        vectorized = np.asarray(mlx_funcify(op())(x_mlx).astype(mlx.float32))
+
+    np.testing.assert_allclose(metal, vectorized, rtol=rtol, atol=0.0)
 
 
 def test_log_ndtr_via_erfcx():
