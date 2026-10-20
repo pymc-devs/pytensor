@@ -126,16 +126,37 @@ def test_sparse_dot_sparse_sparse(op, x_format, y_format, x_shape, y_shape):
 
 
 @pytest.mark.parametrize("sp_format", ["csr", "csc"])
-def test_sparse_spmv(sp_format):
+@pytest.mark.parametrize("sparse_left", [False, True])
+def test_sparse_spmv(sp_format, sparse_left):
     x = ps.matrix(format=sp_format, name="x", shape=(20, 6))
-    y = pt.vector("y", shape=(6,))
-    z = ps.dot(x, y)
+    length = 6 if sparse_left else 20
+    y = pt.vector("y", shape=(length,))
+    z = ps.dot(x, y) if sparse_left else ps.dot(y, x)
 
     rng = np.random.default_rng(sp_format == "csr")
     x_test = scipy.sparse.random(20, 6, density=0.5, format=sp_format, random_state=rng)
-    y_test = rng.normal(size=(6,))
+    y_test = rng.normal(size=(2 * length,))[::-2]
 
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+@pytest.mark.parametrize("sparse_left", [False, True])
+def test_dot_dynamic_shapes_and_strides(format, sparse_left):
+    sparse = ps.matrix(format, dtype="float64")
+    dense = pt.matrix(dtype="float64")
+    x, y = (sparse, dense) if sparse_left else (dense, sparse)
+    f = function([x, y], ps.dot(x, y), mode=numba_mode)
+    rng = np.random.default_rng(51)
+    sparse_value = getattr(scipy.sparse, f"{format}_matrix")(rng.normal(size=(3, 4)))
+    for width in (1, 5, 0):
+        shape = (4, 2 * width) if sparse_left else (2 * width, 3)
+        value = rng.normal(size=shape)
+        dense_value = value[:, ::-2] if sparse_left else value[::-2, :]
+        values = (
+            (sparse_value, dense_value) if sparse_left else (dense_value, sparse_value)
+        )
+        np.testing.assert_allclose(f(*values), values[0] @ values[1])
 
 
 @pytest.mark.parametrize(
@@ -590,6 +611,8 @@ def test_structured_sparse_vector_add_nonfinite(format, dtype):
         dense_expected = dense_x + (dense_x != 0) * y_test
     expected = constructor(dense_expected)
     sparse_assert_fn(fn(x_test, y_test), expected)
+
+
 @pytest.mark.parametrize(
     "x_format, y_format, x_dtype, y_dtype",
     [
