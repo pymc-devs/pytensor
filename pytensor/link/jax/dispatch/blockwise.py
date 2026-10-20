@@ -31,8 +31,6 @@ class JAXUnbatchedScalar(Op):
 
     def make_node(self, x):
         x = as_tensor_variable(x)
-        if x.type.ndim != 0:
-            raise ValueError(f"Expected a scalar, got {x.type}")
         out = tensor(dtype=x.type.dtype, shape=(1,) * self.ndim)
         return Apply(self, [x], [out])
 
@@ -57,7 +55,8 @@ def jax_funcify_JAXUnbatchedScalar(op, node, **kwargs):
 def unbatched_scalar_constant(inp, sig):
     """Return the value of a constant scalar ``Blockwise`` input without batch dims.
 
-    Return None if the input has core dims, batch dims or no constant value.
+    Return None if the input has core dims, a non-broadcastable batch dim or no
+    constant value.
     """
     if sig or not all(inp.type.broadcastable):
         return None
