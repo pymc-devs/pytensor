@@ -4,6 +4,7 @@ Tests of printing functionality
 
 import importlib.util
 import io
+import json
 import logging
 import re
 from io import StringIO
@@ -24,18 +25,20 @@ from pytensor.printing import (
     PPrinter,
     Print,
     _try_pydot_import,
+    build_graph_model,
     char_from_number,
     debugprint,
     default_printer,
     get_node_by_id,
+    iter_graph_nodes,
     min_informative_str,
     pp,
     pydotprint,
 )
 from pytensor.scalar import Composite, float64
-from pytensor.tensor import as_tensor_variable
+from pytensor.tensor import as_tensor_variable, scalars
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.linalg import inv
+from pytensor.tensor.linalg import inv, slogdet
 from pytensor.tensor.math import maximum
 from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
@@ -960,3 +963,145 @@ class TestDebugprintRich:
         sentinels = [l for l in found if "···" in l]
         assert colored, "canonical shared node should be colored"
         assert sentinels, "second occurrence should produce a ··· sentinel"
+
+
+def test_iter_graph_nodes_stable_keys():
+    """Keys are first-visit order, shared across occurrences."""
+    x, y = dvector("x"), dvector("y")
+    u = x * y
+    records = list(iter_graph_nodes(u + u))
+
+    by_var = {}
+    for r in records:
+        by_var.setdefault(r.var, set()).add(r.key)
+        if r.var.owner is not None:
+            assert r.owner_key is not None
+        else:
+            assert r.owner_key is None
+
+    # Four distinct variables, keys assigned in first-visit order:
+    # Add, Mul (u), x, y
+    assert sorted(k for keys in by_var.values() for k in keys) == [
+        "n0",
+        "n1",
+        "n2",
+        "n3",
+    ]
+    # u is yielded twice as a label record (two input slots of Add),
+    # plus once as a "···" sentinel for the second slot
+    assert sum(r.var is u and not r.is_repeat for r in records) == 2
+
+
+def test_iter_graph_nodes_owner_key_multi_output():
+    """Outputs of one Apply share owner_key; leaves have none."""
+    x = matrix("x")
+    sign, logabsdet = slogdet(x)
+
+    (sign_rec,) = [r for r in iter_graph_nodes(sign) if r.var is sign]
+    (logabsdet_rec,) = [r for r in iter_graph_nodes(logabsdet) if r.var is logabsdet]
+    assert sign_rec.owner_key is not None
+    assert logabsdet_rec.owner_key == sign_rec.owner_key
+
+
+def test_graph_model_keys_and_references():
+    """Model references repeat occurrences and stays resolvable."""
+    x, y = dvector("x"), dvector("y")
+    u = x * y
+    model = build_graph_model(u + u, print_type=True)
+
+    (root,) = model.roots
+    assert root.label.startswith("Add")
+    # Second occurrence of Mul is a reference to the same key
+    _canonical, mul_ref = root.children
+    assert mul_ref.key == root.children[0].key
+    assert mul_ref.is_reference
+
+    nodes = model.flattened()
+    assert set(nodes) == {root.key, mul_ref.key, "n2", "n3"}
+    # Canonical (first) record won: it has the expanded children
+    assert nodes[mul_ref.key]["children"]
+
+
+def test_graph_model_reconstructs_dag():
+    """The flattened model's edge set matches the ground-truth graph."""
+    x, y = dvector("x"), dvector("y")
+    u = x * y
+    sign, _ = slogdet(matrix("m"))
+    outputs = [u + u, sign]
+
+    model = build_graph_model(outputs)
+    key2var = {}
+    node_keys: dict = {}
+    owner_keys: dict = {}
+    for out in outputs:
+        for r in iter_graph_nodes(out, node_keys=node_keys, owner_keys=owner_keys):
+            key2var[r.key] = r.var
+
+    def resolve(entry):
+        if entry.get("reference") and entry["kind"] == "node":
+            # Resolve to the canonical expansion of the same owner
+            owner = entry["owner_key"]
+            flattened = model.flattened()
+            canonical = next(
+                e
+                for e in flattened.values()
+                if not e.get("reference") and e["owner_key"] == owner
+            )
+            return canonical["children"]
+        return entry["children"]
+
+    edges = set()
+    for key, entry in model.flattened().items():
+        for child in resolve(entry):
+            edges.add((id(key2var[key]), id(key2var[child])))
+
+    ground_truth = set()
+    for out in outputs:
+        for r in iter_graph_nodes(out, node_keys=node_keys, owner_keys=owner_keys):
+            if r.var.owner is None:
+                continue
+            for inp in r.var.owner.inputs:
+                ground_truth.add((id(r.var), id(inp)))
+
+    assert edges == ground_truth
+
+
+def test_graph_model_deterministic():
+    """Two independent builds give identical dumps (golden-file proxy)."""
+    x = dvector("x")
+    a, b = scalars("a", "b")
+    ofg = OpFromGraph([a, b], [a + b, a * b])
+    z0, z1 = ofg(x.sum(), x.sum())
+    graph = z0 + z1
+
+    dumps = [
+        json.dumps(build_graph_model(graph, print_type=True).flattened(), indent=2)
+        for _ in range(2)
+    ]
+    assert dumps[0] == dumps[1]
+
+
+def test_graph_model_inner_graphs():
+    """Inner graphs are linked to their outer node in both directions."""
+    x = dvector("x")
+    a, b = scalars("a", "b")
+    ofg = OpFromGraph([a, b], [a + b, a * b])
+    z0, z1 = ofg(x.sum(), x.sum())
+    graph = z0 + z1
+
+    model = build_graph_model(graph)
+    assert len(model.inner_graphs) == 1
+    (header,) = model.inner_graphs
+    outer_key = header.meta["outer_node"]
+    assert outer_key in {r.key for r in iter_graph_nodes(graph)}
+    # Inner outputs appear as children of the header
+    assert len(header.children) == 2
+    assert header.children[0].label.startswith("Add")
+
+
+def test_graph_model_depth():
+    """Depth limits propagate to the model."""
+    x = dvector("x")
+    model = build_graph_model(x * x + x, depth=1)
+    (root,) = model.roots
+    assert root.children == []
