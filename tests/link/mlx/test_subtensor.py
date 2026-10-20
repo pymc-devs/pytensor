@@ -562,3 +562,30 @@ def test_mlx_boolean_mask_scalar_update_reexpressible(set_instead_of_inc):
     fn, _ = compare_mlx_and_py([x], [out], [x_np], mlx_mode=bool_idx_mode)
 
     assert not any(isinstance(node.op, Nonzero) for node in fn.maker.fgraph.apply_nodes)
+
+
+@pytest.mark.parametrize(
+    "x_shape, mask_shape",
+    [((3, 3), (3,)), ((2, 3, 4), (2,))],
+    ids=["square", "leading-axis-of-3d"],
+)
+@pytest.mark.filterwarnings("error")  # The eager fallback warns; the rewrite avoids it
+def test_mlx_lower_rank_boolean_mask_reexpressible(x_shape, mask_shape):
+    """A mask covering only the leading axes of `x` still becomes a `where`.
+
+    `where` aligns the mask with the trailing axes, so it has to be padded on the
+    right. On a square `x` a missing pad returns wrong numbers rather than raising.
+    """
+    x = pt.tensor("x", shape=x_shape, dtype="float32")
+    mask = pt.tensor("mask", shape=mask_shape, dtype="bool")
+    outs = [
+        pt_subtensor.set_subtensor(x[mask], np.float32(0.0)),
+        pt_subtensor.inc_subtensor(x[mask], np.float32(100.0)),
+        x[mask].sum(),
+    ]
+
+    x_np = np.arange(np.prod(x_shape), dtype="float32").reshape(x_shape)
+    mask_np = np.arange(np.prod(mask_shape)).reshape(mask_shape) % 2 == 0
+    fn, _ = compare_mlx_and_py([x, mask], outs, [x_np, mask_np], mlx_mode=bool_idx_mode)
+
+    assert not any(isinstance(node.op, Nonzero) for node in fn.maker.fgraph.apply_nodes)

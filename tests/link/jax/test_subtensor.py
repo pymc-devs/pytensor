@@ -304,6 +304,29 @@ def test_jax_IncSubtensor_boolean_indexing_reexpressible():
     compare_jax_and_py([x_pt], [out_pt], [x_np])
 
 
+def test_jax_boolean_indexing_lower_rank_mask():
+    """A runtime mask covering only the leading axis of a square `x` is padded first.
+
+    Unpadded, `where` aligns it with the trailing axis and returns wrong numbers.
+    """
+    x = pt.matrix("x", shape=(3, 3))
+    mask = pt.vector("mask", shape=(3,), dtype="bool")
+    outs = [
+        pt_subtensor.set_subtensor(x[mask], 0.0),
+        pt_subtensor.inc_subtensor(x[mask], 100.0),
+        x[mask].sum(),
+    ]
+
+    compare_jax_and_py(
+        [x, mask],
+        outs,
+        [
+            np.arange(9, dtype=config.floatX).reshape(3, 3),
+            np.array([True, False, True]),
+        ],
+    )
+
+
 def test_boolean_indexing_set_or_inc_not_applicable():
     """Test that `boolean_indexing_set_or_inc` does not return an invalid replacement in cases where it doesn't apply."""
     x = pt.vector("x")
