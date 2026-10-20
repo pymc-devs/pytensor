@@ -92,7 +92,7 @@ _METAL_GAMMALN_SOURCE = """
         res = lanczos_log_gamma(z) - log(z);
     } else {
         // log|sin(pi z)| is -inf at the poles, which makes the result +inf there
-        float log_sin = log(fabs(sinpi(z - floor(z))));
+        float log_sin = log(fabs(sinpi(z)));
         res = LOG_PI - log_sin - lanczos_log_gamma(-z);
     }
     out[i] = (T)res;

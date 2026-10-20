@@ -195,11 +195,16 @@ def test_gammaln_psi_metal_kernel(scalar_op, name, reference):
     # checked against scipy rather than the fallback because it is the more accurate of
     # the two on negative arguments, where sinpi spares it the half-angle detour. The
     # uniform sample never lands near a pole, so points within 1e-1 and 1e-3 of the
-    # first few are added. The edge values are checked against the fallback instead.
-    poles = -np.array([1.0, 2.0, 5.0])
+    # first few are added, and -1e-6 besides: just below zero, reducing the reflection
+    # argument by floor(z) is inexact. The edge values are checked against the fallback.
+    poles = -np.array([0.0, 1.0, 2.0, 5.0])
     offsets = np.array([1e-1, 1e-3])
     near_poles = np.concatenate(
-        [(poles[:, None] + offsets).ravel(), (poles[:, None] - offsets).ravel()]
+        [
+            (poles[:, None] + offsets).ravel(),
+            (poles[:, None] - offsets).ravel(),
+            [-1e-6],
+        ]
     )
     x_test_value = np.concatenate(
         [np.random.default_rng(43).uniform(-9.9, 30.0, 1001), near_poles]
