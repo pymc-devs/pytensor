@@ -252,6 +252,36 @@ def test_gammaln_psi_paths_agree(scalar_op, name, dtype, tolerance):
     np.testing.assert_allclose(metal_scalar, vectorized_scalar, rtol=tolerance)
 
 
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize(
+    "scalar_op, name", [(GammaLn, "gammaln"), (Psi, "psi")], ids=["gammaln", "psi"]
+)
+def test_gammaln_psi_dispatch_reaches_kernel(scalar_op, name):
+    # test_gammaln_psi_paths_agree calls the kernel directly, and everything that goes
+    # through the registered dispatch runs on the CPU stream the conftest pins. So
+    # removing the kernel from the dispatch would leave the whole suite green while every
+    # GPU graph silently took the path that costs several launches.
+    x_test_value = np.random.default_rng(7).uniform(-9.9, 30.0, 1001).astype("float32")
+
+    with mlx.stream(mlx.gpu):
+        dispatched = np.asarray(mlx_funcify(scalar_op())(mlx.array(x_test_value)))
+        kernel = _metal_math_call(name, mlx.array(x_test_value))
+        assert kernel is not None, "the Metal kernel refused this input"
+        kernel = np.asarray(kernel)
+    with mlx.stream(mlx.cpu):
+        vectorized = np.asarray(mlx_funcify(scalar_op())(mlx.array(x_test_value)))
+
+    # Bit equality is only a discriminator while the two paths actually differ; if they
+    # ever agree exactly this test would pass without checking anything
+    assert not np.array_equal(kernel, vectorized), (
+        "the two paths agree bitwise, so this test cannot tell them apart"
+    )
+    np.testing.assert_array_equal(dispatched, kernel)
+
+
 def test_log1mexp():
     x = vector("x")
     out = log1mexp(x)
