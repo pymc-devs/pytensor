@@ -185,21 +185,18 @@ def test_psi_float64_precision(low, high):
     reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
 )
 @pytest.mark.parametrize(
-    "scalar_op, name, reference",
-    [
-        (GammaLn, "gammaln", scipy.special.gammaln),
-        (Psi, "psi", scipy.special.digamma),
-    ],
-    ids=["gammaln", "psi"],
+    "scalar_op, name", [(GammaLn, "gammaln"), (Psi, "psi")], ids=["gammaln", "psi"]
 )
-def test_gammaln_psi_metal_kernel(scalar_op, name, reference):
-    # Both functions run as a Metal kernel for float32 on the GPU stream and as the
-    # vectorized graph everywhere else, and only the latter runs on CI. The kernel is
-    # checked against scipy rather than the fallback because it is the more accurate of
-    # the two on negative arguments, where sinpi spares it the half-angle detour. The
-    # uniform sample never lands near a pole, so points within 1e-1 and 1e-3 of the
-    # first few are added, and -1e-6 besides: just below zero, reducing the reflection
-    # argument by floor(z) is inexact. The edge values are checked against the fallback.
+def test_gammaln_psi_paths_agree(scalar_op, name):
+    # Both functions are implemented twice: a Metal kernel, taken for float32 on the GPU
+    # stream, and the vectorized fallback taken everywhere else -- which is every float64
+    # graph, since Metal has no float64 at all. Only the fallback runs on CI, so this is
+    # the only thing standing between the kernel and a silent drift.
+    #
+    # The uniform sample never lands near a pole, so points within 1e-1 and 1e-3 of the
+    # first few are appended, and -1e-6 besides, where reducing the reflection argument
+    # by hand is inexact. The edges are where the kernel handles infinities and poles
+    # separately, and a 0-d input has to survive the kernel flattening its buffer.
     poles = -np.array([0.0, 1.0, 2.0, 5.0])
     offsets = np.array([1e-1, 1e-3])
     near_poles = np.concatenate(
@@ -216,24 +213,30 @@ def test_gammaln_psi_metal_kernel(scalar_op, name, reference):
         [0.0, -0.0, -1.0, -2.0, np.inf, -np.inf, np.nan, 0.5, 4.0, -1.5, 1e-30],
         dtype="float32",
     )
+    scalar_value = np.float32(2.5)
 
     with mlx.stream(mlx.gpu):
-        assert _metal_math_call(name, mlx.array(x_test_value)) is not None, (
+        # Without this the test compares the fallback against itself and passes whatever
+        # the kernel does
+        kernel = _metal_math_call(name, mlx.array(x_test_value))
+        assert kernel is not None, (
             "the Metal kernel did not engage, so this comparison proves nothing"
         )
-        metal = np.asarray(mlx_funcify(scalar_op())(mlx.array(x_test_value)))
-        metal_edges = np.asarray(mlx_funcify(scalar_op())(mlx.array(edges)))
-        # the kernel flattens its input, which a 0-d array has to survive
-        metal_scalar = np.asarray(mlx_funcify(scalar_op())(mlx.array(np.float32(2.5))))
+        metal = np.asarray(kernel)
+        metal_edges = np.asarray(_metal_math_call(name, mlx.array(edges)))
+        metal_scalar = np.asarray(_metal_math_call(name, mlx.array(scalar_value)))
     with mlx.stream(mlx.cpu):
-        vectorized_edges = np.asarray(mlx_funcify(scalar_op())(mlx.array(edges)))
+        fallback = mlx_funcify(scalar_op())
+        vectorized = np.asarray(fallback(mlx.array(x_test_value)))
+        vectorized_edges = np.asarray(fallback(mlx.array(edges)))
+        vectorized_scalar = np.asarray(fallback(mlx.array(scalar_value)))
 
-    np.testing.assert_allclose(
-        metal, reference(x_test_value.astype("float64")), rtol=1e-5, atol=1e-5
-    )
+    # Both are float32 and disagree by 1.6e-6 at worst, so the bound sits a little above
+    # that spread. The absolute term carries the zeros of both functions
+    np.testing.assert_allclose(metal, vectorized, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(metal_edges, vectorized_edges, rtol=1e-5)
     assert metal_scalar.shape == ()
-    np.testing.assert_allclose(metal_scalar, reference(2.5), rtol=1e-5)
+    np.testing.assert_allclose(metal_scalar, vectorized_scalar, rtol=1e-5)
 
 
 def test_log1mexp():
