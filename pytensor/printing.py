@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from copy import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import reduce, singledispatch
 from io import StringIO
 from pathlib import Path
@@ -69,7 +69,7 @@ class GraphNode:
 
     Carries the graph variable, its structural position in the traversal, and
     any render-time context needed to build a label.  Renderers consume a
-    stream of these objects produced by `_iter_graph_nodes`.
+    stream of these objects produced by `iter_graph_nodes`.
 
     Parameters
     ----------
@@ -115,6 +115,15 @@ class GraphNode:
     storage_map
         VM storage map (only available after a function has been executed
         with ``allow_gc=False``).
+    key
+        Stable node key (``"n0"``, ``"n1"``, ... in first-visit order).
+        Shared across every record for the same `Variable` within one print
+        call, and deterministic across processes, which makes model dumps
+        suitable for diffing and golden files.
+    owner_key
+        Stable key shared by all outputs of the same `Apply` node. Empty for
+        leaves. A record that is a repeat reference can be resolved to the
+        canonical expansion of its ``owner_key``.
     """
 
     var: Variable
@@ -129,6 +138,8 @@ class GraphNode:
     topo_order: Sequence[Apply] | None
     profile: "ProfileStats | None"
     storage_map: "StorageMapType | None"
+    key: str | None = None
+    owner_key: str | None = None
 
     @property
     def node(self) -> Apply | None:
@@ -317,7 +328,7 @@ def _build_label(
     return label
 
 
-def _iter_graph_nodes(
+def iter_graph_nodes(
     var: Variable,
     depth: int = -1,
     done: dict | None = None,
@@ -332,9 +343,18 @@ def _iter_graph_nodes(
     is_inner_graph_header: bool = False,
     ancestor_is_last: list[bool] | None = None,
     is_last_child: bool = True,
+    node_keys: dict | None = None,
+    owner_keys: dict | None = None,
     _current_depth: int = 0,
 ) -> Generator[GraphNode, None, None]:
     """Yield `GraphNode` records for a depth-first pre-order traversal of *var*.
+
+    The yielded records form an occurrence trace of the graph viewed as a
+    tree: nodes are repeated (with ``is_already_done`` marks and sentinel
+    records) where the same subgraph is reached through multiple paths.
+    Consumers get stable node identity via ``GraphNode.key``/``owner_key``
+    and can build renderers or serialized models without touching graph
+    internals.
 
     This generator encapsulates all graph-traversal logic that was previously
     embedded in the recursive `_debugprint` function.  Renderers consume the
@@ -358,6 +378,14 @@ def _iter_graph_nodes(
     inner_to_outer, topo_order, profile, storage_map, parent_node,
     inner_graph_node, is_inner_graph_header
         Passed through to each yielded `GraphNode` unchanged.
+    node_keys
+        Shared registry mapping `Variable` s to stable ``"n<N>"`` keys,
+        assigned in first-visit order. Pass the same dict across calls to
+        keep keys consistent within one print/render session.
+    owner_keys
+        Shared registry mapping `Apply` nodes to stable ``"a<N>"`` keys
+        shared by all their outputs. Enables consumers to resolve repeat
+        records for multi-output ops to their canonical expansion.
     ancestor_is_last
         Tracks whether each ancestor level was itself a last child.
     is_last_child
@@ -371,9 +399,19 @@ def _iter_graph_nodes(
         inner_graph_ops = []
     if ancestor_is_last is None:
         ancestor_is_last = []
+    if node_keys is None:
+        node_keys = {}
+    if owner_keys is None:
+        owner_keys = {}
 
     if depth != -1 and _current_depth >= depth:
         return
+
+    key = node_keys.setdefault(var, f"n{len(node_keys)}")
+    if var.owner is not None:
+        owner_key = owner_keys.setdefault(id(var.owner), f"a{len(owner_keys)}")
+    else:
+        owner_key = None
 
     gnode = GraphNode(
         var=var,
@@ -388,6 +426,8 @@ def _iter_graph_nodes(
         topo_order=topo_order,
         profile=profile,
         storage_map=storage_map,
+        key=key,
+        owner_key=owner_key,
     )
 
     if var.owner is None:
@@ -410,6 +450,8 @@ def _iter_graph_nodes(
                 topo_order=topo_order,
                 profile=profile,
                 storage_map=storage_map,
+                key=key,
+                owner_key=owner_key,
             )
         yield gnode
         return
@@ -450,6 +492,8 @@ def _iter_graph_nodes(
             topo_order=topo_order,
             profile=profile,
             storage_map=storage_map,
+            key=key,
+            owner_key=owner_key,
         )
 
     yield gnode
@@ -471,6 +515,8 @@ def _iter_graph_nodes(
                 topo_order=topo_order,
                 profile=profile,
                 storage_map=storage_map,
+                key=key,
+                owner_key=owner_key,
             )
         return
 
@@ -490,7 +536,7 @@ def _iter_graph_nodes(
             ) and in_var not in inner_graph_ops:
                 inner_graph_ops.append(in_var)
 
-        yield from _iter_graph_nodes(
+        yield from iter_graph_nodes(
             in_var,
             depth=depth,
             done=done,
@@ -505,8 +551,325 @@ def _iter_graph_nodes(
             is_inner_graph_header=False,
             ancestor_is_last=child_ancestor,
             is_last_child=child_is_last,
+            node_keys=node_keys,
+            owner_keys=owner_keys,
             _current_depth=_current_depth + 1,
         )
+
+
+@dataclass
+class GraphModelNode:
+    """Neutral tree model of one node in a printed graph.
+
+    Renderers (text, rich, mermaid, json, html, ...) consume a `GraphModel`
+    without touching graph structure. Labels are presentation; structured
+    fields and ``meta`` are data for programmatic consumers.
+
+    Parameters
+    ----------
+    label
+        Formatted display label, as produced by ``debugprint``.
+    key
+        Stable node key from the traversal stream (first-visit order).
+    kind
+        ``"leaf"`` for graph inputs/constants, ``"node"`` otherwise.
+    is_reference
+        ``True`` when this record repeats an already-printed node. For
+        ``kind="node"`` the subtree was omitted: input edges can be
+        recovered from the canonical expansion sharing the same
+        ``owner_key``. For ``kind="leaf"`` it only means the leaf was seen
+        before; leaves have no outgoing edges.
+    meta
+        Structured per-node information (op, type, shape, name, ...).
+    children
+        Child records, in input-slot order.
+    """
+
+    label: str
+    key: str
+    kind: str
+    is_reference: bool = False
+    meta: dict = field(default_factory=dict)
+    children: list["GraphModelNode"] = field(default_factory=list)
+
+
+@dataclass
+class GraphModel:
+    """Renderer-agnostic model of one or more printed graphs.
+
+    Attributes
+    ----------
+    roots
+        One `GraphModelNode` per printed output.
+    inner_graphs
+        One `GraphModelNode` header per distinct inner graph, with inner
+        output trees as children. ``header.meta["outer_node"]`` links back
+        to the outer-graph node key.
+    """
+
+    roots: list[GraphModelNode]
+    inner_graphs: list[GraphModelNode]
+
+    def flattened(self) -> dict[str, dict]:
+        """Flatten roots and inner graphs into ``{key: node_dict}`` tables.
+
+        The canonical (expanded) occurrence wins for shared keys; later
+        occurrences are references resolvable via ``owner_key``.
+        """
+        nodes: dict[str, dict] = {}
+
+        def visit(node: GraphModelNode) -> dict:
+            if node.key not in nodes:
+                entry = {
+                    "label": node.label,
+                    "key": node.key,
+                    "kind": node.kind,
+                    **node.meta,
+                }
+                if node.is_reference:
+                    entry["reference"] = True
+                entry["children"] = [c.key for c in node.children]
+                nodes[node.key] = entry
+            for child in node.children:
+                visit(child)
+            return nodes[node.key]
+
+        for root in self.roots:
+            visit(root)
+        return nodes
+
+
+def _model_from_stream(
+    root: Variable,
+    *,
+    depth: int,
+    id_type: IDTypesType,
+    print_type: bool,
+    print_shape: bool,
+    print_destroy_map: bool,
+    print_view_map: bool,
+    print_op_info: bool,
+    stop_on_name: bool,
+    done: dict,
+    used_ids: dict,
+    op_information: dict,
+    inner_graph_vars: list,
+    node_keys: dict,
+    owner_keys: dict,
+    with_meta: bool = True,
+    inner_to_outer: dict | None = None,
+    parent_node: Apply | None = None,
+    inner_graph_node: Apply | None = None,
+    is_inner_graph_header: bool = False,
+) -> GraphModelNode:
+    """Consume the node stream for one root and build a `GraphModelNode`."""
+    holder = GraphModelNode(label="", key="<root>", kind="root")
+    depth_stack: list[GraphModelNode] = [holder]
+
+    for gnode in iter_graph_nodes(
+        root,
+        depth=depth,
+        done=done,
+        stop_on_name=stop_on_name,
+        inner_graph_ops=inner_graph_vars,
+        inner_to_outer=inner_to_outer,
+        parent_node=parent_node,
+        inner_graph_node=inner_graph_node,
+        is_inner_graph_header=is_inner_graph_header,
+        node_keys=node_keys,
+        owner_keys=owner_keys,
+    ):
+        current_depth = len(gnode.ancestor_is_last)
+        label = _build_label(
+            gnode,
+            done=done,
+            used_ids=used_ids,
+            id_type=id_type,
+            print_type=print_type,
+            print_shape=print_shape,
+            print_destroy_map=print_destroy_map,
+            print_view_map=print_view_map,
+            print_op_info=print_op_info,
+            op_information=op_information,
+        )
+
+        if gnode.is_repeat and not gnode.is_inner_graph_header:
+            # Sentinel: "subtree omitted" is already expressed by the
+            # preceding reference record; nothing to add.
+            continue
+
+        var = gnode.var
+        meta: dict = {}
+        if with_meta:
+            meta = {
+                "name": getattr(var, "name", None),
+                "type": str(var.type),
+                "output_idx": int(gnode.output_idx[1:]) if gnode.output_idx else 0,
+            }
+            if hasattr(var.type, "shape"):
+                meta["shape"] = list(var.type.shape)
+            if not gnode.is_leaf:
+                meta["op"] = str(var.owner.op)
+                meta["owner_key"] = gnode.owner_key
+
+        node = GraphModelNode(
+            label=label,
+            key=gnode.key,
+            kind="leaf" if gnode.is_leaf else "node",
+            is_reference=gnode.is_already_done,
+            meta=meta,
+        )
+        parent = depth_stack[current_depth]
+        parent.children.append(node)
+        depth_stack = [*depth_stack[: current_depth + 1], node]
+
+    return holder.children[0]
+
+
+def build_graph_model(
+    graph_like: Variable | Apply | Sequence[Variable | Apply],
+    depth: int = -1,
+    id_type: IDTypesType = "CHAR",
+    print_type: bool = False,
+    print_shape: bool = False,
+    print_destroy_map: bool = False,
+    print_view_map: bool = False,
+    print_op_info: bool = False,
+    stop_on_name: bool = False,
+    with_meta: bool = True,
+) -> GraphModel:
+    """Build a neutral, renderer-agnostic `GraphModel` for one or more outputs.
+
+    This is the programmatic layer shared by all graph renderers: it consumes
+    the traversal stream (including inner-graph second passes) and produces a
+    tree with stable keys, so downstream code can render graphs as text,
+    rich trees, JSON, Mermaid, HTML, or anything else, without touching
+    graph internals.
+    """
+    if isinstance(graph_like, Variable | Apply):
+        graphs: Sequence = [graph_like]
+    else:
+        graphs = list(graph_like)
+
+    outputs: list[Variable] = []
+    for obj in graphs:
+        if isinstance(obj, Variable):
+            outputs.append(obj)
+        elif isinstance(obj, AbstractApply):
+            outputs.extend(obj.outputs)
+        else:
+            raise TypeError(
+                f"build_graph_model cannot print an object type {type(obj)}"
+            )
+
+    done: dict = {}
+    used_ids: dict = {}
+    op_information: dict = {}
+    inner_graph_vars: list = []
+    node_keys: dict = {}
+    owner_keys: dict = {}
+
+    roots = [
+        _model_from_stream(
+            var,
+            depth=depth,
+            id_type=id_type,
+            print_type=print_type,
+            print_shape=print_shape,
+            print_destroy_map=print_destroy_map,
+            print_view_map=print_view_map,
+            print_op_info=print_op_info,
+            stop_on_name=stop_on_name,
+            done=done,
+            used_ids=used_ids,
+            op_information=op_information,
+            inner_graph_vars=inner_graph_vars,
+            node_keys=node_keys,
+            owner_keys=owner_keys,
+            with_meta=with_meta,
+        )
+        for var in outputs
+    ]
+
+    inner_graphs: list[GraphModelNode] = []
+    printed: set = set()
+    for ig_var in inner_graph_vars:
+        if ig_var.owner in printed:
+            continue
+        printed.add(ig_var.owner)
+
+        if hasattr(ig_var.owner.op, "scalar_op"):
+            op = ig_var.owner.op.scalar_op
+        else:
+            op = ig_var.owner.op
+        inner_inputs, inner_outputs = op.inner_inputs, op.inner_outputs
+
+        if hasattr(op, "get_oinp_iinp_iout_oout_mappings"):
+            inner_to_outer = {
+                inner_inputs[i]: ig_var.owner.inputs[o]
+                for i, o in op.get_oinp_iinp_iout_oout_mappings()[
+                    "outer_inp_from_inner_inp"
+                ].items()
+            }
+        else:
+            inner_to_outer = None
+
+        if print_op_info:
+            op_information.update(op_debug_information(ig_var.owner.op, ig_var.owner))
+
+        header = _model_from_stream(
+            ig_var,
+            depth=depth,
+            id_type=id_type,
+            print_type=print_type,
+            print_shape=print_shape,
+            print_destroy_map=print_destroy_map,
+            print_view_map=print_view_map,
+            print_op_info=print_op_info,
+            stop_on_name=stop_on_name,
+            done=done,
+            used_ids=used_ids,
+            op_information=op_information,
+            inner_graph_vars=inner_graph_vars,
+            node_keys=node_keys,
+            owner_keys=owner_keys,
+            with_meta=with_meta,
+            parent_node=ig_var.owner,
+            inner_graph_node=ig_var.owner,
+            is_inner_graph_header=True,
+        )
+        header.label += " (inner graph)"
+        header.meta = {**header.meta, "outer_node": node_keys[ig_var]}
+
+        for out in inner_outputs:
+            if out.owner is not None and isinstance(out.owner.op, HasInnerGraph):
+                inner_graph_vars.append(out)
+            header.children.append(
+                _model_from_stream(
+                    out,
+                    depth=depth,
+                    id_type=id_type,
+                    print_type=print_type,
+                    print_shape=print_shape,
+                    print_destroy_map=print_destroy_map,
+                    print_view_map=print_view_map,
+                    print_op_info=print_op_info,
+                    stop_on_name=stop_on_name,
+                    done=done,
+                    used_ids=used_ids,
+                    op_information=op_information,
+                    inner_graph_vars=inner_graph_vars,
+                    node_keys=node_keys,
+                    owner_keys=owner_keys,
+                    with_meta=with_meta,
+                    inner_to_outer=inner_to_outer,
+                    parent_node=ig_var.owner,
+                    inner_graph_node=ig_var.owner,
+                )
+            )
+        inner_graphs.append(header)
+
+    return GraphModel(roots=roots, inner_graphs=inner_graphs)
 
 
 @singledispatch
@@ -1070,7 +1433,7 @@ def _debugprint(
         prefix_child = prefix
     has_child_offset = prefix_child != prefix  # True only for inner-graph outputs
 
-    for gnode in _iter_graph_nodes(
+    for gnode in iter_graph_nodes(
         var,
         depth=depth,
         done=done,
@@ -1231,7 +1594,7 @@ def _build_rich_tree(
         # Depth 0 is the output variable itself (child of root).
         depth_stack: list[rich.tree.Tree] = [root]
 
-        for gnode in _iter_graph_nodes(
+        for gnode in iter_graph_nodes(
             var,
             depth=depth,
             done=done,
@@ -1272,7 +1635,7 @@ def _build_rich_tree(
                 continue
 
             if gnode.is_repeat and not gnode.is_inner_graph_header:
-                # Sentinel emitted by _iter_graph_nodes after is_already_done node;
+                # Sentinel emitted by iter_graph_nodes after is_already_done node;
                 # already handled above — skip.
                 continue
 
@@ -1336,7 +1699,7 @@ def _build_rich_tree(
 
             # Header node for the inner graph op
             ig_depth_stack: list[rich.tree.Tree] = [inner_root]
-            for gnode in _iter_graph_nodes(
+            for gnode in iter_graph_nodes(
                 ig_var,
                 depth=depth,
                 done=done,
@@ -1414,7 +1777,7 @@ def _build_rich_tree(
                     inner_graph_vars.append(out)
 
                 out_stack: list[rich.tree.Tree] = [header_tree]
-                for gnode in _iter_graph_nodes(
+                for gnode in iter_graph_nodes(
                     out,
                     depth=depth,
                     done=done,
