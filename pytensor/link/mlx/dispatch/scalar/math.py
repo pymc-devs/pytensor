@@ -51,29 +51,22 @@ _PSI_SHIFTS_SINGLE = 6
 # branch: small positive arguments shift up rather than reflect, and the psi recurrence
 # stops once the argument is large enough for the asymptotic series. Metal's sinpi and
 # tanpi reduce the argument themselves, so the reflections need no half-angle detour.
-_METAL_HEADER = (
-    _metal_constants(
-        LANCZOS_C=_LANCZOS_COEFFS,
-        PSI_C=_PSI_COEFFS_SINGLE,
-        MATH_CONSTS=(
-            _LANCZOS_G + 0.5,
-            0.5 * float(np.log(2.0 * np.pi)),
-            float(np.log(np.pi)),
-        ),
-    )
+_METAL_MATH_HEADER = (
+    _metal_constants(LG_LANCZOS=_LANCZOS_COEFFS, PSI_C=_PSI_COEFFS_SINGLE)
     + f"""
-#define LANCZOS_G_HALF  MATH_CONSTS[0]
-#define HALF_LOG_2PI    MATH_CONSTS[1]
-#define LOG_PI          MATH_CONSTS[2]
-#define PSI_TERMS       {len(_PSI_COEFFS_SINGLE)}
-#define PSI_MIN         {float(_PSI_SHIFTS_SINGLE)}f
+#define LG_LANCZOS_N      {len(_LANCZOS_COEFFS)}
+#define LG_LANCZOS_T      {_LANCZOS_G + 0.5}f
+#define LG_LOG_SQRT_2PI   {float(0.5 * np.log(2.0 * np.pi))!r}f
+#define LG_LOG_PI         {float(np.log(np.pi))!r}f
+#define PSI_TERMS         {len(_PSI_COEFFS_SINGLE)}
+#define PSI_MIN           {float(_PSI_SHIFTS_SINGLE)}f
 
 // log Gamma(w + 1) for w >= -0.5
-static inline float lanczos_log_gamma(float w) {{
-    float series = LANCZOS_C[0];
-    for (int i = 1; i < {len(_LANCZOS_COEFFS)}; ++i) series += LANCZOS_C[i] / (w + (float)i);
-    float t = w + LANCZOS_G_HALF;
-    return HALF_LOG_2PI + (w + 0.5f) * log(t) - t + log(series);
+static inline float lg_lgamma1p(float w) {{
+    float series = LG_LANCZOS[0];
+    for (int i = 1; i < LG_LANCZOS_N; ++i) series += LG_LANCZOS[i] / (w + (float)i);
+    float t = w + LG_LANCZOS_T;
+    return LG_LOG_SQRT_2PI + (w + 0.5f) * log(t) - t + log(series);
 }}
 """
 )
@@ -87,13 +80,13 @@ _METAL_GAMMALN_SOURCE = """
         // the series forms inf - inf at either end, where both limits are +inf
         res = INFINITY;
     } else if (z >= 0.5f) {
-        res = lanczos_log_gamma(z - 1.0f);
+        res = lg_lgamma1p(z - 1.0f);
     } else if (z > 0.0f) {
-        res = lanczos_log_gamma(z) - log(z);
+        res = lg_lgamma1p(z) - log(z);
     } else {
         // log|sin(pi z)| is -inf at the poles, which makes the result +inf there
         float log_sin = log(fabs(sinpi(z)));
-        res = LOG_PI - log_sin - lanczos_log_gamma(-z);
+        res = LG_LOG_PI - log_sin - lg_lgamma1p(-z);
     }
     out[i] = (T)res;
 """
@@ -126,7 +119,7 @@ _METAL_SOURCES = {"gammaln": _METAL_GAMMALN_SOURCE, "psi": _METAL_PSI_SOURCE}
 def _metal_math_call(name, x):
     """Evaluate ``name`` through its Metal kernel, or return None to fall back."""
     return _metal_unary_call(
-        x, name=name, header=_METAL_HEADER, source=_METAL_SOURCES[name]
+        x, name=name, header=_METAL_MATH_HEADER, source=_METAL_SOURCES[name]
     )
 
 
