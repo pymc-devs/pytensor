@@ -1,11 +1,10 @@
-from collections.abc import Callable
-
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.helpers import (
     _exp,
     _metal_constants,
+    _metal_unary_call,
     _working_precision,
 )
 from pytensor.scalar.math import Erfc, Erfcx
@@ -168,54 +167,11 @@ _METAL_ERFCX_SOURCE = """
 _METAL_SOURCES = {"erfc": _METAL_ERFC_SOURCE, "erfcx": _METAL_ERFCX_SOURCE}
 
 
-_METAL_KERNELS: dict[str, Callable | None] = {}
-
-
-def _metal_erf_kernel(name):
-    """Build and cache the Metal kernel for ``name``, or None if it cannot be built."""
-    if name not in _METAL_KERNELS:
-        try:
-            _METAL_KERNELS[name] = mx.fast.metal_kernel(
-                name=f"pytensor_{name}",
-                input_names=["x"],
-                output_names=["out"],
-                header=_METAL_HEADER,
-                source=_METAL_SOURCES[name],
-            )
-        except Exception:
-            _METAL_KERNELS[name] = None
-    return _METAL_KERNELS[name]
-
-
 def _metal_erf_call(name, x):
-    """Evaluate ``name`` through its Metal kernel, or return None to fall back.
-
-    Metal has no float64 and the kernel needs the GPU stream, which between them leave
-    exactly the case the vectorized path handles least well and float64 needs least: the
-    default device at single precision.
-    """
-    if (
-        x.dtype != mx.float32
-        or not mx.metal.is_available()
-        or mx.default_device() != mx.gpu
-    ):
-        return None
-    kernel = _metal_erf_kernel(name)
-    if kernel is None:
-        return None
-    # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
-    # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
-    # it fails to compile. Reshaping covers every rank at once
-    flat = x.reshape(-1)
-    (out,) = kernel(
-        inputs=[flat],
-        template=[("T", flat.dtype)],
-        grid=(flat.size, 1, 1),
-        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
-        output_shapes=[flat.shape],
-        output_dtypes=[flat.dtype],
+    """Evaluate ``name`` through its Metal kernel, or return None to fall back."""
+    return _metal_unary_call(
+        x, name=name, header=_METAL_HEADER, source=_METAL_SOURCES[name]
     )
-    return out.reshape(x.shape)
 
 
 def _erf_series(x, const):

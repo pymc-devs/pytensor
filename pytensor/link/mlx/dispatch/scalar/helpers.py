@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import mlx.core as mx
 import numpy as np
 
@@ -70,6 +72,73 @@ _TINY = 1e-30
 # everywhere it is selected
 _DEFICIT_SERIES_TERMS = 25
 _DEFICIT_MAX_Z = 0.25
+
+
+_METAL_UNARY_KERNELS: dict[str, Callable | None] = {}
+
+
+def _metal_unary_kernel(name, header, source):
+    """Build and cache the one-input Metal kernel ``name``, or None if it cannot be built."""
+    if name not in _METAL_UNARY_KERNELS:
+        try:
+            _METAL_UNARY_KERNELS[name] = mx.fast.metal_kernel(
+                name=f"pytensor_{name}",
+                input_names=["x"],
+                output_names=["out"],
+                header=header,
+                source=source,
+            )
+        except Exception:
+            _METAL_UNARY_KERNELS[name] = None
+    return _METAL_UNARY_KERNELS[name]
+
+
+def _metal_unary_call(x, *, name, header, source):
+    """Evaluate an elementwise Metal kernel over ``x``, or return None to fall back.
+
+    Metal has no float64 and the kernel needs the GPU stream, which between them leave
+    exactly the case the vectorized path handles least well and float64 needs least: the
+    default device at single precision.
+
+    Parameters
+    ----------
+    x : mx.array
+        Input, of any rank.
+    name : str
+        Kernel name, unique across modules. It keys the kernel cache.
+    header : str
+        Metal source placed ahead of the kernel body.
+    source : str
+        Kernel body. It reads ``x[i]`` and writes ``out[i]`` for the thread index ``i``.
+
+    Returns
+    -------
+    out : mx.array or None
+        The result at the shape and dtype of ``x``, or None where the kernel does not
+        apply.
+    """
+    if (
+        x.dtype != mx.float32
+        or not mx.metal.is_available()
+        or mx.default_device() != mx.gpu
+    ):
+        return None
+    kernel = _metal_unary_kernel(name, header, source)
+    if kernel is None:
+        return None
+    # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
+    # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
+    # it fails to compile. Reshaping covers every rank at once
+    flat = x.reshape(-1)
+    (out,) = kernel(
+        inputs=[flat],
+        template=[("T", flat.dtype)],
+        grid=(flat.size, 1, 1),
+        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
+        output_shapes=[flat.shape],
+        output_dtypes=[flat.dtype],
+    )
+    return out.reshape(x.shape)
 
 
 def _metal_constants(**arrays):
