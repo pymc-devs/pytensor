@@ -3974,13 +3974,11 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         return rval
 
     def c_init_code(self, **kwargs):
-        return list(
-            dict.fromkeys(
-                code
-                for subnode in self.fgraph.toposort()
-                for code in subnode.op.c_init_code(**kwargs)
-            )
-        )
+        return [
+            code
+            for subnode in self.fgraph.toposort()
+            for code in subnode.op.c_init_code(**kwargs)
+        ]
 
     def c_support_code(self, **kwargs):
         # Remove duplicate code blocks by using a `set`
@@ -4206,4 +4204,4 @@ class Composite(ScalarInnerGraphOp):
         return self.c_code_template % d
 
     def c_code_cache_version_outer(self) -> tuple[int, ...]:
-        return (8,)
+        return (7,)

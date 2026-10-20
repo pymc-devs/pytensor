@@ -41,8 +41,8 @@ from pytensor.scalar.basic import (
     upgrade_to_float_no_complex,
 )
 from pytensor.scalar.basic import abs as scalar_abs
+from pytensor.scalar.cython_special import SciPyScalarOp
 from pytensor.scalar.loop import ScalarLoop
-from pytensor.scalar.scipy import SciPyScalarOp
 from pytensor.utils import lazy_scipy_module
 
 
@@ -682,7 +682,7 @@ class GammaIncC(SciPyScalarOp, BinaryScalarOp):
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
 
 
-class GammaIncInv(BinaryScalarOp):
+class GammaIncInv(SciPyScalarOp, BinaryScalarOp):
     """
     Inverse to the regularized lower incomplete gamma function.
     """
@@ -700,14 +700,11 @@ class GammaIncInv(BinaryScalarOp):
             gz * exp(gammaincinv(k, x)) * gamma(k) * (gammaincinv(k, x) ** (1 - k)),
         ]
 
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
 
 gammaincinv = GammaIncInv(upgrade_to_float, name="gammaincinv")
 
 
-class GammaIncCInv(BinaryScalarOp):
+class GammaIncCInv(SciPyScalarOp, BinaryScalarOp):
     """
     Inverse to the regularized upper incomplete gamma function.
     """
@@ -724,9 +721,6 @@ class GammaIncCInv(BinaryScalarOp):
             grad_not_implemented(self, 0, k),
             gz * -exp(gammainccinv(k, x)) * gamma(k) * (gammainccinv(k, x) ** (1 - k)),
         ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
 
 
 gammainccinv = GammaIncCInv(upgrade_to_float, name="gammainccinv")
