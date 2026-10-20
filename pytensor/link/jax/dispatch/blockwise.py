@@ -87,12 +87,25 @@ def jax_funcify_Blockwise(op: Blockwise, node, **kwargs):
         if isinstance(inp.owner_op, JAXUnbatchedScalar)
     )
     vectorized = [i for i in range(len(node.inputs)) if i not in unbatched_scalars]
+    batch_ndim = op.batch_ndim(node)
+
+    if not vectorized:
+        batch_axes = tuple(range(batch_ndim))
+
+        def unbatched_blockwise_fn(*inputs):
+            inputs = [unbatched_constants.get(i, inp) for i, inp in enumerate(inputs)]
+            outputs = core_fn(*inputs)
+            if len(node.outputs) == 1:
+                return jnp.expand_dims(outputs, batch_axes)
+            return tuple(jnp.expand_dims(out, batch_axes) for out in outputs)
+
+        return unbatched_blockwise_fn
+
     inputs_signature = ",".join(f"({','.join(op.inputs_sig[i])})" for i in vectorized)
     outputs_signature = ",".join(f"({','.join(sig)})" for sig in op.outputs_sig)
     signature = f"{inputs_signature}->{outputs_signature}"
     vect_fn = jnp.vectorize(core_fn, signature=signature, excluded=unbatched_scalars)
 
-    batch_ndim = op.batch_ndim(node)
     batch_bcast = [node.inputs[i].type.broadcastable[:batch_ndim] for i in vectorized]
 
     def blockwise_fn(*inputs):

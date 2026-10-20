@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from pytensor import config
+from pytensor.compile.mode import get_mode
 from pytensor.tensor import add, as_tensor, constant, iscalar, lmatrix, tensor
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import Dot, matmul
@@ -83,4 +84,18 @@ def test_unbatched_scalar_inputs():
         [np.ones((2, 3), dtype="int32"), np.int32(3), np.zeros(4)],
         assert_fn=partial(np.testing.assert_array_equal, strict=True),
         jax_mode="JAX",
+    )
+
+
+def test_all_unbatched_scalar_inputs():
+    n = iscalar("n")
+    v = tensor("v", shape=(None,))
+    out = Blockwise(add, signature="(),()->()")(n[None, None], v.shape[0])
+
+    compare_jax_and_py(
+        [n, v],
+        [out],
+        [np.int32(3), np.zeros(4)],
+        assert_fn=partial(np.testing.assert_array_equal, strict=True),
+        jax_mode=get_mode("JAX").excluding("local_useless_unbatched_blockwise"),
     )
