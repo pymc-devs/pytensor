@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from functools import cache
 
 import mlx.core as mx
 import numpy as np
@@ -7,7 +7,11 @@ from scipy.special import gammaln as scipy_gammaln
 from pytensor.graph.basic import Constant
 from pytensor.graph.traversal import ancestors
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.helpers import _exp, _working_precision
+from pytensor.link.mlx.dispatch.scalar.helpers import (
+    _exp,
+    _metal_unary_call,
+    _working_precision,
+)
 from pytensor.scalar.math import I0, I1, Ive
 
 
@@ -323,42 +327,25 @@ _METAL_IVE_SOURCE = """
 """
 
 
-_METAL_IVE_KERNELS: dict[float, Callable | None] = {}
-
-
-def _metal_ive_kernel(order):
-    """Build and cache the Metal kernel for ``order``, or None if it cannot be built."""
-    # .item() rather than float(): a scalar order arrives with shape (1,) once the op
-    # has broadcast it, and NumPy is retiring the implicit conversion of those
-    order = np.asarray(order).item()
-    if order not in _METAL_IVE_KERNELS:
-        # the trailing newline matters: MLX appends its own template declaration straight
-        # after this header, and a #define running into it fails to compile
-        header = (
-            "\n".join(
-                f"#define {name} {value}"
-                for name, value in (
-                    ("IVE_SPLIT", f"{_ive_split(order):.8f}f"),
-                    ("IVE_TERMS", _ive_series_terms(order)),
-                    ("IVE_ORDER", f"{order:.8f}f"),
-                    ("IVE_MU", f"{4.0 * order * order:.8f}f"),
-                    ("IVE_RGAMMA", f"{np.exp(-scipy_gammaln(order + 1.0)):.10e}f"),
-                    ("IVE_ASYMPTOTIC_TERMS", _IVE_ASYMPTOTIC_TERMS),
-                )
+@cache
+def _metal_ive_header(order):
+    """Render the Metal ``#define`` lines that bake ``order`` into the ive kernel."""
+    # the trailing newline matters: MLX appends its own template declaration straight
+    # after this header, and a #define running into it fails to compile
+    return (
+        "\n".join(
+            f"#define {name} {value}"
+            for name, value in (
+                ("IVE_SPLIT", f"{_ive_split(order):.8f}f"),
+                ("IVE_TERMS", _ive_series_terms(order)),
+                ("IVE_ORDER", f"{order:.8f}f"),
+                ("IVE_MU", f"{4.0 * order * order:.8f}f"),
+                ("IVE_RGAMMA", f"{np.exp(-scipy_gammaln(order + 1.0)):.10e}f"),
+                ("IVE_ASYMPTOTIC_TERMS", _IVE_ASYMPTOTIC_TERMS),
             )
-            + "\n"
         )
-        try:
-            _METAL_IVE_KERNELS[order] = mx.fast.metal_kernel(
-                name=f"pytensor_ive_{str(order).replace('.', '_').replace('-', 'neg')}",
-                input_names=["x"],
-                output_names=["out"],
-                header=header,
-                source=_METAL_IVE_SOURCE,
-            )
-        except Exception:
-            _METAL_IVE_KERNELS[order] = None
-    return _METAL_IVE_KERNELS[order]
+        + "\n"
+    )
 
 
 def _metal_ive_call(order, y):
@@ -369,26 +356,17 @@ def _metal_ive_call(order, y):
     them rather than one each. A scalar order reaches this with shape ``(1,)`` when the
     argument is an array, since the op broadcasts it, so size rather than rank decides.
     """
-    if (
-        np.size(order) != 1
-        or y.dtype != mx.float32
-        or not mx.metal.is_available()
-        or mx.default_device() != mx.gpu
-    ):
+    if np.size(order) != 1:
         return None
-    kernel = _metal_ive_kernel(order)
-    if kernel is None:
-        return None
-    flat = y.reshape(-1)
-    (out,) = kernel(
-        inputs=[flat],
-        template=[("T", flat.dtype)],
-        grid=(flat.size, 1, 1),
-        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
-        output_shapes=[flat.shape],
-        output_dtypes=[flat.dtype],
+    # .item() rather than float(): a scalar order arrives with shape (1,) once the op
+    # has broadcast it, and NumPy is retiring the implicit conversion of those
+    order = np.asarray(order).item()
+    return _metal_unary_call(
+        y,
+        name=f"ive_{str(order).replace('.', '_').replace('-', 'neg')}",
+        header=_metal_ive_header(order),
+        source=_METAL_IVE_SOURCE,
     )
-    return out.reshape(y.shape)
 
 
 def _ive_series(y, order, const):

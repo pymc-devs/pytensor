@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import mlx.core as mx
 import numpy as np
 
@@ -134,3 +136,72 @@ static inline float log1p_deficit(float z, float one_plus_z) {{
 }}
 """
 )
+
+
+_METAL_UNARY_KERNELS: dict[tuple[str, str, str], Callable] = {}
+
+
+def _metal_unary_kernel(name, header, source):
+    """Build and cache the one-input Metal kernel ``name``.
+
+    Metal compiles the source lazily, so a malformed source fails when the kernel is
+    first evaluated rather than here.
+    """
+    key = (name, header, source)
+    if key not in _METAL_UNARY_KERNELS:
+        _METAL_UNARY_KERNELS[key] = mx.fast.metal_kernel(
+            name=f"pytensor_{name}",
+            input_names=["x"],
+            output_names=["out"],
+            header=header,
+            source=source,
+        )
+    return _METAL_UNARY_KERNELS[key]
+
+
+def _metal_unary_call(x, *, name, header, source):
+    """Evaluate an elementwise Metal kernel over ``x``, or return None to fall back.
+
+    Metal has no float64 and the kernel needs the GPU stream, which between them leave
+    exactly the case the vectorized path handles least well and float64 needs least: the
+    default device at single or half precision. The kernel reads half precision directly
+    and computes in float32, so a half-precision input is rounded once, on the way out.
+
+    Parameters
+    ----------
+    x : mx.array
+        Input, of any rank.
+    name : str
+        Kernel name.
+    header : str
+        Metal source placed ahead of the kernel body.
+    source : str
+        Kernel body. It reads ``x[i]`` and writes ``out[i]`` for the thread index ``i``,
+        computing in ``float`` and casting the result to ``T``, the dtype of ``x``.
+
+    Returns
+    -------
+    out : mx.array or None
+        The result at the shape and dtype of ``x``, or None where the kernel does not
+        apply.
+    """
+    if (
+        x.dtype not in (mx.float32, mx.float16, mx.bfloat16)
+        or not mx.metal.is_available()
+        or mx.default_device() != mx.gpu
+    ):
+        return None
+    kernel = _metal_unary_kernel(name, header, source)
+    # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
+    # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
+    # it fails to compile. Reshaping covers every rank at once
+    flat = x.reshape(-1)
+    (out,) = kernel(
+        inputs=[flat],
+        template=[("T", flat.dtype)],
+        grid=(flat.size, 1, 1),
+        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
+        output_shapes=[flat.shape],
+        output_dtypes=[flat.dtype],
+    )
+    return out.reshape(x.shape)

@@ -128,7 +128,9 @@ jobs:
             install-torch: 1
             default-mode: "CVM"
             python-version: "3.12"
-            os: "ubuntu-latest"
+            # The mkl<=2024.0 pin below resolves to a libtorch build that glibc 2.41+
+            # refuses to load, and ubuntu-latest now ships such a glibc
+            os: "ubuntu-24.04"
           - part: ["xtensor", "tests/xtensor"]
             install-xarray: 1
             default-mode: "CVM"
