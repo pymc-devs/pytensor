@@ -360,6 +360,11 @@ def iter_graph_nodes(
     embedded in the recursive `_debugprint` function.  Renderers consume the
     yielded records without needing to understand graph structure.
 
+    .. note::
+
+       This API is new and may still change based on the needs of the
+       renderers built on top of it.
+
     Parameters
     ----------
     var
@@ -748,6 +753,11 @@ def build_graph_model(
     tree with stable keys, so downstream code can render graphs as text,
     rich trees, JSON, Mermaid, HTML, or anything else, without touching
     graph internals.
+
+    .. note::
+
+       This API is new and may still change based on the needs of the
+       renderers built on top of it.
     """
     if isinstance(graph_like, Variable | Apply):
         graphs: Sequence = [graph_like]
@@ -921,6 +931,9 @@ def debugprint(
     r"""Print a graph as text.
 
     Each line printed represents a `Variable` in a graph.
+
+    For programmatic access to the printed structure (custom renderers,
+    serialized models), see `iter_graph_nodes` and `build_graph_model`.
     The indentation of lines corresponds to its depth in the symbolic graph.
     The first part of the text identifies whether it is an input or the output
     of some `Apply` node.
