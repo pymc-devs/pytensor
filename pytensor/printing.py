@@ -666,6 +666,9 @@ def _model_from_stream(
     parent_node: Apply | None = None,
     inner_graph_node: Apply | None = None,
     is_inner_graph_header: bool = False,
+    topo_order: Sequence[Apply] | None = None,
+    storage_map: "StorageMapType | None" = None,
+    assumption_tags: dict | None = None,
 ) -> GraphModelNode:
     """Consume the node stream for one root and build a `GraphModelNode`."""
     holder = GraphModelNode(label="", key="<root>", kind="root")
@@ -678,6 +681,8 @@ def _model_from_stream(
         stop_on_name=stop_on_name,
         inner_graph_ops=inner_graph_vars,
         inner_to_outer=inner_to_outer,
+        topo_order=topo_order,
+        storage_map=storage_map,
         parent_node=parent_node,
         inner_graph_node=inner_graph_node,
         is_inner_graph_header=is_inner_graph_header,
@@ -696,6 +701,7 @@ def _model_from_stream(
             print_view_map=print_view_map,
             print_op_info=print_op_info,
             op_information=op_information,
+            assumption_tags=assumption_tags,
         )
 
         if gnode.is_repeat and not gnode.is_inner_graph_header:
@@ -747,6 +753,9 @@ def build_graph_model(
     with_meta: bool = True,
     node_keys: dict | None = None,
     owner_keys: dict | None = None,
+    topo_orders: list[Sequence[Apply] | None] | None = None,
+    storage_maps: list["StorageMapType | None"] | None = None,
+    assumption_tags: dict | None = None,
 ) -> GraphModel:
     """Build a neutral, renderer-agnostic `GraphModel` for one or more outputs.
 
@@ -790,6 +799,15 @@ def build_graph_model(
     if owner_keys is None:
         owner_keys = {}
 
+    if topo_orders is None:
+        topo_orders = [None] * len(outputs)
+    if storage_maps is None:
+        storage_maps = [None] * len(outputs)
+    if len(topo_orders) != len(outputs) or len(storage_maps) != len(outputs):
+        raise ValueError(
+            "topo_orders and storage_maps must match the number of outputs"
+        )
+
     roots = [
         _model_from_stream(
             var,
@@ -808,8 +826,13 @@ def build_graph_model(
             node_keys=node_keys,
             owner_keys=owner_keys,
             with_meta=with_meta,
+            topo_order=topo_order,
+            storage_map=storage_map,
+            assumption_tags=assumption_tags,
         )
-        for var in outputs
+        for var, topo_order, storage_map in zip(
+            outputs, topo_orders, storage_maps, strict=True
+        )
     ]
 
     inner_graphs: list[GraphModelNode] = []
@@ -858,8 +881,8 @@ def build_graph_model(
             parent_node=ig_var.owner,
             inner_graph_node=ig_var.owner,
             is_inner_graph_header=True,
+            assumption_tags=assumption_tags,
         )
-        header.label += " (inner graph)"
         header.meta = {**header.meta, "outer_node": node_keys[ig_var]}
 
         for out in inner_outputs:
@@ -886,6 +909,7 @@ def build_graph_model(
                     inner_to_outer=inner_to_outer,
                     parent_node=ig_var.owner,
                     inner_graph_node=ig_var.owner,
+                    assumption_tags=assumption_tags,
                 )
             )
         inner_graphs.append(header)
@@ -1547,14 +1571,14 @@ def _build_rich_tree(
     stop_on_name: bool = False,
     topo_orders: list[Sequence[Apply] | None] | None = None,
     profiles: list | None = None,
-    storage_maps: list | None = None,
+    storage_maps: list["StorageMapType | None"] | None = None,
     assumption_tags: dict | None = None,
 ) -> Any:  # rich.tree.Tree when rich is installed
     """Build a ``rich.Tree`` for one or more output `Variable`s.
 
-    Returns a single ``rich.Tree`` with ``hide_root=True`` when there are
-    multiple outputs (so the invisible root holds sibling output trees), or
-    a plain tree when there is exactly one output.
+    Renders a `GraphModel` (built with `build_graph_model`) as a rich tree.
+    No traversal logic lives here any more: labels, keys, repeats and
+    inner-graph handling all come from the model.
 
     Parameters
     ----------
@@ -1563,8 +1587,10 @@ def _build_rich_tree(
     depth, id_type, print_type, print_shape, print_destroy_map,
     print_view_map, print_op_info, stop_on_name
         Same semantics as the identically-named parameters of `debugprint`.
-    topo_orders, profiles, storage_maps
-        Per-output metadata lists; ``None`` entries mean "not available".
+    topo_orders, storage_maps, assumption_tags
+        Metadata affecting the labels; same semantics as in `debugprint`.
+    profiles
+        Unused.  Profile timing is only rendered by the text renderer.
     """
     try:
         import rich.markup
@@ -1574,296 +1600,73 @@ def _build_rich_tree(
             "rich is required for file='rich'. Install it with: pip install rich"
         ) from e
 
-    if topo_orders is None:
-        topo_orders = [None] * len(outputs)
-    if profiles is None:
-        profiles = [None] * len(outputs)
-    if storage_maps is None:
-        storage_maps = [None] * len(outputs)
+    model = build_graph_model(
+        outputs,
+        depth=depth,
+        id_type=id_type,
+        print_type=print_type,
+        print_shape=print_shape,
+        print_destroy_map=print_destroy_map,
+        print_view_map=print_view_map,
+        print_op_info=print_op_info,
+        stop_on_name=stop_on_name,
+        topo_orders=topo_orders,
+        storage_maps=storage_maps,
+        assumption_tags=assumption_tags,
+    )
 
-    done: dict = {}
-    used_ids: dict = {}
-    op_information: dict[Apply, dict[Variable, str]] = {}
-    inner_graph_vars: list[Variable] = []
-
-    # Colors assigned to shared (repeated) nodes so canonical and sentinel
-    # occurrences are visually linked.  Populated lazily when a repeat is seen.
+    # Colors assigned to shared (repeated) nodes so all occurrences are
+    # visually linked.  Assigned lazily when a repeat is first seen, and
+    # retroactively applied to earlier occurrences.
     _REPEAT_COLORS = ["blue", "cyan", "green", "yellow", "magenta"]
-    node_colors: dict = {}  # Apply/Variable key → color string
-    # All rich.Tree nodes emitted for a given key (for retroactive coloring).
-    node_tree_map: dict = {}  # Apply/Variable key → list[rich.tree.Tree]
+    node_colors: dict = {}
+    node_tree_map: dict = {}  # color key -> list[rich.tree.Tree]
 
     def _color_label(label: str, color: str) -> str:
         return f"[{color}]{label}[/{color}]"
 
-    def _sentinel_label(color: str) -> str:
-        return f"[{color}]···[/{color}]"
+    def _color_key(node: GraphModelNode) -> str:
+        # Owner-level identity: outputs of one Apply share a color
+        return node.meta.get("owner_key") or node.key
 
-    def _assign_color(node_key) -> str:
-        """Return the color for node_key, assigning one if needed and
+    def _assign_color(ck: str) -> str:
+        """Return the color for ck, assigning one if needed and
         retroactively updating all previously-emitted rich.Tree nodes."""
-        if node_key not in node_colors:
+        if ck not in node_colors:
             color = _REPEAT_COLORS[len(node_colors) % len(_REPEAT_COLORS)]
-            node_colors[node_key] = color
-            for prior_tree_node in node_tree_map.get(node_key, []):
+            node_colors[ck] = color
+            for prior_tree_node in node_tree_map.get(ck, []):
                 prior_tree_node.label = _color_label(str(prior_tree_node.label), color)
-        return node_colors[node_key]
+        return node_colors[ck]
+
+    def walk(node: GraphModelNode, base: rich.tree.Tree) -> None:
+        ck = _color_key(node)
+        if node.is_reference:
+            # Repeated node: colored label with a ··· sentinel child when its
+            # subtree is omitted (owned vars only; leaves have no subtree).
+            color = _assign_color(ck)
+            label = rich.markup.escape(node.label)
+            repeat_tree = base.add(_color_label(label, color))
+            if node.meta.get("owner_key"):
+                repeat_tree.add(_color_label("···", color))
+            return
+        label = rich.markup.escape(node.label)
+        if ck in node_colors:
+            # Already known to be shared; color immediately.
+            label = _color_label(label, node_colors[ck])
+        child_tree = base.add(label)
+        node_tree_map.setdefault(ck, []).append(child_tree)
+        for child in node.children:
+            walk(child, child_tree)
 
     root = rich.tree.Tree("", hide_root=True)
+    for root_node in model.roots:
+        walk(root_node, root)
 
-    for var, topo_order, profile, storage_map in zip(
-        outputs, topo_orders, profiles, storage_maps, strict=True
-    ):
-        # Stack maps traversal depth → rich.Tree node at that depth.
-        # Depth 0 is the output variable itself (child of root).
-        depth_stack: list[rich.tree.Tree] = [root]
-
-        for gnode in iter_graph_nodes(
-            var,
-            depth=depth,
-            done=done,
-            stop_on_name=stop_on_name,
-            inner_graph_ops=inner_graph_vars,
-            topo_order=topo_order,
-            profile=profile,
-            storage_map=storage_map,
-            ancestor_is_last=[],
-            is_last_child=True,
-        ):
-            current_depth = len(gnode.ancestor_is_last)
-            node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
-
-            if gnode.is_already_done:
-                # Repeated node: show its colored label, then ··· as a child
-                # to indicate its subtree is omitted.
-                color = _assign_color(node_key)
-                label = rich.markup.escape(
-                    _build_label(
-                        gnode,
-                        done=done,
-                        used_ids=used_ids,
-                        id_type=id_type,
-                        print_type=print_type,
-                        print_shape=print_shape,
-                        print_destroy_map=print_destroy_map,
-                        print_view_map=print_view_map,
-                        print_op_info=print_op_info,
-                        op_information=op_information,
-                        assumption_tags=assumption_tags,
-                    )
-                )
-                parent_tree = depth_stack[current_depth]
-                repeat_tree = parent_tree.add(_color_label(label, color))
-                if gnode.var.owner is not None:
-                    repeat_tree.add(_sentinel_label(color))
-                continue
-
-            if gnode.is_repeat and not gnode.is_inner_graph_header:
-                # Sentinel emitted by iter_graph_nodes after is_already_done node;
-                # already handled above — skip.
-                continue
-
-            label = _build_label(
-                gnode,
-                done=done,
-                used_ids=used_ids,
-                id_type=id_type,
-                print_type=print_type,
-                print_shape=print_shape,
-                print_destroy_map=print_destroy_map,
-                print_view_map=print_view_map,
-                print_op_info=print_op_info,
-                op_information=op_information,
-                assumption_tags=assumption_tags,
-            )
-
-            label = rich.markup.escape(label)
-
-            if node_key in node_colors:
-                # Already known to be shared; color immediately.
-                label = _color_label(label, node_colors[node_key])
-
-            parent_tree = depth_stack[current_depth]
-            child_tree = parent_tree.add(label)
-            node_tree_map.setdefault(node_key, []).append(child_tree)
-            # Trim the stack to this depth and push the new node.
-            depth_stack = [*depth_stack[: current_depth + 1], child_tree]
-
-    if inner_graph_vars:
+    if model.inner_graphs:
         inner_root = root.add("[bold]Inner graphs:[/bold]")
-        printed = set()
-        for ig_var in inner_graph_vars:
-            if ig_var.owner in printed:
-                continue
-            printed.add(ig_var.owner)
-
-            if hasattr(ig_var.owner.op, "scalar_op"):
-                inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
-                inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
-            else:
-                inner_inputs = ig_var.owner.op.inner_inputs
-                inner_outputs = ig_var.owner.op.inner_outputs
-
-            outer_inputs = ig_var.owner.inputs
-            inner_to_outer: dict[Variable, Variable] | None
-            if hasattr(ig_var.owner.op, "get_oinp_iinp_iout_oout_mappings"):
-                inner_to_outer = {
-                    inner_inputs[i]: outer_inputs[o]
-                    for i, o in ig_var.owner.op.get_oinp_iinp_iout_oout_mappings()[
-                        "outer_inp_from_inner_inp"
-                    ].items()
-                }
-            else:
-                inner_to_outer = None
-
-            if print_op_info:
-                op_information.update(
-                    op_debug_information(ig_var.owner.op, ig_var.owner)
-                )
-
-            # Header node for the inner graph op
-            ig_depth_stack: list[rich.tree.Tree] = [inner_root]
-            for gnode in iter_graph_nodes(
-                ig_var,
-                depth=depth,
-                done=done,
-                stop_on_name=stop_on_name,
-                inner_graph_ops=inner_graph_vars,
-                inner_to_outer=inner_to_outer,
-                parent_node=ig_var.owner,
-                inner_graph_node=ig_var.owner,
-                is_inner_graph_header=True,
-                ancestor_is_last=[],
-                is_last_child=True,
-            ):
-                current_depth = len(gnode.ancestor_is_last)
-                if gnode.is_already_done:
-                    node_key = (
-                        gnode.var.owner if gnode.var.owner is not None else gnode.var
-                    )
-                    color = _assign_color(node_key)
-                    label = rich.markup.escape(
-                        _build_label(
-                            gnode,
-                            done=done,
-                            used_ids=used_ids,
-                            id_type=id_type,
-                            print_type=print_type,
-                            print_shape=print_shape,
-                            print_destroy_map=print_destroy_map,
-                            print_view_map=print_view_map,
-                            print_op_info=print_op_info,
-                            op_information=op_information,
-                            assumption_tags=assumption_tags,
-                        )
-                    )
-                    parent_tree = ig_depth_stack[current_depth]
-                    repeat_tree = parent_tree.add(_color_label(label, color))
-                    if gnode.var.owner is not None:
-                        repeat_tree.add(_sentinel_label(color))
-                    continue
-                if gnode.is_repeat and not gnode.is_inner_graph_header:
-                    continue
-                label = _build_label(
-                    gnode,
-                    done=done,
-                    used_ids=used_ids,
-                    id_type=id_type,
-                    print_type=print_type,
-                    print_shape=print_shape,
-                    print_destroy_map=print_destroy_map,
-                    print_view_map=print_view_map,
-                    print_op_info=print_op_info,
-                    op_information=op_information,
-                    assumption_tags=assumption_tags,
-                )
-                label = rich.markup.escape(label)
-                node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
-                parent_tree = ig_depth_stack[current_depth]
-                child_tree = parent_tree.add(label)
-                node_tree_map.setdefault(node_key, []).append(child_tree)
-                ig_depth_stack = [*ig_depth_stack[: current_depth + 1], child_tree]
-
-            # The header tree node is the first child of inner_root
-            header_tree = inner_root.children[-1]
-
-            for out in inner_outputs:
-                if (
-                    out.owner is not None
-                    and (
-                        isinstance(out.owner.op, HasInnerGraph)
-                        or isinstance(
-                            getattr(out.owner.op, "scalar_op", None), HasInnerGraph
-                        )
-                    )
-                    and out not in inner_graph_vars
-                ):
-                    inner_graph_vars.append(out)
-
-                out_stack: list[rich.tree.Tree] = [header_tree]
-                for gnode in iter_graph_nodes(
-                    out,
-                    depth=depth,
-                    done=done,
-                    stop_on_name=stop_on_name,
-                    inner_graph_ops=inner_graph_vars,
-                    inner_to_outer=inner_to_outer,
-                    parent_node=ig_var.owner,
-                    inner_graph_node=ig_var.owner,
-                    ancestor_is_last=[],
-                    is_last_child=True,
-                ):
-                    current_depth = len(gnode.ancestor_is_last)
-                    if gnode.is_already_done:
-                        node_key = (
-                            gnode.var.owner
-                            if gnode.var.owner is not None
-                            else gnode.var
-                        )
-                        color = _assign_color(node_key)
-                        label = rich.markup.escape(
-                            _build_label(
-                                gnode,
-                                done=done,
-                                used_ids=used_ids,
-                                id_type=id_type,
-                                print_type=print_type,
-                                print_shape=print_shape,
-                                print_destroy_map=print_destroy_map,
-                                print_view_map=print_view_map,
-                                print_op_info=print_op_info,
-                                op_information=op_information,
-                                assumption_tags=assumption_tags,
-                            )
-                        )
-                        parent_tree = out_stack[current_depth]
-                        repeat_tree = parent_tree.add(_color_label(label, color))
-                        if gnode.var.owner is not None:
-                            repeat_tree.add(_sentinel_label(color))
-                        continue
-                    if gnode.is_repeat and not gnode.is_inner_graph_header:
-                        continue
-                    label = _build_label(
-                        gnode,
-                        done=done,
-                        used_ids=used_ids,
-                        id_type=id_type,
-                        print_type=print_type,
-                        print_shape=print_shape,
-                        print_destroy_map=print_destroy_map,
-                        print_view_map=print_view_map,
-                        print_op_info=print_op_info,
-                        op_information=op_information,
-                        assumption_tags=assumption_tags,
-                    )
-                    label = rich.markup.escape(label)
-                    node_key = (
-                        gnode.var.owner if gnode.var.owner is not None else gnode.var
-                    )
-                    parent_tree = out_stack[current_depth]
-                    child_tree = parent_tree.add(label)
-                    node_tree_map.setdefault(node_key, []).append(child_tree)
-                    out_stack = [*out_stack[: current_depth + 1], child_tree]
+        for header in model.inner_graphs:
+            walk(header, inner_root)
 
     return root
 
