@@ -193,10 +193,10 @@ def test_psi_float64_precision(low, high):
     "scalar_op, name", [(GammaLn, "gammaln"), (Psi, "psi")], ids=["gammaln", "psi"]
 )
 def test_gammaln_psi_paths_agree(scalar_op, name, dtype, tolerance):
-    # Both functions are implemented twice: a Metal kernel, taken for float32 on the GPU
-    # stream, and the vectorized fallback taken everywhere else -- which is every float64
-    # graph, since Metal has no float64 at all. Only the fallback runs on CI, so this is
-    # the only thing standing between the kernel and a silent drift.
+    # Both functions are implemented twice: a Metal kernel, taken for single and half
+    # precision on the GPU stream, and the vectorized fallback taken everywhere else --
+    # which is every float64 graph, since Metal has no float64 at all. Only the fallback
+    # runs on CI, so this is the only thing standing between the kernel and a silent drift.
     #
     # The uniform sample never lands near a pole, so points within 1e-1 and 1e-3 of the
     # first few are appended, and -1e-6 besides, where reducing the reflection argument
