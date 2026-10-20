@@ -3984,8 +3984,10 @@ class TestReduceJoin:
         assert not isinstance(topo[-1].op, Elemwise)
 
         # Join axis is included in reduction axes
+        # Use distinct shared variables, otherwise the Join is rewritten to tile
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
-        f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=1), mode=self.mode)
+        B = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
+        f = function([], pt_sum(pt.concatenate((A, B), axis=1), axis=1), mode=self.mode)
         np.testing.assert_allclose(f(), [2, 4, 6, 8, 10])
         topo = f.maker.fgraph.toposort()
         assert isinstance(topo[-1].op, Elemwise)
@@ -4009,9 +4011,7 @@ class TestReduceJoin:
         x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
         y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
         z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
-        # Use py linker to avoid a pre-existing Numba bug with Sum(ExpandDims(...))
-        py_mode = self.mode.__class__("py", self.mode.optimizer)
-        f = function([vx, vy, vz], out, mode=py_mode)
+        f = function([vx, vy, vz], out, mode=self.mode)
         np.testing.assert_allclose(f(x, y, z), np.sum([x, y, z]))
 
     def test_not_supported_unequal_shapes(self):
@@ -4136,15 +4136,6 @@ class TestReduceJoin:
         x, y = vectors("xy")
         out = pt_sum(pt.concatenate([x, y], axis=0), axis=[])
         f = function([x, y], out, mode=self.mode)
-        topo = f.maker.fgraph.toposort()
-        assert any(isinstance(n.op, Join) for n in topo)
-
-    def test_careduce_join_not_applied_dynamic_axis(self):
-        """Non-constant join axis should NOT trigger"""
-        axis = iscalar("axis")
-        x, y = vectors("xy")
-        out = pt_sum(join(axis, x, y), axis=None)
-        f = function([axis, x, y], out, mode=self.mode)
         topo = f.maker.fgraph.toposort()
         assert any(isinstance(n.op, Join) for n in topo)
 

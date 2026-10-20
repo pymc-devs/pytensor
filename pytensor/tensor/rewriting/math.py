@@ -2315,20 +2315,15 @@ def local_careduce_join(fgraph, node):
 
     """
     [joined_out] = node.inputs
-    if not isinstance(joined_out.owner_op, Join):
+    joined_op = joined_out.owner_op
+    if not isinstance(joined_op, Join):
         return None
 
-    join_axis_tensor, *joined_inputs = joined_out.owner.inputs
-
+    joined_inputs = joined_out.owner.inputs
     if len(joined_inputs) < 2:
         return None
 
-    if not isinstance(join_axis_tensor, Constant):
-        return None
-
-    join_axis = int(join_axis_tensor.data)
-    if join_axis < 0:
-        join_axis += joined_out.type.ndim
+    join_axis = joined_op.axis
 
     reduce_op = node.op
     if reduce_op.axis is not None and join_axis not in reduce_op.axis:
