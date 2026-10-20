@@ -34,8 +34,11 @@ from pytensor.link.mlx.dispatch.scalar.math import _metal_math_call
         # where mx.sin is a float32 kernel whatever it is handed, so float64 holds here
         # rather than sharing single precision's ceiling
         (-5.4, -0.6, {"float32": (1e-3, 1e-3), "float64": (1e-11, 1e-11)}),
+        # Just below zero the reflection argument has to be reduced exactly, which
+        # subtracting floor(x) does not do once x is far smaller than one
+        (-1e-3, -1e-7, {"float32": (1e-5, 0.0), "float64": (1e-11, 0.0)}),
     ],
-    ids=["moderate", "tiny", "large", "negative"],
+    ids=["moderate", "tiny", "large", "negative", "negative-near-zero"],
 )
 def test_gammaln(low, high, tolerances, dtype):
     rtol, atol = tolerances[dtype]

@@ -204,10 +204,11 @@ def mlx_funcify_GammaLn(op, **kwargs):
         w = mx.where(reflect, one - y, y) - one
         lanczos = _lanczos_log_gamma(w, const)
 
-        # Reducing the argument keeps log|sin(pi x)| accurate at large |x|, and taking
-        # the sine from the tangent by the half-angle identity keeps it off mx.sin,
-        # which is a float32 kernel at any dtype where mx.tan is not
-        tan_half = mx.tan(const(0.5 * np.pi) * (y - mx.floor(y)))
+        # Reducing by the nearest integer is exact, where subtracting floor(y) rounds
+        # once y is small and negative, and it keeps log|sin(pi x)| accurate at large
+        # |x|. Taking the sine from the tangent by the half-angle identity keeps it off
+        # mx.sin, which is a float32 kernel at any dtype where mx.tan is not
+        tan_half = mx.tan(const(0.5 * np.pi) * (y - mx.round(y)))
         log_sin = mx.log(const(2.0) * mx.abs(tan_half)) - mx.log1p(tan_half * tan_half)
         out = mx.where(reflect, const(np.log(np.pi)) - log_sin - lanczos, lanczos)
         if double:
