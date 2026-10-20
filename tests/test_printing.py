@@ -1124,3 +1124,20 @@ def test_graph_model_structured_meta():
     assert {"Elemwise", "Blockwise"} == set(by_op_type)
     # Specific ops, without parsing the repr
     assert {"Add", "Mul"} <= set(by_op)
+
+
+def test_graph_model_shared_keys():
+    """Shared registries keep node identity across separate builds."""
+    x = dvector("x")
+    node_keys: dict = {}
+    first = build_graph_model(x + 1, node_keys=node_keys)
+    second = build_graph_model(x * 2, node_keys=node_keys)
+
+    first_flat, second_flat = first.flattened(), second.flattened()
+    x_key = next(k for k, e in first_flat.items() if e["name"] == "x")
+    # Surviving variables keep their keys across builds
+    assert second_flat[x_key]["name"] == "x"
+    # A fresh registry would re-assign by traversal position
+    fresh = build_graph_model(2 * x)
+    fresh_key = next(k for k, e in fresh.flattened().items() if e["name"] == "x")
+    assert fresh_key != x_key

@@ -745,6 +745,8 @@ def build_graph_model(
     print_op_info: bool = False,
     stop_on_name: bool = False,
     with_meta: bool = True,
+    node_keys: dict | None = None,
+    owner_keys: dict | None = None,
 ) -> GraphModel:
     """Build a neutral, renderer-agnostic `GraphModel` for one or more outputs.
 
@@ -753,6 +755,10 @@ def build_graph_model(
     tree with stable keys, so downstream code can render graphs as text,
     rich trees, JSON, Mermaid, HTML, or anything else, without touching
     graph internals.
+
+    Pass the same ``node_keys``/``owner_keys`` dicts to multiple calls to
+    keep node identity stable across graph states (e.g. before/after a
+    rewrite), which turns state comparison into a set operation.
 
     .. note::
 
@@ -779,8 +785,10 @@ def build_graph_model(
     used_ids: dict = {}
     op_information: dict = {}
     inner_graph_vars: list = []
-    node_keys: dict = {}
-    owner_keys: dict = {}
+    if node_keys is None:
+        node_keys = {}
+    if owner_keys is None:
+        owner_keys = {}
 
     roots = [
         _model_from_stream(
