@@ -24,7 +24,9 @@ from pytensor.sparse import (
     StructuredDot,
     StructuredDotGradCSC,
     StructuredDotGradCSR,
+    Usmm,
 )
+from pytensor.sparse.rewriting import UsmmCscDense
 
 
 @register_funcify_default_op_cache_key(SpSum)
@@ -125,6 +127,61 @@ def numba_funcify_MultiplySparseDense(op, node, **kwargs):
             return z
 
         return sparse_dense_multiply, cache_version
+
+
+def make_sparse_dense_matmul(format, out_dtype, *, cast_dense=False):
+    """Accumulate a sparse-dense product into an initialized dense output.
+
+    Passing a scale applies it to each sparse value before multiplication.
+    Dense-sparse products use the same kernel with transposed dense operands.
+    Changes to this kernel require bumping the cache versions of its callers.
+    """
+    out_type = np.dtype(out_dtype).type
+
+    @numba_basic.numba_njit
+    def accumulate(values, indices, indptr, y, out, scale=None):
+        indices = indices.view(np.uint32)
+        indptr = indptr.view(np.uint32)
+        n_cols = y.shape[1]
+        if format == "csr":
+            for row in range(out.shape[0]):
+                if n_cols == 1:
+                    acc = out[row, 0]
+                    for pos in range(indptr[row], indptr[row + 1]):
+                        value = out_type(values[pos])
+                        if scale is not None:
+                            value = scale * value
+                        dense_value = y[indices[pos], 0]
+                        if cast_dense:
+                            dense_value = out_type(dense_value)
+                        acc += value * dense_value
+                    out[row, 0] = acc
+                else:
+                    for pos in range(indptr[row], indptr[row + 1]):
+                        inner = indices[pos]
+                        value = out_type(values[pos])
+                        if scale is not None:
+                            value = scale * value
+                        for col in range(n_cols):
+                            dense_value = y[inner, col]
+                            if cast_dense:
+                                dense_value = out_type(dense_value)
+                            out[row, col] += value * dense_value
+        else:
+            for inner in range(y.shape[0]):
+                for pos in range(indptr[inner], indptr[inner + 1]):
+                    row = indices[pos]
+                    value = out_type(values[pos])
+                    if scale is not None:
+                        value = scale * value
+                    for col in range(n_cols):
+                        dense_value = y[inner, col]
+                        if cast_dense:
+                            dense_value = out_type(dense_value)
+                        out[row, col] += value * dense_value
+        return out
+
+    return accumulate
 
 
 @register_funcify_and_cache_key(Dot)
@@ -327,151 +384,43 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             return spmspm_csr_csr, cache_key
 
-    # Only one of 'x' or 'y' is sparse, not both.
-    # Before using a general dot(sparse-matrix, dense-matrix) algorithm,
-    # we check if we can rely on the less intensive (sparse-matrix, dense-vector) algorithm (spmv).
-    y_is_1d_like = y.type.ndim == 1 or (y.type.ndim == 2 and y.type.shape[1] == 1)
-    x_is_1d = x.type.ndim == 1
-
-    if (x_is_sparse and y_is_1d_like) or (y_is_sparse and x_is_1d):
-        # We can use spmv
-        @numba_basic.numba_njit
-        def _spmdv_csr(x_ptr, x_ind, x_data, x_shape, y):
-            n_row = x_shape[0]
-            x_ptr = x_ptr.view(np.uint32)
-            x_ind = x_ind.view(np.uint32)
-            output = np.empty(n_row, dtype=out_dtype)
-
-            for row_idx in range(n_row):
-                acc = out_type(0)
-                for k in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                    acc += out_type(x_data[k]) * out_type(y[x_ind[k]])
-                output[row_idx] = acc
-
-            return output
-
-        @numba_basic.numba_njit
-        def _spmdv_csc(x_ptr, x_ind, x_data, x_shape, y):
-            n_row, n_col = x_shape
-            x_ptr = x_ptr.view(np.uint32)
-            x_ind = x_ind.view(np.uint32)
-            output = np.zeros(n_row, dtype=out_dtype)
-
-            for col_idx in range(n_col):
-                yj = out_type(y[col_idx])
-                for k in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
-                    output[x_ind[k]] += out_type(x_data[k]) * yj
-
-            return output
-
-        if x_is_sparse:
-            if x_format == "csr":
-                _spmdv = _spmdv_csr
-            else:
-                _spmdv = _spmdv_csc
-
-            if y.type.ndim == 1:
-
-                @numba_basic.numba_njit
-                def spmdv(x, y):
-                    assert x.shape[1] == y.shape[0]
-                    return _spmdv(x.indptr, x.indices, x.data, x.shape, y)
-            else:
-
-                @numba_basic.numba_njit
-                def spmdv(x, y):
-                    # Output must be 2d.
-                    assert x.shape[1] == y.shape[0]
-                    return _spmdv(x.indptr, x.indices, x.data, x.shape, y[:, 0])[
-                        :, None
-                    ]
-
-            return spmdv, cache_key
-        else:  # y_is_sparse
-            # Rely on: z = dot(x, y) -> z^T = dot(x, y)^T -> z^T = dot(y^T, x^T)
-            # The transpose of Y is not materialized to avoid unnecessary copies..
-            if y_format == "csr":
-                _spmdv = _spmdv_csc
-            else:  # csc
-                _spmdv = _spmdv_csr
-
-            @numba_basic.numba_njit
-            def spmdv(x, y):
-                # SciPy treats (p, ) * (p, k) as (1, p) @ (p, k),
-                # but returns the result as of shape (k, ).
-                assert x.shape[0] == y.shape[0]
-                return _spmdv(y.indptr, y.indices, y.data, (y.shape[1], y.shape[0]), x)
-
-            return spmdv, cache_key
-
-    # Only one of 'x' or 'y' is sparse, and we can't use spmdv.
-    # We know we have to rely on the general (sparse-matrix, dense-matrix) dot product (spmdm).
-    @numba_basic.numba_njit
-    def _spmdm_csr(x_ptr, x_ind, x_data, x_shape, y):
-        n = x_shape[0]
-        k = y.shape[1]
-        z = np.zeros((n, k), dtype=out_dtype)
-
-        x_ind = x_ind.view(np.uint32)
-        x_ptr = x_ptr.view(np.uint32)
-
-        for row_idx in range(n):
-            for idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                col_idx = x_ind[idx]
-                value = out_type(x_data[idx])
-                for j in range(k):
-                    z[row_idx, j] += value * y[col_idx, j]
-        return z
-
-    @numba_basic.numba_njit
-    def _spmdm_csc(x_ptr, x_ind, x_data, x_shape, y):
-        k = y.shape[1]
-        n, p = x_shape
-        z = np.zeros((n, k), dtype=out_dtype)
-
-        x_ind = x_ind.view(np.uint32)
-        x_ptr = x_ptr.view(np.uint32)
-
-        for col_idx in range(p):
-            for idx in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
-                row_idx = x_ind[idx]
-                value = out_type(x_data[idx])
-                for j in range(k):
-                    z[row_idx, j] += value * y[col_idx, j]
-        return z
-
     if x_is_sparse:
-        if x_format == "csr":
-            _spmdm = _spmdm_csr
-        else:
-            _spmdm = _spmdm_csc
+        accumulate = make_sparse_dense_matmul(x_format, out_dtype)
+        y_is_vector = y.ndim == 1
 
         @numba_basic.numba_njit
         def spmdm(x, y):
             assert x.shape[1] == y.shape[0]
-            return _spmdm(x.indptr, x.indices, x.data, x.shape, y)
+            if y_is_vector:
+                dense = y[:, None]
+            else:
+                dense = y
+            out = np.zeros((x.shape[0], dense.shape[1]), dtype=out_dtype)
+            accumulate(x.data, x.indices, x.indptr, dense, out)
+            if y_is_vector:
+                return out[:, 0]
+            return out
 
         return spmdm, cache_key
 
-    if y_is_sparse:
-        # We don't implement a dense-sparse dot product.
-        # Instead, we use properties of transpose:
-        #     z = dot(x, y) -> z^T = dot(x, y)^T -> z^T = dot(y^T, x^T)
-        # which allows us to reuse sparse-dense dot.
-        # Note we don't need to actually transpose Y, which would create unnecessary copies.
-        if y_format == "csr":
-            # y.T will be CSC.
-            _spmdm = _spmdm_csc
+    transpose_format = "csc" if y_format == "csr" else "csr"
+    accumulate = make_sparse_dense_matmul(transpose_format, out_dtype)
+    x_is_vector = x.ndim == 1
+
+    @numba_basic.numba_njit
+    def dmspm(x, y):
+        if x_is_vector:
+            dense = x[:, None]
         else:
-            # y.T will be CSR
-            _spmdm = _spmdm_csr
+            dense = x.T
+        assert dense.shape[0] == y.shape[0]
+        out = np.zeros((y.shape[1], dense.shape[1]), dtype=out_dtype)
+        accumulate(y.data, y.indices, y.indptr, dense, out)
+        if x_is_vector:
+            return out[:, 0]
+        return out.T
 
-        @numba_basic.numba_njit
-        def dmspm(x, y):
-            assert x.shape[1] == y.shape[0]
-            return _spmdm(y.indptr, y.indices, y.data, (y.shape[1], y.shape[0]), x.T).T
-
-        return dmspm, cache_key
+    return dmspm, cache_key
 
 
 @register_funcify_and_cache_key(StructuredDotGradCSR)
@@ -1365,3 +1314,193 @@ def numba_funcify_StructuredAddSparseDenseVector(op, node, **kwargs):
         return nonfinite_kernel(x, y, nonfinite_columns)
 
     return structured_add_sparse_dense_vector, cache_key
+
+
+@register_funcify_and_cache_key(Usmm)
+def numba_funcify_Usmm(op, node, **kwargs):
+    """Computes the dense matrix resulting from `alpha * x @ y + z`.
+
+    `alpha` is scalar, at least one of `x` and `y` is a sparse matrix, and `z` is a dense matrix.
+    """
+    _, x, y, z = node.inputs
+    [out] = node.outputs
+    out_dtype = out.type.dtype
+    out_type = np.dtype(out_dtype).type
+
+    x_is_sparse = psb._is_sparse_variable(x)
+    y_is_sparse = psb._is_sparse_variable(y)
+    x_format = x.type.format if x_is_sparse else None
+    y_format = y.type.format if y_is_sparse else None
+    z_same_dtype = z.type.dtype == out_dtype
+
+    # Used in the wrapper's fallback, when alpha is nonfinite.
+    dot_node = Dot().make_node(x, y)
+    dot, dot_cache_key = numba_funcify_SparseDot(dot_node.op, dot_node, **kwargs)
+    cache_version = 6
+
+    cache_key = sha256(
+        str(
+            (
+                type(op),
+                tuple(inp.type for inp in node.inputs),
+                tuple(out.type for out in node.outputs),
+                dot_cache_key,
+                cache_version,
+            )
+        ).encode()
+    ).hexdigest()
+
+    def wrap_fused_kernel(kernel):
+        # `fastmath=False` to preserve nonfinite results in the fallback expression.
+        @numba_basic.numba_njit(fastmath=False)
+        def usmm(alpha, x, y, z):
+            n_row, n_inner = x.shape
+            y_n_row, n_col = y.shape
+            assert n_inner == y_n_row
+            shape = (n_row, n_col)
+
+            if (
+                not np.isfinite(alpha.item())
+                or (z.shape[0] != 1 and z.shape[0] != n_row)
+                or (z.shape[1] != 1 and z.shape[1] != n_col)
+            ):
+                # Alpha is nonfinite or z can't broadcast to x @ y.
+                # The original expression will resolve the broadcasting.
+                return (dot(x, y) * alpha.item() + z).astype(out_dtype)
+
+            # Initialize `out` from `z`, casting or broadcasting as needed, before accumulating.
+            if z.shape == shape:
+                if z_same_dtype:
+                    out = z.copy()
+                else:
+                    out = z.astype(out_dtype)
+            else:
+                out = np.empty(shape, dtype=out_dtype)
+                out[:, :] = z
+
+            return kernel(alpha, x, y, out, n_row, n_inner, n_col)
+
+        return usmm, cache_key
+
+    if x_is_sparse and not y_is_sparse:
+        accumulate = make_sparse_dense_matmul(x_format, out_dtype, cast_dense=True)
+
+        @numba_basic.numba_njit
+        def usmm_sparse_dense(alpha, x, y, out, n_row, n_inner, n_col):
+            return accumulate(x.data, x.indices, x.indptr, y, out, alpha.item())
+
+        return wrap_fused_kernel(usmm_sparse_dense)
+
+    if not x_is_sparse and y_is_sparse:
+        transpose_format = "csc" if y_format == "csr" else "csr"
+        accumulate = make_sparse_dense_matmul(
+            transpose_format, out_dtype, cast_dense=True
+        )
+
+        @numba_basic.numba_njit
+        def usmm_dense_sparse(alpha, x, y, out, n_row, n_inner, n_col):
+            accumulate(y.data, y.indices, y.indptr, x.T, out.T, alpha.item())
+            return out
+
+        return wrap_fused_kernel(usmm_dense_sparse)
+
+    @numba_basic.numba_njit
+    def usmm_sparse_sparse(alpha, x, y, out, n_row, n_inner, n_col):
+        alpha_val = alpha.item()
+
+        if x_format == "csr" and y_format == "csc":
+            y = y.tocsr()
+
+        x_indices = x.indices.view(np.uint32)
+        x_indptr = x.indptr.view(np.uint32)
+        y_indices = y.indices.view(np.uint32)
+        y_indptr = y.indptr.view(np.uint32)
+
+        x_data = x.data
+        y_data = y.data
+
+        if x_format == "csr":
+            for i in range(n_row):
+                for x_idx in range(x_indptr[i], x_indptr[i + 1]):
+                    k = x_indices[x_idx]
+                    x_val = alpha_val * out_type(x_data[x_idx])
+                    for y_idx in range(y_indptr[k], y_indptr[k + 1]):
+                        out[i, y_indices[y_idx]] += x_val * out_type(y_data[y_idx])
+        elif y_format == "csc":
+            for j in range(n_col):
+                for y_idx in range(y_indptr[j], y_indptr[j + 1]):
+                    k = y_indices[y_idx]
+                    y_val = alpha_val * out_type(y_data[y_idx])
+                    for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                        out[x_indices[x_idx], j] += out_type(x_data[x_idx]) * y_val
+        else:
+            for k in range(n_inner):
+                for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                    i = x_indices[x_idx]
+                    x_val = alpha_val * out_type(x_data[x_idx])
+                    for y_idx in range(y_indptr[k], y_indptr[k + 1]):
+                        out[i, y_indices[y_idx]] += x_val * out_type(y_data[y_idx])
+
+        return out
+
+    return wrap_fused_kernel(usmm_sparse_sparse)
+
+
+@register_funcify_and_cache_key(UsmmCscDense)
+def numba_funcify_UsmmCscDense(op, node, **kwargs):
+    inplace = op.inplace
+    out_dtype = node.outputs[0].dtype
+    out_type = np.dtype(out_dtype).type
+
+    cache_version = 5
+    cache_key = sha256(
+        str(
+            (
+                type(op),
+                inplace,
+                tuple(inp.type for inp in node.inputs),
+                tuple(out.type for out in node.outputs),
+                cache_version,
+            )
+        ).encode()
+    ).hexdigest()
+
+    accumulate = make_sparse_dense_matmul("csc", out_dtype, cast_dense=True)
+
+    # Preserve nonfinite results in the final scaling and addition.
+    @numba_basic.numba_njit(fastmath=False)
+    def usmm_csc_dense(alpha, values, indices, indptr, n_rows, y, z):
+        assert len(indptr) - 1 == y.shape[0]
+        n_cols = y.shape[1]
+        shape = (n_rows.item(), n_cols)
+        if (z.shape[0] != 1 and z.shape[0] != shape[0]) or (
+            z.shape[1] != 1 and z.shape[1] != shape[1]
+        ):
+            raise ValueError("z must broadcast to the shape of x @ y")
+
+        reuse_z = inplace and z.shape == shape
+        scale = alpha.item()
+        nonfinite_alpha = not np.isfinite(scale)
+
+        if nonfinite_alpha:
+            out = np.zeros(shape, dtype=out_dtype)
+            scale = out_type(1)
+        elif reuse_z:
+            out = z
+        elif z.shape == shape:
+            out = z.copy()
+        else:
+            out = np.empty(shape, dtype=out_dtype)
+            out[:, :] = z
+
+        out = accumulate(values, indices, indptr, y, out, scale)
+
+        if nonfinite_alpha:
+            out *= alpha.item()
+            out += z
+            if reuse_z:
+                z[:, :] = out
+                return z
+        return out
+
+    return usmm_csc_dense, cache_key
