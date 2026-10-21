@@ -368,7 +368,7 @@ def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
             x_stacked = x_stacked.reshape(
                 (
                     *x_stacked_shape[: batch_ndim - n_x_axis_to_merge],
-                    prod(x_stacked_shape[batch_ndim - n_x_axis_to_merge : -1]),
+                    variadic_mul(*x_stacked_shape[batch_ndim - n_x_axis_to_merge : -1]),
                     x_shape[-1],
                 )
             )
@@ -392,7 +392,9 @@ def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
                 (
                     *y_stacked_shape[: batch_ndim - n_y_axis_to_merge],
                     y_shape[-2],
-                    prod(y_stacked_shape[batch_ndim - n_y_axis_to_merge + 1 :]),
+                    variadic_mul(
+                        *y_stacked_shape[batch_ndim - n_y_axis_to_merge + 1 :]
+                    ),
                 )
             )
             dims_were_merged = True

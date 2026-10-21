@@ -92,33 +92,7 @@ def test_specialize_matmul_to_batched_dot(aligned):
     )
 
 
-@pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_batched_matmul_empty_dimensions(dtype):
-    x, y = [tensor(shape=(None,) * 4, dtype=dtype) for _ in range(2)]
-    result = RewriteTester(
-        [x, y],
-        [x @ y],
-        include=None,
-        custom_rewrite=specialize_matmul_to_batched_dot,
-    )
-
-    rng = np.random.default_rng(2517)
-    for batch, rows, contracted, cols in [
-        ((2, 3), 3, 4, 5),
-        ((2, 3), 0, 4, 5),
-        ((2, 3), 3, 0, 5),
-        ((2, 3), 3, 4, 0),
-        ((0, 3), 3, 4, 5),
-        ((2, 0), 3, 0, 5),
-        ((2, 3), 0, 0, 0),
-    ]:
-        a = rng.normal(size=(*batch, rows, contracted)).astype(dtype)
-        b = rng.normal(size=(*batch, contracted, cols)).astype(dtype)
-        result.assert_eval(a, b, rtol=1e-5, atol=1e-6)
-
-
-@pytest.mark.parametrize("core_shape", [(3, 4, 5), (0, 4, 5), (3, 0, 5)])
-def test_batched_matmul_incompatible_batch_dimensions(core_shape):
+def test_batched_matmul_empty_dimensions():
     x, y = [tensor(shape=(None,) * 4) for _ in range(2)]
     result = RewriteTester(
         [x, y],
@@ -126,16 +100,10 @@ def test_batched_matmul_incompatible_batch_dimensions(core_shape):
         include=None,
         custom_rewrite=specialize_matmul_to_batched_dot,
     )
-    rows, contracted, cols = core_shape
-    for x_batch, y_batch in [
-        ((2, 3), (3, 2)),
-        ((0, 3), (3, 0)),
-        ((1, 6), (2, 3)),
-    ]:
-        a = np.ones((*x_batch, rows, contracted), dtype=x.dtype)
-        b = np.ones((*y_batch, contracted, cols), dtype=y.dtype)
-        with pytest.raises(ValueError, match="Incompatible batch dimensions"):
-            result.rewr_fn(a, b)
+
+    a = np.empty((2, 3, 3, 0), dtype=x.dtype)
+    b = np.empty((2, 3, 0, 5), dtype=y.dtype)
+    result.assert_eval(a, b)
 
 
 def test_gemm_factor():

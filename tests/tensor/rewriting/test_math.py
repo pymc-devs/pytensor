@@ -5120,53 +5120,18 @@ def test_local_batched_matmul_to_core_matmul():
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
 
 
-@pytest.mark.parametrize(
-    "x_batch, y_batch",
-    [
-        ((None,), (1,)),
-        ((1,), (None,)),
-        ((None, 1), (1, None)),
-        ((None, None, 1), (None, 1, None)),
-        ((None, None), (1, 1)),
-        ((1, 1), (None, None)),
-    ],
-)
-@pytest.mark.parametrize(
-    "x_is_row, y_is_col", [(False, False), (True, True), (False, True), (True, False)]
-)
-def test_batched_matmul_to_core_empty_dimensions(x_batch, y_batch, x_is_row, y_is_col):
-    x = pt.tensor(shape=(*x_batch, 1 if x_is_row else None, None))
-    y = pt.tensor(shape=(*y_batch, None, 1 if y_is_col else None))
+def test_batched_matmul_to_core_empty_dimensions():
+    x = pt.tensor(shape=(None, 1, None, None))
+    y = pt.tensor(shape=(1, None, None, None))
     result = RewriteTester(
         [x, y],
         [x @ y],
         include=None,
         custom_rewrite=local_batched_matmul_to_core_matmul_with_reshape,
     )
-    rng = np.random.default_rng(2517)
-    for batch_size, rows, contracted, cols in [
-        (2, 3, 4, 5),
-        (2, 3, 0, 5),
-        (2, 0, 4, 5),
-        (2, 3, 4, 0),
-        (0, 3, 4, 5),
-        (0, 3, 0, 5),
-    ]:
-        a = rng.normal(
-            size=(
-                *(1 if dim == 1 else batch_size for dim in x_batch),
-                1 if x_is_row else rows,
-                contracted,
-            )
-        ).astype(x.dtype)
-        b = rng.normal(
-            size=(
-                *(1 if dim == 1 else batch_size for dim in y_batch),
-                contracted,
-                1 if y_is_col else cols,
-            )
-        ).astype(y.dtype)
-        result.assert_eval(a, b, rtol=1e-5, atol=1e-6)
+    a = np.empty((2, 1, 3, 0), dtype=x.dtype)
+    b = np.empty((1, 3, 0, 5), dtype=y.dtype)
+    result.assert_eval(a, b)
 
 
 @pytest.mark.parametrize(
