@@ -1230,21 +1230,14 @@ class Softplus(UnaryScalarOp):
     non_negative = True
 
     def impl(self, x):
-        # If x is an int8 or uint8, numpy.exp will compute the result in
-        # half-precision (float16), where we want float32.
-        x_dtype = getattr(x, "dtype", None)
-        not_int8 = x_dtype is None or x_dtype.itemsize > 1
+        # The output may be wider than the input; compute in double precision.
+        x = np.complex128(x) if isinstance(x, np.complexfloating) else np.float64(x)
         if x < -37.0:
-            return np.exp(x) if not_int8 else np.exp(x, signature="f")
+            return np.exp(x)
         elif x < 18.0:
-            return (
-                np.log1p(np.exp(x)) if not_int8 else np.log1p(np.exp(x, signature="f"))
-            )
+            return np.log1p(np.exp(x))
         elif x < 33.3:
-            if x_dtype is not None and x_dtype.kind == "u":
-                # Negate uint will not do what we want
-                x = x.astype("float32" if x_dtype.itemsize <= 2 else "float64")
-            return x + np.exp(-x) if not_int8 else x + np.exp(-x, signature="f")
+            return x + np.exp(-x)
         else:
             return x
 

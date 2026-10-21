@@ -785,6 +785,33 @@ def check_elemwise_runtime_broadcast(mode):
 
 
 class TestElemwise(unittest_tools.InferShapeTester):
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("ndim", [0, 1])
+    def test_reciprocal_python_linker_precision(self, dtype, ndim):
+        x = tensor("x", dtype=dtype, shape=(None,) * ndim)
+        fn = function(
+            [x], [1 / x, 2.0 / x], mode=Mode(linker="py", optimizer="fast_run")
+        )
+        assert any(
+            isinstance(node.op, Elemwise)
+            and isinstance(node.op.scalar_op, ps.Composite)
+            for node in fn.maker.fgraph.toposort()
+        )
+
+        value = np.asarray(0.657 if ndim == 0 else [0.657, -0.657], dtype=dtype)
+        inverse, double_inverse = fn(value)
+        np.testing.assert_array_equal(inverse, 1.0 / value)
+        np.testing.assert_array_equal(double_inverse, 2.0 / value)
+
+    def test_python_linker_reuses_op_across_dtypes(self):
+        op = Elemwise(ps.clip)
+        # Compile float32 first so an Op-level cache would downcast float64 inputs.
+        for dtype in ("float32", "float64"):
+            x = vector("x", dtype=dtype)
+            fn = function([x], op(x, -1, 1), mode=Mode(linker="py", optimizer=None))
+            value = np.asarray([-2, 0.657, 2], dtype=dtype)
+            np.testing.assert_array_equal(fn(value), np.clip(value, -1, 1))
+
     def test_elemwise_grad_bool(self):
         x = scalar(dtype="bool")
         y = bscalar()

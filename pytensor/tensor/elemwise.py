@@ -709,14 +709,20 @@ class Elemwise(OpenMPOp):
             and self.ufunc is None
             and impl == "py"
         ):
-            ufunc = np.frompyfunc(
-                self.scalar_op.impl, len(node.inputs), self.scalar_op.nout
+            input_types = [np.dtype(inp.dtype).type for inp in node.inputs]
+
+            def scalar_impl(*inputs):
+                # frompyfunc supplies Python scalars; restore the node's NumPy dtypes.
+                return self.scalar_op.impl(
+                    *(
+                        dtype(value)
+                        for dtype, value in zip(input_types, inputs, strict=False)
+                    )
+                )
+
+            node.tag.ufunc = np.frompyfunc(
+                scalar_impl, len(node.inputs), self.scalar_op.nout
             )
-            if self.scalar_op.nin > 0:
-                # We can reuse it for many nodes
-                self.ufunc = ufunc
-            else:
-                node.tag.ufunc = ufunc
 
         # Numpy ufuncs will sometimes perform operations in
         # float16, in particular when the input is int8.
@@ -768,7 +774,7 @@ class Elemwise(OpenMPOp):
         ufunc_kwargs = {}
         # We supported in the past calling manually op.perform.
         # To keep that support we need to sometimes call self.prepare_node
-        if self.nfunc is None and self.ufunc is None:
+        if self.nfunc is None and self.ufunc is None and not hasattr(node.tag, "ufunc"):
             self.prepare_node(node, None, None, "py")
         if self.nfunc and len(inputs) == self.nfunc_spec[1]:
             ufunc = self.nfunc
@@ -785,18 +791,11 @@ class Elemwise(OpenMPOp):
             # numpy the first (faster) version leads to segfaults
             if self.ufunc:
                 ufunc = self.ufunc
-            elif not hasattr(node.tag, "ufunc"):
-                # It happen that make_thunk isn't called, like in
-                # get_underlying_scalar_constant_value
-                self.prepare_node(node, None, None, "py")
-                # prepare_node will add ufunc to self or the tag
-                # depending if we can reuse it or not. So we need to
-                # test both again.
-                if self.ufunc:
-                    ufunc = self.ufunc
-                else:
-                    ufunc = node.tag.ufunc
             else:
+                if not hasattr(node.tag, "ufunc"):
+                    # make_thunk may not have been called, for example in
+                    # get_underlying_scalar_constant_value.
+                    self.prepare_node(node, None, None, "py")
                 ufunc = node.tag.ufunc
 
             nout = ufunc.nout
