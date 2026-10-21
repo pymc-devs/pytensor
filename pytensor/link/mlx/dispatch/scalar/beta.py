@@ -1114,8 +1114,8 @@ def mlx_funcify_BetaInc(op, **kwargs):
 
     def betainc(a, b, x):
         z, const, out_dtype = _working_precision(x)
-        first = mx.array(a).astype(z.dtype)
-        second = mx.array(b).astype(z.dtype)
+        first = mx.asarray(a).astype(z.dtype)
+        second = mx.asarray(b).astype(z.dtype)
         out = _metal_betainc_call(first, second, z)
         if out is None:
             out = _betainc(first, second, z, _C0_MIN_ETA[z.dtype], const, erfc)

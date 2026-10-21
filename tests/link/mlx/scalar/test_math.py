@@ -7,7 +7,8 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.scalar.math import GammaLn, Psi
+from pytensor.scalar.basic import Second
+from pytensor.scalar.math import BetaInc, Erfc, Erfcx, GammaInc, GammaLn, Psi
 from pytensor.tensor.math import log1mexp, sigmoid, softplus
 from pytensor.tensor.type import vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
@@ -280,6 +281,39 @@ def test_gammaln_psi_dispatch_reaches_kernel(scalar_op, name):
         "the two paths agree bitwise, so this test cannot tell them apart"
     )
     np.testing.assert_array_equal(dispatched, kernel)
+
+
+@pytest.mark.parametrize(
+    "scalar_op, n_inputs",
+    [
+        (GammaLn, 1),
+        (Psi, 1),
+        (Erfc, 1),
+        (Erfcx, 1),
+        (GammaInc, 2),
+        (BetaInc, 3),
+        (Second, 2),
+    ],
+    ids=["gammaln", "psi", "erfc", "erfcx", "gammainc", "betainc", "second"],
+)
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_dispatch_does_not_copy_its_input(scalar_op, n_inputs, dtype, tmp_path):
+    # Since MLX 0.32, mx.array copies an input that is already an mx.array, and the copy
+    # survives mx.compile as an AsType node of its own. Every value lies in (0, 1), where
+    # each of these functions is defined
+    x_value = mlx.array(np.linspace(0.1, 0.9, 7, dtype=dtype))
+    mlx.eval(x_value)
+    graph = tmp_path / "graph.dot"
+
+    # The assertion below searches MLX's graph dump for a primitive name, so first
+    # confirm the dump still spells a cast that way
+    mlx.export_to_dot(str(graph), mlx.compile(lambda x: x.astype(mlx.float16))(x_value))
+    assert "AsType" in graph.read_text()
+
+    outputs = mlx.compile(mlx_funcify(scalar_op()))(*[x_value] * n_inputs)
+    mlx.export_to_dot(str(graph), outputs)
+
+    assert "AsType" not in graph.read_text()
 
 
 def test_log1mexp():

@@ -174,7 +174,7 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
 @mlx_funcify.register(GammaLn)
 def mlx_funcify_GammaLn(op, **kwargs):
     def gammaln(x):
-        x = mx.array(x)
+        x = mx.asarray(x)
         fast = _metal_math_call("gammaln", x)
         if fast is not None:
             return fast
@@ -220,7 +220,7 @@ def mlx_funcify_GammaLn(op, **kwargs):
 @mlx_funcify.register(Psi)
 def mlx_funcify_Psi(op, **kwargs):
     def psi(x):
-        x = mx.array(x)
+        x = mx.asarray(x)
         fast = _metal_math_call("psi", x)
         if fast is not None:
             return fast
