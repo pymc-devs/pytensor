@@ -2246,67 +2246,65 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     return [outer_op.clone(axis=sorted(newaxis), **clone_kwargs)(x)]
 
 
+def _reversed_axes(node) -> set[int] | None:
+    """Axes reversed by a Subtensor of whole-axis slices, else None."""
+    indices = get_constant_idx(node.op.idx_list, node.inputs, allow_partial=True)
+    if not all(
+        isinstance(index, slice)
+        and index.start is None
+        and index.stop is None
+        and index.step in (None, -1)
+        for index in indices
+    ):
+        return None
+    return {axis for axis, index in enumerate(indices) if index.step == -1}
+
+
 @register_canonicalize
 @register_specialize
-@node_rewriter([CAReduce])
-def local_reduce_of_permutation(fgraph, node):
-    """reduce(permute(x)) -> reduce(x) when x is only permuted along reduced axes.
+@node_rewriter([SortOp])
+def local_sort_under_reduce(fgraph, node):
+    """reduce(f(sort(x))) -> reduce(f(x)) when only reductions see the sorted order.
 
-    Every ``CAReduce`` is commutative, so a sort along a reduced axis or a reversal of
-    reduced axes cannot change its result. The permutation may sit under ``Elemwise``
-    ops whose other inputs are broadcast along the reduced axes, which commute with it.
+    Every ``CAReduce`` is commutative, so a sort along a reduced axis cannot change its
+    result. Between the sort and the reductions there may be ``Elemwise`` ops whose
+    other inputs are broadcast along the permuted axes, and reversals of whole axes,
+    which are dropped along with the sort.
     """
     [x] = node.inputs
-    axes = set(range(x.type.ndim)) if node.op.axis is None else set(node.op.axis)
+    [sorted_x] = node.outputs
 
-    # Walk down from x, recording the commuting Elemwise nodes passed on the way. An
-    # Elemwise with other clients would have to be computed twice, so it ends the walk.
-    elemwise_path = []
-    var = x
-    unpermuted = None
-    while True:
-        match var.owner_op_and_inputs:
-            case (SortOp(axis=axis), inner) if axis in axes:
-                var = unpermuted = inner
-                n_rebuilt = len(elemwise_path)
-            case (Subtensor(idx_list=idx_list), inner, *_) if all(
-                isinstance(index, slice)
-                and index.start is None
-                and index.stop is None
-                and (index.step is None or (index.step == -1 and axis in axes))
-                for axis, index in enumerate(
-                    get_constant_idx(idx_list, var.owner.inputs, allow_partial=True)
-                )
-            ):
-                var = unpermuted = inner
-                n_rebuilt = len(elemwise_path)
-            case (Elemwise(), *inputs) if (
-                len(var.owner.outputs) == 1 and len(fgraph.clients[var]) == 1
-            ):
-                varying = [
-                    i
-                    for i, inp in enumerate(inputs)
-                    if not all(inp.type.broadcastable[axis] for axis in axes)
-                ]
-                if len(varying) != 1:
-                    break
-                elemwise_path.append((var.owner, varying[0]))
-                var = inputs[varying[0]]
-            case _:
-                break
+    # Each reversal adds the axes it flips to the permuted set of everything below it
+    reversals = []
+    pending = [(sorted_x, {node.op.axis})]
+    while pending:
+        var, permuted = pending.pop()
+        for client, input_index in fgraph.clients[var]:
+            match client.op:
+                case CAReduce(axis=axis) if axis is None or permuted <= set(axis):
+                    pass
+                case Elemwise() if len(client.outputs) == 1 and all(
+                    inp.type.broadcastable[axis]
+                    for i, inp in enumerate(client.inputs)
+                    if i != input_index
+                    for axis in permuted
+                ):
+                    pending.append((client.outputs[0], permuted))
+                case Subtensor() if input_index == 0 and (
+                    (reversed_axes := _reversed_axes(client)) is not None
+                ):
+                    reversals.append(client)
+                    pending.append((client.outputs[0], permuted | reversed_axes))
+                case _:
+                    return None
 
-    if unpermuted is None:
-        return None
-
-    new_x = unpermuted
-    for elemwise_node, permuted_input in reversed(elemwise_path[:n_rebuilt]):
-        new_inputs = list(elemwise_node.inputs)
-        new_inputs[permuted_input] = new_x
-        new_x = elemwise_node.op(*new_inputs)
-
-    new_out = node.op(new_x)
-    copy_stack_trace(node.outputs, new_out)
-    return [new_out]
+    # Replace the deepest reversals first, so every replaced variable is still in the
+    # graph when its turn comes
+    replacements = {
+        reversal.outputs[0]: reversal.inputs[0] for reversal in reversed(reversals)
+    }
+    replacements[sorted_x] = x
+    return replacements
 
 
 @register_canonicalize

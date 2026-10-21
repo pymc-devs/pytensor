@@ -118,7 +118,7 @@ from pytensor.tensor.rewriting.math import (
     local_neg_to_mul,
     local_reduce_broadcastable,
     local_reduce_chain,
-    local_reduce_of_permutation,
+    local_sort_under_reduce,
     local_sum_prod_of_mul_or_div,
     local_useless_abs,
     mul_canonizer,
@@ -3935,6 +3935,113 @@ class TestLocalReduce:
         result.assert_graph(pt_max(x.squeeze(0), axis=0, initial=-np.inf))
         result.assert_eval(np.zeros((1, 0)))
 
+    @pytest.mark.parametrize(
+        "out, expected",
+        [
+            (
+                lambda x, v: pt_max(pt.sort(x, axis=1)[:, ::-1], axis=1),
+                lambda x, v: pt_max(x, axis=1),
+            ),
+            (lambda x, v: pt_sum(pt.sort(x, axis=0)), lambda x, v: pt_sum(x)),
+            (
+                lambda x, v: prod(pt.sort(x, axis=1)[::-1, ::-1]),
+                lambda x, v: prod(x),
+            ),
+            (
+                lambda x, v: pt_sum(pt.sort(x, axis=1) * v[:, None], axis=1),
+                lambda x, v: pt_sum(x * v[:, None], axis=1),
+            ),
+            (
+                lambda x, v: pt_sum(pt.sort(x, axis=1) * v[:, None]),
+                lambda x, v: pt_sum(x * v[:, None]),
+            ),
+            (
+                lambda x, v: pt_sum(exp(2 * pt.sort(x, axis=1)), axis=1),
+                lambda x, v: pt_sum(exp(2 * x), axis=1),
+            ),
+            (
+                lambda x, v: (
+                    pt_sum(y := exp(pt.sort(x, axis=1)), axis=1) + pt_max(y, axis=1)
+                ),
+                lambda x, v: pt_sum(y := exp(x), axis=1) + pt_max(y, axis=1),
+            ),
+            (
+                lambda x, v: pt_sum(exp(pt.sort(x, axis=1)[:, ::-1])[::-1]),
+                lambda x, v: pt_sum(exp(x)),
+            ),
+            (lambda x, v: pt_sum(pt.sort(x, axis=0), axis=1), None),
+            (lambda x, v: pt_sum(pt.sort(x, axis=1)[::-1], axis=1), None),
+            (lambda x, v: pt_sum(pt.sort(x, axis=1) * v[None, :], axis=1), None),
+            (lambda x, v: pt_sum(pt.sort(x, axis=0)[::2], axis=0), None),
+        ],
+        ids=[
+            "max_of_reversed_sort",
+            "sum_all_of_sort",
+            "prod_of_sort_reversed_on_both_axes",
+            "elemwise_with_broadcast_operand",
+            "full_reduce_with_broadcast_operand",
+            "elemwise_chain_over_sort",
+            "elemwise_shared_by_reductions",
+            "reversals_around_elemwise",
+            "sort_on_other_axis",
+            "reversal_on_other_axis",
+            "elemwise_varying_along_sort",
+            "strided_slice",
+        ],
+    )
+    def test_local_sort_under_reduce(self, out, expected):
+        x = matrix("x")
+        v = vector("v")
+        if expected is None:
+            expected_graph = rewrite_graph(
+                out(x, v),
+                include=("canonicalize",),
+                exclude=("local_sort_under_reduce",),
+            )
+        else:
+            expected_graph = rewrite_graph(expected(x, v), include=("canonicalize",))
+
+        result = RewriteTester([x, v], [out(x, v)], include=("canonicalize",))
+        result.assert_graph(expected_graph)
+
+        rng = np.random.default_rng(0)
+        result.assert_eval(
+            rng.normal(size=(4, 4)).astype(config.floatX),
+            rng.normal(size=4).astype(config.floatX),
+        )
+
+    def test_local_sort_under_reduce_skips_multi_output_elemwise(self):
+        x = matrix("x")
+        composite = ps.Composite([a := ps.float64("a")], [ps.exp(a), ps.log(a)])
+        out = pt_sum(Elemwise(composite)(pt.sort(x, axis=1))[1], axis=1)
+
+        result = RewriteTester(
+            [x], [out], include=None, custom_rewrite=local_sort_under_reduce
+        )
+        result.assert_graph(out)
+
+    def test_local_sort_under_reduce_drops_chained_reversals(self):
+        x = matrix("x")
+        out = pt_sum(pt.sort(x, axis=1)[:, ::-1][::-1])
+
+        result = RewriteTester(
+            [x], [out], include=None, custom_rewrite=local_sort_under_reduce
+        )
+        result.assert_graph(pt_sum(x))
+
+    def test_local_sort_under_reduce_keeps_sort_seen_by_output(self):
+        x = vector("x")
+        y = exp(pt.sort(x))
+
+        result = RewriteTester([x], [y, pt_sum(y)])
+        result.assert_graph(
+            *rewrite_graph(
+                [y, pt_sum(y)],
+                include=("canonicalize",),
+                exclude=("local_sort_under_reduce",),
+            )
+        )
+
 
 class TestReduceJoin:
     def setup_method(self):
@@ -3995,91 +4102,6 @@ class TestReduceJoin:
         np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
-
-    @pytest.mark.parametrize(
-        "out, expected",
-        [
-            (
-                lambda x, v: pt_max(pt.sort(x, axis=1)[:, ::-1], axis=1),
-                lambda x, v: pt_max(x, axis=1),
-            ),
-            (lambda x, v: pt_sum(pt.sort(x, axis=0)), lambda x, v: pt_sum(x)),
-            (lambda x, v: pt_min(x[::-1, ::-1]), lambda x, v: pt_min(x)),
-            (
-                lambda x, v: prod(pt.sort(x[:, ::-1], axis=1), axis=1),
-                lambda x, v: prod(x, axis=1),
-            ),
-            (
-                lambda x, v: pt_sum(pt.sort(x, axis=1) * v[:, None], axis=1),
-                lambda x, v: pt_sum(x * v[:, None], axis=1),
-            ),
-            (
-                lambda x, v: pt_sum(exp(2 * pt.sort(x, axis=1)), axis=1),
-                lambda x, v: pt_sum(exp(2 * x), axis=1),
-            ),
-            (lambda x, v: pt_sum(pt.sort(x, axis=0), axis=1), None),
-            (lambda x, v: pt_sum(x[::-1], axis=1), None),
-            (lambda x, v: pt_sum(pt.sort(x, axis=1) * v[None, :], axis=1), None),
-            (lambda x, v: pt_sum(x[::2], axis=0), None),
-        ],
-        ids=[
-            "max_of_reversed_sort",
-            "sum_all_of_sort",
-            "min_of_reversal",
-            "prod_of_sorted_reversal",
-            "elemwise_with_broadcast_operand",
-            "elemwise_chain_over_sort",
-            "sort_on_other_axis",
-            "reversal_on_other_axis",
-            "elemwise_varying_along_sort",
-            "strided_slice",
-        ],
-    )
-    def test_local_reduce_of_permutation(self, out, expected):
-        x = matrix("x")
-        v = vector("v")
-        if expected is None:
-            expected_graph = rewrite_graph(
-                out(x, v),
-                include=("canonicalize",),
-                exclude=("local_reduce_of_permutation",),
-            )
-        else:
-            expected_graph = rewrite_graph(expected(x, v), include=("canonicalize",))
-
-        result = RewriteTester([x, v], [out(x, v)], include=("canonicalize",))
-        result.assert_graph(expected_graph)
-
-        rng = np.random.default_rng(0)
-        result.assert_eval(
-            rng.normal(size=(4, 4)).astype(config.floatX),
-            rng.normal(size=4).astype(config.floatX),
-        )
-
-    def test_local_reduce_of_permutation_skips_multi_output_elemwise(self):
-        x = matrix("x")
-        composite = ps.Composite([a := ps.float64("a")], [ps.exp(a), ps.log(a)])
-        out = pt_sum(Elemwise(composite)(pt.sort(x, axis=1))[1], axis=1)
-
-        result = RewriteTester(
-            [x], [out], include=None, custom_rewrite=local_reduce_of_permutation
-        )
-        result.assert_graph(out)
-
-    def test_local_reduce_of_permutation_keeps_shared_elemwise(self):
-        """Rebuilding exp without the sort would compute it twice, as exp(sort(x)) is
-        also an output."""
-        x = vector("x")
-        y = exp(pt.sort(x))
-
-        result = RewriteTester([x], [y, pt_sum(y)])
-        result.assert_graph(
-            *rewrite_graph(
-                [y, pt_sum(y)],
-                include=("canonicalize",),
-                exclude=("local_reduce_of_permutation",),
-            )
-        )
 
     def test_not_supported_axis_none(self):
         # Test that the rewrite does not crash in one case where it
