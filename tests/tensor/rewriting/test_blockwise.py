@@ -15,6 +15,7 @@ from pytensor.tensor import (
     constant,
     iscalar,
     matrix,
+    mul,
     scalar,
     shape_padleft,
     tensor,
@@ -69,6 +70,15 @@ def test_useless_unbatched_blockwise():
     result.assert_graph(core_out, core_out[None])
     unbatched_out, batched_out = result.rewr_fg.outputs
     assert batched_out.owner.inputs[0] is unbatched_out
+
+
+@pytest.mark.parametrize("core_shape", [(None,), (1,)])
+def test_useless_unbatched_blockwise_preserves_core_dims(core_shape):
+    x = tensor("x", shape=core_shape)
+    s = scalar("s")
+    out = Blockwise(mul, signature="(n),()->(n)")(x[None, None], as_tensor([s]))
+    result = RewriteTester([x, s], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph((x * s)[None, None])
 
 
 def test_local_blockwise_alloc_inputs():

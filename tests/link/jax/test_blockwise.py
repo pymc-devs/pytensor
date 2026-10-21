@@ -4,9 +4,10 @@ import numpy as np
 import pytest
 
 from pytensor import config
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import get_mode
-from pytensor.tensor import add, as_tensor, constant, iscalar, lmatrix, tensor
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor import add, as_tensor, constant, iscalar, lmatrix, lscalar, tensor
+from pytensor.tensor.blockwise import Blockwise, JAXBlockwise
 from pytensor.tensor.math import Dot, matmul
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_blockwise import check_blockwise_runtime_broadcasting
@@ -15,7 +16,6 @@ from tests.unittest_tools import RewriteTester
 
 jax = pytest.importorskip("jax")
 
-from pytensor.link.jax.dispatch.blockwise import JAXUnbatchedScalar
 from pytensor.tensor.rewriting.jax import blockwise_unbatched_scalar_inputs
 
 
@@ -51,9 +51,9 @@ def test_unbatched_scalar_inputs_rewrite():
     x = lmatrix("x")
     n, m = iscalar("n"), iscalar("m")
     two = constant(2, dtype="int32")
-    scalar_add = Blockwise(add, signature="(),(),(),()->()")
+    scalar_add = Blockwise(add, signature="(),(),(),(),()->()")
     # n is padded by a DimShuffle, m by a DimShuffle of a MakeVector
-    out = scalar_add(x, n, as_tensor([m]), two)
+    out = scalar_add(x, n, as_tensor([m]), two.astype("int64"), n)
 
     result = RewriteTester(
         [x, n, m],
@@ -61,14 +61,10 @@ def test_unbatched_scalar_inputs_rewrite():
         include=None,
         custom_rewrite=blockwise_unbatched_scalar_inputs,
     )
-    result.assert_graph(
-        scalar_add(
-            x,
-            JAXUnbatchedScalar(2)(n),
-            JAXUnbatchedScalar(2)(m),
-            two[None, None],
-        )
-    )
+    two = constant(2, dtype="int64")
+    inner_inputs = [inp.type() for inp in (x, n, m, two, n)]
+    lowered_op = JAXBlockwise(inner_inputs, [scalar_add(*inner_inputs)])
+    result.assert_graph(lowered_op(x, n, m, two, n))
 
 
 def test_unbatched_scalar_inputs():
@@ -78,23 +74,48 @@ def test_unbatched_scalar_inputs():
     scalar_add = Blockwise(add, signature="(),(),(),()->()")
     out = scalar_add(x, n, v.shape[0], constant(2, dtype="int32"))
 
-    compare_jax_and_py(
+    fn, _ = compare_jax_and_py(
         [x, n, v],
         [out],
         [np.ones((2, 3), dtype="int32"), np.int32(3), np.zeros(4)],
         assert_fn=partial(np.testing.assert_array_equal, strict=True),
         jax_mode="JAX",
     )
+    np.testing.assert_array_equal(
+        fn(np.ones((2, 3), dtype="int32"), np.int32(7), np.zeros(4)),
+        [np.full((2, 3), 14, dtype=out.dtype)],
+        strict=True,
+    )
 
 
-def test_all_unbatched_scalar_inputs():
+def test_lowered_blockwise_shape():
+    x = lmatrix("x")
+    n = iscalar("n")
+    scalar_add = Blockwise(add, signature="(),()->()")
+    out = JAXBlockwise([x, n], [scalar_add(x, n)])(x, n)
+    compare_jax_and_py(
+        [x, n],
+        [out, out.shape],
+        [np.ones((2, 3), dtype="int64"), np.int32(3)],
+        jax_mode="JAX",
+    )
+
+
+@pytest.mark.parametrize("multiple_outputs", [False, True])
+def test_all_unbatched_scalar_inputs(multiple_outputs):
     n = iscalar("n")
     v = tensor("v", shape=(None,))
-    out = Blockwise(add, signature="(),()->()")(n[None, None], v.shape[0])
+    if multiple_outputs:
+        a, b = iscalar("a"), lscalar("b")
+        core_op = OpFromGraph([a, b], [a + b, a - b])
+        blockwise_op = Blockwise(core_op, signature="(),()->(),()")
+    else:
+        blockwise_op = Blockwise(add, signature="(),()->()")
+    outputs = blockwise_op(n[None, None], v.shape[0], return_list=True)
 
     compare_jax_and_py(
         [n, v],
-        [out],
+        outputs,
         [np.int32(3), np.zeros(4)],
         assert_fn=partial(np.testing.assert_array_equal, strict=True),
         jax_mode=get_mode("JAX").excluding("local_useless_unbatched_blockwise"),

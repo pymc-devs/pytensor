@@ -1,8 +1,8 @@
 import pytensor.tensor as pt
 from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import dfs_rewriter, node_rewriter
-from pytensor.tensor.basic import MakeVector
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter, node_rewriter
+from pytensor.tensor.basic import MakeVector, get_underlying_scalar_constant_value
+from pytensor.tensor.blockwise import Blockwise, JAXBlockwise, _squeeze_left
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
@@ -154,38 +154,43 @@ optdb.register(
 
 @node_rewriter([Blockwise])
 def blockwise_unbatched_scalar_inputs(fgraph, node):
-    """Keep scalar ``Blockwise`` inputs without batch dims out of ``jnp.vectorize``.
+    """Lower Blockwise with explicit scalar inputs that bypass vectorization.
 
-    Under ``jax.jit``, a ``Shape_i`` output is a Python int, and any jnp operation on
-    it returns a traced array. ``Blockwise.make_node`` pads unbatched scalar inputs
-    with a ``MakeVector`` or an ``expand_dims``, which hands the core function a
-    tracer. ``JAXUnbatchedScalar`` replaces that padding and hands the core function a
-    static scalar.
+    Removing padding before JAX conversion preserves concrete values such as
+    ``Shape_i`` outputs. Unbatched scalars that are already traced stay traced.
     """
-    from pytensor.link.jax.dispatch.blockwise import (
-        JAXUnbatchedScalar,
-        unbatched_scalar_constant,
-    )
-
-    new_inputs = list(node.inputs)
-    for i, (inp, sig) in enumerate(zip(node.inputs, node.op.inputs_sig, strict=True)):
-        if (
-            sig
-            or not all(inp.type.broadcastable)
-            or isinstance(inp.owner_op, JAXUnbatchedScalar)
-        ):
-            continue
-        # The Blockwise dispatch passes constants as static values, and core
-        # dispatches like Convolve1d read them from the graph
-        if unbatched_scalar_constant(inp, sig) is not None:
-            continue
-        new_inputs[i] = JAXUnbatchedScalar(inp.type.ndim)(
-            apply_local_dimshuffle_merge(fgraph, inp.squeeze())
+    unbatched_inputs = tuple(
+        i
+        for i, (inp, sig) in enumerate(
+            zip(node.inputs, node.op.inputs_sig, strict=True)
         )
-
-    if new_inputs == node.inputs:
+        if not sig and all(inp.type.broadcastable)
+    )
+    if not unbatched_inputs:
         return None
-    return node.clone_with_new_inputs(new_inputs).outputs
+
+    batch_ndim = node.op.batch_ndim(node)
+    inputs = list(node.inputs)
+    for i in unbatched_inputs:
+        scalar_input = apply_local_dimshuffle_merge(
+            fgraph, _squeeze_left(inputs[i], batch_ndim)
+        )
+        inputs[i] = pt.as_tensor_variable(
+            get_underlying_scalar_constant_value(
+                scalar_input, raise_not_constant=False
+            ),
+            dtype=scalar_input.dtype,
+        )
+    inner_inputs = [inp.type() for inp in inputs]
+    padded_inputs = [
+        pt.shape_padleft(inp, batch_ndim) if i in unbatched_inputs else inp
+        for i, inp in enumerate(inner_inputs)
+    ]
+    inner_outputs = node.op(*padded_inputs, return_list=True)
+    outputs = JAXBlockwise(
+        inner_inputs, inner_outputs, destroy_map=node.op.destroy_map
+    )(*inputs, return_list=True)
+    return copy_stack_trace(node.outputs, outputs)
 
 
 optdb.register(

@@ -170,14 +170,16 @@ def functional_rewrite_ofg_inner_graph(linker, op, node, inner, *, mode):
 
 @graph_rewriter
 def ofg_inner_graph(fgraph):
-    # ``OpWithCoreShape`` is imported lazily: at module import time
-    # ``pytensor.tensor.random`` is only partially initialized. ``*WithCoreShape``
-    # are leaf backend ops with dedicated dispatch; re-optimizing them would loop.
-    from pytensor.tensor.random.op import OpWithCoreShape
+    # Import lazily to avoid circular imports. Backend wrappers have dedicated
+    # dispatch; re-optimizing their bodies would repeat the lowering.
+    from pytensor.tensor.blockwise import JAXBlockwise, OpWithCoreShape
 
     rewrite_inner_graph(
         fgraph,
-        lambda op: isinstance(op, OpFromGraph) and not isinstance(op, OpWithCoreShape),
+        lambda op: (
+            isinstance(op, OpFromGraph)
+            and not isinstance(op, OpWithCoreShape | JAXBlockwise)
+        ),
         rewrite_ofg_inner_graph,
     )
 
