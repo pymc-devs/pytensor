@@ -59,7 +59,7 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
         if constant_splits is not None:
             splits_arr = mx.array(constant_splits)
         else:
-            splits_arr = mx.array(splits)
+            splits_arr = mx.asarray(splits)
 
         cumsum_splits = mx.cumsum(splits_arr[:-1]).tolist()
 
