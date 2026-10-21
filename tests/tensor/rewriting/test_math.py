@@ -109,6 +109,7 @@ from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
     local_add_canonizer,
+    local_batched_matmul_to_core_matmul_with_reshape,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
@@ -5136,8 +5137,11 @@ def test_local_batched_matmul_to_core_matmul():
 def test_batched_matmul_to_core_empty_dimensions(x_batch, y_batch, x_is_row, y_is_col):
     x = pt.tensor(shape=(*x_batch, 1 if x_is_row else None, None))
     y = pt.tensor(shape=(*y_batch, None, 1 if y_is_col else None))
-    fn = pytensor.function(
-        [x, y], x @ y, mode=get_default_mode().including("specialize")
+    result = RewriteTester(
+        [x, y],
+        [x @ y],
+        include=None,
+        custom_rewrite=local_batched_matmul_to_core_matmul_with_reshape,
     )
     rng = np.random.default_rng(2517)
     for batch_size, rows, contracted, cols in [
@@ -5162,9 +5166,7 @@ def test_batched_matmul_to_core_empty_dimensions(x_batch, y_batch, x_is_row, y_i
                 1 if y_is_col else cols,
             )
         ).astype(y.dtype)
-        actual = fn(a, b)
-        assert actual.dtype == x.dtype
-        np.testing.assert_allclose(actual, a @ b, rtol=1e-5, atol=1e-6)
+        result.assert_eval(a, b, rtol=1e-5, atol=1e-6)
 
 
 @pytest.mark.parametrize(

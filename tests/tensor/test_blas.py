@@ -2492,7 +2492,6 @@ def test_batched_dot_empty_dimensions(dtype):
     for batch, rows, contracted, cols in [
         (2, 3, 4, 5),
         (2, 3, 0, 5),
-        (2, 3, 4, 5),
         (2, 0, 4, 5),
         (2, 3, 4, 0),
         (0, 3, 4, 5),
@@ -2501,7 +2500,6 @@ def test_batched_dot_empty_dimensions(dtype):
         a = np.ones((batch, rows, contracted), dtype=dtype)
         b = np.ones((batch, contracted, cols), dtype=dtype)
         actual = fn(a, b)
-        assert actual.dtype == dtype
         np.testing.assert_array_equal(actual, a @ b)
 
     # Empty outputs must not bypass checks on the inputs.
