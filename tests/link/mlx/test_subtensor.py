@@ -54,21 +54,19 @@ def test_mlx_Subtensor_basic():
 
 
 def test_mlx_Subtensor_symbolic_int_index():
-    """Regression test for https://github.com/pymc-devs/pytensor/issues/2422
-
-    A symbolic (non-constant) integer index must not be eagerly coerced to a
-    Python ``int`` -- under ``mx.compile`` it is a traced ``mx.array``, and
-    ``int()`` on a traced array raises.
-    """
+    """Regression test for https://github.com/pymc-devs/pytensor/issues/2422"""
     x_pt = pt.matrix("x", dtype="float32")
     i_pt = pt.iscalar("i")
 
     out_pt = x_pt[i_pt]
     assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    # an integer index next to a slice: only the slice bounds may be coerced to int
+    mixed_pt = x_pt[i_pt, 1:3]
+    assert isinstance(mixed_pt.owner.op, pt_subtensor.Subtensor)
     compare_mlx_and_py(
         [x_pt, i_pt],
-        [out_pt],
-        [np.eye(3, dtype=np.float32), np.int32(1)],
+        [out_pt, mixed_pt],
+        [np.arange(12, dtype=np.float32).reshape(3, 4), np.int32(-1)],
     )
 
 
@@ -133,21 +131,19 @@ def test_mlx_IncSubtensor_set():
 
 
 def test_mlx_IncSubtensor_symbolic_int_index():
-    """Regression test for https://github.com/pymc-devs/pytensor/issues/2422
-
-    Same as test_mlx_Subtensor_symbolic_int_index, for the IncSubtensor
-    (set_subtensor) path.
-    """
+    """Regression test for https://github.com/pymc-devs/pytensor/issues/2422"""
     x_pt = pt.matrix("x", dtype="float32")
     i_pt = pt.iscalar("i")
     st_pt = pt.as_tensor_variable(np.array(-10.0, dtype=np.float32))
 
-    out_pt = pt_subtensor.set_subtensor(x_pt[i_pt, 0], st_pt)
-    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    set_pt = pt_subtensor.set_subtensor(x_pt[i_pt, 0], st_pt)
+    assert isinstance(set_pt.owner.op, pt_subtensor.IncSubtensor)
+    inc_pt = pt_subtensor.inc_subtensor(x_pt[i_pt], np.float32(1.0))
+    assert isinstance(inc_pt.owner.op, pt_subtensor.IncSubtensor)
     compare_mlx_and_py(
         [x_pt, i_pt],
-        [out_pt],
-        [np.eye(3, dtype=np.float32), np.int32(1)],
+        [set_pt, inc_pt],
+        [np.arange(12, dtype=np.float32).reshape(3, 4), np.int32(-1)],
     )
 
 
