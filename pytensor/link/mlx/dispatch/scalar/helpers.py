@@ -55,7 +55,7 @@ def _working_precision(x):
     out_dtype : MLX dtype
         The dtype the result should be cast back to.
     """
-    x = mx.array(x)
+    x = mx.asarray(x)
     working_dtype = mx.float32 if x.dtype in (mx.float16, mx.bfloat16) else x.dtype
 
     def const(value):

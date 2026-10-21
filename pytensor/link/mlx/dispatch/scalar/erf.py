@@ -246,7 +246,7 @@ def _erfc_positive(y, const):
 @mlx_funcify.register(Erfc)
 def mlx_funcify_Erfc(op, **kwargs):
     def erfc(x):
-        x = mx.array(x)
+        x = mx.asarray(x)
         fast = _metal_erf_call("erfc", x)
         if fast is not None:
             return fast
@@ -265,7 +265,7 @@ def mlx_funcify_Erfc(op, **kwargs):
 @mlx_funcify.register(Erfcx)
 def mlx_funcify_Erfcx(op, **kwargs):
     def erfcx(x):
-        x = mx.array(x)
+        x = mx.asarray(x)
         fast = _metal_erf_call("erfcx", x)
         if fast is not None:
             return fast

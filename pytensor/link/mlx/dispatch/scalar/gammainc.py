@@ -530,7 +530,7 @@ def _incomplete_gamma_dispatch(lower):
 
     def incomplete_gamma(a, x):
         z, const, out_dtype = _working_precision(x)
-        shape = mx.array(a).astype(z.dtype)
+        shape = mx.asarray(a).astype(z.dtype)
         out = _metal_gammainc_call(shape, z, lower)
         if out is None:
             out = _incomplete_gamma(shape, z, const, erfc, lower=lower)
