@@ -39,9 +39,9 @@ class Signature:
     arg_dtypes: list[DTypeLike]
     arg_names: list[str | None]
 
-    c_signature: str = ""
-    res_c_type: str = ""
-    arg_c_types: tuple[str, ...] = ()
+    c_signature: str
+    res_c_type: str
+    arg_c_types: tuple[str, ...]
 
     def can_cast_args(self, args: list[DTypeLike]) -> bool:
         ok = True
@@ -166,20 +166,18 @@ class _CythonFunctionSpec:
     """
 
     def __init__(self, signature, capi_name, module_name):
-        self._signature = signature
+        self.signature = signature
         self.capi_name = capi_name
         self.module_name = module_name
         self.input_dtypes = signature.arg_dtypes
         self.output_dtype = signature.res_dtype
 
     def has_pyx_skip_dispatch(self):
-        if not self._signature.arg_names:
+        if not self.signature.arg_names:
             return False
-        if any(
-            name == "__pyx_skip_dispatch" for name in self._signature.arg_names[:-1]
-        ):
+        if any(name == "__pyx_skip_dispatch" for name in self.signature.arg_names[:-1]):
             raise ValueError("skip_dispatch parameter must be last")
-        return self._signature.arg_names[-1] == "__pyx_skip_dispatch"
+        return self.signature.arg_names[-1] == "__pyx_skip_dispatch"
 
 
 def resolve_cython_function(func, restype, arg_types):
@@ -237,15 +235,19 @@ class SciPyScalarOp(ScalarOp):
         return resolve_cython_function(func, np.float64, [np.float64] * self.nin)
 
     @property
-    def scipy_c_symbol(self):
+    def scipy_c_identity(self):
         impl = self.scipy_c_impl
-        identity = (impl.module_name, impl.capi_name, impl._signature.c_signature)
-        return "pytensor_scipy_" + sha256(repr(identity).encode()).hexdigest()
+        identity = (impl.module_name, impl.capi_name, impl.signature.c_signature)
+        return sha256(repr(identity).encode()).hexdigest()
+
+    @property
+    def scipy_c_symbol(self):
+        return "pytensor_scipy_" + self.scipy_c_identity
 
     def c_support_code(self, **kwargs):
         impl = self.scipy_c_impl
         symbol = self.scipy_c_symbol
-        signature = impl._signature
+        signature = impl.signature
         args = ", ".join(signature.arg_c_types)
         return dedent(
             f"""
@@ -260,13 +262,14 @@ class SciPyScalarOp(ScalarOp):
         impl = self.scipy_c_impl
         name = impl.capi_name
         symbol = self.scipy_c_symbol
-        signature = impl._signature.c_signature
-        args = ", ".join(impl._signature.arg_c_types)
+        signature = impl.signature.c_signature
+        args = ", ".join(impl.signature.arg_c_types)
         return [
+            *super().c_init_code(**kwargs),
             dedent(
                 f"""
                 {{
-                    PyObject *module = PyImport_ImportModule("scipy.special.cython_special");
+                    PyObject *module = PyImport_ImportModule("{impl.module_name}");
                     if (module == NULL) return NULL;
                     PyObject *capi = PyObject_GetAttrString(module, "__pyx_capi__");
                     Py_DECREF(module);
@@ -274,28 +277,28 @@ class SciPyScalarOp(ScalarOp):
                     if (!PyDict_Check(capi)) {{
                         Py_DECREF(capi);
                         PyErr_SetString(PyExc_ImportError,
-                            "scipy.special.cython_special.__pyx_capi__ is not a dictionary");
+                            "{impl.module_name}.__pyx_capi__ is not a dictionary");
                         return NULL;
                     }}
                     PyObject *capsule = PyDict_GetItemString(capi, "{name}");
                     if (capsule == NULL) {{
                         Py_DECREF(capi);
                         PyErr_SetString(PyExc_ImportError,
-                            "scipy.special.cython_special does not export {name}");
+                            "{impl.module_name} does not export {name}");
                         return NULL;
                     }}
                     void *pointer = PyCapsule_GetPointer(capsule, "{signature}");
                     Py_DECREF(capi);
                     if (pointer == NULL) {{
                         PyErr_SetString(PyExc_ImportError,
-                            "Incompatible scipy.special.cython_special.{name} C API; "
+                            "Incompatible {impl.module_name}.{name} C API; "
                             "expected {signature}");
                         return NULL;
                     }}
-                    {symbol} = ({impl._signature.res_c_type} (*)({args})) pointer;
+                    {symbol} = ({impl.signature.res_c_type} (*)({args})) pointer;
                 }}
                 """
-            )
+            ),
         ]
 
     def c_code(self, node, name, inputs, outputs, sub):
@@ -315,7 +318,4 @@ class SciPyScalarOp(ScalarOp):
         version = super().c_code_cache_version()
         if not version:
             return ()
-        impl = self.scipy_c_impl
-        identity = (impl.module_name, impl.capi_name, impl._signature.c_signature)
-        signature_version = tuple(sha256(repr(identity).encode()).digest())
-        return (2, signature_version, *version)
+        return (3, self.scipy_c_identity, *version)

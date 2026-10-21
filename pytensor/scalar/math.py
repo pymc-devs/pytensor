@@ -1067,7 +1067,7 @@ class I0(UnaryScalarOp):
 i0 = I0(upgrade_to_float, name="i0")
 
 
-class Ive(BinaryScalarOp):
+class Ive(SciPyScalarOp, BinaryScalarOp):
     """
     Exponentially scaled modified Bessel function of the first kind of order v (real).
     """
@@ -1087,14 +1087,11 @@ class Ive(BinaryScalarOp):
             / 2.0,
         ]
 
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
 
 ive = Ive(upgrade_to_float, name="ive")
 
 
-class Kve(BinaryScalarOp):
+class Kve(SciPyScalarOp, BinaryScalarOp):
     """Exponentially scaled modified Bessel function of the second kind of real order v."""
 
     nfunc_spec = ("scipy.special.kve", 2, 1)
@@ -1114,9 +1111,6 @@ class Kve(BinaryScalarOp):
             grad_not_implemented(self, 0, v),
             g_out * dx,
         ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
 
 
 kve = Kve(upgrade_to_float, name="kve")

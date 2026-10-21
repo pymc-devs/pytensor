@@ -12,14 +12,14 @@ from scipy import special
 import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.mode import Mode
-from pytensor.scalar import Composite, float64, int64, upgrade_to_float
-from pytensor.scalar.cython_special import SciPyScalarOp
+from pytensor.scalar import Composite, ScalarOp, float64, int64, upgrade_to_float
+from pytensor.scalar.cython_special import SciPyScalarOp, Signature, _CythonFunctionSpec
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.scalar.math import gammainc, gammaincc
 from pytensor.tensor.elemwise import Elemwise
 
 
-pytestmark = pytest.mark.skipif(
+requires_cxx = pytest.mark.skipif(
     not pytensor.config.cxx, reason="C++ compiler unavailable"
 )
 
@@ -33,6 +33,7 @@ class SciPyTestOp(SciPyScalarOp):
         super().__init__(upgrade_to_float, name=name)
 
 
+@requires_cxx
 def test_gamma_independent_references():
     a, x = pt.dvectors("a", "x")
     fn = pytensor.function(
@@ -81,6 +82,7 @@ def test_gamma_independent_references():
     np.testing.assert_allclose(q, np.exp(-x_val), rtol=5e-14)
 
 
+@requires_cxx
 def test_gamma_fused_composite():
     a, x = pt.dvectors("a", "x")
     p, q = pt.gammainc(a, x), pt.gammaincc(a, x)
@@ -101,6 +103,7 @@ def test_gamma_fused_composite():
         np.testing.assert_allclose(result, reference, rtol=2e-14)
 
 
+@requires_cxx
 def test_gamma_scalar_loop():
     a, x = float64("a"), float64("x")
     steps = int64("steps")
@@ -122,6 +125,7 @@ def test_gamma_scalar_loop():
         np.testing.assert_allclose(fn(n, a_val, x_val), expected, rtol=2e-14)
 
 
+@requires_cxx
 def test_gamma_openmp():
     sa, sx = float64(), float64()
     composite = Composite([sa, sx], [gammainc(sa, sx) + 2 * gammaincc(sa, sx)])
@@ -140,6 +144,7 @@ def test_gamma_openmp():
     np.testing.assert_allclose(fn(a_val, x_val), expected, rtol=2e-14)
 
 
+@requires_cxx
 def test_gamma_cross_process_cache(tmp_path):
     script = textwrap.dedent("""
         import sys
@@ -174,6 +179,7 @@ def test_gamma_cross_process_cache(tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["missing", "wrong_signature"])
+@requires_cxx
 def test_gamma_bad_c_api(tmp_path, failure):
     script = textwrap.dedent("""
         import sys
@@ -213,6 +219,7 @@ def test_gamma_bad_c_api(tmp_path, failure):
     )
 
 
+@requires_cxx
 def test_scipy_unary_and_duplicate_support():
     loggamma = SciPyTestOp("gammaln", 1)
     sa, sx = float64(), float64()
@@ -240,15 +247,17 @@ def test_scipy_unary_and_duplicate_support():
         ("kv", [[0.0, 0.5, 2.0], [0.25, 1.0, 4.0]]),
     ],
 )
+@requires_cxx
 def test_fused_real_functions(name, values):
     inputs = [pt.dvector() for _ in values]
     op = SciPyTestOp(name, len(inputs))
     fn = pytensor.function(
         inputs, Elemwise(op)(*inputs), mode=Mode(linker="c", optimizer=None)
     )
-    np.testing.assert_allclose(fn(*values), getattr(special, name)(*values), rtol=2e-14)
+    np.testing.assert_array_equal(fn(*values), getattr(special, name)(*values))
 
 
+@requires_cxx
 def test_gamma_inverse():
     a, p = pt.dvectors("a", "p")
     fn = pytensor.function(
@@ -260,3 +269,128 @@ def test_gamma_inverse():
     lower, upper = fn(np.ones_like(p_val), p_val)
     np.testing.assert_allclose(lower, -np.log1p(-p_val), rtol=2e-14)
     np.testing.assert_allclose(upper, -np.log(p_val), rtol=2e-14)
+
+
+@pytest.mark.parametrize(
+    "sig, expected_result, expected_args",
+    [
+        (b"double(double)", np.float64, [np.float64]),
+        (b"float(unsigned int)", np.float32, [np.uintc]),
+        (b"unsigned char(unsigned short foo)", np.ubyte, [np.ushort]),
+        (
+            b"unsigned char(unsigned short foo, double bar)",
+            np.ubyte,
+            [np.ushort, np.float64],
+        ),
+    ],
+)
+def test_parse_signature(sig, expected_result, expected_args):
+    actual = Signature.from_c_types(sig)
+    assert actual.res_dtype == expected_result
+    assert actual.arg_dtypes == expected_args
+
+
+@pytest.mark.parametrize(
+    "have, want, should_provide",
+    [
+        (b"double(int)", b"float(int)", True),
+        (b"float(int)", b"double(int)", False),
+        (b"double(unsigned short)", b"double(unsigned char)", True),
+        (b"double(unsigned char)", b"double(short)", False),
+        (b"short(double)", b"int(double)", True),
+        (b"int(double)", b"short(double)", False),
+        (b"float(double, int)", b"float(double, short)", True),
+    ],
+)
+def test_signature_provides(have, want, should_provide):
+    have = Signature.from_c_types(have)
+    want = Signature.from_c_types(want)
+    provides = have.provides(want.res_dtype, want.arg_dtypes)
+    assert provides == should_provide
+
+
+@pytest.mark.parametrize(
+    "raw, has_dispatch",
+    [
+        (b"double (long, double)", False),
+        (b"double (long long, double, int __pyx_skip_dispatch)", True),
+    ],
+)
+def test_signature_preserves_c_abi(raw, has_dispatch):
+    signature = Signature.from_c_types(raw)
+    assert signature.c_signature == raw.decode()
+    assert signature.arg_c_types[0] == ("long long" if has_dispatch else "long")
+    spec = _CythonFunctionSpec(signature, "export", "module")
+    assert spec.signature is signature
+    assert spec.has_pyx_skip_dispatch() is has_dispatch
+
+
+def test_lazy_cython_import():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import pytensor.scalar.cython_special; "
+            "assert 'scipy' not in sys.modules; "
+            "assert 'numba' not in sys.modules",
+        ],
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("name", ["ive", "kve"])
+@requires_cxx
+def test_scaled_bessel_public_ops(name):
+    v, x = pt.dvectors("v", "x")
+    result = getattr(pt, name)(v, x)
+    assert isinstance(result.owner_op.scalar_op, SciPyScalarOp)
+    fn = pytensor.function([v, x], result, mode=Mode(linker="c", optimizer=None))
+    values = ([0.0, 0.5, 2.0], [0.25, 1.0, 4.0])
+    np.testing.assert_array_equal(fn(*values), getattr(special, name)(*values))
+
+
+@pytest.mark.parametrize("field", ["c_signature", "res_c_type", "arg_c_types"])
+def test_signature_requires_c_fields(field):
+    fields = dict(
+        res_dtype=np.float64,
+        arg_dtypes=[np.float64],
+        arg_names=[None],
+        c_signature="double (double)",
+        res_c_type="double",
+        arg_c_types=("double",),
+    )
+    del fields[field]
+    with pytest.raises(TypeError, match=field):
+        Signature(**fields)
+
+
+def test_bridge_init_and_cache_identity(monkeypatch):
+    signature = Signature.from_c_types(b"double (double)")
+    impl = _CythonFunctionSpec(signature, "export", "test.cython_module")
+    monkeypatch.setattr(SciPyTestOp, "scipy_c_impl", property(lambda self: impl))
+    op = SciPyTestOp("gammaln", 1)
+    monkeypatch.setattr(
+        ScalarOp, "c_init_code", lambda self, **kwargs: ["inherited_init();"]
+    )
+    init_code = op.c_init_code()
+    assert "inherited_init();" in init_code
+    source = "\n".join(init_code)
+    assert 'PyImport_ImportModule("test.cython_module")' in source
+    assert "test.cython_module.__pyx_capi__ is not a dictionary" in source
+    assert "test.cython_module does not export export" in source
+    assert "Incompatible test.cython_module.export C API" in source
+    assert "scipy.special.cython_special" not in source
+    identity = op.scipy_c_identity
+    assert len(identity) == 64
+    assert op.scipy_c_symbol == f"pytensor_scipy_{identity}"
+    assert op.c_code_cache_version()[1] == identity
+    for target, field, value in [
+        (impl, "module_name", "test.other_cython_module"),
+        (impl, "capi_name", "other_export"),
+        (signature, "c_signature", "double (float)"),
+    ]:
+        with monkeypatch.context() as patch:
+            patch.setattr(target, field, value)
+            assert op.scipy_c_identity != identity
+            assert op.scipy_c_symbol == f"pytensor_scipy_{op.scipy_c_identity}"
+            assert op.c_code_cache_version()[1] == op.scipy_c_identity
