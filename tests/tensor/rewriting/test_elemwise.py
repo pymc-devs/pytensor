@@ -20,7 +20,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import EQ, Composite, float64
 from pytensor.tensor.basic import MakeVector
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import (
     add,
@@ -1314,6 +1314,22 @@ class TestFusion:
             for out_node in out_nodes
             if hasattr(out_node.op, "scalar_op")
         )
+
+    @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
+    def test_CAReduce_fusion_scalar_op_support_code(self):
+        """The fused reduction must include the support code of the scalar op."""
+        mode = Mode(linker="cvm", optimizer="fast_run")
+
+        x = pt.dvector("x")
+        out = pt.gammainc(x, pt.exp(x)).sum()
+        out_fn = function([x], out, mode=mode)
+
+        (out_node,) = out_fn.maker.fgraph.toposort()
+        assert isinstance(out_node.op, CAReduce)
+        assert isinstance(out_node.op.scalar_op, ps.basic.Composite)
+
+        x_val = np.array([0.5, 1.0, 2.0])
+        np.testing.assert_allclose(out_fn(x_val), 2.859439866782113)
 
     @pytest.mark.xfail(reason="Not implemented")
     @pytest.mark.parametrize("linker", ["cvm", "py"])
