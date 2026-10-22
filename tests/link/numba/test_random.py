@@ -146,6 +146,51 @@ def test_multivariate_normal():
     )
 
 
+@pytest.mark.parametrize("method", ["cholesky", "svd", "eigh"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_mvnormal_parameter_precision_and_rng(method, dtype):
+    with pytensor.config.change_flags(
+        floatX=dtype, warn_float64="warn" if dtype == "float32" else "ignore"
+    ):
+        rng = shared(np.random.default_rng(123))
+        mean = pt.vector("mean", dtype=dtype)
+        cov = pt.matrix("cov", dtype=dtype)
+        next_rng, draws = ptr.multivariate_normal(
+            mean, cov, size=(10_000,), method=method, rng=rng, return_next_rng=True
+        )
+        fn = function([mean, cov], draws, updates={rng: next_rng}, mode="NUMBA")
+
+    [node] = [
+        node
+        for node in fn.maker.fgraph.toposort()
+        if isinstance(node.op, RandomVariableWithCoreShape)
+    ]
+    assert [param.dtype for param in node.inputs[3:]] == [dtype, dtype]
+    mean_value = np.array([0.2, -0.3], dtype=dtype)
+    cov_value = np.array([[1.0, 0.4], [0.4, 0.8]], dtype=dtype)
+    reference_rng = np.random.default_rng(123)
+    expected = draws.owner.op.rng_fn(
+        reference_rng, mean_value, cov_value, (10_000,)
+    ).astype(dtype)
+    actual = fn(mean_value, cov_value)
+
+    assert actual.dtype == dtype
+    assert actual.shape == (10_000, 2)
+    # SVD and eigenvector signs can differ across LAPACK implementations.
+    if method == "cholesky":
+        tolerance = 10 * np.finfo(dtype).eps
+        np.testing.assert_allclose(actual, expected, rtol=tolerance, atol=tolerance)
+    assert rng.type.values_eq(rng.get_value(), reference_rng)
+    np.testing.assert_allclose(actual.mean(axis=0), mean_value, atol=0.03)
+    np.testing.assert_allclose(np.cov(actual, rowvar=False), cov_value, atol=0.04)
+
+    assert not np.array_equal(actual, fn(mean_value, cov_value))
+    draws.owner.op.rng_fn(reference_rng, mean_value, cov_value, (10_000,))
+    assert rng.type.values_eq(rng.get_value(), reference_rng)
+    rng.set_value(np.random.default_rng(123))
+    np.testing.assert_array_equal(actual, fn(mean_value, cov_value))
+
+
 test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_method_test(
     "NUMBA"
 )
@@ -839,8 +884,7 @@ def test_rv_float_params_cast_to_float64(floatX):
             pt.random.normal(0, 1, size=(5,), rng=rng)
         ) == ["float64", "float64"]
 
-        # Opt-in, and required: numba's np.dot rejects a float32 covariance, so MvNormal
-        # only compiles once mean/cov are float64.
+        # Opt-in: this rewrite still promotes MvNormal's mean and covariance.
         assert _compiled_rv_dist_param_dtypes(
             pt.random.multivariate_normal(
                 np.zeros(3, dtype="float32"), np.eye(3, dtype="float32"), rng=rng
