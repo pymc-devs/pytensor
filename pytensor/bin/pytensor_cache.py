@@ -32,27 +32,22 @@ def remove_extra_caches(base_compiledir: Path) -> None:
 
 
 def print_help(exit_status):
+    stream = sys.stderr if exit_status else sys.stdout
     if exit_status:
-        print(f'command "{" ".join(sys.argv)}" not recognized')
-    print('Type "pytensor-cache" to print the cache location')
-    print('Type "pytensor-cache help" to print this help')
-    print('Type "pytensor-cache clear" to erase the cache')
-    print('Type "pytensor-cache list" to print the cache content')
-    print('Type "pytensor-cache unlock" to unlock the cache directory')
-    print('Type "pytensor-cache cleanup" to delete keys in the old format/code version')
-    print('Type "pytensor-cache purge" to force deletion of the cache directory')
+        print(f'command "{" ".join(sys.argv)}" not recognized', file=stream)
     print(
-        'Type "pytensor-cache basecompiledir" '
-        "to print the parent of the cache directory"
-    )
-    print(
-        'Type "pytensor-cache basecompiledir list" '
-        "to print the content of the base compile dir"
-    )
-    print(
-        'Type "pytensor-cache basecompiledir purge" '
-        "to remove everything in the base compile dir, "
-        "that is, erase ALL cache directories"
+        'Type "pytensor-cache" to print the cache location\n'
+        'Type "pytensor-cache help" to print this help\n'
+        'Type "pytensor-cache clear" to erase the cache\n'
+        'Type "pytensor-cache list" to print the cache content\n'
+        'Type "pytensor-cache unlock" to unlock the cache directory\n'
+        'Type "pytensor-cache cleanup" to delete keys in the old format/code version\n'
+        'Type "pytensor-cache purge" to force deletion of the cache directory\n'
+        'Type "pytensor-cache basecompiledir" to print the parent of the cache directory\n'
+        'Type "pytensor-cache basecompiledir list" to print the content of the base compile dir\n'
+        'Type "pytensor-cache basecompiledir purge" to remove everything in the base compile dir, '
+        "that is, erase ALL cache directories",
+        file=stream,
     )
     sys.exit(exit_status)
 
