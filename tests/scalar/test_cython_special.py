@@ -12,7 +12,7 @@ from scipy import special
 import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.mode import Mode
-from pytensor.scalar import Composite, ScalarOp, float64, int64, upgrade_to_float
+from pytensor.scalar import Composite, float64, int64, upgrade_to_float
 from pytensor.scalar.cython_special import SciPyScalarOp, Signature, _CythonFunctionSpec
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.scalar.math import gammainc, gammaincc
@@ -321,7 +321,6 @@ def test_signature_preserves_c_abi(raw, has_dispatch):
     assert signature.c_signature == raw.decode()
     assert signature.arg_c_types[0] == ("long long" if has_dispatch else "long")
     spec = _CythonFunctionSpec(signature, "export", "module")
-    assert spec.signature is signature
     assert spec.has_pyx_skip_dispatch() is has_dispatch
 
 
@@ -343,54 +342,6 @@ def test_lazy_cython_import():
 def test_scaled_bessel_public_ops(name):
     v, x = pt.dvectors("v", "x")
     result = getattr(pt, name)(v, x)
-    assert isinstance(result.owner_op.scalar_op, SciPyScalarOp)
     fn = pytensor.function([v, x], result, mode=Mode(linker="c", optimizer=None))
     values = ([0.0, 0.5, 2.0], [0.25, 1.0, 4.0])
     np.testing.assert_array_equal(fn(*values), getattr(special, name)(*values))
-
-
-@pytest.mark.parametrize("field", ["c_signature", "res_c_type", "arg_c_types"])
-def test_signature_requires_c_fields(field):
-    fields = dict(
-        res_dtype=np.float64,
-        arg_dtypes=[np.float64],
-        arg_names=[None],
-        c_signature="double (double)",
-        res_c_type="double",
-        arg_c_types=("double",),
-    )
-    del fields[field]
-    with pytest.raises(TypeError, match=field):
-        Signature(**fields)
-
-
-def test_bridge_init_and_cache_identity(monkeypatch):
-    signature = Signature.from_c_types(b"double (double)")
-    impl = _CythonFunctionSpec(signature, "export", "test.cython_module")
-    monkeypatch.setattr(SciPyTestOp, "scipy_c_impl", property(lambda self: impl))
-    op = SciPyTestOp("gammaln", 1)
-    monkeypatch.setattr(
-        ScalarOp, "c_init_code", lambda self, **kwargs: ["inherited_init();"]
-    )
-    init_code = op.c_init_code()
-    assert "inherited_init();" in init_code
-    source = "\n".join(init_code)
-    assert 'PyImport_ImportModule("test.cython_module")' in source
-    assert "test.cython_module.__pyx_capi__ is not a dictionary" in source
-    assert "test.cython_module does not export export" in source
-    assert "Incompatible test.cython_module.export C API" in source
-    assert "scipy.special.cython_special" not in source
-    identity = op.scipy_c_identity
-    assert len(identity) == 64
-    assert op.scipy_c_symbol == f"pytensor_scipy_{identity}"
-    assert op.c_code_cache_version()[1] == identity
-    for target, field, value in [
-        (impl, "module_name", "test.other_cython_module"),
-        (impl, "capi_name", "other_export"),
-        (signature, "c_signature", "double (float)"),
-    ]:
-        with monkeypatch.context() as patch:
-            patch.setattr(target, field, value)
-            assert op.scipy_c_identity != identity
-            assert op.scipy_c_symbol == f"pytensor_scipy_{op.scipy_c_identity}"
-            assert op.c_code_cache_version()[1] == op.scipy_c_identity

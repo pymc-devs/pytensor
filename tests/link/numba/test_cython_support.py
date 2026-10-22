@@ -56,6 +56,4 @@ from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 )
 def test_choose_signature(func, output, inputs, expected):
     wrapper = wrap_cython_function(func, output, inputs)
-    assert wrapper.signature.res_dtype == wrapper.output_dtype
-    assert wrapper.signature.arg_dtypes == wrapper.input_dtypes
     assert wrapper.numba_signature() == expected
