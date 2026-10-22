@@ -12,14 +12,16 @@ def test_fallback_is_input_level_reachability():
     held_fixed = pt.vector("held_fixed")
     held_fixed_shared = shared(np.ones(4), name="held_fixed_shared")
 
-    # No rule in the plan covers sort, so its block stays dense as rules are added.
+    # Sort has no sparsity rule, so its block is the dense fallback.
     outputs = [
         pt.sort(x) * held_fixed.sum() * held_fixed_shared.sum(),
         (y * 2).sum() + pt.ones(x.shape[0]).sum(),
         pt.exp(pt.constant(np.array([1.0, 2.0]))),
     ]
     pattern_function = function(
-        [x, y, held_fixed], pt.jacobian_sparsity(outputs, [x, y])
+        [x, y, held_fixed],
+        pt.jacobian_sparsity(outputs, [x, y]),
+        on_unused_input="ignore",
     )
 
     for x_size, y_shape in ((3, (2, 2)), (2, (1, 3))):

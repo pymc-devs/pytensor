@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import reduce, singledispatch
 
 import numpy as np
@@ -9,6 +9,7 @@ from pytensor.gradient import _node_to_pattern
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import graph_replace
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor.rewriting.basic import topo_unconditional_constant_folding
 from pytensor.tensor.type import TensorType, float_dtypes
@@ -60,6 +61,42 @@ def local_zeros(op, node, zeros):
     return [None for _ in node.outputs]
 
 
+# Rules for Ops that a type alone cannot single out, such as an Elemwise of a particular
+# scalar Op, per dispatcher. Keying by pattern makes registering the same pattern again
+# replace its rule.
+PATTERN_RULES: dict[Callable, dict[OpPattern, Callable]] = {
+    local_sparsity: {},
+    local_zeros: {},
+}
+
+
+def register_pattern_rule(dispatcher: Callable, pattern: OpPattern) -> Callable:
+    """Register a rule of ``dispatcher`` for the Ops that ``pattern`` matches.
+
+    ``dispatcher`` is `local_sparsity` or `local_zeros`. A matching pattern takes
+    precedence over the rule registered for the Op's type, and the first registered
+    pattern that matches wins.
+    """
+
+    def register(rule):
+        PATTERN_RULES[dispatcher][pattern] = rule
+        return rule
+
+    return register
+
+
+def rule_for(dispatcher, op):
+    """Return the rule of ``dispatcher`` that applies to ``op``."""
+    return next(
+        (
+            rule
+            for pattern, rule in PATTERN_RULES[dispatcher].items()
+            if pattern.match_op(op)
+        ),
+        dispatcher,
+    )
+
+
 def node_sparsity(node, zeros):
     """`local_sparsity`, without the blocks that the Op's connection pattern rules out
     or that join an integer input or output.
@@ -79,7 +116,7 @@ def node_sparsity(node, zeros):
     if not any(any(row) for row in connected):
         return [[None] * len(node.inputs) for _ in node.outputs]
 
-    blocks = local_sparsity(node.op, node, zeros)
+    blocks = rule_for(local_sparsity, node.op)(node.op, node, zeros)
     return [
         [
             block if keep else None
@@ -169,7 +206,11 @@ def jacobian_sparsity(
     for node in fgraph.toposort():
         node_zeros = {variable: zeros.get(variable) for variable in node.inputs}
         zeros.update(
-            zip(node.outputs, local_zeros(node.op, node, node_zeros), strict=True)
+            zip(
+                node.outputs,
+                rule_for(local_zeros, node.op)(node.op, node, node_zeros),
+                strict=True,
+            )
         )
         if not any(variable in patterns for variable in node.inputs):
             continue
