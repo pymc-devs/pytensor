@@ -287,6 +287,7 @@ class TestFusion:
 
     rewrites = RewriteDatabaseQuery(
         include=[
+            "ShapeOpt",
             "canonicalize",
             "fusion",
             "add_mul_fusion",
@@ -1021,7 +1022,7 @@ class TestFusion:
                         ge(
                             assert_op(
                                 pt_abs(fx),
-                                pt_all(ge(pt_abs(fx), 0)),
+                                pt_all(ge(pt_abs(fx), 1)),
                             ),
                             0,
                         )
