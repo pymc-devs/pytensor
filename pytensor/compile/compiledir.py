@@ -115,6 +115,11 @@ def print_compiledir_content():
     big_key_files = []
     total_key_sizes = 0
     nb_keys = Counter()
+    # Keys this environment cannot unpickle. The compiledir is shared by every
+    # environment on the same Python, so a key can name an Op from a package
+    # (pymc, ...) that is not installed here: that is expected, not damage.
+    missing_modules = Counter()
+    unreadable_keys = []
     for dir in config.compiledir.iterdir():
         filename = dir / "key.pkl"
         if not filename.exists():
@@ -153,10 +158,16 @@ def print_compiledir_content():
                     big_key_files.append((dir, size, ops))
 
                 nb_keys[len(keydata.keys)] += 1
-            except OSError:
-                pass
-            except AttributeError:
+            except ImportError as exc:
+                missing_modules[(exc.name or str(exc)).split(".")[0]] += 1
+            except (
+                OSError,
+                AttributeError,
+                EOFError,
+                pickle.UnpicklingError,
+            ):
                 _logger.error(f"Could not read key file '{filename}'.")
+                unreadable_keys.append(filename)
 
     print_title(f"PyTensor cache: {compiledir}", overline="=", underline="=")
     print()  # noqa: T201
@@ -221,6 +232,19 @@ def print_compiledir_content():
         f"Skipped {int(zeros_op)} files that contained 0 op "
         "(are they always pytensor.scalar ops?)"
     )
+    if missing_modules:
+        modules = ", ".join(
+            f"{module} ({count})" for module, count in sorted(missing_modules.items())
+        )
+        print(  # noqa: T201
+            f"Skipped {missing_modules.total()} key files whose Ops come from "
+            f"modules not installed in this environment: {modules}"
+        )
+    if unreadable_keys:
+        print(  # noqa: T201
+            f"Skipped {len(unreadable_keys)} key files that could not be read "
+            "(corrupt or truncated?)"
+        )
 
 
 def compiledir_purge():
