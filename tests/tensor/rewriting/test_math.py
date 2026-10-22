@@ -3969,7 +3969,18 @@ class TestLocalReduce:
                 lambda x, v: pt_sum(exp(pt.sort(x, axis=1)[:, ::-1])[::-1]),
                 lambda x, v: pt_sum(exp(x)),
             ),
+            (
+                lambda x, v: pt_sum(pt.sort(x, axis=1).T, axis=0),
+                lambda x, v: pt_sum(x.T, axis=0),
+            ),
+            (
+                lambda x, v: pt_sum(
+                    pt.sort(x, axis=1)[:, None, :] * v[None, :, None], axis=2
+                ),
+                lambda x, v: pt_sum(x[:, None, :] * v[None, :, None], axis=2),
+            ),
             (lambda x, v: pt_sum(pt.sort(x, axis=0), axis=1), None),
+            (lambda x, v: pt_sum(pt.sort(x, axis=1).T, axis=1), None),
             (lambda x, v: pt_sum(pt.sort(x, axis=1)[::-1], axis=1), None),
             (lambda x, v: pt_sum(pt.sort(x, axis=1) * v[None, :], axis=1), None),
             (lambda x, v: pt_sum(pt.sort(x, axis=0)[::2], axis=0), None),
@@ -3983,7 +3994,10 @@ class TestLocalReduce:
             "elemwise_chain_over_sort",
             "elemwise_shared_by_reductions",
             "reversals_around_elemwise",
+            "transpose",
+            "expand_dims_with_broadcast_operand",
             "sort_on_other_axis",
+            "transpose_onto_other_axis",
             "reversal_on_other_axis",
             "elemwise_varying_along_sort",
             "strided_slice",

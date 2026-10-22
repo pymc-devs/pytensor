@@ -2268,8 +2268,8 @@ def local_sort_under_reduce(fgraph, node):
 
     Every ``CAReduce`` is commutative, so a sort along a reduced axis cannot change its
     result. Between the sort and the reductions there may be ``Elemwise`` ops whose
-    other inputs are broadcast along the permuted axes, and reversals of whole axes,
-    which are dropped along with the sort.
+    other inputs are broadcast along the permuted axes, ``DimShuffle`` ops, and reversals
+    of whole axes, which are dropped along with the sort.
     """
     [x] = node.inputs
     [sorted_x] = node.outputs
@@ -2290,6 +2290,10 @@ def local_sort_under_reduce(fgraph, node):
                     for axis in permuted
                 ):
                     pending.append((client.outputs[0], permuted))
+                case DimShuffle(new_order=new_order):
+                    # A dropped axis is broadcastable, so no permutation can act on it
+                    moved = {new_order.index(a) for a in permuted if a in new_order}
+                    pending.append((client.outputs[0], moved))
                 case Subtensor() if input_index == 0 and (
                     (reversed_axes := _reversed_axes(client)) is not None
                 ):
