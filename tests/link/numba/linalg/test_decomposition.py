@@ -265,6 +265,16 @@ class TestDecompositions:
         np.testing.assert_allclose(res_not_contig, res)
         np.testing.assert_allclose(val_not_contig, val)
 
+    def test_cholesky_read_only_input(self):
+        # numba types a read-only input as read-only
+        cov = pt.matrix("cov", dtype=floatX)
+        fn = pytensor.function([cov], cholesky(cov), mode="NUMBA")
+
+        val = (np.eye(3) + 0.5).astype(floatX)
+        val.setflags(write=False)
+
+        np.testing.assert_allclose(fn(val), np.linalg.cholesky(val), rtol=1e-5)
+
     def test_cholesky_raises_on_nan_input(self):
         test_value = rng.random(size=(3, 3)).astype(floatX)
         test_value[0, 0] = np.nan

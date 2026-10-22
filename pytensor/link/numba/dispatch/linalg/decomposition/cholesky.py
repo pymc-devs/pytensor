@@ -21,6 +21,9 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
     ensure_lapack()
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="cholesky")
     dtype = A.dtype
+    # A read-only A is never overwritten, and aliasing it below would make
+    # `A_copy` read-only for the zeroing at the end.
+    mutable = A.mutable
 
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
 
@@ -30,9 +33,9 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
 
         transposed = False
-        if overwrite_a and A.flags.f_contiguous:
+        if mutable and overwrite_a and A.flags.f_contiguous:
             A_copy = A
-        elif overwrite_a and A.flags.c_contiguous:
+        elif mutable and overwrite_a and A.flags.c_contiguous:
             # c_contiguous A reinterpreted as f_contiguous is A^T.
             # potrf(A^T, UPLO='U') produces U where U.T == L (the correct lower factor),
             # even for complex Hermitian matrices. The .T return corrects the result.
