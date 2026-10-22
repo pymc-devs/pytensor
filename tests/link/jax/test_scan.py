@@ -418,6 +418,27 @@ def test_blockwise_scan(x_shape, n_steps, batch_shape):
     compare_jax_and_py([x, a_vec], [ys_vec], test_input_vals, jax_mode="JAX")
 
 
+def test_blockwise_scan_inner_graph_rewritten():
+    # Boolean-mask sum only compiles in JAX after the inner graph is rewritten
+    v = pt.vector("v")
+    a = pt.scalar("a")
+    ys = scan(
+        lambda acc, v, a: acc + v[v > a].sum(),
+        outputs_info=[pt.zeros(())],
+        non_sequences=[v, a],
+        n_steps=3,
+        return_updates=False,
+    )
+    a_vec = pt.vector("a_vec")
+    ys_vec = vectorize_graph(ys, {a: a_vec})
+
+    test_input_vals = [
+        np.array([-1.0, 0.5, 2.0], dtype=config.floatX),
+        np.array([0.0, 1.0], dtype=config.floatX),
+    ]
+    compare_jax_and_py([v, a_vec], [ys_vec], test_input_vals, jax_mode="JAX")
+
+
 def test_higher_order_derivatives():
     ScanCompatibilityTests.check_higher_order_derivative(mode="JAX")
 
