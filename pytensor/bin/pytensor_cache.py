@@ -32,28 +32,28 @@ def remove_extra_caches(base_compiledir: Path) -> None:
 
 
 def print_help(exit_status):
-    if exit_status:
-        print(f'command "{" ".join(sys.argv)}" not recognized')
-    print('Type "pytensor-cache" to print the cache location')
-    print('Type "pytensor-cache help" to print this help')
-    print('Type "pytensor-cache clear" to erase the cache')
-    print('Type "pytensor-cache list" to print the cache content')
-    print('Type "pytensor-cache unlock" to unlock the cache directory')
-    print('Type "pytensor-cache cleanup" to delete keys in the old format/code version')
-    print('Type "pytensor-cache purge" to force deletion of the cache directory')
-    print(
+    # An error goes to stderr, so it never mixes into piped output; asking for
+    # help is not one.
+    stream = sys.stderr if exit_status else sys.stdout
+    lines = [
+        'Type "pytensor-cache" to print the cache location',
+        'Type "pytensor-cache help" to print this help',
+        'Type "pytensor-cache clear" to erase the cache',
+        'Type "pytensor-cache list" to print the cache content',
+        'Type "pytensor-cache unlock" to unlock the cache directory',
+        'Type "pytensor-cache cleanup" to delete keys in the old format/code version',
+        'Type "pytensor-cache purge" to force deletion of the cache directory',
         'Type "pytensor-cache basecompiledir" '
-        "to print the parent of the cache directory"
-    )
-    print(
+        "to print the parent of the cache directory",
         'Type "pytensor-cache basecompiledir list" '
-        "to print the content of the base compile dir"
-    )
-    print(
+        "to print the content of the base compile dir",
         'Type "pytensor-cache basecompiledir purge" '
         "to remove everything in the base compile dir, "
-        "that is, erase ALL cache directories"
-    )
+        "that is, erase ALL cache directories",
+    ]
+    if exit_status:
+        lines.insert(0, f'command "{" ".join(sys.argv)}" not recognized')
+    print("\n".join(lines), file=stream)
     sys.exit(exit_status)
 
 

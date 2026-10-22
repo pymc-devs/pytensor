@@ -1,7 +1,10 @@
+import sys
 from pathlib import Path
 
+import pytest
+
 from pytensor import config
-from pytensor.bin.pytensor_cache import remove_extra_caches
+from pytensor.bin.pytensor_cache import main, remove_extra_caches
 from pytensor.link.utils import write_generated_src
 
 
@@ -24,3 +27,22 @@ def test_remove_extra_caches(tmp_path):
         ]
         assert not generated.exists()
         assert other.exists()
+
+
+@pytest.mark.parametrize(
+    "argv, exit_status",
+    [(["pytensor-cache", "bogus"], 1), (["pytensor-cache", "help"], 0)],
+)
+def test_usage_goes_to_stderr_only_on_error(argv, exit_status, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == exit_status
+
+    out, err = capsys.readouterr()
+    usage, silent = (err, out) if exit_status else (out, err)
+    assert silent == ""
+    assert 'Type "pytensor-cache clear" to erase the cache' in usage
+    assert ('command "pytensor-cache bogus" not recognized' in usage) == bool(
+        exit_status
+    )
