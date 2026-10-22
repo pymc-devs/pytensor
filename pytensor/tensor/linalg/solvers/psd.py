@@ -86,6 +86,7 @@ def cho_solve(
     c_and_lower: tuple[TensorLike, bool],
     b: TensorLike,
     *,
+    check_finite: bool = True,
     b_ndim: int | None = None,
 ):
     """Solve the linear equations A x = b, given the Cholesky factorization of A.
