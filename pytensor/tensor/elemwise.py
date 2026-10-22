@@ -1685,9 +1685,15 @@ class CAReduce(COp):
         # Sometimes, Elemwise's c_code is returned, so we need its headers
         return ["<vector>", "<algorithm>"]
 
+    def c_header_dirs(self, **kwargs):
+        return self.scalar_op.c_header_dirs(**kwargs)
+
+    def c_support_code(self, **kwargs):
+        return self.scalar_op.c_support_code(**kwargs)
+
     def c_code_cache_version_apply(self, node):
         # the version corresponding to the c code in this Op
-        version = [12]
+        version = [13]
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(
