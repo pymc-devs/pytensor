@@ -2235,7 +2235,7 @@ def pydotprint(
         colorCodes = default_colorCodes
 
     if outfile is None:
-        outfile = config.compiledir / f"pytensor.pydotprint.{config.device}.{format}"
+        outfile = config.compiledir / f"pytensor.pydotprint.{format}"
     elif isinstance(outfile, str):
         outfile = Path(outfile)
 
