@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
+from functools import reduce
 from textwrap import dedent
 from typing import Literal
 
@@ -18,8 +19,8 @@ from pytensor.link.c.op import COp, OpenMPOp
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
+from pytensor.scalar.basic import Add, Cast, Mul, upcast
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -704,6 +705,29 @@ class Elemwise(OpenMPOp):
             self.nfunc = import_func_from_string(self.nfunc_spec[0])
 
         if (
+            impl == "py"
+            and isinstance(self.scalar_op, Add | Mul)
+            and len(node.inputs) > 2
+        ):
+            # Variadic Add/Mul fold their binary NumPy ufunc, much faster than
+            # `np.frompyfunc` on the scalar op's Python `impl`
+            nfunc = self.nfunc
+
+            def ufunc(*args):
+                return reduce(nfunc, args)
+
+            ufunc.nout = 1
+            node.tag.ufunc = ufunc
+        elif impl == "py" and isinstance(self.scalar_op, Cast):
+            # `astype` is much faster than `np.frompyfunc` on `Cast.impl`
+            out_dtype = np.dtype(self.scalar_op.o_type.dtype)
+
+            def ufunc(x):
+                return np.asarray(x).astype(out_dtype, copy=True)
+
+            ufunc.nout = 1
+            node.tag.ufunc = ufunc
+        elif (
             (len(node.inputs) + len(node.outputs)) <= 32
             and (self.nfunc is None or self.scalar_op.nin != len(node.inputs))
             and self.ufunc is None

@@ -1210,3 +1210,35 @@ def test_perform_raises_with_too_many_operands():
 
     with pytest.raises(NotImplementedError, match="more than 32 operands"):
         op.perform(node, [np.ones(3) for _ in range(40)], [[None]])
+
+
+@pytest.mark.parametrize("shape", [(), (5,), (3, 4)])
+@pytest.mark.parametrize(
+    "in_dtype, out_dtype",
+    [
+        ("float64", "int64"),
+        ("float64", "float32"),
+        ("float64", "bool"),
+        ("int64", "float64"),
+        ("int64", "uint8"),
+        ("int8", "bool"),
+        ("bool", "int16"),
+        ("complex128", "complex64"),
+    ],
+)
+def test_elemwise_cast_python_mode(in_dtype, out_dtype, shape):
+    x = pt.tensor("x", dtype=in_dtype, shape=shape)
+    out = x.astype(out_dtype)
+    assert isinstance(out.owner.op, Elemwise)
+    assert isinstance(out.owner.op.scalar_op, ps.Cast)
+
+    rng = np.random.default_rng(0)
+    x_val = np.asarray(rng.integers(0, 100, size=shape) / 3).astype(in_dtype)
+    fn = pytensor.function([x], out, mode=Mode(linker="py", optimizer=None))
+
+    res = fn(x_val)
+    assert res.dtype == np.dtype(out_dtype)
+    assert res.shape == x_val.shape
+    assert not np.shares_memory(res, x_val)
+    expected = np.vectorize(out.owner.op.scalar_op.impl, otypes=[out_dtype])(x_val)
+    np.testing.assert_array_equal(res, expected)
