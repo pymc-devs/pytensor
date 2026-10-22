@@ -1,5 +1,26 @@
 from pytensor.assumptions.core import MATRIX_KEYS, FactState, register_assumption
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.scalar.basic import Conj
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+
+
+def conjugate_transpose_input(x):
+    """Return ``X`` when ``x`` is the conjugate transpose of ``X``, else ``None``.
+
+    For real ``X`` that is ``X.mT``. For complex ``X`` it is ``X.conj().mT`` or
+    ``X.mT.conj()``. The transpose may also add broadcastable dimensions on the left.
+    """
+    match x.owner_op_and_inputs:
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), inner):
+            if not inner.type.dtype.startswith("complex"):
+                return inner
+            match inner.owner_op_and_inputs:
+                case (Elemwise(Conj()), X):
+                    return X
+        case (Elemwise(Conj()), inner):
+            match inner.owner_op_and_inputs:
+                case (DimShuffle(is_left_expanded_matrix_transpose=True), X):
+                    return X
+    return None
 
 
 def left_expand_dims_propagates_matrix_property(op) -> bool:
