@@ -7,9 +7,9 @@ import torch
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
+from pytensor.conditional.op import IfElse
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import AbstractFunctionGraph
-from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import (
