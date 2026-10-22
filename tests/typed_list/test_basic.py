@@ -55,6 +55,17 @@ def random_lil(shape, dtype, nnz):
     return rval
 
 
+def test_constant_signature():
+    list_type = TypedListType(vector(dtype="float64").type)
+    a, b, c = (
+        list_type.make_constant([np.array(values)]).signature()
+        for values in ([1.0, 2.0], [1.0, 2.0], [1.0, 3.0])
+    )
+    assert a == b
+    assert a != c
+    assert len({a, b, c}) == 2
+
+
 class TestGetItem:
     def test_sanity_check_slice(self):
         mySymbolicMatricesList = TypedListType(
