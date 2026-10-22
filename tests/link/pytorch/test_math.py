@@ -1,7 +1,7 @@
 import numpy as np
 
 from pytensor.configdefaults import config
-from pytensor.tensor.type import matrix, scalar, vector
+from pytensor.tensor.type import dmatrix, fmatrix, matrix, scalar, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
@@ -27,4 +27,20 @@ def test_pytorch_dot():
 
     compare_pytorch_and_py(
         [y, x, A, alpha, beta], [out], [y_test, x_test, A_test, alpha_test, beta_test]
+    )
+
+
+def test_pytorch_dot_mixed_dtypes():
+    x = fmatrix("x")
+    y = dmatrix("y")
+    out = x.dot(y)
+    assert out.dtype == "float64"
+
+    compare_pytorch_and_py(
+        [x, y],
+        [out],
+        [
+            np.arange(8, dtype="float32").reshape(2, 4),
+            np.arange(12, dtype="float64").reshape(4, 3),
+        ],
     )
