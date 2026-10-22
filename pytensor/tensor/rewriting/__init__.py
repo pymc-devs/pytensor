@@ -14,6 +14,7 @@ import pytensor.tensor.rewriting.ofg
 import pytensor.tensor.rewriting.optimize
 import pytensor.tensor.rewriting.reshape
 import pytensor.tensor.rewriting.shape
+import pytensor.tensor.rewriting.sort
 import pytensor.tensor.rewriting.special
 import pytensor.tensor.rewriting.subtensor
 import pytensor.tensor.rewriting.subtensor_lift
