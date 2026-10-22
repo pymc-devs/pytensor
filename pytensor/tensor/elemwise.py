@@ -1185,6 +1185,9 @@ class Elemwise(OpenMPOp):
     def c_header_dirs(self, **kwargs):
         return self.scalar_op.c_header_dirs(**kwargs)
 
+    def c_init_code(self, **kwargs):
+        return self.scalar_op.c_init_code(**kwargs)
+
     def c_support_code(self, **kwargs):
         return self.scalar_op.c_support_code(**kwargs)
 

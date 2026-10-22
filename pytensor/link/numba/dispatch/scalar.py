@@ -100,7 +100,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
         module_name = scalar_func_numba.module_name
         capi_name = scalar_func_numba.capi_name
         unique_func_name = f"{module_name}.{capi_name}"
-        func_type_ref = types.FunctionType(scalar_func_numba.signature())
+        func_type_ref = types.FunctionType(scalar_func_numba.numba_signature())
 
         @numba_basic.numba_njit
         def get_ptr_func():
