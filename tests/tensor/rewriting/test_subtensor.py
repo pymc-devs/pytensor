@@ -1764,6 +1764,12 @@ def test_slice_read_of_write():
     rewritten = rewrite_graph(out, **rw_kw)
     utt.assert_equal_computations([rewritten], [out])
 
+    # This could simplify to buf2[:2, :2], but the delegated rewrite only
+    # supports 1D indices, not the Cartesian indices needed for both slices.
+    out = buf2[[2, 3], [2, 3]].set(1)[:2, :2]
+    rewritten = rewrite_graph(out, **rw_kw)
+    utt.assert_equal_computations([rewritten], [out])
+
 
 class TestReadOfWriteConstantIndices:
     def setup_method(self):
