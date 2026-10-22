@@ -28,9 +28,7 @@ def _with_int_slice_bounds(indices):
 @mlx_funcify.register(Subtensor)
 def mlx_funcify_Subtensor(op, node, **kwargs):
     def subtensor(x, *ilists):
-        indices = indices_from_subtensor(
-            [int(element) for element in ilists], op.idx_list
-        )
+        indices = _with_int_slice_bounds(indices_from_subtensor(ilists, op.idx_list))
         if len(indices) == 1:
             indices = indices[0]
 
@@ -70,9 +68,7 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
             return x
 
     def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=op.idx_list):
-        # Coerce integer index inputs to Python ints (e.g. slice bounds), as
-        # MLX slices reject array-typed bounds. Mirrors mlx_funcify_Subtensor.
-        indices = indices_from_subtensor([int(element) for element in ilist], idx_list)
+        indices = _with_int_slice_bounds(indices_from_subtensor(ilist, idx_list))
         if len(indices) == 1:
             indices = indices[0]
 
