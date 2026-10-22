@@ -99,18 +99,6 @@ import ``pytensor`` and print the config variable, as in:
 
     python -c 'import pytensor; print(pytensor.config)' | less
 
-.. attribute:: device
-
-    String value: either ``'cpu'``
-
-.. attribute:: print_active_device
-
-    Bool value: either ``True`` or ``False``
-
-    Default: ``True``
-
-    Print the active device when the device is initialized.
-
 .. attribute:: floatX
 
     String value: ``'float64'``, ``'float32'``, or ``'float16'`` (with limited support)
@@ -234,33 +222,12 @@ import ``pytensor`` and print the config variable, as in:
 
     At the moment it behaves differently from NumPy in the following situations:
 
-    * Depending on the value of :attr:`config.int_division`, the resulting dtype
-      of a division of integers with the ``/`` operator may not match
-      that of NumPy.
     * On mixed scalar and array operations, NumPy tries to prevent the scalar
       from upcasting the array's type unless it is of a fundamentally
       different type. PyTensor does not attempt to do the same at this point,
       so users should be careful, since scalars may upcast arrays when they
       otherwise wouldn't in NumPy. This behavior should change in the near
       future.
-
-.. attribute:: int_division
-
-    String value: either ``'int'``, ``'floatX'``, or ``'raise'``
-
-    Default: ``'int'``
-
-    Specifies what to do when one tries to compute ``x / y``, where both ``x`` and
-    ``y`` are of integer types (possibly unsigned). ``'int'`` means an integer is
-    returned (as in Python 2.X). This behavior is deprecated.
-
-    ``'floatX'`` returns a number of with the dtype given by ``config.floatX``.
-
-    ``'raise'`` is the safest choice (and will become default in a future
-    release of PyTensor).  It raises an error when one tries to perform such an
-    operation, enforcing the use of the integer division operator (``//``). If a
-    float result is desired, either cast one of the arguments to a float, or use
-    ``x.__truediv__(y)``.
 
 .. attribute:: mode
 
@@ -354,6 +321,20 @@ import ``pytensor`` and print the config variable, as in:
     Default: ``False``
 
     When ``True``, ignore the first call to an PyTensor function while profiling.
+
+.. attribute:: config.profiling__time_thunks
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    Time individual thunks when profiling.
+
+.. attribute:: config.profiling__output_line_width
+
+    Positive int value, default: 512
+
+    Maximum line width of the profiling output.
 
 .. attribute:: config.lib__amdlibm
 
@@ -458,34 +439,18 @@ import ``pytensor`` and print the config variable, as in:
     PyTensor will test if ``'-lblas'`` works by default. If not, it will disable C
     code for BLAS.
 
-.. attribute:: config.experimental__local_alloc_elemwise_assert
+.. attribute:: config.blas__check_openmp
 
     Bool value: either ``True`` or ``False``
 
     Default: ``True``
 
-    When ``True``, add asserts that highlight shape errors.
+    Check for an OpenMP library conflict between the BLAS library and the one
+    used to compile C code.
 
-    Without such asserts, the underlying rewrite could hide errors in user
-    code.  PyTensor adds the asserts only if it cannot infer that the shapes are
-    equivalent.  When it can determine equivalence, this rewrite does not
-    introduce an assert.
+    .. warning::
 
-    Removing these asserts can speed up execution.
-
-.. attribute:: config.conv__assert_shape
-
-    If ``True``, ``AbstractConv*`` :class:`Op`\s will verify that user-provided shapes
-    match the run-time shapes. This is a debugging option, and may slow down
-    compilation.
-
-.. attribute:: config.ctc__root
-
-    Default: ``''``
-
-    Location of the warp-ctc folder. The folder should contain either a build,
-    lib or lib64 subfolder with the shared library (e.g. ``libwarpctc.so``), and another
-    subfolder called include, with the CTC library header.
+        Setting this to ``False`` leaves you open to wrong results in BLAS-related operations.
 
 .. attribute:: config.gcc__cxxflags
 
@@ -547,6 +512,14 @@ import ``pytensor`` and print the config variable, as in:
 
     When ``True``, print the rewrites applied to stdout.
 
+.. attribute:: config.optimizer_verbose_ignore
+
+    String value
+
+    Default: ``""``
+
+    Names of rewrites to leave out of the output of :attr:`optimizer_verbose`, separated by ``','``.
+
 .. attribute:: compiler_verbose
 
     Bool value: either ``True`` or ``False``
@@ -597,6 +570,45 @@ import ``pytensor`` and print the config variable, as in:
     This section contains various attributes configuring the behaviour of
     :class:`~debugmode.DebugMode`.
 
+.. attribute:: config.DebugMode__check_c
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True`` if a C++ compiler is available, ``False`` otherwise.
+
+    Run the C implementations of :class:`Op`\s where possible.
+
+.. attribute:: config.DebugMode__check_py
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    Run the Python implementations of :class:`Op`\s where possible.
+
+.. attribute:: config.DebugMode__check_finite
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    When ``True``, complain about ``NaN`` and ``Inf`` results.
+
+.. attribute:: config.DebugMode__check_strides
+
+    Int value: ``0``, ``1`` or ``2``
+
+    Default: ``0``
+
+    Check that the ndarrays produced by the Python and C implementations have the
+    same strides. On a difference: ``0`` ignores it, ``1`` warns and ``2`` raises an error.
+
+.. attribute:: config.DebugMode__patience
+
+    Positive int value, default: 10
+
+    Optimize the graph this many times to detect inconsistencies.
+
 .. attribute:: config.DebugMode__check_preallocated_output
 
     Default: ``''``
@@ -631,6 +643,14 @@ import ``pytensor`` and print the config variable, as in:
     Generate a warning when a ``destroy_map`` or ``view_map`` says that an
     :class:`Op` will work inplace, but the :class:`Op` does not reuse the input for its
     output.
+
+.. attribute:: config.NanGuardMode__action
+
+    String value: either ``'raise'``, ``'warn'`` or ``'pdb'``
+
+    Default: ``'raise'``
+
+    What :class:`~pytensor.compile.nanguardmode.NanGuardMode` does when it finds a problem.
 
 .. attribute:: config.NanGuardMode__nan_is_error
 
@@ -710,6 +730,98 @@ import ``pytensor`` and print the config variable, as in:
 
     If ``True``, define a DEBUG macro (if one doesn't already exist) for all
     compiled C code.
+
+.. attribute:: config.check_input
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    Specify whether types should check their input in their C code. Setting it
+    to ``False`` can speed up compilation, reduce overhead (particularly for
+    scalars) and reduce the number of generated C files.
+
+.. attribute:: config.on_unused_input
+
+    String value: either ``'raise'``, ``'warn'`` or ``'ignore'``
+
+    Default: ``'raise'``
+
+    What to do when a variable in the ``inputs`` list of :func:`pytensor.function` is not
+    used in the graph.
+
+.. attribute:: config.print_global_stats
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``False``
+
+    Print some global statistics (time spent) at the end.
+
+.. attribute:: config.unpickle_function
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    Replace unpickled PyTensor functions with ``None``. This is useful to unpickle
+    old graphs that pickled functions when they should not have.
+
+.. attribute:: config.vm__lazy
+
+    Bool value, either ``True``, ``False`` or ``None``
+
+    Default: ``None``
+
+    Only useful for the VM linkers. When ``None``, auto-detect whether lazy
+    evaluation is needed and use the appropriate version. If the C loop isn't
+    being used and ``lazy`` is ``True``, use the Stack VM; otherwise, use the Loop VM.
+
+.. attribute:: config.optdb__position_cutoff
+
+    Float value
+
+    Default: ``inf``
+
+    Where to stop earlier during optimization. It represents the position of the
+    rewrite at which to stop.
+
+.. attribute:: config.optdb__max_use_ratio
+
+    Float value, default: 8
+
+    A ratio that prevents infinite loops in :class:`EquilibriumGraphRewriter`.
+
+.. attribute:: config.tensor__cmp_sloppy
+
+    Int value: ``0``, ``1`` or ``2``
+
+    Default: ``0``
+
+    Relax the comparison done by :func:`pytensor.tensor.math._allclose`: ``0`` not at
+    all, ``1`` a bit, ``2`` more.
+
+.. attribute:: config.tensor__insert_inplace_optimizer_validate_nb
+
+    Int value, default: -1
+
+    ``-1`` picks automatically: 1 if the graph has fewer than 500 nodes, else 10.
+
+.. attribute:: config.numba__cache
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    If ``True``, use Numba's file-based caching.
+
+.. attribute:: config.numba__fastmath
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``True``
+
+    If ``True``, use Numba's fastmath mode.
 
 .. attribute:: config.traceback__limit
 
