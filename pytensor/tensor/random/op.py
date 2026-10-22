@@ -377,17 +377,13 @@ class RandomVariable(RNGConsumerOp):
             Existing PyTensor `Generator` object to be used.  Creates a new one, if `None`.
         size: int or Sequence
             NumPy-like size parameter.
-        dtype: str
-            The dtype of the sampled output.  If the value ``"floatX"`` is
-            given, then `dtype` is set to ``pytensor.config.floatX``.  This value is
-            only used when ``self.dtype`` isn't set.
         dist_params: list
             Distribution parameters.
 
-        Results
+        Returns
         -------
         out: Apply
-            A node with inputs ``(rng, size, dtype) + dist_args`` and outputs
+            A node with inputs ``(rng, size, *dist_params)`` and outputs
             ``(rng_var, out_var)``.
 
         """
