@@ -126,6 +126,7 @@ def subtensor_op_cache_key(op, **extra_fields):
                         idx.start is None,
                         idx.stop is None,
                         idx.step is None,
+                        idx.step == -1,
                     )
                 )
             else:
@@ -144,7 +145,9 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
     def convert_indices(indices_iterator, entry):
-        if isinstance(entry, int):
+        if entry == -1:
+            return "-1"
+        elif isinstance(entry, int):
             name, var = next(indices_iterator)
             if var.ndim == 0 and isinstance(var.type, TensorType):
                 return f"{name}.item()"
@@ -455,6 +458,8 @@ def vector_integer_advanced_indexing(
     def get_idx_str(val, is_slice_component=False):
         if val is None:
             return "None"
+        if isinstance(val, int):
+            return str(val)
         if isinstance(val, Variable) and val in var_to_arg:
             arg = var_to_arg[val]
             if val.ndim == 0 and is_slice_component:

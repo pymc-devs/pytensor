@@ -3114,6 +3114,7 @@ def test_get_vector_length():
         ((slice(0, None),), "x[0:]"),
         ((slice(0, 2),), "x[0:2]"),
         ((slice(0, 2, 2),), "x[0:2:2]"),
+        ((slice(None, None, -1), slice(2, 0, -1)), "x[::-1, 2:0:-1]"),
         ((slice(0, 2), 0, slice(0, 2)), "x[0:2, 0, 0:2]"),
     ],
 )
@@ -3376,6 +3377,23 @@ def test_flip(size: tuple[int]):
         z = flip(x_pt, axis=(0, -1))
         f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
         np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+
+def test_reversed_slice_in_idx_list():
+    x = matrix("x")
+    idx = lvector("idx")
+    step = lscalar("step")
+
+    for reverse_step in (-1, np.int8(-1), constant(-1, dtype="int32")):
+        y = x[:, ::reverse_step]
+        assert y.owner.op.idx_list == (slice(None), slice(None, None, -1))
+        assert y.owner.inputs == [x]
+
+    assert x[idx, 2::-1].owner.op.idx_list == (0, slice(1, None, -1))
+    minus_one = constant(-1)
+    assert x[minus_one::minus_one].owner.op.idx_list == (slice(0, None, -1),)
+    assert x[::-2].owner.op.idx_list == (slice(None, None, 0),)
+    assert x[::step].owner.op.idx_list == (slice(None, None, 0),)
 
 
 def test_subtensor_hash_and_eq():
