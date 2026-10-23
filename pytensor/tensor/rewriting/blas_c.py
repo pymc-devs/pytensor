@@ -1,31 +1,9 @@
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.blas import gemv_inplace, gemv_no_inplace, ger, ger_destructive
-from pytensor.tensor.blas.blas_c import (
-    CGemv,
-    CGer,
-    cgemv_inplace,
-    cgemv_no_inplace,
-    cger_inplace,
-)
+from pytensor.tensor.blas import gemv_inplace, gemv_no_inplace
+from pytensor.tensor.blas.blas_c import CGemv, cgemv_inplace, cgemv_no_inplace
 from pytensor.tensor.rewriting.blas import blas_optdb, node_rewriter, optdb
-
-
-@node_rewriter([ger, ger_destructive])
-def use_c_ger(fgraph, node):
-    if not config.blas__ldflags:
-        return
-    # Only float32 and float64 are supported for now.
-    if node.op == ger and node.outputs[0].dtype in ("float32", "float64"):
-        return [CGer(False)(*node.inputs)]
-    if node.op == ger_destructive and node.outputs[0].dtype in ("float32", "float64"):
-        return [CGer(True)(*node.inputs)]
-
-
-@node_rewriter([CGer(False)])
-def make_c_ger_destructive(fgraph, node):
-    return [cger_inplace(*node.inputs)]
 
 
 @node_rewriter([gemv_inplace, gemv_no_inplace])
@@ -55,7 +33,7 @@ def make_c_gemv_destructive(fgraph, node):
 
 blas_optdb.register(
     "use_c_blas",
-    dfs_rewriter(use_c_ger, use_c_gemv),
+    dfs_rewriter(use_c_gemv),
     "fast_run",
     "c_blas",
     "cxx_only",
@@ -65,9 +43,7 @@ blas_optdb.register(
 # this matches the InplaceBlasOpt defined in blas.py
 optdb.register(
     "c_blas_destructive",
-    dfs_rewriter(
-        make_c_ger_destructive, make_c_gemv_destructive, name="c_blas_destructive"
-    ),
+    dfs_rewriter(make_c_gemv_destructive, name="c_blas_destructive"),
     "fast_run",
     "inplace",
     "c_blas",

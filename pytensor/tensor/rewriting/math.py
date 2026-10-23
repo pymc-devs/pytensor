@@ -458,28 +458,11 @@ def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
 @register_specialize
 @node_rewriter([_matmul, Dot])
 def local_dot_to_mul(fgraph, node):
-    """Rewrite dots that correspond to multiplication without summation.
-
-    We don't touch outer product without batch-dimensions, to allow rewriting into GER,
-    which seems more performant in that case.
-
-    # TODO: Once we blockwise Blas operations we shouldn't do it for outer product with batch-dimensions either
-    # TODO: We may still want to canonicalize outer dot as mul, and detect that for GER.
-    """
+    """Rewrite dots that correspond to multiplication without summation."""
     a, b = node.inputs
-    a_static_shape = a.type.shape
-    b_static_shape = b.type.shape
 
     # Check if we have matrix-matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
-    if not (a_static_shape[-1] == 1 or b_static_shape[-2] == 1):
-        return None
-
-    # If it's a core Dot we only rewrite if there's no outer product
-    # (1, 1) * (1, n) or (m, 1) * (1, 1)
-    # Otherwise we leave as is, so GER can be used instead
-    if isinstance(node.op, Dot) and not (
-        a_static_shape[-2] == 1 or b_static_shape[-1] == 1
-    ):
+    if not (a.type.shape[-1] == 1 or b.type.shape[-2] == 1):
         return None
 
     # Add specify_shape for unknown dimensions that must be 1

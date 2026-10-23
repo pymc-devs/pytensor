@@ -28,7 +28,9 @@ class TestProfiling:
             x = [fvector(f"val{i}") for i in range(3)]
 
             z = []
-            z += [pt.outer(x[i], x[i + 1]).sum(axis=1) for i in range(len(x) - 1)]
+            z += [
+                pt.exp(pt.outer(x[i], x[i + 1])).sum(axis=1) for i in range(len(x) - 1)
+            ]
             z += [x[i] + x[i + 1] for i in range(len(x) - 1)]
 
             p = ProfileStats(False, gpu_checks=False)
@@ -48,7 +50,6 @@ class TestProfiling:
             # NODE: The specific numbers can change for distinct (but correct) toposort orderings
             #  Update the test values if a different algorithm is used
             assert "CPU: 4112KB (4112KB)" in the_string, (lines1, lines2)
-            assert "CPU: 8204KB (8204KB)" in the_string, (lines1, lines2)
             assert "CPU: 8208KB" in the_string, (lines1, lines2)
             assert (
                 "Minimum peak from all valid apply node order is 4104KB" in the_string

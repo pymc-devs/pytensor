@@ -292,7 +292,7 @@ It is recommended to test your PyTensor/BLAS integration. There are many version
 of BLAS that exist and there can be up to 10x speed difference between them.
 Also, having PyTensor link directly against BLAS instead of using NumPy/SciPy as
 an intermediate layer reduces the computational overhead. This is
-important for BLAS calls to ``ger``, ``gemv`` and small ``gemm`` operations
+important for BLAS calls to ``gemv`` and small ``gemm`` operations
 (automatically called when needed when you use ``dot()``). To run the
 PyTensor/BLAS speed test:
 
