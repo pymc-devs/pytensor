@@ -109,6 +109,7 @@ from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
     local_add_canonizer,
+    local_batched_matmul_to_core_matmul_with_reshape,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
@@ -5117,6 +5118,20 @@ def test_local_batched_matmul_to_core_matmul():
     x_test = rng.normal(size=(5, 3, 2))
     y_test = rng.normal(size=(5, 2, 2))
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+
+def test_batched_matmul_to_core_empty_dimensions():
+    x = pt.tensor(shape=(None, 1, None, None))
+    y = pt.tensor(shape=(1, None, None, None))
+    result = RewriteTester(
+        [x, y],
+        [x @ y],
+        include=None,
+        custom_rewrite=local_batched_matmul_to_core_matmul_with_reshape,
+    )
+    a = np.empty((2, 1, 3, 0), dtype=x.dtype)
+    b = np.empty((1, 3, 0, 5), dtype=y.dtype)
+    result.assert_eval(a, b)
 
 
 @pytest.mark.parametrize(
