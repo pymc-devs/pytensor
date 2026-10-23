@@ -1,19 +1,26 @@
 import numpy as np
+from numba.core import types
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import _copy_to_fortran_order, ensure_blas, ensure_lapack
 from scipy import linalg
 
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
+from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,
     int_ptr_to_val,
+    val_to_cptr,
+    val_to_dptr,
     val_to_int_ptr,
+    val_to_sptr,
+    val_to_zptr,
 )
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.tensor.blas._core import must_initialize_y_gemv
 from pytensor.tensor.linalg.products import Expm
 
 
@@ -328,3 +335,337 @@ def numba_funcify_Expm(op, node, **kwargs):
 
     cache_version = 1
     return expm, cache_version
+
+
+@numba_basic.numba_njit(inline="always")
+def _leading_dim(unit_stride, other_stride, unit_extent, other_extent, itemsize):
+    """Leading dimension BLAS can walk the matrix with, or 0 when it cannot."""
+    if unit_extent != 1 and unit_stride != itemsize:
+        return 0
+    if other_extent == 1:
+        return max(1, unit_extent)
+    if other_stride <= 0 or other_stride % itemsize != 0:
+        return 0
+    ld = other_stride // itemsize
+    return ld if ld >= unit_extent else 0
+
+
+@numba_basic.numba_njit(inline="always")
+def _column_major_ld(X):
+    return _leading_dim(X.strides[0], X.strides[1], X.shape[0], X.shape[1], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _row_major_ld(X):
+    return _leading_dim(X.strides[1], X.strides[0], X.shape[1], X.shape[0], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _blas_abs_layout(X):
+    return bool(
+        _leading_dim(
+            abs(X.strides[0]), abs(X.strides[1]), X.shape[0], X.shape[1], X.itemsize
+        )
+        or _leading_dim(
+            abs(X.strides[1]), abs(X.strides[0]), X.shape[1], X.shape[0], X.itemsize
+        )
+    )
+
+
+@numba_basic.numba_njit(inline="always")
+def _is_reversed(X, axis):
+    return X.shape[axis] > 1 and X.strides[axis] < 0
+
+
+@numba_basic.numba_njit(inline="always")
+def _blas_operand(X):
+    """Return the buffer, BLAS transpose flag and leading dimension that read ``X``."""
+    ld = _column_major_ld(X)
+    if ld:
+        return X, False, np.int32(ld)
+    # A row-major buffer is its own transpose to BLAS
+    ld = _row_major_ld(X)
+    if ld:
+        return X, True, np.int32(ld)
+    return np.ascontiguousarray(X), True, np.int32(max(1, X.shape[1]))
+
+
+# Stack slots; a one-element array would cost a heap allocation per call
+_SCALAR_PTR_INTRINSICS = {
+    types.float32: val_to_sptr,
+    types.float64: val_to_dptr,
+    types.complex64: val_to_cptr,
+    types.complex128: val_to_zptr,
+}
+
+
+@numba_basic.numba_njit(inline="always")
+def _blas_vector(x):
+    """Return the vector, its lowest-address view and its signed BLAS increment."""
+    if x.size == 1:
+        return x, x, np.int32(1)
+    if x.strides[0] == 0 or x.strides[0] % x.itemsize:
+        x = x.copy()
+    inc = np.int32(x.strides[0] // x.itemsize)
+    base = x[::-1] if inc < 0 else x
+    return x, base, inc
+
+
+@numba_basic.numba_njit(inline="always")
+def _gemv_operands(A, x, y):
+    # Reversing a matrix axis also reverses its corresponding vector.
+    if _is_reversed(A, 0):
+        A = A[::-1]
+        y = y[::-1]
+    if _is_reversed(A, 1):
+        A = A[:, ::-1]
+        x = x[::-1]
+    A, trans, ld = _blas_operand(A)
+    return A, x, y, trans, ld
+
+
+def _gemv(A, x, y):
+    """Overwrite ``y`` with ``A @ x`` without reading its incoming contents."""
+    y[:] = A @ x
+    return y
+
+
+@overload(_gemv)
+def _gemv_impl(A, x, y):
+    ensure_blas()
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemv")
+    _check_linalg_matrix(x, ndim=1, dtype=A.dtype, func_name="gemv")
+    _check_linalg_matrix(y, ndim=1, dtype=A.dtype, func_name="gemv")
+    numba_gemv = _BLAS().numba_xgemv(A.dtype)
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[A.dtype]
+    # Some BLAS builds read y even when beta is zero
+    zero_y_first = must_initialize_y_gemv()
+
+    if isinstance(A.dtype, Complex):
+
+        @numba_basic.numba_njit(inline="always")
+        def vector_dot(a, x):
+            # Cython's complex return ABI varies by platform; stay in Numba.
+            value = 0j
+            for i in range(x.size):
+                value += a[i] * x[i]
+            return value
+
+    else:
+        numba_dot = _BLAS().numba_xdot(A.dtype)
+
+        @numba_basic.numba_njit(inline="always")
+        def vector_dot(a, x):
+            _, a_base, inca = _blas_vector(a)
+            _, x_base, incx = _blas_vector(x)
+            return numba_dot(
+                val_to_int_ptr(np.int32(x.size)),
+                a_base.ctypes,
+                val_to_int_ptr(inca),
+                x_base.ctypes,
+                val_to_int_ptr(incx),
+            )
+
+    def impl(A, x, y):
+        if A.shape[1] != x.size or A.shape[0] != y.size:
+            raise ValueError("gemv: operands have mismatched dimensions")
+        if y.size == 1:
+            y[0] = vector_dot(A[0], x)
+            return y
+
+        A_work, x, y_view, trans, ld = _gemv_operands(A, x, y)
+        _, x_base, incx = _blas_vector(x)
+        y_work, y_base, incy = _blas_vector(y_view)
+        if zero_y_first:
+            y_work[:] = 0
+        m = np.int32(A_work.shape[1] if trans else A_work.shape[0])
+        n = np.int32(A_work.shape[0] if trans else A_work.shape[1])
+        numba_gemv(
+            val_to_int_ptr(ord("T") if trans else ord("N")),
+            val_to_int_ptr(m),
+            val_to_int_ptr(n),
+            scalar_ptr(1.0),
+            A_work.ctypes,
+            val_to_int_ptr(ld),
+            x_base.ctypes,
+            val_to_int_ptr(incx),
+            scalar_ptr(0.0),
+            y_base.ctypes,
+            val_to_int_ptr(incy),
+        )
+        if y_work is not y_view:
+            y_view[:] = y_work
+        return y
+
+    return impl
+
+
+@numba_basic.numba_njit(inline="always")
+def _cheapest_copies(rows, inner, cols, cost_a, cost_b, cost_c):
+    """Choose the cheapest of A, B and C to copy so every conflicting pair has a copy."""
+    # `rows`, `inner` and `cols` flag conflicts between A and C, A and B, and B and C,
+    # so this is a minimum-weight vertex cover of a triangle.
+    if rows and inner and cols:
+        if cost_a >= cost_b and cost_a >= cost_c:
+            return False, True, True
+        if cost_b >= cost_c:
+            return True, False, True
+        return True, True, False
+    if rows and inner:
+        copy_a = cost_a <= cost_b + cost_c
+        return copy_a, not copy_a, not copy_a
+    if inner and cols:
+        copy_b = cost_b <= cost_a + cost_c
+        return not copy_b, copy_b, not copy_b
+    if rows and cols:
+        copy_c = cost_c <= cost_a + cost_b
+        return not copy_c, not copy_c, copy_c
+    if rows:
+        return cost_a <= cost_c, False, cost_a > cost_c
+    if inner:
+        return cost_a <= cost_b, cost_a > cost_b, False
+    if cols:
+        return False, cost_b <= cost_c, cost_b > cost_c
+    return False, False, False
+
+
+@numba_basic.numba_njit(inline="always")
+def _normalize_gemm_strides(A, B, C):
+    """Reverse paired axes of A, B and C so the fewest elements need a BLAS copy."""
+    ar, ak = _is_reversed(A, 0), _is_reversed(A, 1)
+    bk, bc = _is_reversed(B, 0), _is_reversed(B, 1)
+    cr, cc = _is_reversed(C, 0), _is_reversed(C, 1)
+    if not (ar or ak or bk or bc or cr or cc):
+        return A, B, C
+
+    # Operands with no unit-stride axis are copied whatever their direction.
+    forced_a = not _blas_abs_layout(A)
+    forced_b = not _blas_abs_layout(B)
+    forced_c = not _blas_abs_layout(C)
+    copy_a, copy_b, copy_c = _cheapest_copies(
+        ar != cr and not (forced_a or forced_c),
+        ak != bk and not (forced_a or forced_b),
+        bc != cc and not (forced_b or forced_c),
+        A.size,
+        B.size,
+        C.size,
+    )
+    copied_a = forced_a or copy_a
+    copied_b = forced_b or copy_b
+    copied_c = forced_c or copy_c
+
+    # Reversing the rows of A and C, the contraction axis of A and B, or the columns
+    # of B and C together leaves the product unchanged. Each pair follows the side
+    # read in place, and `_blas_operand` or the C writeback copies the other.
+    if (ar and not copied_a) or (cr and not copied_c):
+        A = A[::-1]
+        C = C[::-1]
+    if (ak and not copied_a) or (bk and not copied_b):
+        A = A[:, ::-1]
+        B = B[::-1]
+    if (bc and not copied_b) or (cc and not copied_c):
+        B = B[:, ::-1]
+        C = C[:, ::-1]
+    return A, B, C
+
+
+def _gemm(A, B, C):
+    """
+    Overwrite ``C`` with the matrix product of ``A`` and ``B``.
+
+    Parameters
+    ----------
+    A, B, C : ndarray
+        2-d arrays of one dtype. ``C`` is the output and is returned. Its incoming
+        contents are never read.
+
+    Returns
+    -------
+    C : ndarray
+    """
+    C[:] = A @ B
+    return C
+
+
+@overload(_gemm)
+def _gemm_impl(A, B, C):
+    ensure_blas()
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
+    _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
+    _check_linalg_matrix(C, ndim=2, dtype=A.dtype, func_name="gemm")
+
+    dtype = A.dtype
+    numba_gemm = _BLAS().numba_xgemm(dtype)
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
+
+    def impl(A, B, C):
+        out = C
+        M = np.int32(A.shape[0])
+        K = np.int32(A.shape[1])
+        N = np.int32(B.shape[1])
+
+        # BLAS trusts the extents it is handed, so a mismatch here reads past the end
+        # of an operand rather than failing.
+        if B.shape[0] != K:
+            raise ValueError("gemm: operands have mismatched contraction dimensions")
+        if C.shape[0] != M or C.shape[1] != N:
+            raise ValueError("gemm: output shape does not match the product")
+
+        if M == 0 or N == 0:
+            return out
+        if K == 0:
+            C[:] = 0
+            return out
+        if N == 1:
+            _gemv(A, B[:, 0], C[:, 0])
+            return out
+        if M == 1:
+            _gemv(B.T, A[0], C[0])
+            return out
+
+        A, B, C = _normalize_gemm_strides(A, B, C)
+        A_work, A_trans, LDA = _blas_operand(A)
+        B_work, B_trans, LDB = _blas_operand(B)
+
+        # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
+        # swap places and each flag flips. A C with no unit-stride axis goes through
+        # a copy.
+        LDC = _column_major_ld(C)
+        if LDC:
+            C_work = C
+            swap = False
+        else:
+            LDC = _row_major_ld(C)
+            swap = True
+            if LDC:
+                C_work = C
+            else:
+                C_work = np.empty(C.shape, dtype=dtype)
+                LDC = max(1, C.shape[1])
+
+        if swap:
+            A_work, B_work = B_work, A_work
+            A_trans, B_trans = not B_trans, not A_trans
+            LDA, LDB = LDB, LDA
+            M, N = N, M
+
+        numba_gemm(
+            val_to_int_ptr(ord("T") if A_trans else ord("N")),
+            val_to_int_ptr(ord("T") if B_trans else ord("N")),
+            val_to_int_ptr(M),
+            val_to_int_ptr(N),
+            val_to_int_ptr(K),
+            scalar_ptr(1.0),
+            A_work.ctypes,
+            val_to_int_ptr(LDA),
+            B_work.ctypes,
+            val_to_int_ptr(LDB),
+            scalar_ptr(0.0),
+            C_work.ctypes,
+            val_to_int_ptr(np.int32(LDC)),
+        )
+        if C_work is not C:
+            C[:] = C_work
+        return out
+
+    return impl
