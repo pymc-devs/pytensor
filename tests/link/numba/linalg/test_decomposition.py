@@ -265,6 +265,11 @@ class TestDecompositions:
         np.testing.assert_allclose(res_not_contig, res)
         np.testing.assert_allclose(val_not_contig, val)
 
+        if not overwrite_a:
+            val_not_contig.flags.writeable = False
+            np.testing.assert_allclose(fn(val_not_contig), res)
+            np.testing.assert_array_equal(val_not_contig, val)
+
     def test_cholesky_raises_on_nan_input(self):
         test_value = rng.random(size=(3, 3)).astype(floatX)
         test_value[0, 0] = np.nan
