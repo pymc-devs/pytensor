@@ -327,6 +327,7 @@ def test_minimize_mvn_logp_mu_and_cov():
         ("halley", True, True, None),
         ("brentq", False, False, {"bracket": (-2, 0)}),
     ],
+    ids=["secant", "newton", "halley", "brentq"],
 )
 def test_root_scalar(method, jac, hess, optimizer_kwargs):
     x = pt.scalar("x")
