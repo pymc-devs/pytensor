@@ -197,6 +197,5 @@ optdb.register(
     "jax_blockwise_unbatched_scalar_inputs",
     dfs_rewriter(blockwise_unbatched_scalar_inputs),
     "jax",
-    # After scan_inner_graph, which cannot see a Scan hidden inside a JAXBlockwise
-    position=100.5,
+    position=100,
 )

@@ -828,10 +828,14 @@ class TestScan:
         assert hash(op1) != hash(op2)
 
         # Compilation optimizes both inner graphs to the identity; the ops must then
-        # be equal *and* hash equal.
-        fn = function([x0], [xs, ys], mode=get_default_mode().excluding("scan"))
+        # be equal *and* hash equal. Separate functions keep the final merge from
+        # collapsing them into one node.
+        mode = get_default_mode().excluding("scan")
         op1, op2 = (
-            node.op for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+            node.op
+            for out in (xs, ys)
+            for node in function([x0], out, mode=mode).maker.fgraph.apply_nodes
+            if isinstance(node.op, Scan)
         )
         assert op1 == op2
         assert hash(op1) == hash(op2)
