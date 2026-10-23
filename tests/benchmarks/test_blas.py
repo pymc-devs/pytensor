@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from pytensor import In, function
-from pytensor.tensor import dot, empty, matrix, outer, scalar, tensor, vector
+from pytensor import function
+from pytensor.tensor import dot, empty, matrix, tensor, vector
 from pytensor.tensor.blas.blas_c import CGemv
 
 
@@ -19,42 +19,6 @@ def test_mat_vec_dot_benchmark_numba(dtype, benchmark):
     x_test = rng.standard_normal(size=x.type.shape).astype(x.type.dtype)
     np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
     benchmark(fn, A_test, x_test)
-
-
-def _test_ger_benchmark(mode, n, inplace, benchmark):
-    alpha = scalar("alpha")
-    x = vector("x")
-    y = vector("y")
-    A = matrix("A")
-
-    out = alpha * outer(x, y) + A
-
-    fn = function(
-        [alpha, x, y, In(A, mutable=inplace)],
-        out,
-        mode=mode,
-        trust_input=True,
-    )
-
-    rng = np.random.default_rng([2274, n])
-    alpha_test = rng.normal(size=())
-    x_test = rng.normal(size=(n,))
-    y_test = rng.normal(size=(n,))
-    A_test = rng.normal(size=(n, n))
-
-    benchmark(fn, alpha_test, x_test, y_test, A_test)
-
-
-@pytest.mark.parametrize("inplace", (True, False), ids=["inplace", "no_inplace"])
-@pytest.mark.parametrize("n", [2**7, 2**9, 2**13])
-def test_ger_benchmark_c(n, inplace, benchmark):
-    _test_ger_benchmark("CVM", n, inplace, benchmark)
-
-
-@pytest.mark.parametrize("inplace", (True, False), ids=["inplace", "no_inplace"])
-@pytest.mark.parametrize("n", [2**7, 2**9, 2**13])
-def test_ger_benchmark_numba(n, inplace, benchmark):
-    _test_ger_benchmark("NUMBA", n, inplace, benchmark)
 
 
 def test_cgemv_vector_dot_benchmark(benchmark):

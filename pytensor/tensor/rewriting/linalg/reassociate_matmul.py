@@ -8,9 +8,11 @@ from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace
+from pytensor.scalar.basic import Mul
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, _dot, matmul
+from pytensor.tensor.rewriting.math import local_dot_to_mul
 from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
@@ -208,10 +210,10 @@ def _dimshuffle_lift(op: DimShuffle) -> tuple[bool, bool]:
     A DimShuffle commutes with matmul iff it touches only batch dimensions (the
     leading ``input_ndim - 2``), or it performs a matrix-transpose (swap of the last
     two dims) -- possibly combined with batch-only operations. Both matmul operands
-    have the DimShuffle's input ndim, because ``Blockwise`` pads its inputs to a common
-    batch ndim and a core ``Dot`` is 2-D. Returns ``(is_liftable, swaps_order)``, where
-    ``swaps_order`` is True iff the lift swaps operand order in the matmul:
-    ``(L @ R).T = R.T @ L.T``.
+    have the DimShuffle's input ndim, because ``Blockwise`` and ``Elemwise`` pad their
+    inputs to a common batch ndim and a core ``Dot`` is 2-D. Returns
+    ``(is_liftable, swaps_order)``, where ``swaps_order`` is True iff the lift swaps
+    operand order in the matmul: ``(L @ R).T = R.T @ L.T``.
 
     DimShuffle disallows duplicate input indices in `new_order`, so once the core dim
     indices appear in the last two positions of the output they cannot appear
@@ -229,12 +231,29 @@ def _dimshuffle_lift(op: DimShuffle) -> tuple[bool, bool]:
     return False, False
 
 
-def _is_chain_link(node: Apply) -> bool:
-    """True iff `node` is a 2-operand matmul that ``matmul()`` can rebuild."""
-    op = node.op
-    return isinstance(op, Dot) or (
-        isinstance(op, Blockwise) and isinstance(op.core_op, Dot)
+def _is_outer_product(left: Variable, right: Variable) -> bool:
+    """True iff ``left * right`` equals ``left @ right``: a contraction of length 1."""
+    return bool(
+        left.type.ndim >= 2 and left.type.shape[-1] == 1 and right.type.shape[-2] == 1
     )
+
+
+def _is_chain_link(node: Apply) -> bool:
+    """True iff `node` is a 2-operand matmul or an outer-product ``Mul``."""
+    match node.op, *node.inputs:
+        case Dot() | Blockwise(Dot()), _, _:
+            return True
+        case Elemwise(Mul()), left, right:
+            return _is_outer_product(left, right) or _is_outer_product(right, left)
+    return False
+
+
+def _link_operands(node: Apply) -> tuple[Variable, Variable]:
+    """``(left, right)`` such that the chain link `node` computes ``left @ right``."""
+    left, right = node.inputs
+    if isinstance(node.op, Elemwise) and not _is_outer_product(left, right):
+        return right, left
+    return left, right
 
 
 def _next_link(node: Apply, fgraph: FunctionGraph) -> Apply | None:
@@ -289,8 +308,8 @@ def _decompose_operand(
       inherited-lift list. For matrix-transpose lifts, swapping operand order:
       (``(L @ R).T = R.T @ L.T``).
 
-    Matmul operands share the matmul's output ndim (``Blockwise`` pads them), so an
-    inherited lift always indexes in bounds.
+    Matmul operands share the matmul's output ndim (``Blockwise`` and ``Elemwise`` pad
+    them), so an inherited lift always indexes in bounds.
 
     Append each chain-link Apply descended into to `consumed` and add it to `visited`.
     """
@@ -321,7 +340,7 @@ def _decompose_operand(
                     visited.add(inner)
                     consumed.append(inner)
                     new_lifts = (ds_op, *lifts)
-                    left, right = inner.inputs
+                    left, right = _link_operands(inner)
                     if swaps:
                         left, right = right, left
                     stack.append((right, new_lifts))
@@ -335,8 +354,9 @@ def _decompose_operand(
         ):
             visited.add(owner)
             consumed.append(owner)
-            stack.append((owner.inputs[1], lifts))
-            stack.append((owner.inputs[0], lifts))
+            left, right = _link_operands(owner)
+            stack.append((right, lifts))
+            stack.append((left, lifts))
             continue
 
         out.append((var, lifts))
@@ -486,7 +506,7 @@ def _existing_cost(
     var_shape: dict[Variable, Shape] = {}
     total = CostExpr.zero()
     for node in reversed(consumed):
-        l_input, r_input = node.inputs
+        l_input, r_input = _link_operands(node)
         if l_input not in var_shape:
             var_shape[l_input] = canonicalize(_operand_shape_raw(l_input, fgraph))
         if r_input not in var_shape:
@@ -496,6 +516,16 @@ def _existing_cost(
         total = total + _contract_cost(l_shape, r_shape)
         var_shape[node.outputs[0]] = _matmul_result_shape(l_shape, r_shape)
     return total
+
+
+def _contract(left: Variable, right: Variable) -> Variable:
+    """``left @ right`` in the form canonicalize leaves it."""
+    if left.type.ndim == right.type.ndim == 2:
+        out = cast(Variable, _dot(left, right))
+    else:
+        out = cast(Variable, matmul(left, right))  # type: ignore[arg-type]
+    as_mul = local_dot_to_mul.transform(None, out.owner)
+    return as_mul[0] if as_mul else out
 
 
 def _build_tree(
@@ -523,12 +553,7 @@ def _build_tree(
         else:
             left = materialized.pop((i, split))
             right = materialized.pop((split + 1, j))
-            # Canonicalize lowers unbatched matmuls to the core Dot before this pass
-            # runs, and BlasOpt only specializes that form
-            if left.type.ndim == right.type.ndim == 2:
-                materialized[(i, j)] = cast(Variable, _dot(left, right))
-            else:
-                materialized[(i, j)] = matmul(left, right)  # type: ignore[arg-type]
+            materialized[(i, j)] = _contract(left, right)
 
     return materialized[top]
 
@@ -536,12 +561,12 @@ def _build_tree(
 class ReassociateMatmulChain(GraphRewriter):
     """Re-associate matmul chains when a strictly cheaper order can be proven.
 
-    Runs before BlasOpt (1.7) and emits the same core ``Dot`` / ``matmul`` forms
-    canonicalize produces, so the usual BLAS and backend specializations apply to the
-    rebuilt chain. For each maximal chain of matmul links in the fgraph, runs a
-    matrix-chain DP over the operand shapes and replaces the chain only when the new
-    total cost provably beats the user's existing parenthesization (under "every dim
-    symbol is positive").
+    Runs before BlasOpt (1.7) and emits the same core ``Dot`` / ``matmul`` / outer
+    product ``Mul`` forms canonicalize produces, so the usual BLAS and backend
+    specializations apply to the rebuilt chain. For each maximal chain of matmul links
+    in the fgraph, runs a matrix-chain DP over the operand shapes and replaces the
+    chain only when the new total cost provably beats the user's existing
+    parenthesization (under "every dim symbol is positive").
 
     Decomposes liftable single-client ``DimShuffle(matmul(L, R))`` patterns into
     ``DimShuffle(L) @ DimShuffle(R)`` (swapping operand order for matrix-transpose)
@@ -591,12 +616,9 @@ class ReassociateMatmulChain(GraphRewriter):
             local_visited = set(visited)
             local_visited.add(top)
             consumed: list[Apply] = [top]
-            left_ops = _decompose_operand(
-                top.inputs[0], fgraph, local_visited, consumed
-            )
-            right_ops = _decompose_operand(
-                top.inputs[1], fgraph, local_visited, consumed
-            )
+            top_left, top_right = _link_operands(top)
+            left_ops = _decompose_operand(top_left, fgraph, local_visited, consumed)
+            right_ops = _decompose_operand(top_right, fgraph, local_visited, consumed)
             operands = [*left_ops, *right_ops]
 
             if len(operands) < 3:

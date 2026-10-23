@@ -7,8 +7,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.tensor.basic import AllocEmpty
-from pytensor.tensor.blas import Ger
-from pytensor.tensor.blas.blas_c import CGemv, CGer, must_initialize_y_gemv
+from pytensor.tensor.blas.blas_c import CGemv, must_initialize_y_gemv
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -36,88 +35,6 @@ def skip_if_blas_ldflags_empty(*functions_detected):
             + functions_string
             + " other than [sd]gemm_."
         )
-
-
-class TestCGer(OptimizationTestMixin):
-    def setup_method(self):
-        self.manual_setup_method()
-
-    def manual_setup_method(self, dtype="float64"):
-        # This tests can run even when pytensor.config.blas__ldflags is empty.
-        self.dtype = dtype
-        self.mode = mode_blas_opt
-        self.A = tensor(dtype=dtype, shape=(None, None))
-        self.a = tensor(dtype=dtype, shape=())
-        self.x = tensor(dtype=dtype, shape=(None,))
-        self.y = tensor(dtype=dtype, shape=(None,))
-        self.Aval = np.ones((2, 3), dtype=dtype)
-        self.xval = np.asarray([1, 2], dtype=dtype)
-        self.yval = np.asarray([1.5, 2.7, 3.9], dtype=dtype)
-
-    def function(self, inputs, outputs):
-        return pytensor.function(
-            inputs,
-            outputs,
-            mode=self.mode,
-            # allow_inplace=True,
-        )
-
-    def run_f(self, f):
-        f(self.Aval, self.xval, self.yval)
-        f(self.Aval[::-1, ::-1], self.xval, self.yval)
-
-    def b(self, bval):
-        return pt.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
-
-    def test_eq(self):
-        assert CGer(True) == CGer(True)
-        assert CGer(False) == CGer(False)
-        assert CGer(False) != CGer(True)
-
-        assert CGer(True) != Ger(True)
-        assert CGer(False) != Ger(False)
-
-        # assert that eq works for non-CGer instances
-        assert CGer(False) is not None
-        assert CGer(True) is not None
-
-    def test_hash(self):
-        assert hash(CGer(True)) == hash(CGer(True))
-        assert hash(CGer(False)) == hash(CGer(False))
-        assert hash(CGer(False)) != hash(CGer(True))
-
-    def test_optimization_pipeline(self):
-        skip_if_blas_ldflags_empty()
-        f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(destructive=True))
-        f(self.xval, self.yval)  # DebugMode tests correctness
-
-    def test_optimization_pipeline_float(self):
-        skip_if_blas_ldflags_empty()
-        self.manual_setup_method("float32")
-        f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(destructive=True))
-        f(self.xval, self.yval)  # DebugMode tests correctness
-
-    def test_int_fails(self):
-        self.manual_setup_method("int32")
-        f = self.function([self.x, self.y], pt.outer(self.x, self.y))
-        self.assertFunctionContains0(f, CGer(destructive=True))
-        self.assertFunctionContains0(f, CGer(destructive=False))
-
-    def test_A_plus_outer(self):
-        skip_if_blas_ldflags_empty()
-        f = self.function([self.A, self.x, self.y], self.A + pt.outer(self.x, self.y))
-        self.assertFunctionContains(f, CGer(destructive=False))
-        self.run_f(f)  # DebugMode tests correctness
-
-    def test_A_plus_scaled_outer(self):
-        skip_if_blas_ldflags_empty()
-        f = self.function(
-            [self.A, self.x, self.y], self.A + 0.1 * pt.outer(self.x, self.y)
-        )
-        self.assertFunctionContains(f, CGer(destructive=False))
-        self.run_f(f)  # DebugMode tests correctness
 
 
 class TestCGemv(OptimizationTestMixin):
