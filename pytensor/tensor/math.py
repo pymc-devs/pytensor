@@ -44,9 +44,7 @@ from pytensor.tensor.type import (
     continuous_dtypes,
     discrete_dtypes,
     float_dtypes,
-    int_dtypes,
     tensor,
-    uint_dtypes,
 )
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import (
@@ -580,22 +578,12 @@ def min(x, axis=None, keepdims=False, initial=None):
     x = as_tensor_variable(x)
     if initial is not None and float(initial) != np.inf:
         raise ValueError(f"initial must be None or inf for min, got {initial}")
-    max_initial = None if initial is None else -np.inf
     str_x_type = str(x.dtype)
-    if str_x_type in int_dtypes and initial is not None:
-        # -max(-x) would overflow on the empty result
-        out = Min(axis=axis, initial=True)(x)
-        return makeKeepDims(x, out, axis) if keepdims else out
-    if str_x_type.startswith("float") or str_x_type in int_dtypes:
-        return -max(-x, axis=axis, keepdims=keepdims, initial=max_initial)
-    elif str_x_type in uint_dtypes:
-        itype = np.iinfo(x.dtype)
-        max_val = np.array(itype.max, dtype=itype.dtype)
-        return max_val - max(
-            max_val - x, axis=axis, keepdims=keepdims, initial=max_initial
-        )
-    elif str_x_type == "bool":
-        return ~max(~x, axis=axis, keepdims=keepdims, initial=max_initial)
+    if str_x_type.startswith("float") or str_x_type in discrete_dtypes:
+        out = Min(axis=axis, initial=initial is not None)(x)
+        if keepdims:
+            out = makeKeepDims(x, out, axis)
+        return out
     else:
         # Be careful about unsigned integers, complex
         raise NotImplementedError()
@@ -618,12 +606,10 @@ def argmin(x, axis=None, keepdims=False):
     """
     x = as_tensor_variable(x)
     str_x_type = str(x.dtype)
-    if str_x_type.startswith("float") or str_x_type in int_dtypes:
+    if str_x_type.startswith("float"):
         return argmax(-x, axis=axis, keepdims=keepdims)
-    elif str_x_type in uint_dtypes:
-        itype = np.iinfo(x.dtype)
-        return argmax(itype.max - x, axis=axis, keepdims=keepdims)
-    elif str_x_type == "bool":
+    elif str_x_type in discrete_dtypes:
+        # -x wraps on the lowest signed value; itype.max - x makes uint64 float64
         return argmax(~x, axis=axis, keepdims=keepdims)
     else:
         # Be careful about unsigned integers, complex
