@@ -86,7 +86,11 @@ class LRUCache1:
         If the input `x` is the same as the last input, return the cached result. Otherwise update the cache with the
         new input and result.
         """
-        x = x.astype(self.dtype)
+        x = (
+            np.dtype(self.dtype).type(x)
+            if isinstance(x, int | float)
+            else x.astype(self.dtype)
+        )
 
         if self.last_result is None or not (x == self.last_x).all():
             self.cache_misses += 1
