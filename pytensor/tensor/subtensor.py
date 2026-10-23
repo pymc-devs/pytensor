@@ -269,7 +269,8 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
 
     - Unsigned-integer dtype (a ``uint`` may be 0).
     - ``Shape`` / ``Shape_i`` outputs (a dimension may be 0).
-    - ``Cast`` of a non-negative input (a float :math:`0 < x < 1` truncates to 0).
+    - ``Cast`` of a non-negative input when the cast cannot overflow to a
+      negative value.
     - A unary scalar op declaring ``non_negative`` (``abs``, ``sqr``, ``exp``, ...),
       restricted to float and unsigned outputs: signed integers wrap on overflow
       (``sqr(int8(12)) == -112``) and complex values are unordered.
@@ -329,7 +330,10 @@ def _is_provably_positive(var, strict: bool = True) -> bool:
     if isinstance(op, Elemwise):
         scalar_op = op.scalar_op
         if not strict and isinstance(scalar_op, Cast):
-            return _is_provably_positive(var.owner.inputs[0], strict)
+            inp = var.owner.inputs[0]
+            if var.dtype.startswith("float") or np.can_cast(inp.dtype, var.dtype):
+                return _is_provably_positive(inp, strict)
+            return False
         if strict and isinstance(scalar_op, Sqr) and var.type.dtype.startswith("float"):
             return _is_provably_positive(var.owner.inputs[0], strict=True)
         if (
