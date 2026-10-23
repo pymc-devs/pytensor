@@ -98,6 +98,7 @@ def _get_vector_length_Constant(op: Op | Variable, var: Constant) -> int:
     return len(var.data)
 
 
+import pytensor.tensor.cost
 import pytensor.tensor.exceptions
 import pytensor.tensor.rewriting
 from pytensor.gradient import grad, hessian, jacobian

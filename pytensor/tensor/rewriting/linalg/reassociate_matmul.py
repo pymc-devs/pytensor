@@ -1,11 +1,15 @@
 import math
-from collections import defaultdict, deque
 from collections.abc import Callable, Sequence
-from itertools import pairwise
 from typing import cast
 
 from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.cost import (
+    FLOPS_PER_MULTIPLY_ADD,
+    CostExpr,
+    DimEntry,
+    _polynomial_le,
+)
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace
 from pytensor.tensor.blockwise import Blockwise
@@ -14,163 +18,7 @@ from pytensor.tensor.math import Dot, _dot, matmul
 from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
-# A "dim entry" is an int (statically known size) or a Variable (a scalar shape var
-# from ShapeFeature, treated as an opaque positive symbol >= 1). A CostExpr is a sum
-# of monomials in those symbols, with literal-int factors folded into each monomial's
-# coefficient.
-
-DimEntry = int | Variable
 Shape = tuple[DimEntry, ...]
-
-
-class CostExpr:
-    """Polynomial in positive dim symbols.
-
-    Stores its monomials as ``{sorted_(symbol,exp)_tuple: int_coef}``. The FLOP cost
-    of a matmul is (approximately) the product of all unique dim lengths. Given
-    inputs A of shape ``(a, b)`` and B of shape ``(b, c)``, computing ``A @ B``
-    costs ``a * b * c``, a single monomial. The cost of a chain of matmuls is the sum
-    of its monomials.
-    """
-
-    __slots__ = ("monomials",)
-
-    def __init__(self, monomials=None):
-        self.monomials: dict[tuple, int] = (
-            dict(monomials) if monomials is not None else {}
-        )
-
-    @classmethod
-    def zero(cls) -> "CostExpr":
-        return cls()
-
-    @classmethod
-    def from_dim_product(cls, dims: Sequence[DimEntry]) -> "CostExpr":
-        """Build a single monomial from the product of `dims`.
-
-        Symbols are sorted so that equal products map to the same monomial key.
-        """
-        coef = 1
-        sym_exps: dict[Variable, int] = defaultdict(int)
-        for d in dims:
-            if isinstance(d, int):
-                coef *= d
-            else:
-                sym_exps[d] += 1
-        key = tuple(
-            sorted(
-                sym_exps.items(),
-                key=lambda kv: (getattr(kv[0], "name", None) or "", id(kv[0])),
-            )
-        )
-        return cls({key: coef})
-
-    def evaluate(self, values: dict[Variable, int]) -> int:
-        """Value of the polynomial with each symbol replaced by ``values[symbol]``."""
-        return sum(
-            coef * math.prod(values[sym] ** exp for sym, exp in key)
-            for key, coef in self.monomials.items()
-        )
-
-    def __add__(self, other: "CostExpr") -> "CostExpr":
-        result = dict(self.monomials)
-        for k, v in other.monomials.items():
-            result[k] = result.get(k, 0) + v
-            if result[k] == 0:
-                del result[k]
-        return CostExpr(result)
-
-    def __repr__(self) -> str:
-        if not self.monomials:
-            return "CostExpr(0)"
-        terms = []
-        for sym_exps, coef in self.monomials.items():
-            parts = [str(coef)] if coef != 1 or not sym_exps else []
-            for sym, exp in sym_exps:
-                name = getattr(sym, "name", None) or "<unnamed>"
-                parts.append(f"{name}^{exp}" if exp != 1 else name)
-            terms.append("*".join(parts) if parts else "1")
-        return "CostExpr(" + " + ".join(terms) + ")"
-
-
-def _provably_cheaper(a: CostExpr, b: CostExpr) -> bool:
-    """True iff a <= b for every assignment of the dim symbols to integers >= 1, and
-    the two polynomials differ.
-
-    A monomial of `b` whose exponents dominate a monomial of `a` is at least as large
-    everywhere, so ``a <= b`` holds when every unit of coefficient in `a` can be paid
-    for by a unit of coefficient on a dominating monomial of `b`, each unit of `b` used
-    once. That assignment is a transportation problem, solved as a max flow from the
-    `a` monomials to the `b` monomials. Returns False for "not provable"; never claims
-    ``b <= a``.
-    """
-    if a.monomials == b.monomials:
-        return False
-    if not a.monomials:
-        return True
-
-    a_terms = list(a.monomials.items())
-    b_terms = list(b.monomials.items())
-    covers = []
-    for a_key, _ in a_terms:
-        a_exp = dict(a_key)
-        row = [
-            j
-            for j, (b_key, _) in enumerate(b_terms)
-            if all(dict(b_key).get(sym, 0) >= exp for sym, exp in a_exp.items())
-        ]
-        if not row:
-            return False
-        covers.append(row)
-
-    # Edmonds-Karp over source -> a_i -> b_j -> sink. Edges a_i -> b_j are uncapped,
-    # so only flow already sent along them can be pushed back.
-    remaining_a = [coef for _, coef in a_terms]
-    remaining_b = [coef for _, coef in b_terms]
-    sent: dict[tuple[int, int], int] = defaultdict(int)
-    received_by_b: list[list[int]] = [[] for _ in b_terms]
-
-    def augmenting_path() -> list[tuple[str, int]] | None:
-        parent: dict[tuple[str, int], tuple[str, int] | None] = {
-            ("a", i): None for i, left in enumerate(remaining_a) if left
-        }
-        queue = deque(parent)
-        while queue:
-            side, idx = queue.popleft()
-            if side == "a":
-                for j in covers[idx]:
-                    if ("b", j) not in parent:
-                        parent[("b", j)] = (side, idx)
-                        if remaining_b[j]:
-                            path = [("b", j)]
-                            while (step := parent[path[-1]]) is not None:
-                                path.append(step)
-                            return path[::-1]
-                        queue.append(("b", j))
-            else:
-                for i in received_by_b[idx]:
-                    if sent[(i, idx)] and ("a", i) not in parent:
-                        parent[("a", i)] = (side, idx)
-                        queue.append(("a", i))
-        return None
-
-    while (path := augmenting_path()) is not None:
-        start, end = path[0][1], path[-1][1]
-        amount = min(remaining_a[start], remaining_b[end])
-        for (from_side, from_idx), (_, to_idx) in pairwise(path):
-            if from_side == "b":
-                amount = min(amount, sent[(to_idx, from_idx)])
-        for (from_side, from_idx), (_, to_idx) in pairwise(path):
-            if from_side == "a":
-                if not sent[(from_idx, to_idx)]:
-                    received_by_b[to_idx].append(from_idx)
-                sent[(from_idx, to_idx)] += amount
-            else:
-                sent[(to_idx, from_idx)] -= amount
-        remaining_a[start] -= amount
-        remaining_b[end] -= amount
-
-    return not any(remaining_a)
 
 
 def _operand_shape_raw(var: Variable, fgraph: FunctionGraph) -> Shape:
@@ -194,12 +42,6 @@ def _matmul_result_shape(left: Shape, right: Shape) -> Shape:
         b if (isinstance(a, int) and a == 1) else a for a, b in zip(pad_l, pad_r)
     )
     return (*batch, left[-2], right[-1])
-
-
-def _contract_cost(left: Shape, right: Shape) -> CostExpr:
-    """FLOPs of ``left @ right``: ``prod(broadcast_batch) * m * k * n``."""
-    result = _matmul_result_shape(left, right)
-    return CostExpr.from_dim_product([*result[:-2], left[-2], left[-1], right[-1]])
 
 
 def _dimshuffle_lift(op: DimShuffle) -> tuple[bool, bool]:
@@ -441,7 +283,8 @@ def _solve_chain(shapes: list[tuple[int, ...]]) -> tuple[int, dict]:
                 lc, _, ls = dp[(i, k)]
                 rc, _, rs = dp[(k + 1, j)]
                 result = cast(tuple[int, ...], _matmul_result_shape(ls, rs))
-                total = lc + rc + math.prod((*result[:-2], ls[-2], ls[-1], rs[-1]))
+                flops = FLOPS_PER_MULTIPLY_ADD * math.prod(result) * ls[-1]
+                total = lc + rc + flops
                 if best is None or total < best[0]:
                     best = (total, k, result)
 
@@ -454,7 +297,7 @@ def _solve_chain(shapes: list[tuple[int, ...]]) -> tuple[int, dict]:
 
 def _tree_cost(shapes: list[Shape], dp: dict) -> CostExpr:
     """Symbolic cost of the parenthesization recorded in `dp`, over `shapes`."""
-    total = CostExpr.zero()
+    contractions = []
     result_shape: dict[tuple[int, int], Shape] = {}
     work = [(0, len(shapes) - 1, False)]
     while work:
@@ -467,9 +310,12 @@ def _tree_cost(shapes: list[Shape], dp: dict) -> CostExpr:
             work.extend([(i, j, True), (split + 1, j, False), (i, split, False)])
             continue
         left, right = result_shape[(i, split)], result_shape[(split + 1, j)]
-        total = total + _contract_cost(left, right)
-        result_shape[(i, j)] = _matmul_result_shape(left, right)
-    return total
+        out_shape = _matmul_result_shape(left, right)
+        result_shape[(i, j)] = out_shape
+        contractions.append(
+            CostExpr.from_dim_product([FLOPS_PER_MULTIPLY_ADD, *out_shape, left[-1]])
+        )
+    return CostExpr.sum(contractions)
 
 
 def _existing_cost(
@@ -484,7 +330,7 @@ def _existing_cost(
     ``_matmul_result_shape`` of their inputs.
     """
     var_shape: dict[Variable, Shape] = {}
-    total = CostExpr.zero()
+    contractions = []
     for node in reversed(consumed):
         l_input, r_input = node.inputs
         if l_input not in var_shape:
@@ -493,9 +339,12 @@ def _existing_cost(
             var_shape[r_input] = canonicalize(_operand_shape_raw(r_input, fgraph))
         l_shape = var_shape[l_input]
         r_shape = var_shape[r_input]
-        total = total + _contract_cost(l_shape, r_shape)
-        var_shape[node.outputs[0]] = _matmul_result_shape(l_shape, r_shape)
-    return total
+        out_shape = _matmul_result_shape(l_shape, r_shape)
+        var_shape[node.outputs[0]] = out_shape
+        contractions.append(
+            CostExpr.from_dim_product([FLOPS_PER_MULTIPLY_ADD, *out_shape, l_shape[-1]])
+        )
+    return CostExpr.sum(contractions)
 
 
 def _build_tree(
@@ -541,13 +390,15 @@ class ReassociateMatmulChain(GraphRewriter):
     rebuilt chain. For each maximal chain of matmul links in the fgraph, runs a
     matrix-chain DP over the operand shapes and replaces the chain only when the new
     total cost provably beats the user's existing parenthesization (under "every dim
-    symbol is positive").
+    symbol is positive"). Costs are polynomials over the chain's own unified shape
+    symbols, so they compare with each other but not with ``graph_cost`` results.
 
     Decomposes liftable single-client ``DimShuffle(matmul(L, R))`` patterns into
     ``DimShuffle(L) @ DimShuffle(R)`` (swapping operand order for matrix-transpose)
     to expose longer chains. The lift commits atomically with the reassociation:
-    ``_build_tree`` constructs the lifted vars and runs only when ``_provably_cheaper``
-    fires, so unsuccessful attempts add no graph nodes.
+    ``_build_tree`` constructs the lifted vars and runs only when the new cost is
+    provably no more than the old one and differs from it, so unsuccessful attempts
+    add no graph nodes.
 
     The pass walks a snapshot toposort once: replacements inside the loop create new
     chain-link nodes that this pass does not re-examine. For matrix chain
@@ -641,7 +492,7 @@ class ReassociateMatmulChain(GraphRewriter):
                 continue
             new_cost = _tree_cost(unified, dp)
 
-            if not _provably_cheaper(new_cost, old_cost):
+            if new_cost == old_cost or not _polynomial_le(new_cost, old_cost):
                 continue
 
             visited.update(consumed)
