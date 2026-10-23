@@ -39,7 +39,10 @@ def _squeeze_left(x, stop_at_dim: int | None = None):
         squeeze_ndim = min(squeeze_ndim, stop_at_dim)
     if squeeze_ndim == 0:
         return x
-    return x.squeeze(axis=tuple(range(squeeze_ndim)))
+    axis = tuple(range(squeeze_ndim))
+    if isinstance(x, Constant):
+        return as_tensor_variable(x.data.squeeze(axis))
+    return x.squeeze(axis=axis)
 
 
 def _vectorize_node_perform(
@@ -598,6 +601,14 @@ def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
 
 
 _vectorize_node.register(Blockwise, _vectorize_not_needed)
+
+
+class JAXBlockwise(OpFromGraph):
+    """JAX lowering of Blockwise with unpadded, unbatched scalar inputs.
+
+    These inputs bypass vectorization, preserving concrete values when available.
+    They can also be traced scalars; being unbatched does not make them static.
+    """
 
 
 class OpWithCoreShape(OpFromGraph):
