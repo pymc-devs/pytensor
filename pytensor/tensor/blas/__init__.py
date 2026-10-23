@@ -55,13 +55,6 @@ The BLAS GEMV operation implements Z <- a X Y + b Z,
 where X is a matrix, Y, and Z are vectors, and a and b are scalars.
 
 
-GER: Ger
---------
-
-The BLAS GER operation implements Z <- a X' Y + Z,
-where X and Y are vectors, and matrix Z gets a rank-1 update.
-
-
 Other Notable BLAS-related Ops
 ------------------------------
 
@@ -93,11 +86,8 @@ from pytensor.tensor.blas.batched import (
 from pytensor.tensor.blas.blas_c import (
     BaseBLAS,
     CGemv,
-    CGer,
     cgemv_inplace,
     cgemv_no_inplace,
-    cger_inplace,
-    cger_no_inplace,
 )
 from pytensor.tensor.blas.blas_c import (
     must_initialize_y_gemv as must_initialize_y_gemv_c,
@@ -120,20 +110,17 @@ from pytensor.tensor.blas.gemm import (
     gemm_no_inplace,
 )
 from pytensor.tensor.blas.gemv import Gemv, gemv, gemv_inplace, gemv_no_inplace
-from pytensor.tensor.blas.ger import Ger, ger, ger_destructive
 
 
 __all__ = [
     "BaseBLAS",
     "BatchedDot",
     "CGemv",
-    "CGer",
     "Dot22",
     "Dot22Scalar",
     "Gemm",
     "GemmRelated",
     "Gemv",
-    "Ger",
     "_batched_dot",
     "_dot22",
     "_dot22scalar",
@@ -143,16 +130,12 @@ __all__ = [
     "blas_header_version",
     "cgemv_inplace",
     "cgemv_no_inplace",
-    "cger_inplace",
-    "cger_no_inplace",
     "gemm",
     "gemm_inplace",
     "gemm_no_inplace",
     "gemv",
     "gemv_inplace",
     "gemv_no_inplace",
-    "ger",
-    "ger_destructive",
     "ldflags",
     "mkl_threads_text",
     "must_initialize_y_gemv",
