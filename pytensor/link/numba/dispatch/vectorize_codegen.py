@@ -17,6 +17,8 @@ from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
 from pytensor import config
+from pytensor.link.numba.cache import compile_numba_function_src
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch._llvmlite_self_ref import (
     ensure_self_ref_metadata_support,
 )
@@ -27,6 +29,22 @@ ensure_self_ref_metadata_support()
 
 def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
+
+
+def reorder_scalar_inputs(core_op_fn, nin, const_positions=()):
+    """Reorder loop-invariant scalar arguments before array arguments."""
+    if not const_positions:
+        return core_op_fn
+    if getattr(core_op_fn, "handles_out", False):
+        raise NotImplementedError("Scalar inputs require a value-returning core")
+    inputs = [f"i{i}" for i in range(nin)]
+    const_set = frozenset(const_positions)
+    ordered = [inputs[i] for i in const_positions] + [
+        name for i, name in enumerate(inputs) if i not in const_set
+    ]
+    src = f"def scalar_core({', '.join(ordered)}):\n    return core_op_fn({', '.join(inputs)})\n"
+    fn = compile_numba_function_src(src, "scalar_core", {"core_op_fn": core_op_fn})
+    return numba_basic.numba_njit(fn)
 
 
 def _jit_options() -> dict[str, Any]:
@@ -336,6 +354,31 @@ def compute_itershape(
     return shape
 
 
+def _make_stack_array(ctx, builder, arrtype, shape):
+    """Build a single-element array struct backed by a stack slot.
+
+    The vectorizer returns arrays even when its enclosing reduction epilogue
+    returns a scalar. This one-cell result buffer preserves that interface
+    without an NRT allocation; the epilogue reads it before returning, so the
+    array never escapes. Supported reductions still use the separate scalar
+    accumulator below. ``meminfo`` is NULL, which Numba's incref/decref already
+    tolerate (``numba.carray`` views are built the same way).
+    """
+    ll_dtype = ctx.get_data_type(arrtype.dtype)
+    data = cgutils.alloca_once(builder, ll_dtype)
+    itemsize = ctx.get_abi_sizeof(ll_dtype)
+    ary = arrayobj.make_array(arrtype)(ctx, builder)
+    arrayobj.populate_array(
+        ary,
+        data=data,
+        shape=[ir.IntType(64)(1)] * len(shape),
+        strides=[ir.IntType(64)(itemsize)] * len(shape),
+        itemsize=ir.IntType(64)(itemsize),
+        meminfo=None,
+    )
+    return ary
+
+
 def make_outputs(
     ctx: numba.core.base.BaseContext,
     builder: ir.IRBuilder,
@@ -348,6 +391,7 @@ def make_outputs(
     output_core_shapes: tuple,
     update_outputs: dict | None = None,
     reduce_identities: dict | None = None,
+    stack_outputs: frozenset[int] = frozenset(),
 ) -> tuple[list[ir.Value], list[types.Array]]:
     """Allocate output arrays for vectorized loop.
 
@@ -358,6 +402,10 @@ def make_outputs(
     outputs.  Such outputs are freshly allocated (size 1 on the reduced axes, via
     their ``bc=True`` pattern) and pre-filled with the reduction identity so the
     accumulating store in the loop reduces into them correctly.
+
+    ``stack_outputs`` holds the indices of those reduction outputs whose buffer
+    is statically a single element and does not escape; they go on the stack
+    rather than the heap (see ``_make_stack_array``).
     """
     output_arrays = []
     output_arry_types = []
@@ -386,7 +434,10 @@ def make_outputs(
             for length, bc_dim in zip(iter_shape, bc, strict=True)
         ]
         shape = batch_shape + core_shape
-        array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
+        if i in stack_outputs:
+            array = _make_stack_array(ctx, builder, arrtype, shape)
+        else:
+            array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
         if reduce_identities is not None and i in reduce_identities:
             # Pre-fill the freshly allocated (C-contiguous) buffer with the
             # reduction identity.  A flat scan over every element is valid
@@ -1139,6 +1190,9 @@ def _vectorized(
         if len(entry) > 3 and entry[3]
     }
     output_updates = {entry[0]: entry[2] for entry in reduce_entries if len(entry) > 2}
+    stack_outputs = frozenset(
+        entry[0] for entry in reduce_entries if len(entry) > 4 and entry[4]
+    )
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -1445,6 +1499,7 @@ def _vectorized(
             output_core_shapes,
             update_outputs=update_outputs_dict,
             reduce_identities=remaining_reduce_identities or None,
+            stack_outputs=stack_outputs,
         )
 
         core_arg_types = [*constant_inputs_types, *core_input_types]
