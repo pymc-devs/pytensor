@@ -102,6 +102,24 @@ def test_gammaln_grad(dtype):
 
 
 @pytest.mark.parametrize("op", [pt.gammaln, pt.psi], ids=["gammaln", "psi"])
+@pytest.mark.parametrize("dtype", ["int16", "int32", "uint16", "uint64"])
+@pytest.mark.parametrize("device", ["cpu", "gpu"])
+def test_special_integer_input(op, dtype, device):
+    if device == "gpu" and (
+        not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1"
+    ):
+        pytest.skip("needs a GPU that can run kernels")
+
+    x = vector("x", dtype=dtype)
+    out = op(x)
+    x_test_value = np.array([3, 5, 10], dtype=dtype)
+    with mlx.stream(getattr(mlx, device)):
+        _, [res] = compare_mlx_and_py([x], [out], [x_test_value])
+        expected_dtype = out.dtype if device == "cpu" else "float32"
+        assert np.asarray(res).dtype == expected_dtype
+
+
+@pytest.mark.parametrize("op", [pt.gammaln, pt.psi], ids=["gammaln", "psi"])
 def test_special_half_precision(op):
     # float16 has too few mantissa bits for the series coefficients, so the dispatch
     # widens to float32 internally. Evaluating the series in float16 throughout is
