@@ -3,6 +3,8 @@ from collections.abc import Callable
 import mlx.core as mx
 import numpy as np
 
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
+
 
 def _exp(t, const):
     r"""``exp(t)`` at the working precision, over the full exponent range of the dtype.
@@ -36,6 +38,7 @@ _LN2 = 0.6931471805599453
 def _working_precision(x):
     """Set up a series approximation over ``x``.
 
+    Integer inputs are promoted to float32 or float64, matching scalar promotion.
     Half precision is widened to float32, having too few mantissa bits for series
     coefficients to mean anything.
 
@@ -56,6 +59,9 @@ def _working_precision(x):
         The dtype the result should be cast back to.
     """
     x = mx.asarray(x)
+    if not mx.issubdtype(x.dtype, mx.inexact):
+        dtype = "float32" if x.itemsize < 4 else "float64"
+        x = x.astype(convert_dtype_to_mlx(dtype))
     working_dtype = mx.float32 if x.dtype in (mx.float16, mx.bfloat16) else x.dtype
 
     def const(value):
