@@ -7,16 +7,39 @@ import logging
 import pickle
 import shutil
 from collections import Counter
+from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
 from pytensor.configdefaults import config
 from pytensor.graph.op import Op
 from pytensor.link.c.type import CType
+from pytensor.link.utils import clear_generated_src
 from pytensor.utils import flatten
 
 
 _logger = logging.getLogger("pytensor.compile.compiledir")
+
+
+class CompiledirContent(NamedTuple):
+    compiledir: Path
+    max_key_file_size: int
+    table: list
+    table_multiple_ops: list
+    table_op_class: Counter
+    zeros_op: int
+    missing_modules: Counter
+    unreadable_keys: int
+    big_key_files: list
+    total_key_sizes: int
+    nb_keys: Counter
+
+
+def remove_extra_caches(base_compiledir: Path) -> None:
+    """Remove the Numba cache and the generated source files."""
+    shutil.rmtree(base_compiledir / "numba", ignore_errors=True)
+    clear_generated_src()
 
 
 def cleanup():
@@ -101,10 +124,8 @@ def print_title(title, overline="", underline=""):
         print(str(underline) * len_title)  # noqa: T201
 
 
-def print_compiledir_content():
-    """
-    print list of %d compiled individual ops in the "pytensor.config.compiledir"
-    """
+def collect_compiledir_content() -> CompiledirContent:
+    """Scan `config.compiledir` and return what is in the cache; prints nothing."""
     max_key_file_size = 1 * 1024 * 1024  # 1M
 
     compiledir = config.compiledir
@@ -160,58 +181,73 @@ def print_compiledir_content():
             except (OSError, AttributeError, EOFError, pickle.UnpicklingError):
                 unreadable_keys += 1
                 _logger.error(f"Could not read key file '{filename}'.")
+    return CompiledirContent(
+        compiledir=compiledir,
+        max_key_file_size=max_key_file_size,
+        table=table,
+        table_multiple_ops=table_multiple_ops,
+        table_op_class=table_op_class,
+        zeros_op=zeros_op,
+        missing_modules=missing_modules,
+        unreadable_keys=unreadable_keys,
+        big_key_files=big_key_files,
+        total_key_sizes=total_key_sizes,
+        nb_keys=nb_keys,
+    )
 
-    print_title(f"PyTensor cache: {compiledir}", overline="=", underline="=")
+
+def render_compiledir_content(content: CompiledirContent) -> None:
+    print_title(f"PyTensor cache: {content.compiledir}", overline="=", underline="=")
     print()  # noqa: T201
 
-    print_title(f"List of {len(table)} compiled individual ops", underline="+")
+    print_title(f"List of {len(content.table)} compiled individual ops", underline="+")
     print_title(
         "sub dir/compiletime/Op/set of different associated PyTensor types",
         underline="-",
     )
-    table = sorted(table, key=lambda t: str(t[1]))
+    table = sorted(content.table, key=lambda t: str(t[1]))
     for dir, op, types, compile_time in table:
         print(dir, f"{compile_time:.3f}s", op, types)  # noqa: T201
 
     print()  # noqa: T201
     print_title(
-        f"List of {len(table_multiple_ops)} compiled sets of ops", underline="+"
+        f"List of {len(content.table_multiple_ops)} compiled sets of ops", underline="+"
     )
     print_title(
         "sub dir/compiletime/Set of ops/set of different associated PyTensor types",
         underline="-",
     )
-    table_multiple_ops = sorted(table_multiple_ops, key=lambda t: (t[1], t[2]))
+    table_multiple_ops = sorted(content.table_multiple_ops, key=lambda t: (t[1], t[2]))
     for dir, ops_to_str, types_to_str, compile_time in table_multiple_ops:
         print(dir, f"{compile_time:.3f}s", ops_to_str, types_to_str)  # noqa: T201
 
     print()  # noqa: T201
     print_title(
         (
-            f"List of {len(table_op_class)} compiled Op classes and "
+            f"List of {len(content.table_op_class)} compiled Op classes and "
             "the number of times they got compiled"
         ),
         underline="+",
     )
-    for op_class, nb in reversed(table_op_class.most_common()):
+    for op_class, nb in reversed(content.table_op_class.most_common()):
         print(op_class, nb)  # noqa: T201
 
-    if big_key_files:
-        big_key_files = sorted(big_key_files, key=lambda t: str(t[1]))
+    if content.big_key_files:
+        big_key_files = sorted(content.big_key_files, key=lambda t: str(t[1]))
         big_total_size = sum(sz for _, sz, _ in big_key_files)
         print(  # noqa: T201
-            f"There are directories with key files bigger than {int(max_key_file_size)} bytes "
+            f"There are directories with key files bigger than {int(content.max_key_file_size)} bytes "
             "(they probably contain big tensor constants)"
         )
         print(  # noqa: T201
-            f"They use {int(big_total_size)} bytes out of {int(total_key_sizes)} (total size "
+            f"They use {int(big_total_size)} bytes out of {int(content.total_key_sizes)} (total size "
             "used by all key files)"
         )
 
         for dir, size, ops in big_key_files:
             print(dir, size, ops)  # noqa: T201
 
-    nb_keys = sorted(nb_keys.items())
+    nb_keys = sorted(content.nb_keys.items())
     print()  # noqa: T201
     print_title("Number of keys for a compiled module", underline="+")
     print_title(
@@ -221,18 +257,26 @@ def print_compiledir_content():
         print(n_k, n_m)  # noqa: T201
     print()  # noqa: T201
     print(  # noqa: T201
-        f"Skipped {int(zeros_op)} files that contained 0 op "
+        f"Skipped {int(content.zeros_op)} files that contained 0 op "
         "(are they always pytensor.scalar ops?)"
     )
-    if missing_modules:
+    if content.missing_modules:
         modules = ", ".join(
-            f"{name} ({count})" for name, count in sorted(missing_modules.items())
+            f"{name} ({count})"
+            for name, count in sorted(content.missing_modules.items())
         )
         print(  # noqa: T201
-            f"Skipped {sum(missing_modules.values())} key files from unavailable modules: {modules}"
+            f"Skipped {sum(content.missing_modules.values())} key files from unavailable modules: {modules}"
         )
-    if unreadable_keys:
-        print(f"Skipped {unreadable_keys} unreadable key files")  # noqa: T201
+    if content.unreadable_keys:
+        print(f"Skipped {content.unreadable_keys} unreadable key files")  # noqa: T201
+
+
+def print_compiledir_content() -> None:
+    """
+    print list of %d compiled individual ops in the "pytensor.config.compiledir"
+    """
+    render_compiledir_content(collect_compiledir_content())
 
 
 def compiledir_purge():
@@ -241,7 +285,7 @@ def compiledir_purge():
 
 def basecompiledir_ls():
     """
-    Print list of files in the "pytensor.config.base_compiledir"
+    Return the sorted sub-directories and other files in the "pytensor.config.base_compiledir"
     """
     subdirs = []
     others = []
@@ -250,10 +294,10 @@ def basecompiledir_ls():
             subdirs.append(f)
         else:
             others.append(f)
+    return sorted(subdirs), sorted(others)
 
-    subdirs = sorted(subdirs)
-    others = sorted(others)
 
+def render_basecompiledir_ls(subdirs, others) -> None:
     print(f"Base compile dir is {config.base_compiledir}")  # noqa: T201
     print("Sub-directories (possible compile caches):")  # noqa: T201
     for d in subdirs:
