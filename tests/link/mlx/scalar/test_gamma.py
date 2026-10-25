@@ -5,13 +5,11 @@ import pytest
 import scipy.special
 
 import pytensor.tensor as pt
-from pytensor.scalar.math import Gamma
 from pytensor.tensor.type import vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch import mlx_funcify
 
 
 # float32 loosens with the argument because gamma grows like a factorial and the
@@ -55,7 +53,9 @@ def test_gamma_float64_precision(low, high):
 
     with mlx.stream(mlx.cpu):
         res = np.asarray(
-            mlx_funcify(Gamma())(mlx.array(x_test_value, dtype=mlx.float64))
+            funcify_from_graph(pt.gamma, "float64")(
+                mlx.array(x_test_value, dtype=mlx.float64)
+            )
         )
 
     np.testing.assert_allclose(res, scipy.special.gamma(x_test_value), rtol=1e-12)
@@ -103,7 +103,9 @@ def test_gamma_small_positive(low, high):
 
     with mlx.stream(mlx.cpu):
         res = np.asarray(
-            mlx_funcify(Gamma())(mlx.array(x_test_value, dtype=mlx.float64))
+            funcify_from_graph(pt.gamma, "float64")(
+                mlx.array(x_test_value, dtype=mlx.float64)
+            )
         )
 
     np.testing.assert_allclose(res, scipy.special.gamma(x_test_value), rtol=1e-12)

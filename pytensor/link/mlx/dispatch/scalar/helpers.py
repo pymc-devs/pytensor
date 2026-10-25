@@ -3,6 +3,8 @@ from collections.abc import Callable
 import mlx.core as mx
 import numpy as np
 
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
+
 
 def _exp(t, const):
     r"""``exp(t)`` at the working precision, over the full exponent range of the dtype.
@@ -33,16 +35,20 @@ def _exp(t, const):
 _LN2 = 0.6931471805599453
 
 
-def _working_precision(x):
-    """Set up a series approximation over ``x``.
+def _working_precision(x, dtype):
+    """Set up a series approximation over ``x`` for an op whose output is ``dtype``.
 
-    Half precision is widened to float32, having too few mantissa bits for series
-    coefficients to mean anything.
+    The approximation runs at the output dtype the graph declares, never at the dtype
+    of ``x``, which is how an integer input reaches a float result. Half precision is
+    widened to float32, having too few mantissa bits for series coefficients to mean
+    anything.
 
     Parameters
     ----------
     x : mx.array
         Input to the approximation.
+    dtype : str
+        Output dtype of the op's node.
 
     Returns
     -------
@@ -53,15 +59,16 @@ def _working_precision(x):
         weak-types Python floats to float32, which would otherwise silently pin a
         float64 approximation to float32 accuracy.
     out_dtype : MLX dtype
-        The dtype the result should be cast back to.
+        The dtype the result should be cast back to: ``dtype``, narrowed to float32
+        where the default device has no float64.
     """
-    x = mx.asarray(x)
-    working_dtype = mx.float32 if x.dtype in (mx.float16, mx.bfloat16) else x.dtype
+    out_dtype = convert_dtype_to_mlx(dtype)
+    working_dtype = mx.float32 if out_dtype in (mx.float16, mx.bfloat16) else out_dtype
 
     def const(value):
         return mx.array(value, dtype=working_dtype)
 
-    return x.astype(working_dtype), const, x.dtype
+    return mx.asarray(x).astype(working_dtype), const, out_dtype
 
 
 # The floor a continued fraction puts under its own denominators. It has to be a normal

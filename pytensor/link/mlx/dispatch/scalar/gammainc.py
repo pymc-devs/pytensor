@@ -1,10 +1,11 @@
 from collections.abc import Callable
+from functools import partial
 
 import mlx.core as mx
 import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.erf import _METAL_HEADER
+from pytensor.link.mlx.dispatch.scalar.erf import _METAL_HEADER, _erfc
 from pytensor.link.mlx.dispatch.scalar.helpers import (
     _METAL_DEFICIT,
     _TINY,
@@ -18,7 +19,7 @@ from pytensor.link.mlx.dispatch.scalar.math import (
     _LANCZOS_G,
     _lanczos_log_gamma,
 )
-from pytensor.scalar.math import Erfc, GammaInc, GammaIncC
+from pytensor.scalar.math import GammaInc, GammaIncC
 
 
 # The regularized incomplete gamma functions have no single expansion that holds over
@@ -524,26 +525,28 @@ def _metal_gammainc_call(a, x, lower):
     return out.reshape(shape.shape)
 
 
-def _incomplete_gamma_dispatch(lower):
+def _incomplete_gamma_dispatch(node, lower):
     """Build the callable one of the two ops dispatches to."""
-    erfc = mlx_funcify(Erfc())
+    dtype = node.outputs[0].dtype
 
     def incomplete_gamma(a, x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
         shape = mx.asarray(a).astype(z.dtype)
         out = _metal_gammainc_call(shape, z, lower)
         if out is None:
-            out = _incomplete_gamma(shape, z, const, erfc, lower=lower)
+            out = _incomplete_gamma(
+                shape, z, const, partial(_erfc, const=const), lower=lower
+            )
         return out.astype(out_dtype)
 
     return incomplete_gamma
 
 
 @mlx_funcify.register(GammaIncC)
-def mlx_funcify_GammaIncC(op, **kwargs):
-    return _incomplete_gamma_dispatch(lower=False)
+def mlx_funcify_GammaIncC(op, node, **kwargs):
+    return _incomplete_gamma_dispatch(node, lower=False)
 
 
 @mlx_funcify.register(GammaInc)
-def mlx_funcify_GammaInc(op, **kwargs):
-    return _incomplete_gamma_dispatch(lower=True)
+def mlx_funcify_GammaInc(op, node, **kwargs):
+    return _incomplete_gamma_dispatch(node, lower=True)

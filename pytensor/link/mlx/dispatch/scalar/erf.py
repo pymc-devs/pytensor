@@ -243,34 +243,40 @@ def _erfc_positive(y, const):
     return mx.where(y <= thresh, near, _erfc_tail(mx.maximum(y, thresh), const))
 
 
+def _erfc(z, const):
+    """erfc at the working precision of ``z``."""
+    y = mx.abs(z)
+
+    # Both branches evaluate erfc(|x|); erfc(-y) = 2 - erfc(y) restores the sign
+    pos = _erfc_positive(y, const)
+    return mx.where(z >= const(0.0), pos, const(2.0) - pos)
+
+
 @mlx_funcify.register(Erfc)
-def mlx_funcify_Erfc(op, **kwargs):
+def mlx_funcify_Erfc(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def erfc(x):
-        x = mx.asarray(x)
-        fast = _metal_erf_call("erfc", x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_erf_call("erfc", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
 
-        z, const, out_dtype = _working_precision(x)
-        y = mx.abs(z)
-
-        # Both branches evaluate erfc(|x|); erfc(-y) = 2 - erfc(y) restores the sign
-        pos = _erfc_positive(y, const)
-        out = mx.where(z >= const(0.0), pos, const(2.0) - pos)
-        return out.astype(out_dtype)
+        return _erfc(z, const).astype(out_dtype)
 
     return erfc
 
 
 @mlx_funcify.register(Erfcx)
-def mlx_funcify_Erfcx(op, **kwargs):
+def mlx_funcify_Erfcx(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def erfcx(x):
-        x = mx.asarray(x)
-        fast = _metal_erf_call("erfcx", x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_erf_call("erfcx", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
 
-        z, const, out_dtype = _working_precision(x)
         y = mx.abs(z)
 
         pos = _erfcx_positive(y, const)

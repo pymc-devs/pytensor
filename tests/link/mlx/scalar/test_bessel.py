@@ -8,9 +8,9 @@ import scipy.stats
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.scalar.math import I0, I1, Ive
+from pytensor.scalar.math import Ive
 from pytensor.tensor.type import scalar, vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
@@ -71,7 +71,8 @@ def test_i0_float64_precision(low, high, rtol):
     x_test_value = np.exp(np.linspace(np.log(low), np.log(high), 401))
 
     with mlx.stream(mlx.cpu):
-        res = np.asarray(mlx_funcify(I0())(mlx.array(x_test_value, dtype=mlx.float64)))
+        i0 = funcify_from_graph(pt.i0, "float64")
+        res = np.asarray(i0(mlx.array(x_test_value, dtype=mlx.float64)))
 
     np.testing.assert_allclose(res, scipy.special.i0(x_test_value), rtol=rtol)
 
@@ -127,7 +128,8 @@ def test_i1_float64_precision(low, high, rtol):
     x_test_value = np.exp(np.linspace(np.log(low), np.log(high), 401))
 
     with mlx.stream(mlx.cpu):
-        res = np.asarray(mlx_funcify(I1())(mlx.array(x_test_value, dtype=mlx.float64)))
+        i1 = funcify_from_graph(pt.i1, "float64")
+        res = np.asarray(i1(mlx.array(x_test_value, dtype=mlx.float64)))
 
     np.testing.assert_allclose(res, scipy.special.i1(x_test_value), rtol=rtol)
 

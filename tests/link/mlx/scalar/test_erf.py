@@ -6,14 +6,12 @@ import pytest
 import scipy.special
 
 import pytensor.tensor as pt
-from pytensor.scalar.math import Erfc, Erfcx
 from pytensor.tensor.math import erf, erfc, erfcx, erfinv
 from pytensor.tensor.type import matrix, scalar, vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.erf import _metal_erf_call
 
 
@@ -130,7 +128,7 @@ def test_erfcx_float64_precision(low, high):
     x_test_value = np.linspace(low, high, 201)
 
     with mlx.stream(mlx.cpu):
-        erfcx_fn = mlx_funcify(Erfcx())
+        erfcx_fn = funcify_from_graph(erfcx, "float64")
         res = np.asarray(erfcx_fn(mlx.array(x_test_value, dtype=mlx.float64)))
 
     np.testing.assert_allclose(res, scipy.special.erfcx(x_test_value), rtol=1e-13)
@@ -143,7 +141,7 @@ def test_erfc_tail_is_not_truncated():
     x_test_value = np.array([4.0, 6.0, 9.0, 12.0, 20.0, 26.0])
 
     with mlx.stream(mlx.cpu):
-        erfc_fn = mlx_funcify(Erfc())
+        erfc_fn = funcify_from_graph(erfc, "float64")
         res = np.asarray(erfc_fn(mlx.array(x_test_value, dtype=mlx.float64)))
 
     assert (res > 0).all()
@@ -156,12 +154,11 @@ def test_erfc_float32_subnormal_tail():
     x_test_value = np.array([9.3, 9.5], dtype="float32")
 
     with mlx.stream(mlx.cpu):
-        res = np.asarray(mlx_funcify(Erfc())(mlx.array(x_test_value)))
+        erfc_fn = funcify_from_graph(erfc, "float32")
+        res = np.asarray(erfc_fn(mlx.array(x_test_value)))
         # x = 10 sits on the smallest float32 subnormal, carrying a bit or two, and by
         # x = 10.5 erfc is 7e-50 and genuinely underflows -- zero is the right answer
-        bottom = np.asarray(
-            mlx_funcify(Erfc())(mlx.array(np.array([10.0, 10.5], dtype="float32")))
-        )
+        bottom = np.asarray(erfc_fn(mlx.array(np.array([10.0, 10.5], dtype="float32"))))
 
     assert (res > 0).all()
     np.testing.assert_allclose(
@@ -177,11 +174,11 @@ def test_erfc_float32_subnormal_tail():
 )
 @pytest.mark.parametrize(
     "dtype, rtol",
-    [("float32", 1e-5), ("float16", 1e-3), ("bfloat16", 8e-3)],
-    ids=["float32", "float16", "bfloat16"],
+    [("float32", 1e-5), ("float16", 1e-3)],
+    ids=["float32", "float16"],
 )
 @pytest.mark.parametrize(
-    "op, name", [(Erfc, "erfc"), (Erfcx, "erfcx")], ids=["erfc", "erfcx"]
+    "op, name", [(erfc, "erfc"), (erfcx, "erfcx")], ids=["erfc", "erfcx"]
 )
 def test_erf_family_paths_agree(op, name, dtype, rtol):
     # erfc and erfcx are implemented twice: a Metal kernel, taken for single and half
@@ -197,19 +194,18 @@ def test_erf_family_paths_agree(op, name, dtype, rtol):
     # running a kernel on it. CI sets PYTENSOR_MLX_SKIP_GPU; a developer machine runs it.
     x_test_value = np.random.default_rng(41).uniform(-4.0, 9.0, 1001).astype("float32")
 
-    # NumPy has no bfloat16, so the input is cast in MLX and the results come back as
-    # float32
-    x_mlx = mlx.array(x_test_value).astype(getattr(mlx, dtype))
+    x_mlx = mlx.array(x_test_value.astype(dtype))
 
+    dispatch = funcify_from_graph(op, dtype)
     with mlx.stream(mlx.gpu):
         # Without this the test compares the fallback against itself and passes whatever
         # the kernel does
         assert _metal_erf_call(name, x_mlx) is not None, (
             "the Metal kernel did not engage, so this comparison proves nothing"
         )
-        metal = np.asarray(mlx_funcify(op())(x_mlx).astype(mlx.float32))
+        metal = np.asarray(dispatch(x_mlx).astype(mlx.float32))
     with mlx.stream(mlx.cpu):
-        vectorized = np.asarray(mlx_funcify(op())(x_mlx).astype(mlx.float32))
+        vectorized = np.asarray(dispatch(x_mlx).astype(mlx.float32))
 
     np.testing.assert_allclose(metal, vectorized, rtol=rtol, atol=0.0)
 

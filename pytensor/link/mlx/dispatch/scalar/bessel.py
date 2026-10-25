@@ -217,9 +217,11 @@ def _i1e_positive(y, const):
 
 
 @mlx_funcify.register(I0)
-def mlx_funcify_I0(op, **kwargs):
+def mlx_funcify_I0(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def i0(x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
 
         # i0 is even, and the series computes the scaled form. Restoring the scale is
         # what caps the accuracy: exp is the one operation here that MLX cannot do
@@ -232,9 +234,11 @@ def mlx_funcify_I0(op, **kwargs):
 
 
 @mlx_funcify.register(I1)
-def mlx_funcify_I1(op, **kwargs):
+def mlx_funcify_I1(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def i1(x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
 
         # i1 is odd, so the series runs on |x| and the sign is restored afterwards
         y = mx.abs(z)
@@ -474,9 +478,10 @@ def mlx_funcify_Ive(op, node=None, **kwargs):
     negative_sign = np.where(is_integer & (np.round(reflected) % 2 == 1), -1.0, 1.0)
     negative_is_nan = ~is_integer
     zero_is_pole = negative_is_nan & (order < 0.0)
+    dtype = node.outputs[0].dtype
 
     def ive(v, x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
         out = _ive_positive(mx.abs(z), reflected, const)
 
         out = mx.where(z < const(0.0), out * const(negative_sign), out)

@@ -6,13 +6,11 @@ import scipy.special
 import scipy.stats
 
 import pytensor.tensor as pt
-from pytensor.scalar.math import Erfcinv
 from pytensor.tensor.type import vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch import mlx_funcify
 
 
 # erfcinv is sampled log-spaced rather than uniformly on purpose. The whole difficulty
@@ -66,7 +64,9 @@ def test_erfcinv_float64_precision(low, high):
 
     with mlx.stream(mlx.cpu):
         res = np.asarray(
-            mlx_funcify(Erfcinv())(mlx.array(x_test_value, dtype=mlx.float64))
+            funcify_from_graph(pt.erfcinv, "float64")(
+                mlx.array(x_test_value, dtype=mlx.float64)
+            )
         )
 
     np.testing.assert_allclose(res, scipy.special.erfcinv(x_test_value), rtol=1e-14)
@@ -90,7 +90,8 @@ def test_erfcinv_float32_subnormal():
     x_test_value = np.array([1.4e-45, 2.8e-45, 1e-44, 1e-40], dtype="float32")
 
     with mlx.stream(mlx.cpu):
-        res = np.asarray(mlx_funcify(Erfcinv())(mlx.array(x_test_value)))
+        erfcinv = funcify_from_graph(pt.erfcinv, "float32")
+        res = np.asarray(erfcinv(mlx.array(x_test_value)))
 
     np.testing.assert_allclose(
         res, scipy.special.erfcinv(x_test_value.astype("float64")), rtol=1e-6
@@ -106,7 +107,9 @@ def test_erfcinv_upper_pole():
 
     with mlx.stream(mlx.cpu):
         res = np.asarray(
-            mlx_funcify(Erfcinv())(mlx.array(x_test_value, dtype=mlx.float64))
+            funcify_from_graph(pt.erfcinv, "float64")(
+                mlx.array(x_test_value, dtype=mlx.float64)
+            )
         )
 
     np.testing.assert_allclose(res, scipy.special.erfcinv(x_test_value), rtol=1e-14)
