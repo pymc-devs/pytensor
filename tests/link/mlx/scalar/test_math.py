@@ -100,8 +100,8 @@ def test_gammaln_grad(dtype):
 
 @pytest.mark.parametrize(
     "op",
-    [pt.gammaln, pt.psi, pt.gamma, pt.erfc, pt.erfcx, pt.i0, pt.i1],
-    ids=["gammaln", "psi", "gamma", "erfc", "erfcx", "i0", "i1"],
+    [pt.gammaln, pt.psi, pt.gamma, pt.erf, pt.erfc, pt.erfcx, pt.i0, pt.i1],
+    ids=["gammaln", "psi", "gamma", "erf", "erfc", "erfcx", "i0", "i1"],
 )
 @pytest.mark.parametrize("dtype", ["int8", "int32", "uint64"], ids=str)
 def test_special_integer_input(op, dtype):

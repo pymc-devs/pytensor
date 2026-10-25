@@ -7,7 +7,7 @@ from pytensor.link.mlx.dispatch.scalar.helpers import (
     _metal_unary_call,
     _working_precision,
 )
-from pytensor.scalar.math import Erfc, Erfcx
+from pytensor.scalar.math import Erf, Erfc, Erfcx
 
 
 # W. J. Cody, "Rational Chebyshev Approximation for the Error Function" (Math. Comp. 23,
@@ -241,6 +241,34 @@ def _erfc_positive(y, const):
     thresh = const(_ERF_THRESH)
     near = const(1.0) - _erf_series(mx.minimum(y, thresh), const)
     return mx.where(y <= thresh, near, _erfc_tail(mx.maximum(y, thresh), const))
+
+
+def _erf(z, const):
+    """erf at the working precision of ``z``."""
+    thresh = const(_ERF_THRESH)
+    y = mx.abs(z)
+    # The series is odd, so clipping rather than taking |z| keeps the sign of a zero
+    small = _erf_series(mx.clip(z, -thresh, thresh), const)
+    # erfc is below 0.51 past the threshold, so 1 - erfc loses at most a bit there
+    large = const(1.0) - _erfc_tail(mx.maximum(y, thresh), const)
+    large = mx.where(z < const(0.0), -large, large)
+    return mx.where(y <= thresh, small, large)
+
+
+@mlx_funcify.register(Erf)
+def mlx_funcify_Erf(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
+    def erf(x):
+        z, const, out_dtype = _working_precision(x, dtype)
+        # mx.erf is a float32 kernel whatever it is handed, which single and half
+        # precision need no more than, and it takes one pass where the series takes both
+        # branches for every element
+        if z.dtype != mx.float64:
+            return mx.erf(z).astype(out_dtype)
+        return _erf(z, const)
+
+    return erf
 
 
 def _erfc(z, const):

@@ -15,26 +15,26 @@ mlx = pytest.importorskip("mlx.core")
 from pytensor.link.mlx.dispatch.scalar.erf import _metal_erf_call
 
 
-# erf keeps the native mx.erf. It is a float32 kernel whatever dtype it is handed, so
-# these tolerances are float32 tolerances at both precisions, but erf is well conditioned
-# everywhere and never loses more than that. erfc and erfcx cannot be built on it -- both
-# decay to where 1 - erf has no significant digits left -- so they carry their own kernel
-# and are held to much tighter tolerances below.
+# Single precision keeps the native mx.erf, a float32 kernel, and erf is well conditioned
+# everywhere so it never loses more than float32 carries. float64 is composed from the
+# erfc kernel below, which is genuine at that precision. erfc and erfcx cannot be built
+# the other way round -- both decay to where 1 - erf has no significant digits left.
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
 @pytest.mark.parametrize(
-    "low, high, rtol, atol",
+    "low, high, tolerances",
     [
-        # erf vanishes at the origin, so an absolute tolerance carries the assertion for
-        # any sample that lands near it
-        (-1.0, 1.0, 3e-6, 1e-6),
-        (1.0, 3.0, 3e-6, 0.0),
-        (3.0, 6.0, 3e-7, 0.0),
+        # erf vanishes at the origin, so an absolute tolerance carries the float32
+        # assertion for any sample that lands near it
+        (-1.0, 1.0, {"float32": (3e-6, 1e-6), "float64": (1e-14, 0.0)}),
+        (1.0, 3.0, {"float32": (3e-6, 0.0), "float64": (1e-14, 0.0)}),
+        (3.0, 6.0, {"float32": (3e-7, 0.0), "float64": (1e-14, 0.0)}),
     ],
     ids=["central", "moderate", "large"],
 )
-def test_erf(low, high, rtol, atol, dtype):
+def test_erf(low, high, tolerances, dtype):
     x = vector("x", dtype=dtype)
     x_test_value = np.random.default_rng(17).uniform(low, high, 101).astype(dtype)
+    rtol, atol = tolerances[dtype]
 
     compare_mlx_and_py(
         [x],
@@ -268,11 +268,20 @@ def test_erf_family_ranks(op, dtype):
 @pytest.mark.parametrize("op", [erf, erfc, erfcx], ids=["erf", "erfc", "erfcx"])
 def test_erf_family_edge_cases(op):
     # Both infinities, both signed zeros, and nan. erfcx(-inf) is +inf rather than a
-    # finite limit, so this also pins the reflection erfcx(-y) = 2 exp(y**2) - erfcx(y)
+    # finite limit, so this also pins the reflection erfcx(-y) = 2 exp(y**2) - erfcx(y).
+    # assert_allclose treats -0.0 and 0.0 as equal, so erf(-0.0) needs its sign checked
     x = vector("x", dtype="float64")
     x_test_value = np.array([0.0, -0.0, np.inf, -np.inf, np.nan])
 
-    compare_mlx_and_py([x], [op(x)], [x_test_value])
+    def assert_values_and_signs(result, expected):
+        result, expected = np.asarray(result), np.asarray(expected)
+        np.testing.assert_allclose(result, expected)
+        not_nan = ~np.isnan(expected)
+        np.testing.assert_array_equal(
+            np.signbit(result[not_nan]), np.signbit(expected[not_nan])
+        )
+
+    compare_mlx_and_py([x], [op(x)], [x_test_value], assert_fn=assert_values_and_signs)
 
 
 @pytest.mark.parametrize("op", [erf, erfc, erfcx], ids=["erf", "erfc", "erfcx"])
