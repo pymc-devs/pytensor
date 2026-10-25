@@ -1,10 +1,10 @@
-from functools import cache
+from functools import cache, partial
 
 import mlx.core as mx
 import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.erf import _METAL_HEADER
+from pytensor.link.mlx.dispatch.scalar.erf import _METAL_HEADER, _erfc
 from pytensor.link.mlx.dispatch.scalar.helpers import (
     _METAL_DEFICIT,
     _TINY,
@@ -13,7 +13,7 @@ from pytensor.link.mlx.dispatch.scalar.helpers import (
     _metal_constants,
     _working_precision,
 )
-from pytensor.scalar.math import BetaInc, Erfc
+from pytensor.scalar.math import BetaInc
 
 
 # Two expansions cover the plane between them:
@@ -1109,16 +1109,23 @@ def _metal_betainc_call(a, b, x):
 
 
 @mlx_funcify.register(BetaInc)
-def mlx_funcify_BetaInc(op, **kwargs):
-    erfc = mlx_funcify(Erfc())
+def mlx_funcify_BetaInc(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
 
     def betainc(a, b, x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
         first = mx.asarray(a).astype(z.dtype)
         second = mx.asarray(b).astype(z.dtype)
         out = _metal_betainc_call(first, second, z)
         if out is None:
-            out = _betainc(first, second, z, _C0_MIN_ETA[z.dtype], const, erfc)
+            out = _betainc(
+                first,
+                second,
+                z,
+                _C0_MIN_ETA[z.dtype],
+                const,
+                partial(_erfc, const=const),
+            )
         return out.astype(out_dtype)
 
     return betainc

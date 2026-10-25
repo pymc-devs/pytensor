@@ -172,14 +172,14 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
 
 
 @mlx_funcify.register(GammaLn)
-def mlx_funcify_GammaLn(op, **kwargs):
+def mlx_funcify_GammaLn(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def gammaln(x):
-        x = mx.asarray(x)
-        fast = _metal_math_call("gammaln", x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_math_call("gammaln", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
-
-        z, const, out_dtype = _working_precision(x)
 
         double = z.dtype == mx.float64
         half = const(0.5)
@@ -218,14 +218,14 @@ def mlx_funcify_GammaLn(op, **kwargs):
 
 
 @mlx_funcify.register(Psi)
-def mlx_funcify_Psi(op, **kwargs):
+def mlx_funcify_Psi(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def psi(x):
-        x = mx.asarray(x)
-        fast = _metal_math_call("psi", x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_math_call("psi", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
-
-        z, const, out_dtype = _working_precision(x)
 
         double = z.dtype == mx.float64
         n_shifts = _PSI_SHIFTS if double else _PSI_SHIFTS_SINGLE
