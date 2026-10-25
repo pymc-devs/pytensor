@@ -223,7 +223,12 @@ def as_index_literal(
         raise TypeError(f"Not an index element: {idx}")
 
     if isinstance(idx, ScalarConstant):
-        return cast(int, idx.data)
+        # Return the Python equivalent: NumPy scalars would subject
+        # downstream integer arithmetic to NumPy 2 weak promotion
+        # (e.g. `200 - np.int8(0)` overflows int8).
+        if isinstance(idx.data, np.generic):
+            return idx.data.item()
+        return idx.data
 
     if (
         isinstance(idx.type, ps.ScalarType)
