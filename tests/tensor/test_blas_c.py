@@ -1,5 +1,3 @@
-from warnings import warn
-
 import numpy as np
 import pytest
 
@@ -7,7 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.tensor.basic import AllocEmpty
-from pytensor.tensor.blas.blas_c import CGemv, must_initialize_y_gemv
+from pytensor.tensor.blas import Gemv
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -37,12 +35,12 @@ def skip_if_blas_ldflags_empty(*functions_detected):
         )
 
 
-class TestCGemv(OptimizationTestMixin):
+class TestGemvC(OptimizationTestMixin):
     """
-    Tests of CGemv specifically.
+    Tests of the C implementation of `Gemv`.
 
     Generic tests of Gemv-compatibility, including both dtypes are
-    done below in TestCGemvFloat32 and TestCGemvFloat64
+    done below in TestGemvCFloat32 and TestGemvCFloat64
     """
 
     def setup_method(self):
@@ -73,7 +71,7 @@ class TestCGemv(OptimizationTestMixin):
             mode=mode,
         )
         [node] = f.maker.fgraph.apply_nodes
-        assert isinstance(node.op, CGemv) and node.op.inplace == inplace
+        assert isinstance(node.op, Gemv) and node.op.inplace == inplace
         for rows in (3, 1, 0):
             for cols in (1, 0):
                 Aval = np.ones((rows, cols), dtype=self.dtype)
@@ -89,7 +87,7 @@ class TestCGemv(OptimizationTestMixin):
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, pt.dot)
-        self.assertFunctionContains1(f, CGemv(inplace=True))
+        self.assertFunctionContains1(f, Gemv(inplace=True))
 
         # Assert they produce the same output
         assert np.allclose(f(self.xval, self.Aval), np.dot(self.xval, self.Aval))
@@ -107,7 +105,7 @@ class TestCGemv(OptimizationTestMixin):
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, pt.dot)
-        self.assertFunctionContains1(f, CGemv(inplace=True))
+        self.assertFunctionContains1(f, Gemv(inplace=True))
 
         # Assert they produce the same output
         assert np.allclose(f(self.Aval, self.yval), np.dot(self.Aval, self.yval))
@@ -116,16 +114,6 @@ class TestCGemv(OptimizationTestMixin):
             f(self.Aval[::-1, ::-1], self.yval),
             np.dot(self.Aval[::-1, ::-1], self.yval),
         )
-
-    def test_must_initialize_y_gemv(self):
-        if must_initialize_y_gemv():
-            # FIME: This warn should be emitted by the function if we find it relevant
-            # Not in a test that doesn't care about the outcome either way
-            warn(
-                "WARNING: The current BLAS requires PyTensor to initialize"
-                " memory for some GEMV calls which will result in a minor"
-                " degradation in performance for such calls."
-            )
 
     def t_gemv1(self, m_shp):
         """test vector2 + dot(matrix, vector1)"""
@@ -140,7 +128,7 @@ class TestCGemv(OptimizationTestMixin):
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
         topo = [n.op for n in f.maker.fgraph.toposort()]
-        assert topo == [CGemv(inplace=False)], topo
+        assert topo == [Gemv(inplace=False)], topo
 
         # test the inplace version
         g = pytensor.function(
@@ -153,7 +141,7 @@ class TestCGemv(OptimizationTestMixin):
             v2.get_value(), np.dot(m.get_value(), v1.get_value()) + v2_orig
         )
         topo = [n.op for n in g.maker.fgraph.toposort()]
-        assert topo == [CGemv(inplace=True)]
+        assert topo == [Gemv(inplace=True)]
 
         # Do the same tests with a matrix with strides in both dimensions
         m.set_value(m.get_value(borrow=True)[::-1, ::-1], borrow=True)
@@ -225,7 +213,7 @@ class TestCGemv(OptimizationTestMixin):
         y = dvector("y")
         alpha = 1.0
         beta = dscalar("beta")
-        gemv = CGemv(inplace=True)(y, alpha, A, x, beta)
+        gemv = Gemv(inplace=True)(y, alpha, A, x, beta)
         fn = pytensor.function(
             [A, x, y, beta],
             gemv,
@@ -240,29 +228,29 @@ class TestCGemv(OptimizationTestMixin):
             np.testing.assert_allclose(out, expected)
 
 
-class TestCGemvFloat32(BaseGemv, OptimizationTestMixin):
+class TestGemvCFloat32(BaseGemv, OptimizationTestMixin):
     mode = mode_blas_opt
     dtype = "float32"
-    gemv = CGemv(inplace=False)
-    gemv_inplace = CGemv(inplace=True)
+    gemv = Gemv(inplace=False)
+    gemv_inplace = Gemv(inplace=True)
 
     def setup_method(self):
         skip_if_blas_ldflags_empty()
 
 
-class TestCGemvFloat64(BaseGemv, OptimizationTestMixin):
+class TestGemvCFloat64(BaseGemv, OptimizationTestMixin):
     mode = mode_blas_opt
     dtype = "float64"
-    gemv = CGemv(inplace=False)
-    gemv_inplace = CGemv(inplace=True)
+    gemv = Gemv(inplace=False)
+    gemv_inplace = Gemv(inplace=True)
 
     def setup_method(self):
         skip_if_blas_ldflags_empty()
 
 
-class TestCGemvNoFlags:
+class TestGemvCNoFlags:
     mode = mode_blas_opt
-    gemv = CGemv(inplace=False)
+    gemv = Gemv(inplace=False)
     M = 4
     N = 5
     slice_step = 3
@@ -324,14 +312,14 @@ class TestCGemvNoFlags:
         return ref_val
 
     @pytensor.config.change_flags(blas__ldflags="")
-    def run_cgemv(self, dtype, ALPHA, BETA, transpose_A, slice_tensors):
+    def run_gemv(self, dtype, ALPHA, BETA, transpose_A, slice_tensors):
         f = self.get_function(
             dtype, transpose_A=transpose_A, slice_tensors=slice_tensors
         )
         values = self.get_data(
             dtype, ALPHA, BETA, transpose_A=transpose_A, slice_tensors=slice_tensors
         )
-        assert any(isinstance(node.op, CGemv) for node in f.maker.fgraph.apply_nodes)
+        assert any(isinstance(node.op, Gemv) for node in f.maker.fgraph.apply_nodes)
         z_val = f(*values)
         assert z_val.dtype == dtype
         assert z_val.ndim == 1
@@ -339,13 +327,13 @@ class TestCGemvNoFlags:
         ref_val = self.compute_ref(*((*values, transpose_A, slice_tensors)))
         unittest_tools.assert_allclose(ref_val, z_val)
 
-    def test_cgemv(self):
+    def test_gemv(self):
         for dtype in ("float32", "float64"):
             for alpha in (0, 1, -2):
                 for beta in (0, 1, -2):
                     for transpose_A in (False, True):
                         for slice_tensors in (False, True):
-                            self.run_cgemv(
+                            self.run_gemv(
                                 dtype,
                                 alpha,
                                 beta,
@@ -354,7 +342,7 @@ class TestCGemvNoFlags:
                             )
 
 
-class TestSdotNoFlags(TestCGemvNoFlags):
+class TestSdotNoFlags(TestGemvCNoFlags):
     M = 1
 
 

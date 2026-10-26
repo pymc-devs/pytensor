@@ -633,7 +633,7 @@ def local_dot22_to_gemv(fgraph, node):
     zero = ptb.as_tensor_variable(np.asarray(0, dtype=x.dtype))
     if xb[0] and yb[1]:
         # x and y are both vectors so this qualifies for a sdot / ddot
-        # PyTensor's CGemv will call sdot/ddot at runtime, the Scipy Gemv may not
+        # PyTensor's C Gemv will call sdot/ddot at runtime, the Scipy Gemv may not
         xv = x.dimshuffle(1)
         zeros = ptb.AllocEmpty(x.dtype)(1)
         rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
@@ -836,6 +836,30 @@ blas_optdb.register(
     dfs_rewriter(local_dot22_to_dot22scalar),
     "fast_run",
     position=12,
+)
+
+
+@node_rewriter([Gemv(inplace=False)])
+def make_gemv_destructive(fgraph, node):
+    inputs = list(node.inputs)
+    dest = inputs[0]
+    if (
+        dest.owner
+        and isinstance(dest.owner.op, ptb.AllocEmpty)
+        and len(fgraph.clients[dest]) > 1
+    ):
+        inputs[0] = ptb.AllocEmpty(dest.dtype)(*dest.owner.inputs)
+
+    return [Gemv(inplace=True)(*inputs)]
+
+
+# Runs after blockwise_inplace (50.1), to catch the Gemv that lost a shared buffer to another destroyer
+optdb.register(
+    "gemv_destructive",
+    dfs_rewriter(make_gemv_destructive, name="gemv_destructive"),
+    "fast_run",
+    "inplace",
+    position=70.0,
 )
 
 
