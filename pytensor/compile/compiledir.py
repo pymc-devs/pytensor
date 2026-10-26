@@ -27,13 +27,13 @@ class CompiledirContent(NamedTuple):
     max_key_file_size: int
     table: list
     table_multiple_ops: list
-    table_op_class: Counter
+    table_op_class: Counter[type[Op]]
     zeros_op: int
-    missing_modules: Counter
+    missing_modules: Counter[str]
     unreadable_keys: int
     big_key_files: list
     total_key_sizes: int
-    nb_keys: Counter
+    nb_keys: Counter[int]
 
 
 def remove_extra_caches(base_compiledir: Path) -> None:
@@ -131,13 +131,13 @@ def collect_compiledir_content() -> CompiledirContent:
     compiledir = config.compiledir
     table = []
     table_multiple_ops = []
-    table_op_class = Counter()
+    table_op_class: Counter[type[Op]] = Counter()
     zeros_op = 0
-    missing_modules = Counter()
+    missing_modules: Counter[str] = Counter()
     unreadable_keys = 0
     big_key_files = []
     total_key_sizes = 0
-    nb_keys = Counter()
+    nb_keys: Counter[int] = Counter()
     for dir in config.compiledir.iterdir():
         filename = dir / "key.pkl"
         if not filename.exists():
