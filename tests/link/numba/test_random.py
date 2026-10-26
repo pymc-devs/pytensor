@@ -151,7 +151,7 @@ def test_mvnormal_float32():
     mean = np.array([0.2, -0.3], dtype="float32")
     cov = np.array([[1.0, 0.4], [0.4, 0.8]], dtype="float32")
     # Prevent the Numba rewrite from promoting the float32 parameters.
-    with pytensor.config.change_flags(floatX="float32", warn_float64="warn"):
+    with pytensor.config.change_flags(floatX="float32", warn_float64="raise"):
         _, draws = ptr.multivariate_normal(
             mean,
             cov,
