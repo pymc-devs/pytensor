@@ -23,15 +23,39 @@ _logger = logging.getLogger("pytensor.compile.compiledir")
 
 
 class CompiledirContent(NamedTuple):
+    """Contents of the C module cache in `config.compiledir`.
+
+    The Numba and generated-source caches live elsewhere and are not
+    included.
+
+    Attributes:
+        compiledir: The cache directory that was scanned.
+        max_key_file_size: Threshold above which a key file is
+            reported in `big_key_files`.
+        table: One entry per module with a single Op:
+            (dir, op, types, compile_time).
+        table_multiple_ops: One entry per module with several Ops:
+            (dir, ops_str, types_str, compile_time).
+        table_op_class: Compiled count per Op class.
+        zeros_op: Number of key files containing zero Ops.
+        missing_modules: Unpicklable keys per missing module name.
+        unreadable_keys: Number of key files that failed to unpickle.
+        big_key_files: (dir, size, ops) for key files above
+            `max_key_file_size`.
+        total_key_sizes: Total size in bytes of all key files.
+        nb_keys: Histogram mapping keys-per-module to the number of
+            modules with that count.
+    """
+
     compiledir: Path
     max_key_file_size: int
-    table: list
-    table_multiple_ops: list
+    table: list[tuple[Path, Op, list[CType], float]]
+    table_multiple_ops: list[tuple[Path, str, str, float]]
     table_op_class: Counter[type[Op]]
     zeros_op: int
     missing_modules: Counter[str]
     unreadable_keys: int
-    big_key_files: list
+    big_key_files: list[tuple[Path, int, list[Op]]]
     total_key_sizes: int
     nb_keys: Counter[int]
 
