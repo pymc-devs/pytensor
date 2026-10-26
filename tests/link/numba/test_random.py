@@ -146,6 +146,27 @@ def test_multivariate_normal():
     )
 
 
+def test_mvnormal_float32():
+    """Regression test for Numba compilation failing with a float32 covariance."""
+    mean = np.array([0.2, -0.3], dtype="float32")
+    cov = np.array([[1.0, 0.4], [0.4, 0.8]], dtype="float32")
+    # Prevent the Numba rewrite from promoting the float32 parameters.
+    with pytensor.config.change_flags(floatX="float32", warn_float64="raise"):
+        _, draws = ptr.multivariate_normal(
+            mean,
+            cov,
+            size=(10_000,),
+            rng=shared(np.random.default_rng(123)),
+            return_next_rng=True,
+        )
+        fn = function([], draws, mode="NUMBA")
+
+    actual = fn()
+    assert actual.dtype == np.float32
+    np.testing.assert_allclose(actual.mean(axis=0), mean, atol=0.03)
+    np.testing.assert_allclose(np.cov(actual, rowvar=False), cov, atol=0.04)
+
+
 test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_method_test(
     "NUMBA"
 )
@@ -839,8 +860,7 @@ def test_rv_float_params_cast_to_float64(floatX):
             pt.random.normal(0, 1, size=(5,), rng=rng)
         ) == ["float64", "float64"]
 
-        # Opt-in, and required: numba's np.dot rejects a float32 covariance, so MvNormal
-        # only compiles once mean/cov are float64.
+        # Opt-in: this rewrite still promotes MvNormal's mean and covariance.
         assert _compiled_rv_dist_param_dtypes(
             pt.random.multivariate_normal(
                 np.zeros(3, dtype="float32"), np.eye(3, dtype="float32"), rng=rng

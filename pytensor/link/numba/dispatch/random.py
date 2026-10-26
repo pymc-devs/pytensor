@@ -218,11 +218,12 @@ def core_MvNormalRV(op, node):
 
         out = rng.normal(size=cov.shape[-1])
         # out argument not working correctly: https://github.com/numba/numba/issues/9924
-        out[:] = np.dot(A, out)
+        # The generator returns float64 noise even for a float32 covariance.
+        out[:] = np.dot(np.asarray(A, dtype=out.dtype), out)
         out += mean
         return out
 
-    return random_fn
+    return random_fn, 1
 
 
 @numba_core_rv_funcify.register(ptr.DirichletRV)
