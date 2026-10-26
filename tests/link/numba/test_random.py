@@ -162,6 +162,7 @@ def test_mvnormal_float32():
         fn = function([], draws, mode="NUMBA")
 
     actual = fn()
+    assert actual.dtype == np.float32
     np.testing.assert_allclose(actual.mean(axis=0), mean, atol=0.03)
     np.testing.assert_allclose(np.cov(actual, rowvar=False), cov, atol=0.04)
 
