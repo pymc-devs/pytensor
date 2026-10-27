@@ -9,6 +9,7 @@ matrix = pt.matrix("matrix")
 row = pt.matrix("row", shape=(1, None))
 mask = pt.constant(np.array([[0.0, 0.0, 1.0]]))
 condition = pt.constant(np.array([[True, False, True]]))
+masked = matrix * mask
 
 CASES = {
     "matrix * row": ([matrix * row], [matrix, row]),
@@ -22,6 +23,12 @@ CASES = {
     "sign(matrix) * row": ([pt.sign(matrix) * row], [matrix, row]),
     "matrix // row": ([matrix // row], [matrix, row]),
     "sin(matrix * mask) * row": ([pt.sin(matrix * mask) * row], [matrix, row]),
+    # A wrt is perturbed freely, so its known zeros do not mask its own columns.
+    "masked * row wrt masked": ([masked * row], [masked, row]),
+    "sin(masked) * row wrt matrix and masked": (
+        [pt.sin(masked) * row],
+        [matrix, masked, row],
+    ),
     "(matrix * mask + matrix * mask) * row": (
         [(matrix * mask + matrix * mask) * row],
         [matrix, row],
@@ -44,7 +51,13 @@ CASES = {
         [matrix, row],
     ),
 }
-CONSERVATIVE_NNZ = {"switch(matrix > 0, matrix, row)": 24}
+CONSERVATIVE_NNZ = {
+    "switch(matrix > 0, matrix, row)": 24,
+    # Dropping the known zeros of a wrt also keeps the row columns where masked is
+    # zero.
+    "masked * row wrt masked": 24,
+    "sin(masked) * row wrt matrix and masked": 28,
+}
 
 
 @pytest.fixture(scope="module")

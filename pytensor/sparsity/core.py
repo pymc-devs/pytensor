@@ -201,7 +201,11 @@ def jacobian_sparsity(
     patterns = dict(seeds)
     zeros = dict.fromkeys(fgraph.inputs)
     for variable in fgraph.variables:
-        if isinstance(variable, Constant) and isinstance(variable.data, np.ndarray):
+        if (
+            isinstance(variable, Constant)
+            and isinstance(variable.data, np.ndarray)
+            and variable not in seeds
+        ):
             is_zero = variable.data == 0
             if is_zero.any():
                 zeros[variable] = pt.constant(is_zero.ravel())
@@ -215,6 +219,8 @@ def jacobian_sparsity(
                 strict=True,
             )
         )
+        # A wrt variable is perturbed freely, so none of its elements is a known zero.
+        zeros.update((output, None) for output in node.outputs if output in seeds)
         if not any(variable in patterns for variable in node.inputs):
             continue
 

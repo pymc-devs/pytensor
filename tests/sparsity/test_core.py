@@ -54,15 +54,18 @@ def test_intermediate_and_empty_wrt():
     assert empty.shape == (3, 0)
 
 
-def test_wrt_ancestor_and_repeated():
+def test_wrt_ancestor_repeated_and_folded():
     x = pt.vector("x")
     y = pt.exp(x)
+    # Constant folding turns the wrt into a zero Constant.
+    folded_zero = pt.zeros(3) + pt.constant(np.zeros(3))
 
     pattern_function = function(
         [x],
         [
             pt.jacobian_sparsity(2 * y, [x, y]),
             pt.jacobian_sparsity(2 * x, [x, x]),
+            pt.jacobian_sparsity(folded_zero * x, [folded_zero, x]),
         ],
     )
     expected = np.hstack([np.eye(3), np.eye(3)]).astype(bool)
