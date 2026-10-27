@@ -100,6 +100,11 @@ def test_as_index_literal():
     res = as_index_literal(ptb.as_tensor(2))
     assert res == 2
 
+    # NumPy-backed scalar constants come back as Python ints, not NumPy
+    # scalars (gh-2567: `200 - np.int8(0)` overflows under NEP 50).
+    res = as_index_literal(scal.constant(np.int8(0)))
+    assert res == 0 and type(res) is int
+
     res = as_index_literal(np.newaxis)
     assert res is np.newaxis
 
