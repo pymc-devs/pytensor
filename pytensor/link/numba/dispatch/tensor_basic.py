@@ -437,9 +437,10 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
 def numba_funcify_ScalarFromTensor(op, **kwargs):
     @numba_basic.numba_njit
     def scalar_from_tensor(x):
-        return x.item()
+        return x[()]
 
-    return scalar_from_tensor
+    cache_version = 1
+    return scalar_from_tensor, cache_version
 
 
 @register_funcify_default_op_cache_key(Nonzero)
