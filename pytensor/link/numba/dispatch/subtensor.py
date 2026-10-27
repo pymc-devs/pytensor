@@ -19,7 +19,11 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
-from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
+from pytensor.link.numba.dispatch.string_codegen import (
+    CODE_TOKEN,
+    build_source_code,
+    create_tuple_string,
+)
 from pytensor.tensor import TensorType, TensorVariable
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -138,10 +142,105 @@ def subtensor_op_cache_key(op, **extra_fields):
     return sha256(str(tuple(key_parts)).encode()).hexdigest()
 
 
+def _scalar_loop_nest(
+    body: str,
+    loop_indices: list[str],
+    shape: str,
+    *,
+    first_axis: int = 0,
+) -> str:
+    """Wrap body in one loop per dimension, from outermost to innermost.
+
+    ``first_axis`` selects the first dimension of ``shape`` to loop over.
+    For indices ``i, j`` and shape ``out.shape``, the emitted loop nest is:
+
+    .. code-block:: python
+
+        for i in range(out.shape[0]):
+            for j in range(out.shape[1]):
+                out[i, j] = value
+    """
+    code: list[str | CODE_TOKEN] = []
+    for axis, index_name in enumerate(loop_indices, start=first_axis):
+        code.extend([f"for {index_name} in range({shape}[{axis}]):", CODE_TOKEN.INDENT])
+    code.extend(body.splitlines())
+    code.extend([CODE_TOKEN.DEDENT] * len(loop_indices))
+    return build_source_code(code)
+
+
+def _update_value(
+    name: str, static_shape: tuple[int | None, ...], indices: list[str]
+) -> str:
+    """Index an update at its original rank, specializing its known dimensions.
+
+    For output indices ``i, j``, the emitted reads depend on the update's static
+    shape. Unknown dimensions retain Subtensor's runtime broadcasting behavior:
+
+    .. code-block:: python
+
+        y[(0, j)]  # Static shape (1, 5)
+        y[(j,)]  # Static shape (5,)
+        y[(0 if y.shape[0] == 1 else i, 0)]  # Static shape (None, 1)
+    """
+    offset = len(indices) - len(static_shape)
+    source_indices = []
+    for axis, (length, index) in enumerate(
+        zip(static_shape, indices[offset:], strict=True)
+    ):
+        if length == 1:
+            source_indices.append("0")
+        elif length is None:
+            source_indices.append(f"0 if {name}.shape[{axis}] == 1 else {index}")
+        else:
+            source_indices.append(index)
+    return f"{name}[{create_tuple_string(source_indices)}]"
+
+
 @register_funcify_and_cache_key(Subtensor)
 @register_funcify_and_cache_key(IncSubtensor)
 def numba_funcify_default_subtensor(op, node, **kwargs):
-    """Create a Python function that assembles and uses an index on an array."""
+    """Create a Python function that assembles and uses an index on an array.
+
+    Examples
+    --------
+    Reading a matrix row ``x[i]``:
+
+    .. code-block:: python
+
+        def subtensor(x, idx_0):
+            indices = (idx_0,)
+            z = x[indices]
+            return np.asarray(z)
+
+    Incrementing ``x[:, i]``, where ``x`` has three dimensions and ``y`` has
+    static shape ``(1, 5)``:
+
+    .. code-block:: python
+
+        def inc_subtensor(x, y, idx_0):
+            z = np.copy(x)
+            indices = (slice(None, None), idx_0)
+            target = z[indices]
+            # Check broadcast compatibility; we work directly on y.
+            np.broadcast_to(y, target.shape)
+            for j0 in range(target.shape[0]):
+                for j1 in range(target.shape[1]):
+                    target[(j0, j1)] += y[(0, j1)]
+            return np.asarray(z)
+
+    Setting a matrix row ``x[i]`` to a scalar in place:
+
+    .. code-block:: python
+
+        def set_subtensor(x, y, idx_0):
+            z = x
+            indices = (idx_0,)
+            target = z[indices]
+            y_scalar = y.item()
+            for j0 in range(target.shape[0]):
+                target[(j0,)] = y_scalar
+            return np.asarray(z)
+    """
 
     def convert_indices(indices_iterator, entry):
         if isinstance(entry, int):
@@ -150,11 +249,13 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
                 return f"{name}.item()"
             return name
         elif isinstance(entry, slice):
-            return (
-                f"slice({convert_indices(indices_iterator, entry.start)}, "
-                f"{convert_indices(indices_iterator, entry.stop)}, "
-                f"{convert_indices(indices_iterator, entry.step)})"
-            )
+            start = convert_indices(indices_iterator, entry.start)
+            stop = convert_indices(indices_iterator, entry.stop)
+            # Omitting a missing step lets Numba preserve contiguous view types.
+            if entry.step is None:
+                return f"slice({start}, {stop})"
+            step = convert_indices(indices_iterator, entry.step)
+            return f"slice({start}, {stop}, {step})"
         elif isinstance(entry, type(None)):
             return "None"
         else:
@@ -181,9 +282,9 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
 
     if set_or_inc:
         if op.inplace:
-            index_prologue = f"z = {input_names[0]}"
+            index_prologue = [f"z = {input_names[0]}"]
         else:
-            index_prologue = f"z = np.copy({input_names[0]})"
+            index_prologue = [f"z = np.copy({input_names[0]})"]
 
         if node.inputs[1].ndim == 0:
             # TODO FIXME: This is a hack to get around a weird Numba typing
@@ -192,33 +293,58 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
         else:
             y_name = input_names[1]
 
-        if op.set_instead_of_inc:
-            function_name = "set_subtensor"
-            index_body = f"z[indices] = {y_name}"
+        function_name = "set_subtensor" if op.set_instead_of_inc else "inc_subtensor"
+        update = "=" if op.set_instead_of_inc else "+="
+        target_ndim = node.inputs[0].ndim - sum(
+            isinstance(idx, int) for idx in idx_list
+        )
+        if isinstance(op, IncSubtensor) and target_ndim:
+            loop_idxs = [f"j{k}" for k in range(target_ndim)]
+            target_idx = create_tuple_string(loop_idxs)
+            index_body = ["target = z[indices]"]
+            y = node.inputs[1]
+            if y.ndim == 0:
+                index_body.append("y_scalar = y.item()")
+                update_value = "y_scalar"
+            else:
+                index_body.extend(
+                    [
+                        "# Check broadcast compatibility; we work directly on y.",
+                        "np.broadcast_to(y, target.shape)",
+                    ]
+                )
+                update_value = _update_value("y", y.type.shape, loop_idxs)
+            update_loop = _scalar_loop_nest(
+                f"target[{target_idx}] {update} {update_value}",
+                loop_idxs,
+                "target.shape",
+            )
+            index_body.extend(update_loop.splitlines())
         else:
-            function_name = "inc_subtensor"
-            index_body = f"z[indices] += {y_name}"
+            index_body = [f"z[indices] {update} {y_name}"]
     else:
         function_name = "subtensor"
-        index_prologue = ""
-        index_body = f"z = {input_names[0]}[indices]"
+        index_prologue = []
+        index_body = [f"z = {input_names[0]}[indices]"]
 
-    subtensor_def_src = f"""
-def {function_name}({", ".join(input_names)}):
-    {index_prologue}
-    {indices_creation_src}
-    {index_body}
-    return np.asarray(z)
-    """
+    subtensor_def_src = build_source_code(
+        [
+            f"def {function_name}({', '.join(input_names)}):",
+            CODE_TOKEN.INDENT,
+            *index_prologue,
+            indices_creation_src,
+            *index_body,
+            "return np.asarray(z)",
+            CODE_TOKEN.DEDENT,
+        ]
+    )
 
     func = compile_numba_function_src(
         subtensor_def_src,
         function_name=function_name,
         global_env=globals() | {"np": np},
     )
-    cache_key = subtensor_op_cache_key(
-        op, func="numba_funcify_default_subtensor", version=1
-    )
+    cache_key = subtensor_op_cache_key(op, codegen=subtensor_def_src)
     return numba_basic.numba_njit(func, boundscheck=True), cache_key
 
 
@@ -355,9 +481,6 @@ def vector_integer_advanced_indexing(
          └─ [3 4] [id F] <Vector(uint8, shape=(2,))>
 
         def set_advanced_integer_vector_indexing(x, y, idx0, idx1, idx2):
-            # Expand dims of y explicitly (if needed)
-            y = y
-
             # Copy x (if not inplace)
             x = x.copy()
 
@@ -373,18 +496,17 @@ def vector_integer_advanced_indexing(
             adv_idx_shape = np.broadcast_shapes(idx0.shape, idx2.shape)
             (idx0, idx2) = (np.broadcast_to(idx0, adv_idx_shape), np.broadcast_to(idx2, adv_idx_shape))
 
-            # Move advanced indexed dims to the front (if needed)
-            y_adv_dims_front = y
-
-            # Broadcast y to the shape of each assignment/update
+            # Validate broadcasting without using the resulting strided view
             adv_idx_shape = idx0.shape
             basic_idx_shape = basic_indexed_x.shape[2:]
-            y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
+            update_shape = (*adv_idx_shape, *basic_idx_shape)
+            # Check broadcast compatibility; we work directly on y.
+            np.broadcast_to(y, update_shape)
 
             # Index over tuples of advanced indices and update buffer
             for i, scalar_idxs in enumerate(zip(idx0, idx2)):
-                for j0 in range(y_bcast.shape[1]):
-                    basic_indexed_x[(*scalar_idxs, j0)] = y_bcast[(i, j0)]
+                for j0 in range(update_shape[1]):
+                    basic_indexed_x[(*scalar_idxs, j0)] = y[(i, j0)]
 
             # Return the original x, with the entries updated
             return x
@@ -402,9 +524,6 @@ def vector_integer_advanced_indexing(
          └─ [3 4] [id F] <Vector(uint8, shape=(2,))>
 
         def inc_advanced_integer_vector_indexing(x, y, idx0, idx1, idx2):
-            # Expand dims of y explicitly (if needed)
-            y = y
-
             # Copy x (if not inplace)
             x = x.copy()
 
@@ -420,18 +539,17 @@ def vector_integer_advanced_indexing(
             adv_idx_shape = np.broadcast_shapes(idx1.shape, idx2.shape)
             (idx1, idx2) = (np.broadcast_to(idx1, adv_idx_shape), np.broadcast_to(idx2, adv_idx_shape))
 
-            # Move advanced indexed dims to the front (if needed)
-            y_adv_dims_front = y.transpose((1, 0))
-
-            # Broadcast y to the shape of each assignment/update
+            # Validate broadcasting in the original indexed dimension order
             adv_idx_shape = idx1.shape
             basic_idx_shape = basic_indexed_x.shape[2:]
-            y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
+            update_shape = (*adv_idx_shape, *basic_idx_shape)
+            # Check broadcast compatibility; we work directly on y.
+            np.broadcast_to(y, (update_shape[1], update_shape[0]))
 
             # Index over tuples of advanced indices and update buffer
             for i, scalar_idxs in enumerate(zip(idx1, idx2)):
-                for j0 in range(y_bcast.shape[1]):
-                    basic_indexed_x[(*scalar_idxs, j0)] += y_bcast[(i, j0)]
+                for j0 in range(update_shape[1]):
+                    basic_indexed_x[(*scalar_idxs, j0)] += y[(j0, i)]
 
             # Return the original x, with the entries updated
             return x
@@ -466,8 +584,11 @@ def vector_integer_advanced_indexing(
         if isinstance(idx, slice):
             start = get_idx_str(idx.start, is_slice_component=True)
             stop = get_idx_str(idx.stop, is_slice_component=True)
-            step = get_idx_str(idx.step, is_slice_component=True)
-            idxs.append(f"slice({start}, {stop}, {step})")
+            if idx.step is None:
+                idxs.append(f"slice({start}, {stop})")
+            else:
+                step = get_idx_str(idx.step, is_slice_component=True)
+                idxs.append(f"slice({start}, {stop}, {step})")
         else:
             # It's a direct index variable
             idxs.append(get_idx_str(idx, is_slice_component=False))
@@ -497,18 +618,6 @@ def vector_integer_advanced_indexing(
     buffer_idx = to_tuple(["i", *trailing_idxs])
     indexed_idx = to_tuple(["*scalar_idxs", *trailing_idxs])
 
-    def trailing_loop_nest(assignment: str, extents_from: str) -> str:
-        # An index step written on whole subarrays goes through Numba's generic array
-        # machinery, and the `+=` form materialises a temporary. Spell it out as a scalar
-        # loop nest instead. The trailing rank is known here, the extents only at run time.
-        # Returned with relative indentation -- the caller places it.
-        lines = [
-            f"{'    ' * k}for {j} in range({extents_from}.shape[{k + 1}]):"
-            for k, j in enumerate(trailing_idxs)
-        ]
-        lines.append(f"{'    ' * n_basic_dims}{assignment}")
-        return "\n".join(lines)
-
     # Compute number of dimensions in advanced indices (after broadcasting)
     if len(adv_indices_pos) == 1:
         adv_idx = reconstructed_indices[adv_indices_pos[0]]
@@ -523,7 +632,7 @@ def vector_integer_advanced_indexing(
     nd_buffer_idx = to_tuple([*adv_loop_idxs, *trailing_idxs])
     nd_indexed_idx = to_tuple([*adv_scalar_names, *trailing_idxs])
 
-    def advanced_loop_nest(assignment: str, extents_from: str) -> str:
+    def advanced_loop_nest(assignment: str, shape: str) -> str:
         """Nest over the broadcast advanced-index shape, then the trailing dims.
 
         Each index view is read into a scalar at the advanced-position level, so the
@@ -532,20 +641,12 @@ def vector_integer_advanced_indexing(
         the index buffer.
         """
         lines = [
-            f"{'    ' * k}for {a} in range(adv_idx_shape[{k}]):"
-            for k, a in enumerate(adv_loop_idxs)
+            f"{s} = {idx}[{adv_pos}]" for s, idx in zip(adv_scalar_names, adv_indices)
         ]
-        pad = "    " * adv_idx_ndim
-        lines += [
-            f"{pad}{s} = {idx}[{adv_pos}]"
-            for s, idx in zip(adv_scalar_names, adv_indices)
-        ]
-        lines += [
-            f"{'    ' * (adv_idx_ndim + k)}for {j} in range({extents_from}.shape[{adv_idx_ndim + k}]):"
-            for k, j in enumerate(trailing_idxs)
-        ]
-        lines.append(f"{'    ' * (adv_idx_ndim + n_basic_dims)}{assignment}")
-        return "\n".join(lines)
+        lines.append(
+            _scalar_loop_nest(assignment, trailing_idxs, shape, first_axis=adv_idx_ndim)
+        )
+        return _scalar_loop_nest("\n".join(lines), adv_loop_idxs, "adv_idx_shape")
 
     # Determine output position of advanced indexed dimensions
     # If advanced indices are consecutive, they go in the first advanced index position
@@ -605,6 +706,12 @@ def vector_integer_advanced_indexing(
                 " " * 4,
             )
         if adv_idx_ndim == 1:
+            copy_loop = _scalar_loop_nest(
+                f"out_buffer[{buffer_idx}] = basic_indexed_x[{indexed_idx}]",
+                trailing_idxs,
+                "out_buffer.shape",
+                first_axis=1,
+            )
             gather_body = f"""
                 # Create output buffer
                 adv_idx_size = {adv_indices[0]}.size
@@ -613,9 +720,13 @@ def vector_integer_advanced_indexing(
 
                 # Index over tuples of advanced indices and write to output buffer
                 for i, scalar_idxs in enumerate(zip{to_tuple(adv_indices)}):
-{indent(trailing_loop_nest(f"out_buffer[{buffer_idx}] = basic_indexed_x[{indexed_idx}]", "out_buffer"), " " * 20)}
+{indent(copy_loop, " " * 20)}
 """
         else:
+            copy_loop = advanced_loop_nest(
+                f"out_buffer[{nd_buffer_idx}] = basic_indexed_x[{nd_indexed_idx}]",
+                "out_buffer.shape",
+            )
             gather_body = f"""
                 # Create output buffer, shaped like the advanced group
                 adv_idx_shape = {adv_indices[0]}.shape
@@ -623,7 +734,7 @@ def vector_integer_advanced_indexing(
                 out_buffer = np.empty((*adv_idx_shape, *basic_idx_shape), dtype=x.dtype)
 
                 # Walk the broadcast advanced shape, reading each index view by position
-{indent(advanced_loop_nest(f"out_buffer[{nd_buffer_idx}] = basic_indexed_x[{nd_indexed_idx}]", "out_buffer"), " " * 16)}
+{indent(copy_loop, " " * 16)}
 """
         codegen += indent(
             dedent(
@@ -637,17 +748,10 @@ def vector_integer_advanced_indexing(
         )
 
     else:
-        # Make implicit dims of y explicit to simplify code
-        # Numba doesn't support `np.expand_dims` with multiple axis, so we use indexing with newaxis
         indexed_ndim = x[tuple(reconstructed_indices)].type.ndim
 
-        y_expand_dims = [":"] * y.type.ndim
-        y_implicit_dims = range(indexed_ndim - y.type.ndim)
-        for axis in y_implicit_dims:
-            y_expand_dims.insert(axis, "None")
-
         # We transpose the advanced dimensions of x to the front for indexing
-        # We may have to do the same for y
+        # Apply the inverse permutation to the scalar indices when reading y.
         # Note that if there are non-contiguous advanced indices,
         # y must already be aligned with the indices jumping to the front
         y_adv_axis_front_order = tuple(
@@ -661,17 +765,30 @@ def vector_integer_advanced_indexing(
         y_order = tuple(range(indexed_ndim))
         y_adv_axis_front_order = (
             *y_adv_axis_front_order,
-            # Basic indices, after explicit_expand_dims
+            # Basic indexed dimensions follow the advanced dimensions.
             *(o for o in y_order if o not in y_adv_axis_front_order),
         )
-        y_adv_axis_front_transpose_needed = y_adv_axis_front_order != y_order
+        y_loop_idxs = (
+            ["i", *trailing_idxs]
+            if adv_idx_ndim == 1
+            else [*adv_loop_idxs, *trailing_idxs]
+        )
+        if y.ndim == 0:
+            y_prologue = "y_scalar = y.item()"
+            update_value = "y_scalar"
+        else:
+            y_axis_order = tuple(y_adv_axis_front_order.index(axis) for axis in y_order)
+            y_shape = to_tuple([f"update_shape[{axis}]" for axis in y_axis_order])
+            y_prologue = ""
+            update_value = _update_value(
+                "y", y.type.shape, [y_loop_idxs[axis] for axis in y_axis_order]
+            )
 
         func_name = f"{'set' if op.set_instead_of_inc else 'inc'}_advanced_integer_vector_indexing"
         codegen = dedent(
             f"""
             def {func_name}(x, y, {idx_signature}):
-                # Expand dims of y explicitly (if needed)
-                y = {f"y[{', '.join(y_expand_dims)},]" if y_implicit_dims else "y"}
+                {y_prologue}
 
                 # Copy x (if not inplace)
                 x = {"x" if op.inplace else "x.copy()"}
@@ -698,35 +815,49 @@ def vector_integer_advanced_indexing(
             )
         update = "=" if op.set_instead_of_inc else "+="
         if adv_idx_ndim == 1:
+            update_loop = _scalar_loop_nest(
+                f"basic_indexed_x[{indexed_idx}] {update} {update_value}",
+                trailing_idxs,
+                "update_shape",
+                first_axis=1,
+            )
             scatter_body = f"""
                 # Index over tuples of advanced indices and update buffer
                 for i, scalar_idxs in enumerate(zip{to_tuple(adv_indices)}):
-{indent(trailing_loop_nest(f"basic_indexed_x[{indexed_idx}] {update} y_bcast[{buffer_idx}]", "y_bcast"), " " * 20)}
+{indent(update_loop, " " * 20)}
 """
         else:
+            update_loop = advanced_loop_nest(
+                f"basic_indexed_x[{nd_indexed_idx}] {update} {update_value}",
+                "update_shape",
+            )
             scatter_body = f"""
                 # Walk the broadcast advanced shape, reading each index view by position
-{indent(advanced_loop_nest(f"basic_indexed_x[{nd_indexed_idx}] {update} y_bcast[{nd_buffer_idx}]", "y_bcast"), " " * 16)}
+{indent(update_loop, " " * 16)}
 """
-        codegen += indent(
-            dedent(
-                f"""
-                # Move advanced indexed dims to the front (if needed)
-                y_adv_dims_front = {f"y.transpose({y_adv_axis_front_order})" if y_adv_axis_front_transpose_needed else "y"}
-
-                # Broadcast y to the shape of each assignment/update
-                adv_idx_shape = {adv_indices[0]}.shape
-                basic_idx_shape = basic_indexed_x.shape[{len(adv_indices)}:]
-                y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
-"""
-                + scatter_body
-                + """
-                # Return the original x, with the entries updated
-                return x
-                """
-            ),
-            " " * 4,
+        update_code: list[str | CODE_TOKEN] = [
+            CODE_TOKEN.INDENT,
+            f"adv_idx_shape = {adv_indices[0]}.shape",
+            f"basic_idx_shape = basic_indexed_x.shape[{len(adv_indices)}:]",
+            "update_shape = (*adv_idx_shape, *basic_idx_shape)",
+        ]
+        if y.ndim:
+            update_code.extend(
+                [
+                    "# Check broadcast compatibility; we work directly on y.",
+                    f"np.broadcast_to(y, {y_shape})",
+                ]
+            )
+        update_code.extend(dedent(scatter_body).strip("\n").splitlines())
+        update_code.extend(
+            [
+                CODE_TOKEN.EMPTY_LINE,
+                "# Return the original x, with the entries updated",
+                "return x",
+                CODE_TOKEN.DEDENT,
+            ]
         )
+        codegen += build_source_code(update_code)
 
     cache_key = subtensor_op_cache_key(
         op,
