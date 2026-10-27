@@ -151,8 +151,9 @@ def jacobian_sparsity(
         concatenated in the order given.
     wrt : Variable or sequence of Variable
         Tensors to differentiate with respect to, flattened and concatenated in the
-        order given. They may be intermediate variables of the graph. Other inputs of
-        the graph are held fixed.
+        order given. They may be intermediate variables of the graph, ancestors of
+        one another, or repeated. Each column is the total derivative, as in
+        `jacobian`. Other inputs of the graph are held fixed.
 
     Returns
     -------
@@ -175,16 +176,17 @@ def jacobian_sparsity(
     outputs = [outputs] if isinstance(outputs, Variable) else list(outputs)
     wrt = [wrt] if isinstance(wrt, Variable) else list(wrt)
 
-    held_fixed = [
+    inputs = [
         variable
-        for variable in graph_inputs(outputs, blockers=wrt)
-        if not isinstance(variable, Constant) and variable not in wrt
+        for variable in graph_inputs([*outputs, *wrt])
+        if not isinstance(variable, Constant)
     ]
-    inputs = [*wrt, *held_fixed]
-    fgraph = FunctionGraph(inputs=inputs, outputs=outputs, clone=True)
+    # wrt are outputs of the graph, so constant folding keeps their clones reachable
+    # without cutting the paths from their ancestors.
+    fgraph = FunctionGraph(inputs=inputs, outputs=[*outputs, *wrt], clone=True)
     topo_unconditional_constant_folding.rewrite(fgraph)
 
-    fgraph_wrt = fgraph.inputs[: len(wrt)]
+    fgraph_wrt = fgraph.outputs[len(outputs) :]
     sizes = [variable.size for variable in fgraph_wrt]  # type: ignore[attr-defined]
     offsets = []
     n_columns = pt.constant(0, dtype="int64")
@@ -192,10 +194,11 @@ def jacobian_sparsity(
         offsets.append(n_columns)
         n_columns = n_columns + size
 
-    patterns = {
-        variable: pt.eye(size, n_columns, k=offset, dtype=config.floatX)
-        for variable, size, offset in zip(fgraph_wrt, sizes, offsets, strict=True)
-    }
+    seeds: dict[Variable, TensorVariable] = {}
+    for variable, size, offset in zip(fgraph_wrt, sizes, offsets, strict=True):
+        seed = pt.eye(size, n_columns, k=offset, dtype=config.floatX)
+        seeds[variable] = seeds[variable] + seed if variable in seeds else seed
+    patterns = dict(seeds)
     zeros = dict.fromkeys(fgraph.inputs)
     for variable in fgraph.variables:
         if isinstance(variable, Constant) and isinstance(variable.data, np.ndarray):
@@ -232,13 +235,16 @@ def jacobian_sparsity(
             )
             if (output_zeros := zeros[output]) is not None:
                 output_pattern *= pt.cast(~output_zeros, config.floatX)[:, None]
+            # A wrt variable is the identity in its own columns.
+            if output in seeds:
+                output_pattern += seeds[output]
             patterns[output] = output_pattern
 
     output_patterns = [
         patterns[output]
         if output in patterns
         else pt.zeros((output.size, n_columns), dtype=config.floatX)  # type: ignore[attr-defined]
-        for output in fgraph.outputs
+        for output in fgraph.outputs[: len(outputs)]
     ]
     pattern = pt.gt(pt.concatenate(output_patterns, axis=0), 0)
 
