@@ -54,6 +54,23 @@ def test_intermediate_and_empty_wrt():
     assert empty.shape == (3, 0)
 
 
+def test_wrt_ancestor_and_repeated():
+    x = pt.vector("x")
+    y = pt.exp(x)
+
+    pattern_function = function(
+        [x],
+        [
+            pt.jacobian_sparsity(2 * y, [x, y]),
+            pt.jacobian_sparsity(2 * x, [x, x]),
+        ],
+    )
+    expected = np.hstack([np.eye(3), np.eye(3)]).astype(bool)
+
+    for pattern in pattern_function(np.ones(3)):
+        np.testing.assert_array_equal(pattern, expected)
+
+
 def test_sparse_constant_in_graph():
     x = pt.vector("x")
     sparse_identity = ps.as_sparse_variable(scipy.sparse.csr_matrix(np.eye(3)))
