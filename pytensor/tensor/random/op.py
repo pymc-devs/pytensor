@@ -7,7 +7,7 @@ import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable, equal_computations
+from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
@@ -26,6 +26,7 @@ from pytensor.tensor.random.utils import (
     explicit_expand_dims,
     normalize_size_param,
 )
+from pytensor.tensor.shape import shape as tensor_shape
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
@@ -504,6 +505,120 @@ class DefaultGeneratorMakerOp(AbstractRNGConstructor):
 default_rng = DefaultGeneratorMakerOp()
 
 
+def _axis_is_broadcast(var: Variable, axis: int) -> bool:
+    """Return whether every index along `axis` holds the same value."""
+    ndim = getattr(var.type, "ndim", None)
+    if not isinstance(ndim, int) or axis < 0 or axis >= ndim:
+        return True
+    if var.type.shape[axis] == 1:
+        return True
+    if isinstance(var, Constant):
+        data = np.asarray(var.data)
+        if data.shape[axis] <= 1:
+            return True
+        indexer = [slice(None)] * data.ndim
+        indexer[axis] = 0
+        core = data[tuple(indexer)]
+        return bool(np.array_equal(data, np.broadcast_to(core, data.shape)))
+
+    owner = var.owner
+    if owner is None:
+        return False
+
+    from pytensor.tensor.basic import Alloc, Join
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.elemwise import DimShuffle, Elemwise
+    from pytensor.tensor.shape import SpecifyShape
+    from pytensor.tensor.subtensor import Subtensor
+
+    op = owner.op
+    if isinstance(op, Alloc):
+        value = owner.inputs[0]
+        new_dims = var.type.ndim - value.type.ndim
+        if axis < new_dims:
+            return True
+        return _axis_is_broadcast(value, axis - new_dims)
+    if isinstance(op, DimShuffle):
+        source = op.new_order[axis]
+        if source == "x":
+            return True
+        return _axis_is_broadcast(owner.inputs[0], source)
+    if isinstance(op, Elemwise):
+        for inp in owner.inputs:
+            inp_axis = axis - (var.type.ndim - inp.type.ndim)
+            if inp_axis < 0:
+                continue
+            if not _axis_is_broadcast(inp, inp_axis):
+                return False
+        return True
+    if isinstance(op, SpecifyShape):
+        return _axis_is_broadcast(owner.inputs[0], axis)
+    if isinstance(op, Blockwise) and axis < op.batch_ndim(owner):
+        return all(_axis_is_broadcast(inp, axis) for inp in owner.inputs)
+    if isinstance(op, Subtensor):
+        return _subtensor_axis_is_broadcast(owner, axis)
+    if isinstance(op, Join) and axis != op.axis:
+        for inp in owner.inputs:
+            inp_axis = axis - (var.type.ndim - inp.type.ndim)
+            if inp_axis < 0:
+                continue
+            if not _axis_is_broadcast(inp, inp_axis):
+                return False
+        return True
+    return False
+
+
+def _subtensor_axis_is_broadcast(node: Apply, axis: int) -> bool:
+    tensor = node.inputs[0]
+    idx_list = list(node.op.idx_list)
+    missing = tensor.type.ndim - len(idx_list)
+    if missing > 0:
+        idx_list.extend([slice(None)] * missing)
+    out_axis = 0
+    for inp_axis, entry in enumerate(idx_list):
+        if isinstance(entry, slice):
+            if out_axis == axis:
+                return _axis_is_broadcast(tensor, inp_axis)
+            out_axis += 1
+        elif isinstance(entry, int):
+            continue
+        else:
+            return False
+    return False
+
+
+def _size_is_rectangular(size: Variable, batch_ndim: int) -> bool:
+    # A shape-only expression can still ask for a different length at each
+    # batch index, as in arange(x.shape[0]). Only a broadcast batch axis has
+    # one core size.
+    return all(_axis_is_broadcast(size, axis) for axis in range(batch_ndim))
+
+
+def _shape_vector_items(shape_vec: Variable) -> tuple[Variable, ...]:
+    length = get_vector_length(shape_vec)
+    return tuple(shape_vec[i] for i in range(length))
+
+
+def _broadcast_shape_vectors(*shape_vectors: Variable) -> Variable | None:
+    from pytensor.tensor.basic import stack
+    from pytensor.tensor.extra_ops import broadcast_shape
+
+    nonempty = [
+        items for items in (_shape_vector_items(v) for v in shape_vectors) if items
+    ]
+    if not nonempty:
+        return None
+    if len(nonempty) == 1:
+        return stack(nonempty[0])
+    return stack(
+        broadcast_shape(
+            *nonempty,
+            arrays_are_shapes=True,
+            allow_runtime_broadcast=True,
+        )
+    )
+
+
 @_vectorize_node.register(RandomVariable)
 def vectorize_random_variable(
     op: RandomVariable, node: Apply, rng, size, *dist_params
@@ -526,6 +641,21 @@ def vectorize_random_variable(
             new_size = compute_batch_shape(dist_params, ndims_params=op.ndims_params)
             new_size_dims = new_size[:new_ndim]
             size = concatenate([new_size_dims, size])
+    elif (
+        not isinstance(old_size.type, NoneTypeT) and size.type.ndim > old_size.type.ndim
+    ):
+        batch_ndim = size.type.ndim - old_size.type.ndim
+        if not _size_is_rectangular(size, batch_ndim):
+            raise NotImplementedError(
+                "vectorize_graph cannot expand a random variable whose size "
+                "is not rectangular across the batch"
+            )
+        core_size = size[(0,) * batch_ndim]
+        new_ndim = dist_params[0].type.ndim - original_dist_params[0].type.ndim
+        param_batch = compute_batch_shape(dist_params, ndims_params=op.ndims_params)
+        param_new = param_batch[:new_ndim] if new_ndim > 0 else param_batch[:0]
+        merged = _broadcast_shape_vectors(tensor_shape(size)[:batch_ndim], param_new)
+        size = core_size if merged is None else concatenate([merged, core_size])
 
     return op.make_node(rng, size, *dist_params)
 
