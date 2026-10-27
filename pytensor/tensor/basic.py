@@ -38,8 +38,9 @@ from pytensor.scalar import int32
 from pytensor.scalar.basic import ScalarConstant, ScalarVariable
 from pytensor.tensor import (
     _as_tensor_variable,
-    _get_vector_length,
+    _get_first_dim_length,
     as_tensor_variable,
+    get_first_dim_length,
     get_vector_length,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
@@ -1812,10 +1813,10 @@ alloc = Alloc()
 pprint.assign(alloc, printing.FunctionPrinter(["alloc"]))
 
 
-@_get_vector_length.register(Alloc)
-def _get_vector_length_Alloc(var_inst, var):
+@_get_first_dim_length.register(Alloc)
+def _get_first_dim_length_Alloc(var_inst, var):
     try:
-        return get_scalar_constant_value(var.owner.inputs[1])
+        return int(get_scalar_constant_value(var.owner.inputs[1]))
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -2012,8 +2013,8 @@ class MakeVectorPrinter(Printer):
 pprint.assign(MakeVector, MakeVectorPrinter())
 
 
-@_get_vector_length.register(MakeVector)
-def _get_vector_length_MakeVector(op, var):
+@_get_first_dim_length.register(MakeVector)
+def _get_first_dim_length_MakeVector(op, var):
     return len(var.owner.inputs)
 
 
@@ -2689,11 +2690,10 @@ class Join(COp):
 pprint.assign(Join, printing.FunctionPrinter(["join"]))
 
 
-@_get_vector_length.register(Join)
-def _get_vector_length_Join(op, var):
-    arrays = var.owner.inputs
-    if op.axis == 0 and builtins.all(a.ndim == 1 for a in arrays):
-        return builtins.sum(get_vector_length(a) for a in arrays)
+@_get_first_dim_length.register(Join)
+def _get_first_dim_length_Join(op, var):
+    if op.axis == 0:
+        return builtins.sum(get_first_dim_length(a) for a in var.owner.inputs)
     raise ValueError(f"Length of {var} cannot be determined")
 
 
@@ -4501,6 +4501,7 @@ __all__ = [
     "flatten",
     "full",
     "full_like",
+    "get_first_dim_length",
     "get_scalar_constant_value",
     "get_underlying_scalar_constant_value",
     "get_vector_length",
