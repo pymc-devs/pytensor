@@ -2,7 +2,7 @@
 
 Introduces ``FusedElemwise``, an ``OpFromGraph`` that wraps
 ``AdvancedSubtensor`` + ``Elemwise`` + ``AdvancedIncSubtensor`` / ``CAReduce``
-subgraphs so the Numba backend can generate a single loop with indirect
+subgraphs so the Numba and JS backends can generate a single loop with indirect
 indexing and inline accumulation, eliminating materialised intermediate arrays.
 """
 
@@ -13,6 +13,7 @@ from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
+from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar.basic import (
     AND,
     OR,
@@ -36,8 +37,8 @@ from pytensor.tensor.subtensor import (
 from pytensor.tensor.variable import TensorVariable
 
 
-# CAReduce scalar ops whose reduction the Numba backend can fuse into the loop
-# (those for which the Numba codegen has an in-place accumulation).
+# CAReduce scalar ops whose reduction a backend can fuse into the loop
+# (those for which the backend codegen has an in-place accumulation).
 _REDUCE_SCALAR_OPS = (Add, Mul, Maximum, Minimum, AND, OR, XOR)
 
 
@@ -87,6 +88,7 @@ optdb.register(
     "fuse_indexed_into_elemwise",
     fused_elemwise_optdb,
     "numba",
+    "js",
     # symbolic_op_recognition is excluded from OpFromGraph inner-graph
     # compilation, preventing recursive fusion.
     "symbolic_op_recognition",
@@ -99,7 +101,31 @@ fused_elemwise_optdb.register(
     "wrap_reduced_gather_in_elemwise",
     dfs_rewriter(wrap_reduced_gather_in_elemwise),
     "numba",
+    "js",
     position=-0.5,
+)
+
+
+@node_rewriter([CAReduce])
+def local_reduce_checked_value(fgraph, node):
+    """Let JS fuse a likelihood reduction through a scalar parameter check.
+
+    The check conditions do not depend on the reduction. Moving a check on a
+    vector after its reduction lets the elementwise producer accumulate into a
+    scalar instead of materialising the full vector first.
+    """
+    [checked] = node.inputs
+    if checked.owner is None or not isinstance(checked.owner.op, CheckAndRaise):
+        return None
+    check_node = checked.owner
+    return [check_node.op(node.op(check_node.inputs[0]), *check_node.inputs[1:])]
+
+
+fused_elemwise_optdb.register(
+    "local_reduce_checked_value",
+    dfs_rewriter(local_reduce_checked_value),
+    "js",
+    position=-1,
 )
 
 
@@ -112,7 +138,7 @@ class FusedElemwise(OpFromGraph):
 
     Inner fgraph contains the unfused subgraph.
     Non-Numba backends run it as-is via ``OpFromGraph.perform``.
-    The Numba backend generates a single loop with indirect indexing.
+    The Numba and JS backends generate a single loop with indirect indexing.
 
     Outer inputs are ordered as::
 
@@ -870,5 +896,6 @@ fused_elemwise_optdb.register(
     "fuse_elemwise",
     FuseElemwise(),
     "numba",
+    "js",
     position=1,
 )

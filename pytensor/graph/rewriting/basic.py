@@ -35,6 +35,7 @@ from pytensor.graph.rewriting.unify import (
     match_pattern,
     reify_pattern,
 )
+from pytensor.graph.trace import TraceSet, as_trace_set
 from pytensor.graph.traversal import (
     apply_ancestors,
     applys_between,
@@ -2873,50 +2874,30 @@ def pre_greedy_node_rewriter(
 
 
 def copy_stack_trace(from_var, to_var):
-    r"""Copy the stack traces from `from_var` to `to_var`.
+    r"""Merge source provenance from ``from_var`` onto ``to_var``.
 
-    Parameters
-    ----------
-    from_var :
-        `Variable` or list `Variable`\s to copy stack traces from.
-    to_var :
-        `Variable` or list `Variable`\s to copy stack traces to.
-
-    Notes
-    -----
-    The stacktrace is assumed to be of the form of a list of lists
-    of tuples. Each tuple contains the filename, line number, function name
-    and so on. Each list of tuples contains the truples belonging to a
-    particular `Variable`.
-
+    Traces are immutable and deduplicated, so graph rewrites can share their
+    provenance instead of repeatedly growing nested lists with duplicate stacks.
+    Historical list-based traces remain readable.
     """
-
-    # Store stack traces from from_var
-    tr = []
+    source = TraceSet()
     if isinstance(from_var, Iterable) and not isinstance(from_var, Variable):
-        # If from_var is a list, store concatenated stack traces
-        for v in from_var:
-            tr += getattr(v.tag, "trace", [])
-
+        for variable in from_var:
+            source = source.merge(as_trace_set(getattr(variable.tag, "trace", [])))
     else:
-        # If from_var is not a list, it must be a single tensor variable,
-        # so just store that particular stack trace
-        tr = getattr(from_var.tag, "trace", [])
+        source = as_trace_set(getattr(from_var.tag, "trace", []))
 
-    if tr and isinstance(tr[0], tuple):
-        # There was one single stack trace, we encapsulate it in a list
-        tr = [tr]
+    def merge_into(variable):
+        current = as_trace_set(getattr(variable.tag, "trace", []))
+        merged = current.merge(source)
+        if merged:
+            variable.tag.trace = merged
 
-    # Copy over stack traces to to_var
     if isinstance(to_var, Iterable) and not isinstance(to_var, Variable):
-        # Copy over stack traces from from_var to each variable in
-        # to_var, including the stack_trace of the to_var before
-        for v in to_var:
-            v.tag.trace = getattr(v.tag, "trace", []) + tr
+        for variable in to_var:
+            merge_into(variable)
     else:
-        # Copy over stack traces from from_var to each variable to
-        # to_var, including the stack_trace of the to_var before
-        to_var.tag.trace = getattr(to_var.tag, "trace", []) + tr
+        merge_into(to_var)
     return to_var
 
 
