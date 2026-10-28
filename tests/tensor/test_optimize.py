@@ -40,7 +40,16 @@ def test_constant_expressions_not_in_args():
     assert minimize_op_node.inputs == [x, a]
 
 
-def test_minimize_scalar():
+@pytest.mark.parametrize("method", ["brent", "bounded"])
+def test_minimize_scalar(method):
+    def minimize_kwargs(a, c):
+        if method == "bounded":
+            return {
+                "bounds": (0, 8 * a * c),
+                "optimizer_kwargs": {"options": {"xatol": 1e-10}},
+            }
+        return {}
+
     x = pt.scalar("x")
     a = pt.scalar("a")
     c = pt.scalar("c")
@@ -49,7 +58,9 @@ def test_minimize_scalar():
     b.name = "b"
     out = (x - b * c) ** 2
 
-    minimized_x, success = minimize_scalar(out, x)
+    minimized_x, success = minimize_scalar(
+        out, x, method=method, **minimize_kwargs(a, c)
+    )
 
     a_val = 2.0
     c_val = 3.0
@@ -63,7 +74,7 @@ def test_minimize_scalar():
 
     def f(x, a, b):
         objective = (x - a * b) ** 2
-        out = minimize_scalar(objective, x)[0]
+        out = minimize_scalar(objective, x, method=method, **minimize_kwargs(a, b))[0]
         return out
 
     utt.verify_grad(f, [0.0, a_val, c_val], eps=1e-6)
@@ -320,25 +331,29 @@ def test_minimize_mvn_logp_mu_and_cov():
 
 
 @pytest.mark.parametrize(
-    "method, jac, hess, optimizer_kwargs",
+    "method, jac, hess, bracketed",
     [
-        ("secant", False, False, None),
-        ("newton", True, False, None),
-        ("halley", True, True, None),
-        ("brentq", False, False, {"bracket": (-2, 0)}),
+        ("secant", False, False, False),
+        ("newton", True, False, False),
+        ("halley", True, True, False),
+        ("brentq", False, False, True),
+        ("bisect", False, False, True),
     ],
-    ids=["secant", "newton", "halley", "brentq"],
+    ids=["secant", "newton", "halley", "brentq", "bisect"],
 )
-def test_root_scalar(method, jac, hess, optimizer_kwargs):
+def test_root_scalar(method, jac, hess, bracketed):
     x = pt.scalar("x")
     a = pt.scalar("a")
 
     def fn(x, a):
         return x + 2 * a * pt.cos(x)
 
+    def root_kwargs(a):
+        return {"bracket": (-2 * a, 0)} if bracketed else {}
+
     f = fn(x, a)
     root_f, success = root_scalar(
-        f, x, method=method, jac=jac, hess=hess, optimizer_kwargs=optimizer_kwargs
+        f, x, method=method, jac=jac, hess=hess, **root_kwargs(a)
     )
     func = pytensor.function([x, a], [root_f, success])
 
@@ -356,9 +371,7 @@ def test_root_scalar(method, jac, hess, optimizer_kwargs):
 
     def root_fn(x, a):
         f = fn(x, a)
-        return root_scalar(
-            f, x, method=method, jac=jac, hess=hess, optimizer_kwargs=optimizer_kwargs
-        )[0]
+        return root_scalar(f, x, method=method, jac=jac, hess=hess, **root_kwargs(a))[0]
 
     utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
 

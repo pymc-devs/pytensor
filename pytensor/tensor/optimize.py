@@ -24,9 +24,10 @@ from pytensor.graph.traversal import (
     truncated_graph_inputs,
 )
 from pytensor.scalar import ScalarType, ScalarVariable
-from pytensor.tensor import as_tensor_variable
+from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import (
     atleast_2d,
+    cast,
     scalar_from_tensor,
     tensor,
     tensor_from_scalar,
@@ -35,6 +36,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.linalg.solvers.general import solve
 from pytensor.tensor.math import tensordot
 from pytensor.tensor.reshape import pack, unpack
+from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable, Variable
 
 
@@ -192,6 +194,20 @@ def _tensorize_scalar_parameters(
     return objective, inner_args, outer_args
 
 
+def _symbolic_bounds(
+    x: TensorVariable, optimizer_kwargs: dict | None, **bounds: TensorLike | None
+) -> tuple[tuple[str, ...], list[TensorVariable]]:
+    """Return the names of the given ``bounds`` and their values as vectors of ``x.dtype``."""
+    if clash := sorted(set(bounds) & set(optimizer_kwargs or {})):
+        raise ValueError(
+            f"Pass {clash} as arguments of the function, not in `optimizer_kwargs`"
+        )
+    given = {name: value for name, value in bounds.items() if value is not None}
+    return tuple(given), [
+        cast(as_tensor_variable(value, ndim=1), x.dtype) for value in given.values()
+    ]
+
+
 class ScipyWrapperOp(HasInnerFunction, Op):
     """Shared logic for scipy optimization ops.
 
@@ -205,6 +221,10 @@ class ScipyWrapperOp(HasInnerFunction, Op):
     # Attribute names (besides the frozen inner graph) that distinguish two ops
     # of the same type for eq/hash. Subclasses override.
     _scipy_props: tuple[str, ...] = ()
+
+    # Names of the scipy keyword arguments fed by the outer inputs that follow
+    # the inner-graph inputs, one vector input each.
+    bound_kwargs: tuple[str, ...] = ()
 
     @property
     def fn_wrapped(self):
@@ -266,13 +286,25 @@ class ScipyWrapperOp(HasInnerFunction, Op):
         self.fn
 
     def make_node(self, *inputs):
-        assert len(inputs) == len(self.inner_inputs)
-        inputs = [
+        assert len(inputs) == len(self.inner_inputs) + len(self.bound_kwargs)
+        inner_inputs, bound_inputs = self.split_inputs(inputs)
+        inner_inputs = [
             inner_input.type.filter_variable(input)
-            for input, inner_input in zip(inputs, self.inner_inputs)
+            for input, inner_input in zip(inner_inputs, self.inner_inputs)
         ]
+        bound_type = TensorType(dtype=self.inner_inputs[0].type.dtype, shape=(None,))
+        bound_inputs = [bound_type.filter_variable(bound) for bound in bound_inputs]
 
-        return Apply(self, inputs, [self.inner_inputs[0].type(), ps.bool("success")])
+        return Apply(
+            self,
+            [*inner_inputs, *bound_inputs],
+            [self.inner_inputs[0].type(), ps.bool("success")],
+        )
+
+    def split_inputs(self, inputs):
+        """Split outer inputs into the inner-graph inputs and the bound inputs."""
+        n_inner = len(self.inner_inputs)
+        return list(inputs[:n_inner]), list(inputs[n_inner:])
 
 
 @singledispatch
@@ -288,6 +320,41 @@ def rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
 
 
 class ScipyScalarWrapperOp(ScipyWrapperOp):
+    is_minimization: bool
+
+    def bound_values(self, bound_inputs) -> dict[str, tuple]:
+        return {
+            name: tuple(value)
+            for name, value in zip(self.bound_kwargs, bound_inputs, strict=True)
+        }
+
+    def connection_pattern(self, node=None):
+        return [
+            *_optimizer_connection_pattern(
+                self.fgraph, is_minimization=self.is_minimization
+            ),
+            *([False, False] for _ in self.bound_kwargs),
+        ]
+
+    def pullback(self, inputs, outputs, output_grads):
+        (x, *args), bound_inputs = self.split_inputs(inputs)
+        x_star, _ = outputs
+        output_grad, _ = output_grads
+
+        d_xstar_d_theta = self.compute_implicit_gradients(
+            x_star=x_star,
+            args=args,
+            output_grad=output_grad,
+            is_minimization=self.is_minimization,
+        )
+
+        # The solution is locally independent of the bracket/bounds that located it
+        return [
+            zeros_like(x),
+            *d_xstar_d_theta,
+            *(DisconnectedType()() for _ in bound_inputs),
+        ]
+
     def compile_fn(self, mode):
         # LRUCache1 hands the inner function a 0-d float64 array, whatever scalar type scipy passes
         fgraph = self.fgraph.unfreeze()
@@ -549,7 +616,8 @@ def _optimizer_connection_pattern(fgraph, is_minimization):
 
 
 class MinimizeScalarOp(ScipyScalarWrapperOp):
-    _scipy_props = ("method", "optimizer_kwargs")
+    _scipy_props = ("method", "optimizer_kwargs", "bound_kwargs")
+    is_minimization = True
 
     def __init__(
         self,
@@ -558,6 +626,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         objective: TensorVariable,
         method: str,
         optimizer_kwargs: dict | None = None,
+        bound_kwargs: tuple[str, ...] = (),
     ):
         if not (isinstance(x, TensorVariable) and x.ndim == 0):
             raise ValueError(
@@ -575,11 +644,9 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
+        self.bound_kwargs = bound_kwargs
         self._fn = None
         self._fn_wrapped = None
-
-    def connection_pattern(self, node=None):
-        return _optimizer_connection_pattern(self.fgraph, is_minimization=True)
 
     def __str__(self):
         return f"{self.__class__.__name__}(method={self.method})"
@@ -594,38 +661,26 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
 
         # minimize_scalar doesn't take x0 as an argument. The Op still needs this input (to symbolically determine
         # the args of the objective function), but it is not used in the optimization.
-        x0, *args = inputs
+        (x0, *args), bound_inputs = self.split_inputs(inputs)
 
         res = optimize.minimize_scalar(
             fun=f.value,
             args=tuple(args),
             method=self.method,
+            **self.bound_values(bound_inputs),
             **self.optimizer_kwargs,
         )
 
         outputs[0][0] = np.array(res.x, dtype=x0.dtype)
         outputs[1][0] = np.bool_(res.success)
 
-    def pullback(self, inputs, outputs, output_grads):
-        # TODO: Handle disconnected inputs
-        x, *args = inputs
-        x_star, _ = outputs
-        output_grad, _ = output_grads
-
-        d_xstar_d_theta = self.compute_implicit_gradients(
-            x_star=x_star,
-            args=args,
-            output_grad=output_grad,
-            is_minimization=True,
-        )
-
-        return [zeros_like(x), *d_xstar_d_theta]
-
 
 def minimize_scalar(
     objective: TensorVariable,
     x: TensorVariable,
     method: str = "brent",
+    bracket: TensorLike | None = None,
+    bounds: TensorLike | None = None,
     optimizer_kwargs: dict | None = None,
 ):
     """
@@ -640,6 +695,13 @@ def minimize_scalar(
         input to the computational graph of `objective`.
     method : str, optional
         The optimization method to use. Default is "brent". See `scipy.optimize.minimize_scalar` for other options.
+    bracket : TensorLike, optional
+        Two or three points that bracket a minimum, used by the "brent" and "golden" methods. It may depend on
+        other symbolic variables.
+    bounds : TensorLike, optional
+        Interval ``(a, b)`` to search for a minimum, required by the "bounded" method. It may depend on other
+        symbolic variables. Gradients of the solution are only valid when the minimum lies strictly inside the
+        interval.
     optimizer_kwargs : dict, optional
         Additional keyword arguments to pass to `scipy.optimize.minimize_scalar`.
 
@@ -654,6 +716,9 @@ def minimize_scalar(
     """
     args = _find_optimization_parameters(objective, x)
     objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
+    bound_kwargs, bound_inputs = _symbolic_bounds(
+        x, optimizer_kwargs, bracket=bracket, bounds=bounds
+    )
 
     minimize_scalar_op = MinimizeScalarOp(
         x,
@@ -661,9 +726,10 @@ def minimize_scalar(
         objective=objective,
         method=method,
         optimizer_kwargs=optimizer_kwargs,
+        bound_kwargs=bound_kwargs,
     )
 
-    solution, success = minimize_scalar_op(x, *outer_args)
+    solution, success = minimize_scalar_op(x, *outer_args, *bound_inputs)
 
     return solution, success
 
@@ -883,7 +949,8 @@ def minimize(
 
 
 class RootScalarOp(ScipyScalarWrapperOp):
-    _scipy_props = ("method", "jac", "hess", "optimizer_kwargs")
+    _scipy_props = ("method", "jac", "hess", "optimizer_kwargs", "bound_kwargs")
+    is_minimization = False
 
     def __init__(
         self,
@@ -894,6 +961,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
         jac: bool = False,
         hess: bool = False,
         optimizer_kwargs=None,
+        bound_kwargs: tuple[str, ...] = (),
     ):
         if not (isinstance(variables, TensorVariable) and variables.ndim == 0):
             raise ValueError(
@@ -929,12 +997,10 @@ class RootScalarOp(ScipyScalarWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self.jac = jac
         self.hess = hess
+        self.bound_kwargs = bound_kwargs
 
         self._fn = None
         self._fn_wrapped = None
-
-    def connection_pattern(self, node=None):
-        return _optimizer_connection_pattern(self.fgraph, is_minimization=False)
 
     def __str__(self):
         str_args = ", ".join(
@@ -950,7 +1016,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
         f = self.fn_wrapped
         f.clear_cache()
 
-        variables, *args = inputs
+        (variables, *args), bound_inputs = self.split_inputs(inputs)
 
         res = optimize.root_scalar(
             f=f.value,
@@ -959,25 +1025,12 @@ class RootScalarOp(ScipyScalarWrapperOp):
             x0=variables,
             args=tuple(args),
             method=self.method,
+            **self.bound_values(bound_inputs),
             **self.optimizer_kwargs,
         )
 
         outputs[0][0] = np.array(res.root)
         outputs[1][0] = np.bool_(res.converged)
-
-    def pullback(self, inputs, outputs, output_grads):
-        x, *args = inputs
-        x_star, _ = outputs
-        output_grad, _ = output_grads
-
-        d_xstar_d_theta = self.compute_implicit_gradients(
-            x_star=x_star,
-            args=args,
-            output_grad=output_grad,
-            is_minimization=False,
-        )
-
-        return [zeros_like(x), *d_xstar_d_theta]
 
 
 def root_scalar(
@@ -986,6 +1039,7 @@ def root_scalar(
     method: str = "secant",
     jac: bool = False,
     hess: bool = False,
+    bracket: TensorLike | None = None,
     optimizer_kwargs: dict | None = None,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
@@ -1007,6 +1061,9 @@ def root_scalar(
     hess : bool, optional
         Whether to compute and use the second derivative of the equation with respect to `variables`.
         Default is False. Some methods require this.
+    bracket : TensorLike, optional
+        Interval ``(a, b)`` on which `equation` changes sign, required by bracketing methods such as "brentq" and
+        "bisect". It may depend on other symbolic variables.
     optimizer_kwargs : dict, optional
         Additional keyword arguments to pass to `scipy.optimize.root_scalar`.
 
@@ -1022,6 +1079,9 @@ def root_scalar(
     """
     args = _find_optimization_parameters(equation, variable)
     equation, args, outer_args = _tensorize_scalar_parameters(equation, args)
+    bound_kwargs, bound_inputs = _symbolic_bounds(
+        variable, optimizer_kwargs, bracket=bracket
+    )
 
     root_scalar_op = RootScalarOp(
         variable,
@@ -1031,9 +1091,10 @@ def root_scalar(
         jac=jac,
         hess=hess,
         optimizer_kwargs=optimizer_kwargs,
+        bound_kwargs=bound_kwargs,
     )
 
-    solution, success = root_scalar_op(variable, *outer_args)
+    solution, success = root_scalar_op(variable, *outer_args, *bound_inputs)
 
     return solution, success
 
