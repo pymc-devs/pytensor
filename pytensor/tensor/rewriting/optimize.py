@@ -68,14 +68,15 @@ def remove_constants_and_duplicate_inputs_scipy(fgraph, node):
     Moving them into the inner graph enables constant-folding. Duplicate outer
     inputs can share a single inner variable.
 
-    Only args (inputs[1:]) are candidates — inputs[0] is always the
-    optimization variable x.
+    Only args are candidates. The first input is always the optimization
+    variable x, and the bound inputs that follow the args have no inner
+    counterpart.
     """
     op: ScipyWrapperOp = node.op
     # Thaw the frozen inner graph; substitutions run on the mutable copy.
     unfrozen_fgraph = op.fgraph.unfreeze()
     inner_x, *inner_args = unfrozen_fgraph.inputs
-    outer_x, *outer_args = list(node.inputs)
+    (outer_x, *outer_args), bound_inputs = op.split_inputs(node.inputs)
 
     givens = {}
     new_inner_args = []
@@ -99,5 +100,5 @@ def remove_constants_and_duplicate_inputs_scipy(fgraph, node):
     new_inner_inputs = (inner_x, *new_inner_args)
     new_fgraph = FunctionGraph(new_inner_inputs, unfrozen_fgraph.outputs, clone=False)
     new_op = op.clone_with_new_fgraph(new_fgraph)
-    new_outer_inputs = (outer_x, *new_outer_args)
+    new_outer_inputs = (outer_x, *new_outer_args, *bound_inputs)
     return new_op.make_node(*new_outer_inputs).outputs
