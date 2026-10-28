@@ -25,6 +25,7 @@ from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.scalar import Composite, float64
 from pytensor.tensor.basic import (
     Alloc,
+    AllocEmpty,
     Join,
     MakeVector,
     ScalarFromTensor,
@@ -724,6 +725,44 @@ class TestConstantFolding:
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
         assert all(isinstance(n.op, DeepCopyOp) for n in topo)
+
+    @pytest.mark.parametrize("advanced", [False, True], ids=["basic", "advanced"])
+    def test_alloc_folds_when_its_inplace_client_is_constant(self, advanced):
+        idx = constant(np.array([0, 2])) if advanced else slice(0, 2)
+
+        # An Alloc feeding an (Advanced)IncSubtensor is not folded when the update
+        # is not constant: the IncSubtensor would have to copy the constant.
+        y = pt.matrix("y")
+        out = pt.set_subtensor(pt.zeros((3, 4))[idx], y)
+        fg = FunctionGraph([y], [out], clone=True)
+        topo_constant_folding.apply(fg)
+        assert any(isinstance(node.op, Alloc) for node in fg.apply_nodes)
+
+        # It is folded when the IncSubtensor is itself constant: that folds away
+        # too, so no copy survives to run time.
+        out = pt.set_subtensor(pt.zeros((3, 4))[idx], np.ones((2, 4)))
+        fg = FunctionGraph([], [out], clone=True)
+        topo_constant_folding.apply(fg)
+        assert isinstance(fg.outputs[0], Constant)
+
+    def test_alloc_empty_folds_only_into_a_constant_client(self):
+        # An undefined buffer is worth keeping unless it folds away entirely.
+        y = pt.matrix("y")
+        out = pt.set_subtensor(pt.empty((3, 4))[:2], y)
+        fg = FunctionGraph([y], [out], clone=True)
+        topo_constant_folding.apply(fg)
+        assert any(isinstance(node.op, AllocEmpty) for node in fg.apply_nodes)
+
+        out = pt.set_subtensor(pt.empty((3, 4))[:2], np.ones((2, 4)))
+        fg = FunctionGraph([], [out], clone=True)
+        topo_constant_folding.apply(fg)
+        assert isinstance(fg.outputs[0], Constant)
+
+        # It is also not folded when it is an output, which would hand out the same
+        # undefined values on every call.
+        fg = FunctionGraph([], [pt.empty((3, 4))], clone=True)
+        topo_constant_folding.apply(fg)
+        assert any(isinstance(node.op, AllocEmpty) for node in fg.apply_nodes)
 
     @pytest.mark.xfail(
         reason="PyTensor rewrites constants before stabilization. "
