@@ -320,10 +320,16 @@ def test_minimize_mvn_logp_mu_and_cov():
 
 
 @pytest.mark.parametrize(
-    "method, jac, hess",
-    [("secant", False, False), ("newton", True, False), ("halley", True, True)],
+    "method, jac, hess, optimizer_kwargs",
+    [
+        ("secant", False, False, None),
+        ("newton", True, False, None),
+        ("halley", True, True, None),
+        ("brentq", False, False, {"bracket": (-2, 0)}),
+    ],
+    ids=["secant", "newton", "halley", "brentq"],
 )
-def test_root_scalar(method, jac, hess):
+def test_root_scalar(method, jac, hess, optimizer_kwargs):
     x = pt.scalar("x")
     a = pt.scalar("a")
 
@@ -331,7 +337,9 @@ def test_root_scalar(method, jac, hess):
         return x + 2 * a * pt.cos(x)
 
     f = fn(x, a)
-    root_f, success = root_scalar(f, x, method=method, jac=jac, hess=hess)
+    root_f, success = root_scalar(
+        f, x, method=method, jac=jac, hess=hess, optimizer_kwargs=optimizer_kwargs
+    )
     func = pytensor.function([x, a], [root_f, success])
 
     x0 = 0.0
@@ -348,7 +356,9 @@ def test_root_scalar(method, jac, hess):
 
     def root_fn(x, a):
         f = fn(x, a)
-        return root_scalar(f, x, method=method, jac=jac, hess=hess)[0]
+        return root_scalar(
+            f, x, method=method, jac=jac, hess=hess, optimizer_kwargs=optimizer_kwargs
+        )[0]
 
     utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
 

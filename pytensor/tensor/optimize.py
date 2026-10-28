@@ -68,7 +68,6 @@ class LRUCache1:
         self.last_result = None
         self.copy_x = copy_x
 
-        # Scipy does not respect dtypes *at all*, so we have to force it ourselves.
         self.dtype = fn.maker.fgraph.inputs[0].type.dtype
 
         self.cache_hits = 0
@@ -86,7 +85,8 @@ class LRUCache1:
         If the input `x` is the same as the last input, return the cached result. Otherwise update the cache with the
         new input and result.
         """
-        x = x.astype(self.dtype)
+        # Scipy does not respect dtypes *at all*, and its C bracketing methods pass bare python floats.
+        x = np.asarray(x, dtype=self.dtype)
 
         if self.last_result is None or not (x == self.last_x).all():
             self.cache_misses += 1
@@ -289,12 +289,11 @@ def rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
 
 class ScipyScalarWrapperOp(ScipyWrapperOp):
     def compile_fn(self, mode):
-        # We need to adjust the graph to work with what scipy will be passing into the inner function --
-        # always scalar array of float64 type
+        # LRUCache1 hands the inner function a 0-d float64 array, whatever scalar type scipy passes
         fgraph = self.fgraph.unfreeze()
         x, *args = fgraph.inputs
-        new_root_x = ps.float64(name="x_scalar")
-        new_x = tensor_from_scalar(new_root_x.astype(x.type.dtype))
+        new_root_x = tensor(name="x_scalar", dtype="float64", shape=())
+        new_x = new_root_x.astype(x.type.dtype)
 
         new_outputs = graph_replace(fgraph.outputs, {x: new_x})
 
@@ -950,7 +949,6 @@ class RootScalarOp(ScipyScalarWrapperOp):
 
         f = self.fn_wrapped
         f.clear_cache()
-        # f.copy_x = True
 
         variables, *args = inputs
 
