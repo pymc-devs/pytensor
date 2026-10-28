@@ -944,13 +944,18 @@ def _build_reduce_impl_src(nout, post_specs):
         kept_axes, out_dtype, cast_needed = spec
         np_dtype = "bool_" if out_dtype == "bool" else out_dtype
         if not kept_axes:
-            # Full reduction → 0-d array of the single accumulated value.
-            code.append(f"{sym} = np.array({src}.ravel()[0], dtype=np.{np_dtype})")
+            expr = f"as_strided({src}, shape=(), strides=())"
+            if cast_needed:
+                expr = f"np.array({expr}[()], dtype=np.{np_dtype})"
+            code.append(f"{sym} = {expr}")
         else:
             shape_expr = create_tuple_string(
                 tuple(f"{src}.shape[{k}]" for k in kept_axes)
             )
-            expr = f"{src}.reshape({shape_expr})"
+            strides_expr = create_tuple_string(
+                tuple(f"{src}.strides[{k}]" for k in kept_axes)
+            )
+            expr = f"as_strided({src}, shape={shape_expr}, strides={strides_expr})"
             if cast_needed:
                 expr = f"{expr}.astype(np.{np_dtype})"
             code.append(f"{sym} = {expr}")
@@ -1152,7 +1157,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 10
+    cache_version = 11
     if scalar_cache_key is None:
         key = None
     else:
