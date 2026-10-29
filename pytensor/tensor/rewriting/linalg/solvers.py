@@ -1,5 +1,7 @@
 from collections.abc import Container
 
+import numpy as np
+
 from pytensor import tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
@@ -51,6 +53,8 @@ from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
     clients_through_expand_dims,
     get_assume_a,
+    kron_eigh,
+    kron_plus_scaled_eye_consumers,
     strip_left_expand_dims_and_transpose,
 )
 
@@ -644,6 +648,52 @@ def solve_of_kron(fgraph, node):
 
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([KroneckerProduct])
+def solve_of_kron_plus_diag_noise(fgraph, node):
+    """solve(kron(*Ks) + c * I, b) -> Q @ ((Q.mT @ b) / d), from eigh of each K_i
+
+    Q = kron(*Q_i) and d = kron(*d_i) + c, so neither the Kronecker matrix nor a
+    dense solve is formed. For assume_a="pos" the result is NaN unless every
+    eigenvalue is positive, matching the failed Cholesky of the original.
+    """
+    # Dropping the Add also drops its check that the eye matches the kron's shape.
+    found = kron_plus_scaled_eye_consumers(fgraph, node, Solve)
+    if found is None:
+        return None
+    Ks, consumers = found
+
+    replacements = {}
+    for consumer, c in consumers:
+        core_op = consumer.op.core_op
+        is_pos = core_op.assume_a == "pos"
+        # A Kronecker product plus c * I is tridiagonal only in degenerate cases, and
+        # positive definiteness is not decided by d + c > 0 for a complex c.
+        if core_op.assume_a == "tridiagonal" or (
+            is_pos and c.type.dtype.startswith("complex")
+        ):
+            continue
+        _, b = consumer.inputs
+        [old_out] = consumer.outputs
+        Q, kron_d = kron_eigh(Ks, old_out.type.dtype)
+        d = kron_d + c
+        # Vector b may carry batch dims, so solve it as a single column. Keeping
+        # Q on the left of each matmul lets dot_of_kron split it.
+        is_vector_b = core_op.b_ndim == 1
+        if is_vector_b:
+            b = b[..., None]
+        new_out = Q @ ((Q.mT @ b) / d[..., :, None])
+        if is_vector_b:
+            new_out = new_out[..., 0]
+        if is_pos:
+            new_out = pt.switch(pt.all(d > 0), new_out, np.nan)
+        new_out = new_out.astype(old_out.type.dtype)
+        copy_stack_trace(old_out, new_out)
+        replacements[old_out] = new_out
+    return replacements or None
 
 
 @register_canonicalize

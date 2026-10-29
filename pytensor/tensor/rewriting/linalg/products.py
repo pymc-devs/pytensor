@@ -25,7 +25,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import Expm, KroneckerProduct
-from pytensor.tensor.linalg.summary import det
+from pytensor.tensor.linalg.summary import Det, det
 from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -34,6 +34,8 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
+    kron_eigh,
+    kron_plus_scaled_eye_consumers,
     permutation_indices_to_det_sign,
     strip_left_expand_dims_and_transpose,
 )
@@ -193,6 +195,28 @@ def det_of_kronecker(fgraph, node):
             )
             [out] = node.outputs
             return [atleast_Nd(det_final, n=out.type.ndim).astype(out.type.dtype)]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([KroneckerProduct])
+def det_of_kron_plus_diag_noise(fgraph, node):
+    """det(kron(*Ks) + c * I) -> prod(kron(*d_i) + c), from eigh of each K_i"""
+    # Dropping the Add also drops its check that the eye matches the kron's shape.
+    found = kron_plus_scaled_eye_consumers(fgraph, node, Det)
+    if found is None:
+        return None
+    Ks, consumers = found
+
+    replacements = {}
+    for consumer, c in consumers:
+        [old_out] = consumer.outputs
+        _, kron_d = kron_eigh(Ks, old_out.type.dtype)
+        new_out = prod(kron_d + c, axis=-1)
+        new_out = atleast_Nd(new_out, n=old_out.type.ndim).astype(old_out.type.dtype)
+        copy_stack_trace(old_out, new_out)
+        replacements[old_out] = new_out
+    return replacements
 
 
 @register_canonicalize

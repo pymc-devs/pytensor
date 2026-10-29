@@ -1,3 +1,5 @@
+from functools import reduce
+
 import numpy as np
 import pytest
 import scipy.linalg
@@ -12,7 +14,9 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.summary import det, slogdet
 from pytensor.tensor.math import Dot
 from tests.unittest_tools import RewriteTester, assert_equal_computations
 
@@ -342,6 +346,87 @@ def test_dot_of_kron_with_vector_factor_not_rewritten():
     result = RewriteTester([v, M, X], [build()], include=["canonicalize"])
     expected = rewrite_graph(
         build(), include=["canonicalize"], exclude=("dot_of_kron",)
+    )
+    result.assert_graph(expected)
+
+
+@pytest.mark.parametrize(
+    "dims, batched",
+    [((4, 3), False), ((3, 2, 4), False), ((4, 3), True)],
+    ids=["two_way", "n_way", "batched"],
+)
+def test_slogdet_of_kron_plus_diag_noise(dims, batched):
+    rng = np.random.default_rng(0)
+    N = int(np.prod(dims))
+    Ks = [pt.dmatrix(f"K{i}", shape=(n, n)) for i, n in enumerate(dims)]
+    sigma = pt.dscalar("sigma")
+    noisy = reduce(pt.linalg.kron, [assume(K, symmetric=True) for K in Ks])
+    noisy = noisy + sigma**2 * pt.eye(N)
+    if batched:
+        noisy = noisy[None]
+    _, log_det = slogdet(noisy)
+    include = ["canonicalize", "stabilize", "specialize", "slogdet_specialization"]
+    result = RewriteTester([*Ks, sigma], [log_det], include=include)
+
+    ds = [eigh(K)[0] for K in Ks]
+    d = reduce(lambda a, b: pt.outer(a, b).ravel(), ds) + sigma**2
+    expected = pt.log(pt.abs(d.prod()))
+    if batched:
+        expected = expected[None]
+    result.assert_graph(rewrite_graph(expected, include=["stabilize", "specialize"]))
+
+    def random_pd(n):
+        a = rng.normal(size=(n, n))
+        return a @ a.T + np.eye(n)
+
+    result.assert_eval(*(random_pd(n) for n in dims), 0.7)
+
+
+@pytest.mark.parametrize(
+    "symmetric, make_noise",
+    [
+        pytest.param(False, lambda s, v, N: s**2 * pt.eye(N), id="asymmetric_factors"),
+        pytest.param(
+            True, lambda s, v, N: v[:, None] * pt.eye(N), id="non_uniform_noise"
+        ),
+        pytest.param(True, lambda s, v, N: s * pt.eye(1), id="broadcast_eye"),
+    ],
+)
+def test_det_of_kron_plus_diag_noise_not_rewritten(symmetric, make_noise):
+    m, p = 4, 3
+    N = m * p
+    K1 = pt.dmatrix("K1", shape=(m, m))
+    K2 = pt.dmatrix("K2", shape=(p, p))
+    s = pt.dscalar("s")
+    v = pt.dvector("v", shape=(N,))
+
+    def build():
+        factors = (K1, K2)
+        if symmetric:
+            factors = (assume(K, symmetric=True) for K in factors)
+        return det(pt.linalg.kron(*factors) + make_noise(s, v, N))
+
+    include = ["canonicalize", "stabilize"]
+    result = RewriteTester([K1, K2, s, v], [build()], include=include)
+    expected = rewrite_graph(
+        build(), include=include, exclude=("det_of_kron_plus_diag_noise",)
+    )
+    result.assert_graph(expected)
+
+
+def test_det_of_broadcast_kron_plus_diag_noise_not_rewritten():
+    K1 = pt.dmatrix("K1", shape=(1, 1))
+    K2 = pt.dmatrix("K2", shape=(1, 1))
+    s = pt.dscalar("s")
+
+    def build():
+        kron = pt.linalg.kron(assume(K1, symmetric=True), assume(K2, symmetric=True))
+        return det(kron + s * pt.eye(4))
+
+    include = ["canonicalize", "stabilize"]
+    result = RewriteTester([K1, K2, s], [build()], include=include)
+    expected = rewrite_graph(
+        build(), include=include, exclude=("det_of_kron_plus_diag_noise",)
     )
     result.assert_graph(expected)
 
