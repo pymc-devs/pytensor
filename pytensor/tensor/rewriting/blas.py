@@ -898,6 +898,10 @@ def specialize_matmul_to_batched_dot(fgraph, node):
     """
     x, y = node.inputs
 
+    if node.outputs[0].dtype == "bool":
+        # BatchedDot's BLAS implementation does not support the boolean semiring.
+        return None
+
     if x.type.ndim < 3:
         # This doesn't actually have a batch dimension
         return None

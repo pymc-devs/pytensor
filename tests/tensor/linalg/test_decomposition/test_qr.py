@@ -15,7 +15,7 @@ from tests import unittest_tools as utt
 def test_qr_grad_dynamic_shape():
     a = tensor("a", dtype=config.floatX, shape=(None, None))
     q, r = qr(a, mode="economic")
-    gradient = function([a], grad((q @ r).sum(), a))
+    gradient = function([a], grad((q @ r).sum(), a), mode="FAST_COMPILE")
     rng = np.random.default_rng(utt.fetch_seed())
     for shape in ((4, 3), (3, 4)):
         value = rng.normal(size=shape).astype(config.floatX)
