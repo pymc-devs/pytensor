@@ -2,10 +2,10 @@ from typing import Literal, cast
 
 import numpy as np
 
-from pytensor import ifelse
 from pytensor import tensor as pt
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph import Apply, Op
+from pytensor.ifelse import ifelse
 from pytensor.raise_op import Assert
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
