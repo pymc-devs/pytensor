@@ -6,9 +6,20 @@ from scipy import linalg as scipy_linalg
 
 from pytensor import function
 from pytensor.configdefaults import config
+from pytensor.gradient import grad
 from pytensor.tensor.linalg import qr
 from pytensor.tensor.type import tensor
 from tests import unittest_tools as utt
+
+
+def test_qr_grad_dynamic_shape():
+    a = tensor("a", dtype=config.floatX, shape=(None, None))
+    q, r = qr(a, mode="economic")
+    gradient = function([a], grad((q @ r).sum(), a))
+    rng = np.random.default_rng(utt.fetch_seed())
+    for shape in ((4, 3), (3, 4)):
+        value = rng.normal(size=shape).astype(config.floatX)
+        np.testing.assert_allclose(gradient(value), np.ones(shape), rtol=1e-6)
 
 
 @pytest.mark.parametrize(
