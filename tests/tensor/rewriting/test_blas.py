@@ -36,6 +36,22 @@ def XYZab():
     return matrix(), matrix(), matrix(), scalar(), scalar()
 
 
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "CVM", "NUMBA"])
+def test_boolean_batched_matmul(mode):
+    if mode == "NUMBA":
+        pytest.importorskip("numba")
+    x, y = (tensor(name, dtype="bool", shape=(None, None, None)) for name in ("x", "y"))
+    fn = function([x, y], matmul(x, y), mode=mode)
+    assert not any(
+        isinstance(node.op, BatchedDot) for node in fn.maker.fgraph.toposort()
+    )
+    rng = np.random.default_rng(42)
+    for inner in (4, 0):
+        left = rng.random((2, 3, inner)) > 0.5
+        right = rng.random((2, inner, 5)) > 0.5
+        np.testing.assert_array_equal(fn(left, right), left @ right)
+
+
 @pytest.mark.skipif(
     config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
 )

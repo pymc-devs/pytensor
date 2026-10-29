@@ -1,0 +1,1828 @@
+{
+  "gist": "https://gist.github.com/jessegrabowski/1cd7ce787755c514c239be29c9e583d9",
+  "revision": "524b2af7118d48c9ade25babb3e44f763fbe4baa",
+  "mode": "FAST_COMPILE",
+  "on_opt_error": "raise",
+  "cases": 84,
+  "completed_cases": 80,
+  "evaluations": 88,
+  "cases_exact_at_all_test_points": 74,
+  "missed_numeric_nonzeros": 0,
+  "direct_reference_comparisons": [
+    {
+      "case": "max(matrix, axis=0)",
+      "ours": 12,
+      "gist": 12,
+      "only_ours": 0,
+      "only_gist": 0
+    },
+    {
+      "case": "batch @ batched constant",
+      "ours": 64,
+      "gist": 120,
+      "only_ours": 0,
+      "only_gist": 56
+    },
+    {
+      "case": "switch(matrix > 0, matrix, row)",
+      "ours": 24,
+      "gist": 24,
+      "only_ours": 0,
+      "only_gist": 0
+    },
+    {
+      "case": "y - y.T",
+      "ours": 28,
+      "gist": 28,
+      "only_ours": 0,
+      "only_gist": 0
+    },
+    {
+      "case": "QR of square * block-diagonal mask",
+      "ours": 44,
+      "gist": 44,
+      "only_ours": 0,
+      "only_gist": 0
+    }
+  ],
+  "results": [
+    {
+      "cell": 31,
+      "group": "masked_reductions",
+      "case": "sum(set_subtensor(matrix[1], 0))",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            1,
+            12
+          ],
+          "detected_nnz": 9,
+          "numeric_nnz": 9,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 31,
+      "group": "masked_reductions",
+      "case": "sum(matrix * mask, axis=1)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            12
+          ],
+          "detected_nnz": 6,
+          "numeric_nnz": 6,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 31,
+      "group": "masked_reductions",
+      "case": "sum(matrix * mask)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            1,
+            12
+          ],
+          "detected_nnz": 6,
+          "numeric_nnz": 6,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 35,
+      "group": "dot_graphs",
+      "case": "dot(block_diag(first, second), vector)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            5,
+            18
+          ],
+          "detected_nnz": 26,
+          "numeric_nnz": 26,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 35,
+      "group": "dot_graphs",
+      "case": "dot(matrix * row_mask, other_matrix)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            8,
+            18
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 43,
+      "group": "solve_graphs",
+      "case": "solve(block-diagonal constant, rhs)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            4
+          ],
+          "detected_nnz": 7,
+          "numeric_nnz": 7,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 43,
+      "group": "solve_graphs",
+      "case": "solve(block_diag(first, second), rhs)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            12
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 51,
+      "group": "kron",
+      "case": "kron(small, other_small)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            24,
+            10
+          ],
+          "detected_nnz": 48,
+          "numeric_nnz": 48,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 51,
+      "group": "kron",
+      "case": "kron(eye(2), other_small)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            24,
+            6
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 51,
+      "group": "kron",
+      "case": "kron(other_small, eye(2))",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            24,
+            6
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "matrix * row",
+      "gist_nnz": 24,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "matrix * [0, 0, 1]",
+      "gist_nnz": 4,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            12
+          ],
+          "detected_nnz": 4,
+          "numeric_nnz": 4,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "[0, 0, 1] / row",
+      "gist_nnz": 1,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            3,
+            3
+          ],
+          "detected_nnz": 1,
+          "numeric_nnz": 1,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "switch([1, 0, 1], matrix, row)",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "matrix.T",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "matrix[1:3, ::2]",
+      "gist_nnz": 4,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            12
+          ],
+          "detected_nnz": 4,
+          "numeric_nnz": 4,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "matrix.reshape((2, 6))",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "join(0, matrix, row[None, :])",
+      "gist_nnz": 15,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            15,
+            15
+          ],
+          "detected_nnz": 15,
+          "numeric_nnz": 15,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "block_diag(first_block, second_block)",
+      "gist_nnz": 13,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            25,
+            13
+          ],
+          "detected_nnz": 13,
+          "numeric_nnz": 13,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "set_subtensor(matrix[1], row)",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "inc_subtensor(matrix[1:3], row)",
+      "gist_nnz": 18,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 18,
+          "numeric_nnz": 18,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "inc_subtensor(matrix[[0, 0, 2]], rows_to_add)",
+      "gist_nnz": 21,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            21
+          ],
+          "detected_nnz": 21,
+          "numeric_nnz": 21,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "sum(matrix, axis=1)",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "max(matrix, axis=0)",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            3,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 3,
+          "missed": 0,
+          "extra": 9
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "matrix @ other_matrix",
+      "gist_nnz": 48,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            8,
+            18
+          ],
+          "detected_nnz": 48,
+          "numeric_nnz": 48,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "batch @ other_matrix",
+      "gist_nnz": 240,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            40,
+            66
+          ],
+          "detected_nnz": 240,
+          "numeric_nnz": 240,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "kron(small, other_small)",
+      "gist_nnz": 48,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            24,
+            10
+          ],
+          "detected_nnz": 48,
+          "numeric_nnz": 48,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 58,
+      "group": "single_nodes",
+      "case": "kron(eye(2), other_small)",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            24,
+            6
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 59,
+      "group": "batched",
+      "case": "batch @ unbatched constant",
+      "gist_nnz": 80,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            40,
+            60
+          ],
+          "detected_nnz": 80,
+          "numeric_nnz": 80,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 59,
+      "group": "batched",
+      "case": "batch @ batched constant",
+      "gist_nnz": 120,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            40,
+            60
+          ],
+          "detected_nnz": 64,
+          "numeric_nnz": 64,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 59,
+      "group": "batched",
+      "case": "broadcast batch dims",
+      "gist_nnz": 240,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            40,
+            42
+          ],
+          "detected_nnz": 240,
+          "numeric_nnz": 240,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve",
+      "gist_nnz": 80,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            20
+          ],
+          "detected_nnz": 80,
+          "numeric_nnz": 80,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve, matrix rhs",
+      "gist_nnz": 160,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            8,
+            24
+          ],
+          "detected_nnz": 160,
+          "numeric_nnz": 160,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve, block-diagonal constant",
+      "gist_nnz": 7,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            4
+          ],
+          "detected_nnz": 7,
+          "numeric_nnz": 7,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve, sym lower",
+      "gist_nnz": 80,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            20
+          ],
+          "detected_nnz": 80,
+          "numeric_nnz": 80,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve, tridiagonal",
+      "gist_nnz": 80,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            20
+          ],
+          "detected_nnz": 80,
+          "numeric_nnz": 80,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve_triangular, lower",
+      "gist_nnz": 30,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            20
+          ],
+          "detected_nnz": 30,
+          "numeric_nnz": 30,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "solve_triangular, unit diagonal",
+      "gist_nnz": 20,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            20
+          ],
+          "detected_nnz": 20,
+          "numeric_nnz": 20,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "cho_solve, lower",
+      "gist_nnz": 56,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            20
+          ],
+          "detected_nnz": 56,
+          "numeric_nnz": 56,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "cho_solve, upper",
+      "gist_nnz": 112,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            8,
+            24
+          ],
+          "detected_nnz": 112,
+          "numeric_nnz": 112,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 60,
+      "group": "solvers",
+      "case": "cho_solve, block-diagonal constant",
+      "gist_nnz": 8,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            4
+          ],
+          "detected_nnz": 8,
+          "numeric_nnz": 8,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 62,
+      "group": "cholesky",
+      "case": "cholesky, lower",
+      "gist_nnz": 45,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 45,
+          "numeric_nnz": 45,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 62,
+      "group": "cholesky",
+      "case": "cholesky, upper",
+      "gist_nnz": 45,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 45,
+          "numeric_nnz": 45,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 62,
+      "group": "cholesky",
+      "case": "cholesky, tridiagonal",
+      "gist_nnz": 28,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 28,
+          "numeric_nnz": 28,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 62,
+      "group": "cholesky",
+      "case": "cholesky, arrow first",
+      "gist_nnz": 36,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 36,
+          "numeric_nnz": 36,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 62,
+      "group": "cholesky",
+      "case": "cholesky, arrow last",
+      "gist_nnz": 16,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 16,
+          "numeric_nnz": 16,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 62,
+      "group": "cholesky",
+      "case": "cholesky, tridiagonal upper",
+      "gist_nnz": 28,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 28,
+          "numeric_nnz": 28,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 63,
+      "group": "piecewise",
+      "case": "floor(matrix) + row",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 63,
+      "group": "piecewise",
+      "case": "sign(matrix) * row",
+      "gist_nnz": 12,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 63,
+      "group": "piecewise",
+      "case": "switch(matrix > 0, matrix, row)",
+      "gist_nnz": 24,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 12
+        }
+      ]
+    },
+    {
+      "cell": 63,
+      "group": "piecewise",
+      "case": "all(matrix) * row",
+      "gist_nnz": 3,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            3,
+            15
+          ],
+          "detected_nnz": 3,
+          "numeric_nnz": 3,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 64,
+      "group": "sharing",
+      "case": "exp(x) * exp(x)[::-1] + sin(exp(x))",
+      "gist_nnz": 9,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            5,
+            5
+          ],
+          "detected_nnz": 9,
+          "numeric_nnz": 9,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 65,
+      "group": "diamond",
+      "case": "y + y.T",
+      "gist_nnz": 28,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 28,
+          "numeric_nnz": 28,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 65,
+      "group": "diamond",
+      "case": "sum(y + y.T)",
+      "gist_nnz": 16,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            1,
+            16
+          ],
+          "detected_nnz": 16,
+          "numeric_nnz": 16,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 65,
+      "group": "diamond",
+      "case": "Hessian of sum((y + y.T) ** 2)",
+      "gist_nnz": 28,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 28,
+          "numeric_nnz": 28,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 65,
+      "group": "diamond",
+      "case": "y - y.T",
+      "gist_nnz": 28,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            16,
+            16
+          ],
+          "detected_nnz": 28,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 4
+        }
+      ]
+    },
+    {
+      "cell": 67,
+      "group": "qr",
+      "case": "QR of a tall matrix",
+      "gist_nnz": 215,
+      "status": "error",
+      "stage": "evaluate",
+      "error": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "cell": 67,
+      "group": "qr",
+      "case": "QR of a square matrix",
+      "gist_nnz": 264,
+      "status": "error",
+      "stage": "evaluate",
+      "error": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "cell": 67,
+      "group": "qr",
+      "case": "QR of a wide matrix",
+      "gist_nnz": 147,
+      "status": "error",
+      "stage": "evaluate",
+      "error": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "cell": 67,
+      "group": "qr",
+      "case": "QR of square * block-diagonal mask",
+      "gist_nnz": 44,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            32,
+            16
+          ],
+          "detected_nnz": 44,
+          "numeric_nnz": 36,
+          "missed": 0,
+          "extra": 8
+        }
+      ]
+    },
+    {
+      "cell": 67,
+      "group": "qr",
+      "case": "Q @ R",
+      "gist_nnz": 160,
+      "status": "error",
+      "stage": "evaluate",
+      "error": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "matrix * row",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            10,
+            15
+          ],
+          "detected_nnz": 20,
+          "numeric_nnz": 20,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "sum(matrix, axis=0)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            3,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            5,
+            10
+          ],
+          "detected_nnz": 10,
+          "numeric_nnz": 10,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "set_subtensor(square[1], rhs)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            9,
+            12
+          ],
+          "detected_nnz": 9,
+          "numeric_nnz": 9,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            36,
+            42
+          ],
+          "detected_nnz": 36,
+          "numeric_nnz": 36,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "block_diag(square, square[:2, :2])",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            25,
+            9
+          ],
+          "detected_nnz": 13,
+          "numeric_nnz": 13,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            64,
+            36
+          ],
+          "detected_nnz": 40,
+          "numeric_nnz": 40,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "batch @ square",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            18,
+            27
+          ],
+          "detected_nnz": 108,
+          "numeric_nnz": 108,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            36,
+            72
+          ],
+          "detected_nnz": 432,
+          "numeric_nnz": 432,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "kron(eye(2), square)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            36,
+            9
+          ],
+          "detected_nnz": 18,
+          "numeric_nnz": 18,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            144,
+            36
+          ],
+          "detected_nnz": 72,
+          "numeric_nnz": 72,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "solve_triangular(square, rhs)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            3,
+            12
+          ],
+          "detected_nnz": 16,
+          "numeric_nnz": 16,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            6,
+            42
+          ],
+          "detected_nnz": 77,
+          "numeric_nnz": 77,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 70,
+      "group": "two_shapes",
+      "case": "cholesky(square + 10 I)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "small",
+          "shape": [
+            9,
+            9
+          ],
+          "detected_nnz": 19,
+          "numeric_nnz": 19,
+          "missed": 0,
+          "extra": 0
+        },
+        {
+          "point": "large",
+          "shape": [
+            36,
+            36
+          ],
+          "detected_nnz": 161,
+          "numeric_nnz": 161,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 73,
+      "group": "broadcast",
+      "case": "a * b",
+      "gist_nnz": 24,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 73,
+      "group": "broadcast",
+      "case": "a * [0, 0, 1]",
+      "gist_nnz": 4,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            12
+          ],
+          "detected_nnz": 4,
+          "numeric_nnz": 4,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 76,
+      "group": "nonlinear",
+      "case": "five-equation system",
+      "gist_nnz": 9,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            5,
+            5
+          ],
+          "detected_nnz": 9,
+          "numeric_nnz": 9,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 79,
+      "group": "hessian",
+      "case": "Rosenbrock Hessian",
+      "gist_nnz": 22,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            8,
+            8
+          ],
+          "detected_nnz": 22,
+          "numeric_nnz": 22,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 84,
+      "group": "cge",
+      "case": "five-sector CGE",
+      "gist_nnz": 168,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            49,
+            49
+          ],
+          "detected_nnz": 168,
+          "numeric_nnz": 168,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 89,
+      "group": "car",
+      "case": "Hessian, through W",
+      "gist_nnz": 73,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            11,
+            11
+          ],
+          "detected_nnz": 73,
+          "numeric_nnz": 73,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 89,
+      "group": "car",
+      "case": "Hessian, through Q",
+      "gist_nnz": 73,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            11,
+            11
+          ],
+          "detected_nnz": 73,
+          "numeric_nnz": 73,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 95,
+      "group": "derivative_semantics",
+      "case": "switch(x > 1, x, y)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            6,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 6,
+          "missed": 0,
+          "extra": 6
+        }
+      ]
+    },
+    {
+      "cell": 95,
+      "group": "derivative_semantics",
+      "case": "floor(2 * x) * y",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            6,
+            12
+          ],
+          "detected_nnz": 6,
+          "numeric_nnz": 6,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 95,
+      "group": "derivative_semantics",
+      "case": "max(x)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            1,
+            6
+          ],
+          "detected_nnz": 6,
+          "numeric_nnz": 1,
+          "missed": 0,
+          "extra": 5
+        }
+      ]
+    },
+    {
+      "cell": 106,
+      "group": "coloring_patterns",
+      "case": "exp(matrix) * row, columns of matrix",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 106,
+      "group": "coloring_patterns",
+      "case": "exp(matrix) * row, columns of row",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            12,
+            15
+          ],
+          "detected_nnz": 24,
+          "numeric_nnz": 24,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 106,
+      "group": "coloring_patterns",
+      "case": "sum(matrix ** 2, axis=1)",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            4,
+            12
+          ],
+          "detected_nnz": 12,
+          "numeric_nnz": 12,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 106,
+      "group": "coloring_patterns",
+      "case": "exp(batch) @ square, columns of batch",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            60,
+            69
+          ],
+          "detected_nnz": 360,
+          "numeric_nnz": 360,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    },
+    {
+      "cell": 106,
+      "group": "coloring_patterns",
+      "case": "x[1:] * x[:-1]",
+      "gist_nnz": null,
+      "status": "no_misses_at_test_points",
+      "evaluations": [
+        {
+          "point": "default",
+          "shape": [
+            5,
+            6
+          ],
+          "detected_nnz": 10,
+          "numeric_nnz": 10,
+          "missed": 0,
+          "extra": 0
+        }
+      ]
+    }
+  ],
+  "cholesky_graph_comparison": {
+    "case": "cholesky(x + 10 * eye(n))",
+    "cleanup": [
+      "ShapeOpt",
+      "canonicalize"
+    ],
+    "fusion": false,
+    "rows": [
+      {
+        "shape": [
+          null,
+          null
+        ],
+        "approach": "vjp",
+        "outer_nodes": 106,
+        "scan_nodes": 2,
+        "scan_inner_nodes": 75,
+        "total_nodes": 181
+      },
+      {
+        "shape": [
+          null,
+          null
+        ],
+        "approach": "gist",
+        "outer_nodes": 36,
+        "scan_nodes": 1,
+        "scan_inner_nodes": 77,
+        "total_nodes": 113
+      },
+      {
+        "shape": [
+          4,
+          4
+        ],
+        "approach": "vjp",
+        "outer_nodes": 23,
+        "scan_nodes": 2,
+        "scan_inner_nodes": 72,
+        "total_nodes": 95
+      },
+      {
+        "shape": [
+          4,
+          4
+        ],
+        "approach": "gist",
+        "outer_nodes": 21,
+        "scan_nodes": 1,
+        "scan_inner_nodes": 77,
+        "total_nodes": 98
+      }
+    ]
+  }
+}
