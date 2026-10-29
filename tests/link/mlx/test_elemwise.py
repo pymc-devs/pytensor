@@ -37,10 +37,22 @@ from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.special import log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector, vectors
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import (
+    compare_mlx_and_py,
+    mlx_mode,
+    mlx_mode_no_compile,
+)
+from tests.tensor.test_elemwise import check_elemwise_runtime_broadcast
 
 
 mx = pytest.importorskip("mlx.core")
+
+
+@pytest.mark.parametrize(
+    "mode", [mlx_mode, mlx_mode_no_compile], ids=["compiled", "uncompiled"]
+)
+def test_elemwise_runtime_broadcast(mode):
+    check_elemwise_runtime_broadcast(mode)
 
 
 @pytest.mark.parametrize("op", [pt_any, pt_all, pt_max, pt_min])
