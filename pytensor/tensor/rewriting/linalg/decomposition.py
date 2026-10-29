@@ -454,6 +454,7 @@ def eigh_of_diag(fgraph, node):
     - ``eigh(A, B)`` with both diagonal -> eigenvalues are ``a / b``; eigenvectors are
       ``e_i / sqrt(b_i)`` so they satisfy ``V^T B V = I``.
     """
+    w, v = node.outputs
     if len(node.inputs) == 1:
         [X] = node.inputs
         if not check_assumption(fgraph, X, DIAGONAL):
@@ -461,7 +462,7 @@ def eigh_of_diag(fgraph, node):
         diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
         sort_idx = pt.argsort(diag_vals, axis=-1)
         new_w = pt.take_along_axis(diag_vals, sort_idx, axis=-1)
-        new_v = pt.eye(X.shape[-1])[sort_idx].mT
+        new_v = pt.eye(X.shape[-1], dtype=v.type.dtype)[sort_idx].mT
     elif len(node.inputs) == 2:
         A, B = node.inputs
         if not check_assumption(fgraph, A, DIAGONAL):
@@ -475,11 +476,12 @@ def eigh_of_diag(fgraph, node):
         new_w = pt.take_along_axis(eigvals, sort_idx, axis=-1)
         # B-orthonormal eigenvectors: column j is e_{sort_idx[j]} / sqrt(b[sort_idx[j]]).
         sorted_b = pt.take_along_axis(diag_b, sort_idx, axis=-1)
-        new_v = pt.eye(A.shape[-1])[sort_idx].mT / pt.expand_dims(pt.sqrt(sorted_b), -2)
+        new_v = pt.eye(A.shape[-1], dtype=v.type.dtype)[sort_idx].mT / pt.expand_dims(
+            pt.sqrt(sorted_b), -2
+        )
     else:
         return None
 
-    w, v = node.outputs
     copy_stack_trace(w, new_w)
     copy_stack_trace(v, new_v)
 
