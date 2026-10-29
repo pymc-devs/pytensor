@@ -61,7 +61,7 @@ CASES = {
     "Cholesky dense": ([pt.linalg.cholesky(positive)], [a]),
     "QR masked": (list(pt.linalg.qr(a * two_blocks, mode="economic")), [a]),
 }
-CONSERVATIVE_BOUNDS = {"Cholesky dense": 50, "QR masked": 44}
+CONSERVATIVE_BOUNDS = {"QR masked": 44}
 
 
 @pytest.fixture(scope="module")
@@ -98,11 +98,6 @@ def test_advanced_patterns(patterns, title):
         np.testing.assert_array_equal(detected, numeric)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="Boolean VJP lifting loses Cholesky cancellation",
-)
 def test_cholesky_first_column_precision():
     matrix = pt.matrix("matrix")
     pattern = jacobian_sparsity_vjp(pt.linalg.cholesky(matrix), matrix)

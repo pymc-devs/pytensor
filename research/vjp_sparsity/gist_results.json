@@ -6,7 +6,7 @@
   "cases": 84,
   "completed_cases": 80,
   "evaluations": 88,
-  "cases_exact_at_all_test_points": 68,
+  "cases_exact_at_all_test_points": 74,
   "missed_numeric_nonzeros": 0,
   "direct_reference_comparisons": [
     {
@@ -879,10 +879,10 @@
             16,
             16
           ],
-          "detected_nnz": 50,
+          "detected_nnz": 45,
           "numeric_nnz": 45,
           "missed": 0,
-          "extra": 5
+          "extra": 0
         }
       ]
     },
@@ -899,10 +899,10 @@
             16,
             16
           ],
-          "detected_nnz": 50,
+          "detected_nnz": 45,
           "numeric_nnz": 45,
           "missed": 0,
-          "extra": 5
+          "extra": 0
         }
       ]
     },
@@ -919,10 +919,10 @@
             16,
             16
           ],
-          "detected_nnz": 36,
+          "detected_nnz": 28,
           "numeric_nnz": 28,
           "missed": 0,
-          "extra": 8
+          "extra": 0
         }
       ]
     },
@@ -939,10 +939,10 @@
             16,
             16
           ],
-          "detected_nnz": 40,
+          "detected_nnz": 36,
           "numeric_nnz": 36,
           "missed": 0,
-          "extra": 4
+          "extra": 0
         }
       ]
     },
@@ -979,10 +979,10 @@
             16,
             16
           ],
-          "detected_nnz": 36,
+          "detected_nnz": 28,
           "numeric_nnz": 28,
           "missed": 0,
-          "extra": 8
+          "extra": 0
         }
       ]
     },
@@ -1452,10 +1452,10 @@
             9,
             9
           ],
-          "detected_nnz": 20,
+          "detected_nnz": 19,
           "numeric_nnz": 19,
           "missed": 0,
-          "extra": 1
+          "extra": 0
         },
         {
           "point": "large",
@@ -1463,10 +1463,10 @@
             36,
             36
           ],
-          "detected_nnz": 196,
+          "detected_nnz": 161,
           "numeric_nnz": 161,
           "missed": 0,
-          "extra": 35
+          "extra": 0
         }
       ]
     },
@@ -1770,5 +1770,59 @@
         }
       ]
     }
-  ]
+  ],
+  "cholesky_graph_comparison": {
+    "case": "cholesky(x + 10 * eye(n))",
+    "cleanup": [
+      "ShapeOpt",
+      "canonicalize"
+    ],
+    "fusion": false,
+    "rows": [
+      {
+        "shape": [
+          null,
+          null
+        ],
+        "approach": "vjp",
+        "outer_nodes": 193,
+        "scan_nodes": 4,
+        "scan_inner_nodes": 58,
+        "total_nodes": 251
+      },
+      {
+        "shape": [
+          null,
+          null
+        ],
+        "approach": "gist",
+        "outer_nodes": 36,
+        "scan_nodes": 1,
+        "scan_inner_nodes": 77,
+        "total_nodes": 113
+      },
+      {
+        "shape": [
+          4,
+          4
+        ],
+        "approach": "vjp",
+        "outer_nodes": 54,
+        "scan_nodes": 4,
+        "scan_inner_nodes": 52,
+        "total_nodes": 106
+      },
+      {
+        "shape": [
+          4,
+          4
+        ],
+        "approach": "gist",
+        "outer_nodes": 21,
+        "scan_nodes": 1,
+        "scan_inner_nodes": 77,
+        "total_nodes": 98
+      }
+    ]
+  }
 }
