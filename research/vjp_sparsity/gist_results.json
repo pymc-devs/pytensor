@@ -1785,10 +1785,10 @@
           null
         ],
         "approach": "vjp",
-        "outer_nodes": 193,
-        "scan_nodes": 4,
-        "scan_inner_nodes": 58,
-        "total_nodes": 251
+        "outer_nodes": 106,
+        "scan_nodes": 2,
+        "scan_inner_nodes": 75,
+        "total_nodes": 181
       },
       {
         "shape": [
@@ -1807,10 +1807,10 @@
           4
         ],
         "approach": "vjp",
-        "outer_nodes": 54,
-        "scan_nodes": 4,
-        "scan_inner_nodes": 52,
-        "total_nodes": 106
+        "outer_nodes": 23,
+        "scan_nodes": 2,
+        "scan_inner_nodes": 72,
+        "total_nodes": 95
       },
       {
         "shape": [

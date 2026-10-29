@@ -8,7 +8,7 @@ It excludes the marginalization/dependence API and axis-label inference.
 
 ## Result
 
-The VJP → numerical algebra → nonzero rewrites → boolean basis batching
+The VJP → nonzero rewrites → boolean basis batching
 pipeline matches or tightens the saved gist counts in every completed case.
 All six dedicated Cholesky cases and both dynamic-size Cholesky evaluations
 match the numerical reference exactly.
@@ -63,58 +63,31 @@ The rewrite database contains producer rules for:
 
 Reuse of existing indexing and lifting rewrites has not been audited.
 
-## Projected triangular solves
+## Cholesky gradient as a semantic operation
 
-The numerical equilibrium database in [algebra.py](algebra.py) normalizes
-unbatched Blockwise wrappers and simplifies a projected two-sided solve
-before boolean lifting. The rule checks the existing upper-triangular
-assumption; it applies to the expression independently of its source Op.
+The native pullback emits `CholeskyGrad(L, v)`, a `SymbolicOp`/`OpFromGraph`
+subclass. Normal compilation inlines its numerical body, including when
+wrapped in Blockwise. The inference database retains it and dispatches on
+the whole operation. Given a known factor triangle, its rule uses a boolean
+reverse column recurrence on factor and cotangent masks.
 
-For a square matrix `M`, define:
-
-```text
-Phi(M) = tril(M)    - diag(diag(M)) / 2
-Psi(M) = triu(M, 1) + diag(diag(M)) / 2
-Phi(M) + Psi(M) = M
-```
-
-For invertible upper-triangular `T`, let `U = tril(V)`. The product of `T`
-and a strictly upper-triangular matrix is strictly upper-triangular, so
-`Phi(T @ V) = Phi(T @ U)`. Consequently:
-
-```text
-T^-1 Phi(T @ V) T^-T
-    = (U - solve(T, Psi(T @ U))) T^-T
-```
-
-The rewrite cancels `solve(T, T @ U)` in real-valued algebra. Boolean
-inference then acts on the simplified expression. Its solve rule continues
-to use conservative inverse reachability; it does not assume an inverse in
-the boolean semiring.
-
-This identity exposes the first-column independence of a lower Cholesky
-factor: `L[2, 0] = A[2, 0] / sqrt(A[0, 0])` has no derivative connection to
-`A[1, 0]`. Dense 3×3 and 6×6 patterns contain exactly 19 and 161 connections.
-
-[test_algebra.py](test_algebra.py) checks numerical equivalence with arbitrary
-direction matrices, verifies the rewritten graph, and checks that unknown
-triangularity prevents the transformation. A precision regression compares
-the original and rewritten solve masks over all 64 upper-triangular 4×4
-sparsity structures and all 16 basis directions; none gains a connection.
-Numerical equivalence and mask precision are checked independently, since
-equivalent numerical forms need not give equally precise boolean bounds.
+Tests cover normal inlining, retention during analysis, and second-order
+numerical derivatives. The semantic mask never gains a connection relative
+to the expanded body over all 64 lower- and upper-triangular 4×4 structures
+and all 16 basis directions. Dense 3×3 and 6×6 patterns contain exactly 19
+and 161 connections.
 
 The dedicated gist recurrence combines dependency propagation and factor
-nonzeros into one Scan. VJP inference composes factor-fill and inverse-
-reachability analyses. For `cholesky(x + 10*eye(n))`, after identical
+nonzeros into one Scan. VJP inference uses separate factor-fill and gradient
+recurrences. For `cholesky(x + 10*eye(n))`, after identical
 ShapeOpt/canonicalization cleanup and before fusion:
 
 | Shape | VJP outer + Scan-body nodes | Gist outer + Scan-body nodes |
 | --- | ---: | ---: |
-| Dynamic | 193 + 58 | 36 + 77 |
-| Static 4×4 | 54 + 52 | 21 + 77 |
+| Dynamic | 106 + 75 | 36 + 77 |
+| Static 4×4 | 23 + 72 | 21 + 77 |
 
-VJP inference has four Scans; the gist has one. Both produce 45 connections
+VJP inference has two Scans; the gist has one. Both produce 45 connections
 for 4×4 inputs. These counts include Scan bodies separately and do not
 estimate tensor sizes, runtime, or memory.
 
@@ -153,10 +126,9 @@ Repository regression checks:
 
 ```bash
 PYTENSOR_FLAGS=mode=FAST_COMPILE,on_opt_error=raise python -m pytest \
-  research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py \
-  research/vjp_sparsity/test_algebra.py -q
+  research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py -q
 ```
 
 The focused inference suite passes **55 tests in each of FAST_COMPILE, CVM,
 and NUMBA**. The regressions cover root resolution, structured directions,
-numerical algebra, and precision of the lifted masks.
+semantic gradient preservation, and precision of the lifted masks.

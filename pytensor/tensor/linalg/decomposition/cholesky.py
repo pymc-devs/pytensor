@@ -3,6 +3,7 @@ from typing import Literal
 
 import numpy as np
 
+from pytensor.compile.builders import SymbolicOp
 from pytensor.graph import Apply, Op
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import TensorLike
@@ -13,6 +14,42 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import tensor
+
+
+class CholeskyGrad(SymbolicOp):
+    """Cholesky pullback from a factor and its cotangent.
+
+    The symbolic body is inlined during ordinary compilation. Graph analyses
+    can retain this operation and register a rule for the complete update.
+    """
+
+    __props__ = ("lower",)
+    gufunc_signature = "(m,m),(m,m)->(m,m)"
+    inline = True
+    lower = True
+
+    @staticmethod
+    def filter_inputs(*inputs):
+        return tuple(as_tensor_variable(value) for value in inputs)
+
+    def build_inner_graph(self, chol_x, dz):
+        from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
+
+        if chol_x.ndim != 2 or dz.ndim != 2:
+            raise TypeError("CholeskyGrad expects a matrix factor and cotangent")
+        if not self.lower:
+            chol_x = chol_x.T
+            dz = dz.T
+
+        product = chol_x.T.dot(dz)
+        projected = ptb.tril(product) - ptb.diag(ptb.diagonal(product) / 2.0)
+        solve_upper = SolveTriangular(lower=False, b_ndim=2)
+        s = solve_upper(chol_x.T, solve_upper(chol_x.T, projected.T).T)
+        triangle = ptb.tril if self.lower else ptb.triu
+        return [triangle(s + s.T) - ptb.diag(ptb.diagonal(s))]
+
+    def infer_shape(self, node, shapes):
+        return [shapes[0]]
 
 
 class Cholesky(Op):
@@ -95,35 +132,7 @@ class Cholesky(Op):
 
         """
 
-        dz = gradients[0]
-        chol_x = outputs[0]
-
-        # deal with upper triangular by converting to lower triangular
-        if not self.lower:
-            chol_x = chol_x.T
-            dz = dz.T
-
-        def tril_and_halve_diagonal(mtx):
-            """Extracts lower triangle of square matrix and halves diagonal."""
-            return ptb.tril(mtx) - ptb.diag(ptb.diagonal(mtx) / 2.0)
-
-        def conjugate_solve_triangular(outer, inner):
-            """Computes L^{-T} P L^{-1} for lower-triangular L."""
-            from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
-
-            solve_upper = SolveTriangular(lower=False, b_ndim=2)
-            return solve_upper(outer.T, solve_upper(outer.T, inner.T).T)
-
-        s = conjugate_solve_triangular(
-            chol_x, tril_and_halve_diagonal(chol_x.T.dot(dz))
-        )
-
-        if self.lower:
-            grad = ptb.tril(s + s.T) - ptb.diag(ptb.diagonal(s))
-        else:
-            grad = ptb.triu(s + s.T) - ptb.diag(ptb.diagonal(s))
-
-        return [grad]
+        return [CholeskyGrad(lower=self.lower)(outputs[0], gradients[0])]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
