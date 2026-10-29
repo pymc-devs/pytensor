@@ -215,7 +215,9 @@ def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None, mode="FAST_RUN"):
 
 
 def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
-    f = compile_graph_log_sum_exp(x, axis, dimshuffle_op)
+    f = compile_graph_log_sum_exp(
+        x, axis, dimshuffle_op, mode=get_mode("FAST_RUN").excluding("scalarize")
+    )
 
     fgraph = f.maker.fgraph.toposort()
     for node in fgraph:

@@ -2987,7 +2987,9 @@ class TestUselessSlice:
 
         y = x[0:3:step, -1:-6:-step, ::]
         # Need this rewrite when `FAST_COMPILE` otherwise step = -1 * step instead of neg(step)
-        mode = get_default_mode().including("local_mul_specialize")
+        mode = (
+            get_default_mode().including("local_mul_specialize").excluding("scalarize")
+        )
         f = pytensor.function([x, step], y, mode=mode)
 
         # Get the DeepCopy input and assert that the Op is a DeepCopy

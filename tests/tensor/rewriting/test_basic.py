@@ -1592,7 +1592,7 @@ def test_assert_op_gradient():
 def test_local_merge_alloc():
     # Add this rewrite to the default mode; otherwise, FAST_COMPILE fails.
     default_mode = get_default_mode()
-    rewrite_mode = default_mode.including("local_merge_alloc")
+    rewrite_mode = default_mode.including("local_merge_alloc").excluding("scalarize")
 
     x = iscalar("x")
     y = iscalar("y")

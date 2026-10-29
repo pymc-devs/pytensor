@@ -475,6 +475,7 @@ class TestMakeVector(utt.InferShapeTester):
             [MakeVector("float64")(adscal, aiscal)],
             [adscal_val, aiscal_val],
             MakeVector,
+            excluding=["scalarize"],
         )
 
         self._compile_and_check(
@@ -482,6 +483,7 @@ class TestMakeVector(utt.InferShapeTester):
             [MakeVector("float64")(adscal, bdscal, aiscal)],
             [adscal_val, bdscal_val, aiscal_val],
             MakeVector,
+            excluding=["scalarize"],
         )
 
         self._compile_and_check(
@@ -489,6 +491,7 @@ class TestMakeVector(utt.InferShapeTester):
             [MakeVector("int32")(aiscal, biscal, ciscal, discal)],
             [aiscal_val, biscal_val, ciscal_val, discal_val],
             MakeVector,
+            excluding=["scalarize"],
         )
 
 
@@ -1338,7 +1341,9 @@ def test_get_vector_length():
     assert 3 == get_vector_length(triple)
 
     a, b, c = triple
-    mode = pytensor.compile.get_default_mode().excluding("constant_folding")
+    mode = pytensor.compile.get_default_mode().excluding(
+        "constant_folding", "scalarize"
+    )
     f = function([x, y], [b, c, a], mode=mode)
     topo = f.maker.fgraph.toposort()
     assert any(True for node in topo if isinstance(node.op, MakeVector))
@@ -1446,7 +1451,7 @@ class TestJoinAndSplit:
         a = iscalar("a")
         b = lscalar("b")
         s = stack([a, b, a, b])
-        f = function([a, b], s, mode=self.mode)
+        f = function([a, b], s, mode=self.mode.excluding("scalarize"))
         val = f(1, 2)
         assert np.all(val == [1, 2, 1, 2])
         topo = f.maker.fgraph.toposort()
@@ -1462,7 +1467,7 @@ class TestJoinAndSplit:
         # test when the constant is the first element.
         # The first element is used in a special way
         s = stack([10, a, b, np.int8(3), np.array(4, dtype=np.int8)])
-        f = function([a, b], s, mode=self.mode)
+        f = function([a, b], s, mode=self.mode.excluding("scalarize"))
         val = f(1, 2)
         assert np.all(val == [10, 1, 2, 3, 4])
         topo = f.maker.fgraph.toposort()
@@ -2825,7 +2830,7 @@ class TestARange:
             mode = config.mode
             if mode == "FAST_COMPILE":
                 mode = "FAST_RUN"
-            mode = compile.mode.get_mode(mode).excluding("fusion")
+            mode = compile.mode.get_mode(mode).excluding("fusion", "scalarize")
             f = function([start, stop, step], out.shape, mode=mode)
             assert len(f.maker.fgraph.toposort()) == 9
 
@@ -4007,7 +4012,7 @@ class TestInferShape(utt.InferShapeTester):
             [TensorFromScalar()(ScalarFromTensor()(aiscal))],
             [45],
             ScalarFromTensor,
-            excluding=["local_tensor_scalar_tensor"],
+            excluding=["local_tensor_scalar_tensor", "remove_scalar_tensor_boundaries"],
         )
 
     def test_TensorFromScalar(self):
