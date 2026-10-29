@@ -121,6 +121,7 @@ from pytensor.tensor.rewriting.math import (
     local_sum_prod_of_mul_or_div,
     local_useless_abs,
     mul_canonizer,
+    non_negative_comparison,
     parse_mul_tree,
     perform_sigm_times_exp,
     simplify_mul,
@@ -1268,6 +1269,50 @@ def test_local_elemwise_sub_zeros():
     ) or isinstance(f.maker.fgraph.toposort()[0].inputs[1], TensorConstant)
     utt.assert_allclose(f(mat_val), np.zeros(mat_val.shape))
     assert check_stack_trace(f, ops_to_check="all")
+
+
+def test_non_negative_comparison():
+    x = pt.dvector("x", shape=(3,))
+    non_positive = pt.constant(np.zeros(3, dtype="int8"))
+    negative = pt.constant(np.full(3, -1, dtype="int8"))
+    outputs = [
+        exp(x) >= non_positive,
+        pt_abs(x) < negative,
+        non_positive <= sqr(x),
+        negative > exp(x),
+        exp(x) > negative,
+        exp(x) <= negative,
+    ]
+    result = RewriteTester([x], outputs)
+    expected = [pt.alloc(np.array(value), 3) for value in [True, False] * 3]
+    result.assert_graph(*expected, strict_dtype=True)
+    result.assert_eval(np.array([-1000, 0, 1.0]))
+
+
+def test_non_negative_comparison_nan_unsafe_excluded():
+    x = pt.dvector("x", shape=(3,))
+    zero = pt.constant(np.zeros(3, dtype="int8"))
+    out = exp(x) >= zero
+    result = RewriteTester([x], [out], exclude=["nan_unsafe"])
+    result.assert_graph(out)
+    result.assert_eval(np.array([np.nan, -np.inf, 0]))
+
+
+def test_non_negative_comparison_unresolved():
+    x = pt.dscalar("x")
+    value = exp(x)
+    outputs = [
+        value <= 0,
+        value > 0,
+        value >= 1,
+        value >= np.nan,
+        value.astype("int8") >= 0,
+        value >= pt.constant([0, -1, -2], dtype="int8"),
+    ]
+    result = RewriteTester(
+        [x], outputs, include=None, custom_rewrite=non_negative_comparison
+    )
+    result.assert_graph(*outputs)
 
 
 class TestLocalUselessElemwiseComparison:

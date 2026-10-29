@@ -70,6 +70,7 @@ from pytensor.tensor.math import (
     exp,
     expm1,
     ge,
+    gt,
     int_div,
     ive,
     kve,
@@ -78,6 +79,7 @@ from pytensor.tensor.math import (
     log1mexp,
     log1p,
     log1pexp,
+    lt,
     mul,
     neg,
     polygamma,
@@ -1913,6 +1915,35 @@ def local_elemwise_sub_zeros(fgraph, node):
         # This could help for failures due to out-of-memory.
         copy_stack_trace(node.outputs, res)
         return [res]
+
+
+@register_canonicalize("nan_unsafe")
+@register_specialize("nan_unsafe")
+@node_rewriter([ge, gt, le, lt])
+def non_negative_comparison(fgraph, node):
+    """``x >= c -> True`` for non-negative ``x`` and constant ``c <= 0``."""
+    scalar_op = node.op.scalar_op
+    inclusive = isinstance(scalar_op, ps.GE | ps.LE)
+    for reverse in (False, True):
+        value, bound = node.inputs[::-1] if reverse else node.inputs
+        if not isinstance(bound, TensorConstant) or bound.dtype in complex_dtypes:
+            continue
+        bound_value = bound.unique_value
+        if bound_value is None:
+            continue
+
+        lower_bound = isinstance(scalar_op, ps.GE | ps.GT) != reverse
+        # At zero, the non-negative expression can still equal the bound.
+        resolved = bound_value <= 0 if lower_bound == inclusive else bound_value < 0
+        if not resolved:
+            continue
+        if _is_provably_non_negative(value):
+            return [
+                broadcast_like_elemwise(
+                    np.array(lower_bound), node, fgraph=fgraph, stack_trace=True
+                )
+            ]
+    return None
 
 
 @register_useless
