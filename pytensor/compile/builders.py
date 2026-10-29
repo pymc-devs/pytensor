@@ -906,6 +906,13 @@ class OpFromGraph(HasInnerFunction, Op):
             output[0] = variable
 
 
+class FinalizedOpFromGraph(OpFromGraph):
+    """An OpFromGraph whose inner graph is ready for backend lowering.
+
+    General inner-graph optimization must preserve its implementation.
+    """
+
+
 class SymbolicOp(OpFromGraph):
     r"""OpFromGraph subclass that builds the inner graph from input types.
 
