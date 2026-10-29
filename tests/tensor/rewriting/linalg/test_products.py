@@ -293,6 +293,59 @@ def test_expm_of_diag(make_diag):
     assert_equal_computations([rewritten], [expected])
 
 
+@pytest.mark.parametrize(
+    "A_shape, B_shape",
+    [((4, 4), (3, 3)), ((2, 3), (4, 5))],
+    ids=["square", "non_square"],
+)
+@pytest.mark.parametrize("transposed", [False, True], ids=["plain", "transposed"])
+@pytest.mark.parametrize("rhs_kind", ["vector", "matrix", "batched_matrix"])
+def test_dot_of_kron(rhs_kind, transposed, A_shape, B_shape):
+    rng = np.random.default_rng(0)
+    k, batch = 5, 2
+    A = pt.dmatrix("A", shape=A_shape)
+    B = pt.dmatrix("B", shape=B_shape)
+    K = pt.linalg.kron(A, B)
+    if transposed:
+        K = K.mT
+    rows = K.type.shape[-1]
+    X_shape = {
+        "vector": (rows,),
+        "matrix": (rows, k),
+        "batched_matrix": (batch, rows, k),
+    }[rhs_kind]
+    X = pt.tensor("X", shape=X_shape, dtype="float64")
+    result = RewriteTester([A, B, X], [K @ X], include=["canonicalize"])
+
+    if transposed:
+        A, B = A.mT, B.mT
+    (m, n), (p, q) = A.type.shape, B.type.shape
+    X_mat = X[:, None] if rhs_kind == "vector" else X
+    *batch_shape, _, cols = X_mat.type.shape
+    Y = pt.moveaxis(X_mat.reshape((*batch_shape, n, q, cols)), -1, -3)
+    Z = pt.moveaxis(A @ Y @ B.mT, -3, -1).reshape((*batch_shape, m * p, cols))
+    expected = Z[:, 0] if rhs_kind == "vector" else Z
+    result.assert_graph(rewrite_graph(expected, include=["canonicalize"]))
+    result.assert_eval(
+        rng.normal(size=A_shape), rng.normal(size=B_shape), rng.normal(size=X_shape)
+    )
+
+
+def test_dot_of_kron_with_vector_factor_not_rewritten():
+    v = pt.dvector("v", shape=(3,))
+    M = pt.dmatrix("M", shape=(2, 2))
+    X = pt.dmatrix("X", shape=(2, 4))
+
+    def build():
+        return pt.linalg.kron(v, M).mT @ X
+
+    result = RewriteTester([v, M, X], [build()], include=["canonicalize"])
+    expected = rewrite_graph(
+        build(), include=["canonicalize"], exclude=("dot_of_kron",)
+    )
+    result.assert_graph(expected)
+
+
 def test_kron_of_diagonal_to_diagonal():
     da = pt.tensor("da", shape=(3, 3))
     db = pt.tensor("db", shape=(4, 4))

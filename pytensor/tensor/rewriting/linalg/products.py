@@ -29,6 +29,7 @@ from pytensor.tensor.linalg.summary import det
 from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
+    register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
@@ -192,6 +193,43 @@ def det_of_kronecker(fgraph, node):
             )
             [out] = node.outputs
             return [atleast_Nd(det_final, n=out.type.ndim).astype(out.type.dtype)]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Dot, blockwise_of(Dot)])
+def dot_of_kron(fgraph, node):
+    """kron(A, B) @ X -> (A @ X.reshape(n, q, k) @ B.mT).reshape(m * p, k)
+
+    The Kronecker matrix is never formed, which drops the cost from O(k (np)^2) to
+    O(k np (n + p)) for square factors.
+    """
+    K, X = node.inputs
+    core, transposed = strip_left_expand_dims_and_transpose(K)
+    match core.owner_op_and_inputs:
+        case (KroneckerProduct(), A, B) if A.type.ndim == 2 and B.type.ndim == 2:
+            pass
+        case _:
+            return None
+
+    # kron(A, B).mT == kron(A.mT, B.mT) for 2-D A, B
+    if transposed:
+        A, B = A.mT, B.mT
+
+    # Bring k to the front so each (n, q) slice is a batched matmul argument.
+    batch_shape = tuple(X.shape[i] for i in range(X.type.ndim - 2))
+    k = X.shape[-1]
+    X_3d = X.reshape((*batch_shape, A.shape[-1], B.shape[-1], k))
+    X_3d = pt.moveaxis(X_3d, -1, -3)
+
+    Z = A @ X_3d @ B.mT
+
+    Z = pt.moveaxis(Z, -3, -1)
+    new_out = Z.reshape((*batch_shape, A.shape[-2] * B.shape[-2], k))
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize
