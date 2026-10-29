@@ -46,9 +46,12 @@ all-true broadcast masks can remain in intermediate graphs.
 
 [rewriting.py](rewriting.py) defines:
 
-- `nonzero_rewrites_db`: a `SequenceDB` with shape inference,
-  pre-canonicalization, equilibrium lifting, final query resolution, and
-  post-canonicalization. The final resolver is added to each call's query.
+- `nonzero_rewrites_db`: a `SequenceDB` with numerical algebra, shape
+  inference, pre-canonicalization, equilibrium lifting, final query
+  resolution, and post-canonicalization. The final resolver is added to each
+  call's query.
+- `nonzero_algebra_db` in [algebra.py](algebra.py): an `EquilibriumDB` of
+  numerical rewrites that run before shape inference and boolean lifting.
 - `nonzero_lift_db`: an `EquilibriumDB` of independently registered rules.
 - `register_nonzero(tracks)`: register a rule against the actual producing Ops.
 
@@ -123,6 +126,14 @@ The registered rules cover:
 | Solve | Boolean inverse reachability times RHS mask |
 | Cholesky/QR coefficients | Factor-value structure, including fill-in |
 | OpFromGraph | Expose its cloned inner expression to the same rules |
+
+Before lifting, numerical identities can expose cancellations whose
+relationships would be lost by independent boolean masks. For example, the
+algebra database simplifies a two-sided triangular solve around a
+half-diagonal lower projection. It uses the upper-triangular assumption to
+cancel a matching solve/product pair; it applies to that expression regardless
+of which operation's pullback produced it. See [PARITY.md](PARITY.md) for the
+identity and Cholesky results.
 
 Data-dependent indexing and sparse-dot rules remain conservative. Non-direction
 queries left unresolved after lifting become all-true masks in the final pass.
@@ -199,12 +210,16 @@ original user graph, final classification of roots, and structured directions.
 The PR cases and root-resolution regressions comprise **34
 tests**, checked in each of FAST_COMPILE, CVM, and NUMBA.
 The advanced regression cases are in [test_advanced.py](test_advanced.py).
-The Cholesky precision counterexample is a strict expected failure.
+The algebraic rewrite has independent graph-structure and numerical-equivalence
+tests in [test_algebra.py](test_algebra.py). The combined inference suite passes
+**55 tests** in each of FAST_COMPILE, CVM, and NUMBA. The precision regression
+compares the rewritten and original solve masks for all 64 upper-triangular
+4×4 sparsity structures and every individual direction.
 
 See [PARITY.md](PARITY.md) for the advanced gist audit: 84 cases, 80 completed,
-no missed numerical nonzeros over 88 evaluations. Operation coverage uses
-registered rewrites. Full parity is still blocked by Cholesky
-cancellations in the VJP; four dynamic-QR cases hit an IfElse batching error.
+no missed numerical nonzeros over 88 evaluations. All six dedicated Cholesky
+examples and both dynamic-size evaluations match the numerical reference
+exactly. Four dynamic-QR cases hit an IfElse batching error.
 
 The sparse batched-constant dot case improves on the gist: **64 inferred
 connections versus 120**, matching the numerical pattern at the audit point.
@@ -216,9 +231,15 @@ After shape/canonicalization cleanup, representative full pattern graphs have
 14 nodes for the five-equation system, 37 for the Rosenbrock Hessian, 80 for
 the CGE system, and 51 for the CAR Hessian. Their operations are boolean and
 integer, with no floating-point node outputs. Factorization graphs are less
-compact: dense Cholesky has 152 outer nodes and nested boolean scans, plus
+compact: dense Cholesky has 193 outer nodes and nested boolean scans, plus
 floating-point shape arithmetic for the reachability iteration count. These
 are graph-size observations, not runtime or memory benchmarks.
+
+For `cholesky(x + 10*eye(n))`, the gist's dedicated rule has a smaller graph
+under that same cleanup. With dynamic dimensions, VJP inference has 193 outer
+nodes plus 58 nodes in Scan bodies; the gist has 36 plus 77. With static 4×4
+dimensions, the counts are 54 plus 52 versus 21 plus 77. The respective Scan
+counts are four and one. Both infer the same 45 connections at size four.
 
 ```bash
 PYTENSOR_FLAGS=mode=FAST_COMPILE python -m pytest research/vjp_sparsity/test_prototype.py -q

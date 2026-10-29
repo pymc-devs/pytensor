@@ -8,17 +8,17 @@ It excludes the marginalization/dependence API and axis-label inference.
 
 ## Result
 
-The VJP → nonzero rewrites → boolean basis batching pipeline covers most of
-the advanced examples.
-**Full precision parity has not been reached: Cholesky exposes cancellation
-inside the numerical VJP that local boolean lifting cannot retain.**
+The VJP → numerical algebra → nonzero rewrites → boolean basis batching
+pipeline matches or tightens the saved gist counts in every completed case.
+All six dedicated Cholesky cases and both dynamic-size Cholesky evaluations
+match the numerical reference exactly.
 
 Direction inputs are classified at the end of lifting, using the explicit
 `cotangents` argument. Root queries remain unresolved until then.
 
 The full audit and its per-case results are in [gist_results.json](gist_results.json).
 Of 84 cases, 80 completed across 88 evaluations, with no missed numerical
-nonzeros. In 68 cases the masks exactly matched the numerical reference at
+nonzeros. In 74 cases the masks exactly matched the numerical reference at
 every evaluated point. Four dynamic-QR cases errored.
 Tests against numerical Jacobians are evidence at the supplied points, not a
 proof that every structural nonzero has been found for every input.
@@ -31,9 +31,9 @@ proof that every structural nonzero has been found for every input.
 | CAR Hessian, either formulation | 73 | 73 | 73 |
 | `kron(small, other_small)` | 48 | 48 | 48 |
 | Batched dot, sparse batched constant | 64 | 120 | 64 |
-| Dense Cholesky, 4×4 | 50 | 45 | 45 |
-| Tridiagonal Cholesky, 4×4 | 36 | 28 | 28 |
-| Arrow-first Cholesky, 4×4 | 40 | 36 | 36 |
+| Dense Cholesky, 4×4 | 45 | 45 | 45 |
+| Tridiagonal Cholesky, 4×4 | 28 | 28 | 28 |
+| Arrow-first Cholesky, 4×4 | 36 | 36 | 36 |
 | Arrow-last Cholesky, 4×4 | 16 | 16 | 16 |
 | QR with a block-diagonal mask | 44 | 44 | 36 |
 
@@ -63,38 +63,60 @@ The rewrite database contains producer rules for:
 
 Reuse of existing indexing and lifting rewrites has not been audited.
 
-## Remaining precision gap: Cholesky
+## Projected triangular solves
 
-For a lower Cholesky factor,
+The numerical equilibrium database in [algebra.py](algebra.py) normalizes
+unbatched Blockwise wrappers and simplifies a projected two-sided solve
+before boolean lifting. The rule checks the existing upper-triangular
+assumption; it applies to the expression independently of its source Op.
+
+For a square matrix `M`, define:
 
 ```text
-L[0, 0] = sqrt(A[0, 0])
-L[2, 0] = A[2, 0] / L[0, 0]
+Phi(M) = tril(M)    - diag(diag(M)) / 2
+Psi(M) = triu(M, 1) + diag(diag(M)) / 2
+Phi(M) + Psi(M) = M
 ```
 
-Therefore `d L[2, 0] / d A[1, 0]` is identically zero. The prototype reports
-that entry as potentially nonzero, even with exact triangular factor masks.
-The 3×3 dense case has 20 inferred entries versus 19 numerical entries;
-this is its only extra connection.
+For invertible upper-triangular `T`, let `U = tril(V)`. The product of `T`
+and a strictly upper-triangular matrix is strictly upper-triangular, so
+`Phi(T @ V) = Phi(T @ U)`. Consequently:
 
-The native pullback uses triangular solves around
-`Phi(L.T @ cotangent)`, followed by symmetrization. Dependencies cancel between
-the terms of those solves. AND/OR lifting retains the paths but discards their
-signs and algebraic relationships, so later boolean cleanup cannot recover the
-zero. This is different from having an unimplemented lift.
+```text
+T^-1 Phi(T @ V) T^-T
+    = (U - solve(T, Psi(T @ U))) T^-T
+```
 
-The gist instead propagates dependencies through the entry-by-entry Cholesky
-recurrence, which exposes this independence directly. To close this gap while
-keeping a VJP-based design, we need a numerical/algebraic rewrite before
-boolean abstraction, or a different symbolic pullback representation. Adding
-more factor-value masks alone does not fix it. A bespoke Cholesky derivative
-pattern would also work, but would reintroduce the specialization this
-experiment is testing whether we can avoid.
+The rewrite cancels `solve(T, T @ U)` in real-valued algebra. Boolean
+inference then acts on the simplified expression. Its solve rule continues
+to use conservative inverse reachability; it does not assume an inverse in
+the boolean semiring.
 
-The gap is recorded as a strict expected failure in
-[test_advanced.py](test_advanced.py); it is not counted as precision parity.
-Five of the six dedicated Cholesky cases remain looser than the gist. The
-dynamic-size Cholesky example also remains loose at both evaluated sizes.
+This identity exposes the first-column independence of a lower Cholesky
+factor: `L[2, 0] = A[2, 0] / sqrt(A[0, 0])` has no derivative connection to
+`A[1, 0]`. Dense 3×3 and 6×6 patterns contain exactly 19 and 161 connections.
+
+[test_algebra.py](test_algebra.py) checks numerical equivalence with arbitrary
+direction matrices, verifies the rewritten graph, and checks that unknown
+triangularity prevents the transformation. A precision regression compares
+the original and rewritten solve masks over all 64 upper-triangular 4×4
+sparsity structures and all 16 basis directions; none gains a connection.
+Numerical equivalence and mask precision are checked independently, since
+equivalent numerical forms need not give equally precise boolean bounds.
+
+The dedicated gist recurrence combines dependency propagation and factor
+nonzeros into one Scan. VJP inference composes factor-fill and inverse-
+reachability analyses. For `cholesky(x + 10*eye(n))`, after identical
+ShapeOpt/canonicalization cleanup and before fusion:
+
+| Shape | VJP outer + Scan-body nodes | Gist outer + Scan-body nodes |
+| --- | ---: | ---: |
+| Dynamic | 193 + 58 | 36 + 77 |
+| Static 4×4 | 54 + 52 | 21 + 77 |
+
+VJP inference has four Scans; the gist has one. Both produce 45 connections
+for 4×4 inputs. These counts include Scan bodies separately and do not
+estimate tensor sizes, runtime, or memory.
 
 ## Other conservative results and execution issue
 
@@ -131,9 +153,10 @@ Repository regression checks:
 
 ```bash
 PYTENSOR_FLAGS=mode=FAST_COMPILE,on_opt_error=raise python -m pytest \
-  research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py -q
+  research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py \
+  research/vjp_sparsity/test_algebra.py -q
 ```
 
-The focused inference suite passes **51 tests in each of FAST_COMPILE, CVM,
-and NUMBA**, with the Cholesky precision counterexample explicitly expected to
-fail. The regressions cover root resolution and structured directions.
+The focused inference suite passes **55 tests in each of FAST_COMPILE, CVM,
+and NUMBA**. The regressions cover root resolution, structured directions,
+numerical algebra, and precision of the lifted masks.

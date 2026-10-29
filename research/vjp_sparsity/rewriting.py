@@ -48,6 +48,7 @@ from pytensor.tensor.subtensor import (
     Subtensor,
 )
 from pytensor.tensor.type import TensorType
+from research.vjp_sparsity.algebra import nonzero_algebra_db
 
 
 class MayBeNonzero(Op):
@@ -413,6 +414,7 @@ def local_nonzero_constants(fgraph, node):
 
 
 nonzero_lift_db.register("local_nonzero_constants", local_nonzero_constants, "basic")
+nonzero_rewrites_db.register("algebra", nonzero_algebra_db, "basic", position=-1)
 nonzero_rewrites_db.register("shape", ShapeOptimizer(), "basic", position=0)
 nonzero_rewrites_db.register(
     "pre-canonicalize", optdb.query("+canonicalize"), "basic", position=1
