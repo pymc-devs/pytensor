@@ -112,6 +112,38 @@ def test_infer_from_regular_vjp():
     np.testing.assert_array_equal(second_vjp, [0.0, 2.0, 0.0])
 
 
+def test_root_resolution_depends_on_requested_directions():
+    left = pt.vector("left")
+    right = pt.vector("right")
+    vjp = left * right
+    function = pytensor.function(
+        [left, right],
+        [infer_nonzero(vjp, right), infer_nonzero(vjp, left)],
+    )
+    first, second = function(np.zeros(3), [1.0, 0.0, 1.0])
+    np.testing.assert_array_equal(first, [True, False, True])
+    np.testing.assert_array_equal(second, [False, False, False])
+    first, second = function(np.ones(3), np.zeros(3))
+    np.testing.assert_array_equal(first, [False, False, False])
+    np.testing.assert_array_equal(second, [True, True, True])
+
+
+def test_structured_direction():
+    index = pt.iscalar("index")
+    amplitude = pt.scalar("amplitude")
+    seed = pt.zeros(4)[index].set(amplitude)
+    function = pytensor.function(
+        [index, amplitude],
+        [infer_nonzero(seed, []), infer_nonzero(seed, amplitude)],
+    )
+    structural, selected = function(1, 0.0)
+    np.testing.assert_array_equal(structural, [False, True, False, False])
+    np.testing.assert_array_equal(selected, [False, False, False, False])
+    structural, selected = function(3, 2.0)
+    np.testing.assert_array_equal(structural, [False, False, False, True])
+    np.testing.assert_array_equal(selected, structural)
+
+
 class CotangentScale(Op):
     def make_node(self, cotangent):
         return Apply(self, [cotangent], [cotangent.type()])

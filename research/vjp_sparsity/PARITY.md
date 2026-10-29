@@ -1,6 +1,6 @@
 # Advanced gist parity
 
-Source: [the corrected gist](https://gist.github.com/jessegrabowski/1cd7ce787755c514c239be29c9e583d9),
+Source: [the gist](https://gist.github.com/jessegrabowski/1cd7ce787755c514c239be29c9e583d9),
 revision `524b2af7118d48c9ade25babb3e44f763fbe4baa`.
 The downloaded notebook was left untouched. This audit covers Jacobian/Hessian
 patterns, including the derivative-semantics examples and inputs to coloring.
@@ -8,10 +8,13 @@ It excludes the marginalization/dependence API and axis-label inference.
 
 ## Result
 
-The existing VJP → nonzero rewrites → boolean basis batching pipeline remains
-unchanged. Ordinary rewrite extensions recover most of the advanced coverage.
+The VJP → nonzero rewrites → boolean basis batching pipeline covers most of
+the advanced examples.
 **Full precision parity has not been reached: Cholesky exposes cancellation
 inside the numerical VJP that local boolean lifting cannot retain.**
+
+Direction inputs are classified at the end of lifting, using the explicit
+`cotangents` argument. Root queries remain unresolved until then.
 
 The full audit and its per-case results are in [gist_results.json](gist_results.json).
 Of 84 cases, 80 completed across 88 evaluations, with no missed numerical
@@ -20,28 +23,27 @@ every evaluated point. Four dynamic-QR cases errored.
 Tests against numerical Jacobians are evidence at the supplied points, not a
 proof that every structural nonzero has been found for every input.
 
-| Representative case | Before extensions | After extensions | Gist | Numerical |
-| --- | ---: | ---: | ---: | ---: |
-| Five-equation nonlinear system | 25 | 9 | 9 | 9 |
-| Rosenbrock Hessian | 64 | 22 | 22 | 22 |
-| Five-sector CGE | 306 | 168 | 168 | 168 |
-| CAR Hessian, either formulation | 121 | 73 | 73 | 73 |
-| `kron(small, other_small)` | 240 | 48 | 48 | 48 |
-| Batched dot, sparse batched constant | 2400 | 64 | 120 | 64 |
-| Dense Cholesky, 4×4 | 256 | 50 | 45 | 45 |
-| Tridiagonal Cholesky, 4×4 | 160 | 36 | 28 | 28 |
-| Arrow-first Cholesky, 4×4 | 160 | 40 | 36 | 36 |
-| Arrow-last Cholesky, 4×4 | 160 | 16 | 16 | 16 |
-| QR with a block-diagonal mask | 256 | 44 | 44 | 36 |
+| Representative case | Prototype | Gist | Numerical |
+| --- | ---: | ---: | ---: |
+| Five-equation nonlinear system | 9 | 9 | 9 |
+| Rosenbrock Hessian | 22 | 22 | 22 |
+| Five-sector CGE | 168 | 168 | 168 |
+| CAR Hessian, either formulation | 73 | 73 | 73 |
+| `kron(small, other_small)` | 48 | 48 | 48 |
+| Batched dot, sparse batched constant | 64 | 120 | 64 |
+| Dense Cholesky, 4×4 | 50 | 45 | 45 |
+| Tridiagonal Cholesky, 4×4 | 36 | 28 | 28 |
+| Arrow-first Cholesky, 4×4 | 40 | 36 | 36 |
+| Arrow-last Cholesky, 4×4 | 16 | 16 | 16 |
+| QR with a block-diagonal mask | 44 | 44 | 36 |
 
-Entries are inferred nonzero counts, not timings. The original graph metrics
-in the README still reproduce: 443 versus 487 nodes over the 17 PR elementwise
-cases. These extensions expand coverage; they do not establish a performance
-advantage.
+Entries are inferred nonzero counts, not timings. The README's graph metrics
+are 443 versus 487 nodes over the 17 PR elementwise cases. These counts do not
+establish a performance advantage.
 
-## What was extended
+## Supported operations
 
-All additions are producer rules in the existing rewrite database:
+The rewrite database contains producer rules for:
 
 - Shape-derived conditions and triangular masks preserve their actual values.
   Conditions depending on unknown floating-point data still union both branches.
@@ -59,8 +61,7 @@ All additions are producer rules in the existing rewrite database:
   masks use boolean Gram–Schmidt. These describe coefficient values used by
   the ordinary VJP; they do not supply bespoke derivative-connectivity rules.
 
-There is still no separate local-Jacobian registry. Reuse of existing indexing
-and lifting rewrites has deliberately not been audited yet.
+Reuse of existing indexing and lifting rewrites has not been audited.
 
 ## Remaining precision gap: Cholesky
 
@@ -104,15 +105,9 @@ strict subset of the gist's mask: 64 versus 120 entries, with no numerical
 nonzeros missing at the audit point.
 
 Four unknown-shape QR cases hit `Blockwise{IfElse}` evaluation with
-`compute_map=None`. They are recorded as errors, not passes, and were parked
-as requested. A separate import bug also prevented constructing QR gradients:
-`from pytensor import ifelse` captured the module during package initialization.
-The import now points directly to the callable, with a native gradient test.
-That fix does not address the batching issue.
+`compute_map=None`. They are recorded as errors.
 
-Backend validation also exposed missing boolean matrix-product support:
-specialization selected BLAS-only `BatchedDot`, and Numba's general dot path
-used floating-point casts. Boolean matmul now keeps the generic core Dot path,
+Boolean matmul keeps the generic core Dot path,
 with an AND/OR kernel for Numba, including preallocated batch outputs. The
 regression tests exercise empty contraction dimensions as well as ordinary
 batched products. No broadcasted three-dimensional AND tensor is introduced.
@@ -136,11 +131,9 @@ Repository regression checks:
 
 ```bash
 PYTENSOR_FLAGS=mode=FAST_COMPILE,on_opt_error=raise python -m pytest \
-  research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py \
-  tests/tensor/linalg/test_decomposition/test_qr.py::test_qr_grad_dynamic_shape -q
+  research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py -q
 ```
 
-The focused suite passes **50 tests in each of FAST_COMPILE, CVM, and NUMBA**,
-with the Cholesky precision counterexample explicitly expected to fail. The
-broader FAST_COMPILE run, including the original PR suite and native boolean
-matmul/Numba dot checks, passes 81 tests with that same expected failure.
+The focused inference suite passes **51 tests in each of FAST_COMPILE, CVM,
+and NUMBA**, with the Cholesky precision counterexample explicitly expected to
+fail. The regressions cover root resolution and structured directions.

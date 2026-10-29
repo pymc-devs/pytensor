@@ -47,12 +47,10 @@ all-true broadcast masks can remain in intermediate graphs.
 [rewriting.py](rewriting.py) defines:
 
 - `nonzero_rewrites_db`: a `SequenceDB` with shape inference,
-  pre-canonicalization, equilibrium lifting, pessimistic completion, marker
-  removal, and post-canonicalization.
+  pre-canonicalization, equilibrium lifting, final query resolution, and
+  post-canonicalization. The final resolver is added to each call's query.
 - `nonzero_lift_db`: an `EquilibriumDB` of independently registered rules.
 - `register_nonzero(tracks)`: register a rule against the actual producing Ops.
-- `Cotangent(value)`: an IR demarcator identifying cotangent inputs without a
-  graph feature or an external variable-to-mask mapping.
 
 For example, the multiplication rule is an ordinary registered node rewrite:
 
@@ -68,8 +66,8 @@ adapter replaces the producer's nonzero-query clients with the returned mask;
 it does not replace the numerical producer or its other clients.
 
 A package can register another rule without editing the inference driver.
-The test suite demonstrates an external rule improving a previously
-pessimistic result. Standard database queries can select or exclude rewrites.
+The test suite demonstrates an external rule refining a pessimistic result.
+Standard database queries can select or exclude rewrites.
 
 `MayBeNonzero(value)` is temporary inference IR, not a replacement for the VJP.
 It distinguishes structural nonzero queries from ordinary runtime
@@ -77,15 +75,31 @@ It distinguishes structural nonzero queries from ordinary runtime
 predicates as if they were analysis queries could change which branches are
 possible. All query markers are removed before returning the result.
 
-`Cotangent(value)` is also temporary. Its nonzero query becomes the ordinary
-`value != 0`; other unknown inputs become potentially nonzero everywhere.
-The final cleanup removes the cotangent demarcators. Only the generic input
-and pessimistic-completion rules track `MayBeNonzero` itself.
+Root queries stay unresolved throughout lifting. At the end, `infer_nonzero`
+uses its explicit `cotangents` argument to resolve direction roots to ordinary
+`value != 0` predicates. Unknown primal roots and unsupported expressions
+become all-true masks in that same final pass. Only the constant rule and this
+final resolver track `MayBeNonzero` itself.
 
-Lifting and pessimistic completion are ordered stages of the same database.
+For example, the VJP of `y = x**2` is `2*x*v`. Lifting it produces queries on
+the primal `x` and the direction `v`:
+
+```text
+may_be_nonzero(x) & may_be_nonzero(v)
+```
+
+With `cotangents=[v]`, final resolution gives `True & (v != 0)`.
+
+A structured direction such as `zeros(n)[idx].set(amplitude)` already carries
+its selection in the zero/scatter graph. Ordinary lifting preserves that
+structure even without declaring a cotangent root. Declaring `amplitude` a
+cotangent additionally preserves its actual zero/nonzero choices.
+
+Lifting and final resolution are ordered stages of the same database.
 Known rules first reach equilibrium, including processing queries they create
-on upstream producers. Only then can remaining queries become dense; applying
-that default earlier could prevent those producer rules from running.
+on upstream producers. Only then are roots classified and unsupported queries
+made dense; applying that default earlier could prevent producer rules from
+running.
 
 The registered rules cover:
 
@@ -110,9 +124,8 @@ The registered rules cover:
 | Cholesky/QR coefficients | Factor-value structure, including fill-in |
 | OpFromGraph | Expose its cloned inner expression to the same rules |
 
-Data-dependent indexing and sparse-dot rules remain conservative. Any query left unresolved after
-the lifting database reaches equilibrium becomes an all-true mask in the
-final pessimistic pass.
+Data-dependent indexing and sparse-dot rules remain conservative. Non-direction
+queries left unresolved after lifting become all-true masks in the final pass.
 
 Derivative behavior for `floor`, comparisons, and other operations comes
 from the existing VJP rules. The prototype does not use the PR's new
@@ -130,14 +143,12 @@ It handles the PR's multiple outputs/inputs, repeats, intermediate variables,
 and dynamic dimensions. The builder calls `infer_nonzero` once after AD.
 Inside that call, the VJP is cloned and requested primal values are made opaque
 before simplification, preserving direct perturbations of requested
-intermediates. This avoids the constant-folding false negative identified in
-the review.
+intermediates even when their producers can be constant-folded.
 
 The full rewrite pipeline runs on the private clone. Original primal bindings
 are restored only after it finishes, with no further rewrites. This follows
 PyMC's `construct_ir_fgraph` isolation pattern. A regression test snapshots the
-user's original node inputs and validates their attached `FunctionGraph`; it
-reproduced the earlier mutation caused by canonicalizing after restoration.
+user's original node inputs and validates their attached `FunctionGraph`.
 
 There is no additional boolean seed-variable mapping: the existing cotangent
 inputs are directly replaced by boolean basis directions during vectorization.
@@ -179,19 +190,20 @@ number of graph nodes.
 expectations: 17 elementwise cases and four core cases. The three explicitly
 conservative nonzero counts also match.
 
-Eleven additional checks cover cancellation, the folded-intermediate regression
+Thirteen additional checks cover cancellation, the folded-intermediate regression
 in three modes, repeated outputs, an existing zero-gradient rule, value
 independence, ordinary VJP input, external rewrite registration, and keeping
 runtime nonzero predicates separate from inference queries, and preserving the
-original user graph.
+original user graph, final classification of roots, and structured directions.
 
-The original **32 tests pass in each of FAST_COMPILE, CVM, and NUMBA**.
+The PR cases and root-resolution regressions comprise **34
+tests**, checked in each of FAST_COMPILE, CVM, and NUMBA.
 The advanced regression cases are in [test_advanced.py](test_advanced.py).
 The Cholesky precision counterexample is a strict expected failure.
 
 See [PARITY.md](PARITY.md) for the advanced gist audit: 84 cases, 80 completed,
-no missed numerical nonzeros over 88 evaluations. Most added coverage uses
-ordinary rewrite extensions. Full parity is still blocked by Cholesky
+no missed numerical nonzeros over 88 evaluations. Operation coverage uses
+registered rewrites. Full parity is still blocked by Cholesky
 cancellations in the VJP; four dynamic-QR cases hit an IfElse batching error.
 
 The sparse batched-constant dot case improves on the gist: **64 inferred
