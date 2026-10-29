@@ -495,7 +495,7 @@ class SymbolicRVOp(SymbolicOp, RNGConsumerOp):
     rng and size inputs, e.g. ``"[rng],[size],(n),(n,n)->[rng],(n)"``.
     """
 
-    extended_signature: str | None = None
+    extended_signature: str
     inline = True
 
     @staticmethod
@@ -507,37 +507,26 @@ class SymbolicRVOp(SymbolicOp, RNGConsumerOp):
         )
 
     @property
-    def signature(self) -> str | None:
+    def signature(self) -> str:
         """The signature with the special ``[rng]``/``[size]`` tokens removed."""
-        extended_signature = self.extended_signature
-        if extended_signature is None:
-            return None
         special_tokens = r"|".join((r"\[rng\],?", r"\[size\],?"))
-        signature = re.sub(special_tokens, "", extended_signature)
+        signature = re.sub(special_tokens, "", self.extended_signature)
         # Remove dangling commas
         return re.sub(r",(?=[->])|,$", "", signature)
 
     @property
-    def ndims_params(self) -> Sequence[int] | None:
-        signature = self.signature
-        if signature is None:
-            return None
-        inputs_sig, _ = _parse_gufunc_signature(signature)
+    def ndims_params(self) -> Sequence[int]:
+        inputs_sig, _ = _parse_gufunc_signature(self.signature)
         return [len(sig) for sig in inputs_sig]
 
     @property
-    def ndim_supp(self) -> int | None:
-        signature = self.signature
-        if signature is None:
-            return None
-        _, outputs_sig = _parse_gufunc_signature(signature)
+    def ndim_supp(self) -> int:
+        _, outputs_sig = _parse_gufunc_signature(self.signature)
         return max(len(out_sig) for out_sig in outputs_sig)
 
     @staticmethod
     def get_input_output_type_idxs(extended_signature):
         """Parse ``extended_signature`` into rng/size/param and rng/output indices."""
-        if extended_signature is None:
-            raise ValueError("extended_signature must be provided")
         fake_signature = extended_signature.replace("[rng]", "(rng)").replace(
             "[size]", "(size)"
         )
