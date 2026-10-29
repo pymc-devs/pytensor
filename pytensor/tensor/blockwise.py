@@ -4,7 +4,7 @@ from typing import Any, Literal, cast, overload
 import numpy as np
 from numpy import broadcast_shapes, empty
 
-from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.builders import FinalizedOpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
@@ -600,7 +600,7 @@ def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
 _vectorize_node.register(Blockwise, _vectorize_not_needed)
 
 
-class OpWithCoreShape(OpFromGraph):
+class OpWithCoreShape(FinalizedOpFromGraph):
     """Generalizes an `Op` to include core shape as an additional input."""
 
     def __init__(self, *args, on_unused_input="ignore", **kwargs):
