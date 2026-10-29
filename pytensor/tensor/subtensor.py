@@ -935,11 +935,7 @@ class Subtensor(BaseSubtensor, COp):
         if len(idx_list) > x.type.ndim:
             raise IndexError("too many indices for array")
 
-        input_positions = get_slice_elements(
-            idx_list, lambda entry: isinstance(entry, int)
-        )
-
-        assert len(inputs) == len(input_positions)
+        assert len(inputs) == self.n_index_vars
 
         padded = [
             *indices_from_subtensor(inputs, self.idx_list),
@@ -1031,25 +1027,22 @@ class Subtensor(BaseSubtensor, COp):
 
     @staticmethod
     def str_from_slice(entry):
-        if entry.step is not None:
-            return ":".join(
-                (
-                    "start" if entry.start is not None else "",
-                    "stop" if entry.stop is not None else "",
-                    "step",
-                )
-            )
-        if entry.stop is not None:
-            return f"{'start' if entry.start is not None else ''}:stop"
-        if entry.start is not None:
-            return "start:"
-        return ":"
+        def component(value, name):
+            if value is None:
+                return ""
+            return str(value) if isinstance(value, int) else name
+
+        start = component(entry.start, "start")
+        stop = component(entry.stop, "stop")
+        if entry.step is None:
+            return f"{start}:{stop}"
+        return f"{start}:{stop}:{component(entry.step, 'step')}"
 
     @staticmethod
-    def str_from_indices(idx_list):
+    def str_from_indices(idx_list, n_index_vars):
         indices = []
         letter_indexes = 0
-        for entry in idx_list:
+        for entry in unflatten_index_variables(["input"] * n_index_vars, idx_list):
             if isinstance(entry, slice):
                 indices.append(Subtensor.str_from_slice(entry))
             else:
@@ -1058,7 +1051,8 @@ class Subtensor(BaseSubtensor, COp):
         return ", ".join(indices)
 
     def __str__(self):
-        return f"{self.__class__.__name__}{{{self.str_from_indices(self.idx_list)}}}"
+        indices = self.str_from_indices(self.idx_list, self.n_index_vars)
+        return f"{self.__class__.__name__}{{{indices}}}"
 
     @staticmethod
     def default_helper_c_code_args():
@@ -1109,51 +1103,26 @@ class Subtensor(BaseSubtensor, COp):
         # see assembla-#767
         NONE_CODE = sys.maxsize - 1
 
-        pos = [0, 1]  # annoying version of global variable for init_entry
+        def init_entry(value):
+            spec_value = NONE_CODE if value is None else value
+            init_cmds.append(f"subtensor_spec[{len(init_cmds)}] = {spec_value};")
 
-        def inc_spec_pos(amt):
-            pos[0] += amt
-
-        def inc_input_pos(amt):
-            pos[1] += amt
-
-        def spec_pos():
-            return pos[0]
-
-        def input_pos():
-            return pos[1]
-
-        def init_entry(entry, depth=0):
-            if isinstance(entry, int):
-                init_cmds.append(
-                    f"subtensor_spec[{spec_pos()}] = {inputs[input_pos()]};"
-                )
-                inc_spec_pos(1)
-                inc_input_pos(1)
-                if depth == 0:
-                    is_slice.append(0)
-            elif entry is None:
-                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {NONE_CODE};")
-                inc_spec_pos(1)
-                if depth == 0:
-                    is_slice.append(0)
-            elif depth == 0 and isinstance(entry, slice):
-                init_entry(entry.start, depth + 1)
-                init_entry(entry.stop, depth + 1)
-                init_entry(entry.step, depth + 1)
+        x, *index_inputs = inputs
+        assert len(index_inputs) == node.op.n_index_vars, len(index_inputs)
+        for entry in unflatten_index_variables(index_inputs, idx_list):
+            if isinstance(entry, slice):
+                init_entry(entry.start)
+                init_entry(entry.stop)
+                init_entry(entry.step)
                 is_slice.append(1)
             else:
-                assert 0, entry
-
-        for entry in idx_list:
-            init_entry(entry)
-        # make sure we used all inputs
-        assert input_pos() == len(inputs), input_pos()
+                init_entry(entry)
+                is_slice.append(0)
         assert len(is_slice) <= node.inputs[0].ndim, node.inputs[0].ndim
 
         len_is_slice = len(is_slice)
 
-        len_subtensor_spec = spec_pos()
+        len_subtensor_spec = len(init_cmds)
         subensor_spec = f"npy_intp subtensor_spec[{len_subtensor_spec}];"
         if len_subtensor_spec == 0:
             subensor_spec = "npy_intp * subtensor_spec = NULL;"
@@ -1166,7 +1135,6 @@ class Subtensor(BaseSubtensor, COp):
             is_slice_init = "int* is_slice = NULL;"
         subtensor_init = "\n".join(init_cmds)
 
-        (x,) = inputs[:1]
         (_z,) = outputs
 
         if view_ndim:
@@ -1446,26 +1414,16 @@ class SubtensorPrinter(Printer):
         return self._process(r.owner.op.idx_list, r.owner.inputs, pstate)
 
     def _process(self, idxs, op_inputs, pstate):
-        inputs = list(op_inputs)
-        input = inputs.pop(0)
-        sidxs = []
-        getattr(pstate, "precedence", None)
+        input, *index_inputs = op_inputs
+        with set_precedence(pstate):
+            printed_indices = [pstate.pprinter.process(inp) for inp in index_inputs]
 
         def process_slice_component(comp):
-            """Process a slice component, returning string representation."""
-            if comp is None:
-                return ""
-            elif isinstance(comp, int):
-                with set_precedence(pstate):
-                    return pstate.pprinter.process(inputs.pop(0))
-            else:
-                return str(comp)
+            return "" if comp is None else str(comp)
 
-        for entry in idxs:
-            if isinstance(entry, int):
-                with set_precedence(pstate):
-                    sidxs.append(pstate.pprinter.process(inputs.pop(0)))
-            elif isinstance(entry, slice):
+        sidxs = []
+        for entry in unflatten_index_variables(printed_indices, idxs):
+            if isinstance(entry, slice):
                 msg1 = process_slice_component(entry.start)
                 msg2 = process_slice_component(entry.stop)
                 if entry.step is None:
@@ -1474,6 +1432,8 @@ class SubtensorPrinter(Printer):
                     msg3 = f":{process_slice_component(entry.step)}"
 
                 sidxs.append(f"{msg1}:{msg2}{msg3}")
+            else:
+                sidxs.append(entry)
 
         with set_precedence(pstate, 1000):
             sub = pstate.pprinter.process(input, pstate)
@@ -1528,7 +1488,8 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def __str__(self):
         name = "SetSubtensor" if self.set_instead_of_inc else "IncSubtensor"
-        return f"{name}{{{Subtensor.str_from_indices(self.idx_list)}}}"
+        indices = Subtensor.str_from_indices(self.idx_list, self.n_index_vars)
+        return f"{name}{{{indices}}}"
 
     def make_node(self, x, y, *inputs):
         """
@@ -1568,20 +1529,7 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def perform(self, node, inputs, output_storage):
         x, y, *flat_indices = inputs
-
-        flat_indices_iterator = iter(flat_indices)
-        indices = tuple(
-            (
-                next(flat_indices_iterator)
-                if isinstance(entry, int)
-                else slice(
-                    None if entry.start is None else next(flat_indices_iterator),
-                    None if entry.stop is None else next(flat_indices_iterator),
-                    None if entry.step is None else next(flat_indices_iterator),
-                )
-            )
-            for entry in self.idx_list
-        )
+        indices = unflatten_index_variables(flat_indices, self.idx_list)
 
         if not self.inplace:
             x = x.copy()

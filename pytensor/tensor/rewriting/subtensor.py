@@ -2796,22 +2796,24 @@ def local_blockwise_inc_subtensor(fgraph, node):
 
     # Massage indices so they respect blockwise semantics while using regular indexing
     core_idxs = []
-    for idx_entry in core_op.idx_list:
-        if isinstance(idx_entry, slice):
+    for index, index_core_ndim in zip(
+        unflatten_index_variables(idxs, core_op.idx_list),
+        unflatten_index_variables(idxs_core_ndim, core_op.idx_list),
+        strict=True,
+    ):
+        if isinstance(index, slice):
             # Squeeze away dummy dimensions so we can convert to slice
             new_entries = [None, None, None]
-            for i, slice_idx_entry in enumerate(
-                (idx_entry.start, idx_entry.stop, idx_entry.step)
-            ):
-                if slice_idx_entry is None:
-                    continue
-                else:
-                    new_entries[i] = new_entry = idxs[slice_idx_entry].squeeze()
+            for i, slice_component in enumerate((index.start, index.stop, index.step)):
+                if isinstance(slice_component, Variable):
+                    new_entries[i] = new_entry = slice_component.squeeze()
                     if new_entry.ndim > 0:
                         # If the slice entry has dimensions after the squeeze we can't convert it to a slice
                         # We could try to convert to equivalent integer indices, but nothing guarantees
                         # that the slice is "square".
                         return None
+                else:
+                    new_entries[i] = slice_component
             squeezed_index = slice(*new_entries)
         else:
             if advanced:
@@ -2819,15 +2821,13 @@ def local_blockwise_inc_subtensor(fgraph, node):
                 # We need to expand batch indexes on the right, so they don't interact with core index dimensions
                 # We still squeeze on the left in case that allows us to use simpler indices
                 squeezed_index = _squeeze_left(
-                    shape_padright(
-                        idxs[idx_entry], max_idx_core_ndim - idxs_core_ndim[idx_entry]
-                    ),
+                    shape_padright(index, max_idx_core_ndim - index_core_ndim),
                     stop_at_dim=batch_ndim,
                 )
             else:
                 # For basic IncSubtensor integers indices can be used as is, but we try to squeeze away dummy
                 # batch dimensions in case we can end up with a basic IncSubtensor again
-                squeezed_index = _squeeze_left(idxs[idx_entry])
+                squeezed_index = _squeeze_left(index)
 
         core_idxs.append(squeezed_index)
 
