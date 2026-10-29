@@ -7,9 +7,12 @@ indexing and inline accumulation, eliminating materialised intermediate arrays.
 """
 
 from pytensor.compile import optdb
-from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.builders import FinalizedOpFromGraph
 from pytensor.graph import node_rewriter
-from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
+from pytensor.graph.basic import NominalVariable
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
@@ -22,9 +25,15 @@ from pytensor.scalar.basic import (
     Maximum,
     Minimum,
     Mul,
+    get_scalar_type,
 )
 from pytensor.scalar.basic import (
     identity as scalar_identity,
+)
+from pytensor.tensor.basic import (
+    atleast_Nd,
+    scalar_from_tensor,
+    tensor_from_scalar,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
@@ -103,7 +112,7 @@ fused_elemwise_optdb.register(
 )
 
 
-class FusedElemwise(OpFromGraph):
+class FusedElemwise(FinalizedOpFromGraph):
     """Fuse indexed reads and updates into a single Elemwise iteration loop.
 
     Absorbs ``AdvancedSubtensor`` (indexed reads on inputs) and
@@ -197,6 +206,68 @@ class FusedElemwise(OpFromGraph):
         # fresh inner input (see FuseElemwise) so a destroyed buffer is
         # never deduped onto a read source.
         super().__init__(*args, on_unused_input="ignore", **kwargs)
+
+    @property
+    def scalarizable_inputs(self):
+        [elemwise] = [n for n in self.fgraph.apply_nodes if isinstance(n.op, Elemwise)]
+        indexed = {
+            source
+            for entry in self.indexed_inputs
+            if entry is not None
+            for source in entry[0]
+        }
+        return set(range(len(elemwise.inputs))) - indexed
+
+    def with_scalar_io(self, scalar_inputs, scalar_outputs):
+        """Change scalar IO types without moving slots or changing fusion specs."""
+        inputs = [
+            NominalVariable(
+                i, get_scalar_type(inp.type.dtype) if i in scalar_inputs else inp.type
+            )
+            for i, inp in enumerate(self.fgraph.inputs)
+        ]
+        tensor_inputs = [
+            atleast_Nd(tensor_from_scalar(inp), n=old.type.ndim)
+            if i in scalar_inputs
+            else inp
+            for i, (old, inp) in enumerate(zip(self.fgraph.inputs, inputs, strict=True))
+        ]
+        outputs = self.fgraph.bind(tensor_inputs)
+        outputs = [
+            scalar_from_tensor(out) if i in scalar_outputs else out
+            for i, out in enumerate(outputs)
+        ]
+        inner = FunctionGraph(inputs, outputs, clone=False)
+        inner.attach_feature(DestroyHandler())
+        [elemwise] = [n for n in inner.apply_nodes if isinstance(n.op, Elemwise)]
+        old_pattern = elemwise.op.inplace_pattern
+        if scalar_inputs.intersection(old_pattern.values()):
+            # Remove only destinations replaced by scalars. All surviving array
+            # pairs were validated in the outer graph and stay unchanged.
+            pattern = {
+                out: inp for out, inp in old_pattern.items() if inp not in scalar_inputs
+            }
+            replacement = Elemwise(
+                elemwise.op.scalar_op, inplace_pattern=pattern
+            ).make_node(*elemwise.inputs)
+            inner.replace_all(
+                zip(elemwise.outputs, replacement.outputs, strict=True),
+                reason="scalarize_io",
+            )
+        destroy_map = {
+            out: positions
+            for out, positions in self.destroy_map.items()
+            if not scalar_inputs.intersection(positions)
+        }
+        return type(self)(
+            inputs,
+            inner.outputs,
+            fgraph=inner.freeze(),
+            destroy_map=destroy_map,
+            indexed_inputs=self.indexed_inputs,
+            indexed_outputs=self.indexed_outputs,
+            reduced_outputs=self.reduced_outputs,
+        )
 
     def __str__(self):
         elemwise_str = "Elemwise"
@@ -799,7 +870,8 @@ class FuseElemwise(GraphRewriter):
                     car_op.scalar_op.identity,
                     acc_dtype,
                 )
-                fgraph_outputs[out_idx] = car_op(node.outputs[out_idx])
+                reduced = car_op(node.outputs[out_idx])
+                fgraph_outputs[out_idx] = reduced
 
             reduced_spec = (
                 tuple(
@@ -829,8 +901,8 @@ class FuseElemwise(GraphRewriter):
 
             outer_inputs = []
             for i, inp in enumerate(fgraph_inputs):
-                val = outer_write_targets.get(i, inp)
-                outer_inputs.append(val.copy() if i in copy_positions else val)
+                value = outer_write_targets.get(i, inp)
+                outer_inputs.append(value.copy() if i in copy_positions else value)
 
             new_outs = FusedElemwise(
                 fgraph_inputs,
@@ -854,6 +926,9 @@ class FuseElemwise(GraphRewriter):
                 else:
                     replacements.append((node.outputs[out_idx], new_outs[out_idx]))
 
+            for old, new in replacements:
+                copy_stack_trace(old, new)
+
             # Safety net for aliasing we didn't anticipate above (e.g. a write
             # target that is a view of another input): skip this node rather than
             # aborting the whole pass and leaving later nodes unfused.
@@ -866,9 +941,4 @@ class FuseElemwise(GraphRewriter):
                 continue
 
 
-fused_elemwise_optdb.register(
-    "fuse_elemwise",
-    FuseElemwise(),
-    "numba",
-    position=1,
-)
+fused_elemwise_optdb.register("fuse_elemwise", FuseElemwise(), "numba", position=0)

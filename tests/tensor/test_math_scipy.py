@@ -906,7 +906,11 @@ class TestHyp2F1Grad:
         wrt_vars = [v for i, v in enumerate((a1, a2, b1, z)) if i in wrt]
         hyp2f1_grad = pt.grad(hyp2f1_out, wrt=wrt_vars)
 
-        mode = get_default_mode().including("local_useless_2f1grad_loop")
+        mode = (
+            get_default_mode()
+            .including("local_useless_2f1grad_loop")
+            .excluding("scalarize")
+        )
         f_grad = function([a1, a2, b1, z], hyp2f1_grad, mode=mode)
 
         if len(wrt) == 3 and "py_only" in mode.linker.required_rewrites:

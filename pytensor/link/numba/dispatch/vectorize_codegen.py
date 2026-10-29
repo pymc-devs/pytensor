@@ -348,6 +348,7 @@ def make_outputs(
     output_core_shapes: tuple,
     update_outputs: dict | None = None,
     reduce_identities: dict | None = None,
+    scalar_outputs: frozenset[int] = frozenset(),
 ) -> tuple[list[ir.Value], list[types.Array]]:
     """Allocate output arrays for vectorized loop.
 
@@ -358,6 +359,10 @@ def make_outputs(
     outputs.  Such outputs are freshly allocated (size 1 on the reduced axes, via
     their ``bc=True`` pattern) and pre-filled with the reduction identity so the
     accumulating store in the loop reduces into them correctly.
+
+    ``scalar_outputs`` holds the indices of those reduction outputs whose buffer
+    is statically a single element and does not escape; they go on the stack
+    rather than the heap.
     """
     output_arrays = []
     output_arry_types = []
@@ -386,7 +391,23 @@ def make_outputs(
             for length, bc_dim in zip(iter_shape, bc, strict=True)
         ]
         shape = batch_shape + core_shape
-        array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
+        if i in scalar_outputs:
+            # The epilogue reads this one-cell array before returning a scalar,
+            # so its data never escapes. NULL meminfo needs no NRT allocation.
+            ll_dtype = ctx.get_data_type(dtype)
+            data = cgutils.alloca_once(builder, ll_dtype)
+            itemsize = ctx.get_constant(types.intp, ctx.get_abi_sizeof(ll_dtype))
+            array = arrayobj.make_array(arrtype)(ctx, builder)
+            arrayobj.populate_array(
+                array,
+                data=data,
+                shape=[one] * output_ndim,
+                strides=[itemsize] * output_ndim,
+                itemsize=itemsize,
+                meminfo=None,
+            )
+        else:
+            array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
         if reduce_identities is not None and i in reduce_identities:
             # Pre-fill the freshly allocated (C-contiguous) buffer with the
             # reduction identity.  A flat scan over every element is valid
@@ -1100,7 +1121,7 @@ def _vectorized(
     out_0 and out_1 with *mode* ``"set"`` or ``"inc"``.
 
     ``reduce_outputs`` lists ``(output_idx, identity, reducer,
-    use_scalar_accumulator)`` entries. Reduction outputs carry ``bc=True`` on
+    use_scalar_accumulator, scalar_output)`` entries. Reduction outputs carry ``bc=True`` on
     reduced axes. Eligible one-cell reductions use a loop-carried scalar
     accumulator; the others initialize an output buffer and update one cell
     per iteration.
@@ -1139,6 +1160,9 @@ def _vectorized(
         if len(entry) > 3 and entry[3]
     }
     output_updates = {entry[0]: entry[2] for entry in reduce_entries if len(entry) > 2}
+    scalar_outputs = frozenset(
+        entry[0] for entry in reduce_entries if len(entry) > 4 and entry[4]
+    )
     indexed_inputs, idx_broadcastable = _decode_literal(
         indexed_inputs, "indexed_inputs"
     )
@@ -1445,6 +1469,7 @@ def _vectorized(
             output_core_shapes,
             update_outputs=update_outputs_dict,
             reduce_identities=remaining_reduce_identities or None,
+            scalar_outputs=scalar_outputs,
         )
 
         core_arg_types = [*constant_inputs_types, *core_input_types]

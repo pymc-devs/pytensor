@@ -935,9 +935,9 @@ class TestAlgebraicCanonizer:
         # a = pt.pt_abs(x)
 
         if config.mode == "FAST_COMPILE":
-            mode = get_mode("FAST_RUN").excluding("local_elemwise_fusion")
+            mode = get_mode("FAST_RUN").excluding("local_elemwise_fusion", "scalarize")
         else:
-            mode = get_default_mode().excluding("local_elemwise_fusion")
+            mode = get_default_mode().excluding("local_elemwise_fusion", "scalarize")
 
         f = function([x], [(4 * x) / abs(2 * x)], mode=mode)
         f(0.1)
@@ -3657,7 +3657,7 @@ class TestLocalSumProd:
         """Test that stack trace is copied over correctly for `local_sum_prod_mul_by_scalar`."""
         m0 = (
             get_default_mode()
-            .excluding("inplace_elemwise_opt")
+            .excluding("inplace_elemwise_opt", "scalarize")
             .including("canonicalize", "specialize")
         )
 
@@ -4205,7 +4205,11 @@ def test_local_mul_exp_to_exp_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
     # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
-    mode = get_default_mode().excluding("fusion").including("local_mul_exp_to_exp_add")
+    mode = (
+        get_default_mode()
+        .excluding("fusion", "scalarize")
+        .including("local_mul_exp_to_exp_add")
+    )
 
     x = scalar("x")
     y = scalar("y")
@@ -4315,7 +4319,7 @@ def test_local_mul_pow_to_pow_add():
     # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
     mode = (
         get_default_mode()
-        .excluding("fusion")
+        .excluding("fusion", "scalarize")
         .including("local_mul_exp_to_exp_add")
         .including("local_mul_pow_to_pow_add")
     )
@@ -4583,7 +4587,7 @@ class TestSigmoidRewrites:
         f(data)
 
     def test_local_1msigmoid(self):
-        m = self.get_mode(excluding=["fusion", "inplace"])
+        m = self.get_mode(excluding=["fusion", "inplace", "scalarize"])
         x = fscalar()
         xd = dscalar()
 
@@ -4816,7 +4820,7 @@ class TestSoftplusRewrites:
     def test_log1p_neg_sigmoid_to_softpuls(self):
         x = scalar()
         out = log1p(-sigmoid(x))
-        f = pytensor.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m.excluding("scalarize"))
 
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
