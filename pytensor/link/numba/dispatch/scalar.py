@@ -42,7 +42,61 @@ def scalar_op_cache_key(op, **extra_fields):
     return sha256(str((type(op), tuple(extra_fields.items()))).encode()).hexdigest()
 
 
-@register_funcify_and_cache_key(ScalarOp)
+def register_scalar_funcify(op_type):
+    """Register a scalar lowering and preserve its declared output dtypes.
+
+    The lowering returns a Numba function and its cache key. Registration wraps
+    that function to narrow promoted results, e.g. int8 * int8 to int64, back to
+    each output's dtype. Elemwise normally enforces this when storing into its
+    output array; native scalar graphs need the cast explicitly.
+
+    The decorated name still refers to the original lowering, so lowerings can
+    reuse each other without nesting these casting wrappers.
+    """
+
+    def register(funcify):
+        @register_funcify_and_cache_key(op_type)
+        def typed_funcify(op, node, **kwargs):
+            func, cache_key = funcify(op, node=node, **kwargs)
+            out_dtypes = tuple(out.type.dtype for out in node.outputs)
+            if all(
+                dtype in {"bool", "int64", "uint64", "float64", "complex128"}
+                for dtype in out_dtypes
+            ):
+                return func, cache_key
+
+            input_names = ", ".join(f"x{i}" for i in range(len(node.inputs)))
+            call = f"func({input_names})"
+            if len(out_dtypes) == 1:
+                body = f"return direct_cast({call}, np.dtype({out_dtypes[0]!r}))"
+            else:
+                casts = ", ".join(
+                    f"direct_cast(res[{i}], np.dtype({dtype!r}))"
+                    for i, dtype in enumerate(out_dtypes)
+                )
+                body = f"res = {call}\n    return ({casts},)"
+            wrapped = compile_numba_function_src(
+                src=f"def cast_scalar_outputs({input_names}):\n    {body}\n",
+                function_name="cast_scalar_outputs",
+                global_env={
+                    "np": np,
+                    "func": func,
+                    "direct_cast": numba_basic.direct_cast,
+                },
+            )
+            if cache_key is not None:
+                cache_version = 1
+                cache_key = sha256(
+                    str((cache_key, cache_version, out_dtypes)).encode()
+                ).hexdigest()
+            return numba_basic.numba_njit(wrapped), cache_key
+
+        return funcify
+
+    return register
+
+
+@register_scalar_funcify(ScalarOp)
 def numba_funcify_ScalarOp(op, node, **kwargs):
     if not hasattr(op, "nfunc_spec"):
         return generate_fallback_impl(op, node=node, **kwargs), None
@@ -172,7 +226,7 @@ def {scalar_op_fn_name}({input_signature}):
     return numba_basic.numba_njit(scalar_op_fn), cache_key
 
 
-@register_funcify_and_cache_key(Sign)
+@register_scalar_funcify(Sign)
 def numba_funcify_Sign(op, node, **kwargs):
     dtype = node.inputs[0].type.dtype
     if dtype.startswith("uint"):
@@ -208,7 +262,7 @@ def numba_funcify_Sign(op, node, **kwargs):
     )
 
 
-@register_funcify_and_cache_key(Switch)
+@register_scalar_funcify(Switch)
 def numba_funcify_Switch(op, node, **kwargs):
     @numba_basic.numba_njit
     def switch(condition, x, y):
@@ -236,7 +290,7 @@ def {binary_op_name}({input_signature}):
     return nary_fn
 
 
-@register_funcify_and_cache_key(Pow)
+@register_scalar_funcify(Pow)
 def numba_funcify_Pow(op, node, **kwargs):
     pow_dtype = node.inputs[1].type.dtype
 
@@ -252,21 +306,21 @@ def numba_funcify_Pow(op, node, **kwargs):
     )
 
 
-@register_funcify_and_cache_key(Add)
+@register_scalar_funcify(Add)
 def numba_funcify_Add(op, node, **kwargs):
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
     return numba_basic.numba_njit(nary_add_fn), scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Mul)
+@register_scalar_funcify(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
     nary_mul_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
     return numba_basic.numba_njit(nary_mul_fn), scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Cast)
+@register_scalar_funcify(Cast)
 def numba_funcify_Cast(op, node, **kwargs):
     dtype = np.dtype(op.o_type.dtype)
 
@@ -277,7 +331,7 @@ def numba_funcify_Cast(op, node, **kwargs):
     return cast, sha256(str((type(op), op.o_type.dtype)).encode()).hexdigest()
 
 
-@register_funcify_and_cache_key(Identity)
+@register_scalar_funcify(Identity)
 def numba_funcify_type_casting(op, **kwargs):
     @numba_basic.numba_njit
     def identity(x):
@@ -286,7 +340,7 @@ def numba_funcify_type_casting(op, **kwargs):
     return identity, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Clip)
+@register_scalar_funcify(Clip)
 def numba_funcify_Clip(op, **kwargs):
     @numba_basic.numba_njit
     def clip(x, min_val, max_val):
@@ -300,7 +354,7 @@ def numba_funcify_Clip(op, **kwargs):
     return clip, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Composite)
+@register_scalar_funcify(Composite)
 def numba_funcify_Composite(op, node, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
@@ -314,7 +368,7 @@ def numba_funcify_Composite(op, node, **kwargs):
     return composite_fn, composite_key
 
 
-@register_funcify_and_cache_key(Second)
+@register_scalar_funcify(Second)
 def numba_funcify_Second(op, node, **kwargs):
     @numba_basic.numba_njit
     def second(x, y):
@@ -323,7 +377,7 @@ def numba_funcify_Second(op, node, **kwargs):
     return second, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Reciprocal)
+@register_scalar_funcify(Reciprocal)
 def numba_funcify_Reciprocal(op, node, **kwargs):
     @numba_basic.numba_njit
     def reciprocal(x):
@@ -333,7 +387,7 @@ def numba_funcify_Reciprocal(op, node, **kwargs):
     return reciprocal, scalar_op_cache_key(op, cache_version=1)
 
 
-@register_funcify_and_cache_key(Sigmoid)
+@register_scalar_funcify(Sigmoid)
 def numba_funcify_Sigmoid(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.dtype
     if inp_dtype.startswith("uint"):
@@ -359,7 +413,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
     return sigmoid, scalar_op_cache_key(op, cache_version=1)
 
 
-@register_funcify_and_cache_key(GammaLn)
+@register_scalar_funcify(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
     @numba_basic.numba_njit
     def gammaln(x):
@@ -368,7 +422,7 @@ def numba_funcify_GammaLn(op, node, **kwargs):
     return gammaln, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Log1mexp)
+@register_scalar_funcify(Log1mexp)
 def numba_funcify_Log1mexp(op, node, **kwargs):
     @numba_basic.numba_njit
     def logp1mexp(x):
@@ -380,7 +434,7 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
     return logp1mexp, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Erf)
+@register_scalar_funcify(Erf)
 def numba_funcify_Erf(op, node, **kwargs):
     if node.inputs[0].type.dtype.startswith("complex"):
         # Complex not supported by numba
@@ -393,7 +447,7 @@ def numba_funcify_Erf(op, node, **kwargs):
     return erf, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Erfc)
+@register_scalar_funcify(Erfc)
 def numba_funcify_Erfc(op, **kwargs):
     @numba_basic.numba_njit
     def erfc(x):
@@ -402,7 +456,7 @@ def numba_funcify_Erfc(op, **kwargs):
     return erfc, scalar_op_cache_key(op)
 
 
-@register_funcify_and_cache_key(Softplus)
+@register_scalar_funcify(Softplus)
 def numba_funcify_Softplus(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.dtype
     if inp_dtype.startswith("uint"):
@@ -434,7 +488,7 @@ def numba_funcify_Softplus(op, node, **kwargs):
     return softplus, scalar_op_cache_key(op, cache_version=1)
 
 
-@register_funcify_and_cache_key(ScalarLoop)
+@register_scalar_funcify(ScalarLoop)
 def numba_funcify_ScalarLoop(op, node, **kwargs):
     inner_fn, inner_fn_cache_key = numba_funcify_and_cache_key(op.fgraph)
     if inner_fn_cache_key is None:
