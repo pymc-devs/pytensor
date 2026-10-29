@@ -70,9 +70,11 @@ from pytensor.tensor.shape import (
     shape_padright,
 )
 from pytensor.tensor.subtensor import (
+    REVERSED_STEP,
     AdvancedIncSubtensor,
     AdvancedSubtensor,
     IncSubtensor,
+    ReversedStep,
     Subtensor,
     _is_provably_non_negative,
     _is_provably_positive,
@@ -553,12 +555,17 @@ def local_useless_slice(fgraph, node):
 
         if step is None:
             positive_step = True
+        elif step is REVERSED_STEP:
+            positive_step = False
         elif isinstance(step, Constant):
             step_value = step.data
             positive_step = step.data > 0
             if step_value == 1:
                 change_flag = True
                 step = None
+            elif step_value == ReversedStep.value:
+                change_flag = True
+                step = REVERSED_STEP
         else:
             # We can only canonicalize start and stop if we know the sign of step
             last_useful_idx = dim
@@ -674,6 +681,8 @@ def _merge_slice_into_slice_no_shape_ref(slice1, slice2):
     def _const_int_or_none(v):
         if v is None:
             return None
+        if v is REVERSED_STEP:
+            return ReversedStep.value
         if isinstance(v, Constant):
             return int(v.data)
         return "unknown"
@@ -862,9 +871,14 @@ def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
         return minimum(a, b)
 
     step = inner_slice.step
-    step_val = (
-        1 if step is None else int(step.data) if isinstance(step, Constant) else None
-    )
+    if step is None:
+        step_val = 1
+    elif step is REVERSED_STEP:
+        step_val = ReversedStep.value
+    elif isinstance(step, Constant):
+        step_val = int(step.data)
+    else:
+        step_val = None
 
     start = inner_slice.start
     stop = inner_slice.stop
@@ -1097,22 +1111,8 @@ def local_useless_inc_subtensor(fgraph, node):
 
     x, y, *index_vars = node.inputs
 
-    indices = indices_from_subtensor(index_vars, node.op.idx_list)
-
-    # Check that all indices are full slices or full reversals
-    if not all(
-        isinstance(e, slice)
-        and e.start is None
-        and e.stop is None
-        and (
-            e.step is None
-            or get_scalar_constant_value(
-                e.step, only_process_constants=True, raise_not_constant=False
-            )
-            == -1
-        )
-        for e in indices
-    ):
+    full_slices = (slice(None), slice(None, None, REVERSED_STEP))
+    if not all(entry in full_slices for entry in node.op.idx_list):
         return
 
     is_inc = not node.op.set_instead_of_inc
@@ -1657,7 +1657,9 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2, allow_symbolic_refs=Tru
             vals.extend([slice2.start, slice2.stop, slice2.step])
         else:
             vals.append(slice2)
-        if not all(v is None or isinstance(v, Constant) for v in vals):
+        if not all(
+            v is None or v is REVERSED_STEP or isinstance(v, Constant) for v in vals
+        ):
             return None
 
     sl1, reverse1 = get_canonical_form_slice(slice1, len1)
@@ -2604,6 +2606,8 @@ def local_join_subtensors(fgraph, node):
         for step in (step_subtensor1, step_subtensor2):
             if step is None:
                 continue
+            if step is REVERSED_STEP:
+                return None
             try:
                 if get_scalar_constant_value(step, only_process_constants=True) != 1:
                     return None
@@ -2796,22 +2800,24 @@ def local_blockwise_inc_subtensor(fgraph, node):
 
     # Massage indices so they respect blockwise semantics while using regular indexing
     core_idxs = []
-    for idx_entry in core_op.idx_list:
-        if isinstance(idx_entry, slice):
+    for index, index_core_ndim in zip(
+        unflatten_index_variables(idxs, core_op.idx_list),
+        unflatten_index_variables(idxs_core_ndim, core_op.idx_list),
+        strict=True,
+    ):
+        if isinstance(index, slice):
             # Squeeze away dummy dimensions so we can convert to slice
             new_entries = [None, None, None]
-            for i, slice_idx_entry in enumerate(
-                (idx_entry.start, idx_entry.stop, idx_entry.step)
-            ):
-                if slice_idx_entry is None:
-                    continue
-                else:
-                    new_entries[i] = new_entry = idxs[slice_idx_entry].squeeze()
+            for i, slice_component in enumerate((index.start, index.stop, index.step)):
+                if isinstance(slice_component, Variable):
+                    new_entries[i] = new_entry = slice_component.squeeze()
                     if new_entry.ndim > 0:
                         # If the slice entry has dimensions after the squeeze we can't convert it to a slice
                         # We could try to convert to equivalent integer indices, but nothing guarantees
                         # that the slice is "square".
                         return None
+                else:
+                    new_entries[i] = slice_component
             squeezed_index = slice(*new_entries)
         else:
             if advanced:
@@ -2819,15 +2825,13 @@ def local_blockwise_inc_subtensor(fgraph, node):
                 # We need to expand batch indexes on the right, so they don't interact with core index dimensions
                 # We still squeeze on the left in case that allows us to use simpler indices
                 squeezed_index = _squeeze_left(
-                    shape_padright(
-                        idxs[idx_entry], max_idx_core_ndim - idxs_core_ndim[idx_entry]
-                    ),
+                    shape_padright(index, max_idx_core_ndim - index_core_ndim),
                     stop_at_dim=batch_ndim,
                 )
             else:
                 # For basic IncSubtensor integers indices can be used as is, but we try to squeeze away dummy
                 # batch dimensions in case we can end up with a basic IncSubtensor again
-                squeezed_index = _squeeze_left(idxs[idx_entry])
+                squeezed_index = _squeeze_left(index)
 
         core_idxs.append(squeezed_index)
 

@@ -117,20 +117,7 @@ def numba_deepcopy_slice(x):
 
 def subtensor_op_cache_key(op, **extra_fields):
     key_parts = [type(op), tuple(extra_fields.items())]
-    if hasattr(op, "idx_list"):
-        idx_parts = []
-        for idx in op.idx_list:
-            if isinstance(idx, slice):
-                idx_parts.append(
-                    (
-                        idx.start is None,
-                        idx.stop is None,
-                        idx.step is None,
-                    )
-                )
-            else:
-                idx_parts.append("i")
-        key_parts.append(tuple(idx_parts))
+    key_parts.append(op.idx_list)
     if isinstance(op, IncSubtensor | AdvancedIncSubtensor):
         key_parts.append((op.inplace, op.set_instead_of_inc))
     if isinstance(op, AdvancedIncSubtensor):
@@ -143,41 +130,33 @@ def subtensor_op_cache_key(op, **extra_fields):
 def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
-    def convert_indices(indices_iterator, entry):
-        if isinstance(entry, int):
-            name, var = next(indices_iterator)
-            if var.ndim == 0 and isinstance(var.type, TensorType):
-                return f"{name}.item()"
-            return name
-        elif isinstance(entry, slice):
+    def index_source(index):
+        if isinstance(index, slice):
             return (
-                f"slice({convert_indices(indices_iterator, entry.start)}, "
-                f"{convert_indices(indices_iterator, entry.stop)}, "
-                f"{convert_indices(indices_iterator, entry.step)})"
+                f"slice({index_source(index.start)}, "
+                f"{index_source(index.stop)}, "
+                f"{index_source(index.step)})"
             )
-        elif isinstance(entry, type(None)):
-            return "None"
-        else:
-            raise ValueError(f"Unknown index type: {entry}")
+        return str(index)
 
     set_or_inc = isinstance(op, IncSubtensor | AdvancedIncSubtensor)
     index_start_idx = 1 + int(set_or_inc)
     op_indices = list(node.inputs[index_start_idx:])
-    idx_list = op.idx_list
     idx_names = [f"idx_{i}" for i in range(len(op_indices))]
 
     input_names = ["x", "y", *idx_names] if set_or_inc else ["x", *idx_names]
 
-    indices_iterator = iter(zip(idx_names, op_indices))
+    index_sources = [
+        f"{name}[()]" if var.ndim == 0 and isinstance(var.type, TensorType) else name
+        for name, var in zip(idx_names, op_indices, strict=True)
+    ]
     indices_creation_src = tuple(
-        convert_indices(indices_iterator, idx) for idx in idx_list
+        index_source(index)
+        for index in indices_from_subtensor(
+            index_sources, op.idx_list, reversed_step_as_int=True
+        )
     )
-
-    if len(indices_creation_src) == 1:
-        indices_creation_src = f"indices = ({indices_creation_src[0]},)"
-    else:
-        indices_creation_src = ", ".join(indices_creation_src)
-        indices_creation_src = f"indices = ({indices_creation_src})"
+    indices_creation_src = f"indices = {create_tuple_string(indices_creation_src)}"
 
     if set_or_inc:
         if op.inplace:
@@ -217,7 +196,7 @@ def {function_name}({", ".join(input_names)}):
         global_env=globals() | {"np": np},
     )
     cache_key = subtensor_op_cache_key(
-        op, func="numba_funcify_default_subtensor", version=1
+        op, func="numba_funcify_default_subtensor", version=2
     )
     return numba_basic.numba_njit(func, boundscheck=True), cache_key
 
@@ -445,7 +424,9 @@ def vector_integer_advanced_indexing(
 
     [out] = node.outputs
 
-    reconstructed_indices = indices_from_subtensor(index_variables, op.idx_list)
+    reconstructed_indices = indices_from_subtensor(
+        index_variables, op.idx_list, reversed_step_as_int=True
+    )
 
     idx_args = [f"idx{i}" for i in range(len(index_variables))]
     var_to_arg = dict(zip(index_variables, idx_args))
@@ -455,6 +436,9 @@ def vector_integer_advanced_indexing(
     def get_idx_str(val, is_slice_component=False):
         if val is None:
             return "None"
+        # A REVERSED_STEP slice step, requested as -1
+        if isinstance(val, int):
+            return str(val)
         if isinstance(val, Variable) and val in var_to_arg:
             arg = var_to_arg[val]
             if val.ndim == 0 and is_slice_component:

@@ -34,7 +34,7 @@ slice length.
 @jax_funcify.register(AdvancedSubtensor)
 def jax_funcify_Subtensor(op, node, **kwargs):
     def subtensor(x, *ilists):
-        indices = indices_from_subtensor(ilists, op.idx_list)
+        indices = indices_from_subtensor(ilists, op.idx_list, reversed_step_as_int=True)
         if len(indices) == 1:
             indices = indices[0]
 
@@ -57,7 +57,7 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
             return x.at[indices].add(y)
 
     def incsubtensor(x, y, *ilist, jax_fn=jax_fn, idx_list=op.idx_list):
-        indices = indices_from_subtensor(ilist, idx_list)
+        indices = indices_from_subtensor(ilist, idx_list, reversed_step_as_int=True)
         if len(indices) == 1:
             indices = indices[0]
 

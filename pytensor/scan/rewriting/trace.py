@@ -38,7 +38,9 @@ from pytensor.tensor.math import ge, maximum, minimum
 from pytensor.tensor.rewriting.basic import broadcasted_by
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import (
+    REVERSED_STEP,
     IncSubtensor,
+    ReversedStep,
     Subtensor,
     as_index_constant,
     basic_subtensor,
@@ -54,6 +56,8 @@ def _maybe_constant_int(v) -> int | None:
     Callers dealing with slice components that may be ``None`` (= omitted)
     must check for that case themselves before calling.
     """
+    if v is REVERSED_STEP:
+        return ReversedStep.value
     if isinstance(v, Constant):
         return int(v.data)
     return None

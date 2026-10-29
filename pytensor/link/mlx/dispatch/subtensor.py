@@ -28,7 +28,9 @@ def _with_int_slice_bounds(indices):
 @mlx_funcify.register(Subtensor)
 def mlx_funcify_Subtensor(op, node, **kwargs):
     def subtensor(x, *ilists):
-        indices = _with_int_slice_bounds(indices_from_subtensor(ilists, op.idx_list))
+        indices = _with_int_slice_bounds(
+            indices_from_subtensor(ilists, op.idx_list, reversed_step_as_int=True)
+        )
         if len(indices) == 1:
             indices = indices[0]
 
@@ -40,7 +42,9 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 @mlx_funcify.register(AdvancedSubtensor)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
     def advanced_subtensor(x, *ilists):
-        indices = _with_int_slice_bounds(indices_from_subtensor(ilists, op.idx_list))
+        indices = _with_int_slice_bounds(
+            indices_from_subtensor(ilists, op.idx_list, reversed_step_as_int=True)
+        )
         if len(indices) == 1:
             indices = indices[0]
 
@@ -68,7 +72,9 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
             return x
 
     def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=op.idx_list):
-        indices = _with_int_slice_bounds(indices_from_subtensor(ilist, idx_list))
+        indices = _with_int_slice_bounds(
+            indices_from_subtensor(ilist, idx_list, reversed_step_as_int=True)
+        )
         if len(indices) == 1:
             indices = indices[0]
 
@@ -111,7 +117,9 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         op._check_runtime_broadcast_of_vector_index(node, x, y, ilist[0])
 
         # mirrors AdvancedIncSubtensor.perform
-        indices = _with_int_slice_bounds(indices_from_subtensor(ilist, idx_list))
+        indices = _with_int_slice_bounds(
+            indices_from_subtensor(ilist, idx_list, reversed_step_as_int=True)
+        )
 
         return mlx_fn(x, indices, y)
 

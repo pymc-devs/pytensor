@@ -1,4 +1,5 @@
 import logging
+import pickle
 import re
 import sys
 from contextlib import nullcontext
@@ -29,6 +30,7 @@ from pytensor.tensor.math import exp, isinf, lt, maximum, minimum, prod, sqr, sw
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
+    REVERSED_STEP,
     AdvancedIncSubtensor,
     AdvancedSubtensor,
     IncSubtensor,
@@ -47,6 +49,7 @@ from pytensor.tensor.subtensor import (
     get_canonical_form_slice,
     inc_subtensor,
     indexed_result_shape,
+    indices_from_subtensor,
     set_subtensor,
     slice_at_axis,
     take,
@@ -3114,6 +3117,7 @@ def test_get_vector_length():
         ((slice(0, None),), "x[0:]"),
         ((slice(0, 2),), "x[0:2]"),
         ((slice(0, 2, 2),), "x[0:2:2]"),
+        ((slice(None, None, -1), slice(2, 0, -1)), "x[::-1, 2:0:-1]"),
         ((slice(0, 2), 0, slice(0, 2)), "x[0:2, 0, 0:2]"),
     ],
 )
@@ -3376,6 +3380,58 @@ def test_flip(size: tuple[int]):
         z = flip(x_pt, axis=(0, -1))
         f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
         np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.parametrize("inc", [False, True], ids=["subtensor", "inc_subtensor"])
+@pytest.mark.parametrize("advanced", [False, True], ids=["basic", "advanced"])
+def test_reversed_slice_in_idx_list(advanced, inc):
+    x = matrix("x")
+    idx = lvector("idx")
+    step = lscalar("step")
+    minus_one = constant(-1)
+
+    if advanced:
+        lead_index, lead_entry, lead_inputs = idx, 0, [idx]
+    else:
+        lead_index, lead_entry, lead_inputs = slice(None), slice(None), []
+    first_slice_input = len(lead_inputs)
+
+    def index_node(last_index):
+        indexed = x[lead_index, last_index]
+        return inc_subtensor(indexed, 1.0).owner if inc else indexed.owner
+
+    for reverse_step in (-1, np.int8(-1), constant(-1, dtype="int32")):
+        node = index_node(slice(None, None, reverse_step))
+        assert node.op.idx_list == (lead_entry, slice(None, None, REVERSED_STEP))
+        assert node.inputs[1 + inc :] == lead_inputs
+    reversed_node = index_node(slice(None, None, -1))
+    assert (
+        pickle.loads(pickle.dumps(reversed_node.op)).idx_list[1].step is REVERSED_STEP
+    )
+
+    indices = indices_from_subtensor(
+        reversed_node.inputs[1 + inc :], reversed_node.op.idx_list
+    )
+    assert indices[1] == slice(None, None, REVERSED_STEP)
+    assert x[indices].owner.op.idx_list == reversed_node.op.idx_list
+
+    for reversed_slice in (slice(2, None, -1), slice(minus_one, None, minus_one)):
+        assert index_node(reversed_slice).op.idx_list == (
+            lead_entry,
+            slice(first_slice_input, None, REVERSED_STEP),
+        )
+    for other_step in (-2, step):
+        assert index_node(slice(None, None, other_step)).op.idx_list == (
+            lead_entry,
+            slice(None, None, first_slice_input),
+        )
+
+
+def test_reversed_step_idx_list_validation():
+    with pytest.raises(ValueError, match="must be None or integer"):
+        Subtensor(idx_list=(slice(REVERSED_STEP, None),))
+    with pytest.raises(ValueError, match="must be int or slice"):
+        Subtensor(idx_list=(REVERSED_STEP,))
 
 
 def test_subtensor_hash_and_eq():
