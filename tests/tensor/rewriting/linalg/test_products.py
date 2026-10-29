@@ -431,6 +431,39 @@ def test_det_of_broadcast_kron_plus_diag_noise_not_rewritten():
     result.assert_graph(expected)
 
 
+@pytest.mark.parametrize(
+    "a_shape, b_shape",
+    [
+        ((1, 1), (3, 2)),
+        ((3, 2), (1, 1)),
+        ((1, 1), (1, 1)),
+        ((1, 1), (2, 3, 4)),
+        ((1, 1, 1), (3, 2)),
+    ],
+    ids=["left", "right", "both", "3d_other", "mixed_ndim"],
+)
+def test_kron_of_size_one_factor_to_mul(a_shape, b_shape):
+    rng = np.random.default_rng(0)
+    a = pt.tensor("a", shape=a_shape, dtype="float64")
+    b = pt.tensor("b", shape=b_shape, dtype="float64")
+    result = RewriteTester([a, b], [pt.linalg.kron(a, b)])
+    result.assert_graph(a * b)
+    result.assert_eval(rng.normal(size=a_shape), rng.normal(size=b_shape))
+
+
+@pytest.mark.parametrize(
+    "a_shape", [(None, None), (1, 3)], ids=["dynamic_size_one", "row"]
+)
+def test_kron_of_size_one_factor_not_rewritten(a_shape):
+    a = pt.tensor("a", shape=a_shape, dtype="float64")
+    b = pt.dmatrix("b", shape=(3, 2))
+    result = RewriteTester([a, b], [pt.linalg.kron(a, b)])
+    expected = rewrite_graph(
+        pt.linalg.kron(a, b), exclude=("kron_of_size_one_factor_to_mul",)
+    )
+    result.assert_graph(expected)
+
+
 def test_kron_of_diagonal_to_diagonal():
     da = pt.tensor("da", shape=(3, 3))
     db = pt.tensor("db", shape=(4, 4))

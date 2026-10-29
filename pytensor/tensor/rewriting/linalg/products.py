@@ -259,6 +259,19 @@ def dot_of_kron(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([KroneckerProduct])
+def kron_of_size_one_factor_to_mul(fgraph, node):
+    """kron(a, b) -> a * b when a or b has static size 1 in every dimension"""
+    a, b = node.inputs
+    if not (all(a.type.broadcastable) or all(b.type.broadcastable)):
+        return None
+    new_out = a * b
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([KroneckerProduct])
 def kron_of_diagonal_to_diagonal(fgraph, node):
     """kron(D1, D2) -> alloc_diag(outer_product) when both inputs are diagonal."""
     a, b = node.inputs
