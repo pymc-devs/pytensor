@@ -101,11 +101,16 @@ The registered rules cover:
 | Sum reduction | Boolean `any` |
 | Product reduction | Boolean `all` |
 | Shapes/broadcasting | Corresponding shape operation on the mask |
-| Constant-condition switch | Select branch masks |
+| Constant/shape-condition switch | Select branch masks |
 | Unknown-condition switch | Union branch masks |
+| Fixed-index gather/scatter | Apply the indexing Op to boolean masks |
+| Dense dot | Boolean matrix multiplication |
+| Join/Split, diagonal/block-diagonal | Corresponding boolean construction |
+| Solve | Boolean inverse reachability times RHS mask |
+| Cholesky/QR coefficients | Factor-value structure, including fill-in |
+| OpFromGraph | Expose its cloned inner expression to the same rules |
 
-Conservative indexing/scatter and dot rules preserve the fact that an
-all-zero incoming mask contributes nothing. Any query left unresolved after
+Data-dependent indexing and sparse-dot rules remain conservative. Any query left unresolved after
 the lifting database reaches equilibrium becomes an all-true mask in the
 final pessimistic pass.
 
@@ -180,7 +185,28 @@ independence, ordinary VJP input, external rewrite registration, and keeping
 runtime nonzero predicates separate from inference queries, and preserving the
 original user graph.
 
-All **32 tests pass in each of FAST_COMPILE, CVM, and NUMBA**.
+The original **32 tests pass in each of FAST_COMPILE, CVM, and NUMBA**.
+The advanced regression cases are in [test_advanced.py](test_advanced.py).
+The Cholesky precision counterexample is a strict expected failure.
+
+See [PARITY.md](PARITY.md) for the advanced gist audit: 84 cases, 80 completed,
+no missed numerical nonzeros over 88 evaluations. Most added coverage uses
+ordinary rewrite extensions. Full parity is still blocked by Cholesky
+cancellations in the VJP; four dynamic-QR cases hit an IfElse batching error.
+
+The sparse batched-constant dot case improves on the gist: **64 inferred
+connections versus 120**, matching the numerical pattern at the audit point.
+A direct mask comparison confirms that ours removes 56 connections and adds
+none. The masks for `max`, data-dependent `switch`, `y - y.T`, and masked QR
+match the gist exactly.
+
+After shape/canonicalization cleanup, representative full pattern graphs have
+14 nodes for the five-equation system, 37 for the Rosenbrock Hessian, 80 for
+the CGE system, and 51 for the CAR Hessian. Their operations are boolean and
+integer, with no floating-point node outputs. Factorization graphs are less
+compact: dense Cholesky has 152 outer nodes and nested boolean scans, plus
+floating-point shape arithmetic for the reachability iteration count. These
+are graph-size observations, not runtime or memory benchmarks.
 
 ```bash
 PYTENSOR_FLAGS=mode=FAST_COMPILE python -m pytest research/vjp_sparsity/test_prototype.py -q
