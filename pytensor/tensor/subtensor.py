@@ -62,7 +62,7 @@ from pytensor.tensor.type import (
 )
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorConstant, TensorVariable
-from pytensor.utils import unzip
+from pytensor.utils import Singleton, unzip
 
 
 _logger = logging.getLogger("pytensor.tensor.subtensor")
@@ -71,21 +71,48 @@ _logger = logging.getLogger("pytensor.tensor.subtensor")
 T = TypeVar("T")
 
 
+class ReversedStep(Singleton):
+    """Marks a constant ``-1`` slice step stored directly in an ``idx_list``."""
+
+    value = -1
+
+    def __repr__(self):
+        return "REVERSED_STEP"
+
+
+REVERSED_STEP = ReversedStep()
+
+
 def flatten_index_variables[T](
     idx_vars: Sequence[T | None | slice],
 ) -> tuple[list[int | slice], list[T]]:
+
+    def is_reverse_step(entry) -> bool:
+        if entry is REVERSED_STEP:
+            return True
+        try:
+            value = get_scalar_constant_value(entry, only_process_constants=True)
+        except NotScalarConstantError:
+            return False
+        return bool(value.dtype.kind == "i" and value == -1)
+
     counter = 0
     idx_list: list[int | slice] = []
     flat_vars = []
+
     for idx_var in idx_vars:
         if isinstance(idx_var, slice):
-            slice_idx_list: list[None | int] = []
-            for arg_entry in (idx_var.start, idx_var.stop, idx_var.step):
+            slice_idx_list: list[int | ReversedStep | None] = []
+            for slot, arg_entry in enumerate(
+                (idx_var.start, idx_var.stop, idx_var.step)
+            ):
                 if arg_entry is None or (
                     isinstance(arg_entry, Variable)
                     and isinstance(arg_entry.type, NoneTypeT)
                 ):
                     slice_idx_list.append(None)
+                elif slot == 2 and is_reverse_step(arg_entry):
+                    slice_idx_list.append(REVERSED_STEP)
                 else:
                     flat_vars.append(arg_entry)
                     slice_idx_list.append(counter)
@@ -102,18 +129,26 @@ def flatten_index_variables[T](
 def unflatten_index_variables[T](
     flat_indices: Sequence[T],
     idx_list: Sequence[slice | int],
+    reversed_step_as_int: bool = False,
 ) -> tuple[slice | T, ...]:
+
+    def slice_component(entry):
+        if entry is None:
+            return None
+        if entry is REVERSED_STEP:
+            return ReversedStep.value if reversed_step_as_int else REVERSED_STEP
+        return flat_indices[entry]
+
     indices: list[T | slice] = []
     for idx_entry in idx_list:
         if isinstance(idx_entry, int):
             indices.append(flat_indices[idx_entry])
         elif isinstance(idx_entry, slice):
-            start, stop, step = idx_entry.start, idx_entry.stop, idx_entry.step
             indices.append(
                 slice(
-                    None if idx_entry.start is None else flat_indices[start],
-                    None if idx_entry.stop is None else flat_indices[stop],
-                    None if idx_entry.step is None else flat_indices[step],
+                    slice_component(idx_entry.start),
+                    slice_component(idx_entry.stop),
+                    slice_component(idx_entry.step),
                 )
             )
         else:
@@ -124,6 +159,7 @@ def unflatten_index_variables[T](
 def indices_from_subtensor(
     op_indices: Sequence[Variable],
     idx_list: tuple[slice | int, ...],
+    reversed_step_as_int: bool = False,
 ) -> tuple[slice | Variable, ...]:
     """Recreate the index tuple from which a ``*Subtensor**`` ``Op`` was created.
 
@@ -135,7 +171,10 @@ def indices_from_subtensor(
         The values describing each dimension's index. This is obtained from
         ``op.idx_list``. Entries can be:
         - Integer positions (indices into op_indices)
-        - slice objects with int/None components
+        - slice objects with int/None components, and ``REVERSED_STEP`` as a step
+    reversed_step_as_int
+        Return a ``REVERSED_STEP`` slice step as its integer value. Set it when the
+        indices are applied to concrete arrays.
 
     Returns
     -------
@@ -153,7 +192,9 @@ def indices_from_subtensor(
         indices = indices_from_subtensor(op_indices, subtensor_node.op.idx_list)
 
     """
-    return unflatten_index_variables(op_indices, idx_list)
+    return unflatten_index_variables(
+        op_indices, idx_list, reversed_step_as_int=reversed_step_as_int
+    )
 
 
 def as_index_constant(
@@ -173,13 +214,13 @@ def as_index_constant(
         )
     elif isinstance(a, int | np.integer):
         return ps.ScalarConstant(ps.int64, a)
-    elif isinstance(a, Variable):
+    elif isinstance(a, Variable | ReversedStep):
         return a
     return as_tensor_variable(a)
 
 
 @overload
-def as_index_literal(idx: int | np.integer) -> int | np.integer: ...
+def as_index_literal(idx: int | np.integer | ReversedStep) -> int | np.integer: ...
 
 
 @overload
@@ -199,7 +240,14 @@ def as_index_literal(idx: Variable): ...
 
 
 def as_index_literal(
-    idx: None | int | np.integer | slice | ScalarConstant | TensorConstant | Variable,
+    idx: None
+    | int
+    | np.integer
+    | ReversedStep
+    | slice
+    | ScalarConstant
+    | TensorConstant
+    | Variable,
 ) -> int | np.integer | slice | None:
     """Convert a symbolic index element to its Python equivalent.
 
@@ -211,6 +259,9 @@ def as_index_literal(
     """
     if idx is None or isinstance(idx, int | np.integer):
         return idx
+
+    if idx is REVERSED_STEP:
+        return ReversedStep.value
 
     if isinstance(idx, slice):
         return slice(
@@ -825,7 +876,7 @@ def get_constant_idx(
     pytensor.tensor.exceptions.NotScalarConstantError
 
     """
-    real_idx = get_idx_list(inputs, idx_list)
+    real_idx = indices_from_subtensor(inputs[1:], idx_list, reversed_step_as_int=True)
 
     # TODO: Combine this with `as_index_literal`
     def conv(val):
@@ -875,7 +926,12 @@ def slice_static_length(slc, dim_length):
 
 
 class BaseSubtensor:
-    """Base class for Subtensor operations that handles idx_list."""
+    """Base class for Subtensor operations that handles idx_list.
+
+    Integers in ``idx_list`` are positions into the flat index inputs. A constant ``-1``
+    slice step is stored as ``REVERSED_STEP``, which stays in the unflattened indices
+    unless the caller passes ``reversed_step_as_int=True``.
+    """
 
     def __init__(self, idx_list: Sequence[int | slice]):
         index_counter = -1
@@ -887,10 +943,11 @@ class BaseSubtensor:
                     )
                 index_counter = idx_entry
             elif isinstance(idx_entry, slice):
+                step = idx_entry.step
                 for slice_idx_entry in (
                     idx_entry.start,
                     idx_entry.stop,
-                    idx_entry.step,
+                    None if step is REVERSED_STEP else step,
                 ):
                     if slice_idx_entry is not None:
                         if not isinstance(slice_idx_entry, int):
@@ -938,7 +995,7 @@ class Subtensor(BaseSubtensor, COp):
         assert len(inputs) == self.n_index_vars
 
         padded = [
-            *indices_from_subtensor(inputs, self.idx_list),
+            *indices_from_subtensor(inputs, self.idx_list, reversed_step_as_int=True),
             *[slice(None, None, None)] * (x.type.ndim - len(idx_list)),
         ]
 
@@ -958,7 +1015,9 @@ class Subtensor(BaseSubtensor, COp):
         (out,) = out_
         x, *index_variables = inputs
 
-        cdata = unflatten_index_variables(index_variables, self.idx_list)
+        cdata = unflatten_index_variables(
+            index_variables, self.idx_list, reversed_step_as_int=True
+        )
         out[0] = np.asarray(x.__getitem__(tuple(cdata)))
 
     def infer_shape(self, node, shapes):
@@ -983,11 +1042,7 @@ class Subtensor(BaseSubtensor, COp):
                     and (idx.step is None or _is_constant(idx.step, 1))
                 ):
                     outshp.append(xl)
-                elif (
-                    (idx.start is None)
-                    and (idx.stop is None)
-                    and _is_constant(idx.step, -1)
-                ):
+                elif idx == slice(None, None, REVERSED_STEP):
                     # Reverse slice
                     outshp.append(xl)
                 else:
@@ -1042,7 +1097,9 @@ class Subtensor(BaseSubtensor, COp):
     def str_from_indices(idx_list, n_index_vars):
         indices = []
         letter_indexes = 0
-        for entry in unflatten_index_variables(["input"] * n_index_vars, idx_list):
+        for entry in unflatten_index_variables(
+            ["input"] * n_index_vars, idx_list, reversed_step_as_int=True
+        ):
             if isinstance(entry, slice):
                 indices.append(Subtensor.str_from_slice(entry))
             else:
@@ -1109,7 +1166,9 @@ class Subtensor(BaseSubtensor, COp):
 
         x, *index_inputs = inputs
         assert len(index_inputs) == node.op.n_index_vars, len(index_inputs)
-        for entry in unflatten_index_variables(index_inputs, idx_list):
+        for entry in unflatten_index_variables(
+            index_inputs, idx_list, reversed_step_as_int=True
+        ):
             if isinstance(entry, slice):
                 init_entry(entry.start)
                 init_entry(entry.stop)
@@ -1285,7 +1344,7 @@ class Subtensor(BaseSubtensor, COp):
 
     @staticmethod
     def helper_c_code_cache_version():
-        return (9,)
+        return (10,)
 
     def c_code(self, node, name, inputs, outputs, sub):  # DEBUG
         if not isinstance(node.inputs[0].type, TensorType):
@@ -1369,7 +1428,9 @@ def _get_vector_length_Subtensor(op, var):
     # If we take a slice, we know how many elements it will result in
     # TODO: We can cover more `*Subtensor` cases.
     try:
-        indices = get_idx_list(var.owner.inputs, var.owner.op.idx_list)
+        indices = indices_from_subtensor(
+            var.owner.inputs[1:], var.owner.op.idx_list, reversed_step_as_int=True
+        )
         start = (
             None
             if indices[0].start is None
@@ -1424,7 +1485,9 @@ class SubtensorPrinter(Printer):
             return "" if comp is None else str(comp)
 
         sidxs = []
-        for entry in unflatten_index_variables(printed_indices, idxs):
+        for entry in unflatten_index_variables(
+            printed_indices, idxs, reversed_step_as_int=True
+        ):
             if isinstance(entry, slice):
                 msg1 = process_slice_component(entry.start)
                 msg2 = process_slice_component(entry.stop)
@@ -1531,7 +1594,9 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def perform(self, node, inputs, output_storage):
         x, y, *flat_indices = inputs
-        indices = unflatten_index_variables(flat_indices, self.idx_list)
+        indices = unflatten_index_variables(
+            flat_indices, self.idx_list, reversed_step_as_int=True
+        )
 
         if not self.inplace:
             x = x.copy()
@@ -2013,7 +2078,9 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         if len(idx_list) > x.type.ndim:
             raise IndexError("too many indices for array")
 
-        reconstructed_indices = unflatten_index_variables(index_variables, idx_list)
+        reconstructed_indices = unflatten_index_variables(
+            index_variables, idx_list, reversed_step_as_int=True
+        )
 
         explicit_indices = []
         for idx in reconstructed_indices:
@@ -2162,7 +2229,9 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
         x, *index_variables = inputs
 
-        full_indices = unflatten_index_variables(index_variables, self.idx_list)
+        full_indices = unflatten_index_variables(
+            index_variables, self.idx_list, reversed_step_as_int=True
+        )
 
         rval = x.__getitem__(tuple(full_indices))
 
@@ -2511,7 +2580,9 @@ class AdvancedIncSubtensor(BaseSubtensor, COp):
 
         self._check_runtime_broadcast_of_vector_index(node, x, y, index_variables[0])
 
-        full_indices = unflatten_index_variables(index_variables, self.idx_list)
+        full_indices = unflatten_index_variables(
+            index_variables, self.idx_list, reversed_step_as_int=True
+        )
 
         (out,) = out_
         if not self.inplace:

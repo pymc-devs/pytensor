@@ -117,8 +117,7 @@ def numba_deepcopy_slice(x):
 
 def subtensor_op_cache_key(op, **extra_fields):
     key_parts = [type(op), tuple(extra_fields.items())]
-    if hasattr(op, "idx_list"):
-        key_parts.append(op.idx_list)
+    key_parts.append(op.idx_list)
     if isinstance(op, IncSubtensor | AdvancedIncSubtensor):
         key_parts.append((op.inplace, op.set_instead_of_inc))
     if isinstance(op, AdvancedIncSubtensor):
@@ -153,7 +152,9 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     ]
     indices_creation_src = tuple(
         index_source(index)
-        for index in indices_from_subtensor(index_sources, op.idx_list)
+        for index in indices_from_subtensor(
+            index_sources, op.idx_list, reversed_step_as_int=True
+        )
     )
     indices_creation_src = f"indices = {create_tuple_string(indices_creation_src)}"
 
@@ -423,7 +424,9 @@ def vector_integer_advanced_indexing(
 
     [out] = node.outputs
 
-    reconstructed_indices = indices_from_subtensor(index_variables, op.idx_list)
+    reconstructed_indices = indices_from_subtensor(
+        index_variables, op.idx_list, reversed_step_as_int=True
+    )
 
     idx_args = [f"idx{i}" for i in range(len(index_variables))]
     var_to_arg = dict(zip(index_variables, idx_args))
@@ -433,6 +436,9 @@ def vector_integer_advanced_indexing(
     def get_idx_str(val, is_slice_component=False):
         if val is None:
             return "None"
+        # A REVERSED_STEP slice step, requested as -1
+        if isinstance(val, int):
+            return str(val)
         if isinstance(val, Variable) and val in var_to_arg:
             arg = var_to_arg[val]
             if val.ndim == 0 and is_slice_component:

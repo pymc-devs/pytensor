@@ -39,6 +39,10 @@ rng = np.random.default_rng(sum(map(ord, "Numba subtensors")))
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             (slice(1, 2), 1, slice(None)),
         ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            (slice(None, None, -1), 1, slice(3, 0, -1)),
+        ),
     ],
 )
 def test_Subtensor(x, indices):
@@ -148,6 +152,11 @@ def test_AdvancedSubtensor1_out_of_bounds():
             as_tensor(np.arange(4 * 4).reshape((4, 4))),
             (None, [0, 1, 2], [0, 1, 2]),
         ),
+        # Vector indexing with a reversed slice
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            ([2, 0], slice(None, None, -1)),
+        ),
     ],
 )
 @pytest.mark.filterwarnings("error")  # Raise if we did not expect objmode to be needed
@@ -188,6 +197,11 @@ def test_AdvancedSubtensor(x, indices):
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             as_tensor(rng.poisson(size=(1, 5))),
             (slice(1, 2), 1, slice(None)),
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            as_tensor(rng.poisson(size=(3, 5))),
+            (slice(None, None, -1), 1, slice(None, None, -1)),
         ),
     ],
 )

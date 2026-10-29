@@ -26,7 +26,7 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
     if all(isinstance(idx, Constant) for idx in idxs):
         # Use constant indices to avoid graph break
         constant_indices = indices_from_subtensor(
-            [int(idx.data) for idx in idxs], idx_list
+            [int(idx.data) for idx in idxs], idx_list, reversed_step_as_int=True
         )
         check_negative_steps(constant_indices)
 
@@ -37,7 +37,9 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
 
     # Fallback that will introduce a graph break
     def subtensor(x, *flattened_indices):
-        indices = indices_from_subtensor(flattened_indices, idx_list)
+        indices = indices_from_subtensor(
+            flattened_indices, idx_list, reversed_step_as_int=True
+        )
         check_negative_steps(indices)
         return x[indices]
 
@@ -47,7 +49,9 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
 @pytorch_funcify.register(AdvancedSubtensor)
 def pytorch_funcify_AdvSubtensor(op, node, **kwargs):
     def advsubtensor(x, *indices):
-        indices = indices_from_subtensor(indices, op.idx_list)
+        indices = indices_from_subtensor(
+            indices, op.idx_list, reversed_step_as_int=True
+        )
         check_negative_steps(indices)
         return x[indices]
 
@@ -61,7 +65,9 @@ def pytorch_funcify_IncSubtensor(op, node, **kwargs):
     if op.set_instead_of_inc:
 
         def set_subtensor(x, y, *flattened_indices):
-            indices = indices_from_subtensor(flattened_indices, idx_list)
+            indices = indices_from_subtensor(
+                flattened_indices, idx_list, reversed_step_as_int=True
+            )
             check_negative_steps(indices)
             if not inplace:
                 x = x.clone()
@@ -73,7 +79,9 @@ def pytorch_funcify_IncSubtensor(op, node, **kwargs):
     else:
 
         def inc_subtensor(x, y, *flattened_indices):
-            indices = indices_from_subtensor(flattened_indices, idx_list)
+            indices = indices_from_subtensor(
+                flattened_indices, idx_list, reversed_step_as_int=True
+            )
             check_negative_steps(indices)
             if not inplace:
                 x = x.clone()
@@ -92,7 +100,9 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
     if op.set_instead_of_inc:
 
         def adv_set_subtensor(x, y, *flattened_indices):
-            indices = indices_from_subtensor(flattened_indices, idx_list)
+            indices = indices_from_subtensor(
+                flattened_indices, idx_list, reversed_step_as_int=True
+            )
             check_negative_steps(indices)
             op._check_runtime_broadcast_of_vector_index(node, x, y, indices[0])
             if not inplace:
@@ -105,7 +115,9 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
     elif ignore_duplicates:
 
         def adv_inc_subtensor_no_duplicates(x, y, *flattened_indices):
-            indices = indices_from_subtensor(flattened_indices, idx_list)
+            indices = indices_from_subtensor(
+                flattened_indices, idx_list, reversed_step_as_int=True
+            )
             check_negative_steps(indices)
             op._check_runtime_broadcast_of_vector_index(node, x, y, indices[0])
             if not inplace:
@@ -122,7 +134,9 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
             )
 
         def adv_inc_subtensor(x, y, *flattened_indices):
-            indices = indices_from_subtensor(flattened_indices, idx_list)
+            indices = indices_from_subtensor(
+                flattened_indices, idx_list, reversed_step_as_int=True
+            )
             # Not needed because slices aren't supported in this path
             # check_negative_steps(indices)
             op._check_runtime_broadcast_of_vector_index(node, x, y, indices[0])
