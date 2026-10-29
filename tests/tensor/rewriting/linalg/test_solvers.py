@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 import scipy.linalg
@@ -686,6 +688,192 @@ def test_block_diag_solve_pushdown_both_sides_block_diag():
         scipy.linalg.block_diag(B1_v, B2_v),
     )
     assert_allclose(f(A1_v, A2_v, B1_v, B2_v), expected, atol=1e-10)
+
+
+KRON_SOLVE_PASSES = ["canonicalize", "stabilize"]
+
+
+def _vec_solve(A, B, b, b_ndim, solve_factor):
+    """Solve ``kron(A, B) x = b`` one factor at a time."""
+    m, p = A.type.shape[-1], B.type.shape[-1]
+    batch_shape = b.type.shape[: b.type.ndim - b_ndim]
+    if b_ndim == 1:
+        Z = solve_factor(A, b.reshape((*batch_shape, m, p)))
+        return solve_factor(B, Z.mT).mT.reshape((*batch_shape, m * p))
+    k = b.type.shape[-1]
+    Z = solve_factor(A, b.reshape((*batch_shape, m, p * k)))
+    Z = Z.reshape((*batch_shape, m, p, k))
+    return solve_factor(B, Z).reshape((*batch_shape, m * p, k))
+
+
+class TestSolveOfKron:
+    @pytest.mark.parametrize(
+        "assume_a, transposed",
+        [
+            ("gen", False),
+            ("gen", True),
+            ("lower triangular", False),
+            ("lower triangular", True),
+            ("pos", False),
+        ],
+        ids=["gen-plain", "gen-transposed", "lower-tri", "lower-tri-transposed", "pos"],
+    )
+    @pytest.mark.parametrize(
+        "b_shape, b_ndim",
+        [((12,), 1), ((12, 5), 2), ((5, 12), 1)],
+        ids=["vector_b", "matrix_b", "batched_vector_b"],
+    )
+    def test_solve_of_kron(self, b_shape, b_ndim, assume_a, transposed):
+        rng = np.random.default_rng(0)
+        m, p = 4, 3
+        A_raw = pt.dmatrix("A", shape=(m, m))
+        B_raw = pt.dmatrix("B", shape=(p, p))
+        b = pt.tensor("b", shape=b_shape, dtype="float64")
+
+        solve_factor = partial(solve, b_ndim=2)
+        if assume_a == "lower triangular":
+            # kron(U1, U2).mT is lower triangular, so the transposed case needs upper
+            # triangular factors.
+            if transposed:
+                A = assume(pt.triu(A_raw), upper_triangular=True)
+                B = assume(pt.triu(B_raw), upper_triangular=True)
+            else:
+                A = assume(pt.tril(A_raw), lower_triangular=True)
+                B = assume(pt.tril(B_raw), lower_triangular=True)
+            solve_factor = partial(solve_triangular, lower=True, b_ndim=2)
+        elif assume_a == "pos":
+            A = assume(A_raw @ A_raw.mT + pt.eye(m), positive_definite=True)
+            B = assume(B_raw @ B_raw.mT + pt.eye(p), positive_definite=True)
+            solve_factor = partial(solve, assume_a="pos", b_ndim=2)
+        else:
+            A, B = A_raw, B_raw
+
+        K = pt.linalg.kron(A, B)
+        if transposed:
+            K, A, B = K.mT, A.mT, B.mT
+        out = solve(K, b, assume_a=assume_a, b_ndim=b_ndim)
+        result = RewriteTester([A_raw, B_raw, b], [out], include=KRON_SOLVE_PASSES)
+
+        expected = _vec_solve(A, B, b, b_ndim, solve_factor)
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+        result.assert_eval(
+            rng.normal(size=(m, m)), rng.normal(size=(p, p)), rng.normal(size=b_shape)
+        )
+
+    def test_n_way_kron(self):
+        rng = np.random.default_rng(3)
+        m, p, q = 3, 2, 4
+        A = pt.dmatrix("A", shape=(m, m))
+        B = pt.dmatrix("B", shape=(p, p))
+        C = pt.dmatrix("C", shape=(q, q))
+        b = pt.dvector("b", shape=(m * p * q,))
+
+        out = solve(pt.linalg.kron(pt.linalg.kron(A, B), C), b)
+        result = RewriteTester([A, B, C, b], [out], include=KRON_SOLVE_PASSES)
+
+        solve_factor = partial(solve, b_ndim=2)
+        Z = _vec_solve(A, B, b.reshape((m * p, q)), 2, solve_factor)
+        expected = solve_factor(C, Z.mT).mT.reshape((m * p * q,))
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+        result.assert_eval(
+            rng.normal(size=(m, m)),
+            rng.normal(size=(p, p)),
+            rng.normal(size=(q, q)),
+            rng.normal(size=(m * p * q,)),
+        )
+
+    def test_cho_solve_of_kron(self):
+        rng = np.random.default_rng(1)
+        m, p = 3, 2
+        A_raw = pt.dmatrix("A", shape=(m, m))
+        B_raw = pt.dmatrix("B", shape=(p, p))
+        b = pt.dvector("b", shape=(m * p,))
+        L_A = assume(pt.tril(A_raw), lower_triangular=True)
+        L_B = assume(pt.tril(B_raw), lower_triangular=True)
+
+        out = cho_solve((pt.linalg.kron(L_A, L_B), True), b)
+        result = RewriteTester([A_raw, B_raw, b], [out], include=KRON_SOLVE_PASSES)
+
+        def solve_factor(L, y):
+            return cho_solve((L, True), y, b_ndim=2)
+
+        expected = _vec_solve(L_A, L_B, b, 1, solve_factor)
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+        result.assert_eval(
+            rng.normal(size=(m, m)) + 3 * np.eye(m),
+            rng.normal(size=(p, p)) + 3 * np.eye(p),
+            rng.normal(size=(m * p,)),
+        )
+
+    def test_pos_assume_a_kept_on_factors(self):
+        """Unannotated factors keep assume_a="pos", so an indefinite kron still gives NaN."""
+        m, p = 3, 2
+        A = pt.dmatrix("A", shape=(m, m))
+        B = pt.dmatrix("B", shape=(p, p))
+        b = pt.dvector("b", shape=(m * p,))
+
+        out = solve(pt.linalg.kron(A, B), b, assume_a="pos")
+        result = RewriteTester([A, B, b], [out], include=KRON_SOLVE_PASSES)
+        expected = _vec_solve(A, B, b, 1, partial(solve, assume_a="pos", b_ndim=2))
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+
+    @pytest.mark.parametrize(
+        "make_factor, make_solve",
+        [
+            pytest.param(
+                lambda X: assume(pt.tril(X), lower_triangular=True),
+                partial(solve_triangular, lower=True, unit_diagonal=True),
+                id="unit_diagonal",
+            ),
+            pytest.param(
+                lambda X: X,
+                partial(solve_triangular, lower=True),
+                id="solve_triangular_full_factors",
+            ),
+            pytest.param(
+                lambda X: X,
+                lambda K, b: cho_solve((K, True), b),
+                id="cho_solve_full_factors",
+            ),
+            pytest.param(
+                lambda X: assume(pt.tril(X), lower_triangular=True),
+                lambda K, b: solve_triangular(K.mT, b, lower=True),
+                id="lower_factors_transposed",
+            ),
+            pytest.param(
+                lambda X: X,
+                partial(solve, assume_a="tridiagonal"),
+                id="tridiagonal",
+            ),
+        ],
+    )
+    def test_does_not_fire(self, make_factor, make_solve):
+        A = pt.dmatrix("A", shape=(3, 3))
+        B = pt.dmatrix("B", shape=(2, 2))
+        b = pt.dvector("b", shape=(6,))
+
+        def build():
+            return make_solve(pt.linalg.kron(make_factor(A), make_factor(B)), b)
+
+        result = RewriteTester([A, B, b], [build()], include=KRON_SOLVE_PASSES)
+        expected = rewrite_graph(
+            build(), include=KRON_SOLVE_PASSES, exclude=("solve_of_kron",)
+        )
+        result.assert_graph(expected)
+
+    def test_static_non_square_factors_not_rewritten(self):
+        A = pt.dmatrix("A", shape=(2, 4))
+        B = pt.dmatrix("B", shape=(4, 2))
+        b = pt.dvector("b", shape=(8,))
+
+        out = solve(pt.linalg.kron(A, B), b)
+        result = RewriteTester([A, B, b], [out], include=KRON_SOLVE_PASSES)
+        expected = rewrite_graph(
+            solve(pt.linalg.kron(A, B), b),
+            include=KRON_SOLVE_PASSES,
+            exclude=("solve_of_kron",),
+        )
+        result.assert_graph(expected)
 
 
 class TestDiagonalSolveToDivision:
