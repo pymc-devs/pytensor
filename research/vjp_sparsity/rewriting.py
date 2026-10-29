@@ -50,35 +50,6 @@ from pytensor.tensor.subtensor import (
 from pytensor.tensor.type import TensorType
 
 
-class Cotangent(Op):
-    """Identify a symbolic direction input in the private inference IR.
-
-    In a VJP such as ``v * cos(x)``, the nonzeros of ``v`` must remain symbolic
-    so different basis directions can enable different connections. The primal
-    ``x`` instead ranges over unknown values, so ``cos(x)`` is conservatively
-    potentially nonzero everywhere. The two inputs need different treatment
-    even though they can have the same tensor type.
-
-    This identity annotation carries that distinction through cloning and
-    rewriting. It is introduced after differentiation; its nonzero query becomes
-    ``v != 0``, and the annotation is removed before inference returns.
-    """
-
-    __props__ = ()
-
-    def make_node(self, value):
-        return Apply(self, [value], [value.type()])
-
-    def perform(self, node, inputs, outputs):
-        outputs[0][0] = inputs[0]
-
-    def infer_shape(self, node, shapes):
-        return shapes
-
-    def do_constant_folding(self, fgraph, node):
-        return False
-
-
 class MayBeNonzero(Op):
     """Structural query, distinct from an existing runtime nonzero predicate."""
 
@@ -97,7 +68,6 @@ class MayBeNonzero(Op):
         return False
 
 
-cotangent = Cotangent()
 may_be_nonzero = MayBeNonzero()
 nonzero_lift_db = EquilibriumDB(ignore_newtrees=False)
 nonzero_rewrites_db = SequenceDB()
@@ -162,12 +132,6 @@ def _shape_only(variables, *, allow_integer_inputs=False):
             return False
         pending.extend(variable.owner.inputs)
     return True
-
-
-@register_nonzero([Cotangent])
-def local_nonzero_cotangent(fgraph, node):
-    """Keep directional nonzeros symbolic instead of making them all possible."""
-    return pt.neq(node.inputs[0], 0)
 
 
 @register_nonzero([elemwise_of(ps.Mul)])
@@ -441,43 +405,21 @@ def local_nonzero_solve(fgraph, node):
 
 
 @node_rewriter([MayBeNonzero])
-def local_nonzero_inputs(fgraph, node):
+def local_nonzero_constants(fgraph, node):
     [value] = node.inputs
     if isinstance(value, Constant):
         data = value.data.toarray() if scipy.sparse.issparse(value.data) else value.data
         return [pt.constant(np.asarray(data) != 0)]
-    if value.owner_op is None:
-        return [pt.ones(value.shape, dtype="bool")]
 
 
-@node_rewriter([MayBeNonzero])
-def local_nonzero_unknown(fgraph, node):
-    [value] = node.inputs
-    return [pt.ones(value.shape, dtype="bool")]
-
-
-@node_rewriter([Cotangent])
-def local_remove_cotangent(fgraph, node):
-    return node.inputs
-
-
-nonzero_lift_db.register("local_nonzero_inputs", local_nonzero_inputs, "basic")
+nonzero_lift_db.register("local_nonzero_constants", local_nonzero_constants, "basic")
 nonzero_rewrites_db.register("shape", ShapeOptimizer(), "basic", position=0)
 nonzero_rewrites_db.register(
     "pre-canonicalize", optdb.query("+canonicalize"), "basic", position=1
 )
 nonzero_rewrites_db.register("lift", nonzero_lift_db, "basic", position=2)
 nonzero_rewrites_db.register(
-    "pessimistic",
-    in2out(local_nonzero_unknown, ignore_newtrees=False),
-    "basic",
-    position=3,
-)
-nonzero_rewrites_db.register(
-    "remove_cotangents", in2out(local_remove_cotangent), "basic", position=4
-)
-nonzero_rewrites_db.register(
-    "post-canonicalize", optdb.query("+canonicalize"), "basic", position=5
+    "post-canonicalize", optdb.query("+canonicalize"), "basic", position=4
 )
 
 
@@ -488,6 +430,10 @@ def infer_nonzero(vjp, cotangents, *, wrt=(), query=nonzero_basic_query):
     remain in the result so callers can supply basis directions. Other runtime
     inputs are unknown primal values; a connection cannot be excluded just
     because a coefficient happens to vanish at one particular input value.
+
+    Lifting leaves root queries unresolved. A final resolution pass turns queries
+    on cotangent roots into ordinary ``value != 0`` expressions, and all other
+    unresolved queries into all-true masks.
 
     Requested ``wrt`` values are opaque during inference, including values whose
     producers normally force some elements to zero. They are directly
@@ -501,18 +447,23 @@ def infer_nonzero(vjp, cotangents, *, wrt=(), query=nonzero_basic_query):
     vjp = [vjp] if single else list(vjp)
     cotangents = [cotangents] if isinstance(cotangents, Variable) else list(cotangents)
     wrt = [wrt] if isinstance(wrt, Variable) else list(wrt)
-    protected = {variable: variable.type() for variable in wrt}
-    annotated = clone_replace(
-        vjp,
-        replace={**protected, **{value: cotangent(value) for value in cotangents}},
-    )
+    protected = {variable: variable.type() for variable in [*wrt, *cotangents]}
+    cotangent_roots = {protected[variable] for variable in cotangents}
+    cloned = clone_replace(vjp, replace=protected)
     fgraph = FunctionGraph(
-        outputs=[may_be_nonzero(gradient) for gradient in annotated], clone=False
+        outputs=[may_be_nonzero(gradient) for gradient in cloned], clone=False
     )
+
+    @node_rewriter([MayBeNonzero])
+    def resolve_nonzero_queries(fgraph, node):
+        [value] = node.inputs
+        if value in cotangent_roots:
+            return [pt.neq(value, 0)]
+        return [pt.ones(value.shape, dtype="bool")]
+
+    query = query.register((in2out(resolve_nonzero_queries, ignore_newtrees=False), 3))
     nonzero_rewrites_db.query(query).rewrite(fgraph)
-    assert not any(
-        isinstance(node.op, MayBeNonzero | Cotangent) for node in fgraph.toposort()
-    )
+    assert not any(isinstance(node.op, MayBeNonzero) for node in fgraph.toposort())
     # Bind only after the complete rewrite pipeline; never rewrite these nodes.
     fgraph.replace_all(
         ((placeholder, original) for original, placeholder in protected.items()),
