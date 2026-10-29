@@ -8,7 +8,6 @@ from pytensor.tensor.basic import cast
 from pytensor.tensor.random.basic import (
     InvGammaRV,
     LogNormalRV,
-    MvNormalRV,
     NormalRV,
 )
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
@@ -17,9 +16,7 @@ from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.variable import TensorConstant
 
 
-_RVS_TO_CAST_FLOAT_PARAMS_TO_FLOAT64 = frozenset(
-    (NormalRV, LogNormalRV, InvGammaRV, MvNormalRV)
-)
+_RVS_TO_CAST_FLOAT_PARAMS_TO_FLOAT64 = frozenset((NormalRV, LogNormalRV, InvGammaRV))
 
 
 @node_rewriter([RandomVariable])

@@ -885,13 +885,6 @@ def test_rv_float_params_cast_to_float64(floatX):
             pt.random.normal(0, 1, size=(5,), rng=rng)
         ) == ["float64", "float64"]
 
-        # Opt-in: this rewrite still promotes MvNormal's mean and covariance.
-        assert _compiled_rv_dist_param_dtypes(
-            pt.random.multivariate_normal(
-                np.zeros(3, dtype="float32"), np.eye(3, dtype="float32"), rng=rng
-            )
-        ) == ["float64", "float64"]
-
         # Not opt-in (no measurable numba speedup): the float32 probability is left as-is,
         # as is the integer count ``n``.
         assert _compiled_rv_dist_param_dtypes(
