@@ -1416,7 +1416,9 @@ class SubtensorPrinter(Printer):
     def _process(self, idxs, op_inputs, pstate):
         input, *index_inputs = op_inputs
         with set_precedence(pstate):
-            printed_indices = [pstate.pprinter.process(inp) for inp in index_inputs]
+            printed_indices = [
+                pstate.pprinter.process(inp, pstate) for inp in index_inputs
+            ]
 
         def process_slice_component(comp):
             return "" if comp is None else str(comp)
