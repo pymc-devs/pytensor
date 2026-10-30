@@ -23,6 +23,7 @@ from pytensor.tensor.rewriting.fused_elemwise import (
     FusedElemwise,
     fused_elemwise_optdb,
 )
+from pytensor.tensor.rewriting.subtensor import local_subtensor_merge_integer
 from pytensor.tensor.subtensor import Subtensor
 
 
@@ -77,10 +78,10 @@ class ScalarizeRewriter(GraphRewriter):
                 continue
             op = node.op
             outputs = None
-            if isinstance(op, Subtensor) and node.outputs[0].ndim == 0:
-                outputs = self.scalarize_producer(fgraph, node, ScalarSubtensor)
-            elif isinstance(op, CAReduce) and node.outputs[0].ndim == 0:
-                outputs = self.scalarize_producer(fgraph, node, ScalarCAReduce)
+            if isinstance(op, Subtensor) and all(node.outputs[0].type.broadcastable):
+                outputs = self.scalarize_subtensor(fgraph, node)
+            elif isinstance(op, CAReduce) and all(node.outputs[0].type.broadcastable):
+                outputs = self.scalarize_careduce(fgraph, node)
             elif isinstance(op, FusedElemwise):
                 outputs = self.scalarize_fused(fgraph, node)
             elif isinstance(op, Elemwise):
@@ -129,13 +130,32 @@ class ScalarizeRewriter(GraphRewriter):
         return False
 
     @staticmethod
-    def scalarize_producer(fgraph, node, scalar_op_type):
-        """Make scalar indexing or a full reduction return a scalar."""
+    def scalarize_subtensor(fgraph, node):
+        """Return a single-element indexed read as a native scalar."""
         if not ScalarizeRewriter.has_scalar_consumer(fgraph, node.outputs[0]):
             return None
+        original_outputs = node.outputs
+        if node.outputs[0].ndim:
+            # Merge away the singleton view so the wrapper keeps one scalar read.
+            indexed = node.outputs[0][(0,) * node.outputs[0].ndim]
+            merged = local_subtensor_merge_integer.transform(fgraph, indexed.owner)
+            if not merged or merged[0].owner.inputs[0] is not node.inputs[0]:
+                return None
+            node = merged[0].owner
         inner_inputs = [inp.type() for inp in node.inputs]
         inner_output = scalar_from_tensor(node.op(*inner_inputs))
-        scalar = scalar_op_type(inner_inputs, [inner_output])(*node.inputs)
+        scalar = ScalarSubtensor(inner_inputs, [inner_output])(*node.inputs)
+        return ScalarizeRewriter.tensor_outputs(original_outputs, [scalar])
+
+    @staticmethod
+    def scalarize_careduce(fgraph, node):
+        """Return a single-element reduction as a native scalar."""
+        if not ScalarizeRewriter.has_scalar_consumer(fgraph, node.outputs[0]):
+            return None
+        [x] = node.inputs
+        inner_input = x.type()
+        inner_output = scalar_from_tensor(node.op.clone(axis=None)(inner_input))
+        scalar = ScalarCAReduce([inner_input], [inner_output])(x)
         return ScalarizeRewriter.tensor_outputs(node.outputs, [scalar])
 
     @staticmethod
@@ -200,7 +220,7 @@ class ScalarizeRewriter(GraphRewriter):
             for i, spec in enumerate(node.op.reduced_outputs)
             if spec is not None
             and not isinstance(node.outputs[i].type, ScalarType)
-            and node.outputs[i].ndim == 0
+            and all(node.outputs[i].type.broadcastable)
             and (
                 scalars
                 or ScalarizeRewriter.has_scalar_consumer(fgraph, node.outputs[i])

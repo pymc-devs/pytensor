@@ -219,7 +219,7 @@ class FusedElemwise(FinalizedOpFromGraph):
         return set(range(len(elemwise.inputs))) - indexed
 
     def with_scalar_io(self, scalar_inputs, scalar_outputs):
-        """Change scalar IO types without moving slots or changing fusion specs."""
+        """Change scalar IO types without moving slots."""
         inputs = [
             NominalVariable(
                 i, get_scalar_type(inp.type.dtype) if i in scalar_inputs else inp.type
@@ -232,11 +232,16 @@ class FusedElemwise(FinalizedOpFromGraph):
             else inp
             for i, (old, inp) in enumerate(zip(self.fgraph.inputs, inputs, strict=True))
         ]
-        outputs = self.fgraph.bind(tensor_inputs)
-        outputs = [
-            scalar_from_tensor(out) if i in scalar_outputs else out
-            for i, out in enumerate(outputs)
-        ]
+        outputs = list(self.fgraph.bind(tensor_inputs))
+        reduced_outputs = list(self.reduced_outputs)
+        for i in scalar_outputs:
+            out = outputs[i]
+            reduction = out.owner_op.clone(axis=None)(*out.owner.inputs)
+            outputs[i] = scalar_from_tensor(reduction)
+            # Keep the fusion metadata aligned with the replacement reduction.
+            spec = reduced_outputs[i]
+            axes = tuple(range(out.owner.inputs[0].ndim))
+            reduced_outputs[i] = (spec[0], axes, *spec[2:])
         inner = FunctionGraph(inputs, outputs, clone=False)
         inner.attach_feature(DestroyHandler())
         [elemwise] = [n for n in inner.apply_nodes if isinstance(n.op, Elemwise)]
@@ -266,7 +271,7 @@ class FusedElemwise(FinalizedOpFromGraph):
             destroy_map=destroy_map,
             indexed_inputs=self.indexed_inputs,
             indexed_outputs=self.indexed_outputs,
-            reduced_outputs=self.reduced_outputs,
+            reduced_outputs=tuple(reduced_outputs),
         )
 
     def __str__(self):
