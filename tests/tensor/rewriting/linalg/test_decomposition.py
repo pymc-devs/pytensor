@@ -1022,3 +1022,24 @@ def test_eig_to_eigh():
     w_expected = w_expected.astype("complex128")
     v_expected = v_expected.astype("complex128")
     assert_equal_computations([w_r, v_r], [w_expected, v_expected])
+
+
+def test_eig_to_eigh_complex_positive_definite():
+    x = pt.zmatrix("x", shape=(5, 5))
+    w, v = pt.linalg.eig(assume(x, positive_definite=True))
+
+    rewrites = ("canonicalize", "ShapeOpt")
+    w_r, v_r = rewrite_graph([w, v], include=rewrites)
+
+    w_expected, v_expected = eigh(x)
+    assert_equal_computations([w_r, v_r], [w_expected.astype("complex128"), v_expected])
+
+
+def test_eig_of_complex_symmetric_not_rewritten():
+    x = pt.zmatrix("x", shape=(5, 5))
+    rewrites = ("canonicalize", "ShapeOpt")
+    rewritten = rewrite_graph(
+        pt.linalg.eig(assume(x, symmetric=True)), include=rewrites
+    )
+    expected = rewrite_graph(pt.linalg.eig(x), include=rewrites)
+    assert_equal_computations(rewritten, expected)
