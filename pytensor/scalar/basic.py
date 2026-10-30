@@ -1152,6 +1152,10 @@ class ScalarOp(COp):
     nin = -1
     nout = 1
 
+    # True when the output can change only at isolated points of the input, so its
+    # derivative is zero almost everywhere.
+    piecewise_constant = False
+
     def __init__(self, output_types_preference=None, name=None):
         self.name = name
         if output_types_preference is not None:
@@ -1350,6 +1354,8 @@ class BinaryScalarOp(ScalarOp):
 
 
 class LogicalComparison(BinaryScalarOp):
+    piecewise_constant = True
+
     def __init__(self, *args, **kwargs):
         BinaryScalarOp.__init__(self, *args, **kwargs)
         # This is for compat with old pickles.
@@ -1385,6 +1391,8 @@ class FixedLogicalComparison(UnaryScalarOp):
     Comparison to a fixed value.
 
     """
+
+    piecewise_constant = True
 
     def __init__(self, *args, **kwargs):
         UnaryScalarOp.__init__(self, *args, **kwargs)
@@ -1632,6 +1640,8 @@ switch = Switch()
 
 
 class UnaryBitOp(UnaryScalarOp):
+    piecewise_constant = True
+
     def output_types(self, *input_types):
         for i in input_types[0]:
             if i not in discrete_types:
@@ -1646,6 +1656,8 @@ class UnaryBitOp(UnaryScalarOp):
 
 
 class BinaryBitOp(BinaryScalarOp):
+    piecewise_constant = True
+
     def output_types(self, *input_types):
         t0, t1 = input_types[0]
         if t0 == bool and t1 == bool:
@@ -2033,6 +2045,7 @@ true_div = TrueDiv(upcast_out, name="true_div")
 
 class IntDiv(BinaryScalarOp):
     nfunc_spec = ("floor_divide", 2, 1)
+    piecewise_constant = True
     complex_error = ComplexError(
         "PyTensor does not support integer division (//) on "
         "complex numbers, since numpy deprecated it."
@@ -2580,6 +2593,7 @@ abs = Abs(same_out)
 
 class Sign(UnaryScalarOp):
     preserves_zero = True
+    piecewise_constant = True
     monotonic_increasing = True
 
     nfunc_spec = ("sign", 1, 1)
@@ -2663,6 +2677,7 @@ sign = Sign(name="sign", output_types_preference=Sign._output_types_preference)
 
 class Ceil(UnaryScalarOp):
     preserves_zero = True
+    piecewise_constant = True
     monotonic_increasing = True
 
     nfunc_spec = ("ceil", 1, 1)
@@ -2692,6 +2707,7 @@ ceil = Ceil(upgrade_to_float_no_complex, name="ceil")
 
 class Floor(UnaryScalarOp):
     preserves_zero = True
+    piecewise_constant = True
     monotonic_increasing = True
 
     nfunc_spec = ("floor", 1, 1)
@@ -2721,6 +2737,7 @@ floor = Floor(upgrade_to_float_no_complex, name="floor")
 
 class Trunc(UnaryScalarOp):
     preserves_zero = True
+    piecewise_constant = True
     monotonic_increasing = True
 
     nfunc_spec = ("trunc", 1, 1)
@@ -2744,6 +2761,7 @@ trunc = Trunc(upgrade_to_float_no_complex, name="trunc")
 
 class RoundHalfToEven(UnaryScalarOp):
     preserves_zero = True
+    piecewise_constant = True
     monotonic_increasing = True
 
     """
@@ -2835,6 +2853,7 @@ def round_half_away_from_zero_vec(a):
 
 class RoundHalfAwayFromZero(UnaryScalarOp):
     preserves_zero = True
+    piecewise_constant = True
     monotonic_increasing = True
 
     """
