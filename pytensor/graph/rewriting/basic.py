@@ -2891,32 +2891,32 @@ def copy_stack_trace(from_var, to_var):
 
     """
 
-    # Store stack traces from from_var
-    tr = []
     if isinstance(from_var, Iterable) and not isinstance(from_var, Variable):
-        # If from_var is a list, store concatenated stack traces
-        for v in from_var:
-            tr += getattr(v.tag, "trace", [])
-
+        from_vars = from_var
     else:
-        # If from_var is not a list, it must be a single tensor variable,
-        # so just store that particular stack trace
-        tr = getattr(from_var.tag, "trace", [])
+        from_vars = [from_var]
 
+    tr = []
+    for source in from_vars:
+        tr += getattr(source.tag, "trace", [])
     if tr and isinstance(tr[0], tuple):
         # There was one single stack trace, we encapsulate it in a list
         tr = [tr]
 
-    # Copy over stack traces to to_var
     if isinstance(to_var, Iterable) and not isinstance(to_var, Variable):
-        # Copy over stack traces from from_var to each variable in
-        # to_var, including the stack_trace of the to_var before
-        for v in to_var:
-            v.tag.trace = getattr(v.tag, "trace", []) + tr
+        to_vars = to_var
     else:
-        # Copy over stack traces from from_var to each variable to
-        # to_var, including the stack_trace of the to_var before
-        to_var.tag.trace = getattr(to_var.tag, "trace", []) + tr
+        to_vars = [to_var]
+
+    for target in to_vars:
+        # Trace entries are shared by reference, so identity catches every repeated copy
+        target_trace = list(getattr(target.tag, "trace", []))
+        seen = {id(entry) for entry in target_trace}
+        for entry in tr:
+            if id(entry) not in seen:
+                seen.add(id(entry))
+                target_trace.append(entry)
+        target.tag.trace = target_trace
     return to_var
 
 

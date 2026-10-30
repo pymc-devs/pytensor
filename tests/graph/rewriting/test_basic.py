@@ -17,6 +17,7 @@ from pytensor.graph.rewriting.basic import (
     PatternNodeRewriter,
     SequentialNodeRewriter,
     WalkingGraphRewriter,
+    copy_stack_trace,
     in2out,
     logging,
     node_rewriter,
@@ -991,3 +992,21 @@ def test_rewrite_weakref_leak():
         # Only start checking after warmup
         if i > 15:
             assert not res, "Object counts are still growing"
+
+
+def test_copy_stack_trace_deduplicates():
+    c = vector("c")
+    a = vector("a")
+    b = vector("b")
+    c.tag.trace = [[("c.py", 1, "f", "c")]]
+    a.tag.trace = [[("a.py", 1, "f", "a")]]
+    b.tag.trace = [[("b.py", 1, "f", "b")]]
+    copy_stack_trace(c, [a, b])
+
+    d = vector("d")
+    d.tag.trace = []
+    copy_stack_trace([a, b], d)
+    assert d.tag.trace == a.tag.trace + b.tag.trace[:1]
+
+    copy_stack_trace(d, d)
+    assert len(d.tag.trace) == 3
