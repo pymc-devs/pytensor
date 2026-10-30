@@ -27,7 +27,7 @@ from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
-from pytensor.tensor.linalg.products import KroneckerProduct, kron
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm, kron
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -491,6 +491,33 @@ def eigh_of_diag(fgraph, node):
         return None
 
     return broadcast_like_blockwise([new_w, new_v], node, fgraph=fgraph)
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Eigh)])
+def eigh_of_sqrtm(fgraph, node):
+    """eigh(sqrtm(A)) -> (sqrt(w), V) with w, V = eigh(A), for positive definite A.
+
+    sqrtm(A) shares the eigenvectors of A, and sqrt preserves the ascending order of
+    the eigenvalues. sqrtm(A) is Hermitian, so its transpose is its conjugate, with
+    eigenvectors conj(V).
+    """
+    if len(node.inputs) != 1:
+        return None
+
+    [X] = node.inputs
+    core, transposed = strip_left_expand_dims_and_transpose(X)
+    match core.owner_op_and_inputs:
+        case (Blockwise(Sqrtm()), A) if check_assumption(fgraph, A, POSITIVE_DEFINITE):
+            pass
+        case _:
+            return None
+
+    w, V = eigh(A)
+    if transposed and V.type.dtype.startswith("complex"):
+        V = V.conj()
+    return broadcast_like_blockwise([pt.sqrt(pt.maximum(w, 0)), V], node, fgraph=fgraph)
 
 
 @register_canonicalize
