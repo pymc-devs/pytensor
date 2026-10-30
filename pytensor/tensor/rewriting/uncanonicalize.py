@@ -51,8 +51,8 @@ def local_max_to_min(fgraph, node):
 
     Notes
     -----
-    We don't need an opt that will do the reverse as by default
-    the interface put only Max into the graph.
+    `min` builds `Min` directly, so this only matches graphs written as
+    ``-max(-x)``.
 
     """
     if node.op == neg and node.inputs[0].owner:

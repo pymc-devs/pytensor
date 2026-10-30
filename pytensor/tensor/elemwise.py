@@ -1632,7 +1632,7 @@ class CAReduce(COp):
         if np.isposinf(identity):
             if inp.type.dtype in ("float32", "float64"):
                 identity = "__builtin_inf()"
-            elif inp.type.dtype.startswith("uint") or inp.type.dtype == "bool":
+            elif inp.type.dtype == "bool":
                 identity = "1"
             else:
                 identity = "NPY_MAX_" + str(inp.type.dtype).upper()
