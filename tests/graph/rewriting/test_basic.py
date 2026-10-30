@@ -995,18 +995,18 @@ def test_rewrite_weakref_leak():
 
 
 def test_copy_stack_trace_deduplicates():
-    c = vector("c")
-    a = vector("a")
-    b = vector("b")
-    c.tag.trace = [[("c.py", 1, "f", "c")]]
-    a.tag.trace = [[("a.py", 1, "f", "a")]]
-    b.tag.trace = [[("b.py", 1, "f", "b")]]
-    copy_stack_trace(c, [a, b])
-
-    d = vector("d")
+    a, b, c, d = vector("a"), vector("b"), vector("c"), vector("d")
+    a_entry = [("a.py", 1, "f", "a")]
+    b_entry = [("b.py", 1, "f", "b")]
+    c_entry = [("c.py", 1, "f", "c")]
+    a.tag.trace = [a_entry]
+    b.tag.trace = [b_entry]
+    c.tag.trace = [c_entry]
     d.tag.trace = []
+
+    copy_stack_trace(c, [a, b])
     copy_stack_trace([a, b], d)
-    assert d.tag.trace == a.tag.trace + b.tag.trace[:1]
+    assert d.tag.trace == [a_entry, c_entry, b_entry]
 
     copy_stack_trace(d, d)
-    assert len(d.tag.trace) == 3
+    assert d.tag.trace == [a_entry, c_entry, b_entry]
