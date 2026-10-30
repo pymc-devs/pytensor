@@ -643,10 +643,12 @@ def test_useless_specify_shape():
     # We avoid the helper specify_shape that optimizes some (but not all) cases eagerly
     ss = SpecifyShape()
 
+    x_trace = x.tag.trace
     out = ss(x, None, 5, None)
     assert isinstance(out.owner.op, SpecifyShape)
     ret = local_useless_specify_shape.transform(None, out.owner)
     assert ret == [x]
+    assert x.tag.trace == x_trace
 
     # SpecifyShape is needed to enfore unknown dim is 3
     out = ss(x, 3, 5, None)

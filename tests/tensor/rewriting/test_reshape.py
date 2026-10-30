@@ -48,6 +48,7 @@ def test_local_join_dims_noop():
     )
     rewritten = rewrite_graph(x_join, include=("canonicalize",))
     assert_equal_computations([rewritten], [x])
+    assert rewritten.tag.trace == x.tag.trace
 
 
 def test_local_join_dims_to_expand_dims():
