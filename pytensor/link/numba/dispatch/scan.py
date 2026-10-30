@@ -553,13 +553,17 @@ def scan({", ".join(outer_in_names)}):
         },
     )
 
+    inline_policy = "always" if scalar_inner_io else "never"
     if inner_func_cache_key is None:
         # If we can't cache the inner function, we can't cache the Scan either
         scan_cache_key = None
     else:
-        scan_cache_version = 1
+        scan_cache_version = 2
         scan_cache_key = sha256(
-            f"({scan_op_src}, {inner_func_cache_key}, {scan_cache_version})".encode()
+            f"({scan_op_src}, {inner_func_cache_key}, {inline_policy}, {scan_cache_version})".encode()
         ).hexdigest()
 
-    return numba_basic.numba_njit(scan_op_fn, boundscheck=False), scan_cache_key
+    return (
+        numba_basic.numba_njit(scan_op_fn, boundscheck=False, inline=inline_policy),
+        scan_cache_key,
+    )

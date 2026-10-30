@@ -448,7 +448,7 @@ def register_funcify_and_cache_key(op_type):
     return decorator
 
 
-def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | None]:
+def numba_funcify_ensure_cache(op, node=None, **kwargs) -> tuple[Callable, str | None]:
     """Obtain a numba function for an Op and ensure it can be cached by numba.
 
     If `config.numba__cache` is `True`, and `numba_funcify_and_cache_key` returns a non-None key,
@@ -460,9 +460,9 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
     2. String generated functions: Alloc, Scan, OpFromGraph, and FunctionGraph itself
     """
     if config.numba__cache:
-        jitable_func, cache_key = numba_funcify_and_cache_key(op, *args, **kwargs)
+        jitable_func, cache_key = numba_funcify_and_cache_key(op, node=node, **kwargs)
     else:
-        jitable_func, cache_key = numba_funcify(op, *args, **kwargs), None
+        jitable_func, cache_key = numba_funcify(op, node=node, **kwargs), None
 
     if cache_key is None:
         if config.numba__cache and config.compiler_verbose:
@@ -470,13 +470,25 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
         return jitable_func, None
     else:
         op_name = jitable_func.__name__
+        inline_policy = getattr(jitable_func, "targetoptions", {}).get(
+            "inline", "never"
+        )
+        if inline_policy == "always":
+            # Numba's inliner cannot forward a closure through *args.
+            arity = len(
+                op.inputs if isinstance(op, AbstractFunctionGraph) else node.inputs
+            )
+            arguments = ", ".join(f"a{i}" for i in range(arity))
+            cache_key = f"{cache_key}_inlinealways_nargs{arity}"
+        else:
+            arguments = "*args"
         cached_func = compile_numba_function_src(
-            src=f"def {op_name}(*args): return jitable_func(*args)",
+            src=f"def {op_name}({arguments}): return jitable_func({arguments})",
             function_name=op_name,
             global_env=globals() | {"jitable_func": jitable_func},
             cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
         )
-        return numba_njit(cached_func, cache=True), cache_key
+        return numba_njit(cached_func, cache=True, inline=inline_policy), cache_key
 
 
 def cache_key_for_constant(data):

@@ -19,6 +19,73 @@ from tests.link.numba.test_basic import compare_numba_and_py
 from tests.scan.test_basic import ScanCompatibilityTests
 
 
+@pytest.mark.parametrize("cache", [False, True])
+@pytest.mark.parametrize("as_while", [False, True])
+def test_scalar_scan_inline_cache_wrapper(cache, as_while):
+    # Different Scan arities must survive caching without hiding the inlineable loop.
+    import inspect
+
+    from pytensor.link.numba.dispatch.basic import numba_funcify_ensure_cache
+
+    a, b = pt.dvector("a"), pt.dvector("b")
+    initial, coefficient = pt.dscalar("initial"), pt.dscalar("coefficient")
+    first = scan(
+        lambda value, previous: value + previous,
+        sequences=[a],
+        outputs_info=[initial],
+        return_updates=False,
+    )
+
+    def step(x, y, previous, scale):
+        value = previous + scale * x + y
+        if as_while:
+            return value, until(value > 0.65)
+        return value
+
+    second = scan(
+        step,
+        sequences=[a, b],
+        outputs_info=[initial],
+        non_sequences=[coefficient],
+        return_updates=False,
+    )
+    mode = get_mode("NUMBA").excluding("scan_merge")
+    with config.change_flags(numba__cache=cache):
+        fn = function([a, b, initial, coefficient], [first[-1], second[-1]], mode=mode)
+        scan_nodes = [n for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+        assert len(scan_nodes) == 2
+        assert len({len(n.inputs) for n in scan_nodes}) == 2
+        for node in scan_nodes:
+            lowered, key = numba_funcify_ensure_cache(node.op, node=node)
+            assert lowered.targetoptions["inline"] == "always"
+            parameters = inspect.signature(lowered.py_func).parameters.values()
+            assert len(parameters) == len(node.inputs)
+            assert all(
+                p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD for p in parameters
+            )
+            if cache:
+                assert key.endswith(f"_inlinealways_nargs{len(node.inputs)}")
+
+        x, y = np.linspace(0.1, 0.5, 5), np.arange(5) / 10
+        for values_a, values_b in ((x, y), (x[::2], y[::-1])):
+            value = 0.2
+            for vx, vy in zip(values_a, values_b):
+                value += 0.7 * vx + vy
+                if as_while and value > 0.65:
+                    break
+            np.testing.assert_allclose(
+                fn(values_a, values_b, 0.2, 0.7), [0.2 + values_a.sum(), value]
+            )
+
+    native = fn.vm.jit_fn
+    for signature in native.signatures:
+        llvm = str(native.overloads[signature].library._get_module_for_linking())
+        assert not any(
+            line.startswith("define ") and "4scanB" in line
+            for line in llvm.splitlines()
+        )
+
+
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 def test_scalar_scan_strided_sequence(dtype):
     # Unit-stride fast paths must preserve general/reversed/read-only fallbacks.
