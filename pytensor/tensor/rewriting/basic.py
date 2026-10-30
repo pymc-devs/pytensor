@@ -1073,17 +1073,17 @@ def local_useless_switch(fgraph, node):
 
     # if left is right -> left
     if equivalent_up_to_constant_casting(left, right):
-        if left.type.broadcastable != out_bcast:
-            left, _ = broadcast_arrays(left, cond_var)
+        out = left
+        if out.type.broadcastable != out_bcast:
+            out, _ = broadcast_arrays(out, cond_var)
 
         out_dtype = node.outputs[0].type.dtype
-        if left.type.dtype != out_dtype:
-            left = cast(left, out_dtype)
+        if out.type.dtype != out_dtype:
+            out = cast(out, out_dtype)
 
-        # left is still an input of the node unless it was broadcast or cast above
-        if left is not node.inputs[1]:
-            copy_stack_trace(node.outputs + node.inputs, left)
-        return [left]
+        if out is not left:
+            copy_stack_trace(node.outputs + node.inputs, out)
+        return [out]
 
     # This case happens with scan.
     # Elemwise{switch}(le(shape_i{id}(X), 0), 0, shape_i{id}(X)) -> shape_i{id}(X)
