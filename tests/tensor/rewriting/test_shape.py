@@ -645,6 +645,7 @@ def test_useless_specify_shape():
 
     x_trace = x.tag.trace
     out = ss(x, None, 5, None)
+    out.tag.trace = [[("file.py", 1, "function", "line")]]
     assert isinstance(out.owner.op, SpecifyShape)
     ret = local_useless_specify_shape.transform(None, out.owner)
     assert ret == [x]

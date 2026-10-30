@@ -41,6 +41,7 @@ def test_local_join_dims_to_reshape():
 def test_local_join_dims_noop():
     """Test that join_dims with n_axes=1 becomes identity (no-op)."""
     x = tensor("x", shape=(2, 3, 4))
+    x_trace = x.tag.trace
     x_join = join_dims(x, start_axis=1, n_axes=1)
 
     assert (
@@ -48,7 +49,7 @@ def test_local_join_dims_noop():
     )
     rewritten = rewrite_graph(x_join, include=("canonicalize",))
     assert_equal_computations([rewritten], [x])
-    assert rewritten.tag.trace == x.tag.trace
+    assert rewritten.tag.trace == x_trace
 
 
 def test_local_join_dims_to_expand_dims():
