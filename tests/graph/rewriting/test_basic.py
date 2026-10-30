@@ -17,6 +17,7 @@ from pytensor.graph.rewriting.basic import (
     PatternNodeRewriter,
     SequentialNodeRewriter,
     WalkingGraphRewriter,
+    copy_stack_trace,
     in2out,
     logging,
     node_rewriter,
@@ -44,6 +45,82 @@ from tests.graph.utils import (
     op_z,
 )
 from tests.unittest_tools import assert_equal_computations
+
+
+def test_copy_stack_trace():
+    x, y = MyVariable("x"), MyVariable("y")
+    x_trace = [[("file.py", 1, "function", "line")]]
+    y_trace = [[("other.py", 2, "other_function", "other_line")]]
+    x.tag.trace = x_trace
+    y.tag.trace = y_trace
+
+    assert copy_stack_trace(x, y) is y
+    assert x.tag.trace == x_trace
+    assert y.tag.trace == y_trace + x_trace
+
+    assert copy_stack_trace(x, x) is x
+    assert x.tag.trace == x_trace
+
+    outputs = [x]
+    assert copy_stack_trace(x, outputs) is outputs
+    assert x.tag.trace is x_trace
+
+    assert copy_stack_trace([x], outputs) is outputs
+    assert x.tag.trace is x_trace
+
+    y.tag.trace = y_trace
+    outputs = [y]
+    assert copy_stack_trace([x], outputs) is outputs
+    assert y.tag.trace == y_trace + x_trace
+
+    y.tag.trace = y_trace
+    assert copy_stack_trace(x, outputs) is outputs
+    assert y.tag.trace == y_trace + x_trace
+
+
+@pytest.mark.parametrize(
+    "source_indices, target_indices, expected_indices",
+    [
+        (0, [0, 1], [[0], [1, 0], [2]]),
+        ([0, 1], 0, [[0, 1], [1], [2]]),
+        ([0, 1], [0, 1], [[0, 1], [1, 0], [2]]),
+        ([0, 1], [1, 2], [[0], [1, 0], [2, 0, 1]]),
+    ],
+)
+def test_copy_stack_trace_overlapping_iterables(
+    source_indices, target_indices, expected_indices
+):
+    variables = [MyVariable(name) for name in ("x", "y", "z")]
+    traces = [[(f"{var.name}.py", 1, "function", "line")] for var in variables]
+    for var, trace in zip(variables, traces, strict=True):
+        var.tag.trace = [trace]
+    sources = (
+        variables[source_indices]
+        if isinstance(source_indices, int)
+        else tuple(variables[i] for i in source_indices)
+    )
+    targets = (
+        variables[target_indices]
+        if isinstance(target_indices, int)
+        else [variables[i] for i in target_indices]
+    )
+    if source_indices == target_indices:
+        sources = targets
+
+    assert copy_stack_trace(sources, targets) is targets
+    assert [var.tag.trace for var in variables] == [
+        [traces[i] for i in indices] for indices in expected_indices
+    ]
+
+
+def test_copy_stack_trace_missing_source_trace():
+    x, y = MyVariable("x"), MyVariable("y")
+    trace = [[("file.py", 1, "function", "line")]]
+    y.tag.trace = trace
+
+    copy_stack_trace([x, y], [x, y])
+    assert x.tag.trace == trace
+    assert y.tag.trace == trace
 
 
 class AssertNoChanges(Feature):
