@@ -2875,6 +2875,8 @@ def pre_greedy_node_rewriter(
 def copy_stack_trace(from_var, to_var):
     r"""Copy the stack traces from `from_var` to `to_var`.
 
+    Entries already present in a target's trace are not added again.
+
     Parameters
     ----------
     from_var :
@@ -2909,7 +2911,7 @@ def copy_stack_trace(from_var, to_var):
         to_vars = [to_var]
 
     for target in to_vars:
-        # Trace entries are shared by reference, so identity catches every repeated copy
+        # Entries are shared by reference, so identity catches every repeated copy
         target_trace = list(getattr(target.tag, "trace", []))
         seen = {id(entry) for entry in target_trace}
         for entry in tr:
