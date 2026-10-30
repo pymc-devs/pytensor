@@ -209,8 +209,11 @@ def as_index_literal(
     ------
     NotScalarConstantError
     """
-    if idx is None or isinstance(idx, int | np.integer):
+    if idx is None or isinstance(idx, int):
         return idx
+
+    if isinstance(idx, np.integer):
+        return idx.item()
 
     if isinstance(idx, slice):
         return slice(
@@ -223,7 +226,7 @@ def as_index_literal(
         raise TypeError(f"Not an index element: {idx}")
 
     if isinstance(idx, ScalarConstant):
-        return cast(int, idx.data)
+        return cast(int, idx.data.item())
 
     if (
         isinstance(idx.type, ps.ScalarType)
