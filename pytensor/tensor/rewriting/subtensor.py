@@ -1664,44 +1664,24 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2, allow_symbolic_refs=Tru
     sl2, reverse2 = get_canonical_form_slice(slice2, len2)
 
     if not isinstance(sl2, slice):
-        if reverse1 is None:
-            # The first slice is not in reverse, which makes things a lot
-            # more clear.
-            # In this case we need to take care only of the special cases:
-            # len2 <=0    -> throw index error regardless of sl2
-            # sl2 > len2  -> throw index error
-            # sl2 < -len2 -> throw index error
-            # To get a index error we simply use len1+1 to indicate we are
-            # out of bounds, because passing this index through the formula
-            # of getting the mixed slice is not guaranteed to result in an
-            # index error. The **issue though** if that the error will
-            # complain about accessing element len1+1 which is probably not
-            # too intuitive for the user
+        if isinstance(sl2, np.integer):
+            sl2 = sl2.item()
+
+        if reverse1 is None or reverse1 == 1:
             val = sl1.start + sl2 * sl1.step
-            val = switch(le(len2, 0), len1 + 1, val)
-            val = switch(ge(sl2, len2), len1 + 1, val)
-            val = switch(lt(sl2, 0), -len1 - 1, val)
-            if sl1.step:
-                val = switch(eq(sl1.step, 0), len1 + 1, val)
-            return val
+        elif reverse1 == -1:
+            val = sl1.stop - 1 - sl2 * sl1.step
         else:
-            # We are in the more complex case when we do not actually know
-            # if the first slice was in reverse or not.
-            # in case it was not in reverse:
             p_val = sl1.start + sl2 * sl1.step
-            # case it was in reverse we need to realize that we do not want
-            # the k-th element from sl.start but the k-th element from
-            # sl.stop backwards
             n_val = sl1.stop - 1 - sl2 * sl1.step
-            # we need to pick either n_val or p_val and then follow same
-            # steps as above for covering the index error cases
             val = switch(lt(reverse1, 0), n_val, p_val)
-            val = switch(le(len2, 0), len1 + 1, val)
-            val = switch(ge(sl2, len2), len1 + 1, val)
-            val = switch(lt(sl2, 0), -len1 - 1, val)
-            if sl1.step is not None:
-                val = switch(eq(sl1.step, 0), len1 + 1, val)
-            return val
+
+        val = switch(le(len2, 0), len1 + 1, val)
+        val = switch(ge(sl2, len2), len1 + 1, val)
+        val = switch(lt(sl2, 0), -len1 - 1, val)
+        if sl1.step is not None:
+            val = switch(eq(sl1.step, 0), len1 + 1, val)
+        return val
     else:
         # We are deleaing with two slices that need to be put together
         # according to the two steps we have 4 different combinations of
