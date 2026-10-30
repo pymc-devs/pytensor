@@ -18,7 +18,6 @@ from pytensor.scalar.basic import (
     UnaryScalarOp,
     as_scalar,
     complex_types,
-    constant,
     discrete_types,
     eq,
     exp,
@@ -33,7 +32,6 @@ from pytensor.scalar.basic import (
     log1p,
     maximum,
     reciprocal,
-    sqrt,
     switch,
     true_div,
     upcast,
@@ -797,191 +795,144 @@ def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=Scal
     return op(n_steps, *init, *constant)
 
 
+def _gammainc_grad_series(k, x, skip_loop):
+    """dP/dk from the power series of P, differentiated term by term.
+
+    P(k, x) = x^k e^-x / Gamma(k + 1) * sum_n t_n, with t_0 = 1 and
+    t_n = t_{n-1} x / (k + n) (DLMF 8.7.1).
+    """
+    dtype = upcast(k.type.dtype, x.type.dtype, "float32")
+    k, x = k.astype(dtype), x.astype(dtype)
+    eps = np.array(np.finfo(dtype).eps, dtype=dtype)
+    max_iters = switch(
+        skip_loop, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
+    )
+
+    def inner_loop(s, ds, t, dt, k_plus_n, x):
+        k_plus_n += 1
+        r = x / k_plus_n
+        # dr/dk = -r / (k + n)
+        dt = r * (dt - t / k_plus_n)
+        t = t * r
+        s += t
+        ds += dt
+        return (
+            (s, ds, t, dt, k_plus_n),
+            (t <= eps * s) & (scalar_abs(dt) <= eps * scalar_abs(ds)),
+        )
+
+    one, zero = np.array(1, dtype=dtype), np.array(0, dtype=dtype)
+    init = [one, zero, one, zero, k]
+    s, ds, *_, converges = _make_scalar_loop(
+        max_iters, init, [x], inner_loop, name="gammainc_grad_series"
+    )
+    log_x = log(x)
+    grad = exp(k * log_x - x - gammaln(k + 1)) * (s * (log_x - psi(k + 1)) + ds)
+    return switch(converges, grad, np.array(np.nan, dtype=dtype))
+
+
+def _gammaincc_grad_cf(k, x, skip_loop):
+    """dQ/dk from the continued fraction of Q, differentiated through its recurrence.
+
+    Q(k, x) = x^k e^-x / Gamma(k) * lim p_n / q_n, with the convergents of the
+    continued fraction as Cephes `igamc` computes them (DLMF 8.9.2).
+    """
+    dtype = upcast(k.type.dtype, x.type.dtype, "float32")
+    k, x = k.astype(dtype), x.astype(dtype)
+    eps = np.array(np.finfo(dtype).eps, dtype=dtype)
+    one, zero = np.array(1, dtype=dtype), np.array(0, dtype=dtype)
+    log_x = log(x)
+    log_prefactor = k * log_x - x - gammaln(k)
+    # Q underflows, as in Cephes. Also avoids overflowing the convergents for huge x.
+    underflow = (log_prefactor < np.log(np.finfo(dtype).tiny)) & (k > 0)
+    max_iters = switch(
+        skip_loop | underflow,
+        np.array(0, dtype="int32"),
+        np.array(1e5, dtype="int32"),
+    )
+
+    def inner_loop(f, df, pm2, pm1, qm2, qm1, dpm2, dpm1, dqm2, dqm1, n, k, x):
+        n += 1
+        # dz/dk = -1 and d(yn)/dk = -n
+        z = x + 2 * n + 2 - k
+        yn = (n + 1 - k) * n
+        p = pm1 * z - pm2 * yn
+        q = qm1 * z - qm2 * yn
+        dp = dpm1 * z - pm1 - dpm2 * yn + pm2 * n
+        dq = dqm1 * z - qm1 - dqm2 * yn + qm2 * n
+        q_is_zero = eq(q, 0)
+        f_new = switch(q_is_zero, f, p / q)
+        df_new = switch(q_is_zero, df, (dp - f_new * dq) / q)
+        converged = (
+            ~q_is_zero
+            & (scalar_abs(f_new - f) <= eps * scalar_abs(f_new))
+            & (scalar_abs(df_new - df) <= eps * scalar_abs(df_new))
+        )
+        # Rescale before the convergents overflow
+        s = switch(scalar_abs(p) > 1 / eps, eps, one)
+        return (
+            (
+                f_new,
+                df_new,
+                pm1 * s,
+                p * s,
+                qm1 * s,
+                q * s,
+                dpm1 * s,
+                dp * s,
+                dqm1 * s,
+                dq * s,
+                n,
+            ),
+            converged,
+        )
+
+    pm1 = x + 1
+    qm1 = (x + 2 - k) * x
+    f = pm1 / qm1
+    df = f * x / qm1
+    init = [f, df, one, pm1, x, qm1, zero, zero, zero, -x, zero]
+    f, df, *_, converges = _make_scalar_loop(
+        max_iters, init, [k, x], inner_loop, name="gammaincc_grad_cf"
+    )
+    grad = exp(log_prefactor) * (f * (log_x - psi(k)) + df)
+    return switch(
+        underflow, zero, switch(converges, grad, np.array(np.nan, dtype=dtype))
+    )
+
+
 def gammainc_grad(k, x):
     """Gradient of the regularized lower gamma function (P) wrt to the first
     argument (k, a.k.a. alpha).
 
-    Adapted from STAN `grad_reg_lower_inc_gamma.hpp`
-
-    Reference: Gautschi, W. (1979). A computational procedure for incomplete gamma functions.
-    ACM Transactions on Mathematical Software (TOMS), 5(4), 466-481.
+    Differentiates the power series of P for x <= max(k, 1) and the continued
+    fraction of Q = 1 - P otherwise, the split Cephes uses for P and Q.
     """
     dtype = upcast(k.type.dtype, x.type.dtype, "float32")
-
-    def grad_approx(skip_loop):
-        precision = np.array(1e-10, dtype=config.floatX)
-        max_iters = switch(
-            skip_loop, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
-        )
-
-        log_x = log(x)
-        log_gamma_k_plus_1 = gammaln(k + 1)
-
-        # First loop
-        k_plus_n = k  # Should not overflow unless k > 2,147,383,647
-        log_gamma_k_plus_n_plus_1 = log_gamma_k_plus_1
-        sum_a0 = np.array(0.0, dtype=dtype)
-
-        def inner_loop_a(sum_a, log_gamma_k_plus_n_plus_1, k_plus_n, log_x):
-            term = exp(k_plus_n * log_x - log_gamma_k_plus_n_plus_1)
-            sum_a += term
-
-            log_gamma_k_plus_n_plus_1 += log1p(k_plus_n)
-            k_plus_n += 1
-            return (
-                (sum_a, log_gamma_k_plus_n_plus_1, k_plus_n),
-                (term <= precision),
-            )
-
-        init = [sum_a0, log_gamma_k_plus_n_plus_1, k_plus_n]
-        constant = [log_x]
-        sum_a, *_, sum_a_converges = _make_scalar_loop(
-            max_iters, init, constant, inner_loop_a, name="gammainc_grad_a"
-        )
-        sum_a = switch(sum_a_converges, sum_a, np.nan)
-
-        # Second loop
-        n = np.array(0, dtype="int32")
-        log_gamma_k_plus_n_plus_1 = log_gamma_k_plus_1
-        k_plus_n = k
-        sum_b0 = np.array(0.0, dtype=dtype)
-
-        def inner_loop_b(sum_b, log_gamma_k_plus_n_plus_1, n, k_plus_n, log_x):
-            term = exp(k_plus_n * log_x - log_gamma_k_plus_n_plus_1) * psi(k_plus_n + 1)
-            sum_b += term
-
-            log_gamma_k_plus_n_plus_1 += log1p(k_plus_n)
-            n += 1
-            k_plus_n += 1
-            return (
-                (sum_b, log_gamma_k_plus_n_plus_1, n, k_plus_n),
-                # Require at least two iterations
-                ((term <= precision) & (n > 1)),
-            )
-
-        init = [sum_b0, log_gamma_k_plus_n_plus_1, n, k_plus_n]
-        constant = [log_x]
-        sum_b, *_, sum_b_converges = _make_scalar_loop(
-            max_iters, init, constant, inner_loop_b, name="gammainc_grad_b"
-        )
-        sum_b = switch(sum_b_converges, sum_b, np.nan)
-
-        grad_approx = exp(-x) * (log_x * sum_a - sum_b)
-        return grad_approx
-
-    zero_branch = eq(x, 0)
-    sqrt_exp = -756 - x**2 + 60 * x
-    gammaincc_branch = (
-        ((k < 0.8) & (x > 15))
-        | ((k < 12) & (x > 30))
-        | ((sqrt_exp > 0) & (k < sqrt(sqrt_exp)))
-    )
-    grad = switch(
-        zero_branch,
-        0,
+    nan_branch = (k < 0) | (x < 0)
+    zero_branch = eq(x, 0) | isinf(x)
+    series_branch = (x <= 1) | (x <= k)
+    skip_loops = nan_branch | zero_branch
+    return switch(
+        nan_branch,
+        np.array(np.nan, dtype=dtype),
         switch(
-            gammaincc_branch,
-            -gammaincc_grad(k, x, skip_loops=zero_branch | (~gammaincc_branch)),
-            grad_approx(skip_loop=zero_branch | gammaincc_branch),
+            zero_branch,
+            np.array(0, dtype=dtype),
+            switch(
+                series_branch,
+                _gammainc_grad_series(k, x, skip_loop=skip_loops | ~series_branch),
+                -_gammaincc_grad_cf(k, x, skip_loop=skip_loops | series_branch),
+            ),
         ),
     )
-    return grad
 
 
-def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
+def gammaincc_grad(k, x):
     """Gradient of the regularized upper gamma function (Q) wrt to the first
     argument (k, a.k.a. alpha).
-
-    Adapted from STAN `grad_reg_inc_gamma.hpp`
-
-    skip_loops is used for faster branching when this function is called by `gammainc_der`
     """
-    dtype = upcast(k.type.dtype, x.type.dtype, "float32")
-
-    gamma_k = gamma(k)
-    digamma_k = psi(k)
-    log_x = log(x)
-
-    def approx_a(skip_loop):
-        n_steps = switch(
-            skip_loop, np.array(0, dtype="int32"), np.array(9, dtype="int32")
-        )
-        sum_a0 = np.array(0.0, dtype=dtype)
-        dfac = np.array(1.0, dtype=dtype)
-        xpow = x
-        k_minus_one_minus_n = k - 1
-        fac = k_minus_one_minus_n
-        delta = true_div(dfac, xpow)
-
-        def inner_loop_a(sum_a, delta, xpow, k_minus_one_minus_n, fac, dfac, x):
-            sum_a += delta
-            xpow *= x
-            k_minus_one_minus_n -= 1
-            dfac = k_minus_one_minus_n * dfac + fac
-            fac *= k_minus_one_minus_n
-            delta = dfac / xpow
-            return (sum_a, delta, xpow, k_minus_one_minus_n, fac, dfac), None
-
-        init = [sum_a0, delta, xpow, k_minus_one_minus_n, fac, dfac]
-        constant = [x]
-        sum_a, *_ = _make_scalar_loop(
-            n_steps, init, constant, inner_loop_a, name="gammaincc_grad_a"
-        )
-        grad_approx_a = (
-            gammaincc(k, x) * (log_x - digamma_k)
-            + exp(-x + (k - 1) * log_x) * sum_a / gamma_k
-        )
-        return grad_approx_a
-
-    def approx_b(skip_loop):
-        max_iters = switch(
-            skip_loop, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
-        )
-        log_precision = np.array(np.log(1e-6), dtype=config.floatX)
-
-        sum_b0 = np.array(0.0, dtype=dtype)
-        log_s = np.array(0.0, dtype=dtype)
-        s_sign = np.array(1, dtype="int8")
-        n = np.array(1, dtype="int32")
-        log_delta = log_s - 2 * log(k).astype(dtype)
-
-        def inner_loop_b(sum_b, log_s, s_sign, log_delta, n, k, log_x):
-            delta = exp(log_delta)
-            sum_b += switch(s_sign > 0, delta, -delta)
-            s_sign = -s_sign
-
-            # log will cast >int16 to float64
-            log_s += log_x - log(n)
-            if log_s.type.dtype != dtype:
-                log_s = log_s.astype(dtype)
-
-            log_delta = log_s - 2 * log(n + k)
-            if log_delta.type.dtype != dtype:
-                log_delta = log_delta.astype(dtype)
-
-            n += 1
-            return (
-                (sum_b, log_s, s_sign, log_delta, n),
-                log_delta <= log_precision,
-            )
-
-        init = [sum_b0, log_s, s_sign, log_delta, n]
-        constant = [k, log_x]
-        sum_b, *_, sum_b_converges = _make_scalar_loop(
-            max_iters, init, constant, inner_loop_b, name="gammaincc_grad_b"
-        )
-        sum_b = switch(sum_b_converges, sum_b, np.nan)
-        grad_approx_b = (
-            gammainc(k, x) * (digamma_k - log_x) + exp(k * log_x) * sum_b / gamma_k
-        )
-        return grad_approx_b
-
-    branch_a = (x >= k) & (x >= 8)
-    return switch(
-        branch_a,
-        approx_a(skip_loop=~branch_a | skip_loops),
-        approx_b(skip_loop=branch_a | skip_loops),
-    )
+    return -gammainc_grad(k, x)
 
 
 class Jv(BinaryScalarOp):
