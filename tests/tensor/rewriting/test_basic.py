@@ -69,6 +69,7 @@ from pytensor.tensor.rewriting.basic import (
     local_merge_alloc,
     local_useless_alloc,
     local_useless_elemwise,
+    local_useless_switch,
     topo_constant_folding,
     topo_unconditional_constant_folding,
     topological_second_sink,
@@ -113,7 +114,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -1108,6 +1109,40 @@ class TestLocalUselessSwitch:
             out, include=("canonicalize", "stabilize", "specialize")
         )
         assert equal_computations([rewritten_out], [expected_out])
+
+    def test_shared_branch_trace(self):
+        # Removing switch(cond, zero, zero) returns the existing zero, so its trace must not change.
+        # Otherwise a constant shared by many such switches gets a trace that grows exponentially.
+        xs = pt.dscalars("x0", "x1", "x2", "x3")
+        zero = pt.constant(0.0, dtype="float64")
+        zero.tag.trace = [[("file.py", 1, "function", "line")]]
+        outputs = [pt.switch(x > 0, zero, zero) for x in xs]
+
+        result = RewriteTester(
+            xs,
+            outputs,
+            include=None,
+            custom_rewrite=local_useless_switch,
+        )
+        result.assert_graph(*[zero] * len(xs))
+        [rewritten_zero] = set(result.rewr_fg.outputs)
+        assert rewritten_zero.tag.trace == zero.tag.trace
+
+    def test_constant_cond_trace(self):
+        # Removing switch(1, x, y) returns the existing x, so its trace must not change.
+        x, y = pt.dscalars("x", "y")
+        x.tag.trace = [[("file.py", 1, "function", "line")]]
+        out = pt.switch(pt.constant(1, dtype="int8"), x, y)
+
+        result = RewriteTester(
+            [x, y],
+            [out],
+            include=None,
+            custom_rewrite=local_useless_switch,
+        )
+        result.assert_graph(x)
+        [rewritten_x] = result.rewr_fg.outputs
+        assert rewritten_x.tag.trace == x.tag.trace
 
 
 class TestLocalMergeSwitchSameCond:

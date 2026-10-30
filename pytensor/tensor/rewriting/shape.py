@@ -796,7 +796,6 @@ def local_useless_specify_shape(fgraph, node):
 
     # If we arrived here, it means SpecifyShape was already encoded in the static shape
     # We don't need it
-    copy_stack_trace(node.outputs[0], x)
     return [x]
 
 

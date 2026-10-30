@@ -63,7 +63,6 @@ def local_join_dims(fgraph, node):
         return [expanded_x]
 
     if n_axes == 1:
-        copy_stack_trace(x, x)
         return [x]
 
     output_shape = [

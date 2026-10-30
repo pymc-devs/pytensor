@@ -1069,7 +1069,8 @@ def local_useless_switch(fgraph, node):
             out = broadcast_arrays(out, *node.inputs)[0]
 
         # Copy over stacktrace from selected output to new output
-        copy_stack_trace(node.outputs + correct_out, out)
+        if out is not correct_out:
+            copy_stack_trace([*node.outputs, correct_out], out)
         return [out]
 
     # if left is right -> left
@@ -1081,7 +1082,9 @@ def local_useless_switch(fgraph, node):
         if left.type.dtype != out_dtype:
             left = cast(left, out_dtype)
 
-        copy_stack_trace(node.outputs + node.inputs, left)
+        # left is still an input of the node unless it was broadcast or cast above
+        if left is not node.inputs[1]:
+            copy_stack_trace(node.outputs + node.inputs, left)
         return [left]
 
     # This case happens with scan.
