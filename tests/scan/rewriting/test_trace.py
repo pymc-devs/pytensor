@@ -14,6 +14,7 @@ from pytensor.link.basic import JITLinker
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.rewriting.trace import (
     scan_mit_mot_to_sit_sot,
+    scan_reduce_trace_no_prealloc,
     scan_reduce_trace_prealloc,
 )
 from pytensor.scan.utils import expand_empty, until
@@ -36,6 +37,44 @@ _mode = (
     .including("scan_save_mem", "scan_remove_unused")
     .excluding("scan_pushout")
 )
+
+
+@pytest.mark.parametrize(
+    "index, needed",
+    [(slice(None, -2, -1), 1), (slice(-1, -4, -1), 3), (slice(-2, -6, -2), 5)],
+)
+@pytest.mark.parametrize("prealloc", [False, True])
+def test_reduce_reverse_tail(index, needed, prealloc):
+    initial = pt.dscalar("initial")
+    n_steps = pt.lscalar("n_steps")
+    previous = initial.type()
+    op = Scan(
+        [previous],
+        [previous + 1],
+        ScanInfo(0, (), (), (), ((-1,),), 0, 0, 0, False),
+    )
+    raw = op(n_steps, expand_empty(initial[None], n_steps))
+    result = utt.RewriteTester(
+        [initial, n_steps],
+        [raw[index]],
+        include=None,
+        custom_rewrite=dfs_rewriter(
+            scan_reduce_trace_prealloc if prealloc else scan_reduce_trace_no_prealloc,
+            ignore_newtrees=True,
+        ),
+    )
+    # A bounded reverse slice needs only its tail, not the full trace.
+    [rewritten_scan] = [n for n in result.rewr_fg.toposort() if isinstance(n.op, Scan)]
+    size = max(needed, 1 + prealloc)
+    buffer_size = function(
+        result.rewr_fg.inputs,
+        rewritten_scan.inputs[1].shape[0],
+        on_unused_input="ignore",
+    )
+    for steps in (0, 1, 2, 7):
+        expected_size = 1 + min(size - 1, steps)
+        assert buffer_size(0.5, steps) == expected_size
+        result.assert_eval(0.5, steps)
 
 
 @pytest.mark.parametrize("shape", [(), (None,)])

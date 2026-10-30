@@ -790,20 +790,29 @@ def scan_reduce_trace_rewrite(
                 # from its natural start; trimming would require a roll
                 # to realign the circular buffer, more expensive than
                 # keeping everything.
-                if start in (0, None, init_l[i]):
-                    store_steps[i] = 0
-                    break
-                # Only forward ``[-k:...]`` has an obvious buffer-size
-                # answer (``k``). Reverse / non-positive steps walk back
-                # to index 0 and would need the full buffer.
                 s_step = None if s0.step is None else _maybe_constant_int(s0.step)
                 forward = s0.step is None or (s_step is not None and s_step > 0)
                 s_start = None if s0.start is None else _maybe_constant_int(s0.start)
-                needed = (
-                    abs(s_start)
-                    if forward and s_start is not None and s_start < 0
-                    else None
-                )
+                if forward:
+                    if start in (0, None, init_l[i]):
+                        store_steps[i] = 0
+                        break
+                    needed = (
+                        abs(s_start) if s_start is not None and s_start < 0 else None
+                    )
+                else:
+                    s_stop = None if s0.stop is None else _maybe_constant_int(s0.stop)
+                    # A reverse slice bounded within the tail only needs
+                    # the entries after its excluded negative stop.
+                    needed = (
+                        -s_stop - 1
+                        if s_step is not None
+                        and s_step < 0
+                        and (s0.start is None or (s_start is not None and s_start < 0))
+                        and s_stop is not None
+                        and s_stop < -1
+                        else None
+                    )
             else:
                 idx = _maybe_constant_int(s0)
                 needed = abs(idx) if (idx is not None and idx < 0) else None
