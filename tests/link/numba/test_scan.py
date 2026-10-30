@@ -19,6 +19,210 @@ from tests.link.numba.test_basic import compare_numba_and_py
 from tests.scan.test_basic import ScanCompatibilityTests
 
 
+@pytest.mark.parametrize("cache", [False, True])
+@pytest.mark.parametrize("as_while", [False, True])
+def test_scalar_scan_inline_cache_wrapper(cache, as_while):
+    # Different Scan arities must survive caching without hiding the inlineable loop.
+    import inspect
+
+    from pytensor.link.numba.dispatch.basic import numba_funcify_ensure_cache
+
+    a, b = pt.dvector("a"), pt.dvector("b")
+    initial, coefficient = pt.dscalar("initial"), pt.dscalar("coefficient")
+    first = scan(
+        lambda value, previous: value + previous,
+        sequences=[a],
+        outputs_info=[initial],
+        return_updates=False,
+    )
+
+    def step(x, y, previous, scale):
+        value = previous + scale * x + y
+        if as_while:
+            return value, until(value > 0.65)
+        return value
+
+    second = scan(
+        step,
+        sequences=[a, b],
+        outputs_info=[initial],
+        non_sequences=[coefficient],
+        return_updates=False,
+    )
+    mode = get_mode("NUMBA").excluding("scan_merge")
+    with config.change_flags(numba__cache=cache):
+        fn = function([a, b, initial, coefficient], [first[-1], second[-1]], mode=mode)
+        scan_nodes = [n for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+        assert len(scan_nodes) == 2
+        assert len({len(n.inputs) for n in scan_nodes}) == 2
+        for node in scan_nodes:
+            lowered, key = numba_funcify_ensure_cache(node.op, node=node)
+            assert lowered.targetoptions["inline"] == "always"
+            parameters = inspect.signature(lowered.py_func).parameters.values()
+            assert len(parameters) == len(node.inputs)
+            assert all(
+                p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD for p in parameters
+            )
+            if cache:
+                assert key.endswith(f"_inlinealways_nargs{len(node.inputs)}")
+
+        x, y = np.linspace(0.1, 0.5, 5), np.arange(5) / 10
+        for values_a, values_b in ((x, y), (x[::2], y[::-1])):
+            value = 0.2
+            for vx, vy in zip(values_a, values_b):
+                value += 0.7 * vx + vy
+                if as_while and value > 0.65:
+                    break
+            np.testing.assert_allclose(
+                fn(values_a, values_b, 0.2, 0.7), [0.2 + values_a.sum(), value]
+            )
+
+    native = fn.vm.jit_fn
+    for signature in native.signatures:
+        llvm = str(native.overloads[signature].library._get_module_for_linking())
+        assert not any(
+            line.startswith("define ") and "4scanB" in line
+            for line in llvm.splitlines()
+        )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_scalar_scan_strided_sequence(dtype):
+    # Unit-stride fast paths must preserve general/reversed/read-only fallbacks.
+    sequence = pt.vector("sequence", dtype=dtype)
+    initial = pt.scalar("initial", dtype=dtype)
+    decay = np.array(0.9, dtype=dtype)
+    history = scan(
+        lambda x, previous: x + decay * previous,
+        sequences=[sequence],
+        outputs_info=[initial],
+        return_updates=False,
+    )
+    fn = function([sequence, initial], history[-1], mode="NUMBA")
+    [scan_op] = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    assert scan_op.info.n_untraced_sit_sot == 1
+    base = np.linspace(0.99, 1.01, 100, dtype=dtype)
+    initial_value = np.array(0.7, dtype=dtype)
+    readonly = base[::-1].copy()[::-1]
+    readonly.flags.writeable = False
+    for values in (
+        base,
+        base[::-1],
+        base[::2],
+        base[::-2],
+        readonly,
+        base[:1],
+        np.broadcast_to(base[:1], (10,)),
+    ):
+        weights = decay ** np.arange(values.size - 1, -1, -1)
+        expected = initial_value * decay**values.size + values @ weights
+        np.testing.assert_allclose(fn(values, initial_value), expected, rtol=1e-5)
+
+
+def test_scalar_scan_multiple_strided_sequences():
+    # Eligibility depends on every sequence, including unequal extents and strides.
+    a, b = pt.dvector("a"), pt.dvector("b")
+    initial = pt.dscalar("initial")
+    histories = scan(
+        lambda x, y, previous_x, previous_y: (
+            x + 0.9 * previous_x,
+            y + 0.9 * previous_y,
+        ),
+        sequences=[a, b],
+        outputs_info=[initial, initial],
+        return_updates=False,
+    )
+    fn = function([a, b, initial], [history[-1] for history in histories], mode="NUMBA")
+    [op] = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    assert op.info.n_seqs == op.info.n_untraced_sit_sot == 2
+    x, y = np.linspace(0.5, 1.5, 10), np.sin(np.arange(10))
+    for vx, vy in (
+        (x, y),
+        (x[::-1], y[::-1]),
+        (x[::-1], y),
+        (x[::2], y[::2]),
+        (x[::-1], y[::-1][:3]),
+    ):
+        steps = min(vx.size, vy.size)
+        weights = 0.9 ** np.arange(steps - 1, -1, -1)
+        expected = [0.7 * 0.9**steps + values[:steps] @ weights for values in (vx, vy)]
+        np.testing.assert_allclose(fn(vx, vy, 0.7), expected)
+
+
+@pytest.mark.parametrize("shape", [(), (2,)])
+def test_scan_direct_and_circular_indices(shape):
+    # Short traces exercise circular storage; full buffers use direct indexing.
+    initial = pt.tensor("initial", dtype="float64", shape=shape)
+    coefficient = pt.dscalar("coefficient")
+    steps = pt.lscalar("steps")
+    history = scan(
+        lambda previous, a: pt.tanh(a * previous),
+        outputs_info=[initial],
+        non_sequences=[coefficient],
+        n_steps=steps,
+        return_updates=False,
+    )
+    fn = function([initial, coefficient, steps], history[-3:], mode="NUMBA")
+    initial_value = np.full(shape, 0.2)
+    for n in (0, 1, 2, 5, 9):
+        expected = np.empty((n, *shape))
+        value = initial_value
+        for i in range(n):
+            value = np.tanh(0.7 * value)
+            expected[i] = value
+        np.testing.assert_allclose(
+            fn(initial_value, 0.7, n), expected[-3:], rtol=1e-12, atol=1e-12
+        )
+
+
+@pytest.mark.parametrize("constant_steps", [False, True])
+@pytest.mark.parametrize("return_all", [False, True])
+@pytest.mark.parametrize("differentiate", [False, True])
+def test_scalar_scan_boundary(constant_steps, return_all, differentiate):
+    # Native step values preserve full/final outputs and their reverse gradients.
+    from pytensor.link.numba.dispatch.scan import scalarize_scan_inner_graph
+    from pytensor.scalar.basic import ScalarType
+
+    initial = pt.dscalar("initial")
+    coefficient = pt.dscalar("coefficient")
+    sequence = pt.dvector("sequence")
+    steps = 4 if constant_steps else pt.lscalar("steps")
+    history = scan(
+        lambda x, previous, a: pt.tanh(a * previous + x),
+        sequences=[sequence],
+        outputs_info=[initial],
+        non_sequences=[coefficient],
+        n_steps=steps,
+        return_updates=False,
+    )
+    output = history if return_all else history[-1]
+    outputs = [output]
+    if differentiate:
+        outputs += grad(output.sum(), [initial, coefficient])
+    inputs = [initial, coefficient, sequence]
+    if not constant_steps:
+        inputs.append(steps)
+    fn = function(inputs, outputs, mode="NUMBA")
+    reference = function(
+        inputs, outputs, mode=Mode(linker="py", optimizer="fast_compile")
+    )
+    scans = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    assert scans
+    for op in scans:
+        if differentiate:
+            assert op.info.n_mit_mot == 0
+        inner = scalarize_scan_inner_graph(op.fgraph)
+        assert all(
+            isinstance(var.type, ScalarType) for var in (*inner.inputs, *inner.outputs)
+        )
+    for n in (4,) if constant_steps else (3, 5):
+        values = [np.array(0.2), np.array(0.7), np.linspace(-0.1, 0.1, 5)]
+        if not constant_steps:
+            values.append(np.array(n, dtype="int64"))
+        for actual, expected in zip(fn(*values), reference(*values), strict=True):
+            np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
 @pytest.mark.parametrize(
     "fn, sequences, outputs_info, non_sequences, n_steps, input_vals, output_vals, op_check",
     [

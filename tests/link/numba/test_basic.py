@@ -2,6 +2,8 @@ import contextlib
 import copy
 import os
 import pickle
+import subprocess
+import sys
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -37,6 +39,7 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.scalar.basic import Composite, ScalarOp, as_scalar
+from pytensor.scan.op import Scan, ScanInfo
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.utils import hash_from_ndarray
 
@@ -566,6 +569,59 @@ class ComplexType:
         self.b = b
 
 
+@pytest.mark.parametrize(
+    "output_kind, shape",
+    [
+        ("single", ()),
+        ("duplicate", ()),
+        ("independent", ()),
+        ("view", ()),
+        ("single", (3,)),
+    ],
+)
+def test_scan_output_copy(output_kind, shape):
+    # Scalar returns are freshly boxed; shared/viewed outputs still need copies.
+    initial = pt.tensor("initial", dtype="float64", shape=shape)
+    n_steps = pt.lscalar("n_steps")
+    state = initial.type()
+    if output_kind == "independent":
+        other = initial.type()
+        op = Scan(
+            [state, other],
+            [state + 1, other + 2],
+            ScanInfo(0, (), (), (), (), 0, 2, 0, False),
+        )
+        outputs = op(n_steps, initial, initial, return_list=True)
+    else:
+        op = Scan([state], [state + 1], ScanInfo(0, (), (), (), (), 0, 1, 0, False))
+        [output] = op(n_steps, initial, return_list=True)
+        outputs = [output]
+        if output_kind == "duplicate":
+            outputs.append(output)
+        elif output_kind == "view":
+            outputs.append(output[None])
+    fn = function([initial, n_steps], outputs, mode="NUMBA")
+    for steps in (0, 4):
+        # Zero steps must not expose the original input's array storage either.
+        value = np.full(shape, 0.5)
+        actual = fn(value, steps)
+        expected = [value + steps]
+        if output_kind == "independent":
+            expected.append(value + 2 * steps)
+        elif output_kind == "view":
+            expected.append((value + steps)[None])
+        elif output_kind == "duplicate":
+            expected.append(value + steps)
+        for output, reference in zip(actual, expected, strict=True):
+            np.testing.assert_array_equal(output, reference)
+            assert not np.shares_memory(output, value)
+        for i, output in enumerate(actual):
+            assert all(not np.shares_memory(output, other) for other in actual[i + 1 :])
+        next_actual = fn(value, steps)
+        assert all(not np.shares_memory(a, b) for a in actual for b in next_actual)
+        np.testing.assert_array_equal(value, np.full(shape, 0.5))
+
+
 class TestKeyForConstant:
     def test_numpy_scalars(self):
         key_float64_0 = cache_key_for_constant(np.float64(0))
@@ -812,6 +868,44 @@ class TestFgraphCacheKey:
 
 
 class TestNumbaCacheMuliprocessSafe:
+    @pytest.mark.parametrize("first_boundscheck", [0, 1])
+    def test_boundscheck_override(self, tmp_path, first_boundscheck):
+        # Check linked parent/child LLVM after reusing one cache in both directions.
+        script = """
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from pytensor import config
+from pytensor.link.numba import cache
+from pytensor.link.numba.dispatch.basic import numba_njit
+
+config.numba__cache = True
+cache.NUMBA_CACHE_PATH = Path(sys.argv[1])
+inner = cache.compile_numba_function_src(
+    "def inner(x, i): return x[i]", "inner", cache_key="inner"
+)
+inner = numba_njit(inner, cache=True, boundscheck=False)
+outer = cache.compile_numba_function_src(
+    "def outer(x, i): return inner(x, i)",
+    "outer", {"inner": inner}, cache_key="outer",
+)
+outer = numba_njit(outer, cache=True, final_function=True)
+assert outer(np.arange(3.), 1) == 1
+llvm = str(outer.overloads[outer.signatures[0]].library._get_module_for_linking())
+assert ("index is out of bounds" in llvm) == bool(int(os.environ["NUMBA_BOUNDSCHECK"]))
+"""
+        for boundscheck in (first_boundscheck, 1 - first_boundscheck):
+            subprocess.run(
+                [sys.executable, "-c", script, str(tmp_path)],
+                env=os.environ | {"NUMBA_BOUNDSCHECK": str(boundscheck)},
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
     @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
     def test_case1(self, tmp_path, monkeypatch):
         """Regression test for fork-safety of the numba disk cache.

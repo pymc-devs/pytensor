@@ -33,10 +33,14 @@ supposed to be canonical.
 
 from pytensor import scalar as ps
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.tensor.basic import Alloc, alloc, constant
+from pytensor.tensor.basic import Alloc, alloc
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.math import Min, neg
 from pytensor.tensor.rewriting.basic import register_uncanonicalize
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
+from pytensor.tensor.rewriting.subtensor import (
+    local_subtensor_remove_broadcastable_index,
+)
 from pytensor.tensor.shape import Reshape, reshape
 from pytensor.tensor.subtensor import Subtensor, indices_from_subtensor
 
@@ -200,7 +204,7 @@ def local_dimshuffle_subtensor(fgraph, node):
         indices = list(
             indices_from_subtensor(input_.owner.inputs[1:], input_.owner.op.idx_list)
         )
-        zero = constant(0)
+        zero = ps.constant(0)
 
         # Track which output dimension each index corresponds to
         # Scalar indices remove dimensions, slices keep them
@@ -228,5 +232,12 @@ def local_dimshuffle_subtensor(fgraph, node):
                 indices.append(slice(None))
             output_dim += 1
 
-        return [x[tuple(indices)]]
+        replacement = x[tuple(indices)]
+        if isinstance(replacement.owner_op, Subtensor):
+            simplified = local_subtensor_remove_broadcastable_index.transform(
+                fgraph, replacement.owner
+            )
+            if simplified:
+                replacement = apply_local_dimshuffle_merge(fgraph, simplified[0])
+        return [replacement]
     return False

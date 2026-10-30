@@ -12,6 +12,8 @@ needs:
   ``n_steps`` to the smallest range any client actually reads.
 * :func:`scan_sit_sot_to_untraced` — convert sit_sot states whose
   history is unused into the cheaper ``untraced_sit_sot`` form.
+* :func:`scan_mit_mot_to_sit_sot` — replace adjoint tapes by a carried
+  state and, when needed, an immutable incoming-gradient sequence.
 
 Subtensor chains rooted at scan outputs (e.g. ``raw_out[init_l:][-k]``)
 are folded by ``local_subtensor_merge_integer`` running in canonicalize
@@ -25,13 +27,15 @@ from typing import cast
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.traversal import apply_depends_on
 from pytensor.scan.op import Scan
-from pytensor.scan.utils import expand_empty
+from pytensor.scan.utils import ScanArgs, expand_empty
 from pytensor.tensor.basic import (
     AllocEmpty,
     atleast_Nd,
+    get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.basic import switch as pt_switch
 from pytensor.tensor.math import ge, maximum, minimum
@@ -44,7 +48,7 @@ from pytensor.tensor.subtensor import (
     basic_subtensor,
     get_idx_list,
 )
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 def _maybe_constant_int(v) -> int | None:
@@ -134,6 +138,143 @@ def _is_default_scan_buffer(final_buffer: TensorVariable, taps: int) -> bool:
         # the buffer, to check for potential broadcasting in other dimensions.
         init_value_ = atleast_Nd(init_value, n=init_buffer.ndim)
         return not broadcasted_by(init_value_.squeeze(0), init_buffer[0])
+
+
+def _is_zero(value):
+    return (
+        get_underlying_scalar_constant_value(
+            value, elemwise=False, raise_not_constant=False
+        )
+        == 0
+    )
+
+
+def _last_nonzero_step(fgraph, buffer):
+    """Extract the last row when every earlier row is provably zero."""
+    if _is_zero(buffer):
+        return pt.zeros(buffer.shape[1:], dtype=buffer.dtype)
+    if isinstance(buffer, TensorConstant):
+        if buffer.data.shape[0] and (buffer.data[:-1] == 0).all():
+            return pt.constant(buffer.data[-1])
+        return None
+    match buffer.owner_op_and_inputs:
+        case IncSubtensor() as op, base, value, *indices:
+            if not _is_zero(base):
+                return None
+            first, *rest = get_idx_list([base, *indices], op.idx_list)
+            if rest:
+                return None
+            if not isinstance(first, slice):
+                if _maybe_constant_int(first) != -1 or value.ndim >= buffer.ndim:
+                    return None
+                last = value
+            else:
+                first = _python_slice_from_idx(first)
+                if not (
+                    first is not None
+                    and first.stop is None
+                    and first.step in (None, 1)
+                    and first.start in (None, 0, 1)
+                    and value.ndim == buffer.ndim
+                    and (shape_feature := getattr(fgraph, "shape_feature", None))
+                    is not None
+                    and shape_feature.same_shape(value, base[first], 0, 0)
+                ):
+                    return None
+                last = _last_nonzero_step(fgraph, value)
+                if last is None:
+                    return None
+            return pt.alloc(last.astype(buffer.dtype), *base.shape[1:])
+    return None
+
+
+def _has_full_trace(fgraph, buffer, n_steps):
+    shape_feature = getattr(fgraph, "shape_feature", None)
+    return shape_feature is not None and shape_feature.same_shape(
+        buffer, pt.empty((pt.constant(1, dtype=n_steps.dtype) + n_steps,)), 0, 0
+    )
+
+
+@node_rewriter([Scan])
+def scan_mit_mot_to_sit_sot(fgraph, node):
+    """Carry a single updated state instead of mutating a full adjoint tape.
+
+    For taps ``(0, 1) -> (1,)``, the second input has not been updated by
+    earlier iterations. It can be read from an immutable sequence instead.
+    Last-state gradients have a zero suffix, so that input disappears entirely.
+    """
+    op = node.op
+    if not op.info.n_mit_mot or op.info.as_while or op.truncate_gradient != -1:
+        return False
+    n_steps = node.inputs[0]
+    convertible = []
+    for k, (taps, out_taps, buffer) in enumerate(
+        zip(
+            op.info.mit_mot_in_slices,
+            op.info.mit_mot_out_slices,
+            op.outer_mitmot(node.inputs),
+            strict=True,
+        )
+    ):
+        if taps != (0, 1) or out_taps != (1,):
+            continue
+        if _has_full_trace(fgraph, buffer, n_steps):
+            convertible.append(k)
+    if not convertible:
+        return False
+
+    args = ScanArgs.from_node(node, clone=True)
+    substitutions = {}
+    for k in convertible:
+        current, future = args.inner_in_mit_mot[k]
+        buffer = args.outer_in_mit_mot[k]
+        reverse_source = None
+        match buffer.owner_op_and_inputs:
+            case Subtensor() as subtensor, source, *indices:
+                match get_idx_list([source, *indices], subtensor.idx_list):
+                    case [slice() as index]:
+                        if _python_slice_from_idx(index) == slice(None, None, -1):
+                            reverse_source = source
+        seed = (
+            _last_nonzero_step(fgraph, reverse_source)
+            if reverse_source is not None
+            else None
+        )
+        if seed is not None:
+            substitutions[future] = pt.zeros_like(current)
+        else:
+            seed = buffer[0]
+            args.inner_in_seqs.append(future)
+            args.outer_in_seqs.append(buffer[1:])
+        args.inner_in_sit_sot.append(current)
+        args.inner_out_sit_sot.append(args.inner_out_mit_mot[k][0])
+        args.outer_in_sit_sot.append(expand_empty(seed[None], n_steps))
+        args.outer_out_sit_sot.append(args.outer_out_mit_mot[k])
+
+    for k in reversed(convertible):
+        for field in (
+            "inner_in_mit_mot",
+            "inner_out_mit_mot",
+            "outer_in_mit_mot",
+            "outer_out_mit_mot",
+            "mit_mot_in_slices",
+            "mit_mot_out_slices",
+        ):
+            values = list(getattr(args, field))
+            del values[k]
+            setattr(args, field, values)
+    new_op = Scan(
+        args.inner_inputs,
+        graph_replace(args.inner_outputs, substitutions, strict=False),
+        args.info,
+        mode=op.mode,
+        profile=op.profile,
+        truncate_gradient=op.truncate_gradient,
+        name=op.name,
+        allow_gc=op.allow_gc,
+    )
+    new_outputs = new_op(*args.outer_inputs, return_list=True)
+    return dict(zip(args.outer_outputs, new_outputs, strict=True))
 
 
 @node_rewriter([Scan])
@@ -716,20 +857,29 @@ def scan_reduce_trace_rewrite(
                 # from its natural start; trimming would require a roll
                 # to realign the circular buffer, more expensive than
                 # keeping everything.
-                if start in (0, None, init_l[i]):
-                    store_steps[i] = 0
-                    break
-                # Only forward ``[-k:...]`` has an obvious buffer-size
-                # answer (``k``). Reverse / non-positive steps walk back
-                # to index 0 and would need the full buffer.
                 s_step = None if s0.step is None else _maybe_constant_int(s0.step)
                 forward = s0.step is None or (s_step is not None and s_step > 0)
                 s_start = None if s0.start is None else _maybe_constant_int(s0.start)
-                needed = (
-                    abs(s_start)
-                    if forward and s_start is not None and s_start < 0
-                    else None
-                )
+                if forward:
+                    if start in (0, None, init_l[i]):
+                        store_steps[i] = 0
+                        break
+                    needed = (
+                        abs(s_start) if s_start is not None and s_start < 0 else None
+                    )
+                else:
+                    s_stop = None if s0.stop is None else _maybe_constant_int(s0.stop)
+                    # A reverse slice bounded within the tail only needs
+                    # the entries after its excluded negative stop.
+                    needed = (
+                        -s_stop - 1
+                        if s_step is not None
+                        and s_step < 0
+                        and (s0.start is None or (s_start is not None and s_start < 0))
+                        and s_stop is not None
+                        and s_stop < -1
+                        else None
+                    )
             else:
                 idx = _maybe_constant_int(s0)
                 needed = abs(idx) if (idx is not None and idx < 0) else None
@@ -798,6 +948,16 @@ def scan_reduce_trace_rewrite(
                         if extra_size > 0 and not cap_provable:
                             extra_size = minimum(extra_size, n_steps)
                         nw_input = expand_empty(nw_input.owner.inputs[1], extra_size)
+                    elif (
+                        val == 1
+                        and _is_zero(nw_input)
+                        and _has_full_trace(fgraph, nw_input, n_steps)
+                    ):
+                        # A full trace has at least its initial state for every
+                        # valid (nonnegative) step count, including zero.
+                        nw_input = pt.zeros(
+                            (1, *nw_input.shape[1:]), dtype=nw_input.dtype
+                        )
                     # Otherwise, just trim with a slice
                     else:
                         nw_input = nw_input[:val]

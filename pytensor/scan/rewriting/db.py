@@ -30,6 +30,7 @@ from pytensor.scan.rewriting.push_out import (
     scan_push_out_seq,
 )
 from pytensor.scan.rewriting.trace import (
+    scan_mit_mot_to_sit_sot,
     scan_reduce_nsteps,
     scan_reduce_trace_no_prealloc,
     scan_reduce_trace_prealloc,
@@ -69,6 +70,13 @@ optdb.register(
     "scan",
     "scan_remove_unused",
     position=1.605,
+)
+optdb.register(
+    "scan_mit_mot_to_sit_sot",
+    dfs_rewriter(scan_mit_mot_to_sit_sot, ignore_newtrees=True),
+    "fast_run",
+    "scan",
+    position=1.608,
 )
 optdb.register(
     "scan_reduce_nsteps",

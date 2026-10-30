@@ -25,7 +25,7 @@ from pytensor.link.numba.dispatch.string_codegen import (
     create_tuple_string,
 )
 from pytensor.tensor import TensorType, TensorVariable
-from pytensor.tensor.rewriting.scalarize import ScalarSubtensor
+from pytensor.tensor.rewriting.scalarize import ScalarizedIncSubtensor, ScalarSubtensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
@@ -199,11 +199,13 @@ def _update_value(
 
 @register_funcify_and_cache_key(Subtensor)
 @register_funcify_and_cache_key(IncSubtensor)
-def numba_funcify_default_subtensor(op, node, scalar_out=False, **kwargs):
+def numba_funcify_default_subtensor(
+    op, node, scalar_out=False, scalar_update=False, **kwargs
+):
     """Create a Python function that assembles and uses an index on an array.
 
-    With ``scalar_out``, return the indexed scalar directly instead of boxing it
-    with ``np.asarray``.
+    With ``scalar_out``, return the single indexed element as a native scalar.
+    With ``scalar_update``, consume a native scalar update value.
 
     Examples
     --------
@@ -240,7 +242,7 @@ def numba_funcify_default_subtensor(op, node, scalar_out=False, **kwargs):
             z = x
             indices = (idx_0,)
             target = z[indices]
-            y_scalar = y.item()
+            y_scalar = y[()]
             for j0 in range(target.shape[0]):
                 target[(j0,)] = y_scalar
             return np.asarray(z)
@@ -250,7 +252,7 @@ def numba_funcify_default_subtensor(op, node, scalar_out=False, **kwargs):
         if isinstance(entry, int):
             name, var = next(indices_iterator)
             if var.ndim == 0 and isinstance(var.type, TensorType):
-                return f"{name}.item()"
+                return f"{name}[()]"
             return name
         elif isinstance(entry, slice):
             start = convert_indices(indices_iterator, entry.start)
@@ -290,10 +292,12 @@ def numba_funcify_default_subtensor(op, node, scalar_out=False, **kwargs):
         else:
             index_prologue = [f"z = np.copy({input_names[0]})"]
 
-        if node.inputs[1].ndim == 0:
+        if scalar_update:
+            y_name = input_names[1]
+        elif node.inputs[1].ndim == 0:
             # TODO FIXME: This is a hack to get around a weird Numba typing
             # issue.  See https://github.com/numba/numba/issues/6000
-            y_name = f"{input_names[1]}.item()"
+            y_name = f"{input_names[1]}[()]"
         else:
             y_name = input_names[1]
 
@@ -307,8 +311,10 @@ def numba_funcify_default_subtensor(op, node, scalar_out=False, **kwargs):
             target_idx = create_tuple_string(loop_idxs)
             index_body = ["target = z[indices]"]
             y = node.inputs[1]
-            if y.ndim == 0:
-                index_body.append("y_scalar = y.item()")
+            if scalar_update:
+                update_value = "y"
+            elif y.ndim == 0:
+                index_body.append("y_scalar = y[()]")
                 update_value = "y_scalar"
             else:
                 index_body.extend(
@@ -358,6 +364,14 @@ def numba_funcify_ScalarSubtensor(op, node, **kwargs):
     [subtensor_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, Subtensor)]
     return numba_funcify_default_subtensor(
         subtensor_node.op, subtensor_node, scalar_out=True, **kwargs
+    )
+
+
+@register_funcify_and_cache_key(ScalarizedIncSubtensor)
+def numba_funcify_ScalarizedIncSubtensor(op, node, **kwargs):
+    [inner_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, IncSubtensor)]
+    return numba_funcify_default_subtensor(
+        inner_node.op, node, scalar_update=True, **kwargs
     )
 
 
@@ -589,7 +603,7 @@ def vector_integer_advanced_indexing(
         if isinstance(val, Variable) and val in var_to_arg:
             arg = var_to_arg[val]
             if val.ndim == 0 and is_slice_component:
-                return f"{arg}.item()"
+                return f"{arg}[()]"
             return arg
         raise ValueError(f"Unexpected index value: {val}")
 
@@ -787,7 +801,7 @@ def vector_integer_advanced_indexing(
             else [*adv_loop_idxs, *trailing_idxs]
         )
         if y.ndim == 0:
-            y_prologue = "y_scalar = y.item()"
+            y_prologue = "y_scalar = y[()]"
             update_value = "y_scalar"
         else:
             y_axis_order = tuple(y_adv_axis_front_order.index(axis) for axis in y_order)

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pytensor
 import pytensor.tensor as pt
@@ -19,6 +20,7 @@ from pytensor.tensor.rewriting.uncanonicalize import (
 from pytensor.tensor.shape import reshape, specify_shape
 from pytensor.tensor.type import dtensor4, iscalar, matrix, tensor, vector
 from tests.link.test_link import make_function
+from tests.unittest_tools import RewriteTester
 
 
 class TestMinMax:
@@ -115,6 +117,23 @@ def test_local_dimshuffle_alloc():
 
     topo = g.toposort()
     assert not all(isinstance(x, DimShuffle) for x in topo)
+
+
+@pytest.mark.parametrize("new_order", [("x",), ("x", 0, "x", 1)])
+def test_local_dimshuffle_subtensor_roundtrip(new_order):
+    # Late squeeze/index rewrites must remove the singleton axes they just added.
+    ndim = sum(axis != "x" for axis in new_order)
+    x = pt.tensor("x", shape=(None,) * ndim, dtype="float64")
+    slices = tuple(
+        slice(None, None, -1) if axis == "x" else slice(None) for axis in new_order
+    )
+    kept_axes = tuple(i for i, axis in enumerate(new_order) if axis != "x")
+    out = x.dimshuffle(new_order)[slices].dimshuffle(kept_axes)
+    result = RewriteTester(
+        [x], [out], include=None, custom_rewrite=local_dimshuffle_subtensor
+    )
+    result.assert_graph(x)
+    result.assert_eval(np.arange(6.0).reshape(2, 3) if ndim else np.array(0.7))
 
 
 def test_local_dimshuffle_subtensor():

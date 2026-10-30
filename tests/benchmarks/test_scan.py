@@ -24,6 +24,28 @@ from pytensor.tensor import (
 from pytensor.tensor.subtensor import Subtensor
 
 
+@pytest.mark.parametrize("n_steps", [10, 1000])
+def test_scalar_fibonacci_benchmark_numba(n_steps, benchmark):
+    # Return only the final scalar states so boundary overhead remains visible.
+    initial = scalar("initial", dtype="int32")
+    history, _ = scan(
+        lambda a, b: (a + b, a),
+        outputs_info=[as_tensor(1, dtype="int32"), initial],
+        n_steps=n_steps,
+        return_updates=False,
+    )
+    fn = function([initial], history[-1], mode="NUMBA", trust_input=True)
+    assert any(isinstance(node.op, Scan) for node in fn.maker.fgraph.apply_nodes)
+    for seed in (1, 2):
+        a, b = 1, seed
+        for _ in range(n_steps):
+            a, b = a + b, a
+        expected = (a + 2**31) % 2**32 - 2**31
+        np.testing.assert_array_equal(fn(np.array(seed, dtype="int32")), expected)
+
+    benchmark(fn.vm.jit_fn, np.array(1, dtype="int32"))
+
+
 def SEIR_model_logp():
     def binomln(n, k):
         return gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)

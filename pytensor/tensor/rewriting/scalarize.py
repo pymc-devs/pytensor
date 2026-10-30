@@ -5,6 +5,8 @@ from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, dfs_
 from pytensor.graph.utils import InconsistencyError
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
+    Alloc,
+    AllocEmpty,
     Join,
     MakeVector,
     ScalarFromTensor,
@@ -23,7 +25,8 @@ from pytensor.tensor.rewriting.fused_elemwise import (
     FusedElemwise,
     fused_elemwise_optdb,
 )
-from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.rewriting.subtensor import local_subtensor_merge_integer
+from pytensor.tensor.subtensor import IncSubtensor, Subtensor
 
 
 class ScalarCAReduce(FinalizedOpFromGraph):
@@ -42,11 +45,35 @@ class ScalarSubtensor(FinalizedOpFromGraph):
         return f"Scalar{node.op}"
 
 
+class ScalarizedIncSubtensor(FinalizedOpFromGraph):
+    """A basic indexed update with a native scalar update value."""
+
+    def __str__(self):
+        [node] = [n for n in self.fgraph.apply_nodes if isinstance(n.op, IncSubtensor)]
+        return f"Scalarized{node.op}"
+
+
 class ScalarizedJoin(FinalizedOpFromGraph):
     """A vector Join with some native ScalarType inputs."""
 
     def __str__(self):
         return "ScalarizedJoin"
+
+
+class ScalarizedAlloc(FinalizedOpFromGraph):
+    """An Alloc or AllocEmpty with native scalar dimensions."""
+
+    def __str__(self):
+        [node] = [
+            n for n in self.fgraph.apply_nodes if isinstance(n.op, Alloc | AllocEmpty)
+        ]
+        return f"Scalarized{node.op}"
+
+    def do_constant_folding(self, fgraph, node):
+        [allocation] = [
+            n for n in self.fgraph.apply_nodes if isinstance(n.op, Alloc | AllocEmpty)
+        ]
+        return allocation.op.do_constant_folding(fgraph, node)
 
 
 class ScalarizedElemwise(FinalizedOpFromGraph):
@@ -69,7 +96,7 @@ class ScalarizeRewriter(GraphRewriter):
     Preserves array inplace buffers.
     """
 
-    scalar_consumers = (MakeVector, Elemwise, ScalarFromTensor)
+    scalar_consumers = (AllocEmpty, MakeVector, Elemwise, ScalarFromTensor)
 
     def apply(self, fgraph):
         for node in fgraph.toposort():
@@ -77,14 +104,20 @@ class ScalarizeRewriter(GraphRewriter):
                 continue
             op = node.op
             outputs = None
-            if isinstance(op, Subtensor) and node.outputs[0].ndim == 0:
-                outputs = self.scalarize_producer(fgraph, node, ScalarSubtensor)
-            elif isinstance(op, CAReduce) and node.outputs[0].ndim == 0:
-                outputs = self.scalarize_producer(fgraph, node, ScalarCAReduce)
+            if isinstance(op, Subtensor) and all(node.outputs[0].type.broadcastable):
+                outputs = self.scalarize_subtensor(fgraph, node)
+            elif isinstance(op, CAReduce) and all(node.outputs[0].type.broadcastable):
+                outputs = self.scalarize_careduce(fgraph, node)
             elif isinstance(op, FusedElemwise):
                 outputs = self.scalarize_fused(fgraph, node)
             elif isinstance(op, Elemwise):
                 outputs = self.scalarize_elemwise(fgraph, node)
+            elif isinstance(op, IncSubtensor) and all(
+                node.inputs[1].type.broadcastable
+            ):
+                outputs = self.scalarize_incsubtensor(node)
+            elif isinstance(op, Alloc | AllocEmpty):
+                outputs = self.scalarize_alloc(node)
             elif isinstance(op, MakeVector) or (
                 isinstance(op, Join) and op.axis == 0 and node.outputs[0].ndim == 1
             ):
@@ -126,16 +159,40 @@ class ScalarizeRewriter(GraphRewriter):
             elif isinstance(client.op, FusedElemwise):
                 if input_index in client.op.scalarizable_inputs:
                     return True
+            elif isinstance(client.op, IncSubtensor):
+                if input_index == 1 and all(client.inputs[1].type.broadcastable):
+                    return True
+            elif isinstance(client.op, Alloc) and input_index > 0:
+                return True
         return False
 
     @staticmethod
-    def scalarize_producer(fgraph, node, scalar_op_type):
-        """Make scalar indexing or a full reduction return a scalar."""
+    def scalarize_subtensor(fgraph, node):
+        """Return a single-element indexed read as a native scalar."""
         if not ScalarizeRewriter.has_scalar_consumer(fgraph, node.outputs[0]):
             return None
+        original_outputs = node.outputs
+        if node.outputs[0].ndim:
+            # Merge away the singleton view so the wrapper keeps one scalar read.
+            indexed = node.outputs[0][(0,) * node.outputs[0].ndim]
+            merged = local_subtensor_merge_integer.transform(fgraph, indexed.owner)
+            if not merged or merged[0].owner.inputs[0] is not node.inputs[0]:
+                return None
+            node = merged[0].owner
         inner_inputs = [inp.type() for inp in node.inputs]
         inner_output = scalar_from_tensor(node.op(*inner_inputs))
-        scalar = scalar_op_type(inner_inputs, [inner_output])(*node.inputs)
+        scalar = ScalarSubtensor(inner_inputs, [inner_output])(*node.inputs)
+        return ScalarizeRewriter.tensor_outputs(original_outputs, [scalar])
+
+    @staticmethod
+    def scalarize_careduce(fgraph, node):
+        """Return a single-element reduction as a native scalar."""
+        if not ScalarizeRewriter.has_scalar_consumer(fgraph, node.outputs[0]):
+            return None
+        [x] = node.inputs
+        inner_input = x.type()
+        inner_output = scalar_from_tensor(node.op.clone(axis=None)(inner_input))
+        scalar = ScalarCAReduce([inner_input], [inner_output])(x)
         return ScalarizeRewriter.tensor_outputs(node.outputs, [scalar])
 
     @staticmethod
@@ -200,7 +257,7 @@ class ScalarizeRewriter(GraphRewriter):
             for i, spec in enumerate(node.op.reduced_outputs)
             if spec is not None
             and not isinstance(node.outputs[i].type, ScalarType)
-            and node.outputs[i].ndim == 0
+            and all(node.outputs[i].type.broadcastable)
             and (
                 scalars
                 or ScalarizeRewriter.has_scalar_consumer(fgraph, node.outputs[i])
@@ -212,6 +269,28 @@ class ScalarizeRewriter(GraphRewriter):
         inputs = [scalars.get(i, inp) for i, inp in enumerate(node.inputs)]
         outputs = op(*inputs, return_list=True)
         return ScalarizeRewriter.tensor_outputs(node.outputs, outputs)
+
+    @staticmethod
+    def scalarize_incsubtensor(node):
+        """Pass scalar updates directly while retaining the array destination."""
+        x, value, *indices = node.inputs
+        target_ndim = x.ndim - sum(isinstance(idx, int) for idx in node.op.idx_list)
+        if value.ndim > target_ndim:
+            return None
+        scalar = ScalarizeRewriter.scalar_behind(value)
+        if scalar is None:
+            scalar = scalar_from_tensor(value.squeeze())
+        outer_inputs = [x, scalar, *indices]
+        inner_inputs = [inp.type() for inp in outer_inputs]
+        inner_output = node.op(
+            inner_inputs[0],
+            atleast_Nd(tensor_from_scalar(inner_inputs[1]), n=value.ndim),
+            *inner_inputs[2:],
+        )
+        scalarized = ScalarizedIncSubtensor(
+            inner_inputs, [inner_output], destroy_map=node.op.destroy_map
+        )
+        return [scalarized(*outer_inputs)]
 
     @staticmethod
     def scalarize_join(node):
@@ -235,6 +314,32 @@ class ScalarizeRewriter(GraphRewriter):
                 tensor_inputs.append(tensor_from_scalar(inner)[None])
             inner_inputs.append(inner)
         scalarized = ScalarizedJoin(inner_inputs, [join(0, *tensor_inputs)])
+        return [scalarized(*outer_inputs)]
+
+    @staticmethod
+    def scalarize_alloc(node):
+        if all(dim is not None for dim in node.outputs[0].type.shape):
+            return None
+        n_data_inputs = int(isinstance(node.op, Alloc))
+        outer_inputs = list(node.inputs[:n_data_inputs])
+        inner_inputs = [inp.type() for inp in outer_inputs]
+        dimensions = []
+        for inp, static_dim in zip(
+            node.inputs[n_data_inputs:], node.outputs[0].type.shape, strict=True
+        ):
+            if static_dim is not None:
+                dimensions.append(static_dim)
+                continue
+            scalar = ScalarizeRewriter.scalar_behind(inp)
+            if scalar is None:
+                scalar = scalar_from_tensor(inp)
+            inner = scalar.type()
+            outer_inputs.append(scalar)
+            inner_inputs.append(inner)
+            dimensions.append(tensor_from_scalar(inner))
+        scalarized = ScalarizedAlloc(
+            inner_inputs, [node.op(*inner_inputs[:n_data_inputs], *dimensions)]
+        )
         return [scalarized(*outer_inputs)]
 
     @staticmethod

@@ -23,6 +23,7 @@ from pytensor.scan.rewriting.push_out import (
     scan_push_out_seq,
 )
 from pytensor.scan.rewriting.trace import (
+    scan_mit_mot_to_sit_sot,
     scan_reduce_nsteps,
     scan_reduce_trace_no_prealloc,
     scan_reduce_trace_prealloc,

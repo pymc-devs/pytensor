@@ -92,7 +92,9 @@ class NumbaPyTensorCacheLocator(_CacheLocator):
         """Get a string disambiguator for this locator's function.
         It should allow disambiguating different but similarly-named functions.
         """
-        return self._hash
+        # Numba's environment override is not included in its compiler flags.
+        # Parents must also be isolated because their cache embeds child code.
+        return f"{self._hash}_boundscheck{numba.config.BOUNDSCHECK}"
 
     @classmethod
     def from_function(cls, py_func, py_file):

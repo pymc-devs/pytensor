@@ -1,19 +1,146 @@
 import numpy as np
+import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor import In
 from pytensor import scalar as ps
+from pytensor.gradient import DisconnectedType
+from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.rewriting.scalarize import (
     ScalarCAReduce,
+    ScalarizedAlloc,
     ScalarizedElemwise,
+    ScalarizedIncSubtensor,
     ScalarizedJoin,
     ScalarizeRewriter,
     ScalarSubtensor,
 )
 from tests.link.numba.test_basic import compare_numba_and_py
 from tests.unittest_tools import RewriteTester
+
+
+def test_scalarized_allocempty_not_constant_folded():
+    # A constant shape does not make uninitialized contents a constant value.
+    size = ps.int64("size")
+    empty = ScalarizedAlloc(
+        [size], [pt.empty(tensor_from_scalar(size), dtype="float32")]
+    )(ps.constant(2, dtype="int64"))
+    RewriteTester([], [empty]).assert_graph(empty)
+
+
+@pytest.mark.parametrize("linker", ["numba", "py"])
+def test_scalarized_allocempty(linker):
+    # Dynamic shape arithmetic stays native while the static middle axis survives.
+    n, m = pt.lscalars("n", "m")
+    empty = pt.empty((n + 1, 2, m), dtype="float32")
+    shape0, shape2 = ps.int64("shape0"), ps.int64("shape2")
+    inner = pt.empty(
+        (tensor_from_scalar(shape0), 2, tensor_from_scalar(shape2)), dtype="float32"
+    )
+    addition = empty.owner.inputs[0].owner
+    native_sum = addition.op.scalar_op(
+        *(scalar_from_tensor(inp) for inp in addition.inputs)
+    )
+    expected = ScalarizedAlloc([shape0, shape2], [inner])(
+        native_sum, scalar_from_tensor(m)
+    )
+    result = RewriteTester(
+        [n, m],
+        [empty.shape],
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+        linker=linker,
+    )
+    result.assert_graph(expected.shape)
+    for values in ((2, 3), (-1, 3), (2, 0)):
+        result.assert_eval(*values)
+    allocation_error = ValueError if linker == "numba" else (ValueError, MemoryError)
+    for fn in (result.orig_fn, result.rewr_fn):
+        for values in ((-2, 3), (2, -1)):
+            with pytest.raises(allocation_error):
+                fn(*values)
+    [node] = [
+        node
+        for node in result.rewr_fg.toposort()
+        if isinstance(node.op, ScalarizedAlloc)
+    ]
+    assert all(isinstance(inp.type, ScalarType) for inp in node.inputs)
+    assert all(
+        isinstance(derivative.type, DisconnectedType)
+        for derivative in pytensor.grad(
+            node.outputs[0].sum(),
+            node.inputs,
+            disconnected_inputs="ignore",
+            return_disconnected="disconnected",
+        )
+    )
+
+
+@pytest.mark.parametrize("set_value", [False, True])
+def test_scalarized_incsubtensor(set_value):
+    # A scalar read feeds the update directly, without boxing its value again.
+    index = slice(None, None, -2)
+    x = pt.dvector("x")
+    values = pt.dvector("values")
+    scalar = ps.float64("scalar")
+    read_index = ps.int64("read_index")
+    indexed_value = values[0]
+    output = x[index].set(indexed_value) if set_value else x[index].inc(indexed_value)
+    indexed = ScalarSubtensor(
+        [values, read_index], [scalar_from_tensor(values[read_index])]
+    )(values, indexed_value.owner.inputs[1])
+    indices = output.owner.inputs[2:]
+    inner_indices = [inp.type() for inp in indices]
+    inner_indexed = output.owner.op(x, tensor_from_scalar(scalar), *inner_indices)
+    expected = ScalarizedIncSubtensor([x, scalar, *inner_indices], [inner_indexed])(
+        x, indexed, *indices
+    )
+
+    result = RewriteTester(
+        [x, values],
+        [output],
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+        linker="numba",
+    )
+    result.assert_graph(expected)
+    result.assert_eval(np.arange(6, dtype="float64"), np.array([1.25]))
+
+
+def test_scalarized_fused_singleton_reduction():
+    # The fused reduction produces a scalar while retaining a singleton axis.
+    x = pt.fmatrix("x", shape=(None, 1))
+    y = pt.fmatrix("y", shape=(None, 1))
+    reduction = (x + y).sum(axis=0, dtype="float32", acc_dtype="float64")
+    specs = ((ps.add, (0,), 0.0, "float64"),)
+    output = FusedElemwise(
+        [x, y],
+        [reduction],
+        reduced_outputs=specs,
+    )(x, y)
+    client = scalar_from_tensor(output.squeeze())
+    expected = FusedElemwise(
+        [x, y],
+        [scalar_from_tensor((x + y).sum(dtype="float32", acc_dtype="float64"))],
+        reduced_outputs=((ps.add, (0, 1), 0.0, "float64"),),
+    )(x, y)
+
+    result = RewriteTester(
+        [x, y],
+        [client],
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+        linker="numba",
+    )
+    result.assert_graph(expected)
+    for size in (3, 0):
+        result.assert_eval(
+            np.arange(size, dtype="float32")[:, None],
+            np.ones((size, 1), dtype="float32"),
+        )
 
 
 def test_scalarized_elemwise():
@@ -59,13 +186,18 @@ def test_scalarized_elemwise():
     result.assert_graph(output)
 
 
-def test_scalar_subtensor():
+@pytest.mark.parametrize("trailing_shape", [(), (1, 1)])
+def test_scalar_subtensor(trailing_shape):
     # Subtensor consumes a scalar index and produces a scalar for its client.
-    x = pt.dvector("x")
+    x = pt.tensor("x", dtype="float64", shape=(None, *trailing_shape))
     index = ps.int64("index")
     output = x[index]
-    client = scalar_from_tensor(output)
-    expected = ScalarSubtensor([x, index], [client])(x, index)
+    client = scalar_from_tensor(output.squeeze())
+    indexed = x[(index,) + (0,) * len(trailing_shape)]
+    expected = ScalarSubtensor(
+        indexed.owner.inputs,
+        [scalar_from_tensor(indexed)],
+    )(*indexed.owner.inputs)
 
     result = RewriteTester(
         [x, index],
@@ -75,7 +207,7 @@ def test_scalar_subtensor():
         linker="numba",
     )
     result.assert_graph(expected)
-    result.assert_eval(np.array([-3.0, 2.0]), 1)
+    result.assert_eval(np.array([-3.0, 2.0]).reshape(2, *trailing_shape), 1)
 
     # Without a scalar client, Subtensor keeps its tensor output.
     result = RewriteTester(
@@ -87,12 +219,16 @@ def test_scalar_subtensor():
     result.assert_graph(output)
 
 
-def test_scalar_careduce():
+@pytest.mark.parametrize("trailing_shape", [(), (1, 1)])
+def test_scalar_careduce(trailing_shape):
     # A scalar client receives a float32 reduction accumulated in float64.
-    x = pt.fvector("x")
-    output = x.sum(dtype="float32", acc_dtype="float64")
-    client = scalar_from_tensor(output)
-    expected = ScalarCAReduce([x], [client])(x)
+    x = pt.tensor("x", dtype="float32", shape=(None, *trailing_shape))
+    output = x.sum(axis=0, dtype="float32", acc_dtype="float64")
+    client = scalar_from_tensor(output.squeeze())
+    expected = ScalarCAReduce(
+        [x],
+        [scalar_from_tensor(x.sum(dtype="float32", acc_dtype="float64"))],
+    )(x)
 
     result = RewriteTester(
         [x],
@@ -102,7 +238,10 @@ def test_scalar_careduce():
         linker="numba",
     )
     result.assert_graph(expected)
-    result.assert_eval(np.array([2.0, -1.0, 3.0], dtype="float32"))
+    result.assert_eval(
+        np.array([2.0, -1.0, 3.0], dtype="float32").reshape(3, *trailing_shape)
+    )
+    result.assert_eval(np.empty((0, *trailing_shape), dtype="float32"))
 
     # Without a scalar client, the reduction keeps its tensor output.
     result = RewriteTester(

@@ -1,5 +1,5 @@
 from hashlib import sha256
-from textwrap import dedent, indent
+from textwrap import dedent
 
 import numpy as np
 
@@ -28,39 +28,60 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
-from pytensor.tensor.rewriting.scalarize import ScalarizedJoin
+from pytensor.tensor.rewriting.scalarize import ScalarizedAlloc, ScalarizedJoin
 
 
-@register_funcify_default_op_cache_key(AllocEmpty)
-def numba_funcify_AllocEmpty(op, node, **kwargs):
-    shape_var_names = [f"sh{i}" for i in range(len(node.inputs))]
-    shape_var_item_names = [f"{name}_item" for name in shape_var_names]
-    shapes_to_items_src = indent(
-        "\n".join(
-            f"{item_name} = {shape_name}.item()"
-            for item_name, shape_name in zip(
-                shape_var_item_names, shape_var_names, strict=True
-            )
-        ),
-        " " * 4,
-    )
-
+def _numba_funcify_allocempty(dtype, shape_var_names, shape_values):
     alloc_def_src = f"""
 def allocempty({", ".join(shape_var_names)}):
-{shapes_to_items_src}
-    scalar_shape = {create_tuple_string(shape_var_item_names)}
+    scalar_shape = {create_tuple_string(shape_values)}
     return np.empty(scalar_shape, dtype)
     """
 
     alloc_fn = compile_numba_function_src(
-        alloc_def_src, "allocempty", globals() | {"np": np, "dtype": np.dtype(op.dtype)}
+        alloc_def_src, "allocempty", globals() | {"np": np, "dtype": np.dtype(dtype)}
     )
-
     return numba_basic.numba_njit(alloc_fn)
 
 
+@register_funcify_default_op_cache_key(AllocEmpty)
+def numba_funcify_AllocEmpty(op, node, **kwargs):
+    names = [f"sh{i}" for i in range(len(node.inputs))]
+    return _numba_funcify_allocempty(
+        op.dtype, names, [f"{name}[()]" for name in names]
+    ), 1
+
+
+@register_funcify_and_cache_key(ScalarizedAlloc)
+def numba_funcify_ScalarizedAlloc(op, node, **kwargs):
+    [allocation] = [
+        n for n in op.fgraph.apply_nodes if isinstance(n.op, Alloc | AllocEmpty)
+    ]
+    n_data_inputs = int(isinstance(allocation.op, Alloc))
+    dtype = node.outputs[0].dtype
+    shape = node.outputs[0].type.shape
+    names = [f"sh{i}" for i in range(len(node.inputs) - n_data_inputs)]
+    dynamic = iter(names)
+    dimensions = [next(dynamic) if dim is None else str(dim) for dim in shape]
+    if n_data_inputs:
+        fn, _ = numba_funcify_Alloc(
+            allocation.op,
+            allocation,
+            shape_arguments=names,
+            shape_values=dimensions,
+        )
+        value_shape = allocation.inputs[0].type.shape
+    else:
+        fn = _numba_funcify_allocempty(dtype, names, dimensions)
+        value_shape = None
+    key = sha256(
+        str(("ScalarizedAlloc", 1, dtype, shape, value_shape)).encode()
+    ).hexdigest()
+    return fn, key
+
+
 @register_funcify_and_cache_key(Alloc)
-def numba_funcify_Alloc(op, node, **kwargs):
+def numba_funcify_Alloc(op, node, shape_arguments=None, shape_values=None, **kwargs):
     r"""Generate one of three fills, chosen by the static shape of the value.
 
     Examples
@@ -71,8 +92,8 @@ def numba_funcify_Alloc(op, node, **kwargs):
     .. code-block:: python
 
         def alloc(val, sh0, sh1):
-            sh0_item = sh0.item()
-            sh1_item = sh1.item()
+            sh0_item = sh0[()]
+            sh1_item = sh1[()]
             scalar_shape = (sh0_item, sh1_item)
             res = np.empty(scalar_shape, dtype=np.float64)
             res[...] = val
@@ -84,8 +105,8 @@ def numba_funcify_Alloc(op, node, **kwargs):
     .. code-block:: python
 
         def alloc(val, sh0, sh1):
-            sh0_item = sh0.item()
-            sh1_item = sh1.item()
+            sh0_item = sh0[()]
+            sh1_item = sh1[()]
             scalar_shape = (sh0_item, sh1_item)
             res = np.empty(scalar_shape, dtype=np.float64)
             res[...] = val[0, 0]
@@ -98,8 +119,8 @@ def numba_funcify_Alloc(op, node, **kwargs):
     .. code-block:: python
 
         def alloc(val, sh0, sh1):
-            sh0_item = sh0.item()
-            sh1_item = sh1.item()
+            sh0_item = sh0[()]
+            sh1_item = sh1[()]
             scalar_shape = (sh0_item, sh1_item)
             if val.shape[-2] != scalar_shape[-2]:
                 if val.shape[-2] == 1:
@@ -117,19 +138,15 @@ def numba_funcify_Alloc(op, node, **kwargs):
     # The dimensions of `val` align with the trailing dimensions of the output
     offset = out_ndim - val.type.ndim
 
-    shape_var_names = [f"sh{i}" for i in range(out_ndim)]
-    shape_var_item_names = [f"{name}_item" for name in shape_var_names]
+    if shape_arguments is None:
+        shape_arguments = [f"sh{i}" for i in range(out_ndim)]
+    if shape_values is None:
+        shape_values = [f"{name}[()]" for name in shape_arguments]
 
     code: list[str | CODE_TOKEN] = [
-        f"def alloc(val, {', '.join(shape_var_names)}):",
+        f"def alloc({', '.join(['val', *shape_arguments])}):",
         CODE_TOKEN.INDENT,
-        *(
-            f"{item_name} = {shape_name}.item()"
-            for item_name, shape_name in zip(
-                shape_var_item_names, shape_var_names, strict=True
-            )
-        ),
-        f"scalar_shape = {create_tuple_string(shape_var_item_names)}",
+        f"scalar_shape = {create_tuple_string(shape_values)}",
     ]
 
     mismatch_error_msg = (
@@ -173,9 +190,7 @@ def numba_funcify_Alloc(op, node, **kwargs):
         code.append(f"res[...] = {val_item}")
     else:
         for d in range(out_ndim):
-            code.extend(
-                (f"for i{d} in range({shape_var_item_names[d]}):", CODE_TOKEN.INDENT)
-            )
+            code.extend((f"for i{d} in range(scalar_shape[{d}]):", CODE_TOKEN.INDENT))
         out_idxs = [f"i{d}" for d in range(out_ndim)]
         code.append(f"res[{', '.join(out_idxs)}] = val[{', '.join(val_idxs)}]")
         code.extend([CODE_TOKEN.DEDENT] * out_ndim)
@@ -189,7 +204,7 @@ def numba_funcify_Alloc(op, node, **kwargs):
         write_to_disk=True,
     )
 
-    cache_version = 1
+    cache_version = 2
     # The code branches on whether a dimension of the value is statically 1 (it
     # broadcasts), of unknown size (it needs a runtime broadcast check) or of known
     # size, but never on the concrete sizes.

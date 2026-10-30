@@ -15,6 +15,17 @@ class NumbaLinker(JITLinker):
 
     """A `Linker` that JIT-compiles NumPy-based operations using Numba."""
 
+    def accept(self, fgraph, no_recycling=None, profile=None):
+        from pytensor.graph.rewriting.basic import dfs_rewriter
+        from pytensor.link.numba.rewriting import numba_remove_scalar_scan_output_copy
+
+        # FunctionMaker inserts ownership copies after the ordinary rewrite
+        # passes; remove redundant copies before scheduling and storage mapping.
+        dfs_rewriter(
+            numba_remove_scalar_scan_output_copy, ignore_newtrees=True
+        ).rewrite(fgraph)
+        return super().accept(fgraph, no_recycling, profile)
+
     def fgraph_convert(self, fgraph, **kwargs):
         # Import numba_njit_and_cache lazily (as numba is an optional dependency)
         # This is what triggers the registering of the dispatches as well
