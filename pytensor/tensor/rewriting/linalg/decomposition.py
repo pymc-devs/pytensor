@@ -5,6 +5,7 @@ from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
     ORTHOGONAL,
+    POSITIVE_DEFINITE,
     SYMMETRIC,
     UPPER_TRIANGULAR,
     check_assumption,
@@ -430,7 +431,12 @@ def eig_to_eigh(fgraph, node):
     # Eigh is a subclass of Eig, so this tracker also matches Eigh — skip it
     if isinstance(node.op.core_op, Eigh):
         return None
-    if not check_assumption(fgraph, X, SYMMETRIC):
+    # eigh needs a Hermitian input, which a complex symmetric matrix is not
+    is_hermitian = check_assumption(fgraph, X, POSITIVE_DEFINITE) or (
+        not X.type.dtype.startswith("complex")
+        and check_assumption(fgraph, X, SYMMETRIC)
+    )
+    if not is_hermitian:
         return None
 
     w, v = eigh(X)

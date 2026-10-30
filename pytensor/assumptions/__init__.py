@@ -38,6 +38,7 @@ from pytensor.assumptions.core import (
     ConflictingAssumptionsError,
     FactState,
     check_assumption,
+    implication_holds,
     register_assumption,
     register_constant_inference,
     register_implies,
@@ -72,13 +73,18 @@ def summarize_assumptions(feature: AssumptionFeature, var) -> str:
         label = key.short_name or key.name
         if state is FactState.TRUE:
             if any(
-                key in weaker and states[stronger] is FactState.TRUE
+                key in weaker
+                and implication_holds(var, stronger, key)
+                and states[stronger] is FactState.TRUE
                 for stronger, weaker in IMPLIES.items()
             ):
                 continue
             tokens.append(label)
         elif state is FactState.FALSE:
-            if any(states[w] is FactState.FALSE for w in IMPLIES.get(key, ())):
+            if any(
+                implication_holds(var, key, w) and states[w] is FactState.FALSE
+                for w in IMPLIES.get(key, ())
+            ):
                 continue
             tokens.append(f"!{label}")
         elif state is FactState.CONFLICT:
