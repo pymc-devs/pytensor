@@ -9,12 +9,44 @@ from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.rewriting.scalarize import (
     ScalarCAReduce,
     ScalarizedElemwise,
+    ScalarizedIncSubtensor,
     ScalarizedJoin,
     ScalarizeRewriter,
     ScalarSubtensor,
 )
 from tests.link.numba.test_basic import compare_numba_and_py
 from tests.unittest_tools import RewriteTester
+
+
+@pytest.mark.parametrize("set_value", [False, True])
+def test_scalarized_incsubtensor(set_value):
+    # A scalar read feeds the update directly, without boxing its value again.
+    index = slice(None, None, -2)
+    x = pt.dvector("x")
+    values = pt.dvector("values")
+    scalar = ps.float64("scalar")
+    read_index = ps.int64("read_index")
+    indexed_value = values[0]
+    output = x[index].set(indexed_value) if set_value else x[index].inc(indexed_value)
+    indexed = ScalarSubtensor(
+        [values, read_index], [scalar_from_tensor(values[read_index])]
+    )(values, indexed_value.owner.inputs[1])
+    indices = output.owner.inputs[2:]
+    inner_indices = [inp.type() for inp in indices]
+    inner_indexed = output.owner.op(x, tensor_from_scalar(scalar), *inner_indices)
+    expected = ScalarizedIncSubtensor([x, scalar, *inner_indices], [inner_indexed])(
+        x, indexed, *indices
+    )
+
+    result = RewriteTester(
+        [x, values],
+        [output],
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+        linker="numba",
+    )
+    result.assert_graph(expected)
+    result.assert_eval(np.arange(6, dtype="float64"), np.array([1.25]))
 
 
 def test_scalarized_fused_singleton_reduction():

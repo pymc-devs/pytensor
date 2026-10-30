@@ -24,7 +24,7 @@ from pytensor.tensor.rewriting.fused_elemwise import (
     fused_elemwise_optdb,
 )
 from pytensor.tensor.rewriting.subtensor import local_subtensor_merge_integer
-from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.subtensor import IncSubtensor, Subtensor
 
 
 class ScalarCAReduce(FinalizedOpFromGraph):
@@ -41,6 +41,14 @@ class ScalarSubtensor(FinalizedOpFromGraph):
     def __str__(self):
         [node] = [n for n in self.fgraph.apply_nodes if isinstance(n.op, Subtensor)]
         return f"Scalar{node.op}"
+
+
+class ScalarizedIncSubtensor(FinalizedOpFromGraph):
+    """A basic indexed update with a native scalar update value."""
+
+    def __str__(self):
+        [node] = [n for n in self.fgraph.apply_nodes if isinstance(n.op, IncSubtensor)]
+        return f"Scalarized{node.op}"
 
 
 class ScalarizedJoin(FinalizedOpFromGraph):
@@ -86,6 +94,10 @@ class ScalarizeRewriter(GraphRewriter):
                 outputs = self.scalarize_fused(fgraph, node)
             elif isinstance(op, Elemwise):
                 outputs = self.scalarize_elemwise(fgraph, node)
+            elif isinstance(op, IncSubtensor) and all(
+                node.inputs[1].type.broadcastable
+            ):
+                outputs = self.scalarize_incsubtensor(node)
             elif isinstance(op, MakeVector) or (
                 isinstance(op, Join) and op.axis == 0 and node.outputs[0].ndim == 1
             ):
@@ -126,6 +138,9 @@ class ScalarizeRewriter(GraphRewriter):
                     return True
             elif isinstance(client.op, FusedElemwise):
                 if input_index in client.op.scalarizable_inputs:
+                    return True
+            elif isinstance(client.op, IncSubtensor):
+                if input_index == 1 and all(client.inputs[1].type.broadcastable):
                     return True
         return False
 
@@ -232,6 +247,28 @@ class ScalarizeRewriter(GraphRewriter):
         inputs = [scalars.get(i, inp) for i, inp in enumerate(node.inputs)]
         outputs = op(*inputs, return_list=True)
         return ScalarizeRewriter.tensor_outputs(node.outputs, outputs)
+
+    @staticmethod
+    def scalarize_incsubtensor(node):
+        """Pass scalar updates directly while retaining the array destination."""
+        x, value, *indices = node.inputs
+        target_ndim = x.ndim - sum(isinstance(idx, int) for idx in node.op.idx_list)
+        if value.ndim > target_ndim:
+            return None
+        scalar = ScalarizeRewriter.scalar_behind(value)
+        if scalar is None:
+            scalar = scalar_from_tensor(value.squeeze())
+        outer_inputs = [x, scalar, *indices]
+        inner_inputs = [inp.type() for inp in outer_inputs]
+        inner_output = node.op(
+            inner_inputs[0],
+            atleast_Nd(tensor_from_scalar(inner_inputs[1]), n=value.ndim),
+            *inner_inputs[2:],
+        )
+        scalarized = ScalarizedIncSubtensor(
+            inner_inputs, [inner_output], destroy_map=node.op.destroy_map
+        )
+        return [scalarized(*outer_inputs)]
 
     @staticmethod
     def scalarize_join(node):
