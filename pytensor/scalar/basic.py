@@ -3993,6 +3993,13 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         )
         return rval
 
+    def c_init_code(self, **kwargs):
+        return [
+            code
+            for subnode in self.fgraph.toposort()
+            for code in subnode.op.c_init_code(**kwargs)
+        ]
+
     def c_support_code(self, **kwargs):
         # Remove duplicate code blocks by using a `set`
         rval = {
