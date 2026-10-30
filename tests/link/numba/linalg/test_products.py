@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -11,7 +13,7 @@ from pytensor.link.numba.dispatch.linalg.products import (
     _gemv_operands,
     _normalize_gemm_strides,
 )
-from pytensor.tensor.linalg.products import Expm, expm
+from pytensor.tensor.linalg.products import Expm, expm, sqrtm
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
@@ -94,6 +96,40 @@ class TestExpm:
         _, res = compare_numba_and_py([A], [y], [val])
         np.testing.assert_array_equal(val, original)
         assert res[0].dtype == np.float64
+
+
+class TestSqrtm:
+    @pytest.mark.parametrize("dtype", ["float32", "float64", "complex64", "complex128"])
+    def test_sqrtm(self, dtype: str):
+        sqrtm_rng = np.random.default_rng(5521)
+        A = pt.matrix("A", dtype=dtype)
+        y = sqrtm(A)
+
+        x = sqrtm_rng.normal(size=(5, 5)) + 5 * np.eye(5)
+        if np.dtype(dtype).kind == "c":
+            x = x + 1j * sqrtm_rng.normal(size=(5, 5))
+        rtol = 1e-4 if np.dtype(dtype).char in "fF" else 1e-10
+
+        compare_numba_and_py(
+            [A],
+            [y],
+            [x.astype(dtype)],
+            assert_fn=partial(np.testing.assert_allclose, rtol=rtol),
+        )
+
+    def test_sqrtm_no_real_root(self):
+        A = pt.matrix("A", dtype="float64")
+        _, [res] = compare_numba_and_py([A], [sqrtm(A)], [np.diag([4.0, -1.0, 9.0])])
+        assert np.isnan(res).all()
+
+    def test_sqrtm_zero_matrix(self):
+        A = pt.matrix("A", dtype="float64")
+        fn = function([A], sqrtm(A), mode="NUMBA")
+        np.testing.assert_array_equal(fn(np.zeros((3, 3))), np.zeros((3, 3)))
+
+    def test_sqrtm_size_zero(self):
+        A = pt.matrix("A", dtype=floatX)
+        compare_numba_and_py([A], [sqrtm(A)], [np.zeros((0, 0), dtype=floatX)])
 
 
 @numba_njit(final_function=True)

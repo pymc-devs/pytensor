@@ -46,6 +46,7 @@ Products
 .. autofunction:: pytensor.tensor.linalg.matrix_dot
 .. autofunction:: pytensor.tensor.linalg.matrix_power
 .. autofunction:: pytensor.tensor.linalg.expm
+.. autofunction:: pytensor.tensor.linalg.sqrtm
 
 Solve
 =====
