@@ -160,8 +160,7 @@ class ScalarizeRewriter(GraphRewriter):
             scalar_inputs = []
             for inp, scalar in zip(node.inputs, scalars, strict=True):
                 if scalar is None:
-                    squeezed = copy_stack_trace(inp, inp.squeeze())
-                    scalar = copy_stack_trace(inp, scalar_from_tensor(squeezed))
+                    scalar = copy_stack_trace(inp, scalar_from_tensor(inp.squeeze()))
                 scalar_inputs.append(scalar)
             outputs = node.op.scalar_op(*scalar_inputs, return_list=True)
             return ScalarizeRewriter.tensor_outputs(node.outputs, outputs)
