@@ -9,6 +9,23 @@ from pytensor.tensor.type import matrix
 from tests import unittest_tools as utt
 
 
+def _random_hermitian_pd(rng, n, shift):
+    M = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    return M @ M.conj().T + shift * np.eye(n)
+
+
+def _complex_numeric_grad(f, x, eps=1e-6):
+    """Central-difference gradient dL/dRe + i dL/dIm of a real loss of complex x."""
+    grad = np.zeros_like(x)
+    for idx in np.ndindex(x.shape):
+        step = np.zeros_like(x)
+        step[idx] = eps
+        d_real = (f(x + step) - f(x - step)) / (2 * eps)
+        d_imag = (f(x + 1j * step) - f(x - 1j * step)) / (2 * eps)
+        grad[idx] = d_real + 1j * d_imag
+    return grad
+
+
 class TestEig(utt.InferShapeTester):
     op_class = Eig
     dtype = "float64"
@@ -187,6 +204,38 @@ class TestEigh(TestEig):
             rng=rng,
         )
 
+    @pytest.mark.parametrize(
+        "generalized", [False, True], ids=["standard", "generalized"]
+    )
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_pullback_complex(self, lower, generalized):
+        # pytensor.grad rejects complex gradients, so the pullback is called directly
+        rng = np.random.default_rng(utt.fetch_seed())
+        vals = [_random_hermitian_pd(rng, 4, shift) for shift in (1, 5)]
+        vals = vals[: 1 + generalized]
+        inputs = [pt.zmatrix(f"x{i}") for i in range(len(vals))]
+        op = Eigh(lower=lower)
+        w, v = op(*inputs)
+        fwd = function(inputs, [w, v])
+
+        w_weights = rng.normal(size=4)
+        v_weights = rng.normal(size=(4, 4))
+
+        def loss(*args):
+            w_val, v_val = fwd(*args)
+            return w_val @ w_weights + (np.abs(v_val) ** 2 * v_weights).sum()
+
+        gw, gv = pt.dvector("gw"), pt.zmatrix("gv")
+        pullback = function([*inputs, gw, gv], op.pullback(inputs, [w, v], [gw, gv]))
+        # Cotangents of loss, which does not depend on the phase of each eigenvector
+        grads = pullback(*vals, w_weights, 2 * v_weights * fwd(*vals)[1])
+
+        for k, grad in enumerate(grads):
+            expected = _complex_numeric_grad(
+                lambda x, k=k: loss(*vals[:k], x, *vals[k + 1 :]), vals[k]
+            )
+            np.testing.assert_allclose(grad, expected, atol=1e-7)
+
 
 class TestEigvalsh(TestEig):
     op = staticmethod(eigvalsh)
@@ -281,3 +330,28 @@ class TestEigvalsh(TestEig):
             [a_val, b_val],
             rng=rng,
         )
+
+    @pytest.mark.parametrize(
+        "generalized", [False, True], ids=["standard", "generalized"]
+    )
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_pullback_complex(self, lower, generalized):
+        # pytensor.grad rejects complex gradients, so the pullback is called directly
+        rng = np.random.default_rng(utt.fetch_seed())
+        vals = [_random_hermitian_pd(rng, 4, shift) for shift in (1, 5)]
+        vals = vals[: 1 + generalized]
+        inputs = [pt.zmatrix(f"x{i}") for i in range(len(vals))]
+        op = Eigvalsh(lower=lower)
+        w = op(*inputs)
+        fwd = function(inputs, w)
+        w_weights = rng.normal(size=4)
+
+        gw = pt.dvector("gw")
+        pullback = function([*inputs, gw], op.pullback(inputs, [w], [gw]))
+        grads = pullback(*vals, w_weights)
+
+        for k, grad in enumerate(grads):
+            expected = _complex_numeric_grad(
+                lambda x, k=k: fwd(*vals[:k], x, *vals[k + 1 :]) @ w_weights, vals[k]
+            )
+            np.testing.assert_allclose(grad, expected, atol=1e-7)
