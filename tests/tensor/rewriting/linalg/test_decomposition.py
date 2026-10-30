@@ -356,6 +356,31 @@ def test_eigh_of_complex_diag():
     result.assert_eval(np.diag([3.0, 1.0, 2.0]).astype("complex128"))
 
 
+def test_eigh_of_transposed_complex_sqrtm():
+    x = pt.zmatrix("x")
+    S = pt.linalg.sqrtm(assume(x, positive_definite=True))
+    w, V = pt.linalg.eigh(S.mT)
+
+    result = RewriteTester([x], [w, V])
+    w_x, V_x = pt.linalg.eigh(x)
+    result.assert_graph(*rewrite_graph([pt.sqrt(pt.maximum(w_x, 0)), V_x.conj()]))
+
+
+@pytest.mark.parametrize("transpose", [False, True], ids=["plain", "transposed"])
+def test_eigh_of_sqrtm(transpose):
+    x = pt.dmatrix("x")
+    S = pt.linalg.sqrtm(assume(x, positive_definite=True))
+    w, V = pt.linalg.eigh(S.mT if transpose else S)
+
+    result = RewriteTester([x], [w, V])
+    w_x, V_x = pt.linalg.eigh(x)
+    result.assert_graph(*rewrite_graph([pt.sqrt(pt.maximum(w_x, 0)), V_x]))
+
+    rng = np.random.default_rng(303)
+    A = rng.normal(size=(4, 4))
+    result.assert_eval(A @ A.T + np.eye(4))
+
+
 def test_eigh_of_batched_diag():
     x = pt.dtensor3("x", shape=(2, 3, 3))
     w, v = pt.linalg.eigh(assume(x, diagonal=True))

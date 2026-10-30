@@ -5,7 +5,9 @@ from pytensor.assumptions import (
     DIAGONAL,
     ORTHOGONAL,
     PERMUTATION,
+    POSITIVE_DEFINITE,
     SELECTION,
+    SYMMETRIC,
     check_assumption,
 )
 from pytensor.assumptions.dimshuffle import conjugate_transpose_input
@@ -24,11 +26,13 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
-from pytensor.tensor.linalg.products import Expm, KroneckerProduct
+from pytensor.tensor.linalg.decomposition.eigen import eigh
+from pytensor.tensor.linalg.products import Expm, KroneckerProduct, Sqrtm
 from pytensor.tensor.linalg.summary import det
 from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
+    register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
@@ -229,6 +233,69 @@ def expm_of_diag(fgraph, node):
     diag_vals = pt.exp(pt.diagonal(X, axis1=-2, axis2=-1))
     new_out = alloc_diag(diag_vals, axis1=-2, axis2=-1)
     copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Sqrtm)])
+def sqrtm_of_diag(fgraph, node):
+    """sqrtm(D) -> diag(sqrt(diagonal(D))) for diagonal D.
+
+    A real D with a negative diagonal entry has no real root, and every entry of the
+    result is NaN, as for the general Op.
+    """
+    [X] = node.inputs
+    [old_out] = node.outputs
+
+    if all(X.type.broadcastable[-2:]):
+        new_out = pt.sqrt(X)
+    elif check_assumption(fgraph, X, DIAGONAL):
+        diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+        new_out = alloc_diag(pt.sqrt(diag_vals), axis1=-2, axis2=-1)
+        if not X.type.dtype.startswith("complex"):
+            has_real_root = pt.all(diag_vals >= 0, axis=-1)[..., None, None]
+            new_out = pt.where(has_real_root, new_out, np.nan)
+    else:
+        return None
+
+    new_out = new_out.astype(old_out.type.dtype)
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+@register_specialize
+@node_rewriter([blockwise_of(Sqrtm)])
+def sqrtm_of_symmetric(fgraph, node):
+    """sqrtm(A) -> V diag(sqrt(w)) V^H for Hermitian A, with w, V = eigh(A).
+
+    Splitting the root as (V diag(w^(1/4))) (V diag(w^(1/4)))^H keeps the result
+    exactly Hermitian. For positive definite A, eigenvalues that roundoff pushes below
+    zero are clamped to zero. For a real symmetric A with a negative eigenvalue, no
+    real root exists, and every entry of the result is NaN, as for the general Op.
+    """
+    [A] = node.inputs
+    [old_out] = node.outputs
+
+    if check_assumption(fgraph, A, POSITIVE_DEFINITE):
+        w, V = eigh(A)
+        w = pt.maximum(w, 0)
+        has_real_root = None
+    elif not A.type.dtype.startswith("complex") and check_assumption(
+        fgraph, A, SYMMETRIC
+    ):
+        w, V = eigh(A)
+        has_real_root = pt.all(w >= 0, axis=-1)[..., None, None]
+    else:
+        return None
+
+    scaled = V * pt.expand_dims(pt.sqrt(pt.sqrt(w)), -2)
+    new_out = scaled @ scaled.conj().mT
+    if has_real_root is not None:
+        new_out = pt.where(has_real_root, new_out, np.nan)
+
+    new_out = new_out.astype(old_out.type.dtype)
+    copy_stack_trace(old_out, new_out)
     return [new_out]
 
 
