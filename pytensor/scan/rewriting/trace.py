@@ -27,6 +27,7 @@ from typing import cast
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.traversal import apply_depends_on
 from pytensor.scan.op import Scan
@@ -34,6 +35,7 @@ from pytensor.scan.utils import ScanArgs, expand_empty
 from pytensor.tensor.basic import (
     AllocEmpty,
     atleast_Nd,
+    get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.basic import switch as pt_switch
 from pytensor.tensor.math import ge, maximum, minimum
@@ -46,7 +48,7 @@ from pytensor.tensor.subtensor import (
     basic_subtensor,
     get_idx_list,
 )
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 def _maybe_constant_int(v) -> int | None:
@@ -138,6 +140,54 @@ def _is_default_scan_buffer(final_buffer: TensorVariable, taps: int) -> bool:
         return not broadcasted_by(init_value_.squeeze(0), init_buffer[0])
 
 
+def _is_zero(value):
+    return (
+        get_underlying_scalar_constant_value(
+            value, elemwise=False, raise_not_constant=False
+        )
+        == 0
+    )
+
+
+def _last_nonzero_step(fgraph, buffer):
+    """Extract the last row when every earlier row is provably zero."""
+    if _is_zero(buffer):
+        return pt.zeros(buffer.shape[1:], dtype=buffer.dtype)
+    if isinstance(buffer, TensorConstant):
+        if buffer.data.shape[0] and (buffer.data[:-1] == 0).all():
+            return pt.constant(buffer.data[-1])
+        return None
+    match buffer.owner_op_and_inputs:
+        case IncSubtensor() as op, base, value, *indices:
+            if not _is_zero(base):
+                return None
+            first, *rest = get_idx_list([base, *indices], op.idx_list)
+            if rest:
+                return None
+            if not isinstance(first, slice):
+                if _maybe_constant_int(first) != -1 or value.ndim >= buffer.ndim:
+                    return None
+                last = value
+            else:
+                first = _python_slice_from_idx(first)
+                if not (
+                    first is not None
+                    and first.stop is None
+                    and first.step in (None, 1)
+                    and first.start in (None, 0, 1)
+                    and value.ndim == buffer.ndim
+                    and (shape_feature := getattr(fgraph, "shape_feature", None))
+                    is not None
+                    and shape_feature.same_shape(value, base[first], 0, 0)
+                ):
+                    return None
+                last = _last_nonzero_step(fgraph, value)
+                if last is None:
+                    return None
+            return pt.alloc(last.astype(buffer.dtype), *base.shape[1:])
+    return None
+
+
 def _has_full_trace(fgraph, buffer, n_steps):
     shape_feature = getattr(fgraph, "shape_feature", None)
     return shape_feature is not None and shape_feature.same_shape(
@@ -151,6 +201,7 @@ def scan_mit_mot_to_sit_sot(fgraph, node):
 
     For taps ``(0, 1) -> (1,)``, the second input has not been updated by
     earlier iterations. It can be read from an immutable sequence instead.
+    Last-state gradients have a zero suffix, so that input disappears entirely.
     """
     op = node.op
     if not op.info.n_mit_mot or op.info.as_while or op.truncate_gradient != -1:
@@ -173,12 +224,28 @@ def scan_mit_mot_to_sit_sot(fgraph, node):
         return False
 
     args = ScanArgs.from_node(node, clone=True)
+    substitutions = {}
     for k in convertible:
         current, future = args.inner_in_mit_mot[k]
         buffer = args.outer_in_mit_mot[k]
-        seed = buffer[0]
-        args.inner_in_seqs.append(future)
-        args.outer_in_seqs.append(buffer[1:])
+        reverse_source = None
+        match buffer.owner_op_and_inputs:
+            case Subtensor() as subtensor, source, *indices:
+                match get_idx_list([source, *indices], subtensor.idx_list):
+                    case [slice() as index]:
+                        if _python_slice_from_idx(index) == slice(None, None, -1):
+                            reverse_source = source
+        seed = (
+            _last_nonzero_step(fgraph, reverse_source)
+            if reverse_source is not None
+            else None
+        )
+        if seed is not None:
+            substitutions[future] = pt.zeros_like(current)
+        else:
+            seed = buffer[0]
+            args.inner_in_seqs.append(future)
+            args.outer_in_seqs.append(buffer[1:])
         args.inner_in_sit_sot.append(current)
         args.inner_out_sit_sot.append(args.inner_out_mit_mot[k][0])
         args.outer_in_sit_sot.append(expand_empty(seed[None], n_steps))
@@ -198,7 +265,7 @@ def scan_mit_mot_to_sit_sot(fgraph, node):
             setattr(args, field, values)
     new_op = Scan(
         args.inner_inputs,
-        args.inner_outputs,
+        graph_replace(args.inner_outputs, substitutions, strict=False),
         args.info,
         mode=op.mode,
         profile=op.profile,
@@ -881,6 +948,16 @@ def scan_reduce_trace_rewrite(
                         if extra_size > 0 and not cap_provable:
                             extra_size = minimum(extra_size, n_steps)
                         nw_input = expand_empty(nw_input.owner.inputs[1], extra_size)
+                    elif (
+                        val == 1
+                        and _is_zero(nw_input)
+                        and _has_full_trace(fgraph, nw_input, n_steps)
+                    ):
+                        # A full trace has at least its initial state for every
+                        # valid (nonnegative) step count, including zero.
+                        nw_input = pt.zeros(
+                            (1, *nw_input.shape[1:]), dtype=nw_input.dtype
+                        )
                     # Otherwise, just trim with a slice
                     else:
                         nw_input = nw_input[:val]

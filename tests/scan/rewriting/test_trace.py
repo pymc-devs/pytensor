@@ -10,6 +10,7 @@ from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import dfs_rewriter
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.link.basic import JITLinker
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.rewriting.trace import (
@@ -109,6 +110,82 @@ def test_mit_mot_to_sit_sot(shape):
         ),
         np.full(value_shape, 0.5, dtype=initial.dtype),
     )
+
+
+@pytest.mark.parametrize("shape", [(), (None,)])
+def test_mit_mot_zero_suffix(shape):
+    seed = pt.tensor("seed", shape=shape)
+    current, future = seed.type(), seed.type()
+    n_steps = pt.constant(4, dtype="int64")
+    suffix = pt.zeros((4, *seed.shape), dtype=seed.dtype)[-1].inc(seed)
+    buffer = pt.zeros((5, *seed.shape), dtype=seed.dtype)[1:].inc(suffix)[::-1]
+    op = Scan(
+        [current, future],
+        [2 * current + future],
+        ScanInfo(0, ((0, 1),), ((1,),), (), (), 0, 0, 0, False),
+    )
+    result = utt.RewriteTester(
+        [seed],
+        [op(n_steps, buffer)],
+        include=("ShapeOpt",),
+        custom_rewrite=scan_mit_mot_to_sit_sot,
+    )
+    # Proven zero incoming gradients disappear instead of materializing a tape.
+    rewrite_graph(result.rewr_fg, include=("ShapeOpt", "canonicalize"))
+    [rewritten_scan] = [n for n in result.rewr_fg.toposort() if isinstance(n.op, Scan)]
+    assert rewritten_scan.op.info.n_mit_mot == 0
+    assert rewritten_scan.op.info.n_seqs == 0
+    for value in (0.0, 0.5):
+        result.assert_eval(np.full((3,) if shape else (), value, dtype=seed.dtype))
+
+
+def test_mit_mot_broadcast_suffix():
+    seed = pt.dvector("seed")
+    current, future = seed.type(), seed.type()
+    n_steps = pt.constant(4, dtype="int64")
+    buffer = pt.zeros((5, seed.size))[1:].inc(seed[None])[::-1]
+    op = Scan(
+        [current, future],
+        [2 * current + future],
+        ScanInfo(0, ((0, 1),), ((1,),), (), (), 0, 0, 0, False),
+    )
+    result = utt.RewriteTester(
+        [seed],
+        [op(n_steps, buffer)],
+        include=("ShapeOpt",),
+        custom_rewrite=scan_mit_mot_to_sit_sot,
+    )
+    # A broadcasted update is not proof that every earlier incoming row is zero.
+    [rewritten_scan] = [n for n in result.rewr_fg.toposort() if isinstance(n.op, Scan)]
+    assert rewritten_scan.op.info.n_mit_mot == 0
+    assert rewritten_scan.op.info.n_seqs == 1
+    result.assert_eval(np.array([0.5, 1.0, 1.5]))
+
+
+def test_mit_mot_dynamic_broadcast_suffix():
+    length = pt.lscalar("length")
+    seed = pt.dscalar("seed")
+    current, future = seed.type(), seed.type()
+    n_steps = pt.constant(4, dtype="int64")
+    suffix = pt.zeros((length,), dtype=seed.dtype)[-1].inc(seed)
+    buffer = pt.zeros((5,), dtype=seed.dtype)[1:].inc(suffix)[::-1]
+    op = Scan(
+        [current, future],
+        [2 * current + future],
+        ScanInfo(0, ((0, 1),), ((1,),), (), (), 0, 0, 0, False),
+    )
+    result = utt.RewriteTester(
+        [length, seed],
+        [op(n_steps, buffer)],
+        include=("ShapeOpt",),
+        custom_rewrite=scan_mit_mot_to_sit_sot,
+    )
+    # A broadcasted update is not proof that every earlier incoming row is zero.
+    [rewritten_scan] = [n for n in result.rewr_fg.toposort() if isinstance(n.op, Scan)]
+    assert rewritten_scan.op.info.n_mit_mot == 0
+    assert rewritten_scan.op.info.n_seqs == 1
+    for size in (1, 4):
+        result.assert_eval(size, 0.5)
 
 
 @pytest.mark.parametrize("n_steps, truncate", [(3, -1), (4, 2)])
