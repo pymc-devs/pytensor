@@ -10,7 +10,10 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable, diag, eye, tril, triu
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg._lazy import scipy_linalg
-from pytensor.tensor.linalg.dtype_utils import linalg_real_output_dtype
+from pytensor.tensor.linalg.dtype_utils import (
+    linalg_output_dtype,
+    linalg_real_output_dtype,
+)
 from pytensor.tensor.math import sub, switch
 from pytensor.tensor.type import Variable, tensor, vector
 from pytensor.tensor.type_other import NoneTypeT
@@ -168,10 +171,9 @@ class Eigh(Op):
         else:
             inputs = [a]
 
-        w_dtype = linalg_real_output_dtype(*[x.type.dtype for x in inputs])
-
-        w = tensor(dtype=w_dtype, shape=(M,))
-        v = tensor(dtype=w_dtype, shape=(M, N))
+        input_dtypes = [x.type.dtype for x in inputs]
+        w = tensor(dtype=linalg_real_output_dtype(*input_dtypes), shape=(M,))
+        v = tensor(dtype=linalg_output_dtype(*input_dtypes), shape=(M, N))
 
         return Apply(self, inputs, [w, v])
 
