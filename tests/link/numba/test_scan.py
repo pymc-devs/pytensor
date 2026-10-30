@@ -209,6 +209,8 @@ def test_scalar_scan_boundary(constant_steps, return_all, differentiate):
     scans = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
     assert scans
     for op in scans:
+        if differentiate:
+            assert op.info.n_mit_mot == 0
         inner = scalarize_scan_inner_graph(op.fgraph)
         assert all(
             isinstance(var.type, ScalarType) for var in (*inner.inputs, *inner.outputs)

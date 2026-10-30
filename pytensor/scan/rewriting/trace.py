@@ -12,6 +12,8 @@ needs:
   ``n_steps`` to the smallest range any client actually reads.
 * :func:`scan_sit_sot_to_untraced` — convert sit_sot states whose
   history is unused into the cheaper ``untraced_sit_sot`` form.
+* :func:`scan_mit_mot_to_sit_sot` — replace adjoint tapes by a carried
+  state and, when needed, an immutable incoming-gradient sequence.
 
 Subtensor chains rooted at scan outputs (e.g. ``raw_out[init_l:][-k]``)
 are folded by ``local_subtensor_merge_integer`` running in canonicalize
@@ -28,7 +30,7 @@ from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.traversal import apply_depends_on
 from pytensor.scan.op import Scan
-from pytensor.scan.utils import expand_empty
+from pytensor.scan.utils import ScanArgs, expand_empty
 from pytensor.tensor.basic import (
     AllocEmpty,
     atleast_Nd,
@@ -134,6 +136,78 @@ def _is_default_scan_buffer(final_buffer: TensorVariable, taps: int) -> bool:
         # the buffer, to check for potential broadcasting in other dimensions.
         init_value_ = atleast_Nd(init_value, n=init_buffer.ndim)
         return not broadcasted_by(init_value_.squeeze(0), init_buffer[0])
+
+
+def _has_full_trace(fgraph, buffer, n_steps):
+    shape_feature = getattr(fgraph, "shape_feature", None)
+    return shape_feature is not None and shape_feature.same_shape(
+        buffer, pt.empty((pt.constant(1, dtype=n_steps.dtype) + n_steps,)), 0, 0
+    )
+
+
+@node_rewriter([Scan])
+def scan_mit_mot_to_sit_sot(fgraph, node):
+    """Carry a single updated state instead of mutating a full adjoint tape.
+
+    For taps ``(0, 1) -> (1,)``, the second input has not been updated by
+    earlier iterations. It can be read from an immutable sequence instead.
+    """
+    op = node.op
+    if not op.info.n_mit_mot or op.info.as_while or op.truncate_gradient != -1:
+        return False
+    n_steps = node.inputs[0]
+    convertible = []
+    for k, (taps, out_taps, buffer) in enumerate(
+        zip(
+            op.info.mit_mot_in_slices,
+            op.info.mit_mot_out_slices,
+            op.outer_mitmot(node.inputs),
+            strict=True,
+        )
+    ):
+        if taps != (0, 1) or out_taps != (1,):
+            continue
+        if _has_full_trace(fgraph, buffer, n_steps):
+            convertible.append(k)
+    if not convertible:
+        return False
+
+    args = ScanArgs.from_node(node, clone=True)
+    for k in convertible:
+        current, future = args.inner_in_mit_mot[k]
+        buffer = args.outer_in_mit_mot[k]
+        seed = buffer[0]
+        args.inner_in_seqs.append(future)
+        args.outer_in_seqs.append(buffer[1:])
+        args.inner_in_sit_sot.append(current)
+        args.inner_out_sit_sot.append(args.inner_out_mit_mot[k][0])
+        args.outer_in_sit_sot.append(expand_empty(seed[None], n_steps))
+        args.outer_out_sit_sot.append(args.outer_out_mit_mot[k])
+
+    for k in reversed(convertible):
+        for field in (
+            "inner_in_mit_mot",
+            "inner_out_mit_mot",
+            "outer_in_mit_mot",
+            "outer_out_mit_mot",
+            "mit_mot_in_slices",
+            "mit_mot_out_slices",
+        ):
+            values = list(getattr(args, field))
+            del values[k]
+            setattr(args, field, values)
+    new_op = Scan(
+        args.inner_inputs,
+        args.inner_outputs,
+        args.info,
+        mode=op.mode,
+        profile=op.profile,
+        truncate_gradient=op.truncate_gradient,
+        name=op.name,
+        allow_gc=op.allow_gc,
+    )
+    new_outputs = new_op(*args.outer_inputs, return_list=True)
+    return dict(zip(args.outer_outputs, new_outputs, strict=True))
 
 
 @node_rewriter([Scan])
