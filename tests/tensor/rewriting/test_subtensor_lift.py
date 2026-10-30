@@ -1243,9 +1243,12 @@ class TestExtractDiagLiftPass:
     )
     def test_extract_diag_of_alloc_diag_match(self, v_len, k_alloc, offset):
         v = pt.vector("v", shape=(v_len,))
+        v_trace = v.tag.trace
         out = pt.diagonal(pt.diag(v, k=k_alloc), offset=offset)
+        out.tag.trace = [[("file.py", 1, "function", "line")]]
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         assert_equal_computations([rewritten], [v])
+        assert rewritten.tag.trace == v_trace
 
     def test_extract_diag_of_alloc_diag_offset_mismatch(self):
         """When offsets differ, the diagonals don't overlap, so the result is zeros."""

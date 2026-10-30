@@ -66,6 +66,7 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,
+    local_elemwise_alloc,
     local_merge_alloc,
     local_useless_alloc,
     local_useless_elemwise,
@@ -1905,6 +1906,22 @@ class TestLocalElemwiseAlloc:
 
         z_opt_fg = rewrite_graph(z_fg, clone=False, include=["local_elemwise_alloc"])
         assert any(isinstance(node.op, Alloc) for node in z_opt_fg.apply_nodes)
+
+    def test_alloc_input_trace(self):
+        # The rewrite reads the value under each Alloc, so that existing value's trace must not change.
+        x, y = pt.dmatrices("x", "y")
+        x.tag.trace = [[("file.py", 1, "function", "line")]]
+        out = pt.alloc(x, 5, 5) * y
+
+        result = RewriteTester(
+            [x, y],
+            [out],
+            include=None,
+            custom_rewrite=local_elemwise_alloc,
+        )
+        result.assert_graph(pt.specify_shape(x * y, (5, 5)))
+        [rewritten_x, _] = result.rewr_fg.inputs
+        assert rewritten_x.tag.trace == x.tag.trace
 
     def test_remove_alloc_wo_dimshuffle(self):
         # Exclude `local_useless_alloc`, since it does not introduce

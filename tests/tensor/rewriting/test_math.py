@@ -1391,6 +1391,12 @@ class TestLocalUselessElemwiseComparison:
         f = function([x], maximum(x, x), mode=mode)
         self.assert_identity(f)
 
+        x_trace = x.tag.trace
+        out = maximum(x, x)
+        out.tag.trace = [[("file.py", 1, "function", "line")]]
+        rewritten = rewrite_graph(out, include=("canonicalize",))
+        assert rewritten.tag.trace == x_trace
+
     def test_shape_inequality_with_self(self):
         x = vector("x", dtype=config.floatX)
         mode = get_default_mode().including(
