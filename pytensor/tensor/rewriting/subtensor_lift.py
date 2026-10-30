@@ -944,7 +944,6 @@ def local_extract_diag_of_alloc_diag(fgraph, node):
         return None  # cross-axis case is rare; bail
     [v] = inner.owner.inputs
     if op.offset == diag_op.offset:
-        copy_stack_trace(node.outputs[0], v)
         return [v]
     v_shape = tuple(
         s if s is not None else v.shape[i] for i, s in enumerate(v.type.shape)

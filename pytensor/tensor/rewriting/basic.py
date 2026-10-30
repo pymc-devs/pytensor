@@ -383,9 +383,7 @@ def local_elemwise_alloc(fgraph, node):
     new_inputs = list(node.inputs)
     for idx in alloc_idxs:
         alloc_inp = node.inputs[idx]
-        new_inp = alloc_inp.owner.inputs[0]
-        copy_stack_trace(alloc_inp, new_inp)
-        new_inputs[idx] = new_inp
+        new_inputs[idx] = alloc_inp.owner.inputs[0]
 
     new_outs = node.op(*new_inputs, return_list=True)
     new_outs = broadcast_like_elemwise(new_outs, node, fgraph=fgraph, stack_trace=True)

@@ -1983,10 +1983,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         isinstance(node.op.scalar_op, ps.ScalarMinimum | ps.ScalarMaximum)
         and node.inputs[0] is node.inputs[1]
     ):
-        res = node.inputs[0]
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
+        return [node.inputs[0]]
 
     # Elemwise[LT](X.shape[i], 0) -> Elemwise[zeros](X)
     if (
