@@ -182,7 +182,6 @@ def test_psi(linker):
     fn = function([x], out, mode=Mode(linker=linker, optimizer="fast_run"))
     fn.dprint()
 
-    x_test = np.float64(0.7)
-
-    np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test))
-    np.testing.assert_allclose(fn(-x_test), scipy.special.psi(-x_test))
+    for x_test in [0.7, 1.5, 6.3, 51.7]:
+        np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test), rtol=1e-13)
+    np.testing.assert_allclose(fn(-0.7), scipy.special.psi(-0.7), rtol=1e-13)
