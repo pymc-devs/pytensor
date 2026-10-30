@@ -59,6 +59,27 @@ def test_scalarized_elemwise():
     result.assert_graph(output)
 
 
+def test_scalarized_elemwise_preserves_input_trace():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2585
+    # Scalarizing several Elemwise clients of one 0d input must not grow its trace.
+    x = pt.dscalar("x")
+    x.tag.trace = [[("file.py", 1, "function", "line")]]
+    tensor_ops = (pt.exp, pt.log, pt.sin, pt.cos)
+    scalar_ops = (ps.exp, ps.log, ps.sin, ps.cos)
+    clients = [scalar_from_tensor(op(x)) for op in tensor_ops]
+    expected = [op(scalar_from_tensor(x)) for op in scalar_ops]
+
+    result = RewriteTester(
+        [x],
+        clients,
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+    )
+    result.assert_graph(*expected)
+    [rewritten_x] = result.rewr_fg.inputs
+    assert rewritten_x.tag.trace == x.tag.trace
+
+
 def test_scalar_subtensor():
     # Subtensor consumes a scalar index and produces a scalar for its client.
     x = pt.dvector("x")
