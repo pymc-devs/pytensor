@@ -163,41 +163,6 @@ def mlx_sample_fn_categorical(op, node):
     return sample_fn
 
 
-@mlx_sample_fn.register(ptr.MvNormalRV)
-def mlx_sample_fn_mvnormal(op, node):
-    method = op.method
-
-    def sample_fn(rng_key, size, dtype, mean, cov):
-        mlx_dtype = convert_dtype_to_mlx(dtype)
-        mean = mx.asarray(mean, dtype=mlx_dtype)
-        cov = mx.asarray(cov, dtype=mlx_dtype)
-
-        n = cov.shape[-1]
-        if size is not None:
-            batch_shape = mlx_to_list_shape(size)
-        else:
-            batch_shape = mx.broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
-
-        if 0 in tuple(batch_shape):
-            # Empty batch dim crashes MLX's compiled matmul; the draw is empty anyway.
-            return mx.broadcast_to(mean, [*batch_shape, n])
-
-        # Factor ``cov = A @ A.T`` so that ``mean + A @ z`` has covariance ``cov``.
-        if method == "cholesky":
-            A = mx.linalg.cholesky(cov, stream=mx.cpu)
-        elif method == "svd":
-            U, s, _ = mx.linalg.svd(cov, stream=mx.cpu)
-            A = U * mx.sqrt(s)[..., None, :]
-        else:  # eigh
-            w, vecs = mx.linalg.eigh(cov, stream=mx.cpu)
-            A = vecs * mx.sqrt(w)[..., None, :]
-
-        z = mx.random.normal(shape=[*batch_shape, n], dtype=mlx_dtype, key=rng_key)
-        return mean + (A @ z[..., None])[..., 0]
-
-    return sample_fn
-
-
 @mlx_sample_fn.register(ptr.PermutationRV)
 def mlx_sample_fn_permutation(op, node):
     if op.batch_ndim(node):

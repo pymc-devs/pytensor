@@ -3,17 +3,11 @@ import warnings
 from typing import Literal
 
 import numpy as np
-from numpy import broadcast_shapes as np_broadcast_shapes
-from numpy import einsum as np_einsum
-from numpy import sqrt as np_sqrt
-from numpy.linalg import cholesky as np_cholesky
-from numpy.linalg import eigh as np_eigh
-from numpy.linalg import svd as np_svd
 
 from pytensor.tensor import get_vector_length, specify_shape
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sqrt
-from pytensor.tensor.random.op import RandomVariable
+from pytensor.tensor.random.op import RandomVariable, SymbolicRVOp
 from pytensor.tensor.random.utils import (
     broadcast_params,
     normalize_size_param,
@@ -852,7 +846,7 @@ class VonMisesRV(RandomVariable):
 vonmises = VonMisesRV()
 
 
-class MvNormalRV(RandomVariable):
+class MvNormalRV(SymbolicRVOp):
     r"""A multivariate normal random variable.
 
     The probability density function for `multivariate_normal` in term of its location parameter
@@ -867,20 +861,20 @@ class MvNormalRV(RandomVariable):
     """
 
     name = "multivariate_normal"
-    signature = "(n),(n,n)->(n)"
-    dtype = "floatX"
+    extended_signature = "[rng],[size],(n),(n,n)->[rng],(n)"
     _print_name = ("MultivariateNormal", "\\operatorname{MultivariateNormal}")
-    __props__ = ("name", "signature", "dtype", "inplace", "method")
+    __props__ = ("method",)
 
-    def __init__(self, *args, method: Literal["cholesky", "svd", "eigh"], **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self, *, method: Literal["cholesky", "svd", "eigh"] = "cholesky", **kwargs
+    ):
         if method not in ("cholesky", "svd", "eigh"):
             raise ValueError(
                 f"Unknown method {method}. The method must be one of 'cholesky', 'svd', or 'eigh'."
             )
-        self.method = method
+        super().__init__(method=method, **kwargs)
 
-    def __call__(self, mean, cov, size=None, method=None, **kwargs):
+    def __call__(self, mean, cov, size=None, method=None, rng=None, **kwargs):
         r""" "Draw samples from a multivariate normal distribution.
 
         Signature
@@ -904,36 +898,47 @@ class MvNormalRV(RandomVariable):
 
         """
         if method is not None and method != self.method:
-            # Recreate Op with the new method
-            props = self._props_dict()
-            props["method"] = method
-            new_op = type(self)(**props)
-            return new_op.__call__(mean, cov, size=size, method=method, **kwargs)
-        return super().__call__(mean, cov, size=size, **kwargs)
+            return type(self)(method=method)(mean, cov, size=size, rng=rng, **kwargs)
+        return super().__call__(mean, cov, size=size, rng=rng, **kwargs)
 
-    def rng_fn(self, rng, mean, cov, size):
-        if size is None:
-            size = np_broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
+    def build_inner_graph(self, rng, size, mean, cov):
+        from pytensor.tensor.extra_ops import broadcast_shape
+        from pytensor.tensor.linalg import cholesky, eigh, svd
+        from pytensor.tensor.math import matvec, sqrt
+        from pytensor.tensor.type_other import NoneTypeT
 
         if self.method == "cholesky":
-            A = np_cholesky(cov)
+            a = cholesky(cov, lower=True)
         elif self.method == "svd":
-            A, s, _ = np_svd(cov)
-            A *= np_sqrt(s, out=s)[..., None, :]
+            u, s, _ = svd(cov)
+            a = u * sqrt(s)[..., None, :]
         else:
-            w, A = np_eigh(cov)
-            A *= np_sqrt(w, out=w)[..., None, :]
+            w, v = eigh(cov)
+            a = v * sqrt(w)[..., None, :]
 
-        out = rng.normal(size=(*size, mean.shape[-1]))
-        np_einsum(
-            "...ij,...j->...i",  # numpy doesn't have a batch matrix-vector product
-            A,
-            out,
-            optimize=False,  # Nothing to optimize with two operands, skip costly setup
-            out=out,
+        core_shape = (cov.shape[-1],)
+        if isinstance(size.type, NoneTypeT):
+            batch_shape = broadcast_shape(
+                tuple(mean.shape)[:-1],
+                tuple(cov.shape)[:-2],
+                arrays_are_shapes=True,
+            )
+        else:
+            # Use the statically-known size dimensions (self.static_params) so the
+            # draws carry the correct static/broadcastable shape; fall back to the
+            # runtime size vector for dimensions that aren't statically known.
+            batch_shape = tuple(
+                runtime_dim if static_dim is None else static_dim
+                for static_dim, runtime_dim in zip(
+                    self.static_params, size, strict=True
+                )
+            )
+
+        next_rng, std_draws = normal(
+            0.0, 1.0, size=(*batch_shape, *core_shape), rng=rng, return_next_rng=True
         )
-        out += mean
-        return out
+        draws = mean + matvec(a, std_draws)
+        return [next_rng, draws]
 
 
 multivariate_normal = MvNormalRV(method="cholesky")

@@ -315,7 +315,11 @@ class XRV(XOp, RNGConsumerOp):
         from pytensor.tensor.random.type import random_generator_type
 
         dummy_rng = random_generator_type()
-        core_node = self.core_op.make_node(dummy_rng, None, *dummy_core_inputs)
+        # Build a dummy core node via __call__ (works for both RandomVariable and
+        # SymbolicRVOp core ops; the latter builds its inner graph lazily).
+        core_node = self.core_op(
+            *dummy_core_inputs, rng=dummy_rng, return_next_rng=True
+        )[1].owner
 
         if not len(core_node.outputs) == 2:
             raise NotImplementedError(

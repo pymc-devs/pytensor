@@ -100,10 +100,11 @@ def lower_rv(fgraph, node):
     input_is_xrng = isinstance(rng.type, XRandomGeneratorType)
     tensor_rng = as_rng(rng)
 
-    # RVs are their own core Op
-    new_next_rng, tensor_out = core_op.make_node(
-        tensor_rng, size, *tensor_params
-    ).outputs
+    # RVs are their own core Op. Build via __call__ so SymbolicRVOp core ops
+    # (e.g. MvNormalRV) construct their inner graph lazily for these input types.
+    new_next_rng, tensor_out = core_op(
+        *tensor_params, size=size, rng=tensor_rng, return_next_rng=True
+    )
 
     # Cast back to xtensor RNG if the input was xtensor
     if input_is_xrng:

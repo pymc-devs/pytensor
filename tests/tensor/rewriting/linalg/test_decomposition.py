@@ -341,8 +341,9 @@ def test_eigh_of_diag(make_diag):
     assert_equal_computations(rewritten, expected)
 
 
-def test_eigh_of_batched_diag():
-    x = pt.dtensor3("x", shape=(2, 3, 3))
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_eigh_of_batched_diag(dtype):
+    x = pt.tensor3("x", shape=(2, 3, 3), dtype=dtype)
     w, v = pt.linalg.eigh(assume(x, diagonal=True))
 
     result = RewriteTester([x], [w, (v * w[..., None, :]) @ v.mT])
@@ -350,7 +351,7 @@ def test_eigh_of_batched_diag():
         isinstance(getattr(node.op, "core_op", None), Eigh)
         for node in result.rewr_fg.apply_nodes
     )
-    a = np.zeros((2, 3, 3))
+    a = np.zeros((2, 3, 3), dtype=dtype)
     a[:, range(3), range(3)] = [[3.0, 1.0, 2.0], [0.0, 5.0, -1.0]]
     result.assert_eval(a)
 
