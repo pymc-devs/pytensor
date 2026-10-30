@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -9,7 +11,7 @@ from pytensor.link.numba.dispatch.linalg.products import (
     _gemm,
     _normalize_gemm_strides,
 )
-from pytensor.tensor.linalg.products import Expm, expm
+from pytensor.tensor.linalg.products import Expm, Sqrtm, expm, sqrtm
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
@@ -92,6 +94,62 @@ class TestExpm:
         _, res = compare_numba_and_py([A], [y], [val])
         np.testing.assert_array_equal(val, original)
         assert res[0].dtype == np.float64
+
+
+class TestSqrtm:
+    @pytest.mark.parametrize("dtype", ["float32", "float64", "complex64", "complex128"])
+    @pytest.mark.parametrize(
+        "overwrite_a", [False, True], ids=["no_overwrite", "overwrite_a"]
+    )
+    def test_sqrtm(self, overwrite_a: bool, dtype: str):
+        sqrtm_rng = np.random.default_rng(5521)
+        A = pt.matrix("A", dtype=dtype)
+        y = Sqrtm(overwrite_a=overwrite_a)(A)
+
+        x = sqrtm_rng.normal(size=(5, 5)) + 5 * np.eye(5)
+        if np.dtype(dtype).kind == "c":
+            x = x + 1j * sqrtm_rng.normal(size=(5, 5))
+        val = x.astype(dtype)
+        single = np.dtype(dtype).char in "fF"
+        rtol, atol = (1e-4, 1e-5) if single else (1e-10, 0)
+        assert_fn = partial(np.testing.assert_allclose, rtol=rtol, atol=atol)
+
+        fn, res = compare_numba_and_py(
+            [In(A, mutable=overwrite_a)],
+            [y],
+            [val],
+            numba_mode=numba_inplace_mode,
+            inplace=True,
+            assert_fn=assert_fn,
+        )
+        assert overwrite_a == (
+            fn.maker.fgraph.outputs[0].owner.op.destroy_map == {0: [0]}
+        )
+
+        # Schur overwrites an F-contiguous input, and the C-contiguous one through its
+        # transpose. A strided input is always copied.
+        for order in "FC":
+            val_contig = np.copy(val, order=order)
+            assert_fn(fn(val_contig), res)
+            assert (val == val_contig).all() == (not overwrite_a)
+
+        val_not_contig = np.repeat(val, 2, axis=0)[::2]
+        assert_fn(fn(val_not_contig), res)
+        np.testing.assert_array_equal(val_not_contig, val)
+
+    def test_sqrtm_no_real_root(self):
+        A = pt.matrix("A", dtype="float64")
+        _, [res] = compare_numba_and_py([A], [sqrtm(A)], [np.diag([4.0, -1.0, 9.0])])
+        assert np.isnan(res).all()
+
+    def test_sqrtm_zero_matrix(self):
+        A = pt.matrix("A", dtype="float64")
+        fn = function([A], sqrtm(A), mode="NUMBA")
+        np.testing.assert_array_equal(fn(np.zeros((3, 3))), np.zeros((3, 3)))
+
+    def test_sqrtm_size_zero(self):
+        A = pt.matrix("A", dtype=floatX)
+        compare_numba_and_py([A], [sqrtm(A)], [np.zeros((0, 0), dtype=floatX)])
 
 
 @numba_njit(final_function=True)
