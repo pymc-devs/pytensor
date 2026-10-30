@@ -440,19 +440,11 @@ class Psi(UnaryScalarOp):
             #define _PSIFUNCDEFINED
             DEVICE double _psi(double x) {
 
-                /*taken from
-                Bernardo, J. M. (1976). Algorithm AS 103:
-                Psi (Digamma) Function. Applied Statistics. 25 (3), 315-317.
-                http://www.uv.es/~bernardo/1976AppStatist.pdf
+                /* As in Cephes psi: recurrence up to y >= 10, then the asymptotic
+                series log(y) - 1/(2y) - sum_n B_2n / (2n y^2n) to n = 7.
                 */
 
                 double y, R, psi_ = 0;
-                double S  = 1.0e-5;
-                double C = 8.5;
-                double S3 = 8.333333333e-2;
-                double S4 = 8.333333333e-3;
-                double S5 = 3.968253968e-3;
-                double D1 = -0.5772156649;
 
                 if (x <= 0) {
                     // the digamma function approaches infinity from one side and -infinity from the other, around negative integers and zero
@@ -468,10 +460,7 @@ class Psi(UnaryScalarOp):
 
                 y = x;
 
-                if (y <= S)
-                    return D1 - 1.0/y;
-
-                while (y < C) {
+                while (y < 10) {
                     psi_ = psi_ - 1.0 / y;
                     y = y + 1;
                 }
@@ -479,12 +468,20 @@ class Psi(UnaryScalarOp):
                 R = 1.0 / y;
                 psi_ = psi_ + log(y) - .5 * R ;
                 R= R*R;
-                psi_ = psi_ - R * (S3 - R * (S4 - R * S5));
+                psi_ = psi_ - R * (1.0 / 12 - R * (1.0 / 120 - R * (1.0 / 252
+                    - R * (1.0 / 240 - R * (1.0 / 132 - R * (691.0 / 32760 - R / 12))))));
 
                 return psi_;
             }
             #endif
             """
+
+    def c_code_cache_version(self):
+        v = super().c_code_cache_version()
+        if v:
+            return (1, *v)
+        else:
+            return v
 
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
