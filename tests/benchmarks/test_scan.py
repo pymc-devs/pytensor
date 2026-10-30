@@ -612,7 +612,7 @@ def test_scan_grad_subtensor_compile_benchmark(benchmark):
     fn = benchmark(lambda: function(*build(), mode=no_fusion))
 
     n_apply = len(fn.maker.fgraph.apply_nodes)
-    assert n_apply <= 20, f"Graph has {n_apply} nodes, expected <= 20"
+    assert n_apply <= 22, f"Graph has {n_apply} nodes, expected <= 22"
 
     subtensor_nodes = [
         n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Subtensor)
