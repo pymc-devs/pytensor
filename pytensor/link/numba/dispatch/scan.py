@@ -6,6 +6,11 @@ from numba import types
 from numba.extending import overload
 
 from pytensor.compile.aliasing import alias_root
+from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import graph_replace
+from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -14,7 +19,50 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
+from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
+from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
+from pytensor.tensor.rewriting.basic import (
+    local_scalar_tensor_scalar,
+    local_tensor_scalar_tensor,
+)
+from pytensor.tensor.rewriting.scalarize import ScalarizeRewriter
+from pytensor.tensor.type import TensorType
+
+
+def scalarize_scan_inner_graph(fgraph):
+    """Expose native scalar step inputs and outputs in a separate lowering graph."""
+    if not any(
+        isinstance(var.type, TensorType) and var.ndim == 0
+        for var in (*fgraph.inputs, *fgraph.outputs)
+    ):
+        return fgraph
+    fgraph = fgraph.unfreeze()
+    inputs = [
+        ScalarType(inp.dtype)(inp.name)
+        if isinstance(inp.type, TensorType) and inp.ndim == 0
+        else inp
+        for inp in fgraph.inputs
+    ]
+    replacements = {
+        original: tensor_from_scalar(scalar)
+        for original, scalar in zip(fgraph.inputs, inputs, strict=True)
+        if original is not scalar
+    }
+    outputs = graph_replace(fgraph.outputs, replacements, strict=False)
+    for i, out in enumerate(outputs):
+        if isinstance(out.type, TensorType) and out.ndim == 0:
+            # Native scalar outputs cannot alias a buffer, so boundary copies
+            # and views have no role in the step's scalar return convention.
+            while isinstance(out.owner_op, DeepCopyOp | ViewOp):
+                out = out.owner.inputs[0]
+            outputs[i] = scalar_from_tensor(out)
+    inner = FunctionGraph(inputs, outputs, features=[DestroyHandler()])
+    ScalarizeRewriter().rewrite(inner)
+    dfs_rewriter(
+        local_scalar_tensor_scalar, local_tensor_scalar_tensor, ignore_newtrees=True
+    ).rewrite(inner)
+    return inner.freeze()
 
 
 def idx_to_str(
@@ -47,7 +95,7 @@ def array0d_range(x):
     if isinstance(x, types.Array) and x.ndim == 0:
 
         def range_arr(x):
-            return range(x.item())
+            return range(x[()])
 
         return range_arr
 
@@ -73,8 +121,9 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         if inner_inp in destroyed_roots
     }
 
+    inner_fgraph = scalarize_scan_inner_graph(op.fgraph)
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
-        op.fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
+        inner_fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
     )
 
     outer_in_names_to_vars = {
@@ -128,46 +177,37 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     # Inner-inputs are ordered as follows:
     # sequences + mit-mot-inputs + mit-sot-inputs + sit-sot-inputs +
     # untraced-sit-sot-inputs + non-sequences.
-    temp_0d_storage_alloc_stmts: list[str] = []
-    inner_in_exprs_scalar: list[str] = []
     inner_in_exprs: list[str] = []
 
     def add_inner_in_expr(
         outer_in_name: str,
         tap_offset: int | None,
         storage_size_var: str | None,
-        vector_slice_opt: bool,
     ):
         """Construct an inner-input expression."""
+        outer_in_var = outer_in_names_to_vars[outer_in_name]
         storage_name = outer_in_to_storage_name.get(outer_in_name, outer_in_name)
-        if vector_slice_opt:
-            indexed_inner_in_str_scalar = idx_to_str(
+        inner_input = inner_fgraph.inputs[len(inner_in_exprs)]
+        scalar_input = isinstance(inner_input.type, ScalarType)
+        indexed_inner_in_str = (
+            storage_name
+            if tap_offset is None
+            else idx_to_str(
                 storage_name, tap_offset, size=storage_size_var, allow_scalar=True
             )
-            temp_storage = f"{storage_name}_temp_scalar_{tap_offset}"
-            storage_dtype = outer_in_var.type.numpy_dtype.name
-            temp_0d_storage_alloc_stmts.append(
-                f"{temp_storage} = np.empty((), dtype=np.{storage_dtype})"
-            )
-            inner_in_exprs_scalar.append(
-                f"{temp_storage}[()] = {indexed_inner_in_str_scalar}"
-            )
-            indexed_inner_in_str = temp_storage
-        else:
-            indexed_inner_in_str = (
-                storage_name
-                if tap_offset is None
-                else idx_to_str(
-                    storage_name, tap_offset, size=storage_size_var, allow_scalar=True
-                )
-            )
+        )
+        if (
+            scalar_input
+            and tap_offset is None
+            and outer_in_name not in outer_in_untraced_sit_sot_names
+            and isinstance(outer_in_var.type, TensorType)
+        ):
+            indexed_inner_in_str += "[()]"
         inner_in_exprs.append(indexed_inner_in_str)
 
     for outer_in_name in outer_in_seqs_names:
         # These outer-inputs are indexed without offsets or storage wrap-around
-        outer_in_var = outer_in_names_to_vars[outer_in_name]
-        is_vector = outer_in_var.ndim == 1
-        add_inner_in_expr(outer_in_name, 0, None, vector_slice_opt=is_vector)
+        add_inner_in_expr(outer_in_name, 0, None)
 
     inner_in_names_to_input_taps: dict[str, tuple[int, ...]] = dict(
         zip(
@@ -275,12 +315,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
 
                 for in_tap in input_taps:
                     tap_offset = max_lookback_inp_tap + in_tap
-                    is_vector = outer_in_var.ndim == 1
                     add_inner_in_expr(
                         outer_in_name,
                         tap_offset,
                         storage_size_name,
-                        vector_slice_opt=is_vector,
                     )
 
                 output_taps = inner_in_names_to_output_taps.get(outer_in_name, [0])
@@ -305,7 +343,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
 
             else:
                 storage_size_stmt = ""
-                add_inner_in_expr(outer_in_name, None, None, vector_slice_opt=False)
+                add_inner_in_expr(outer_in_name, None, None)
                 inner_out_to_outer_in_stmts.append(storage_name)
 
             output_idx = outer_output_names.index(storage_name)
@@ -317,7 +355,16 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 # so we make the copy conditional on that actually happening
                 or output_idx in untraced_inputs_destroyed_by_inner_function
             )
-            if needs_copy:
+            if (
+                not is_tapped
+                and isinstance(outer_in_var.type, TensorType)
+                and outer_in_var.ndim == 0
+            ):
+                storage_alloc_stmt = f"{storage_name} = {outer_in_name}[()]"
+                outer_output_names[output_idx] = (
+                    f"np.asarray({storage_name}, dtype=np.{outer_in_var.dtype})"
+                )
+            elif needs_copy:
                 storage_alloc_stmt = f"{storage_name} = numba_deepcopy({outer_in_name})"
             else:
                 storage_alloc_stmt = f"{storage_name} = {outer_in_name}"
@@ -365,7 +412,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             storage_alloc_stmts.append(
                 dedent(
                     f"""
-                {storage_size_name} = {outer_in_name}.item()
+                {storage_size_name} = {outer_in_name}[()]
                 {storage_name} = np.empty({storage_shape}, dtype=np.{storage_dtype})
                 """
                 ).strip()
@@ -388,7 +435,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 )
 
     for name in outer_in_non_seqs_names:
-        add_inner_in_expr(name, None, None, vector_slice_opt=False)
+        add_inner_in_expr(name, None, None)
 
     if op.info.as_while:
         # The inner function will return a boolean as the last value
@@ -396,12 +443,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
 
     assert len(inner_in_exprs) == len(op.fgraph.inputs)
 
-    inner_scalar_in_args_to_temp_storage = "\n".join(inner_in_exprs_scalar)
     # Break inputs in new lines, just for readability of the source code
     inner_in_args = f",\n{' ' * 12}".join(inner_in_exprs)
     inner_outputs = create_tuple_string(inner_output_names)
     input_storage_block = "\n".join(storage_alloc_stmts)
-    input_temp_0d_storage_block = "\n".join(temp_0d_storage_alloc_stmts)
     output_storage_post_processing_block = "\n".join(output_storage_post_proc_stmts)
     inner_out_post_processing_block = "\n".join(inner_out_post_processing_stmts)
 
@@ -415,13 +460,9 @@ def scan({", ".join(outer_in_names)}):
 
 {indent(input_storage_block, " " * 4)}
 
-{indent(input_temp_0d_storage_block, " " * 4)}
-
     i = 0
-    cond = np.array(False)
-    while i < n_steps and not cond.item():
-{indent(inner_scalar_in_args_to_temp_storage, " " * 8)}
-
+    cond = False
+    while i < n_steps and not cond:
         {inner_outputs} = scan_inner_func(
             {inner_in_args}
         )

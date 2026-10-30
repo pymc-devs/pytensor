@@ -168,8 +168,8 @@ def numba_rewrite_scan_inner_graph(linker, op, node, inner, *, mode):
     Numba is the only backend that consumes inner *tap* inplace, so the memory
     model that governs it lives here: the rewrite bakes the inplace, bans
     destroying reads the loop overwrites, and inserts the boundary deepcopies,
-    leaving ``op.fgraph`` ready for ``numba_funcify_Scan`` to funcify with no
-    further graph work.
+    leaving ``op.fgraph`` ready for ``numba_funcify_Scan``. The lowering may
+    additionally expose scalar step inputs and outputs using a separate graph.
 
     Memory-aliasing contract
     ------------------------

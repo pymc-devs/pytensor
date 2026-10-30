@@ -19,6 +19,52 @@ from tests.link.numba.test_basic import compare_numba_and_py
 from tests.scan.test_basic import ScanCompatibilityTests
 
 
+@pytest.mark.parametrize("constant_steps", [False, True])
+@pytest.mark.parametrize("return_all", [False, True])
+@pytest.mark.parametrize("differentiate", [False, True])
+def test_scalar_scan_boundary(constant_steps, return_all, differentiate):
+    # Native step values preserve full/final outputs and their reverse gradients.
+    from pytensor.link.numba.dispatch.scan import scalarize_scan_inner_graph
+    from pytensor.scalar.basic import ScalarType
+
+    initial = pt.dscalar("initial")
+    coefficient = pt.dscalar("coefficient")
+    sequence = pt.dvector("sequence")
+    steps = 4 if constant_steps else pt.lscalar("steps")
+    history = scan(
+        lambda x, previous, a: pt.tanh(a * previous + x),
+        sequences=[sequence],
+        outputs_info=[initial],
+        non_sequences=[coefficient],
+        n_steps=steps,
+        return_updates=False,
+    )
+    output = history if return_all else history[-1]
+    outputs = [output]
+    if differentiate:
+        outputs += grad(output.sum(), [initial, coefficient])
+    inputs = [initial, coefficient, sequence]
+    if not constant_steps:
+        inputs.append(steps)
+    fn = function(inputs, outputs, mode="NUMBA")
+    reference = function(
+        inputs, outputs, mode=Mode(linker="py", optimizer="fast_compile")
+    )
+    scans = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    assert scans
+    for op in scans:
+        inner = scalarize_scan_inner_graph(op.fgraph)
+        assert all(
+            isinstance(var.type, ScalarType) for var in (*inner.inputs, *inner.outputs)
+        )
+    for n in (4,) if constant_steps else (3, 5):
+        values = [np.array(0.2), np.array(0.7), np.linspace(-0.1, 0.1, 5)]
+        if not constant_steps:
+            values.append(np.array(n, dtype="int64"))
+        for actual, expected in zip(fn(*values), reference(*values), strict=True):
+            np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
 @pytest.mark.parametrize(
     "fn, sequences, outputs_info, non_sequences, n_steps, input_vals, output_vals, op_check",
     [
