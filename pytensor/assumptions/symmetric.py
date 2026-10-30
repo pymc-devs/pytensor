@@ -19,7 +19,7 @@ from pytensor.tensor.basic import Alloc, AllocDiag, Eye
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm
 from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
@@ -54,6 +54,7 @@ register_assumption(SYMMETRIC, BlockDiagonal)(all_inputs_have_key)
 register_assumption(SYMMETRIC, MatrixInverse)(propagate_first)
 register_assumption(SYMMETRIC, MatrixPinv)(propagate_first)
 register_assumption(SYMMETRIC, KroneckerProduct)(all_inputs_have_key)
+register_assumption(SYMMETRIC, Sqrtm)(propagate_first)
 register_assumption(SYMMETRIC, Subtensor)(subtensor_propagates_matrix_property)
 
 

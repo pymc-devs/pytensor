@@ -3,6 +3,7 @@ import pytest
 import scipy.linalg
 from numpy.testing import assert_allclose
 
+import pytensor
 from pytensor import function
 from pytensor import tensor as pt
 from pytensor.assumptions.specify import assume
@@ -12,6 +13,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.decomposition.eigen import Eigh
 from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.math import Dot
 from tests.unittest_tools import RewriteTester, assert_equal_computations
@@ -291,6 +293,84 @@ def test_expm_of_diag(make_diag):
     rewritten = rewrite_graph(out, include=passes)
     expected = rewrite_graph(alloc_diag(pt.exp(d), axis1=-2, axis2=-1), include=passes)
     assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(4) * d, id="eye_mul"),
+    ],
+)
+def test_sqrtm_of_diag(make_diag):
+    d = pt.dvector("d", shape=(4,))
+    passes = ("canonicalize", "stabilize", "specialize")
+    result = RewriteTester([d], [pt.linalg.sqrtm(make_diag(d))], include=passes)
+
+    root = alloc_diag(pt.sqrt(d), axis1=-2, axis2=-1)
+    expected = pt.where(pt.all(d >= 0, axis=-1)[..., None, None], root, np.nan)
+    result.assert_graph(rewrite_graph(expected, include=passes))
+    result.assert_eval(np.array([1.0, 4.0, 9.0, 0.5]))
+    result.assert_eval(np.array([1.0, -4.0, 9.0, 0.5]))
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_sqrtm_of_positive_definite(dtype):
+    x = pt.matrix("x", dtype=dtype)
+    passes = ("canonicalize", "specialize")
+    result = RewriteTester(
+        [x], [pt.linalg.sqrtm(assume(x, positive_definite=True))], include=passes
+    )
+
+    w, V = pt.linalg.eigh(x)
+    scaled = V * pt.expand_dims(pt.sqrt(pt.sqrt(pt.maximum(w, 0))), -2)
+    result.assert_graph(rewrite_graph(scaled @ scaled.conj().mT, include=passes))
+
+    rng = np.random.default_rng(301)
+    A = rng.normal(size=(4, 4))
+    if dtype == "complex128":
+        A = A + 1j * rng.normal(size=(4, 4))
+    result.assert_eval(A @ A.conj().T + np.eye(4))
+
+
+def test_sqrtm_of_symmetric():
+    x = pt.dmatrix("x")
+    passes = ("canonicalize", "specialize")
+    result = RewriteTester(
+        [x], [pt.linalg.sqrtm(assume(x, symmetric=True))], include=passes
+    )
+
+    w, V = pt.linalg.eigh(x)
+    scaled = V * pt.expand_dims(pt.sqrt(pt.sqrt(w)), -2)
+    has_real_root = pt.all(w >= 0, axis=-1)[..., None, None]
+    expected = pt.where(has_real_root, scaled @ scaled.mT, np.nan)
+    result.assert_graph(rewrite_graph(expected, include=passes))
+
+    rng = np.random.default_rng(301)
+    A = rng.normal(size=(4, 4))
+    result.assert_eval(A @ A.T + np.eye(4))
+    result.assert_eval(A + A.T)
+
+
+def test_sqrtm_pd_gradient_uses_one_eigh():
+    x = pt.dmatrix("x")
+    out = pt.linalg.sqrtm(assume(x, positive_definite=True))
+    g = pytensor.grad(out.sum(), x)
+
+    result = RewriteTester(
+        [x], [g], include=("canonicalize", "stabilize", "specialize", "merge")
+    )
+    eigh_nodes = [
+        node
+        for node in result.rewr_fg.apply_nodes
+        if isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Eigh)
+    ]
+    assert len(eigh_nodes) == 1
+    result.assert_eval(np.eye(4))
+
+    rng = np.random.default_rng(302)
+    A = rng.normal(size=(4, 4))
+    result.assert_eval(A @ A.T + np.eye(4))
 
 
 def test_kron_of_diagonal_to_diagonal():

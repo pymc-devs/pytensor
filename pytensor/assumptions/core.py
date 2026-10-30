@@ -259,11 +259,34 @@ class KeyRegistryView:
 # Registry mapping assumptions to other assumptions they imply.  For example, a "diagonal" matrix is also "symmetric"
 # and "triangular".  This is consulted after all other inference rules to derive additional facts.
 IMPLIES: dict[AssumptionKey, list[AssumptionKey]] = {}
+# (stronger, weaker) pairs from IMPLIES that hold only for real dtypes.
+REAL_ONLY_IMPLIES: set[tuple[AssumptionKey, AssumptionKey]] = set()
 
 
-def register_implies(stronger: AssumptionKey, *weaker: AssumptionKey) -> None:
-    """Declare that *stronger* being TRUE implies each *weaker* key is also TRUE."""
+def register_implies(
+    stronger: AssumptionKey, *weaker: AssumptionKey, real_only: bool = False
+) -> None:
+    """Declare that *stronger* being TRUE implies each *weaker* key is also TRUE.
+
+    Parameters
+    ----------
+    stronger : AssumptionKey
+        The key whose truth implies the others.
+    *weaker : AssumptionKey
+        Keys implied by *stronger*.
+    real_only : bool, optional
+        Apply the implications only to variables with a real dtype. Default False.
+    """
     IMPLIES.setdefault(stronger, []).extend(weaker)
+    if real_only:
+        REAL_ONLY_IMPLIES.update((stronger, key) for key in weaker)
+
+
+def implication_holds(var: Any, stronger: AssumptionKey, weaker: AssumptionKey) -> bool:
+    """Return whether the registered implication *stronger* -> *weaker* applies to *var*."""
+    if (stronger, weaker) not in REAL_ONLY_IMPLIES:
+        return True
+    return not getattr(var.type, "dtype", "").startswith("complex")
 
 
 # Maps a key to a function that infers it directly from a literal TensorConstant's data.
@@ -350,7 +373,8 @@ ALL_KEYS = KeyRegistryView()
 
 # Implications about structural properties derivably from other structural properties
 register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC, TRIDIAGONAL)
-register_implies(POSITIVE_DEFINITE, SYMMETRIC)
+# A complex positive definite matrix is Hermitian, which is not symmetric
+register_implies(POSITIVE_DEFINITE, SYMMETRIC, real_only=True)
 register_implies(PERMUTATION, SELECTION, ORTHOGONAL)
 
 
@@ -559,13 +583,20 @@ class AssumptionFeature(Feature):
 
             if state is FactState.UNKNOWN:
                 for stronger, weaker_list in IMPLIES.items():
-                    if key in weaker_list and self.get(v, stronger) is FactState.TRUE:
+                    if (
+                        key in weaker_list
+                        and implication_holds(v, stronger, key)
+                        and self.get(v, stronger) is FactState.TRUE
+                    ):
                         state = FactState.TRUE
                         break
 
             if state is FactState.UNKNOWN:
                 for weaker in IMPLIES.get(key, ()):
-                    if self.get(v, weaker) is FactState.FALSE:
+                    if (
+                        implication_holds(v, key, weaker)
+                        and self.get(v, weaker) is FactState.FALSE
+                    ):
                         state = FactState.FALSE
                         break
 
