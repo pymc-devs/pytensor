@@ -71,6 +71,7 @@ def idx_to_str(
     size: str | None = None,
     idx_symbol: str = "i",
     allow_scalar=False,
+    indexed_buffers: dict[str, set[int]] | None = None,
 ) -> str:
     assert offset >= 0
     if offset > 0:
@@ -78,7 +79,10 @@ def idx_to_str(
     else:
         indices = idx_symbol
 
-    if size:
+    if size and indexed_buffers is not None:
+        indexed_buffers.setdefault(size, set()).add(offset)
+        indices = f"{size}_index_{offset}"
+    elif size:
         # TODO FIXME: The `Scan` `Op` should tell us which outputs are computed
         # in this way.  We shouldn't have to waste run-time efforts in order to
         # compensate for this poor `Op`/rewrite design and implementation.
@@ -178,6 +182,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     # sequences + mit-mot-inputs + mit-sot-inputs + sit-sot-inputs +
     # untraced-sit-sot-inputs + non-sequences.
     inner_in_exprs: list[str] = []
+    scalar_input_stmts: list[str] = []
+    indexed_buffers: dict[str, set[int]] = {}
 
     def add_inner_in_expr(
         outer_in_name: str,
@@ -193,7 +199,11 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             storage_name
             if tap_offset is None
             else idx_to_str(
-                storage_name, tap_offset, size=storage_size_var, allow_scalar=True
+                storage_name,
+                tap_offset,
+                size=storage_size_var,
+                allow_scalar=True,
+                indexed_buffers=indexed_buffers,
             )
         )
         if (
@@ -202,7 +212,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             and outer_in_name not in outer_in_untraced_sit_sot_names
             and isinstance(outer_in_var.type, TensorType)
         ):
-            indexed_inner_in_str += "[()]"
+            indexed_inner_in_str = f"{outer_in_name}_scalar"
+            scalar_input_stmts.append(f"{indexed_inner_in_str} = {outer_in_name}[()]")
         inner_in_exprs.append(indexed_inner_in_str)
 
     for outer_in_name in outer_in_seqs_names:
@@ -331,6 +342,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                             tap_offset,
                             size=storage_size_name,
                             allow_scalar=True,
+                            indexed_buffers=indexed_buffers,
                         )
                     )
 
@@ -388,7 +400,13 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             storage_size_name = f"{outer_in_name}_len"
 
             inner_out_to_outer_in_stmts.append(
-                idx_to_str(storage_name, 0, size=storage_size_name, allow_scalar=True)
+                idx_to_str(
+                    storage_name,
+                    0,
+                    size=storage_size_name,
+                    allow_scalar=True,
+                    indexed_buffers=indexed_buffers,
+                )
             )
             add_output_storage_post_proc_stmt(storage_name, 0, storage_size_name)
 
@@ -443,8 +461,6 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
 
     assert len(inner_in_exprs) == len(op.fgraph.inputs)
 
-    # Break inputs in new lines, just for readability of the source code
-    inner_in_args = f",\n{' ' * 12}".join(inner_in_exprs)
     inner_outputs = create_tuple_string(inner_output_names)
     input_storage_block = "\n".join(storage_alloc_stmts)
     output_storage_post_processing_block = "\n".join(output_storage_post_proc_stmts)
@@ -455,20 +471,47 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names, strict=True)
     )
 
-    scan_op_src = f"""
-def scan({", ".join(outer_in_names)}):
-
-{indent(input_storage_block, " " * 4)}
-
+    def loop_source(index_stmts, in_exprs=inner_in_exprs):
+        inner_in_args = f",\n{' ' * 12}".join(in_exprs)
+        return f"""\
     i = 0
     cond = False
     while i < n_steps and not cond:
+{indent(index_stmts, " " * 8)}
         {inner_outputs} = scan_inner_func(
             {inner_in_args}
         )
 {indent(inner_out_post_processing_block, " " * 8)}
 {indent(inner_out_to_outer_out_stmts, " " * 8)}
         i += 1
+"""
+
+    if indexed_buffers:
+        conditions = []
+        indices = []
+        for size, offsets in indexed_buffers.items():
+            conditions.append(f"n_steps <= {size} - {max(offsets)}")
+            indices.extend(
+                f"{size}_index_{offset} = i + {offset} if no_wrap else (i + {offset}) % {size}"
+                for offset in sorted(offsets)
+            )
+        # LLVM unswitches this invariant choice. Known single-slot recurrences
+        # have already become untraced states; other buffers keep modulo indexing.
+        loop_block = f"    no_wrap = {' and '.join(conditions)}\n" + loop_source(
+            "\n".join(indices)
+        )
+    else:
+        loop_block = loop_source("")
+
+    scalar_input_block = "\n".join(scalar_input_stmts)
+    scan_op_src = f"""
+def scan({", ".join(outer_in_names)}):
+
+{indent(input_storage_block, " " * 4)}
+{indent(scalar_input_block, " " * 4)}
+    n_steps = n_steps[()]
+
+{loop_block}
 
 {indent(output_storage_post_processing_block, " " * 4)}
 

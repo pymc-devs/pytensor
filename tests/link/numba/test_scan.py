@@ -19,6 +19,32 @@ from tests.link.numba.test_basic import compare_numba_and_py
 from tests.scan.test_basic import ScanCompatibilityTests
 
 
+@pytest.mark.parametrize("shape", [(), (2,)])
+def test_scan_direct_and_circular_indices(shape):
+    # Short traces exercise circular storage; full buffers use direct indexing.
+    initial = pt.tensor("initial", dtype="float64", shape=shape)
+    coefficient = pt.dscalar("coefficient")
+    steps = pt.lscalar("steps")
+    history = scan(
+        lambda previous, a: pt.tanh(a * previous),
+        outputs_info=[initial],
+        non_sequences=[coefficient],
+        n_steps=steps,
+        return_updates=False,
+    )
+    fn = function([initial, coefficient, steps], history[-3:], mode="NUMBA")
+    initial_value = np.full(shape, 0.2)
+    for n in (0, 1, 2, 5, 9):
+        expected = np.empty((n, *shape))
+        value = initial_value
+        for i in range(n):
+            value = np.tanh(0.7 * value)
+            expected[i] = value
+        np.testing.assert_allclose(
+            fn(initial_value, 0.7, n), expected[-3:], rtol=1e-12, atol=1e-12
+        )
+
+
 @pytest.mark.parametrize("constant_steps", [False, True])
 @pytest.mark.parametrize("return_all", [False, True])
 @pytest.mark.parametrize("differentiate", [False, True])
