@@ -126,6 +126,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     }
 
     inner_fgraph = scalarize_scan_inner_graph(op.fgraph)
+    scalar_inner_io = all(
+        isinstance(var.type, ScalarType)
+        for var in (*inner_fgraph.inputs, *inner_fgraph.outputs)
+    )
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
         inner_fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
     )
@@ -499,6 +503,26 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         # have already become untraced states; other buffers keep modulo indexing.
         loop_block = f"    no_wrap = {' and '.join(conditions)}\n" + loop_source(
             "\n".join(indices)
+        )
+    elif op.info.n_seqs and scalar_inner_io:
+        # The guards prove nonnegative indices and fixed strides for LLVM.
+        unsigned_inputs = [f"{seq}[np.uintp(i)]" for seq in outer_in_seqs_names]
+        unsigned_loop = loop_source(
+            "", unsigned_inputs + inner_in_exprs[op.info.n_seqs :]
+        )
+        branches = []
+        for keyword, direction in (("if", -1), ("elif", 1)):
+            conditions = [
+                f"(0 <= n_steps <= {seq}.shape[0] and {seq}.strides[0] == "
+                f"{direction * outer_in_names_to_vars[seq].type.numpy_dtype.itemsize})"
+                for seq in outer_in_seqs_names
+            ]
+            branches.append(
+                f"    {keyword} {' and '.join(conditions)}:\n"
+                + indent(unsigned_loop, " " * 4)
+            )
+        loop_block = (
+            "".join(branches) + "    else:\n" + indent(loop_source(""), " " * 4)
         )
     else:
         loop_block = loop_source("")

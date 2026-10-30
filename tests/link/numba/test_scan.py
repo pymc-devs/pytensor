@@ -19,6 +19,69 @@ from tests.link.numba.test_basic import compare_numba_and_py
 from tests.scan.test_basic import ScanCompatibilityTests
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_scalar_scan_strided_sequence(dtype):
+    # Unit-stride fast paths must preserve general/reversed/read-only fallbacks.
+    sequence = pt.vector("sequence", dtype=dtype)
+    initial = pt.scalar("initial", dtype=dtype)
+    decay = np.array(0.9, dtype=dtype)
+    history = scan(
+        lambda x, previous: x + decay * previous,
+        sequences=[sequence],
+        outputs_info=[initial],
+        return_updates=False,
+    )
+    fn = function([sequence, initial], history[-1], mode="NUMBA")
+    [scan_op] = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    assert scan_op.info.n_untraced_sit_sot == 1
+    base = np.linspace(0.99, 1.01, 100, dtype=dtype)
+    initial_value = np.array(0.7, dtype=dtype)
+    readonly = base[::-1].copy()[::-1]
+    readonly.flags.writeable = False
+    for values in (
+        base,
+        base[::-1],
+        base[::2],
+        base[::-2],
+        readonly,
+        base[:1],
+        np.broadcast_to(base[:1], (10,)),
+    ):
+        weights = decay ** np.arange(values.size - 1, -1, -1)
+        expected = initial_value * decay**values.size + values @ weights
+        np.testing.assert_allclose(fn(values, initial_value), expected, rtol=1e-5)
+
+
+def test_scalar_scan_multiple_strided_sequences():
+    # Eligibility depends on every sequence, including unequal extents and strides.
+    a, b = pt.dvector("a"), pt.dvector("b")
+    initial = pt.dscalar("initial")
+    histories = scan(
+        lambda x, y, previous_x, previous_y: (
+            x + 0.9 * previous_x,
+            y + 0.9 * previous_y,
+        ),
+        sequences=[a, b],
+        outputs_info=[initial, initial],
+        return_updates=False,
+    )
+    fn = function([a, b, initial], [history[-1] for history in histories], mode="NUMBA")
+    [op] = [n.op for n in fn.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+    assert op.info.n_seqs == op.info.n_untraced_sit_sot == 2
+    x, y = np.linspace(0.5, 1.5, 10), np.sin(np.arange(10))
+    for vx, vy in (
+        (x, y),
+        (x[::-1], y[::-1]),
+        (x[::-1], y),
+        (x[::2], y[::2]),
+        (x[::-1], y[::-1][:3]),
+    ):
+        steps = min(vx.size, vy.size)
+        weights = 0.9 ** np.arange(steps - 1, -1, -1)
+        expected = [0.7 * 0.9**steps + values[:steps] @ weights for values in (vx, vy)]
+        np.testing.assert_allclose(fn(vx, vy, 0.7), expected)
+
+
 @pytest.mark.parametrize("shape", [(), (2,)])
 def test_scan_direct_and_circular_indices(shape):
     # Short traces exercise circular storage; full buffers use direct indexing.
