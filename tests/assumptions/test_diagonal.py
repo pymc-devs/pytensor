@@ -77,12 +77,15 @@ def test_cholesky_of_diagonal_is_diagonal():
     assert af.check(L, DIAGONAL)
 
 
-def test_inv_propagates_diagonal():
+@pytest.mark.parametrize(
+    "matrix_fn", [pt.linalg.inv, pt.linalg.sqrtm], ids=["inv", "sqrtm"]
+)
+def test_matrix_function_propagates_diagonal(matrix_fn):
     x = pt.matrix("x", shape=(3, 3))
     x_diag = assume(x, diagonal=True)
-    inv_x = pt.linalg.inv(x_diag)
-    _, af = make_fgraph(inv_x)
-    assert af.check(inv_x, DIAGONAL)
+    out = matrix_fn(x_diag)
+    _, af = make_fgraph(out)
+    assert af.check(out, DIAGONAL)
 
 
 def test_pinv_propagates_diagonal():

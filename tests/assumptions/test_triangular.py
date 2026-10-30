@@ -46,12 +46,15 @@ def test_cholesky_triangularity(lower, expected_true, expected_false):
     assert not af.check(L, expected_false)
 
 
-def test_inv_propagates_lower_triangular():
+@pytest.mark.parametrize(
+    "matrix_fn", [pt.linalg.inv, pt.linalg.sqrtm], ids=["inv", "sqrtm"]
+)
+def test_matrix_function_propagates_lower_triangular(matrix_fn):
     x = pt.matrix("x", shape=(3, 3))
     x_lower = assume(x, lower_triangular=True)
-    inv_x = pt.linalg.inv(x_lower)
-    _, af = make_fgraph(inv_x)
-    assert af.check(inv_x, LOWER_TRIANGULAR)
+    out = matrix_fn(x_lower)
+    _, af = make_fgraph(out)
+    assert af.check(out, LOWER_TRIANGULAR)
 
 
 @pytest.mark.parametrize("key", [LOWER_TRIANGULAR, UPPER_TRIANGULAR])
