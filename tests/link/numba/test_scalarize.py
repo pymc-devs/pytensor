@@ -1,13 +1,17 @@
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor import In
 from pytensor import scalar as ps
+from pytensor.gradient import DisconnectedType
+from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.rewriting.scalarize import (
     ScalarCAReduce,
+    ScalarizedAlloc,
     ScalarizedElemwise,
     ScalarizedIncSubtensor,
     ScalarizedJoin,
@@ -16,6 +20,63 @@ from pytensor.tensor.rewriting.scalarize import (
 )
 from tests.link.numba.test_basic import compare_numba_and_py
 from tests.unittest_tools import RewriteTester
+
+
+def test_scalarized_allocempty_not_constant_folded():
+    # A constant shape does not make uninitialized contents a constant value.
+    size = ps.int64("size")
+    empty = ScalarizedAlloc(
+        [size], [pt.empty(tensor_from_scalar(size), dtype="float32")]
+    )(ps.constant(2, dtype="int64"))
+    RewriteTester([], [empty]).assert_graph(empty)
+
+
+@pytest.mark.parametrize("linker", ["numba", "py"])
+def test_scalarized_allocempty(linker):
+    # Dynamic shape arithmetic stays native while the static middle axis survives.
+    n, m = pt.lscalars("n", "m")
+    empty = pt.empty((n + 1, 2, m), dtype="float32")
+    shape0, shape2 = ps.int64("shape0"), ps.int64("shape2")
+    inner = pt.empty(
+        (tensor_from_scalar(shape0), 2, tensor_from_scalar(shape2)), dtype="float32"
+    )
+    addition = empty.owner.inputs[0].owner
+    native_sum = addition.op.scalar_op(
+        *(scalar_from_tensor(inp) for inp in addition.inputs)
+    )
+    expected = ScalarizedAlloc([shape0, shape2], [inner])(
+        native_sum, scalar_from_tensor(m)
+    )
+    result = RewriteTester(
+        [n, m],
+        [empty.shape],
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+        linker=linker,
+    )
+    result.assert_graph(expected.shape)
+    for values in ((2, 3), (-1, 3), (2, 0)):
+        result.assert_eval(*values)
+    allocation_error = ValueError if linker == "numba" else (ValueError, MemoryError)
+    for fn in (result.orig_fn, result.rewr_fn):
+        for values in ((-2, 3), (2, -1)):
+            with pytest.raises(allocation_error):
+                fn(*values)
+    [node] = [
+        node
+        for node in result.rewr_fg.toposort()
+        if isinstance(node.op, ScalarizedAlloc)
+    ]
+    assert all(isinstance(inp.type, ScalarType) for inp in node.inputs)
+    assert all(
+        isinstance(derivative.type, DisconnectedType)
+        for derivative in pytensor.grad(
+            node.outputs[0].sum(),
+            node.inputs,
+            disconnected_inputs="ignore",
+            return_disconnected="disconnected",
+        )
+    )
 
 
 @pytest.mark.parametrize("set_value", [False, True])
