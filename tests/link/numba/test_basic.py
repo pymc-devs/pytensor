@@ -2,6 +2,8 @@ import contextlib
 import copy
 import os
 import pickle
+import subprocess
+import sys
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -812,6 +814,44 @@ class TestFgraphCacheKey:
 
 
 class TestNumbaCacheMuliprocessSafe:
+    @pytest.mark.parametrize("first_boundscheck", [0, 1])
+    def test_boundscheck_override(self, tmp_path, first_boundscheck):
+        # Check linked parent/child LLVM after reusing one cache in both directions.
+        script = """
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from pytensor import config
+from pytensor.link.numba import cache
+from pytensor.link.numba.dispatch.basic import numba_njit
+
+config.numba__cache = True
+cache.NUMBA_CACHE_PATH = Path(sys.argv[1])
+inner = cache.compile_numba_function_src(
+    "def inner(x, i): return x[i]", "inner", cache_key="inner"
+)
+inner = numba_njit(inner, cache=True, boundscheck=False)
+outer = cache.compile_numba_function_src(
+    "def outer(x, i): return inner(x, i)",
+    "outer", {"inner": inner}, cache_key="outer",
+)
+outer = numba_njit(outer, cache=True, final_function=True)
+assert outer(np.arange(3.), 1) == 1
+llvm = str(outer.overloads[outer.signatures[0]].library._get_module_for_linking())
+assert ("index is out of bounds" in llvm) == bool(int(os.environ["NUMBA_BOUNDSCHECK"]))
+"""
+        for boundscheck in (first_boundscheck, 1 - first_boundscheck):
+            subprocess.run(
+                [sys.executable, "-c", script, str(tmp_path)],
+                env=os.environ | {"NUMBA_BOUNDSCHECK": str(boundscheck)},
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
     @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
     def test_case1(self, tmp_path, monkeypatch):
         """Regression test for fork-safety of the numba disk cache.
