@@ -78,7 +78,10 @@ class TestEigh(TestEig):
             dtype = self.dtype
 
         A = matrix(dtype=dtype)
-        fn = function([A], self.op(A))
+        w_sym, v_sym = self.op(A)
+        assert w_sym.type.dtype == np.finfo(dtype).dtype
+        assert v_sym.type.dtype == dtype
+        fn = function([A], [w_sym, v_sym])
 
         A_val = self.rng.normal(size=(5, 5)).astype(dtype)
         if is_complex:

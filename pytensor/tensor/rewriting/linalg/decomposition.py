@@ -443,6 +443,14 @@ def eig_to_eigh(fgraph, node):
     return [w, v]
 
 
+def _hermitian_diagonal(X):
+    # LAPACK ignores the imaginary part of a Hermitian diagonal
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+    if X.type.dtype.startswith("complex"):
+        return diag_vals.real
+    return diag_vals
+
+
 @register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(Eigh)])
@@ -458,7 +466,7 @@ def eigh_of_diag(fgraph, node):
         [X] = node.inputs
         if not check_assumption(fgraph, X, DIAGONAL):
             return None
-        diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+        diag_vals = _hermitian_diagonal(X)
         sort_idx = pt.argsort(diag_vals, axis=-1)
         new_w = pt.take_along_axis(diag_vals, sort_idx, axis=-1)
         new_v = pt.eye(X.shape[-1])[sort_idx].mT
@@ -468,8 +476,8 @@ def eigh_of_diag(fgraph, node):
             return None
         if not check_assumption(fgraph, B, DIAGONAL):
             return None
-        diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
-        diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
+        diag_a = _hermitian_diagonal(A)
+        diag_b = _hermitian_diagonal(B)
         eigvals = diag_a / diag_b
         sort_idx = pt.argsort(eigvals, axis=-1)
         new_w = pt.take_along_axis(eigvals, sort_idx, axis=-1)
@@ -480,6 +488,8 @@ def eigh_of_diag(fgraph, node):
         return None
 
     w, v = node.outputs
+    new_w = new_w.astype(w.type.dtype)
+    new_v = new_v.astype(v.type.dtype)
     copy_stack_trace(w, new_w)
     copy_stack_trace(v, new_v)
 

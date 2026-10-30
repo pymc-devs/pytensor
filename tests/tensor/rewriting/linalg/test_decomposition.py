@@ -341,6 +341,21 @@ def test_eigh_of_diag(make_diag):
     assert_equal_computations(rewritten, expected)
 
 
+def test_eigh_of_complex_diag():
+    x = pt.zmatrix("x", shape=(3, 3))
+    w, v = pt.linalg.eigh(assume(x, diagonal=True))
+
+    passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
+    result = RewriteTester([x], [w, v], include=passes)
+
+    d = pt.diagonal(x).real
+    idx = pt.argsort(d)
+    expected_w = pt.take_along_axis(d, idx, axis=-1)
+    expected_v = pt.eye(3)[idx].mT.astype("complex128")
+    result.assert_graph(*rewrite_graph([expected_w, expected_v], include=passes))
+    result.assert_eval(np.diag([3.0, 1.0, 2.0]).astype("complex128"))
+
+
 def test_eigh_of_batched_diag():
     x = pt.dtensor3("x", shape=(2, 3, 3))
     w, v = pt.linalg.eigh(assume(x, diagonal=True))
