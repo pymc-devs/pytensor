@@ -902,7 +902,7 @@ def _reduce_identity(identity, acc_dtype):
     return acc_dtype.type(identity)
 
 
-def _build_reduce_impl_src(nout, post_specs, scalar_positions, n_outer):
+def _build_reduce_impl_src(nout, post_specs, scalar_positions, n_outer, promoted_ndims):
     """Build the ``@overload`` impl source for a fused op.
 
     Calls ``_vectorized`` (which produces a keepdims, size-1-on-reduced-axes
@@ -914,18 +914,22 @@ def _build_reduce_impl_src(nout, post_specs, scalar_positions, n_outer):
 
     ``scalar_positions`` lists the outer input positions that are ``ScalarType``
     and so are handed to ``_vectorized`` as native scalar ``constant_inputs``
-    rather than as arrays to be iterated.
+    rather than as arrays to be iterated. ``promoted_ndims`` maps each ``ScalarType``
+    input passed as an array of shape ``(1, ..., 1)`` instead to that array's ndim.
     """
-    if scalar_positions:
+
+    def array_access(p):
+        if p in promoted_ndims:
+            shape = create_tuple_string(("1",) * promoted_ndims[p])
+            return f"np.full({shape}, outer_inputs[{p}])"
+        return f"outer_inputs[{p}]"
+
+    if scalar_positions or promoted_ndims:
         scalar_expr = create_tuple_string(
             tuple(f"outer_inputs[{p}]" for p in scalar_positions)
         )
         array_expr = create_tuple_string(
-            tuple(
-                f"outer_inputs[{p}]"
-                for p in range(n_outer)
-                if p not in scalar_positions
-            )
+            tuple(array_access(p) for p in range(n_outer) if p not in scalar_positions)
         )
     else:
         scalar_expr = "()"
@@ -1088,6 +1092,12 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         for i, inp in enumerate(node.inputs[:nin_elemwise])
         if isinstance(inp.type, ScalarType)
     )
+    # _vectorized iterates over its array inputs. When every loop input is a native
+    # scalar, the first one is passed as an array of shape (1, ..., 1) instead.
+    promoted_positions = (
+        scalar_positions[:1] if len(scalar_positions) == nin_elemwise else ()
+    )
+    scalar_positions = scalar_positions[len(promoted_positions) :]
     array_positions = [i for i in range(nin_elemwise) if i not in scalar_positions]
     array_pos_map = {old: new for new, old in enumerate(array_positions)}
 
@@ -1188,8 +1198,8 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         res = op.fn(*outer_inputs)
         return res[0] if len(res) == 1 else tuple(res)
 
-    # Scalar inputs need generated constant-index accesses into outer_inputs.
-    if not has_reductions and not scalar_positions:
+    # Native and promoted scalar inputs need generated accesses into outer_inputs.
+    if not has_reductions and not scalar_positions and not promoted_positions:
 
         @overload(fused_elemwise_fn, jit_options=_jit_options())
         def ov_fused_elemwise_fn(*outer_inputs):
@@ -1214,7 +1224,13 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
             return impl
     else:
         impl_src = _build_reduce_impl_src(
-            nout, post_specs, scalar_positions, len(node.inputs)
+            nout,
+            post_specs,
+            scalar_positions,
+            len(node.inputs),
+            promoted_ndims={
+                p: elemwise_node.inputs[p].type.ndim for p in promoted_positions
+            },
         )
         impl_fn = compile_numba_function_src(
             impl_src,
@@ -1238,7 +1254,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 12
+    cache_version = 13
     if scalar_cache_key is None:
         key = None
     else:
@@ -1256,6 +1272,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 cache_version,
                 inplace_pattern,
                 scalar_positions,
+                promoted_positions,
                 input_bc_patterns,
                 indexed_inputs,
                 idx_broadcastable,
