@@ -1,6 +1,6 @@
 import logging
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import copy
 from functools import singledispatch
 
@@ -692,7 +692,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
 def minimize_scalar(
     objective: TensorVariable,
     x: TensorVariable,
-    method: str = "brent",
+    method: str | Callable = "brent",
     bracket: TensorLike | None = None,
     bounds: TensorLike | None = None,
     optimizer_kwargs: dict | None = None,
@@ -728,6 +728,8 @@ def minimize_scalar(
         Symbolic boolean flag indicating whether the minimization routine reported convergence to a minimum
         value, based on the requested convergence criteria.
     """
+    if isinstance(method, str):
+        method = method.lower()
     args = _find_optimization_parameters(objective, x)
     objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
     optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
@@ -1091,6 +1093,7 @@ def root_scalar(
     success: TensorVariable
         Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
     """
+    method = method.lower()
     args = _find_optimization_parameters(equation, variable)
     equation, args, outer_args = _tensorize_scalar_parameters(equation, args)
     optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
