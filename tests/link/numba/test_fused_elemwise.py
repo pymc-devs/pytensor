@@ -189,7 +189,7 @@ class TestIndexedReadFusion:
         np.testing.assert_allclose(fn(xv, sv, vv, zv), fn_u(xv, sv, vv, zv), rtol=1e-10)
 
     def test_all_scalar_indices(self):
-        """AdvancedSubtensor with all 0-d indices (degenerate case)."""
+        """AdvancedSubtensor with all 0-d indices feeds an Elemwise left for scalarize."""
         rng = np.random.default_rng(42)
         x = pt.matrix("x", shape=(100, 200))
         si0 = pt.scalar("si0", dtype="int64")
@@ -197,7 +197,9 @@ class TestIndexedReadFusion:
         y = pt.scalar("y", dtype="float64")
         adv_sub = AdvancedSubtensor(idx_list=(0, 1))(x, si0, si1)
         fn, fn_u = fused_and_unfused([x, si0, si1, y], adv_sub + y)
-        assert_fused(fn)
+        assert not any(
+            isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.toposort()
+        )
         xv = rng.normal(size=(100, 200))
         s0 = np.array(rng.integers(100), dtype=np.int64)
         s1 = np.array(rng.integers(200), dtype=np.int64)
@@ -491,6 +493,26 @@ class TestIndexedWriteFusion:
         np.testing.assert_allclose(
             fn(xv, yv, tv.copy()), fn_u(xv, yv, tv.copy()), rtol=1e-10
         )
+
+    @pytest.mark.parametrize(
+        "value",
+        [lambda sx, sy: sx[None] ** 2, lambda sx, sy: (sx * sy)[None]],
+        ids=["one_scalar", "two_scalars"],
+    )
+    def test_set_subtensor_of_scalarized_values(self, value):
+        """Elemwise with only scalar-shaped inputs is left for scalarize, not fused."""
+        x = pt.dscalar("x")
+        y = pt.dscalar("y")
+        sx, sy = pt.exp(x), pt.log(y)
+        out = pt.set_subtensor(pt.zeros(1)[[0]], value(sx, sy))
+        fn, fn_u = fused_and_unfused(inputs=[x, y], output=[out, sx * 2, sy * 3])
+        assert not any(
+            isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.toposort()
+        )
+
+        xv, yv = np.array(0.1), np.array(2.0)
+        for result, expected in zip(fn(xv, yv), fn_u(xv, yv), strict=True):
+            np.testing.assert_allclose(result, expected)
 
     def test_set_subtensor_same_index_both_axes(self):
         """target[idx, idx].set(vals) — same 1-D index on both axes (diagonal write)."""
