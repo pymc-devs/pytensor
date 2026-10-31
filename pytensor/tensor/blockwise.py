@@ -603,6 +603,14 @@ def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
 _vectorize_node.register(Blockwise, _vectorize_not_needed)
 
 
+class JAXBlockwise(FinalizedOpFromGraph):
+    """JAX lowering of Blockwise with unpadded, unbatched scalar inputs.
+
+    These inputs bypass vectorization, preserving concrete values when available.
+    They can also be traced scalars; being unbatched does not make them static.
+    """
+
+
 class OpWithCoreShape(FinalizedOpFromGraph):
     """Generalizes an `Op` to include core shape as an additional input."""
 
