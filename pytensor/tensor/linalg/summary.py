@@ -207,6 +207,8 @@ def norm(
     axis: tuple of int, optional
         Axes over which to compute the norm. If None, norm of entire matrix (or vector) is computed. Row or column
         norms can be computed by passing a single integer; this will treat a matrix like a batch of vectors.
+        If a tuple of two integers, it specifies the axes of `x` that hold the matrices (as in `np.linalg.norm`),
+        and the matrix norms of all the remaining axes are computed.
 
     keepdims: bool
         If True, dummy axes will be inserted into the output so that norm.dnim == x.dnim. Default is False.
@@ -257,7 +259,7 @@ def norm(
             return ret
 
         # No special computation to exploit -- set default axis before continuing
-        axis = tuple(range(core_ndim))
+        axis = tuple(range(batch_ndim, ndim))
 
     elif not isinstance(axis, tuple):
         try:
@@ -293,10 +295,8 @@ def norm(
 
     elif len(axis) == 2:
         # Matrix norms
-        row_axis, col_axis = (
-            batch_ndim + x for x in normalize_axis_tuple(axis, core_ndim)
-        )
-        axis = (row_axis, col_axis)
+        axis = normalize_axis_tuple(axis, ndim)
+        row_axis, col_axis = axis
 
         if ord in [None, "fro", "f"]:
             ret = ptm.sqrt(ptm.sum((x.conj() * x).real, axis=axis))
