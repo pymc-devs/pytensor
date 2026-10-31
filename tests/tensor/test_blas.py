@@ -27,12 +27,6 @@ from pytensor.tensor.blas import (
     _batched_dot,
     _dot22,
     _dot22scalar,
-    gemm,
-    gemm_inplace,
-    gemm_no_inplace,
-    gemv,
-    gemv_inplace,
-    gemv_no_inplace,
 )
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, dot, mean, mul, sigmoid
@@ -71,7 +65,7 @@ def sharedX(x, name):
 
 class TestGemm:
     """
-    This test suite is supposed to establish that gemm works as it is supposed to.
+    This test suite is supposed to establish that Gemm works as it is supposed to.
     """
 
     def setup_method(self):
@@ -100,7 +94,7 @@ class TestGemm:
 
                 f = inplace_func(
                     [tz, ta, tx, ty, tb],
-                    gemm_inplace(tz, ta, tx, ty, tb),
+                    Gemm(inplace=True)(tz, ta, tx, ty, tb),
                     mode=Mode(optimizer=None, linker=l),
                 )
                 f(z, a, x, y, b)
@@ -126,7 +120,7 @@ class TestGemm:
     def test_basic(self):
         Gemm.debug = True
         with pytest.raises(TypeError, match=Gemm.E_rank):
-            gemm_no_inplace([1.0], 1.0, [1.0], [1.0], 1.0)
+            Gemm(inplace=False)([1.0], 1.0, [1.0], [1.0], 1.0)
 
     def test_basic_1(self):
         with pytest.raises(TypeError, match=Gemm.E_rank):
@@ -189,7 +183,7 @@ class TestGemm:
         lr2 = pt.constant(2).astype(config.floatX)
         l2_reg = pt.constant(0.0001).astype(config.floatX)
 
-        # test constant merge with gemm
+        # test constant merge with Gemm
         f = function(
             [a, b],
             updates=[(s, lr1 * dot(a, b) + l2_reg * lr2 * s)],
@@ -199,7 +193,7 @@ class TestGemm:
         # <TensorType(float64, matrix)>, <TensorType(float64, matrix)>,
         # 2e-06)]
         assert len(f) == 1
-        assert f[0].op == gemm_inplace
+        assert f[0].op == Gemm(inplace=True)
 
         # test factored scalar with merge
         f = function(
@@ -211,7 +205,7 @@ class TestGemm:
         # <TensorType(float64, matrix)>, <TensorType(float64, matrix)>,
         # -2e-06)]
         assert len(f) == 1
-        assert f[0].op == gemm_inplace
+        assert f[0].op == Gemm(inplace=True)
 
         # test factored scalar with merge and neg
         f = function(
@@ -223,14 +217,14 @@ class TestGemm:
         # <TensorType(float64, matrix)>, <TensorType(float64, matrix)>,
         # 0.999998)]
         assert len(f) == 1
-        assert f[0].op == gemm_inplace
+        assert f[0].op == Gemm(inplace=True)
 
     def test_destroy_map0(self):
         # test that only first input can be overwritten.
         rng = np.random.default_rng(seed=utt.fetch_seed())
         Z = as_tensor_variable(rng.random((2, 2)))
         with pytest.raises(InconsistencyError, match=Gemm.E_z_uniq):
-            gemm_inplace(Z, 1.0, Z, Z, 1.0)
+            Gemm(inplace=True)(Z, 1.0, Z, Z, 1.0)
 
     def test_destroy_map1(self):
         # test that only first input can be overwritten.
@@ -240,7 +234,7 @@ class TestGemm:
         Zt = Z.transpose()
         assert isinstance(Zt.owner.op, DimShuffle) and Zt.owner.op.view_map == {0: [0]}
         with pytest.raises(InconsistencyError, match=Gemm.E_z_uniq):
-            gemm_inplace(Z, 1.0, A, Zt, 1.0)
+            Gemm(inplace=True)(Z, 1.0, A, Zt, 1.0)
 
     def test_destroy_map2(self):
         # test that only first input can be overwritten.
@@ -250,7 +244,7 @@ class TestGemm:
         Zt = Z.transpose()
         assert isinstance(Zt.owner.op, DimShuffle) and Zt.owner.op.view_map == {0: [0]}
         with pytest.raises(InconsistencyError, match=Gemm.E_z_uniq):
-            gemm_inplace(Z, 1.0, Zt, A, 1.0)
+            Gemm(inplace=True)(Z, 1.0, Zt, A, 1.0)
 
     def test_destroy_map3(self):
         # test that only first input can be overwritten
@@ -258,7 +252,7 @@ class TestGemm:
         Z = as_tensor_variable(rng.random((2, 2)))
         A = as_tensor_variable(rng.random((2, 2)))
         with pytest.raises(InconsistencyError, match=Gemm.E_z_uniq):
-            gemm_inplace(Z, 1.0, Z, A, 1.0)
+            Gemm(inplace=True)(Z, 1.0, Z, A, 1.0)
 
     def test_destroy_map4(self):
         # test that dot args can be aliased
@@ -266,10 +260,10 @@ class TestGemm:
         Z = shared(rng.random((2, 2)), name="Z")
         A = shared(rng.random((2, 2)), name="A")
         one = pt.constant(1.0).astype(Z.dtype)
-        f = inplace_func([], gemm_inplace(Z, one, A, A, one))
+        f = inplace_func([], Gemm(inplace=True)(Z, one, A, A, one))
         # TODO FIXME: This is a bad test
         f()
-        f = inplace_func([], gemm_inplace(Z, one, A, A.T, one))
+        f = inplace_func([], Gemm(inplace=True)(Z, one, A, A.T, one))
         # TODO FIXME: This is a bad test
         f()
 
@@ -282,17 +276,13 @@ class TestGemm:
 
         def t(z, x, y, a=1.0, b=0.0, l="c|py", dt="float64"):
             z, a, x, y, b = (np.asarray(p, dtype=dt) for p in (z, a, x, y, b))
-            # z_orig = z.copy()
             z_after = self._gemm(z, a, x, y, b)
 
             tz, ta, tx, ty, tb = (shared(p) for p in (z, a, x, y, b))
 
-            # f = inplace_func([tz,ta,tx,ty,tb], gemm_inplace(tz,ta,tx,ty,tb),
-            #                 mode = Mode(optimizer = None, linker=l))
-            # f(z, a, x, y, b)
             f = inplace_func(
                 [],
-                gemm_inplace(tz, ta, tx, ty, tb),
+                Gemm(inplace=True)(tz, ta, tx, ty, tb),
                 mode=Mode(optimizer=None, linker=l),
             )
             f()
@@ -350,7 +340,7 @@ class TestGemm:
             for i in range(3):
                 f_i = inplace_func(
                     [],
-                    gemm_inplace(tz[:, :, i], ta, tx[:, :, i], ty[:, :, i], tb),
+                    Gemm(inplace=True)(tz[:, :, i], ta, tx[:, :, i], ty[:, :, i], tb),
                     mode=Mode(optimizer=None, linker=l),
                 )
                 for j in range(3):
@@ -365,7 +355,9 @@ class TestGemm:
                         z_after[:, :, i], tz.get_value(borrow=True)[:, :, i]
                     )
 
-                tz_i = gemm_no_inplace(tz[:, :, i], ta, tx[:, :, i], ty[:, :, i], tb)
+                tz_i = Gemm(inplace=False)(
+                    tz[:, :, i], ta, tx[:, :, i], ty[:, :, i], tb
+                )
                 g_i = function(
                     [],
                     tz_i,
@@ -394,7 +386,7 @@ class TestGemm:
 
 
 class TestGemmNoFlags:
-    gemm = gemm_no_inplace
+    gemm = Gemm(inplace=False)
     M = 4
     N = 5
     K = 6
@@ -572,10 +564,10 @@ def just_gemm(i, o, ishapes=None, max_graphlen=0, expected_nb_gemm=1):
     nb_gemm = 0
     for node in f.maker.fgraph.apply_nodes:
         assert not isinstance(node.op, Dot), (
-            "_dot22 not changed to gemm_inplace in graph"
+            "_dot22 not changed to an inplace Gemm in graph"
         )
         assert node.op != _dot22
-        if node.op == gemm_inplace:
+        if node.op == Gemm(inplace=True):
             nb_gemm += 1
     assert nb_gemm == expected_nb_gemm, (nb_gemm, expected_nb_gemm)
     g = inplace_func(
@@ -586,7 +578,7 @@ def just_gemm(i, o, ishapes=None, max_graphlen=0, expected_nb_gemm=1):
         on_unused_input="ignore",
     )
     for node in g.maker.fgraph.apply_nodes:
-        assert node.op != gemm_inplace, "gemm_inplace in original graph"
+        assert node.op != Gemm(inplace=True), "Gemm(inplace=True) in original graph"
 
     graphlen = len(f.maker.fgraph.toposort())
     assert not (max_graphlen and (graphlen <= max_graphlen)), (
@@ -657,7 +649,7 @@ def test_gemm_opt_double_gemm():
     o = [
         (
             a * dot(X, Y)
-            + gemm_inplace(Z, b, S.T, R.T, pt.constant(1.0).astype(config.floatX))
+            + Gemm(inplace=True)(Z, b, S.T, R.T, pt.constant(1.0).astype(config.floatX))
         )
     ]
     f = inplace_func(
@@ -802,15 +794,15 @@ def test_gemm_opt_vector_stuff():
     u, v = vector(), vector()
 
     f = inplace_func([a, u, v], a + dot(u, v), mode=mode_blas_opt)
-    assert gemm_inplace not in [n.op for n in f.maker.fgraph.apply_nodes]
+    assert Gemm(inplace=True) not in [n.op for n in f.maker.fgraph.apply_nodes]
 
     f = inplace_func([a, u, X, Y], a * u + dot(X, Y), mode=mode_blas_opt)
-    assert gemm_inplace not in [n.op for n in f.maker.fgraph.apply_nodes]
+    assert Gemm(inplace=True) not in [n.op for n in f.maker.fgraph.apply_nodes]
 
 
 def test_gemm_unrolled():
-    # This test that the gemm optimizer remove the dot22 that was
-    # present in the graph. Otherwise, this add a gemm, but still
+    # This test that the Gemm optimizer remove the dot22 that was
+    # present in the graph. Otherwise, this add a Gemm, but still
     # compute the dot22.
 
     # This was not always the case in the with this the following code.
@@ -858,7 +850,7 @@ def test_gemm_unrolled():
 
 
 def test_inplace0():
-    # should fail to insert gemm_inplace because gemm_inplace would
+    # should fail to insert an inplace Gemm because it would
     # create cycles
     X, Y, Z, a, b = (
         matrix("X"),
@@ -870,16 +862,16 @@ def test_inplace0():
     R, S, c = matrix("R"), matrix("S"), scalar("c")
 
     f = inplace_func([Z, b, R, S], [Z * (Z + b * dot(R, S).T)], mode=mode_blas_opt)
-    assert gemm_inplace not in [n.op for n in f.maker.fgraph.apply_nodes]
-    assert gemm_no_inplace in [n.op for n in f.maker.fgraph.apply_nodes]
+    assert Gemm(inplace=True) not in [n.op for n in f.maker.fgraph.apply_nodes]
+    assert Gemm(inplace=False) in [n.op for n in f.maker.fgraph.apply_nodes]
 
-    # gemm_inplace should be inserted here, to work in-place on Z*c
+    # An inplace Gemm should be inserted here, to work in-place on Z*c
     f = inplace_func(
         [X, Y, Z, a, b, R, S, c],
         [Z * (c * Z + a * dot(X, Y) + b * dot(R, S).T)],
         mode=mode_blas_opt,
     )
-    assert gemm_inplace in [n.op for n in f.maker.fgraph.apply_nodes]
+    assert Gemm(inplace=True) in [n.op for n in f.maker.fgraph.apply_nodes]
 
 
 def test_inplace1():
@@ -888,7 +880,7 @@ def test_inplace1():
     f = inplace_func([X, Y, Z], [Z + Z + dot(X, Y)], mode=mode_blas_opt)
     # pytensor.printing.debugprint(f)
     # it doesn't work inplace because we didn't mark Z as mutable input
-    assert [n.op for n in f.maker.fgraph.apply_nodes] == [gemm_no_inplace]
+    assert [n.op for n in f.maker.fgraph.apply_nodes] == [Gemm(inplace=False)]
 
 
 @pytest.mark.parametrize("linker", ("py", "cvm"))
@@ -899,13 +891,13 @@ def test_gemm_broadcasting(inplace, linker):
 
     mode = Mode(linker=linker)
     if inplace:
-        out = gemm_inplace(z, a, x, y, b)
+        out = Gemm(inplace=True)(z, a, x, y, b)
         f = pytensor.function([z, x, y, a, b], out, accept_inplace=True, mode=mode)
-        assert [node.op for node in f.maker.fgraph.toposort()] == [gemm_inplace]
+        assert [node.op for node in f.maker.fgraph.toposort()] == [Gemm(inplace=True)]
     else:
-        out = gemm_no_inplace(z, a, x, y, b)
+        out = Gemm(inplace=False)(z, a, x, y, b)
         f = pytensor.function([z, x, y, a, b], out, mode=mode)
-        assert [node.op for node in f.maker.fgraph.toposort()] == [gemm_no_inplace]
+        assert [node.op for node in f.maker.fgraph.toposort()] == [Gemm(inplace=False)]
 
     shapes_z = [(5, 3), (1, 3), (5, 1), (1, 1)]
     shapes_x = [(5, 4), (1, 4)]
@@ -933,7 +925,7 @@ def test_gemm_static_shape():
     z = matrix("z", shape=(1, 1))
     x = matrix("x", shape=(5, 4))
     y = matrix("y", shape=(4, 3))
-    assert gemm_no_inplace(z, a, x, y, b).type.shape == (5, 3)
+    assert Gemm(inplace=False)(z, a, x, y, b).type.shape == (5, 3)
 
 
 def test_dot22():
@@ -1159,7 +1151,7 @@ def test_local_dot22_to_dot22scalar():
 
 def test_dot_w_self():
     # This can trigger problems in the optimization because what would
-    # normally be a gemm must not be because the output is aliased to
+    # normally be a Gemm must not be because the output is aliased to
     # one of the inputs.
 
     A = shared(value=np.ones((2, 2)))
@@ -1181,7 +1173,7 @@ def test_dot_w_self():
 
 class TestGemv(unittest_tools.OptimizationTestMixin):
     def test_dot_vv(self):
-        # Currently we generate a gemv for that case
+        # Currently we generate a Gemv for that case
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         v = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
         w = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
@@ -1319,7 +1311,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         )
 
     def test_gemv_broadcast(self):
-        # test gemv with some broadcasted input
+        # test Gemv with some broadcasted input
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         v1 = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
         v2_orig = np.array(rng.uniform(size=(1,)), dtype="float32")
@@ -1336,8 +1328,8 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         topo = f.maker.fgraph.toposort()
         assert sum(isinstance(node.op, Gemv) for node in topo) == 1
 
-        # call gemv directly for mixed broadcast pattern.
-        o = gemv_no_inplace(v2, 0.5, m, v1, 0.25)
+        # call Gemv directly for mixed broadcast pattern.
+        o = Gemv(inplace=False)(v2, 0.5, m, v1, 0.25)
         f = function([], o, mode=mode_blas_opt)
         assert np.allclose(
             f(), 0.5 * np.dot(m.get_value(), v1.get_value()) + 0.25 * v2.get_value()
@@ -1372,8 +1364,8 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
             f(A_val, ones_4, ones_6)
 
 
-# The following gemv tests were added in March 2011 by Ian Goodfellow
-# and are based on the gemv tests from scipy
+# The following Gemv tests were added in March 2011 by Ian Goodfellow
+# and are based on the Gemv tests from scipy
 # http://projects.scipy.org/scipy/browser/trunk/scipy/linalg/tests/test_fblas.py?rev=6803
 # NOTE: At the time these tests were written, pytensor did not have a
 # conjugate function. If such a thing is ever added, the tests involving
@@ -1593,7 +1585,7 @@ class BaseGemv:
         rval = dot(a, x) * alpha + y
 
         f = function([alpha], rval, mode=self.mode)
-        # this function is currently optimized so that the gemv is
+        # this function is currently optimized so that the Gemv is
         # done inplace on a temporarily allocated-buffer, which is
         # then scaled by alpha and to t with a fused elemwise.
         n_gemvs = 0
@@ -1610,14 +1602,14 @@ class BaseGemv:
 
 class TestSgemv(BaseGemv, unittest_tools.OptimizationTestMixin):
     dtype = np.float32
-    gemv = gemv_no_inplace
-    gemv_inplace = gemv_inplace
+    gemv = Gemv(inplace=False)
+    gemv_inplace = Gemv(inplace=True)
 
 
 class TestDgemv(BaseGemv, unittest_tools.OptimizationTestMixin):
     dtype = np.float64
-    gemv = gemv_no_inplace
-    gemv_inplace = gemv_inplace
+    gemv = Gemv(inplace=False)
+    gemv_inplace = Gemv(inplace=True)
 
 
 # The optimization to put Gemv don't work for complex type for now.
@@ -1995,7 +1987,7 @@ class TestInferShape(unittest_tools.InferShapeTester):
         b = scalar("b")
         self._compile_and_check(
             [x, y, a, z, b],
-            [gemm(z, a, x, y, b)],
+            [Gemm(inplace=False)(z, a, x, y, b)],
             [
                 rng.random((2, 3)).astype(config.floatX),
                 rng.random((3, 4)).astype(config.floatX),
@@ -2015,7 +2007,7 @@ class TestInferShape(unittest_tools.InferShapeTester):
         # Broadcast Z
         self._compile_and_check(
             [x, y, a, z, b],
-            [gemm(z, a, x, y, b)],
+            [Gemm(inplace=False)(z, a, x, y, b)],
             [
                 rng.random((2, 3)).astype(config.floatX),
                 rng.random((3, 4)).astype(config.floatX),
@@ -2029,7 +2021,7 @@ class TestInferShape(unittest_tools.InferShapeTester):
         # Broadcast dot(X, Y)
         self._compile_and_check(
             [x, y, a, z, b],
-            [gemm(z, a, x, y, b)],
+            [Gemm(inplace=False)(z, a, x, y, b)],
             [
                 rng.random((1, 3)).astype(config.floatX),
                 rng.random((3, 4)).astype(config.floatX),
@@ -2048,7 +2040,7 @@ class TestInferShape(unittest_tools.InferShapeTester):
         b = scalar("b")
         self._compile_and_check(
             [y, a, A, x, b],
-            [gemv(y, a, A, x, b)],
+            [Gemv(inplace=False)(y, a, A, x, b)],
             [
                 rng.random((2,)).astype(config.floatX),
                 np.asarray(0.5, dtype=config.floatX),
