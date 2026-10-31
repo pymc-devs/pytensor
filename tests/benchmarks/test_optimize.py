@@ -1,7 +1,8 @@
-"""Compare Numba optimizers with the SciPy fallback, JAX BFGS and Optax L-BFGS.
+"""Compare Numba optimizers with SciPy, JAX BFGS and Optax L-BFGS.
 
-Cheap objectives expose the cost of running the solver and its callbacks in
-Python. All solvers use the same symbolic objective, but their line searches
+Cheap objectives expose the cost of running the solver in Python. SciPy calls
+the same Numba-compiled objective and gradient, so its timings isolate the
+solver. All solvers use the same symbolic objective, but their line searches
 can take different steps. Timings exclude compilation and synchronize JAX;
 extra_info records preparation through the first solve separately.
 """
@@ -10,57 +11,86 @@ import time
 
 import numpy as np
 import pytest
+import scipy.optimize
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function
 from pytensor.tensor.optimize import minimize
 
 
-@pytest.mark.parametrize(
-    "n",
-    [
-        pytest.param(10, marks=pytest.mark.benchmark(group="minimize-10")),
-        pytest.param(100, marks=pytest.mark.benchmark(group="minimize-100")),
-    ],
-)
-@pytest.mark.parametrize("method", ["BFGS", "L-BFGS-B"])
-@pytest.mark.parametrize("backend", ["SCIPY", "NUMBA", "JAX", "OPTAX"])
-def test_minimize_benchmark(n, method, backend, benchmark, monkeypatch):
-    if backend == "JAX" and method != "BFGS":
-        pytest.skip("JAX's public minimize supports BFGS")
-    if backend == "OPTAX" and method != "L-BFGS-B":
-        pytest.skip("Compare Optax's L-BFGS with unbounded L-BFGS-B")
-    start = time.perf_counter()
+def quadratic(n):
     x = pt.vector("x", shape=(n,), dtype="float64")
     target = pt.vector("target", shape=(n,), dtype="float64")
     weights = pt.vector("weights", shape=(n,), dtype="float64")
-    objective = (weights * (x - target) ** 2).sum()
     inputs = (
         np.zeros(n, dtype="float64"),
         np.linspace(-1, 1, n, dtype="float64"),
         np.geomspace(0.1, 1, n, dtype="float64"),
     )
-    options = {"gtol": 1e-6, "maxiter": 1000}
+    return [x, target, weights], (weights * (x - target) ** 2).sum(), inputs, inputs[1]
+
+
+def rosenbrock(n):
+    x = pt.vector("x", shape=(n,), dtype="float64")
+    odd, even = x[::2], x[1::2]
+    objective = (100 * (even - odd**2) ** 2 + (1 - odd) ** 2).sum()
+    return [x], objective, (np.tile([-1.2, 1.0], n // 2),), np.ones(n)
+
+
+@pytest.mark.parametrize("n", [10, 100, 1000])
+@pytest.mark.parametrize("problem", [quadratic, rosenbrock], ids=lambda p: p.__name__)
+@pytest.mark.parametrize(
+    "method, backend",
+    [
+        ("BFGS", "SCIPY"),
+        ("BFGS", "NUMBA"),
+        ("BFGS", "JAX"),
+        ("L-BFGS-B", "SCIPY"),
+        ("L-BFGS-B", "NUMBA"),
+        ("L-BFGS-B", "OPTAX"),
+    ],
+)
+def test_minimize_benchmark(n, problem, method, backend, benchmark):
+    if backend == "JAX" and problem is rosenbrock:
+        pytest.skip("JAX BFGS stops with a line-search failure (status 3)")
+    benchmark.group = f"minimize-{problem.__name__}-{n}"
+    start = time.perf_counter()
+    symbolic_inputs, objective, inputs, expected = problem(n)
+    x = symbolic_inputs[0]
+    value_and_grad = function(
+        symbolic_inputs,
+        [objective, pytensor.grad(objective, x)],
+        mode="NUMBA",
+        trust_input=True,
+    )
+    options = {"gtol": 1e-6, "maxiter": 200 * n}  # SciPy's BFGS default
     if method == "L-BFGS-B":
         options["ftol"] = 0  # Compare at the same gradient tolerance.
 
-    if backend in ("SCIPY", "NUMBA"):
-        if backend == "SCIPY":
-            from pytensor.link.numba.dispatch import optimize as numba_optimize
+    if backend == "SCIPY":
 
-            monkeypatch.setattr(
-                numba_optimize,
-                "_can_use_native_bfgs"
-                if method == "BFGS"
-                else "_can_use_native_lbfgsb",
-                lambda op: False,
+        def solve(*inputs):
+            result = scipy.optimize.minimize(
+                value_and_grad,
+                inputs[0],
+                args=inputs[1:],
+                jac=True,
+                method=method,
+                options=options,
             )
+            return result.x, result.success
 
+        assert solve(*inputs)[1]  # Compile and check convergence before timing.
+        benchmark.extra_info["ready_seconds"] = time.perf_counter() - start
+        result = benchmark(solve, *inputs)
+
+    elif backend == "NUMBA":
         solution, success = minimize(
             objective, x, method=method, optimizer_kwargs={"options": options}
         )
         solve = function(
-            [x, target, weights],
+            symbolic_inputs,
             [solution, success],
             mode="NUMBA",
             trust_input=True,
@@ -74,21 +104,19 @@ def test_minimize_benchmark(n, method, backend, benchmark, monkeypatch):
         from jax.scipy.optimize import minimize as jax_minimize
 
         with config.change_flags(floatX="float64"), jax.enable_x64():
-            objective_fn = function(
-                [x, target, weights], objective, mode="JAX"
-            ).vm.jit_fn
+            objective_fn = function(symbolic_inputs, objective, mode="JAX").vm.jit_fn
 
-            def jax_objective(x, target, weights):
-                return objective_fn(x, target, weights)[0]
+            def jax_objective(x, *args):
+                return objective_fn(x, *args)[0]
 
             if backend == "OPTAX":
                 optax = pytest.importorskip("optax")
                 solver = optax.lbfgs(memory_size=10)
 
                 @jax.jit
-                def jax_solve(x0, target, weights):
+                def jax_solve(x0, *args):
                     def value_fn(x):
-                        return jax_objective(x, target, weights)
+                        return jax_objective(x, *args)
 
                     value_and_grad = optax.value_and_grad_from_state(value_fn)
                     state = solver.init(x0)
@@ -127,11 +155,11 @@ def test_minimize_benchmark(n, method, backend, benchmark, monkeypatch):
             else:
 
                 @jax.jit
-                def jax_solve(x0, target, weights):
+                def jax_solve(x0, *args):
                     result = jax_minimize(
                         jax_objective,
                         x0,
-                        args=(target, weights),
+                        args=args,
                         method="BFGS",
                         options=options,
                     )
@@ -149,8 +177,7 @@ def test_minimize_benchmark(n, method, backend, benchmark, monkeypatch):
 
     solution, success = result
     assert success
-    np.testing.assert_allclose(
-        solution, inputs[1], rtol=0, atol=options["gtol"] / (2 * inputs[2].min())
-    )
-    gradient = 2 * inputs[2] * (np.asarray(solution) - inputs[1])
+    solution = np.asarray(solution)
+    _, gradient = value_and_grad(solution, *inputs[1:])
     assert np.max(np.abs(gradient)) <= options["gtol"]
+    np.testing.assert_allclose(solution, expected, rtol=0, atol=1e-4)
