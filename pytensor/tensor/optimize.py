@@ -929,7 +929,8 @@ def minimize(
     It supports ``tol`` and the ``gtol``, ``maxiter``, ``norm``, ``xrtol``, ``c1``, and ``c2`` options.
     Unbounded ``L-BFGS-B`` also runs natively, with ``tol`` and the ``ftol``, ``gtol``,
     ``maxcor``, ``maxiter``, ``maxfun``, and ``maxls`` options. Bounded ``L-BFGS-B``
-    uses SciPy.
+    uses SciPy. Unbounded ``Nelder-Mead`` also runs natively, with ``tol`` and the
+    ``maxiter``, ``maxfev``, ``xatol``, ``fatol``, and ``adaptive`` options.
     Other methods or options use SciPy. The native line search can take different steps from SciPy,
     so intermediate iterates and convergence results need not be identical. Native BFGS also scales its
     initial inverse Hessian to the first observed curvature and, like SciPy's L-BFGS-B, restarts from

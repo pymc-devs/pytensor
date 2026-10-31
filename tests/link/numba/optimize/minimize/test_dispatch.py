@@ -10,19 +10,19 @@ from pytensor.tensor.optimize import MinimizeOp, minimize
 
 
 @pytest.mark.filterwarnings("error")
-@pytest.mark.parametrize("method", ["BFGS", "L-BFGS-B"])
+@pytest.mark.parametrize("method", ["BFGS", "L-BFGS-B", "Nelder-Mead"])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 @pytest.mark.parametrize("shape", [(), (4,)])
 def test_minimize_quadratic(method, dtype, shape, native_only):
     x = pt.tensor("x", shape=shape, dtype=dtype)
     target = x.type("target")
     weights = x.type("weights")
-    gtol = 1e-4 if dtype == "float32" else 1e-8
+    tol = 1e-4 if dtype == "float32" else 1e-8
     solution, success = minimize(
         (weights * (x - target) ** 2).sum(),
         x,
         method=method,
-        optimizer_kwargs={"options": {"gtol": gtol}},
+        optimizer_kwargs={"tol": tol},
     )
     fn = function([x, target, weights], [solution, success], mode="NUMBA")
     x0 = np.zeros(shape, dtype=dtype)
@@ -34,7 +34,7 @@ def test_minimize_quadratic(method, dtype, shape, native_only):
         assert converged
         assert actual.shape == shape
         assert actual.dtype == dtype
-        np.testing.assert_allclose(actual, expected, rtol=0, atol=gtol)
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=tol)
     np.testing.assert_array_equal(x0, 0)
     np.testing.assert_array_equal(weights_value, 0.25)
 
@@ -110,6 +110,14 @@ def test_minimize_finite_domain(method, native_only):
         {"method": "CG"},
         {"method": "L-BFGS-B", "optimizer_kwargs": {"options": {"eps": 1e-8}}},
         {"method": "L-BFGS-B", "optimizer_kwargs": {"bounds": [(-1, 1), (-2, None)]}},
+        {
+            "method": "Nelder-Mead",
+            "jac": False,
+            "optimizer_kwargs": {
+                "bounds": [(-3, 3), (-2, None)],
+                "options": {"xatol": 1e-8, "fatol": 1e-16},
+            },
+        },
         {"jac": False},
         {"optimizer_kwargs": {"options": {"hess_inv0": np.eye(2)}}},
     ],
