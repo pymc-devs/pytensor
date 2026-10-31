@@ -492,6 +492,24 @@ class TestIndexedWriteFusion:
             fn(xv, yv, tv.copy()), fn_u(xv, yv, tv.copy()), rtol=1e-10
         )
 
+    @pytest.mark.parametrize(
+        "value",
+        [lambda sx, sy: sx[None] ** 2, lambda sx, sy: (sx * sy)[None]],
+        ids=["one_scalar", "two_scalars"],
+    )
+    def test_set_subtensor_of_scalarized_values(self, value):
+        """Every loop input of the written value is a native scalar after scalarize."""
+        x = pt.dscalar("x")
+        y = pt.dscalar("y")
+        sx, sy = pt.exp(x), pt.log(y)
+        out = pt.set_subtensor(pt.zeros(1)[[0]], value(sx, sy))
+        fn, fn_u = fused_and_unfused(inputs=[x, y], output=[out, sx * 2, sy * 3])
+        assert_fused(fn)
+
+        xv, yv = np.array(0.1), np.array(2.0)
+        for result, expected in zip(fn(xv, yv), fn_u(xv, yv), strict=True):
+            np.testing.assert_allclose(result, expected)
+
     def test_set_subtensor_same_index_both_axes(self):
         """target[idx, idx].set(vals) — same 1-D index on both axes (diagonal write)."""
         rng = np.random.default_rng(42)
