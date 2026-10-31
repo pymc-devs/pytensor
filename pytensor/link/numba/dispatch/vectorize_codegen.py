@@ -144,6 +144,18 @@ def _core_slice_layout(full_layout, batch_bc_pattern):
     return "A"
 
 
+def _loop_batch_ndim(input_bc_patterns, output_bc_patterns) -> int:
+    """Number of loop dimensions, read off the outputs when there are no array inputs.
+
+    A fused op whose inputs are all ``ScalarType`` passes them as ``constant_inputs``.
+    """
+    if input_bc_patterns:
+        return len(input_bc_patterns[0])
+    if output_bc_patterns:
+        return len(output_bc_patterns[0])
+    return 0
+
+
 def _compute_vectorized_types(
     input_types,
     input_bc_patterns,
@@ -154,7 +166,7 @@ def _compute_vectorized_types(
     output_core_shape_types,
 ):
     """Compute core input/output types and return type for vectorized intrinsics."""
-    batch_ndim = len(input_bc_patterns[0])
+    batch_ndim = _loop_batch_ndim(input_bc_patterns, output_bc_patterns)
 
     if not all(isinstance(t, types.Array) for t in input_types):
         raise TypingError("Vectorized inputs must be arrays.")
@@ -1271,7 +1283,7 @@ def _vectorized(
     if out_idx_to_write_target:
         core_out_types = list(core_out_types)
         out_types = list(out_types)
-        batch_ndim = len(input_bc_patterns[0])
+        batch_ndim = _loop_batch_ndim(input_bc_patterns, output_bc_patterns)
         for out_idx, target_idx in out_idx_to_write_target.items():
             target_type = write_target_types[target_idx]
             out_types[out_idx] = target_type
@@ -1409,7 +1421,7 @@ def _vectorized(
         # indices on a given loop dim are bc=True, none constrains the loop
         # size.  Force bc=False in that case so compute_itershape requires
         # the index length to match the loop.
-        batch_ndim = len(input_bc_patterns[0]) if input_bc_patterns else 0
+        batch_ndim = _loop_batch_ndim(input_bc_patterns, output_bc_patterns)
 
         write_all_bc = [True] * batch_ndim
         for k in range(n_indices):

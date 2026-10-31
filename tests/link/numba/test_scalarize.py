@@ -3,6 +3,7 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor import In
 from pytensor import scalar as ps
+from pytensor.compile.mode import get_mode
 from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.rewriting.scalarize import (
@@ -198,6 +199,24 @@ def test_fused_elemwise():
         custom_rewrite=ScalarizeRewriter(),
     )
     result.assert_graph(output)
+
+
+def test_fused_indexed_write_of_scalarized_input():
+    # The second use of exp(x) scalarizes it, so the fused indexed write has no
+    # array input to read the loop rank from (pytensor#2591)
+    x = pt.dscalar("x")
+    s = pt.exp(x)
+    updated = pt.set_subtensor(pt.zeros(1)[[0]], s[None] ** 2)
+
+    fn, _ = compare_numba_and_py(
+        [x], [updated, s * 2], [0.1], numba_mode=get_mode("NUMBA")
+    )
+    [fused] = [
+        node
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(node.op, FusedElemwise)
+    ]
+    assert isinstance(fused.inputs[0].type, ps.ScalarType)
 
 
 def test_scalarized_join():
