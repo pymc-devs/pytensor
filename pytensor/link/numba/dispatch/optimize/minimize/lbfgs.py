@@ -1,22 +1,3 @@
-"""Unbounded L-BFGS: JAX's two-loop recursion with SciPy stopping/search settings.
-
-Direction: JAX's _lbfgs.py, Algorithm 7.5 of Nocedal/Wright:
-https://github.com/jax-ml/jax/blob/jax-v0.10.2/jax/_src/scipy/optimize/_lbfgs.py
-Line search and termination: SciPy's lnsrlb/mainlb:
-https://github.com/scipy/scipy/blob/v1.18.0/scipy/optimize/src/lbfgsb.c
-"""
-
-# Copyright 2020 The JAX Authors.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# https://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 # Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
 # All rights reserved.
 #
@@ -50,8 +31,8 @@ https://github.com/scipy/scipy/blob/v1.18.0/scipy/optimize/src/lbfgsb.c
 
 import numpy as np
 
-from pytensor.link.numba.dispatch._linesearch import FAILED, _dcsrch
 from pytensor.link.numba.dispatch.basic import numba_njit
+from pytensor.link.numba.dispatch.optimize.minimize.line_search import FAILED, _dcsrch
 
 
 # reassoc lets LLVM split and vectorize the dot-product reductions. It only

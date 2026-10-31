@@ -1,5 +1,3 @@
-"""Numba port of the More-Thuente search in scipy.optimize._dcsrch."""
-
 # Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
 # All rights reserved.
 #
