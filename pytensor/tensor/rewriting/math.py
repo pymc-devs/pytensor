@@ -98,6 +98,10 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import pow as pt_pow
+from pytensor.tensor.property_inference import (
+    is_provably_non_negative,
+    is_provably_positive,
+)
 from pytensor.tensor.rewriting.basic import (
     broadcast_like_elemwise,
     local_second_sink,
@@ -110,11 +114,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.subtensor import (
-    Subtensor,
-    _is_provably_non_negative,
-    _is_provably_positive,
-)
+from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
@@ -589,7 +589,7 @@ def local_useless_abs(fgraph, node):
     # Case for abs(x) -> x, when x is already non-negative
     [x] = node.inputs
 
-    if x.dtype.startswith("complex") or not _is_provably_non_negative(x):
+    if x.dtype.startswith("complex") or not is_provably_non_negative(x):
         return
 
     return [x]
@@ -765,8 +765,8 @@ def local_log_div(fgraph, node):
 
     if isinstance(scalar_op, ps.TrueDiv):
         num, den = inp.owner.inputs
-        if (isinstance(num, Constant) and _is_provably_positive(num, strict=True)) or (
-            isinstance(den, Constant) and _is_provably_positive(den, strict=True)
+        if (isinstance(num, Constant) and is_provably_positive(num, strict=True)) or (
+            isinstance(den, Constant) and is_provably_positive(den, strict=True)
         ):
             out_dtype = node.outputs[0].dtype
             return [log(num.astype(out_dtype)) - log(den.astype(out_dtype))]
@@ -798,9 +798,9 @@ def local_sign_div(fgraph, node):
 
     num, den = inp.owner.inputs
 
-    if _is_provably_positive(num, strict=True):
+    if is_provably_positive(num, strict=True):
         return [sign(den)]
-    if _is_provably_positive(den, strict=True):
+    if is_provably_positive(den, strict=True):
         return [sign(num)]
 
     for side, other in ((num, den), (den, num)):
@@ -820,7 +820,7 @@ def local_useless_sign(fgraph, node):
     log-determinant path still propagates the NaN.
     """
     [x] = node.inputs
-    if _is_provably_positive(x, strict=True):
+    if is_provably_positive(x, strict=True):
         new = ones_like(x, dtype=node.outputs[0].dtype)
         copy_stack_trace(node.outputs[0], new)
         return [new]
