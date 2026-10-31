@@ -48,6 +48,27 @@ optimize = None
 
 _log = logging.getLogger(__name__)
 
+# scipy's messages for failures caused by runtime inputs (bracket, bounds, initial
+# point, objective values). perform reports these as a NaN solution and a failed flag,
+# so one bad point does not stop the computation. Errors from static options still
+# raise.
+_RUNTIME_FAILURE_MESSAGES = (
+    "f(a) and f(b) must have different signs",
+    "Invalid function value",
+    "a is not finite",
+    "b is not finite",
+    "are not an interval",
+    "x1 and x0 must be different",
+    "Bracketing values",
+    "Bracketing interval must be length 2 or 3",
+    "No valid bracket was found",
+    "bounds must have two elements",
+    "Optimization bounds must be finite",
+    "The lower bound exceeds the upper bound",
+)
+
+_BRACKETING_ROOT_METHODS = ("bisect", "brentq", "brenth", "ridder", "toms748")
+
 
 class LRUCache1:
     """
@@ -236,6 +257,10 @@ def _bounded_absolute_tolerance(method: str, optimizer_kwargs: dict) -> dict:
     optimizer_kwargs = dict(optimizer_kwargs)
     optimizer_kwargs["options"] = {**options, "xatol": optimizer_kwargs.pop("tol")}
     return optimizer_kwargs
+
+
+def _is_runtime_failure(error: Exception) -> bool:
+    return any(message in str(error) for message in _RUNTIME_FAILURE_MESSAGES)
 
 
 class ScipyWrapperOp(HasInnerFunction, Op):
@@ -693,13 +718,20 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         # the args of the objective function), but it is not used in the optimization.
         (x0, *args), bound_inputs = self.split_inputs(inputs)
 
-        res = optimize.minimize_scalar(
-            fun=f.value,
-            args=tuple(args),
-            method=self.method,
-            **self.bound_values(bound_inputs),
-            **self.optimizer_kwargs,
-        )
+        try:
+            res = optimize.minimize_scalar(
+                fun=f.value,
+                args=tuple(args),
+                method=self.method,
+                **self.bound_values(bound_inputs),
+                **self.optimizer_kwargs,
+            )
+        except (ValueError, RuntimeError) as e:
+            if not _is_runtime_failure(error=e):
+                raise
+            outputs[0][0] = np.array(np.nan, dtype=x0.dtype)
+            outputs[1][0] = np.bool_(False)
+            return
 
         outputs[0][0] = np.array(res.x, dtype=x0.dtype)
         outputs[1][0] = np.bool_(res.success)
@@ -1052,17 +1084,33 @@ class RootScalarOp(ScipyScalarWrapperOp):
         f.clear_cache()
 
         (variables, *args), bound_inputs = self.split_inputs(inputs)
+        bounds = self.bound_values(bound_inputs)
+        if (
+            self.method in _BRACKETING_ROOT_METHODS
+            and "bracket" in bounds
+            and len(bounds["bracket"]) < 2
+        ):
+            outputs[0][0] = np.array(np.nan, dtype=variables.dtype)
+            outputs[1][0] = np.bool_(False)
+            return
 
-        res = optimize.root_scalar(
-            f=f.value,
-            fprime=f.grad if self.jac else None,
-            fprime2=f.hess if self.hess else None,
-            x0=variables,
-            args=tuple(args),
-            method=self.method,
-            **self.bound_values(bound_inputs),
-            **self.optimizer_kwargs,
-        )
+        try:
+            res = optimize.root_scalar(
+                f=f.value,
+                fprime=f.grad if self.jac else None,
+                fprime2=f.hess if self.hess else None,
+                x0=variables,
+                args=tuple(args),
+                method=self.method,
+                **bounds,
+                **self.optimizer_kwargs,
+            )
+        except (ValueError, RuntimeError) as e:
+            if not _is_runtime_failure(error=e):
+                raise
+            outputs[0][0] = np.array(np.nan, dtype=variables.dtype)
+            outputs[1][0] = np.bool_(False)
+            return
 
         outputs[0][0] = np.array(res.root, dtype=variables.dtype)
         outputs[1][0] = np.bool_(res.converged)
