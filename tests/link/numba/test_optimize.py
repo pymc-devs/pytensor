@@ -47,6 +47,27 @@ def test_minimize_quadratic(method, dtype, shape, native_only):
 
 
 @pytest.mark.filterwarnings("error")
+def test_minimize_inner_inplace(native_only):
+    # The inner graph may work in place on its own buffers, never on its inputs.
+    x = pt.dvector("x")
+    a = pt.dvector("a")
+    residual = pt.cumsum(x) - a
+    solution, success = minimize(residual.dot(residual), x)
+    fn = function([x, a], [solution, success], mode="NUMBA")
+    [node] = [
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, MinimizeOp)
+    ]
+    assert any(inner.op.destroy_map for inner in node.op.fgraph.apply_nodes)
+    x0 = np.zeros(3)
+    a_value = np.array([1.0, 2.0, 3.0])
+    actual, converged = fn(x0, a_value)
+    assert converged
+    np.testing.assert_allclose(actual, 1, rtol=0, atol=1e-5)
+    np.testing.assert_array_equal(x0, 0)
+    np.testing.assert_array_equal(a_value, [1.0, 2.0, 3.0])
+
+
+@pytest.mark.filterwarnings("error")
 def test_bfgs_objective_scale(native_only):
     x = pt.dvector("x")
     scale = pt.dscalar("scale")
