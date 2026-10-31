@@ -39,7 +39,10 @@ def _squeeze_left(x, stop_at_dim: int | None = None):
         squeeze_ndim = min(squeeze_ndim, stop_at_dim)
     if squeeze_ndim == 0:
         return x
-    return x.squeeze(axis=tuple(range(squeeze_ndim)))
+    axis = tuple(range(squeeze_ndim))
+    if isinstance(x, Constant):
+        return as_tensor_variable(x.data.squeeze(axis))
+    return x.squeeze(axis=axis)
 
 
 def _vectorize_node_perform(
