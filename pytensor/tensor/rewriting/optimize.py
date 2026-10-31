@@ -38,8 +38,9 @@ def c_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
 def jit_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
     # JIT backends manage memory themselves, so leave the inner graph functional.
     # (Unlike ``OpFromGraph`` under numba, no deepcopies are baked in either: a
-    # scipy op is never funcified -- it always perform-links via ``compile_fn``,
-    # whose ``FunctionMaker`` pass inserts the boundary deepcopies.)
+    # funcified scalar scipy op reads its objective's outputs into scalars at
+    # once, and every other scipy op perform-links via ``compile_fn``, whose
+    # ``FunctionMaker`` pass inserts the boundary deepcopies.)
     mode.excluding("inplace").optimizer.rewrite(inner)
 
 
