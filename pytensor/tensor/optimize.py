@@ -1029,7 +1029,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
             **self.optimizer_kwargs,
         )
 
-        outputs[0][0] = np.array(res.root)
+        outputs[0][0] = np.array(res.root, dtype=variables.dtype)
         outputs[1][0] = np.bool_(res.converged)
 
 
