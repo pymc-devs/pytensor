@@ -491,6 +491,9 @@ class FuseElemwise(GraphRewriter):
                 continue
             if node not in fgraph.apply_nodes:
                 continue
+            # If all inputs are scalar (even with dummy dims) it is not Elemwise
+            if all(all(inp.type.broadcastable) for inp in node.inputs):
+                continue
 
             idx_groups = {}  # (idx_var, axis) -> (reads: list[int], writes: list[int])
 
