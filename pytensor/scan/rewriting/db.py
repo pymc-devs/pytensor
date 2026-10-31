@@ -250,6 +250,8 @@ scan_eqopt2.register(
 # Runs after the inplace passes (notably ``scan_make_inplace`` at 50.5): a tap may
 # only be destroyed in place when the outer Scan owns its buffer, so the inner graph
 # can only be baked correctly once the outer destroy/view permissions are final.
+# Runs before the backend lowerings at 100, which can hide a ``Scan`` inside a
+# backend-specific ``Blockwise``.
 @graph_rewriter
 def scan_inner_graph(fgraph):
     rewrite_inner_graph(
@@ -262,5 +264,5 @@ optdb.register(
     scan_inner_graph,
     "minimum_compile",
     "compile_inner_graph",
-    position=100,
+    position=99.9,
 )
