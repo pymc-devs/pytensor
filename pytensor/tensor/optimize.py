@@ -931,7 +931,10 @@ def minimize(
     ``maxcor``, ``maxiter``, ``maxfun``, and ``maxls`` options. Bounded ``L-BFGS-B``
     uses SciPy.
     Other methods or options use SciPy. The native line search can take different steps from SciPy,
-    so intermediate iterates and convergence results need not be identical.
+    so intermediate iterates and convergence results need not be identical. Native BFGS also scales its
+    initial inverse Hessian to the first observed curvature and, like SciPy's L-BFGS-B, restarts from
+    steepest descent after a failed line search. It can therefore report ``success=True`` on problems
+    where SciPy's BFGS stops with a precision-loss failure.
     """
     objective = as_tensor_variable(objective)
 
