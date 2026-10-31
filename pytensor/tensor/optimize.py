@@ -1,4 +1,5 @@
 import logging
+import warnings
 from collections.abc import Sequence
 from copy import copy
 from functools import singledispatch
@@ -196,16 +197,29 @@ def _tensorize_scalar_parameters(
 
 def _symbolic_bounds(
     x: TensorVariable, optimizer_kwargs: dict | None, **bounds: TensorLike | None
-) -> tuple[tuple[str, ...], list[TensorVariable]]:
-    """Return the names of the given ``bounds`` and their values as vectors of ``x.dtype``."""
-    if clash := sorted(set(bounds) & set(optimizer_kwargs or {})):
-        raise ValueError(
-            f"Pass {clash} as arguments of the function, not in `optimizer_kwargs`"
+) -> tuple[dict, tuple[str, ...], list[TensorVariable]]:
+    """Return ``optimizer_kwargs`` without the bounds, the names of the given bounds, and their values as vectors
+    of ``x.dtype``."""
+    optimizer_kwargs = dict(optimizer_kwargs or {})
+    for name in bounds.keys() & optimizer_kwargs.keys():
+        if bounds[name] is not None:
+            raise ValueError(
+                f"Cannot pass `{name}` both as an argument and in `optimizer_kwargs`"
+            )
+        warnings.warn(
+            f"Passing `{name}` in `optimizer_kwargs` is deprecated. "
+            f"Pass it as the `{name}` argument instead.",
+            FutureWarning,
+            stacklevel=3,
         )
+        bounds[name] = optimizer_kwargs.pop(name)
+
     given = {name: value for name, value in bounds.items() if value is not None}
-    return tuple(given), [
-        cast(as_tensor_variable(value, ndim=1), x.dtype) for value in given.values()
-    ]
+    return (
+        optimizer_kwargs,
+        tuple(given),
+        [cast(as_tensor_variable(value, ndim=1), x.dtype) for value in given.values()],
+    )
 
 
 class ScipyWrapperOp(HasInnerFunction, Op):
@@ -716,8 +730,8 @@ def minimize_scalar(
     """
     args = _find_optimization_parameters(objective, x)
     objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
-    bound_kwargs, bound_inputs = _symbolic_bounds(
-        x, optimizer_kwargs, bracket=bracket, bounds=bounds
+    optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
+        x=x, optimizer_kwargs=optimizer_kwargs, bracket=bracket, bounds=bounds
     )
 
     minimize_scalar_op = MinimizeScalarOp(
@@ -1079,8 +1093,8 @@ def root_scalar(
     """
     args = _find_optimization_parameters(equation, variable)
     equation, args, outer_args = _tensorize_scalar_parameters(equation, args)
-    bound_kwargs, bound_inputs = _symbolic_bounds(
-        variable, optimizer_kwargs, bracket=bracket
+    optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
+        x=variable, optimizer_kwargs=optimizer_kwargs, bracket=bracket
     )
 
     root_scalar_op = RootScalarOp(

@@ -376,6 +376,36 @@ def test_root_scalar(method, jac, hess, bracketed):
     utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
 
 
+@pytest.mark.parametrize(
+    "solve, name",
+    [
+        (
+            lambda x, **kwargs: root_scalar(
+                equation=x + 2 * pt.cos(x), variable=x, method="brentq", **kwargs
+            ),
+            "bracket",
+        ),
+        (
+            lambda x, **kwargs: minimize_scalar(
+                objective=pt.cos(x), x=x, method="bounded", **kwargs
+            ),
+            "bounds",
+        ),
+    ],
+    ids=["root_scalar_bracket", "minimize_scalar_bounds"],
+)
+def test_bound_in_optimizer_kwargs(solve, name):
+    x = pt.scalar("x")
+
+    with pytest.warns(FutureWarning, match=f"`{name}` in `optimizer_kwargs`"):
+        solution, _ = solve(x, optimizer_kwargs={name: (-2.0, 0.0)})
+    assert solution.owner.op.bound_kwargs == (name,)
+    assert solution.owner.op.optimizer_kwargs == {}
+
+    with pytest.raises(ValueError, match="both as an argument"):
+        solve(x, **{name: (-2.0, 0.0)}, optimizer_kwargs={name: (-2.0, 0.0)})
+
+
 def test_root_simple():
     x = pt.scalar("x")
     a = pt.scalar("a")
