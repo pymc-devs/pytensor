@@ -1,3 +1,4 @@
+import pickle
 from functools import partial
 
 import numpy as np
@@ -749,6 +750,17 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         r1, r2 = fn(2.0, 3.0, 4.0, 5.0)
         np.testing.assert_allclose(r1, 2.0 + 3.0 * 2.0)
         np.testing.assert_allclose(r2, 4.0 + 5.0 * 4.0)
+
+    def test_pickle_after_differentiation(self):
+        x = vector("x")
+        out = OpFromGraph([x], [pt.sin(x) * x])(x)
+        g = grad(out.sum(), x)
+        pushforward(out, x, x)
+
+        out_new, g_new = pickle.loads(pickle.dumps((out, g)))
+        assert out_new.owner.op == out.owner.op
+        x_new = out_new.owner.inputs[0]
+        assert equal_computations([grad(out_new.sum(), x_new)], [g_new])
 
 
 @pytest.mark.parametrize("linker", ["cvm", "py"])

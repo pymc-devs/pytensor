@@ -403,6 +403,13 @@ class OpFromGraph(HasInnerFunction, Op):
         "OpFromGraph._freezing_overrides", default=False
     )
 
+    def __getstate__(self):
+        # The cached pullback/pushforward are local closures that can't be pickled
+        state = self.__dict__.copy()
+        state["_lop_op_cache"] = {}
+        state["_rop_op_cache"] = None
+        return state
+
     @staticmethod
     def _freeze_override_to_fgraph(
         all_inputs: list[Variable], results: list[Variable]
