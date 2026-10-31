@@ -222,6 +222,22 @@ def _symbolic_bounds(
     )
 
 
+def _bounded_absolute_tolerance(method: str, optimizer_kwargs: dict) -> dict:
+    """Move ``tol`` into ``options["xatol"]`` for the bounded method, warning as scipy does."""
+    options = optimizer_kwargs.get("options") or {}
+    if method != "bounded" or "tol" not in optimizer_kwargs or "xatol" in options:
+        return optimizer_kwargs
+    warnings.warn(
+        "Method 'bounded' does not support relative tolerance in x; "
+        "defaulting to absolute tolerance.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+    optimizer_kwargs = dict(optimizer_kwargs)
+    optimizer_kwargs["options"] = {**options, "xatol": optimizer_kwargs.pop("tol")}
+    return optimizer_kwargs
+
+
 class ScipyWrapperOp(HasInnerFunction, Op):
     """Shared logic for scipy optimization ops.
 
@@ -734,6 +750,9 @@ def minimize_scalar(
     objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
     optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
         x=x, optimizer_kwargs=optimizer_kwargs, bracket=bracket, bounds=bounds
+    )
+    optimizer_kwargs = _bounded_absolute_tolerance(
+        method=method, optimizer_kwargs=optimizer_kwargs
     )
 
     minimize_scalar_op = MinimizeScalarOp(

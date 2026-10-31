@@ -406,6 +406,20 @@ def test_bound_in_optimizer_kwargs(solve, name):
         solve(x, **{name: (-2.0, 0.0)}, optimizer_kwargs={name: (-2.0, 0.0)})
 
 
+def test_minimize_scalar_bounded_tol_is_absolute():
+    x = pt.scalar("x")
+
+    with pytest.warns(RuntimeWarning, match="does not support relative tolerance"):
+        solution, _ = minimize_scalar(
+            objective=pt.cos(x),
+            x=x,
+            method="bounded",
+            bounds=(0.0, 5.0),
+            optimizer_kwargs={"tol": 1e-3},
+        )
+    assert solution.owner.op.optimizer_kwargs == {"options": {"xatol": 1e-3}}
+
+
 def test_root_simple():
     x = pt.scalar("x")
     a = pt.scalar("a")
