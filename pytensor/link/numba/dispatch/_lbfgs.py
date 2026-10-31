@@ -50,103 +50,67 @@ https://github.com/scipy/scipy/blob/v1.18.0/scipy/optimize/src/lbfgsb.c
 
 import numpy as np
 
-from pytensor.link.numba.dispatch._linesearch import _dcstep
+from pytensor.link.numba.dispatch._linesearch import FAILED, _dcsrch
 from pytensor.link.numba.dispatch.basic import numba_njit
 
 
-@numba_njit(fastmath=False)
-def _direction(g, s_history, y_history, rho_history, gamma, count):
-    size = rho_history.size
-    q = -g.copy()
-    alphas = np.zeros(size)
-    for i in range(size - 1, size - count - 1, -1):
-        alphas[i] = rho_history[i] * np.dot(s_history[i], q)
-        q -= alphas[i] * y_history[i]
+# reassoc lets LLVM split and vectorize the dot-product reductions. It only
+# reorders sums, so the directions match SciPy's up to rounding.
+@numba_njit(fastmath={"reassoc"})
+def _direction(g, s_history, y_history, rho_history, gamma, count, head):
+    # Two-loop recursion over a ring buffer whose newest pair sits before head.
+    m = rho_history.size
+    q = -g
+    alphas = np.zeros(m)
+    for k in range(count):
+        i = (head - 1 - k) % m
+        total = 0.0
+        for j in range(q.size):
+            total += s_history[i, j] * q[j]
+        alphas[i] = rho_history[i] * total
+        for j in range(q.size):
+            q[j] -= alphas[i] * y_history[i, j]
     q *= gamma
-    for i in range(size - count, size):
-        beta = rho_history[i] * np.dot(y_history[i], q)
-        q += (alphas[i] - beta) * s_history[i]
+    for k in range(count - 1, -1, -1):
+        i = (head - 1 - k) % m
+        total = 0.0
+        for j in range(q.size):
+            total += y_history[i, j] * q[j]
+        beta = rho_history[i] * total
+        for j in range(q.size):
+            q[j] += (alphas[i] - beta) * s_history[i, j]
     return q
 
 
 @numba_njit(fastmath=False, inline="always")
-def _line_search(evaluate, x, p, args, f0, g0, alpha, maxls):
-    # SciPy lnsrlb's unbounded DCSRCH settings, including accepted warnings.
-    c1, c2, xtol, stepmax = 1e-3, 0.9, 0.1, 1e10
+def _lnsrlb(evaluate, x, p, args, f0, g0, alpha, maxls, trial_x):
+    # SciPy lnsrlb's unbounded DCSRCH settings, which accept warnings as steps.
     d0 = np.dot(g0, p)
     if not np.isfinite(d0) or d0 >= 0:
         return 0.0, f0, g0, False, 0
-    bracketed, stage1 = False, True
-    stx, fx, dx = 0.0, f0, d0
-    sty, fy, dy = 0.0, f0, d0
-    stmin, stmax = 0.0, 5 * alpha
-    width, previous_width = stepmax, 2 * stepmax
-    gtest = c1 * d0
-    for evaluation in range(maxls):
-        if not np.isfinite(alpha):
-            return 0.0, f0, g0, False, evaluation
-        f, g = evaluate(x + alpha * p, *args)
-        d = np.dot(g, p)
-        ftest = f0 + alpha * gtest
-        if not np.isfinite(f) or not np.isfinite(d):
-            return 0.0, f0, g0, False, evaluation + 1
-        if (
-            (f <= ftest and abs(d) <= -c2 * d0)
-            or (
-                bracketed
-                and (alpha <= stmin or alpha >= stmax or stmax - stmin <= xtol * stmax)
-            )
-            or (alpha == stepmax and f <= ftest and d <= gtest)
-            or (alpha == 0 and (f > ftest or d >= gtest))
-        ):
-            return alpha, f, g, True, evaluation + 1
-
-        if stage1 and f <= ftest and d >= 0:
-            stage1 = False
-        if stage1 and f <= fx and f > ftest:
-            stx, fx, dx, sty, fy, dy, alpha, bracketed = _dcstep(
-                stx,
-                fx - stx * gtest,
-                dx - gtest,
-                sty,
-                fy - sty * gtest,
-                dy - gtest,
-                alpha,
-                f - alpha * gtest,
-                d - gtest,
-                bracketed,
-                stmin,
-                stmax,
-            )
-            fx += stx * gtest
-            fy += sty * gtest
-            dx += gtest
-            dy += gtest
-        else:
-            stx, fx, dx, sty, fy, dy, alpha, bracketed = _dcstep(
-                stx, fx, dx, sty, fy, dy, alpha, f, d, bracketed, stmin, stmax
-            )
-        if bracketed:
-            if abs(sty - stx) >= 0.66 * previous_width:
-                alpha = stx + 0.5 * (sty - stx)
-            previous_width, width = width, abs(sty - stx)
-            stmin, stmax = min(stx, sty), max(stx, sty)
-        else:
-            stmin = alpha + 1.1 * (alpha - stx)
-            stmax = alpha + 4 * (alpha - stx)
-        alpha = min(max(alpha, 0.0), stepmax)
-        if bracketed and (
-            alpha <= stmin or alpha >= stmax or stmax - stmin <= xtol * stmax
-        ):
-            alpha = stx
-    return 0.0, f0, g0, False, maxls
+    alpha, f, g, status, evaluations = _dcsrch(
+        evaluate,
+        x,
+        p,
+        args,
+        f0,
+        g0,
+        d0,
+        alpha,
+        1e-3,
+        0.9,
+        0.1,
+        0.0,
+        1e10,
+        maxls,
+        trial_x,
+    )
+    return alpha, f, g, status != FAILED, evaluations
 
 
 @numba_njit(fastmath=False, inline="always")
 def _lbfgs(evaluate, x, args, m, ftol, gtol, maxiter, maxfun, maxls):
-    if maxls <= 0:
-        raise ValueError("maxls must be positive.")
-    if x.size == 0 or m <= 0 or ftol < 0:
+    if x.size == 0:
         return x, False
     f, g = evaluate(x, *args)
     if not np.isfinite(f) or not np.all(np.isfinite(g)):
@@ -156,12 +120,13 @@ def _lbfgs(evaluate, x, args, m, ftol, gtol, maxiter, maxfun, maxls):
 
     s_history, y_history = np.zeros((m, x.size)), np.zeros((m, x.size))
     rho_history = np.zeros(m)
-    gamma, count, iterations, nfev = 1.0, 0, 0, 1
+    s, y, trial_x = np.empty(x.size), np.empty(x.size), np.empty(x.size)
+    gamma, count, head, iterations, nfev = 1.0, 0, 0, 0, 1
     while True:
-        p = _direction(g, s_history, y_history, rho_history, gamma, count)
+        p = _direction(g, s_history, y_history, rho_history, gamma, count, head)
         alpha = min(1.0 / np.linalg.norm(p), 1e10) if iterations == 0 else 1.0
-        alpha, new_f, new_g, found, evaluations = _line_search(
-            evaluate, x, p, args, f, g, alpha, maxls
+        alpha, new_f, new_g, found, evaluations = _lnsrlb(
+            evaluate, x, p, args, f, g, alpha, maxls, trial_x
         )
         nfev += evaluations
         if not found:
@@ -171,9 +136,12 @@ def _lbfgs(evaluate, x, args, m, ftol, gtol, maxiter, maxfun, maxls):
             count, gamma = 0, 1.0
             continue
 
-        s, y = alpha * p, new_g - g
-        old_f, old_g = f, g
-        x, f, g = x + s, new_f, new_g
+        descent = -np.dot(g, p) * alpha
+        for j in range(x.size):
+            s[j] = alpha * p[j]
+            y[j] = new_g[j] - g[j]
+            x[j] += s[j]
+        old_f, f, g = f, new_f, new_g
         iterations += 1
         # SciPy's driver checks these limits before resuming convergence checks.
         if iterations >= maxiter or nfev > maxfun:
@@ -184,11 +152,11 @@ def _lbfgs(evaluate, x, args, m, ftol, gtol, maxiter, maxfun, maxls):
             return x, True
 
         curvature = np.dot(y, s)
-        if curvature <= np.finfo(np.float64).eps * (-np.dot(old_g, p) * alpha):
+        if curvature <= np.finfo(np.float64).eps * descent:
             continue
-        s_history[:-1], y_history[:-1] = s_history[1:], y_history[1:]
-        rho_history[:-1] = rho_history[1:]
-        s_history[-1], y_history[-1] = s, y
-        rho_history[-1] = 1.0 / curvature
+        s_history[head] = s
+        y_history[head] = y
+        rho_history[head] = 1.0 / curvature
         gamma = curvature / np.dot(y, y)
+        head = (head + 1) % m
         count = min(count + 1, m)

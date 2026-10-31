@@ -36,11 +36,29 @@ import numpy as np
 from pytensor.link.numba.dispatch.basic import numba_njit
 
 
+CONVERGED, WARNING, FAILED = 0, 1, 2
+
+
 @numba_njit(fastmath=False, inline="always")
-def _more_thuente(evaluate, x, p, args, f0, g0, d0, alpha, c1, c2):
-    stepmin, stepmax, xtol = 1e-100, 1e100, 1e-14
+def _dcsrch(
+    evaluate,
+    x,
+    p,
+    args,
+    f0,
+    g0,
+    d0,
+    alpha,
+    c1,
+    c2,
+    xtol,
+    stepmin,
+    stepmax,
+    maxiter,
+    trial_x,
+):
     if not stepmin <= alpha <= stepmax:
-        return 0.0, f0, g0, False
+        return 0.0, f0, g0, FAILED, 0
 
     bracketed, stage1 = False, True
     stx, fx, dx = 0.0, f0, d0
@@ -48,26 +66,27 @@ def _more_thuente(evaluate, x, p, args, f0, g0, d0, alpha, c1, c2):
     stmin, stmax = 0.0, 5 * alpha
     width, previous_width = stepmax - stepmin, 2 * (stepmax - stepmin)
     gtest = c1 * d0
-    # SciPy's DCSRCH uses 100 iterations as a guard on adaptive step selection.
-    for _ in range(100):
+    for evaluation in range(maxiter):
+        # Like SciPy, only a non-finite step fails. A non-finite f or slope flows
+        # through _dcstep's IEEE arithmetic, which steps back inside the domain.
         if not np.isfinite(alpha):
-            break
-        f, g = evaluate(x + alpha * p, *args)
+            return 0.0, f0, g0, FAILED, evaluation
+        for j in range(x.size):
+            trial_x[j] = x[j] + alpha * p[j]
+        f, g = evaluate(trial_x, *args)
         d = np.dot(g, p)
         ftest = f0 + alpha * gtest
         if f <= ftest and abs(d) <= -c2 * d0:
-            return alpha, f, g, True
+            return alpha, f, g, CONVERGED, evaluation + 1
         if (
-            not np.isfinite(f)
-            or not np.isfinite(d)
-            or (
+            (
                 bracketed
                 and (alpha <= stmin or alpha >= stmax or stmax - stmin <= xtol * stmax)
             )
             or (alpha == stepmax and f <= ftest and d <= gtest)
             or (alpha == stepmin and (f > ftest or d >= gtest))
         ):
-            break
+            return alpha, f, g, WARNING, evaluation + 1
 
         if stage1 and f <= ftest and d >= 0:
             stage1 = False
@@ -110,7 +129,7 @@ def _more_thuente(evaluate, x, p, args, f0, g0, d0, alpha, c1, c2):
         ):
             alpha = stx
 
-    return 0.0, f0, g0, False
+    return 0.0, f0, g0, FAILED, maxiter
 
 
 @numba_njit(fastmath=False, error_model="numpy")
