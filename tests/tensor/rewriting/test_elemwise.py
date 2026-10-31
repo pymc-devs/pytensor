@@ -213,6 +213,17 @@ def test_dimshuffle_merge():
     assert check_stack_trace(result.rewr_fg, ops_to_check="all")
 
 
+def test_eager_dimshuffle_merge_makevector():
+    s = scalar("s")
+    out = MakeVector(s.type.dtype)(s).dimshuffle("x", "x").squeeze()
+    result = utt.RewriteTester([s], [out], include=None)
+    fgraph = result.rewr_fg
+    [old_out] = fgraph.outputs
+    fgraph.replace(old_out, apply_local_dimshuffle_merge(fgraph, old_out))
+    result.assert_graph(s)
+    result.assert_eval(2.0)
+
+
 def test_dimshuffle_merge_stops_at_elemwise():
     x = matrix("x")
     inp = exp(x[None])
