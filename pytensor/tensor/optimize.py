@@ -1273,6 +1273,12 @@ def root(
 
     success: TensorVariable
         Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
+
+    Notes
+    -----
+    The Numba backend runs ``hybr`` with ``jac=True`` natively, with ``tol`` and the ``xtol``, ``maxfev``, and
+    ``factor`` options. Other methods or options use SciPy. The native solver is a port of SciPy's MINPACK
+    ``hybrj``. Compilers may fuse multiply-adds differently, so results can differ from SciPy's by rounding.
     """
     packed_variables, packed_shapes, equations = pack_inputs_of_objective(
         equations, variables
