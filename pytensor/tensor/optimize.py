@@ -1276,9 +1276,10 @@ def root(
 
     Notes
     -----
-    The Numba backend runs ``hybr`` with ``jac=True`` natively, with ``tol`` and the ``xtol``, ``maxfev``, and
-    ``factor`` options. Other methods or options use SciPy. The native solver is a port of SciPy's MINPACK
-    ``hybrj``. Compilers may fuse multiply-adds differently, so results can differ from SciPy's by rounding.
+    The Numba backend runs ``hybr`` and ``lm`` with ``jac=True`` natively. ``hybr`` takes ``tol`` and the ``xtol``,
+    ``maxfev``, and ``factor`` options, and ``lm`` takes ``tol`` and the ``xtol``, ``ftol``, ``gtol``, ``maxiter``, and
+    ``factor`` options. Other methods or options use SciPy. The native solvers are ports of SciPy's MINPACK ``hybrj``
+    and ``lmder``. Compilers may fuse multiply-adds differently, so results can differ from SciPy's by rounding.
     """
     packed_variables, packed_shapes, equations = pack_inputs_of_objective(
         equations, variables

@@ -87,6 +87,7 @@ from pytensor.link.numba.dispatch.basic import numba_njit
 
 
 EPSMCH = np.finfo(np.float64).eps
+DWARF = np.finfo(np.float64).tiny
 GIANT = np.finfo(np.float64).max
 RGIANT = 2.0**63.5
 

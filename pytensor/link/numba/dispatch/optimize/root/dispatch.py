@@ -9,6 +9,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.optimize.root.hybr import _hybrj
+from pytensor.link.numba.dispatch.optimize.root.lm import _lmder
 from pytensor.tensor.optimize import RootOp
 
 
@@ -28,6 +29,20 @@ def _can_use_native_hybr(op):
         and op.optimizer_kwargs.keys() <= {"tol", "options"}
         and options.keys() <= {"xtol", "maxfev", "factor"}
         and (maxfev is None or isinstance(maxfev, int | np.integer))
+    )
+
+
+def _can_use_native_lm(op):
+    options = op.optimizer_kwargs.get("options") or {}
+    maxiter = options.get("maxiter")
+    return (
+        isinstance(op.method, str)
+        and op.method.lower() == "lm"
+        and op.jac
+        and op.inner_inputs[0].dtype in ("float32", "float64")
+        and op.optimizer_kwargs.keys() <= {"tol", "options"}
+        and options.keys() <= {"xtol", "ftol", "gtol", "maxiter", "factor"}
+        and (maxiter is None or isinstance(maxiter, int | np.integer))
     )
 
 
@@ -99,8 +114,39 @@ def _funcify_hybr(op, **kwargs):
     return root_hybr, cache_key
 
 
+def _funcify_lm(op, **kwargs):
+    options = op.optimizer_kwargs.get("options") or {}
+    tol = op.optimizer_kwargs.get("tol")
+    xtol = float(options.get("xtol", 1.49012e-08 if tol is None else tol))
+    ftol = float(options.get("ftol", 1.49012e-08))
+    gtol = float(options.get("gtol", 0.0))
+    # SciPy treats a non-positive maxiter as unset.
+    maxfev = int(options.get("maxiter", 0))
+    factor = float(options.get("factor", 100))
+    for name, value in (("xtol", xtol), ("ftol", ftol), ("gtol", gtol)):
+        if value < 0:
+            raise ValueError(f"'{name}' must be non-negative.")
+    if factor <= 0:
+        raise ValueError("'factor' must be positive.")
+
+    evaluate, inner_key = _compile_residuals(op, **kwargs)
+    x_dtype = op.inner_inputs[0].dtype
+
+    @numba_njit(fastmath=False)
+    def root_lm(x0, *args):
+        x = x0.ravel().astype(np.float64)
+        limit = maxfev if maxfev > 0 else 100 * (x.size + 1)
+        solution, info = _lmder(evaluate, x, args, ftol, xtol, gtol, limit, factor)
+        return solution.reshape(x0.shape).astype(x_dtype), 1 <= info <= 4
+
+    cache_key = _solver_cache_key(op, inner_key, "lm", xtol, ftol, gtol, maxfev, factor)
+    return root_lm, cache_key
+
+
 @register_funcify_and_cache_key(RootOp)
 def numba_funcify_RootOp(op, node, **kwargs):
     if _can_use_native_hybr(op):
         return _funcify_hybr(op, **kwargs)
+    if _can_use_native_lm(op):
+        return _funcify_lm(op, **kwargs)
     return generate_fallback_impl(op, node, **kwargs), None
