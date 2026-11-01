@@ -5,19 +5,8 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.assumptions import LOWER_TRIANGULAR, UPPER_TRIANGULAR
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.rewriting import inline_ofg_node
-from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.replace import vectorize_graph
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.tensor.linalg.decomposition.cholesky import CholeskyGrad
 from research.vjp_sparsity.prototype import jacobian_sparsity_vjp
-from research.vjp_sparsity.rewriting import (
-    infer_nonzero,
-    may_be_nonzero,
-    nonzero_rewrites_db,
-)
 from tests.sparsity.conftest import detected_and_numeric_patterns
 
 
@@ -115,35 +104,3 @@ def test_cholesky_first_column_precision():
     function = pytensor.function([matrix], pattern)
     # L[2, 0] = A[2, 0] / sqrt(A[0, 0]); A[1, 0] cannot affect it.
     assert not function(np.eye(3))[6, 3]
-
-
-def test_cholesky_grad_retained_for_analysis():
-    factor, direction = pt.matrix("factor"), pt.matrix("direction")
-    gradient = CholeskyGrad()(factor, direction)
-    fgraph = FunctionGraph(outputs=[may_be_nonzero(gradient)])
-    nonzero_rewrites_db.query(
-        RewriteDatabaseQuery(include=["basic"], position_cutoff=2)
-    ).rewrite(fgraph)
-    assert any(isinstance(node.op, CholeskyGrad) for node in fgraph.toposort())
-
-
-@pytest.mark.parametrize("lower", [True, False])
-def test_cholesky_grad_masks_do_not_loosen(lower):
-    rows, columns = pt.lvector("rows"), pt.lvector("columns")
-    triangle = LOWER_TRIANGULAR if lower else UPPER_TRIANGULAR
-    factor = triangle.assume(pt.eye(4)[rows, columns].set(1.0))
-    direction = pt.matrix("direction", shape=(4, 4))
-    gradient = CholeskyGrad(lower=lower)(factor, direction)
-    expanded = inline_ofg_node(gradient.owner)[0]
-    masks = [infer_nonzero(expanded, direction), infer_nonzero(gradient, direction)]
-    batched = vectorize_graph(
-        masks, replace={direction: pt.eye(16, dtype="bool").reshape((16, 4, 4))}
-    )
-    function = pytensor.function([rows, columns], batched)
-    indices = np.tril_indices(4, k=-1) if lower else np.triu_indices(4, k=1)
-    for bits in range(1 << len(indices[0])):
-        selected = bits & (1 << np.arange(len(indices[0]))) != 0
-        expanded_mask, semantic_mask = function(
-            indices[0][selected], indices[1][selected]
-        )
-        assert not (semantic_mask & ~expanded_mask).any()

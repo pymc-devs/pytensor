@@ -241,9 +241,6 @@ class QR(Op):
         def _H(x: ptb.TensorVariable):
             return x.conj().mT
 
-        def _copyltu(x: ptb.TensorVariable):
-            return ptb.tril(x, k=0) + _H(ptb.tril(x, k=-1))
-
         if self.mode == "raw":
             raise NotImplementedError("Gradient of qr not implemented for mode=raw")
 
@@ -292,31 +289,48 @@ class QR(Op):
 
             (dQ, dR) = (cast(ptb.TensorVariable, x) for x in new_output_grads)
 
-        if shapes_unknown or M_static >= N_static:
-            # gradient expression when m >= n
-            M = R @ _H(dR) - _H(dQ) @ Q
-            K = dQ + Q @ _copyltu(M)
-            A_bar_m_ge_n = _H(solve_triangular(R, _H(K)))
+            if self.mode == "full":
+                # Full mode only differs from economic mode when m > n, which the assert above rejects. Slicing to
+                # the economic shapes keeps the graph well typed so that the assert is what raises.
+                k = pt.minimum(m, n)
+                Q, dQ = Q[:, :k], dQ[:, :k]
+                R, dR = R[:k], dR[:k]
+
+        # The references give A_bar = [dQ + Q copyltu(M)] R^{-H}. Substituting copyltu(M) = M^H + tril(M - M^H, -1)
+        # and R^H R^{-H} = I cancels the parts of copyltu that the triangular solve would otherwise undo:
+        #   A_bar = Q dR + (I - Q Q^H) dQ R^{-H} + Q tril(M - M^H, -1) R^{-H}.
+        # The lower triangle of R is identically zero, so its cotangent is dropped first. When Q is square the
+        # projector I - Q Q^H vanishes, which the m <= n expression uses.
+        dR = ptb.triu(dR)
+
+        if shapes_unknown or M_static > N_static:
+            # gradient expression when m > n
+            QhdQ = _H(Q) @ dQ
+            M = R @ _H(dR) - _H(QhdQ)
+            inner = ptb.tril(M - _H(M), k=-1) - QhdQ
+            A_bar_m_gt_n = _H(solve_triangular(R, _H(dQ))) + Q @ (
+                dR + _H(solve_triangular(R, _H(inner)))
+            )
 
             if not shapes_unknown:
-                return [A_bar_m_ge_n]
+                return [A_bar_m_gt_n]
 
         # We have to trigger both branches if shapes_unknown is True, so this is purposefully not an elif branch
-        if shapes_unknown or M_static < N_static:
-            # gradient expression when m < n
+        if shapes_unknown or M_static <= N_static:
+            # gradient expression when m <= n
             Y = A[:, m:]
             U = R[:, :m]
             dU, dV = dR[:, :m], dR[:, m:]
             dQ_Yt_dV = dQ + Y @ _H(dV)
             M = U @ _H(dU) - _H(dQ_Yt_dV) @ Q
-            X_bar = _H(solve_triangular(U, _H(dQ_Yt_dV + Q @ _copyltu(M))))
+            X_bar = Q @ (dU + _H(solve_triangular(U, _H(ptb.tril(M - _H(M), k=-1)))))
             Y_bar = Q @ dV
-            A_bar_m_lt_n = pt.concatenate([X_bar, Y_bar], axis=1)
+            A_bar_m_le_n = pt.concatenate([X_bar, Y_bar], axis=1)
 
             if not shapes_unknown:
-                return [A_bar_m_lt_n]
+                return [A_bar_m_le_n]
 
-        return [ifelse(ptm.ge(m, n), A_bar_m_ge_n, A_bar_m_lt_n)]
+        return [ifelse(ptm.gt(m, n), A_bar_m_gt_n, A_bar_m_le_n)]
 
 
 def qr(

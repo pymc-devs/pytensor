@@ -123,14 +123,12 @@ The registered rules cover:
 | Join/Split, diagonal/block-diagonal | Corresponding boolean construction |
 | Solve | Boolean inverse reachability times RHS mask |
 | Cholesky/QR coefficients | Factor-value structure, including fill-in |
-| CholeskyGrad | Reverse column recurrence on factor/cotangent masks |
 | OpFromGraph | Expose its cloned inner expression to the same rules |
 
-Cholesky's pullback emits `CholeskyGrad`, a `SymbolicOp`/`OpFromGraph` subclass.
-Ordinary compilation inlines its numerical body, including through Blockwise.
-This database keeps the operation intact and dispatches on it directly. With
-known factor triangularity, its nonzero rule reverses the column recurrence
-using boolean factor and cotangent masks.
+The Cholesky and QR pullbacks are written without terms that cancel exactly,
+so no gradient-specific rule is needed. Each drops the cotangent of the factor's
+zero triangle, and none multiplies a triangular factor into an expression that
+is then solved against the same factor.
 
 Data-dependent indexing and sparse-dot rules remain conservative. Non-direction
 queries left unresolved after lifting become all-true masks in the final pass.
@@ -207,10 +205,8 @@ original user graph, final classification of roots, and structured directions.
 The PR cases and root-resolution regressions comprise **34
 tests**, checked in each of FAST_COMPILE, CVM, and NUMBA.
 The advanced regression cases are in [test_advanced.py](test_advanced.py).
-The combined inference suite contains **55 tests**. The precision regression
-compares the semantic gradient with its expanded body over all 64 lower- and
-upper-triangular 4×4 sparsity structures and every individual direction.
-Native tests also check normal inlining and second-order derivatives.
+The combined inference suite contains **52 tests**. Native tests check
+second-order Cholesky derivatives.
 
 See [PARITY.md](PARITY.md) for the advanced gist audit: 84 cases, 80 completed,
 no missed numerical nonzeros over 88 evaluations. All six dedicated Cholesky
@@ -220,8 +216,9 @@ exactly. Four dynamic-QR cases hit an IfElse batching error.
 The sparse batched-constant dot case improves on the gist: **64 inferred
 connections versus 120**, matching the numerical pattern at the audit point.
 A direct mask comparison confirms that ours removes 56 connections and adds
-none. The masks for `max`, data-dependent `switch`, `y - y.T`, and masked QR
-match the gist exactly.
+none. The masks for `max`, data-dependent `switch`, and `y - y.T` match the
+gist exactly. Masked QR gives 36 connections versus the gist's 44, matching the
+numerical pattern.
 
 After shape/canonicalization cleanup, representative full pattern graphs have
 14 nodes for the five-equation system, 37 for the Rosenbrock Hessian, 80 for

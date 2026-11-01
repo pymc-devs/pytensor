@@ -35,7 +35,7 @@ proof that every structural nonzero has been found for every input.
 | Tridiagonal Cholesky, 4×4 | 28 | 28 | 28 |
 | Arrow-first Cholesky, 4×4 | 36 | 36 | 36 |
 | Arrow-last Cholesky, 4×4 | 16 | 16 | 16 |
-| QR with a block-diagonal mask | 44 | 44 | 36 |
+| QR with a block-diagonal mask | 36 | 44 | 36 |
 
 Entries are inferred nonzero counts, not timings. The README's graph metrics
 are 443 versus 487 nodes over the 17 PR elementwise cases. These counts do not
@@ -63,19 +63,15 @@ The rewrite database contains producer rules for:
 
 Reuse of existing indexing and lifting rewrites has not been audited.
 
-## Cholesky gradient as a semantic operation
+## Cholesky and QR pullbacks without cancellation
 
-The native pullback emits `CholeskyGrad(L, v)`, a `SymbolicOp`/`OpFromGraph`
-subclass. Normal compilation inlines its numerical body, including when
-wrapped in Blockwise. The inference database retains it and dispatches on
-the whole operation. Given a known factor triangle, its rule uses a boolean
-reverse column recurrence on factor and cotangent masks.
-
-Tests cover normal inlining, retention during analysis, and second-order
-numerical derivatives. The semantic mask never gains a connection relative
-to the expanded body over all 64 lower- and upper-triangular 4×4 structures
-and all 16 basis directions. Dense 3×3 and 6×6 patterns contain exactly 19
-and 161 connections.
+The Cholesky pullback evaluates L^{-T} Phi(L^T dz) L^{-1} as
+(dz - L^{-T} (L^T dz - Phi(L^T dz))) L^{-1}, so the left solve never meets
+L^T. The QR pullback replaces copyltu(M) with M^H + tril(M - M^H, -1), which
+removes R^{-H} R^H and, for square Q, the vanishing projector I - Q Q^H. Both
+drop the cotangent of the factor's zero triangle. The ordinary lifting is
+then exact on the Cholesky cases and on static-shape economic QR, at first
+and second order, with no gradient-specific rule.
 
 The dedicated gist recurrence combines dependency propagation and factor
 nonzeros into one Scan. VJP inference uses separate factor-fill and gradient
@@ -93,11 +89,12 @@ estimate tensor sizes, runtime, or memory.
 
 ## Other conservative results and execution issue
 
-`max`, data-dependent `switch`, `y - y.T`, and masked QR have the same masks
+`max`, data-dependent `switch`, and `y - y.T` have the same masks
 as the gist in a separate direct comparison. They can exceed a numerical
 Jacobian's nonzeros at one point. The sparse batched-constant dot mask is a
 strict subset of the gist's mask: 64 versus 120 entries, with no numerical
-nonzeros missing at the audit point.
+nonzeros missing at the audit point. Masked QR is also tighter than the gist,
+36 versus 44, and matches the numerical reference.
 
 Four unknown-shape QR cases hit `Blockwise{IfElse}` evaluation with
 `compute_map=None`. They are recorded as errors.
@@ -129,6 +126,6 @@ PYTENSOR_FLAGS=mode=FAST_COMPILE,on_opt_error=raise python -m pytest \
   research/vjp_sparsity/test_prototype.py research/vjp_sparsity/test_advanced.py -q
 ```
 
-The focused inference suite passes **55 tests in each of FAST_COMPILE, CVM,
+The focused inference suite passes **52 tests in each of FAST_COMPILE, CVM,
 and NUMBA**. The regressions cover root resolution, structured directions,
-semantic gradient preservation, and precision of the lifted masks.
+and precision of the lifted masks.
