@@ -98,6 +98,17 @@ def test_cholesky_grad():
     )
 
 
+@pytest.mark.parametrize("lower", [True, False])
+def test_cholesky_grad_second_order(lower):
+    rng = np.random.default_rng(utt.fetch_seed())
+    value = rng.normal(size=(2, 2)).astype(config.floatX)
+    utt.verify_grad(
+        lambda x: grad(cholesky(x @ x.T, lower=lower).sum(), x),
+        [value],
+        rng=rng,
+    )
+
+
 def test_cholesky_grad_indef():
     x = matrix()
     mat = np.array([[1, 0.2], [0.2, -2]]).astype(config.floatX)

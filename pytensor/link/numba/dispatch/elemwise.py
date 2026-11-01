@@ -1531,6 +1531,26 @@ def numba_funcify_Dot(op, node, **kwargs):
     x_dtype = x.type.numpy_dtype
     y_dtype = y.type.numpy_dtype
 
+    if out.dtype == "bool":
+
+        @numba_basic.numba_njit
+        def boolean_dot(x, y, out=None):
+            if x.shape[1] != y.shape[0]:
+                raise ValueError("Incompatible dimensions for boolean dot")
+            if out is None:
+                out = np.empty((x.shape[0], y.shape[1]), dtype=np.bool_)
+            for i in range(x.shape[0]):
+                for j in range(y.shape[1]):
+                    out[i, j] = False
+                    for k in range(x.shape[1]):
+                        if x[i, k] and y[k, j]:
+                            out[i, j] = True
+                            break
+            return out
+
+        boolean_dot.handles_out = True
+        return boolean_dot, 3
+
     numba_dot_dtype = out_dtype = out.type.numpy_dtype
     if out_dtype.kind not in "fc":
         # Numba alawys returns non-integral outputs, we need to cast to float
