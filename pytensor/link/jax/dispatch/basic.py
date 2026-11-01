@@ -81,7 +81,31 @@ def jax_funcify_LazyIfElse(op, **kwargs):
     false_fn = jax_funcify(op.false_branch, **kwargs)
 
     def lazy_ifelse(cond, *args):
-        return jax.lax.cond(cond, true_fn, false_fn, *args)
+        is_tracer = [isinstance(a, jax.core.Tracer) for a in args]
+        if all(is_tracer):
+            return jax.lax.cond(cond, true_fn, false_fn, *args)
+
+        dynamic_indices = [i for i, t in enumerate(is_tracer) if t]
+        static_args = {i: a for i, a in enumerate(args) if not is_tracer[i]}
+
+        def branch_wrapper(branch_fn):
+            def wrapped(*dyn_args):
+                full_args = [None] * len(args)
+                for i, arg in static_args.items():
+                    full_args[i] = arg
+                for idx, dyn_arg in zip(dynamic_indices, dyn_args):
+                    full_args[idx] = dyn_arg
+                return branch_fn(*full_args)
+
+            return wrapped
+
+        dyn_args = [args[i] for i in dynamic_indices]
+        return jax.lax.cond(
+            cond,
+            branch_wrapper(true_fn),
+            branch_wrapper(false_fn),
+            *dyn_args,
+        )
 
     return lazy_ifelse
 
