@@ -4,9 +4,7 @@ import scipy
 
 from pytensor import function, grad
 from pytensor.configdefaults import config
-from pytensor.graph.traversal import io_toposort
 from pytensor.tensor.linalg import Cholesky, cholesky
-from pytensor.tensor.linalg.decomposition.cholesky import CholeskyGrad
 from pytensor.tensor.type import matrix
 from tests import unittest_tools as utt
 
@@ -98,24 +96,6 @@ def test_cholesky_grad():
         abs_tol=0.05,
         rel_tol=0.05,
     )
-
-
-@pytest.mark.parametrize("lower", [True, False])
-def test_cholesky_grad_symbolic_and_inline(lower):
-    x = matrix("x")
-    gradient = grad(cholesky(x, lower=lower).sum(), x)
-    assert any(
-        isinstance(getattr(node.op, "core_op", node.op), CholeskyGrad)
-        for node in io_toposort([], [gradient])
-    )
-    function_grad = function([x], gradient)
-    assert not any(
-        isinstance(getattr(node.op, "core_op", node.op), CholeskyGrad)
-        for node in function_grad.maker.fgraph.toposort()
-    )
-    triangle = np.tril if lower else np.triu
-    expected = triangle(np.ones((3, 3)), k=-1 if lower else 1) + np.eye(3) / 2
-    np.testing.assert_allclose(function_grad(np.eye(3).astype(x.dtype)), expected)
 
 
 @pytest.mark.parametrize("lower", [True, False])

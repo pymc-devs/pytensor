@@ -7,7 +7,6 @@ import scipy.sparse
 
 import pytensor.tensor as pt
 from pytensor import scalar as ps
-from pytensor.assumptions import LOWER_TRIANGULAR, UPPER_TRIANGULAR, check_assumption
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -33,7 +32,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
-from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, CholeskyGrad
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve
@@ -341,40 +340,6 @@ def local_nonzero_cholesky(fgraph, node):
     )
     result = pt.concatenate([initial[None], filled], axis=0)[-1]
     return _triangle_mask(result, op.lower)
-
-
-@register_nonzero([CholeskyGrad])
-def local_nonzero_cholesky_grad(fgraph, node):
-    """Reverse the column recurrence using factor and cotangent value masks."""
-    triangle = LOWER_TRIANGULAR if node.op.lower else UPPER_TRIANGULAR
-    if not check_assumption(fgraph, node.inputs[0], triangle):
-        return None
-    factor, direction = map(may_be_nonzero, node.inputs)
-    if not node.op.lower:
-        factor, direction = factor.T, direction.T
-    size = factor.shape[0]
-    rows = pt.arange(size)
-    initial = _triangle_mask(direction, lower=True)
-
-    def column(j, adjoint, factor):
-        before, after = rows < j, rows > j
-        off_diagonal = adjoint[:, j] & after
-        diagonal = adjoint[j, j] | pt.any(off_diagonal & factor[:, j])
-        adjoint |= off_diagonal[:, None] & factor[j][None, :] & before[None, :]
-        row_update = pt.any(off_diagonal[:, None] & factor, axis=0)
-        row_update |= diagonal & factor[j]
-        adjoint = adjoint[j].set(adjoint[j] | (row_update & before))
-        return adjoint[:, j].set(off_diagonal | (pt.eq(rows, j) & diagonal))
-
-    adjoints = scan(
-        column,
-        sequences=rows[::-1],
-        outputs_info=initial,
-        non_sequences=[factor],
-        return_updates=False,
-    )
-    result = pt.concatenate([initial[None], adjoints], axis=0)[-1]
-    return result if node.op.lower else result.T
 
 
 @register_nonzero([QR, OpPattern(Blockwise, core_op=OpPattern(QR))])

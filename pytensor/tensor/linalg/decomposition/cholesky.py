@@ -3,7 +3,6 @@ from typing import Literal
 
 import numpy as np
 
-from pytensor.compile.builders import SymbolicOp
 from pytensor.graph import Apply, Op
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import TensorLike
@@ -14,42 +13,6 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import tensor
-
-
-class CholeskyGrad(SymbolicOp):
-    """Cholesky pullback from a factor and its cotangent.
-
-    The symbolic body is inlined during ordinary compilation. Graph analyses
-    can retain this operation and register a rule for the complete update.
-    """
-
-    __props__ = ("lower",)
-    gufunc_signature = "(m,m),(m,m)->(m,m)"
-    inline = True
-    lower = True
-
-    @staticmethod
-    def filter_inputs(*inputs):
-        return tuple(as_tensor_variable(value) for value in inputs)
-
-    def build_inner_graph(self, chol_x, dz):
-        from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
-
-        if chol_x.ndim != 2 or dz.ndim != 2:
-            raise TypeError("CholeskyGrad expects a matrix factor and cotangent")
-        if not self.lower:
-            chol_x = chol_x.T
-            dz = dz.T
-
-        product = chol_x.T.dot(dz)
-        projected = ptb.tril(product) - ptb.diag(ptb.diagonal(product) / 2.0)
-        solve_upper = SolveTriangular(lower=False, b_ndim=2)
-        s = solve_upper(chol_x.T, solve_upper(chol_x.T, projected.T).T)
-        triangle = ptb.tril if self.lower else ptb.triu
-        return [triangle(s + s.T) - ptb.diag(ptb.diagonal(s))]
-
-    def infer_shape(self, node, shapes):
-        return [shapes[0]]
 
 
 class Cholesky(Op):
@@ -132,7 +95,32 @@ class Cholesky(Op):
 
         """
 
-        return [CholeskyGrad(lower=self.lower)(outputs[0], gradients[0])]
+        from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
+
+        dz = gradients[0]
+        chol_x = outputs[0]
+
+        # deal with upper triangular by converting to lower triangular
+        if not self.lower:
+            chol_x = chol_x.T
+            dz = dz.T
+
+        # The upper triangle of the factor is identically zero, so its cotangent is dropped. The reference
+        # expression L^{-T} Phi(L^T dz) L^{-1}, with Phi keeping the lower triangle and halving the diagonal, is
+        # evaluated as (dz - L^{-T} (L^T dz - Phi(L^T dz))) L^{-1}. The left solve against L^T then never
+        # meets L^T itself, so the result is not formed from terms that cancel.
+        dz = ptb.tril(dz)
+        product = chol_x.T.dot(dz)
+        upper_part = ptb.triu(product, k=1) + ptb.diag(ptb.diagonal(product) / 2.0)
+        solve_upper = SolveTriangular(lower=False, b_ndim=2)
+        s = solve_upper(chol_x.T, (dz - solve_upper(chol_x.T, upper_part)).T).T
+
+        if self.lower:
+            grad = ptb.tril(s + s.T) - ptb.diag(ptb.diagonal(s))
+        else:
+            grad = ptb.triu(s + s.T) - ptb.diag(ptb.diagonal(s))
+
+        return [grad]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
