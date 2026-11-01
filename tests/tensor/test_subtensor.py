@@ -103,6 +103,14 @@ def test_as_index_literal():
     res = as_index_literal(np.newaxis)
     assert res is np.newaxis
 
+    res = as_index_literal(np.int8(0))
+    assert res == 0 and type(res) is int
+
+    import pytensor.scalar.basic as ps
+
+    res = as_index_literal(ps.ScalarConstant(ps.int8, np.int8(5)))
+    assert res == 5 and type(res) is int
+
 
 class TestProvablyPositive:
     @pytest.mark.parametrize(

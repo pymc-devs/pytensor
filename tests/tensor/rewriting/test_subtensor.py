@@ -12,6 +12,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
 from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
@@ -1219,6 +1220,28 @@ class TestLocalSubtensorMerge:
         rewritten4 = rewrite_graph(z4, include=("canonicalize",))
         expected4 = x4[y:, 1:4, w:, 2:6][1:, :, 2:]
         utt.assert_equal_computations([rewritten4], [expected4])
+
+    def test_merge_slice_int8_scalar_overflow(self):
+        # Regression test for #2567:
+        # Merging a slice with length > 127 and a narrow int8 index scalar must not overflow.
+        value = vector("value", shape=(200,))
+        first = rewrite_graph(pt.take(value, 0, axis=0), include=("canonicalize",))
+
+        x = vector("x", shape=(201,))
+        first = graph_replace(first, {value: x[1:201]})
+        rewritten = rewrite_graph(first, include=("canonicalize",))
+        expected = x[1]
+        utt.assert_equal_computations([rewritten], [expected])
+
+        fn = function([x], first)
+        val = np.arange(201, dtype=np.float64)
+        np.testing.assert_allclose(fn(val), val[1])
+
+        # Negative step slice (reversed) with int8 index
+        rev = x[::-1]
+        idx0 = first.owner.inputs[1]
+        fn_rev = function([x], rev[idx0])
+        np.testing.assert_allclose(fn_rev(val), val[-1])
 
     def test_scalar6(self):
         # General case with one slice and one index
