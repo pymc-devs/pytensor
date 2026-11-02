@@ -301,6 +301,18 @@ def register_constant_inference(key: AssumptionKey, fn: ConstantInferFn) -> None
     CONSTANT_INFER_REGISTRY[key] = fn
 
 
+# Maps a key to a function that infers it from a variable's type alone, such as a
+# matrix with static shape (1, 1) being diagonal. AssumptionFeature consults this
+# before the owner or constant data, since a fact the type settles needs no more.
+TypeInferFn = Callable[[Variable], FactState]
+_TYPE_INFER_REGISTRY: dict[AssumptionKey, TypeInferFn] = {}
+
+
+def _register_type_inference(key: AssumptionKey, fn: TypeInferFn) -> None:
+    """Register *fn* as the type-level inference for *key*."""
+    _TYPE_INFER_REGISTRY[key] = fn
+
+
 # Maps (key, Op type) to rules that read a fact about a variable off a node consuming it,
 # such as ``solve(a, b, assume_a="pos")`` promising that ``a`` is positive definite. A rule
 # is called as ``fn(key, op, node, input_index)`` and returns the state of that input.
@@ -535,7 +547,8 @@ class AssumptionFeature(Feature):
     def _compute(self, var: Any, key: AssumptionKey) -> FactState:
         """Infer the fact state for ``(var, key)``, caching ancestors inputs-first.
 
-        When the owner says nothing, asks the clients of ``var`` what they promise about it.
+        Consults the type-level rule first, then the owner or literal constant data.
+        When those say nothing, asks the clients of ``var`` what they promise about it.
         Then walks the ``IMPLIES`` graph in both directions:
           - Forward: a stronger key being TRUE makes this (weaker) key TRUE.
           - Contrapositive: a weaker key being FALSE makes this (stronger) key FALSE.
@@ -561,17 +574,22 @@ class AssumptionFeature(Feature):
             self.cache[(v, key)] = FactState.UNKNOWN
             self._var_to_keys.setdefault(v, set()).add(key)
 
+            type_rule = _TYPE_INFER_REGISTRY.get(key)
+            state = FactState.UNKNOWN if type_rule is None else type_rule(v)
+
             owner = getattr(v, "owner", None)
-            if owner is not None:
+            if state is FactState.UNKNOWN and owner is not None:
                 input_states = [self.get(inp, key) for inp in owner.inputs]
                 output_states = infer_assumption_for_node(
                     key, owner.op, self, self.fgraph, owner, input_states
                 )
                 state = output_states[owner.outputs.index(v)]
-            elif isinstance(v, TensorConstant) and key in CONSTANT_INFER_REGISTRY:
+            elif (
+                state is FactState.UNKNOWN
+                and isinstance(v, TensorConstant)
+                and key in CONSTANT_INFER_REGISTRY
+            ):
                 state = CONSTANT_INFER_REGISTRY[key](v)
-            else:
-                state = FactState.UNKNOWN
 
             if state is FactState.UNKNOWN and key in CLIENT_INFER_KEYS:
                 for client, input_index in self.fgraph.clients.get(v, ()):
