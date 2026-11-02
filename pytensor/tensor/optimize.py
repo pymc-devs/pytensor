@@ -1,5 +1,6 @@
 import logging
-from collections.abc import Sequence
+import warnings
+from collections.abc import Callable, Sequence
 from copy import copy
 from functools import singledispatch
 
@@ -46,6 +47,27 @@ optimize = None
 
 
 _log = logging.getLogger(__name__)
+
+# scipy's messages for failures caused by runtime inputs (bracket, bounds, initial
+# point, objective values). perform reports these as a NaN solution and a failed flag,
+# so one bad point does not stop the computation. Errors from static options still
+# raise.
+_RUNTIME_FAILURE_MESSAGES = (
+    "f(a) and f(b) must have different signs",
+    "Invalid function value",
+    "a is not finite",
+    "b is not finite",
+    "are not an interval",
+    "x1 and x0 must be different",
+    "Bracketing values",
+    "Bracketing interval must be length 2 or 3",
+    "No valid bracket was found",
+    "bounds must have two elements",
+    "Optimization bounds must be finite",
+    "The lower bound exceeds the upper bound",
+)
+
+_BRACKETING_ROOT_METHODS = ("bisect", "brentq", "brenth", "ridder", "toms748")
 
 
 class LRUCache1:
@@ -196,16 +218,49 @@ def _tensorize_scalar_parameters(
 
 def _symbolic_bounds(
     x: TensorVariable, optimizer_kwargs: dict | None, **bounds: TensorLike | None
-) -> tuple[tuple[str, ...], list[TensorVariable]]:
-    """Return the names of the given ``bounds`` and their values as vectors of ``x.dtype``."""
-    if clash := sorted(set(bounds) & set(optimizer_kwargs or {})):
-        raise ValueError(
-            f"Pass {clash} as arguments of the function, not in `optimizer_kwargs`"
+) -> tuple[dict, tuple[str, ...], list[TensorVariable]]:
+    """Return ``optimizer_kwargs`` without the bounds, the names of the given bounds, and their values as vectors
+    of ``x.dtype``."""
+    optimizer_kwargs = dict(optimizer_kwargs or {})
+    for name in bounds.keys() & optimizer_kwargs.keys():
+        if bounds[name] is not None:
+            raise ValueError(
+                f"Cannot pass `{name}` both as an argument and in `optimizer_kwargs`"
+            )
+        warnings.warn(
+            f"Passing `{name}` in `optimizer_kwargs` is deprecated. "
+            f"Pass it as the `{name}` argument instead.",
+            FutureWarning,
+            stacklevel=3,
         )
+        bounds[name] = optimizer_kwargs.pop(name)
+
     given = {name: value for name, value in bounds.items() if value is not None}
-    return tuple(given), [
-        cast(as_tensor_variable(value, ndim=1), x.dtype) for value in given.values()
-    ]
+    return (
+        optimizer_kwargs,
+        tuple(given),
+        [cast(as_tensor_variable(value, ndim=1), x.dtype) for value in given.values()],
+    )
+
+
+def _bounded_absolute_tolerance(method: str, optimizer_kwargs: dict) -> dict:
+    """Move ``tol`` into ``options["xatol"]`` for the bounded method, warning as scipy does."""
+    options = optimizer_kwargs.get("options") or {}
+    if method != "bounded" or "tol" not in optimizer_kwargs or "xatol" in options:
+        return optimizer_kwargs
+    warnings.warn(
+        "Method 'bounded' does not support relative tolerance in x; "
+        "defaulting to absolute tolerance.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+    optimizer_kwargs = dict(optimizer_kwargs)
+    optimizer_kwargs["options"] = {**options, "xatol": optimizer_kwargs.pop("tol")}
+    return optimizer_kwargs
+
+
+def _is_runtime_failure(error: Exception) -> bool:
+    return any(message in str(error) for message in _RUNTIME_FAILURE_MESSAGES)
 
 
 class ScipyWrapperOp(HasInnerFunction, Op):
@@ -663,13 +718,20 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         # the args of the objective function), but it is not used in the optimization.
         (x0, *args), bound_inputs = self.split_inputs(inputs)
 
-        res = optimize.minimize_scalar(
-            fun=f.value,
-            args=tuple(args),
-            method=self.method,
-            **self.bound_values(bound_inputs),
-            **self.optimizer_kwargs,
-        )
+        try:
+            res = optimize.minimize_scalar(
+                fun=f.value,
+                args=tuple(args),
+                method=self.method,
+                **self.bound_values(bound_inputs),
+                **self.optimizer_kwargs,
+            )
+        except (ValueError, RuntimeError) as e:
+            if not _is_runtime_failure(error=e):
+                raise
+            outputs[0][0] = np.array(np.nan, dtype=x0.dtype)
+            outputs[1][0] = np.bool_(False)
+            return
 
         outputs[0][0] = np.array(res.x, dtype=x0.dtype)
         outputs[1][0] = np.bool_(res.success)
@@ -678,7 +740,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
 def minimize_scalar(
     objective: TensorVariable,
     x: TensorVariable,
-    method: str = "brent",
+    method: str | Callable = "brent",
     bracket: TensorLike | None = None,
     bounds: TensorLike | None = None,
     optimizer_kwargs: dict | None = None,
@@ -714,10 +776,15 @@ def minimize_scalar(
         Symbolic boolean flag indicating whether the minimization routine reported convergence to a minimum
         value, based on the requested convergence criteria.
     """
+    if isinstance(method, str):
+        method = method.lower()
     args = _find_optimization_parameters(objective, x)
     objective, args, outer_args = _tensorize_scalar_parameters(objective, args)
-    bound_kwargs, bound_inputs = _symbolic_bounds(
-        x, optimizer_kwargs, bracket=bracket, bounds=bounds
+    optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
+        x=x, optimizer_kwargs=optimizer_kwargs, bracket=bracket, bounds=bounds
+    )
+    optimizer_kwargs = _bounded_absolute_tolerance(
+        method=method, optimizer_kwargs=optimizer_kwargs
     )
 
     minimize_scalar_op = MinimizeScalarOp(
@@ -1017,19 +1084,35 @@ class RootScalarOp(ScipyScalarWrapperOp):
         f.clear_cache()
 
         (variables, *args), bound_inputs = self.split_inputs(inputs)
+        bounds = self.bound_values(bound_inputs)
+        if (
+            self.method in _BRACKETING_ROOT_METHODS
+            and "bracket" in bounds
+            and len(bounds["bracket"]) < 2
+        ):
+            outputs[0][0] = np.array(np.nan, dtype=variables.dtype)
+            outputs[1][0] = np.bool_(False)
+            return
 
-        res = optimize.root_scalar(
-            f=f.value,
-            fprime=f.grad if self.jac else None,
-            fprime2=f.hess if self.hess else None,
-            x0=variables,
-            args=tuple(args),
-            method=self.method,
-            **self.bound_values(bound_inputs),
-            **self.optimizer_kwargs,
-        )
+        try:
+            res = optimize.root_scalar(
+                f=f.value,
+                fprime=f.grad if self.jac else None,
+                fprime2=f.hess if self.hess else None,
+                x0=variables,
+                args=tuple(args),
+                method=self.method,
+                **bounds,
+                **self.optimizer_kwargs,
+            )
+        except (ValueError, RuntimeError) as e:
+            if not _is_runtime_failure(error=e):
+                raise
+            outputs[0][0] = np.array(np.nan, dtype=variables.dtype)
+            outputs[1][0] = np.bool_(False)
+            return
 
-        outputs[0][0] = np.array(res.root)
+        outputs[0][0] = np.array(res.root, dtype=variables.dtype)
         outputs[1][0] = np.bool_(res.converged)
 
 
@@ -1077,10 +1160,11 @@ def root_scalar(
     success: TensorVariable
         Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
     """
+    method = method.lower()
     args = _find_optimization_parameters(equation, variable)
     equation, args, outer_args = _tensorize_scalar_parameters(equation, args)
-    bound_kwargs, bound_inputs = _symbolic_bounds(
-        variable, optimizer_kwargs, bracket=bracket
+    optimizer_kwargs, bound_kwargs, bound_inputs = _symbolic_bounds(
+        x=variable, optimizer_kwargs=optimizer_kwargs, bracket=bracket
     )
 
     root_scalar_op = RootScalarOp(
