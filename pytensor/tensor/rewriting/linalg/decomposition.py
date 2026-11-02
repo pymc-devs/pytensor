@@ -90,9 +90,6 @@ def cholesky_of_diag(fgraph, node):
     """cholesky(D) -> diag(sqrt(diagonal(D))) for diagonal D."""
     [X] = node.inputs
 
-    if all(X.type.broadcastable[-2:]):
-        return [pt.sqrt(X)]
-
     if not check_assumption(fgraph, X, DIAGONAL):
         return None
 

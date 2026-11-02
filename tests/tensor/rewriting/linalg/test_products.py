@@ -373,6 +373,14 @@ def test_sqrtm_pd_gradient_uses_one_eigh():
     result.assert_eval(A @ A.T + np.eye(4))
 
 
+@pytest.mark.parametrize("shape", [(1, 1), (3, 1, 1)], ids=["matrix", "batched"])
+def test_expm_of_static_unit_matrix(shape):
+    x = pt.tensor("x", shape=shape)
+    result = RewriteTester([x], [pt.linalg.expm(x)])
+    result.assert_graph(pt.exp(x))
+    result.assert_eval(np.full(shape, 0.5))
+
+
 def test_kron_of_diagonal_to_diagonal():
     da = pt.tensor("da", shape=(3, 3))
     db = pt.tensor("db", shape=(4, 4))

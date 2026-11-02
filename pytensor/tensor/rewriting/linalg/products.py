@@ -224,9 +224,6 @@ def expm_of_diag(fgraph, node):
     """expm(D) -> diag(exp(diagonal(D))) for diagonal D."""
     [X] = node.inputs
 
-    if all(X.type.broadcastable[-2:]):
-        return [pt.exp(X)]
-
     if not check_assumption(fgraph, X, DIAGONAL):
         return None
 

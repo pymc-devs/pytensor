@@ -316,6 +316,14 @@ def test_cholesky_of_diag_not_applied():
     assert any(isinstance(node.op, Cholesky) for node in nodes)
 
 
+@pytest.mark.parametrize("shape", [(1, 1), (3, 1, 1)], ids=["matrix", "batched"])
+def test_cholesky_of_static_unit_matrix(shape):
+    x = pt.tensor("x", shape=shape)
+    result = RewriteTester([x], [cholesky(x)])
+    result.assert_graph(pt.sqrt(x))
+    result.assert_eval(np.full(shape, 4.0))
+
+
 @pytest.mark.parametrize(
     "make_diag",
     [
