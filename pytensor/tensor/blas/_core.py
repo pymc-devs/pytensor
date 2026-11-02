@@ -48,7 +48,7 @@ def must_initialize_y_gemv():
 must_initialize_y_gemv._result = None  # type: ignore
 
 
-def ldflags(libs=True, flags=False, libs_dir=False, include_dir=False):
+def ldflags(libs=True, flags=False, libs_dir=False, include_dir=False) -> list[str]:
     """Extract a list of compilation flags from config.blas__ldflags.
 
     Depending on the options, different type of flags will be kept.

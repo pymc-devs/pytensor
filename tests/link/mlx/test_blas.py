@@ -19,7 +19,7 @@ def test_mlx_Gemv_static_scales():
     A = pt.matrix("A", dtype=config.floatX)
     x = pt.vector("x", dtype=config.floatX)
 
-    out = pt_blas.gemv_no_inplace(
+    out = pt_blas.Gemv(inplace=False)(
         y,
         np.asarray(0.5, dtype=config.floatX),
         A,
@@ -46,7 +46,7 @@ def test_mlx_Gemv_symbolic_scales():
     alpha = pt.scalar("alpha", dtype=config.floatX)
     beta = pt.scalar("beta", dtype=config.floatX)
 
-    out = pt_blas.gemv_no_inplace(y, alpha, A, x, beta)
+    out = pt_blas.Gemv(inplace=False)(y, alpha, A, x, beta)
 
     rng = np.random.default_rng(sum(map(ord, "test_mlx_Gemv_symbolic_scales")))
     y_test = rng.normal(size=(3,)).astype(config.floatX)
