@@ -1,3 +1,5 @@
+from functools import partial, reduce
+
 import numpy as np
 import pytest
 import scipy.linalg
@@ -16,6 +18,7 @@ from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
@@ -686,6 +689,407 @@ def test_block_diag_solve_pushdown_both_sides_block_diag():
         scipy.linalg.block_diag(B1_v, B2_v),
     )
     assert_allclose(f(A1_v, A2_v, B1_v, B2_v), expected, atol=1e-10)
+
+
+KRON_SOLVE_PASSES = ["canonicalize", "stabilize"]
+
+
+def _vec_solve(A, B, b, b_ndim, solve_factor):
+    """Solve ``kron(A, B) x = b`` one factor at a time."""
+    m, p = A.type.shape[-1], B.type.shape[-1]
+    batch_shape = b.type.shape[: b.type.ndim - b_ndim]
+    if b_ndim == 1:
+        Z = solve_factor(A, b.reshape((*batch_shape, m, p)))
+        return solve_factor(B, Z.mT).mT.reshape((*batch_shape, m * p))
+    k = b.type.shape[-1]
+    Z = solve_factor(A, b.reshape((*batch_shape, m, p * k)))
+    Z = Z.reshape((*batch_shape, m, p, k))
+    return solve_factor(B, Z).reshape((*batch_shape, m * p, k))
+
+
+class TestSolveOfKron:
+    @pytest.mark.parametrize(
+        "assume_a, transposed",
+        [
+            ("gen", False),
+            ("gen", True),
+            ("lower triangular", False),
+            ("lower triangular", True),
+            ("pos", False),
+        ],
+        ids=["gen-plain", "gen-transposed", "lower-tri", "lower-tri-transposed", "pos"],
+    )
+    @pytest.mark.parametrize(
+        "b_shape, b_ndim",
+        [((12,), 1), ((12, 5), 2), ((5, 12), 1)],
+        ids=["vector_b", "matrix_b", "batched_vector_b"],
+    )
+    def test_solve_of_kron(self, b_shape, b_ndim, assume_a, transposed):
+        rng = np.random.default_rng(0)
+        m, p = 4, 3
+        A_raw = pt.dmatrix("A", shape=(m, m))
+        B_raw = pt.dmatrix("B", shape=(p, p))
+        b = pt.tensor("b", shape=b_shape, dtype="float64")
+
+        solve_factor = partial(solve, b_ndim=2)
+        if assume_a == "lower triangular":
+            # kron(U1, U2).mT is lower triangular, so the transposed case needs upper
+            # triangular factors.
+            if transposed:
+                A = assume(pt.triu(A_raw), upper_triangular=True)
+                B = assume(pt.triu(B_raw), upper_triangular=True)
+            else:
+                A = assume(pt.tril(A_raw), lower_triangular=True)
+                B = assume(pt.tril(B_raw), lower_triangular=True)
+            solve_factor = partial(solve_triangular, lower=True, b_ndim=2)
+        elif assume_a == "pos":
+            A = assume(A_raw @ A_raw.mT + pt.eye(m), positive_definite=True)
+            B = assume(B_raw @ B_raw.mT + pt.eye(p), positive_definite=True)
+            solve_factor = partial(solve, assume_a="pos", b_ndim=2)
+        else:
+            A, B = A_raw, B_raw
+
+        K = pt.linalg.kron(A, B)
+        if transposed:
+            K, A, B = K.mT, A.mT, B.mT
+        out = solve(K, b, assume_a=assume_a, b_ndim=b_ndim)
+        result = RewriteTester([A_raw, B_raw, b], [out], include=KRON_SOLVE_PASSES)
+
+        expected = _vec_solve(A, B, b, b_ndim, solve_factor)
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+        result.assert_eval(
+            rng.normal(size=(m, m)), rng.normal(size=(p, p)), rng.normal(size=b_shape)
+        )
+
+    def test_n_way_kron(self):
+        rng = np.random.default_rng(3)
+        m, p, q = 3, 2, 4
+        A = pt.dmatrix("A", shape=(m, m))
+        B = pt.dmatrix("B", shape=(p, p))
+        C = pt.dmatrix("C", shape=(q, q))
+        b = pt.dvector("b", shape=(m * p * q,))
+
+        out = solve(pt.linalg.kron(pt.linalg.kron(A, B), C), b)
+        result = RewriteTester([A, B, C, b], [out], include=KRON_SOLVE_PASSES)
+
+        solve_factor = partial(solve, b_ndim=2)
+        Z = _vec_solve(A, B, b.reshape((m * p, q)), 2, solve_factor)
+        expected = solve_factor(C, Z.mT).mT.reshape((m * p * q,))
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+        result.assert_eval(
+            rng.normal(size=(m, m)),
+            rng.normal(size=(p, p)),
+            rng.normal(size=(q, q)),
+            rng.normal(size=(m * p * q,)),
+        )
+
+    def test_cho_solve_of_kron(self):
+        rng = np.random.default_rng(1)
+        m, p = 3, 2
+        A_raw = pt.dmatrix("A", shape=(m, m))
+        B_raw = pt.dmatrix("B", shape=(p, p))
+        b = pt.dvector("b", shape=(m * p,))
+        L_A = assume(pt.tril(A_raw), lower_triangular=True)
+        L_B = assume(pt.tril(B_raw), lower_triangular=True)
+
+        out = cho_solve((pt.linalg.kron(L_A, L_B), True), b)
+        result = RewriteTester([A_raw, B_raw, b], [out], include=KRON_SOLVE_PASSES)
+
+        def solve_factor(L, y):
+            return cho_solve((L, True), y, b_ndim=2)
+
+        expected = _vec_solve(L_A, L_B, b, 1, solve_factor)
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+        result.assert_eval(
+            rng.normal(size=(m, m)) + 3 * np.eye(m),
+            rng.normal(size=(p, p)) + 3 * np.eye(p),
+            rng.normal(size=(m * p,)),
+        )
+
+    def test_pos_assume_a_kept_on_factors(self):
+        """Unannotated factors keep assume_a="pos", so an indefinite kron still gives NaN."""
+        m, p = 3, 2
+        A = pt.dmatrix("A", shape=(m, m))
+        B = pt.dmatrix("B", shape=(p, p))
+        b = pt.dvector("b", shape=(m * p,))
+
+        out = solve(pt.linalg.kron(A, B), b, assume_a="pos")
+        result = RewriteTester([A, B, b], [out], include=KRON_SOLVE_PASSES)
+        expected = _vec_solve(A, B, b, 1, partial(solve, assume_a="pos", b_ndim=2))
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+
+    @pytest.mark.parametrize(
+        "make_factor, make_solve",
+        [
+            pytest.param(
+                lambda X: assume(pt.tril(X), lower_triangular=True),
+                partial(solve_triangular, lower=True, unit_diagonal=True),
+                id="unit_diagonal",
+            ),
+            pytest.param(
+                lambda X: X,
+                partial(solve_triangular, lower=True),
+                id="solve_triangular_full_factors",
+            ),
+            pytest.param(
+                lambda X: X,
+                lambda K, b: cho_solve((K, True), b),
+                id="cho_solve_full_factors",
+            ),
+            pytest.param(
+                lambda X: assume(pt.tril(X), lower_triangular=True),
+                lambda K, b: solve_triangular(K.mT, b, lower=True),
+                id="lower_factors_transposed",
+            ),
+            pytest.param(
+                lambda X: X,
+                partial(solve, assume_a="tridiagonal"),
+                id="tridiagonal",
+            ),
+        ],
+    )
+    def test_does_not_fire(self, make_factor, make_solve):
+        A = pt.dmatrix("A", shape=(3, 3))
+        B = pt.dmatrix("B", shape=(2, 2))
+        b = pt.dvector("b", shape=(6,))
+
+        def build():
+            return make_solve(pt.linalg.kron(make_factor(A), make_factor(B)), b)
+
+        result = RewriteTester([A, B, b], [build()], include=KRON_SOLVE_PASSES)
+        expected = rewrite_graph(
+            build(), include=KRON_SOLVE_PASSES, exclude=("solve_of_kron",)
+        )
+        result.assert_graph(expected)
+
+    def test_static_non_square_factors_not_rewritten(self):
+        A = pt.dmatrix("A", shape=(2, 4))
+        B = pt.dmatrix("B", shape=(4, 2))
+        b = pt.dvector("b", shape=(8,))
+
+        out = solve(pt.linalg.kron(A, B), b)
+        result = RewriteTester([A, B, b], [out], include=KRON_SOLVE_PASSES)
+        expected = rewrite_graph(
+            solve(pt.linalg.kron(A, B), b),
+            include=KRON_SOLVE_PASSES,
+            exclude=("solve_of_kron",),
+        )
+        result.assert_graph(expected)
+
+
+def _kron_plus_scaled_eye_solve(Ks, c, b, b_ndim, positive_definite):
+    """Solve ``(kron(*Ks) + c * I) x = b`` from the eigendecomposition of each K_i."""
+    ds, Qs = zip(*(eigh(K) for K in Ks), strict=True)
+    Q = reduce(pt.linalg.kron, Qs)
+    d = reduce(lambda x, y: pt.outer(x, y).ravel(), ds) + c
+    b_col = b[..., None] if b_ndim == 1 else b
+    x = Q @ ((Q.mT @ b_col) / d[..., :, None])
+    if b_ndim == 1:
+        x = x[..., 0]
+    if positive_definite:
+        x = pt.switch(pt.all(d > 0), x, np.nan)
+    return x
+
+
+class TestSolveOfKronPlusDiagNoise:
+    @pytest.mark.parametrize(
+        "dims, b_shape, b_ndim, noise_first",
+        [
+            pytest.param((4, 3), (12,), 1, False, id="vector_b"),
+            pytest.param((4, 3), (12, 5), 2, False, id="matrix_b"),
+            pytest.param((4, 3), (2, 12), 1, False, id="batched_vector_b"),
+            pytest.param((4, 3), (12,), 1, True, id="noise_first"),
+            pytest.param((3, 2, 4), (24,), 1, False, id="n_way"),
+        ],
+    )
+    def test_solve(self, dims, b_shape, b_ndim, noise_first):
+        rng = np.random.default_rng(0)
+        N = int(np.prod(dims))
+        Ks = [pt.dmatrix(f"K{i}", shape=(n, n)) for i, n in enumerate(dims)]
+        sigma = pt.dscalar("sigma")
+        b = pt.tensor("b", shape=b_shape, dtype="float64")
+
+        kron = reduce(pt.linalg.kron, [assume(K, symmetric=True) for K in Ks])
+        noise = sigma**2 * pt.eye(N)
+        noisy = noise + kron if noise_first else kron + noise
+        out = solve(noisy, b, assume_a="pos", b_ndim=b_ndim)
+        result = RewriteTester([*Ks, sigma, b], [out], include=KRON_SOLVE_PASSES)
+
+        expected = _kron_plus_scaled_eye_solve(
+            Ks, sigma**2, b, b_ndim, positive_definite=True
+        )
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+
+        def random_pd(n):
+            a = rng.normal(size=(n, n))
+            return a @ a.T + np.eye(n)
+
+        result.assert_eval(*(random_pd(n) for n in dims), 0.7, rng.normal(size=b_shape))
+
+    def test_pos_solve_of_indefinite_matrix_is_nan(self):
+        rng = np.random.default_rng(5)
+        m, p = 3, 2
+        K1 = pt.dmatrix("K1", shape=(m, m))
+        K2 = pt.dmatrix("K2", shape=(p, p))
+        b = pt.dvector("b", shape=(m * p,))
+
+        kron = pt.linalg.kron(assume(K1, symmetric=True), assume(K2, symmetric=True))
+        out = solve(kron + 0.1 * pt.eye(m * p), b, assume_a="pos")
+        result = RewriteTester([K1, K2, b], [out], include=KRON_SOLVE_PASSES)
+
+        indefinite = np.diag([2.0, -1.0, 3.0])
+        [x] = result.rewr_fn(indefinite, np.eye(p), rng.normal(size=m * p))
+        assert x.shape == (m * p,)
+        assert np.isnan(x).all()
+
+    def test_broadcast_kron_not_rewritten(self):
+        K1 = pt.dmatrix("K1", shape=(1, 1))
+        K2 = pt.dmatrix("K2", shape=(1, 1))
+        s = pt.dscalar("s")
+        b = pt.dvector("b", shape=(4,))
+
+        def build():
+            kron = pt.linalg.kron(
+                assume(K1, symmetric=True), assume(K2, symmetric=True)
+            )
+            return solve(kron + s * pt.eye(4), b)
+
+        result = RewriteTester([K1, K2, s, b], [build()], include=KRON_SOLVE_PASSES)
+        expected = rewrite_graph(
+            build(),
+            include=KRON_SOLVE_PASSES,
+            exclude=("solve_of_kron_plus_diag_noise",),
+        )
+        result.assert_graph(expected)
+
+    def test_mixed_precision(self):
+        rng = np.random.default_rng(2)
+        m, p = 3, 2
+        Ks = [pt.fmatrix(f"K{i}", shape=(n, n)) for i, n in enumerate((m, p))]
+        sigma = pt.fscalar("sigma")
+        b = pt.fvector("b", shape=(m * p,))
+
+        kron = pt.linalg.kron(*(assume(K, symmetric=True) for K in Ks))
+        out = solve(kron + sigma**2 * pt.eye(m * p, dtype="float64"), b)
+        result = RewriteTester([*Ks, sigma, b], [out], include=KRON_SOLVE_PASSES)
+
+        Ks_f64 = [K.astype("float64") for K in Ks]
+        expected = _kron_plus_scaled_eye_solve(
+            Ks_f64, sigma**2, b, 1, positive_definite=False
+        )
+        result.assert_graph(rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+
+        def random_pd(n):
+            a = rng.normal(size=(n, n))
+            return (a @ a.T + np.eye(n)).astype("float32")
+
+        # The original rounds kron(K0, K1) to float32 before the Add upcasts it.
+        result.assert_eval(
+            random_pd(m),
+            random_pd(p),
+            np.float32(0.7),
+            rng.normal(size=m * p).astype("float32"),
+            rtol=1e-5,
+        )
+
+    def test_rewrites_solve_when_sibling_noisy_matrix_is_unsolved(self):
+        m, p = 3, 2
+        N = m * p
+        K1 = pt.dmatrix("K1", shape=(m, m))
+        K2 = pt.dmatrix("K2", shape=(p, p))
+        s = pt.dscalar("s")
+        t = pt.dscalar("t")
+        b = pt.dvector("b", shape=(N,))
+
+        kron = pt.linalg.kron(assume(K1, symmetric=True), assume(K2, symmetric=True))
+        unsolved = (kron + t * pt.eye(N)).sum()
+        out = solve(kron + s**2 * pt.eye(N), b)
+        result = RewriteTester(
+            [K1, K2, s, t, b], [unsolved, out], include=KRON_SOLVE_PASSES
+        )
+
+        expected = [
+            (pt.linalg.kron(K1, K2) + t * pt.eye(N)).sum(),
+            _kron_plus_scaled_eye_solve([K1, K2], s**2, b, 1, positive_definite=False),
+        ]
+        result.assert_graph(*rewrite_graph(expected, include=KRON_SOLVE_PASSES))
+
+    @pytest.mark.parametrize(
+        "symmetric, dtype, make_noise, make_solve",
+        [
+            pytest.param(
+                False,
+                "float64",
+                lambda s, v, N: s**2 * pt.eye(N),
+                solve,
+                id="asymmetric_factors",
+            ),
+            pytest.param(
+                True,
+                "complex128",
+                lambda s, v, N: s**2 * pt.eye(N),
+                solve,
+                id="complex_factors",
+            ),
+            pytest.param(
+                True,
+                "float64",
+                lambda s, v, N: v[:, None] * pt.eye(N),
+                solve,
+                id="non_uniform_noise",
+            ),
+            pytest.param(
+                True,
+                "float64",
+                lambda s, v, N: s * pt.eye(1),
+                solve,
+                id="broadcast_eye",
+            ),
+            pytest.param(
+                True,
+                "float64",
+                lambda s, v, N: s**2 * pt.eye(N),
+                lambda K, b: cho_solve((K, True), b),
+                id="cho_solve_consumer",
+            ),
+            pytest.param(
+                True,
+                "float64",
+                lambda s, v, N: s**2 * pt.eye(N),
+                partial(solve_triangular, lower=True),
+                id="solve_triangular_consumer",
+            ),
+            pytest.param(
+                True,
+                "float64",
+                lambda s, v, N: s**2 * pt.eye(N),
+                partial(solve, assume_a="tridiagonal"),
+                id="tridiagonal_consumer",
+            ),
+        ],
+    )
+    def test_does_not_fire(self, symmetric, dtype, make_noise, make_solve):
+        m, p = 4, 3
+        N = m * p
+        K1 = pt.matrix("K1", shape=(m, m), dtype=dtype)
+        K2 = pt.matrix("K2", shape=(p, p), dtype=dtype)
+        s = pt.scalar("s", dtype=dtype)
+        v = pt.vector("v", shape=(N,), dtype=dtype)
+        b = pt.vector("b", shape=(N,), dtype=dtype)
+
+        def build():
+            factors = (K1, K2)
+            if symmetric:
+                factors = (assume(K, symmetric=True) for K in factors)
+            return make_solve(pt.linalg.kron(*factors) + make_noise(s, v, N), b)
+
+        result = RewriteTester([K1, K2, s, v, b], [build()], include=KRON_SOLVE_PASSES)
+        expected = rewrite_graph(
+            build(),
+            include=KRON_SOLVE_PASSES,
+            exclude=("solve_of_kron_plus_diag_noise",),
+        )
+        result.assert_graph(expected)
 
 
 class TestDiagonalSolveToDivision:

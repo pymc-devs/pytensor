@@ -1,7 +1,15 @@
 from collections.abc import Container
 
+import numpy as np
+
 from pytensor import tensor as pt
-from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
+from pytensor.assumptions import (
+    DIAGONAL,
+    LOWER_TRIANGULAR,
+    ORTHOGONAL,
+    UPPER_TRIANGULAR,
+    check_assumption,
+)
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.fg import FunctionGraph
@@ -21,6 +29,7 @@ from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.inverse import MatrixInverse
+from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.linear_control import (
@@ -44,6 +53,8 @@ from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
     clients_through_expand_dims,
     get_assume_a,
+    kron_eigh,
+    kron_plus_scaled_eye_consumers,
     strip_left_expand_dims_and_transpose,
 )
 
@@ -551,6 +562,138 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
     new_out = atleast_Nd(new_out, n=out.type.ndim).astype(out.type.dtype)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([blockwise_of(SolveBase)])
+def solve_of_kron(fgraph, node):
+    """solve(kron(A, B), b) -> vec(solve(B, solve(A, b.reshape(m, p)).mT).mT)
+
+    The per-factor Solves keep assume_a="pos", so an indefinite matrix still gives
+    NaN, and downgrade every other assume_a to "gen", because a symmetric Kronecker
+    product does not make its factors symmetric.
+    """
+    A_kron, b = node.inputs
+    core, transposed = strip_left_expand_dims_and_transpose(A_kron)
+    match core.owner_op_and_inputs:
+        case (KroneckerProduct(), A, B) if A.type.ndim == 2 and B.type.ndim == 2:
+            pass
+        case _:
+            return None
+
+    # A square kron of non-square factors is singular. When the factors are not
+    # known to be square, the per-factor solves can raise where the original
+    # returned NaN.
+    if any(
+        rows != cols
+        for rows, cols in (A.type.shape, B.type.shape)
+        if None not in (rows, cols)
+    ):
+        return None
+
+    core_op = node.op.core_op
+    match core_op:
+        # unit_diagonal replaces the Kronecker diagonal a_ii * b_jj with ones, which
+        # does not factor into unit-diagonal solves on A and B.
+        case SolveTriangular(unit_diagonal=True):
+            return None
+        # A Kronecker product is tridiagonal only in degenerate cases.
+        case Solve(assume_a="tridiagonal"):
+            return None
+        case SolveTriangular() | CholeskySolve():
+            # These ops read one triangle of the Kronecker matrix, and that triangle
+            # is itself a Kronecker product only when both factors are triangular.
+            reads_lower = core_op.lower != transposed
+            triangle = LOWER_TRIANGULAR if reads_lower else UPPER_TRIANGULAR
+            if not (
+                check_assumption(fgraph, A, triangle)
+                and check_assumption(fgraph, B, triangle)
+            ):
+                return None
+
+    # kron(A, B).mT == kron(A.mT, B.mT) for 2-D A, B
+    if transposed:
+        A, B = A.mT, B.mT
+
+    b_ndim = core_op.b_ndim
+
+    props = core_op._props_dict()
+    props["b_ndim"] = 2
+    # Fresh destroy_map: the new ops mustn't inherit overwrite flags from the
+    # outer Solve, which would mark unrelated tensors for in-place destruction.
+    props.pop("overwrite_a", None)
+    props.pop("overwrite_b", None)
+    if isinstance(core_op, Solve) and core_op.assume_a != "pos":
+        props["assume_a"] = "gen"
+    factor_solve = Blockwise(type(core_op)(**props))
+
+    m = A.shape[-1]
+    p = B.shape[-1]
+
+    if b_ndim == 1:
+        # b: (..., m*p)
+        batch_shape = tuple(b.shape[i] for i in range(b.type.ndim - 1))
+        Z = factor_solve(A, b.reshape((*batch_shape, m, p)))
+        X = factor_solve(B, Z.mT).mT
+        new_out = X.reshape((*batch_shape, m * p))
+    else:
+        # b: (..., m*p, k)
+        batch_shape = tuple(b.shape[i] for i in range(b.type.ndim - 2))
+        k = b.shape[-1]
+        # Fold (p, k) into one RHS axis so the A-solve is a single matrix solve.
+        Z = factor_solve(A, b.reshape((*batch_shape, m, p * k)))
+        X = factor_solve(B, Z.reshape((*batch_shape, m, p, k)))
+        new_out = X.reshape((*batch_shape, m * p, k))
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([KroneckerProduct])
+def solve_of_kron_plus_diag_noise(fgraph, node):
+    """solve(kron(*Ks) + c * I, b) -> Q @ ((Q.mT @ b) / d), from eigh of each K_i
+
+    Q = kron(*Q_i) and d = kron(*d_i) + c, so neither the Kronecker matrix nor a
+    dense solve is formed. For assume_a="pos" the result is NaN unless every
+    eigenvalue is positive, matching the failed Cholesky of the original.
+    """
+    # Dropping the Add also drops its check that the eye matches the kron's shape.
+    found = kron_plus_scaled_eye_consumers(fgraph, node, Solve)
+    if found is None:
+        return None
+    Ks, consumers = found
+
+    replacements = {}
+    for consumer, c in consumers:
+        core_op = consumer.op.core_op
+        is_pos = core_op.assume_a == "pos"
+        # A Kronecker product plus c * I is tridiagonal only in degenerate cases, and
+        # positive definiteness is not decided by d + c > 0 for a complex c.
+        if core_op.assume_a == "tridiagonal" or (
+            is_pos and c.type.dtype.startswith("complex")
+        ):
+            continue
+        _, b = consumer.inputs
+        [old_out] = consumer.outputs
+        Q, kron_d = kron_eigh(Ks, old_out.type.dtype)
+        d = kron_d + c
+        # Vector b may carry batch dims, so solve it as a single column. Keeping
+        # Q on the left of each matmul lets dot_of_kron split it.
+        is_vector_b = core_op.b_ndim == 1
+        if is_vector_b:
+            b = b[..., None]
+        new_out = Q @ ((Q.mT @ b) / d[..., :, None])
+        if is_vector_b:
+            new_out = new_out[..., 0]
+        if is_pos:
+            new_out = pt.switch(pt.all(d > 0), new_out, np.nan)
+        new_out = new_out.astype(old_out.type.dtype)
+        copy_stack_trace(old_out, new_out)
+        replacements[old_out] = new_out
+    return replacements or None
 
 
 @register_canonicalize
