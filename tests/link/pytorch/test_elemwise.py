@@ -5,6 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
+from pytensor.link.pytorch.dispatch import pytorch_funcify
 from pytensor.scalar.basic import ScalarOp, get_scalar_type
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import ProdWithoutZeros
@@ -86,6 +87,33 @@ def test_pytorch_careduce(fn, axis):
     x = fn(a_pt, axis=axis)
 
     compare_pytorch_and_py([a_pt], [x], [test_value])
+
+
+@pytest.mark.parametrize(
+    "x_test, kwargs",
+    [
+        (np.array([[1, 1, 0]], dtype="float32"), dict(axis=1, dtype="int64")),
+        (
+            np.array([1e8, 1, -1e8], dtype="float32"),
+            dict(axis=0, dtype="float32", acc_dtype="float64"),
+        ),
+        (np.array([[1, 2], [3, 4]], dtype="float32"), dict(axis=())),
+    ],
+    ids=["output_dtype", "acc_dtype", "empty_axis"],
+)
+def test_pytorch_sum_dtype_and_empty_axis(x_test, kwargs):
+    # Lower eagerly: torch.compile may reorder the reduction and hide acc_dtype issues
+    x = pt.tensor("x", shape=(None,) * x_test.ndim, dtype=x_test.dtype)
+    node = pt.sum(x, **kwargs).owner
+
+    storage = [[None]]
+    node.op.perform(node, [x_test], storage)
+    expected = storage[0][0]
+
+    actual = pytorch_funcify(node.op, node=node)(torch.from_numpy(x_test)).numpy()
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
 
 
 def test_prod_without_zeros():

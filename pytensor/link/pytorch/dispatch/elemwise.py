@@ -67,9 +67,20 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
 
 
 @pytorch_funcify.register(Sum)
-def pytorch_funcify_sum(op, **kwargs):
-    def torch_sum(x):
-        return torch.sum(x, dim=op.axis)
+def pytorch_funcify_sum(op, node, **kwargs):
+    axis = op.axis
+    out_dtype = getattr(torch, node.outputs[0].dtype)
+
+    # torch reduces over all axes for ``dim=()``, whereas NumPy reduces over none
+    if axis == ():
+
+        def torch_sum(x):
+            return x.to(out_dtype, copy=True)
+    else:
+        acc_dtype = getattr(torch, op.acc_dtype)
+
+        def torch_sum(x):
+            return torch.sum(x, dim=axis, dtype=acc_dtype).to(out_dtype)
 
     return torch_sum
 
