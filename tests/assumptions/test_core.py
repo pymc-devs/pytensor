@@ -134,6 +134,15 @@ def test_symmetric_does_not_imply_diagonal():
     assert not af.check(x_sym, DIAGONAL)
 
 
+def test_complex_positive_definite_does_not_imply_symmetric():
+    x = pt.matrix("x", shape=(3, 3), dtype="complex128")
+    x_pd = assume(x, positive_definite=True)
+    x_not_sym = assume(x, symmetric=False)
+    _, af = make_fgraph(x_pd, x_not_sym)
+    assert af.get(x_pd, SYMMETRIC) is FactState.UNKNOWN
+    assert af.get(x_not_sym, POSITIVE_DEFINITE) is FactState.UNKNOWN
+
+
 def test_deep_graph_no_recursion_error():
     x = pt.eye(5)
     for _ in range(2000):

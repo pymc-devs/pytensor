@@ -30,6 +30,7 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
+    alloc_diag,
     as_tensor,
     cast,
     constant,
@@ -2090,3 +2091,42 @@ class TestExtractDiagOfTranspose:
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         expected = pt.diagonal(x, axis1=-2, axis2=-1)
         assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "shape, axis1, axis2, expected_order",
+    [((1, 1), 0, 1, (1,)), ((1, 3, 1), 0, 2, (1, 2))],
+    ids=["matrix", "batched_split_axes"],
+)
+def test_local_extract_diag_of_unit_matrix(shape, axis1, axis2, expected_order):
+    x = pt.tensor("x", shape=shape)
+    out = pt.diagonal(x, axis1=axis1, axis2=axis2)
+
+    result = utt.RewriteTester([x], [out])
+    result.assert_graph(x.dimshuffle(expected_order))
+    result.assert_eval(np.arange(np.prod(shape), dtype=x.dtype).reshape(shape))
+
+
+@pytest.mark.parametrize(
+    "shape, diag_op",
+    [((1, 1), pt.diagonal), ((1,), alloc_diag)],
+    ids=["extract_diag", "alloc_diag"],
+)
+def test_unit_diag_with_offset_not_rewritten(shape, diag_op):
+    x = pt.tensor("x", shape=shape)
+    out = diag_op(x, offset=1)
+    utt.RewriteTester([x], [out]).assert_graph(out)
+
+
+@pytest.mark.parametrize(
+    "shape, axis1, axis2, expected_order",
+    [((1,), 0, 1, ("x", 0)), ((3, 1), 0, 2, ("x", 0, 1))],
+    ids=["vector", "batched_split_axes"],
+)
+def test_local_alloc_diag_of_unit_vector(shape, axis1, axis2, expected_order):
+    v = pt.tensor("v", shape=shape)
+    out = alloc_diag(v, axis1=axis1, axis2=axis2)
+
+    result = utt.RewriteTester([v], [out])
+    result.assert_graph(v.dimshuffle(expected_order))
+    result.assert_eval(np.arange(np.prod(shape), dtype=v.dtype).reshape(shape) + 1)

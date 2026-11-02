@@ -316,6 +316,14 @@ def test_cholesky_of_diag_not_applied():
     assert any(isinstance(node.op, Cholesky) for node in nodes)
 
 
+@pytest.mark.parametrize("shape", [(1, 1), (3, 1, 1)], ids=["matrix", "batched"])
+def test_cholesky_of_static_unit_matrix(shape):
+    x = pt.tensor("x", shape=shape)
+    result = RewriteTester([x], [cholesky(x)])
+    result.assert_graph(pt.sqrt(x))
+    result.assert_eval(np.full(shape, 4.0))
+
+
 @pytest.mark.parametrize(
     "make_diag",
     [
@@ -339,6 +347,50 @@ def test_eigh_of_diag(make_diag):
     expected = rewrite_graph([expected_w, expected_v], include=passes)
 
     assert_equal_computations(rewritten, expected)
+
+
+def test_eigh_of_complex_diag():
+    x = pt.zmatrix("x", shape=(3, 3))
+    w, v = pt.linalg.eigh(assume(x, diagonal=True))
+
+    passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
+    result = RewriteTester([x], [w, v], include=passes)
+
+    d = pt.diagonal(x).real
+    idx = pt.argsort(d)
+    expected_w = pt.take_along_axis(d, idx, axis=-1)
+    expected_v = pt.eye(3)[idx].mT.astype("complex128")
+    result.assert_graph(*rewrite_graph([expected_w, expected_v], include=passes))
+    result.assert_eval(np.diag([3.0, 1.0, 2.0]).astype("complex128"))
+
+
+def test_eigh_of_transposed_complex_sqrtm():
+    x = pt.zmatrix("x")
+    S = pt.linalg.sqrtm(assume(x, positive_definite=True))
+    w, V = pt.linalg.eigh(S.mT)
+
+    result = RewriteTester([x], [w, V])
+    w_x, V_x = pt.linalg.eigh(x)
+    result.assert_graph(*rewrite_graph([pt.sqrt(pt.maximum(w_x, 0)), V_x.conj()]))
+
+
+@pytest.mark.parametrize("transpose", [False, True], ids=["plain", "transposed"])
+def test_eigh_of_sqrtm(transpose):
+    x = pt.dmatrix("x")
+    S = pt.linalg.sqrtm(assume(x, positive_definite=True))
+    w, V = pt.linalg.eigh(S.mT if transpose else S)
+
+    # Eigenvector signs are arbitrary, so compare the sign-invariant reconstruction
+    result = RewriteTester([x], [w, (V * w[..., None, :]) @ V.mT])
+    w_x, V_x = pt.linalg.eigh(x)
+    w_expected = pt.sqrt(pt.maximum(w_x, 0))
+    result.assert_graph(
+        *rewrite_graph([w_expected, (V_x * w_expected[..., None, :]) @ V_x.mT])
+    )
+
+    rng = np.random.default_rng(303)
+    A = rng.normal(size=(4, 4))
+    result.assert_eval(A @ A.T + np.eye(4))
 
 
 def test_eigh_of_batched_diag():
@@ -1007,3 +1059,24 @@ def test_eig_to_eigh():
     w_expected = w_expected.astype("complex128")
     v_expected = v_expected.astype("complex128")
     assert_equal_computations([w_r, v_r], [w_expected, v_expected])
+
+
+def test_eig_to_eigh_complex_positive_definite():
+    x = pt.zmatrix("x", shape=(5, 5))
+    w, v = pt.linalg.eig(assume(x, positive_definite=True))
+
+    rewrites = ("canonicalize", "ShapeOpt")
+    w_r, v_r = rewrite_graph([w, v], include=rewrites)
+
+    w_expected, v_expected = eigh(x)
+    assert_equal_computations([w_r, v_r], [w_expected.astype("complex128"), v_expected])
+
+
+def test_eig_of_complex_symmetric_not_rewritten():
+    x = pt.zmatrix("x", shape=(5, 5))
+    rewrites = ("canonicalize", "ShapeOpt")
+    rewritten = rewrite_graph(
+        pt.linalg.eig(assume(x, symmetric=True)), include=rewrites
+    )
+    expected = rewrite_graph(pt.linalg.eig(x), include=rewrites)
+    assert_equal_computations(rewritten, expected)

@@ -44,10 +44,12 @@ from pytensor.tensor.linalg.inverse import (
 from pytensor.tensor.linalg.products import (
     Expm,
     KroneckerProduct,
+    Sqrtm,
     expm,
     kron,
     matrix_dot,
     matrix_power,
+    sqrtm,
 )
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import (
@@ -122,6 +124,7 @@ __all__ = [
     "solve_discrete_lyapunov",
     "solve_sylvester",
     "solve_triangular",
+    "sqrtm",
     "svd",
     "tensorinv",
     "tensorsolve",

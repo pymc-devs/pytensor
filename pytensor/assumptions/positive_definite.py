@@ -19,7 +19,7 @@ from pytensor.tensor.basic import AllocDiag, Eye
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.inverse import MatrixInverse
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm
 from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
@@ -46,6 +46,7 @@ def _alloc_diag(key, op, feature, fgraph, node, input_states):
 register_assumption(POSITIVE_DEFINITE, BlockDiagonal)(all_inputs_have_key)
 register_assumption(POSITIVE_DEFINITE, MatrixInverse)(propagate_first)
 register_assumption(POSITIVE_DEFINITE, KroneckerProduct)(all_inputs_have_key)
+register_assumption(POSITIVE_DEFINITE, Sqrtm)(propagate_first)
 register_assumption(POSITIVE_DEFINITE, Subtensor)(subtensor_propagates_matrix_property)
 
 

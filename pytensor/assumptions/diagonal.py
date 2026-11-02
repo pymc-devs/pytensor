@@ -9,6 +9,7 @@ from pytensor.assumptions.core import (
     DIAGONAL,
     ORTHOGONAL,
     FactState,
+    _register_type_inference,
     all_inputs_have_key,
     propagate_first,
     register_assumption,
@@ -17,19 +18,20 @@ from pytensor.assumptions.core import (
 from pytensor.assumptions.dimshuffle import conjugate_transpose_input
 from pytensor.assumptions.elemwise import elemwise_preserves_zero_pattern
 from pytensor.assumptions.subtensor import subtensor_propagates_matrix_property
+from pytensor.graph.basic import Variable
 from pytensor.tensor.basic import Alloc, AllocDiag, Eye
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm
 from pytensor.tensor.math import Dot
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     IncSubtensor,
     Subtensor,
 )
-from pytensor.tensor.variable import TensorConstant
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 def _diagonal_from_constant(var: TensorConstant) -> FactState:
@@ -65,6 +67,20 @@ def _diagonal_from_constant(var: TensorConstant) -> FactState:
 register_constant_inference(DIAGONAL, _diagonal_from_constant)
 
 
+def _diagonal_from_static_shape(var: Variable) -> FactState:
+    """Recognize a matrix whose last two axes are statically (1, 1) as DIAGONAL."""
+    if (
+        isinstance(var, TensorVariable)
+        and var.type.ndim >= 2
+        and all(var.type.broadcastable[-2:])
+    ):
+        return FactState.TRUE
+    return FactState.UNKNOWN
+
+
+_register_type_inference(DIAGONAL, _diagonal_from_static_shape)
+
+
 def indexes_diagonal(node) -> bool:
     """True when an ``*IncSubtensor*`` node modifies only diagonal entries."""
     op = node.op
@@ -90,6 +106,7 @@ register_assumption(DIAGONAL, BlockDiagonal)(all_inputs_have_key)
 register_assumption(DIAGONAL, MatrixInverse)(propagate_first)
 register_assumption(DIAGONAL, MatrixPinv)(propagate_first)
 register_assumption(DIAGONAL, KroneckerProduct)(all_inputs_have_key)
+register_assumption(DIAGONAL, Sqrtm)(propagate_first)
 register_assumption(DIAGONAL, Dot)(all_inputs_have_key)
 register_assumption(DIAGONAL, Subtensor)(subtensor_propagates_matrix_property)
 

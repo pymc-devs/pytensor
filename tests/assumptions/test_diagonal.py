@@ -58,6 +58,26 @@ def test_constant_sub_matrix_ndim_is_false(data):
     assert af.get(c, DIAGONAL) == FactState.FALSE
 
 
+@pytest.mark.parametrize(
+    "shape, expected",
+    [
+        ((1, 1), FactState.TRUE),
+        ((3, 1, 1), FactState.TRUE),
+        ((1, None), FactState.UNKNOWN),
+        ((1,), FactState.UNKNOWN),
+    ],
+    ids=["matrix", "batched", "partially_static", "vector"],
+)
+def test_static_unit_matrix_is_diagonal(shape, expected):
+    """A matrix whose last two axes are statically (1, 1) has no off-diagonal entries,
+    whatever produced it."""
+    x = pt.tensor("x", shape=shape)
+    y = pt.exp(x)
+    _, af = make_fgraph(y)
+    assert af.get(x, DIAGONAL) == expected
+    assert af.get(y, DIAGONAL) == expected
+
+
 def test_dot_of_constant_eye_reduces():
     """End-to-end: ``Dot(Constant(eye), x)`` reduces via ``dot_diag_to_elemwise``
     once the Constant-DIAGONAL inference recovers the structural property that
@@ -77,12 +97,15 @@ def test_cholesky_of_diagonal_is_diagonal():
     assert af.check(L, DIAGONAL)
 
 
-def test_inv_propagates_diagonal():
+@pytest.mark.parametrize(
+    "matrix_fn", [pt.linalg.inv, pt.linalg.sqrtm], ids=["inv", "sqrtm"]
+)
+def test_matrix_function_propagates_diagonal(matrix_fn):
     x = pt.matrix("x", shape=(3, 3))
     x_diag = assume(x, diagonal=True)
-    inv_x = pt.linalg.inv(x_diag)
-    _, af = make_fgraph(inv_x)
-    assert af.check(inv_x, DIAGONAL)
+    out = matrix_fn(x_diag)
+    _, af = make_fgraph(out)
+    assert af.check(out, DIAGONAL)
 
 
 def test_pinv_propagates_diagonal():

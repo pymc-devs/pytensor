@@ -61,6 +61,7 @@ from pytensor.scalar import (
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     Alloc,
+    AllocDiag,
     AllocEmpty,
     ExtractDiag,
     Join,
@@ -1442,3 +1443,41 @@ def extract_diag_of_transpose(fgraph, node):
             return [diagonal(inner, offset=-op.offset, axis1=op.axis1, axis2=op.axis2)]
         case _:
             return None
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([ExtractDiag])
+def local_extract_diag_of_unit_matrix(fgraph, node):
+    """ExtractDiag(X) -> X with its static (1, 1) diagonal axes collapsed to one axis."""
+    op = node.op
+    [x] = node.inputs
+    if op.offset != 0 or x.type.shape[op.axis1] != 1 or x.type.shape[op.axis2] != 1:
+        return None
+
+    batch_axes = [
+        axis for axis in range(x.type.ndim) if axis not in (op.axis1, op.axis2)
+    ]
+    new_out = x.dimshuffle([*batch_axes, op.axis2])
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([AllocDiag])
+def local_alloc_diag_of_unit_vector(fgraph, node):
+    """AllocDiag(v) -> v with its static (1,) last axis expanded to the diagonal axes."""
+    op = node.op
+    [v] = node.inputs
+    if op.offset != 0 or v.type.shape[-1] != 1:
+        return None
+
+    order: list[int | str] = list(range(v.type.ndim - 1))
+    order.insert(op.axis1, "x")
+    order.insert(op.axis2, v.type.ndim - 1)
+    new_out = v.dimshuffle(order)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]

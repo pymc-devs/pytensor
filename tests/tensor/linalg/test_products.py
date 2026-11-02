@@ -11,6 +11,7 @@ from pytensor.tensor.linalg import (
     matrix_dot,
     matrix_power,
     pinv,
+    sqrtm,
 )
 from pytensor.tensor.type import matrix, tensor, vector
 from tests import unittest_tools as utt
@@ -155,3 +156,38 @@ def test_expm_grad(mode):
             raise ValueError(f"Invalid mode: {mode}")
 
     utt.verify_grad(expm, [A], rng=rng, abs_tol=1e-5, rel_tol=1e-5)
+
+
+def test_sqrtm():
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = rng.standard_normal((5, 5)) + 5 * np.eye(5)
+    batch = np.stack([A, -np.eye(5)]).astype(config.floatX)
+
+    x = tensor(dtype=config.floatX, shape=(None, 5, 5))
+    out = function([x], sqrtm(x))(batch)
+
+    atol = 1e-4 if config.floatX == "float32" else 1e-10
+    assert np.iscomplex(np.linalg.eigvals(batch[0])).any()
+    np.testing.assert_allclose(out[0] @ out[0], batch[0], atol=atol)
+    assert np.isnan(out[1]).all()
+
+
+@pytest.mark.parametrize(
+    "mode", ["identity", "positive_definite", "real_eig", "complex_eig"]
+)
+def test_sqrtm_grad(mode):
+    rng = np.random.default_rng([898, sum(map(ord, mode))])
+    A = rng.standard_normal((5, 5))
+
+    match mode:
+        case "identity":
+            A = np.eye(5)
+        case "positive_definite":
+            A = A @ A.T + np.eye(5)
+        case "real_eig":
+            w = rng.uniform(1, 3, size=5)
+            A = A @ np.diag(w) @ np.linalg.inv(A)
+        case "complex_eig":
+            A = A + 5 * np.eye(5)
+
+    utt.verify_grad(sqrtm, [A], rng=rng, abs_tol=1e-5, rel_tol=1e-5)
