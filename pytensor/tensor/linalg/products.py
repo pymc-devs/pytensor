@@ -1,7 +1,11 @@
 import warnings
+from typing import cast
+
+import numpy as np
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
@@ -10,6 +14,7 @@ from pytensor.tensor.linalg._lazy import scipy_linalg
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.symbolic import TensorSymbolicOp
 from pytensor.tensor.type import matrix
+from pytensor.tensor.variable import TensorVariable
 
 
 class Expm(Op):
@@ -81,6 +86,92 @@ class Expm(Op):
 
 
 expm = Blockwise(Expm())
+
+
+class Sqrtm(Op):
+    """
+    Compute the principal square root of a square array.
+    """
+
+    __props__ = ()
+    gufunc_signature = "(m,m)->(m,m)"
+
+    def make_node(self, A):
+        A = as_tensor_variable(A)
+        assert A.ndim == 2
+
+        dtype = linalg_output_dtype(A.type.dtype)
+        sqrtm = matrix(dtype=dtype, shape=A.type.shape)
+
+        return Apply(self, [A], [sqrtm])
+
+    def perform(self, node, inputs, outputs):
+        (A,) = inputs
+        (sqrtm,) = outputs
+        out_dtype = node.outputs[0].type.numpy_dtype
+
+        S = scipy_linalg.sqrtm(A)
+        if S.dtype.kind == "c" and out_dtype.kind != "c":
+            # Older scipy returns a complex dtype for any real matrix with complex
+            # eigenvalues, so the dtype alone does not say whether a real root exists.
+            # LAPACK reports the real eigenvalues of a real matrix with an exactly
+            # zero imaginary part.
+            eigenvalues = np.linalg.eigvals(A)
+            if np.any((eigenvalues.imag == 0) & (eigenvalues.real < 0)):
+                S = np.full(A.shape, np.nan, dtype=out_dtype)
+            else:
+                S = S.real
+
+        sqrtm[0] = S.astype(out_dtype, copy=False)
+
+    def pullback(self, inputs, outputs, output_grads):
+        r"""Reverse-mode gradient via the Sylvester equation of the Fréchet derivative.
+
+        Differentiating :math:`S S = A` gives :math:`S \, dS + dS \, S = dA`. The
+        Frobenius adjoint of :math:`X \mapsto S X + X S` is
+        :math:`Y \mapsto S^H Y + Y S^H`, so the pullback :math:`\bar{A}` solves
+
+            .. math:: S^H \bar{A} + \bar{A} S^H = \bar{S}.
+
+        The equation has a unique solution whenever no two eigenvalues of
+        :math:`S` sum to zero, which holds for every principal root of a
+        nonsingular matrix, including those with repeated eigenvalues.
+        """
+        from pytensor.tensor.linalg.solvers.linear_control import solve_sylvester
+
+        (S,) = outputs
+        (S_bar,) = output_grads
+        S_H = S.conj().mT
+
+        return [solve_sylvester(S_H, S_H, S_bar)]
+
+    def infer_shape(self, node, shapes):
+        return [shapes[0]]
+
+
+def sqrtm(A: TensorLike) -> TensorVariable:
+    """Principal square root of a square matrix.
+
+    Same as ``scipy.linalg.sqrtm``, except that a real input always gives a real
+    output. A real matrix with an eigenvalue on the negative real axis has no real
+    principal square root, and the result is then filled with NaN. A singular
+    ``A`` need not have a square root, and the result for one can differ between
+    backends.
+
+    When ``A`` is known to be symmetric or positive definite, for example through
+    :func:`pytensor.assumptions.assume`, the root is computed from ``eigh(A)``.
+
+    Parameters
+    ----------
+    A : TensorLike
+        Square matrix of shape ``(..., M, M)``.
+
+    Returns
+    -------
+    TensorVariable
+        Matrix ``S`` of shape ``(..., M, M)`` with ``S @ S = A``.
+    """
+    return cast(TensorVariable, Blockwise(Sqrtm())(A))
 
 
 class KroneckerProduct(TensorSymbolicOp):

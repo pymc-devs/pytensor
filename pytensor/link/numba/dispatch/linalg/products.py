@@ -19,9 +19,13 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     val_to_sptr,
     val_to_zptr,
 )
+from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
+    schur_complex,
+    schur_real,
+)
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 from pytensor.tensor.blas._core import must_initialize_y_gemv
-from pytensor.tensor.linalg.products import Expm
+from pytensor.tensor.linalg.products import Expm, Sqrtm
 
 
 @numba_basic.numba_njit(inline="always")
@@ -335,6 +339,166 @@ def numba_funcify_Expm(op, node, **kwargs):
 
     cache_version = 1
     return expm, cache_version
+
+
+@numba_basic.numba_njit
+def _schur_blocks_real(T):
+    """Start index of each diagonal block of a real Schur form, closed by n.
+
+    Return None when a 1x1 block is negative, since the root is then not real.
+    """
+    n = T.shape[0]
+    block_starts = np.empty(n + 1, dtype=np.int64)
+    n_blocks = 0
+    i = 0
+    while i < n:
+        block_starts[n_blocks] = i
+        n_blocks += 1
+        if i + 1 < n and T[i + 1, i] != 0:
+            i += 2
+        elif T[i, i] < 0:
+            return None
+        else:
+            i += 1
+    block_starts[n_blocks] = n
+    return block_starts[: n_blocks + 1]
+
+
+@numba_basic.numba_njit
+def _schur_blocks_complex(T):
+    return np.arange(T.shape[0] + 1)
+
+
+@numba_basic.numba_njit
+def _sqrtm_diagonal_block_real(T, R, j0, j1):
+    if j1 - j0 == 1:
+        R[j0, j0] = np.sqrt(T[j0, j0])
+        return
+
+    # 2x2 block with eigenvalues theta +/- i mu, rooted as
+    # alpha I + (B - theta I) / (2 alpha) with alpha = Re(sqrt(theta + i mu))
+    a, b = T[j0, j0], T[j0, j0 + 1]
+    c, d = T[j0 + 1, j0], T[j0 + 1, j0 + 1]
+    theta = (a + d) / 2
+    mu = np.sqrt(-((a - d) ** 2 / 4 + b * c))
+    radius = np.hypot(theta, mu)
+    if theta >= 0:
+        alpha = np.sqrt((theta + radius) / 2)
+    else:
+        alpha = mu / (2 * np.sqrt((radius - theta) / 2))
+    scale = 1 / (2 * alpha)
+
+    R[j0, j0] = alpha + (a - theta) * scale
+    R[j0, j0 + 1] = b * scale
+    R[j0 + 1, j0] = c * scale
+    R[j0 + 1, j0 + 1] = alpha + (d - theta) * scale
+
+
+@numba_basic.numba_njit
+def _sqrtm_diagonal_block_complex(T, R, j0, j1):
+    R[j0, j0] = np.sqrt(T[j0, j0])
+
+
+@numba_basic.numba_njit
+def _solve_small_sylvester(R_ii, R_jj, C):
+    """Solve R_ii X + X R_jj = C for blocks of size at most 2x2."""
+    p, q = C.shape
+    if p == 1 and q == 1:
+        denominator = R_ii[0, 0] + R_jj[0, 0]
+        # Zero eigenvalues on both sides leave the entry undetermined. Zero keeps the
+        # root of a zero block at zero, following the old scipy _sqrtm_triu.
+        if denominator == 0 and C[0, 0] == 0:
+            return np.zeros_like(C)
+        return C / denominator
+
+    size = p * q
+    M = np.zeros((size, size), dtype=C.dtype)
+    rhs = np.empty(size, dtype=C.dtype)
+    for col in range(q):
+        for row in range(p):
+            r = col * p + row
+            rhs[r] = C[row, col]
+            for k in range(p):
+                M[r, col * p + k] += R_ii[row, k]
+            for k in range(q):
+                M[r, k * p + row] += R_jj[k, col]
+
+    x = np.linalg.solve(M, rhs)
+    X = np.empty_like(C)
+    for col in range(q):
+        for row in range(p):
+            X[row, col] = x[col * p + row]
+    return X
+
+
+def _sqrtm(A):
+    return linalg.sqrtm(A)
+
+
+@overload(_sqrtm)
+def _sqrtm_impl(A):
+    # Schur method: Bjorck & Hammarling (1983) for complex input, with the 2x2 block
+    # extension of Higham (1987) for real input
+    ensure_lapack()
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="sqrtm")
+
+    if isinstance(A.dtype, Complex):
+        schur_fn = schur_complex
+        schur_blocks = _schur_blocks_complex
+        diagonal_block_root = _sqrtm_diagonal_block_complex
+    else:
+        schur_fn = schur_real
+        schur_blocks = _schur_blocks_real
+        diagonal_block_root = _sqrtm_diagonal_block_real
+
+    def impl(A):
+        T, Z = schur_fn(A, lwork=None, overwrite_a=False)
+        n = T.shape[0]
+
+        block_starts = schur_blocks(T)
+        if block_starts is None:
+            return np.full((n, n), np.nan, dtype=A.dtype)
+
+        R = np.zeros_like(T)
+        for jb in range(block_starts.shape[0] - 1):
+            j0, j1 = block_starts[jb], block_starts[jb + 1]
+            diagonal_block_root(T, R, j0, j1)
+
+            for ib in range(jb - 1, -1, -1):
+                i0, i1 = block_starts[ib], block_starts[ib + 1]
+                C = T[i0:i1, j0:j1].copy()
+                for k in range(i1, j0):
+                    for row in range(i1 - i0):
+                        for col in range(j1 - j0):
+                            C[row, col] -= R[i0 + row, k] * R[k, j0 + col]
+                R[i0:i1, j0:j1] = _solve_small_sylvester(
+                    R[i0:i1, i0:i1], R[j0:j1, j0:j1], C
+                )
+
+        return Z @ R @ Z.conj().T
+
+    return impl
+
+
+@register_funcify_default_op_cache_key(Sqrtm)
+def numba_funcify_Sqrtm(op, node, **kwargs):
+    inp_dtype = node.inputs[0].type.numpy_dtype
+    discrete_input = inp_dtype.kind in "ibu"
+    if discrete_input and config.compiler_verbose:
+        print("Sqrtm requires casting discrete input to float")  # noqa: T201
+
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    @numba_basic.numba_njit
+    def sqrtm(a):
+        if a.size == 0:
+            return np.zeros(a.shape, dtype=out_dtype)
+        if discrete_input:
+            a = a.astype(out_dtype)
+        return _sqrtm(a)
+
+    cache_version = 1
+    return sqrtm, cache_version
 
 
 @numba_basic.numba_njit(inline="always")

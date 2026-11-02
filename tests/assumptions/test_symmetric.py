@@ -6,12 +6,15 @@ from pytensor.assumptions.specify import assume
 from tests.assumptions.conftest import make_fgraph
 
 
-def test_inv_propagates_symmetric():
+@pytest.mark.parametrize(
+    "matrix_fn", [pt.linalg.inv, pt.linalg.sqrtm], ids=["inv", "sqrtm"]
+)
+def test_matrix_function_propagates_symmetric(matrix_fn):
     x = pt.matrix("x", shape=(3, 3))
     x_sym = assume(x, symmetric=True)
-    inv_x = pt.linalg.inv(x_sym)
-    _, af = make_fgraph(inv_x)
-    assert af.check(inv_x, SYMMETRIC)
+    out = matrix_fn(x_sym)
+    _, af = make_fgraph(out)
+    assert af.check(out, SYMMETRIC)
 
 
 def test_pinv_propagates_symmetric():
