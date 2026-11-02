@@ -13,15 +13,28 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.scalar.math import Softplus
+from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import Max, exp, log
+from pytensor.tensor.math import Max, add, exp, log, sigmoid, softplus
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.special import (
     local_exp_log_softmax,
+    local_log_add_exp,
     local_log_softmax_from_logsumexp,
+    local_logaddexp_const_to_softplus,
+    local_sigmoid_stabilize,
 )
-from pytensor.tensor.special import LogSoftmax, Softmax, log_softmax, logsumexp, softmax
-from pytensor.tensor.type import TensorType, dvector, matrix, tensor3, vector
+from pytensor.tensor.special import (
+    LogAddExp,
+    LogSoftmax,
+    Softmax,
+    log_softmax,
+    logaddexp,
+    logsumexp,
+    softmax,
+)
+from pytensor.tensor.type import TensorType, dscalar, dvector, matrix, tensor3, vector
 from tests import unittest_tools as utt
 from tests.unittest_tools import RewriteTester
 
@@ -203,7 +216,148 @@ def test_local_log_add_exp(mode):
     assert np.isfinite(f([10000], [10000]))  # causes overflow if handled incorrectly
     utt.assert_allclose(f([10000], [10000]), 20000)
 
+    # test that provably positive non-exp addends are handled as exp(log(c))
+    x = dvector()
+    f = pytensor.function([x], log(2.0 + exp(x)), mode=m)
+
+    utt.assert_allclose(f([0]), np.log(3.0))
+    assert np.isfinite(f([800]))  # causes overflow if handled incorrectly
+    utt.assert_allclose(f([800]), 800.0)
+
     # TODO: test that the rewrite works in the presence of broadcasting.
+
+
+def test_local_log_add_exp_positive_addends():
+    """``log(c + exp(x)) -> logaddexp(log(c), x)`` for provably positive ``c``."""
+    x = dscalar("x")
+    c = constant(2.0)
+
+    result = RewriteTester(
+        [x], [log(add(c, exp(x)))], include=None, custom_rewrite=local_log_add_exp
+    )
+    result.assert_graph(logaddexp(log(c), x))
+    result.assert_eval(3.0)
+
+    # The unstable form overflows for x past log(float64 max)
+    np.testing.assert_allclose(result.rewr_fn(800.0), 800.0)
+
+    # A negative constant or a sign-unknown variable blocks the rewrite
+    y = dscalar("y")
+    for other in (constant(-2.0), y):
+        unstable = log(add(other, exp(x)))
+        result = RewriteTester(
+            [x, y], [unstable], include=None, custom_rewrite=local_log_add_exp
+        )
+        result.assert_graph(unstable)
+
+    # So does the absence of any exp addend
+    result = RewriteTester(
+        [x], [log(add(c, sigmoid(x)))], include=None, custom_rewrite=local_log_add_exp
+    )
+    result.assert_graph(log(add(c, sigmoid(x))))
+
+
+def test_local_sigmoid_stabilize():
+    """Divisions by a sum of exp / provably positive addends that includes the
+    numerator are recognized as ``sigmoid``.
+    """
+    x = dscalar("x")
+    y = dscalar("y")
+    c = constant(2.0)
+
+    # c / (c + exp(x)) -> sigmoid(log(c) - x)
+    result = RewriteTester(
+        [x], [c / add(c, exp(x))], include=None, custom_rewrite=local_sigmoid_stabilize
+    )
+    result.assert_graph(sigmoid(log(c) - x))
+    result.assert_eval(3.0)
+
+    # exp(x) / (exp(x) + c) -> sigmoid(x - log(c))
+    ex = exp(x)
+    result = RewriteTester(
+        [x], [ex / add(ex, c)], include=None, custom_rewrite=local_sigmoid_stabilize
+    )
+    result.assert_graph(sigmoid(x - log(c)))
+    result.assert_eval(3.0)
+    # The unstable form is inf / inf -> nan for x past log(float64 max)
+    np.testing.assert_allclose(result.rewr_fn(800.0), 1.0)
+
+    # exp(x) / (exp(x) + exp(y)) -> sigmoid(x - y)
+    ey = exp(y)
+    result = RewriteTester(
+        [x, y], [ex / add(ex, ey)], include=None, custom_rewrite=local_sigmoid_stabilize
+    )
+    result.assert_graph(sigmoid(x - y))
+    result.assert_eval(3.0, 2.5)
+    np.testing.assert_allclose(result.rewr_fn(800.0, 800.0), 0.5)
+
+    # Remaining addends are combined with logaddexp:
+    # exp(x) / (exp(x) + exp(y) + c) -> sigmoid(x - logaddexp(y, log(c)))
+    result = RewriteTester(
+        [x, y],
+        [ex / add(ex, ey, c)],
+        include=None,
+        custom_rewrite=local_sigmoid_stabilize,
+    )
+    result.assert_graph(sigmoid(x - logaddexp(y, log(c))))
+    result.assert_eval(3.0, 2.5)
+
+    # A numerator that is not one of the addends blocks the rewrite
+    result = RewriteTester(
+        [x, y], [ey / add(ex, c)], include=None, custom_rewrite=local_sigmoid_stabilize
+    )
+    result.assert_graph(ey / add(ex, c))
+
+    # So does a sign-unknown addend
+    result = RewriteTester(
+        [x, y], [ex / add(ex, y)], include=None, custom_rewrite=local_sigmoid_stabilize
+    )
+    result.assert_graph(ex / add(ex, y))
+
+
+def test_local_logaddexp_const_to_softplus():
+    """``logaddexp(c, x) -> c + softplus(x - c)`` for a finite constant ``c``."""
+    x = dscalar("x")
+    c = constant(2.0)
+
+    for out in (logaddexp(c, x), logaddexp(x, c)):
+        result = RewriteTester(
+            [x], [out], include=None, custom_rewrite=local_logaddexp_const_to_softplus
+        )
+        result.assert_graph(c + softplus(x - c))
+        result.assert_eval(3.0)
+        np.testing.assert_allclose(result.rewr_fn(800.0), 800.0)
+
+    # c = -inf needs LogAddExp's max-subtraction guard: the softplus form would be nan
+    neg_inf = constant(-np.inf)
+    result = RewriteTester(
+        [x],
+        [logaddexp(neg_inf, x)],
+        include=None,
+        custom_rewrite=local_logaddexp_const_to_softplus,
+    )
+    result.assert_graph(logaddexp(neg_inf, x))
+
+    # Variadic logaddexp is left alone
+    y = dscalar("y")
+    result = RewriteTester(
+        [x, y],
+        [logaddexp(c, x, y)],
+        include=None,
+        custom_rewrite=local_logaddexp_const_to_softplus,
+    )
+    result.assert_graph(logaddexp(c, x, y))
+
+    # In the full pipeline recognition plus lowering leave a plain softplus graph
+    f = pytensor.function(
+        [x], log(2.0 + exp(x)), mode=get_mode("FAST_RUN").excluding("fusion")
+    )
+    topo = f.maker.fgraph.toposort()
+    assert not any(isinstance(node.op, LogAddExp) for node in topo)
+    assert any(
+        isinstance(getattr(node.op, "scalar_op", None), Softplus) for node in topo
+    )
+    np.testing.assert_allclose(f(800.0), 800.0)
 
 
 def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None, mode="FAST_RUN"):
