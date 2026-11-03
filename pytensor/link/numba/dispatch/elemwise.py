@@ -1518,11 +1518,6 @@ def numba_funcify_Argmax(op, node, **kwargs):
     return argmax, cache_version
 
 
-_GEMM_DTYPES = frozenset(
-    np.dtype(name) for name in ("float32", "float64", "complex64", "complex128")
-)
-
-
 def _gemm_shape_case(x, y):
     """Choose an existing BLAS branch from static core shapes."""
     m, k = x.type.shape[-2:]
@@ -1538,7 +1533,7 @@ def _gemm_shape_case(x, y):
 
 @register_funcify_and_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
-    # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
+    # Numba's BLAS kernels require floating-point or complex operands.
     x, y = node.inputs
     [out] = node.outputs
 
@@ -1547,7 +1542,6 @@ def numba_funcify_Dot(op, node, **kwargs):
 
     numba_dot_dtype = out_dtype = out.type.numpy_dtype
     if out_dtype.kind not in "fc":
-        # Numba alawys returns non-integral outputs, we need to cast to float
         numba_dot_dtype = np.dtype(
             f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
         )
@@ -1560,42 +1554,24 @@ def numba_funcify_Dot(op, node, **kwargs):
             f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
         )
 
-    shape_case = _gemm_shape_case(x, y) if numba_dot_dtype in _GEMM_DTYPES else 0
-    if numba_dot_dtype in _GEMM_DTYPES:
-        # Calling gemm directly reads transposed and column-sliced operands through
-        # their leading dimension, where `np.dot` would copy them first.
-        @numba_basic.numba_njit
-        def product(x, y, out):
-            return _gemm(x, y, out, shape_case)
-
-    else:
-
-        @numba_basic.numba_njit
-        def product(x, y, out):
-            np.dot(x, y, out)
-            return out
-
-    @numba_basic.numba_njit
-    def as_is(a):
-        return a
-
-    @numba_basic.numba_njit
-    def to_dot_dtype(a):
-        return a.astype(numba_dot_dtype)
-
-    cast_x = as_is if x_dtype == numba_dot_dtype else to_dot_dtype
-    cast_y = as_is if y_dtype == numba_dot_dtype else to_dot_dtype
+    shape_case = _gemm_shape_case(x, y)
+    cast_x = x_dtype != numba_dot_dtype
+    cast_y = y_dtype != numba_dot_dtype
 
     @numba_basic.numba_njit
     def dot(x, y, out=None):
         if out is None:
             out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
-        return product(cast_x(x), cast_y(y), out)
+        if cast_x:
+            x = x.astype(numba_dot_dtype)
+        if cast_y:
+            y = y.astype(numba_dot_dtype)
+        return _gemm(x, y, out, shape_case)
 
     # Bump whenever `_gemm` changes: it is inlined here, so its source is not part of
     # this key.
     cache_key = default_hash_key_from_props(
-        op, cache_version=4, gemm_shape_case=shape_case
+        op, cache_version=5, gemm_shape_case=shape_case
     )
 
     if out_dtype == numba_dot_dtype:
@@ -1618,36 +1594,19 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
     x, y = node.inputs
 
-    use_gemm = (
-        x.type.numpy_dtype == y.type.numpy_dtype == dtype and dtype in _GEMM_DTYPES
-    )
-    shape_case = _gemm_shape_case(x, y) if use_gemm else 0
+    shape_case = _gemm_shape_case(x, y)
 
-    # Numba does not support 3D matmul (numba#3804), so either path loops over the batch.
-    if use_gemm:
+    # Numba does not support 3D matmul (numba#3804), so loop over the batch.
+    @numba_basic.numba_njit
+    def batched_dot(x, y, out=None):
+        if out is None:
+            shape = x.shape[:-1] + y.shape[2:]
+            out = np.empty(shape, dtype=dtype)
+        for i in range(out.shape[0]):
+            # Writes into out[i] directly and reads an F-ordered slice without a copy
+            _gemm(x[i], y[i], out[i], shape_case)
 
-        @numba_basic.numba_njit
-        def batched_dot(x, y, out=None):
-            if out is None:
-                shape = x.shape[:-1] + y.shape[2:]
-                out = np.empty(shape, dtype=dtype)
-            for i in range(out.shape[0]):
-                # Writes into out[i] directly and reads an F-ordered slice without a copy
-                _gemm(x[i], y[i], out[i], shape_case)
-
-            return out
-
-    else:
-
-        @numba_basic.numba_njit
-        def batched_dot(x, y, out=None):
-            if out is None:
-                shape = x.shape[:-1] + y.shape[2:]
-                out = np.empty(shape, dtype=dtype)
-            for i in range(out.shape[0]):
-                out[i] = np.dot(x[i], y[i])
-
-            return out
+        return out
 
     batched_dot.handles_out = True
     return batched_dot, default_hash_key_from_props(
