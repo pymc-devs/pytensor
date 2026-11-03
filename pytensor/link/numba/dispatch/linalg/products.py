@@ -7,6 +7,7 @@ from scipy import linalg
 
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.array_utils import _copyto
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
 from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -299,7 +300,7 @@ def _expm_impl(A, overwrite_a):
             R[:] = np.nan
 
         if s > 0:
-            A2[:] = R
+            _copyto(A2, R)
             R = A2
             R_buf = U
             for _ in range(s):
@@ -333,7 +334,7 @@ def numba_funcify_Expm(op, node, **kwargs):
             a = a.astype(out_dtype)
         return _expm(a, effective_overwrite_a)
 
-    cache_version = 1
+    cache_version = 2
     return expm, cache_version
 
 
@@ -554,7 +555,7 @@ def _gemv_impl(A, x, y):
             val_to_int_ptr(incy),
         )
         if y_work is not y_view:
-            y_view[:] = y_work
+            _copyto(y_view, y_work)
         return y
 
     return impl
@@ -716,6 +717,10 @@ def _gemm_impl(A, B, C, shape_case=0):
 
         return impl_vector
 
+    # Normalization preserves the layouts when every operand is contiguous.
+    output_layout = (
+        C.layout if all(array.layout in ("C", "F") for array in (A, B, C)) else "A"
+    )
     dtype = A.dtype
     numba_gemm = _BLAS().numba_xgemm(dtype)
     scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
@@ -753,18 +758,27 @@ def _gemm_impl(A, B, C, shape_case=0):
         # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
         # swap places and each flag flips. A C with no unit-stride axis goes through
         # a copy.
-        LDC = _column_major_ld(C)
-        if LDC:
+        if output_layout == "F":
             C_work = C
+            LDC = max(1, C.shape[0])
             swap = False
-        else:
-            LDC = _row_major_ld(C)
+        elif output_layout == "C":
+            C_work = C
+            LDC = max(1, C.shape[1])
             swap = True
+        else:
+            LDC = _column_major_ld(C)
             if LDC:
                 C_work = C
+                swap = False
             else:
-                C_work = np.empty(C.shape, dtype=dtype)
-                LDC = max(1, C.shape[1])
+                LDC = _row_major_ld(C)
+                swap = True
+                if LDC:
+                    C_work = C
+                else:
+                    C_work = np.empty(C.shape, dtype=dtype)
+                    LDC = max(1, C.shape[1])
 
         if swap:
             A_work, B_work = B_work, A_work
@@ -787,8 +801,8 @@ def _gemm_impl(A, B, C, shape_case=0):
             C_work.ctypes,
             val_to_int_ptr(np.int32(LDC)),
         )
-        if C_work is not C:
-            C[:] = C_work
+        if output_layout == "A" and C_work is not C:
+            _copyto(C, C_work)
         return out
 
     return impl

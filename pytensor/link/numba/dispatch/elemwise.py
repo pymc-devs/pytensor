@@ -1571,7 +1571,7 @@ def numba_funcify_Dot(op, node, **kwargs):
     # Bump whenever `_gemm` changes: it is inlined here, so its source is not part of
     # this key.
     cache_key = default_hash_key_from_props(
-        op, cache_version=5, gemm_shape_case=shape_case
+        op, cache_version=6, gemm_shape_case=shape_case
     )
 
     if out_dtype == numba_dot_dtype:
@@ -1610,5 +1610,5 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
 
     batched_dot.handles_out = True
     return batched_dot, default_hash_key_from_props(
-        op, cache_version=3, gemm_shape_case=shape_case
+        op, cache_version=4, gemm_shape_case=shape_case
     )

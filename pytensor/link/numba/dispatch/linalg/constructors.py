@@ -2,6 +2,7 @@ import numpy as np
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.array_utils import _copyto
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
 from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
@@ -28,17 +29,17 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
 
         r, c = 0, 0
         rr, cc = arr0.shape
-        out[r: r + rr, c: c + cc] = arr0
+        _copyto(out[r: r + rr, c: c + cc], arr0)
         r += rr
         c += cc
 
         rr, cc = arr1.shape
-        out[r: r + rr, c: c + cc] = arr1
+        _copyto(out[r: r + rr, c: c + cc], arr1)
         r += rr
         c += cc
 
         rr, cc = arr2.shape
-        out[r: r + rr, c: c + cc] = arr2
+        _copyto(out[r: r + rr, c: c + cc], arr2)
         r += rr
         c += cc
 
@@ -68,7 +69,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
         code.extend(
             [
                 f"rr, cc = {arg_name}.shape",
-                f"out[r: r + rr, c: c + cc] = {arg_name}",
+                f"_copyto(out[r: r + rr, c: c + cc], {arg_name})",
                 "r += rr",
                 "c += cc",
                 CODE_TOKEN.EMPTY_LINE,
@@ -80,10 +81,10 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
     block_diag = compile_numba_function_src(
         code_txt,
         "block_diagonal",
-        globals() | {"np": np},
+        {"np": np, "_copyto": _copyto},
     )
 
     block_diag = numba_basic.numba_njit(block_diag)
     block_diag.handles_out = True
-    cache_version = 2
+    cache_version = 3
     return block_diag, cache_version
