@@ -44,11 +44,14 @@ body:
     label: "Error message:"
     description: >
       Please include the full error message below.
-    placeholder: |
+    value: |
       <details>
+
+      ```shell
       << Full traceback starting from `Traceback: ...` >>
+      ```
+
       </details>
-    render: shell
 
 - type: textarea
   attributes:
@@ -61,9 +64,13 @@ body:
       Specific config for the issue if any
       (you may use `python -c "import pytensor; print(pytensor.config)"` 
       to get it and enclose in `<details>` `</details>`)
-    placeholder: |
+    value: |
       <details>
-      configuration information
+
+      ```
+      << configuration information >>
+      ```
+
       </details>
   validations:
     required: true
