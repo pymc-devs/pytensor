@@ -377,8 +377,8 @@ def _is_reversed(X, axis):
     return X.shape[axis] > 1 and X.strides[axis] < 0
 
 
-@numba_basic.numba_njit(inline="always")
-def _blas_operand(X):
+@numba_basic.numba_njit
+def _blas_operand_generic(X):
     """Return the buffer, BLAS transpose flag and leading dimension that read ``X``."""
     ld = _column_major_ld(X)
     if ld:
@@ -390,6 +390,27 @@ def _blas_operand(X):
     return np.ascontiguousarray(X), True, np.int32(max(1, X.shape[1]))
 
 
+def _blas_operand(X):
+    return _blas_operand_generic(X)
+
+
+@overload(_blas_operand, inline="always")
+def _blas_operand_impl(X):
+    if isinstance(X, types.Array) and X.ndim == 2 and X.layout in ("C", "F"):
+        column_major = X.layout == "F"
+
+        def impl(X):
+            extent = X.shape[0] if column_major else X.shape[1]
+            return X, not column_major, np.int32(max(1, extent))
+
+        return impl
+
+    def impl_generic(X):
+        return _blas_operand_generic(X)
+
+    return impl_generic
+
+
 # Stack slots; a one-element array would cost a heap allocation per call
 _SCALAR_PTR_INTRINSICS = {
     types.float32: val_to_sptr,
@@ -399,8 +420,8 @@ _SCALAR_PTR_INTRINSICS = {
 }
 
 
-@numba_basic.numba_njit(inline="always")
-def _blas_vector(x):
+@numba_basic.numba_njit
+def _blas_vector_generic(x):
     """Return the vector, its lowest-address view and its signed BLAS increment."""
     if x.size == 1:
         return x, x, np.int32(1)
@@ -411,8 +432,27 @@ def _blas_vector(x):
     return x, base, inc
 
 
-@numba_basic.numba_njit(inline="always")
-def _gemv_operands(A, x, y):
+def _blas_vector(x):
+    return _blas_vector_generic(x)
+
+
+@overload(_blas_vector, inline="always")
+def _blas_vector_impl(x):
+    if isinstance(x, types.Array) and x.ndim == 1 and x.layout in ("C", "F"):
+
+        def impl(x):
+            return x, x, np.int32(1)
+
+        return impl
+
+    def impl_generic(x):
+        return _blas_vector_generic(x)
+
+    return impl_generic
+
+
+@numba_basic.numba_njit
+def _gemv_operands_generic(A, x, y):
     # Reversing a matrix axis also reverses its corresponding vector.
     if _is_reversed(A, 0):
         A = A[::-1]
@@ -422,6 +462,26 @@ def _gemv_operands(A, x, y):
         x = x[::-1]
     A, trans, ld = _blas_operand(A)
     return A, x, y, trans, ld
+
+
+def _gemv_operands(A, x, y):
+    return _gemv_operands_generic(A, x, y)
+
+
+@overload(_gemv_operands, inline="always")
+def _gemv_operands_impl(A, x, y):
+    if isinstance(A, types.Array) and A.ndim == 2 and A.layout in ("C", "F"):
+
+        def impl(A, x, y):
+            A, trans, ld = _blas_operand(A)
+            return A, x, y, trans, ld
+
+        return impl
+
+    def impl_generic(A, x, y):
+        return _gemv_operands_generic(A, x, y)
+
+    return impl_generic
 
 
 def _gemv(A, x, y):
@@ -529,8 +589,8 @@ def _cheapest_copies(rows, inner, cols, cost_a, cost_b, cost_c):
     return False, False, False
 
 
-@numba_basic.numba_njit(inline="always")
-def _normalize_gemm_strides(A, B, C):
+@numba_basic.numba_njit
+def _normalize_gemm_strides_generic(A, B, C):
     """Reverse paired axes of A, B and C so the fewest elements need a BLAS copy."""
     ar, ak = _is_reversed(A, 0), _is_reversed(A, 1)
     bk, bc = _is_reversed(B, 0), _is_reversed(B, 1)
@@ -569,7 +629,33 @@ def _normalize_gemm_strides(A, B, C):
     return A, B, C
 
 
-def _gemm(A, B, C):
+def _normalize_gemm_strides(A, B, C):
+    return _normalize_gemm_strides_generic(A, B, C)
+
+
+@overload(_normalize_gemm_strides, inline="always")
+def _normalize_gemm_strides_impl(A, B, C):
+    # Contiguous types cannot reverse a non-singleton axis. Prune the view
+    # branches before typing them so the original C/F types survive.
+    if all(
+        isinstance(array, types.Array)
+        and array.ndim == 2
+        and array.layout in ("C", "F")
+        for array in (A, B, C)
+    ):
+
+        def impl(A, B, C):
+            return A, B, C
+
+        return impl
+
+    def impl_generic(A, B, C):
+        return _normalize_gemm_strides_generic(A, B, C)
+
+    return impl_generic
+
+
+def _gemm(A, B, C, shape_case=0):
     """
     Overwrite ``C`` with the matrix product of ``A`` and ``B``.
 
@@ -578,6 +664,9 @@ def _gemm(A, B, C):
     A, B, C : ndarray
         2-d arrays of one dtype. ``C`` is the output and is returned. Its incoming
         contents are never read.
+    shape_case : literal int
+        Private graph-converter proof selecting a static BLAS shape branch.
+        The default retains all generic shape branches.
 
     Returns
     -------
@@ -587,18 +676,51 @@ def _gemm(A, B, C):
     return C
 
 
-@overload(_gemm)
-def _gemm_impl(A, B, C):
+@overload(_gemm, prefer_literal=True)
+def _gemm_impl(A, B, C, shape_case=0):
     ensure_blas()
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
     _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
     _check_linalg_matrix(C, ndim=2, dtype=A.dtype, func_name="gemm")
 
+    known_case = (
+        shape_case.literal_value
+        if isinstance(shape_case, types.IntegerLiteral)
+        else shape_case
+        if isinstance(shape_case, int)
+        else 0
+    )
+    if known_case in (2, 3):
+        column = known_case == 2
+
+        def impl_vector(A, B, C, shape_case=0):
+            M = np.int32(A.shape[0])
+            K = np.int32(A.shape[1])
+            N = np.int32(B.shape[1])
+            if B.shape[0] != K:
+                raise ValueError(
+                    "gemm: operands have mismatched contraction dimensions"
+                )
+            if C.shape[0] != M or C.shape[1] != N:
+                raise ValueError("gemm: output shape does not match the product")
+            if M == 0 or N == 0:
+                return C
+            if K == 0:
+                C[:] = 0
+                return C
+            if column:
+                _gemv(A, B[:, 0], C[:, 0])
+            else:
+                _gemv(B.T, A[0], C[0])
+            return C
+
+        return impl_vector
+
     dtype = A.dtype
     numba_gemm = _BLAS().numba_xgemm(dtype)
     scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
 
-    def impl(A, B, C):
+    def impl(A, B, C, shape_case=0):
         out = C
         M = np.int32(A.shape[0])
         K = np.int32(A.shape[1])
@@ -611,17 +733,18 @@ def _gemm_impl(A, B, C):
         if C.shape[0] != M or C.shape[1] != N:
             raise ValueError("gemm: output shape does not match the product")
 
-        if M == 0 or N == 0:
-            return out
-        if K == 0:
-            C[:] = 0
-            return out
-        if N == 1:
-            _gemv(A, B[:, 0], C[:, 0])
-            return out
-        if M == 1:
-            _gemv(B.T, A[0], C[0])
-            return out
+        if known_case != 1:
+            if M == 0 or N == 0:
+                return out
+            if K == 0:
+                C[:] = 0
+                return out
+            if N == 1:
+                _gemv(A, B[:, 0], C[:, 0])
+                return out
+            if M == 1:
+                _gemv(B.T, A[0], C[0])
+                return out
 
         A, B, C = _normalize_gemm_strides(A, B, C)
         A_work, A_trans, LDA = _blas_operand(A)
