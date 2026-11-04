@@ -1,8 +1,6 @@
 import numpy as np
 import pytest
 import scipy.sparse as scipy_sparse
-from packaging import version
-from scipy import __version__ as scipy_version
 
 import pytensor
 import pytensor.sparse.math
@@ -578,10 +576,6 @@ class TestCsm:
                     structured=True,
                 )
 
-    @pytest.mark.skipif(
-        version.parse(scipy_version) >= version.parse("1.16.0"),
-        reason="Scipy 1.16 introduced some changes that make this test fail",
-    )
     def test_csm_sparser(self):
         # Test support for gradients sparser than the input.
 
@@ -614,10 +608,6 @@ class TestCsm:
 
                 assert len(spmat.data) == len(res)
 
-    @pytest.mark.skipif(
-        version.parse(scipy_version) >= version.parse("1.16.0"),
-        reason="Scipy 1.16 introduced some changes that make this test fail",
-    )
     def test_csm_unsorted(self):
         # Test support for gradients of unsorted inputs.
 
