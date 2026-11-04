@@ -9,6 +9,7 @@ import pytensor
 import pytensor.sparse.math as psm
 import pytensor.tensor as pt
 from pytensor.compile import get_default_mode
+from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.replace import vectorize_graph
 from pytensor.link.numba import NumbaLinker
@@ -48,8 +49,6 @@ from pytensor.sparse.math import (
     true_dot,
 )
 from pytensor.sparse.rewriting import UsmmCscDense
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     TensorType,
     matrix,
@@ -785,193 +784,285 @@ class TestDots(utt.InferShapeTester):
 
 
 class TestUsmm:
-    def setup_method(self):
-        x_size = (10, 100)
-        y_size = (100, 200)
-        z_size = (x_size[0], y_size[1])
+    @pytest.mark.parametrize("z_dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("product_shape", [(1, 3), (2, 1), (1, 1), (2, 3)])
+    def test_perform_broadcast(self, z_dtype, product_shape):
+        # Regression: matching dtypes used +=, which cannot expand the product's shape.
+        n_rows, n_cols = product_shape
+        alpha = scalar("alpha", dtype="float64")
+        x = csc_matrix("x", dtype="float64", shape=(n_rows, 2))
+        y = matrix("y", dtype="float64", shape=(2, n_cols))
+        z = matrix("z", dtype=z_dtype, shape=(2, 3))
+        f = pytensor.function(
+            [alpha, x, y, z],
+            psm.usmm(alpha, x, y, z),
+            mode=Mode(linker="py", optimizer=None),
+        )
+        x_value = scipy_sparse.csc_matrix(
+            np.arange(n_rows * 2, dtype="float64").reshape(n_rows, 2)
+        )
+        y_value = np.arange(2 * n_cols, dtype="float64").reshape(2, n_cols)
+        z_value = np.arange(6, dtype=z_dtype).reshape(2, 3)
+        expected = 0.5 * (x_value @ y_value) + z_value
+        np.testing.assert_allclose(
+            f(np.array(0.5), x_value, y_value, z_value), expected, strict=True
+        )
 
-        self.rng = np.random.default_rng(seed=utt.fetch_seed())
-        self.x = np.asarray(
-            self.rng.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
-        )
-        self.y = np.asarray(
-            self.rng.uniform(-1, 1, y_size), dtype=pytensor.config.floatX
-        )
-        self.z = np.asarray(
-            self.rng.uniform(-1, 1, z_size), dtype=pytensor.config.floatX
+    @pytest.mark.parametrize("alpha_shape", [(), (1, 1), (1, 1, 1)])
+    def test_scalar_alpha(self, alpha_shape):
+        alpha = pytensor.tensor.tensor("alpha", shape=alpha_shape, dtype="float64")
+        x = csc_matrix("x", dtype="float64")
+        y = matrix("y", dtype="float64")
+        z = matrix("z", dtype="float64")
+
+        if alpha.ndim > 2:
+            with pytest.raises(TypeError, match="at most two dimensions"):
+                psm.usmm(alpha, x, y, z)
+        else:
+            out = psm.usmm(alpha, x, y, z)
+            scalar_alpha = alpha if not alpha.ndim else alpha.dimshuffle()
+            utt.assert_equal_computations([out.owner.inputs[0]], [scalar_alpha])
+            assert out.owner.inputs[0].ndim == 0
+
+    @pytest.fixture
+    def operands(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        return (
+            rng.binomial(1, 0.5, (10, 100)).astype(config.floatX),
+            rng.uniform(-1, 1, (100, 200)).astype(config.floatX),
+            rng.uniform(-1, 1, (10, 200)).astype(config.floatX),
         )
 
     @pytest.mark.slow
     @pytest.mark.parametrize("dtype1", ["float32", "float64", "int16", "complex64"])
     @pytest.mark.parametrize("dtype2", ["float32", "float64", "int16", "complex64"])
     @pytest.mark.parametrize("can_inplace", [False, True])
-    @pytest.mark.parametrize("format1", ["dense", "csc", "csr"])
-    @pytest.mark.parametrize("format2", ["dense", "csc", "csr"])
-    def test_basic(self, dtype1, dtype2, can_inplace, format1, format2):
+    @pytest.mark.parametrize(
+        "format1, format2",
+        [
+            formats
+            for formats in product(("dense", "csc", "csr"), repeat=2)
+            if formats != ("dense", "dense")
+        ],
+    )
+    def test_basic(self, dtype1, dtype2, can_inplace, format1, format2, operands):
         def mat(format, name, dtype):
             if format == "dense":
                 return matrix(name, dtype=dtype)
-            else:
-                return pytensor.sparse.matrix(format, name, dtype=dtype)
-
-        if format1 == "dense" and format2 == "dense":
-            pytest.skip("Skipping dense-dense case")
+            return pytensor.sparse.matrix(format, name, dtype=dtype)
 
         dtype3 = upcast(dtype1, dtype2)
         dtype4 = dtype3 if can_inplace else "int32"
-        inplace = can_inplace
-
         x = mat(format1, "x", dtype1)
         y = mat(format2, "y", dtype2)
-
         a = scalar("a", dtype=dtype3)
-        z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
+        x_value, y_value, z_value = operands
+        x_value = x_value.astype(dtype1)
+        y_value = y_value.astype(dtype2)
 
-        def f_b(z, a, x, y):
-            return z - a * (x * y)
-
-        x_data = np.asarray(self.x, dtype=dtype1)
         if format1 != "dense":
-            x_data = as_sparse_format(x_data, format1)
-        y_data = np.asarray(self.y, dtype=dtype2)
+            x_value = as_sparse_format(x_value, format1)
         if format2 != "dense":
-            y_data = as_sparse_format(y_data, format2)
-        a_data = np.asarray(1.5, dtype=dtype3)
-        z_data = np.asarray(self.z, dtype=dtype4)
+            y_value = as_sparse_format(y_value, format2)
+        a_value = np.array(1.5, dtype=dtype3)
+        z_value = z_value.astype(dtype4)
+        z = pytensor.shared(z_value.copy())
 
-        f_b_out = f_b(z_data, a_data, x_data, y_data)
-
-        # To make it easier to check the toposort
+        out_dtype = upcast(dtype1, dtype2, dtype3, dtype4)
+        expected = z_value.astype(out_dtype) - a_value.astype(out_dtype) * (
+            x_value.astype(out_dtype) @ y_value.astype(out_dtype)
+        )
+        expression = z - a * psm.dot(x, y)
         mode = get_default_mode().excluding("fusion")
 
-        if inplace:
-            updates = [(z, z - a * psm.dot(x, y))]
-            f_a = pytensor.function([a, x, y], [], updates=updates, mode=mode)
-            f_a(a_data, x_data, y_data)
-            f_a_out = z.get_value(borrow=True)
+        if can_inplace:
+            f = pytensor.function([a, x, y], [], updates=[(z, expression)], mode=mode)
+            f(a_value, x_value, y_value)
+            result = z.get_value(borrow=True)
         else:
-            f_a = pytensor.function([a, x, y], z - a * psm.dot(x, y), mode=mode)
-            f_a_out = f_a(a_data, x_data, y_data)
+            f = pytensor.function([a, x, y], expression, mode=mode)
+            result = f(a_value, x_value, y_value)
 
-        # As we do a dot product of 2 vector of 100 element,
-        # This mean we can have 2*100*eps abs error.
-        if f_a_out.dtype in ["float64", "complex128"]:
-            atol = 3e-8
-            rtol = 1e-5
+        if result.dtype in ("float64", "complex128"):
+            # The product can use single precision before adding z promotes it.
+            atol = (
+                2 * x_value.shape[1] * np.finfo(dtype3).eps
+                if dtype3 in ("float32", "complex64")
+                else 3e-8
+            )
+            utt.assert_allclose(result, expected, atol=atol, rtol=1e-5)
         else:
-            atol = None
-            rtol = None
-        utt.assert_allclose(f_a_out, f_b_out, rtol=rtol, atol=atol)
-        topo = f_a.maker.fgraph.toposort()
-        up = upcast(dtype1, dtype2, dtype3, dtype4)
+            utt.assert_allclose(result, expected)
 
-        fast_compile = pytensor.config.mode == "FAST_COMPILE"
-        cxx_only_excluded = "cxx_only" in f_a.maker.linker.incompatible_rewrites
+    @pytest.mark.parametrize("format", ["csc", "csr"])
+    def test_infer_shape(self, format, operands):
+        x = pytensor.sparse.matrix(format, "x", dtype="float32")
+        y = matrix("y", dtype="float64")
+        a = scalar("a", dtype="int16")
+        x_value, y_value, z_value = operands
+        x_value = as_sparse_format(x_value.astype("float32"), format)
+        z = pytensor.shared(z_value.astype("complex64"))
 
-        if not pytensor.config.blas__ldflags or cxx_only_excluded:
-            # Usmm should not be inserted, because it relies on BLAS / cxx
-            assert len(topo) == 4, topo
-            assert isinstance(topo[0].op, psm.Dot)
-            assert isinstance(topo[1].op, DimShuffle)
-            assert isinstance(topo[2].op, Elemwise) and isinstance(
-                topo[2].op.scalar_op, pytensor.scalar.Mul
+        mode = get_default_mode().excluding("fusion")
+        f = pytensor.function([a, x, y], (z - a * psm.dot(x, y)).shape, mode=mode)
+
+        np.testing.assert_array_equal(
+            f(np.array(1, dtype="int16"), x_value, y_value.astype("float64")),
+            z_value.shape,
+        )
+        assert not any(
+            isinstance(node.op, Dot | Usmm | UsmmCscDense)
+            for node in f.maker.fgraph.toposort()
+        )
+
+
+@pytest.mark.skipif(
+    not config.cxx or not config.blas__ldflags,
+    reason="Requires C compiler and BLAS",
+)
+class TestUsmmCscDense:
+    @pytest.fixture
+    def csc_dense(self, dtype, inplace):
+        alpha = scalar("alpha", dtype=dtype)
+        x = csc_matrix("x", dtype=dtype)
+        y = matrix("y", dtype=dtype)
+        z = matrix("z", dtype=dtype)
+        data, indices, indptr, shape = CSMProperties()(x)
+        out = UsmmCscDense(inplace)(alpha, data, indices, indptr, shape[0], y, z)
+        return pytensor.function(
+            [alpha, x, y, pytensor.In(z, mutable=inplace, borrow=inplace)],
+            pytensor.Out(out, borrow=True),
+            mode=Mode(linker="cvm", optimizer=None),
+            accept_inplace=True,
+        )
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("mutable", [False, True])
+    @pytest.mark.parametrize("z_shape", [(1, None), (None, 1), (1, 1), (None, None)])
+    def test_broadcast(self, dtype, mutable, z_shape):
+        x = csc_matrix("x", dtype=dtype)
+        y = matrix("y", dtype=dtype)
+        z = pt.matrix("z", shape=z_shape, dtype=dtype)
+        out = psm.usmm(np.array(0.5, dtype=dtype), x, y, z)
+        f = pytensor.function(
+            [x, y, pytensor.In(z, mutable=mutable, borrow=mutable)],
+            pytensor.Out(out, borrow=True),
+            mode=Mode(linker="cvm", optimizer="fast_run"),
+        )
+        [op] = [
+            node.op
+            for node in f.maker.fgraph.toposort()
+            if isinstance(node.op, UsmmCscDense)
+        ]
+        assert op.inplace == mutable
+
+        x_value = scipy_sparse.csc_matrix(np.eye(2, dtype=dtype))
+        y_value = np.arange(6, dtype=dtype).reshape(2, 3)
+        row_sizes = (1,) if z_shape[0] == 1 else (1, 2)
+        col_sizes = (1,) if z_shape[1] == 1 else (1, 3)
+        for runtime_shape in product(row_sizes, col_sizes):
+            z_value = np.arange(np.prod(runtime_shape), dtype=dtype).reshape(
+                runtime_shape
             )
-            assert isinstance(topo[3].op, Elemwise) and isinstance(
-                topo[3].op.scalar_op, pytensor.scalar.Sub
-            )
-        elif (
-            y.type.dtype == up
-            and format1 == "csc"
-            and format2 == "dense"
-            and up in ("float32", "float64")
+            z_before = z_value.copy()
+            result = f(x_value, y_value, z_value)
+            np.testing.assert_allclose(result, 0.5 * (x_value @ y_value) + z_before)
+            reuse_z = mutable and runtime_shape == (2, 3)
+            assert np.shares_memory(result, z_value) == reuse_z
+            if not reuse_z:
+                np.testing.assert_array_equal(z_value, z_before)
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_nonfinite(self, dtype, inplace, csc_dense):
+        f = csc_dense
+        x_value = scipy_sparse.csc_matrix(
+            np.array([[1.0, 0.0], [0.0, 0.0]], dtype=dtype)
+        )
+        y_value = np.array([[1.0, 0.0, 2.0], [0.0, 0.0, 0.0]], dtype=dtype)[:, ::-1]
+        for alpha_value, z_shape in product(
+            (np.inf, -np.inf, np.nan), ((2, 3), (1, 3), (2, 1), (1, 1))
         ):
-            # The op UsmmCscDense should be inserted
-            assert (
-                sum(
-                    isinstance(node.op, Elemwise)
-                    and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
-                    for node in topo
+            z_value = np.ones((z_shape[0], 2 * z_shape[1]), dtype=dtype)[:, ::-2]
+            with np.errstate(invalid="ignore"):
+                expected = alpha_value * (x_value @ y_value) + z_value
+                result = f(
+                    np.array(alpha_value, dtype=dtype), x_value, y_value, z_value
                 )
-                == len(topo) - 5
+            np.testing.assert_allclose(result, expected, equal_nan=True)
+            reuse_z = inplace and z_shape == (2, 3)
+            assert np.shares_memory(result, z_value) == reuse_z
+            if not reuse_z:
+                np.testing.assert_array_equal(z_value, np.ones(z_shape, dtype=dtype))
+
+        # Fusion can avoid a product overflow that occurs in separate operations.
+        big = np.finfo(dtype).max * np.array(0.75, dtype=dtype)
+        x_value = scipy_sparse.csc_matrix(np.array([[big]], dtype=dtype))
+        y_value = np.array([[2]], dtype=dtype)
+        alpha_value = np.array(0.25, dtype=dtype)
+        with np.errstate(over="ignore"):
+            separate = alpha_value * (x_value @ y_value)
+        result = f(alpha_value, x_value, y_value, np.zeros((1, 1), dtype=dtype))
+        assert np.isposinf(separate).all()
+        np.testing.assert_array_equal(result, np.array([[big * 0.5]], dtype=dtype))
+
+        cases = ((1, [[np.inf]], [[1]], [[-np.inf]]), (0, [[np.inf]], [[1]], [[0]]))
+        for alpha_value, x_array, y_array, z_array in cases:
+            x_value = scipy_sparse.csc_matrix(np.array(x_array, dtype=dtype))
+            y_value = np.array(y_array, dtype=dtype)
+            z_value = np.array(z_array, dtype=dtype)
+            z_before = z_value.copy()
+            alpha_value = np.array(alpha_value, dtype=dtype)
+            with np.errstate(over="ignore", invalid="ignore"):
+                expected = alpha_value * (x_value @ y_value) + z_before
+                result = f(alpha_value, x_value, y_value, z_value)
+            np.testing.assert_array_equal(result, expected, strict=True)
+
+        # BLAS skips zero coefficients, including stored zeros multiplied by inf.
+        x_value = scipy_sparse.csc_matrix(
+            (np.zeros(1, dtype=dtype), [0], [0, 1]), shape=(1, 1)
+        )
+        result = f(
+            np.array(1, dtype=dtype),
+            x_value,
+            np.array([[np.inf]], dtype=dtype),
+            np.zeros((1, 1), dtype=dtype),
+        )
+        np.testing.assert_array_equal(result, np.zeros((1, 1), dtype=dtype))
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_strides(self, dtype, inplace, csc_dense):
+        alpha = np.array(0.5, dtype=dtype)
+        for n_inner, n_cols in [(3, 5), (5, 3), (3, 0), (0, 5)]:
+            x_value = scipy_sparse.csc_matrix(
+                np.arange(2 * n_inner, dtype=dtype).reshape(2, n_inner)
             )
-            new_topo = [
-                node
-                for node in topo
-                if not (
-                    isinstance(node.op, Elemwise)
-                    and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
-                )
-            ]
-            topo = new_topo
-            assert len(topo) == 5, topo
 
-            # Usmm is tested at the same time in debugmode
-            # Check if the optimization local_usmm and local_usmm_csx is
-            # applied
+            # Regression: the negative-stride pointer adjustment used y's row count
+            # instead of its column count. Padding lets the bug produce wrong values
+            # without reading outside the allocated memory.
+            column_steps = (1, -1, 2, -2)
+            y_padding = 2 * n_inner
+            padded_shape = (n_inner, 4 * (n_inner + n_cols))
+            padded_size = np.prod(padded_shape)
+            y_base = np.arange(padded_size, dtype=dtype).reshape(padded_shape)
+            for y_step, z_step in product(column_steps, repeat=2):
+                y_width = n_cols * abs(y_step)
+                y_value = y_base[:, y_padding : y_padding + y_width][:, ::y_step]
+                z_shape = (2, n_cols * abs(z_step))
+                z_size = np.prod(z_shape)
+                z_value = np.arange(z_size, dtype=dtype).reshape(z_shape)[:, ::z_step]
+                z_before = z_value.copy()
+                expected = z_before + 0.5 * (x_value @ y_value)
+                result = csc_dense(alpha, x_value, y_value, z_value)
+                np.testing.assert_allclose(result, expected)
 
-            def check_once(x):
-                assert sum(isinstance(n.op, x) for n in topo) == 1
+                if inplace and result.size:
+                    assert np.shares_memory(result, z_value)
 
-            check_once(CSMProperties)
-            check_once(DimShuffle)
-            check_once(Subtensor)
-            check_once(UsmmCscDense)
-            check_once(Elemwise)
-            if inplace:
-                assert topo[4].op.inplace
-        elif not fast_compile:
-            # The op Usmm should be inserted
-            assert len(topo) == 3, topo
-            assert isinstance(topo[0].op, DimShuffle)
-            assert topo[1].op == pytensor.tensor.neg
-            assert isinstance(topo[2].op, psm.Usmm)
-
-    @pytest.mark.parametrize(
-        "params",
-        [
-            ("float32", "float64", "int16", "complex64", "csc", "dense"),
-            ("float32", "float64", "int16", "complex64", "csr", "dense"),
-        ],
-    )
-    def test_infer_shape(self, params):
-        def mat(format, name, dtype):
-            if format == "dense":
-                return matrix(name, dtype=dtype)
-            else:
-                return pytensor.sparse.matrix(format, name, dtype=dtype)
-
-        dtype1, dtype2, dtype3, dtype4, format1, format2 = params
-
-        if format1 == "dense" and format2 == "dense":
-            pytest.skip("Skipping dense-dense case; Usmm won't be used.")
-
-        x = mat(format1, "x", dtype1)
-        y = mat(format2, "y", dtype2)
-        a = scalar("a", dtype=dtype3)
-        z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
-
-        def f_b(z, a, x, y):
-            return z - a * (x * y)
-
-        x_data = np.asarray(self.x, dtype=dtype1)
-        if format1 != "dense":
-            x_data = as_sparse_format(x_data, format1)
-        y_data = np.asarray(self.y, dtype=dtype2)
-        if format2 != "dense":
-            y_data = as_sparse_format(y_data, format2)
-        a_data = np.asarray(1.5, dtype=dtype3)
-        z_data = np.asarray(self.z, dtype=dtype4)
-
-        f_b_out = f_b(z_data, a_data, x_data, y_data)
-
-        # To make it easier to check the toposort
-        mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
-
-        # test infer_shape of Dot got applied
-        f_shape = pytensor.function([a, x, y], (z - a * psm.dot(x, y)).shape, mode=mode)
-        assert all(f_shape(a_data, x_data, y_data) == f_b_out.shape)
-        topo = f_shape.maker.fgraph.toposort()
-        assert not any(isinstance(node.op, Dot | Usmm | UsmmCscDense) for node in topo)
+                if not inplace:
+                    np.testing.assert_array_equal(z_value, z_before)
 
 
 class TestTrueDot(utt.InferShapeTester):

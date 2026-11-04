@@ -639,14 +639,13 @@ class UsmmCscDense(_NoPythonCOp):
     """Performs ``alpha * x @ y + z``.
 
     ``x`` and ``y`` are a matrices, ``z`` is a dense matrix, and ``alpha`` is a
-    scalar.  The result is a dense matrix.
+    scalar. The result is a dense matrix. `z` must broadcast to the shape of `x @ y`.
 
     Notes
     -----
     The gradient is not implemented for this `Op`.
 
     This is an optimized version of `Usmm` when ``x`` is in CSC format and ``y`` is dense.
-
     """
 
     __props__ = ("inplace",)
@@ -663,7 +662,7 @@ class UsmmCscDense(_NoPythonCOp):
             return "UsmmCscDense{no_inplace}"
 
     def make_node(self, alpha, x_val, x_ind, x_ptr, x_nrows, y, z):
-        alpha = as_tensor_variable(alpha)
+        alpha = as_tensor_variable(alpha, ndim=0)
         x_val = as_tensor_variable(x_val)
         x_ind = as_tensor_variable(x_ind)
         x_ptr = as_tensor_variable(x_ptr)
@@ -673,7 +672,9 @@ class UsmmCscDense(_NoPythonCOp):
         assert x_ind.dtype == "int32"
         assert x_ptr.dtype == "int32"
         assert x_nrows.dtype == "int32"
-        assert alpha.ndim == 2 and alpha.type.shape == (1, 1)
+        assert x_ind.ndim == 1
+        assert x_ptr.ndim == 1
+        assert x_nrows.ndim == 0
         assert x_val.ndim == 1
         assert y.ndim == 2
         assert z.ndim == 2
@@ -709,6 +710,9 @@ class UsmmCscDense(_NoPythonCOp):
         )
         return r
 
+    def c_headers(self, **kwargs):
+        return ["cmath"]
+
     def c_support_code(self, **kwargs):
         return blas.blas_header_text()
 
@@ -726,168 +730,120 @@ class UsmmCscDense(_NoPythonCOp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         alpha, x_val, x_ind, x_ptr, x_nrows, y, z = inputs
-        zn = outputs[0]
-        if node.inputs[1].type.dtype in ("complex64", "complex128"):
-            raise NotImplementedError("Complex types are not supported for x_val")
-        if node.inputs[5].type.dtype in ("complex64", "complex128"):
-            raise NotImplementedError("Complex types are not supported for y")
-        if node.inputs[6].type.dtype != node.outputs[0].type.dtype:
-            raise NotImplementedError("z and output must have same type")
+        [out] = outputs
 
-        if node.inputs[1].type.dtype == "float32":
-            conv_type = "float"
+        if node.outputs[0].dtype == "float32":
             axpy = "saxpy_"
         else:
-            conv_type = "double"
             axpy = "daxpy_"
-        # retrieve dtype numbers
-        typenum_alpha = node.inputs[0].type.dtype_specs()[2]
-        typenum_x_val = node.inputs[1].type.dtype_specs()[2]
-        typenum_y = node.inputs[5].type.dtype_specs()[2]
-        typenum_z = node.inputs[6].type.dtype_specs()[2]
-        typenum_zn = node.outputs[0].type.dtype_specs()[2]
 
-        inplace = int(self.inplace)
-
+        out_typenum = node.outputs[0].type.dtype_specs()[2]
         fail = sub["fail"]
-        rval = f"""
 
-        if (PyArray_NDIM({x_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_val) != 1"); {fail};}}
-        if (PyArray_NDIM({x_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_ind) != 1"); {fail};}}
-        if (PyArray_NDIM({x_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_ptr) != 1"); {fail};}}
-        if (PyArray_NDIM({x_nrows}) != 0) {{PyErr_SetString(PyExc_NotImplementedError, "rank(nrows) != 0"); {fail};}}
-        if (PyArray_NDIM({y}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); {fail};}}
-
-        if (PyArray_TYPE({x_val}) != {typenum_x_val}) {{
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for x_val"); {fail};}}
-
-        if (PyArray_TYPE({y}) != {typenum_y}) {{
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for y"); {fail};}}
-
-        if (PyArray_TYPE({z}) != {typenum_z}) {{
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for z"); {fail};}}
-
-        if (PyArray_TYPE({alpha}) != {typenum_alpha}) {{
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for alpha"); {fail};}}
-
-        if (PyArray_TYPE({x_ind}) != NPY_INT32) {{
-        PyErr_SetString(PyExc_NotImplementedError, "x_ind dtype not INT32"); {fail};}}
-
-        if (PyArray_TYPE({x_ptr}) != NPY_INT32)
-        {{PyErr_SetString(PyExc_NotImplementedError, "x_ptr dtype not INT32"); {fail};}}
-
-        if (PyArray_TYPE({x_nrows}) != NPY_INT32)
-        {{PyErr_SetString(PyExc_NotImplementedError, "x_nrows dtype not INT32"); {fail};}}
-
-        if (PyArray_DIMS({x_val})[0] != PyArray_DIMS({x_ind})[0])
-        {{PyErr_SetString(PyExc_NotImplementedError, "x_val and x_ind have different lengths"); {fail};}}
-
-        if (PyArray_DIMS({x_ptr})[0] != PyArray_DIMS({y})[0]+1)
-        {{PyErr_SetString(PyExc_NotImplementedError, "x's number of columns doesn't match y's rows"); {fail};}}
-
-        if (PyArray_DIMS({z})[0] != ((npy_int32 *)PyArray_DATA({x_nrows}))[0] || PyArray_DIMS({z})[1] != PyArray_DIMS({y})[1])
-        {{PyErr_SetString(PyExc_NotImplementedError, "The dimension of the allocated output doesn't match the correct output size."); {fail};}}
-
-        if (PyArray_SIZE({alpha}) != 1)
-        {{PyErr_SetString(PyExc_NotImplementedError, "The number of element in alpha must be 1"); {fail};}}
-
-        if (PyArray_NDIM({alpha}) != 2)
-        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of alpha must be 2"); {fail};}}
-
-        if (PyArray_NDIM({x_val}) != 1)
-        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of x_val must be 1"); {fail};}}
-
-        if (PyArray_NDIM({y}) != 2)
-        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of y must be 2"); {fail};}}
-
-        if (PyArray_NDIM({z}) != 2)
-        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of z must be 2"); {fail};}}
-
-        if ({inplace})
+        return f"""
         {{
-            if ({typenum_zn} != {typenum_z}) {{
-            PyErr_SetString(PyExc_NotImplementedError, "When inplace the output dtype must be the same as the input"); {fail};}}
+            const npy_intp n_rows = *(npy_int32*)PyArray_DATA({x_nrows});
+            const npy_intp n_cols = PyArray_DIM({y}, 1);
+            const npy_intp n_inner = PyArray_DIM({y}, 0);
+            const npy_intp z_rows = PyArray_DIM({z}, 0);
+            const npy_intp z_cols = PyArray_DIM({z}, 1);
 
-            Py_XDECREF({zn});
-            {zn} = {z};
-            Py_INCREF({zn});
-        }}
-        else if (!{zn}
-            || (PyArray_DIMS({zn})[0] != ((npy_int32 *)PyArray_DATA({x_nrows}))[0])
-            || (PyArray_DIMS({zn})[1] != PyArray_DIMS({y})[1])
-            )
-        {{
-            {{Py_XDECREF({zn});}}
-            npy_intp dims[] = {{0, 0}};
-            dims[0] = ((npy_int32 *)PyArray_DATA({x_nrows}))[0];
-            dims[1] = PyArray_DIMS({y})[1];
-            {zn} = (PyArrayObject*) PyArray_SimpleNew(2, dims, {typenum_zn});
-        }}
+            if (PyArray_DIM({x_val}, 0) != PyArray_DIM({x_ind}, 0)) {{
+                PyErr_SetString(PyExc_ValueError, "x data and indices must have the same length");
+                {fail};
+            }}
+            if (PyArray_DIM({x_ptr}, 0) != n_inner + 1) {{
+                PyErr_SetString(PyExc_ValueError, "x's number of columns must match y's rows");
+                {fail};
+            }}
+            if ((z_rows != 1 && z_rows != n_rows) || (z_cols != 1 && z_cols != n_cols)) {{
+                PyErr_SetString(PyExc_ValueError, "z must broadcast to the shape of x @ y");
+                {fail};
+            }}
 
-        {{
-            // sparse array has size MxK, dense KxN, output MxN
-            npy_intp M = PyArray_DIMS({zn})[0];
-            npy_intp N = PyArray_DIMS({zn})[1];
-            npy_intp K = PyArray_DIMS({y})[0];
-
-            // pointers to access actual data in the arrays passed as params.
-            const dtype_{x_val}* __restrict__ Dval = (dtype_{x_val}*)PyArray_DATA({x_val});
-            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA({x_ind});
-            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA({x_ptr});
-            const dtype_{alpha} alpha = ((dtype_{alpha}*)PyArray_DATA({alpha}))[0];
-
-            npy_intp Sz = PyArray_STRIDES({z})[1] / PyArray_ITEMSIZE({z});
-            npy_intp Szn = PyArray_STRIDES({zn})[1] / PyArray_ITEMSIZE({zn});
-            npy_intp Sval = PyArray_STRIDES({x_val})[0] / PyArray_ITEMSIZE({x_val});
-            npy_intp Sind = PyArray_STRIDES({x_ind})[0] / PyArray_ITEMSIZE({x_ind});
-            npy_intp Sptr = PyArray_STRIDES({x_ptr})[0] / PyArray_ITEMSIZE({x_ptr});
-            npy_intp Sy = PyArray_STRIDES({y})[1] / PyArray_ITEMSIZE({y});
-
-            // blas expects ints; convert here (rather than just making N etc ints) to avoid potential overflow in the negative-stride correction
-            if ((N > 0x7fffffffL)||(Sy > 0x7fffffffL)||(Szn > 0x7fffffffL)||(Sy < -0x7fffffffL)||(Szn < -0x7fffffffL))
-            {{PyErr_SetString(PyExc_NotImplementedError, "array too big for BLAS (overflows int32 index)"); {fail};}}
-            int N32 = N;
-            int Sy32 = Sy;
-            int Szn32 = Szn;
-
-            if (!({inplace}))
-            {{
-                if (PyArray_CopyInto({zn}, {z}))
-                {{
-                    Py_XDECREF({zn});
+            if ({int(self.inplace)} && z_rows == n_rows && z_cols == n_cols) {{
+                Py_INCREF({z});
+                Py_XDECREF({out});
+                {out} = {z};
+            }} else {{
+                if (!{out} || PyArray_DIM({out}, 0) != n_rows || PyArray_DIM({out}, 1) != n_cols) {{
+                    Py_CLEAR({out});
+                    npy_intp dims[] = {{n_rows, n_cols}};
+                    {out} = (PyArrayObject*)PyArray_SimpleNew(2, dims, {out_typenum});
+                    if (!{out}) {{
+                        {fail};
+                    }}
+                }}
+                if (PyArray_CopyInto({out}, {z}) < 0) {{
                     {fail};
                 }}
             }}
 
-            for (npy_intp k = 0; k < K; ++k)
-            {{
-                for (npy_int32 m_idx = Dptr[k * Sptr]; m_idx < Dptr[(k+1)*Sptr]; ++m_idx)
-                {{
-                    const npy_int32 m = Dind[m_idx * Sind]; // row index of non-null value for column K
+            const npy_intp y_stride = PyArray_STRIDE({y}, 1) / PyArray_ITEMSIZE({y});
+            const dtype_{alpha} alpha_value = *(dtype_{alpha}*)PyArray_DATA({alpha});
+            const bool nonfinite_alpha = !std::isfinite(alpha_value);
+            const dtype_{alpha} scale = nonfinite_alpha ? 1 : alpha_value;
+            const npy_intp out_stride = nonfinite_alpha ? 1 : PyArray_STRIDE({out}, 1) / PyArray_ITEMSIZE({out});
+            if (n_cols > NPY_MAX_INT32 ||
+                y_stride > NPY_MAX_INT32 || y_stride < -NPY_MAX_INT32 ||
+                out_stride > NPY_MAX_INT32 || out_stride < -NPY_MAX_INT32) {{
+                PyErr_SetString(PyExc_OverflowError, "Usmm dimensions or strides exceed the BLAS int32 limit");
+                {fail};
+            }}
+            int n = (int)n_cols;
+            int inc_y = (int)y_stride;
+            int inc_out = (int)out_stride;
 
-                    const dtype_{x_val} Amk = alpha * Dval[m_idx * Sval]; // actual value at that location
+            const dtype_{x_val}* values = (dtype_{x_val}*)PyArray_DATA({x_val});
+            const npy_int32* indices = (npy_int32*)PyArray_DATA({x_ind});
+            const npy_int32* indptr = (npy_int32*)PyArray_DATA({x_ptr});
+            const npy_intp value_stride = PyArray_STRIDE({x_val}, 0) / PyArray_ITEMSIZE({x_val});
+            const npy_intp index_stride = PyArray_STRIDE({x_ind}, 0) / PyArray_ITEMSIZE({x_ind});
+            const npy_intp ptr_stride = PyArray_STRIDE({x_ptr}, 0) / PyArray_ITEMSIZE({x_ptr});
 
-                    dtype_{y}* y_row = (dtype_{y}*)(PyArray_BYTES({y}) + PyArray_STRIDES({y})[0] * k);
-                    // axpy expects pointer to the beginning of memory arrays,
-                    // so when the stride is negative, we need to get the
-                    // last element
-                    if (Sy < 0)
-                        y_row += (K - 1) * Sy;
-
-                    dtype_{zn}* z_row = (dtype_{zn}*)(PyArray_BYTES({zn}) + PyArray_STRIDES({zn})[0] * m);
-                    if (Szn < 0)
-                        z_row += (N - 1) * Szn;
-
-                    {axpy}(&N32, ({conv_type}*)&Amk, ({conv_type}*)y_row, &Sy32, ({conv_type}*)z_row, &Szn32);
+            PyArrayObject* accumulator = {out};
+            if (nonfinite_alpha) {{
+                npy_intp dims[] = {{n_rows, n_cols}};
+                accumulator = (PyArrayObject*)PyArray_ZEROS(2, dims, {out_typenum}, 0);
+                if (!accumulator) {{
+                    {fail};
                 }}
+            }}
+
+            // BLAS starts negative increments from the end of the passed buffer.
+            // Pass the lowest-address element of each N-element row, not K.
+            if (n_cols > 0) {{
+                for (npy_intp k = 0; k < n_inner; ++k) {{
+                    dtype_{y}* y_row = (dtype_{y}*)(PyArray_BYTES({y}) + k * PyArray_STRIDE({y}, 0));
+                    if (y_stride < 0) {{
+                        y_row += (n_cols - 1) * y_stride;
+                    }}
+                    for (npy_int32 pos = indptr[k * ptr_stride]; pos < indptr[(k + 1) * ptr_stride]; ++pos) {{
+                        const npy_int32 row = indices[pos * index_stride];
+                        dtype_{x_val} scaled_value = scale * values[pos * value_stride];
+                        dtype_{out}* out_row = (dtype_{out}*)(PyArray_BYTES(accumulator) + row * PyArray_STRIDE(accumulator, 0));
+                        if (out_stride < 0) {{
+                            out_row += (n_cols - 1) * out_stride;
+                        }}
+                        {axpy}(&n, &scaled_value, y_row, &inc_y, out_row, &inc_out);
+                    }}
+                }}
+            }}
+            if (nonfinite_alpha) {{
+                for (npy_intp row = 0; row < n_rows; ++row) {{
+                    for (npy_intp col = 0; col < n_cols; ++col) {{
+                        const dtype_{out} product = *(dtype_{out}*)PyArray_GETPTR2(accumulator, row, col);
+                        const dtype_{z} z_value = *(dtype_{z}*)PyArray_GETPTR2({z}, z_rows == 1 ? 0 : row, z_cols == 1 ? 0 : col);
+                        *(dtype_{out}*)PyArray_GETPTR2({out}, row, col) = product * alpha_value + z_value;
+                    }}
+                }}
+                Py_DECREF(accumulator);
             }}
         }}
         """
 
-        return rval
-
     def c_code_cache_version(self):
-        return (4, blas.blas_header_version())
+        return (5, blas.blas_header_version())
 
 
 usmm_csc_dense = UsmmCscDense(inplace=False)
@@ -931,7 +887,6 @@ register_specialize(local_usmm_csc_dense_inplace, "cxx_only", "inplace")
 def local_usmm_csx(fgraph, node):
     """
     usmm -> usmm_csc_dense
-
     """
     if node.op == usmm:
         alpha, x, y, z = node.inputs
@@ -941,13 +896,22 @@ def local_usmm_csx(fgraph, node):
 
         if x_is_sparse_variable and not y_is_sparse_variable:
             if x.type.format == "csc":
+                # CSC can broadcast z, but cannot expand the product itself.
+                for z_dim, product_dim in zip(
+                    z.type.shape, (x.type.shape[0], y.type.shape[1])
+                ):
+                    if product_dim == 1 and z_dim != 1:
+                        return
+
                 x_val, x_ind, x_ptr, x_shape = csm_properties(x)
                 x_nsparse = x_shape[0]
                 dtype_out = ps.upcast(
                     alpha.type.dtype, x.type.dtype, y.type.dtype, z.type.dtype
                 )
+
                 if dtype_out not in ("float32", "float64"):
                     return False
+
                 # Sparse cast is not implemented.
                 if y.type.dtype != dtype_out:
                     return False
@@ -957,6 +921,47 @@ def local_usmm_csx(fgraph, node):
 
 
 register_specialize(local_usmm_csx, "cxx_only")
+
+
+local_usmm_numba = PatternNodeRewriter(
+    (
+        sub,
+        "z",
+        (
+            mul,
+            {
+                "pattern": "alpha",
+                "constraint": lambda expr: all(s == 1 for s in expr.type.shape),
+            },
+            (spm._dot, "x", "y"),
+        ),
+    ),
+    (spm.usmm, (neg, "alpha"), "x", "y", "z"),
+)
+pytensor.compile.optdb["specialize"].register(
+    "local_usmm_numba", local_usmm_numba, "numba"
+)
+
+
+@node_rewriter([spm.usmm])
+def local_usmm_csx_numba(fgraph, node):
+    return local_usmm_csx.transform(fgraph, node)
+
+
+@node_rewriter([usmm_csc_dense])
+def local_usmm_csc_dense_inplace_numba(fgraph, node):
+    return local_usmm_csc_dense_inplace.transform(fgraph, node)
+
+
+pytensor.compile.optdb["specialize"].register(
+    "local_usmm_csx_numba", local_usmm_csx_numba, "numba"
+)
+pytensor.compile.optdb["specialize"].register(
+    "local_usmm_csc_dense_inplace_numba",
+    local_usmm_csc_dense_inplace_numba,
+    "numba",
+    "inplace",
+)
 
 
 class CSMGradC(_NoPythonCOp):
