@@ -107,6 +107,42 @@ class TestNorm:
         ):
             norm([[1, 2], [3, 4]], axis=axis)
 
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    @pytest.mark.parametrize("keepdims", [True, False])
+    def test_default_vector_norm_explicit_axis(self, dtype, keepdims):
+        x = vector("x", dtype=dtype)
+        axes = [0, -1, (0,), (-1,)]
+        f = function([x], [norm(x, axis=axis, keepdims=keepdims) for axis in axes])
+        for values in [[], [3], [3, 4]]:
+            values = np.asarray(values, dtype=dtype)
+            if dtype.startswith("complex"):
+                values = values * (1 + 1j)
+            expected = np.linalg.norm(values, keepdims=keepdims)
+            for result in f(values):
+                assert result.shape == expected.shape
+                utt.assert_allclose(result, expected)
+
+    @pytest.mark.parametrize("keepdims", [True, False])
+    def test_default_norm_empty_batch(self, keepdims):
+        x = tensor("x", shape=(None, None, None), dtype=config.floatX)
+        f = function([x], norm(x, keepdims=keepdims))
+        for shape in [(0, 2, 3), (2, 0, 3), (2, 3, 0), (2, 2, 3)]:
+            values = np.arange(np.prod(shape), dtype=config.floatX).reshape(shape)
+            result = f(values)
+            expected = np.linalg.norm(values, axis=(-2, -1), keepdims=keepdims)
+            assert result.shape == expected.shape
+            utt.assert_allclose(result, expected)
+
+    @pytest.mark.parametrize("ndim", [1, 2])
+    def test_default_vector_norm_real_gradient(self, ndim):
+        x = tensor("x", shape=(None,) * ndim, dtype=config.floatX)
+        loss = (norm(x, axis=-1) ** 2).sum()
+        f = function([x], pytensor.grad(loss, x))
+        values = np.asarray([[3, 0, 4], [1, 2, 2]], dtype=config.floatX)
+        if ndim == 1:
+            values = values[0]
+        utt.assert_allclose(f(values), 2 * values)
+
     @pytest.mark.parametrize(
         "ord",
         [None, np.inf, -np.inf, 1, -1, 2, -2],
