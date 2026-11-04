@@ -30,7 +30,7 @@ import numpy as np
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -87,7 +87,7 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
 from pytensor.tensor.shape import Shape_i
-from pytensor.tensor.type import DenseTensorType, TensorType
+from pytensor.tensor.type import DenseTensorType, TensorType, integer_dtypes
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
 
@@ -554,6 +554,41 @@ def local_alloc_sink_dimshuffle(fgraph, node):
             range(len(new_output_shape))
         )
         return [inner.dimshuffle(dimshuffle_new_order)]
+
+
+def uncast_integer(var: Variable, dtypes: Sequence[str] = integer_dtypes) -> Variable:
+    """Return the input of an integer `Cast` that can't change its value, or `var` itself.
+
+    Only inputs with one of ``dtypes`` are returned.
+    """
+    match var.owner_op_and_inputs:
+        case Elemwise(Cast()), x if x.type.dtype in dtypes and np.can_cast(
+            x.type.dtype, var.type.dtype, casting="safe"
+        ):
+            return x
+        case _:
+            return var
+
+
+@register_canonicalize
+@node_rewriter([Alloc])
+def local_alloc_shape_uncast(fgraph, node):
+    """Remove lossless integer casts from the shape of an `Alloc`.
+
+    alloc(x, s.astype("int64")) -> alloc(x, s)
+    """
+    value, *shape = node.inputs
+    new_shape = [uncast_integer(s) for s in shape]
+    # Casts of constants are left to constant folding
+    if all(
+        new_s is s or isinstance(new_s, Constant)
+        for new_s, s in zip(new_shape, shape, strict=True)
+    ):
+        return None
+
+    new_out = node.op(value, *new_shape)
+    copy_stack_trace(node.outputs, new_out)
+    return [new_out]
 
 
 @node_rewriter([AllocEmpty])

@@ -65,6 +65,7 @@ from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
     assert_op,
+    local_alloc_shape_uncast,
     local_alloc_sink_dimshuffle,
     local_merge_alloc,
     local_useless_alloc,
@@ -113,7 +114,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -357,6 +358,32 @@ class TestLocalCanonicalizeAlloc:
             assert any(isinstance(node.op, Alloc) for node in g.toposort())
         else:
             assert not any(isinstance(node.op, Alloc) for node in g.toposort())
+
+    def test_shape_uncast(self):
+        x = scalar("x")
+        i32 = iscalar("i32")
+        u8 = scalar("u8", dtype="uint8")
+        i64 = lscalar("i64")
+        u64 = scalar("u64", dtype="uint64")
+
+        out = pt.alloc(
+            x,
+            i32.astype("int64"),
+            u8.astype("int64"),
+            # Casts that can change the value are kept
+            i64.astype("int32"),
+            u64.astype("int64"),
+        )
+        result = RewriteTester(
+            [x, i32, u8, i64, u64],
+            [out],
+            include=None,
+            custom_rewrite=local_alloc_shape_uncast,
+        )
+        result.assert_graph(
+            pt.alloc(x, i32, u8, i64.astype("int32"), u64.astype("int64"))
+        )
+        result.assert_eval(np.array(1.0, dtype=config.floatX), 2, 3, 4, 5)
 
 
 class TestLocalUselessIncSubtensorAlloc:
