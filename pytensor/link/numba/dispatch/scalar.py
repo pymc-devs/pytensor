@@ -490,7 +490,11 @@ def numba_funcify_Softplus(op, node, **kwargs):
 
 @register_scalar_funcify(ScalarLoop)
 def numba_funcify_ScalarLoop(op, node, **kwargs):
-    inner_fn, inner_fn_cache_key = numba_funcify_and_cache_key(op.fgraph)
+    inner_fn, inner_fn_cache_key = numba_funcify_and_cache_key(
+        op.fgraph,
+        ofg_memo=kwargs.get("ofg_memo"),
+        node_functions=kwargs.get("node_functions"),
+    )
     if inner_fn_cache_key is None:
         loop_cache_key = None
     else:

@@ -20,13 +20,26 @@ class NumbaLinker(JITLinker):
         # This is what triggers the registering of the dispatches as well
         from pytensor.link.numba.dispatch.basic import numba_funcify_ensure_cache
 
+        profile = getattr(fgraph, "profile", None)
+        self.native_profiler = None
+        if profile:
+            from pytensor.link.numba.profiling import NumbaProfiler
+
+            self.native_profiler = NumbaProfiler(fgraph)
+            kwargs["node_functions"] = self.native_profiler.node_functions
         return numba_funcify_ensure_cache(fgraph, **kwargs)
 
     def jit_compile(self, fn_and_cache):
         from pytensor.link.numba.dispatch.basic import numba_njit
 
         fn, cache_key = fn_and_cache
-        return numba_njit(fn.py_func, final_function=True, cache=cache_key is not None)
+        dispatcher = numba_njit(
+            fn.py_func, final_function=True, cache=cache_key is not None
+        )
+        if profiler := getattr(self, "native_profiler", None):
+            profiler.dispatcher = dispatcher
+            profiler.fgraph.profile._native_profilers.append(profiler)
+        return dispatcher
 
     def create_thunk_inputs(self, storage_map):
         return [storage_map[n] for n in self.fgraph.inputs]

@@ -5,6 +5,7 @@ __pycache__
 *.linkinfo
 *.o
 *.c
+!pytensor/link/numba/_profiling_unwind.c
 *.orig
 *.pyc
 *.pyo

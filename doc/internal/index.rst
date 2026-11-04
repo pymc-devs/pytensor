@@ -10,3 +10,4 @@ Internal Documentation
 
    metadocumentation
    how_to_release
+   native_profiling
