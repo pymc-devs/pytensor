@@ -28,20 +28,18 @@ to pip. The ``[user:pass@]`` portion is optional.
 
 .. _TensorVariable_TypeError:
 
-How to solve TypeError: object of type 'TensorVariable' has no len()
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+How to solve TypeError: Length of TensorVariable cannot be determined
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you receive the following error, it is because the Python function *__len__* cannot
-be implemented on PyTensor variables:
+Python requires that *__len__* returns an integer, but PyTensor variables are symbolic.
+``len(var)`` therefore only works when the length of the first dimension of ``var`` can be
+determined when the graph is built, for instance when it has a static shape or is a constant. Otherwise you will see an error like:
 
 .. code-block:: python
 
-   TypeError: object of type 'TensorVariable' has no len()
+   TypeError: Length of x cannot be determined. Use `x.shape[0]` for the symbolic length.
 
-Python requires that *__len__* returns an integer, yet it cannot be done as PyTensor's variables are symbolic. However, `var.shape[0]` can be used as a workaround.
-
-This error message cannot be made more explicit because the relevant aspects of Python's
-internals cannot be modified.
+In that case, ``var.shape[0]`` can be used to obtain the symbolic length instead.
 
 .. _out_of_memory:
 

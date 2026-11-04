@@ -14,7 +14,7 @@ from pytensor.graph.utils import MetaType
 from pytensor.scalar import (
     ComplexError,
 )
-from pytensor.tensor import _get_vector_length
+from pytensor.tensor import _get_first_dim_length
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import hash_from_ndarray
@@ -262,15 +262,6 @@ class _tensor_py_operators:
 
     def all(self, axis=None, keepdims=False):
         return pt.math.all(self, axis=axis, keepdims=keepdims)
-
-    # Old note: "We can't implement this because Python requests that this
-    # function returns an integer."
-    # TODO: We could use `get_vector_length` and let it raise an exception just like
-    # `__iter__` does
-    # def __len__(self):
-    #     raise Exception("PyTensor Variables can't work with len(PyTensor "
-    #                     "Variable) due to Python restriction. You can use "
-    #                     "PyTensorVariable.shape[0] instead.")
 
     def reshape(self, shape, *, ndim=None):
         """Return a reshaped view/copy of this variable.
@@ -583,16 +574,30 @@ class _tensor_py_operators:
         copied_variable.name = name
         return copied_variable
 
+    def __len__(self) -> int:
+        if self.type.ndim == 0:
+            raise TypeError("len() of unsized object")
+        try:
+            return pt.basic.get_first_dim_length(self)
+        except ValueError:
+            # Raise TypeError, not ValueError, so that `list`, `operator.length_hint`
+            # and NumPy treat the variable as unsized instead of failing
+            raise TypeError(
+                f"Length of {self} cannot be determined. "
+                "Use `x.shape[0]` for the symbolic length."
+            ) from None
+
     def __iter__(self):
         try:
-            for i in range(pt.basic.get_vector_length(self)):
-                yield self[i]
+            length = pt.basic.get_first_dim_length(self)
         except TypeError:
             # This prevents accidental iteration via sum(self)
             raise TypeError(
                 "TensorType does not support iteration.\n"
                 "\tDid you try to unpack a Variable or used a function that expects a list?\n"
             )
+        for i in range(length):
+            yield self[i]
 
     @property
     def ndim(self) -> int:
@@ -887,8 +892,8 @@ class TensorVariable(
                 pdb.set_trace()
 
 
-@_get_vector_length.register(TensorVariable)
-def _get_vector_length_TensorVariable(op_or_var, var):
+@_get_first_dim_length.register(TensorVariable)
+def _get_first_dim_length_TensorVariable(op_or_var, var):
     if var.type.shape[0] is None:
         raise ValueError(f"Length of {var} cannot be determined")
     return var.type.shape[0]
