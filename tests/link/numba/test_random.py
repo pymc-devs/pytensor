@@ -768,6 +768,14 @@ def test_unnatural_batched_dims(batch_dims_tester):
     batch_dims_tester(mode="NUMBA")
 
 
+@pytest.mark.parametrize("a", [20, np.arange(20)])
+def test_choice_without_replacement_uses_full_population(a):
+    rng = shared(np.random.default_rng(532))
+    _, draws = ptr.choice(a, size=5, replace=False, rng=rng, return_next_rng=True)
+    fn = function([], draws, mode=numba_mode)
+    assert np.any(fn() >= 5)
+
+
 def test_repeated_args():
     v = pt.scalar()
     x = ptr.beta(v, v)
