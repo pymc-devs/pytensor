@@ -352,6 +352,41 @@ class TestComparison:
 
 
 class TestStructuredDot:
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    @pytest.mark.parametrize(
+        "dense_left", [False, True], ids=["sparse_left", "dense_left"]
+    )
+    def test_vector_grad(self, format, dense_left):
+        matrix = SparseTensorType(format, dtype="float64")("matrix")
+        vector = pt.dvector("vector")
+        weights = pt.dvector("weights")
+
+        # A = [[1, 0, 2], [-1, 0, 0]], with (0, 1) explicitly stored as zero.
+        matrix_value = scipy_sparse.coo_matrix(
+            ([1.0, 0.0, 2.0, -1.0], ([0, 0, 0, 1], [0, 1, 2, 0])), shape=(2, 3)
+        )
+        vector_value = np.array([-1.0, 2.0, 1.0])
+        weights_value = np.array([2.0, -3.0])
+        # The structured gradient keeps stored entries of outer(weights, vector).
+        expected_matrix_grad = np.array([[-2.0, 4.0, 2.0], [3.0, 0.0, 0.0]])
+        if dense_left:
+            output = structured_dot(vector, matrix)
+            matrix_value = matrix_value.T
+            expected_matrix_grad = expected_matrix_grad.T
+        else:
+            output = structured_dot(matrix, vector)
+        matrix_value = matrix_value.asformat(format)
+
+        matrix_grad, vector_grad = pt.grad(pt.dot(output, weights), [matrix, vector])
+        assert matrix_grad.type == matrix.type
+        f = pytensor.function([matrix, vector, weights], [matrix_grad, vector_grad])
+        sparse_gradient, dense_gradient = f(matrix_value, vector_value, weights_value)
+
+        np.testing.assert_allclose(dense_gradient, [5.0, 0.0, 4.0])
+        np.testing.assert_allclose(sparse_gradient.toarray(), expected_matrix_grad)
+        np.testing.assert_array_equal(sparse_gradient.indices, matrix_value.indices)
+        np.testing.assert_array_equal(sparse_gradient.indptr, matrix_value.indptr)
+
     def test_structureddot_csc_grad(self):
         spmat = scipy_sparse.csc_matrix(random_lil((4, 3), "float32", 3))
         mat = np.asarray(np.random.standard_normal((3, 2)), "float32")

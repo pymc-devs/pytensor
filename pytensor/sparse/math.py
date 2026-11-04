@@ -1428,26 +1428,28 @@ _structured_dot = StructuredDot()
 
 def structured_dot(x, y):
     """
-    Structured Dot is like dot, except that only the gradient wrt non-zero elements of the sparse matrix
-    `x` are calculated and propagated.
-
-    The output is presumed to be a dense matrix, and is represented by a TensorType instance.
+    Compute a sparse dot product with a structured gradient.
 
     Parameters
     ----------
     x
-        A sparse matrix.
+        A sparse matrix or a dense matrix or vector.
     y
-        A sparse or dense matrix.
+        A sparse matrix or a dense matrix or vector.
 
     Returns
     -------
-    A sparse matrix
-        The dot product of `x` and `y`.
+    TensorVariable or SparseVariable
+        The dot product of `x` and `y`. The result is sparse when both inputs
+        are sparse, and dense otherwise. A dense vector input produces a
+        dense vector output.
 
     Notes
     -----
-    The grad implemented is structured.
+    At least one input must be a sparse matrix. When one input is dense,
+    the gradient with respect to the sparse input is computed only for its
+    stored entries, including explicitly stored zeros, and preserves its
+    sparsity pattern.
 
     """
 
@@ -1469,9 +1471,13 @@ def structured_dot(x, y):
         raise TypeError("structured_dot requires at least one sparse argument")
 
     if x_is_sparse_variable:
+        if y.ndim == 1:
+            return _structured_dot(x, y[:, None]).squeeze(axis=1)
         return _structured_dot(x, y)
     else:
         assert y_is_sparse_variable
+        if x.ndim == 1:
+            return structured_dot(x[None, :], y).squeeze(axis=0)
         return _structured_dot(y.T, x.T).T
 
 
