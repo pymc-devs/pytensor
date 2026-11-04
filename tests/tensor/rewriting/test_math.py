@@ -1391,6 +1391,23 @@ class TestLocalUselessElemwiseComparison:
         f = function([x], maximum(x, x), mode=mode)
         self.assert_identity(f)
 
+    def test_ge_exp_zero_nan_unsafe(self):
+        x = vector("x", dtype="float64")
+        expr = ge(exp(x), 0)
+        values = np.array([1.0, np.nan])
+
+        # The default optimizer enables nan_unsafe rewrites.
+        optimized = function([x], expr, mode=get_default_mode().excluding("fusion"))
+        np.testing.assert_array_equal(optimized(values), [True, True])
+
+        # Excluding nan_unsafe preserves the original NaN comparison.
+        safe = function(
+            [x],
+            expr,
+            mode=get_default_mode().excluding("fusion", "nan_unsafe"),
+        )
+        np.testing.assert_array_equal(safe(values), [True, False])
+
     def test_shape_inequality_with_self(self):
         x = vector("x", dtype=config.floatX)
         mode = get_default_mode().including(

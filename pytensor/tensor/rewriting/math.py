@@ -2158,6 +2158,34 @@ def local_useless_elemwise_comparison(fgraph, node):
     return
 
 
+@register_canonicalize("nan_unsafe")
+@node_rewriter([Elemwise])
+def local_ge_exp_to_true(fgraph, node):
+    """Rewrite ge(exp(x), 0) to True, allowing NaN-unsafe optimization."""
+    if not isinstance(node.op.scalar_op, ps.GE):
+        return
+
+    exp_var, threshold = node.inputs
+    if (
+        exp_var.owner is None
+        or not isinstance(exp_var.owner.op, Elemwise)
+        or not isinstance(exp_var.owner.op.scalar_op, ps.Exp)
+    ):
+        return
+
+    threshold_value = get_underlying_scalar_constant_value(
+        threshold,
+        only_process_constants=True,
+        raise_not_constant=False,
+    )
+    if threshold_value != 0:
+        return
+
+    result = ones_like(exp_var, dtype=node.outputs[0].type.dtype, opt=True)
+    copy_stack_trace(node.outputs, result)
+    return [result]
+
+
 @register_canonicalize
 @node_rewriter([Sum, Prod])
 def local_sum_prod_all_to_none(fgraph, node):
