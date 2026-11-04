@@ -237,7 +237,9 @@ def norm(
             or (ord in ("f", "fro") and core_ndim == 2)
             or (ord == 2 and core_ndim == 1)
         ):
-            x = x.reshape(tuple(x.shape[:-2]) + (-1,) + (1,) * (core_ndim - 1))
+            x = x.reshape(
+                tuple(x.shape[:-2]) + (ptm.prod(x.shape[-2:]),) + (1,) * (core_ndim - 1)
+            )
             batch_T_dim_order = tuple(range(batch_ndim)) + tuple(
                 range(batch_ndim + core_ndim - 1, batch_ndim - 1, -1)
             )
@@ -271,10 +273,11 @@ def norm(
 
     if len(axis) == 1:
         # Vector norms
-        if ord in [None, "fro", "f"] and (core_ndim == 2):
+        if ord is None or (ord in ["fro", "f"] and core_ndim == 2):
             # This is here to catch the case where X is a 2D tensor but the user wants to treat it as a batch of
             # vectors. Other vector norms will work fine in this case.
-            ret = ptm.sqrt(ptm.sum((x.conj() * x).real, axis=axis, keepdims=keepdims))
+            squared = (x.conj() * x).real if x.dtype.startswith("complex") else x * x
+            ret = ptm.sqrt(ptm.sum(squared, axis=axis, keepdims=keepdims))
         elif (ord == "inf") or (ord == np.inf):
             ret = ptm.max(ptm.abs(x), axis=axis, keepdims=keepdims)
         elif (ord == "-inf") or (ord == -np.inf):
