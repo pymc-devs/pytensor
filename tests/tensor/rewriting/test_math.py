@@ -5675,3 +5675,94 @@ def test_sign_prod_unsafe_dtype(dtype, prod_dtype, acc_dtype):
         [x], [out], include=["canonicalize", "stabilize", "specialize"]
     )
     result.assert_graph(out)
+
+
+@pytest.mark.parametrize("kind", ["loggamma", "psi"])
+def test_gamma_increment_not_automatic(kind):
+    x, n = pt.dvector("x"), pt.lvector("n")
+    unary = pt.gammaln if kind == "loggamma" else pt.psi
+    out = unary(x + n) - unary(x)
+    result = RewriteTester(
+        [x, n], [out], include=("canonicalize", "stabilize", "specialize")
+    )
+    result.assert_graph(out, strict_dtype=True)
+
+
+@pytest.mark.parametrize("kind", ["loggamma", "psi"])
+@pytest.mark.parametrize("form", ["difference", "reverse", "sum", "add"])
+def test_gamma_increment_rewrite(kind, form):
+    from pytensor.scalar.math import (
+        LogGammaIncrement,
+        PsiIncrement,
+        _gamma_increment_op,
+    )
+    from pytensor.tensor.rewriting.math import local_gamma_increment
+
+    x, n, extra = pt.dvector("x"), pt.lvector("n"), pt.dvector("extra")
+    unary, cls = (
+        (pt.gammaln, LogGammaIncrement)
+        if kind == "loggamma"
+        else (pt.psi, PsiIncrement)
+    )
+    positive, negative = unary(x + n), unary(x)
+    expected = Elemwise(_gamma_increment_op(cls, x.dtype, n.dtype))(x, n)
+    if form == "reverse":
+        out, expected = negative - positive, -expected
+    elif form == "sum":
+        out = expected = positive.sum() - negative.sum()
+    elif form == "add":
+        out, expected = positive + (-negative) + extra, expected + extra
+    else:
+        out = positive - negative
+    result = RewriteTester(
+        [x, n, extra] if form == "add" else [x, n],
+        [out],
+        include=None,
+        custom_rewrite=local_gamma_increment,
+    )
+    result.assert_graph(expected, strict_dtype=True)
+    values = [np.array([0.1, 1.5, 10.0]), np.array([0, 2, 7], dtype="int64")]
+    if form == "add":
+        values.append(np.array([1.0, 2.0, 3.0]))
+    result.assert_eval(*values)
+
+
+@pytest.mark.parametrize(
+    "counts, eligible",
+    [
+        ([0.0, 1.0, 4.0], True),
+        ([0.0, 0.5, 4.0], False),
+        ([0.0, np.inf, 4.0], False),
+        ([0.0, np.nan, 4.0], False),
+        ([0.0, 2.0**53, 4.0], False),
+    ],
+)
+def test_gamma_increment_constant_delta(counts, eligible):
+    from pytensor.scalar.math import LogGammaIncrement, _gamma_increment_op
+    from pytensor.tensor.rewriting.math import local_gamma_increment
+
+    x = pt.dvector("x")
+    n = pt.constant(np.array(counts))
+    out = pt.gammaln(x + n) - pt.gammaln(x)
+    result = RewriteTester(
+        [x], [out], include=None, custom_rewrite=local_gamma_increment
+    )
+    expected = (
+        Elemwise(_gamma_increment_op(LogGammaIncrement, x.dtype, "int64"))(
+            x, n.astype("int64")
+        )
+        if eligible
+        else out
+    )
+    result.assert_graph(expected, strict_dtype=True)
+
+
+def test_gamma_increment_dynamic_float_delta():
+    from pytensor.tensor.rewriting.math import local_gamma_increment
+
+    x, n = pt.dvectors("x", "n")
+    out = pt.gammaln(x + n) - pt.gammaln(x)
+    result = RewriteTester(
+        [x, n], [out], include=None, custom_rewrite=local_gamma_increment
+    )
+    result.assert_graph(out)

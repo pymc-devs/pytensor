@@ -381,3 +381,35 @@ class TestScalarLoop:
         res = fn(x_test)
         expected_res = ps.psi(x).eval({x: x_test})
         np.testing.assert_allclose(res, expected_res)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.parametrize("count_dtype", ["int32", "int64", "uint64"])
+@pytest.mark.parametrize("cls_name", ["LogGammaIncrement", "PsiIncrement"])
+def test_gamma_increment_numba(dtype, count_dtype, cls_name):
+    cls = getattr(psm, cls_name)
+    x = pt.vector("x", dtype=dtype)
+    n = pt.vector("n", dtype=count_dtype)
+    out = Elemwise(cls(dtype, count_dtype))(x, n)
+    values = np.array(
+        [0.1, 1.0, 10.0, 100.0, 0.5, 2.3, -0.5, 0.0, np.inf, np.nan], dtype=dtype
+    )
+    counts = np.array([0, 1, 2, 3, 4, 9, 1, 1, 0, 0], dtype=count_dtype)
+    fn = function([x, n], out, mode=numba_mode)
+    reference = function([x, n], out, mode=py_mode)
+    np.testing.assert_allclose(
+        fn(values, counts),
+        reference(values, counts),
+        rtol=2e-5 if dtype == "float32" else 1e-10,
+        atol=2e-5 if dtype == "float32" else 1e-10,
+        equal_nan=True,
+    )
+
+
+def test_gamma_increment_large_base_numba():
+    x, n = pt.dvector("x"), pt.lvector("n")
+    out = Elemwise(psm.LogGammaIncrement(x.dtype, n.dtype))(x, n)
+    fn = function([x, n], [out, pt.grad(out.sum(), x)], mode=numba_mode)
+    actual, derivative = fn(np.array([1e12, 1e12]), np.array([0, 1], dtype="int64"))
+    np.testing.assert_allclose(actual, [0.0, np.log(1e12)], rtol=1e-14)
+    np.testing.assert_allclose(derivative, [0.0, 1e-12], rtol=1e-14)

@@ -4190,3 +4190,93 @@ local_log_iv = PatternNodeRewriter(
 )
 
 register_stabilize(local_log_iv)
+
+
+def _integer_gamma_delta(base, delta):
+    """Prove integrality only for the delta of an already matched difference."""
+    if base.dtype == "float64" and isinstance(delta, Constant):
+        data = delta.data
+        if (
+            data.dtype.kind == "f"
+            and np.isfinite(data).all()
+            and (np.abs(data) <= 2**53 - 1).all()
+            and (data == np.floor(data)).all()
+        ):
+            delta = cast(delta, "int64")
+    return delta if delta.type.numpy_dtype.kind in "iu" else None
+
+
+def _gamma_increment_pair(positive, negative):
+    expected_type = positive.type
+    for scalar_cls, increment_cls in (
+        (ps_math.GammaLn, ps_math.LogGammaIncrement),
+        (ps_math.Psi, ps_math.PsiIncrement),
+    ):
+        match positive.owner_op_and_inputs, negative.owner_op_and_inputs:
+            case (
+                (Elemwise(scalar_op=pos_op), shifted),
+                (Elemwise(scalar_op=neg_op), base),
+            ) if isinstance(pos_op, scalar_cls) and isinstance(neg_op, scalar_cls):
+                pass
+            case _:
+                continue
+        match shifted.owner_op_and_inputs:
+            case (Elemwise(ps.Add()), *terms) if base in terms:
+                pass
+            case _:
+                continue
+        terms.remove(base)
+        delta = terms[0] if len(terms) == 1 else variadic_add(*terms)
+        delta = _integer_gamma_delta(base, delta)
+        if delta is None:
+            continue
+        op = ps_math._gamma_increment_op(increment_cls, base.dtype, delta.dtype)
+        result = Elemwise(op)(base, delta)
+        if result.type == expected_type:
+            return result
+    return None
+
+
+@node_rewriter([Elemwise])
+def local_gamma_increment(fgraph, node):
+    """Experimental rewrite for integer gamma/digamma increments."""
+    if node.op.scalar_op == ps.sub:
+        positive, negative = node.inputs
+        result = _gamma_increment_pair(positive, negative)
+        if result is None:
+            reverse = _gamma_increment_pair(negative, positive)
+            result = None if reverse is None else -reverse
+        return None if result is None else [result]
+    if node.op.scalar_op != ps.add:
+        return None
+    for position, term in enumerate(node.inputs):
+        match term.owner_op_and_inputs:
+            case (Elemwise(ps.Neg()), negative):
+                pass
+            case (Elemwise(ps.Mul()), coefficient, other) if (
+                isinstance(coefficient, Constant)
+                and coefficient.data.size == 1
+                and coefficient.data.item() == -1
+            ):
+                negative = other
+            case (Elemwise(ps.Mul()), other, coefficient) if (
+                isinstance(coefficient, Constant)
+                and coefficient.data.size == 1
+                and coefficient.data.item() == -1
+            ):
+                negative = other
+            case _:
+                continue
+        for other, positive in enumerate(node.inputs):
+            if other == position:
+                continue
+            result = _gamma_increment_pair(positive, negative)
+            if result is None:
+                reverse = _gamma_increment_pair(negative, positive)
+                result = None if reverse is None else -reverse
+            if result is not None:
+                rest = [
+                    v for i, v in enumerate(node.inputs) if i not in (position, other)
+                ]
+                return [variadic_add(result, *rest) if rest else result]
+    return None

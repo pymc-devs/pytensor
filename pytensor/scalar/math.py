@@ -4,7 +4,7 @@ r"""
 As SciPy is not always available, we treat them separately.
 """
 
-from functools import reduce
+from functools import cache, reduce
 from pathlib import Path
 from textwrap import dedent
 
@@ -14,6 +14,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import grad_not_implemented, grad_undefined
 from pytensor.scalar.basic import (
     BinaryScalarOp,
+    Composite,
     ScalarOp,
     UnaryScalarOp,
     as_scalar,
@@ -26,6 +27,7 @@ from pytensor.scalar.basic import (
     float64,
     float_types,
     floor,
+    get_scalar_type,
     identity,
     integer_types,
     isinf,
@@ -1875,3 +1877,50 @@ def hyp2f1_grad(a, b, c, z, wrt: tuple[int, ...]):
         )
         for grad in grads
     ]
+
+
+@cache
+def _gamma_increment_op(cls, x_dtype, n_dtype):
+    return cls(x_dtype, n_dtype)
+
+
+class LogGammaIncrement(Composite):
+    """Compute gammaln(x + n) - gammaln(x) for an integer increment n."""
+
+    def __init__(self, x_dtype, n_dtype):
+        x, n = get_scalar_type(x_dtype)(), get_scalar_type(n_dtype)()
+        if n.type not in integer_types:
+            raise TypeError("LogGammaIncrement requires an integer increment")
+        super().__init__(
+            [x, n], [gammaln(x + n) - gammaln(x)], name="LogGammaIncrement"
+        )
+
+    def pullback(self, inputs, outputs, grads):
+        x, n = inputs
+        (g,) = grads
+        dx = (
+            x.zeros_like(dtype=config.floatX)
+            if x.type in discrete_types
+            else g * _gamma_increment_op(PsiIncrement, x.dtype, n.dtype)(x, n)
+        )
+        return [dx, n.zeros_like(dtype=config.floatX)]
+
+
+class PsiIncrement(Composite):
+    """Compute psi(x + n) - psi(x) for an integer increment n."""
+
+    def __init__(self, x_dtype, n_dtype):
+        x, n = get_scalar_type(x_dtype)(), get_scalar_type(n_dtype)()
+        if n.type not in integer_types:
+            raise TypeError("PsiIncrement requires an integer increment")
+        super().__init__([x, n], [psi(x + n) - psi(x)], name="PsiIncrement")
+
+    def pullback(self, inputs, outputs, grads):
+        x, n = inputs
+        (g,) = grads
+        dx = (
+            x.zeros_like(dtype=config.floatX)
+            if x.type in discrete_types
+            else g * (tri_gamma(x + n) - tri_gamma(x))
+        )
+        return [dx, n.zeros_like(dtype=config.floatX)]

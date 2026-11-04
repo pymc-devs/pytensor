@@ -1101,6 +1101,8 @@ class FusionOptimizer(GraphRewriter):
 def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
     comp = node.op.scalar_op
+    if type(comp) is not Composite:
+        return None
     used_outputs_idxs = [
         i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]
     ]
@@ -1209,6 +1211,8 @@ def local_careduce_fusion(fgraph, node):
 def local_inline_composite_constants(fgraph, node):
     """Inline scalar constants in Composite graphs."""
     composite_op = node.op.scalar_op
+    if type(composite_op) is not Composite:
+        return None
 
     # Check if any outer inputs are inlineable constants before unfreezing
     inlineable = [

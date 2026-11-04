@@ -33,7 +33,16 @@ from pytensor.scalar.basic import (
     Sign,
     Switch,
 )
-from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.math import (
+    Erf,
+    Erfc,
+    GammaLn,
+    Log1mexp,
+    LogGammaIncrement,
+    PsiIncrement,
+    Sigmoid,
+    Softplus,
+)
 
 
 def scalar_op_cache_key(op, **extra_fields):
@@ -481,3 +490,45 @@ def numba_funcify_ScalarLoop(op, node, **kwargs):
                 return carry
 
         return for_loop, loop_cache_key
+
+
+@register_funcify_and_cache_key(LogGammaIncrement)
+@register_funcify_and_cache_key(PsiIncrement)
+def numba_funcify_GammaIncrement(op, node, **kwargs):
+    if node.inputs[0].dtype not in ("float32", "float64"):
+        return numba_funcify_Composite(op, node=node, **kwargs)
+    # The shifted argument may have a wider dtype than the base.
+    shifted_node, base_node = [v.owner for v in op.fgraph.outputs[0].owner.inputs]
+    shifted, shifted_key = numba_basic.numba_funcify_ensure_cache(
+        shifted_node.op, node=shifted_node
+    )
+    base, base_key = numba_basic.numba_funcify_ensure_cache(
+        base_node.op, node=base_node
+    )
+    shifted_type = np.dtype(shifted_node.inputs[0].dtype).type
+    output_type = np.dtype(node.outputs[0].dtype).type
+    is_log = isinstance(op, LogGammaIncrement)
+
+    @numba_basic.numba_njit(fastmath=False)
+    def increment(x, n):
+        if 0 <= n <= 4 and x > 0 and math.isfinite(x):
+            if is_log:
+                product = 1.0
+                for j in range(n):
+                    product *= x + j
+                if 0 < product < math.inf:
+                    return output_type(math.log(product))
+            result = 0.0
+            for j in range(n):
+                result += math.log(x + j) if is_log else 1.0 / (x + j)
+            return output_type(result)
+        return output_type(shifted(shifted_type(x + n)) - base(x))
+
+    return increment, scalar_op_cache_key(
+        op,
+        input_dtypes=tuple(v.dtype for v in node.inputs),
+        output_dtype=node.outputs[0].dtype,
+        base_key=base_key,
+        shifted_key=shifted_key,
+        small_count_cutoff=4,
+    )

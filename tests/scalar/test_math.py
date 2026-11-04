@@ -186,3 +186,35 @@ def test_psi(linker):
 
     np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test))
     np.testing.assert_allclose(fn(-x_test), scipy.special.psi(-x_test))
+
+
+@pytest.mark.parametrize("cls", ["LogGammaIncrement", "PsiIncrement"])
+def test_gamma_increment_integer_contract(cls):
+    from pytensor.scalar import math as scalar_math
+
+    op_cls = getattr(scalar_math, cls)
+    for dtype in ("float32", "float64", "bool"):
+        with pytest.raises(TypeError, match="integer increment"):
+            op_cls("float64", dtype)
+    for dtype in ("int32", "int64", "uint64"):
+        op_cls("float64", dtype)
+
+
+@pytest.mark.parametrize("linker", ["py", "cvm"])
+def test_gamma_increment_pullback(linker):
+    from pytensor.scalar.math import LogGammaIncrement
+    from pytensor.tensor.elemwise import Elemwise
+
+    x, n = pt.dvector("x"), pt.lvector("n")
+    out = Elemwise(LogGammaIncrement(x.dtype, n.dtype))(x, n)
+    dx = pt.grad(out.sum(), x)
+    dxx = pt.grad(dx.sum(), x)
+    fn = function([x, n], [out, dx, dxx], mode=Mode(linker=linker, optimizer=None))
+    values, counts = np.array([0.1, 1.5, 10.0]), np.array([0, 2, 7], dtype="int64")
+    expected = [
+        sp.gammaln(values + counts) - sp.gammaln(values),
+        sp.psi(values + counts) - sp.psi(values),
+        sp.polygamma(1, values + counts) - sp.polygamma(1, values),
+    ]
+    for actual, reference in zip(fn(values, counts), expected, strict=True):
+        np.testing.assert_allclose(actual, reference, rtol=1e-7, atol=1e-10)

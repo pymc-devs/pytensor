@@ -340,7 +340,7 @@ class FuseElemwise(GraphRewriter):
         *dup_map* maps each original output index to its duplicate position.
         """
         scalar_op = node.op.scalar_op
-        if isinstance(scalar_op, Composite):
+        if type(scalar_op) is Composite:
             s_inputs = list(scalar_op.inputs)
             s_outputs = list(scalar_op.outputs)
         else:
