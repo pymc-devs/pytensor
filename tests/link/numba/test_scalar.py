@@ -413,3 +413,121 @@ def test_gamma_increment_large_base_numba():
     actual, derivative = fn(np.array([1e12, 1e12]), np.array([0, 1], dtype="int64"))
     np.testing.assert_allclose(actual, [0.0, np.log(1e12)], rtol=1e-14)
     np.testing.assert_allclose(derivative, [0.0, 1e-12], rtol=1e-14)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.parametrize("unary", [pt.gammaln, pt.psi])
+def test_positive_gamma_psi(dtype, unary):
+    x = pt.vector("x", dtype=dtype)
+    fn = function([x], unary(x), mode=numba_mode)
+    reference = scipy.special.gammaln if unary is pt.gammaln else scipy.special.psi
+    low, high = (-35, 35) if dtype == "float32" else (-300, 300)
+    values = list(np.logspace(low, high, 50))
+    for boundary in (1.0, 2.0, 10.0, 13.0, 1000.0, 1e8, 1e17):
+        point = np.asarray(boundary, dtype=dtype)
+        values.extend(
+            [
+                np.nextafter(point, np.asarray(0, dtype=dtype)),
+                point,
+                np.nextafter(point, np.asarray(np.inf, dtype=dtype)),
+            ]
+        )
+    values.extend(
+        [
+            -0.5,
+            -1.0,
+            0.0,
+            -0.0,
+            np.inf,
+            -np.inf,
+            np.nan,
+            np.nextafter(np.asarray(0, dtype=dtype), np.asarray(1, dtype=dtype)),
+        ]
+    )
+    values = np.asarray(values, dtype=dtype)
+    expected = reference(values)
+    if unary is pt.gammaln:
+        # Preserve math.lgamma's convention outside the native positive kernel.
+        expected[np.isneginf(values)] = np.inf
+        subnormal = (values != 0) & (np.abs(values) < np.finfo(dtype).tiny)
+        expected[subnormal] = -np.log(np.abs(values[subnormal]))
+    np.testing.assert_allclose(
+        fn(values),
+        expected,
+        rtol=2e-6 if dtype == "float32" else 3e-14,
+        atol=2e-6 if dtype == "float32" else 3e-14,
+        equal_nan=True,
+    )
+
+
+@pytest.mark.parametrize("fastmath", [False, True])
+def test_float64_gamma_psi_accuracy(fastmath):
+    x = pt.dvector("x")
+    with config.change_flags(numba__fastmath=fastmath):
+        fn = function([x], [pt.gammaln(x), pt.psi(x)], mode=numba_mode)
+
+    # References computed with 100-digit mpmath precision.
+    gamma_values = np.array(
+        [
+            np.nextafter(0.0, 1.0),
+            np.nextafter(0.0, -1.0),
+            np.nextafter(np.finfo("float64").tiny, 0.0),
+            np.finfo("float64").tiny,
+            np.nextafter(1.0, 0.0),
+            np.nextafter(1.0, 2.0),
+            np.nextafter(2.0, 1.0),
+            np.nextafter(2.0, 3.0),
+            np.nextafter(2.556348e305, np.inf),
+        ]
+    )
+    expected_gamma = np.array(
+        [
+            744.4400719213812,
+            744.4400719213812,
+            708.3964185322641,
+            708.3964185322641,
+            6.408381213480008e-17,
+            -1.2816762426960008e-16,
+            -9.387698065543117e-17,
+            1.8775396131086244e-16,
+            1.7951366714594416e308,
+        ]
+    )
+    actual_gamma, _ = fn(gamma_values)
+    np.testing.assert_allclose(actual_gamma, expected_gamma, rtol=2e-15, atol=4e-16)
+
+    psi_values = np.array(
+        [
+            1.4616321449683614,
+            1.4616321449683618,
+            1.461632144968362,
+            1.4616321449683622,
+            1.4616321449683625,
+            1.4616321449683627,
+            1.4616321449683631,
+        ]
+    )
+    expected_psi = np.array(
+        [
+            -9.518782609666346e-16,
+            -5.221454580919643e-16,
+            -3.072790566546293e-16,
+            -9.241265521729427e-17,
+            1.2245374622004068e-16,
+            3.3732014765737563e-16,
+            7.670529505320453e-16,
+        ]
+    )
+    _, actual_psi = fn(psi_values)
+    np.testing.assert_allclose(actual_psi, expected_psi, rtol=2e-15, atol=1e-32)
+
+
+def test_native_gamma_derivative_numba():
+    x = pt.dvector("x")
+    y = pt.gammaln(x)
+    fn = function([x], [y, pt.grad(y.sum(), x)], mode=numba_mode)
+    values = np.array([0.01, 0.5, 1.0, 1.4616321449683623, 2.0, 10.0, 13.0, 1000.0])
+    _, gradient = fn(values)
+    np.testing.assert_allclose(
+        gradient, scipy.special.psi(values), rtol=1e-13, atol=1e-14
+    )

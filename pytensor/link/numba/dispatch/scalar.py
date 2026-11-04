@@ -6,9 +6,11 @@ import numpy as np
 from numba.core import types
 from numba.core.extending import get_cython_function_address
 
+from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch._special import positive_loggamma, positive_psi
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     numba_funcify_and_cache_key,
@@ -39,6 +41,7 @@ from pytensor.scalar.math import (
     GammaLn,
     Log1mexp,
     LogGammaIncrement,
+    Psi,
     PsiIncrement,
     Sigmoid,
     Softplus,
@@ -370,11 +373,55 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
 
 @register_funcify_and_cache_key(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
-    @numba_basic.numba_njit
+    if node.inputs[0].dtype != "float64":
+
+        @numba_basic.numba_njit
+        def gammaln(x):
+            return math.lgamma(x)
+
+        return gammaln, scalar_op_cache_key(op)
+
+    @numba_basic.numba_njit(error_model="numpy")
     def gammaln(x):
+        if np.finfo(np.float64).tiny <= x <= 2.556348e305:
+            return positive_loggamma(x)
         return math.lgamma(x)
 
-    return gammaln, scalar_op_cache_key(op)
+    return gammaln, scalar_op_cache_key(
+        op,
+        native_positive_gamma_version=3,
+        fastmath=config.numba__fastmath,
+        input_dtype=node.inputs[0].dtype,
+        output_dtype=node.outputs[0].dtype,
+        error_model="numpy",
+    )
+
+
+@register_funcify_and_cache_key(Psi)
+def numba_funcify_Psi(op, node, **kwargs):
+    fallback, fallback_key = numba_funcify_ScalarOp(op, node=node, **kwargs)
+    if node.inputs[0].dtype != "float64":
+        return fallback, fallback_key
+    output_type = np.dtype(node.outputs[0].dtype).type
+
+    # Reassociation would collapse the split root used near digamma's zero.
+    fastmath = {"arcp", "contract", "afn", "nsz"} if config.numba__fastmath else False
+
+    @numba_basic.numba_njit(fastmath=fastmath, error_model="numpy")
+    def psi(x):
+        if x > 0 and math.isfinite(x):
+            return output_type(positive_psi(x))
+        return output_type(fallback(x))
+
+    return psi, scalar_op_cache_key(
+        op,
+        native_positive_psi_version=3,
+        fastmath=config.numba__fastmath,
+        input_dtype=node.inputs[0].dtype,
+        output_dtype=node.outputs[0].dtype,
+        fallback_key=fallback_key,
+        error_model="numpy",
+    )
 
 
 @register_funcify_and_cache_key(Log1mexp)
