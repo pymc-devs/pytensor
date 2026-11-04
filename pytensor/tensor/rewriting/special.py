@@ -4,10 +4,16 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.scalar.basic import Exp
+from pytensor.scalar.basic import Add, Exp, Sub
+from pytensor.tensor.basic import cast
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Sum, add, exp, log, sub, true_div
-from pytensor.tensor.rewriting.basic import register_stabilize
+from pytensor.tensor.math import Sum, add, exp, log, neg, sub, true_div, variadic_add
+from pytensor.tensor.rewriting.basic import (
+    broadcast_like_elemwise,
+    register_canonicalize,
+    register_specialize,
+    register_stabilize,
+)
 from pytensor.tensor.special import (
     LogSoftmax,
     LogSumExp,
@@ -134,6 +140,65 @@ def local_softmax_stabilize(fgraph, node):
     ret = Softmax(axis=normalize_reduce_axis(axis, x.type.ndim, normalize_none=True))(x)
     copy_stack_trace(node.outputs, ret)
     return [ret]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Softmax, LogSoftmax, LogSumExp])
+def local_softmax_drop_axis_invariant_terms(fgraph, node):
+    """Remove added terms that are constant along the reduced axes.
+
+    softmax(x + c) -> softmax(x)
+    log_softmax(x + c) -> log_softmax(x)
+    logsumexp(x + c) -> logsumexp(x) + c
+
+    where ``c`` is broadcastable along every reduced axis. This also covers
+    a manual stabilization like ``softmax(x - x.max(axis, keepdims=True))``.
+    """
+    [x] = node.inputs
+
+    match x.owner_op_and_inputs:
+        case Elemwise(Add()), *terms:
+            signed_terms = [(term, False) for term in terms]
+        case Elemwise(Sub()), a, b:
+            signed_terms = [(a, False), (b, True)]
+        case _:
+            return None
+
+    axis = range(x.type.ndim) if node.op.axis is None else node.op.axis
+    variant_terms = []
+    invariant_terms = []
+    for term, negated in signed_terms:
+        if all(term.type.broadcastable[a] for a in axis):
+            invariant_terms.append((term, negated))
+        else:
+            variant_terms.append((term, negated))
+
+    if not (variant_terms and invariant_terms):
+        return None
+
+    def signed_sum(signed_terms):
+        pos = [term for term, negated in signed_terms if not negated]
+        negs = [term for term, negated in signed_terms if negated]
+        if not negs:
+            return variadic_add(*pos)
+        if not pos:
+            return neg(variadic_add(*negs))
+        return variadic_add(*pos) - variadic_add(*negs)
+
+    new_x = signed_sum(variant_terms)
+    if isinstance(node.op, LogSumExp):
+        if new_x.type.dtype != x.type.dtype:
+            new_x = cast(new_x, x.type.dtype)
+        offset = signed_sum(invariant_terms).squeeze(axis=tuple(axis))
+        new_out = node.op(new_x) + offset
+    else:
+        # The dropped terms may still broadcast the other axes
+        new_x = broadcast_like_elemwise(new_x, x.owner, fgraph=fgraph)
+        new_out = node.op(new_x)
+
+    copy_stack_trace(node.outputs, new_out)
+    return [new_out]
 
 
 @register_stabilize("symbolic_op_recognition", "fast_compile")

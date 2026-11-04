@@ -19,9 +19,10 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.special import (
     local_exp_log_softmax,
     local_log_softmax_from_logsumexp,
+    local_softmax_drop_axis_invariant_terms,
 )
 from pytensor.tensor.special import LogSoftmax, Softmax, log_softmax, logsumexp, softmax
-from pytensor.tensor.type import TensorType, dvector, matrix, tensor3, vector
+from pytensor.tensor.type import TensorType, dvector, matrix, tensor, tensor3, vector
 from tests import unittest_tools as utt
 from tests.unittest_tools import RewriteTester
 
@@ -167,6 +168,53 @@ def test_softmax_graph():
         return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])
+
+
+@pytest.mark.parametrize("op", [softmax, log_softmax, logsumexp])
+def test_local_softmax_drop_axis_invariant_terms(op):
+    x = tensor3("x")
+    c = tensor3("c")
+    offset = exp(c).sum(axis=-1, keepdims=True)
+    rng = np.random.default_rng(utt.fetch_seed())
+    x_val = rng.normal(size=(2, 3, 4)).astype(config.floatX)
+    c_val = rng.normal(size=(2, 3, 5)).astype(config.floatX)
+
+    result = RewriteTester(
+        [x, c],
+        [op(offset + x, axis=-1), op(x - offset, axis=-1), op(offset - x, axis=-1)],
+        include=None,
+        custom_rewrite=local_softmax_drop_axis_invariant_terms,
+    )
+    if op is logsumexp:
+        result.assert_graph(
+            op(x, axis=-1) + offset.squeeze(-1),
+            op(x, axis=-1) + (-offset).squeeze(-1),
+            op(-x, axis=-1) + offset.squeeze(-1),
+        )
+    else:
+        result.assert_graph(op(x, axis=-1), op(x, axis=-1), op(-x, axis=-1))
+    result.assert_eval(x_val, c_val, rtol=1e-6)
+
+    # Terms that vary along any reduced axis are kept
+    out = op(x + offset, axis=(1, 2))
+    result = RewriteTester(
+        [x, c],
+        [out],
+        include=None,
+        custom_rewrite=local_softmax_drop_axis_invariant_terms,
+    )
+    result.assert_graph(out)
+
+    # The dropped terms can still broadcast the other axes
+    x = tensor("x", shape=(1, 4))
+    c = tensor("c", shape=(3, 1))
+    result = RewriteTester(
+        [x, c],
+        [op(x + c, axis=-1)],
+        include=None,
+        custom_rewrite=local_softmax_drop_axis_invariant_terms,
+    )
+    result.assert_eval(x_val[0, :1], c_val[0, :, :1], rtol=1e-6)
 
 
 @pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
