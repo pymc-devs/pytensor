@@ -12,6 +12,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
 from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
@@ -1219,6 +1220,20 @@ class TestLocalSubtensorMerge:
         rewritten4 = rewrite_graph(z4, include=("canonicalize",))
         expected4 = x4[y:, 1:4, w:, 2:6][1:, :, 2:]
         utt.assert_equal_computations([rewritten4], [expected4])
+
+    def test_merge_int8_scalar_index_large_slice(self):
+        # gh-2567: merging a constant slice with bounds >= 128 and an int8
+        # scalar index must not overflow (NumPy 2 weak promotion would
+        # otherwise try to fit the Python int into int8).
+        value = vector("value", shape=(200,))
+        first = rewrite_graph(pt.take(value, 0, axis=0), include=("canonicalize",))
+        x = vector("x", shape=(201,))
+        first = graph_replace(first, {value: x[1:201]})
+        f = function([x], first, mode=mode_opt)
+        topo = f.maker.fgraph.toposort()
+        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 1
+        x_val = np.arange(201, dtype=config.floatX)
+        assert f(x_val) == 1.0
 
     def test_scalar6(self):
         # General case with one slice and one index
