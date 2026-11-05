@@ -491,14 +491,6 @@ def _normalize_gemm_strides(A, B, C):
 
 
 @numba_basic.numba_njit(inline="always")
-def _pair_reversed_contraction(A, B, C):
-    # Reversing the contraction axis of both operands leaves the product unchanged
-    if _is_reversed(A, 1) and _is_reversed(B, 0):
-        return A[:, ::-1], B[::-1], C
-    return A, B, C
-
-
-@numba_basic.numba_njit(inline="always")
 def _keep_operands(A, B, C):
     return A, B, C
 
@@ -528,15 +520,10 @@ def _gemm_impl(A, B, C):
     _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
     _check_linalg_matrix(C, ndim=2, dtype=A.dtype, func_name="gemm")
 
-    if C.layout in ("C", "F"):
-        # A contiguous C has no reversed axis to pair with A's rows or B's columns,
-        # so only a reversed contraction axis on both operands can be cancelled.
+    if all(array.layout in ("C", "F") for array in (A, B, C)):
+        # Contiguous types have no reversed axis to cancel
         output_layout = C.layout
-        normalize = (
-            _pair_reversed_contraction
-            if A.layout == "A" and B.layout == "A"
-            else _keep_operands
-        )
+        normalize = _keep_operands
     else:
         output_layout = "A"
         normalize = _normalize_gemm_strides
