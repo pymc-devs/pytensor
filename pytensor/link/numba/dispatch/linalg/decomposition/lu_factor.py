@@ -4,7 +4,7 @@ from typing import cast as typing_cast
 import numpy as np
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -12,7 +12,10 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
 
 
 def _getrf(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray, int]:
@@ -45,10 +48,7 @@ def getrf_impl(
     ) -> tuple[np.ndarray, np.ndarray, int]:
         _M, _N = np.int32(A.shape[-2:])  # type: ignore
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
         M = val_to_int_ptr(_M)  # type: ignore
         N = val_to_int_ptr(_N)  # type: ignore

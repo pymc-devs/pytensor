@@ -9,7 +9,11 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _c_work_array,
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
 
 
 def _svd_gesvd_full(a, full_matrices=True):
@@ -372,10 +376,7 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
             # gesdd uses A as scratch and clobbers it regardless of JOBZ, so
             # when the caller donates an f-contig A we reuse the buffer; the
             # post-call contents are meaningless but the alloc is saved.
-            if overwrite_a and A.flags.f_contiguous:
-                A_copy = A
-            else:
-                A_copy = _copy_to_fortran_order(A)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
             if full_matrices:
                 JOBZ = val_to_int_ptr(ord("A"))
@@ -387,6 +388,10 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
                 VT = np.empty((_N, _K), dtype=A.dtype).T
 
             S = np.empty(_K, dtype=real_dtype)
+            if _K == 0:
+                U.fill(0)
+                VT.fill(0)
+                return U, S, VT
             M = val_to_int_ptr(_M)
             N = val_to_int_ptr(_N)
             LDA = val_to_int_ptr(max(np.int32(1), _M))
@@ -461,26 +466,23 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
             return U, S, VT
 
     else:
+        # Real A: a c-contiguous buffer reinterpreted as fortran-order is A.T (M and N
+        # swapped in LAPACK's view). For SVD this lets us solve the swapped (N, M)
+        # problem and recover A's SVD by swapping roles: if A = U S Vt, then
+        # A.T = V S U.T, so LAPACK's U' maps to Vt.T and LAPACK's Vt' maps to U.T.
+        # Choosing this from the type keeps U and Vt one layout on every return path.
+        swap = A.layout == "C"
 
         def impl(A, full_matrices=True, overwrite_a=False):
             _M = np.int32(A.shape[0])
             _N = np.int32(A.shape[1])
             _K = min(_M, _N)
 
-            # Real A: a c-contiguous buffer reinterpreted as fortran-order is
-            # A.T (M and N swapped in LAPACK's view). For SVD this lets us
-            # solve the swapped (N, M) problem and recover A's SVD by swapping
-            # roles: if A = U S Vt, then A.T = V S U.T, so LAPACK's U' maps to
-            # Vt.T and LAPACK's Vt' maps to U.T.
-            swap = False
-            if overwrite_a and A.flags.f_contiguous:
-                A_copy = A
-            elif overwrite_a and A.flags.c_contiguous:
-                A_copy = A.T
-                swap = True
+            if swap:
+                A_copy = _c_work_array(A, overwrite_a).T
                 _M, _N = _N, _M
             else:
-                A_copy = _copy_to_fortran_order(A)
+                A_copy = _fortran_work_array(A, overwrite_a)
 
             if full_matrices:
                 JOBZ = val_to_int_ptr(ord("A"))
@@ -492,6 +494,12 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
                 VT = np.empty((_N, _K), dtype=A.dtype).T
 
             S = np.empty(_K, dtype=A.dtype)
+            if _K == 0:
+                U.fill(0)
+                VT.fill(0)
+                if swap:
+                    return VT.T, S, U.T
+                return U, S, VT
             M = val_to_int_ptr(_M)
             N = val_to_int_ptr(_N)
             LDA = val_to_int_ptr(max(np.int32(1), _M))
@@ -571,10 +579,7 @@ def svd_gesdd_no_uv_impl(A, overwrite_a=False):
             _N = np.int32(A.shape[1])
             _K = min(_M, _N)
 
-            if overwrite_a and A.flags.f_contiguous:
-                A_copy = A
-            else:
-                A_copy = _copy_to_fortran_order(A)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
             JOBZ = val_to_int_ptr(ord("N"))
             U = np.empty(1, dtype=A.dtype)
