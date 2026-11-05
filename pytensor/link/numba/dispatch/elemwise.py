@@ -19,7 +19,6 @@ from pytensor.link.numba.cache import (
 )
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    default_hash_key_from_props,
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
@@ -1518,20 +1517,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
     return argmax, cache_version
 
 
-def _gemm_shape_case(x, y):
-    """Choose an existing BLAS branch from static core shapes."""
-    m, k = x.type.shape[-2:]
-    n = y.type.shape[-1]
-    if n == 1:
-        return 2
-    if None in (m, k, n) or 0 in (m, k, n):
-        return 0
-    if m == 1:
-        return 3
-    return 1
-
-
-@register_funcify_and_cache_key(Dot)
+@register_funcify_default_op_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
     # Numba's BLAS kernels require floating-point or complex operands.
     x, y = node.inputs
@@ -1554,7 +1540,6 @@ def numba_funcify_Dot(op, node, **kwargs):
             f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
         )
 
-    shape_case = _gemm_shape_case(x, y)
     cast_x = x_dtype != numba_dot_dtype
     cast_y = y_dtype != numba_dot_dtype
 
@@ -1566,18 +1551,15 @@ def numba_funcify_Dot(op, node, **kwargs):
             x = x.astype(numba_dot_dtype)
         if cast_y:
             y = y.astype(numba_dot_dtype)
-        return _gemm(x, y, out, shape_case)
+        return _gemm(x, y, out)
 
-    # Bump whenever `_gemm` changes: it is inlined here, so its source is not part of
-    # this key.
-    cache_key = default_hash_key_from_props(
-        op, cache_version=6, gemm_shape_case=shape_case
-    )
+    # Bump whenever `_gemm` changes, because its source is not part of this key.
+    cache_version = 4
 
     if out_dtype == numba_dot_dtype:
         # The product writes straight into the pre-allocated batch output slice.
         dot.handles_out = True
-        return dot, cache_key
+        return dot, cache_version
 
     else:
         # Output needs a dtype cast the product can't do in place, so fall back to
@@ -1586,15 +1568,12 @@ def numba_funcify_Dot(op, node, **kwargs):
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)
 
-        return dot_with_cast, cache_key
+        return dot_with_cast, cache_version
 
 
-@register_funcify_and_cache_key(BatchedDot)
+@register_funcify_default_op_cache_key(BatchedDot)
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
-    x, y = node.inputs
-
-    shape_case = _gemm_shape_case(x, y)
 
     # Numba does not support 3D matmul (numba#3804), so loop over the batch.
     @numba_basic.numba_njit
@@ -1604,11 +1583,11 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
             out = np.empty(shape, dtype=dtype)
         for i in range(out.shape[0]):
             # Writes into out[i] directly and reads an F-ordered slice without a copy
-            _gemm(x[i], y[i], out[i], shape_case)
+            _gemm(x[i], y[i], out[i])
 
         return out
 
     batched_dot.handles_out = True
-    return batched_dot, default_hash_key_from_props(
-        op, cache_version=4, gemm_shape_case=shape_case
-    )
+    # Bump whenever `_gemm` changes, because its source is not part of this key.
+    cache_version = 3
+    return batched_dot, cache_version

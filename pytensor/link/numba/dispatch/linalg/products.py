@@ -656,7 +656,7 @@ def _normalize_gemm_strides_impl(A, B, C):
     return impl_generic
 
 
-def _gemm(A, B, C, shape_case=0):
+def _gemm(A, B, C):
     """
     Overwrite ``C`` with the matrix product of ``A`` and ``B``.
 
@@ -665,9 +665,6 @@ def _gemm(A, B, C, shape_case=0):
     A, B, C : ndarray
         2-d arrays of one dtype. ``C`` is the output and is returned. Its incoming
         contents are never read.
-    shape_case : literal int
-        Private graph-converter proof selecting a static BLAS shape branch.
-        The default retains all generic shape branches.
 
     Returns
     -------
@@ -677,45 +674,12 @@ def _gemm(A, B, C, shape_case=0):
     return C
 
 
-@overload(_gemm, prefer_literal=True)
-def _gemm_impl(A, B, C, shape_case=0):
+@overload(_gemm)
+def _gemm_impl(A, B, C):
     ensure_blas()
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
     _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
     _check_linalg_matrix(C, ndim=2, dtype=A.dtype, func_name="gemm")
-
-    known_case = (
-        shape_case.literal_value
-        if isinstance(shape_case, types.IntegerLiteral)
-        else shape_case
-        if isinstance(shape_case, int)
-        else 0
-    )
-    if known_case in (2, 3):
-        column = known_case == 2
-
-        def impl_vector(A, B, C, shape_case=0):
-            M = np.int32(A.shape[0])
-            K = np.int32(A.shape[1])
-            N = np.int32(B.shape[1])
-            if B.shape[0] != K:
-                raise ValueError(
-                    "gemm: operands have mismatched contraction dimensions"
-                )
-            if C.shape[0] != M or C.shape[1] != N:
-                raise ValueError("gemm: output shape does not match the product")
-            if M == 0 or N == 0:
-                return C
-            if K == 0:
-                C[:] = 0
-                return C
-            if column:
-                _gemv(A, B[:, 0], C[:, 0])
-            else:
-                _gemv(B.T, A[0], C[0])
-            return C
-
-        return impl_vector
 
     # Normalization preserves the layouts when every operand is contiguous.
     output_layout = (
@@ -725,7 +689,7 @@ def _gemm_impl(A, B, C, shape_case=0):
     numba_gemm = _BLAS().numba_xgemm(dtype)
     scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
 
-    def impl(A, B, C, shape_case=0):
+    def impl(A, B, C):
         out = C
         M = np.int32(A.shape[0])
         K = np.int32(A.shape[1])
@@ -738,18 +702,17 @@ def _gemm_impl(A, B, C, shape_case=0):
         if C.shape[0] != M or C.shape[1] != N:
             raise ValueError("gemm: output shape does not match the product")
 
-        if known_case != 1:
-            if M == 0 or N == 0:
-                return out
-            if K == 0:
-                C[:] = 0
-                return out
-            if N == 1:
-                _gemv(A, B[:, 0], C[:, 0])
-                return out
-            if M == 1:
-                _gemv(B.T, A[0], C[0])
-                return out
+        if M == 0 or N == 0:
+            return out
+        if K == 0:
+            C[:] = 0
+            return out
+        if N == 1:
+            _gemv(A, B[:, 0], C[:, 0])
+            return out
+        if M == 1:
+            _gemv(B.T, A[0], C[0])
+            return out
 
         A, B, C = _normalize_gemm_strides(A, B, C)
         A_work, A_trans, LDA = _blas_operand(A)
