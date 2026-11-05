@@ -9,12 +9,6 @@ from numba.np.linalg import _copy_to_fortran_order
 from pytensor.link.numba.dispatch import basic as numba_basic
 
 
-@numba_basic.numba_njit(inline="always")
-def _copy_to_fortran_order_even_if_1d(x):
-    # Numba's _copy_to_fortran_order doesn't do anything for vectors
-    return x.copy() if x.ndim == 1 else _copy_to_fortran_order(x)
-
-
 # A LAPACK kernel chooses its working layout from the input types at typing time, so
 # every return path has one layout and the output is typed "C" or "F", never "A". Where
 # the math allows, a C-typed input is worked on as its transpose, in a buffer from
