@@ -451,7 +451,7 @@ def _cheapest_copies(rows, inner, cols, cost_a, cost_b, cost_c):
 
 
 @numba_basic.numba_njit
-def _normalize_gemm_strides_generic(A, B, C):
+def _normalize_gemm_strides(A, B, C):
     """Reverse paired axes of A, B and C so the fewest elements need a BLAS copy."""
     ar, ak = _is_reversed(A, 0), _is_reversed(A, 1)
     bk, bc = _is_reversed(B, 0), _is_reversed(B, 1)
@@ -490,30 +490,17 @@ def _normalize_gemm_strides_generic(A, B, C):
     return A, B, C
 
 
-def _normalize_gemm_strides(A, B, C):
-    return _normalize_gemm_strides_generic(A, B, C)
+@numba_basic.numba_njit(inline="always")
+def _pair_reversed_contraction(A, B, C):
+    # Reversing the contraction axis of both operands leaves the product unchanged
+    if _is_reversed(A, 1) and _is_reversed(B, 0):
+        return A[:, ::-1], B[::-1], C
+    return A, B, C
 
 
-@overload(_normalize_gemm_strides, inline="always")
-def _normalize_gemm_strides_impl(A, B, C):
-    # Contiguous types cannot reverse a non-singleton axis. Prune the view
-    # branches before typing them so the original C/F types survive.
-    if all(
-        isinstance(array, types.Array)
-        and array.ndim == 2
-        and array.layout in ("C", "F")
-        for array in (A, B, C)
-    ):
-
-        def impl(A, B, C):
-            return A, B, C
-
-        return impl
-
-    def impl_generic(A, B, C):
-        return _normalize_gemm_strides_generic(A, B, C)
-
-    return impl_generic
+@numba_basic.numba_njit(inline="always")
+def _keep_operands(A, B, C):
+    return A, B, C
 
 
 def _gemm(A, B, C):
@@ -541,10 +528,18 @@ def _gemm_impl(A, B, C):
     _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
     _check_linalg_matrix(C, ndim=2, dtype=A.dtype, func_name="gemm")
 
-    # Normalization preserves the layouts when every operand is contiguous.
-    output_layout = (
-        C.layout if all(array.layout in ("C", "F") for array in (A, B, C)) else "A"
-    )
+    if C.layout in ("C", "F"):
+        # A contiguous C has no reversed axis to pair with A's rows or B's columns,
+        # so only a reversed contraction axis on both operands can be cancelled.
+        output_layout = C.layout
+        normalize = (
+            _pair_reversed_contraction
+            if A.layout == "A" and B.layout == "A"
+            else _keep_operands
+        )
+    else:
+        output_layout = "A"
+        normalize = _normalize_gemm_strides
     dtype = A.dtype
     numba_gemm = _BLAS().numba_xgemm(dtype)
     numba_gemv = _BLAS().numba_xgemv(dtype)
@@ -571,7 +566,7 @@ def _gemm_impl(A, B, C):
             C[:] = 0
             return out
 
-        A, B, C = _normalize_gemm_strides(A, B, C)
+        A, B, C = normalize(A, B, C)
         A_work, A_trans, LDA = _blas_operand(A)
         B_work, B_trans, LDB = _blas_operand(B)
 

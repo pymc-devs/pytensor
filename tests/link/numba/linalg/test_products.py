@@ -8,6 +8,7 @@ from pytensor.link.numba.dispatch.linalg.products import (
     _blas_operand,
     _gemm,
     _normalize_gemm_strides,
+    _pair_reversed_contraction,
 )
 from pytensor.tensor.linalg.products import Expm, expm
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
@@ -100,7 +101,7 @@ def _gemm_jit(A, B, C):
 
 
 @numba_njit(final_function=True)
-def _gemm_buffers_jit(A, B, C):
+def _normalized_buffers_jit(A, B, C):
     A, B, C = _normalize_gemm_strides(A, B, C)
     A, _, _ = _blas_operand(A)
     B, _, _ = _blas_operand(B)
@@ -206,7 +207,7 @@ def test_gemm_vector_strides(dtype, transpose):
 
 
 @pytest.mark.parametrize("order", ["C", "F"])
-def test_gemm_cancels_reversals(order):
+def test_normalize_gemm_strides_cancels_reversals(order):
     A_base = np.asarray(rng.normal(size=(4, 3)), order=order)
     B_base = np.asarray(rng.normal(size=(3, 5)), order=order)
     C_base = np.asarray(rng.normal(size=(4, 5)), order=order)
@@ -217,11 +218,33 @@ def test_gemm_cancels_reversals(order):
                 B = B_base[::inner_step, ::col_step]
                 C = C_base[::row_step, ::col_step]
                 for work, original in zip(
-                    _gemm_buffers_jit(A, B, C), (A, B, C), strict=True
+                    _normalized_buffers_jit(A, B, C), (A, B, C), strict=True
                 ):
                     assert np.shares_memory(work, original)
                 _gemm_jit(A, B, C)
                 np.testing.assert_allclose(C, A @ B)
+
+
+@numba_njit(final_function=True)
+def _pair_reversed_contraction_jit(A, B, C):
+    return _pair_reversed_contraction(A, B, C)
+
+
+def test_pair_reversed_contraction_reads_in_place():
+    """Two operands that both reverse the contraction axis are read in place."""
+    A = _matrix_views(4, 3, "float64")["column_slice"]
+    B = _matrix_views(3, 5, "float64")["column_slice"]
+    for a_step, b_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
+        A_view, B_view = A[:, ::a_step], B[::b_step]
+        A_work, B_work, _ = _pair_reversed_contraction_jit(A_view, B_view, np.empty(0))
+        direction = -1 if a_step == b_step == -1 else 1
+        assert A_work.strides[1] == direction * A_view.strides[1]
+        assert B_work.strides[0] == direction * B_view.strides[0]
+        assert np.shares_memory(A_work, A)
+        assert np.shares_memory(B_work, B)
+        np.testing.assert_allclose(
+            _gemm_jit(A_view, B_view, np.full((4, 5), np.nan)), A_view @ B_view
+        )
 
 
 @pytest.mark.parametrize(
@@ -249,14 +272,14 @@ def test_gemm_cancels_reversals(order):
         "forced_copy_of_A_absorbs_C_reversal",
     ],
 )
-def test_gemm_copies_cheapest_operands(
+def test_normalize_gemm_strides_copies_cheapest_operands(
     a_shape, a_view, b_shape, b_view, c_shape, c_view, read_in_place
 ):
     A = rng.normal(size=a_shape)[a_view]
     B = rng.normal(size=b_shape)[b_view]
     C = rng.normal(size=c_shape)[c_view]
 
-    works = _gemm_buffers_jit(A, B, C)
+    works = _normalized_buffers_jit(A, B, C)
 
     for work, original, in_place in zip(works, (A, B, C), read_in_place, strict=True):
         assert np.shares_memory(work, original) == bool(in_place)
