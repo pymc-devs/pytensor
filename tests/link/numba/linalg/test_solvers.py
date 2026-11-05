@@ -1,5 +1,6 @@
 from typing import Literal
 
+import numba
 import numpy as np
 import pytest
 import scipy
@@ -7,10 +8,17 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.link.numba.dispatch.basic import numba_njit
+from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
 from pytensor.link.numba.dispatch.linalg.solvers.triangular import _solve_triangular
+from pytensor.tensor.linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
+from pytensor.tensor.linalg.decomposition.qr import qr
+from pytensor.tensor.linalg.decomposition.schur import qz, schur
+from pytensor.tensor.linalg.decomposition.svd import svd
+from pytensor.tensor.linalg.products import expm
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
+from pytensor.tensor.linalg.solvers.linear_control import TRSYL
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
@@ -446,6 +454,79 @@ class TestSolves:
             [np.zeros((0, 0), dtype=floatX), np.zeros(0, dtype=floatX)],
             eval_obj_mode=False,
         )
+
+
+def test_lapack_output_layouts():
+    """Every return path of a LAPACK kernel has one layout, so the output is never typed "A".
+
+    Each op is also checked with every overwrite flag set, one at a time, since the
+    buffer-reuse branches are only typed then. Kernels are compiled from the input types
+    alone, so no input is overwritten.
+    """
+
+    def readonly(x):
+        x = x.copy(order="K")
+        x.flags.writeable = False
+        return x
+
+    rng = np.random.default_rng(418)
+    A, B, C = pt.dmatrix("A"), pt.dmatrix("B"), pt.dmatrix("C")
+    Z = pt.zmatrix("Z")
+    v = pt.dvector("v")
+    a = np.triu(rng.normal(size=(3, 3))) + 3 * np.eye(3)
+    spd = a.T @ a
+    b = rng.normal(size=(3, 3))
+    z = b + 1j * rng.normal(size=(3, 3))
+    triangular = solve_triangular(A, B)
+    cases = [
+        (triangular, (a, b), "C"),
+        (triangular, (a, np.asfortranarray(b)), "F"),
+        (triangular, (a, b[:, ::2]), "F"),
+        (triangular, (a, readonly(b)), "C"),
+        (solve(A, B), (a, b), "F"),
+        (solve(A, v), (a, b[0]), "C"),
+        (solve(A, B, assume_a="sym"), (spd, b), "F"),
+        (solve(A, B, assume_a="pos"), (spd, b), "F"),
+        (solve(A, B, assume_a="tridiagonal"), (a, b), "F"),
+        (cho_solve((A, False), B), (a, b), "F"),
+        (TRSYL()(A, B, C), (a, a.T, b), "F"),
+        (cholesky(A), (spd,), "C"),
+        (cholesky(A), (np.asfortranarray(spd),), "F"),
+        (cholesky(A), (readonly(spd),), "C"),
+        (cholesky(A), (readonly(np.asfortranarray(spd)),), "F"),
+        (lu_factor(A)[0], (b,), "FC"),
+        (qr(A)[0], (b,), "FC"),
+        (svd(A)[0], (b,), "CCC"),
+        (svd(A)[0], (np.asfortranarray(b),), "FCF"),
+        (svd(Z)[0], (z,), "FCF"),
+        (eigh(A)[0], (spd,), "CF"),
+        (schur(A)[0], (b,), "FF"),
+        (schur(Z, output="complex")[0], (z,), "FF"),
+        (qz(A, C)[0], (b, b.T), "FFFF"),
+        (expm(A), (b,), "C"),
+        (expm(A), (np.asfortranarray(b),), "F"),
+    ]
+    for output, values, expected in cases:
+        core_op = getattr(output.owner.op, "core_op", output.owner.op)
+        overwrite_variants = [
+            type(core_op)(**{**core_op._props_dict(), name: True})
+            for name in core_op.__props__
+            if name.startswith("overwrite_")
+        ]
+        for op in [core_op, *overwrite_variants]:
+            fn = numba_funcify(op, op.make_node(*output.owner.inputs))
+            # Dispatcher.compile needs one explicit parameter per argument type
+            call = [
+                lambda x: fn(x),
+                lambda x, y: fn(x, y),
+                lambda x, y, z: fn(x, y, z),
+            ][len(values) - 1]
+            jitted = numba.njit(call)
+            jitted.compile(tuple(numba.typeof(value) for value in values))
+            [signature] = jitted.nopython_signatures
+            return_type = signature.return_type
+            types = getattr(return_type, "types", (return_type,))
+            assert "".join(array_type.layout for array_type in types) == expected, op
 
 
 @numba_njit(final_function=True)
