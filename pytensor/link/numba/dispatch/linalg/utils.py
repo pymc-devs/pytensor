@@ -17,7 +17,7 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 # of the result then inherits.
 
 
-def _fortran_work_array(x, overwrite):
+def _fortran_work_array(x: np.ndarray, overwrite: bool) -> np.ndarray:
     """Return ``x`` in LAPACK's layout, reusing its buffer if ``overwrite`` allows."""
     return np.asfortranarray(x) if overwrite else np.array(x, order="F")
 
@@ -56,7 +56,7 @@ def _fortran_work_array_impl(x, overwrite):
     return impl
 
 
-def _c_work_array(x, overwrite):
+def _c_work_array(x: np.ndarray, overwrite: bool) -> np.ndarray:
     """Return C-typed ``x`` as a C-ordered buffer, reusing it if ``overwrite`` allows."""
     return x if overwrite else x.copy()
 
@@ -68,7 +68,7 @@ def _c_work_array_impl(x, overwrite):
     return lambda x, overwrite: x if overwrite else x.copy()
 
 
-def _full_fortran_order(shape, fill_value, dtype):
+def _full_fortran_order(shape, fill_value, dtype) -> np.ndarray:
     """Return a new array of ``shape`` filled with ``fill_value``, in LAPACK's layout."""
     return np.full(shape, fill_value, dtype=dtype, order="F")
 
