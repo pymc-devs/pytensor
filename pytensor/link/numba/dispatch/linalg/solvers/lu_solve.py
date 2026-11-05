@@ -16,7 +16,7 @@ from pytensor.link.numba.dispatch.linalg.solvers.utils import _solve_check_input
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
-    _copy_to_fortran_order_even_if_1d,
+    _fortran_work_array,
     _trans_char_to_int,
 )
 
@@ -63,13 +63,7 @@ def getrs_impl(
 
         B_is_1d = B.ndim == 1
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order_even_if_1d(B)
-
-        if B_is_1d:
-            B_copy = np.expand_dims(B_copy, -1)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         NRHS = 1 if B_is_1d else int(B_copy.shape[-1])
 
@@ -92,9 +86,6 @@ def getrs_impl(
             LDB,
             INFO,
         )
-
-        if B_is_1d:
-            B_copy = B_copy[..., 0]
 
         return B_copy, int_ptr_to_val(INFO)
 

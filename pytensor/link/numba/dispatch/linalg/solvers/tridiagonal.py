@@ -21,7 +21,8 @@ from pytensor.link.numba.dispatch.linalg.solvers.utils import _solve_check_input
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
-    _copy_to_fortran_order_even_if_1d,
+    _fortran_work_array,
+    _full_fortran_order,
     _trans_char_to_int,
 )
 from pytensor.tensor.linalg.solvers.tridiagonal import (
@@ -163,8 +164,7 @@ def gttrs_impl(
         nrhs = 1 if b.ndim == 1 else int(b.shape[-1])
         info = val_to_int_ptr(0)
 
-        if not overwrite_b or not b.flags.f_contiguous:
-            b = _copy_to_fortran_order_even_if_1d(b)
+        b = _fortran_work_array(b, overwrite_b)
 
         if not dl.flags.f_contiguous:
             dl = dl.copy()
@@ -334,7 +334,7 @@ def numba_funcify_SolveLUFactorTridiagonal(
             if b_ndim == 1:
                 return np.zeros(d.shape, dtype=out_dtype)
             else:
-                return np.zeros((d.shape[0], b.shape[1]), dtype=out_dtype)
+                return _full_fortran_order((d.shape[0], b.shape[1]), 0, out_dtype)
 
         if cast_dl:
             dl = dl.astype(out_dtype)
@@ -364,5 +364,5 @@ def numba_funcify_SolveLUFactorTridiagonal(
 
         return x
 
-    cache_version = 3
+    cache_version = 4
     return solve_lu_factor_tridiagonal, cache_version
