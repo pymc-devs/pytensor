@@ -86,3 +86,94 @@ To run the example:
 The output:
 
 .. literalinclude:: profiling_example_out.prof
+
+.. _numba_native_profiling:
+
+Native sampling with Numba
+==========================
+
+Compile with ``profile=True``, warm up the function, and record representative
+calls with ``f.profile.sample()``. ``summary()`` shows native hotspots and
+``dprint()`` places their costs on the optimized graph:
+
+.. literalinclude:: profiling_numba_example.py
+    :language: python
+
+The context records only the calls you make. Increase or decrease the loop
+count for your function's speed; compilation must finish before recording.
+
+The native section of ``summary()`` and the graph from this example are shown
+below. Other function/compilation statistics and repeated graph metadata are
+omitted; long symbol names are abbreviated. Measurements vary between runs
+and machines.
+
+.. literalinclude:: profiling_numba_example_out.txt
+    :language: text
+
+``self`` includes library work associated with one node, excluding computation
+of its inputs. ``shared`` has multiple candidate nodes: its percentage appears
+on each candidate, but totals count each sample once. Unassigned work stays in
+the denominator. These are sampled event costs, not Op wall times. JIT address
+coverage describes where instructions execute; library instructions can still
+belong to graph nodes. ``graph0/3`` identifies topological node 3 of the first
+graph. Nested locations append inner-graph indices.
+
+Costs follow inner graphs, including fused scalar expressions, Scan, and
+OpFromGraph, when compiled symbols or call sites identify their nodes.
+Remaining loop or wrapper costs stay on the enclosing Op.
+
+With Rich installed, ``pytensor.dprint(f, file="rich")`` as a notebook cell's
+last expression displays a heat-colored tree. In a script, render it with
+``rich.print()``. Colors follow self plus shared cost relative to the hottest
+node. ``print_profile=False`` hides profiling information.
+
+Setup
+-----
+
+The default Linux x86-64 backend requires perf, ``objdump``, a C compiler
+(``cc``), and libdw/libelf development headers and libraries. The small native
+unwinder is compiled once into PyTensor's compilation cache. Keep
+``numba__cache=True`` (the default). From a checkout, install the Python
+requirements and check access to the default event:
+
+.. code-block:: bash
+
+    python -m pip install -e '.[numba]'
+    perf --version
+    perf stat --all-user --event cycles:u -- python -c "sum(range(1_000_000))"
+    python doc/tutorial/profiling_numba_example.py
+
+Install perf and native development packages through your system's package
+manager. Recording must permit attaching to the current process and collecting
+user-space stacks; kernel or container policy can restrict this access. An
+available alternative event can be selected with ``event="cpu-clock:u"``.
+Defaults are ``cycles:u`` at 499 Hz, with 8 KiB user-stack snapshots.
+
+The built-in frame-pointer backend needs no unwinder helper but can recover
+less library work. Import ``LinuxPerfBackend`` from
+``pytensor.link.numba.profiling`` and pass ``backend=LinuxPerfBackend()`` to
+select it. Other platforms/tools can provide a backend using the
+:ref:`developer interface <native_sampling_backends>`; no macOS backend is
+bundled.
+
+Saved results
+-------------
+
+By default, reports are written to a new temporary directory whose location is
+printed in the summary. ``output="native_profile"`` selects a new directory
+explicitly. Decoded samples, graph/source dumps, native objects, and annotated
+``hot_*.asm`` files are retained. ``n_hot_functions=0`` disables assembly output.
+
+The DWARF backend removes raw ``perf.data`` after successful decoding. To retain
+it, pass ``backend=LinuxDwarfBackend(keep_raw=True)`` after importing that class
+from ``pytensor.link.numba.profiling``. Saved decoded results can be rebuilt
+without the raw recording:
+
+.. code-block:: bash
+
+    python -m pytensor.link.numba.profiling native_profile
+
+Inlining, incomplete stacks, and worker threads can still leave costs
+unassigned. ``call_graph=False`` collects flat native samples only. Keep Numba
+cache files until decoding completes. ``f.profile.reset()`` clears in-memory
+results without deleting saved files.
