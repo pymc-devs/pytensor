@@ -146,8 +146,8 @@ SpecifyShape.0
 >>> pytensor.dprint(v3, print_type=True)
 SpecifyShape [id A] <TensorType(float64, (2, 1))>
  |<TensorType(float64, (2, ?))> [id B] <TensorType(float64, (2, ?))>
- |TensorConstant{2} [id C] <TensorType(int8, ())>
- |TensorConstant{1} [id D] <TensorType(int8, ())>
+ |TensorConstant{2} [id C] <TensorType(int64, ())>
+ |TensorConstant{1} [id D] <TensorType(int64, ())>
 
 
 Performing this in the opposite direction returned the output of a
