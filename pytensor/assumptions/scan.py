@@ -4,9 +4,13 @@ from pytensor.assumptions.core import (
     AssumptionInference,
     AssumptionKey,
     FactState,
+    check_assumption,
     register_assumption,
 )
+from pytensor.assumptions.specify import SpecifyAssumptions
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter, node_rewriter
 from pytensor.scan.op import Scan
+from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.subtensor import IncSubtensor
 
@@ -138,3 +142,83 @@ def register_scan_assumption(key: AssumptionKey) -> None:
 
 for _key in (*MATRIX_KEYS, UNIT_MAGNITUDE):
     register_scan_assumption(_key)
+
+
+@node_rewriter([Scan])
+def push_assumptions_into_scan(fgraph, node):
+    """Restate the facts a Scan's inner inputs are known to have on those inputs.
+
+    An inner input is a bare leaf, so an ``assume`` on the outer variable is
+    invisible to rewrites of the inner graph. This re-asserts it with a
+    :class:`SpecifyAssumptions` node inside, so those rewrites can fire -- e.g.
+    ``inv(X) @ y`` of a positive-definite :math:`X` specializes to a Cholesky
+    solve within the loop body. Only keys registered with
+    :func:`register_scan_assumption` are pushed, because only they hold for every
+    slice of a tensor that has them.
+
+    A sequence or non-sequence takes the facts of the outer input feeding it. A
+    recurrence's carried state takes the facts of the recurrence's outer output: that
+    output is the buffer of every state, so a TRUE fact on it is the proof that the
+    loop body preserves the fact from the initial value on.
+    """
+    scan_op = node.op
+    inner_inputs = scan_op.inner_inputs
+    mappings = scan_op.get_oinp_iinp_iout_oout_mappings()
+
+    source_of = {
+        inner_inp: node.inputs[mappings["outer_inp_from_inner_inp"][inner_idx]]
+        for inner_idx, inner_inp in enumerate(inner_inputs)
+    }
+    for outer_oidx, inner_iidxs in mappings["inner_inp_from_outer_out"].items():
+        for inner_iidx in inner_iidxs:
+            source_of[inner_inputs[inner_iidx]] = node.outputs[outer_oidx]
+
+    new_facts = {}
+    for inner_inp, source in source_of.items():
+        clients = scan_op.fgraph.clients.get(inner_inp, ())
+        if any(isinstance(client.op, SpecifyAssumptions) for client, _ in clients):
+            # Already carries an inner assertion -- skip to avoid re-firing.
+            continue
+        facts = {
+            key: FactState.TRUE
+            for key in _SCAN_KEYS
+            if check_assumption(fgraph, source, key)
+        }
+        if facts:
+            new_facts[inner_inp] = facts
+
+    if not new_facts:
+        return None
+
+    # Rebuild the inner graph over fresh leaves, splicing the assertions on.
+    replace = {}
+    new_inner_inputs = []
+    for inner_inp in inner_inputs:
+        dummy = inner_inp.type()
+        new_inner_inputs.append(dummy)
+        facts = new_facts.get(inner_inp)
+        replace[inner_inp] = SpecifyAssumptions(facts)(dummy) if facts else dummy
+    new_inner_outputs = scan_op.fgraph.bind(replace)
+
+    new_scan_op = Scan(
+        new_inner_inputs,
+        new_inner_outputs,
+        scan_op.info,
+        mode=scan_op.mode,
+        profile=scan_op.profile,
+        truncate_gradient=scan_op.truncate_gradient,
+        name=scan_op.name,
+        allow_gc=scan_op.allow_gc,
+    )
+    new_outs = new_scan_op.make_node(*node.inputs).outputs
+    copy_stack_trace(node.outputs, new_outs)
+    return new_outs
+
+
+scan_seqopt1.register(
+    push_assumptions_into_scan.__name__,
+    dfs_rewriter(push_assumptions_into_scan, ignore_newtrees=True),
+    "fast_run",
+    "scan",
+    position=1,
+)

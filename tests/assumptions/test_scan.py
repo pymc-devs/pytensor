@@ -9,13 +9,18 @@ from pytensor.assumptions import (
     UNIT_MAGNITUDE,
     FactState,
 )
+from pytensor.assumptions.scan import push_assumptions_into_scan
 from pytensor.assumptions.specify import assume
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import dfs_rewriter
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.push_out import scan_push_out_non_seq
+from pytensor.tensor.linalg import MatrixInverse
 from tests.assumptions.conftest import make_fgraph
+from tests.unittest_tools import RewriteTester
 
 
 def test_map_preserving_body_forwards_property():
@@ -270,6 +275,127 @@ def test_nested_scan_forwards_property():
     out = scan(body, sequences=[seq], return_updates=False)
     _, af = make_fgraph(out, inputs=[x])
     assert af.check(out, DIAGONAL)
+
+
+def test_outer_assumption_pushed_into_scan_inner_graph():
+    """`push_assumptions_into_scan` restates a sequence's facts, implied ones
+    included, on the matching inner input."""
+    Xs = pt.tensor("Xs", shape=(4, 3, 3))
+    ys = pt.tensor("ys", shape=(4, 3, 3))
+    seq = assume(Xs, positive_definite=True)
+    out = scan(
+        lambda Xt, yt: pt.linalg.inv(Xt) @ yt, sequences=[seq, ys], return_updates=False
+    )
+    rewrite = RewriteTester(
+        [Xs, ys], [out], include=None, custom_rewrite=push_assumptions_into_scan
+    )
+
+    expected = scan(
+        lambda Xt, yt: (
+            pt.linalg.inv(assume(Xt, positive_definite=True, symmetric=True)) @ yt
+        ),
+        sequences=[seq, ys],
+        return_updates=False,
+    )
+    rewrite.assert_graph(expected)
+
+
+def test_push_in_does_not_refire_on_its_own_output():
+    """An inner input that already carries pushed facts is left alone, so the
+    rewrite reaches a fixed point instead of nesting assertions forever."""
+    Xs = pt.tensor("Xs", shape=(4, 3, 3))
+    ys = pt.tensor("ys", shape=(4, 3, 3))
+    out = scan(
+        lambda Xt, yt: pt.linalg.inv(Xt) @ yt,
+        sequences=[assume(Xs, positive_definite=True), ys],
+        return_updates=False,
+    )
+    fg = FunctionGraph([Xs, ys], [out], clone=True)
+    push_in = dfs_rewriter(push_assumptions_into_scan, ignore_newtrees=True)
+
+    push_in.rewrite(fg)
+    pushed = fg.outputs[0]
+    push_in.rewrite(fg)
+    assert fg.outputs[0] is pushed
+
+
+def test_proven_recurrence_fact_pushed_onto_carried_state():
+    """A recurrence whose body keeps ``P`` positive definite gets that fact on its
+    carried state, so a per-step solve against ``P`` can use a Cholesky solve."""
+    A = pt.matrix("A", shape=(3, 3))
+    P0 = pt.matrix("P0", shape=(3, 3))
+    init = assume(P0, positive_definite=True)
+    out = scan(
+        lambda P, A: A @ P @ A.T + pt.eye(3),
+        outputs_info=[init],
+        non_sequences=[A],
+        n_steps=5,
+        return_updates=False,
+    )
+    rewrite = RewriteTester(
+        [A, P0], [out], include=None, custom_rewrite=push_assumptions_into_scan
+    )
+
+    expected = scan(
+        lambda P, A: (
+            A @ assume(P, positive_definite=True, symmetric=True) @ A.T + pt.eye(3)
+        ),
+        outputs_info=[init],
+        non_sequences=[A],
+        n_steps=5,
+        return_updates=False,
+    )
+    rewrite.assert_graph(expected)
+
+
+@pytest.mark.parametrize(
+    "body, n_states",
+    [
+        (lambda prev, M: prev @ M, 1),
+        (lambda p1, p2, M: [p1 @ p2, p2 @ M], 2),
+    ],
+    ids=["breaking-body", "relies-on-breaking-recurrence"],
+)
+def test_unproven_recurrence_fact_not_pushed(body, n_states):
+    """A carried state gets no fact the loop body does not preserve, including one
+    that holds only while another, breaking, recurrence keeps its fact."""
+    M = pt.matrix("M", shape=(3, 3))
+    inits = [pt.matrix(f"init{i}", shape=(3, 3)) for i in range(n_states)]
+    out = scan(
+        body,
+        outputs_info=[assume(init, diagonal=True) for init in inits],
+        non_sequences=[M],
+        n_steps=5,
+        return_updates=False,
+    )
+    outs = out if n_states > 1 else [out]
+    rewrite = RewriteTester(
+        [*inits, M], outs, include=None, custom_rewrite=push_assumptions_into_scan
+    )
+    rewrite.assert_graph(*outs)
+
+
+def test_non_sequence_assumption_does_not_block_push_out():
+    """The assertion pushed onto a positive-definite non-sequence ``X`` must not
+    anchor the loop-invariant ``inv(X)`` inside the loop: it is computed once
+    outside, and the loop body is left with the per-step product."""
+    X = pt.matrix("X", shape=(3, 3))
+    ys = pt.tensor("ys", shape=(4, 3, 3))
+    out = scan(
+        lambda yt, X: pt.linalg.inv(X) @ yt,
+        sequences=[ys],
+        non_sequences=[assume(X, positive_definite=True)],
+        return_updates=False,
+    )
+    rewrite = RewriteTester([X, ys], [out], include="o3", exclude=["fusion", "inplace"])
+
+    expected = scan(
+        lambda yt, A: assume(A, positive_definite=True, symmetric=True) @ yt,
+        sequences=[ys],
+        non_sequences=[MatrixInverse()(X)],
+        return_updates=False,
+    )
+    rewrite.assert_graph(rewrite_graph(expected, include=("canonicalize",)))
 
 
 def test_congruence_recurrence_keeps_property_through_push_out():
