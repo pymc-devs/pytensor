@@ -799,6 +799,20 @@ def test_gammainc_wrt_k_grad():
             (pt.dmatrix(), np.empty((3, 0))),
             (pt.dmatrix(), np.empty((0, 4))),
         ),
+        # Empty contraction into a single column, which must still zero the output
+        (
+            (pt.dmatrix(), np.empty((3, 0))),
+            (pt.tensor(dtype="float64", shape=(None, 1)), np.empty((0, 1))),
+        ),
+        # A single output column or row takes the gemv branches of gemm
+        (
+            (pt.dmatrix(), rng.random(size=(3, 4))),
+            (pt.dmatrix(), rng.random(size=(4, 1))),
+        ),
+        (
+            (pt.dmatrix(), rng.random(size=(1, 4))),
+            (pt.dmatrix(), rng.random(size=(4, 3))),
+        ),
     ],
 )
 def test_Dot(x, y):
@@ -837,6 +851,20 @@ def test_Dot(x, y):
                 pt.ltensor3(),
                 rng.poisson(size=(2, 3, 3)).astype("int64"),
             ),
+            None,
+        ),
+        # A single output column or row takes the gemv branches of gemm
+        (
+            (pt.dtensor3(), rng.random(size=(2, 3, 4))),
+            (
+                pt.tensor(dtype="float64", shape=(None, None, 1)),
+                rng.random(size=(2, 4, 1)),
+            ),
+            None,
+        ),
+        (
+            (pt.dtensor3(), rng.random(size=(2, 1, 4))),
+            (pt.dtensor3(), rng.random(size=(2, 4, 3))),
             None,
         ),
     ],

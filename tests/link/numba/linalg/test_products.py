@@ -6,9 +6,7 @@ from pytensor import In, config, function
 from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg.products import (
     _blas_operand,
-    _blas_vector,
     _gemm,
-    _gemv_operands,
     _normalize_gemm_strides,
 )
 from pytensor.tensor.linalg.products import Expm, expm
@@ -102,15 +100,7 @@ def _gemm_jit(A, B, C):
 
 
 @numba_njit(final_function=True)
-def _gemv_buffers_jit(A, x, y):
-    A, x, y, _, _ = _gemv_operands(A, x, y)
-    x, x_base, incx = _blas_vector(x)
-    y, y_base, incy = _blas_vector(y)
-    return A, x, x_base, y, y_base, incx, incy
-
-
-@numba_njit(final_function=True)
-def _gemm_buffers_jit(A, B, C):
+def _normalized_buffers_jit(A, B, C):
     A, B, C = _normalize_gemm_strides(A, B, C)
     A, _, _ = _blas_operand(A)
     B, _, _ = _blas_operand(B)
@@ -216,33 +206,47 @@ def test_gemm_vector_strides(dtype, transpose):
 
 
 def test_gemv_keeps_operand_buffers():
+    from numba.core.runtime import _nrt_python, rtsys
+
+    @numba_njit(final_function=True)
+    def repeat(A, x, y, count):
+        for _ in range(count):
+            _gemm(A, x[:, None], y[:, None])
+
+    def allocations(A, x, y, count):
+        before = rtsys.get_allocation_stats().alloc
+        repeat(A, x, y, count)
+        return rtsys.get_allocation_stats().alloc - before
+
+    def check(A, x, y):
+        repeat(A, x, y, 1)
+        # Unboxing inputs has a fixed cost; another native GEMV must add none.
+        assert allocations(A, x, y, 2) == allocations(A, x, y, 1)
+
     matrix = rng.normal(size=(4, 3))
-    x = rng.normal(size=6)[::-2]
-    y = rng.normal(size=8)[::-2]
+    x_storage = rng.normal(size=6)
+    y_storage = rng.normal(size=8)
     layouts = [
         np.array(matrix, order="C"),
         np.array(matrix, order="F"),
         np.repeat(matrix, 2, axis=0)[::2],
         np.asfortranarray(np.repeat(matrix, 2, axis=1))[:, ::2],
     ]
-    for A in layouts:
-        for row_step, col_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
-            view = A[::row_step, ::col_step]
-            work, x_view, x_base, y_view, y_base, incx, incy = _gemv_buffers_jit(
-                view, x, y
-            )
-            assert np.shares_memory(work, A)
-            for logical, base, inc, original in [
-                (x_view, x_base, incx, x),
-                (y_view, y_base, incy, y),
-            ]:
-                assert np.shares_memory(logical, original)
-                assert np.shares_memory(base, original)
-                assert abs(inc) == 2
+    stats_enabled = _nrt_python.memsys_stats_enabled()
+    _nrt_python.memsys_enable_stats()
+    try:
+        for A in layouts:
+            for row_step, col_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
+                check(A[::row_step, ::col_step], x_storage[::-2], y_storage[::-2])
+            check(A[::-1], x_storage[::2], np.empty(4))
+            check(A, x_storage[::-2], np.empty(4))
+    finally:
+        if not stats_enabled:
+            _nrt_python.memsys_disable_stats()
 
 
 @pytest.mark.parametrize("order", ["C", "F"])
-def test_gemm_cancels_reversals(order):
+def test_normalize_gemm_strides_cancels_reversals(order):
     A_base = np.asarray(rng.normal(size=(4, 3)), order=order)
     B_base = np.asarray(rng.normal(size=(3, 5)), order=order)
     C_base = np.asarray(rng.normal(size=(4, 5)), order=order)
@@ -253,11 +257,23 @@ def test_gemm_cancels_reversals(order):
                 B = B_base[::inner_step, ::col_step]
                 C = C_base[::row_step, ::col_step]
                 for work, original in zip(
-                    _gemm_buffers_jit(A, B, C), (A, B, C), strict=True
+                    _normalized_buffers_jit(A, B, C), (A, B, C), strict=True
                 ):
                     assert np.shares_memory(work, original)
                 _gemm_jit(A, B, C)
                 np.testing.assert_allclose(C, A @ B)
+
+
+@pytest.mark.parametrize("c_order", ["C", "F"])
+def test_gemm_reversed_free_axes_into_contiguous_output(c_order):
+    """Reversed rows of A and columns of B written into a contiguous C match NumPy."""
+    for m, k, n in [(6, 5, 1), (1, 5, 6), (5, 6, 4), (6, 4, 6)]:
+        A_base = np.asfortranarray(rng.normal(size=(m, k)))
+        B_base = rng.normal(size=(k, n))
+        for row_step, column_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
+            A, B = A_base[::row_step], B_base[:, ::column_step]
+            C = np.full((m, n), np.nan, order=c_order)
+            np.testing.assert_allclose(_gemm_jit(A, B, C), A @ B)
 
 
 @pytest.mark.parametrize(
@@ -285,14 +301,14 @@ def test_gemm_cancels_reversals(order):
         "forced_copy_of_A_absorbs_C_reversal",
     ],
 )
-def test_gemm_copies_cheapest_operands(
+def test_normalize_gemm_strides_copies_cheapest_operands(
     a_shape, a_view, b_shape, b_view, c_shape, c_view, read_in_place
 ):
     A = rng.normal(size=a_shape)[a_view]
     B = rng.normal(size=b_shape)[b_view]
     C = rng.normal(size=c_shape)[c_view]
 
-    works = _gemm_buffers_jit(A, B, C)
+    works = _normalized_buffers_jit(A, B, C)
 
     for work, original, in_place in zip(works, (A, B, C), read_in_place, strict=True):
         assert np.shares_memory(work, original) == bool(in_place)

@@ -5,6 +5,7 @@ import numpy as np
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.array_utils import _copyto
 from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
@@ -422,10 +423,10 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
                     new_entry = x[(*leading_dims, i, *middle_dims, i + offset)]
                 else:
                     new_entry = x[(*leading_dims, i - offset, *middle_dims, i)]
-                out[..., i] = new_entry
+                _copyto(out[..., i], new_entry)
             return out
 
-    cache_version = 1
+    cache_version = 2
     return extract_diag, cache_version
 
 
