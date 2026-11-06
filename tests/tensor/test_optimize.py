@@ -189,7 +189,14 @@ def test_minimize_vector_x(method, jac, hess):
 
     def f(x, a, b):
         objective = rosenbrock_shifted_scaled(x, a, b)
-        out = minimize(objective, x, use_vectorized_jac=False)[0]
+        # Finite differences of the solution only measure dx*/da when the
+        # solver error is far below eps.
+        out = minimize(
+            objective,
+            x,
+            optimizer_kwargs={"tol": 1e-12},
+            use_vectorized_jac=False,
+        )[0]
         return out
 
     utt.verify_grad(f, [x0, a_val, b_val], eps=1e-3 if floatX == "float32" else 1e-6)
