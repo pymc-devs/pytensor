@@ -404,6 +404,38 @@ class TestPushOutNonSeqScan:
         rewrite.assert_graph(pt.alloc(value, pt.constant(3), *value.shape))
         rewrite.assert_eval(np.array([[1.0, 2.0], [3.0, 4.0]]))
 
+    def test_invariant_body_with_nitsot_buffer_larger_than_nsteps(self):
+        """Repeating an invariant value gives ``n_steps`` rows, and the rest of a longer
+        nit-sot buffer stays zero, as ``Scan.pullback`` relies on under
+        ``truncate_gradient``."""
+        info = ScanInfo(
+            n_seqs=0,
+            mit_mot_in_slices=(),
+            mit_mot_out_slices=(),
+            mit_sot_in_slices=(),
+            sit_sot_in_slices=(),
+            n_nit_sot=1,
+            n_untraced_sit_sot=0,
+            n_non_seqs=1,
+            as_while=False,
+        )
+        inner_x = pt.dvector("inner_x")
+        scan_op = Scan(inputs=[inner_x], outputs=[pt.exp(inner_x)], info=info)
+
+        x = pt.dvector("x")
+        n_steps = pt.lscalar("n_steps")
+        nit_sot_size = pt.lscalar("nit_sot_size")
+        out = scan_op(n_steps, nit_sot_size, x)
+        rewrite = utt.RewriteTester(
+            [x, n_steps, nit_sot_size],
+            [out],
+            include=None,
+            custom_rewrite=scan_push_out_non_seq,
+        )
+
+        assert not any(isinstance(n.op, Scan) for n in rewrite.rewr_fg.apply_nodes)
+        rewrite.assert_eval(np.ones(2), np.array(2), np.array(4))
+
     @pytest.mark.parametrize(
         "body, outputs_info",
         [

@@ -69,6 +69,22 @@ def _strip_markers(x):
     return x
 
 
+def _fit_nit_sot_buffer(stacked, nit_sot_size, n_steps):
+    """Lay *stacked*, of length *n_steps*, out as a nit-sot's outer buffer.
+
+    The buffer may be longer than *n_steps*: `Scan.pullback` emits gradient Scans whose
+    nit-sot size is the forward step count while ``n_steps`` is truncated, and its
+    concat padding reads the trailing zeros. The sizes count as equal only when they
+    are the same variable. Otherwise the result is padded with zeros.
+    """
+    if nit_sot_size is n_steps:
+        return stacked
+
+    extra_dims = [stacked.shape[i] for i in range(1, stacked.ndim)]
+    zero_buf = pt.zeros((nit_sot_size, *extra_dims), dtype=stacked.dtype)
+    return set_subtensor(zero_buf[:n_steps], stacked)
+
+
 @node_rewriter([Scan])
 def scan_push_out_non_seq(fgraph, node):
     r"""Push out the variables inside the `Scan` that depend only on non-sequences.
@@ -245,12 +261,17 @@ def scan_push_out_non_seq(fgraph, node):
         return replacements
     elif whole_body_invariant:
         # Nothing in the inner graph should be kept
+        n_steps = node.inputs[0]
+        nit_sot_sizes = op.outer_nitsot(node.inputs)
         replace_with = {}
-        for x, out in zip(node.outputs, node_outputs, strict=True):
+        for x, out, nit_sot_size in zip(
+            node.outputs, node_outputs, nit_sot_sizes, strict=True
+        ):
             if out in to_replace_set or _stays_in_loop(out.owner_op):
                 y = _outer_input_for(out)
                 y_shape = list(y.shape)
-                replace_with[x] = pt.alloc(y, node.inputs[0], *y_shape)
+                repeated = pt.alloc(y, n_steps, *y_shape)
+                replace_with[x] = _fit_nit_sot_buffer(repeated, nit_sot_size, n_steps)
 
         # We need to add one extra dimension to the outputs
         # because the scan op expects for a tensor3, to which an
@@ -488,26 +509,9 @@ def scan_push_out_seq(fgraph, node):
                     inp = op.outer_sitsot(node.inputs)[odx]
                     y = set_subtensor(inp[1:], _y)
                 elif out in op.inner_nitsot_outs(ls):
-                    # The pushed-out Elemwise has length == n_steps, but the
-                    # nit_sot's outer buffer size (`outer_nitsot` input) may
-                    # be larger. When it is, folding directly would silently
-                    # drop the trailing zero-initialized slots that any
-                    # downstream consumer reading the full buffer expects --
-                    # e.g., `Scan.pullback` emits grad scans where the
-                    # nit_sot size is the forward's step count while
-                    # `n_steps == grad_steps == min(forward_steps, truncate)`
-                    # and its concat padding depends on those trailing zeros.
-                    # Fold into the direct Elemwise only when the two sizes
-                    # are the same Variable; otherwise pad with zeros via
-                    # set_subtensor.
                     odx = op.inner_nitsot_outs(ls).index(out)
                     nit_sot_size = op.outer_nitsot(node.inputs)[odx]
-                    if nit_sot_size is n_steps:
-                        y = _y
-                    else:
-                        extra_dims = [_y.shape[i] for i in range(1, _y.ndim)]
-                        zero_buf = pt.zeros((nit_sot_size, *extra_dims), dtype=_y.dtype)
-                        y = set_subtensor(zero_buf[:n_steps], _y)
+                    y = _fit_nit_sot_buffer(_y, nit_sot_size, n_steps)
                 else:
                     y = _y[-1]
                 replace_with[x] = y
