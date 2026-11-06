@@ -1,8 +1,13 @@
+from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.mode import optdb
 from pytensor.compile.rewriting import inline_ofg_node
 from pytensor.graph import node_rewriter
+from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import MergeOptimizer, dfs_rewriter
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import fuse_seqopt
 from pytensor.tensor.special import (
     LogAddExp,
@@ -11,6 +16,23 @@ from pytensor.tensor.special import (
     Softmax,
     XLog1PY,
     XLogY,
+)
+
+
+@node_rewriter([blockwise_of(OpPattern(OpFromGraph, is_inline=True))])
+def inline_blockwise_ofg_expansion(fgraph, node):
+    inner = node.op.core_op.fgraph.unfreeze()
+    return vectorize_graph(
+        inner.outputs, replace=dict(zip(inner.inputs, node.inputs, strict=True))
+    )
+
+
+optdb.register(
+    "inline_blockwise_ofg_expansion",
+    dfs_rewriter(inline_blockwise_ofg_expansion, ignore_newtrees=False),
+    "fast_run",
+    "fast_compile",
+    position=-0.01,
 )
 
 
