@@ -1,6 +1,8 @@
+import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor import config, function, grad
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
@@ -9,11 +11,13 @@ from pytensor.assumptions import (
     SYMMETRIC,
     UNIQUE_INDICES,
     UNIT_MAGNITUDE,
+    ConflictingAssumptionsError,
     FactState,
 )
 from pytensor.assumptions import scan as scan_assumptions
 from pytensor.assumptions.scan import push_assumptions_into_scan
 from pytensor.assumptions.specify import SpecifyAssumptions, assume
+from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.graph.rewriting.utils import rewrite_graph
@@ -21,8 +25,9 @@ from pytensor.graph.traversal import ancestors
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.push_out import scan_push_out_non_seq
+from pytensor.scan.utils import until
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.linalg import MatrixInverse
+from pytensor.tensor.linalg import Cholesky, MatrixInverse
 from tests.assumptions.conftest import make_fgraph
 from tests.unittest_tools import RewriteTester
 
@@ -173,6 +178,38 @@ def test_conflict_on_unrelated_key_does_not_escape():
     out = scan(lambda s: s * 2.0, sequences=[seq], return_updates=False)
     _, af = make_fgraph(out, inputs=[x])
     assert af.get(out, DIAGONAL) == FactState.UNKNOWN
+
+
+def test_body_denying_seeded_fact_without_proof_is_not_a_conflict():
+    """``p`` is seeded diagonal, and the body declares its next value not diagonal
+    while nothing proves otherwise. The seed is dropped, with no conflict, since the
+    declaration only rules the fact out from the second step."""
+    p0 = pt.matrix("p0", shape=(3, 3))
+    out = scan(
+        lambda p: assume(p + pt.ones_like(p), diagonal=False),
+        outputs_info=[assume(p0, diagonal=True)],
+        n_steps=5,
+        return_updates=False,
+    )
+    _, af = make_fgraph(out, inputs=[p0])
+    assert af.get(out, DIAGONAL) == FactState.UNKNOWN
+
+
+def test_contradiction_in_body_fails_the_push_like_any_rewrite_query():
+    """A body that contradicts its own declaration surfaces through the rewrite that
+    asks, as it does outside a Scan, so ``on_opt_error`` decides what happens."""
+    p0 = pt.matrix("p0", shape=(3, 3))
+    out = scan(
+        lambda p: assume(assume(p, orthogonal=True), orthogonal=False) * 2.0,
+        outputs_info=[p0],
+        n_steps=5,
+        return_updates=False,
+    )
+    fg = FunctionGraph([p0], [out], clone=True)
+    push_in = dfs_rewriter(push_assumptions_into_scan, ignore_newtrees=True)
+    with config.change_flags(on_opt_error="raise"):
+        with pytest.raises(ConflictingAssumptionsError):
+            push_in.rewrite(fg)
 
 
 def test_traced_output_drops_false():
@@ -614,3 +651,101 @@ def test_congruence_recurrence_keeps_property_through_push_out():
     fg, af = make_fgraph(out, inputs=[A, Q, P0])
     dfs_rewriter(scan_push_out_non_seq, ignore_newtrees=True).rewrite(fg)
     assert af.check(fg.outputs[0], POSITIVE_DEFINITE)
+
+
+def _covariance_step(P, A, y):
+    return A @ P @ A.T + pt.eye(3), pt.linalg.inv(P) @ y
+
+
+def _covariance_scan(step=_covariance_step, **kwargs):
+    P0 = pt.matrix("P0", shape=(3, 3))
+    A = pt.matrix("A", shape=(3, 3))
+    y = pt.matrix("y", shape=(3, 3))
+    outputs = scan(
+        step,
+        outputs_info=[assume(P0, positive_definite=True), None],
+        non_sequences=[A, y],
+        return_updates=False,
+        **kwargs,
+    )
+    return [P0, A, y], outputs
+
+
+def _assert_specialized_body_matches_reference(inputs, outputs, *input_sets):
+    """Compare a compile that specialized a loop body to Cholesky with an unoptimized
+    one. ``assert_eval`` cannot do this: it never runs the rewritten body."""
+    optimized = function(inputs, outputs, mode="FAST_RUN")
+    reference = function(inputs, outputs, mode=Mode(linker="py", optimizer=None))
+
+    scan_nodes = [
+        n for n in optimized.maker.fgraph.apply_nodes if isinstance(n.op, Scan)
+    ]
+    assert any(
+        isinstance(inner.op, Cholesky)
+        for node in scan_nodes
+        for inner in node.op.fgraph.apply_nodes
+    )
+    for values in input_sets:
+        for result, expected in zip(
+            optimized(*values), reference(*values), strict=True
+        ):
+            np.testing.assert_allclose(result, expected, rtol=1e-6)
+    return optimized
+
+
+COVARIANCE_VALUES = (2.0 * np.eye(3) + 0.5, 0.5 * np.eye(3) + 0.1, np.eye(3) + 0.2)
+
+
+def test_specialized_body_with_until_condition():
+    limit = pt.scalar("limit")
+
+    def step(P, A, y):
+        next_P, solved = _covariance_step(P, A, y)
+        return (next_P, solved), until(pt.trace(next_P) > limit)
+
+    inputs, outputs = _covariance_scan(step, n_steps=6)
+    _assert_specialized_body_matches_reference(
+        [*inputs, limit],
+        outputs,
+        (*COVARIANCE_VALUES, np.array(0.0, dtype=limit.dtype)),
+        (*COVARIANCE_VALUES, np.array(1e9, dtype=limit.dtype)),
+    )
+
+
+def test_specialized_recurrence_with_zero_steps():
+    n_steps = pt.iscalar("n_steps")
+    inputs, outputs = _covariance_scan(n_steps=n_steps)
+    optimized = _assert_specialized_body_matches_reference(
+        [*inputs, n_steps],
+        outputs,
+        (*COVARIANCE_VALUES, np.array(3, dtype="int32")),
+    )
+
+    covariances, solved = optimized(*COVARIANCE_VALUES, np.array(0, dtype="int32"))
+    assert covariances.shape == solved.shape == (0, 3, 3)
+
+
+def test_gradient_through_specialized_body():
+    inputs, (covariances, solved) = _covariance_scan(n_steps=4)
+    cost = covariances.sum() + solved.sum()
+    _assert_specialized_body_matches_reference(
+        inputs, grad(cost, inputs[:2]), COVARIANCE_VALUES
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [lambda r: r[None, :], lambda r: pt.stack([r, r, r])],
+    ids=["one-row", "repeated-row"],
+)
+def test_matrix_fact_does_not_reach_vector_slices(body):
+    """Slicing a diagonal matrix gives vectors, which a matrix property says nothing
+    about, even on a Scan whose outer sequence keeps the fact."""
+    x = pt.matrix("x", shape=(3, 3))
+    traced = scan(body, sequences=[x], return_updates=False)
+    [node] = [v.owner for v in ancestors([traced]) if isinstance(v.owner_op, Scan)]
+
+    n_steps, _, *rest = node.inputs
+    out = node.op.make_node(n_steps, assume(x, diagonal=True), *rest).outputs[0]
+    _, af = make_fgraph(out, inputs=[x])
+    assert af.get(out, DIAGONAL) == FactState.UNKNOWN
