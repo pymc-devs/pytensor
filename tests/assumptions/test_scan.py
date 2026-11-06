@@ -381,6 +381,91 @@ def test_push_in_does_not_refire_on_its_own_output():
     assert fg.outputs[0] is pushed
 
 
+def test_inner_marker_does_not_suppress_pushed_facts():
+    """A user's marker in the body covers only its own keys, so the facts proven for
+    the sequence are still pushed, and a key the user states is left to the user."""
+    Xs = pt.tensor("Xs", shape=(4, 3, 3))
+    out = scan(
+        lambda Xt: pt.linalg.inv(assume(Xt, symmetric=True)),
+        sequences=[assume(Xs, positive_definite=True)],
+        return_updates=False,
+    )
+    rewrite = RewriteTester(
+        [Xs], [out], include=None, custom_rewrite=push_assumptions_into_scan
+    )
+
+    expected = scan(
+        lambda Xt: pt.linalg.inv(
+            assume(assume(Xt, positive_definite=True), symmetric=True)
+        ),
+        sequences=[assume(Xs, positive_definite=True)],
+        return_updates=False,
+    )
+    rewrite.assert_graph(expected)
+
+
+def test_marker_on_one_branch_does_not_state_fact_for_the_input():
+    """``inv(Xt)`` does not read the marker on the other branch, so the fact it states
+    is pushed onto the input as well."""
+    Xs = pt.tensor("Xs", shape=(4, 3, 3))
+
+    def body(Xt):
+        return pt.linalg.inv(Xt) + assume(Xt, positive_definite=True)
+
+    out = scan(
+        body,
+        sequences=[assume(Xs, positive_definite=True, symmetric=True)],
+        return_updates=False,
+    )
+    rewrite = RewriteTester(
+        [Xs], [out], include=None, custom_rewrite=push_assumptions_into_scan
+    )
+
+    def expected_body(Xt):
+        pushed = assume(Xt, positive_definite=True, symmetric=True)
+        return pt.linalg.inv(pushed) + assume(pushed, positive_definite=True)
+
+    expected = scan(
+        expected_body,
+        sequences=[assume(Xs, positive_definite=True, symmetric=True)],
+        return_updates=False,
+    )
+    rewrite.assert_graph(expected)
+
+
+def test_fact_proven_later_is_pushed_and_rewrite_settles():
+    """A fact that appears after a first push joins the pushed ones, and repeating the
+    rewrite then changes nothing, however many markers the input carries."""
+    Xs = pt.tensor("Xs", shape=(4, 3, 3))
+    ys = pt.tensor("ys", shape=(4, 3, 3))
+    seq = assume(Xs, symmetric=True)
+    out = scan(
+        lambda Xt, yt: pt.linalg.inv(Xt) @ yt,
+        sequences=[seq, ys],
+        return_updates=False,
+    )
+    fg = FunctionGraph([Xs, ys], [out], clone=True)
+    push_in = dfs_rewriter(push_assumptions_into_scan, ignore_newtrees=True)
+    push_in.rewrite(fg)
+
+    [assumed] = [v for v in fg.variables if isinstance(v.owner_op, SpecifyAssumptions)]
+    fg.replace(assumed, assume(fg.inputs[0], symmetric=True, diagonal=True))
+    push_in.rewrite(fg)
+    pushed = fg.outputs[0]
+    push_in.rewrite(fg)
+    assert fg.outputs[0] is pushed
+
+    [scan_node] = [n for n in fg.apply_nodes if isinstance(n.op, Scan)]
+    inner_markers = [
+        n.op
+        for n in scan_node.op.fgraph.toposort()
+        if isinstance(n.op, SpecifyAssumptions)
+    ]
+    stated = {key for marker in inner_markers for key, _ in marker.assumptions}
+    assert {SYMMETRIC, DIAGONAL} <= stated
+    assert len(inner_markers) == 2
+
+
 def test_proven_recurrence_fact_pushed_onto_carried_state():
     """A recurrence whose body keeps ``P`` positive definite gets that fact on its
     carried state, so a per-step solve against ``P`` can use a Cholesky solve."""

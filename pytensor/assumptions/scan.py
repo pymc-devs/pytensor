@@ -167,6 +167,24 @@ for _key in (*MATRIX_KEYS, UNIT_MAGNITUDE):
     register_scan_assumption(_key)
 
 
+def _keys_stated_on(inner_input, clients):
+    """Return the keys that markers state on every use of *inner_input*.
+
+    Follow the chain of ``SpecifyAssumptions`` starting at the input, ending where a
+    variable has another client: a marker on one branch of the body says nothing for
+    the rest. A key stated FALSE counts, so a push never contradicts it.
+    """
+    stated = set()
+    var = inner_input
+    while True:
+        match clients[var]:
+            case [(marker, _)] if isinstance(marker.op, SpecifyAssumptions):
+                stated.update(key for key, _ in marker.op.assumptions)
+                var = marker.outputs[0]
+            case _:
+                return stated
+
+
 @node_rewriter([Scan])
 def push_assumptions_into_scan(fgraph, node):
     """Restate the facts a Scan's inner inputs are known to have on those inputs.
@@ -198,14 +216,12 @@ def push_assumptions_into_scan(fgraph, node):
 
     new_facts = {}
     for inner_inp, source in source_of.items():
-        clients = scan_op.fgraph.clients.get(inner_inp, ())
-        if any(isinstance(client.op, SpecifyAssumptions) for client, _ in clients):
-            # Already carries an inner assertion -- skip to avoid re-firing.
-            continue
+        # A stated key is not pushed again, which is what ends the rewrite.
+        stated = _keys_stated_on(inner_inp, scan_op.fgraph.clients)
         facts = {
             key: FactState.TRUE
             for key in _SCAN_KEYS
-            if check_assumption(fgraph, source, key)
+            if key not in stated and check_assumption(fgraph, source, key)
         }
         if facts:
             new_facts[inner_inp] = facts
