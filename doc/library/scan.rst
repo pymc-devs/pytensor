@@ -13,6 +13,14 @@ The scan functions provides the basic functionality needed to do loops
 in PyTensor. Scan comes with many whistles and bells, which we will introduce
 by way of examples.
 
+.. note::
+
+    With ``mode="MLX"``, zero-step Scan outputs retain their dtype.
+    Non-recurring (map) outputs also retain their trailing dimensions when these
+    are statically known. If a non-recurring output's trailing shape is unknown
+    and the Scan remains in the compiled graph, zero steps raise
+    ``NotImplementedError``.
+
 
 Simple loop with accumulation:  Computing :math:`A^k`
 -----------------------------------------------------

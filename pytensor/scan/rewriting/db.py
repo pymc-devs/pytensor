@@ -87,6 +87,7 @@ optdb.register(
     "scan_save_mem_prealloc",  # backcompat
     position=1.612,
 )
+# Do not add "mlx": its Scan dispatch infers n_steps from full-sized buffers.
 optdb.register(
     "scan_reduce_trace_no_prealloc",
     dfs_rewriter(scan_reduce_trace_no_prealloc, ignore_newtrees=True),
