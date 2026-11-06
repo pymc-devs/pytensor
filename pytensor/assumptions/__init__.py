@@ -9,6 +9,7 @@ import pytensor.assumptions.orthogonal
 import pytensor.assumptions.permutation
 import pytensor.assumptions.positive_definite
 import pytensor.assumptions.reshape
+import pytensor.assumptions.scan
 import pytensor.assumptions.selection
 import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
@@ -44,6 +45,7 @@ from pytensor.assumptions.core import (
     register_implies,
     register_universal_assumption,
 )
+from pytensor.assumptions.scan import register_scan_assumption
 from pytensor.assumptions.specify import (
     SpecifyAssumptions,
     assume,

@@ -5,6 +5,7 @@ from pytensor.assumptions.reshape import (
     join_dims_propagates_matrix_property,
     split_dims_propagates_matrix_property,
 )
+from pytensor.assumptions.scan import register_scan_assumption
 from pytensor.assumptions.shape import (
     reshape_propagates_matrix_property,
     specify_shape_propagates_matrix_property,
@@ -53,3 +54,4 @@ def register_matrix_property_rules(key: AssumptionKey) -> None:
     register_assumption(key, Alloc)(alloc_propagates_matrix_property)
     register_assumption(key, Subtensor)(subtensor_propagates_matrix_property)
     register_assumption(key, IncSubtensor)(incsubtensor_propagates_matrix_property)
+    register_scan_assumption(key)
