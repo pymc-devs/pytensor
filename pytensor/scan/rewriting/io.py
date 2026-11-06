@@ -3,8 +3,8 @@
 These run under the ``scan_input_and_output_cleanup*`` registrations and
 shrink the Scan signature without changing what it computes:
 
-* :func:`scan_inline_invariant_constants` — inline outer ``Constant``
-  non-sequences and uniform-value ``TensorConstant`` sequences.
+* :func:`scan_inline_invariant_constants` — inline constant non-sequences
+  and iteration-invariant constant sequences, including ``Alloc`` expressions.
 * :func:`scan_merge_duplicate_inputs` — collapse outer seqs / non_seqs
   whose values are :func:`equal_computations`.
 * :func:`scan_remove_unused` — drop inner-/outer-side state slots,
@@ -18,6 +18,7 @@ from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.utils import _rebuild_scan_with_new_signature
+from pytensor.tensor.basic import Alloc, alloc
 from pytensor.tensor.variable import TensorConstant
 
 
@@ -25,11 +26,10 @@ from pytensor.tensor.variable import TensorConstant
 def scan_inline_invariant_constants(fgraph, node):
     """Inline compile-time-constant, iteration-invariant Scan inputs.
 
-    A non-sequence whose outer input is a ``Constant`` is replaced inside
-    the inner graph by that constant. A sequence whose outer input is a
-    ``TensorConstant`` with a uniform value is collapsed to a scalar
-    constant. Once inlined, the inner graph can constant-fold through the
-    value and the corresponding inner / outer input pair is dropped.
+    Inline non-sequences that are constants or Alloc expressions with constant
+    inputs. Uniform constant sequences and constant Allocs that broadcast across
+    time are replaced by one invariant step, without materializing the sequence.
+    The corresponding inner / outer input pairs are dropped.
     """
     op = node.op
     drop_seqs: set = set()
@@ -45,6 +45,17 @@ def scan_inline_invariant_constants(fgraph, node):
                 drop_seqs.add(k)
             except TypeError:
                 pass
+        else:
+            match outer.owner_op_and_inputs:
+                case (Alloc(), value, *shape) if all(
+                    isinstance(inp, Constant) for inp in outer.owner.inputs
+                ):
+                    if value.ndim == outer.ndim:
+                        if not value.type.broadcastable[0]:
+                            continue
+                        value = value.squeeze(axis=0)
+                    substitutions[inner] = alloc(value, *shape[1:])
+                    drop_seqs.add(k)
 
     for k, (inner, outer) in enumerate(
         zip(
@@ -55,6 +66,11 @@ def scan_inline_invariant_constants(fgraph, node):
     ):
         if isinstance(outer, Constant):
             substitutions[inner] = outer
+            drop_non_seqs.add(k)
+        elif isinstance(outer.owner_op, Alloc) and all(
+            isinstance(inp, Constant) for inp in outer.owner.inputs
+        ):
+            substitutions[inner] = outer.owner.clone().outputs[0]
             drop_non_seqs.add(k)
 
     if not substitutions:

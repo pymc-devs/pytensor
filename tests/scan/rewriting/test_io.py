@@ -7,14 +7,20 @@ from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import in2out
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.scan.op import Scan
-from pytensor.scan.rewriting import scan_remove_unused
+from pytensor.scan.rewriting import (
+    scan_inline_invariant_constants,
+    scan_push_out_non_seq,
+    scan_remove_unused,
+)
 from pytensor.scan.utils import until
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import dot
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import ivector, matrix, vector
 from tests.scan.test_basic import scan_nodes_from_fct
+from tests.unittest_tools import RewriteTester
 
 
 class TestScanInputAndOutputCleanup:
@@ -686,3 +692,29 @@ def test_alloc_inputs3():
     scan_node = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan))
 
     assert len(scan_node.op.inner_inputs) == 1
+
+
+def test_inline_invariant_alloc():
+    """Inline constant sequence/non-sequence Allocs and keep them inside Scan."""
+    h0 = vector("h0", shape=(3,))
+    out = scan(
+        lambda s, h, W: dot(h, W) + s,
+        sequences=[pt.full((5, 3), 1.0)],
+        outputs_info=h0,
+        non_sequences=[pt.full((3, 3), 2.0)],
+        n_steps=5,
+        return_updates=False,
+    )
+    expected = scan(
+        lambda h: dot(h, pt.full((3, 3), 2.0)) + pt.full((3,), 1.0),
+        outputs_info=h0,
+        n_steps=5,
+        return_updates=False,
+    )
+    expected = rewrite_graph(expected, include=("canonicalize",))
+    result = RewriteTester([h0], [out], custom_rewrite=scan_inline_invariant_constants)
+    result.assert_graph(expected)
+    in2out(scan_push_out_non_seq).rewrite(result.rewr_fg)
+    result.assert_graph(expected)
+    test_value = np.array([0.0, 1.0, 2.0], dtype=h0.dtype)
+    result.assert_eval(test_value)

@@ -41,6 +41,9 @@ def scan_push_out_non_seq(fgraph, node):
     computation ends up being done every iteration on the same values so moving
     it to the outer function to be executed only once, before the `Scan` `Op`,
     reduces the amount of computation that needs to be performed.
+
+    Constant-only expressions stay inside for inner-graph rewriting, unless the
+    entire Scan can be removed.
     """
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
@@ -49,6 +52,7 @@ def scan_push_out_non_seq(fgraph, node):
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
     to_remove_set = set()
+    constant_nodes = set()
     to_replace_set = set()
     to_replace_map = {}
 
@@ -105,6 +109,11 @@ def scan_push_out_non_seq(fgraph, node):
             # b) the outputs of other nodes being pushed out of the inner-graph,
             # c) or constants.
             to_remove_set.add(nd)
+            if all(
+                isinstance(inp, Constant) or inp.owner in constant_nodes
+                for inp in nd.inputs
+            ):
+                constant_nodes.add(nd)
             new_inputs = []
             for old_input in nd.inputs:
                 if old_input in inner_non_seqs_set:
@@ -155,6 +164,8 @@ def scan_push_out_non_seq(fgraph, node):
             out.type.is_super(replace_with_in[idx].type)
             and out in to_keep_set
             and out.owner not in existent_nodes_set
+            # Leave constant-only expressions for inner-graph rewriting.
+            and out.owner not in constant_nodes
         ):
             clean_to_replace.append(out)
             clean_replace_with_in.append(replace_with_in[idx])
