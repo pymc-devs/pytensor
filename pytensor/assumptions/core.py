@@ -7,6 +7,7 @@ from typing import Any
 from pytensor.graph import Apply, FunctionGraph, Op
 from pytensor.graph.basic import Variable
 from pytensor.graph.features import AlreadyThere, Feature
+from pytensor.graph.fg import AbstractFunctionGraph, FrozenFunctionGraph
 from pytensor.graph.traversal import walk_toposort
 from pytensor.tensor import TensorLike
 from pytensor.tensor.variable import TensorConstant
@@ -177,11 +178,18 @@ class ConflictingAssumptionsError(ValueError):
     """
 
 
-# An inference function takes the active AssumptionKey, the Op, the current AssumptionFeature, the FunctionGraph,
+# An inference function takes the active AssumptionKey, the Op, the current AssumptionInference, the graph,
 # the Apply node being analyzed, and the states of the input variables for the current key. It returns a list of
 # FactState with one entry per node output.
 InferFactFn = Callable[
-    [AssumptionKey, Op, "AssumptionFeature", FunctionGraph, Apply, list[FactState]],
+    [
+        AssumptionKey,
+        Op,
+        "AssumptionInference",
+        AbstractFunctionGraph,
+        Apply,
+        list[FactState],
+    ],
     list[FactState],
 ]
 
@@ -362,6 +370,11 @@ def register_assumption(
     The decorated function is called as ``fn(key, op, feature, fgraph, node, input_states)``
     and must return a list of :class:`FactState` with one entry per node output.
 
+    A rule also runs over the frozen inner graph of an Op such as
+    :class:`~pytensor.scan.op.Scan`. There *fgraph* is a ``FrozenFunctionGraph`` and
+    *node* a frozen node, so a rule reads facts through *feature* and neither changes
+    *fgraph* nor attaches features to it.
+
     Parameters
     ----------
     key : AssumptionKey
@@ -389,8 +402,8 @@ def register_assumption(
 def infer_assumption_for_node(
     key: AssumptionKey,
     op: Op,
-    feature: "AssumptionFeature",
-    fgraph: FunctionGraph,
+    feature: "AssumptionInference",
+    fgraph: AbstractFunctionGraph,
     node: Apply,
     input_states: list[FactState],
 ) -> list[FactState]:
@@ -420,25 +433,181 @@ def infer_assumption_for_node(
     return [FactState.UNKNOWN] * n_outputs
 
 
-class AssumptionFeature(Feature):
-    """``FunctionGraph`` feature that tracks symbolic assumptions about variables.
+class AssumptionInference:
+    """Lazily infer and cache facts about the variables of a frozen graph.
 
-    Assumptions (e.g. "this matrix is diagonal") are represented as ``(variable,
-    AssumptionKey) -> FactState`` mappings. Facts are inferred lazily via per-Op
-    rules registered with :func:`register_assumption`.
+    Facts are ``(variable, AssumptionKey) -> FactState`` mappings, inferred on demand
+    via per-Op rules registered with :func:`register_assumption` and cached
+    inputs-first. Facts known from outside the graph, such as those of the outer
+    inputs feeding an inner graph, come from *leaf_fact*, asked only for the leaves
+    and keys that inference reaches.
 
-    Attached lazily by :func:`check_assumption` on first use.
-    Results are cached and automatically refreshed when the graph changes.
+    Construct it to query the frozen inner graph of an Op such as
+    :class:`~pytensor.scan.op.Scan`: a frozen graph accepts no features, and thawing a
+    mutable copy for each query costs more than the inference itself. The cache lives
+    as long as this object, so reuse one instance for every query over the same graph
+    and *leaf_fact*. Nothing invalidates the cache, so the constructor refuses a
+    mutable ``FunctionGraph``: query one with :func:`check_assumption`, which attaches
+    an :class:`AssumptionFeature`.
+
+    Inference rules receive an instance of this class as their *feature*. Over a
+    mutable graph it is the attached :class:`AssumptionFeature`, a subclass that
+    follows rewrites, so a rule may rely only on :meth:`get` and :meth:`check`.
+
+    Parameters
+    ----------
+    fgraph : FrozenFunctionGraph
+        The graph whose variables are queried. It is handed to every rule.
+    leaf_fact : callable, optional
+        Called as ``leaf_fact(variable, key)`` for an ownerless variable that no
+        constant rule answers, and returns its :class:`FactState`. Its answer must
+        not change while this object is in use. Leaves are UNKNOWN when omitted.
     """
 
-    __slots__ = ("_stale_vars", "_var_to_keys", "cache", "fgraph")
+    __slots__ = ("_leaf_fact", "_var_to_keys", "cache", "fgraph")
+
+    def __init__(
+        self,
+        fgraph: FrozenFunctionGraph,
+        leaf_fact: Callable[[Variable, "AssumptionKey"], FactState] | None = None,
+    ) -> None:
+        if not isinstance(fgraph, FrozenFunctionGraph):
+            raise TypeError(
+                f"AssumptionInference needs a FrozenFunctionGraph, got "
+                f"{type(fgraph).__name__}: nothing would invalidate its cache. Query a "
+                "mutable graph with check_assumption."
+            )
+        self._bind(fgraph, leaf_fact)
+
+    def _bind(
+        self,
+        fgraph: Any,
+        leaf_fact: Callable[[Variable, "AssumptionKey"], FactState] | None = None,
+    ) -> None:
+        self.fgraph = fgraph
+        self._leaf_fact = leaf_fact
+        self.cache: dict[tuple[Any, AssumptionKey], FactState] = {}
+        self._var_to_keys: dict[Any, set[AssumptionKey]] = {}
+
+    def get(self, var: Any, key: AssumptionKey) -> FactState:
+        """Return the inferred :class:`FactState` for ``(var, key)``.
+
+        Raise :class:`ConflictingAssumptionsError` when the cached state is
+        :attr:`FactState.CONFLICT` -- surfaces conflicts from substitutions or
+        owner-inferred rules at the point of query, where the graph is stable
+        and the caller can react.
+        """
+        state = self.cache.get((var, key))
+        if state is None:
+            state = self._compute(var, key)
+        if state is FactState.CONFLICT:
+            raise ConflictingAssumptionsError(
+                f"Conflicting evidence for key {key!r} on {var!r}."
+            )
+        return state
+
+    def check(self, var: Any, key: AssumptionKey) -> bool:
+        """Return ``True`` iff the assumption is definitively TRUE for ``var``."""
+        return self.get(var, key) is FactState.TRUE
+
+    def _compute(self, var: Any, key: AssumptionKey) -> FactState:
+        """Infer the fact state for ``(var, key)``, caching ancestors inputs-first.
+
+        When the owner says nothing, asks the clients of ``var`` what they promise about it.
+        Then walks the ``IMPLIES`` graph in both directions:
+          - Forward: a stronger key being TRUE makes this (weaker) key TRUE.
+          - Contrapositive: a weaker key being FALSE makes this (stronger) key FALSE.
+
+        Raise :class:`ConflictingAssumptionsError` if owner-inferred rules produce
+        ``FactState.CONFLICT``.
+        """
+
+        def deps(v: Any) -> tuple:
+            # Stop descending at cached variables — their facts (and their ancestors')
+            # are already settled for this key.
+            if (v, key) in self.cache:
+                return ()
+            owner = getattr(v, "owner", None)
+            return tuple(owner.inputs) if owner is not None else ()
+
+        for v in walk_toposort([var], deps):
+            if (v, key) in self.cache:
+                continue
+
+            # Cache UNKNOWN up front so any recursive ``self.get(v, other_key)`` triggered
+            # by the IMPLIES checks sees a placeholder instead of recursing back here.
+            # A raise drops it, so the next query raises again instead of reading it.
+            self.cache[(v, key)] = FactState.UNKNOWN
+            self._var_to_keys.setdefault(v, set()).add(key)
+            try:
+                self.cache[(v, key)] = self._infer(v, key)
+            except Exception:
+                del self.cache[(v, key)]
+                self._var_to_keys[v].discard(key)
+                raise
+
+        return self.cache[(var, key)]
+
+    def _infer(self, v: Any, key: AssumptionKey) -> FactState:
+        """Infer the fact for ``(v, key)`` from its owner or as a leaf, then clients and IMPLIES."""
+        owner = getattr(v, "owner", None)
+        if owner is not None:
+            input_states = [self.get(inp, key) for inp in owner.inputs]
+            output_states = infer_assumption_for_node(
+                key, owner.op, self, self.fgraph, owner, input_states
+            )
+            state = output_states[owner.outputs.index(v)]
+        elif isinstance(v, TensorConstant) and key in CONSTANT_INFER_REGISTRY:
+            state = CONSTANT_INFER_REGISTRY[key](v)
+        elif self._leaf_fact is not None:
+            state = self._leaf_fact(v, key)
+        else:
+            state = FactState.UNKNOWN
+
+        if state is FactState.UNKNOWN and key in CLIENT_INFER_KEYS:
+            for client, input_index in self.fgraph.clients.get(v, ()):
+                state = infer_assumption_from_client(
+                    key, client.op, client, input_index
+                )
+                if state is not FactState.UNKNOWN:
+                    break
+
+        if state is FactState.UNKNOWN:
+            for stronger, weaker_list in IMPLIES.items():
+                if key in weaker_list and self.get(v, stronger) is FactState.TRUE:
+                    return FactState.TRUE
+
+        if state is FactState.UNKNOWN:
+            for weaker in IMPLIES.get(key, ()):
+                if self.get(v, weaker) is FactState.FALSE:
+                    return FactState.FALSE
+
+        if state is FactState.CONFLICT:
+            raise ConflictingAssumptionsError(
+                f"Conflicting evidence for {key} on {v!r} from owner-inferred rules."
+            )
+        return state
+
+
+class AssumptionFeature(AssumptionInference, Feature):
+    """``FunctionGraph`` feature that keeps an :class:`AssumptionInference` current.
+
+    Attached lazily by :func:`check_assumption` on first use. Graph changes carry
+    facts from replaced variables to their replacements and mark downstream UNKNOWN
+    entries stale, so the next query re-derives them.
+    """
+
+    __slots__ = ("_stale_vars",)
+
+    def __init__(self) -> None:
+        # Bound to a graph by ``on_attach``.
+        pass
 
     def on_attach(self, fgraph: Any) -> None:
         if hasattr(fgraph, "assumption_feature"):
             raise AlreadyThere("AssumptionFeature is already attached")
-        self.fgraph = fgraph
-        self.cache: dict[tuple[Any, AssumptionKey], FactState] = {}
-        self._var_to_keys: dict[Any, set[AssumptionKey]] = {}
+        # A mutable graph is fine here: the change events below invalidate the cache.
+        self._bind(fgraph)
         self._stale_vars: set = set()
         fgraph.assumption_feature = self
 
@@ -480,103 +649,13 @@ class AssumptionFeature(Feature):
         return AssumptionFeature()
 
     def get(self, var: Any, key: AssumptionKey) -> FactState:
-        """Return the inferred :class:`FactState` for ``(var, key)``.
-
-        Raise :class:`ConflictingAssumptionsError` when the cached state is
-        :attr:`FactState.CONFLICT` — surfaces conflicts from substitutions or
-        owner-inferred rules at the point of query, where the graph is stable
-        and the caller can react.
-        """
-        cache_key = (var, key)
-        state = self.cache.get(cache_key)
-        if state is None or state is FactState.UNKNOWN:
-            if self._stale_vars:
+        if self._stale_vars:
+            state = self.cache.get((var, key))
+            if state is None or state is FactState.UNKNOWN:
                 self._drop_unknown_downstream(self._stale_vars)
                 self._stale_vars.clear()
-                # Re-check: the UNKNOWN will still be valid
-                # if the stale vars were not ancestors of var.
-                state = self.cache.get(cache_key)
-            if state is None:
-                state = self._compute(var, key)
-        if state is FactState.CONFLICT:
-            raise ConflictingAssumptionsError(
-                f"Conflicting evidence for key {key!r} on {var!r}."
-            )
-        return state
-
-    def check(self, var: Any, key: AssumptionKey) -> bool:
-        """Return ``True`` iff the assumption is definitively TRUE for ``var``."""
-        return self.get(var, key) is FactState.TRUE
-
-    def _compute(self, var: Any, key: AssumptionKey) -> FactState:
-        """Infer the fact state for ``(var, key)``, caching ancestors inputs-first.
-
-        When the owner says nothing, asks the clients of ``var`` what they promise about it.
-        Then walks the ``IMPLIES`` graph in both directions:
-          - Forward: a stronger key being TRUE makes this (weaker) key TRUE.
-          - Contrapositive: a weaker key being FALSE makes this (stronger) key FALSE.
-
-        Raise :class:`ConflictingAssumptionsError` if owner-inferred rules produce
-        ``FactState.CONFLICT``.
-        """
-
-        def deps(v: Any) -> tuple:
-            # Stop descending at cached variables — their facts (and their ancestors')
-            # are already settled for this key.
-            if (v, key) in self.cache:
-                return ()
-            owner = getattr(v, "owner", None)
-            return tuple(owner.inputs) if owner is not None else ()
-
-        for v in walk_toposort([var], deps):
-            if (v, key) in self.cache:
-                continue
-
-            # Cache UNKNOWN up front so any recursive ``self.get(v, other_key)`` triggered
-            # by the IMPLIES checks sees a placeholder instead of recursing back here.
-            self.cache[(v, key)] = FactState.UNKNOWN
-            self._var_to_keys.setdefault(v, set()).add(key)
-
-            owner = getattr(v, "owner", None)
-            if owner is not None:
-                input_states = [self.get(inp, key) for inp in owner.inputs]
-                output_states = infer_assumption_for_node(
-                    key, owner.op, self, self.fgraph, owner, input_states
-                )
-                state = output_states[owner.outputs.index(v)]
-            elif isinstance(v, TensorConstant) and key in CONSTANT_INFER_REGISTRY:
-                state = CONSTANT_INFER_REGISTRY[key](v)
-            else:
-                state = FactState.UNKNOWN
-
-            if state is FactState.UNKNOWN and key in CLIENT_INFER_KEYS:
-                for client, input_index in self.fgraph.clients.get(v, ()):
-                    state = infer_assumption_from_client(
-                        key, client.op, client, input_index
-                    )
-                    if state is not FactState.UNKNOWN:
-                        break
-
-            if state is FactState.UNKNOWN:
-                for stronger, weaker_list in IMPLIES.items():
-                    if key in weaker_list and self.get(v, stronger) is FactState.TRUE:
-                        state = FactState.TRUE
-                        break
-
-            if state is FactState.UNKNOWN:
-                for weaker in IMPLIES.get(key, ()):
-                    if self.get(v, weaker) is FactState.FALSE:
-                        state = FactState.FALSE
-                        break
-
-            if state is FactState.CONFLICT:
-                raise ConflictingAssumptionsError(
-                    f"Conflicting evidence for {key} on {v!r} from owner-inferred rules."
-                )
-
-            self.cache[(v, key)] = state
-
-        return self.cache[(var, key)]
+        # Explicit base call: super() adds measurable cost to this hot cached path.
+        return AssumptionInference.get(self, var, key)
 
     def _drop_unknown_downstream(self, start_vars) -> None:
         """Drop UNKNOWN entries for *start_vars* and downstream so they re-probe."""

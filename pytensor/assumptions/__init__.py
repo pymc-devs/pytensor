@@ -34,6 +34,7 @@ from pytensor.assumptions.core import (
     UNIT_MAGNITUDE,
     UPPER_TRIANGULAR,
     AssumptionFeature,
+    AssumptionInference,
     AssumptionKey,
     ConflictingAssumptionsError,
     FactState,
@@ -51,7 +52,7 @@ from pytensor.assumptions.specify import (
 from pytensor.graph.fg import FunctionGraph
 
 
-def summarize_assumptions(feature: AssumptionFeature, var) -> str:
+def summarize_assumptions(feature: AssumptionInference, var) -> str:
     """Return a compact ``{...}`` tag of the facts known about *var*.
 
     Each TRUE fact appears as its ``short_name``; each FALSE fact as ``!short_name``.
