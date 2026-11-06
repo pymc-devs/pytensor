@@ -18,7 +18,7 @@ import numpy as np
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.rewriting.basic import node_rewriter
@@ -30,6 +30,19 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot
 from pytensor.tensor.shape import shape
 from pytensor.tensor.subtensor import Subtensor, get_idx_list, set_subtensor
+
+
+def _stays_in_loop(op) -> bool:
+    """Whether `scan_push_out_non_seq` keeps a node of *op* in the loop body.
+
+    Markers (``TypeCastingOp``, e.g. ``assume()``) and matrix transposes cost nothing
+    per step, and hoisting them hides structure that inner rewrites and assumption
+    rules match on: a hoisted ``A.T`` turns ``A @ P @ A.T`` into a product of
+    unrelated inputs. Their loop-invariant consumers are still hoisted.
+    """
+    return isinstance(op, TypeCastingOp) or (
+        isinstance(op, DimShuffle) and op.is_matrix_transpose
+    )
 
 
 @node_rewriter([Scan])
@@ -79,21 +92,35 @@ def scan_push_out_non_seq(fgraph, node):
     assert len(inner_non_seqs) == len(outer_non_seqs)
     assert len(inner_seqs) == len(outer_seqs)
 
+    def _is_pushable_input(x):
+        # A node that stays in the loop is seen through, so the work behind it is
+        # not anchored in the loop with it.
+        return (
+            x in inner_non_seqs_set
+            or x.owner in to_remove_set
+            or isinstance(x, Constant)
+            or (
+                _stays_in_loop(x.owner_op)
+                and all(_is_pushable_input(i) for i in x.owner.inputs)
+            )
+        )
+
+    def _outer_input_for(x):
+        # The outer-graph stand-in for a pushable inner input.
+        if x in inner_non_seqs_set:
+            return outer_non_seqs[inner_non_seqs_map[x]]
+        if x in to_replace_set:
+            return replace_with_out[to_replace_map[x]]
+        if isinstance(x, Constant):
+            return x
+        # A node seen through: rebuild it over its argument's outer stand-in.
+        return x.owner.op(*[_outer_input_for(i) for i in x.owner.inputs])
+
     for nd in local_fgraph_topo:
         if (  # we haven't already looked at this node
             nd not in to_remove_set
-            and all(
-                (
-                    (x in inner_non_seqs_set)
-                    or (x.owner in to_remove_set)
-                    or isinstance(x, Constant)
-                )
-                for x in nd.inputs
-            )
-            # We can (supposedly) do this because the assumption is that a
-            # `ViewOp` or `DeepCopyOp` will be just at the end of the
-            # function and not somewhere in the middle
-            and not isinstance(nd.op, ViewOp)
+            and all(_is_pushable_input(x) for x in nd.inputs)
+            and not _stays_in_loop(nd.op)
             and not isinstance(nd.op, DeepCopyOp)
         ):
             # We have a candidate node to remove from the inner-graph
@@ -103,25 +130,13 @@ def scan_push_out_non_seq(fgraph, node):
             # More specifically, the node's current inputs are either
             # a) inner-graph input place-holders for non-sequences,
             # b) the outputs of other nodes being pushed out of the inner-graph,
-            # c) or constants.
+            # c) constants,
+            # d) or nodes kept in the loop wrapping any of these, rebuilt outside.
             to_remove_set.add(nd)
-            new_inputs = []
-            for old_input in nd.inputs:
-                if old_input in inner_non_seqs_set:
-                    # This is case a), so we want to use the corresponding
-                    # outer-graph input as the input to our new pushed-out node
-                    _idx = inner_non_seqs_map[old_input]
-                    new_input = outer_non_seqs[_idx]
-                elif old_input in to_replace_set:
-                    # This is case b), so we want to use the new pushed-out node
-                    # as the input to this new pushed-out node
-                    new_input = replace_with_out[to_replace_map[old_input]]
-                else:
-                    assert isinstance(old_input, Constant)
-                    new_input = old_input
-
-                new_input = old_input.type.filter_variable(new_input)
-                new_inputs.append(new_input)
+            new_inputs = [
+                old_input.type.filter_variable(_outer_input_for(old_input))
+                for old_input in nd.inputs
+            ]
 
             pushed_out_node = nd.op.make_node(*new_inputs)
 

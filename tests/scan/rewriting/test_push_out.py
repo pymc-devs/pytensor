@@ -3,13 +3,14 @@ import numpy as np
 import pytensor
 import pytensor.tensor as pt
 from pytensor import function, scan, shared
+from pytensor.assumptions.specify import assume
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import until
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import shape
@@ -328,6 +329,50 @@ class TestPushOutNonSeqScan:
         np.testing.assert_array_equal(
             res, np.array([0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 0.0])
         )
+
+    def test_pushout_through_assumption_marker(self):
+        """A marker op such as ``assume()`` stays in the loop, but loop-invariant work
+        behind it is still hoisted out."""
+        X = matrix("X")
+        ys = tensor3("ys")
+        out = scan(
+            lambda yt, X: pt.exp(assume(X, diagonal=True)) @ yt,
+            sequences=[ys],
+            non_sequences=[X],
+            return_updates=False,
+        )
+        f = function([X, ys], out, mode=get_default_mode().including("scan"))
+
+        [scan_node] = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+        inner_nodes = scan_node.op.fgraph.toposort()
+        assert not any(isinstance(n.op, Elemwise) for n in inner_nodes)
+
+    def test_matrix_transpose_stays_but_its_consumers_are_hoisted(self):
+        """``A.T`` stays in the loop so ``A @ y @ A.T`` keeps its structure, while
+        the loop-invariant ``A.T @ Q`` behind it is still hoisted out."""
+        A = matrix("A")
+        Q = matrix("Q")
+        ys = tensor3("ys")
+        out = scan(
+            lambda yt, A, Q: A @ yt @ A.T + A.T @ Q,
+            sequences=[ys],
+            non_sequences=[A, Q],
+            return_updates=False,
+        )
+        f = function([A, Q, ys], out, mode=get_default_mode().including("scan"))
+
+        def is_transpose(var):
+            return (
+                isinstance(var.owner_op, DimShuffle)
+                and var.owner_op.is_matrix_transpose
+            )
+
+        [scan_node] = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+        [kept, hoisted] = scan_node.op.outer_non_seqs(scan_node.inputs)
+        assert kept is A
+        assert is_transpose(hoisted.owner.inputs[0])
+        inner_vars = [out for n in scan_node.op.fgraph.toposort() for out in n.outputs]
+        assert sum(map(is_transpose, inner_vars)) == 1
 
     def test_dot_not_output(self):
         """
