@@ -45,6 +45,24 @@ def _stays_in_loop(op) -> bool:
     )
 
 
+def _has_pushable_inputs(node, pushable_leaves, removed_nodes) -> bool:
+    """Whether every input of inner *node* can be computed outside the loop.
+
+    A node that stays in the loop is seen through, so the work behind it is not
+    anchored in the loop with it.
+    """
+    return all(
+        x in pushable_leaves
+        or x.owner in removed_nodes
+        or isinstance(x, Constant)
+        or (
+            _stays_in_loop(x.owner_op)
+            and _has_pushable_inputs(x.owner, pushable_leaves, removed_nodes)
+        )
+        for x in node.inputs
+    )
+
+
 @node_rewriter([Scan])
 def scan_push_out_non_seq(fgraph, node):
     r"""Push out the variables inside the `Scan` that depend only on non-sequences.
@@ -58,8 +76,6 @@ def scan_push_out_non_seq(fgraph, node):
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
     local_fgraph_topo = node.op.fgraph.toposort()
-    local_fgraph_outs_set = set(node_outputs)
-    local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
     to_remove_set = set()
     to_replace_set = set()
@@ -92,19 +108,6 @@ def scan_push_out_non_seq(fgraph, node):
     assert len(inner_non_seqs) == len(outer_non_seqs)
     assert len(inner_seqs) == len(outer_seqs)
 
-    def _is_pushable_input(x):
-        # A node that stays in the loop is seen through, so the work behind it is
-        # not anchored in the loop with it.
-        return (
-            x in inner_non_seqs_set
-            or x.owner in to_remove_set
-            or isinstance(x, Constant)
-            or (
-                _stays_in_loop(x.owner_op)
-                and all(_is_pushable_input(i) for i in x.owner.inputs)
-            )
-        )
-
     def _outer_input_for(x):
         # The outer-graph stand-in for a pushable inner input.
         if x in inner_non_seqs_set:
@@ -119,7 +122,7 @@ def scan_push_out_non_seq(fgraph, node):
     for nd in local_fgraph_topo:
         if (  # we haven't already looked at this node
             nd not in to_remove_set
-            and all(_is_pushable_input(x) for x in nd.inputs)
+            and _has_pushable_inputs(nd, inner_non_seqs_set, to_remove_set)
             and not _stays_in_loop(nd.op)
             and not isinstance(nd.op, DeepCopyOp)
         ):
@@ -175,7 +178,19 @@ def scan_push_out_non_seq(fgraph, node):
             clean_replace_with_in.append(replace_with_in[idx])
             clean_replace_with_out.append(replace_with_out[idx])
 
-    if len(clean_to_replace) > 0:
+    # Repeating one value only reproduces nit-sot outputs: a recurrence's buffer also
+    # holds its initial values, and a while loop ends after a run-time number of steps.
+    whole_body_invariant = (
+        not op.info.as_while
+        and op.info.n_nit_sot == len(node.outputs)
+        and all(
+            _stays_in_loop(nd.op)
+            and _has_pushable_inputs(nd, inner_non_seqs_set, to_remove_set)
+            for nd in existent_nodes
+        )
+    )
+
+    if len(clean_to_replace) > 0 and not whole_body_invariant:
         # We can finally put an end to all this madness
         givens = {}
         nw_outer = []
@@ -222,13 +237,12 @@ def scan_push_out_non_seq(fgraph, node):
         replacements = dict(zip(node.outputs, nw_node.outputs, strict=True))
         replacements["remove"] = [node]
         return replacements
-    elif not to_keep_set:
+    elif whole_body_invariant:
         # Nothing in the inner graph should be kept
         replace_with = {}
-        for out, idx in to_replace_map.items():
-            if out in local_fgraph_outs_set:
-                x = node.outputs[local_fgraph_outs_map[out]]
-                y = replace_with_out[idx]
+        for x, out in zip(node.outputs, node_outputs, strict=True):
+            if out in to_replace_set or _stays_in_loop(out.owner_op):
+                y = _outer_input_for(out)
                 y_shape = list(y.shape)
                 replace_with[x] = pt.alloc(y, node.inputs[0], *y_shape)
 

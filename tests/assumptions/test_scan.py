@@ -398,6 +398,23 @@ def test_non_sequence_assumption_does_not_block_push_out():
     rewrite.assert_graph(rewrite_graph(expected, include=("canonicalize",)))
 
 
+def test_non_sequence_assumption_on_invariant_body_removes_scan():
+    """The assertion pushed onto ``X`` is all that would be left of a body that never
+    reads a sequence, so it must not keep the Scan alive."""
+    X = pt.matrix("X", shape=(3, 3))
+    out = scan(
+        lambda X: pt.linalg.inv(X),
+        non_sequences=[assume(X, positive_definite=True)],
+        n_steps=5,
+        return_updates=False,
+    )
+    rewrite = RewriteTester([X], [out], include="o3", exclude=["fusion", "inplace"])
+
+    inverse = MatrixInverse()(assume(X, positive_definite=True, symmetric=True))
+    expected = pt.alloc(inverse, pt.constant(5), *inverse.shape)
+    rewrite.assert_graph(rewrite_graph(expected, include=("canonicalize",)))
+
+
 def test_congruence_recurrence_keeps_property_through_push_out():
     """``A @ P @ A.T + Q`` keeps a positive-definite ``P`` positive definite, and
     hoisting loop-invariant work out of the body must not hide the transpose."""

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pytensor
 import pytensor.tensor as pt
@@ -9,6 +10,9 @@ from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.rewriting.push_out import (
+    scan_push_out_non_seq,
+)
 from pytensor.scan.utils import until
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid, tanh
@@ -373,6 +377,63 @@ class TestPushOutNonSeqScan:
         assert is_transpose(hoisted.owner.inputs[0])
         inner_vars = [out for n in scan_node.op.fgraph.toposort() for out in n.outputs]
         assert sum(map(is_transpose, inner_vars)) == 1
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            lambda A: pt.exp(A.T @ A),
+            lambda A: A.T,
+            lambda A: (A @ A).T,
+            lambda A: pt.exp(assume(A.T, symmetric=True)),
+            lambda A: assume(pt.exp(A), symmetric=True),
+        ],
+        ids=["consumer", "transpose", "transposed-consumer", "marker", "marker-output"],
+    )
+    def test_invariant_body_removes_scan(self, body):
+        """Nodes that stay in a loop must not keep a Scan alive once nothing per-step
+        is left: the value is computed once and repeated."""
+        A = dmatrix("A")
+        out = scan(body, non_sequences=[A], n_steps=3, return_updates=False)
+        rewrite = utt.RewriteTester(
+            [A], [out], include=None, custom_rewrite=scan_push_out_non_seq
+        )
+
+        value = body(A)
+        rewrite.assert_graph(pt.alloc(value, pt.constant(3), *value.shape))
+        rewrite.assert_eval(np.array([[1.0, 2.0], [3.0, 4.0]]))
+
+    @pytest.mark.parametrize(
+        "body, outputs_info",
+        [
+            (lambda _, A: pt.exp(A), lambda x: [x[0]]),
+            (lambda _, A: A.T @ A, lambda x: [x[0]]),
+            (
+                lambda _2, _1, A: pt.exp(A),
+                lambda x: [dict(initial=x, taps=[-2, -1])],
+            ),
+            (lambda A: (pt.exp(A), until(pt.all(A > 1e9))), lambda x: None),
+            (lambda A: (pt.exp(A), until(pt.all(A < 1e9))), lambda x: None),
+        ],
+        ids=["sit-sot", "sit-sot-transpose", "mit-sot", "until-false", "until-true"],
+    )
+    def test_invariant_body_with_state_or_condition(self, body, outputs_info):
+        """An invariant body does not make a Scan's output a repeated value: a
+        recurrence's buffer holds its initial values, and ``until`` sets its length."""
+        A = dmatrix("A")
+        x = pt.dtensor3("x")
+        out = scan(
+            body,
+            outputs_info=outputs_info(x),
+            non_sequences=[A],
+            n_steps=5,
+            return_updates=False,
+        )
+        rewrite = utt.RewriteTester(
+            [A, x], [out], include=None, custom_rewrite=scan_push_out_non_seq
+        )
+
+        A_value = np.eye(2) + 0.1
+        rewrite.assert_eval(A_value, np.stack([A_value, A_value]))
 
     def test_dot_not_output(self):
         """
