@@ -737,6 +737,36 @@ def test_funcify_dispatch_interop():
     assert numba.njit(lambda x: fn2_def_cached(x))(test_x) == 2
 
 
+@pytest.mark.parametrize("beyond_limit", [False, True])
+def test_numba_many_inputs(beyond_limit):
+    n_inputs = 1001 if beyond_limit else 2
+
+    class FirstInput(Op):
+        __props__ = ()
+
+        def make_node(self, *inputs):
+            return Apply(self, list(inputs), [inputs[0].type()])
+
+        def perform(self, node, inputs, outputs):
+            outputs[0][0] = inputs[0]
+
+    @numba_basic.register_funcify_default_op_cache_key(FirstInput)
+    def funcify_first_input(op, node, **kwargs):
+        names = ", ".join(f"x{i}" for i in range(len(node.inputs)))
+        py_func = numba_cache.compile_numba_function_src(
+            f"def first_input({names}): return x0", "first_input"
+        )
+        return numba_basic.numba_njit(py_func)
+
+    # Native scalars and a trivial body isolate the argument limit without
+    # the compilation cost of building a large vector.
+    x = ps.float64("x")
+    out = FirstInput()(*([x] * n_inputs))
+    with config.change_flags(numba__cache=True):
+        fn = function([x], out, mode=numba_mode)
+        assert fn(0.5) == 0.5
+
+
 class TestFgraphCacheKey:
     @staticmethod
     def generate_and_validate_key(fg):

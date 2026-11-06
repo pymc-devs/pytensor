@@ -448,7 +448,7 @@ def register_funcify_and_cache_key(op_type):
     return decorator
 
 
-def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | None]:
+def numba_funcify_ensure_cache(op, node=None, **kwargs) -> tuple[Callable, str | None]:
     """Obtain a numba function for an Op and ensure it can be cached by numba.
 
     If `config.numba__cache` is `True`, and `numba_funcify_and_cache_key` returns a non-None key,
@@ -460,15 +460,24 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
     2. String generated functions: Alloc, Scan, OpFromGraph, and FunctionGraph itself
     """
     if config.numba__cache:
-        jitable_func, cache_key = numba_funcify_and_cache_key(op, *args, **kwargs)
+        jitable_func, cache_key = numba_funcify_and_cache_key(op, node=node, **kwargs)
     else:
-        jitable_func, cache_key = numba_funcify(op, *args, **kwargs), None
+        jitable_func, cache_key = numba_funcify(op, node=node, **kwargs), None
 
     if cache_key is None:
         if config.numba__cache and config.compiler_verbose:
             print(f"{op} of type {type(op)} will not be cached by PyTensor.\n")  # noqa: T201
         return jitable_func, None
     else:
+        if (
+            len((node := op if isinstance(op, AbstractFunctionGraph) else node).inputs)
+            > 1000
+        ):
+            # Skip the wrapper that enables caching this subkernel: its *args
+            # tuple would exceed Numba's limit. Keep the key so enclosing graphs
+            # can still be cached.
+            return jitable_func, cache_key
+
         op_name = jitable_func.__name__
         cached_func = compile_numba_function_src(
             src=f"def {op_name}(*args): return jitable_func(*args)",
@@ -561,7 +570,7 @@ def numba_funcify_FunctionGraph(
         **kwargs,
     )
     if not fgraph_can_be_cached[0]:
-        # If a single element couldn't be cached, we can't cache the whole FunctionGraph either
+        # Without a key for every element, we cannot identify the whole graph.
         fgraph_key = None
     else:
         # Add graph coordinate information for fgraph outputs
