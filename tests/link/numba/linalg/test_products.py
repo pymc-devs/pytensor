@@ -4,9 +4,11 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import In, config, function
 from pytensor.link.numba.dispatch.basic import numba_njit
+from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
 from pytensor.link.numba.dispatch.linalg.products import (
     _blas_operand,
     _gemm,
+    _gemm_impl,
     _normalize_gemm_strides,
 )
 from pytensor.tensor.linalg.products import Expm, expm
@@ -203,6 +205,63 @@ def test_gemm_vector_strides(dtype, transpose):
         rtol=rtol,
         atol=1e-6,
     )
+
+
+def test_gemv_keeps_operand_buffers(monkeypatch):
+    calls = []
+    gemv = _BLAS.numba_xgemv(numba.float64)
+
+    @numba_njit
+    def gemv_spy(trans, m, n, alpha, A, lda, x, incx, beta, y, incy):
+        A_ptr, x_ptr, y_ptr = A.data, x.data, y.data
+        x_step, y_step = incx[0], incy[0]
+        with numba.objmode():
+            calls.append((A_ptr, x_ptr, y_ptr, x_step, y_step))
+        gemv(trans, m, n, alpha, A, lda, x, incx, beta, y, incy)
+
+    monkeypatch.setattr(_BLAS, "numba_xgemv", classmethod(lambda cls, dtype: gemv_spy))
+    kernels = {}
+
+    def call(A, x, y):
+        args = A, x[:, None], y[:, None]
+        signature = tuple(map(numba.typeof, args))
+        if signature not in kernels:
+            # Exercise the real implementation with the spy, independently of
+            # overload specializations already compiled by other tests.
+            kernels[signature] = numba_njit(final_function=True)(_gemm_impl(*signature))
+        calls.clear()
+        kernels[signature](*args)
+        [buffers] = calls
+        return buffers
+
+    matrix = rng.normal(size=(4, 3))
+    x_storage = rng.normal(size=6)
+    y_storage = rng.normal(size=8)
+    layouts = [
+        np.array(matrix, order="C"),
+        np.array(matrix, order="F"),
+        np.repeat(matrix, 2, axis=0)[::2],
+        np.asfortranarray(np.repeat(matrix, 2, axis=1))[:, ::2],
+    ]
+    for A in layouts:
+        for row_step, col_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
+            view = A[::row_step, ::col_step]
+            # Paired matrix/vector reversals require no copies of any operand.
+            x = x_storage[:: 2 * col_step]
+            y = y_storage[:: 2 * row_step]
+            A_ptr, x_ptr, y_ptr, incx, incy = call(view, x, y)
+            for pointer, original in [(A_ptr, view), (x_ptr, x), (y_ptr, y)]:
+                assert pointer == np.lib.array_utils.byte_bounds(original)[0]
+            assert abs(incx) == abs(incy) == 2
+
+        # A contiguous output can require a small writeback buffer, but the
+        # reversed matrix must still be read in place.
+        view = A[::-1]
+        x = rng.normal(size=3)
+        y = np.empty(4)
+        A_ptr, x_ptr, *_ = call(view, x, y)
+        assert A_ptr == np.lib.array_utils.byte_bounds(view)[0]
+        assert x_ptr == x.ctypes.data
 
 
 @pytest.mark.parametrize("order", ["C", "F"])
