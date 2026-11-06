@@ -2878,9 +2878,9 @@ def copy_stack_trace(from_var, to_var):
     Parameters
     ----------
     from_var :
-        `Variable` or list `Variable`\s to copy stack traces from.
+        `Variable` or list/tuple of `Variable`\s to copy stack traces from.
     to_var :
-        `Variable` or list `Variable`\s to copy stack traces to.
+        `Variable` or list/tuple of `Variable`\s to copy stack traces to.
 
     Notes
     -----
@@ -2889,34 +2889,98 @@ def copy_stack_trace(from_var, to_var):
     and so on. Each list of tuples contains the truples belonging to a
     particular `Variable`.
 
+    Self-copies are ignored, including overlap between source and destination
+    lists or tuples.
+
     """
 
-    # Store stack traces from from_var
-    tr = []
-    if isinstance(from_var, Iterable) and not isinstance(from_var, Variable):
-        # If from_var is a list, store concatenated stack traces
-        for v in from_var:
-            tr += getattr(v.tag, "trace", [])
+    # Access metadata directly to avoid Scratchpad's Python attribute hooks.
+    if isinstance(from_var, Variable):
+        if isinstance(to_var, Variable):
+            target = to_var
+        elif len(to_var) == 1:
+            target = to_var[0]
+        else:
+            if trace := object.__getattribute__(from_var.tag, "__dict__").get("trace"):
+                if isinstance(trace[0], tuple):
+                    trace = [trace]
+                for var in to_var:
+                    if var is not from_var:
+                        tag = object.__getattribute__(var.tag, "__dict__")
+                        tag["trace"] = tag.get("trace", []) + trace
+            return to_var
 
+        if from_var is target:
+            return to_var
+        if trace := object.__getattribute__(from_var.tag, "__dict__").get("trace"):
+            if isinstance(trace[0], tuple):
+                trace = [trace]
+            tag = object.__getattribute__(target.tag, "__dict__")
+            tag["trace"] = tag.get("trace", []) + trace
+    elif isinstance(to_var, Variable):
+        tr = []
+        for var in from_var:
+            if var is to_var:
+                continue
+            if trace := object.__getattribute__(var.tag, "__dict__").get("trace"):
+                tr += trace
+        if tr:
+            if isinstance(tr[0], tuple):
+                tr = [tr]
+            tag = object.__getattribute__(to_var.tag, "__dict__")
+            tag["trace"] = tag.get("trace", []) + tr
     else:
-        # If from_var is not a list, it must be a single tensor variable,
-        # so just store that particular stack trace
-        tr = getattr(from_var.tag, "trace", [])
+        if len(from_var) == 1 and len(to_var) == 1:
+            source, target = from_var[0], to_var[0]
+            if source is target:
+                return to_var
+            if trace := object.__getattribute__(source.tag, "__dict__").get("trace"):
+                if isinstance(trace[0], tuple):
+                    trace = [trace]
+                tag = object.__getattribute__(target.tag, "__dict__")
+                tag["trace"] = tag.get("trace", []) + trace
+            return to_var
 
-    if tr and isinstance(tr[0], tuple):
-        # There was one single stack trace, we encapsulate it in a list
-        tr = [tr]
+        if set(from_var).isdisjoint(to_var):
+            tr = []
+            for var in from_var:
+                tr += object.__getattribute__(var.tag, "__dict__").get("trace", ())
+            if tr:
+                if isinstance(tr[0], tuple):
+                    tr = [tr]
+                for var in to_var:
+                    tag = object.__getattribute__(var.tag, "__dict__")
+                    tag["trace"] = tag.get("trace", []) + tr
+            return to_var
 
-    # Copy over stack traces to to_var
-    if isinstance(to_var, Iterable) and not isinstance(to_var, Variable):
-        # Copy over stack traces from from_var to each variable in
-        # to_var, including the stack_trace of the to_var before
-        for v in to_var:
-            v.tag.trace = getattr(v.tag, "trace", []) + tr
-    else:
-        # Copy over stack traces from from_var to each variable to
-        # to_var, including the stack_trace of the to_var before
-        to_var.tag.trace = getattr(to_var.tag, "trace", []) + tr
+        # Snapshot sources and aggregate once for destinations without overlap.
+        source_traces = {}
+        tr = []
+        for var in from_var:
+            source_traces[var] = trace = (
+                object.__getattribute__(var.tag, "__dict__").get("trace") or ()
+            )
+            tr += trace
+        if not tr:
+            return to_var
+        if isinstance(tr[0], tuple):
+            tr = [tr]
+
+        for var in to_var:
+            if var in source_traces:
+                trace = [
+                    trace
+                    for source in from_var
+                    if source is not var
+                    for trace in source_traces[source]
+                ]
+                if trace and isinstance(trace[0], tuple):
+                    trace = [trace]
+            else:
+                trace = tr
+            if trace:
+                tag = object.__getattribute__(var.tag, "__dict__")
+                tag["trace"] = tag.get("trace", []) + trace
     return to_var
 
 
