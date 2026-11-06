@@ -225,8 +225,10 @@ Optional methods or attributes
    call. If you want to force the execution of an :class:`Op` during the
    function call, make do_constant_folding return False.
 
-   As done in the Alloc :class:`Op`, you can return False only in some cases by
-   analyzing the graph from the node parameter.
+   Keep graph-dependent decisions about rewrite ordering, consumers, and
+   inplace opportunities in specialized graph rewrites. For example,
+   :class:`Alloc` opts out here and is materialized by
+   ``local_alloc_constant_folding`` after structural rewrites have run.
 
 .. function:: debug_perform(node, inputs, output_storage)
 

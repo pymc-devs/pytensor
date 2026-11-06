@@ -28,9 +28,11 @@ from collections.abc import Sequence
 import numpy as np
 
 from pytensor import compile, config
+from pytensor.compile.aliasing import view_tree_set
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph, Op
 from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.fg import Output
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -82,11 +84,13 @@ from pytensor.tensor.basic import (
     tile,
     zeros,
 )
+from pytensor.tensor.blas import Gemm, Gemv
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
 from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
@@ -777,8 +781,9 @@ def is_an_upcast(type1, type2):
         return False
 
 
-@register_useless
-@register_specialize
+@register_useless("fast_compile")
+@register_canonicalize
+@register_specialize("fast_compile")
 @node_rewriter([CheckAndRaise])
 def local_remove_useless_assert(fgraph, node):
     new_conds = []
@@ -1244,9 +1249,82 @@ topo_constant_folding = in2out(
     constant_folding, ignore_newtrees=True, name="topo_constant_folding"
 )
 register_canonicalize(topo_constant_folding, "fast_compile", final_rewriter=True)
-register_uncanonicalize(topo_constant_folding, "fast_compile", final_rewriter=True)
 register_stabilize(topo_constant_folding, "fast_compile", final_rewriter=True)
 register_specialize(topo_constant_folding, "fast_compile", final_rewriter=True)
+
+
+@node_rewriter([Alloc])
+def local_alloc_constant_folding(fgraph, node):
+    """Fold Alloc after specialization, preserving buffers for runtime consumers.
+
+    Allocation lifting has already run. Retain allocations when folding would
+    force output copying or a consumer to copy into a new buffer at runtime,
+    but fold independent constant consumers even when the allocation is shared.
+    """
+    if not all(isinstance(inp, Constant) for inp in node.inputs):
+        return False
+
+    [allocated] = node.outputs
+    keep_alloc = False
+    constant_clients = {}
+    for client, idx in fgraph.clients[allocated]:
+        client_op = client.op
+        if isinstance(client_op, Output):
+            # A constant output would need a deep copy on every function call.
+            keep_alloc = True
+        elif client_op.view_map and any(
+            idx in input_idxs for input_idxs in client_op.view_map.values()
+        ):
+            views = set()
+            for output_idx, input_idxs in client_op.view_map.items():
+                if idx in input_idxs:
+                    view_tree_set(fgraph, client.outputs[output_idx], views)
+            # Returning a view of a constant also requires an output copy.
+            if not views.isdisjoint(fgraph.outputs):
+                keep_alloc = True
+        elif (
+            idx == 0
+            and isinstance(client_op, IncSubtensor | AdvancedIncSubtensor | Gemv | Gemm)
+            and not all(isinstance(inp, Constant) for inp in client.inputs[1:])
+        ):
+            # These Ops must copy input 0 into a new buffer when they cannot
+            # write inplace. Keep Alloc to initialize that buffer directly.
+            keep_alloc = True
+        elif all(
+            inp is allocated or isinstance(inp, Constant) for inp in client.inputs
+        ):
+            constant_clients[client] = None
+
+    if not keep_alloc:
+        return unconditional_constant_folding.transform(fgraph, node)
+    if constant_clients:
+        # Keep the live Alloc for outputs/runtime consumers and give constant
+        # consumers a folded allocation; ordinary constant folding handles them.
+        [folded_alloc] = unconditional_constant_folding.transform(fgraph, node)
+        replacements = {}
+        for client in constant_clients:
+            constant_client = client.clone_with_new_inputs(
+                [folded_alloc if inp is allocated else inp for inp in client.inputs]
+            )
+            replacements.update(
+                zip(client.outputs, constant_client.outputs, strict=True)
+            )
+
+        return replacements
+
+    return None
+
+
+register_uncanonicalize(
+    in2out(
+        local_alloc_constant_folding,
+        constant_folding,
+        ignore_newtrees=True,
+        name="topo_constant_folding",
+    ),
+    "fast_compile",
+    final_rewriter=True,
+)
 
 
 @register_infer_shape

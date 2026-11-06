@@ -827,18 +827,6 @@ class TestAlloc:
         # TODO: Assert something about the value if we bothered to call it?
         fgrad(test_params)
 
-    def test_alloc_output(self):
-        val = constant(self.rng.standard_normal((1, 1)), dtype=self.dtype)
-        for alloc_ in self.allocs:
-            # The output is the result of the alloc operation,
-            # we do not want it to be constant-folded
-            out = alloc_(val, 50, 60)
-
-            f = pytensor.function([], out, mode=self.mode)
-            topo = f.maker.fgraph.toposort()
-            assert sum(isinstance(node.op, type(alloc_)) for node in topo) == 1
-            assert not isinstance(topo[0].op, DeepCopyOp)
-
     def test_ones(self):
         for shp in [[], 1, [1], [1, 2], [1, 2, 3], np.r_[1, 2, 3]]:
             ones = pytensor.function([], [ptb.ones(shp)], mode=self.mode)

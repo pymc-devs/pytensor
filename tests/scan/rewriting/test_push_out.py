@@ -8,6 +8,7 @@ from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.rewriting import scan_push_out_non_seq
 from pytensor.scan.utils import until
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid, tanh
@@ -165,6 +166,20 @@ class TestPushOutNonSeqScan:
     on a non-sequence matrix input to `Scan` and a vector that is the result of
     computation in the inner function.
     """
+
+    def test_constant_expression(self):
+        """Leave a constant-only expression inside Scan, including its dependent operations."""
+        h0 = vector("h0", shape=(3,))
+        out = scan(
+            lambda h: h + pt.exp(pt.sin(pt.constant([0.0, 1.0, 2.0]))),
+            outputs_info=h0,
+            n_steps=5,
+            return_updates=False,
+        )
+        result = utt.RewriteTester(
+            [h0], [out], include=None, custom_rewrite=scan_push_out_non_seq
+        )
+        result.assert_graph(out)
 
     def test_pushout_seqs(self):
         def init_predictive_output(inputs, targets, hyp, x_star, s_star):
