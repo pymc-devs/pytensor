@@ -10,6 +10,7 @@ from pytensor.assumptions import (
     register_matrix_property_rules,
 )
 from pytensor.assumptions.core import ASSUMPTION_INFER_REGISTRY
+from pytensor.scan.op import Scan
 from pytensor.tensor.basic import Alloc
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.reshape import JoinDims, SplitDims
@@ -70,7 +71,7 @@ def test_prepend_decides_which_rule_answers(prepend, expected):
 @pytest.mark.parametrize("key", MATRIX_KEYS, ids=lambda k: k.name)
 @pytest.mark.parametrize(
     "op_type",
-    [DimShuffle, Reshape, SpecifyShape, JoinDims, SplitDims, Alloc, IncSubtensor],
+    [DimShuffle, Reshape, SpecifyShape, JoinDims, SplitDims, Alloc, IncSubtensor, Scan],
     ids=lambda op: op.__name__,
 )
 def test_core_matrix_keys_carry_the_bundled_rules(key, op_type):

@@ -8,6 +8,7 @@ from pytensor.assumptions import (
     SYMMETRIC,
     UPPER_TRIANGULAR,
     AssumptionFeature,
+    AssumptionInference,
     AssumptionKey,
     ConflictingAssumptionsError,
     FactState,
@@ -52,6 +53,22 @@ def test_double_attach_keeps_single_feature():
     fg.attach_feature(AssumptionFeature())
     fg.attach_feature(AssumptionFeature())
     assert sum(isinstance(f, AssumptionFeature) for f in fg._features) == 1
+
+
+def test_inference_runs_on_frozen_graph_only():
+    x = pt.matrix("x")
+    fg = FunctionGraph([x], [x @ x])
+    with pytest.raises(TypeError, match="needs a FrozenFunctionGraph"):
+        AssumptionInference(fg)
+
+    frozen = fg.freeze()
+    inference = AssumptionInference(
+        frozen,
+        leaf_fact=lambda var, key: (
+            FactState.TRUE if key is DIAGONAL else FactState.UNKNOWN
+        ),
+    )
+    assert inference.check(frozen.outputs[0], DIAGONAL)
 
 
 def test_bare_input_is_unknown():
@@ -188,6 +205,16 @@ def test_replace_unknown_does_not_override_new_inference():
     d = pt.diag(v)
     fg.replace(x, d, reason="replace")
     assert af.check(d, DIAGONAL)
+
+
+def test_conflict_raises_on_every_query():
+    """A raise during inference must not leave its UNKNOWN placeholder cached."""
+    x = pt.matrix("x", shape=(3, 3))
+    y = assume(assume(x, diagonal=True), diagonal=False) * 2.0
+    _, af = make_fgraph(y, inputs=[x])
+    for _ in range(2):
+        with pytest.raises(ConflictingAssumptionsError):
+            af.get(y, DIAGONAL)
 
 
 def test_conflict_during_substitution_does_not_corrupt_graph():
