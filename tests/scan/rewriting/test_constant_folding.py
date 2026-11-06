@@ -7,6 +7,8 @@ from pytensor.raise_op import CheckAndRaise
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.constant_folding import scan_constant_folding
 from pytensor.scan.rewriting.db import scan_inner_graph
+from pytensor.tensor.basic import AllocEmpty
+from pytensor.tensor.rewriting.basic import topo_alloc_constant_folding
 from tests.unittest_tools import RewriteTester
 
 
@@ -24,6 +26,37 @@ def test_constant_scan():
     result = RewriteTester([], [out], include="o3", exclude=["topo_constant_folding"])
     assert any(isinstance(node.op, Scan) for node in result.rewr_fg.apply_nodes)
     result.assert_eval()
+
+
+@pytest.mark.parametrize(
+    "buffer_kind", ["alloc", "alloc_write", "empty_write", "alloc_view"]
+)
+def test_runtime_scan_buffers(buffer_kind):
+    delta = pt.scalar("delta")
+    out = scan(
+        lambda previous, delta: previous + delta,
+        outputs_info=pt.constant(0.0, dtype=delta.dtype),
+        non_sequences=[delta],
+        n_steps=4,
+        return_updates=False,
+    )
+    scan_node = out.owner.inputs[0].owner
+    if buffer_kind == "alloc_view":
+        buffer = pt.zeros((1, 5), dtype=delta.dtype).reshape((5,))
+    elif buffer_kind == "empty_write":
+        buffer = AllocEmpty(delta.dtype)(5)[:1].set(1.0)
+    else:
+        buffer = pt.zeros(5, dtype=delta.dtype)
+        if buffer_kind == "alloc_write":
+            buffer = buffer[:1].set(1.0)
+    inputs = list(scan_node.inputs)
+    inputs[1] = buffer
+    out = scan_node.op(*inputs)[1:]
+    result = RewriteTester(
+        [delta], [out], include=None, custom_rewrite=topo_alloc_constant_folding
+    )
+    result.assert_graph(out)
+    result.assert_eval(2.0)
 
 
 def test_scan_with_symbolic_initial_value():
