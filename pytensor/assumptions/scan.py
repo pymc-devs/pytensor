@@ -39,6 +39,16 @@ def _recurrent_init_fact(buffer_var, key, feature, buffer_fact):
 
 
 def scan_delegate(key, op, feature, fgraph, node, input_states):
+    """Infer *key* for a :class:`Scan`'s outer outputs, once per node and key."""
+    memo_key = (node, key)
+    out_states = feature.rule_memo.get(memo_key)
+    if out_states is None:
+        out_states = _infer_scan_outputs(key, op, feature, node, input_states)
+        feature.rule_memo[memo_key] = out_states
+    return out_states
+
+
+def _infer_scan_outputs(key, op, feature, node, input_states):
     """Infer *key* for a :class:`Scan`'s outer outputs from its inner graph.
 
     A sequence or non-sequence inner input takes, for any key registered with
@@ -90,21 +100,34 @@ def scan_delegate(key, op, feature, fgraph, node, input_states):
         if init_fact is not FactState.UNKNOWN
     }
 
-    def leaf_fact(inner_input, leaf_key):
-        if inner_input in recurrence_of:
-            outer_oidx = recurrence_of[inner_input]
-            if leaf_key is key and outer_oidx in seeded:
-                return init_facts[outer_oidx]
-            return FactState.UNKNOWN
-        if inner_input not in outer_input_of or leaf_key not in _SCAN_KEYS:
-            return FactState.UNKNOWN
-        state = feature.get(outer_input_of[inner_input], leaf_key)
-        if inner_input in inner_seqs and state is not FactState.TRUE:
-            return FactState.UNKNOWN
-        return state
+    def inner_inference_for(seeds):
+        def leaf_fact(inner_input, leaf_key):
+            if inner_input in recurrence_of:
+                outer_oidx = recurrence_of[inner_input]
+                if leaf_key == key and outer_oidx in seeds:
+                    return init_facts[outer_oidx]
+                return FactState.UNKNOWN
+            if inner_input not in outer_input_of or leaf_key not in _SCAN_KEYS:
+                return FactState.UNKNOWN
+            state = feature.get(outer_input_of[inner_input], leaf_key)
+            if inner_input in inner_seqs and state is not FactState.TRUE:
+                return FactState.UNKNOWN
+            return state
+
+        if seeds:
+            return AssumptionInference(op.fgraph, leaf_fact=leaf_fact)
+
+        # With no seeds the leaves do not depend on *key*, so every key shares one
+        # inference. Without that, nested Scans multiply the keys asked at each depth.
+        memo_key = (node, None)
+        inference = feature.rule_memo.get(memo_key)
+        if inference is None:
+            inference = AssumptionInference(op.fgraph, leaf_fact=leaf_fact)
+            feature.rule_memo[memo_key] = inference
+        return inference
 
     while True:
-        inner_inference = AssumptionInference(op.fgraph, leaf_fact=leaf_fact)
+        inner_inference = inner_inference_for(frozenset(seeded))
         broken = {
             outer_oidx
             for outer_oidx in seeded

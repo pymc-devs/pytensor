@@ -452,7 +452,8 @@ class AssumptionInference:
 
     Inference rules receive an instance of this class as their *feature*. Over a
     mutable graph it is the attached :class:`AssumptionFeature`, a subclass that
-    follows rewrites, so a rule may rely only on :meth:`get` and :meth:`check`.
+    follows rewrites, so a rule may rely only on :meth:`get`, :meth:`check` and
+    ``rule_memo``, a dict where a costly rule may keep results until the graph changes.
 
     Parameters
     ----------
@@ -464,7 +465,7 @@ class AssumptionInference:
         not change while this object is in use. Leaves are UNKNOWN when omitted.
     """
 
-    __slots__ = ("_leaf_fact", "_var_to_keys", "cache", "fgraph")
+    __slots__ = ("_leaf_fact", "_var_to_keys", "cache", "fgraph", "rule_memo")
 
     def __init__(
         self,
@@ -488,6 +489,7 @@ class AssumptionInference:
         self._leaf_fact = leaf_fact
         self.cache: dict[tuple[Any, AssumptionKey], FactState] = {}
         self._var_to_keys: dict[Any, set[AssumptionKey]] = {}
+        self.rule_memo: dict[Any, Any] = {}
 
     def get(self, var: Any, key: AssumptionKey) -> FactState:
         """Return the inferred :class:`FactState` for ``(var, key)``.
@@ -614,6 +616,7 @@ class AssumptionFeature(AssumptionInference, Feature):
     def on_detach(self, fgraph: Any) -> None:
         self.cache = {}
         self._var_to_keys = {}
+        self.rule_memo = {}
         self._stale_vars = set()
         self.fgraph = None
         del fgraph.assumption_feature
@@ -623,6 +626,7 @@ class AssumptionFeature(AssumptionInference, Feature):
         # UNKNOWN invalidation to the next get()/check() call.
         # CONFLICT is cached, not raised: the graph mutation has already landed,
         # so raising here corrupts the caller's view.
+        self.rule_memo.clear()
         for key in self._var_to_keys.get(old_var, ()):
             old_state = self.cache.get((old_var, key))
             if old_state is None or old_state is FactState.UNKNOWN:

@@ -4,11 +4,14 @@ import pytensor.tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
+    MATRIX_KEYS,
     POSITIVE_DEFINITE,
+    SYMMETRIC,
     UNIQUE_INDICES,
     UNIT_MAGNITUDE,
     FactState,
 )
+from pytensor.assumptions import scan as scan_assumptions
 from pytensor.assumptions.scan import push_assumptions_into_scan
 from pytensor.assumptions.specify import SpecifyAssumptions, assume
 from pytensor.graph.fg import FunctionGraph
@@ -276,6 +279,64 @@ def test_nested_scan_forwards_property():
     out = scan(body, sequences=[seq], return_updates=False)
     _, af = make_fgraph(out, inputs=[x])
     assert af.check(out, DIAGONAL)
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [(LOWER_TRIANGULAR, SYMMETRIC), (SYMMETRIC, LOWER_TRIANGULAR)],
+    ids=["broken-first", "kept-first"],
+)
+def test_keys_seeding_one_recurrence_do_not_share_inference(keys):
+    """Two keys that seed the same recurrence give different leaves, so one key's
+    inner inference must not answer the other, whichever is queried first."""
+    p0 = pt.matrix("p0", shape=(3, 3))
+    out = scan(
+        lambda prev: prev + prev.T,
+        outputs_info=[assume(p0, lower_triangular=True, symmetric=True)],
+        n_steps=5,
+        return_updates=False,
+    )
+    _, af = make_fgraph(out, inputs=[p0])
+
+    states = {key: af.get(out, key) for key in keys}
+    assert states == {
+        LOWER_TRIANGULAR: FactState.UNKNOWN,
+        SYMMETRIC: FactState.TRUE,
+    }
+
+
+def test_compile_cost_does_not_multiply_with_nesting(monkeypatch):
+    """Each Scan builds a bounded number of inner inferences, however deeply nested."""
+
+    def nested(depth, x):
+        if depth == 0:
+            return 2.0 * x
+        return scan(
+            lambda p, c: nested(depth - 1, p) @ c,
+            outputs_info=[x],
+            non_sequences=[x],
+            n_steps=2,
+            return_updates=False,
+        )[-1]
+
+    def inferences_built(depth):
+        built = []
+        original = scan_assumptions.AssumptionInference
+
+        def counting(*args, **kwargs):
+            built.append(1)
+            return original(*args, **kwargs)
+
+        x = pt.matrix("x", shape=(3, 3))
+        out = nested(depth, assume(x, diagonal=True))
+        _, af = make_fgraph(out, inputs=[x])
+        with monkeypatch.context() as patch:
+            patch.setattr(scan_assumptions, "AssumptionInference", counting)
+            for key in MATRIX_KEYS:
+                af.get(out, key)
+        return len(built)
+
+    assert inferences_built(4) <= 5 * inferences_built(2)
 
 
 def test_outer_assumption_pushed_into_scan_inner_graph():
