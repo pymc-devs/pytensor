@@ -202,31 +202,23 @@ import ``pytensor`` and print the config variable, as in:
 
     String value: either ``'numpy+floatX'`` or ``'custom'``
 
-    Default: ``'custom'``
+    Default: ``'numpy+floatX'``
 
     This specifies how data types are implicitly determined by PyTensor during the
     creation of constants or in the results of arithmetic operations.
 
-    The ``'custom'`` value corresponds to a set of custom rules originally used
-    in PyTensor.  These rules can be partially customized (e.g. see the in-code
-    help of ``pytensor.scalar.basic.NumpyAutocaster``).  This will be deprecated
+    The ``'numpy+floatX'`` setting mimics NumPy casting rules, except that
+    Python floats become ``config.floatX`` instead of ``float64`` (NumPy scalars
+    and arrays typed as ``float64`` are left alone). Unlike NumPy, a Python
+    scalar can still upcast an array: ``fvector() + 1.5`` is ``float64`` when
+    ``floatX`` is ``'float64'``.
+
+    The ``'custom'`` value corresponds to the rules originally used in PyTensor:
+    a Python number gets the narrowest dtype that represents it exactly, so
+    ``2`` becomes ``int8`` and ``2.5`` becomes ``float32``. These rules can be
+    partially customized (see the in-code help of
+    ``pytensor.scalar.basic.NumpyAutocaster``). This policy will be deprecated
     in the future.
-
-    The ``'numpy+floatX'`` setting attempts to mimic NumPy casting rules,
-    although it prefers to use ``float32`` numbers instead of ``float64`` when
-    ``config.floatX`` is set to ``'float32'`` and the associated data is not
-    explicitly typed as ``float64`` (e.g. regular Python floats).  Note that
-    ``'numpy+floatX'`` is not currently behaving exactly as planned (it is a
-    work-in-progress), and thus it should considered experimental.
-
-    At the moment it behaves differently from NumPy in the following situations:
-
-    * On mixed scalar and array operations, NumPy tries to prevent the scalar
-      from upcasting the array's type unless it is of a fundamentally
-      different type. PyTensor does not attempt to do the same at this point,
-      so users should be careful, since scalars may upcast arrays when they
-      otherwise wouldn't in NumPy. This behavior should change in the near
-      future.
 
 .. attribute:: mode
 
