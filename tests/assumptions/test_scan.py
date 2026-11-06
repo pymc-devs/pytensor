@@ -10,7 +10,7 @@ from pytensor.assumptions import (
     FactState,
 )
 from pytensor.assumptions.scan import push_assumptions_into_scan
-from pytensor.assumptions.specify import assume
+from pytensor.assumptions.specify import SpecifyAssumptions, assume
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import dfs_rewriter
 from pytensor.graph.rewriting.utils import rewrite_graph
@@ -18,6 +18,7 @@ from pytensor.graph.traversal import ancestors
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.push_out import scan_push_out_non_seq
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg import MatrixInverse
 from tests.assumptions.conftest import make_fgraph
 from tests.unittest_tools import RewriteTester
@@ -413,6 +414,42 @@ def test_non_sequence_assumption_on_invariant_body_removes_scan():
     inverse = MatrixInverse()(assume(X, positive_definite=True, symmetric=True))
     expected = pt.alloc(inverse, pt.constant(5), *inverse.shape)
     rewrite.assert_graph(rewrite_graph(expected, include=("canonicalize",)))
+
+
+def test_sequence_assumption_does_not_block_push_out():
+    """The assertion pushed onto a sequence must not stop an elementwise body from
+    being vectorized outside the loop."""
+    x = pt.tensor("x", shape=(4, 3, 3))
+    y = pt.matrix("y", shape=(3, 3))
+    out = scan(
+        lambda s, y: pt.exp(s) + y,
+        sequences=[assume(x, diagonal=True)],
+        non_sequences=[y],
+        return_updates=False,
+    )
+    rewrite = RewriteTester([x, y], [out], include="o3", exclude=["fusion", "inplace"])
+
+    rewrite.assert_graph(rewrite_graph(pt.exp(x) + y, include=("canonicalize",)))
+
+
+def test_hoisted_sequence_work_keeps_fact_for_inner_rewrites():
+    """``2 * s`` is hoisted out of the loop, and the new sequence takes the fact, so
+    ``inv`` of it can still specialize inside the loop body."""
+    Xs = pt.tensor("Xs", shape=(4, 3, 3))
+    y = pt.matrix("y", shape=(3, 3))
+    out = scan(
+        lambda s, y: pt.linalg.inv(2.0 * s) @ y,
+        sequences=[assume(Xs, positive_definite=True)],
+        non_sequences=[y],
+        return_updates=False,
+    )
+    rewritten = rewrite_graph(out, include=("fast_run",), exclude=("fusion", "inplace"))
+    [scan_var] = [v for v in ancestors([rewritten]) if isinstance(v.owner_op, Scan)]
+    inner_ops = [n.op for n in scan_var.owner_op.fgraph.toposort()]
+
+    assert not any(isinstance(op, Elemwise) for op in inner_ops)
+    [marker] = [op for op in inner_ops if isinstance(op, SpecifyAssumptions)]
+    assert dict(marker.assumptions)[POSITIVE_DEFINITE] is FactState.TRUE
 
 
 def test_congruence_recurrence_keeps_property_through_push_out():

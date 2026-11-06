@@ -11,7 +11,9 @@ from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.rewriting.push_out import (
+    scan_push_out_add,
     scan_push_out_non_seq,
+    scan_push_out_seq,
 )
 from pytensor.scan.utils import until
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -435,6 +437,33 @@ class TestPushOutNonSeqScan:
         A_value = np.eye(2) + 0.1
         rewrite.assert_eval(A_value, np.stack([A_value, A_value]))
 
+    @pytest.mark.parametrize(
+        "body, expected",
+        [
+            (
+                lambda s, B: pt.exp(assume(s, symmetric=True)) + B,
+                lambda x, A: pt.exp(x) + A,
+            ),
+            (lambda s, B: s + B.T, lambda x, A: x + A.T),
+            (
+                lambda s, B: assume(s, symmetric=True).T * B,
+                lambda x, A: x.transpose(0, 2, 1) * A,
+            ),
+        ],
+        ids=["marker", "non-sequence-transpose", "transposed-marker"],
+    )
+    def test_seq_pushout_sees_through_kept_nodes(self, body, expected):
+        """A marker or transpose left in the loop must not block vectorizing a body
+        that depends only on sequences. A marker is dropped, since its fact on a slice
+        need not hold for the stack."""
+        A = dmatrix("A")
+        x = pt.dtensor3("x", shape=(4, None, None))
+        out = scan(body, sequences=[x], non_sequences=[A], return_updates=False)
+        rewrite = utt.RewriteTester([x, A], [out], custom_rewrite=scan_push_out_seq)
+
+        rewrite.assert_graph(expected(x, A))
+        rewrite.assert_eval(np.ones((4, 2, 2)), np.eye(2))
+
     def test_dot_not_output(self):
         """
         Test the case where the vector input to the dot is not already an
@@ -643,6 +672,31 @@ class TestPushOutAddScan:
         vA = rng.uniform(size=(5, 5)).astype(config.floatX)
         vB = rng.uniform(size=(5, 5)).astype(config.floatX)
         utt.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
+
+    def test_sum_dot_sees_through_marker(self):
+        """A marker on a sequence must not hide it from the replacement of an
+        accumulated dot with a dot of the stacked sequences."""
+        A = pt.dtensor3("A")
+        B = pt.dtensor3("B")
+        init = dmatrix("init")
+        S = scan(
+            lambda x1, x2, u: u + dot(assume(x1, symmetric=True), x2),
+            sequences=[A, B],
+            outputs_info=[init],
+            return_updates=False,
+        )
+        result = utt.RewriteTester(
+            [A, B, init],
+            [S.owner.inputs[0][-1]],
+            include=None,
+            custom_rewrite=scan_push_out_add,
+        )
+
+        assert not any(isinstance(n.op, Scan) for n in result.rewr_fg.apply_nodes)
+        rng = np.random.default_rng(utt.fetch_seed())
+        result.assert_eval(
+            rng.uniform(size=(3, 2, 2)), rng.uniform(size=(3, 2, 2)), np.eye(2)
+        )
 
     def test_machine_translation(self):
         """

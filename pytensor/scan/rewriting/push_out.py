@@ -63,6 +63,12 @@ def _has_pushable_inputs(node, pushable_leaves, removed_nodes) -> bool:
     )
 
 
+def _strip_markers(x):
+    while isinstance(x.owner_op, TypeCastingOp):
+        x = x.owner.inputs[0]
+    return x
+
+
 @node_rewriter([Scan])
 def scan_push_out_non_seq(fgraph, node):
     r"""Push out the variables inside the `Scan` that depend only on non-sequences.
@@ -316,38 +322,34 @@ def scan_push_out_seq(fgraph, node):
     assert len(inner_non_seqs) == len(outer_non_seqs)
     assert len(inner_seqs) == len(outer_seqs)
 
+    pushable_leaves = inner_seqs_set | inner_non_seqs_set
+
+    def _outer_input_for(x):
+        # A marker is dropped: its fact on a slice need not hold for the stack, and a
+        # fact pushed in from the outer sequence is still on that sequence.
+        x = _strip_markers(x)
+        if x in inner_non_seqs_set:
+            return outer_non_seqs[inner_non_seqs_map[x]]
+        if x in inner_seqs_set:
+            return outer_seqs[inner_seqs_map[x]]
+        if x in to_replace_set:
+            return replace_with_out[to_replace_map[x]]
+        if isinstance(x, Constant):
+            return x
+        # A matrix transpose of a non-sequence, which stayed in the loop.
+        return x.owner.op(*[_outer_input_for(i) for i in x.owner.inputs])
+
+    def _comes_from_seqs(x):
+        x = _strip_markers(x)
+        return x in inner_seqs_set or x in to_replace_set
+
     for nd in local_fgraph_topo:
         if (
             nd not in to_remove_set
-            and all(
-                (x in inner_non_seqs_set)
-                or (x.owner in to_remove_set)
-                or isinstance(x, Constant)
-                or (x in inner_seqs_set)
-                for x in nd.inputs
-            )
+            and _has_pushable_inputs(nd, pushable_leaves, to_remove_set)
             and isinstance(nd.op, Elemwise)
         ):
-            outside_ins = []
-            depends_on_seqs = False
-
-            for x in nd.inputs:
-                if x in inner_non_seqs_set:
-                    _idx = inner_non_seqs_map[x]
-                    new_input = outer_non_seqs[_idx]
-                elif x in inner_seqs_set:
-                    new_input = outer_seqs[inner_seqs_map[x]]
-                    depends_on_seqs = True
-                elif x in to_replace_set:
-                    new_input = replace_with_out[to_replace_map[x]]
-                    depends_on_seqs = True
-                else:
-                    assert isinstance(x, Constant)
-                    new_input = x
-
-                outside_ins.append(new_input)
-
-            if not depends_on_seqs:
+            if not any(_comes_from_seqs(x) for x in nd.inputs):
                 # Removing this node from the inner graph of scan
                 # should be handled by the PushOutNonSeqScan
                 # optimization. The current optimization only tries
@@ -357,7 +359,7 @@ def scan_push_out_seq(fgraph, node):
 
             to_remove_set.add(nd)
 
-            nw_outer_node = nd.op.make_node(*outside_ins)
+            nw_outer_node = nd.op.make_node(*map(_outer_input_for, nd.inputs))
 
             # Step 2. Create variables for replacements
             for idx, y in enumerate(nd.outputs):
@@ -369,14 +371,10 @@ def scan_push_out_seq(fgraph, node):
         elif (
             nd not in to_remove_set
             and isinstance(nd.op, DimShuffle)
-            and (nd.inputs[0] in inner_seqs_set or nd.inputs[0].owner in to_remove_set)
+            and _comes_from_seqs(nd.inputs[0])
         ):
             to_remove_set.add(nd)
-            x = nd.inputs[0]
-            if x in inner_seqs_set:
-                outside_ins = outer_seqs[inner_seqs_map[x]]
-            elif x in to_replace_set:
-                outside_ins = replace_with_out[to_replace_map[x]]
+            outside_ins = _outer_input_for(nd.inputs[0])
             new_ord = (0,)
             for old_ord in nd.op.new_order:
                 if old_ord == "x":
@@ -466,7 +464,11 @@ def scan_push_out_seq(fgraph, node):
         replacements["remove"] = [node]
         return replacements
 
-    elif not to_keep_set and not op.info.as_while and not op.outer_mitmot(node.inputs):
+    elif (
+        all(_stays_in_loop(nd.op) for nd in existent_nodes)
+        and not op.info.as_while
+        and not op.outer_mitmot(node.inputs)
+    ):
         # Nothing in the inner graph should be kept.
         n_steps = node.inputs[0]
 
@@ -766,15 +768,15 @@ def scan_push_out_add(fgraph, node):
                     dot_input.owner.op, Dot
                 )
 
+                inner_dot_inputs = [_strip_markers(x) for x in dot_input.owner.inputs]
                 if (
-                    get_outer_ndim(dot_input.owner.inputs[0], args) == 3
-                    and get_outer_ndim(dot_input.owner.inputs[1], args) == 3
+                    get_outer_ndim(inner_dot_inputs[0], args) == 3
+                    and get_outer_ndim(inner_dot_inputs[1], args) == 3
                 ):
                     # The optimization can be be applied in this case.
 
                     # Move out of scan the two inputs to the Dot and
                     # perform a dot outside of scan on these two inputs
-                    inner_dot_inputs = nd.inputs[dot_in_idx].owner.inputs
                     (
                         outer_dot_inputs,
                         new_scan_args,
