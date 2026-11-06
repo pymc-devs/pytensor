@@ -8,8 +8,7 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
-from pytensor.link.numba.dispatch.linalg.solvers.triangular import _solve_triangular
+from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
@@ -527,19 +526,3 @@ def test_lapack_output_layouts():
             return_type = signature.return_type
             types = getattr(return_type, "types", (return_type,))
             assert "".join(array_type.layout for array_type in types) == expected, op
-
-
-@numba_njit(final_function=True)
-def _solve_triangular_jit(A, B, trans):
-    return _solve_triangular(A, B, trans, True, False, False)
-
-
-def test_solve_triangular_conjugate_transpose_of_row_major_b():
-    rng = np.random.default_rng(418)
-    a = np.tril(rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))) + 4 * np.eye(4)
-    b = rng.normal(size=(4, 3)) + 1j * rng.normal(size=(4, 3))
-    expected = scipy.linalg.solve_triangular(a, b, trans=2, lower=True)
-    np.testing.assert_allclose(_solve_triangular_jit(a, b, 2), expected)
-
-    b.flags.writeable = False
-    np.testing.assert_allclose(_solve_triangular_jit(a, b, 2), expected)

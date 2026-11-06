@@ -105,13 +105,12 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
         return _solve_triangular(
             a,
             b,
-            trans=0,  # transposing is handled explicitly on the graph, so we never use this argument
             lower=lower,
             unit_diagonal=unit_diagonal,
             overwrite_b=overwrite_b,
         )
 
-    cache_version = 5
+    cache_version = 6
     return solve_triangular, cache_version
 
 
