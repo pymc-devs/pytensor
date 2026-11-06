@@ -1,6 +1,7 @@
 import numpy as np
 from numba.core import types
-from numba.core.extending import overload
+from numba.core.extending import intrinsic, overload
+from numba.core.imputils import impl_ret_borrowed
 from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_blas, ensure_lapack
 from scipy import linalg
@@ -338,6 +339,21 @@ def numba_funcify_Expm(op, node, **kwargs):
     return expm, cache_version
 
 
+@intrinsic
+def _array_ctypes_at(typingctx, array, address):
+    """Adjust an array's ctypes pointer while retaining its memory owner."""
+    signature = types.ArrayCTypes(array)(array, address)
+
+    def codegen(context, builder, sig, args):
+        owner = context.make_array(sig.args[0])(context, builder, args[0])
+        pointer = context.make_helper(builder, sig.return_type)
+        pointer.data = builder.inttoptr(args[1], owner.data.type)
+        pointer.meminfo = owner.meminfo
+        return impl_ret_borrowed(context, builder, sig.return_type, pointer._getvalue())
+
+    return signature, codegen
+
+
 @numba_basic.numba_njit(inline="always")
 def _leading_dim(unit_stride, other_stride, unit_extent, other_extent, itemsize):
     """Leading dimension BLAS can walk the matrix with, or 0 when it cannot."""
@@ -554,87 +570,119 @@ def _gemm_impl(A, B, C):
             return out
 
         A, B, C = normalize(A, B, C)
-        A_work, A_trans, LDA = _blas_operand(A)
-        B_work, B_trans, LDB = _blas_operand(B)
-
-        # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
-        # swap places and each flag flips. A C with no unit-stride axis goes through
-        # a copy.
-        if output_layout == "F":
-            C_work = C
-            LDC = max(1, C.shape[0])
-            swap = False
-        elif output_layout == "C":
-            C_work = C
-            LDC = max(1, C.shape[1])
-            swap = True
-        else:
-            LDC = _column_major_ld(C)
-            if LDC:
-                C_work = C
-                swap = False
+        # General layouts can require signed vector strides. Prepare GEMV before
+        # GEMM's matrix-layout checks can pack the input or output vector.
+        if output_layout == "A" and (N == 1 or M == 1):
+            if N == 1:
+                matrix, trans, ld = _blas_operand(A)
+                rows, cols = (K, M) if trans else (M, K)
+                vector, x_stride = B, B.strides[0]
+                y_stride, y_length = C.strides[0], M
             else:
-                LDC = _row_major_ld(C)
+                matrix, trans, ld = _blas_operand(B)
+                rows, cols = (N, K) if trans else (K, N)
+                trans = not trans
+                vector, x_stride = A, A.strides[1]
+                y_stride, y_length = C.strides[1], N
+            C_work = C
+            if K != 1 and (x_stride == 0 or x_stride % A.itemsize):
+                vector = vector.copy()
+                x_stride = A.itemsize
+            if y_length != 1 and (y_stride == 0 or y_stride % A.itemsize):
+                C_work = np.empty(C.shape, dtype=dtype)
+                y_stride = A.itemsize
+            # BLAS expects the lowest address, then applies the signed step.
+            x_address = np.intp(vector.ctypes.data)
+            y_address = np.intp(C_work.ctypes.data)
+            if x_stride < 0:
+                x_address += (K - 1) * x_stride
+            if y_stride < 0:
+                y_address += (y_length - 1) * y_stride
+            x_ptr = _array_ctypes_at(vector, x_address)
+            y_ptr = _array_ctypes_at(C_work, y_address)
+            incx = np.int32(1 if K == 1 else x_stride // A.itemsize)
+            incy = np.int32(1 if y_length == 1 else y_stride // A.itemsize)
+        else:
+            A_work, A_trans, LDA = _blas_operand(A)
+            B_work, B_trans, LDB = _blas_operand(B)
+
+            # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
+            # swap places and each flag flips. A C with no unit-stride axis goes through
+            # a copy.
+            if output_layout == "F":
+                C_work = C
+                LDC = max(1, C.shape[0])
+                swap = False
+            elif output_layout == "C":
+                C_work = C
+                LDC = max(1, C.shape[1])
                 swap = True
+            else:
+                LDC = _column_major_ld(C)
                 if LDC:
                     C_work = C
+                    swap = False
                 else:
-                    C_work = np.empty(C.shape, dtype=dtype)
-                    LDC = max(1, C.shape[1])
+                    LDC = _row_major_ld(C)
+                    swap = True
+                    if LDC:
+                        C_work = C
+                    else:
+                        C_work = np.empty(C.shape, dtype=dtype)
+                        LDC = max(1, C.shape[1])
 
-        if swap:
-            A_work, B_work = B_work, A_work
-            A_trans, B_trans = not B_trans, not A_trans
-            LDA, LDB = LDB, LDA
-            M, N = N, M
+            if swap:
+                A_work, B_work = B_work, A_work
+                A_trans, B_trans = not B_trans, not A_trans
+                LDA, LDB = LDB, LDA
+                M, N = N, M
 
-        # gemv is faster than gemm for a single column or row of C. The operands are
-        # already in BLAS's column-major frame, so it reads the same buffers.
-        if N == 1 or M == 1:
-            if zero_y_first:
-                C_work[:] = 0
+            if N != 1 and M != 1:
+                numba_gemm(
+                    val_to_int_ptr(ord("T") if A_trans else ord("N")),
+                    val_to_int_ptr(ord("T") if B_trans else ord("N")),
+                    val_to_int_ptr(M),
+                    val_to_int_ptr(N),
+                    val_to_int_ptr(K),
+                    scalar_ptr(1.0),
+                    A_work.ctypes,
+                    val_to_int_ptr(LDA),
+                    B_work.ctypes,
+                    val_to_int_ptr(LDB),
+                    scalar_ptr(0.0),
+                    C_work.ctypes,
+                    val_to_int_ptr(LDC),
+                )
+                if output_layout == "A" and C_work is not C:
+                    _copyto(C, C_work)
+                return out
+
+            # Only known-contiguous vectors reach GEMV through this path.
             if N == 1:
-                # C = op(A) @ b, where b is the only column of op(B)
-                TRANS, matrix, LD, vector = A_trans, A_work, LDA, B_work
-                ROWS, COLS = (K, M) if A_trans else (M, K)
-                INCX = LDB if B_trans else 1
-                INCY = 1
+                trans, matrix, ld, vector = A_trans, A_work, LDA, B_work
+                rows, cols = (K, M) if A_trans else (M, K)
             else:
-                # C^T = op(B)^T @ a^T, where a is the only row of op(A)
-                TRANS, matrix, LD, vector = not B_trans, B_work, LDB, A_work
-                ROWS, COLS = (N, K) if B_trans else (K, N)
-                INCX = 1 if A_trans else LDA
-                INCY = LDC
-            numba_gemv(
-                val_to_int_ptr(ord("T") if TRANS else ord("N")),
-                val_to_int_ptr(ROWS),
-                val_to_int_ptr(COLS),
-                scalar_ptr(1.0),
-                matrix.ctypes,
-                val_to_int_ptr(LD),
-                vector.ctypes,
-                val_to_int_ptr(INCX),
-                scalar_ptr(0.0),
-                C_work.ctypes,
-                val_to_int_ptr(INCY),
-            )
-        else:
-            numba_gemm(
-                val_to_int_ptr(ord("T") if A_trans else ord("N")),
-                val_to_int_ptr(ord("T") if B_trans else ord("N")),
-                val_to_int_ptr(M),
-                val_to_int_ptr(N),
-                val_to_int_ptr(K),
-                scalar_ptr(1.0),
-                A_work.ctypes,
-                val_to_int_ptr(LDA),
-                B_work.ctypes,
-                val_to_int_ptr(LDB),
-                scalar_ptr(0.0),
-                C_work.ctypes,
-                val_to_int_ptr(LDC),
-            )
+                trans, matrix, ld, vector = not B_trans, B_work, LDB, A_work
+                rows, cols = (N, K) if B_trans else (K, N)
+            x_ptr = vector.ctypes
+            y_ptr = C_work.ctypes
+            incx = incy = np.int32(1)
 
+        if zero_y_first:
+            C_work[:] = 0
+        numba_gemv(
+            val_to_int_ptr(ord("T") if trans else ord("N")),
+            val_to_int_ptr(rows),
+            val_to_int_ptr(cols),
+            scalar_ptr(1.0),
+            matrix.ctypes,
+            val_to_int_ptr(ld),
+            x_ptr,
+            val_to_int_ptr(incx),
+            scalar_ptr(0.0),
+            y_ptr,
+            val_to_int_ptr(incy),
+        )
         if output_layout == "A" and C_work is not C:
             _copyto(C, C_work)
         return out

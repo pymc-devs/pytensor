@@ -1554,7 +1554,7 @@ def numba_funcify_Dot(op, node, **kwargs):
         return _gemm(x, y, out)
 
     # Bump whenever `_gemm` changes, because its source is not part of this key.
-    cache_version = 4
+    cache_version = 5
 
     if out_dtype == numba_dot_dtype:
         # The product writes straight into the pre-allocated batch output slice.
@@ -1589,5 +1589,5 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
 
     batched_dot.handles_out = True
     # Bump whenever `_gemm` changes, because its source is not part of this key.
-    cache_version = 3
+    cache_version = 4
     return batched_dot, cache_version

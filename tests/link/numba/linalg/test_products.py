@@ -4,11 +4,9 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import In, config, function
 from pytensor.link.numba.dispatch.basic import numba_njit
-from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
 from pytensor.link.numba.dispatch.linalg.products import (
     _blas_operand,
     _gemm,
-    _gemm_impl,
     _normalize_gemm_strides,
 )
 from pytensor.tensor.linalg.products import Expm, expm
@@ -207,32 +205,23 @@ def test_gemm_vector_strides(dtype, transpose):
     )
 
 
-def test_gemv_keeps_operand_buffers(monkeypatch):
-    calls = []
-    gemv = _BLAS.numba_xgemv(numba.float64)
+def test_gemv_keeps_operand_buffers():
+    from numba.core.runtime import _nrt_python, rtsys
 
-    @numba_njit
-    def gemv_spy(trans, m, n, alpha, A, lda, x, incx, beta, y, incy):
-        A_ptr, x_ptr, y_ptr = A.data, x.data, y.data
-        x_step, y_step = incx[0], incy[0]
-        with numba.objmode():
-            calls.append((A_ptr, x_ptr, y_ptr, x_step, y_step))
-        gemv(trans, m, n, alpha, A, lda, x, incx, beta, y, incy)
+    @numba_njit(final_function=True)
+    def repeat(A, x, y, count):
+        for _ in range(count):
+            _gemm(A, x[:, None], y[:, None])
 
-    monkeypatch.setattr(_BLAS, "numba_xgemv", classmethod(lambda cls, dtype: gemv_spy))
-    kernels = {}
+    def allocations(A, x, y, count):
+        before = rtsys.get_allocation_stats().alloc
+        repeat(A, x, y, count)
+        return rtsys.get_allocation_stats().alloc - before
 
-    def call(A, x, y):
-        args = A, x[:, None], y[:, None]
-        signature = tuple(map(numba.typeof, args))
-        if signature not in kernels:
-            # Exercise the real implementation with the spy, independently of
-            # overload specializations already compiled by other tests.
-            kernels[signature] = numba_njit(final_function=True)(_gemm_impl(*signature))
-        calls.clear()
-        kernels[signature](*args)
-        [buffers] = calls
-        return buffers
+    def check(A, x, y):
+        repeat(A, x, y, 1)
+        # Unboxing inputs has a fixed cost; another native GEMV must add none.
+        assert allocations(A, x, y, 2) == allocations(A, x, y, 1)
 
     matrix = rng.normal(size=(4, 3))
     x_storage = rng.normal(size=6)
@@ -243,25 +232,17 @@ def test_gemv_keeps_operand_buffers(monkeypatch):
         np.repeat(matrix, 2, axis=0)[::2],
         np.asfortranarray(np.repeat(matrix, 2, axis=1))[:, ::2],
     ]
-    for A in layouts:
-        for row_step, col_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
-            view = A[::row_step, ::col_step]
-            # Paired matrix/vector reversals require no copies of any operand.
-            x = x_storage[:: 2 * col_step]
-            y = y_storage[:: 2 * row_step]
-            A_ptr, x_ptr, y_ptr, incx, incy = call(view, x, y)
-            for pointer, original in [(A_ptr, view), (x_ptr, x), (y_ptr, y)]:
-                assert pointer == np.lib.array_utils.byte_bounds(original)[0]
-            assert abs(incx) == abs(incy) == 2
-
-        # A contiguous output can require a small writeback buffer, but the
-        # reversed matrix must still be read in place.
-        view = A[::-1]
-        x = rng.normal(size=3)
-        y = np.empty(4)
-        A_ptr, x_ptr, *_ = call(view, x, y)
-        assert A_ptr == np.lib.array_utils.byte_bounds(view)[0]
-        assert x_ptr == x.ctypes.data
+    stats_enabled = _nrt_python.memsys_stats_enabled()
+    _nrt_python.memsys_enable_stats()
+    try:
+        for A in layouts:
+            for row_step, col_step in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
+                check(A[::row_step, ::col_step], x_storage[::-2], y_storage[::-2])
+            check(A[::-1], x_storage[::2], np.empty(4))
+            check(A, x_storage[::-2], np.empty(4))
+    finally:
+        if not stats_enabled:
+            _nrt_python.memsys_disable_stats()
 
 
 @pytest.mark.parametrize("order", ["C", "F"])
