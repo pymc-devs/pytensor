@@ -129,5 +129,18 @@ def mlx_funcify_LogSoftmax(op, **kwargs):
 
 @mlx_funcify.register(Elemwise)
 def mlx_funcify_Elemwise(op, node, **kwargs):
-    scalar_op = op.scalar_op
-    return mlx_funcify(scalar_op, node=node, **kwargs)
+    base_fn = mlx_funcify(op.scalar_op, node=node, **kwargs)
+    if len(node.inputs) < 2:
+        return base_fn
+
+    def elemwise(*inputs):
+        # Other backends reject a runtime size-1 dim that is not statically
+        # broadcastable; match them rather than silently broadcasting here. Bool
+        # constants arrive as Python scalars, which have no shape to check
+        Elemwise._check_runtime_broadcast(
+            node,
+            tuple(x if isinstance(x, mx.array) else np.asarray(x) for x in inputs),
+        )
+        return base_fn(*inputs)
+
+    return elemwise

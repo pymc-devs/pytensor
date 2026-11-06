@@ -4,7 +4,7 @@ from pytensor.graph.rewriting.basic import dfs_rewriter, node_rewriter
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
 from pytensor.tensor.variable import TensorVariable
 
@@ -36,6 +36,10 @@ def boolean_indexing_set_or_inc(fgraph, node):
     if not cond.type.dtype == "bool":
         return
 
+    # `where` aligns the mask with the trailing axes of `x`, where indexing aligns it
+    # with the leading ones, so a mask that covers fewer axes is padded on the right
+    cond = shape_padright(cond, x.type.ndim - cond.type.ndim)
+
     if op.set_instead_of_inc:
         out = pt.where(cond, y, x)
         return out.owner.outputs
@@ -48,7 +52,10 @@ optdb.register(
     "jax_boolean_indexing_set_or_inc",
     dfs_rewriter(boolean_indexing_set_or_inc),
     "jax",
-    position=100,
+    "mlx",
+    # Must run before `specialize`: `bool_idx_to_nonzero` lives there and rewrites
+    # the mask into integer indices, leaving nothing for this to match.
+    position=1.95,
 )
 
 
@@ -89,6 +96,9 @@ def boolean_indexing_sum(fgraph, node):
     if not cond.type.dtype == "bool":
         return
 
+    # Padded for the same reason as in `boolean_indexing_set_or_inc`
+    cond = shape_padright(cond, x.type.ndim - cond.type.ndim)
+
     # Output must be a scalar, since pure boolean indexing returns a vector
     # No need to worry about axis
     out = pt.sum(pt.where(cond, x, 0))
@@ -96,7 +106,12 @@ def boolean_indexing_sum(fgraph, node):
 
 
 optdb.register(
-    "jax_boolean_indexing_sum", dfs_rewriter(boolean_indexing_sum), "jax", position=100
+    "jax_boolean_indexing_sum",
+    dfs_rewriter(boolean_indexing_sum),
+    "jax",
+    "mlx",
+    # Before `specialize`, for the same reason as `boolean_indexing_set_or_inc`.
+    position=1.95,
 )
 
 
