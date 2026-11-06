@@ -3,7 +3,7 @@
 from textwrap import indent
 
 from pytensor.gradient import disconnected_type
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
@@ -141,8 +141,8 @@ class CheckAndRaise(COp):
         return [input_shapes[0]]
 
     def do_constant_folding(self, fgraph, node):
-        # Only constant-fold if the Assert does not fail
-        return all((isinstance(c, Constant) and bool(c.data)) for c in node.inputs[1:])
+        # Keep failures at runtime; local_remove_useless_assert removes true conditions.
+        return False
 
 
 class Assert(CheckAndRaise):

@@ -1486,27 +1486,29 @@ class TestExtractDiagLiftPass:
             else:
                 offset = -offset
                 A = A[..., rows[offset:], cols[:-offset]].set(value)
-        # Partial write along offset 3
-        A = A[..., rows[1:-3], cols[4:]].set(np.pi)
+        # Keep the partial write symbolic so constant folding cannot remove it.
+        partial_value = pt.scalar("partial_value", dtype=A.dtype)
+        A = A[..., rows[1:-3], cols[4:]].set(partial_value)
 
         read_offsets = [-2, -1, 0, 1, 2, 3]
         outs = [
             A.diagonal(offset=offset, axis1=-2, axis2=-1) for offset in read_offsets
         ]
 
-        f_on = function([], outs)
+        f_on = function([partial_value], outs)
         f_off = function(
-            [],
+            [partial_value],
             outs,
             mode=get_default_mode().excluding("extract_diag_lift_pass"),
         )
 
-        # The partial-coverage read at offset=3 keeps exactly one scatter write of pi.
+        # The partial-coverage read at offset=3 keeps exactly one scatter write.
         on_topo = f_on.maker.fgraph.toposort()
         n_writes = sum(isinstance(n.op, AdvancedIncSubtensor) for n in on_topo)
         assert n_writes == 1
 
-        for got, ref in zip(f_on(), f_off(), strict=True):
+        value = np.asarray(np.pi, dtype=partial_value.dtype)
+        for got, ref in zip(f_on(value), f_off(value), strict=True):
             np.testing.assert_allclose(got, ref, equal_nan=True)
 
 

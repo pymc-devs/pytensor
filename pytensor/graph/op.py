@@ -510,12 +510,13 @@ class Op(MetaObject):
         """
 
     def do_constant_folding(self, fgraph: "FunctionGraph", node: Apply) -> bool:
-        """Determine whether constant folding should be performed for the given node.
+        """Determine whether generic constant folding may evaluate the given node.
 
-        This allows each `Op` to determine if it wants to be constant
-        folded when all its inputs are constant. This allows it to choose where
-        it puts its memory/speed trade-off. Also, it could make things faster
-        as constants can't be used for in-place operations (see ``*IncSubtensor``).
+        Return ``False`` to opt out when evaluating the Op at compile time is
+        inappropriate. Graph-dependent decisions about rewrite ordering,
+        consumers, and inplace opportunities belong in specialized rewrites.
+        Such rewrites can use unconditional constant folding after deciding
+        that materializing a node is worthwhile.
 
         Parameters
         ----------
