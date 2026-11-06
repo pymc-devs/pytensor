@@ -8,6 +8,7 @@ import pytensor
 import pytensor.scalar as ps
 from pytensor import shared
 from pytensor.compile import optdb
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import get_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
@@ -167,6 +168,24 @@ def test_softmax_graph():
         return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])
+
+
+def test_logsumexp_gradient_reuses_exponential():
+    x = matrix("x", shape=(2, 3))
+    value = logsumexp(x, axis=1)
+    grad = pytensor.grad(value.sum(), x)
+    out = [value, grad]
+
+    # Keep tensor expressions unfused and non-inplace for structural assertions.
+    result = RewriteTester(
+        [x],
+        out,
+        include="o3",
+        exclude=["composite_elemwise_fusion"],
+    )
+    nodes = result.rewr_fg.apply_nodes
+    assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
+    assert sum(node.op == exp for node in nodes) == 1
 
 
 @pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])

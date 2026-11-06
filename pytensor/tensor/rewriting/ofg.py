@@ -6,12 +6,11 @@ from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.elemwise import fuse_seqopt
 from pytensor.tensor.special import (
     LogAddExp,
-    LogSoftmax,
     LogSumExp,
-    Softmax,
     XLog1PY,
     XLogY,
 )
+from pytensor.tensor.symbolic import FusibleSymbolicOp, FusibleSymbolicOpDerivative
 
 
 @register_specialize("inline_ofg")
@@ -43,18 +42,18 @@ def late_inline_OpFromGraph(fgraph, node):
     return inline_ofg_node(node)
 
 
-@node_rewriter([Softmax, LogSoftmax, LogSumExp, LogAddExp, XLogY, XLog1PY])
+@node_rewriter([FusibleSymbolicOp, FusibleSymbolicOpDerivative])
 def inline_symbolic_for_fusion(fgraph, node):
-    """Inline `SymbolicOp`s so their bodies can fuse.
+    """Inline symbolic forward and derivative graphs so their bodies can fuse.
 
     The inner graph is otherwise compiled on its own, making the op a fusion barrier
-    both inside and across its boundary. Ops are listed explicitly, as some are worth
-    keeping opaque anyway (`KroneckerProduct` is: its body is one broadcasting `mul`
-    behind a `reshape`). Backends that dispatch these ops directly (JAX, PyTorch and MLX
-    have their own `Softmax`) exclude the whole fusion pass, so they keep them whole.
+    both inside and across its boundary. This pass only inlines `FusibleSymbolicOp`
+    and its generated derivatives; other ops may be inlined by separate rewrites.
+    Backends that dispatch these ops directly (JAX, PyTorch and MLX have their own
+    `Softmax`) exclude the whole fusion pass, so they keep them whole.
 
-    Ops that `late_inline_OpFromGraph` already inlines at specialize are listed here
-    too, since fusion also runs in modes that skip specialize.
+    Some opted-in ops are already inlined by `late_inline_OpFromGraph` at specialize;
+    this pass also handles modes that skip specialize.
     """
     return inline_ofg_node(node)
 

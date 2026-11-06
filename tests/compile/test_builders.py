@@ -14,6 +14,7 @@ from pytensor.gradient import (
     DisconnectedType,
     disconnected_type,
     grad,
+    pullback,
     pushforward,
     verify_grad,
 )
@@ -147,6 +148,23 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         yv = np.ones((2, 2), dtype=config.floatX) * 3
         zv = np.ones((2, 2), dtype=config.floatX) * 5
         np.testing.assert_array_almost_equal(6.0, fn(xv, yv, zv), 4)
+
+    def test_derivative_op_type(self):
+        class CustomOpFromGraph(OpFromGraph):
+            @property
+            def derivative_op_type(self):
+                return type(self)
+
+        x, tangent = pt.scalars("x", "tangent")
+        y = CustomOpFromGraph([x], [x**2])(x)
+
+        backward = pullback(y, x, tangent)
+        forward = pushforward(y, x, tangent, use_op_pushforward=True)
+        assert isinstance(backward.owner_op, CustomOpFromGraph)
+        assert isinstance(forward.owner_op, CustomOpFromGraph)
+
+        f = function([x, tangent], [backward, forward])
+        np.testing.assert_allclose(f(3.0, 2.0), [12.0, 12.0])
 
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]

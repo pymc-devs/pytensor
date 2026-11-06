@@ -296,6 +296,32 @@ def test_logsumexp_logaddexp_stable_grad(mode):
             np.testing.assert_allclose(f(inp, 2.0), 2.0 * scipy_softmax(inp))
 
 
+@pytest.mark.parametrize("mode", ["NUMBA", "CVM"])
+@pytest.mark.xfail(raises=AssertionError, reason="unknown nan edge case")
+def test_logaddexp_second_grad_inf(mode):
+    """The second derivative should approach zero as the other input goes to +inf.
+
+    Applying local_neg_to_mul, local_mul_switch_sink and local_div_switch_sink
+    to a fixed point on the derivative's inner graph before fusion inlining fixes
+    this case. Negation normalization exposes switches to the sinking rewrites,
+    which move invalid arithmetic inside zero-valued switch guards, avoiding
+    0 * inf -> NaN. It is unclear whether the extra rewriting of every derivative
+    graph is worth supporting this limiting case, where the output is already +inf.
+    """
+    if mode == "NUMBA":
+        pytest.importorskip("numba")
+
+    x, y = vectors("x", "y")
+    first_grad = grad(logaddexp(x, y).sum(), x)
+    second_grad = grad(first_grad.sum(), x)
+    f = function([x, y], second_grad, mode=mode)
+
+    np.testing.assert_allclose(
+        f(np.array([0.0, 1.0]), np.array([np.inf, 0.0])),
+        [0.0, np.e / (1 + np.e) ** 2],
+    )
+
+
 def test_poch():
     _z, _m = vectors("z", "m")
     actual_fn = function([_z, _m], poch(_z, _m))
