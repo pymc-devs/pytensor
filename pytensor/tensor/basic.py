@@ -1186,7 +1186,7 @@ def tril(m, k=0):
             [55, 56, 57, 58,  0]]])
 
     """
-    return m * tri(*m.shape[-2:], k=k, dtype=m.dtype)
+    return m * tri(*tuple(m.shape)[-2:], k=k, dtype=m.dtype)
 
 
 def triu(m, k=0):
@@ -1229,7 +1229,9 @@ def triu(m, k=0):
             [ 0,  0,  0, 58, 59]]])
 
     """
-    return m * (constant(1, dtype=m.dtype) - tri(*m.shape[-2:], k=k - 1, dtype=m.dtype))
+    return m * (
+        constant(1, dtype=m.dtype) - tri(*tuple(m.shape)[-2:], k=k - 1, dtype=m.dtype)
+    )
 
 
 def tril_indices(
@@ -3155,18 +3157,19 @@ def tile(
 class ARange(COp):
     """Create an array containing evenly spaced values within a given interval.
 
-    Parameters and behaviour are the same as numpy.arange().
+    Parameters and behavior are the same as numpy.arange().
 
     """
 
     # TODO: Arange should work with scalars as inputs, not arrays
     __props__ = ("dtype",)
+    _output_type_depends_on_input_value = True
 
     def __init__(self, dtype):
         self.dtype = np.dtype(dtype).name
 
     def make_node(self, start, stop, step):
-        from math import ceil
+        from math import ceil, isfinite
 
         start, stop, step = map(as_tensor_variable, (start, stop, step))
 
@@ -3174,18 +3177,67 @@ class ARange(COp):
         assert stop.ndim == 0
         assert step.ndim == 0
 
-        # if it is possible to directly determine the shape i.e static shape is present, we find it.
-        if (
-            isinstance(start, TensorConstant)
-            and isinstance(stop, TensorConstant)
-            and isinstance(step, TensorConstant)
-        ):
-            length = max(
-                ceil((float(stop.data) - float(start.data)) / float(step.data)), 0
-            )
-            shape = (length,)
-        else:
+        def static_dim(var):
+            """Return a constant's value or a static dim from ``Shape``, else None."""
+            owner = var.owner
+            if owner is None:
+                return var.data if isinstance(var, Constant) else None
+            op = owner.op
+            if isinstance(op, Shape_i):
+                dim = owner.inputs[0].type.shape[op.i]
+            elif len(owner.inputs) == 2 and isinstance(owner.inputs[0].owner_op, Shape):
+                from pytensor.tensor.subtensor import Subtensor
+
+                shape_var, index = owner.inputs
+                if not (
+                    isinstance(op, Subtensor)
+                    and len(op.idx_list) == 1
+                    and not isinstance(op.idx_list[0], slice)
+                    and isinstance(index, Constant)
+                ):
+                    return None
+                dim = shape_var.owner.inputs[0].type.shape[int(index.data)]
+            else:
+                return None
+            # Static dims are Python ints. Make them int64, the dtype of ``Shape``, so
+            # arithmetic with narrow constants promotes as it does at runtime.
+            return None if dim is None else np.int64(dim)
+
+        def static_bound(var):
+            """Return `static_dim` of `var`, or of one level of `Elemwise` on it."""
+            # One level covers the ``M - k`` that ``tri`` builds. Deeper graphs would
+            # cost more on this hot path than they are worth.
+            op = var.owner_op
+            if not isinstance(op, Elemwise):
+                return static_dim(var)
+            values = []
+            for inp in var.owner.inputs:
+                value = static_dim(inp)
+                if value is None:
+                    return None
+                values.append(value)
+            if not isinstance(op.scalar_op, _scalar_constant_value_elemwise_ops):
+                return None
+            value = op.scalar_op.impl(*values)
+            return value if isfinite(value) else None
+
+        start_value = (
+            start.data if isinstance(start, TensorConstant) else static_bound(start)
+        )
+        stop_value = (
+            stop.data if isinstance(stop, TensorConstant) else static_bound(stop)
+        )
+        step_value = (
+            step.data if isinstance(step, TensorConstant) else static_bound(step)
+        )
+
+        if start_value is None or stop_value is None or step_value is None:
             shape = (None,)
+        elif (step_float := float(step_value)) == 0:
+            shape = (None,)
+        else:
+            length = max(ceil((float(stop_value) - float(start_value)) / step_float), 0)
+            shape = (length,)
 
         inputs = [start, stop, step]
         outputs = [tensor(dtype=self.dtype, shape=shape)]
