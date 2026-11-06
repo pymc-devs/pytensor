@@ -557,6 +557,11 @@ class OpFromGraph(HasInnerFunction, Op):
             )
         return outputs
 
+    @property
+    def derivative_op_type(self):
+        """Type used to wrap automatically constructed derivative graphs."""
+        return OpFromGraph
+
     def _build_and_cache_lop_op(
         self, disconnected_output_grads: tuple[bool, ...]
     ) -> Callable:
@@ -657,7 +662,7 @@ class OpFromGraph(HasInnerFunction, Op):
             for inp_grad in input_grads
             if not isinstance(inp_grad.type, DisconnectedType | NullType)
         ]
-        lop_op = OpFromGraph(
+        lop_op = self.derivative_op_type(
             inputs=inner_inputs + all_inner_outputs + connected_output_grads,
             outputs=connected_input_grads,
             inline=self.is_inline,
@@ -751,7 +756,7 @@ class OpFromGraph(HasInnerFunction, Op):
             for out_grad in output_grads
             if not isinstance(out_grad.type, DisconnectedType | NullType)
         ]
-        rop_op = OpFromGraph(
+        rop_op = self.derivative_op_type(
             inputs=inner_inputs + eval_points,
             outputs=filtered_output_grads,
             inline=self.is_inline,

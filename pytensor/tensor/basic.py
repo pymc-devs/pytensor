@@ -3901,7 +3901,10 @@ def trace(a, offset=0, axis1=0, axis2=1):
 
 
 class AllocDiag(SymbolicOp):
-    """Allocate a diagonal matrix from a vector."""
+    """Allocate a diagonal matrix from a vector.
+
+    Inlined by `late_inline_OpFromGraph` during the specialization pass.
+    """
 
     __props__ = ("axis1", "axis2", "offset")
 
