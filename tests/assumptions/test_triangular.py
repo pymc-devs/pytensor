@@ -234,3 +234,19 @@ def test_lu_solve_factor_is_unknown_triangular():
     _, af = make_fgraph(pt.linalg.lu_solve((lu, pivots), b))
     assert af.get(lu, LOWER_TRIANGULAR) == FactState.UNKNOWN
     assert af.get(lu, UPPER_TRIANGULAR) == FactState.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "key, assumption",
+    [
+        (LOWER_TRIANGULAR, {"lower_triangular": True}),
+        (UPPER_TRIANGULAR, {"upper_triangular": True}),
+    ],
+    ids=["lower", "upper"],
+)
+def test_switch_of_triangular_branches(key, assumption):
+    x = assume(pt.dmatrix("x"), **assumption)
+    y = pt.switch(pt.matrix("condition", dtype="bool"), x, 0.0)
+
+    _, af = make_fgraph(y)
+    assert af.check(y, key)
