@@ -1901,6 +1901,40 @@ def local_sum_of_neg_to_neg_of_sum(fgraph, node):
         return [ret]
 
 
+@register_canonicalize("nan_unsafe")
+@register_stabilize("nan_unsafe")
+@node_rewriter([Sum])
+def local_sum_of_diagonal(fgraph, node):
+    """Rewrite a sum over the core axes of a diagonal matrix to read only its diagonal.
+
+    sum(D, axis=-1) -> diagonal(D)
+    sum(D, axis=-2) -> diagonal(D)
+    sum(D, axis=(-2, -1)) -> sum(diagonal(D), axis=-1)
+
+    Any batch axes in the reduction are summed over `diagonal(D)` directly.
+    """
+    [matrix] = node.inputs
+    ndim = matrix.type.ndim
+    if ndim < 2:
+        return None
+
+    reduced_axes = set(range(ndim) if node.op.axis is None else node.op.axis)
+    core_axes = reduced_axes & {ndim - 2, ndim - 1}
+    if not core_axes or not check_assumption(fgraph, matrix, DIAGONAL):
+        return None
+
+    new_out = diagonal(matrix, axis1=-2, axis2=-1)
+    axes_to_sum = reduced_axes - core_axes
+    if len(core_axes) == 2:
+        axes_to_sum.add(ndim - 2)
+    if axes_to_sum:
+        new_out = new_out.sum(axis=tuple(axes_to_sum))
+    if new_out.dtype != node.out.dtype:
+        new_out = cast(new_out, dtype=node.out.dtype)
+    copy_stack_trace(node.out, new_out)
+    return [new_out]
+
+
 @register_specialize
 @node_rewriter([sub])
 def local_elemwise_sub_zeros(fgraph, node):
