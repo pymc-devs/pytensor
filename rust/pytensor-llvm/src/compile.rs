@@ -103,12 +103,13 @@ pub fn salt(opts: &Options) -> String {
     let (mut ma, mut mi, mut pa) = (0u32, 0u32, 0u32);
     unsafe { llvm_sys::core::LLVMGetVersion(&mut ma, &mut mi, &mut pa) };
     format!(
-        "v{CODEGEN_VERSION}|{}|llvm{ma}.{mi}.{pa}|{}|{}|O{}|veclib{}",
+        "v{CODEGEN_VERSION}|{}|llvm{ma}.{mi}.{pa}|{}|{}|O{}|veclib{}|fp{}",
         env!("CARGO_PKG_VERSION"),
         TargetMachine::get_host_cpu_name().to_string(),
         TargetMachine::get_host_cpu_features().to_string(),
         opts.opt_level,
         veclib_enabled(),
+        crate::perf::enabled(),
     )
 }
 
@@ -133,6 +134,7 @@ pub fn compile_one(name: &str, spec: &KernelSpec, opts: &Options) -> Result<Vec<
     cg.module.set_triple(&tm.get_triple());
     cg.module.set_data_layout(&tm.get_target_data().get_data_layout());
     cg.gen_kernel(name, spec)?;
+    crate::perf::add_frame_pointers(&cg.module);
     cg.module.verify().map_err(|e| format!("invalid IR for {}: {}", spec.describe(), e))?;
     let pbo = PassBuilderOptions::create();
     pbo.set_loop_vectorization(true);
@@ -215,7 +217,7 @@ pub fn get_kernels(specs: &[KernelSpec], opts: &Options) -> Result<(Vec<usize>, 
         } else {
             stats.n_disk_cache += 1;
         }
-        j.add_object(&names[i], &obj)?;
+        j.add_object(&names[i], &obj, &specs[i].describe())?;
     }
     let addrs: Vec<usize> = names
         .iter()

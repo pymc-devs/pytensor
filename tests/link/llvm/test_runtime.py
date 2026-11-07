@@ -274,3 +274,29 @@ def test_segment_threshold_and_disable():
     off = pytensor.function([x, y], out, mode=Mode(linker=LLVMLinker(segment_max_elems=2), optimizer="fast_run"))
     assert _segments(on) and not _segments(off)
     np.testing.assert_allclose(on(*vals), off(*vals), rtol=1e-13)
+
+
+def test_perf_map_written_when_enabled(tmp_path):
+    # PYTENSOR_ENABLE_PERF is read once per process, so check in a fresh one
+    import os
+    import subprocess
+    import sys
+
+    code = """
+import os, numpy as np, pytensor, pytensor.tensor as pt
+x = pt.vector("x")
+f = pytensor.function([x], (pt.exp(x) * 2).sum(), mode="LLVM")
+f(np.ones(3))
+print(open(f"/tmp/perf-{os.getpid()}.map").read())
+os.unlink(f"/tmp/perf-{os.getpid()}.map")
+"""
+    env = dict(os.environ, PYTENSOR_ENABLE_PERF="1", PTLLVM_CACHE_DIR=str(tmp_path))
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True).stdout
+    lines = [line.split(" ", 2) for line in out.splitlines() if line.strip()]
+    assert lines
+    for start, size, name in lines:
+        assert int(start, 16) > 0 and int(size, 16) > 0
+        assert name.startswith("ptk_")
+    assert any("[" in name for *_, name in lines)  # entry points carry the kernel description
+    # frame pointers are part of the cache key: profiling objects are separate files
+    assert all(p.suffix == ".o" for p in tmp_path.iterdir())
