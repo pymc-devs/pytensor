@@ -213,3 +213,16 @@ def test_logp_and_grad():
     logp += -0.5 * mu**2 + log_sigma
     grads = pytensor.grad(logp, [mu, log_sigma])
     compare([mu, log_sigma, data], [logp, *grads], [np.array(0.3), np.array(-0.2), rng.normal(size=1000)], rtol=1e-11)
+
+
+@pytest.mark.parametrize("dtype", ["int32", "int64", "uint8"])
+def test_integer_mod_and_floordiv_python_semantics(dtype):
+    a, b = pt.vector("a", dtype=dtype), pt.vector("b", dtype=dtype)
+    signed = not dtype.startswith("u")
+    av = np.array([7, -7, 7, -7, 0, 5, 3] if signed else [7, 9, 0, 5, 3, 1, 8], dtype=dtype)
+    bv = np.array([3, 3, -3, -3, 4, 0, 1] if signed else [3, 4, 4, 0, 1, 2, 0], dtype=dtype)
+    f = pytensor.function([a, b], [a % b, a // b], mode=llvm_mode())
+    with np.errstate(divide="ignore"):
+        exp = [av % bv, av // bv]
+    for r, x in zip(f(av, bv), exp, strict=True):
+        np.testing.assert_array_equal(r, x)

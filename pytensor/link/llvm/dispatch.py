@@ -17,9 +17,11 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.graph.basic import Constant, Variable
 from pytensor.raise_op import CheckAndRaise
+from pytensor.scan.op import Scan
 from pytensor.scalar.basic import Composite, ScalarOp, ScalarType
 from pytensor.tensor.basic import (
     Alloc,
+    AllocEmpty,
     ARange,
     MakeVector,
     ScalarFromTensor,
@@ -28,6 +30,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
 from pytensor.tensor.basic import Join
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -79,7 +82,19 @@ class GraphConversion:
             self.builder.foreign(kernel.address, ins, outs, str(node.op), kernel)
 
     def inline(self, inner, inputs, outputs):
-        """Convert the nodes of an inner graph in place of an OpFromGraph node."""
+        """Convert the nodes of an inner graph in place of an OpFromGraph node.
+
+        The inner variables get their own id scope: the same inner graph can be
+        shared by several nodes (e.g. after merging), and must not see the ids
+        assigned while inlining another of them.
+        """
+        outer_ids, self.ids = self.ids, {}
+        try:
+            self._inline(inner, inputs, outputs)
+        finally:
+            self.ids = outer_ids
+
+    def _inline(self, inner, inputs, outputs):
         for iv, i in zip(inner.inputs, inputs, strict=True):
             self.ids[iv] = i
         copies = []
@@ -97,6 +112,8 @@ class GraphConversion:
         if v in self.ids:
             return self.ids[v]
         t = v.type
+        if isinstance(t, NoneTypeT) and isinstance(v, Constant):
+            return None  # e.g. unknown dims of SpecifyShape; converters must not use it
         if isinstance(t, ScalarType):
             # PyTensor scalars are 0-d tensors here
             bcast, shape = [], []
@@ -427,6 +444,34 @@ def _register_fused():
 _register_fused()
 
 
+@llvm_build.register(Scan)
+def _(op, node, conv, inputs, outputs):
+    # the step function becomes its own graph (compiled natively; see scan.rs)
+    inner = GraphConversion(numba_fallback=conv.numba_fallback)
+    for i in op.fgraph.inputs:
+        inner.builder.add_input(inner.var(i))
+    for n in op.fgraph.toposort():
+        inner.convert_node(n)
+    for o in op.fgraph.outputs:
+        inner.builder.add_output(inner.var(o))
+    info = op.info
+    taps = lambda slices: [[int(t) for t in s] for s in slices]  # noqa: E731
+    conv.builder.scan(
+        inner.builder,
+        inputs,
+        outputs,
+        n_seqs=info.n_seqs,
+        mit_mot_in=taps(info.mit_mot_in_slices),
+        mit_mot_out=taps(info.mit_mot_out_slices),
+        mit_sot_in=taps(info.mit_sot_in_slices),
+        sit_sot_in=taps(info.sit_sot_in_slices),
+        n_untraced=info.n_untraced_sit_sot,
+        n_nit_sot=info.n_nit_sot,
+        n_non_seqs=info.n_non_seqs,
+        as_while=info.as_while,
+    )
+
+
 @llvm_build.register(OpFromGraph)
 def _(op, node, conv, inputs, outputs):
     # FusedElemwise, ScalarizedElemwise, ScalarCAReduce, user OpFromGraphs, ...
@@ -436,6 +481,11 @@ def _(op, node, conv, inputs, outputs):
 @llvm_build.register(ARange)
 def _(op, node, conv, inputs, outputs):
     conv.builder.arange(*inputs, outputs[0])
+
+
+@llvm_build.register(AllocEmpty)
+def _(op, node, conv, inputs, outputs):
+    conv.builder.alloc_empty(inputs, outputs[0])
 
 
 @llvm_build.register(Alloc)

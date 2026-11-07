@@ -248,45 +248,7 @@ pub fn form_segments(g: Graph, max_elems: i64, fastmath: bool) -> Graph {
                 }
                 outs.push(values.len() - 1);
             }
-            let layout_of = |x: usize, values: &Vec<SegValue>| match values[x].loc {
-                SegLoc::Temp | SegLoc::ExtOut(_) => Layout::C.normalize(values[x].ndim),
-                _ => Layout::Any,
-            };
-            let operand = |x: usize, v: usize, values: &Vec<SegValue>| Operand {
-                dtype: vars[v].dtype,
-                bcast: vars[v].bcast.clone(),
-                layout: layout_of(x, values),
-            };
-            match &n.op {
-                Op::Elemwise { scalar } => {
-                    let spec = KernelSpec::Elemwise {
-                        ndim: vars[n.outputs[0]].ndim(),
-                        inputs: n.inputs.iter().zip(&ins).map(|(&v, &x)| operand(x, v, &values)).collect(),
-                        outputs: n.outputs.iter().zip(&outs).map(|(&v, &x)| operand(x, v, &values)).collect(),
-                        inplace: vec![None; n.outputs.len()],
-                        scalar: scalar.clone(),
-                        fastmath,
-                    };
-                    let mut args = ins.clone();
-                    args.extend(&outs);
-                    seg_members.push(SegMember::Kernel { spec: Box::new(spec), args });
-                }
-                Op::Reduce { op, axes } => {
-                    let spec = KernelSpec::Reduce {
-                        op: *op,
-                        axes: axes.clone(),
-                        input: operand(ins[0], n.inputs[0], &values),
-                        output: operand(outs[0], n.outputs[0], &values),
-                        fastmath,
-                    };
-                    seg_members.push(SegMember::Kernel { spec: Box::new(spec), args: vec![ins[0], outs[0]] });
-                }
-                Op::ShapeI { i } => seg_members.push(SegMember::ShapeI { i: *i, input: ins[0], output: outs[0] }),
-                Op::MakeVector => seg_members.push(SegMember::MakeVector { inputs: ins.clone(), output: outs[0] }),
-                Op::Assert { .. } => seg_members.push(SegMember::Assert { conds: ins[1..].to_vec() }),
-                Op::DimShuffle { .. } => {}
-                _ => unreachable!("not eligible"),
-            }
+            push_member(n, &ins, &outs, &values, &vars, fastmath, &mut seg_members);
         }
         // views needed outside: copy into a segment output
         for (x, o) in copies {
@@ -318,6 +280,127 @@ pub fn form_segments(g: Graph, max_elems: i64, fastmath: bool) -> Graph {
     }
     let _ = &mut vars;
     Graph { nodes: new_nodes, ..g }
+}
+
+
+/// The segment member for an eligible node (none for pure views).
+fn push_member(n: &Node, ins: &[usize], outs: &[usize], values: &[SegValue], vars: &[crate::ir::VarInfo], fastmath: bool, seg_members: &mut Vec<SegMember>) {
+    let layout_of = |x: usize| match values[x].loc {
+        SegLoc::Temp | SegLoc::ExtOut(_) => Layout::C.normalize(values[x].ndim),
+        _ => Layout::Any,
+    };
+    let operand = |x: usize, v: usize| Operand { dtype: vars[v].dtype, bcast: vars[v].bcast.clone(), layout: layout_of(x) };
+    match &n.op {
+        Op::Elemwise { scalar } => {
+            let spec = KernelSpec::Elemwise {
+                ndim: vars[n.outputs[0]].ndim(),
+                inputs: n.inputs.iter().zip(ins).map(|(&v, &x)| operand(x, v)).collect(),
+                outputs: n.outputs.iter().zip(outs).map(|(&v, &x)| operand(x, v)).collect(),
+                inplace: vec![None; n.outputs.len()],
+                scalar: scalar.clone(),
+                fastmath,
+            };
+            let mut args = ins.to_vec();
+            args.extend(outs);
+            seg_members.push(SegMember::Kernel { spec: Box::new(spec), args });
+        }
+        Op::Reduce { op, axes } => {
+            let spec = KernelSpec::Reduce {
+                op: *op,
+                axes: axes.clone(),
+                input: operand(ins[0], n.inputs[0]),
+                output: operand(outs[0], n.outputs[0]),
+                fastmath,
+            };
+            seg_members.push(SegMember::Kernel { spec: Box::new(spec), args: vec![ins[0], outs[0]] });
+        }
+        Op::ShapeI { i } => seg_members.push(SegMember::ShapeI { i: *i, input: ins[0], output: outs[0] }),
+        Op::MakeVector => seg_members.push(SegMember::MakeVector { inputs: ins.to_vec(), output: outs[0] }),
+        Op::Assert { .. } => seg_members.push(SegMember::Assert { conds: ins[1..].to_vec() }),
+        Op::DimShuffle { .. } => {}
+        _ => unreachable!("not eligible"),
+    }
+}
+
+fn identity_member(x: usize, y: usize, info: &crate::ir::VarInfo, fastmath: bool) -> SegMember {
+    let spec = KernelSpec::Elemwise {
+        ndim: info.ndim(),
+        inputs: vec![Operand { dtype: info.dtype, bcast: info.bcast.clone(), layout: Layout::Any }],
+        outputs: vec![Operand { dtype: info.dtype, bcast: info.bcast.clone(), layout: Layout::C.normalize(info.ndim()) }],
+        inplace: vec![None],
+        scalar: identity_copy(info.dtype),
+        fastmath,
+    };
+    SegMember::Kernel { spec: Box::new(spec), args: vec![x, y] }
+}
+
+/// A whole graph as one segment, if every node is small (see `eligible`). External
+/// inputs are the graph inputs followed by its constants; external outputs are the graph
+/// outputs, in order. Used for Scan step functions.
+pub fn whole_graph_segment(g: &Graph, max_elems: i64, fastmath: bool) -> Option<(SegmentSpec, Vec<String>)> {
+    if !g.nodes.iter().all(|n| eligible(g, n, max_elems)) {
+        return None;
+    }
+    let vars = &g.vars;
+    let mut values: Vec<SegValue> = Vec::new();
+    let mut val_of: HashMap<usize, usize> = HashMap::new();
+    for (k, &v) in g.inputs.iter().chain(&g.constants).enumerate() {
+        values.push(SegValue { dtype: vars[v].dtype, ndim: vars[v].ndim(), shape: static_shape(g, v), loc: SegLoc::ExtIn(k) });
+        val_of.insert(v, values.len() - 1);
+    }
+    // outputs written directly by their producing (non-view) node: first occurrence only
+    let mut direct: HashMap<usize, usize> = HashMap::new();
+    for (k, &o) in g.outputs.iter().enumerate() {
+        let produced = g.nodes.iter().any(|n| n.outputs.contains(&o) && !matches!(n.op, Op::DimShuffle { .. } | Op::Assert { .. }));
+        if produced && !direct.contains_key(&o) {
+            direct.insert(o, k);
+        }
+    }
+    let mut members = Vec::new();
+    let mut descs = Vec::new();
+    for n in &g.nodes {
+        let ins: Vec<usize> = n.inputs.iter().map(|v| val_of.get(v).copied()).collect::<Option<_>>()?;
+        let is_view = matches!(n.op, Op::DimShuffle { .. } | Op::Assert { .. });
+        let mut outs = Vec::new();
+        for &o in &n.outputs {
+            let loc = if is_view {
+                let order = match &n.op {
+                    Op::DimShuffle { order } => order.clone(),
+                    _ => (0..vars[o].ndim()).map(Some).collect(),
+                };
+                SegLoc::View { base: ins[0], order }
+            } else if let Some(&k) = direct.get(&o) {
+                SegLoc::ExtOut(k)
+            } else {
+                SegLoc::Temp
+            };
+            values.push(SegValue { dtype: vars[o].dtype, ndim: vars[o].ndim(), shape: static_shape(g, o), loc });
+            val_of.insert(o, values.len() - 1);
+            outs.push(values.len() - 1);
+        }
+        let before = members.len();
+        push_member(n, &ins, &outs, &values, vars, fastmath, &mut members);
+        if members.len() > before {
+            descs.push(node_desc(n));
+        }
+    }
+    // outputs that are inputs, constants, views or repeated: copy into the output
+    for (k, &o) in g.outputs.iter().enumerate() {
+        if direct.get(&o) == Some(&k) {
+            continue;
+        }
+        let x = *val_of.get(&o)?;
+        let shape = static_shape(g, o)?;
+        values.push(SegValue { dtype: vars[o].dtype, ndim: vars[o].ndim(), shape: Some(shape), loc: SegLoc::ExtOut(k) });
+        members.push(identity_member(x, values.len() - 1, &vars[o], fastmath));
+        descs.push("copy".into());
+    }
+    // every output must have a static shape (the caller provides stack-sized buffers)
+    for &o in &g.outputs {
+        static_shape(g, o)?;
+    }
+    let spec = SegmentSpec { n_in: g.inputs.len() + g.constants.len(), n_out: g.outputs.len(), values, members, fastmath };
+    Some((spec, descs))
 }
 
 fn node_desc(n: &Node) -> String {

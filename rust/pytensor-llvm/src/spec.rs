@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 /// Bump when code generation changes in a way that invalidates cached objects.
-pub const CODEGEN_VERSION: u32 = 8;
+pub const CODEGEN_VERSION: u32 = 9;
 
 /// What is statically known about an operand's memory layout. Strides passed at runtime
 /// are always the truth; this only lets kernels skip runtime checks and pick loop order.

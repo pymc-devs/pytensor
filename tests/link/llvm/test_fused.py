@@ -7,7 +7,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.link.llvm.linker import FUSION_REWRITES, LLVMLinker
+from pytensor.link.llvm.linker import LLVM_REWRITES, LLVMLinker
 
 
 pytest.importorskip("pytensor_llvm")
@@ -15,7 +15,7 @@ pytest.importorskip("pytensor_llvm")
 # numba_fallback=False: everything must be native
 LLVM = Mode(
     linker=LLVMLinker(numba_fallback=False),
-    optimizer=RewriteDatabaseQuery(include=["fast_run", *FUSION_REWRITES]),
+    optimizer=RewriteDatabaseQuery(include=["fast_run", *LLVM_REWRITES]),
 )
 REF = Mode(linker="py", optimizer="fast_run")
 rng = np.random.default_rng(11)
