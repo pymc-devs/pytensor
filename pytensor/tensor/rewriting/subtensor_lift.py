@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
+from pytensor.assumptions import DIAGONAL, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -26,6 +27,7 @@ from pytensor.tensor.basic import (
     Join,
     MakeVector,
     alloc,
+    alloc_diag,
     arange,
     as_tensor,
     diagonal,
@@ -982,23 +984,14 @@ def local_extract_diag_of_eye(fgraph, node):
     return [out]
 
 
-@register_stabilize("shape_unsafe")
-@node_rewriter([ExtractDiag])
-def local_extract_diag_of_elemwise(fgraph, node):
-    """Lift ``ExtractDiag`` through an ``Elemwise``.
+def _elemwise_of_diagonals(elemwise_out, *, axis1, axis2, offset, fgraph):
+    """Rebuild ``diagonal(elemwise_out)`` as the ``Elemwise`` of its inputs' diagonals.
 
-    diagonal(x + y) -> diagonal(x) + diagonal(y)
-    diagonal(u[:, None] + v[None, :]) -> u[:d] + v[:d]
-
-    Here ``d`` is the diagonal length. An input broadcast along one diagonal axis is a
-    line of values along the other, and reads the ``d`` entries it puts on the diagonal.
+    An input broadcast along one diagonal axis is a line of values along the other, and
+    reads the entries it puts on the diagonal. Return None when every input is broadcast
+    along both axes and ``offset`` is nonzero.
     """
-    [matrix] = node.inputs
-    if not isinstance(matrix.owner_op, Elemwise) or len(matrix.owner.outputs) > 1:
-        return None
-
-    axis1, axis2, offset = node.op.axis1, node.op.axis2, node.op.offset
-    elemwise_inputs = matrix.owner.inputs
+    elemwise_inputs = elemwise_out.owner.inputs
     is_broadcast = [
         (inp.type.broadcastable[axis1], inp.type.broadcastable[axis2])
         for inp in elemwise_inputs
@@ -1016,7 +1009,7 @@ def local_extract_diag_of_elemwise(fgraph, node):
     if offset != 0:
         diag_length = maximum(diag_length, 0)
 
-    batch_axes = [i for i in range(matrix.type.ndim) if i not in (axis1, axis2)]
+    batch_axes = [i for i in range(elemwise_out.type.ndim) if i not in (axis1, axis2)]
 
     def read_diagonal(inp, rows_broadcast, columns_broadcast):
         if not (rows_broadcast or columns_broadcast):
@@ -1034,8 +1027,61 @@ def local_extract_diag_of_elemwise(fgraph, node):
         read_diagonal(inp, *broadcast)
         for inp, broadcast in zip(elemwise_inputs, is_broadcast)
     ]
-    new_out = matrix.owner.op(*diagonal_inputs)
+    return elemwise_out.owner.op(*diagonal_inputs)
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([ExtractDiag])
+def local_extract_diag_of_elemwise(fgraph, node):
+    """Lift ``ExtractDiag`` through an ``Elemwise``.
+
+    diagonal(x + y) -> diagonal(x) + diagonal(y)
+    diagonal(u[:, None] + v[None, :]) -> u[:d] + v[:d]
+
+    Here ``d`` is the diagonal length.
+    """
+    [matrix] = node.inputs
+    if not isinstance(matrix.owner_op, Elemwise) or len(matrix.owner.outputs) > 1:
+        return None
+
+    new_out = _elemwise_of_diagonals(
+        matrix,
+        axis1=node.op.axis1,
+        axis2=node.op.axis2,
+        offset=node.op.offset,
+        fgraph=fgraph,
+    )
+    if new_out is None:
+        return None
     copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_stabilize("shape_unsafe", "nan_unsafe")
+@node_rewriter([Elemwise])
+def local_elemwise_of_diagonal(fgraph, node):
+    """Rewrite an ``Elemwise`` with a diagonal output to act on the diagonal alone.
+
+    alloc_diag(g) * x -> alloc_diag(g * diagonal(x))
+    alloc_diag(g) + alloc_diag(h) -> alloc_diag(g + h)
+    -alloc_diag(g) -> alloc_diag(-g)
+
+    Off-diagonal entries are never read, so a nan that ``0 * inf`` or ``0 / 0`` would
+    produce there is dropped.
+    """
+    if len(node.outputs) > 1:
+        return None
+
+    [out] = node.outputs
+    ndim = out.type.ndim
+    if ndim < 2 or not check_assumption(fgraph, out, DIAGONAL):
+        return None
+
+    new_diagonal = _elemwise_of_diagonals(
+        out, axis1=ndim - 2, axis2=ndim - 1, offset=0, fgraph=fgraph
+    )
+    new_out = alloc_diag(new_diagonal, axis1=-2, axis2=-1)
+    copy_stack_trace(out, new_out)
     return [new_out]
 
 
