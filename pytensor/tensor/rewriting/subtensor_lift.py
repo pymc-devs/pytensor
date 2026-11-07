@@ -36,6 +36,7 @@ from pytensor.tensor.basic import (
     join,
     register_infer_shape,
 )
+from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -372,14 +373,19 @@ def local_advanced_subtensor_of_dot(fgraph, node):
     x, *idx_vars = node.inputs
 
     match x.owner_op:
-        case Dot() | Blockwise(Dot()):
+        case Dot() | Dot22() | Blockwise(Dot()):
             pass
         case _:
             return None
 
     # If the product feeds other clients it is materialized anyway, so pushing the
-    # index into the operands would only add work.
-    if len(fgraph.clients[x]) > 1:
+    # index into the operands would only add work. Identical clients are one read
+    # that has not been merged yet.
+    (first_client, _), *other_clients = fgraph.clients[x]
+    if any(
+        client.op != first_client.op or client.inputs != first_client.inputs
+        for client, _ in other_clients
+    ):
         return None
 
     ndim = x.type.ndim
@@ -1097,9 +1103,9 @@ def local_extract_diag_lift(fgraph, node):
     - ``Alloc`` parent — gated on ``local_subtensor_of_alloc``; rebuilds the
       outer Alloc shape with the diag length ``d`` so ``Shape(arange(d))[0]``
       doesn't survive.
-    - ``Dot`` / ``Blockwise(Dot)`` parent over the two contracted axes — gated on
-      ``local_advanced_subtensor_of_dot``, which turns the paired-arange gather
-      into ``(A * B.mT).sum(-1)``.
+    - ``Dot`` / ``Dot22`` / ``Blockwise(Dot)`` parent over the two contracted axes —
+      gated on ``local_advanced_subtensor_of_dot``, which turns the paired-arange
+      gather into ``(A * B.mT).sum(-1)``.
     - ``Blockwise`` parent — gated on ``local_subtensor_of_batch_dims``. Blockwise
       core dims bail (the lift can't push past core ndim), so a batched dot
       diagonalized over its batch dims lands here rather than on the branch above.
@@ -1117,7 +1123,7 @@ def local_extract_diag_lift(fgraph, node):
     # A dot whose diagonal straddles both core dims: the paired index couples the
     # two operands, which only the fold below can express.
     elif (
-        isinstance(parent_op, Dot)
+        isinstance(parent_op, Dot | Dot22)
         or (isinstance(parent_op, Blockwise) and isinstance(parent_op.core_op, Dot))
     ) and (a1, a2) == (inner.type.ndim - 2, inner.type.ndim - 1):
         shape_inputs = inner.shape

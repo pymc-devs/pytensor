@@ -59,6 +59,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
     extract_diag_lift_pass,
     local_advanced_subtensor_of_dot,
+    local_extract_diag_lift,
     local_subtensor_make_vector,
     local_subtensor_of_batch_dims,
     local_subtensor_of_expand_dims,
@@ -1879,6 +1880,70 @@ class TestDiagOfDot:
     """
 
     rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    @pytest.mark.parametrize(
+        "x_shape, offset",
+        [((3, 3), 0), ((3, 3), 1), ((2, 3, 3), 0)],
+        ids=["matrix", "offset", "batched"],
+    )
+    def test_identical_diagonal_clients_count_as_one(self, x_shape, offset):
+        x = pt.tensor("x", shape=x_shape)
+        y = pt.tensor("y", shape=x_shape)
+        product = x @ y
+        first = pt.diagonal(product, offset=offset, axis1=-2, axis2=-1)
+        second = pt.diagonal(product, offset=offset, axis1=-2, axis2=-1)
+
+        result = RewriteTester(
+            [x, y],
+            [first, second],
+            include=None,
+            custom_rewrite=local_extract_diag_lift,
+        )
+        assert not any(
+            isinstance(node.op, Blockwise | Dot) for node in result.rewr_fg.apply_nodes
+        )
+        values = np.arange(1.0, 1 + np.prod(x_shape)).reshape(x_shape)
+        result.assert_eval(values, values + 1)
+
+    def test_identical_advanced_clients_count_as_one(self):
+        x = pt.matrix("x", shape=(3, 3))
+        y = pt.matrix("y", shape=(3, 3))
+        product = x @ y
+        index = pt.constant(np.array([0, 2]))
+
+        result = RewriteTester(
+            [x, y],
+            [product[index, index], product[index, index]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        assert not any(
+            isinstance(node.op, Blockwise | Dot) for node in result.rewr_fg.apply_nodes
+        )
+        values = np.arange(1.0, 10.0).reshape(3, 3)
+        result.assert_eval(values, values + 1)
+
+    @pytest.mark.parametrize(
+        "make_other",
+        [
+            pytest.param(lambda product: product, id="product_itself"),
+            pytest.param(
+                lambda product: pt.diagonal(product, offset=1), id="other_diagonal"
+            ),
+        ],
+    )
+    def test_product_with_other_clients_is_kept(self, make_other):
+        x = pt.matrix("x", shape=(3, 3))
+        y = pt.matrix("y", shape=(3, 3))
+        product = x @ y
+        out = [pt.diagonal(product), make_other(product)]
+
+        result = RewriteTester(
+            [x, y], out, include=None, custom_rewrite=local_extract_diag_lift
+        )
+        assert any(
+            isinstance(node.op, Blockwise | Dot) for node in result.rewr_fg.apply_nodes
+        )
 
     @pytest.mark.parametrize("batch", [(), (3,)], ids=["2d", "batched"])
     @pytest.mark.parametrize("offset", [0, 1, -1, 2, -2], ids=str)

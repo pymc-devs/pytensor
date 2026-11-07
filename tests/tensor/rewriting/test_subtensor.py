@@ -3332,3 +3332,48 @@ class TestSetAllocDiagIntoSquareZeros:
             [x], [out], include=self.include, exclude=["shape_unsafe"]
         )
         assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+
+
+def _squared_distance_of_first_column(X):
+    return pt.sqr(X[:, 0, None] - X[:, 0][None, :])
+
+
+def _squared_distance_with_gram_matrix(X):
+    squared_norms = pt.sum(pt.sqr(X), axis=1)
+    return squared_norms[:, None] + squared_norms[None, :] - 2 * X @ X.T
+
+
+@pytest.mark.parametrize("order", [1, 2], ids=["first", "second"])
+@pytest.mark.parametrize(
+    "distance",
+    [_squared_distance_of_first_column, _squared_distance_with_gram_matrix],
+    ids=["elemwise", "gram_matrix"],
+)
+@pytest.mark.parametrize("mode", ["NUMBA", "CVM"])
+def test_gradient_of_diagonal_builds_no_pairwise_node(distance, order, mode):
+    X = pt.matrix("X", shape=(None, 2))
+    lengthscale = pt.scalar("lengthscale")
+    amplitude = pt.scalar("amplitude")
+
+    def kernel(scale):
+        tau = pt.maximum(distance(X), 0.0) / scale**2
+        return pt.switch(tau > 0.5, pt.exp(-tau) * (1 + tau), pt.exp(-tau))
+
+    K = amplitude**2 * kernel(lengthscale) + kernel(2.0 * lengthscale)
+    out = pt.sum(pt.diagonal(assume(K, symmetric=True)))
+    for _ in range(order):
+        out = pytensor.grad(out, lengthscale)
+
+    no_fusion = get_mode(mode).excluding("fusion", "inplace")
+    fn = function([X, lengthscale, amplitude], out, mode=no_fusion)
+    assert not any(
+        output.type.ndim >= 2 and output.type.shape[:2] == (None, None)
+        for node in fn.maker.fgraph.apply_nodes
+        for output in node.outputs
+    )
+
+    reference = function(
+        [X, lengthscale, amplitude], out, mode=Mode(linker="cvm", optimizer=None)
+    )
+    values = np.random.default_rng(0).normal(size=(6, 2)), 0.7, 1.3
+    np.testing.assert_allclose(fn(*values), reference(*values))
