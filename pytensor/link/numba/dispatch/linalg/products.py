@@ -3,7 +3,7 @@ from numba.core import types
 from numba.core.extending import intrinsic, overload
 from numba.core.imputils import impl_ret_borrowed
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_blas, ensure_lapack
+from numba.np.linalg import ensure_blas, ensure_lapack
 from scipy import linalg
 
 from pytensor import config
@@ -21,7 +21,10 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     val_to_sptr,
     val_to_zptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
 from pytensor.tensor.blas._core import must_initialize_y_gemv
 from pytensor.tensor.linalg.products import Expm
 
@@ -143,8 +146,17 @@ def _expm_impl(A, overwrite_a):
         )
     )
 
+    # expm(X.T) = expm(X).T, so a C-typed A runs the kernel on A.T, an f-contig view of
+    # its buffer. Choosing this from the type keeps every return path one layout.
+    transposed = A.layout == "C"
+
     def impl(A, overwrite_a):
         n = A.shape[-1]
+        if n == 0:
+            empty = np.zeros((n, n), dtype=A.dtype)
+            if transposed:
+                return empty
+            return empty.T
 
         A_L1 = np.linalg.norm(A, 1)
 
@@ -153,18 +165,10 @@ def _expm_impl(A, overwrite_a):
         else:
             s = 0
 
-        # expm(X.T) = expm(X).T -- run the kernel on A.T when A is c-contig so
-        # we get an f-contig view of the input buffer for free.
-        transposed = False
-        if A.flags.c_contiguous:
+        if transposed:
             A_s = A.T if overwrite_a else A.copy().T
-            transposed = True
-        elif overwrite_a and A.flags.f_contiguous:
-            A_s = A
         else:
-            A_s = _copy_to_fortran_order(A)
-
-        A_s = np.asfortranarray(A_s)
+            A_s = _fortran_work_array(A, overwrite_a)
 
         if s > 0:
             A_s /= real_dtype.type(2.0) ** s
@@ -300,13 +304,14 @@ def _expm_impl(A, overwrite_a):
         if int_ptr_to_val(INFO_RF) != 0 or int_ptr_to_val(INFO_RS) != 0:
             R[:] = np.nan
 
-        if s > 0:
-            _copyto(A2, R)
-            R = A2
-            R_buf = U
-            for _ in range(s):
-                np.dot(R, R, R_buf)
-                R, R_buf = R_buf, R
+        # R is Fortran-ordered, so squaring its C-ordered transpose view needs no copy:
+        # (R^T)^2 = (R^2)^T
+        R_t = R.T
+        R_t_buf = U
+        for _ in range(s):
+            np.dot(R_t, R_t, R_t_buf)
+            R_t, R_t_buf = R_t_buf, R_t
+        R = R_t.T
 
         if transposed:
             return R.T
@@ -329,13 +334,11 @@ def numba_funcify_Expm(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def expm(a):
-        if a.size == 0:
-            return np.zeros(a.shape, dtype=out_dtype)
         if discrete_input:
             a = a.astype(out_dtype)
         return _expm(a, effective_overwrite_a)
 
-    cache_version = 2
+    cache_version = 3
     return expm, cache_version
 
 

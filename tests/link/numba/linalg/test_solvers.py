@@ -7,7 +7,10 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
+from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
+from pytensor.tensor.linalg.decomposition.svd import svd
+from pytensor.tensor.linalg.products import expm
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
@@ -444,3 +447,72 @@ class TestSolves:
             [np.zeros((0, 0), dtype=floatX), np.zeros(0, dtype=floatX)],
             eval_obj_mode=False,
         )
+
+
+GENERAL = np.random.default_rng(418).normal(size=(3, 3))
+TRIANGULAR = np.triu(GENERAL) + 3 * np.eye(3)
+POSDEF = TRIANGULAR.T @ TRIANGULAR
+
+
+def readonly(x):
+    x = x.copy(order="K")
+    x.flags.writeable = False
+    return x
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["copy", "overwrite"])
+@pytest.mark.parametrize(
+    "op, values, expected",
+    [
+        (solve_triangular, (TRIANGULAR, GENERAL), "C"),
+        (solve_triangular, (TRIANGULAR, np.asfortranarray(GENERAL)), "F"),
+        (solve_triangular, (TRIANGULAR, GENERAL[:, ::2]), "F"),
+        (solve_triangular, (TRIANGULAR, readonly(GENERAL)), "C"),
+        (solve, (TRIANGULAR, GENERAL), "F"),
+        (cholesky, (POSDEF,), "C"),
+        (cholesky, (np.asfortranarray(POSDEF),), "F"),
+        (cholesky, (readonly(np.asfortranarray(POSDEF)),), "F"),
+        (lu_factor, (GENERAL,), "FC"),
+        (svd, (GENERAL,), "CCC"),
+        (svd, (np.asfortranarray(GENERAL),), "FCF"),
+        (expm, (GENERAL,), "C"),
+        (expm, (np.asfortranarray(GENERAL),), "F"),
+    ],
+    ids=[
+        "solve_triangular_c",
+        "solve_triangular_f",
+        "solve_triangular_strided",
+        "solve_triangular_readonly_c",
+        "solve",
+        "cholesky_c",
+        "cholesky_f",
+        "cholesky_readonly_f",
+        "lu_factor",
+        "svd_c",
+        "svd_f",
+        "expm_c",
+        "expm_f",
+    ],
+)
+def test_output_layouts(op, values, expected, overwrite):
+    """A layout chosen at runtime would type the output "A" in every consumer."""
+    inputs = [pt.dmatrix(f"x{i}") for i in range(len(values))]
+    fn = pytensor.function(
+        [In(x, mutable=overwrite) for x in inputs],
+        op(*inputs),
+        mode=numba_inplace_mode,
+    )
+    assert bool(fn.maker.fgraph.outputs[0].owner.op.destroy_map) == overwrite
+
+    # Strided and readonly inputs are never overwritten, so the rest get a copy
+    fresh_values = [
+        value.copy(order="K")
+        if value.flags.writeable and value.flags.contiguous
+        else value
+        for value in values
+    ]
+    fn(*fresh_values)
+
+    [signature] = fn.vm.jit_fn.nopython_signatures
+    layouts = "".join(array.layout for array in signature.return_type.types)
+    assert layouts == expected

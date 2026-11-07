@@ -3,7 +3,7 @@ from typing import Literal
 import numpy as np
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import ensure_lapack
 from scipy.linalg import qr
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -11,7 +11,10 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _get_underlying_float,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
 
 
 def _qr_full_pivot(
@@ -178,10 +181,7 @@ def qr_full_pivot_impl(x, mode="full", pivoting=True, overwrite_a=False, lwork=N
         N = np.int32(x.shape[1])
         K = min(M, N)
 
-        if overwrite_a and x.flags.f_contiguous:
-            x_copy = x
-        else:
-            x_copy = _copy_to_fortran_order(x)
+        x_copy = _fortran_work_array(x, overwrite_a)
 
         LDA = val_to_int_ptr(M)
         TAU = np.empty(K, dtype=dtype)
@@ -259,7 +259,8 @@ def qr_full_pivot_impl(x, mode="full", pivoting=True, overwrite_a=False, lwork=N
             R = np.triu(x_copy[:N, :])
 
         if M < N:
-            Q_in = x_copy[:, :M]
+            # Numba types any slice of an F array "A", though this one stays F-contiguous
+            Q_in = np.asfortranarray(x_copy[:, :M])
         elif M == N or mode == "economic":
             Q_in = x_copy
         else:
@@ -328,10 +329,7 @@ def qr_full_no_pivot_impl(
         N = np.int32(x.shape[1])
         K = min(M, N)
 
-        if overwrite_a and x.flags.f_contiguous:
-            x_copy = x
-        else:
-            x_copy = _copy_to_fortran_order(x)
+        x_copy = _fortran_work_array(x, overwrite_a)
 
         LDA = val_to_int_ptr(M)
         TAU = np.empty(K, dtype=dtype)
@@ -375,7 +373,8 @@ def qr_full_no_pivot_impl(
             R = np.triu(x_copy[:N, :])
 
         if M < N:
-            Q_in = x_copy[:, :M]
+            # Numba types any slice of an F array "A", though this one stays F-contiguous
+            Q_in = np.asfortranarray(x_copy[:, :M])
         elif M == N or mode == "economic":
             Q_in = x_copy
         else:
@@ -436,10 +435,7 @@ def qr_r_pivot_impl(x, mode="r", pivoting=True, overwrite_a=False, lwork=None):
         M = np.int32(x.shape[0])
         N = np.int32(x.shape[1])
 
-        if overwrite_a and x.flags.f_contiguous:
-            x_copy = x
-        else:
-            x_copy = _copy_to_fortran_order(x)
+        x_copy = _fortran_work_array(x, overwrite_a)
 
         LDA = val_to_int_ptr(M)
         K = min(M, N)
@@ -508,10 +504,7 @@ def qr_r_no_pivot_impl(x, mode="r", pivoting=False, overwrite_a=False, lwork=Non
         M = np.int32(x.shape[0])
         N = np.int32(x.shape[1])
 
-        if overwrite_a and x.flags.f_contiguous:
-            x_copy = x
-        else:
-            x_copy = _copy_to_fortran_order(x)
+        x_copy = _fortran_work_array(x, overwrite_a)
 
         LDA = val_to_int_ptr(M)
         K = min(M, N)
@@ -577,10 +570,7 @@ def qr_raw_no_pivot_impl(x, mode="raw", pivoting=False, overwrite_a=False, lwork
         M = np.int32(x.shape[0])
         N = np.int32(x.shape[1])
 
-        if overwrite_a and x.flags.f_contiguous:
-            x_copy = x
-        else:
-            x_copy = _copy_to_fortran_order(x)
+        x_copy = _fortran_work_array(x, overwrite_a)
 
         LDA = val_to_int_ptr(M)
         K = min(M, N)
@@ -649,10 +639,7 @@ def qr_raw_pivot_impl(x, mode="raw", pivoting=True, overwrite_a=False, lwork=Non
         M = np.int32(x.shape[0])
         N = np.int32(x.shape[1])
 
-        if overwrite_a and x.flags.f_contiguous:
-            x_copy = x
-        else:
-            x_copy = _copy_to_fortran_order(x)
+        x_copy = _fortran_work_array(x, overwrite_a)
 
         LDA = val_to_int_ptr(M)
         K = min(M, N)
