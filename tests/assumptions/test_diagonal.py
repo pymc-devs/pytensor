@@ -266,3 +266,19 @@ class TestElemwiseAssumptions:
         y = transform(pt.eye(5))
         _, af = make_fgraph(y)
         assert af.check(y, DIAGONAL)
+
+
+@pytest.mark.parametrize(
+    "other, expected",
+    [
+        pytest.param(pt.diag(pt.vector("e", shape=(3,))), True, id="diagonal"),
+        pytest.param(pt.as_tensor(0.0), True, id="zero"),
+        pytest.param(pt.as_tensor(1.0), False, id="nonzero_scalar"),
+    ],
+)
+def test_switch_of_diagonal_branches(other, expected):
+    condition = pt.matrix("condition", shape=(3, 3), dtype="bool")
+    y = pt.switch(condition, pt.diag(pt.vector("d", shape=(3,))), other)
+
+    _, af = make_fgraph(y)
+    assert bool(af.check(y, DIAGONAL)) is expected
