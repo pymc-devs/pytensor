@@ -20,9 +20,6 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
-from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
-from pytensor.link.numba.dispatch.linalg.decomposition.eigen import _eigh
-from pytensor.link.numba.dispatch.linalg.decomposition.svd import _svd_gesdd_full
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
@@ -197,32 +194,6 @@ def core_MultinomialRV(op, node):
         return out
 
     random_fn.handles_out = True
-    return random_fn, 1
-
-
-@numba_core_rv_funcify.register(ptr.MvNormalRV)
-def core_MvNormalRV(op, node):
-    method = op.method
-
-    # The LAPACK-backed helpers return NaN for a non-finite covariance, where np.linalg raises
-    @numba_basic.numba_njit
-    def random_fn(rng, mean, cov):
-        if method == "cholesky":
-            A = _cholesky(cov, lower=True)
-        elif method == "svd":
-            A, s, _ = _svd_gesdd_full(cov)
-            A *= np.sqrt(s)[None, :]
-        else:
-            w, A = _eigh(cov, np.int32(0))
-            A *= np.sqrt(w)[None, :]
-
-        out = rng.normal(size=cov.shape[-1])
-        # out argument not working correctly: https://github.com/numba/numba/issues/9924
-        # The generator returns float64 noise even for a float32 covariance.
-        out[:] = np.dot(np.asarray(A, dtype=out.dtype), out)
-        out += mean
-        return out
-
     return random_fn, 1
 
 

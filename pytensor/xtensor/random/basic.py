@@ -6,7 +6,7 @@ from typing import Literal
 
 import pytensor.tensor.random.basic as ptrb
 from pytensor.graph.basic import Variable
-from pytensor.tensor.random.op import RandomVariable
+from pytensor.tensor.random.op import RandomVariable, SymbolicRVOp
 from pytensor.xtensor.type import as_xtensor
 from pytensor.xtensor.vectorization import XRV
 
@@ -54,7 +54,7 @@ __all__ = [
 
 
 def as_xrv(
-    core_op: RandomVariable,
+    core_op: RandomVariable | SymbolicRVOp,
     core_inps_dims_map: Sequence[Sequence[int]] | None = None,
     core_out_dims_map: Sequence[int] | None = None,
     name: str | None = None,
@@ -63,7 +63,7 @@ def as_xrv(
 
     Parameters
     ----------
-    core_op : RandomVariable
+    core_op : RandomVariable or SymbolicRVOp
         The core random variable operation to wrap.
     core_inps_dims_map : Sequence[Sequence[int]] | None
         Mapping of core dimensions for each input parameter.
@@ -143,8 +143,9 @@ def as_xrv(
             return next_rng, out
         return out
 
-    xrv_constructor.__name__ = name or core_op.name
-    xrv_constructor.__qualname__ = name or core_op.name
+    constructor_name = name or core_op.name or type(core_op).__name__
+    xrv_constructor.__name__ = constructor_name
+    xrv_constructor.__qualname__ = constructor_name
     xrv_constructor.__doc__ = core_op.__doc__
     return xrv_constructor
 

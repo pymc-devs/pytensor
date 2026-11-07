@@ -8,7 +8,7 @@ import scipy.stats as stats
 
 import pytensor.tensor as pt
 from pytensor import function, shared
-from pytensor.compile.mode import Mode, get_mode
+from pytensor.compile.mode import Mode
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
@@ -16,8 +16,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.traversal import graph_inputs
-from pytensor.link.jax import JAXLinker
-from pytensor.link.numba import NumbaLinker
 from pytensor.tensor import ones, stack
 from pytensor.tensor.random.basic import (
     ChoiceWithoutReplacement,
@@ -639,13 +637,12 @@ def test_mvnormal_no_default_args():
 
 
 def test_mvnormal_impl_catches_incompatible_size():
-    with pytest.raises(ValueError, match="operands could not be broadcast together "):
-        multivariate_normal.rng_fn(
-            np.random.default_rng(),
+    with pytest.raises((ValueError, AssertionError)):
+        multivariate_normal(
             np.zeros((3, 2)),
             np.broadcast_to(np.eye(2), (3, 2, 2)),
             size=(4,),
-        )
+        ).eval()
 
 
 def test_mvnormal_ShapeFeature():
@@ -714,12 +711,10 @@ def create_mvnormal_cov_decomposition_method_test(mode):
         assert draws.owner.op.method == method
 
         if not psd and method == "cholesky":
-            if isinstance(get_mode(mode).linker, NumbaLinker | JAXLinker):
-                # JAX and Numba don't raise errors at runtime, instead they return nan
-                assert np.isnan(draws.eval(mode=mode)).all()
-            else:
-                with pytest.raises(np.linalg.LinAlgError):
-                    draws.eval(mode=mode)
+            # The decomposed MvNormal uses the Cholesky Op, which returns nan
+            # (rather than raising) for non-positive-definite inputs across all
+            # backends, so the draws propagate nan.
+            assert np.isnan(draws.eval(mode=mode)).all()
 
         else:
             draws_eval = draws.eval(mode=mode)

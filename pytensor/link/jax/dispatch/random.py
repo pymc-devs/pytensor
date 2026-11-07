@@ -177,17 +177,6 @@ def jax_sample_fn_loc_scale(op, node):
     return sample_fn
 
 
-@jax_sample_fn.register(ptr.MvNormalRV)
-def jax_sample_mvnormal(op, node):
-    def sample_fn(rng_key, size, dtype, mean, cov):
-        sample = jax.random.multivariate_normal(
-            rng_key, mean, cov, shape=size, dtype=dtype, method=op.method
-        )
-        return sample
-
-    return sample_fn
-
-
 @jax_sample_fn.register(ptr.BernoulliRV)
 def jax_sample_fn_bernoulli(op, node):
     """JAX implementation of `BernoulliRV`."""
