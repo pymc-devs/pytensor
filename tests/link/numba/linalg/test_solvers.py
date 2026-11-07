@@ -448,6 +448,21 @@ class TestSolves:
             eval_obj_mode=False,
         )
 
+    def test_cho_solve_of_constant_result_is_writeable(self):
+        A = pt.matrix("A", shape=(3, 3))
+        value = pt.vector("value", shape=(3,))
+        result = cho_solve((pt.linalg.cholesky(A), True), pt.constant(np.eye(3)))
+        positions = pt.constant(np.arange(3, dtype="uint8"))
+        out = (-0.5 * result)[positions, positions].inc(value)
+
+        compare_numba_and_py(
+            [A, value],
+            [out],
+            [2.0 * np.eye(3), np.ones(3)],
+            numba_mode="NUMBA",
+            eval_obj_mode=False,
+        )
+
 
 GENERAL = np.random.default_rng(418).normal(size=(3, 3))
 TRIANGULAR = np.triu(GENERAL) + 3 * np.eye(3)
