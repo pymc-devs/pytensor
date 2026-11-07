@@ -1229,6 +1229,31 @@ def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
     )
 
 
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(lambda x: pt.diagonal(x), id="diagonal"),
+        pytest.param(lambda x: x[0], id="subtensor"),
+    ],
+)
+def test_lift_keeps_multi_output_elemwise(read):
+    scalar_input = ps.float64("scalar_input")
+    multi_output_op = Elemwise(
+        ps.Composite([scalar_input], [ps.exp(scalar_input), ps.log(scalar_input)])
+    )
+    x = pt.matrix("x", shape=(3, 3))
+    first, second = multi_output_op(x)
+
+    with config.change_flags(on_opt_error="raise"):
+        result = RewriteTester(
+            [x],
+            [read(first), second],
+            include=("canonicalize", "stabilize", "specialize"),
+        )
+
+    result.assert_graph(read(first), second)
+
+
 class TestExtractDiagLiftPass:
     """Coverage for ``extract_diag_lift_pass`` and its constituent rewrites:
     ``local_extract_diag_of_alloc_diag``, ``local_extract_diag_of_eye``,

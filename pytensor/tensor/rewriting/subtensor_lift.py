@@ -454,8 +454,8 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
-    if len(fgraph.clients[elem]) > 1:
-        # Elemwise output is used beyond the Subtensor.
+    if len(fgraph.clients[elem]) > 1 or len(elem.owner.outputs) > 1:
+        # Output is used beyond the Subtensor, or its node computes other outputs.
         # Get out to avoid repeated computations
         return None
 
