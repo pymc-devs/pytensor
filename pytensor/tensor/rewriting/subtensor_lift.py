@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
+from pytensor.assumptions import DIAGONAL, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -26,18 +27,21 @@ from pytensor.tensor.basic import (
     Join,
     MakeVector,
     alloc,
+    alloc_diag,
     arange,
     as_tensor,
+    diagonal,
     expand_dims,
     get_underlying_scalar_constant_value,
     join,
     register_infer_shape,
 )
+from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.math import Dot, dot, minimum
+from pytensor.tensor.math import Dot, dot, maximum, minimum
 from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
     get_simplified_broadcast_shape,
@@ -369,14 +373,19 @@ def local_advanced_subtensor_of_dot(fgraph, node):
     x, *idx_vars = node.inputs
 
     match x.owner_op:
-        case Dot() | Blockwise(Dot()):
+        case Dot() | Dot22() | Blockwise(Dot()):
             pass
         case _:
             return None
 
     # If the product feeds other clients it is materialized anyway, so pushing the
-    # index into the operands would only add work.
-    if len(fgraph.clients[x]) > 1:
+    # index into the operands would only add work. Identical clients are one read
+    # that has not been merged yet.
+    (first_client, _), *other_clients = fgraph.clients[x]
+    if any(
+        client.op != first_client.op or client.inputs != first_client.inputs
+        for client, _ in other_clients
+    ):
         return None
 
     ndim = x.type.ndim
@@ -454,8 +463,8 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
-    if len(fgraph.clients[elem]) > 1:
-        # Elemwise output is used beyond the Subtensor.
+    if len(fgraph.clients[elem]) > 1 or len(elem.owner.outputs) > 1:
+        # Output is used beyond the Subtensor, or its node computes other outputs.
         # Get out to avoid repeated computations
         return None
 
@@ -924,6 +933,8 @@ def _diag_indices(ndim, a1, a2, d, row_off, col_off):
     return idxs
 
 
+@register_canonicalize
+@register_stabilize
 @node_rewriter([ExtractDiag])
 def local_extract_diag_of_alloc_diag(fgraph, node):
     """Short-circuit ``extract_diag(alloc_diag(v, ..., k_alloc), offset)``.
@@ -979,6 +990,107 @@ def local_extract_diag_of_eye(fgraph, node):
     return [out]
 
 
+def _elemwise_of_diagonals(elemwise_out, *, axis1, axis2, offset, fgraph):
+    """Rebuild ``diagonal(elemwise_out)`` as the ``Elemwise`` of its inputs' diagonals.
+
+    An input broadcast along one diagonal axis is a line of values along the other, and
+    reads the entries it puts on the diagonal. Return None when every input is broadcast
+    along both axes and ``offset`` is nonzero.
+    """
+    elemwise_inputs = elemwise_out.owner.inputs
+    is_broadcast = [
+        (inp.type.broadcastable[axis1], inp.type.broadcastable[axis2])
+        for inp in elemwise_inputs
+    ]
+    if offset != 0 and all(rows and columns for rows, columns in is_broadcast):
+        return None
+
+    shape = get_simplified_broadcast_shape(*elemwise_inputs, fgraph=fgraph)
+    row_offset, column_offset = max(0, -offset), max(0, offset)
+    rows_left = shape[axis1] - row_offset if row_offset else shape[axis1]
+    columns_left = shape[axis2] - column_offset if column_offset else shape[axis2]
+    diag_length = (
+        rows_left if rows_left is columns_left else minimum(rows_left, columns_left)
+    )
+    if offset != 0:
+        diag_length = maximum(diag_length, 0)
+
+    batch_axes = [i for i in range(elemwise_out.type.ndim) if i not in (axis1, axis2)]
+
+    def read_diagonal(inp, rows_broadcast, columns_broadcast):
+        if not (rows_broadcast or columns_broadcast):
+            return diagonal(inp, offset=offset, axis1=axis1, axis2=axis2)
+
+        kept_axis, start = (
+            (axis1, row_offset) if columns_broadcast else (axis2, column_offset)
+        )
+        line = inp.dimshuffle(*batch_axes, kept_axis)
+        if rows_broadcast and columns_broadcast:
+            return line
+        return line[..., start : start + diag_length]
+
+    diagonal_inputs = [
+        read_diagonal(inp, *broadcast)
+        for inp, broadcast in zip(elemwise_inputs, is_broadcast)
+    ]
+    return elemwise_out.owner.op(*diagonal_inputs)
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([ExtractDiag])
+def local_extract_diag_of_elemwise(fgraph, node):
+    """Lift ``ExtractDiag`` through an ``Elemwise``.
+
+    diagonal(x + y) -> diagonal(x) + diagonal(y)
+    diagonal(u[:, None] + v[None, :]) -> u[:d] + v[:d]
+
+    Here ``d`` is the diagonal length.
+    """
+    [matrix] = node.inputs
+    if not isinstance(matrix.owner_op, Elemwise) or len(matrix.owner.outputs) > 1:
+        return None
+
+    new_out = _elemwise_of_diagonals(
+        matrix,
+        axis1=node.op.axis1,
+        axis2=node.op.axis2,
+        offset=node.op.offset,
+        fgraph=fgraph,
+    )
+    if new_out is None:
+        return None
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_stabilize("shape_unsafe", "nan_unsafe")
+@node_rewriter([Elemwise])
+def local_elemwise_of_diagonal(fgraph, node):
+    """Rewrite an ``Elemwise`` with a diagonal output to act on the diagonal alone.
+
+    alloc_diag(g) * x -> alloc_diag(g * diagonal(x))
+    alloc_diag(g) + alloc_diag(h) -> alloc_diag(g + h)
+    -alloc_diag(g) -> alloc_diag(-g)
+
+    Off-diagonal entries are never read, so a nan that ``0 * inf`` or ``0 / 0`` would
+    produce there is dropped.
+    """
+    if len(node.outputs) > 1:
+        return None
+
+    [out] = node.outputs
+    ndim = out.type.ndim
+    if ndim < 2 or not check_assumption(fgraph, out, DIAGONAL):
+        return None
+
+    new_diagonal = _elemwise_of_diagonals(
+        out, axis1=ndim - 2, axis2=ndim - 1, offset=0, fgraph=fgraph
+    )
+    new_out = alloc_diag(new_diagonal, axis1=-2, axis2=-1)
+    copy_stack_trace(out, new_out)
+    return [new_out]
+
+
 @node_rewriter([ExtractDiag])
 def local_extract_diag_lift(fgraph, node):
     """Lower ``ExtractDiag(X)`` to ``X[..., arange(d)+r, arange(d)+c, ...]``
@@ -991,13 +1103,12 @@ def local_extract_diag_lift(fgraph, node):
     - ``Alloc`` parent — gated on ``local_subtensor_of_alloc``; rebuilds the
       outer Alloc shape with the diag length ``d`` so ``Shape(arange(d))[0]``
       doesn't survive.
-    - ``Dot`` / ``Blockwise(Dot)`` parent over the two contracted axes — gated on
-      ``local_advanced_subtensor_of_dot``, which turns the paired-arange gather
-      into ``(A * B.mT).sum(-1)``.
-    - ``Elemwise`` / ``Blockwise`` parent — gated on
-      ``local_subtensor_of_batch_dims``. Blockwise core dims bail (the lift
-      can't push past core ndim), so a batched dot diagonalized over its batch
-      dims lands here rather than on the branch above.
+    - ``Dot`` / ``Dot22`` / ``Blockwise(Dot)`` parent over the two contracted axes —
+      gated on ``local_advanced_subtensor_of_dot``, which turns the paired-arange
+      gather into ``(A * B.mT).sum(-1)``.
+    - ``Blockwise`` parent — gated on ``local_subtensor_of_batch_dims``. Blockwise
+      core dims bail (the lift can't push past core ndim), so a batched dot
+      diagonalized over its batch dims lands here rather than on the branch above.
     - ``AdvancedIncSubtensor`` write-chain parent — gated on
       ``local_advanced_read_of_write_constant_indices``.
     """
@@ -1012,16 +1123,15 @@ def local_extract_diag_lift(fgraph, node):
     # A dot whose diagonal straddles both core dims: the paired index couples the
     # two operands, which only the fold below can express.
     elif (
-        isinstance(parent_op, Dot)
+        isinstance(parent_op, Dot | Dot22)
         or (isinstance(parent_op, Blockwise) and isinstance(parent_op.core_op, Dot))
     ) and (a1, a2) == (inner.type.ndim - 2, inner.type.ndim - 1):
         shape_inputs = inner.shape
         gate = local_advanced_subtensor_of_dot
-    elif isinstance(parent_op, Elemwise | Blockwise):
-        if isinstance(parent_op, Blockwise):
-            batch_ndim = inner.owner.op.batch_ndim(inner.owner)
-            if a1 >= batch_ndim or a2 >= batch_ndim:
-                return None
+    elif isinstance(parent_op, Blockwise):
+        batch_ndim = inner.owner.op.batch_ndim(inner.owner)
+        if a1 >= batch_ndim or a2 >= batch_ndim:
+            return None
         shape_inputs = inner.shape
         gate = local_subtensor_of_batch_dims
     elif isinstance(parent_op, AdvancedIncSubtensor):
@@ -1053,6 +1163,7 @@ extract_diag_lift_pass = SequentialGraphRewriter(
     out2in(
         local_extract_diag_of_alloc_diag,
         local_extract_diag_of_eye,
+        local_extract_diag_of_elemwise,
         local_extract_diag_lift,
         local_subtensor_of_alloc,
         local_advanced_subtensor_of_dot,

@@ -39,6 +39,7 @@ from pytensor.tensor import (
     vector,
 )
 from pytensor.tensor.basic import (
+    AllocDiag,
     ExtractDiag,
     MakeVector,
     concatenate,
@@ -58,6 +59,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
     extract_diag_lift_pass,
     local_advanced_subtensor_of_dot,
+    local_extract_diag_lift,
     local_subtensor_make_vector,
     local_subtensor_of_batch_dims,
     local_subtensor_of_expand_dims,
@@ -1229,6 +1231,31 @@ def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
     )
 
 
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(lambda x: pt.diagonal(x), id="diagonal"),
+        pytest.param(lambda x: x[0], id="subtensor"),
+    ],
+)
+def test_lift_keeps_multi_output_elemwise(read):
+    scalar_input = ps.float64("scalar_input")
+    multi_output_op = Elemwise(
+        ps.Composite([scalar_input], [ps.exp(scalar_input), ps.log(scalar_input)])
+    )
+    x = pt.matrix("x", shape=(3, 3))
+    first, second = multi_output_op(x)
+
+    with config.change_flags(on_opt_error="raise"):
+        result = RewriteTester(
+            [x],
+            [read(first), second],
+            include=("canonicalize", "stabilize", "specialize"),
+        )
+
+    result.assert_graph(read(first), second)
+
+
 class TestExtractDiagLiftPass:
     """Coverage for ``extract_diag_lift_pass`` and its constituent rewrites:
     ``local_extract_diag_of_alloc_diag``, ``local_extract_diag_of_eye``,
@@ -1245,6 +1272,11 @@ class TestExtractDiagLiftPass:
         v = pt.vector("v", shape=(v_len,))
         out = pt.diagonal(pt.diag(v, k=k_alloc), offset=offset)
         rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [v])
+
+    def test_extract_diag_of_alloc_diag_at_canonicalize(self):
+        v = pt.vector("v", shape=(4,))
+        rewritten = rewrite_graph(pt.diagonal(pt.diag(v)), include=("canonicalize",))
         assert_equal_computations([rewritten], [v])
 
     def test_extract_diag_of_alloc_diag_offset_mismatch(self):
@@ -1418,6 +1450,75 @@ class TestExtractDiagLiftPass:
         expected = pt.diagonal(x, offset=1) + r[:, 1:].squeeze(axis=0)
         assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
+    def test_extract_diag_of_elemwise_at_stabilize(self):
+        x = pt.vector("x", shape=(4,))
+        y = pt.matrix("y", shape=(4, 4))
+
+        result = RewriteTester(
+            [x, y], [pt.diagonal(x[:, None] * y)], include=("stabilize",)
+        )
+        result.assert_graph(x * pt.diagonal(y))
+        result.assert_eval(np.arange(4.0), np.arange(16.0).reshape(4, 4))
+
+    @pytest.mark.parametrize(
+        "x_length, y_length, offset",
+        [(5, 3, 0), (3, 5, 0), (4, 4, 1), (4, 4, -1), (2, 3, -5), (3, 2, 5)],
+    )
+    def test_extract_diag_of_elemwise_row_and_column_inputs(
+        self, x_length, y_length, offset
+    ):
+        x = pt.vector("x", shape=(None,))
+        y = pt.vector("y", shape=(None,))
+        out = pt.diagonal(x[:, None] + y[None, :], offset=offset)
+
+        result = RewriteTester([x, y], [out], include=("stabilize",))
+        assert not isinstance(result.rewr_fg.outputs[0].owner.op, ExtractDiag)
+        result.assert_eval(np.arange(x_length) + 1.0, np.arange(y_length) + 1.0)
+
+    def test_extract_diag_of_elemwise_rectangular_matrix_input(self):
+        x = pt.vector("x", shape=(None,))
+        y = pt.matrix("y", shape=(None, None))
+
+        result = RewriteTester(
+            [x, y], [pt.diagonal(x[:, None] * y)], include=("stabilize",)
+        )
+        assert not isinstance(result.rewr_fg.outputs[0].owner.op, ExtractDiag)
+        result.assert_eval(np.arange(1.0, 6.0), np.arange(15.0).reshape(5, 3))
+
+    @pytest.mark.parametrize(
+        "axis1, tensor_shape",
+        [(0, (4, 2, 4)), (1, (2, 4, 4))],
+        ids=["batch_between_diagonal_axes", "batch_before_diagonal_axes"],
+    )
+    def test_extract_diag_of_elemwise_batch_axis(self, axis1, tensor_shape):
+        x = pt.matrix("x", shape=tensor_shape[:2])
+        y = pt.tensor3("y", shape=tensor_shape)
+        out = pt.diagonal(x[:, :, None] * y, axis1=axis1, axis2=2)
+
+        result = RewriteTester([x, y], [out], include=("stabilize",))
+        assert not isinstance(result.rewr_fg.outputs[0].owner.op, ExtractDiag)
+        result.assert_eval(
+            np.arange(8.0).reshape(tensor_shape[:2]),
+            np.arange(32.0).reshape(tensor_shape),
+        )
+
+    def test_extract_diag_of_elemwise_with_other_client(self):
+        x = pt.matrix("x", shape=(3, 3))
+        y = pt.matrix("y", shape=(3, 3))
+        elemwise = x + y
+
+        result = RewriteTester(
+            [x, y], [elemwise, pt.diagonal(elemwise)], include=("stabilize",)
+        )
+        result.assert_graph(elemwise, pt.diagonal(x) + pt.diagonal(y))
+
+    def test_extract_diag_of_elemwise_offset_on_single_entry_is_kept(self):
+        s = pt.scalar("s")
+        out = pt.diagonal(-s[None, None], offset=1)
+
+        result = RewriteTester([s], [out], include=("stabilize",))
+        result.assert_graph(out)
+
     def test_extract_diag_of_elemwise_unary_full_broadcast(self):
         """Diagonal of a unary Elemwise on a fully-broadcast (1, 1) matrix is length-1."""
         s = pt.scalar("s")
@@ -1508,6 +1609,113 @@ class TestExtractDiagLiftPass:
 
         for got, ref in zip(f_on(), f_off(), strict=True):
             np.testing.assert_allclose(got, ref, equal_nan=True)
+
+
+class TestElemwiseOfDiagonal:
+    rewrite_kw = dict(include=("canonicalize", "stabilize"))
+
+    @pytest.mark.parametrize(
+        "operation, expected",
+        [
+            pytest.param(lambda g, h: pt.diag(g) + pt.diag(h), pt.add, id="add"),
+            pytest.param(lambda g, h: pt.diag(g) - pt.diag(h), pt.sub, id="sub"),
+            pytest.param(lambda g, h: pt.diag(g) * pt.diag(h), pt.mul, id="mul"),
+        ],
+    )
+    def test_elemwise_of_two_diagonals(self, operation, expected):
+        g = pt.vector("g", shape=(3,))
+        h = pt.vector("h", shape=(3,))
+
+        result = RewriteTester([g, h], [operation(g, h)], **self.rewrite_kw)
+        result.assert_graph(pt.diag(expected(g, h)))
+        result.assert_eval(np.arange(3.0), np.arange(3.0, 6.0))
+
+    def test_unary_zero_preserving(self):
+        g = pt.vector("g", shape=(3,))
+
+        result = RewriteTester([g], [pt.abs(pt.diag(g))], **self.rewrite_kw)
+        result.assert_graph(pt.diag(pt.abs(g)))
+        result.assert_eval(np.arange(3.0))
+
+    @pytest.mark.parametrize(
+        "other_shape",
+        [(4, 4), (4, 1), (1, 4), (1, 1)],
+        ids=["matrix", "column", "row", "single_entry"],
+    )
+    @pytest.mark.parametrize(
+        "operation",
+        [lambda d, x: d * x, lambda d, x: d / x],
+        ids=["multiply", "divide"],
+    )
+    def test_diagonal_with_general_operand(self, operation, other_shape):
+        g = pt.vector("g", shape=(4,))
+        other = pt.matrix("other", shape=other_shape)
+
+        result = RewriteTester(
+            [g, other], [operation(pt.diag(g), other)], **self.rewrite_kw
+        )
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(
+            np.arange(4.0),
+            np.arange(1.0, 1 + np.prod(other_shape)).reshape(other_shape),
+        )
+
+    def test_off_diagonal_nan_is_dropped(self):
+        g = pt.vector("g", shape=(2,))
+        x = pt.matrix("x", shape=(2, 2))
+
+        result = RewriteTester([g, x], [pt.diag(g) / x], **self.rewrite_kw)
+        values = np.array([1.0, 2.0]), np.array([[1.0, 0.0], [1.0, 1.0]])
+        [original] = result.orig_fn(*values)
+        [rewritten] = result.rewr_fn(*values)
+
+        assert np.isnan(original[0, 1])
+        np.testing.assert_allclose(rewritten, np.diag([1.0, 2.0]))
+
+    def test_nan_unsafe_excluded(self):
+        g = pt.vector("g", shape=(2,))
+        x = pt.matrix("x", shape=(2, 2))
+
+        result = RewriteTester(
+            [g, x], [pt.diag(g) / x], exclude=["nan_unsafe"], **self.rewrite_kw
+        )
+        assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+
+    def test_batched(self):
+        g = pt.vector("g", shape=(3,))
+        x = pt.tensor3("x", shape=(2, 3, 3))
+
+        result = RewriteTester([g, x], [pt.diag(g) * x], **self.rewrite_kw)
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(np.arange(3.0), np.arange(18.0).reshape(2, 3, 3))
+
+    @pytest.mark.parametrize(
+        "make_out",
+        [
+            pytest.param(lambda g, x: pt.diag(g) * x, id="mul"),
+            pytest.param(lambda g, x: pt.diag(g) + pt.diag(pt.ones(3)), id="add"),
+        ],
+    )
+    def test_broadcast_length_one_diagonal_is_kept(self, make_out):
+        g = pt.vector("g", shape=(1,))
+        x = pt.matrix("x", shape=(3, 3))
+        out = make_out(g, x)
+
+        result = RewriteTester([g, x], [out], include=("stabilize",))
+        assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(np.array([2.0]), np.arange(1.0, 10.0).reshape(3, 3))
+
+    def test_output_with_several_clients(self):
+        g = pt.vector("g", shape=(3,))
+        x = pt.matrix("x", shape=(3, 3))
+        elemwise = pt.diag(g) * x
+
+        result = RewriteTester(
+            [g, x],
+            [elemwise, elemwise.sum(axis=0), pt.diagonal(elemwise)],
+            **self.rewrite_kw,
+        )
+        result.assert_eval(np.arange(3.0), np.arange(1.0, 10.0).reshape(3, 3))
 
 
 class TestAdvancedSubtensorOfDot:
@@ -1672,6 +1880,70 @@ class TestDiagOfDot:
     """
 
     rewrite_kw = dict(include=("ShapeOpt", "canonicalize", "specialize"))
+
+    @pytest.mark.parametrize(
+        "x_shape, offset",
+        [((3, 3), 0), ((3, 3), 1), ((2, 3, 3), 0)],
+        ids=["matrix", "offset", "batched"],
+    )
+    def test_identical_diagonal_clients_count_as_one(self, x_shape, offset):
+        x = pt.tensor("x", shape=x_shape)
+        y = pt.tensor("y", shape=x_shape)
+        product = x @ y
+        first = pt.diagonal(product, offset=offset, axis1=-2, axis2=-1)
+        second = pt.diagonal(product, offset=offset, axis1=-2, axis2=-1)
+
+        result = RewriteTester(
+            [x, y],
+            [first, second],
+            include=None,
+            custom_rewrite=local_extract_diag_lift,
+        )
+        assert not any(
+            isinstance(node.op, Blockwise | Dot) for node in result.rewr_fg.apply_nodes
+        )
+        values = np.arange(1.0, 1 + np.prod(x_shape)).reshape(x_shape)
+        result.assert_eval(values, values + 1)
+
+    def test_identical_advanced_clients_count_as_one(self):
+        x = pt.matrix("x", shape=(3, 3))
+        y = pt.matrix("y", shape=(3, 3))
+        product = x @ y
+        index = pt.constant(np.array([0, 2]))
+
+        result = RewriteTester(
+            [x, y],
+            [product[index, index], product[index, index]],
+            include=None,
+            custom_rewrite=local_advanced_subtensor_of_dot,
+        )
+        assert not any(
+            isinstance(node.op, Blockwise | Dot) for node in result.rewr_fg.apply_nodes
+        )
+        values = np.arange(1.0, 10.0).reshape(3, 3)
+        result.assert_eval(values, values + 1)
+
+    @pytest.mark.parametrize(
+        "make_other",
+        [
+            pytest.param(lambda product: product, id="product_itself"),
+            pytest.param(
+                lambda product: pt.diagonal(product, offset=1), id="other_diagonal"
+            ),
+        ],
+    )
+    def test_product_with_other_clients_is_kept(self, make_other):
+        x = pt.matrix("x", shape=(3, 3))
+        y = pt.matrix("y", shape=(3, 3))
+        product = x @ y
+        out = [pt.diagonal(product), make_other(product)]
+
+        result = RewriteTester(
+            [x, y], out, include=None, custom_rewrite=local_extract_diag_lift
+        )
+        assert any(
+            isinstance(node.op, Blockwise | Dot) for node in result.rewr_fg.apply_nodes
+        )
 
     @pytest.mark.parametrize("batch", [(), (3,)], ids=["2d", "batched"])
     @pytest.mark.parametrize("offset", [0, 1, -1, 2, -2], ids=str)

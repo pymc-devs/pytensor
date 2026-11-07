@@ -13,7 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
-from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
+from pytensor.tensor.basic import Alloc, AllocDiag, ExtractDiag, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
@@ -3203,3 +3203,177 @@ def test_local_convert_negative_indices():
     # TODO: If Subtensor decides to raise on make_node, this test can be removed
     rewritten_out = rewrite_graph(x[:, :, -2])
     assert equal_computations([rewritten_out], [x[:, :, -2]])
+
+
+class TestSetAllocDiagIntoSquareZeros:
+    include = ("ShapeOpt", "canonicalize", "stabilize")
+
+    @pytest.mark.parametrize("n_rows", [3, 5], ids=["full_block", "smaller_block"])
+    def test_block_at_top_left(self, n_rows):
+        n = pt.iscalar("n")
+        g = pt.vector("g", shape=(None,))
+        length = g.shape[0]
+        out = pt.set_subtensor(pt.zeros((n, n))[:length, :length], pt.diag(g))
+
+        result = utt.RewriteTester([n, g], [out], include=self.include)
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(n_rows, np.arange(1.0, 4.0))
+
+    def test_cotangent_of_symmetric_matrix_diagonal(self):
+        x = pt.matrix("x", shape=(None, None))
+        w = pt.vector("w", shape=(None,))
+        out = pytensor.grad(pt.sum(w * pt.diagonal(assume(x, symmetric=True))), x)
+
+        result = utt.RewriteTester([x, w], [out], include=self.include)
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(np.arange(9.0).reshape(3, 3), np.arange(1.0, 4.0))
+
+    def test_cotangent_of_static_square_matrix_diagonal(self):
+        x = pt.matrix("x", shape=(3, 3))
+        w = pt.vector("w", shape=(None,))
+        out = pytensor.grad(pt.sum(w * pt.diagonal(x)), x)
+
+        result = utt.RewriteTester([x, w], [out], include=self.include)
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(np.arange(9.0).reshape(3, 3), np.arange(1.0, 4.0))
+
+    def test_block_larger_than_target_raises(self):
+        n = pt.iscalar("n")
+        g = pt.vector("g", shape=(None,))
+        length = g.shape[0]
+        out = pt.set_subtensor(pt.zeros((n, n))[:length, :length], pt.diag(g))
+
+        result = utt.RewriteTester([n, g], [out], include=self.include)
+        with pytest.raises(ValueError):
+            result.rewr_fn(2, np.arange(3.0))
+
+    def test_cast_to_target_dtype(self):
+        n = pt.iscalar("n")
+        g = pt.vector("g", shape=(None,), dtype="float32")
+        length = g.shape[0]
+        out = pt.set_subtensor(pt.zeros((n, n))[:length, :length], pt.diag(g))
+
+        result = utt.RewriteTester([n, g], [out], include=self.include)
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(3, np.ones(3, dtype="float32"))
+
+    @pytest.mark.parametrize(
+        "write",
+        [
+            pytest.param(
+                lambda x, y, d, n: pt.set_subtensor(x[1:, 1:], d), id="shifted_block"
+            ),
+            pytest.param(
+                lambda x, y, d, n: pt.set_subtensor(x[::2, ::2], d), id="stepped_block"
+            ),
+            pytest.param(
+                lambda x, y, d, n: pt.inc_subtensor(x[:n, :n], d), id="increment"
+            ),
+            pytest.param(
+                lambda x, y, d, n: pt.set_subtensor(y[:n, :n], d), id="nonzero_target"
+            ),
+        ],
+    )
+    def test_other_writes_are_kept(self, write):
+        n = pt.iscalar("n")
+        g = pt.vector("g", shape=(None,))
+        zeros, ones = pt.zeros((n, n)), pt.ones((n, n))
+        out = write(zeros, ones, pt.diag(g), g.shape[0])
+
+        result = utt.RewriteTester([n, g], [out], include=self.include)
+        assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(3, np.arange(1.0, 3.0))
+
+    def test_open_slice_is_kept(self):
+        n = pt.iscalar("n")
+        g = pt.vector("g", shape=(None,))
+        out = pt.set_subtensor(pt.zeros((n, n))[:, : g.shape[0]], pt.diag(g))
+
+        result = utt.RewriteTester([n, g], [out], include=self.include)
+        assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(2, np.arange(1.0, 3.0))
+
+    def test_rectangular_target_is_kept(self):
+        x = pt.matrix("x", shape=(None, None))
+        w = pt.vector("w", shape=(None,))
+        out = pytensor.grad(pt.sum(w * pt.diagonal(x)), x)
+
+        result = utt.RewriteTester([x, w], [out], include=self.include)
+        assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(np.arange(15.0).reshape(5, 3), np.arange(1.0, 4.0))
+
+    def test_cotangent_of_computed_diagonal(self):
+        x = pt.matrix("x", shape=(None, None))
+        out = pytensor.grad(pt.sum(pt.exp(pt.diagonal(assume(x, symmetric=True)))), x)
+
+        result = utt.RewriteTester([x], [out], include=self.include)
+        assert isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+        result.assert_eval(np.arange(9.0).reshape(3, 3))
+
+    def test_full_block_needs_no_padding(self):
+        x = pt.vector("x", shape=(None,))
+        scale = pt.scalar("scale")
+        pairwise = pt.exp(-pt.sqr(x[:, None] - x[None, :]) / scale**2)
+        out = pytensor.grad(
+            pt.sum(pt.exp(pt.diagonal(assume(pairwise, symmetric=True)))), scale
+        )
+
+        result = utt.RewriteTester([x, scale], [out], include=self.include)
+        assert not any(
+            isinstance(node.op, IncSubtensor) for node in result.rewr_fg.apply_nodes
+        )
+        result.assert_eval(np.arange(1.0, 4.0), 0.7)
+
+    def test_shape_unsafe_excluded(self):
+        x = pt.matrix("x", shape=(None, None))
+        out = pytensor.grad(pt.sum(pt.exp(pt.diagonal(assume(x, symmetric=True)))), x)
+
+        result = utt.RewriteTester(
+            [x], [out], include=self.include, exclude=["shape_unsafe"]
+        )
+        assert not isinstance(result.rewr_fg.outputs[0].owner_op, AllocDiag)
+
+
+def _squared_distance_of_first_column(X):
+    return pt.sqr(X[:, 0, None] - X[:, 0][None, :])
+
+
+def _squared_distance_with_gram_matrix(X):
+    squared_norms = pt.sum(pt.sqr(X), axis=1)
+    return squared_norms[:, None] + squared_norms[None, :] - 2 * X @ X.T
+
+
+@pytest.mark.parametrize("order", [1, 2], ids=["first", "second"])
+@pytest.mark.parametrize(
+    "distance",
+    [_squared_distance_of_first_column, _squared_distance_with_gram_matrix],
+    ids=["elemwise", "gram_matrix"],
+)
+@pytest.mark.parametrize("mode", ["NUMBA", "CVM"])
+def test_gradient_of_diagonal_builds_no_pairwise_node(distance, order, mode):
+    X = pt.matrix("X", shape=(None, 2))
+    lengthscale = pt.scalar("lengthscale")
+    amplitude = pt.scalar("amplitude")
+
+    def kernel(scale):
+        tau = pt.maximum(distance(X), 0.0) / scale**2
+        return pt.switch(tau > 0.5, pt.exp(-tau) * (1 + tau), pt.exp(-tau))
+
+    K = amplitude**2 * kernel(lengthscale) + kernel(2.0 * lengthscale)
+    out = pt.sum(pt.diagonal(assume(K, symmetric=True)))
+    for _ in range(order):
+        out = pytensor.grad(out, lengthscale)
+
+    no_fusion = get_mode(mode).excluding("fusion", "inplace")
+    fn = function([X, lengthscale, amplitude], out, mode=no_fusion)
+    assert not any(
+        output.type.ndim >= 2 and output.type.shape[:2] == (None, None)
+        for node in fn.maker.fgraph.apply_nodes
+        for output in node.outputs
+    )
+
+    reference = function(
+        [X, lengthscale, amplitude], out, mode=Mode(linker="cvm", optimizer=None)
+    )
+    values = np.random.default_rng(0).normal(size=(6, 2)), 0.7, 1.3
+    np.testing.assert_allclose(fn(*values), reference(*values))

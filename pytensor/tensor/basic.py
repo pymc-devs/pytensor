@@ -3838,7 +3838,7 @@ class ExtractDiag(COp):
         elif offset < 0:
             diag_size = clip(dim1 + offset, 0, dim2)
         else:
-            diag_size = minimum(dim1, dim2)
+            diag_size = dim1 if dim1 is dim2 else minimum(dim1, dim2)
         out_shape.append(diag_size)
         return [tuple(out_shape)]
 

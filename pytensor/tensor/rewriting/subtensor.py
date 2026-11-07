@@ -5,9 +5,9 @@ from itertools import pairwise, zip_longest
 import numpy as np
 
 from pytensor import compile
-from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
+from pytensor.assumptions.core import SYMMETRIC, UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
@@ -21,12 +21,14 @@ from pytensor.scalar import Add, ScalarConstant, ScalarMinimum, Sub
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
+    AllocDiag,
     ARange,
     Join,
     Nonzero,
     ScalarFromTensor,
     TensorFromScalar,
     alloc,
+    alloc_diag,
     arange,
     cast,
     concatenate,
@@ -36,6 +38,7 @@ from pytensor.tensor.basic import (
     moveaxis,
     register_infer_shape,
     switch,
+    zeros,
 )
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.blockwise import _squeeze_left
@@ -83,6 +86,7 @@ from pytensor.tensor.subtensor import (
     get_constant_idx,
     get_slice_elements,
     indices_from_subtensor,
+    set_subtensor,
     unflatten_index_variables,
 )
 from pytensor.tensor.type import TensorType
@@ -1082,6 +1086,85 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         all_dim = range(node.inputs[0].ndim)
         remain_dim = [x for x in all_dim if x not in remove_dim]
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
+
+
+def _is_dim_of(fgraph, stop, x, axis) -> bool:
+    """Whether the slice bound ``stop`` is provably ``x.shape[axis]``."""
+    if stop is None:
+        return False
+    if isinstance(stop.owner_op, ScalarFromTensor):
+        [stop] = stop.owner.inputs
+    if _is_shape_of_x_at(stop, x, axis):
+        return True
+    return hasattr(fgraph, "shape_feature") and equal_computations(
+        [stop], [fgraph.shape_feature.get_shape(x, axis)]
+    )
+
+
+def _is_square_zeros(fgraph, x) -> bool:
+    """Whether ``x`` is provably an all-zero square matrix."""
+    try:
+        is_zero = get_underlying_scalar_constant_value(x) == 0
+    except NotScalarConstantError:
+        return False
+
+    return is_zero and (
+        check_assumption(fgraph, x, SYMMETRIC)
+        or (
+            hasattr(fgraph, "shape_feature")
+            and fgraph.shape_feature.same_shape(x, x, dim_x=0, dim_y=1)
+        )
+    )
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([IncSubtensor])
+def local_set_alloc_diag_into_square_zeros(fgraph, node):
+    """Rewrite a diagonal block written into a square zero matrix to ``AllocDiag``.
+
+    zeros(N, N)[:N, :N].set(alloc_diag(g)) -> alloc_diag(g)
+    zeros(N, N)[:n, :n].set(alloc_diag(g)) -> alloc_diag(zeros(N)[:n].set(g))
+
+    Here ``n`` is the length of ``g``. This is the form ``ExtractDiag.pullback`` writes.
+    """
+    if not node.op.set_instead_of_inc:
+        return None
+
+    target, value, *index_inputs = node.inputs
+    if target.type.ndim != 2:
+        return None
+
+    match value.owner_op_and_inputs:
+        case (AllocDiag(offset=0, axis1=0, axis2=1), diag_values) if (
+            diag_values.type.ndim == 1
+        ):
+            pass
+        case _:
+            return None
+
+    indices = indices_from_subtensor(index_inputs, node.op.idx_list)
+    if len(indices) != 2 or not all(
+        isinstance(index, slice)
+        and index.start is None
+        and index.step is None
+        and _is_dim_of(fgraph, index.stop, diag_values, 0)
+        for index in indices
+    ):
+        return None
+
+    if not _is_square_zeros(fgraph, target):
+        return None
+
+    stop = indices[0].stop
+    if _is_dim_of(fgraph, stop, target, 0):
+        new_diagonal = cast(diag_values, target.dtype)
+    else:
+        full_diagonal = zeros((target.shape[0],), dtype=target.dtype)
+        new_diagonal = set_subtensor(full_diagonal[:stop], diag_values)
+
+    new_out = alloc_diag(new_diagonal)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize
