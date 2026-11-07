@@ -1157,15 +1157,15 @@ def as_string(
 
 
 def equal_computations(
-    xs: list[np.ndarray | Variable],
-    ys: list[np.ndarray | Variable],
+    xs: Sequence[np.ndarray | Variable],
+    ys: Sequence[np.ndarray | Variable],
     in_xs: list[Variable] | None = None,
     in_ys: list[Variable] | None = None,
     strict_dtype=True,
 ) -> bool:
     """Checks if PyTensor graphs represent the same computations.
 
-    The two lists `xs`, `ys` should have the same number of entries. The
+    The two sequences `xs`, `ys` should have the same number of entries. The
     function checks if for any corresponding pair ``(x, y)`` from ``zip(xs, ys)``
     ``x`` and ``y`` represent the same computations on the same variables
     (unless equivalences are provided using `in_xs`, `in_ys`).
@@ -1179,8 +1179,8 @@ def equal_computations(
 
     Parameters
     ----------
-    xs : list of Variable
-    ys : list of Variable
+    xs : sequence of Variable
+    ys : sequence of Variable
 
     Returns
     -------
