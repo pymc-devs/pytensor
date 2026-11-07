@@ -1769,9 +1769,10 @@ def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=N
     Parameters
     ==========
     m : array_like
-        A 2-D array containing multiple variables and observations.
+        A 1-D or 2-D array containing multiple variables and observations.
         Each row of `m` represents a variable, and each column is
-        observations of all those variables.
+        observations of all those variables. A 1-D array is treated as a
+        single variable (as in NumPy).
     y : array_like, optional
         An additional set of variables and observations. `y` has the same form
         as that of `m`.
@@ -1800,11 +1801,25 @@ def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=N
     if aweights is not None:
         raise NotImplementedError("aweights are not implemented")
 
-    if not rowvar and m.shape[0] != 1:
+    # Match NumPy: ``ndmin=2``, and skip the rowvar transpose when ``m`` was 1-D.
+    m = as_tensor_variable(m)
+    if m.ndim > 2:
+        raise ValueError("m has more than 2 dimensions")
+    m_was_1d = m.ndim == 1
+    if m_was_1d:
+        m = expand_dims(m, 0)
+
+    if not rowvar and not m_was_1d and m.shape[0] != 1:
         m = m.T
 
     if y is not None:
-        if not rowvar and y.shape[0] != 1:
+        y = as_tensor_variable(y)
+        if y.ndim > 2:
+            raise ValueError("y has more than 2 dimensions")
+        y_was_1d = y.ndim == 1
+        if y_was_1d:
+            y = expand_dims(y, 0)
+        if not rowvar and not y_was_1d and y.shape[0] != 1:
             y = y.T
         m = concatenate((m, y), axis=0)
 

@@ -3050,6 +3050,28 @@ def test_cov():
         )
 
 
+def test_cov_1d():
+    """1-D inputs are a single variable, matching ``np.cov``."""
+    rng = np.random.default_rng(utt.fetch_seed())
+    x = vector("x")
+    y = vector("y")
+    data = np.asarray(rng.random(5), dtype=config.floatX)
+    y_val = np.asarray(rng.random(5), dtype=config.floatX)
+
+    for rowvar, bias, ddof in product([True, False], [True, False], [None, 2]):
+        f = function([x], cov(x, rowvar=rowvar, bias=bias, ddof=ddof))
+        assert np.allclose(f(data), np.cov(data, rowvar=rowvar, bias=bias, ddof=ddof))
+
+        f = function([x, y], cov(x, y=y, rowvar=rowvar, bias=bias, ddof=ddof))
+        assert np.allclose(
+            f(data, y_val),
+            np.cov(data, y=y_val, rowvar=rowvar, bias=bias, ddof=ddof),
+        )
+
+    with pytest.raises(ValueError, match="more than 2 dimensions"):
+        cov(matrix("m").dimshuffle(0, 1, "x"))
+
+
 def test_ptp():
     # Should return 0 for all scalar
     x = scalar("x")
