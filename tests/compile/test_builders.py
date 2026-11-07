@@ -1,3 +1,4 @@
+import pickle
 from functools import partial
 
 import numpy as np
@@ -874,3 +875,48 @@ def test_inner_graph_keeps_symbolic_op_recognition():
     np.testing.assert_allclose(
         function([x], op(x))(test_val), scipy.special.softmax(test_val)
     )
+
+
+def test_opfromgraph_pickles_after_gradient():
+    # The pullback cache used to hold a local closure, so the op became unpicklable as
+    # soon as a gradient had been taken through it.
+    x = pt.vector("x")
+    y = OpFromGraph([x], [pt.sin(x) * x])(x)
+
+    assert pickle.loads(pickle.dumps(y)).owner.op is not None
+
+    grad(y.sum(), x)
+    assert pickle.loads(pickle.dumps(y)).owner.op is not None
+
+
+def test_opfromgraph_gradient_cache_is_rebuilt_after_unpickling():
+    # Dropping the cache is only safe if the pullback is rebuilt on demand, so the
+    # restored op must still differentiate to the same values.
+    x = pt.vector("x")
+    y = OpFromGraph([x], [pt.sin(x) * x])(x)
+    grad(y.sum(), x)
+
+    restored_y = pickle.loads(pickle.dumps(y))
+    assert type(restored_y.owner.op) is OpFromGraph
+
+    # The restored graph has its own inner input, so wire the values through that.
+    (restored_x,) = restored_y.owner.inputs
+    x_val = np.array([1.0, 2.0])
+    np.testing.assert_allclose(
+        function([restored_x], restored_y)(x_val), np.sin(x_val) * x_val
+    )
+    np.testing.assert_allclose(
+        function([restored_x], grad(restored_y.sum(), restored_x))(x_val),
+        np.sin(x_val) + x_val * np.cos(x_val),
+    )
+
+
+def test_opfromgraph_pickles_after_pushforward():
+    x = pt.vector("x")
+    t = pt.vector("t")
+    y = OpFromGraph([x], [pt.sin(x) * x])(x)
+
+    assert pickle.loads(pickle.dumps(y)).owner.op is not None
+
+    pushforward(y, [x], [t])
+    assert pickle.loads(pickle.dumps(y)).owner.op is not None
