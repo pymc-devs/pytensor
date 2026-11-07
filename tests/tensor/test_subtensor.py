@@ -1693,6 +1693,9 @@ def test_take_basic():
         ((4, 5, 6), np.array([[1, 2, 3], [1, 2, 3]]), 1, None),
         ((4, 5, 6), np.array([[1, 2, 3], [5, 6, 7]]), 1, "clip"),
         ((4, 5, 6), np.array([[1, 2, 3], [5, 6, 7]]), 1, "wrap"),
+        # mode must apply to the flattened array when axis is None (#2598)
+        ((3, 4), np.array([70, -9]), None, "clip"),
+        ((3, 4), np.array([70, -9]), None, "wrap"),
     ],
 )
 def test_take_cases(a_shape, index, axis, mode):

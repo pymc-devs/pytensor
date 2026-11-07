@@ -2899,7 +2899,13 @@ def take(a, indices, axis=None, mode="raise"):
         raise TypeError("`axis` must be an integer or None")
 
     if axis is None:
-        return advanced_subtensor(a.flatten(), indices)
+        # np.take applies mode to the flattened array, so flatten and fall
+        # through to the axis-0 handling below. The early return used to
+        # bypass clip/wrap entirely, so out-of-range indices raised (or read
+        # past the end of the buffer in a backend without bounds checks)
+        # instead of clipping (#2598).
+        a = a.flatten()
+        axis = 0
     elif axis < 0:
         axis += a.ndim
 
