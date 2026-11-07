@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pytensor-llvm"
+version = "0.1.0"
+description = "Native LLVM code generation and runtime for PyTensor's LLVM backend"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+
+[tool.maturin]
+module-name = "pytensor_llvm"
+features = ["pyo3/extension-module"]
