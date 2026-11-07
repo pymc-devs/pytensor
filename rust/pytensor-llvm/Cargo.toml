@@ -10,6 +10,7 @@ libm = "0.2.16"
 llvm-sys = { version = "181", features = ["prefer-dynamic"] }
 matrixmultiply = "0.3.11"
 numpy = "0.30.0"
+object = { version = "0.40.0", default-features = false, features = ["read_core", "elf", "std"] }
 pyo3 = { version = "0.30.1", features = ["extension-module", "abi3-py310"] }
 rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
