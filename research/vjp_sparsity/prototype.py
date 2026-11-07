@@ -5,10 +5,10 @@ from pytensor.gradient import pullback
 from pytensor.graph.basic import Variable
 from pytensor.graph.replace import vectorize_graph
 from pytensor.tensor.type import DenseTensorType, float_dtypes
-from research.vjp_sparsity.rewriting import infer_nonzero
+from research.vjp_sparsity.rewriting import infer_nonzero, nonzero_basic_query
 
 
-def jacobian_sparsity_vjp(outputs, wrt, *, diagnostics=None):
+def jacobian_sparsity_vjp(outputs, wrt, *, diagnostics=None, query=nonzero_basic_query):
     """Infer a dense boolean Jacobian pattern from the existing symbolic VJP."""
     outputs = [outputs] if isinstance(outputs, Variable) else list(outputs)
     wrt = [wrt] if isinstance(wrt, Variable) else list(wrt)
@@ -33,7 +33,7 @@ def jacobian_sparsity_vjp(outputs, wrt, *, diagnostics=None):
         list(unique), wrt, list(unique.values()), disconnected_inputs="ignore"
     )
 
-    lifted = infer_nonzero(vjp, cotangents, wrt=wrt)
+    lifted = infer_nonzero(vjp, cotangents, wrt=wrt, query=query)
 
     basis = {}
     offset = pt.constant(0, dtype="int64")

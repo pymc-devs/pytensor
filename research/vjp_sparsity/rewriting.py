@@ -50,6 +50,7 @@ from pytensor.tensor.subtensor import (
     Subtensor,
 )
 from pytensor.tensor.type import TensorType
+from research.vjp_sparsity.algebra import AlgebraRewriter
 
 
 class MayBeNonzero(Op):
@@ -434,6 +435,9 @@ nonzero_rewrites_db.register(
 nonzero_rewrites_db.register("shape", ShapeOptimizer(), "basic", position=0)
 nonzero_rewrites_db.register(
     "pre-canonicalize", optdb.query("+canonicalize"), "basic", position=1
+)
+nonzero_rewrites_db.register(
+    "linear_algebra", AlgebraRewriter(), "algebra", position=1.5
 )
 nonzero_rewrites_db.register("lift", nonzero_lift_db, "basic", position=2)
 nonzero_rewrites_db.register(
