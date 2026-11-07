@@ -1272,6 +1272,11 @@ class TestExtractDiagLiftPass:
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         assert_equal_computations([rewritten], [v])
 
+    def test_extract_diag_of_alloc_diag_at_canonicalize(self):
+        v = pt.vector("v", shape=(4,))
+        rewritten = rewrite_graph(pt.diagonal(pt.diag(v)), include=("canonicalize",))
+        assert_equal_computations([rewritten], [v])
+
     def test_extract_diag_of_alloc_diag_offset_mismatch(self):
         """When offsets differ, the diagonals don't overlap, so the result is zeros."""
         v = pt.vector("v", shape=(4,))

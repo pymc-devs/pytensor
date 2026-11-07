@@ -924,6 +924,8 @@ def _diag_indices(ndim, a1, a2, d, row_off, col_off):
     return idxs
 
 
+@register_canonicalize
+@register_stabilize
 @node_rewriter([ExtractDiag])
 def local_extract_diag_of_alloc_diag(fgraph, node):
     """Short-circuit ``extract_diag(alloc_diag(v, ..., k_alloc), offset)``.
