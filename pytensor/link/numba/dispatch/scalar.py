@@ -471,20 +471,14 @@ def numba_funcify_Softplus(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def softplus(x):
-        if x < -37.0:
-            value = np.exp(x)
-        elif x < 18.0:
-            value = np.log1p(np.exp(x))
-        elif x < 33.3:
-            if upcast_uint_dtype is not None:
-                # Can't negate uint
-                x = numba_basic.direct_cast(x, upcast_uint_dtype)
-            value = x + np.exp(-x)
-        else:
-            value = x
+        if upcast_uint_dtype is not None:
+            # Can't negate uint
+            x = numba_basic.direct_cast(x, upcast_uint_dtype)
+        # Branch-free, and exp(-|x|) is shared with Sigmoid
+        value = np.maximum(x, 0) + np.log1p(np.exp(-np.abs(x)))
         return numba_basic.direct_cast(value, out_dtype)
 
-    return softplus, scalar_op_cache_key(op, cache_version=1)
+    return softplus, scalar_op_cache_key(op, cache_version=2)
 
 
 @register_scalar_funcify(ScalarLoop)

@@ -6,7 +6,6 @@ As SciPy is not always available, we treat them separately.
 
 from functools import reduce
 from pathlib import Path
-from textwrap import dedent
 
 import numpy as np
 
@@ -1185,23 +1184,12 @@ class Softplus(UnaryScalarOp):
     non_negative = True
 
     def impl(self, x):
-        # If x is an int8 or uint8, numpy.exp will compute the result in
-        # half-precision (float16), where we want float32.
+        # Same formula as the compiled backends. Cast integers first: numpy would compute
+        # int8/uint8 in half-precision (float16), and -abs(x) wraps for unsigned integers.
         x_dtype = getattr(x, "dtype", None)
-        not_int8 = x_dtype is None or x_dtype.itemsize > 1
-        if x < -37.0:
-            return np.exp(x) if not_int8 else np.exp(x, signature="f")
-        elif x < 18.0:
-            return (
-                np.log1p(np.exp(x)) if not_int8 else np.log1p(np.exp(x, signature="f"))
-            )
-        elif x < 33.3:
-            if x_dtype is not None and x_dtype.kind == "u":
-                # Negate uint will not do what we want
-                x = x.astype("float32" if x_dtype.itemsize <= 2 else "float64")
-            return x + np.exp(-x) if not_int8 else x + np.exp(-x, signature="f")
-        else:
-            return x
+        if x_dtype is not None and x_dtype.kind in "iub":
+            x = x.astype("float32" if x_dtype.itemsize <= 2 else "float64")
+        return np.maximum(x, 0) + np.log1p(np.exp(-np.abs(x)))
 
     def pullback(self, inp, outputs, grads):
         (x,) = inp
@@ -1211,38 +1199,19 @@ class Softplus(UnaryScalarOp):
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
         (z,) = out
-        # We use the same limits for all precisions, which may be suboptimal. The reference
-        # paper only looked at double precision
+        # Branch-free, and exp(-|x|) is shared with Sigmoid
         if node.inputs[0].type in float_types:
             if node.inputs[0].type == float64:
-                return dedent(
-                    f"""
-                    {z} = (
-                        {x} < -37.0 ? exp({x}) :
-                        {x} < 18.0 ? log1p(exp({x})) :
-                        {x} < 33.3 ? {x} + exp(-{x}) :
-                        {x}
-                    );
-                    """
-                )
+                return f"{z} = fmax({x}, 0.0) + log1p(exp(-fabs({x})));"
             else:
-                return dedent(
-                    f"""
-                    {z} = (
-                        {x} < -37.0f ? exp({x}) :
-                        {x} < 18.0f ? log1p(exp({x})) :
-                        {x} < 33.3f ? {x} + exp(-{x}) :
-                        {x}
-                    );
-                    """
-                )
+                return f"{z} = fmaxf({x}, 0.0f) + log1p(exp(-fabsf({x})));"
         else:
             raise NotImplementedError("only floatingpoint is implemented")
 
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
-            return (3, *v)
+            return (4, *v)
         else:
             return v
 
