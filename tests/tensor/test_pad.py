@@ -267,6 +267,30 @@ ALL_MODES = [
 GATHER_BASED_MODES = ["wrap", "symmetric", "reflect"]
 
 
+@pytest.mark.parametrize("mode", ["constant", "edge", *GATHER_BASED_MODES])
+@pytest.mark.parametrize("dtype", ["float32", "int64"])
+def test_pad_preserves_dtype(mode, dtype):
+    x = pt.vector("x", dtype=dtype)
+    f = pytensor.function([x], pad(x, (2, 1), mode=mode))
+
+    for values in ([1, 2], [2, 3]):
+        x_val = np.array(values, dtype=dtype)
+        expected = np.pad(x_val, (2, 1), mode=mode)
+        actual = f(x_val)
+        assert actual.dtype == expected.dtype
+        np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("mode", ["constant", "edge"])
+def test_pad_preserves_large_integers(mode):
+    x = pt.vector("x", dtype="int64")
+    f = pytensor.function([x], pad(x, (1, 2), mode=mode))
+    x_val = np.array([2**60 + 1, 2**60 + 3], dtype="int64")
+    actual = f(x_val)
+    assert actual.dtype == x_val.dtype
+    np.testing.assert_array_equal(actual, np.pad(x_val, (1, 2), mode=mode))
+
+
 def _pad_width_as_symbolic_expression(ndim, width):
     """Build a uniform pad_width of ``width`` that is symbolic but constant-foldable."""
     pad_width = pt.zeros((ndim, 2), dtype="int64")
@@ -424,3 +448,28 @@ def test_edge_pad_grad(pad_width):
             probe[i, j] = 1.0
             expected[i, j] = np.pad(probe, width, mode="edge").sum()
     np.testing.assert_allclose(got, expected, atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.parametrize("mode", ["constant", "edge"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_pad_discrete_intermediate_grad(mode, dtype):
+    x = pt.vector("x", dtype=dtype)
+    padded = pad(x.astype("int64"), (1, 2), mode=mode)
+    derivative = grad(padded.astype(dtype).sum(), x)
+    f = pytensor.function([x], derivative)
+
+    np.testing.assert_array_equal(f(np.array([1.25, 2.75], dtype=dtype)), [0, 0])
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_discrete_constant_pad_value_grad(dtype):
+    x = pt.vector("x", dtype="int64")
+    value = pt.scalar("value", dtype=dtype)
+    padded = pad(x, (1, 2), constant_values=value)
+    derivative = grad(padded.astype(dtype).sum(), value)
+    f = pytensor.function([x, value], [padded, derivative])
+
+    assert derivative.dtype == dtype
+    padded_val, derivative_val = f([1, 2], 1.5)
+    np.testing.assert_array_equal(padded_val, [1, 1, 2, 1, 1])
+    np.testing.assert_array_equal(derivative_val, 0)
