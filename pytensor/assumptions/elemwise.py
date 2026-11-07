@@ -4,6 +4,7 @@ from pytensor.scalar.basic import (
     Mul,
     Pow,
     Sub,
+    Switch,
     TrueDiv,
     UnaryScalarOp,
 )
@@ -22,6 +23,7 @@ def elemwise_preserves_zero_pattern(
     The output preserves *key* when:
     - ``Mul``: at least one such input has *key* and is a non-singleton matrix.
     - ``Add`` / ``Sub``: every such input has *key*, and at least one exists.
+    - ``Switch``: the same rule, applied to the two branches.
     - ``TrueDiv``: the numerator has *key* and is a non-singleton matrix.
     - ``Pow``: the base has *key*, is a non-singleton matrix, and the exponent is provably positive.
     - Zero-preserving unary ops (e.g. ``Neg``, ``Abs``, ``Sin``, ``Sqr``):
@@ -41,10 +43,10 @@ def elemwise_preserves_zero_pattern(
             )
         )
 
-    if isinstance(scalar_op, (Add, Sub)):
+    def _all_preserve_pattern(inputs) -> list[FactState]:
         matrix_inputs = []
         broadcast_inputs = []
-        for inp in node.inputs:
+        for inp in inputs:
             if _not_singleton_matrix(inp):
                 matrix_inputs.append(inp)
             else:
@@ -53,7 +55,7 @@ def elemwise_preserves_zero_pattern(
             return [FactState.UNKNOWN]
 
         # A scalar / vector / (1, 1) input broadcasts to every entry of the matrix,
-        # so it adds (or subtracts) its value at every off-diagonal position too.
+        # so it contributes its value at every off-diagonal position too.
         # The zero pattern survives only if every such broadcast input is zero.
         for inp in broadcast_inputs:
             try:
@@ -63,6 +65,12 @@ def elemwise_preserves_zero_pattern(
             if val != 0:
                 return [FactState.UNKNOWN]
         return true_if(all(feature.check(inp, key) for inp in matrix_inputs))
+
+    if isinstance(scalar_op, (Add, Sub)):
+        return _all_preserve_pattern(node.inputs)
+
+    if isinstance(scalar_op, Switch):
+        return _all_preserve_pattern(node.inputs[1:])
 
     if isinstance(scalar_op, TrueDiv):
         numerator = node.inputs[0]
