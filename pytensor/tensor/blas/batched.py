@@ -224,7 +224,7 @@ class BatchedDot(COp):
         """
 
     def c_code_cache_version(self):
-        return (6, blas_header_version())
+        return (7, blas_header_version())
 
     def pullback(self, inp, outputs, grads):
         x, y = inp

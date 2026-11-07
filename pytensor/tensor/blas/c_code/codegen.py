@@ -834,6 +834,20 @@ BATCH_GEMM = """
                 return 1;
             }
 
+            // Empty arrays need no BLAS call and may have zero strides.
+            if (Nz[0] == 0 || Nz[1] == 0 || Nz[2] == 0) {
+                return 0;
+            }
+            if (Nx[2] == 0) {
+                PyObject* zero = PyFloat_FromDouble(0.0);
+                if (zero == NULL) {
+                    return 1;
+                }
+                int result = PyArray_FillWithScalar(zs, zero);
+                Py_DECREF(zero);
+                return result < 0;
+            }
+
             /* encode the stride structure of _x,_y,_z into a single integer. */
             int unit = 0;
             unit |= ((Sx[2] == type_size || Nx[2] == 1) ? 0x0 : (Sx[1] == type_size || Nx[1]==1) ? 0x1 : 0x2) << 8;
