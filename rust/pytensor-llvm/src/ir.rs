@@ -68,6 +68,31 @@ pub enum FusedOut {
     Write { at: IndexedAxis, target: usize, set: bool },
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ScanInfo {
+    pub n_seqs: usize,
+    pub mit_mot_in: Vec<Vec<i64>>,
+    pub mit_mot_out: Vec<Vec<i64>>,
+    pub mit_sot_in: Vec<Vec<i64>>,
+    pub sit_sot_in: Vec<Vec<i64>>,
+    pub n_untraced: usize,
+    pub n_nit_sot: usize,
+    pub n_non_seqs: usize,
+    pub as_while: bool,
+}
+
+/// The step function of a Scan: a graph with its constants.
+pub struct ScanInner {
+    pub graph: Graph,
+    pub consts: Vec<crate::runtime::ConstData>,
+}
+
+impl std::fmt::Debug for ScanInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ScanInner({} nodes)", self.graph.nodes.len())
+    }
+}
+
 /// One entry of a basic index. Numbers are positions in the node's inputs.
 #[derive(Clone, Debug, PartialEq)]
 pub enum IndexEntry {
@@ -101,6 +126,11 @@ pub enum Op {
     Arange,
     /// Alloc(value, *shape): kernel-allocated output.
     Alloc,
+    /// AllocEmpty(*shape): kernel-allocated, uninitialized.
+    AllocEmpty,
+    /// PyTensor Scan: a loop running `inner` once per step (see `scan.rs`). Outer inputs
+    /// and outputs follow Scan's order; all outputs are kernel-allocated.
+    Scan { info: ScanInfo, inner: std::sync::Arc<ScanInner> },
     /// Basic indexing (integers and slices); declared view of input 0.
     Subtensor { entries: Vec<IndexEntry> },
     /// Basic set/inc: out = x with out[entries] (+)= y (broadcast). Inputs: x, y, index vars.

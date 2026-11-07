@@ -6,7 +6,7 @@ use crate::dtype::DType;
 use crate::runtime::{CallState, OutArray, Program};
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
 use std::sync::Mutex;
@@ -105,7 +105,7 @@ impl CompiledFunction {
             prog.execute(&mut st, None)
         };
         drop(keep);
-        res.map_err(PyRuntimeError::new_err)?;
+        res.map_err(runtime_error)?;
         let arrays: Vec<Bound<'_, PyAny>> = st.outs.iter().map(|o| wrap_output(py, o)).collect::<PyResult<_>>()?;
         drop(st);
         Ok(PyList::new(py, arrays)?.unbind())
@@ -185,4 +185,13 @@ fn pytensor_llvm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CompiledFunction>()?;
     m.add("ABI_VERSION", crate::abi::ABI_VERSION)?;
     Ok(())
+}
+
+/// Kernel errors as Python exceptions; out-of-bounds indexing is an IndexError like in numpy.
+fn runtime_error(msg: String) -> PyErr {
+    if msg.contains("out of bounds") {
+        PyIndexError::new_err(msg)
+    } else {
+        PyRuntimeError::new_err(msg)
+    }
 }
