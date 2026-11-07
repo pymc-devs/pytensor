@@ -316,6 +316,28 @@ A `PtFunction` is immutable and can be shared across threads. `call` doesn't
 touch Python. The fixed per-call overhead from C is about 1–2 µs for small
 functions.
 
+## Profiling with perf
+
+Set `PYTENSOR_ENABLE_PERF=1` before the first function is compiled (it is read once per
+process). Then:
+
+- **Frame pointers.** Generated functions keep a frame pointer
+  (`"frame-pointer"="all"`), so `perf record -g` can walk the stack through
+  them. The setting is part of the object cache key, so profiling objects and
+  normal objects are cached separately.
+- **Perf map.** Every JIT-linked function is appended to
+  `/tmp/perf-<pid>.map`, which `perf report` reads to name samples in JIT
+  memory. Entry points are listed as `ptk_<hash> [<kernel description>]`; the
+  hash matches the names in `CompiledFunction.plan()`.
+
+The map holds only names and address ranges. `perf annotate` can't show the
+instructions of JIT code; that would need jitdump. Numba fallback kernels are
+not listed.
+
+Stacks currently end at `Program::execute`, because the Rust crate is built
+without frame pointers. Building with `RUSTFLAGS="-C force-frame-pointers=yes"`
+fixes that.
+
 ## Testing and benchmarks (current numbers)
 
 **Tests**

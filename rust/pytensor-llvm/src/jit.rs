@@ -104,7 +104,7 @@ impl Jit {
     }
 
     /// Link an object file and return the address of `name`.
-    pub fn add_object(&mut self, name: &str, obj: &[u8]) -> Result<usize, String> {
+    pub fn add_object(&mut self, name: &str, obj: &[u8], label: &str) -> Result<usize, String> {
         if let Some(a) = self.symbols.get(name) {
             return Ok(*a);
         }
@@ -119,6 +119,7 @@ impl Jit {
             let mut addr: LLVMOrcExecutorAddress = 0;
             check(LLVMOrcLLJITLookup(self.jit, &mut addr, bufname.as_ptr()), "lookup")?;
             self.symbols.insert(name.to_string(), addr as usize);
+            crate::perf::register_object(obj, name, addr as usize, label);
             Ok(addr as usize)
         }
     }
