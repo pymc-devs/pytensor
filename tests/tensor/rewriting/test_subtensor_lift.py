@@ -1448,6 +1448,75 @@ class TestExtractDiagLiftPass:
         expected = pt.diagonal(x, offset=1) + r[:, 1:].squeeze(axis=0)
         assert_equal_computations([rewritten], [expected], strict_dtype=False)
 
+    def test_extract_diag_of_elemwise_at_stabilize(self):
+        x = pt.vector("x", shape=(4,))
+        y = pt.matrix("y", shape=(4, 4))
+
+        result = RewriteTester(
+            [x, y], [pt.diagonal(x[:, None] * y)], include=("stabilize",)
+        )
+        result.assert_graph(x * pt.diagonal(y))
+        result.assert_eval(np.arange(4.0), np.arange(16.0).reshape(4, 4))
+
+    @pytest.mark.parametrize(
+        "x_length, y_length, offset",
+        [(5, 3, 0), (3, 5, 0), (4, 4, 1), (4, 4, -1), (2, 3, -5), (3, 2, 5)],
+    )
+    def test_extract_diag_of_elemwise_row_and_column_inputs(
+        self, x_length, y_length, offset
+    ):
+        x = pt.vector("x", shape=(None,))
+        y = pt.vector("y", shape=(None,))
+        out = pt.diagonal(x[:, None] + y[None, :], offset=offset)
+
+        result = RewriteTester([x, y], [out], include=("stabilize",))
+        assert not isinstance(result.rewr_fg.outputs[0].owner.op, ExtractDiag)
+        result.assert_eval(np.arange(x_length) + 1.0, np.arange(y_length) + 1.0)
+
+    def test_extract_diag_of_elemwise_rectangular_matrix_input(self):
+        x = pt.vector("x", shape=(None,))
+        y = pt.matrix("y", shape=(None, None))
+
+        result = RewriteTester(
+            [x, y], [pt.diagonal(x[:, None] * y)], include=("stabilize",)
+        )
+        assert not isinstance(result.rewr_fg.outputs[0].owner.op, ExtractDiag)
+        result.assert_eval(np.arange(1.0, 6.0), np.arange(15.0).reshape(5, 3))
+
+    @pytest.mark.parametrize(
+        "axis1, tensor_shape",
+        [(0, (4, 2, 4)), (1, (2, 4, 4))],
+        ids=["batch_between_diagonal_axes", "batch_before_diagonal_axes"],
+    )
+    def test_extract_diag_of_elemwise_batch_axis(self, axis1, tensor_shape):
+        x = pt.matrix("x", shape=tensor_shape[:2])
+        y = pt.tensor3("y", shape=tensor_shape)
+        out = pt.diagonal(x[:, :, None] * y, axis1=axis1, axis2=2)
+
+        result = RewriteTester([x, y], [out], include=("stabilize",))
+        assert not isinstance(result.rewr_fg.outputs[0].owner.op, ExtractDiag)
+        result.assert_eval(
+            np.arange(8.0).reshape(tensor_shape[:2]),
+            np.arange(32.0).reshape(tensor_shape),
+        )
+
+    def test_extract_diag_of_elemwise_with_other_client(self):
+        x = pt.matrix("x", shape=(3, 3))
+        y = pt.matrix("y", shape=(3, 3))
+        elemwise = x + y
+
+        result = RewriteTester(
+            [x, y], [elemwise, pt.diagonal(elemwise)], include=("stabilize",)
+        )
+        result.assert_graph(elemwise, pt.diagonal(x) + pt.diagonal(y))
+
+    def test_extract_diag_of_elemwise_offset_on_single_entry_is_kept(self):
+        s = pt.scalar("s")
+        out = pt.diagonal(-s[None, None], offset=1)
+
+        result = RewriteTester([s], [out], include=("stabilize",))
+        result.assert_graph(out)
+
     def test_extract_diag_of_elemwise_unary_full_broadcast(self):
         """Diagonal of a unary Elemwise on a fully-broadcast (1, 1) matrix is length-1."""
         s = pt.scalar("s")
