@@ -60,6 +60,7 @@ CASES = {
     "Cholesky arrow last": ([pt.linalg.cholesky(a * arrow + 10 * np.eye(4))], [a]),
     "Cholesky dense": ([pt.linalg.cholesky(positive)], [a]),
     "QR masked": (list(pt.linalg.qr(a * two_blocks, mode="economic")), [a]),
+    "QR dynamic shape": (list(pt.linalg.qr(a, mode="economic")), [a]),
 }
 CONSERVATIVE_BOUNDS = {"QR masked": 44}
 

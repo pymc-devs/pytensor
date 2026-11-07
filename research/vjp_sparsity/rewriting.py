@@ -9,6 +9,7 @@ import pytensor.tensor as pt
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import optdb
+from pytensor.conditional import IfElse, ifelse
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -167,6 +168,19 @@ def local_nonzero_switch(fgraph, node):
     return pt.second(
         may_be_nonzero(condition), may_be_nonzero(yes) | may_be_nonzero(no)
     )
+
+
+@register_nonzero([IfElse])
+def local_nonzero_ifelse(fgraph, node):
+    condition, *branches = node.inputs
+    if _shape_only([condition]):
+        yes, no = branches[: node.op.n_outs], branches[node.op.n_outs :]
+        masks = ifelse(
+            condition,
+            [may_be_nonzero(value) for value in yes],
+            [may_be_nonzero(value) for value in no],
+        )
+        return masks if isinstance(masks, list) else [masks]
 
 
 @register_nonzero([elemwise_of(ps.LogicalComparison)])
