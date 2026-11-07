@@ -47,6 +47,7 @@ from pytensor.link.numba.dispatch.linalg.decomposition.svd import (
     _svd_gesdd_full,
     _svd_gesdd_no_uv,
 )
+from pytensor.link.numba.dispatch.linalg.utils import _full_fortran_order
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
@@ -69,7 +70,6 @@ def numba_funcify_SVD(op, node, **kwargs):
     # kernel may safely mutate it regardless of the user's overwrite_a setting.
     effective_overwrite_a = op.overwrite_a or discrete_input
 
-    matrix_dtype = out_dtype
     # SVD declares S with the real component dtype via linalg_real_output_dtype,
     # so the s output's own dtype is the right answer for both real and complex
     # input.
@@ -91,23 +91,6 @@ def numba_funcify_SVD(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def svd(x):
-            if x.size == 0:
-                m, n = x.shape
-                k = min(m, n)
-                # LAPACK returns matrices in fortran order; build the empty
-                # returns with reversed shape + transpose to match.
-                if full_matrices:
-                    return (
-                        np.zeros((m, m), dtype=matrix_dtype).T,
-                        np.zeros((k,), dtype=s_dtype),
-                        np.zeros((n, n), dtype=matrix_dtype).T,
-                    )
-                else:
-                    return (
-                        np.zeros((k, m), dtype=matrix_dtype).T,
-                        np.zeros((k,), dtype=s_dtype),
-                        np.zeros((n, k), dtype=matrix_dtype).T,
-                    )
             if discrete_input:
                 x = x.astype(out_dtype)
             return _svd_gesdd_full(
@@ -116,7 +99,7 @@ def numba_funcify_SVD(op, node, **kwargs):
                 overwrite_a=effective_overwrite_a,
             )
 
-    cache_version = 2
+    cache_version = 3
     return svd, cache_version
 
 
@@ -194,7 +177,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
                 effective_overwrite_a,
             )
 
-    cache_version = 1
+    cache_version = 2
     return eigh, cache_version
 
 
@@ -267,15 +250,12 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def cholesky(a):
-        if a.size == 0:
-            return np.zeros(a.shape, dtype=out_dtype)
-
         if discrete_inp:
             a = a.astype(out_dtype)
 
         return _cholesky(a, lower, effective_overwrite_a)
 
-    cache_version = 3
+    cache_version = 4
     return cholesky, cache_version
 
 
@@ -355,7 +335,7 @@ def numba_funcify_LU(op, node, **kwargs):
 
         return res
 
-    cache_version = 3
+    cache_version = 4
     return lu, cache_version
 
 
@@ -375,7 +355,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
     def lu_factor(a):
         if a.size == 0:
             return (
-                np.zeros(a.shape, dtype=out_dtype),
+                _full_fortran_order(a.shape, 0, out_dtype),
                 np.zeros(a.shape[0], dtype="int32"),
             )
 
@@ -386,7 +366,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
         return LU, piv
 
-    cache_version = 3
+    cache_version = 4
     return lu_factor, cache_version
 
 
@@ -431,13 +411,13 @@ def numba_funcify_QR(op, node, **kwargs):
                 R = np.zeros((m, n), dtype=out_dtype)
                 return R
             elif mode == "raw" and pivoting:
-                H = np.zeros((m, m), dtype=out_dtype)
+                H = _full_fortran_order((m, m), 0, out_dtype)
                 tau = np.zeros(k, dtype=out_dtype)
                 R = np.zeros((m, n), dtype=out_dtype)
                 P = np.zeros(n, dtype=np.int32)
                 return H, tau, R, P
             else:
-                H = np.zeros((m, m), dtype=out_dtype)
+                H = _full_fortran_order((m, m), 0, out_dtype)
                 tau = np.zeros(k, dtype=out_dtype)
                 R = np.zeros((m, n), dtype=out_dtype)
                 return H, tau, R
@@ -504,7 +484,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 f"QR mode={mode}, pivoting={pivoting} not supported in numba mode."
             )
 
-    cache_version = 2
+    cache_version = 3
     return qr, cache_version
 
 
@@ -544,8 +524,8 @@ def numba_funcify_Schur(op, node, **kwargs):
         def schur(a):
             if a.size == 0:
                 n = a.shape[0]
-                return np.zeros((n, n), dtype=out_dtype), np.zeros(
-                    (n, n), dtype=out_dtype
+                return _full_fortran_order((n, n), 0, out_dtype), _full_fortran_order(
+                    (n, n), 0, out_dtype
                 )
             if integer_input:
                 a = a.astype(out_dtype)
@@ -559,15 +539,15 @@ def numba_funcify_Schur(op, node, **kwargs):
         def schur(a):
             if a.size == 0:
                 n = a.shape[0]
-                return np.zeros((n, n), dtype=out_dtype), np.zeros(
-                    (n, n), dtype=out_dtype
+                return _full_fortran_order((n, n), 0, out_dtype), _full_fortran_order(
+                    (n, n), 0, out_dtype
                 )
             if integer_input:
                 a = a.astype(out_dtype)
             T, Z = schur_real(a, lwork=None, overwrite_a=effective_overwrite_a)
             return T, Z
 
-    cache_version = 1
+    cache_version = 2
     return schur, cache_version
 
 
@@ -634,18 +614,18 @@ def numba_funcify_QZ(op, node, **kwargs):
                 n = a.shape[0]
                 if return_eigenvalues:
                     return (
-                        np.zeros((n, n), dtype=out_dtype),
-                        np.zeros((n, n), dtype=out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
                         np.zeros((n,), dtype=alpha_dtype),
                         np.zeros((n,), dtype=out_dtype),
-                        np.zeros((n, n), dtype=out_dtype),
-                        np.zeros((n, n), dtype=out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
                     )
                 return (
-                    np.zeros((n, n), dtype=out_dtype),
-                    np.zeros((n, n), dtype=out_dtype),
-                    np.zeros((n, n), dtype=out_dtype),
-                    np.zeros((n, n), dtype=out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
                 )
             if integer_input_a:
                 a = a.astype(out_dtype)
@@ -664,18 +644,18 @@ def numba_funcify_QZ(op, node, **kwargs):
                 n = a.shape[0]
                 if return_eigenvalues:
                     return (
-                        np.zeros((n, n), dtype=out_dtype),
-                        np.zeros((n, n), dtype=out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
                         np.zeros((n,), dtype=alpha_dtype),
                         np.zeros((n,), dtype=out_dtype),
-                        np.zeros((n, n), dtype=out_dtype),
-                        np.zeros((n, n), dtype=out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
+                        _full_fortran_order((n, n), 0, out_dtype),
                     )
                 return (
-                    np.zeros((n, n), dtype=out_dtype),
-                    np.zeros((n, n), dtype=out_dtype),
-                    np.zeros((n, n), dtype=out_dtype),
-                    np.zeros((n, n), dtype=out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
+                    _full_fortran_order((n, n), 0, out_dtype),
                 )
             if integer_input_a:
                 a = a.astype(out_dtype)
@@ -687,5 +667,5 @@ def numba_funcify_QZ(op, node, **kwargs):
                 b = b.astype(out_dtype)
             return qz_fn(a, b, effective_overwrite_a, effective_overwrite_b)
 
-    cache_version = 1
+    cache_version = 2
     return qz, cache_version

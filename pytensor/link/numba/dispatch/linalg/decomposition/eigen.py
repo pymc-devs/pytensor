@@ -10,7 +10,10 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
 
 
 def _eigh(a, UPLO, overwrite_a=False):
@@ -47,10 +50,7 @@ def eigh_impl(A, UPLO, overwrite_a=False):
             # syevr/heevr scratch the input triangle of A (Householder reflectors) and read them back during the
             # back-transform, so A and Z must remain distinct buffers. When A is donated and f-contig we reuse it as the
             # LAPACK input/scratch buffer and still allocate Z separately.
-            if overwrite_a and A.flags.f_contiguous:
-                A_copy = A
-            else:
-                A_copy = _copy_to_fortran_order(A)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
             JOBZ = val_to_int_ptr(ord("V"))
             RANGE = val_to_int_ptr(ord("A"))
@@ -290,10 +290,7 @@ def eigh_evd_impl(A, UPLO, overwrite_a=False):
             if A.shape[-2] != _N:
                 raise np.linalg.LinAlgError("Last 2 dimensions of A must be square")
 
-            if overwrite_a and A.flags.f_contiguous:
-                A_copy = A
-            else:
-                A_copy = _copy_to_fortran_order(A)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
             JOBZ = val_to_int_ptr(ord("V"))
             UPLO_ptr = val_to_int_ptr(ord("L") if UPLO == 0 else ord("U"))
@@ -492,15 +489,9 @@ def eigh_generalized_impl(A, B, UPLO, overwrite_a=False, overwrite_b=False):
             # apply here: returning eigenvectors of A^T (== conj(V) for Hermitian) would require a conjugate-on-return
             # that defeats the alloc savings. B has no such issue since its post-call content is discarded scratch
             # (Cholesky factor).
-            if overwrite_a and A.flags.f_contiguous:
-                A_copy = A
-            else:
-                A_copy = _copy_to_fortran_order(A)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
-            if overwrite_b and B.flags.f_contiguous:
-                B_copy = B
-            else:
-                B_copy = _copy_to_fortran_order(B)
+            B_copy = _fortran_work_array(B, overwrite_b)
 
             ITYPE = val_to_int_ptr(np.int32(1))
             JOBZ = val_to_int_ptr(ord("V"))

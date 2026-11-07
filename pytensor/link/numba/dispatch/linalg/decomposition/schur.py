@@ -3,7 +3,7 @@ from typing import Any
 import numpy as np
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import ensure_lapack
 from scipy.linalg import schur
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -12,7 +12,10 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
 
 
 def schur_real(
@@ -60,10 +63,7 @@ def schur_real_impl(A, lwork, overwrite_a):
         if lwork is None:
             lwork = -1
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
         if lwork == -1:
             WORK = np.empty(1, dtype=dtype)
@@ -152,10 +152,7 @@ def schur_complex_impl(A, lwork, overwrite_a):
         if lwork is None:
             lwork = -1
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
         if lwork == -1:
             WORK = np.empty(1, dtype=dtype)

@@ -223,7 +223,7 @@ def core_MvNormalRV(op, node):
         out += mean
         return out
 
-    return random_fn, 1
+    return random_fn, 2
 
 
 @numba_core_rv_funcify.register(ptr.DirichletRV)

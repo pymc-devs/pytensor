@@ -16,6 +16,7 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
+    _fortran_work_array,
 )
 
 
@@ -54,10 +55,7 @@ def trsyl_impl(A, B, C, overwrite_c):
         A_copy = _copy_to_fortran_order(A)
         B_copy = _copy_to_fortran_order(B)
 
-        if overwrite_c and C.flags.f_contiguous:
-            C_copy = C
-        else:
-            C_copy = _copy_to_fortran_order(C)
+        C_copy = _fortran_work_array(C, overwrite_c)
 
         TRANA = val_to_int_ptr(ord("N"))
         TRANB = val_to_int_ptr(ord("N"))

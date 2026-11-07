@@ -1,7 +1,5 @@
 import warnings
 
-import numpy as np
-
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
@@ -15,6 +13,7 @@ from pytensor.link.numba.dispatch.linalg.solvers.posdef import _solve_psd
 from pytensor.link.numba.dispatch.linalg.solvers.symmetric import _solve_symmetric
 from pytensor.link.numba.dispatch.linalg.solvers.triangular import _solve_triangular
 from pytensor.link.numba.dispatch.linalg.solvers.tridiagonal import _solve_tridiagonal
+from pytensor.link.numba.dispatch.linalg.utils import _full_fortran_order
 from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.linear_control import TRSYL
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve
@@ -65,7 +64,7 @@ def numba_funcify_Solve(op, node, **kwargs):
     @numba_basic.numba_njit
     def solve(a, b):
         if b.size == 0:
-            return np.zeros(b.shape, dtype=out_dtype)
+            return _full_fortran_order(b.shape, 0, out_dtype)
 
         if must_cast_A:
             a = a.astype(out_dtype)
@@ -74,7 +73,7 @@ def numba_funcify_Solve(op, node, **kwargs):
 
         return solve_fn(a, b, lower, overwrite_a, overwrite_b, transposed)
 
-    cache_version = 2
+    cache_version = 3
     return solve, cache_version
 
 
@@ -98,8 +97,6 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def solve_triangular(a, b):
-        if b.size == 0:
-            return np.zeros(b.shape, dtype=out_dtype)
         if must_cast_A:
             a = a.astype(out_dtype)
         if must_cast_B:
@@ -108,13 +105,12 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
         return _solve_triangular(
             a,
             b,
-            trans=0,  # transposing is handled explicitly on the graph, so we never use this argument
             lower=lower,
             unit_diagonal=unit_diagonal,
             overwrite_b=overwrite_b,
         )
 
-    cache_version = 4
+    cache_version = 6
     return solve_triangular, cache_version
 
 
@@ -138,7 +134,7 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     @numba_basic.numba_njit
     def cho_solve(c, b):
         if b.size == 0:
-            return np.zeros(b.shape, dtype=out_dtype)
+            return _full_fortran_order(b.shape, 0, out_dtype)
         if must_cast_c:
             c = c.astype(out_dtype)
 
@@ -152,7 +148,7 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
             overwrite_b=overwrite_b,
         )
 
-    cache_version = 2
+    cache_version = 3
     return cho_solve, cache_version
 
 
@@ -178,7 +174,7 @@ def numba_funcify_TRSYL(op, node, **kwargs):
     @numba_basic.numba_njit
     def trsyl(a, b, c):
         if a.size == 0 or b.size == 0 or c.size == 0:
-            return np.empty(c.shape, dtype=out_dtype)
+            return _full_fortran_order(c.shape, 0, out_dtype)
         if must_cast_a:
             a = a.astype(out_dtype)
         if must_cast_b:
@@ -189,5 +185,5 @@ def numba_funcify_TRSYL(op, node, **kwargs):
         x = _trsyl(a, b, c, overwrite_c=overwrite_c)
         return x
 
-    cache_version = 1
+    cache_version = 2
     return trsyl, cache_version

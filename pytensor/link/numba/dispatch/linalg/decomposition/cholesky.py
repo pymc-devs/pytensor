@@ -1,7 +1,7 @@
 import numpy as np
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -9,7 +9,12 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _c_work_array,
+    _check_linalg_matrix,
+    _fortran_work_array,
+    _full_fortran_order,
+)
 
 
 def _cholesky(a, lower=False, overwrite_a=False):
@@ -23,27 +28,27 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
     dtype = A.dtype
 
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
-    # PyTensor won't overwrite user-provided inputs without permission, but Numba
-    # typing doesn't infer this. Statically exclude aliases of readonly inputs.
-    input_mutable = A.mutable
+    # A c_contiguous A reinterpreted as f_contiguous is A^T. potrf(A^T, UPLO='U')
+    # produces U where U.T == L (the correct lower factor), even for complex Hermitian
+    # matrices, and the .T return corrects the result. Choosing this from the type
+    # keeps every return path one layout.
+    transposed = A.layout == "C"
 
     def impl(A, lower=False, overwrite_a=False):
+        if A.size == 0:
+            if transposed:
+                return np.zeros(A.shape, dtype=A.dtype)
+            return _full_fortran_order(A.shape, 0, A.dtype)
+
         _N = np.int32(A.shape[-1])
         if A.shape[-2] != _N:
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
 
-        transposed = False
-        if input_mutable and overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        elif input_mutable and overwrite_a and A.flags.c_contiguous:
-            # c_contiguous A reinterpreted as f_contiguous is A^T.
-            # potrf(A^T, UPLO='U') produces U where U.T == L (the correct lower factor),
-            # even for complex Hermitian matrices. The .T return corrects the result.
-            A_copy = A.T
-            transposed = True
+        if transposed:
+            A_copy = _c_work_array(A, overwrite_a).T
             lower = not lower
         else:
-            A_copy = _copy_to_fortran_order(A)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         N = val_to_int_ptr(_N)
@@ -60,9 +65,7 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
 
         if int_ptr_to_val(INFO) != 0:
             A_copy = np.full_like(A_copy, np.nan)
-            return A_copy
-
-        if lower:
+        elif lower:
             for j in range(1, _N):
                 for i in range(j):
                     A_copy[i, j] = 0.0
@@ -73,7 +76,6 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
 
         if transposed:
             return A_copy.T
-        else:
-            return A_copy
+        return A_copy
 
     return impl

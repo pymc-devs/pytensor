@@ -475,7 +475,7 @@ class TestDecompositions:
         np.testing.assert_allclose(val_not_contig, A_val)
 
     @pytest.mark.parametrize(
-        "decomp_op", (cholesky, lu, lu_factor), ids=lambda x: x.__name__
+        "decomp_op", (cholesky, lu, lu_factor, svd), ids=lambda x: x.__name__
     )
     def test_empty(self, decomp_op):
         x = pt.matrix("x")
@@ -486,6 +486,13 @@ class TestDecompositions:
             [x],
             outs,
             [np.zeros((0, 0), dtype=floatX)],
+        )
+
+    def test_cholesky_empty_non_square(self):
+        x = pt.matrix("x")
+        fn = pytensor.function([x], cholesky(x), mode="NUMBA")
+        np.testing.assert_array_equal(
+            fn(np.zeros((3, 0), dtype=floatX)), np.zeros((3, 0))
         )
 
     @pytest.mark.parametrize("output", ["real", "complex"], ids=lambda x: f"output_{x}")
