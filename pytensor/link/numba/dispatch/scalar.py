@@ -397,20 +397,19 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
             "uint32": np.float64,
             "uint64": np.float64,
         }[inp_dtype]
-
-        @numba_basic.numba_njit
-        def sigmoid(x):
-            # Can't negate uint
-            float_x = numba_basic.direct_cast(x, upcast_uint_dtype)
-            return 1 / (1 + np.exp(-float_x))
-
     else:
+        upcast_uint_dtype = None
 
-        @numba_basic.numba_njit
-        def sigmoid(x):
-            return 1 / (1 + np.exp(-x))
+    @numba_basic.numba_njit
+    def sigmoid(x):
+        if upcast_uint_dtype is not None:
+            # Can't negate uint
+            x = numba_basic.direct_cast(x, upcast_uint_dtype)
+        # exp(-|x|) is shared with Softplus, so LLVM can reuse it when both are fused
+        e = np.exp(-np.abs(x))
+        return (1 if x >= 0 else e) / (1 + e)
 
-    return sigmoid, scalar_op_cache_key(op, cache_version=1)
+    return sigmoid, scalar_op_cache_key(op, cache_version=2)
 
 
 @register_scalar_funcify(GammaLn)

@@ -1140,17 +1140,24 @@ class Sigmoid(UnaryScalarOp):
         (z,) = out
 
         if node.inputs[0].type in float_types:
+            # exp(-|x|) is shared with Softplus, so the compiler can reuse it
             if node.inputs[0].type == float64:
-                return f"""{z} = 1.0 / (1.0 + exp(-{x}));"""
+                return f"""{{
+                    double e = exp(-fabs({x}));
+                    {z} = ({x} >= 0 ? 1.0 : e) / (1.0 + e);
+                }}"""
             else:
-                return f"""{z} = 1.0f / (1.0f + exp(-{x}));"""
+                return f"""{{
+                    float e = exp(-fabsf({x}));
+                    {z} = ({x} >= 0 ? 1.0f : e) / (1.0f + e);
+                }}"""
         else:
             raise NotImplementedError("only floatingpoint is implemented")
 
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
-            return (2, *v)
+            return (3, *v)
         else:
             return v
 
