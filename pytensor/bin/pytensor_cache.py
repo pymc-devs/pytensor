@@ -1,6 +1,5 @@
 import logging
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -19,16 +18,9 @@ import pytensor
 import pytensor.compile.compiledir
 from pytensor import config
 from pytensor.link.c.basic import get_module_cache
-from pytensor.link.utils import clear_generated_src
 
 
 _logger = logging.getLogger("pytensor.bin.pytensor-cache")
-
-
-def remove_extra_caches(base_compiledir: Path) -> None:
-    """Remove the Numba cache and the generated source files."""
-    shutil.rmtree(base_compiledir / "numba", ignore_errors=True)
-    clear_generated_src()
 
 
 def print_help(exit_status):
@@ -78,7 +70,7 @@ def main():
                     "remove everything from that directory."
                 )
                 _logger.debug(f"Remaining elements ({len(items)}): {items}")
-            remove_extra_caches(config.base_compiledir)
+            pytensor.compile.compiledir.remove_extra_caches(config.base_compiledir)
 
         elif sys.argv[1] == "list":
             pytensor.compile.compiledir.print_compiledir_content()
@@ -91,7 +83,7 @@ def main():
             print("Lock successfully removed!")
         elif sys.argv[1] == "purge":
             pytensor.compile.compiledir.compiledir_purge()
-            remove_extra_caches(config.base_compiledir)
+            pytensor.compile.compiledir.remove_extra_caches(config.base_compiledir)
         elif sys.argv[1] == "basecompiledir":
             # Simply print the base_compiledir
             print(pytensor.config.base_compiledir)
@@ -99,7 +91,8 @@ def main():
             print_help(exit_status=1)
     elif len(sys.argv) == 3 and sys.argv[1] == "basecompiledir":
         if sys.argv[2] == "list":
-            pytensor.compile.compiledir.basecompiledir_ls()
+            subdirs, others = pytensor.compile.compiledir.basecompiledir_ls()
+            pytensor.compile.compiledir.render_basecompiledir_ls(subdirs, others)
         elif sys.argv[2] == "purge":
             pytensor.compile.compiledir.basecompiledir_purge()
         else:
