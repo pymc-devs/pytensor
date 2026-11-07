@@ -73,9 +73,9 @@ def local_useless_unbatched_blockwise(fgraph, node):
 
     if batch_ndims:
         # Remove dummy batch dims
-        axis = tuple(range(batch_ndims))
         inputs = [
-            apply_local_dimshuffle_merge(fgraph, inp.squeeze(axis)) for inp in inputs
+            apply_local_dimshuffle_merge(fgraph, _squeeze_left(inp, batch_ndims))
+            for inp in inputs
         ]
     new_outs = op.core_op.make_node(*inputs).outputs
     if batch_ndims:

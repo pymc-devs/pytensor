@@ -8,7 +8,19 @@ from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
-from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
+from pytensor.tensor import (
+    add,
+    alloc,
+    as_tensor,
+    constant,
+    iscalar,
+    matrix,
+    mul,
+    scalar,
+    shape_padleft,
+    tensor,
+    tensor3,
+)
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -44,6 +56,13 @@ def test_useless_unbatched_blockwise():
     result = RewriteTester([x], [out], include="local_useless_unbatched_blockwise")
     result.assert_graph(out)
 
+    # A MakeVector-padded scalar and a padded constant reach the core op as scalars
+    s = scalar("s")
+    scalar_add = Blockwise(add, signature="(),()->()")
+    out = scalar_add(as_tensor([s]), constant([2.0], dtype=s.type.dtype))
+    result = RewriteTester([s], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph(shape_padleft(add(s, constant(2.0, dtype=s.type.dtype)), 1))
+
     # Equivalent factorizations should share the same core computation.
     x = matrix("x")
     result = RewriteTester([x], [cholesky(x), cholesky(x[None])], include="o3")
@@ -51,6 +70,15 @@ def test_useless_unbatched_blockwise():
     result.assert_graph(core_out, core_out[None])
     unbatched_out, batched_out = result.rewr_fg.outputs
     assert batched_out.owner.inputs[0] is unbatched_out
+
+
+@pytest.mark.parametrize("core_shape", [(None,), (1,)])
+def test_useless_unbatched_blockwise_preserves_core_dims(core_shape):
+    x = tensor("x", shape=core_shape)
+    s = scalar("s")
+    out = Blockwise(mul, signature="(n),()->(n)")(x[None, None], as_tensor([s]))
+    result = RewriteTester([x, s], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph((x * s)[None, None])
 
 
 def test_local_blockwise_alloc_inputs():
