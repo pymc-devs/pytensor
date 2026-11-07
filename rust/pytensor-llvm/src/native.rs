@@ -335,6 +335,28 @@ pub unsafe extern "C" fn ptl_alloc(ctx: *mut PtCtx, args: *mut PtArray, params: 
     0
 }
 
+/// args = [shape_0 .. shape_{n-1} (0-d ints), out(kernel-allocated, uninitialized)].
+pub unsafe extern "C" fn ptl_alloc_empty(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+    let prm = p::<AllocParams>(params);
+    let n = prm.n_shape as usize;
+    let mut shape = [0i64; MAX_NDIM];
+    for i in 0..n {
+        let s = read_i64(arg(args, i).data, DType::from_code(prm.shape_dtypes[i]).unwrap());
+        if s < 0 {
+            return PtCtx::fail(ctx, 2, "alloc_empty: negative dimension");
+        }
+        shape[i] = s;
+    }
+    let total: i64 = shape[..n].iter().product();
+    let (data, owner) = PtCtx::alloc(ctx, total as usize * prm.itemsize as usize);
+    let o = arg(args, n);
+    o.data = data;
+    o.owner = owner;
+    o.shape_mut().copy_from_slice(&shape[..n]);
+    c_strides(&shape[..n], prm.itemsize, o.strides_mut());
+    0
+}
+
 // ------------------------------------------------------------------ shape ops
 
 /// args = [x, out(0-d int64)].

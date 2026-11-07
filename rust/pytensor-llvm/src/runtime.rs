@@ -28,6 +28,7 @@ use crate::ir::{FusedOut, Graph, IndexEntry, Node, Op};
 use crate::native::{self, *};
 use crate::spec::{KernelSpec, Layout, Operand};
 use std::alloc::{alloc, dealloc, Layout as MemLayout};
+use std::sync::Arc;
 
 // ------------------------------------------------------------------ slot buffers
 
@@ -82,6 +83,13 @@ impl ConstData {
         let buf = PtBuffer::new(bytes.len(), 64);
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), (*buf).data, bytes.len()) };
         ConstData { buf, shape, strides }
+    }
+}
+
+impl Clone for ConstData {
+    fn clone(&self) -> Self {
+        unsafe { PtBuffer::incref(self.buf) };
+        ConstData { buf: self.buf, shape: self.shape.clone(), strides: self.strides.clone() }
     }
 }
 
@@ -149,6 +157,10 @@ pub struct Program {
     out_static: Vec<Vec<i64>>,
     /// objects that own foreign kernel code (e.g. numba cfuncs); dropped with the program
     keepalive: Vec<Box<dyn std::any::Any + Send + Sync>>,
+    /// per Scan node: its step executor and metadata (kernel params point here, so this
+    /// is only held for ownership)
+    #[allow(dead_code)]
+    scans: Vec<Box<crate::scan::ScanData>>,
 }
 
 pub struct CallState {
@@ -210,6 +222,7 @@ fn op_name(op: &Op) -> &'static str {
         Op::Assert { .. } => "Assert",
         Op::Arange => "ARange",
         Op::Alloc => "Alloc",
+        Op::AllocEmpty => "AllocEmpty",
         Op::Segment { .. } => "Segment",
         Op::Foreign { .. } => "Foreign",
         Op::Subtensor { .. } => "Subtensor",
@@ -219,6 +232,7 @@ fn op_name(op: &Op) -> &'static str {
         Op::Join { .. } => "Join",
         Op::Reshape => "Reshape",
         Op::FusedElemwise { .. } => "FusedElemwise",
+        Op::Scan { .. } => "Scan",
     }
 }
 
@@ -276,7 +290,7 @@ enum OutMode {
 fn out_mode(op: &Op) -> OutMode {
     match op {
         Op::DimShuffle { .. } | Op::Assert { .. } | Op::Subtensor { .. } => OutMode::View(0),
-        Op::Arange | Op::Alloc | Op::Foreign { .. } => OutMode::KernelAlloc,
+        Op::Arange | Op::Alloc | Op::AllocEmpty | Op::Foreign { .. } | Op::Scan { .. } => OutMode::KernelAlloc,
         _ => OutMode::Provided,
     }
 }
@@ -554,6 +568,8 @@ impl Program {
         // ---- kernels
         let mut specs: Vec<KernelSpec> = Vec::new();
         let mut steps: Vec<Step> = Vec::new();
+        // Scan nodes: (step index, node, fast-path segment kernel index or inner program)
+        let mut pending_scans: Vec<(usize, usize, Result<usize, Arc<Program>>)> = Vec::new();
         for (ni, n) in graph.nodes.iter().enumerate() {
             let vi = |v: usize| &graph.vars[v];
             let operand = |v: usize| Operand { dtype: vi(v).dtype, bcast: vi(v).bcast.clone(), layout: layout[v] };
@@ -561,6 +577,26 @@ impl Program {
             args.extend(&n.outputs);
             let mut member_descs = Vec::new();
             let (src, params, desc) = match &n.op {
+                Op::Scan { inner, .. } => {
+                    let fast = if opts.segments {
+                        crate::segment::whole_graph_segment(&inner.graph, opts.segment_max_elems.max(1024), opts.fastmath)
+                    } else {
+                        None
+                    };
+                    let (exec, d) = match fast {
+                        Some((seg, descs)) => {
+                            specs.push(KernelSpec::Segment(Box::new(seg)));
+                            (Ok(specs.len() - 1), format!("Scan (fast path: step is one segment of {} kernels)", descs.len()))
+                        }
+                        None => {
+                            let p = Program::new(inner.graph.clone(), inner.consts.clone(), opts)
+                                .map_err(|m| format!("in Scan step function: {m}"))?;
+                            (Err(Arc::new(p)), "Scan (general path: step is an inner program)".to_string())
+                        }
+                    };
+                    pending_scans.push((steps.len(), ni, exec));
+                    (Src::Native(crate::scan::ptl_scan), Params::none(), d)
+                }
                 Op::FusedElemwise { scalar, ndim, n_elem, reads, outs } => {
                     let dim_src = (0..*ndim).map(|d| fused_dim_candidates(&graph, n, d).first().copied()).collect();
                     let spec = KernelSpec::Fused {
@@ -617,6 +653,14 @@ impl Program {
                     let prm = ReshapeParams { shape_dtype: vi(n.inputs[1]).dtype.code(), itemsize: vi(n.inputs[0]).dtype.itemsize() as i32, view: view as i64 };
                     let d = if view { "view reshape" } else { "native reshape (allocates)" };
                     (Src::Native(native::ptl_reshape), Params::of(prm), d.into())
+                }
+                Op::AllocEmpty => {
+                    let mut sd = [0i32; MAX_NDIM];
+                    for (k, &v) in n.inputs.iter().enumerate() {
+                        sd[k] = vi(v).dtype.code();
+                    }
+                    let prm = AllocParams { n_shape: n.inputs.len() as i64, itemsize: vi(n.outputs[0]).dtype.itemsize() as i64, shape_dtypes: sd };
+                    (Src::Native(native::ptl_alloc_empty), Params::of(prm), "native alloc_empty (allocates)".into())
                 }
                 Op::Foreign { addr, desc } => {
                     let f = unsafe { std::mem::transmute::<usize, KernelFn>(*addr) };
@@ -734,6 +778,38 @@ impl Program {
                 Src::Native(f) => f,
             });
         }
+        let mut scans = Vec::new();
+        for (si, ni, exec) in pending_scans {
+            let n = &graph.nodes[ni];
+            let Op::Scan { info, inner } = &n.op else { unreachable!() };
+            let g = &inner.graph;
+            let inner_outs = g
+                .outputs
+                .iter()
+                .map(|&v| crate::scan::OutType {
+                    dtype: g.vars[v].dtype,
+                    shape: (0..g.vars[v].ndim())
+                        .map(|d| if g.vars[v].bcast[d] { Some(1) } else { g.vars[v].static_shape.get(d).copied().flatten() })
+                        .collect(),
+                })
+                .collect();
+            let step = match exec {
+                Ok(k) => crate::scan::StepExec::Kernel {
+                    func: unsafe { std::mem::transmute::<usize, KernelFn>(addrs[k]) },
+                    consts: inner.consts.clone(),
+                },
+                Err(p) => crate::scan::StepExec::Program(p),
+            };
+            let data = Box::new(crate::scan::ScanData {
+                info: info.clone(),
+                step,
+                inner_outs,
+                outer_in_dtypes: n.inputs.iter().map(|&v| graph.vars[v].dtype).collect(),
+                desc: steps[si].desc.clone(),
+            });
+            steps[si].params = Params::of(&*data as *const crate::scan::ScanData as usize);
+            scans.push(data);
+        }
 
         let mut dim_off = Vec::with_capacity(nv);
         let mut total = 0;
@@ -750,6 +826,7 @@ impl Program {
         let in_static = graph.inputs.iter().map(|&v| static_of(v)).collect();
         let out_static = graph.outputs.iter().map(|&v| static_of(v)).collect();
         Ok(Program {
+            scans,
             keepalive: Vec::new(),
             in_static,
             out_static,
@@ -948,7 +1025,7 @@ impl Program {
             Op::ShapeI { .. } => {}
             Op::Shape => sh[o0] = self.graph.vars[n.inputs[0]].ndim() as i64,
             Op::MakeVector => sh[o0] = n.inputs.len() as i64,
-            Op::DimShuffle { .. } | Op::Assert { .. } | Op::Arange | Op::Alloc | Op::Foreign { .. } | Op::Subtensor { .. } | Op::Reshape => {} // kernel fills shapes
+            Op::DimShuffle { .. } | Op::Assert { .. } | Op::Arange | Op::Alloc | Op::AllocEmpty | Op::Foreign { .. } | Op::Subtensor { .. } | Op::Reshape | Op::Scan { .. } => {} // kernel fills shapes
             Op::FusedElemwise { ndim, outs, .. } => {
                 let mut loop_shape = [1i64; MAX_NDIM];
                 for d in 0..*ndim {

@@ -22,7 +22,7 @@
 use crate::codegen::scalar_op_arity;
 use crate::compile::Options;
 use crate::dtype::DType;
-use crate::ir::{FusedOut, Graph, IndexEntry, IndexedAxis, Node, Op, ReduceOp, SRef, ScalarGraph as IrScalarGraph, ScalarNode, VarInfo};
+use crate::ir::{FusedOut, Graph, IndexEntry, IndexedAxis, Node, Op, ReduceOp, SRef, ScanInfo, ScanInner, ScalarGraph as IrScalarGraph, ScalarNode, VarInfo};
 use crate::py::CompiledFunction;
 use crate::runtime::{ConstData, Program};
 use numpy::{PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
@@ -580,6 +580,44 @@ impl GraphBuilder {
         Ok(())
     }
 
+    /// PyTensor Scan. `inner` is a builder holding the step graph (it is consumed);
+    /// `inputs`/`outputs` and the info fields follow Scan's conventions.
+    #[pyo3(signature = (inner, inputs, outputs, n_seqs, mit_mot_in, mit_mot_out, mit_sot_in, sit_sot_in, n_untraced, n_nit_sot, n_non_seqs, as_while))]
+    #[allow(clippy::too_many_arguments)]
+    fn scan(
+        &mut self,
+        inner: &mut GraphBuilder,
+        inputs: Vec<usize>,
+        outputs: Vec<usize>,
+        n_seqs: usize,
+        mit_mot_in: Vec<Vec<i64>>,
+        mit_mot_out: Vec<Vec<i64>>,
+        mit_sot_in: Vec<Vec<i64>>,
+        sit_sot_in: Vec<Vec<i64>>,
+        n_untraced: usize,
+        n_nit_sot: usize,
+        n_non_seqs: usize,
+        as_while: bool,
+    ) -> PyResult<()> {
+        self.check_inputs("scan", &inputs)?;
+        self.check_outputs("scan", &outputs)?;
+        let (n_mm, n_ms, n_ss) = (mit_mot_in.len(), mit_sot_in.len(), sit_sot_in.len());
+        self.require(mit_mot_out.len() == n_mm, || "scan: mit_mot taps".into())?;
+        self.require(inputs.len() == 1 + n_seqs + n_mm + n_ms + n_ss + n_untraced + n_nit_sot + n_non_seqs, || "scan: outer input count".into())?;
+        self.require(outputs.len() == n_mm + n_ms + n_ss + n_nit_sot + n_untraced, || "scan: outer output count".into())?;
+        let n_in_taps: usize = mit_mot_in.iter().chain(&mit_sot_in).chain(&sit_sot_in).map(|t| t.len()).sum();
+        let n_out_taps: usize = mit_mot_out.iter().map(|t| t.len()).sum();
+        let g = std::mem::take(&mut inner.graph);
+        let consts = std::mem::take(&mut inner.consts);
+        inner.keepalive.drain(..).for_each(|o| self.keepalive.push(o));
+        self.require(g.inputs.len() == n_seqs + n_in_taps + n_untraced + n_non_seqs, || "scan: inner input count".into())?;
+        self.require(g.outputs.len() == n_out_taps + n_ms + n_ss + n_nit_sot + n_untraced + as_while as usize, || "scan: inner output count".into())?;
+        self.require(self.ndim(inputs[0]) == 0 && !self.dt(inputs[0]).is_float(), || "scan: n_steps must be a 0-d integer".into())?;
+        let info = ScanInfo { n_seqs, mit_mot_in, mit_mot_out, mit_sot_in, sit_sot_in, n_untraced, n_nit_sot, n_non_seqs, as_while };
+        self.push(Op::Scan { info, inner: std::sync::Arc::new(ScanInner { graph: g, consts }) }, inputs, outputs);
+        Ok(())
+    }
+
     fn join(&mut self, inputs: Vec<usize>, axis: usize, output: usize) -> PyResult<()> {
         self.check_inputs("join", &inputs)?;
         self.check_outputs("join", &[output])?;
@@ -596,6 +634,16 @@ impl GraphBuilder {
         self.require(self.ndim(shape) == 1 && !self.dt(shape).is_float(), || "reshape: shape must be a 1-d integer vector".into())?;
         self.require(self.dt(output) == self.dt(x) && self.ndim(output) <= crate::abi::MAX_NDIM, || "reshape: output type is wrong".into())?;
         self.push(Op::Reshape, vec![x, shape], vec![output]);
+        Ok(())
+    }
+
+    /// Uninitialized array with the shape given by 0-d integer variables; kernel-allocated.
+    fn alloc_empty(&mut self, shape: Vec<usize>, output: usize) -> PyResult<()> {
+        self.check_inputs("alloc_empty", &shape)?;
+        self.check_outputs("alloc_empty", &[output])?;
+        self.require(shape.len() <= crate::abi::MAX_NDIM && self.ndim(output) == shape.len(), || "alloc_empty: ndim mismatch".into())?;
+        self.require(shape.iter().all(|&s| self.ndim(s) == 0 && !self.dt(s).is_float()), || "alloc_empty: shape entries must be 0-d integers".into())?;
+        self.push(Op::AllocEmpty, shape, vec![output]);
         Ok(())
     }
 

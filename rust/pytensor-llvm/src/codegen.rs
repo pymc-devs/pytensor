@@ -486,7 +486,12 @@ impl<'ctx> Cg<'ctx> {
                     self.fintr("llvm.floor", out, &[q])?
                 } else {
                     // Python floor division
-                    let (a, b) = (conv(0)?.into_int_value(), conv(1)?.into_int_value());
+                    let (a, b0) = (conv(0)?.into_int_value(), conv(1)?.into_int_value());
+                    // x // 0 == 0 like numpy (division by zero is UB in LLVM)
+                    let z0 = b0.get_type().const_zero();
+                    let bz = self.b.build_int_compare(IntPredicate::EQ, b0, z0, "bz").map_err(e)?;
+                    let b = self.b.build_select(bz, b0.get_type().const_int(1, false), b0, "b1").map_err(e)?.into_int_value();
+                    let a = self.b.build_select(bz, z0, a, "a0").map_err(e)?.into_int_value();
                     if out.is_signed_int() {
                         let q = self.b.build_int_signed_div(a, b, "q").map_err(e)?;
                         let r = self.b.build_int_signed_rem(a, b, "r").map_err(e)?;
@@ -503,8 +508,27 @@ impl<'ctx> Cg<'ctx> {
                     }
                 }
             }
+            "mod" if !out.is_float() => {
+                // Python semantics (sign of the divisor); x % 0 == 0 like numpy
+                let (a, b0) = (conv(0)?.into_int_value(), conv(1)?.into_int_value());
+                let z = b0.get_type().const_zero();
+                let bz = self.b.build_int_compare(IntPredicate::EQ, b0, z, "bz").map_err(e)?;
+                let b = self.b.build_select(bz, b0.get_type().const_int(1, false), b0, "b1").map_err(e)?.into_int_value();
+                let r = if out.is_signed_int() {
+                    let r = self.b.build_int_signed_rem(a, b, "r").map_err(e)?;
+                    let rnz = self.b.build_int_compare(IntPredicate::NE, r, z, "rnz").map_err(e)?;
+                    let rneg = self.b.build_int_compare(IntPredicate::SLT, r, z, "rn").map_err(e)?;
+                    let bneg = self.b.build_int_compare(IntPredicate::SLT, b, z, "bn").map_err(e)?;
+                    let diff = self.b.build_xor(rneg, bneg, "d").map_err(e)?;
+                    let adj = self.b.build_and(rnz, diff, "adj").map_err(e)?;
+                    let rb = self.b.build_int_add(r, b, "rb").map_err(e)?;
+                    self.b.build_select(adj, rb, r, "fr").map_err(e)?.into_int_value()
+                } else {
+                    self.b.build_int_unsigned_rem(a, b, "r").map_err(e)?
+                };
+                self.b.build_select(bz, z, r, "m").map_err(e)?
+            }
             "mod" => {
-                Self::require_float(op, out)?;
                 // Python semantics: a - floor(a/b)*b
                 let (a, b) = (conv(0)?, conv(1)?);
                 let q = self.fintr("llvm.floor", out, &[self.fbin("div", a, b)?])?;

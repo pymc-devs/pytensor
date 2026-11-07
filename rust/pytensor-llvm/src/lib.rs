@@ -10,6 +10,7 @@ pub mod ir;
 pub mod jit;
 pub mod native;
 pub mod runtime;
+pub mod scan;
 pub mod segment;
 pub mod spec;
 
