@@ -713,6 +713,21 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         op = CAReduce(ps.add, axis=(1,))
         assert str(op) == "CAReduce{add, axis=1}"
 
+    def test_clone(self):
+        op = CAReduce(
+            ps.add,
+            axis=(1,),
+            dtype="int64",
+            acc_dtype="float64",
+            upcast_discrete_output=True,
+        )
+        assert op.clone() == op
+        cloned_op = op.clone(
+            axis=None, dtype=None, acc_dtype=None, upcast_discrete_output=False
+        )
+        assert cloned_op != op
+        assert cloned_op == CAReduce(ps.add)
+
     def test_repeated_axis(self):
         x = vector("x")
         with pytest.raises(ValueError, match="repeated axis"):
