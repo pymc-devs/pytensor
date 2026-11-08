@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 import pytensor.tensor as pt
@@ -15,7 +17,7 @@ from pytensor.assumptions import (
     FactState,
 )
 from pytensor.assumptions.specify import SpecifyAssumptions, assume
-from tests.assumptions.conftest import make_fgraph
+from tests.assumptions.conftest import RankBoundedOp, make_fgraph
 
 
 @pytest.mark.parametrize(
@@ -120,3 +122,26 @@ def test_assume_conflict_with_inferred_fact_raises():
     _, af = make_fgraph(e_not_diag)
     with pytest.raises(ConflictingAssumptionsError):
         af.get(e_not_diag, DIAGONAL)
+
+
+def test_assume_valued_key_joins_declared_and_inferred(rank):
+    x = pt.matrix("x")
+    declared = assume(x, rank_bound=5)
+    tightened = assume(RankBoundedOp(3)(x), rank_bound=5)
+    _, af = make_fgraph(declared, tightened)
+    assert af.get(x, rank) == math.inf
+    assert af.get(declared, rank) == 5
+    assert af.get(tightened, rank) == 3
+
+
+def test_specify_assumptions_valued_round_trip(rank):
+    op = SpecifyAssumptions({rank: 5, DIAGONAL: FactState.TRUE})
+    assert SpecifyAssumptions(dict(op.assumptions)) == op
+    assert str(op) == "SpecifyAssumptions{diagonal, rank_bound=5.0}"
+
+
+def test_valued_key_rejects_bool(rank):
+    with pytest.raises(TypeError, match="takes a float value"):
+        rank.assume(pt.matrix("x"))
+    with pytest.raises(TypeError, match="takes a float value"):
+        SpecifyAssumptions({rank: True})

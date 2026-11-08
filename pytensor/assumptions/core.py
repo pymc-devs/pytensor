@@ -97,9 +97,10 @@ class AssumptionKey:
 
     A key whose fact is a value other than a :class:`FactState` -- a bound, a set, a
     pair -- subclasses ``AssumptionKey`` and overrides ``value_type``, ``unknown``,
-    :meth:`join` and :meth:`is_conflict`. ``unknown`` means "nothing proven" and is
-    what inference returns when no rule applies, so it must be correct for every
-    variable.
+    :meth:`join` and :meth:`is_conflict`, and optionally :meth:`format_value`.
+    :meth:`coerce` converts declared values with ``value_type``. ``unknown`` means
+    "nothing proven" and is what inference returns when no rule applies, so it must be
+    correct for every variable.
 
     .. code-block:: python
 
@@ -134,6 +135,32 @@ class AssumptionKey:
         """Return True when *value* records contradictory evidence."""
         return value is FactState.CONFLICT
 
+    def format_value(self, value: Any) -> str:
+        """Return *value* as printed after ``name=`` for a key that is not boolean."""
+        return str(value)
+
+    def coerce(self, value: Any) -> Any:
+        """Return *value* converted with ``value_type``.
+
+        A key that is not boolean rejects a ``bool``.
+        """
+        if self.value_type is not FactState and isinstance(value, bool):
+            raise TypeError(
+                f"Assumption {self.name!r} takes a {self.value_type.__name__} value, "
+                f"not a bool."
+            )
+        return self.value_type(value)
+
+    def declare(self, value: Any) -> Any:
+        """Return the fact a user declaration of *value* stores.
+
+        A boolean key maps truthiness to ``TRUE`` or ``FALSE``. Any other key returns
+        :meth:`coerce` of *value*.
+        """
+        if self.value_type is FactState:
+            return FactState.TRUE if value else FactState.FALSE
+        return self.coerce(value)
+
     def __post_init__(self) -> None:
         registered = KEY_REGISTRY.get(self.name)
         if registered is not None:
@@ -160,15 +187,17 @@ class AssumptionKey:
     def __repr__(self) -> str:
         return self.name
 
-    def assume(self, x: TensorLike, *, state: bool = True):
+    def assume(self, x: TensorLike, *, state: Any = True):
         """Return a view of *x* declaring this assumption.
 
         Parameters
         ----------
         x : tensor-like
             The input to annotate.
-        state : bool, optional
-            Whether to assert the property holds or that it does not. Default True.
+        state : bool or value, optional
+            For a boolean key, whether to assert the property holds or that it does
+            not. For any other key, the value to declare, which this key's
+            :meth:`declare` accepts. Default True.
 
         Returns
         -------
@@ -177,8 +206,7 @@ class AssumptionKey:
         """
         from pytensor.assumptions.specify import SpecifyAssumptions
 
-        fact = FactState.TRUE if state else FactState.FALSE
-        return SpecifyAssumptions({self: fact})(x)
+        return SpecifyAssumptions({self: self.declare(state)})(x)
 
     def holds(self, var: Variable, fgraph: FunctionGraph | None = None) -> bool:
         """Return True iff this assumption is provably TRUE for *var*.
