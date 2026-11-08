@@ -122,3 +122,30 @@ def test_unfused_patterns_are_inlined_natively():
     out = (pt.exp(x[m]) * 2).sum()
     f = compare([x, m], out, [rng.normal(size=5), rng.integers(0, 5, (3, 4))])
     assert not [d for d in f.maker.linker.compiled.info()["schedule"] if d.startswith("foreign")]
+
+
+def test_one_index_writes_several_outputs():
+    # radon-style varying intercept and slope: the gradients of a and b are both
+    # scattered through the same index, so one index entry has two write targets
+    a, b, x, y = pt.vectors("a", "b", "x", "y")
+    g = pt.lvector("g")
+    logp = (-0.5 * (y - a[g] - b[g] * x) ** 2).sum()
+    vals = [rng.normal(size=8), rng.normal(size=8), rng.normal(size=200), rng.normal(size=200), rng.integers(0, 8, 200)]
+    f = compare([a, b, x, y, g], [logp, *pytensor.grad(logp, [a, b])], vals)
+    sched = f.maker.linker.compiled.info()["schedule"]
+    assert not [d for d in sched if "take" in d], sched
+
+
+def test_multi_index_point_gather_and_scatter():
+    # x[rows, cols] reads one source through two index arrays (e.g. the packed
+    # triangle of a Cholesky factor); not fused natively, but must stay correct
+    x = pt.matrix("x")
+    rows, cols = np.tril_indices(5)
+    w = pt.vector("w")
+    out = (x[rows, cols] * w).sum()
+    vals = [rng.normal(size=(5, 5)), rng.normal(size=len(rows))]
+    with_fallback = Mode(linker=LLVMLinker(numba_fallback=True), optimizer=LLVM.optimizer)
+    f = pytensor.function([x, w], [out, pytensor.grad(out, x)], mode=with_fallback)
+    ref = pytensor.function([x, w], [out, pytensor.grad(out, x)], mode=REF)(*vals)
+    for r, e in zip(f(*vals), ref, strict=True):
+        np.testing.assert_allclose(r, e, rtol=1e-12)

@@ -8,7 +8,7 @@ from pytensor.link.basic import JITLinker
 FUSION_REWRITES = ("fuse_indexed_into_elemwise", "fuse_elemwise", "wrap_reduced_gather_in_elemwise")
 # Rewrites the LLVM mode includes on top of fast_run: FusedElemwise, and the
 # save-memory scan rewrite for linkers without preallocated outputs.
-LLVM_REWRITES = (*FUSION_REWRITES, "scan_save_mem_no_prealloc")
+LLVM_REWRITES = (*FUSION_REWRITES, "scan_save_mem_no_prealloc", "llvm_scalar_adv_index_to_basic")
 
 
 class LLVMLinker(JITLinker):

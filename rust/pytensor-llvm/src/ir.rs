@@ -110,6 +110,14 @@ pub enum Op {
     DimShuffle { order: Vec<Option<usize>> },
     /// tensor.math.Dot (1d/2d operands). Precompiled Rust kernel.
     Dot,
+    /// Cholesky factor of a square matrix (faer). NaN result if not positive definite.
+    Cholesky { lower: bool },
+    /// Solve A x = b for triangular A (faer); b is 1-d or 2-d.
+    SolveTriangular { lower: bool, unit_diagonal: bool },
+    /// CumOp: cumulative sum (or product) along an axis.
+    CumOp { axis: usize, mul: bool },
+    /// ExtractDiag: diagonal of two axes as a view (the diagonal is the last dim).
+    ExtractDiag { offset: i64, axis1: usize, axis2: usize },
     /// SortOp along one axis. Precompiled Rust kernel.
     Sort { axis: usize, stable: bool },
     /// DeepCopyOp. Precompiled Rust kernel.

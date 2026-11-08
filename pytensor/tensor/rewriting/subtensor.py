@@ -2960,3 +2960,73 @@ optdb["specialize"].register(
     "shape_unsafe",  # It can mask invalid mask sizes
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
+
+
+def _split_scalar_indices(var, idx_inputs, idx_list):
+    """For x[i, s] (consecutive advanced indices: one integer array and integer
+    scalars, full slices elsewhere): (basic, axis, array) with x[i, s] ==
+    basic[(slice(None),) * axis + (array,)], basic a view of x. Else None."""
+    indices = list(indices_from_subtensor(idx_inputs, idx_list))
+    indices += [slice(None)] * (var.type.ndim - len(indices))
+    adv = [d for d, e in enumerate(indices) if not isinstance(e, slice)]
+    if len(adv) < 2 or adv != list(range(adv[0], adv[0] + len(adv))):
+        return None
+    if any(e != slice(None) for d, e in enumerate(indices) if d not in adv):
+        return None
+    for d in adv:
+        t = indices[d].type
+        if not isinstance(t, TensorType) or t.dtype == "bool" or not t.dtype.startswith(("int", "uint")):
+            return None
+    arrays = [d for d in adv if indices[d].type.ndim > 0]
+    if len(arrays) != 1:
+        return None
+    [a] = arrays
+    basic_idx = tuple(e if d in adv and d != a else slice(None) for d, e in enumerate(indices))
+    axis = a - sum(1 for d in adv if d < a)
+    return var[basic_idx], basic_idx, axis, indices[a]
+
+
+@node_rewriter([AdvancedSubtensor, AdvancedIncSubtensor])
+def llvm_scalar_adv_index_to_basic(fgraph, node):
+    """``x[g, 0]`` -> ``x[:, 0][g]``: integer scalars among advanced indices become
+    basic indexing (a view), leaving a single-array gather the native take kernel
+    and the FusedElemwise rewrites handle. Same for inc/set_subtensor."""
+    op = node.op
+    if isinstance(op, AdvancedSubtensor):
+        var, *idx = node.inputs
+        split = _split_scalar_indices(var, idx, op.idx_list)
+        if split is None:
+            return None
+        basic, _, axis, arr = split
+        out = basic[(slice(None),) * axis + (arr,)]
+    else:
+        var, y, *idx = node.inputs
+        split = _split_scalar_indices(var, idx, op.idx_list)
+        if split is None:
+            return None
+        basic, basic_idx, axis, arr = split
+        from pytensor.tensor.subtensor import inc_subtensor, set_subtensor
+
+        # update the view, then write it back into (a copy of) x
+        new_basic = inc_subtensor(
+            basic[(slice(None),) * axis + (arr,)],
+            y,
+            set_instead_of_inc=op.set_instead_of_inc,
+            ignore_duplicates=op.ignore_duplicates,
+        )
+        out = set_subtensor(var[basic_idx], new_basic)
+    if out.type != node.outputs[0].type:
+        out = out.astype(node.outputs[0].type.dtype)
+        if out.type.broadcastable != node.outputs[0].type.broadcastable:
+            return None
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
+# Opt-in by name (the LLVM mode includes it): before the FusedElemwise rewrites
+# (position 100), after specialize.
+optdb.register(
+    "llvm_scalar_adv_index_to_basic",
+    dfs_rewriter(llvm_scalar_adv_index_to_basic),
+    position=49.9,
+)

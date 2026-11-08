@@ -291,8 +291,9 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
                 for t in temps.iter_mut() {
                     step_args.push(t.view(None));
                 }
+                let mark = (*ctx).scratch_mark();
                 let rc = func(ctx, step_args.as_mut_ptr(), std::ptr::null());
-                (*ctx).end_kernel();
+                (*ctx).scratch_release(mark);
                 if rc != 0 {
                     err = Some((*ctx).error.take().map(|(_, m)| m).unwrap_or_else(|| format!("Scan step failed (code {rc})")));
                     break;

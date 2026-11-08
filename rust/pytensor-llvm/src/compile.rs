@@ -70,12 +70,30 @@ pub fn veclib_enabled() -> bool {
     unsafe { VECLIB }
 }
 
-/// libmvec ISA variants usable on this host: SSE ('b', 2 x f64) and AVX2 ('d', 4 x f64).
+/// Target CPU and features: the host, or `PTLLVM_CPU` (e.g. "haswell" to run the
+/// generated code under valgrind, which has no AVX-512). Part of the cache key.
+pub fn target_cpu() -> (String, String) {
+    match std::env::var("PTLLVM_CPU") {
+        Ok(cpu) if !cpu.is_empty() => (cpu, String::new()),
+        _ => (TargetMachine::get_host_cpu_name().to_string(), TargetMachine::get_host_cpu_features().to_string()),
+    }
+}
+
+/// libmvec ISA variants usable on this target: SSE ('b', 2 x f64) and AVX2 ('d', 4 x f64).
 fn vfabi_variants() -> Vec<(char, u32)> {
     if !veclib_enabled() {
         return vec![];
     }
-    let features = TargetMachine::get_host_cpu_features().to_string();
+    let (cpu, features) = target_cpu();
+    if !features.is_empty() || cpu.is_empty() {
+        let mut v = vec![('b', 2)];
+        if features.split(',').any(|f| f == "+avx2") {
+            v.push(('d', 4));
+        }
+        return v;
+    }
+    // named CPU: ask LLVM whether it has AVX2 via a target machine
+    let features = String::from(if ["haswell", "broadwell", "skylake", "znver1", "znver2", "znver3", "x86-64-v3"].contains(&cpu.as_str()) { "+avx2" } else { "" });
     let mut v = vec![('b', 2)];
     if features.split(',').any(|f| f == "+avx2") {
         v.push(('d', 4));
@@ -86,8 +104,7 @@ fn vfabi_variants() -> Vec<(char, u32)> {
 fn target_machine(opt: u32) -> Result<TargetMachine, String> {
     let triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-    let cpu = TargetMachine::get_host_cpu_name().to_string();
-    let features = TargetMachine::get_host_cpu_features().to_string();
+    let (cpu, features) = target_cpu();
     let level = match opt {
         0 => OptimizationLevel::None,
         1 => OptimizationLevel::Less,
@@ -105,8 +122,8 @@ pub fn salt(opts: &Options) -> String {
     format!(
         "v{CODEGEN_VERSION}|{}|llvm{ma}.{mi}.{pa}|{}|{}|O{}|veclib{}|fp{}",
         env!("CARGO_PKG_VERSION"),
-        TargetMachine::get_host_cpu_name().to_string(),
-        TargetMachine::get_host_cpu_features().to_string(),
+        target_cpu().0,
+        target_cpu().1,
         opts.opt_level,
         veclib_enabled(),
         crate::perf::enabled(),

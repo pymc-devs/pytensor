@@ -13,6 +13,8 @@ from functools import singledispatch
 import numpy as np
 
 import pytensor.scalar.basic as ps
+import pytensor.tensor as _pt
+import pytensor.tensor.basic as _ptb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.graph.basic import Constant, Variable
@@ -274,6 +276,23 @@ def _(op, node, conv, inputs, outputs):
     conv.builder.sort(inputs[0], outputs[0], axis, op.kind in ("stable", "mergesort"))
 
 
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky  # noqa: E402
+from pytensor.tensor.linalg.solvers.triangular import SolveTriangular  # noqa: E402
+
+
+@llvm_build.register(Cholesky)
+def _(op, node, conv, inputs, outputs):
+    out_dtype = node.outputs[0].type.dtype
+    conv.builder.cholesky(conv.cast(node.inputs[0], out_dtype), outputs[0], bool(op.lower))
+
+
+@llvm_build.register(SolveTriangular)
+def _(op, node, conv, inputs, outputs):
+    out_dtype = node.outputs[0].type.dtype
+    a, b = (conv.cast(v, out_dtype) for v in node.inputs)
+    conv.builder.solve_triangular(a, b, outputs[0], bool(op.lower), bool(op.unit_diagonal))
+
+
 @llvm_build.register(DeepCopyOp)
 def _(op, node, conv, inputs, outputs):
     conv.builder.copy(inputs[0], outputs[0])
@@ -336,16 +355,24 @@ def _(op, node, conv, inputs, outputs):
 def _(op, node, conv, inputs, outputs):
     axis = _take_axis(op.idx_list, node.inputs[1:])
     if axis is None:
-        raise NotImplementedError(f"LLVM backend: advanced indexing pattern {op}")
+        multi = _multi_index(op, node.inputs[1:])
+        if multi is None:
+            raise NotImplementedError(f"LLVM backend: advanced indexing pattern {op}")
+        return _lower_adv_read(conv, node, inputs, outputs, *multi)
     conv.builder.take(inputs[0], inputs[1], axis, outputs[0])
 
 
 @llvm_build.register(AdvancedIncSubtensor)
 def _(op, node, conv, inputs, outputs):
     axis = _take_axis(op.idx_list, node.inputs[2:])
-    if axis is None or (op.ignore_duplicates and not op.set_instead_of_inc):
+    if op.ignore_duplicates and not op.set_instead_of_inc:
         # ignore_duplicates increments follow `x[idx] += y` (no accumulation)
         raise NotImplementedError(f"LLVM backend: advanced indexing pattern {op}")
+    if axis is None:
+        multi = _multi_index(op, node.inputs[2:])
+        if multi is None:
+            raise NotImplementedError(f"LLVM backend: advanced indexing pattern {op}")
+        return _lower_adv_inc(conv, node, inputs, outputs, *multi, op.set_instead_of_inc)
     x, y, _ = node.inputs
     y_id = conv.cast(y, x.type.dtype)
     conv.builder.inc_take(inputs[0], y_id, inputs[2], axis, outputs[0], op.set_instead_of_inc)
@@ -374,8 +401,10 @@ def _fused_spec(op, node):
     n_idx = len(op.indexed_inputs)
     if len(op.indexed_outputs) not in (0, n_idx):
         raise NotImplementedError("FusedElemwise: inconsistent index specs")
-    n_targets = sum(e is not None for e in op.indexed_outputs)
-    n_elem = len(node.inputs) - n_idx - n_targets
+    # one target buffer per written output (an index can write several),
+    # ordered by output position
+    written = sorted(int(s) for e in op.indexed_outputs if e is not None for s in e[0])
+    n_elem = len(node.inputs) - n_idx - len(written)
     if len(E.inputs) != n_elem or len(E.outputs) != len(node.outputs):
         raise NotImplementedError("FusedElemwise: unexpected inner structure")
 
@@ -391,6 +420,9 @@ def _fused_spec(op, node):
         sources, axis = entry
         check_index(n_elem + k)
         for s in sources:
+            if reads[s] is not None:
+                # x[i, j]: one source read through several index arrays
+                raise NotImplementedError("FusedElemwise: multi-index reads are not fused natively")
             reads[s] = (n_elem + k, int(axis))
     # inputs must be the inner graph inputs themselves (or indexed reads of them)
     for j, e_in in enumerate(E.inputs):
@@ -410,15 +442,15 @@ def _fused_spec(op, node):
         if name is None or not (acc_dtype == node.outputs[i].type.dtype == E.outputs[i].type.dtype):
             raise NotImplementedError("FusedElemwise: reduction not supported natively")
         outs[i] = ("reduce", name, [int(a) for a in axes])
-    t = 0
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
         sources, axis, mode = entry
         check_index(n_elem + k)
-        target = n_elem + n_idx + t
-        t += 1
         for s in sources:
+            if outs[s][0] != "plain":
+                raise NotImplementedError("FusedElemwise: multi-index writes are not fused natively")
+            target = n_elem + n_idx + written.index(int(s))
             outs[s] = ("write", n_elem + k, int(axis), target, mode == "set")
     for i, o in enumerate(node.outputs):
         if o.type.dtype != E.outputs[i].type.dtype:
@@ -528,3 +560,137 @@ def fgraph_to_llvm(
         segments=segments,
         segment_max_elems=segment_max_elems,
     )
+
+
+# ---------------------------------------------------------------- lowered ops
+#
+# Ops expressed through other supported ops: a small PyTensor graph built on the
+# node's inputs, converted in place of the node.
+
+
+def _lower(conv, node, inputs, outputs, build):
+    """Convert `build(*node.inputs)` (a list of PyTensor outputs) in place of `node`.
+
+    Constant inputs stay constants in the built graph (so slices with constant bounds
+    are static), the others are replaced by fresh variables bound to `inputs`.
+    """
+    from pytensor.graph.fg import FunctionGraph
+
+    fresh = [v if isinstance(v, Constant) else v.type() for v in node.inputs]
+    outs = build(*fresh)
+    outs = [o if o.type == n.type else o.astype(n.type.dtype) for o, n in zip(outs, node.outputs, strict=True)]
+    # outputs that are inputs or constants are copied by `inline`
+    fg_inputs = [f for f, v in zip(fresh, node.inputs, strict=True) if not isinstance(v, Constant)]
+    fg_ids = [i for i, v in zip(inputs, node.inputs, strict=True) if not isinstance(v, Constant)]
+    fg = FunctionGraph(fg_inputs, outs, clone=False)
+    conv.inline(fg, fg_ids, outputs)
+
+
+@llvm_build.register(_ptb.Split)
+def _(op, node, conv, inputs, outputs):
+    x, splits = node.inputs
+    axis = int(op.axis)
+
+    def build(x, splits):
+        if isinstance(splits, Constant):
+            sizes = [int(s) for s in np.asarray(splits.data)]
+            starts = np.concatenate([[0], np.cumsum(sizes)[:-1]]).tolist()
+            bounds = [(int(a), int(a) + s) for a, s in zip(starts, sizes, strict=True)]
+        else:
+            ends = _pt.cumsum(splits)
+            bounds = [(ends[k] - splits[k], ends[k]) for k in range(op.len_splits)]
+        lead = (slice(None),) * axis
+        return [x[(*lead, slice(a, b))] for a, b in bounds]
+
+    _lower(conv, node, inputs, outputs, build)
+
+
+def _multi_index(op, index_vars):
+    """For x[i0, ..., ik] with integer index arrays on consecutive axes a..a+k (full
+    slices elsewhere): (a, index vars), else None."""
+    idx = op.idx_list
+    ints = [d for d, e in enumerate(idx) if isinstance(e, int)]
+    if len(ints) < 2 or ints != list(range(ints[0], ints[0] + len(ints))):
+        return None
+    if any(e != slice(None) for d, e in enumerate(idx) if d not in ints):
+        return None
+    vars_ = [index_vars[idx[d]] for d in ints]
+    if any(not isinstance(v.type, TensorType) or v.type.dtype == "bool" or not v.type.dtype.startswith(("int", "uint")) for v in vars_):
+        return None
+    return ints[0], vars_
+
+
+def _flat_index(x, a, index_vars):
+    """Flat index into x reshaped to (shape[:a], prod(shape[a:a+k]), shape[a+k:]),
+    with numpy's negative wrapping and bounds check."""
+    from pytensor.raise_op import Assert
+
+    shape = [x.shape[a + j] for j in range(len(index_vars))]
+    flat = None
+    checks = []
+    for v, n in zip(index_vars, shape, strict=True):
+        v = _pt.cast(v, "int64")
+        v = _pt.switch(_pt.lt(v, 0), v + n, v)
+        checks.append(_pt.all(_pt.and_(_pt.ge(v, 0), _pt.lt(v, n))))
+        flat = v if flat is None else flat * n + v
+    ok = checks[0]
+    for c in checks[1:]:
+        ok = _pt.and_(ok, c)
+    flat = Assert("index out of bounds")(flat, ok)
+    rest = [x.shape[d] for d in range(a + len(index_vars), x.type.ndim)]
+    xr = x.reshape([*[x.shape[d] for d in range(a)], _pt.prod(_pt.stack(shape)), *rest], ndim=a + 1 + len(rest))
+    return xr, flat
+
+
+def _lower_adv_read(conv, node, inputs, outputs, a, index_vars):
+    pos = [node.inputs.index(v) for v in index_vars]
+
+    def build(x, *idx):
+        ivars = [idx[p - 1] for p in pos]
+        xr, flat = _flat_index(x, a, ivars)
+        lead = (slice(None),) * a
+        taken = xr[(*lead, flat.ravel())]
+        bshape = [flat.shape[d] for d in range(flat.type.ndim)]
+        out_shape = [*[x.shape[d] for d in range(a)], *bshape, *[x.shape[d] for d in range(a + len(ivars), x.type.ndim)]]
+        return [taken.reshape(out_shape, ndim=node.outputs[0].type.ndim)]
+
+    _lower(conv, node, inputs, outputs, build)
+
+
+def _lower_adv_inc(conv, node, inputs, outputs, a, index_vars, set_):
+    pos = [node.inputs.index(v) for v in index_vars]
+
+    def build(x, y, *idx):
+        ivars = [idx[p - 2] for p in pos]
+        xr, flat = _flat_index(x, a, ivars)
+        lead = (slice(None),) * a
+        target = xr[(*lead, flat.ravel())]
+        # y broadcast to the indexed region, then flattened like it
+        region = [*[x.shape[d] for d in range(a)], *[flat.shape[d] for d in range(flat.type.ndim)],
+                  *[x.shape[d] for d in range(a + len(ivars), x.type.ndim)]]
+        y = _pt.cast(y, x.type.dtype)
+        full = y.type.ndim == len(region) and not any(y.type.broadcastable)
+        yb = y if full else _pt.alloc(y, *region)
+        yf = yb.reshape([target.shape[d] for d in range(target.type.ndim)], ndim=target.type.ndim)
+        upd = _pt.set_subtensor(target, yf) if set_ else _pt.inc_subtensor(target, yf)
+        return [upd.reshape(x.shape, ndim=x.type.ndim)]
+
+    _lower(conv, node, inputs, outputs, build)
+
+
+from pytensor.tensor.extra_ops import CumOp  # noqa: E402
+
+
+@llvm_build.register(CumOp)
+def _(op, node, conv, inputs, outputs):
+    out_dtype = node.outputs[0].type.dtype
+    x = node.inputs[0]
+    if x.type.ndim == 0:
+        raise NotImplementedError("LLVM backend: CumOp on a 0-d input")
+    conv.builder.cumop(conv.cast(x, out_dtype), outputs[0], int(op.axis) % x.type.ndim, op.mode == "mul")
+
+
+@llvm_build.register(_ptb.ExtractDiag)
+def _(op, node, conv, inputs, outputs):
+    nd = node.inputs[0].type.ndim
+    conv.builder.extract_diag(inputs[0], outputs[0], int(op.offset), int(op.axis1) % nd, int(op.axis2) % nd)

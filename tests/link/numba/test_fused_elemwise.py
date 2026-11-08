@@ -1159,3 +1159,25 @@ class TestReductionPythonMode:
         np.testing.assert_allclose(
             perform_fn(xv, yv, idxv)[0], np.sum(xv[idxv] + yv, axis=1), rtol=1e-10
         )
+
+
+def test_chained_writes_from_same_elemwise_without_inplace():
+    # The gradient of ab[g, 0] + ab[g, 1] * x is a chain of two inc_subtensors into
+    # one buffer whose values both come from the same Elemwise. Fusing the outer
+    # write made the FusedElemwise consume its own output (a cycle, toposort never
+    # finished) when the inplace rewrites were excluded.
+    rng = np.random.default_rng(0)
+    z = pt.matrix("z", shape=(5, 2))
+    L = pt.matrix("L", shape=(2, 2))
+    x = pt.vector("x", shape=(30,))
+    y = pt.vector("y", shape=(30,))
+    g = pt.lvector("g", shape=(30,))
+    ab = z @ L.T
+    logp = (-0.5 * (y - ab[g, 0] - ab[g, 1] * x) ** 2).sum() - 0.5 * (z**2).sum()
+    outs = [logp, *pt.grad(logp, [z, L])]
+    vals = [rng.normal(size=(5, 2)), rng.normal(size=(2, 2)), rng.normal(size=30), rng.normal(size=30), rng.integers(0, 5, 30)]
+    ref = function([z, L, x, y, g], outs, mode="FAST_COMPILE")(*vals)
+    for mode in [get_mode("NUMBA"), get_mode("NUMBA").excluding("inplace")]:
+        res = function([z, L, x, y, g], outs, mode=mode)(*vals)
+        for r, e in zip(res, ref, strict=True):
+            np.testing.assert_allclose(r, e, rtol=1e-10)
