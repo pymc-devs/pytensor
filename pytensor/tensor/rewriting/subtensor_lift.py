@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
+from pytensor.assumptions import DIAGONAL, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -27,8 +28,10 @@ from pytensor.tensor.basic import (
     Join,
     MakeVector,
     alloc,
+    alloc_diag,
     arange,
     as_tensor,
+    diagonal,
     expand_dims,
     get_underlying_scalar_constant_value,
     join,
@@ -78,7 +81,7 @@ from pytensor.tensor.subtensor import (
     indexed_result_shape,
     indices_from_subtensor,
 )
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import TensorType, values_eq_approx_remove_nan
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -918,6 +921,60 @@ def local_extract_diag_of_eye(fgraph, node):
     out = alloc(val, d)
     copy_stack_trace(node.outputs[0], out)
     return [out]
+
+
+def _elemwise_of_diagonals(elemwise_out, *, fgraph):
+    """Rebuild the main diagonal of ``elemwise_out`` as the ``Elemwise`` of its inputs' diagonals.
+
+    The diagonal runs over the last two axes. An input broadcast along one of them is a
+    line of values along the other, and reads the entries it puts on the diagonal.
+    """
+    elemwise_inputs = elemwise_out.owner.inputs
+    batch_ndim = elemwise_out.type.ndim - 2
+    rows, columns = get_simplified_broadcast_shape(*elemwise_inputs, fgraph=fgraph)[-2:]
+    diag_length = rows if rows is columns else minimum(rows, columns)
+
+    def read_diagonal(inp):
+        rows_broadcast, columns_broadcast = inp.type.broadcastable[-2:]
+        if not (rows_broadcast or columns_broadcast):
+            return diagonal(inp, axis1=-2, axis2=-1)
+
+        kept_axis = batch_ndim if columns_broadcast else batch_ndim + 1
+        line = inp.dimshuffle(*range(batch_ndim), kept_axis)
+        if rows_broadcast and columns_broadcast:
+            return line
+        return line[..., :diag_length]
+
+    return elemwise_out.owner.op(*(read_diagonal(inp) for inp in elemwise_inputs))
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([Elemwise])
+def local_elemwise_of_diagonal(fgraph, node):
+    """Rewrite an ``Elemwise`` with a diagonal output to act on the diagonal alone.
+
+    alloc_diag(g) * x -> alloc_diag(g * diagonal(x))
+    alloc_diag(g) + alloc_diag(h) -> alloc_diag(g + h)
+    -alloc_diag(g) -> alloc_diag(-g)
+
+    Off-diagonal entries are never read, so a nan that ``0 * inf`` or ``0 / 0`` would
+    produce there is dropped.
+    """
+    if len(node.outputs) > 1:
+        return None
+
+    [out] = node.outputs
+    if out.type.ndim < 2 or not check_assumption(fgraph, out, DIAGONAL):
+        return None
+
+    rows, columns = out.type.shape[-2:]
+    if rows is not None and columns is not None and rows != columns:
+        return None
+
+    new_out = alloc_diag(_elemwise_of_diagonals(out, fgraph=fgraph), axis1=-2, axis2=-1)
+    new_out.tag.values_eq_approx = values_eq_approx_remove_nan
+    copy_stack_trace(out, new_out)
+    return [new_out]
 
 
 @node_rewriter([ExtractDiag])

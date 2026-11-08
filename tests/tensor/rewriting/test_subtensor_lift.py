@@ -14,6 +14,7 @@ from pytensor import scalar as ps
 from pytensor import tensor as pt
 from pytensor.assumptions import assume
 from pytensor.compile import get_default_mode, get_mode
+from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph import (
     Constant,
@@ -42,6 +43,7 @@ from pytensor.tensor import (
 from pytensor.tensor.basic import (
     ExtractDiag,
     MakeVector,
+    alloc_diag,
     concatenate,
     expand_dims,
     make_vector,
@@ -1660,6 +1662,162 @@ class TestExtractDiagLiftPass:
         values = np.random.default_rng(0).normal(size=(6, 2)), 0.7
         reference = function([X, lengthscale], outputs, mode=NO_OPTIMIZATION_MODE)
         np.testing.assert_allclose(fn(*values), reference(*values))
+
+
+class TestElemwiseOfDiagonal:
+    rewrite_kw = dict(include=("canonicalize", "stabilize"))
+
+    @pytest.mark.parametrize(
+        "operation, expected",
+        [
+            pytest.param(lambda g, h: pt.diag(g) + pt.diag(h), pt.add, id="add"),
+            pytest.param(lambda g, h: pt.diag(g) - pt.diag(h), pt.sub, id="sub"),
+            pytest.param(lambda g, h: pt.diag(g) * pt.diag(h), pt.mul, id="mul"),
+        ],
+    )
+    def test_elemwise_of_two_diagonals(self, operation, expected):
+        g = pt.vector("g", shape=(3,))
+        h = pt.vector("h", shape=(3,))
+
+        result = RewriteTester([g, h], [operation(g, h)], **self.rewrite_kw)
+        result.assert_graph(pt.diag(expected(g, h)))
+        result.assert_eval(np.arange(3.0), np.arange(3.0, 6.0))
+
+    def test_unary_zero_preserving(self):
+        g = pt.vector("g", shape=(3,))
+
+        result = RewriteTester([g], [pt.abs(pt.diag(g))], **self.rewrite_kw)
+        result.assert_graph(pt.diag(pt.abs(g)))
+        result.assert_eval(np.arange(3.0))
+
+    @pytest.mark.parametrize(
+        "other_shape, read",
+        [
+            ((4, 4), pt.diagonal),
+            ((4, 1), lambda x: x.squeeze(axis=1)),
+            ((1, 4), lambda x: x.squeeze(axis=0)),
+            ((1, 1), lambda x: x.squeeze(axis=1)),
+        ],
+        ids=["matrix", "column", "row", "single_entry"],
+    )
+    @pytest.mark.parametrize(
+        "operation",
+        [lambda d, x: d * x, lambda d, x: d / x],
+        ids=["multiply", "divide"],
+    )
+    def test_diagonal_with_general_operand(self, operation, other_shape, read):
+        g = pt.vector("g", shape=(4,))
+        other = pt.matrix("other", shape=other_shape)
+
+        result = RewriteTester(
+            [g, other], [operation(pt.diag(g), other)], **self.rewrite_kw
+        )
+        result.assert_graph(
+            rewrite_graph(pt.diag(operation(g, read(other))), **self.rewrite_kw)
+        )
+        result.assert_eval(
+            np.arange(4.0),
+            np.arange(1.0, 1 + np.prod(other_shape)).reshape(other_shape),
+        )
+
+    def test_off_diagonal_nan_is_dropped(self):
+        g = pt.vector("g", shape=(2,))
+        x = pt.matrix("x", shape=(2, 2))
+
+        result = RewriteTester([g, x], [pt.diag(g) / x], **self.rewrite_kw)
+        values = np.array([1.0, 2.0]), np.array([[1.0, 0.0], [1.0, 1.0]])
+        [original] = result.orig_fn(*values)
+        [rewritten] = result.rewr_fn(*values)
+
+        assert np.isnan(original[0, 1])
+        np.testing.assert_allclose(rewritten, np.diag([1.0, 2.0]))
+
+    def test_statically_rectangular_assumption_is_kept(self):
+        x = pt.matrix("x", shape=(3, 4))
+        out = assume(x, diagonal=True) * 2.0
+
+        with config.change_flags(on_opt_error="raise"):
+            result = RewriteTester([x], [out], **self.rewrite_kw)
+        result.assert_graph(rewrite_graph(x * 2.0, **self.rewrite_kw))
+
+    def test_batched(self):
+        g = pt.vector("g", shape=(3,))
+        x = pt.tensor3("x", shape=(2, 3, 3))
+
+        result = RewriteTester([g, x], [pt.diag(g) * x], **self.rewrite_kw)
+        expanded_diagonal = pt.diagonal(pt.diag(g)[None], axis1=-2, axis2=-1)
+        diagonal_product = expanded_diagonal * pt.diagonal(x, axis1=-2, axis2=-1)
+        result.assert_graph(
+            rewrite_graph(
+                alloc_diag(diagonal_product, axis1=-2, axis2=-1),
+                **self.rewrite_kw,
+            )
+        )
+        result.assert_eval(np.arange(3.0), np.arange(18.0).reshape(2, 3, 3))
+
+    @pytest.mark.parametrize(
+        "make_out",
+        [
+            pytest.param(lambda g, x: pt.diag(g) * x, id="mul"),
+            pytest.param(lambda g, x: pt.diag(g) + pt.diag(pt.ones(3)), id="add"),
+        ],
+    )
+    def test_broadcast_length_one_diagonal_is_kept(self, make_out):
+        g = pt.vector("g", shape=(1,))
+        x = pt.matrix("x", shape=(3, 3))
+        out = make_out(g, x)
+
+        result = RewriteTester([g, x], [out], include=("stabilize",))
+        result.assert_graph(
+            rewrite_graph(
+                out, include=("stabilize",), exclude=["local_elemwise_of_diagonal"]
+            )
+        )
+        result.assert_eval(np.array([2.0]), np.arange(1.0, 10.0).reshape(3, 3))
+
+    def test_output_with_several_clients(self):
+        g = pt.vector("g", shape=(3,))
+        x = pt.matrix("x", shape=(3, 3))
+        elemwise = pt.diag(g) * x
+
+        outputs = [elemwise, elemwise.sum(axis=0), pt.diagonal(elemwise)]
+
+        result = RewriteTester([g, x], outputs, **self.rewrite_kw)
+
+        rewritten = alloc_diag(g * pt.diagonal(x))
+        result.assert_graph(
+            *rewrite_graph(
+                [rewritten, rewritten.sum(axis=0), pt.diagonal(rewritten)],
+                **self.rewrite_kw,
+            )
+        )
+        result.assert_eval(np.arange(3.0), np.arange(1.0, 10.0).reshape(3, 3))
+
+    def test_assumed_diagonal_operand(self):
+        A = pt.matrix("A", shape=(3, 3))
+        B = pt.matrix("B", shape=(3, 3))
+        assumed = assume(A, diagonal=True)
+
+        result = RewriteTester([A, B], [assumed * B], **self.rewrite_kw)
+
+        result.assert_graph(
+            rewrite_graph(
+                alloc_diag(pt.diagonal(assumed) * pt.diagonal(B)), **self.rewrite_kw
+            )
+        )
+        result.assert_eval(np.diag([1.0, 2.0, 3.0]), np.arange(9.0).reshape(3, 3))
+
+    def test_dropped_nan_passes_debug_mode(self):
+        g = pt.vector("g", shape=(2,))
+        x = pt.matrix("x", shape=(2, 2))
+        mode = DebugMode(check_py_code=True, check_c_code=False)
+
+        fn = function([g, x], pt.diag(g) / x, mode=mode)
+
+        np.testing.assert_allclose(
+            fn(np.array([1.0, 2.0]), np.array([[1.0, 0.0], [1.0, 1.0]])),
+            np.diag([1.0, 2.0]),
+        )
 
 
 class TestAdvancedSubtensorOfDot:
