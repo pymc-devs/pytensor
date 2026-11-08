@@ -32,7 +32,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
-from pytensor.tensor.basic import Alloc, constant, join, second, switch
+from pytensor.tensor.basic import Alloc, alloc_diag, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
@@ -5400,6 +5400,108 @@ def test_local_dot_to_mul_unspecified_length_1():
         fn(x=np.ones((1, 1)) * 5, y=np.ones((1, 5))),
         np.ones((1, 5)) * 5,
     )
+
+
+class TestSumOfDiagonal:
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda g: alloc_diag(g), id="alloc_diag"),
+            pytest.param(lambda g: pt.eye(3) * g[None, :], id="eye_mul"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "axis, expected",
+        [
+            pytest.param(0, lambda g: g, id="rows"),
+            pytest.param(1, lambda g: g, id="columns"),
+            pytest.param(None, lambda g: g.sum(), id="all"),
+        ],
+    )
+    def test_sum_reads_diagonal(self, make_diag, axis, expected):
+        g = dvector("g", shape=(3,))
+
+        result = RewriteTester(
+            [g],
+            [make_diag(g).sum(axis=axis)],
+            include=("canonicalize", "stabilize", "specialize"),
+        )
+        result.assert_graph(expected(g))
+        result.assert_eval(np.arange(3.0))
+
+    @pytest.mark.parametrize(
+        "axis, expected",
+        [
+            pytest.param(-1, lambda G: G, id="columns"),
+            pytest.param(-2, lambda G: G, id="rows"),
+            pytest.param((-2, -1), lambda G: G.sum(axis=-1), id="core"),
+            pytest.param((0, -1), lambda G: G.sum(axis=0), id="batch_and_columns"),
+            pytest.param(None, lambda G: G.sum(), id="all"),
+        ],
+    )
+    def test_batched(self, axis, expected):
+        G = dmatrix("G", shape=(2, 3))
+        out = alloc_diag(G, axis1=-2, axis2=-1).sum(axis=axis)
+
+        result = RewriteTester([G], [out])
+        result.assert_graph(expected(G))
+        result.assert_eval(np.arange(6.0).reshape(2, 3))
+
+    def test_batch_only_reduction_is_kept(self):
+        G = dmatrix("G", shape=(2, 3))
+        out = alloc_diag(G, axis1=-2, axis2=-1).sum(axis=0)
+
+        result = RewriteTester([G], [out])
+        result.assert_graph(out)
+        result.assert_eval(np.arange(6.0).reshape(2, 3))
+
+    def test_requested_dtype_accumulates_in_full_precision(self):
+        g = pt.vector("g", shape=(None,), dtype="float32")
+        out = alloc_diag(g).sum(dtype="float64")
+
+        result = RewriteTester([g], [out])
+        result.assert_graph(g.sum(dtype="float64"))
+        result.assert_eval(np.full(3, 0.1, dtype="float32"))
+
+    def test_statically_rectangular_assumption_is_kept(self):
+        x = dmatrix("x", shape=(3, 4))
+        out = assume(x, diagonal=True).sum(axis=0)
+
+        with pytensor.config.change_flags(on_opt_error="raise"):
+            RewriteTester([x], [out]).assert_graph(x.sum(axis=0))
+
+    def test_elemwise_of_diagonal(self):
+        g = dvector("g", shape=(3,))
+        A = dmatrix("A", shape=(3, 3))
+        out = (alloc_diag(g) * A).sum(axis=0)
+
+        result = RewriteTester([g, A], [out])
+        result.assert_graph(pt.diagonal(alloc_diag(g) * A))
+        result.assert_eval(np.arange(3.0), np.arange(9.0).reshape(3, 3))
+
+    @pytest.mark.parametrize(
+        "make_matrix",
+        [
+            pytest.param(lambda g, A: alloc_diag(g, offset=1), id="off_band"),
+            pytest.param(lambda g, A: alloc_diag(g) * A, id="broadcast_length_one"),
+        ],
+    )
+    def test_non_diagonal_is_kept(self, make_matrix):
+        g = dvector("g", shape=(1,))
+        A = dmatrix("A", shape=(2, 2))
+        out = make_matrix(g, A).sum(axis=0)
+
+        result = RewriteTester([g, A], [out])
+        result.assert_graph(out)
+        result.assert_eval(np.array([2.0]), np.arange(4.0).reshape(2, 2))
+
+    @pytest.mark.parametrize("dtype", ["int8", "bool"])
+    def test_sum_upcast_is_kept(self, dtype):
+        g = pt.vector("g", shape=(3,), dtype=dtype)
+
+        result = RewriteTester([g], [alloc_diag(g).sum(axis=0)])
+        result.assert_graph(g.astype("int64"))
+        result.assert_eval(np.array([1, 0, 1], dtype=dtype))
 
 
 class TestDotDiagToElemwise:
