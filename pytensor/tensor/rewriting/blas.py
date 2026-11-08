@@ -84,14 +84,13 @@ from pytensor.graph.utils import InconsistencyError
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import (
     Dot22,
+    Gemm,
+    Gemv,
     _batched_dot,
     _dot22,
     _dot22scalar,
-    gemm_inplace,
-    gemm_no_inplace,
-    gemv_inplace,
-    gemv_no_inplace,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import (
     Dot,
@@ -102,6 +101,7 @@ from pytensor.tensor.math import (
     sub,
     variadic_add,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.type import (
     TensorType,
@@ -173,7 +173,7 @@ def _beta_L_plus_alpha_M(fgraph, beta, L, alpha, M, recurse_flip=True):
     # if res_is_a(M, _dot22, 1):
     if M.owner and M.owner.op == _dot22:
         Ml, Mr = M.owner.inputs
-        rval = [gemm_no_inplace(L, alpha, Ml, Mr, beta)]
+        rval = [Blockwise(Gemm(inplace=False))(L, alpha, Ml, Mr, beta)]
         return rval, M
 
     # it also might be the case that there is a dimshuffle between the +
@@ -188,19 +188,25 @@ def _beta_L_plus_alpha_M(fgraph, beta, L, alpha, M, recurse_flip=True):
         if M.owner.op.new_order == (0,):
             # it is making a column MM into a vector
             MMl, MMr = MM.owner.inputs
-            g = gemm_no_inplace(L.dimshuffle(0, "x"), alpha, MMl, MMr, beta)
+            g = Blockwise(Gemm(inplace=False))(
+                L.dimshuffle(0, "x"), alpha, MMl, MMr, beta
+            )
             rval = [g.dimshuffle(0)]
             return rval, MM
         if M.owner.op.new_order == (1,):
             # it is making a row MM into a vector
             MMl, MMr = MM.owner.inputs
-            g = gemm_no_inplace(L.dimshuffle("x", 0), alpha, MMl, MMr, beta)
+            g = Blockwise(Gemm(inplace=False))(
+                L.dimshuffle("x", 0), alpha, MMl, MMr, beta
+            )
             rval = [g.dimshuffle(1)]
             return rval, MM
         if len(M.owner.op.new_order) == 0:
             # it is making a row MM into a vector
             MMl, MMr = MM.owner.inputs
-            g = gemm_no_inplace(L.dimshuffle("x", "x"), alpha, MMl, MMr, beta)
+            g = Blockwise(Gemm(inplace=False))(
+                L.dimshuffle("x", "x"), alpha, MMl, MMr, beta
+            )
             rval = [g.dimshuffle()]
             return rval, MM
 
@@ -591,31 +597,21 @@ def local_dot_to_dot22(fgraph, node):
     _logger.info(f"Not optimizing dot with inputs {x} {y} {x.type} {y.type}")
 
 
-@node_rewriter([gemm_no_inplace], inplace=True)
-def local_inplace_gemm(fgraph, node):
-    if node.op == gemm_no_inplace:
-        new_out = [gemm_inplace(*node.inputs)]
-        copy_stack_trace(node.outputs, new_out)
-        return new_out
-
-
-@node_rewriter([gemv_no_inplace], inplace=True)
-def local_inplace_gemv(fgraph, node):
-    if node.op == gemv_no_inplace:
-        new_out = [gemv_inplace(*node.inputs)]
-        copy_stack_trace(node.outputs, new_out)
-        return new_out
-
-
-@node_rewriter([gemm_no_inplace])
+@node_rewriter([Gemm, blockwise_of(Gemm)])
 def local_gemm_to_gemv(fgraph, node):
     """GEMM acting on row or column matrices -> GEMV."""
+    # These trackers match any `Gemm`; an inplace one must not be traded for a `Gemv`
+    # that would no longer destroy `z`.
+    core_op = node.op.core_op if isinstance(node.op, Blockwise) else node.op
+    if core_op.inplace:
+        return None
+
     z, a, x, y, b = node.inputs
     if z.broadcastable == x.broadcastable == (True, False):
-        r = gemv_no_inplace(z.dimshuffle(1), a, y.T, x.dimshuffle(1), b)
+        r = Blockwise(Gemv(inplace=False))(z.dimshuffle(1), a, y.T, x.dimshuffle(1), b)
         new_out = [r.dimshuffle("x", 0)]
     elif z.broadcastable == y.broadcastable == (False, True):
-        r = gemv_no_inplace(z.dimshuffle(0), a, x, y.dimshuffle(0), b)
+        r = Blockwise(Gemv(inplace=False))(z.dimshuffle(0), a, x, y.dimshuffle(0), b)
         new_out = [r.dimshuffle(0, "x")]
     else:
         return
@@ -633,22 +629,22 @@ def local_dot22_to_gemv(fgraph, node):
     zero = ptb.as_tensor_variable(np.asarray(0, dtype=x.dtype))
     if xb[0] and yb[1]:
         # x and y are both vectors so this qualifies for a sdot / ddot
-        # PyTensor's CGemv will call sdot/ddot at runtime, the Scipy Gemv may not
+        # PyTensor's C Gemv will call sdot/ddot at runtime, the Scipy Gemv may not
         xv = x.dimshuffle(1)
         zeros = ptb.AllocEmpty(x.dtype)(1)
-        rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
+        rval = Blockwise(Gemv(inplace=False))(zeros, one, y.T, xv, zero)
         new_out = [rval.dimshuffle("x", 0)]
     elif xb[0] and not yb[0] and not yb[1]:
         # x is vector, y is matrix so try gemv
         xv = x.dimshuffle(1)
         zeros = ptb.AllocEmpty(x.dtype)(y.shape[1])
-        rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
+        rval = Blockwise(Gemv(inplace=False))(zeros, one, y.T, xv, zero)
         new_out = [rval.dimshuffle("x", 0)]
     elif not xb[0] and not xb[1] and yb[1]:
         # x is matrix, y is vector, try gemv
         yv = y.dimshuffle(0)
         zeros = ptb.AllocEmpty(x.dtype)(x.shape[0])
-        rval = gemv_no_inplace(zeros, one, x, yv, zero)
+        rval = Blockwise(Gemv(inplace=False))(zeros, one, x, yv, zero)
         new_out = [rval.dimshuffle(0, "x")]
     else:
         return
@@ -691,20 +687,6 @@ blas_optdb.register(
     ),
     "fast_run",
     position=11,
-)
-
-
-blas_opt_inplace = dfs_rewriter(
-    local_inplace_gemm, local_inplace_gemv, name="blas_opt_inplace"
-)
-optdb.register(
-    "InplaceBlasOpt",
-    blas_opt_inplace,
-    "fast_run",
-    "inplace",
-    "blas_opt_inplace",
-    # Before we try to make elemwise things inplace (70.5)
-    position=50.2,
 )
 
 
@@ -836,6 +818,30 @@ blas_optdb.register(
     dfs_rewriter(local_dot22_to_dot22scalar),
     "fast_run",
     position=12,
+)
+
+
+@node_rewriter([Gemv(inplace=False)])
+def make_gemv_destructive(fgraph, node):
+    inputs = list(node.inputs)
+    dest = inputs[0]
+    if (
+        dest.owner
+        and isinstance(dest.owner.op, ptb.AllocEmpty)
+        and len(fgraph.clients[dest]) > 1
+    ):
+        inputs[0] = ptb.AllocEmpty(dest.dtype)(*dest.owner.inputs)
+
+    return [Gemv(inplace=True)(*inputs)]
+
+
+# Runs after blockwise_inplace (50.1), to catch the Gemv that lost a shared buffer to another destroyer
+optdb.register(
+    "gemv_destructive",
+    dfs_rewriter(make_gemv_destructive, name="gemv_destructive"),
+    "fast_run",
+    "inplace",
+    position=70.0,
 )
 
 

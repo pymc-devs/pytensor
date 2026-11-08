@@ -438,4 +438,4 @@ class TestBackends:
         y = pt.vector("y", shape=(100,))
 
         fn = function([C, D, y], C @ D @ y, mode="CVM")
-        assert _blas_nodes(fn) == [("CGemv", (100,)), ("CGemv", (100,))]
+        assert _blas_nodes(fn) == [("Gemv", (100,)), ("Gemv", (100,))]
