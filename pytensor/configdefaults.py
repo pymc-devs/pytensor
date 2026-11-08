@@ -50,6 +50,7 @@ def _filter_mode(val):
         "PYTORCH",
         "MLX",
         "LLVM",
+        "LLVM_V2",
     ]
     if val in str_options:
         return val

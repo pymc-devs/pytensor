@@ -16,6 +16,7 @@ pub mod runtime;
 pub mod scan;
 pub mod segment;
 pub mod spec;
+pub mod v2;
 
 mod builder;
 mod py;
