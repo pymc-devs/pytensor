@@ -4,7 +4,7 @@ from typing import Any
 from pytensor.assumptions.core import (
     KEY_REGISTRY,
     AssumptionKey,
-    FactState,
+    OrthogonalFact,
     register_universal_assumption,
 )
 from pytensor.compile.ops import TypeCastingOp
@@ -50,7 +50,9 @@ class SpecifyAssumptions(TypeCastingOp):
         )
 
     def __str__(self):
-        facts = ", ".join(_format_fact(key, state) for key, state in self.assumptions)
+        facts = ", ".join(
+            key.format_fact(key.name, state) for key, state in self.assumptions
+        )
         return f"{type(self).__name__}{{{facts}}}"
 
     def make_node(self, x):
@@ -66,12 +68,6 @@ class SpecifyAssumptions(TypeCastingOp):
         self, inputs, outputs, output_cotangents: Sequence[Variable]
     ) -> list[Variable]:
         return list(output_cotangents)
-
-
-def _format_fact(key: AssumptionKey, state: Any) -> str:
-    if key.value_type is not FactState:
-        return f"{key.name}={key.format_value(state)}"
-    return key.name if state is FactState.TRUE else f"!{key.name}"
 
 
 @register_universal_assumption(SpecifyAssumptions)
@@ -93,7 +89,7 @@ def assume(
     upper_triangular: bool | None = None,
     symmetric: bool | None = None,
     positive_definite: bool | None = None,
-    orthogonal: bool | None = None,
+    orthogonal: bool | OrthogonalFact | set[OrthogonalFact] | None = None,
     selection: bool | None = None,
     permutation: bool | None = None,
     unique_indices: bool | None = None,
@@ -122,8 +118,10 @@ def assume(
         Assert that *x* is (or is not) symmetric.
     positive_definite : bool, optional
         Assert that *x* is (or is not) positive-definite.
-    orthogonal : bool, optional
+    orthogonal : bool, {"columns", "rows", "not_orthogonal"} or set of them, optional
         Assert that *x* is (or is not) orthogonal. For complex *x* this means unitary.
+        ``"columns"`` or ``"rows"`` asserts only that side is orthonormal, and
+        ``"not_orthogonal"`` is the same as ``False``.
     selection : bool, optional
         Assert that *x* is (or is not) a selection matrix
     permutation : bool, optional

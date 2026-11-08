@@ -2,7 +2,7 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import IntFlag, auto
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pytensor.graph import Apply, FunctionGraph, Op
 from pytensor.graph.basic import Variable
@@ -97,10 +97,13 @@ class AssumptionKey:
 
     A key whose fact is a value other than a :class:`FactState` -- a bound, a set, a
     pair -- subclasses ``AssumptionKey`` and overrides ``value_type``, ``unknown``,
-    :meth:`join` and :meth:`is_conflict`, and optionally :meth:`format_value`.
-    :meth:`coerce` converts declared values with ``value_type``. ``unknown`` means
-    "nothing proven" and is what inference returns when no rule applies, so it must be
-    correct for every variable.
+    :meth:`join` and :meth:`is_conflict`. ``unknown`` means "nothing proven" and is
+    what inference returns when no rule applies, so it must be correct for every
+    variable. :meth:`coerce` converts declared values with ``value_type``, and
+    :meth:`format_fact` prints a value. :meth:`is_true` and :meth:`is_false` say which
+    values prove or refute the property, for :meth:`holds` and for
+    :func:`register_implies`, whose implications assign ``true_value`` and
+    ``false_value``. :meth:`refine` strengthens a value from the variable it describes.
 
     .. code-block:: python
 
@@ -126,6 +129,8 @@ class AssumptionKey:
 
     value_type: ClassVar[type] = FactState
     unknown: ClassVar[Any] = FactState.UNKNOWN
+    true_value: ClassVar[Any] = FactState.TRUE
+    false_value: ClassVar[Any] = FactState.FALSE
 
     def join(self, left: Any, right: Any) -> Any:
         """Combine two pieces of evidence about the same variable."""
@@ -135,9 +140,29 @@ class AssumptionKey:
         """Return True when *value* records contradictory evidence."""
         return value is FactState.CONFLICT
 
-    def format_value(self, value: Any) -> str:
-        """Return *value* as printed after ``name=`` for a key that is not boolean."""
-        return str(value)
+    def is_true(self, value: Any) -> bool:
+        """Return True when *value* proves the property, which :meth:`holds` reports."""
+        return value is FactState.TRUE
+
+    def is_false(self, value: Any) -> bool:
+        """Return True when *value* proves the property does not hold."""
+        return value is FactState.FALSE
+
+    def refine(self, var: Variable, value: Any) -> Any:
+        """Return *value* strengthened by what *var* itself shows, such as its shape."""
+        return value
+
+    def format_fact(self, label: str, value: Any) -> str:
+        """Return the printed token for *value*, labelled *label*.
+
+        A TRUE fact prints as ``label``, a FALSE one as ``!label``, and any other value
+        as ``label=value``.
+        """
+        if value is FactState.TRUE:
+            return label
+        if value is FactState.FALSE:
+            return f"!{label}"
+        return f"{label}={value}"
 
     def coerce(self, value: Any) -> Any:
         """Return *value* converted with ``value_type``.
@@ -381,6 +406,83 @@ def infer_assumption_from_client(
     return key.unknown
 
 
+OrthogonalFact = Literal["columns", "rows", "not_orthogonal"]
+ORTHONORMAL_COLUMNS: OrthogonalFact = "columns"
+ORTHONORMAL_ROWS: OrthogonalFact = "rows"
+NOT_ORTHOGONAL: OrthogonalFact = "not_orthogonal"
+
+
+class OrthogonalKey(AssumptionKey):
+    """Key whose value is the set of facts proven about a matrix's orthonormality.
+
+    The set is drawn from ``"columns"`` (``X^T X = I``), ``"rows"`` (``X X^T = I``)
+    and ``"not_orthogonal"`` (not both). The property holds when both sides do. Join
+    is union, and a set that has both sides and ``"not_orthogonal"`` is a conflict.
+    A statically square matrix with either side has both.
+    """
+
+    value_type = frozenset
+    unknown = frozenset()
+    true_value = frozenset({ORTHONORMAL_COLUMNS, ORTHONORMAL_ROWS})
+    false_value = frozenset({NOT_ORTHOGONAL})
+
+    def join(
+        self, left: frozenset[OrthogonalFact], right: frozenset[OrthogonalFact]
+    ) -> frozenset[OrthogonalFact]:
+        return left | right
+
+    def is_conflict(self, value: Any) -> bool:
+        return self.is_true(value) and self.is_false(value)
+
+    def is_true(self, value: frozenset[OrthogonalFact]) -> bool:
+        return value >= self.true_value
+
+    def is_false(self, value: Any) -> bool:
+        return NOT_ORTHOGONAL in value
+
+    def refine(
+        self, var: Variable, value: frozenset[OrthogonalFact]
+    ) -> frozenset[OrthogonalFact]:
+        if not value & self.true_value or var.type.ndim < 2:
+            return value
+        rows, cols = var.type.shape[-2:]
+        if rows is not None and rows == cols:
+            return value | self.true_value
+        return value
+
+    def coerce(self, value: Any) -> frozenset[OrthogonalFact]:
+        """Return *value* as a set of orthonormality facts.
+
+        ``True`` and ``FactState.TRUE`` mean both sides, ``False`` and
+        ``FactState.FALSE`` mean ``"not_orthogonal"``, a string is one fact, and any
+        other iterable is a set of them.
+        """
+        if value is True or value is FactState.TRUE:
+            return self.true_value
+        if value is False or value is FactState.FALSE:
+            return self.false_value
+        facts = frozenset({value} if isinstance(value, str) else value)
+        invalid = facts - self.true_value - self.false_value
+        if invalid:
+            raise ValueError(
+                f"Unknown orthogonality facts {sorted(invalid)!r}. Use "
+                f"{ORTHONORMAL_COLUMNS!r}, {ORTHONORMAL_ROWS!r} or {NOT_ORTHOGONAL!r}."
+            )
+        return facts
+
+    def format_fact(self, label: str, value: frozenset[OrthogonalFact]) -> str:
+        tokens = []
+        if self.is_true(value):
+            tokens.append(label)
+        else:
+            tokens.extend(
+                f"{label}={side}" for side in sorted(value - self.false_value)
+            )
+        if self.is_false(value):
+            tokens.append(f"!{label}")
+        return ", ".join(tokens)
+
+
 # The canonical structural-property keys
 DIAGONAL = AssumptionKey("diagonal", short_name="diag")
 LOWER_TRIANGULAR = AssumptionKey("lower_triangular", short_name="tril")
@@ -388,7 +490,7 @@ UPPER_TRIANGULAR = AssumptionKey("upper_triangular", short_name="triu")
 SYMMETRIC = AssumptionKey("symmetric", short_name="sym")
 TRIDIAGONAL = AssumptionKey("tridiagonal", short_name="tridiag")
 POSITIVE_DEFINITE = AssumptionKey("positive_definite", short_name="pd")
-ORTHOGONAL = AssumptionKey("orthogonal", short_name="orth")
+ORTHOGONAL = OrthogonalKey("orthogonal", short_name="orth")
 SELECTION = AssumptionKey("selection", short_name="sel")
 PERMUTATION = AssumptionKey("permutation", short_name="perm")
 UNIQUE_INDICES = AssumptionKey("unique_indices", short_name="uniq")
@@ -572,8 +674,8 @@ class AssumptionFeature(Feature):
         return state
 
     def check(self, var: Any, key: AssumptionKey) -> bool:
-        """Return ``True`` iff the boolean assumption is definitively TRUE for ``var``."""
-        return self.get(var, key) is FactState.TRUE
+        """Return ``True`` iff the assumption is definitively TRUE for ``var``."""
+        return key.is_true(self.get(var, key))
 
     def _compute(self, var: Any, key: AssumptionKey) -> Any:
         """Infer the value for ``(var, key)``, caching ancestors inputs-first.
@@ -583,13 +685,10 @@ class AssumptionFeature(Feature):
           - Forward: a stronger key being TRUE makes this (weaker) key TRUE.
           - Contrapositive: a weaker key being FALSE makes this (stronger) key FALSE.
 
-        The ``IMPLIES`` walk only runs for boolean keys.
-
         Raise :class:`ConflictingAssumptionsError` if owner-inferred rules produce a
         conflict for *key*.
         """
         unknown = key.unknown
-        is_boolean = key.value_type is FactState
 
         def deps(v: Any) -> tuple:
             # Stop descending at cached variables — their facts (and their ancestors')
@@ -628,18 +727,19 @@ class AssumptionFeature(Feature):
                     if state != unknown:
                         break
 
-            if is_boolean and state is FactState.UNKNOWN:
+            if state == unknown:
                 for stronger, weaker_list in IMPLIES.items():
-                    if key in weaker_list and self.get(v, stronger) is FactState.TRUE:
-                        state = FactState.TRUE
+                    if key in weaker_list and stronger.is_true(self.get(v, stronger)):
+                        state = key.true_value
                         break
 
-            if is_boolean and state is FactState.UNKNOWN:
+            if state == unknown:
                 for weaker in IMPLIES.get(key, ()):
-                    if self.get(v, weaker) is FactState.FALSE:
-                        state = FactState.FALSE
+                    if weaker.is_false(self.get(v, weaker)):
+                        state = key.false_value
                         break
 
+            state = key.refine(v, state)
             if key.is_conflict(state):
                 raise ConflictingAssumptionsError(
                     f"Conflicting evidence for {key} on {v!r} from owner-inferred rules."
@@ -705,7 +805,7 @@ def _assumption_feature(fgraph: FunctionGraph) -> AssumptionFeature:
 def check_assumption(
     fgraph: FunctionGraph | None, var: Any, key: AssumptionKey
 ) -> bool:
-    """Return True iff the boolean *key* is definitively TRUE for *var* in *fgraph*.
+    """Return True iff *key* is definitively TRUE for *var* in *fgraph*.
 
     Lazily attaches :class:`AssumptionFeature` to *fgraph* if it is not already present.
     """

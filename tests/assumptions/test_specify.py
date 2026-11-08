@@ -36,7 +36,7 @@ def test_assume_records_false_assertions(key):
     x = pt.matrix("x", shape=(3, 3))
     x_not = assume(x, **{key.name: False})
     _, af = make_fgraph(x_not)
-    assert af.get(x_not, key) is FactState.FALSE
+    assert key.is_false(af.get(x_not, key))
 
 
 def test_assume_unique_indices_on_vector():
@@ -60,7 +60,7 @@ def test_assume_mixed_true_and_false_kwargs():
     x_mix = assume(x, diagonal=True, orthogonal=False)
     _, af = make_fgraph(x_mix)
     assert af.check(x_mix, DIAGONAL)
-    assert af.get(x_mix, ORTHOGONAL) is FactState.FALSE
+    assert ORTHOGONAL.is_false(af.get(x_mix, ORTHOGONAL))
 
 
 def test_assume_chained_combines_facts():
@@ -108,7 +108,7 @@ def test_assume_keeps_released_positional_order(position, key):
     flags = [None] * position + [True]
     x = assume(pt.matrix("x", shape=(3, 3)), *flags)
     _, af = make_fgraph(x)
-    assert af.get(x, key) is FactState.TRUE
+    assert af.check(x, key)
 
 
 def test_assume_no_kwargs_returns_input_unchanged():

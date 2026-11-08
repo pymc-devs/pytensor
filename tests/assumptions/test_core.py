@@ -6,6 +6,8 @@ import pytensor.tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
+    ORTHOGONAL,
+    PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
     UPPER_TRIANGULAR,
@@ -104,6 +106,7 @@ def test_register_custom_assumption_key():
         (DIAGONAL, LOWER_TRIANGULAR),
         (DIAGONAL, UPPER_TRIANGULAR),
         (POSITIVE_DEFINITE, SYMMETRIC),
+        (PERMUTATION, ORTHOGONAL),
     ],
 )
 def test_implication(stronger, weaker):
@@ -120,6 +123,7 @@ def test_implication(stronger, weaker):
         (DIAGONAL, LOWER_TRIANGULAR),
         (DIAGONAL, UPPER_TRIANGULAR),
         (POSITIVE_DEFINITE, SYMMETRIC),
+        (PERMUTATION, ORTHOGONAL),
     ],
 )
 def test_contrapositive_implication(stronger, weaker):
@@ -127,8 +131,8 @@ def test_contrapositive_implication(stronger, weaker):
     x = pt.matrix("x", shape=(3, 3))
     x_asserted = assume(x, **{weaker.name: False})
     _, af = make_fgraph(x_asserted)
-    assert af.get(x_asserted, weaker) is FactState.FALSE
-    assert af.get(x_asserted, stronger) is FactState.FALSE
+    assert weaker.is_false(af.get(x_asserted, weaker))
+    assert stronger.is_false(af.get(x_asserted, stronger))
 
 
 def test_symmetric_does_not_imply_diagonal():

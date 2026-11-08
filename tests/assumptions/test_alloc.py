@@ -48,7 +48,7 @@ def test_eye_non_identity_is_false(eye_args):
         (LOWER_TRIANGULAR, FactState.TRUE),
         (POSITIVE_DEFINITE, FactState.FALSE),
         (PERMUTATION, FactState.FALSE),
-        (ORTHOGONAL, FactState.FALSE),
+        (ORTHOGONAL, ORTHOGONAL.false_value),
     ],
 )
 def test_square_eye_with_empty_band_is_zero_matrix(key, expected):
