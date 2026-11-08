@@ -262,14 +262,18 @@ class TestIfelse(utt.OptimizationTestMixin):
 
         fsub = [fsub0, fsub1, fsub2, fsub3]
 
-        acc = ptb.constant(1, "int8") >= 0
+        acc_input = iscalar("acc")
+        acc = acc_input >= 0
 
         new_positions = ifelse(acc, fsub, p)
 
         new_updates = [(p[0], new_positions[0])]
 
         f = function(
-            [ften0, fmat1, ften2, fmat3], [], updates=new_updates, mode=self.mode
+            [ften0, fmat1, ften2, fmat3, acc_input],
+            [],
+            updates=new_updates,
+            mode=self.mode,
         )
         self.assertFunctionContainsClassN(f, (IfElse, LazyIfElse), 1)
 
@@ -278,7 +282,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         i3 = np.asarray(np.random.random([19, 8, 3]), dtype=self.dtype)
         i4 = np.asarray(np.random.random([19, 3]), dtype=self.dtype)
 
-        f(i1, i2, i3, i4)
+        f(i1, i2, i3, i4, 1)
 
     def test_dtype_mismatch(self):
         rng = np.random.default_rng(utt.fetch_seed())

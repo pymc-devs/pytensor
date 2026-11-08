@@ -510,8 +510,37 @@ def merge_sibling_ifelse(fgraph, node):
     return False
 
 
+@node_rewriter([IfElse])
+def cond_constant_condition(fgraph, node):
+    """Replace a conditional whose condition is a known constant by its taken branch.
+
+    Pattern::
+
+        ifelse(True, xs, ys)  # any constant condition
+
+    Replacement::
+
+        xs
+
+    The branch that is not taken is never evaluated, so it can be dropped.
+    """
+    condition = node.inputs[0]
+    if not isinstance(condition, Constant):
+        return False
+
+    n_outs = node.op.n_outs
+    return list(
+        node.inputs[1 : 1 + n_outs] if condition.data else node.inputs[1 + n_outs :]
+    )
+
+
 ifelse_simplify_db = EquilibriumDB()
-for rewrite in (cond_merge_ifs_true, cond_merge_ifs_false, merge_sibling_ifelse):
+for rewrite in (
+    cond_constant_condition,
+    cond_merge_ifs_true,
+    cond_merge_ifs_false,
+    merge_sibling_ifelse,
+):
     ifelse_simplify_db.register(
         rewrite.__name__, rewrite, "numba", "jax", "lazy_ifelse"
     )
