@@ -86,6 +86,7 @@ impl Jit {
             let es = LLVMOrcLLJITGetExecutionSession(jit);
             let mut pairs: Vec<LLVMOrcCSymbolMapPair> = native::scalar_symbols()
                 .into_iter()
+                .chain(crate::v2::unit::runtime_symbols())
                 .map(|(name, addr)| {
                     let c = CString::new(name).unwrap();
                     LLVMOrcCSymbolMapPair {

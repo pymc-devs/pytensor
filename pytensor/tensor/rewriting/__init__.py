@@ -20,3 +20,4 @@ import pytensor.tensor.rewriting.special
 import pytensor.tensor.rewriting.subtensor
 import pytensor.tensor.rewriting.subtensor_lift
 import pytensor.tensor.rewriting.uncanonicalize
+import pytensor.tensor.rewriting.units

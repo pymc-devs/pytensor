@@ -253,6 +253,11 @@ fn pytensor_llvm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ScalarRef>()?;
     m.add_class::<CompiledFunction>()?;
     m.add("ABI_VERSION", crate::abi::ABI_VERSION)?;
+    let v2 = PyModule::new(m.py(), "v2")?;
+    crate::v2::py::register(&v2)?;
+    m.add_submodule(&v2)?;
+    // make `import pytensor_llvm.v2` work
+    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.v2", &v2)?;
     Ok(())
 }
 
