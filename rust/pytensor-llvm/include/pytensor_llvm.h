@@ -85,14 +85,18 @@ typedef struct {
     /*
      * Run the function. Returns 0 on success; on failure see last_error(st).
      *
-     * inputs[i]: data, shape and strides of input i (ndim must match, dtype is not
-     *   checked). The runtime never writes to inputs.
+     * inputs[i]: data, shape and strides of input i. Checked: ndim, static shapes,
+     *   non-negative lengths, non-NULL data for non-empty arrays, alignment of data and
+     *   strides to the itemsize. NOT checked (the caller's responsibility): the dtype
+     *   (it must be the one input_type reports) and that the memory described really
+     *   exists. The runtime never writes to inputs.
      *
      * outputs[k], chosen per output by the caller:
      *   - provided (data != NULL): shape must point to the expected shape (checked),
      *     strides to the strides to write with. The result is written there: directly by
      *     the producing kernel when the strides match what the planner chose (usually
-     *     C-contiguous), otherwise via one copy. owner is left untouched.
+     *     C-contiguous), otherwise via one copy. owner is left untouched. Provided
+     *     outputs must not overlap any input or each other (checked).
      *   - runtime-allocated (data == NULL): shape and strides must point to caller
      *     arrays of length ndim; the runtime fills them, sets data, and sets owner to a
      *     new reference the caller releases with buffer_decref.
