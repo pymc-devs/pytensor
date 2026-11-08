@@ -8,6 +8,7 @@ pub mod compile;
 pub mod dtype;
 pub mod ir;
 pub mod jit;
+pub mod linalg;
 pub mod perf;
 pub mod native;
 pub mod runtime;

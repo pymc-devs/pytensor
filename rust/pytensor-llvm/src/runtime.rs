@@ -215,6 +215,10 @@ fn op_name(op: &Op) -> &'static str {
         Op::DimShuffle { .. } => "DimShuffle",
         Op::Dot => "Dot",
         Op::Sort { .. } => "Sort",
+        Op::Cholesky { .. } => "Cholesky",
+        Op::CumOp { .. } => "CumOp",
+        Op::ExtractDiag { .. } => "ExtractDiag",
+        Op::SolveTriangular { .. } => "SolveTriangular",
         Op::Copy => "Copy",
         Op::ShapeI { .. } => "Shape_i",
         Op::Shape => "Shape",
@@ -238,7 +242,7 @@ fn op_name(op: &Op) -> &'static str {
 
 /// Where each loop dim of a FusedElemwise gets its length: (node input, dim), checked
 /// against all other sources at runtime. Candidates for dim d, in order of preference.
-fn fused_dim_candidates(g: &Graph, n: &Node, d: usize) -> Vec<(usize, usize)> {
+pub(crate) fn fused_dim_candidates(g: &Graph, n: &Node, d: usize) -> Vec<(usize, usize)> {
     let Op::FusedElemwise { ndim, n_elem, reads, outs, .. } = &n.op else { unreachable!() };
     let var = |p: usize| &g.vars[n.inputs[p]];
     let mut c = Vec::new();
@@ -280,7 +284,7 @@ fn subtensor_params(entries: &[IndexEntry], dtypes: &[DType]) -> Result<Subtenso
     Ok(prm)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum OutMode {
     Provided,
     KernelAlloc,
@@ -289,16 +293,32 @@ enum OutMode {
 
 fn out_mode(op: &Op) -> OutMode {
     match op {
-        Op::DimShuffle { .. } | Op::Assert { .. } | Op::Subtensor { .. } => OutMode::View(0),
+        Op::DimShuffle { .. } | Op::Assert { .. } | Op::Subtensor { .. } | Op::ExtractDiag { .. } => OutMode::View(0),
         Op::Arange | Op::Alloc | Op::AllocEmpty | Op::Foreign { .. } | Op::Scan { .. } => OutMode::KernelAlloc,
         _ => OutMode::Provided,
     }
 }
 
+fn static_shape_of(g: &Graph, v: usize) -> Option<Vec<i64>> {
+    let info = &g.vars[v];
+    (0..info.ndim()).map(|d| if info.bcast[d] { Some(1) } else { info.static_shape.get(d).copied().flatten() }).collect()
+}
+
+/// Values of the 0-d integer constants (static indices for segments).
+fn const_ints(g: &Graph, consts: &[ConstData]) -> crate::segment::ConstInts {
+    g.constants
+        .iter()
+        .zip(consts)
+        .filter(|(v, _)| g.vars[**v].ndim() == 0 && !g.vars[**v].dtype.is_float())
+        .map(|(&v, c)| (v, unsafe { native::read_i64((*c.buf).data, g.vars[v].dtype) }))
+        .collect()
+}
+
 impl Program {
     pub fn new(graph: Graph, consts: Vec<ConstData>, opts: &Options) -> Result<Program, String> {
         let graph = if opts.segments {
-            crate::segment::form_segments(graph, opts.segment_max_elems, opts.fastmath)
+            let cints = const_ints(&graph, &consts);
+            crate::segment::form_segments(graph, opts.segment_max_elems, opts.fastmath, &cints)
         } else {
             graph
         };
@@ -331,6 +351,8 @@ impl Program {
                         OutMode::KernelAlloc
                     }
                 }
+                // static shape: an ordinary output (planner slot, no allocation per call)
+                Op::Alloc | Op::AllocEmpty if static_shape_of(&graph, n.outputs[0]).is_some() => OutMode::Provided,
                 op => out_mode(op),
             };
             match mode {
@@ -361,6 +383,7 @@ impl Program {
                             }
                         }
                         Op::Reshape => Layout::C,
+                        Op::ExtractDiag { .. } => Layout::Any,
                         _ => layout[x],
                     }
                     .normalize(ndim(o));
@@ -460,6 +483,9 @@ impl Program {
                 match &n.op {
                     Op::Elemwise { .. } => (0..n.inputs.len()).collect(),
                     Op::IncSubtensor { .. } | Op::AdvancedIncTake { .. } => vec![0],
+                    // these copy into the output first and skip the copy if it's the same buffer
+                    Op::Cholesky { .. } => vec![0],
+                    Op::SolveTriangular { .. } => vec![1],
                     Op::FusedElemwise { outs, .. } => match &outs[k] {
                         FusedOut::Write { target, .. } => vec![*target],
                         _ => vec![],
@@ -579,7 +605,8 @@ impl Program {
             let (src, params, desc) = match &n.op {
                 Op::Scan { inner, .. } => {
                     let fast = if opts.segments {
-                        crate::segment::whole_graph_segment(&inner.graph, opts.segment_max_elems.max(1024), opts.fastmath)
+                        let cints = const_ints(&inner.graph, &inner.consts);
+                        crate::segment::whole_graph_segment(&inner.graph, opts.segment_max_elems.max(1024), opts.fastmath, &cints)
                     } else {
                         None
                     };
@@ -659,7 +686,8 @@ impl Program {
                     for (k, &v) in n.inputs.iter().enumerate() {
                         sd[k] = vi(v).dtype.code();
                     }
-                    let prm = AllocParams { n_shape: n.inputs.len() as i64, itemsize: vi(n.outputs[0]).dtype.itemsize() as i64, shape_dtypes: sd };
+                    let provided = (modes[ni] == OutMode::Provided) as i64;
+                    let prm = AllocParams { n_shape: n.inputs.len() as i64, itemsize: vi(n.outputs[0]).dtype.itemsize() as i64, provided, shape_dtypes: sd };
                     (Src::Native(native::ptl_alloc_empty), Params::of(prm), "native alloc_empty (allocates)".into())
                 }
                 Op::Foreign { addr, desc } => {
@@ -725,6 +753,38 @@ impl Program {
                     };
                     (Src::Native(f), Params::none(), "native matmul".into())
                 }
+                Op::CumOp { axis, mul } => {
+                    let f: KernelFn = match vi(n.outputs[0]).dtype {
+                        DType::Float64 => native::ptl_cum_f64,
+                        DType::Float32 => native::ptl_cum_f32,
+                        DType::Int64 => native::ptl_cum_i64,
+                        DType::Int32 => native::ptl_cum_i32,
+                        dt => return Err(format!("CumOp for {dt:?} not supported")),
+                    };
+                    let prm = native::CumParams { axis: *axis as i64, mul: *mul as i64 };
+                    (Src::Native(f), Params::of(prm), format!("native cum{}", if *mul { "prod" } else { "sum" }))
+                }
+                Op::ExtractDiag { offset, axis1, axis2 } => {
+                    let prm = native::DiagParams { offset: *offset, axis1: *axis1 as i64, axis2: *axis2 as i64 };
+                    (Src::Native(native::ptl_extract_diag), Params::of(prm), "view diagonal".into())
+                }
+                Op::Cholesky { lower } => {
+                    let f: KernelFn = match vi(n.outputs[0]).dtype {
+                        DType::Float64 => crate::linalg::ptl_cholesky_f64,
+                        DType::Float32 => crate::linalg::ptl_cholesky_f32,
+                        dt => return Err(format!("Cholesky for {dt:?} not supported")),
+                    };
+                    (Src::Native(f), Params::of(crate::linalg::CholeskyParams { lower: *lower as i64 }), "native cholesky (faer)".into())
+                }
+                Op::SolveTriangular { lower, unit_diagonal } => {
+                    let f: KernelFn = match vi(n.outputs[0]).dtype {
+                        DType::Float64 => crate::linalg::ptl_solve_triangular_f64,
+                        DType::Float32 => crate::linalg::ptl_solve_triangular_f32,
+                        dt => return Err(format!("SolveTriangular for {dt:?} not supported")),
+                    };
+                    let prm = crate::linalg::SolveTriangularParams { lower: *lower as i64, unit_diagonal: *unit_diagonal as i64 };
+                    (Src::Native(f), Params::of(prm), "native solve_triangular (faer)".into())
+                }
                 Op::Sort { axis, stable } => {
                     let f: KernelFn = match vi(n.inputs[0]).dtype {
                         DType::Float64 => native::ptl_sort_f64,
@@ -762,9 +822,10 @@ impl Program {
                     let prm = AllocParams {
                         n_shape: (n.inputs.len() - 1) as i64,
                         itemsize: vi(n.outputs[0]).dtype.itemsize() as i64,
+                        provided: (modes[ni] == OutMode::Provided) as i64,
                         shape_dtypes: sd,
                     };
-                    (Src::Native(native::ptl_alloc), Params::of(prm), "native alloc (allocates)".into())
+                    (Src::Native(native::ptl_alloc), Params::of(prm), if modes[ni] == OutMode::KernelAlloc { "native alloc (allocates)".into() } else { "native alloc (fill)".into() })
                 }
             };
             let release = std::mem::take(&mut release[ni]);
@@ -1016,7 +1077,13 @@ impl Program {
                     sh[o0 + k] = sh[ob + 1];
                 }
             }
-            Op::Sort { .. } | Op::Copy => {
+            Op::SolveTriangular { .. } => {
+                let i0 = off[n.inputs[1]];
+                for d in 0..self.graph.vars[n.inputs[1]].ndim() {
+                    sh[o0 + d] = sh[i0 + d];
+                }
+            }
+            Op::Sort { .. } | Op::Copy | Op::Cholesky { .. } | Op::CumOp { .. } => {
                 let i0 = off[n.inputs[0]];
                 for d in 0..self.graph.vars[n.inputs[0]].ndim() {
                     sh[o0 + d] = sh[i0 + d];
@@ -1025,7 +1092,13 @@ impl Program {
             Op::ShapeI { .. } => {}
             Op::Shape => sh[o0] = self.graph.vars[n.inputs[0]].ndim() as i64,
             Op::MakeVector => sh[o0] = n.inputs.len() as i64,
-            Op::DimShuffle { .. } | Op::Assert { .. } | Op::Arange | Op::Alloc | Op::AllocEmpty | Op::Foreign { .. } | Op::Subtensor { .. } | Op::Reshape | Op::Scan { .. } => {} // kernel fills shapes
+            Op::Alloc | Op::AllocEmpty => {
+                // provided when static (see the planner); otherwise the kernel fills it
+                if let Some(s) = static_shape_of(&self.graph, n.outputs[0]) {
+                    sh[o0..o0 + s.len()].copy_from_slice(&s);
+                }
+            }
+            Op::DimShuffle { .. } | Op::Assert { .. } | Op::Arange | Op::Foreign { .. } | Op::Subtensor { .. } | Op::Reshape | Op::Scan { .. } | Op::ExtractDiag { .. } => {} // kernel fills shapes
             Op::FusedElemwise { ndim, outs, .. } => {
                 let mut loop_shape = [1i64; MAX_NDIM];
                 for d in 0..*ndim {

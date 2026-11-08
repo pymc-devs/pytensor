@@ -226,3 +226,23 @@ def test_integer_mod_and_floordiv_python_semantics(dtype):
         exp = [av % bv, av // bv]
     for r, x in zip(f(av, bv), exp, strict=True):
         np.testing.assert_array_equal(r, x)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+@pytest.mark.parametrize("m,k", [(2000, 10), (7, 3), (3, 70), (0, 5), (5, 0)])
+def test_dot_layouts(dtype, m, k):
+    # faer for general products; the short-row matvec path for A @ x with
+    # contiguous short rows (x copied to scratch when strided)
+    rng = np.random.default_rng(3)
+    A = pt.matrix("A", dtype=dtype)
+    x = pt.vector("x", dtype=dtype)  # length 2k: x[::2] is strided
+    y = pt.vector("y", dtype=dtype)  # length m
+    B = pt.matrix("B", dtype=dtype)  # (k, 4)
+    outs = [A @ x[:k], A @ x[::2], A.T @ y, y @ A, A @ B, A.T @ (A @ B), (A @ B)[::2]]
+    vals = [rng.normal(size=s).astype(dtype) for s in [(m, k), (2 * k,), (m,), (k, 4)]]
+    tol = 1e-10 if dtype == "float64" else 1e-3
+    f = pytensor.function([A, x, y, B], outs, mode=llvm_mode())
+    ref = pytensor.function([A, x, y, B], outs, mode="FAST_COMPILE")
+    for r, e in zip(f(*vals), ref(*vals), strict=True):
+        assert r.shape == e.shape
+        np.testing.assert_allclose(r, e, rtol=tol, atol=tol)

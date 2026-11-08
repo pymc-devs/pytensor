@@ -354,6 +354,44 @@ impl GraphBuilder {
         Ok(())
     }
 
+    fn cholesky(&mut self, input: usize, output: usize, lower: bool) -> PyResult<()> {
+        self.check_inputs("cholesky", &[input])?;
+        self.check_outputs("cholesky", &[output])?;
+        self.require(self.ndim(input) == 2 && self.ndim(output) == 2, || "cholesky: operands must be 2-d".into())?;
+        self.require(self.dt(input) == self.dt(output) && self.dt(input).is_float(), || "cholesky: needs a float input of the output dtype".into())?;
+        self.push(Op::Cholesky { lower }, vec![input], vec![output]);
+        Ok(())
+    }
+
+    fn solve_triangular(&mut self, a: usize, b: usize, output: usize, lower: bool, unit_diagonal: bool) -> PyResult<()> {
+        self.check_inputs("solve_triangular", &[a, b])?;
+        self.check_outputs("solve_triangular", &[output])?;
+        self.require(self.ndim(a) == 2 && (1..=2).contains(&self.ndim(b)) && self.ndim(output) == self.ndim(b), || "solve_triangular: A must be 2-d, b and output 1-d or 2-d".into())?;
+        let dt = self.dt(output);
+        self.require(dt.is_float() && self.dt(a) == dt && self.dt(b) == dt, || "solve_triangular: operands must have the output's float dtype".into())?;
+        self.push(Op::SolveTriangular { lower, unit_diagonal }, vec![a, b], vec![output]);
+        Ok(())
+    }
+
+    fn cumop(&mut self, input: usize, output: usize, axis: usize, mul: bool) -> PyResult<()> {
+        self.check_inputs("cumop", &[input])?;
+        self.check_outputs("cumop", &[output])?;
+        self.require(axis < self.ndim(input) && self.ndim(output) == self.ndim(input), || "cumop: bad axis or ndim".into())?;
+        self.require(self.dt(input) == self.dt(output), || "cumop: dtype mismatch".into())?;
+        self.push(Op::CumOp { axis, mul }, vec![input], vec![output]);
+        Ok(())
+    }
+
+    fn extract_diag(&mut self, input: usize, output: usize, offset: i64, axis1: usize, axis2: usize) -> PyResult<()> {
+        self.check_inputs("extract_diag", &[input])?;
+        self.check_outputs("extract_diag", &[output])?;
+        let nd = self.ndim(input);
+        self.require(axis1 < nd && axis2 < nd && axis1 != axis2 && self.ndim(output) == nd - 1, || "extract_diag: bad axes".into())?;
+        self.require(self.dt(input) == self.dt(output), || "extract_diag: dtype mismatch".into())?;
+        self.push(Op::ExtractDiag { offset, axis1, axis2 }, vec![input], vec![output]);
+        Ok(())
+    }
+
     #[pyo3(signature = (input, output, axis, stable=false))]
     fn sort(&mut self, input: usize, output: usize, axis: usize, stable: bool) -> PyResult<()> {
         self.check_inputs("sort", &[input])?;

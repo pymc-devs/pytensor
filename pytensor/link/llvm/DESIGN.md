@@ -82,7 +82,11 @@ The `LLVM` mode is `fast_run` plus the `LLVM_REWRITES` from `linker.py`:
 
 - the FusedElemwise rewrites (`fuse_indexed_into_elemwise`, `fuse_elemwise`,
   `wrap_reduced_gather_in_elemwise`);
-- `scan_save_mem_no_prealloc`, the save-memory scan rewrite for JIT linkers.
+- `scan_save_mem_no_prealloc`, the save-memory scan rewrite for JIT linkers;
+- `llvm_scalar_adv_index_to_basic`, which rewrites `x[g, 0]` into
+  `x[:, 0][g]`, and likewise for inc/set. It runs before fusion, so the
+  remaining single-array gather can use the native take and the FusedElemwise
+  rewrites. It lives in `tensor/rewriting/subtensor.py` and is opt-in by name.
 
 The linker declares these rewrites incompatible:
 
@@ -152,8 +156,16 @@ typedef struct { const PtRuntime *rt; ... } PtCtx;
 - **Memory.** Buffers are freed when their refcount drops to zero. There is no
   arena or pool on purpose: if the planner can't prove reuse, memory is freed
   and allocated again.
-- **Scratch.** `rt->scratch` is a per-call-state scratch area for kernels that
-  need temporary space.
+- **Scratch.** `rt->scratch(ctx, n)` hands out 64-byte-aligned temporary memory
+  that is valid until the kernel returns, for example faer's work space or a
+  contiguous copy of a strided vector.
+  - It comes from a bump arena owned by the context, one per call state.
+  - A request that doesn't fit gets its own overflow block, so earlier pointers
+    stay valid.
+  - When the kernel returns, the arena regrows to the peak demand, so from the
+    second call on, scratch requests don't allocate.
+  - Drivers that call kernels repeatedly with the same context (the Scan fast
+    path) use `scratch_mark` / `scratch_release` around each call.
 
 ## Planner (`Program::new`)
 
@@ -164,8 +176,15 @@ The planner runs once per function, over the graph in topological order:
    Transpose flips C and F; elemwise follows its inputs. Layouts don't depend
    on storage, so this pass comes first.
 2. **Output modes** per node (`out_mode`): provided, kernel-allocated, or view
-   of input `i`. Some of these depend on layout. For example, `Reshape` is a
-   view only if its input is statically C-contiguous, and a copy otherwise.
+   of input `i`. Some of these depend on layout or static shapes:
+   - `Reshape` is a view only if its input is statically C-contiguous, and a
+     copy otherwise;
+   - `Alloc` / `AllocEmpty` are provided (a planner slot, no malloc per call)
+     when the output shape is static, and kernel-allocated otherwise.
+
+   Kernels are told their mode through their params; they never infer it from
+   the pointers. A stale data pointer left over from the previous call caused a
+   use-after-free once.
 3. **Storage.** Each variable gets one of:
    - `Input(k)`, `Const(k)` or `View{root}`;
    - `Slot(i)`: a reusable buffer;
@@ -197,9 +216,11 @@ The planner runs once per function, over the graph in topological order:
 the ABI signature.
 
 - **Elemwise.** An n-ary scalar expression tree over broadcast inputs. There is
-  a fast path for inputs with contiguous (or broadcast) strides, selected at
-  runtime, and a general strided loop nest. Loop order follows the output
-  layout.
+  a fast path for contiguous (or broadcast) strides, selected at runtime, and a
+  general strided loop nest. Loop order follows the output layout. Inputs
+  without a static layout, and outputs that aren't planner slots (slices inside
+  segments), are checked before the fast path is taken. Which dims are length 1
+  comes from the output operand, so broadcast copies (`Alloc`) work.
 - **Reduce** (CAReduce). The loop order follows the input layout. The inner
   loop has a contiguous version, and accumulators live in registers.
 - **Fused** (PyTensor's `FusedElemwise`). One loop nest that combines:
@@ -207,9 +228,15 @@ the ABI signature.
   - indexed reads (gathers) and indexed writes (scatter/inc);
   - reductions, with several accumulators.
 
-  The outer levels are generic. The innermost level has a contiguous version
-  and a strided version, chosen at runtime. A failed bounds check on an index
-  returns an error.
+  The outer levels are generic. In the innermost level:
+  - inputs that are one value for the whole loop are loaded once, before it;
+  - each index array is loaded once per element and checked with a single
+    unsigned compare against the smallest length it indexes; negative or
+    out-of-range values take a slow path that wraps and checks per array;
+  - there is a contiguous version, using element indexing for loop strides and
+    for gathers/scatters, and a byte-strided version, chosen at runtime.
+
+  A failed bounds check returns an error.
 - **Segment.** A run of small nodes compiled as one function: the member
   kernels are `alwaysinline`, and intermediates live in stack temporaries.
 - **Scalar math.** Scalar ops use LLVM intrinsics or libm, and declare libmvec
@@ -222,19 +249,50 @@ the ABI signature.
   nsz`. It deliberately doesn't use `nnan`/`ninf`, so NaN and inf still
   propagate.
 
-### Native kernels (`native.rs`)
+### Native kernels (`native.rs`, `linalg.rs`)
 
 - **Copies and views:** copy, dimshuffle, assert/check views, reshape (view or
-  copy).
+  copy), diagonal (`ExtractDiag`, a view).
 - **Creation and shapes:** arange, alloc, alloc_empty, shape, shape_i,
   make_vector.
-- **matmul:** uses `matrixmultiply`, with gemv and dot fast paths.
+- **Linear algebra with faer, sequential (`Par::Seq`):**
+  - matmul (`Dot`);
+  - Cholesky, with LAPACK potrf semantics: the other triangle is zero, and the
+    result is NaN if the matrix isn't positive definite;
+  - triangular solve, with trtrs semantics: NaN for a zero diagonal.
+
+  faer's work space comes from the context scratch.
+
+  One case bypasses faer: matrix-vector products with contiguous short rows,
+  like `X @ beta` with X row-major. faer does poorly there, so a hand-written
+  loop handles it: 4 rows at a time, 4 lanes along each row. It is
+  multiversioned, choosing an AVX2+FMA copy at runtime, because the crate itself
+  is built for baseline x86-64.
+- **Cumulative ops:** cumsum and cumprod along an axis.
 - **sort.**
 - **Indexing:**
   - subtensor and inc/set_subtensor, with runtime index resolution;
   - take and inc_take (advanced indexing on one axis), with 1-d fast paths;
   - join.
 - **scan:** the Scan driver.
+
+### Ops lowered in the converter
+
+Some ops are written as a small PyTensor graph over supported ops, then
+converted in place of the node (`_lower` in `dispatch.py`):
+
+- **`Split`** becomes basic slices. With constant split sizes those slices are
+  static, so they can live in segments.
+- **Multi-index advanced indexing** `x[i, j, ...]` covers several integer index
+  arrays on consecutive axes, with full slices elsewhere. The case of one array
+  plus scalars is rewritten earlier, as described above. Reads and
+  inc/set both become:
+  1. a flat index, with numpy's negative wrapping and bounds check;
+  2. a reshape of the indexed axes into one;
+  3. the 1-d take / inc_take kernels.
+
+  This covers the packed triangle of a Cholesky factor (`chol[rows, cols]`) and
+  `ab[g, 0]`.
 
 ## Segments
 
@@ -244,6 +302,20 @@ groups consecutive nodes that are statically small (at most `segment_max_elems`
 elements) and can be expressed as inlined members. Each group compiles to one
 function. The group's external inputs and outputs go through the normal ABI;
 everything else lives on the stack.
+
+Segment members, besides Elemwise, Reduce, Shape_i, MakeVector and Assert:
+- **Basic slices and integer indices** with constant bounds become views
+  (`SegLoc::Slice`), resolved statically with Python semantics. The base may be
+  large (the joined parameter vector), as long as the result is small.
+- **`Join`** becomes copies into slices of the output.
+- **`Alloc`** becomes a broadcast copy.
+- **`IncSubtensor` / `SetSubtensor`** with static indices become a copy of `x`,
+  then `+=` or `=` into a slice of the copy.
+- **`FusedElemwise`** without indexed writes.
+
+With these, small nutpie-style functions become one kernel. Those functions
+slice one joined vector, compute, and join the gradients. eight schools runs
+in 0.12 µs (1 kernel, plus a view for the scalar output).
 
 `whole_graph_segment(graph)` turns an entire graph into one segment if possible.
 Scan uses it for its step function.
@@ -256,6 +328,9 @@ Scan uses it for its step function.
   level and vector library.
 - **Loading.** Cached objects go straight into the LLJIT; there is no IR step.
   A kernel already linked in this process is reused by name.
+- **Target CPU.** The host CPU by default. `PTLLVM_CPU=haswell` (for example)
+  targets another CPU, which is useful for running under valgrind, since
+  valgrind doesn't support AVX-512.
 - **Typical compile times:**
   - 0.15–0.4 s cold for the benchmark models (numba: 2–5 s);
   - 0.02–0.1 s for scans, including their gradients.
@@ -342,14 +417,32 @@ fixes that.
 
 **Tests**
 
-- `tests/link/llvm`: 182 tests. They compare against the Python backend and
-  cover the ABI and runtime, the C API (with a small C harness), the numba
-  fallback, indexing, fused kernels and scan.
+- `tests/link/llvm`: 235 tests. They compare against the Python backend and
+  cover:
+  - the ABI and runtime, and the C API (with a small C harness);
+  - the numba fallback;
+  - indexing, segments, fused kernels and scan;
+  - faer linalg, and the lowered and added ops.
+
+  The main files also run clean under valgrind:
+  `PTLLVM_CPU=haswell PYTENSOR_FLAGS=cxx= PYTHONMALLOC=malloc valgrind ...`.
 - PyTensor's `tests/scan` under `mode=LLVM`: 223 passed, 20 failed.
   - Almost all of the failures use random generator state, which isn't
     supported.
   - Four check the scan in-place rewrite, which this mode excludes.
   - One pickles a compiled function.
+
+**Model corpus.** 20 PyMC models (synthetic data), compiled with nutpie's own
+`_make_functions`, and timed per logp+gradient evaluation from C against
+numba's jitted function:
+- all 20 run with no numba fallback;
+- cold compile takes 10.6 s in total, against 210 s for numba;
+- run time is a geometric mean of 1.0× numba: faster on 8 models, slower on 8;
+- logp and gradient agree with numba to 2e-9.
+
+Still slower: radon (the fused gather/scatter loop and per-step overhead),
+ordered_logistic and categorical_softmax (the lowered multi-index paths and
+lots of small steps), and stochastic_volatility.
 
 **Rough timings** (N = 100k, compared with numba):
 
@@ -383,6 +476,11 @@ These are known problems, roughly ordered by how much they shape the design.
   call. That isn't designed.
 - **Output layouts are fixed.** Provided outputs whose strides don't match the
   planner's choice go through an extra copy, and the kernel can't adapt.
+- **Implicit assumptions in generated kernels.** Elemwise assumed its outputs
+  had the planner's layout. That was only true until segments started writing
+  into slices, and it produced wrong results until the runtime check was added.
+  The same kind of unstated assumption probably exists elsewhere. Each
+  `KernelSpec` should say what it assumes about every operand.
 
 ### Op knowledge is scattered
 
@@ -405,7 +503,9 @@ shape", "emit or native fn"), or at least one module per op.
   it runs lazily per step on every call.
 - Static shapes come from PyTensor's types, but nothing else is propagated
   statically. For example, a static shape behind a dynamic `Reshape` is lost.
-- Segments, and the scan fast path, require fully static shapes.
+- Segments, and the scan fast path, require fully static shapes. Static slice
+  bounds in segments rely on index constants being visible to the planner
+  (`ConstInts`); indices computed at runtime keep the slice out of the segment.
 
 A cleaner split would be to infer shapes symbolically once, ideally as a
 PyTensor shape graph compiled into the program, and only evaluate it per call.
@@ -453,10 +553,24 @@ PyTensor shape graph compiled into the program, and only evaluate it per call.
 
 - **dtypes.** float64, float32, int8/16/32/64, uint8 and bool. Not
   uint16/32/64, float16 or complex.
-- **Ops.** Many are missing: linalg beyond Dot, cumsum and cumop, most of
-  `tensor.extra_ops`, random variables, sparse.
-- **Dot.** Uses `matrixmultiply` rather than a system BLAS. That is fine for
-  the small and medium sizes in typical models, but slower for large GEMMs.
+- **Ops.** Many are missing:
+  - argmax/argsort;
+  - linalg beyond Dot, Cholesky and triangular solves (det, solve, eigh, ...);
+  - Blockwise (batched) linalg;
+  - most of `tensor.extra_ops`;
+  - random variables;
+  - sparse;
+  - boolean-mask and non-consecutive advanced indexing.
+- **Lowered ops aren't rewritten.** The small graphs that replace Split and
+  multi-index indexing are converted as built, without PyTensor's rewrites or
+  fusion. For example, multi-index reads pay for a separate bounds-check
+  reduction instead of a fused one.
+- **Dense linalg is sequential.** faer runs single-threaded (`Par::Seq`), which
+  is right for samplers running one chain per thread, but slow for one large
+  problem.
+- **One hand-written SIMD kernel.** Only the short-row matvec is
+  multiversioned. Other Rust kernels are built for baseline x86-64 and don't
+  use AVX.
 
 ### Lifetime and process-level state
 
@@ -491,4 +605,6 @@ PyTensor shape graph compiled into the program, and only evaluate it per call.
 5. Error kinds in the ABI.
 6. A distributable build.
 7. More ops, driven by what real PyMC models hit; the foreign (numba fallback)
-   steps listed by `CompiledFunction.info()` show which.
+   steps listed by `CompiledFunction.info()` show which. The model corpus
+   (benchmark scripts outside the repo for now) should become a checked-in
+   benchmark.

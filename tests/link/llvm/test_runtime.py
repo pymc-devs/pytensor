@@ -300,3 +300,44 @@ os.unlink(f"/tmp/perf-{os.getpid()}.map")
     assert any("[" in name for *_, name in lines)  # entry points carry the kernel description
     # frame pointers are part of the cache key: profiling objects are separate files
     assert all(p.suffix == ".o" for p in tmp_path.iterdir())
+
+
+def test_small_graph_with_slices_join_alloc_is_one_segment():
+    # nutpie-style: slice a joined parameter vector, compute, join the gradients
+    import pytensor
+    import pytensor.tensor as pt
+
+    x = pt.vector("x", shape=(10,))
+    mu, ltau, z = x[0], x[1], x[2:]
+    z2 = x[::-3]  # negative step
+    logp = -0.5 * mu**2 + ltau - 0.5 * (z**2).sum() - pt.exp(ltau) * (z2 * z[:4]).sum()
+    grad = pytensor.grad(logp, x)
+    out = pt.join(0, grad[:3], pt.alloc(logp, 2), grad[3:])
+    f = pytensor.function([x], [logp, out], mode="LLVM")
+    ref = pytensor.function([x], [logp, out], mode="FAST_COMPILE")
+    xv = np.random.default_rng(0).normal(size=10)
+    for r, e in zip(f(xv), ref(xv), strict=True):
+        np.testing.assert_allclose(r, e, rtol=1e-12)
+    sched = f.maker.linker.compiled.info()["schedule"]
+    assert len([d for d in sched if not d.startswith("view")]) == 1, sched
+
+
+def test_static_inc_and_set_subtensor_in_segments():
+    import pytensor
+    import pytensor.tensor as pt
+
+    x = pt.matrix("x", shape=(4, 3))
+    y = pt.vector("y", shape=(3,))
+    outs = [
+        pt.inc_subtensor(x[1], y),
+        pt.set_subtensor(x[::2, 1:], y[:2]),  # broadcast over rows
+        pt.inc_subtensor(x[-1, ::-1], y * 2) + 1,
+        pt.set_subtensor(x[:, 0], 5.0),
+    ]
+    f = pytensor.function([x, y], outs, mode="LLVM")
+    ref = pytensor.function([x, y], outs, mode="FAST_COMPILE")
+    vals = [np.arange(12.0).reshape(4, 3), np.array([10.0, 20.0, 30.0])]
+    for r, e in zip(f(*vals), ref(*vals), strict=True):
+        np.testing.assert_allclose(r, e)
+    sched = f.maker.linker.compiled.info()["schedule"]
+    assert not [d for d in sched if "inc_subtensor" in d], sched
