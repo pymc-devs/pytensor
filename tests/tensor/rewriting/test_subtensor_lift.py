@@ -1512,6 +1512,39 @@ class TestExtractDiagLiftPass:
         for got, ref in zip(f_on(value), f_off(value), strict=True):
             np.testing.assert_allclose(got, ref, equal_nan=True)
 
+    def test_paired_arange_with_shape_from_shape_feature_is_diagonal(self):
+        rewrite_kw = dict(
+            include=("ShapeOpt", "canonicalize"),
+            exclude=("local_subtensor_of_batch_dims",),
+        )
+        x = pt.vector("x")
+        kernel = pt.exp(x[:, None] - 2.0 * x[None, :])
+        positions = pt.arange(x.shape[0])
+
+        result = RewriteTester([x], [kernel[positions, positions]], **rewrite_kw)
+
+        result.assert_graph(rewrite_graph(pt.diagonal(kernel), **rewrite_kw))
+        result.assert_eval(np.array([1.0, 2.0, 3.0]))
+
+    def test_paired_arange_on_rectangular_matrix_is_kept(self):
+        x = pt.matrix("x")
+        positions = pt.arange(x.shape[0])
+        out = pt.exp(x)[positions, positions]
+
+        rewrite_kw = dict(
+            include=("ShapeOpt", "canonicalize"),
+            exclude=("local_subtensor_of_batch_dims",),
+        )
+
+        result = RewriteTester([x], [out], **rewrite_kw)
+
+        without_diagonal = dict(
+            include=rewrite_kw["include"],
+            exclude=(*rewrite_kw["exclude"], "local_adv_idx_to_diagonal"),
+        )
+        result.assert_graph(rewrite_graph(out, **without_diagonal))
+        result.assert_eval(np.arange(12.0).reshape(3, 4))
+
 
 class TestAdvancedSubtensorOfDot:
     """``dot(A, B)[i, j]``: a separable index leaves a smaller ``Dot``, a coupled

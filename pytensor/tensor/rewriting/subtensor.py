@@ -7,7 +7,7 @@ import numpy as np
 from pytensor import compile
 from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
@@ -17,7 +17,12 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.raise_op import Assert
-from pytensor.scalar import Add, ScalarConstant, ScalarMinimum, Sub
+from pytensor.scalar import (
+    Add,
+    ScalarConstant,
+    ScalarMinimum,
+    Sub,
+)
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
@@ -477,8 +482,15 @@ def _idx_to_int_array(idx):
     return np.arange(n, dtype=np.int64) + off_val
 
 
-def _is_shape_of_x_at(var, x, axis):
-    """``True`` when ``var`` is statically equivalent to ``x.shape[axis]``."""
+def _is_shape_of_x_at(var, x, axis, shape_feature=None):
+    """``True`` when ``var`` is statically equivalent to ``x.shape[axis]``.
+
+    With a ``shape_feature``, ``var`` may also recompute the shape it records for ``x``.
+    """
+    if shape_feature is not None and equal_computations(
+        [var], [shape_feature.get_shape(x, axis)]
+    ):
+        return True
     if isinstance(var, TensorConstant):
         s = x.type.shape[axis]
         return s is not None and int(var.data) == s
@@ -539,6 +551,7 @@ def local_useless_slice(fgraph, node):
         x, *idx_vars = node.inputs
 
     new_idxs = list(indices_from_subtensor(idx_vars, idx_list))
+    shape_feature = getattr(fgraph, "shape_feature", None)
     change_flag = False
     last_useful_idx = -1
     for dim, s in enumerate(new_idxs):
@@ -609,7 +622,7 @@ def local_useless_slice(fgraph, node):
                 if isinstance(stop.owner_op, ScalarFromTensor)
                 else stop
             )
-            if _is_shape_of_x_at(tensor_stop, x, dim):
+            if _is_shape_of_x_at(tensor_stop, x, dim, shape_feature=shape_feature):
                 change_flag = True
                 stop = None
             elif isinstance(tensor_stop.owner_op, Elemwise) and isinstance(
@@ -618,9 +631,9 @@ def local_useless_slice(fgraph, node):
                 a, b = tensor_stop.owner.inputs
                 kept = (
                     a
-                    if _is_shape_of_x_at(b, x, dim)
+                    if _is_shape_of_x_at(b, x, dim, shape_feature=shape_feature)
                     else b
-                    if _is_shape_of_x_at(a, x, dim)
+                    if _is_shape_of_x_at(a, x, dim, shape_feature=shape_feature)
                     else None
                 )
                 if kept is not None:
@@ -1309,6 +1322,86 @@ def local_add_of_sparse_write(fgraph, node):
     return None
 
 
+def _canonical_indexing(var, indices, drop_broadcasted_index=False):
+    """Index ``var``, squeezing indexed broadcast dims whose index has size 1.
+
+    On a length-1 dim only zero is a valid index, so the index is
+    redundant — squeezing is equivalent and simpler.  If squeezed
+    indices contributed unique output dimensions, those are reinserted
+    via ``expand_dims`` after indexing.
+
+    When ``drop_broadcasted_index`` is set, the index is neutralized on *every*
+    broadcast dim: a size>1 advanced index that would otherwise expand the dim is
+    dropped, and a slice that would otherwise shrink it (e.g. ``[1:]`` -> size 0)
+    is replaced by a full slice. This keeps ``var`` small at the cost of an
+    under-broadcast result; the caller must broadcast it back to the full shape.
+    """
+    squeeze_axes = []
+    kept_indices = []
+    max_drop_ndim = 0
+    max_kept_ndim = 0
+    first_adv_axis = None
+    for axis, (bcast, idx) in enumerate(
+        zip(var.type.broadcastable, indices, strict=False)
+    ):
+        if isinstance(idx, slice):
+            if bcast and drop_broadcasted_index:
+                # Slicing a length-1 dim can shrink it (e.g. [1:] -> size 0);
+                # leave it untouched and let the caller broadcast it back.
+                kept_indices.append(slice(None))
+            else:
+                kept_indices.append(idx)
+        else:
+            if first_adv_axis is None:
+                first_adv_axis = axis
+
+            # np.ndim works for all supported cases: int, numpy arrays, pytensor variables
+            idx_ndim = np.ndim(idx)
+            if bcast:
+                if drop_broadcasted_index:
+                    drop_idx = True
+                else:
+                    match idx:
+                        case Variable():
+                            drop_idx = all(idx.type.broadcastable)
+                        case np.ndarray():
+                            drop_idx = idx.size == 1
+                        case int() | np.integer():
+                            drop_idx = True
+                        case _:
+                            raise AssertionError
+
+                # idx only contributes dummy dimensions (if any), not actual shape
+                # It doesn't really matter what the index was, only valid values are zeros.
+                if drop_idx:
+                    max_drop_ndim = max(max_drop_ndim, idx_ndim)
+                    squeeze_axes.append(axis)
+                    continue
+
+            max_kept_ndim = max(max_kept_ndim, idx_ndim)
+            kept_indices.append(idx)
+
+    # Remove useless trailing slice(None) indices
+    while kept_indices and kept_indices[-1] == slice(None):
+        kept_indices.pop()
+
+    result = var
+
+    if squeeze_axes:
+        result = result.squeeze(axis=tuple(squeeze_axes))
+
+    if kept_indices:
+        result = result[tuple(kept_indices)]
+
+    if (lost := max_drop_ndim - max_kept_ndim) > 0:
+        assert first_adv_axis is not None
+        result = expand_dims(
+            result, tuple(range(first_adv_axis, first_adv_axis + lost))
+        )
+
+    return result
+
+
 @register_canonicalize
 @register_specialize
 @node_rewriter([Subtensor])
@@ -1541,15 +1634,23 @@ def local_adv_idx_to_diagonal(fgraph, node):
 
     # Verify that the arange spans the full diagonal at this offset:
     # d == min(shape[a1] - row_off, shape[a2] - col_off).
+    def _is_dim_of_var(term, axis):
+        return _is_shape_of_x_at(
+            term,
+            var,
+            axis,
+            shape_feature=getattr(fgraph, "shape_feature", None),
+        )
+
     def _is_diag_length_term(term, axis, offset):
         if offset == 0:
-            return _is_shape_of_x_at(term, var, axis)
+            return _is_dim_of_var(term, axis)
         if not isinstance(term.owner_op, Elemwise):
             return False
         if not isinstance(term.owner.op.scalar_op, Sub):
             return False
         sub_a, sub_b = term.owner.inputs
-        if not _is_shape_of_x_at(sub_a, var, axis):
+        if not _is_dim_of_var(sub_a, axis):
             return False
         try:
             return int(get_underlying_scalar_constant_value(sub_b)) == offset
@@ -1566,11 +1667,9 @@ def local_adv_idx_to_diagonal(fgraph, node):
             return None
         if stop_val != min(dim_a - row_off, dim_b - col_off):
             return None
-    else:
-        if not isinstance(stop.owner_op, Elemwise):
-            return None
-        if not isinstance(stop.owner.op.scalar_op, ScalarMinimum):
-            return None
+    elif isinstance(stop.owner_op, Elemwise) and isinstance(
+        stop.owner.op.scalar_op, ScalarMinimum
+    ):
         term_a, term_b = stop.owner.inputs
         if not (
             (
@@ -1583,6 +1682,11 @@ def local_adv_idx_to_diagonal(fgraph, node):
             )
         ):
             return None
+    elif not (
+        _is_diag_length_term(stop, a1, row_off)
+        and _is_diag_length_term(stop, a2, col_off)
+    ):
+        return None
 
     offset = col_off - row_off
     out = var.diagonal(offset=offset, axis1=a1, axis2=a2)
