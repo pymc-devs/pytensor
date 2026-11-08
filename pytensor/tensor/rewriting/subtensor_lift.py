@@ -12,6 +12,7 @@ from pytensor.graph import (
     node_rewriter,
     vectorize_graph,
 )
+from pytensor.graph.basic import equal_computations
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     SequentialGraphRewriter,
@@ -41,6 +42,7 @@ from pytensor.tensor.math import Dot, dot, minimum
 from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
     get_simplified_broadcast_shape,
+    get_simplified_shape,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -77,6 +79,17 @@ from pytensor.tensor.subtensor import (
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
+
+
+def _has_one_distinct_client(fgraph: FunctionGraph, var: Variable) -> bool:
+    """Whether every client of ``var`` applies the same Op to the same inputs."""
+    (first_client, _), *other_clients = fgraph.clients[var]
+    return all(
+        client.op == first_client.op
+        and len(client.inputs) == len(first_client.inputs)
+        and equal_computations(client.inputs, first_client.inputs)
+        for client, _ in other_clients
+    )
 
 
 def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]:
@@ -223,7 +236,7 @@ def local_subtensor_of_dot(fgraph, node):
         return
     # If there is other node that use the outputs of the dot
     # We don't want to compute twice the sub part.
-    if len(fgraph.clients[x]) > 1:
+    if not _has_one_distinct_client(fgraph, x):
         return
 
     a = x.owner.inputs[0]
@@ -295,9 +308,9 @@ def local_advanced_subtensor_of_dot(fgraph, node):
         case _:
             return None
 
-    # If the product feeds other clients it is materialized anyway, so pushing the
+    # If the product feeds a distinct client it is materialized anyway, so pushing the
     # index into the operands would only add work.
-    if len(fgraph.clients[x]) > 1:
+    if not _has_one_distinct_client(fgraph, x):
         return None
 
     ndim = x.type.ndim
@@ -375,8 +388,11 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
-    if len(fgraph.clients[elem]) > 1:
-        # Elemwise output is used beyond the Subtensor.
+    if len(elem.owner.outputs) > 1:
+        return None
+
+    if not _has_one_distinct_client(fgraph, elem):
+        # Elemwise output has a client that reads something else.
         # Get out to avoid repeated computations
         return None
 
@@ -936,17 +952,17 @@ def local_extract_diag_lift(fgraph, node):
         isinstance(parent_op, Dot)
         or (isinstance(parent_op, Blockwise) and isinstance(parent_op.core_op, Dot))
     ) and (a1, a2) == (inner.type.ndim - 2, inner.type.ndim - 1):
-        shape_inputs = inner.shape
+        shape_inputs = get_simplified_shape(inner, fgraph=fgraph)
         gate = local_advanced_subtensor_of_dot
     elif isinstance(parent_op, Elemwise | Blockwise):
         if isinstance(parent_op, Blockwise):
             batch_ndim = inner.owner.op.batch_ndim(inner.owner)
             if a1 >= batch_ndim or a2 >= batch_ndim:
                 return None
-        shape_inputs = inner.shape
+        shape_inputs = get_simplified_shape(inner, fgraph=fgraph)
         gate = local_subtensor_of_batch_dims
     elif isinstance(parent_op, AdvancedIncSubtensor):
-        shape_inputs = inner.shape
+        shape_inputs = get_simplified_shape(inner, fgraph=fgraph)
         gate = local_advanced_read_of_write_constant_indices
     else:
         return None
