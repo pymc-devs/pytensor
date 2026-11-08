@@ -316,7 +316,10 @@ def _op_debug_information_FusedElemwise(op, node):
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
-        sources, _source_axis, mode = entry
+        sources, _source_axis, modes = entry
+        if isinstance(modes, str):
+            # pickles from before the per-output mode change carried one mode
+            modes = (modes,) * len(sources)
         buf_label = f"buf_{buf_counter}"
         buf_counter += 1
         idx_label = f"idx_{k}"
@@ -326,7 +329,7 @@ def _op_debug_information_FusedElemwise(op, node):
         if target_pos < len(node.inputs):
             info[node.inputs[target_pos]] = buf_label
 
-        for out_idx in sources:
+        for out_idx, mode in zip(sources, modes):
             if out_idx < len(node.outputs):
                 info[node.outputs[out_idx]] = (
                     f"indexed {mode} ({buf_label}, {idx_label})"
@@ -886,7 +889,10 @@ class FuseElemwise(GraphRewriter):
             )
 
             # indexed_inputs_spec: ((read_positions, axis) | None, ...)
-            # indexed_outputs_spec: ((write_positions, axis, "inc"|"set") | None, ...)
+            # indexed_outputs_spec: ((write_positions, axis, modes) | None, ...) with one
+            # mode per write position. A single mode per index group is wrong: two writes
+            # through the same index array can disagree, e.g. `x[idx].set(a)` next to
+            # `x[idx].inc(b)`, and taking the mode from the first write made both accumulate.
             indexed_inputs_spec = tuple(
                 (tuple(reads), axis) if reads else None
                 for (_, axis), (reads, _) in idx_groups.items()
@@ -895,7 +901,10 @@ class FuseElemwise(GraphRewriter):
                 (
                     tuple(writes),
                     key[1],
-                    "set" if write_targets[writes[0]].op.set_instead_of_inc else "inc",
+                    tuple(
+                        "set" if write_targets[w].op.set_instead_of_inc else "inc"
+                        for w in writes
+                    ),
                 )
                 if writes
                 else None

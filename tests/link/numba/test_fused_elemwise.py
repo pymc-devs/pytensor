@@ -267,6 +267,33 @@ class TestIndexedReadFusion:
 class TestIndexedWriteFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
 
+    def test_set_and_inc_through_one_index_do_not_share_a_write_mode(self):
+        """`set` and `inc` at the same indices must keep their own write mode.
+
+        Both writes go through the same index array, so they land in one index
+        group. The rewriter used to take the group's mode from the first write
+        target alone, which made the `.set()` accumulate. Repeated indices are
+        what expose it: with distinct indices the two writes never touch the
+        same cells and either mode looks right.
+        """
+        x = pt.vector("x", shape=(3,))
+        idx = pt.constant(np.array([0, 0, 2]))
+        zeros = pt.zeros(3)
+
+        set_out = zeros[idx].set(pt.exp(x))
+        inc_out = zeros[idx].inc(pt.exp(x) * 2.0)
+        fn, fn_u = fused_and_unfused([x], [set_out, inc_out])
+        assert_fused(fn)
+
+        value = np.log([1.0, 2.0, 3.0])
+        got_set, got_inc = fn(value)
+        want_set, want_inc = fn_u(value)
+        # last write wins for `.set()`, so index 0 holds exp(1) and not 3*exp(1)
+        np.testing.assert_allclose(got_set, want_set)
+        np.testing.assert_allclose(got_inc, want_inc)
+        np.testing.assert_allclose(got_set, [2.0, 0.0, 3.0])
+        np.testing.assert_allclose(got_inc, [6.0, 0.0, 6.0])
+
     def test_no_fusion_when_right_pad_covers_index(self):
         s = pt.scalar("s")
         idx = pt.lvector("idx")
