@@ -58,7 +58,9 @@ def summarize_assumptions(feature: AssumptionFeature, var) -> str:
     Each TRUE fact appears as its ``short_name``; each FALSE fact as ``!short_name``.
     Implied facts are pruned: a TRUE fact is dropped when a stronger fact (one that
     implies it) is also TRUE, and a FALSE fact is dropped when a weaker fact (one it
-    implies) is also FALSE. Return ``""`` when nothing is known.
+    implies) is also FALSE. A key that is not boolean appears as
+    ``short_name=value``, formatted by :meth:`AssumptionKey.format_value`, whenever its
+    value differs from ``key.unknown``. Return ``""`` when nothing is known.
     """
     states = {}
     for key in ALL_KEYS:
@@ -71,7 +73,12 @@ def summarize_assumptions(feature: AssumptionFeature, var) -> str:
     for key in ALL_KEYS:
         state = states[key]
         label = key.short_name or key.name
-        if state is FactState.TRUE:
+        if state is FactState.CONFLICT:
+            tokens.append(f"{label}=CONFLICT")
+        elif key.value_type is not FactState:
+            if state != key.unknown:
+                tokens.append(f"{label}={key.format_value(state)}")
+        elif state is FactState.TRUE:
             if any(
                 key in weaker and states[stronger] is FactState.TRUE
                 for stronger, weaker in IMPLIES.items()
@@ -82,8 +89,6 @@ def summarize_assumptions(feature: AssumptionFeature, var) -> str:
             if any(states[w] is FactState.FALSE for w in IMPLIES.get(key, ())):
                 continue
             tokens.append(f"!{label}")
-        elif state is FactState.CONFLICT:
-            tokens.append(f"{label}=CONFLICT")
 
     return "{" + ", ".join(tokens) + "}" if tokens else ""
 
