@@ -43,8 +43,27 @@ pub struct KernelStats {
     pub n_compiled: usize,
     /// Sum over kernels of codegen + optimization + emission time (CPU seconds).
     pub llvm_cpu_s: f64,
+    /// ... split into: building the LLVM IR (incl. verification), the optimization
+    /// pipeline, and machine-code generation (CPU seconds, summed over kernels).
+    pub irgen_cpu_s: f64,
+    pub opt_cpu_s: f64,
+    pub codegen_cpu_s: f64,
+    /// reading cached object files (CPU seconds, summed)
+    pub cache_read_s: f64,
+    /// wall time of get_kernels (kernels compile in parallel)
     pub wall_s: f64,
+    /// adding objects to the JIT and resolving addresses
     pub link_s: f64,
+    /// Program::new without get_kernels (layout, storage, segments, specs)
+    pub plan_s: f64,
+}
+
+/// Per-kernel compile times (seconds): IR generation, optimization, machine code.
+#[derive(Default, Clone, Copy)]
+pub struct CompileTimes {
+    pub irgen: f64,
+    pub opt: f64,
+    pub codegen: f64,
 }
 
 static INIT: Once = Once::new();
@@ -80,7 +99,7 @@ pub fn target_cpu() -> (String, String) {
 }
 
 /// libmvec ISA variants usable on this target: SSE ('b', 2 x f64) and AVX2 ('d', 4 x f64).
-fn vfabi_variants() -> Vec<(char, u32)> {
+pub fn vfabi_variants() -> Vec<(char, u32)> {
     if !veclib_enabled() {
         return vec![];
     }
@@ -101,7 +120,7 @@ fn vfabi_variants() -> Vec<(char, u32)> {
     v
 }
 
-fn target_machine(opt: u32) -> Result<TargetMachine, String> {
+pub fn target_machine(opt: u32) -> Result<TargetMachine, String> {
     let triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
     let (cpu, features) = target_cpu();
@@ -131,7 +150,7 @@ pub fn salt(opts: &Options) -> String {
     )
 }
 
-fn cache_dir() -> PathBuf {
+pub fn cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("PTLLVM_CACHE_DIR") {
         return PathBuf::from(d);
     }
@@ -141,6 +160,11 @@ fn cache_dir() -> PathBuf {
 
 /// Compile one kernel spec to an object file.
 pub fn compile_one(name: &str, spec: &KernelSpec, opts: &Options) -> Result<Vec<u8>, String> {
+    compile_one_timed(name, spec, opts).map(|(o, _)| o)
+}
+
+pub fn compile_one_timed(name: &str, spec: &KernelSpec, opts: &Options) -> Result<(Vec<u8>, CompileTimes), String> {
+    let t0 = Instant::now();
     let fastmath = match spec {
         KernelSpec::Elemwise { fastmath, .. } | KernelSpec::Reduce { fastmath, .. } => *fastmath,
         KernelSpec::Segment(s) => s.fastmath,
@@ -154,6 +178,7 @@ pub fn compile_one(name: &str, spec: &KernelSpec, opts: &Options) -> Result<Vec<
     cg.gen_kernel(name, spec)?;
     crate::perf::add_frame_pointers(&cg.module);
     cg.module.verify().map_err(|e| format!("invalid IR for {}: {}", spec.describe(), e))?;
+    let t1 = Instant::now();
     let pbo = PassBuilderOptions::create();
     pbo.set_loop_vectorization(true);
     pbo.set_loop_slp_vectorization(true);
@@ -161,6 +186,7 @@ pub fn compile_one(name: &str, spec: &KernelSpec, opts: &Options) -> Result<Vec<
     pbo.set_loop_unrolling(true);
     let pipeline = format!("default<O{}>", opts.opt_level.min(3));
     cg.module.run_passes(&pipeline, &tm, pbo).map_err(|e| e.to_string())?;
+    let t2 = Instant::now();
     if let Some(dir) = &opts.dump_ir {
         let _ = std::fs::create_dir_all(dir);
         let _ = std::fs::write(dir.join(format!("{name}.ll")), cg.module.print_to_string().to_string());
@@ -168,7 +194,9 @@ pub fn compile_one(name: &str, spec: &KernelSpec, opts: &Options) -> Result<Vec<
     let buf = tm
         .write_to_memory_buffer(&cg.module, FileType::Object)
         .map_err(|e| e.to_string())?;
-    Ok(buf.as_slice().to_vec())
+    let t3 = Instant::now();
+    let times = CompileTimes { irgen: (t1 - t0).as_secs_f64(), opt: (t2 - t1).as_secs_f64(), codegen: (t3 - t2).as_secs_f64() };
+    Ok((buf.as_slice().to_vec(), times))
 }
 
 /// Resolve function pointers for all specs, compiling what's missing in parallel.
@@ -201,19 +229,19 @@ pub fn get_kernels(specs: &[KernelSpec], opts: &Options) -> Result<(Vec<usize>, 
     if opts.cache {
         let _ = std::fs::create_dir_all(&dir);
     }
-    // (index, object bytes, compiled?, cpu seconds)
-    let results: Vec<Result<(usize, Vec<u8>, bool, f64), String>> = todo
+    // (index, object bytes, Some(times) if compiled / None if read from the cache, seconds)
+    let results: Vec<Result<(usize, Vec<u8>, Option<CompileTimes>, f64), String>> = todo
         .par_iter()
         .map(|&i| {
             let path = dir.join(format!("{}.o", names[i]));
             if opts.cache {
+                let t = Instant::now();
                 if let Ok(bytes) = std::fs::read(&path) {
-                    return Ok((i, bytes, false, 0.0));
+                    return Ok((i, bytes, None, t.elapsed().as_secs_f64()));
                 }
             }
-            let t = Instant::now();
-            let obj = compile_one(&names[i], &specs[i], opts)?;
-            let dt = t.elapsed().as_secs_f64();
+            let (obj, times) = compile_one_timed(&names[i], &specs[i], opts)?;
+            let dt = times.irgen + times.opt + times.codegen;
             if opts.cache {
                 // atomic publish so concurrent processes never see partial files
                 let tmp = dir.join(format!("{}.{}.tmp", names[i], std::process::id()));
@@ -221,19 +249,26 @@ pub fn get_kernels(specs: &[KernelSpec], opts: &Options) -> Result<(Vec<usize>, 
                     let _ = std::fs::rename(&tmp, &path);
                 }
             }
-            Ok((i, obj, true, dt))
+            Ok((i, obj, Some(times), dt))
         })
         .collect();
 
     let tl = Instant::now();
     let mut j = jit().lock().unwrap();
     for r in results {
-        let (i, obj, compiled, dt) = r?;
-        if compiled {
-            stats.n_compiled += 1;
-            stats.llvm_cpu_s += dt;
-        } else {
-            stats.n_disk_cache += 1;
+        let (i, obj, times, dt) = r?;
+        match times {
+            Some(t) => {
+                stats.n_compiled += 1;
+                stats.llvm_cpu_s += dt;
+                stats.irgen_cpu_s += t.irgen;
+                stats.opt_cpu_s += t.opt;
+                stats.codegen_cpu_s += t.codegen;
+            }
+            None => {
+                stats.n_disk_cache += 1;
+                stats.cache_read_s += dt;
+            }
         }
         j.add_object(&names[i], &obj, &specs[i].describe())?;
     }
