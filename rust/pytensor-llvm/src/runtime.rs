@@ -37,7 +37,10 @@ pub struct SlotBuf {
     cap: usize,
 }
 
+// SAFETY: SlotBuf owns its allocation exclusively (like a Box<[u8]>); moving it to another thread
+// is fine.
 unsafe impl Send for SlotBuf {}
+// SAFETY: shared references only read `ptr`/`cap`; writes need &mut (ensure, drop).
 unsafe impl Sync for SlotBuf {}
 
 impl SlotBuf {
@@ -49,6 +52,8 @@ impl SlotBuf {
         if bytes <= self.cap {
             return;
         }
+        // SAFETY: `ptr` was allocated here with `cap` bytes and align 64 (or is null); the new
+        // layout is valid (bytes >= 64).
         unsafe {
             if !self.ptr.is_null() {
                 dealloc(self.ptr, MemLayout::from_size_align_unchecked(self.cap, 64));
@@ -63,6 +68,7 @@ impl SlotBuf {
 impl Drop for SlotBuf {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
+            // SAFETY: allocated in `ensure` with exactly this size and alignment.
             unsafe { dealloc(self.ptr, MemLayout::from_size_align_unchecked(self.cap, 64)) };
         }
     }
@@ -75,12 +81,18 @@ pub struct ConstData {
     pub strides: Vec<i64>,
 }
 
+// SAFETY: the buffer is owned by the ConstData (one reference) and only freed by its Drop.
 unsafe impl Send for ConstData {}
+// SAFETY: constant data is never written after construction: the planner never runs a kernel in
+// place on a constant (only slot or kernel-allocated buffers that die at the node qualify, see the
+// in-place selection in Program::new), and constants that are graph outputs are copied. Concurrent
+// reads are fine.
 unsafe impl Sync for ConstData {}
 
 impl ConstData {
     pub fn from_bytes(bytes: &[u8], shape: Vec<i64>, strides: Vec<i64>) -> Self {
         let buf = PtBuffer::new(bytes.len(), 64);
+        // SAFETY: `buf` was just allocated with bytes.len() bytes; the regions can't overlap.
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), (*buf).data, bytes.len()) };
         ConstData { buf, shape, strides }
     }
@@ -88,6 +100,7 @@ impl ConstData {
 
 impl Clone for ConstData {
     fn clone(&self) -> Self {
+        // SAFETY: self holds a reference to the live buffer.
         unsafe { PtBuffer::incref(self.buf) };
         ConstData { buf: self.buf, shape: self.shape.clone(), strides: self.strides.clone() }
     }
@@ -95,6 +108,7 @@ impl Clone for ConstData {
 
 impl Drop for ConstData {
     fn drop(&mut self) {
+        // SAFETY: releases the reference this ConstData holds.
         unsafe { PtBuffer::decref(self.buf) };
     }
 }
@@ -176,10 +190,14 @@ pub struct CallState {
     /// caller-provided output k for a variable, during a call
     prov_var: Vec<Option<usize>>,
     direct_written: Vec<bool>,
+    /// byte ranges of the bound inputs (for the overlap check on provided outputs)
+    in_ranges: Vec<(usize, usize)>,
     /// outputs of the last successful call
     pub outs: Vec<OutArray>,
 }
 
+// SAFETY: a CallState is used by one thread at a time (&mut for every call); its raw pointers point
+// to buffers it owns (owners/slots) or borrows from the Program, which is Sync.
 unsafe impl Send for CallState {}
 
 /// A graph output of the last call. Unless `owner` is null (caller-provided memory), the
@@ -206,6 +224,7 @@ impl OutArray {
     }
 }
 
+// SAFETY: plain data plus an owned buffer reference that moves with the value.
 unsafe impl Send for OutArray {}
 
 fn op_name(op: &Op) -> &'static str {
@@ -304,12 +323,19 @@ fn static_shape_of(g: &Graph, v: usize) -> Option<Vec<i64>> {
     (0..info.ndim()).map(|d| if info.bcast[d] { Some(1) } else { info.static_shape.get(d).copied().flatten() }).collect()
 }
 
+/// `PTLLVM_CHECKED=1`: check every kernel call against its memory (see `check_step`).
+pub fn checked_mode() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| matches!(std::env::var("PTLLVM_CHECKED").as_deref(), Ok(v) if !v.is_empty() && v != "0"))
+}
+
 /// Values of the 0-d integer constants (static indices for segments).
 fn const_ints(g: &Graph, consts: &[ConstData]) -> crate::segment::ConstInts {
     g.constants
         .iter()
         .zip(consts)
         .filter(|(v, _)| g.vars[**v].ndim() == 0 && !g.vars[**v].dtype.is_float())
+        // SAFETY: 0-d integer constants: `data` holds one element of this dtype.
         .map(|(&v, c)| (v, unsafe { native::read_i64((*c.buf).data, g.vars[v].dtype) }))
         .collect()
 }
@@ -691,6 +717,9 @@ impl Program {
                     (Src::Native(native::ptl_alloc_empty), Params::of(prm), "native alloc_empty (allocates)".into())
                 }
                 Op::Foreign { addr, desc } => {
+                    // SAFETY: `addr` is a numba cfunc compiled with the kernel signature
+                    // int32(void*, void*, void*), kept alive by the Python side (see
+                    // numba_fallback.py).
                     let f = unsafe { std::mem::transmute::<usize, KernelFn>(*addr) };
                     (Src::Native(f), Params::none(), format!("foreign: {desc}"))
                 }
@@ -835,6 +864,8 @@ impl Program {
         let (addrs, _names, stats) = get_kernels(&specs, opts)?;
         for st in &mut steps {
             st.func = Some(match st.src {
+                // SAFETY: addresses come from the JIT lookup of kernels generated with the KernelFn
+                // signature; JIT code is never freed.
                 Src::Jit(i) => unsafe { std::mem::transmute::<usize, KernelFn>(addrs[i]) },
                 Src::Native(f) => f,
             });
@@ -856,6 +887,7 @@ impl Program {
                 .collect();
             let step = match exec {
                 Ok(k) => crate::scan::StepExec::Kernel {
+                    // SAFETY: as above.
                     func: unsafe { std::mem::transmute::<usize, KernelFn>(addrs[k]) },
                     consts: inner.consts.clone(),
                 },
@@ -970,6 +1002,7 @@ impl Program {
             profile: None,
             prov_var: vec![None; self.graph.vars.len()],
             direct_written: vec![false; self.graph.outputs.len()],
+            in_ranges: vec![(0, 0); self.graph.inputs.len()],
             outs: self.graph.outputs.iter().map(|&v| OutArray::new(self.graph.vars[v].dtype, self.graph.vars[v].ndim())).collect(),
         }
     }
@@ -1007,6 +1040,7 @@ impl Program {
             st.strides[o + d] = t;
         }
         let shape = &st.shapes[o..o + nd];
+        st.in_ranges[k] = crate::abi::validate_array(data, shape, &st.strides[o..o + nd], info.dtype.itemsize()).map_err(|e| format!("input {k}: {e}"))?;
         for d in 0..shape.len() {
             if info.bcast[d] && shape[d] != 1 {
                 return Err(format!("input {k}: dim {d} is broadcastable but has length {}", shape[d]));
@@ -1197,8 +1231,117 @@ impl Program {
         self.layout[v].strides(sh, isz, strd);
     }
 
-    fn nbytes(&self, st: &CallState, v: usize) -> usize {
-        self.shape(st, v).iter().product::<i64>() as usize * self.graph.vars[v].dtype.itemsize()
+    /// Memory that backs variable v right now, as a byte range: its slot, owned buffer,
+    /// the caller's array, or a constant. None if unknown (e.g. segment internals).
+    fn backing(&self, st: &CallState, v: usize, provided: Option<&[PtArray]>) -> Option<(usize, usize)> {
+        let owned = |b: *mut PtBuffer| -> Option<(usize, usize)> {
+            // SAFETY: owners hold live references (or borrowed constants)
+            (!b.is_null()).then(|| unsafe { ((*b).data as usize, (*b).data as usize + (*b).size()) })
+        };
+        match self.storage[v] {
+            Storage::Input(k) => Some(st.in_ranges[k]),
+            Storage::Const(k) => owned(self.consts[k].buf),
+            Storage::Slot(sl) => Some((st.slots[sl].ptr as usize, st.slots[sl].ptr as usize + st.slots[sl].cap)),
+            Storage::View { root } => self.backing(st, root, provided),
+            Storage::Fresh if st.prov_var[v].is_some() && st.owners[v].is_null() => {
+                let p = &provided?[st.prov_var[v]?];
+                // SAFETY: validated in check_provided
+                let (sh, sd) = unsafe { (p.shape(), p.strides()) };
+                crate::abi::validate_array(p.data, sh, sd, self.graph.vars[v].dtype.itemsize()).ok()
+            }
+            Storage::Fresh | Storage::KernelAlloc | Storage::Take { .. } => owned(st.owners[v]),
+            Storage::Internal => None,
+        }
+    }
+
+    /// PTLLVM_CHECKED: verify a kernel call against the memory that really backs its
+    /// arguments, instead of trusting the planner. Before the call: every argument the
+    /// runtime set up lies inside its backing memory, outputs don't overlap inputs
+    /// (unless planned in place), and outputs are poisoned (0xFF bytes, NaN for floats)
+    /// so unwritten elements show up. After the call: what kernels allocated or
+    /// declared as views lies inside its backing memory.
+    fn check_step(&self, st: &mut CallState, step: &Step, args: &[PtArray], provided: Option<&[PtArray]>, before: bool) -> Result<(), String> {
+        let node = &self.graph.nodes[step.node];
+        let ni = node.inputs.len();
+        let range = |a: &PtArray, v: usize| -> Result<(usize, usize), String> {
+            // SAFETY: shape/strides point into the call state's arrays (ndim long)
+            let (sh, sd) = unsafe { (a.shape(), a.strides()) };
+            crate::abi::validate_array(a.data, sh, sd, self.graph.vars[v].dtype.itemsize())
+        };
+        let fail = |what: String| Err(format!("checked mode: step {} ({}): {what}", step.node, step.desc));
+        let mut in_ranges = Vec::new();
+        for (pos, &v) in step.args.iter().enumerate() {
+            let is_out = pos >= ni;
+            // outputs the kernel sets up itself (allocates, or points into an input)
+            let set_by_kernel = is_out && matches!(self.storage[v], Storage::KernelAlloc | Storage::View { .. });
+            // before the call: inputs and runtime-prepared outputs; after: the rest
+            if before == set_by_kernel {
+                continue;
+            }
+            let r = match range(&args[pos], v) {
+                Ok(r) => r,
+                Err(e) => return fail(format!("argument {pos} is not a valid array: {e}")),
+            };
+            if let Some(b) = self.backing(st, v, provided) {
+                if r.0 < r.1 && (r.0 < b.0 || r.1 > b.1) {
+                    return fail(format!("argument {pos} spans {:#x}..{:#x}, outside its memory {:#x}..{:#x}", r.0, r.1, b.0, b.1));
+                }
+            }
+            if before && !is_out {
+                in_ranges.push((v, r));
+            }
+            if before && is_out {
+                let planned_inplace = |iv: usize| match (self.storage[v], self.storage[iv]) {
+                    (Storage::Slot(a), Storage::Slot(b)) => a == b,
+                    (Storage::Take { from }, _) => from == iv || self.root[iv] == self.root[from],
+                    _ => false,
+                };
+                if let Some(&(iv, _)) = in_ranges.iter().find(|&&(iv, ir)| crate::abi::overlaps(ir, r) && !planned_inplace(iv)) {
+                    return fail(format!("output argument {pos} overlaps input variable {iv}"));
+                }
+                if !in_ranges.iter().any(|&(iv, ir)| crate::abi::overlaps(ir, r) && planned_inplace(iv)) && r.0 < r.1 {
+                    // SAFETY: r is inside the output's backing memory (checked above)
+                    unsafe { std::ptr::write_bytes(r.0 as *mut u8, 0xFF, r.1 - r.0) };
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Caller memory for outputs: a valid array of the output's ndim, not overlapping
+    /// any input or another provided output (kernels write it while reading inputs).
+    fn check_provided(&self, st: &CallState, p: &[PtArray]) -> Result<(), String> {
+        if p.len() != self.graph.outputs.len() {
+            return Err(format!("expected {} outputs, got {}", self.graph.outputs.len(), p.len()));
+        }
+        let mut ranges: Vec<(usize, usize)> = Vec::new();
+        for (k, a) in p.iter().enumerate() {
+            if a.data.is_null() {
+                continue; // allocate for the caller
+            }
+            let info = &self.graph.vars[self.graph.outputs[k]];
+            if a.ndim as usize != info.ndim() {
+                return Err(format!("provided output {k}: expected {} dims, got {}", info.ndim(), a.ndim));
+            }
+            // SAFETY: `a.ndim` is checked against the output's ndim by the C API before execute;
+            // Python never provides outputs.
+            let (sh, sd) = unsafe { (a.shape(), a.strides()) };
+            let r = crate::abi::validate_array(a.data, sh, sd, info.dtype.itemsize()).map_err(|e| format!("provided output {k}: {e}"))?;
+            if let Some(i) = st.in_ranges.iter().position(|&x| crate::abi::overlaps(x, r)) {
+                return Err(format!("provided output {k} overlaps the memory of input {i}"));
+            }
+            if ranges.iter().any(|&x| crate::abi::overlaps(x, r)) {
+                return Err(format!("provided output {k} overlaps another provided output"));
+            }
+            ranges.push(r);
+        }
+        Ok(())
+    }
+
+    /// Byte size of v's (inferred) shape; an error if it can't exist (see `checked_nbytes`).
+    fn nbytes(&self, st: &CallState, v: usize) -> Result<usize, String> {
+        let shape = self.shape(st, v);
+        crate::abi::checked_nbytes(shape, self.graph.vars[v].dtype.itemsize()).ok_or_else(|| crate::abi::bad_size("output", shape))
     }
 
     /// Release every owned buffer still held (error path, or leftovers).
@@ -1206,6 +1349,7 @@ impl Program {
         for v in 0..st.owners.len() {
             let is_const = matches!(self.storage[v], Storage::Const(_));
             if !st.owners[v].is_null() && !is_const {
+                // SAFETY: owners[v] holds one reference (or a borrowed constant, skipped above).
                 unsafe { PtBuffer::decref(st.owners[v]) };
             }
             st.owners[v] = std::ptr::null_mut();
@@ -1217,8 +1361,20 @@ impl Program {
     /// `provided[k]` with non-null data is caller memory for output k (see the C header).
     /// Outputs written there are returned with a null owner.
     /// On success the outputs are in `st.outs`.
+    /// Run the program. Errors, including panics in Rust kernels (see `KernelFn`), come
+    /// back as `Err`; the state stays usable: buffers held by the call are released.
     pub fn execute(&self, st: &mut CallState, provided: Option<&[PtArray]>) -> Result<(), String> {
-        let res = self.execute_inner(st, provided);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.execute_inner(st, provided)));
+        let res = match res {
+            Ok(r) => r,
+            Err(p) => {
+                let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+                // the kernel was interrupted: its scratch and error state are dead
+                st.ctx.end_kernel();
+                st.ctx.error = None;
+                Err(format!("internal error (panic in a kernel): {msg}"))
+            }
+        };
         if res.is_err() {
             self.release_all(st);
         }
@@ -1229,6 +1385,7 @@ impl Program {
         st.prov_var.iter_mut().for_each(|x| *x = None);
         st.direct_written.iter_mut().for_each(|x| *x = false);
         if let Some(p) = provided {
+            self.check_provided(st, p)?;
             for (k, &v) in self.graph.outputs.iter().enumerate() {
                 if !p[k].data.is_null() && self.out_direct[k] && self.storage[v] == Storage::Fresh {
                     st.prov_var[v] = Some(k);
@@ -1241,6 +1398,7 @@ impl Program {
             let nd = c.shape.len();
             st.shapes[o..o + nd].copy_from_slice(&c.shape);
             st.strides[o..o + nd].copy_from_slice(&c.strides);
+            // SAFETY: the constant's buffer is live for the Program's lifetime.
             st.ptrs[v] = unsafe { (*c.buf).data };
             st.owners[v] = c.buf; // borrowed; never released by the driver
         }
@@ -1251,7 +1409,7 @@ impl Program {
             for &o in &step.outs {
                 match self.storage[o] {
                     Storage::Slot(sl) => {
-                        let nb = self.nbytes(st, o);
+                        let nb = self.nbytes(st, o)?;
                         st.slots[sl].ensure(nb);
                         st.ptrs[o] = st.slots[sl].ptr;
                         self.set_contiguous_strides(st, o);
@@ -1262,6 +1420,7 @@ impl Program {
                         let p = &provided.unwrap()[k];
                         self.set_contiguous_strides(st, o);
                         let (off, nd) = (self.dim_off[o], self.graph.vars[o].ndim());
+                        // SAFETY: as in check_provided.
                         let (sh, sd) = unsafe { (p.shape(), p.strides()) };
                         p.ndim as usize == nd
                             && (0..nd).all(|d| sh[d] == st.shapes[off + d] && (sh[d] == 1 || sd[d] == st.strides[off + d]))
@@ -1272,8 +1431,9 @@ impl Program {
                         st.direct_written[k] = true;
                     }
                     Storage::Fresh => {
-                        let b = PtBuffer::new(self.nbytes(st, o), 64);
+                        let b = PtBuffer::new(self.nbytes(st, o)?, 64);
                         st.owners[o] = b;
+                        // SAFETY: `b` was just allocated.
                         st.ptrs[o] = unsafe { (*b).data };
                         self.set_contiguous_strides(st, o);
                     }
@@ -1294,7 +1454,10 @@ impl Program {
                 let o = self.dim_off[v];
                 args.push(PtArray {
                     data: st.ptrs[v],
+                    // SAFETY: o + ndim <= total_dims by construction of dim_off; the pointers stay
+                    // in bounds.
                     shape: unsafe { st.shapes.as_mut_ptr().add(o) },
+                    // SAFETY: as above.
                     strides: unsafe { st.strides.as_mut_ptr().add(o) },
                     owner: match self.storage[v] {
                         Storage::View { root } => st.owners[root],
@@ -1304,8 +1467,15 @@ impl Program {
                 });
             }
             let f = step.func.unwrap();
+            if checked_mode() {
+                self.check_step(st, step, &args, provided, true)?;
+            }
             let t = st.profile.as_ref().map(|_| std::time::Instant::now());
             let ctx: *mut PtCtx = &mut st.ctx;
+            // SAFETY: the kernel contract (DESIGN.md, Safety): every argument is a valid array of
+            // the planned dtype/ndim with inferred shapes, outputs are sized by the planner or
+            // allocated by the kernel as its mode says, params belong to this step, and `ctx` is
+            // ours for the call.
             let rc = unsafe { f(ctx, args.as_mut_ptr(), step.params.as_ptr()) };
             st.ctx.end_kernel();
             if let (Some(t), Some(p)) = (t, st.profile.as_mut()) {
@@ -1322,6 +1492,9 @@ impl Program {
                     Storage::View { .. } => st.ptrs[o] = args[ni + k].data,
                     _ => {}
                 }
+            }
+            if rc == 0 && checked_mode() {
+                self.check_step(st, step, &args, provided, false)?;
             }
             if rc != 0 {
                 st.args = args;
@@ -1343,6 +1516,7 @@ impl Program {
             for &v in &step.release {
                 let b = std::mem::replace(&mut st.owners[v], std::ptr::null_mut());
                 if !b.is_null() {
+                    // SAFETY: releases the reference owners[v] held; v's last use was this step.
                     unsafe { PtBuffer::decref(b) };
                 }
             }
@@ -1367,16 +1541,20 @@ impl Program {
             let prm = CopyParams { itemsize: isz };
             let prm_ptr = &prm as *const CopyParams as *const std::ffi::c_void;
             if let Some(p) = provided.map(|p| p[k]).filter(|p| !p.data.is_null()) {
+                // SAFETY: as in check_provided.
                 let (psh, pst) = unsafe { (p.shape(), p.strides()) };
                 if p.ndim as usize != nd || (0..nd).any(|d| psh[d] != out.shape_buf[d]) {
                     return Err(format!("provided output {k} has shape {psh:?}, result has shape {:?}", out.shape()));
                 }
                 if !st.direct_written[k] {
                     let mut a = [src, p];
+                    // SAFETY: src is a valid array of the result's shape, p a validated caller
+                    // array of the same shape that overlaps no input (check_provided).
                     unsafe { native::ptl_copy(&mut st.ctx, a.as_mut_ptr(), prm_ptr) };
                     if self.out_direct[k] {
                         let b = std::mem::replace(&mut st.owners[v], std::ptr::null_mut());
                         if !b.is_null() {
+                            // SAFETY: releases the reference owners[v] held.
                             unsafe { PtBuffer::decref(b) };
                         }
                     }
@@ -1390,12 +1568,14 @@ impl Program {
             } else {
                 // inputs, constants, views or repeated outputs: copy into a fresh C array
                 Layout::C.strides(&out.shape_buf[..nd], isz, &mut out.strides_buf[..nd]);
-                let n: i64 = out.shape().iter().product();
-                let b = PtBuffer::new(n as usize * isz as usize, 64);
+                let nb = crate::abi::checked_nbytes(out.shape(), isz as usize).expect("copy of an existing array");
+                let b = PtBuffer::new(nb, 64);
                 out.owner = b;
+                // SAFETY: `b` was just allocated.
                 out.data = unsafe { (*b).data };
                 let dst = PtArray { data: out.data, shape: out.shape_buf.as_mut_ptr(), strides: out.strides_buf.as_mut_ptr(), owner: b, ndim: nd as i64 };
                 let mut a = [src, dst];
+                // SAFETY: copy into a fresh buffer of exactly the result's size.
                 unsafe { native::ptl_copy(&mut st.ctx, a.as_mut_ptr(), prm_ptr) };
             }
             st.outs[k] = out;
@@ -1403,6 +1583,7 @@ impl Program {
         for &v in &self.release_at_end {
             let b = std::mem::replace(&mut st.owners[v], std::ptr::null_mut());
             if !b.is_null() {
+                // SAFETY: releases the reference owners[v] held; nothing uses v after the call.
                 unsafe { PtBuffer::decref(b) };
             }
         }

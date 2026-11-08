@@ -196,10 +196,13 @@ impl<'ctx> Cg<'ctx> {
     }
 
     fn gep_elem(&self, dt: DType, base: PointerValue<'ctx>, idx: IntValue<'ctx>) -> R<PointerValue<'ctx>> {
+        // SAFETY: builds IR only; the generated access is in bounds under the kernel
+        // contract (indices come from planned shapes, or are checked for indexed ops).
         unsafe { self.b.build_in_bounds_gep(self.memty(dt), base, &[idx], "p").map_err(e) }
     }
 
     fn gep_bytes(&self, base: PointerValue<'ctx>, off: IntValue<'ctx>) -> R<PointerValue<'ctx>> {
+        // SAFETY: as in gep_elem: IR only, in bounds under the kernel contract.
         unsafe {
             self.b
                 .build_in_bounds_gep(self.ctx.i8_type(), base, &[off], "pb")
@@ -339,7 +342,8 @@ impl<'ctx> Cg<'ctx> {
                 }
             }
             let attr = self.ctx.create_string_attribute("vector-function-abi-variant", &variants.join(","));
-            let cs: inkwell::values::CallSiteValue = unsafe { inkwell::values::CallSiteValue::new(call.as_value_ref()) };
+            // SAFETY: `call` is a call instruction we just built.
+        let cs: inkwell::values::CallSiteValue = unsafe { inkwell::values::CallSiteValue::new(call.as_value_ref()) };
             cs.add_attribute(AttributeLoc::Function, attr);
         }
         Ok(v)
@@ -1410,6 +1414,7 @@ impl<'ctx> Cg<'ctx> {
                 let arr = self.b.build_array_alloca(arr_t, self.i64c(args.len() as i64), "margs").map_err(e)?;
                 for (k, &a) in args.iter().enumerate() {
                     let val = self.b.build_load(arr_t, vp[a], "a").map_err(e)?;
+                    // SAFETY: IR only; k < the array type's length.
                     let dst = unsafe { self.b.build_in_bounds_gep(arr_t, arr, &[self.i64c(k as i64)], "d").map_err(e)? };
                     self.b.build_store(dst, val).map_err(e)?;
                 }

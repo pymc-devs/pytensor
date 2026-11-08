@@ -47,74 +47,131 @@ pub fn function_handle(prog: &Arc<Program>) -> *const Program {
     Arc::into_raw(prog.clone())
 }
 
+// SAFETY contract of every entry point below (the C API's preconditions, as documented
+// in pytensor_llvm.h; the caller's responsibility, not checkable here):
+// - `f` is a live `PtFunction*`: from `c_function()` / `function_incref`, not yet
+//   released. It is `Arc::into_raw` of a `Program`.
+// - `s` is a live `PtCallState*` from `state_new`, used by one thread at a time.
+// - out-pointers point to writable memory of the right type.
+// Within that contract the functions are sound: everything they read through the
+// arrays passed to `call` is validated first (see `call`).
+
 unsafe extern "C" fn function_incref(f: *const Program) {
-    Arc::increment_strong_count(f);
+    // SAFETY: `f` is a live PtFunction (contract above).
+    unsafe { Arc::increment_strong_count(f) };
 }
 
 unsafe extern "C" fn function_decref(f: *const Program) {
-    Arc::decrement_strong_count(f);
+    // SAFETY: the caller releases a reference it holds.
+    unsafe { Arc::decrement_strong_count(f) };
 }
 
 unsafe extern "C" fn n_inputs(f: *const Program) -> usize {
-    (*f).n_inputs()
+    // SAFETY: `f` is live.
+    unsafe { (*f).n_inputs() }
 }
 
 unsafe extern "C" fn n_outputs(f: *const Program) -> usize {
-    (*f).n_outputs()
+    // SAFETY: `f` is live.
+    unsafe { (*f).n_outputs() }
 }
 
+/// `static_shape` points into the Program, valid while the caller holds `f`.
 unsafe fn fill_type(dt: crate::dtype::DType, shape: &[i64], out: *mut PtTypeInfo) {
-    *out = PtTypeInfo { dtype: dt.code(), ndim: shape.len() as i32, static_shape: shape.as_ptr() };
+    // SAFETY: `out` is writable (contract).
+    unsafe { *out = PtTypeInfo { dtype: dt.code(), ndim: shape.len() as i32, static_shape: shape.as_ptr() } };
 }
 
 unsafe extern "C" fn input_type(f: *const Program, i: usize, out: *mut PtTypeInfo) -> i32 {
-    if i >= (*f).n_inputs() {
+    // SAFETY: `f` is live.
+    let f = unsafe { &*f };
+    if i >= f.n_inputs() {
         return 1;
     }
-    let (dt, sh) = (*f).input_type(i);
-    fill_type(dt, sh, out);
+    let (dt, sh) = f.input_type(i);
+    // SAFETY: `out` is writable (contract).
+    unsafe { fill_type(dt, sh, out) };
     0
 }
 
 unsafe extern "C" fn output_type(f: *const Program, i: usize, out: *mut PtTypeInfo) -> i32 {
-    if i >= (*f).n_outputs() {
+    // SAFETY: `f` is live.
+    let f = unsafe { &*f };
+    if i >= f.n_outputs() {
         return 1;
     }
-    let (dt, sh) = (*f).output_type(i);
-    fill_type(dt, sh, out);
+    let (dt, sh) = f.output_type(i);
+    // SAFETY: `out` is writable (contract).
+    unsafe { fill_type(dt, sh, out) };
     0
 }
 
 unsafe extern "C" fn state_new(f: *const Program) -> *mut PtCallState {
-    Arc::increment_strong_count(f);
-    let prog = Arc::from_raw(f);
+    // a new strong reference, owned by the state
+    // SAFETY: `f` is live; the state owns the new reference.
+    let prog = unsafe {
+        Arc::increment_strong_count(f);
+        Arc::from_raw(f)
+    };
     let st = prog.new_state();
     Box::into_raw(Box::new(PtCallState { prog, st, err: CString::default() }))
 }
 
 unsafe extern "C" fn state_free(s: *mut PtCallState) {
     if !s.is_null() {
-        drop(Box::from_raw(s));
+        // SAFETY: `s` came from state_new and is freed once.
+        drop(unsafe { Box::from_raw(s) });
     }
 }
 
+/// Run the function: see `call` in pytensor_llvm.h. Before anything reads through a
+/// caller pointer, the input/output counts come from the Program and each array's
+/// `ndim` and shape/stride pointers are checked; `set_input_raw` and `execute` then
+/// validate data, shapes, strides, alignment and output overlap.
 unsafe extern "C" fn call(s: *mut PtCallState, inputs: *const PtArray, outputs: *mut PtArray) -> i32 {
-    let s = &mut *s;
+    // SAFETY: `s` is live and used by this thread only (contract).
+    let s = unsafe { &mut *s };
     let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
         let prog = &*s.prog;
-        for k in 0..prog.n_inputs() {
-            let a = &*inputs.add(k);
-            prog.set_input_raw(&mut s.st, k, a.data as *mut u8, a.shape(), a.strides())?;
+        if (inputs.is_null() && prog.n_inputs() > 0) || (outputs.is_null() && prog.n_outputs() > 0) {
+            return Err("inputs and outputs must not be NULL".into());
         }
-        let outs = std::slice::from_raw_parts_mut(outputs, prog.n_outputs());
+        // Before building any slice from caller pointers: ndim must be the expected one
+        // (so shape/strides are read with a length we know), and they must be non-null.
+        let check = |what: &str, k: usize, a: &PtArray, nd: usize| -> Result<(), String> {
+            if a.ndim < 0 || a.ndim as usize != nd {
+                return Err(format!("{what} {k}: expected {nd} dims, got {}", a.ndim));
+            }
+            if nd > 0 && (a.shape.is_null() || a.strides.is_null()) {
+                return Err(format!("{what} {k}: shape and strides must not be NULL"));
+            }
+            Ok(())
+        };
+        for k in 0..prog.n_inputs() {
+            // SAFETY: `inputs` holds n_inputs arrays (contract); shape/strides checked above
+            let a = unsafe { &*inputs.add(k) };
+            check("input", k, a, prog.input_type(k).1.len())?;
+            // SAFETY: ndim and the shape/stride pointers were checked just above.
+            prog.set_input_raw(&mut s.st, k, a.data, unsafe { a.shape() }, unsafe { a.strides() })?;
+        }
+        for k in 0..prog.n_outputs() {
+            // SAFETY: `outputs` holds n_outputs arrays (contract).
+            check("output", k, unsafe { &*outputs.add(k) }, prog.output_type(k).1.len())?;
+        }
+        // SAFETY: n_outputs arrays (contract), each with a checked ndim and pointers
+        let outs = unsafe { std::slice::from_raw_parts_mut(outputs, prog.n_outputs()) };
         prog.execute(&mut s.st, Some(outs))?;
         for (o, r) in outs.iter_mut().zip(&s.st.outs) {
             if o.data.is_null() {
+                // runtime-allocated: the caller takes over `r.owner`
                 o.data = r.data;
                 o.owner = r.owner;
-                o.ndim = r.ndim as i64;
-                o.shape_mut().copy_from_slice(r.shape());
-                o.strides_mut().copy_from_slice(r.strides());
+                // SAFETY: o's shape/strides point to caller arrays of length ndim
+                // (checked equal to the output's ndim above).
+                unsafe {
+                    o.shape_mut().copy_from_slice(r.shape());
+                    o.strides_mut().copy_from_slice(r.strides());
+                }
             }
         }
         Ok(())
@@ -129,12 +186,14 @@ unsafe extern "C" fn call(s: *mut PtCallState, inputs: *const PtArray, outputs: 
 }
 
 unsafe extern "C" fn last_error(s: *const PtCallState) -> *const c_char {
-    (*s).err.as_ptr()
+    // SAFETY: `s` is live; the string lives until the next call on `s`.
+    unsafe { (*s).err.as_ptr() }
 }
 
 unsafe extern "C" fn buffer_decref(b: *mut PtBuffer) {
     if !b.is_null() {
-        PtBuffer::decref(b)
+        // SAFETY: the caller releases a reference it got from `call`
+        unsafe { PtBuffer::decref(b) }
     }
 }
 

@@ -18,8 +18,13 @@
 //!
 //! Step outputs are written into per-step temporaries and copied into their rows, so a
 //! circular buffer whose output row coincides with an input tap is still correct.
+// Kernel module: every function here is called with the kernel contract (see the
+// Safety section of DESIGN.md: arguments are valid arrays as planned, params are the
+// step's own). Raw-pointer work is the whole body, so unsafe ops aren't wrapped
+// one by one; the preconditions are documented per kernel instead.
+#![allow(unsafe_op_in_unsafe_fn)]
 
-use crate::abi::{PtArray, PtBuffer, PtCtx, KernelFn, MAX_NDIM};
+use crate::abi::{KernelFn, OwnedBuf, PtArray, PtBuffer, PtCtx, MAX_NDIM};
 use crate::dtype::DType;
 use crate::ir::ScanInfo;
 use crate::runtime::{CallState, ConstData, Program};
@@ -46,7 +51,11 @@ pub struct ScanData {
     pub desc: String,
 }
 
+// SAFETY: ScanData is immutable after construction; its raw parts are a JIT function
+// address (code is never freed), constants (Sync, see ConstData) and an inner Program
+// (Sync).
 unsafe impl Send for ScanData {}
+// SAFETY: as above: shared, read-only use from concurrent calls.
 unsafe impl Sync for ScanData {}
 
 /// A C-contiguous buffer owned by the driver (until handed out as an output).
@@ -59,16 +68,18 @@ struct Buf {
 }
 
 impl Buf {
-    fn new(shape: Vec<i64>, itemsize: i64) -> Buf {
-        let n: i64 = shape.iter().product();
-        let owner = PtBuffer::new(n as usize * itemsize as usize, 64);
+    /// C-contiguous buffer; an error for shapes that can't exist (n_steps from a value).
+    fn new(shape: Vec<i64>, itemsize: i64) -> Result<Buf, String> {
+        let nbytes = crate::abi::checked_nbytes(&shape, itemsize as usize).ok_or_else(|| crate::abi::bad_size("scan buffer", &shape))?;
+        let owner = PtBuffer::new(nbytes, 64);
         let mut strides = vec![0; shape.len()];
         let mut acc = itemsize;
         for d in (0..shape.len()).rev() {
             strides[d] = acc;
             acc *= shape[d].max(1);
         }
-        Buf { owner, data: unsafe { (*owner).data }, shape, strides, itemsize }
+        // SAFETY: `owner` was just allocated.
+        Ok(Buf { owner, data: unsafe { (*owner).data }, shape, strides, itemsize })
     }
     fn len(&self) -> i64 {
         self.shape[0]
@@ -77,6 +88,7 @@ impl Buf {
         self.shape[1..].iter().product::<i64>() * self.itemsize
     }
     fn row(&self, r: i64) -> *mut u8 {
+        // SAFETY: r < len (callers index rows modulo the buffer length), inside the buffer.
         unsafe { self.data.offset((r * self.row_bytes()) as isize) }
     }
     /// PtArray view of the whole buffer or of row `r`
@@ -157,22 +169,23 @@ struct Traced {
 }
 
 /// args = outer inputs ++ outer outputs (all kernel-allocated). params -> &ScanData.
-pub unsafe extern "C" fn ptl_scan(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_scan(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let data = &*(*(params as *const usize) as *const ScanData);
-    let mut owned: Vec<*mut PtBuffer> = Vec::new();
-    let res = run(ctx, args, data, &mut owned);
-    match res {
-        Ok(()) => 0,
-        Err(m) => {
-            for b in owned {
-                PtBuffer::decref(b);
-            }
-            PtCtx::fail(ctx, 2, &m)
+    // buffers we own until they're handed out; dropped (released) on errors and panics
+    let mut owned: Vec<OwnedBuf> = Vec::new();
+    match run(ctx, args, data, &mut owned) {
+        Ok(()) => {
+            // the references now live in the outputs' owner fields
+            owned.into_iter().for_each(|b| {
+                b.into_raw();
+            });
+            0
         }
+        Err(m) => PtCtx::fail(ctx, 2, &m),
     }
 }
 
-unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec<*mut PtBuffer>) -> Result<(), String> {
+unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec<OwnedBuf>) -> Result<(), String> {
     let info = &d.info;
     let arg = |i: usize| *args.add(i);
     let (n_mm, n_ms, n_ss) = (info.mit_mot_in.len(), info.mit_sot_in.len(), info.sit_sot_in.len());
@@ -187,9 +200,9 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
     let n_steps = read_int(&arg(0), d.outer_in_dtypes[0]).max(0);
 
     // ---- buffers: copies of the outer buffers (the loop writes into them)
-    let copy_of = |a: PtArray, dt: DType, owned: &mut Vec<*mut PtBuffer>| -> Buf {
-        let b = Buf::new(a.shape().to_vec(), dt.itemsize() as i64);
-        owned.push(b.owner);
+    let copy_of = |a: PtArray, dt: DType, owned: &mut Vec<OwnedBuf>| -> Buf {
+        let b = Buf::new(a.shape().to_vec(), dt.itemsize() as i64).expect("copy of an existing array");
+        owned.push(OwnedBuf::from_raw(b.owner));
         copy_into(a.data, a.shape(), a.strides(), b.data, b.itemsize);
         b
     };
@@ -221,8 +234,8 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
             Some(s) => {
                 let mut shape = vec![len];
                 shape.extend(s);
-                let b = Buf::new(shape, t.dtype.itemsize() as i64);
-                owned.push(b.owner);
+                let b = Buf::new(shape, t.dtype.itemsize() as i64)?;
+                owned.push(OwnedBuf::from_raw(b.owner));
                 Some(b)
             }
             None => None,
@@ -236,7 +249,7 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
         StepExec::Kernel { .. } => {
             for t in &d.inner_outs {
                 let shape: Vec<i64> = t.shape.iter().map(|s| s.expect("fast-path step outputs have static shapes")).collect();
-                let b = Buf::new(shape, t.dtype.itemsize() as i64);
+                let b = Buf::new(shape, t.dtype.itemsize() as i64)?;
                 temps.push(b);
             }
         }
@@ -352,8 +365,8 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
             if nit[j].is_none() {
                 let mut shape = vec![nit_len[j]];
                 shape.extend(outs[q].shape());
-                let b = Buf::new(shape, t.dtype.itemsize() as i64);
-                owned.push(b.owner);
+                let b = Buf::new(shape, t.dtype.itemsize() as i64)?;
+                owned.push(OwnedBuf::from_raw(b.owner));
                 nit[j] = Some(b);
             }
             let b = nit[j].as_mut().unwrap();
@@ -368,10 +381,10 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
         for u in untraced.iter_mut() {
             // untraced state: becomes the step output (its shape may change)
             if outs[q].shape() != &u.shape[..] {
-                let nb = Buf::new(outs[q].shape().to_vec(), u.itemsize);
-                owned.retain(|&x| x != u.owner);
+                let nb = Buf::new(outs[q].shape().to_vec(), u.itemsize)?;
+                owned.retain(|x| x.as_ptr() != u.owner);
                 PtBuffer::decref(u.owner);
-                owned.push(nb.owner);
+                owned.push(OwnedBuf::from_raw(nb.owner));
                 *u = nb;
             }
             copy_into(outs[q].data, outs[q].shape(), outs[q].strides(), u.data, u.itemsize);
@@ -401,19 +414,19 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
     }
 
     // ---- post-processing: rotate circular buffers, truncate (while) or zero the tail
-    let finish = |b: &mut Buf, max_offset: i64, owned: &mut Vec<*mut PtBuffer>| {
+    let finish = |b: &mut Buf, max_offset: i64, owned: &mut Vec<OwnedBuf>| {
         let len = b.len();
         let used = i + max_offset;
         if 1 < len && len < used {
             let shift = used.rem_euclid(len);
             if shift > 0 {
-                let nb = Buf::new(b.shape.clone(), b.itemsize);
+                let nb = Buf::new(b.shape.clone(), b.itemsize).expect("same shape as an existing buffer");
                 let rb = b.row_bytes();
                 std::ptr::copy_nonoverlapping(b.row(shift), nb.data, ((len - shift) * rb) as usize);
                 std::ptr::copy_nonoverlapping(b.data, nb.row(len - shift), (shift * rb) as usize);
-                owned.retain(|&x| x != b.owner);
+                owned.retain(|x| x.as_ptr() != b.owner);
                 PtBuffer::decref(b.owner);
-                owned.push(nb.owner);
+                owned.push(OwnedBuf::from_raw(nb.owner));
                 *b = nb;
             }
         } else if len > used {
@@ -436,8 +449,8 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
             let t = &d.inner_outs[first_nit_out + j];
             let mut shape = vec![nit_len[j]];
             shape.extend(t.shape.iter().map(|s| s.unwrap_or(0)));
-            let nb = Buf::new(shape, t.dtype.itemsize() as i64);
-            owned.push(nb.owner);
+            let nb = Buf::new(shape, t.dtype.itemsize() as i64)?;
+            owned.push(OwnedBuf::from_raw(nb.owner));
             *b = Some(nb);
         }
         finish(b.as_mut().unwrap(), 0, owned);
@@ -462,6 +475,5 @@ unsafe fn run(ctx: *mut PtCtx, args: *mut PtArray, d: &ScanData, owned: &mut Vec
     for u in &untraced {
         emit(u);
     }
-    owned.clear(); // ownership moved to the outputs
     Ok(())
 }

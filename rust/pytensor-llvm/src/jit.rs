@@ -20,21 +20,28 @@ pub struct Jit {
 }
 
 // The LLJIT is internally synchronized; we additionally guard it with a Mutex.
+// SAFETY: the LLJIT is internally synchronized; we additionally only use it behind
+// the Mutex in `jit()`.
 unsafe impl Send for Jit {}
 
 static JIT: OnceLock<Mutex<Jit>> = OnceLock::new();
 
+/// SAFETY: `err` is a live LLVMErrorRef; this consumes it.
 unsafe fn err_to_string(err: LLVMErrorRef) -> String {
-    let msg = LLVMGetErrorMessage(err);
-    let s = CStr::from_ptr(msg).to_string_lossy().into_owned();
-    LLVMDisposeErrorMessage(msg);
-    s
+    // SAFETY: the function's contract; the message is disposed once.
+    unsafe {
+        let msg = LLVMGetErrorMessage(err);
+        let s = CStr::from_ptr(msg).to_string_lossy().into_owned();
+        LLVMDisposeErrorMessage(msg);
+        s
+    }
 }
 
 fn check(err: LLVMErrorRef, what: &str) -> Result<(), String> {
     if err.is_null() {
         Ok(())
     } else {
+        // SAFETY: a non-null error returned by an LLVM call, consumed here.
         Err(format!("{what}: {}", unsafe { err_to_string(err) }))
     }
 }
@@ -46,6 +53,8 @@ pub fn jit() -> &'static Mutex<Jit> {
 impl Jit {
     fn new() -> Result<Self, String> {
         crate::compile::init_llvm();
+        // SAFETY: LLVM C API calls on handles created right here; every error is
+        // checked before a handle is used.
         unsafe {
             let builder = LLVMOrcCreateLLJITBuilder();
             let mut jit: LLVMOrcLLJITRef = std::ptr::null_mut();
@@ -108,6 +117,8 @@ impl Jit {
         if let Some(a) = self.symbols.get(name) {
             return Ok(*a);
         }
+        // SAFETY: `self.jit`/`self.jd` are the live LLJIT handles (we hold &mut via the
+        // Mutex); the object bytes are copied into an LLVM-owned buffer the JIT takes.
         unsafe {
             let bufname = CString::new(name).unwrap();
             let buf = llvm_sys::core::LLVMCreateMemoryBufferWithMemoryRangeCopy(

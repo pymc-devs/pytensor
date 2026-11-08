@@ -48,7 +48,7 @@ pub struct KernelStats {
 }
 
 static INIT: Once = Once::new();
-static mut VECLIB: bool = false;
+static VECLIB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn init_llvm() {
     INIT.call_once(|| {
@@ -57,17 +57,17 @@ pub fn init_llvm() {
         let veclib = std::env::var("PTLLVM_NO_VECLIB").is_err();
         if veclib {
             let args = [c"ptllvm".as_ptr(), c"-vector-library=LIBMVEC-X86".as_ptr()];
-            unsafe {
-                llvm_sys::support::LLVMParseCommandLineOptions(2, args.as_ptr(), std::ptr::null());
-                VECLIB = true;
-            }
+            // SAFETY: two valid NUL-terminated strings; called once (inside INIT), before
+            // any LLVM pass pipeline exists, as LLVM requires for global options.
+            unsafe { llvm_sys::support::LLVMParseCommandLineOptions(2, args.as_ptr(), std::ptr::null()) };
+            VECLIB.store(true, std::sync::atomic::Ordering::Release);
         }
     });
 }
 
 pub fn veclib_enabled() -> bool {
     init_llvm();
-    unsafe { VECLIB }
+    VECLIB.load(std::sync::atomic::Ordering::Acquire)
 }
 
 /// Target CPU and features: the host, or `PTLLVM_CPU` (e.g. "haswell" to run the
@@ -118,6 +118,7 @@ fn target_machine(opt: u32) -> Result<TargetMachine, String> {
 
 pub fn salt(opts: &Options) -> String {
     let (mut ma, mut mi, mut pa) = (0u32, 0u32, 0u32);
+    // SAFETY: plain out-parameters.
     unsafe { llvm_sys::core::LLVMGetVersion(&mut ma, &mut mi, &mut pa) };
     format!(
         "v{CODEGEN_VERSION}|{}|llvm{ma}.{mi}.{pa}|{}|{}|O{}|veclib{}|fp{}",

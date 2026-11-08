@@ -243,6 +243,13 @@ impl GraphBuilder {
         kw.set_item("order", "C")?;
         // np.array(order="C") keeps 0-d arrays 0-d (ascontiguousarray would not)
         let arr = np.getattr("array")?.call((value,), Some(&kw))?;
+        // native byte order: kernels read constants as native values
+        let arr = if arr.cast::<PyUntypedArray>()?.dtype().is_native_byteorder() == Some(false) {
+            let native = arr.cast::<PyUntypedArray>()?.dtype().call_method1("newbyteorder", ("=",))?;
+            arr.call_method1("astype", (native,))?
+        } else {
+            arr
+        };
         let arr = arr.cast::<PyUntypedArray>()?;
         let d = arr.dtype();
         let dt = DType::from_numpy(d.kind(), d.itemsize())
@@ -254,7 +261,10 @@ impl GraphBuilder {
             return err("broadcastable does not match the constant's ndim");
         }
         let nbytes = arr.len() * d.itemsize();
+        // SAFETY: `arr` is a C-contiguous, native-endian array (np.array(order="C") and
+        // the conversion above) of `arr.len()` elements, alive for this function.
         let data = unsafe { (*arr.as_array_ptr()).fields.data as *const u8 };
+        // SAFETY: as above: nbytes contiguous bytes starting at `data`.
         let bytes = unsafe { std::slice::from_raw_parts(data, nbytes) };
         let static_shape = shape.iter().map(|&s| Some(s)).collect();
         self.graph.vars.push(VarInfo { dtype: dt, bcast, static_shape });

@@ -341,3 +341,78 @@ def test_static_inc_and_set_subtensor_in_segments():
         np.testing.assert_allclose(r, e)
     sched = f.maker.linker.compiled.info()["schedule"]
     assert not [d for d in sched if "inc_subtensor" in d], sched
+
+
+def test_shape_overflow_is_an_error_not_a_crash():
+    import pytensor
+    import pytensor.tensor as pt
+
+    n = pt.lscalar("n")
+    f = pytensor.function([n], pt.alloc(np.float64(1.0), n, n), mode="LLVM")
+    with pytest.raises(Exception, match="too big"):
+        f(2**32)  # n*n wraps to 0 in int64
+    with pytest.raises(Exception, match="negative"):
+        f(-1)
+    assert f(3).shape == (3, 3)
+
+
+def test_concurrent_calls_from_threads():
+    # used to deadlock: the call state's lock was held while the GIL was released
+    import threading
+
+    import pytensor
+    import pytensor.tensor as pt
+
+    x = pt.vector("x")
+    f = pytensor.function([x], pt.exp(x).sum(), mode="LLVM")
+    xv = np.ones(100_000)
+    results = []
+
+    def work():
+        results.extend(float(f(xv)) for _ in range(20))
+
+    ts = [threading.Thread(target=work) for _ in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=60)
+    assert not any(t.is_alive() for t in ts), "deadlock"
+    np.testing.assert_allclose(results, np.e * 100_000)
+    assert len(results) == 80
+
+
+def test_byte_swapped_and_misaligned_inputs():
+    import pytensor
+    import pytensor.tensor as pt
+
+    x = pt.vector("x")
+    f = pytensor.function([x], x * 2, mode="LLVM", trust_input=True)
+    be = np.arange(4.0).astype(">f8")
+    np.testing.assert_allclose(f(be), [0, 2, 4, 6])
+    raw = np.zeros(4 * 8 + 1, dtype=np.uint8)
+    mis = raw[1:].view(np.float64)
+    mis[:] = 1.5
+    np.testing.assert_allclose(f.maker.linker.compiled(mis)[0], 3.0)
+
+
+def test_checked_mode_runs_clean(tmp_path):
+    # PTLLVM_CHECKED is read once per process: run a mix of kernels in a fresh one
+    import os
+    import subprocess
+    import sys
+
+    code = """
+import numpy as np, pytensor, pytensor.tensor as pt
+x = pt.matrix("x"); i = pt.lvector("i")
+y = pt.exp(x[i]).sum(0) @ x.T + pt.cumsum(x, 0)[-1].sum()
+outs = [y, pytensor.grad(y.sum(), x), pt.sort(x, axis=1), pt.linalg.cholesky(x.T @ x + 3 * pt.eye(4))]
+f = pytensor.function([x, i], outs, mode="LLVM")
+v = np.random.default_rng(0).normal(size=(5, 4)); iv = np.array([0, 4, 2, 2])
+r = f(v, iv)
+ref = pytensor.function([x, i], outs, mode="FAST_COMPILE")(v, iv)
+assert all(np.allclose(a, b) for a, b in zip(r, ref))
+print("ok")
+"""
+    env = dict(os.environ, PTLLVM_CHECKED="1", PTLLVM_CACHE_DIR=str(tmp_path))
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and "ok" in out.stdout, out.stderr[-2000:]

@@ -391,6 +391,137 @@ A `PtFunction` is immutable and can be shared across threads. `call` doesn't
 touch Python. The fixed per-call overhead from C is about 1–2 µs for small
 functions.
 
+## Safety
+
+Generated kernels do no bounds checks, apart from indexed reads and writes, and
+Rust kernels work on raw pointers. So the backend's memory safety rests on a few
+invariants. This section lists them, who establishes each one, and who relies on
+it. Code that relies on one says so in a `// SAFETY:` comment. Clippy's
+`undocumented_unsafe_blocks` is on, and `unsafe_op_in_unsafe_fn` is denied
+outside the three kernel modules.
+
+### 1. Arrays from outside are validated once, at the boundary
+
+Established by `bind` (inputs) and `check_provided` (caller memory for outputs),
+both via `validate_array`. The checks are:
+- ndim and static shapes;
+- non-negative lengths;
+- a size that fits `isize`;
+- non-null data for non-empty arrays;
+- data and strides aligned to the itemsize;
+- an address range that doesn't overflow;
+- provided outputs don't overlap any input or each other.
+
+The C API checks each array's `ndim` and its shape/stride pointers before
+building any slice from them. The Python path copies byte-swapped or misaligned
+arrays to native, aligned ones, the same way it converts non-arrays.
+
+Not checkable, so stated as preconditions in `pytensor_llvm.h`:
+- In the C API, the dtype must be the one `input_type` reports (`PtArray` has no
+  dtype field).
+- The memory an array describes must exist.
+- A `PtCallState` is used by one thread at a time.
+
+Relied on by everything after: from here on, an argument array is "valid".
+
+### 2. Sizes are computed with checked arithmetic
+
+Established by `checked_nbytes`. Every allocation sized from a shape goes
+through it:
+- planner slots;
+- the alloc, alloc_empty, arange and reshape kernels;
+- Scan buffers.
+
+Reshape's element count is checked too. A shape whose element count overflows
+`i64` is an error, never a small buffer that a large loop then writes past.
+
+Relied on by kernels that loop over an output's shape.
+
+### 3. The kernel contract
+
+Established by the planner (`Program::new`) and the executor (`execute`). Relied
+on by every kernel: generated, Rust or numba. When a kernel is called:
+
+- **Arguments.** Every argument is a valid array (in the sense of point 1) of the
+  dtype and ndim the planner recorded. Its shape has been inferred and checked
+  for consistency (Elemwise broadcasting, Dot's inner dimension, ...).
+- **Provided outputs** are sized from that shape, and their strides follow the
+  planned layout.
+- **Kernel-allocated outputs** must be allocated by the kernel. The kernel learns
+  this from its params, never by inspecting the output's pointer. Guessing from
+  the pointer caused a use-after-free once.
+- **Declared views** point into input `i`.
+- **Aliasing.** Outputs don't overlap inputs, except where the planner chose
+  in-place: the same slot, or `Take` of a dying kernel-allocated buffer. For
+  in-place Elemwise the aliasing is exact (same pointer and strides), which
+  elementwise code handles.
+- **Shape and stride storage.** Each variable has its own shape and stride
+  storage, so shape slices of different arguments never alias.
+- **Params** are the step's own and live as long as the Program.
+- **Context.** `ctx` is the call state's context, used by this kernel alone for
+  the call. Its scratch memory is valid until the kernel returns.
+
+This is the contract `PTLLVM_CHECKED=1` verifies at runtime, without trusting the
+planner. Before each kernel, every argument must lie inside the memory that backs
+it (its slot, owned buffer, constant or caller array), and no output may overlap
+an input unless the planner chose in-place. Outputs are poisoned with 0xFF (NaN
+for floats), so unwritten elements show up. After the call, kernel-allocated
+outputs and views must lie inside their buffers. The tests, the model corpus and
+PyTensor's scan tests all pass in checked mode, and a deliberately broken kernel
+is caught.
+
+### 4. Constants are never written
+
+Established by the in-place selection in `Program::new`: only slot-backed or
+kernel-allocated buffers that die at the node qualify, and no other input of the
+node may share their root. Graph outputs that are constants are copied.
+
+Relied on by `unsafe impl Sync for ConstData` (a Program is shared across
+threads) and by reusing one Program across calls.
+
+### 5. Buffer ownership
+
+Every `PtBuffer` reference has exactly one holder:
+- `CallState::owners[v]` while the call runs;
+- a kernel output's `owner` field;
+- an `OutArray` handed to the caller;
+- a numpy capsule;
+- an `OwnedBuf`.
+
+`execute` releases everything left on errors and panics (`release_all`). Scan
+holds its buffers as `OwnedBuf`, so an error or panic releases them. Releasing
+is a decref; at refcount 0 the buffer is freed, with no pool.
+
+### 6. Panics become errors
+
+Rust kernels use the `"C-unwind"` ABI, so a panic (a bug, or running out of
+memory) unwinds to the single `catch_unwind` in `execute`. That catch releases
+the call's buffers and returns an error; the C API has one more catch at its
+entry point.
+
+The runtime table (`rt->alloc`, ...) stays `"C"`, because generated and numba
+frames can't be unwound: a panic there aborts. Generated code calls no Rust
+code that can panic.
+
+### 7. Threads
+
+- A `Program` is immutable after construction and shared freely: across Python
+  threads, and across C callers through the `PtFunction` refcount.
+- Each call needs its own `CallState`. Python keeps a pool, so concurrent calls
+  run in parallel and the GIL is never released while a lock is held. C callers
+  create one state per thread.
+- The JIT is a process-wide singleton behind a mutex. JIT code is never freed, so
+  kernel addresses stay valid.
+
+### Not covered
+
+- **Generated IR is trusted** to match its `KernelSpec`. That is a codegen
+  correctness question, tested against the Python backend and exercised by the
+  checked mode, not something types can enforce.
+- **The numba fallback** reads `PtArray` and `PtRuntime` through hard-coded
+  offsets.
+- **Uninitialized memory.** `AllocEmpty` returns it, as numpy's `empty` does.
+
 ## Profiling with perf
 
 Set `PYTENSOR_ENABLE_PERF=1` before the first function is compiled (it is read once per
@@ -534,7 +665,8 @@ PyTensor shape graph compiled into the program, and only evaluate it per call.
 
 - Errors are strings set through `rt->set_error`, with no error codes.
 - The Python layer turns messages containing "out of bounds" into `IndexError`.
-  That is a substring hack; the ABI should carry an error kind.
+  That is a substring hack; the ABI should carry an error kind. Size errors come
+  back as RuntimeError, where numpy raises ValueError.
 - `SpecifyShape` is an identity view: there is no runtime shape check yet.
 - Integer `//` and `%` by zero return 0, like numpy. `INT_MIN // -1` is still
   undefined behaviour in the generated code.

@@ -188,3 +188,43 @@ def test_bench_runs(harness):
         ns = harness.pt_bench(ctypes.addressof(a), fn, ins, provided, 1000, err, 512)
         assert ns > 0, err.value
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)
+
+
+def test_c_boundary_checks(harness):
+    x = pt.vector("x")
+    f = pytensor.function([x], x * 2, mode=LLVM)
+    fn = f.maker.linker.compiled.c_function()
+    a = api()
+    err = ctypes.create_string_buffer(512)
+
+    def run(ins, outs):
+        rc = harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512)
+        return rc, err.value
+
+    xv = np.arange(6.0)
+    # provided output overlapping the input (in-place calls aren't supported)
+    ins, k1 = as_ptarrays([xv])
+    outs, k2 = as_ptarrays([xv])
+    rc, msg = run(ins, outs)
+    assert rc != 0 and b"overlaps the memory of input 0" in msg
+    # misaligned data, negative length, NULL data, wrong ndim
+    raw = np.zeros(7 * 8 + 1, dtype=np.uint8)
+    bad = [
+        (lambda p: setattr(p, "data", raw.ctypes.data + 1), b"not aligned"),
+        (lambda p: p.shape.__setitem__(0, -1), b"negative length"),
+        (lambda p: setattr(p, "data", None), b"null data"),
+        (lambda p: setattr(p, "ndim", 2), b"expected 1 dims"),
+    ]
+    for corrupt, expected in bad:
+        ins, k1 = as_ptarrays([xv.copy()])
+        outs, k2 = as_ptarrays([np.empty(6)])
+        corrupt(ins[0])
+        rc, msg = run(ins, outs)
+        assert rc != 0 and expected in msg, (expected, msg)
+    # still works afterwards
+    ins, k1 = as_ptarrays([xv])
+    out = np.empty(6)
+    outs, k2 = as_ptarrays([out])
+    assert run(ins, outs)[0] == 0
+    np.testing.assert_allclose(out, xv * 2)
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)

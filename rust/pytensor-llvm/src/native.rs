@@ -2,8 +2,13 @@
 //!
 //! Scalar functions (`ptl_*`) are registered in the JIT as absolute symbols so generated
 //! code can call them by name; cached object files stay position independent.
+// Kernel module: every function here is called with the kernel contract (see the
+// Safety section of DESIGN.md: arguments are valid arrays as planned, params are the
+// step's own). Raw-pointer work is the whole body, so unsafe ops aren't wrapped
+// one by one; the preconditions are documented per kernel instead.
+#![allow(unsafe_op_in_unsafe_fn)]
 
-use crate::abi::{PtArray, PtCtx, MAX_NDIM};
+use crate::abi::{bad_size, checked_nbytes, PtArray, PtCtx, MAX_NDIM};
 use crate::dtype::DType;
 use std::cmp::Ordering;
 use std::ffi::c_void;
@@ -213,7 +218,7 @@ unsafe fn for_each_lane(shape: &[i64], st_a: &[i64], st_b: &[i64], skip_axis: Op
 // ------------------------------------------------------------------ copy
 
 /// args = [src, dst(provided)].
-pub unsafe extern "C" fn ptl_copy(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_copy(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let isz = p::<CopyParams>(params).itemsize as usize;
     let (s, d) = (arg(args, 0), arg(args, 1));
     for_each_lane(s.shape(), s.strides(), d.strides(), None, |a, b| {
@@ -225,7 +230,7 @@ pub unsafe extern "C" fn ptl_copy(_ctx: *mut PtCtx, args: *mut PtArray, params: 
 // ------------------------------------------------------------------ views
 
 /// args = [x, out(view of x)].
-pub unsafe extern "C" fn ptl_dimshuffle(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_dimshuffle(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let order = &p::<DimShuffleParams>(params).order;
     let x = *arg(args, 0);
     let o = arg(args, 1);
@@ -241,7 +246,7 @@ pub unsafe extern "C" fn ptl_dimshuffle(_ctx: *mut PtCtx, args: *mut PtArray, pa
 }
 
 /// args = [x, conds..., out(view of x)]. Fails if any (0-d) condition is false.
-pub unsafe extern "C" fn ptl_assert(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_assert(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let n = p::<AssertParams>(params).n_conds as usize;
     for i in 0..n {
         if *arg(args, 1 + i).data == 0 {
@@ -259,7 +264,7 @@ pub unsafe extern "C" fn ptl_assert(_ctx: *mut PtCtx, args: *mut PtArray, params
 // ------------------------------------------------------------------ kernel-allocated outputs
 
 /// args = [start, stop, step, out(kernel-allocated, 1-d)]. numpy.arange semantics.
-pub unsafe extern "C" fn ptl_arange(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_arange(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let dts = p::<ArangeParams>(params).dtypes;
     let dt = |i: usize| DType::from_code(dts[i]).unwrap();
     let all_int = (0..3).all(|i| !dt(i).is_float());
@@ -269,17 +274,24 @@ pub unsafe extern "C" fn ptl_arange(ctx: *mut PtCtx, args: *mut PtArray, params:
         if s == 0 {
             return PtCtx::fail(ctx, 2, "arange: step must not be zero");
         }
-        let n = if s > 0 { (b - a + s - 1).div_euclid(s) } else { (a - b - s - 1).div_euclid(-s) };
-        (n.max(0), 0.0, 0.0, a, s)
+        let (a2, b2, s2) = (a as i128, b as i128, s as i128);
+        let n = if s > 0 { (b2 - a2 + s2 - 1).div_euclid(s2) } else { (a2 - b2 - s2 - 1).div_euclid(-s2) };
+        let Ok(n) = i64::try_from(n.max(0)) else { return PtCtx::fail(ctx, 2, "arange: too many elements") };
+        (n, 0.0, 0.0, a, s)
     } else {
         let (a, b, s) = (read_f64(arg(args, 0).data, dt(0)), read_f64(arg(args, 1).data, dt(1)), read_f64(arg(args, 2).data, dt(2)));
         if s == 0.0 {
             return PtCtx::fail(ctx, 2, "arange: step must not be zero");
         }
-        (((b - a) / s).ceil().max(0.0) as i64, a, s, 0, 0)
+        let n = ((b - a) / s).ceil().max(0.0);
+        if !n.is_finite() || n >= i64::MAX as f64 {
+            return PtCtx::fail(ctx, 2, "arange: too many elements (or a non-finite bound)");
+        }
+        (n as i64, a, s, 0, 0)
     };
     let isz = out_dt.itemsize();
-    let (data, owner) = PtCtx::alloc(ctx, n as usize * isz);
+    let Some(nbytes) = checked_nbytes(&[n], isz) else { return PtCtx::fail(ctx, 2, &bad_size("arange", &[n])) };
+    let (data, owner) = PtCtx::alloc(ctx, nbytes);
     let o = arg(args, 3);
     o.data = data;
     o.owner = owner;
@@ -294,7 +306,7 @@ pub unsafe extern "C" fn ptl_arange(ctx: *mut PtCtx, args: *mut PtArray, params:
 
 /// args = [value, shape_0 .. shape_{n-1} (0-d ints), out(kernel-allocated)].
 /// Broadcasts `value` (numpy rules, right-aligned) to the requested shape.
-pub unsafe extern "C" fn ptl_alloc(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_alloc(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<AllocParams>(params);
     let n = prm.n_shape as usize;
     let isz = prm.itemsize;
@@ -323,10 +335,10 @@ pub unsafe extern "C" fn ptl_alloc(ctx: *mut PtCtx, args: *mut PtArray, params: 
             return PtCtx::fail(ctx, 2, &format!("alloc: cannot broadcast value of shape {:?} to {:?}", v.shape(), shape));
         }
     }
-    let total: i64 = shape.iter().product();
+    let Some(nbytes) = checked_nbytes(shape, isz as usize) else { return PtCtx::fail(ctx, 2, &bad_size("alloc", shape)) };
     let o = arg(args, 1 + n);
     let data = if prm.provided == 0 {
-        let (data, owner) = PtCtx::alloc(ctx, total as usize * isz as usize);
+        let (data, owner) = PtCtx::alloc(ctx, nbytes);
         o.data = data;
         o.owner = owner;
         o.shape_mut().copy_from_slice(shape);
@@ -347,7 +359,7 @@ pub unsafe extern "C" fn ptl_alloc(ctx: *mut PtCtx, args: *mut PtArray, params: 
 }
 
 /// args = [shape_0 .. shape_{n-1} (0-d ints), out(kernel-allocated, uninitialized)].
-pub unsafe extern "C" fn ptl_alloc_empty(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_alloc_empty(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<AllocParams>(params);
     let n = prm.n_shape as usize;
     let mut shape = [0i64; MAX_NDIM];
@@ -358,13 +370,13 @@ pub unsafe extern "C" fn ptl_alloc_empty(ctx: *mut PtCtx, args: *mut PtArray, pa
         }
         shape[i] = s;
     }
-    let total: i64 = shape[..n].iter().product();
+    let Some(nbytes) = checked_nbytes(&shape[..n], prm.itemsize as usize) else { return PtCtx::fail(ctx, 2, &bad_size("alloc_empty", &shape[..n])) };
     let o = arg(args, n);
     if prm.provided != 0 {
         // provided (static shape)
         return if o.shape() == &shape[..n] { 0 } else { PtCtx::fail(ctx, 2, "alloc_empty: shape differs from the static shape") };
     }
-    let (data, owner) = PtCtx::alloc(ctx, total as usize * prm.itemsize as usize);
+    let (data, owner) = PtCtx::alloc(ctx, nbytes);
     o.data = data;
     o.owner = owner;
     o.shape_mut().copy_from_slice(&shape[..n]);
@@ -375,14 +387,14 @@ pub unsafe extern "C" fn ptl_alloc_empty(ctx: *mut PtCtx, args: *mut PtArray, pa
 // ------------------------------------------------------------------ shape ops
 
 /// args = [x, out(0-d int64)].
-pub unsafe extern "C" fn ptl_shape_i(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_shape_i(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let i = p::<ShapeIParams>(params).i as usize;
     *(arg(args, 1).data as *mut i64) = arg(args, 0).shape()[i];
     0
 }
 
 /// args = [x, out(1-d int64)].
-pub unsafe extern "C" fn ptl_shape(_ctx: *mut PtCtx, args: *mut PtArray, _params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_shape(_ctx: *mut PtCtx, args: *mut PtArray, _params: *const c_void) -> i32 {
     let x = *arg(args, 0);
     let o = arg(args, 1);
     let os = o.strides()[0] as isize;
@@ -393,7 +405,7 @@ pub unsafe extern "C" fn ptl_shape(_ctx: *mut PtCtx, args: *mut PtArray, _params
 }
 
 /// args = n 0-d inputs, then the 1-d output.
-pub unsafe extern "C" fn ptl_make_vector(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_make_vector(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<MakeVectorParams>(params);
     let (n, isz) = (prm.n as usize, prm.itemsize as usize);
     let o = *arg(args, n);
@@ -501,7 +513,7 @@ macro_rules! matmul_kernel {
     ($name:ident, $t:ty) => {
         /// args = [a, b, out(provided)]; 1-d/2-d operands (numpy dot semantics).
         /// faer, sequential.
-        pub unsafe extern "C" fn $name(_ctx: *mut PtCtx, args: *mut PtArray, _params: *const c_void) -> i32 {
+        pub unsafe extern "C-unwind" fn $name(_ctx: *mut PtCtx, args: *mut PtArray, _params: *const c_void) -> i32 {
             let (a, b, c) = (*arg(args, 0), *arg(args, 1), *arg(args, 2));
             let isz = std::mem::size_of::<$t>() as i64;
             let (m, k, rsa, csa) = mat_parts(&a, isz, true);
@@ -599,13 +611,13 @@ unsafe fn sort_impl<T: SortElem>(args: *mut PtArray, params: *const c_void) -> i
 }
 
 /// args = [src, dst(provided)].
-pub unsafe extern "C" fn ptl_sort_f64(_c: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_sort_f64(_c: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     sort_impl::<f64>(args, params)
 }
-pub unsafe extern "C" fn ptl_sort_f32(_c: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_sort_f32(_c: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     sort_impl::<f32>(args, params)
 }
-pub unsafe extern "C" fn ptl_sort_i64(_c: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_sort_i64(_c: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     sort_impl::<i64>(args, params)
 }
 
@@ -726,7 +738,7 @@ unsafe fn resolve_index(base: &PtArray, args: *mut PtArray, prm: &SubtensorParam
 }
 
 /// args = [x, index vars..., out(view of x)].
-pub unsafe extern "C" fn ptl_subtensor(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_subtensor(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<SubtensorParams>(params);
     let x = *arg(args, 0);
     let r = match resolve_index(&x, args, prm) {
@@ -803,6 +815,7 @@ unsafe fn copy_unless_same(src: &PtArray, dst: &PtArray, itemsize: usize) {
 
 /// Strides of `y` broadcast (numpy, right-aligned) to `shape`; 0 where y has length 1.
 fn broadcast_strides(y: &PtArray, shape: &[i64]) -> Result<[i64; MAX_NDIM], String> {
+    // SAFETY: kernel contract: y is a valid argument array.
     let (ys, yst) = unsafe { (y.shape(), y.strides()) };
     let n = shape.len();
     if ys.len() > n {
@@ -821,7 +834,7 @@ fn broadcast_strides(y: &PtArray, shape: &[i64]) -> Result<[i64; MAX_NDIM], Stri
 }
 
 /// args = [x, y, index vars..., out(provided, shape of x)].
-pub unsafe extern "C" fn ptl_inc_subtensor(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_inc_subtensor(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<IncSubtensorParams>(params);
     let (x, y) = (*arg(args, 0), *arg(args, 1));
     let out = *arg(args, n_args_before_out(&prm.sub, 2));
@@ -914,7 +927,7 @@ fn is_c_contig(shape: &[i64], strides: &[i64], itemsize: i64) -> bool {
 }
 
 /// args = [x, idx, out(provided)].
-pub unsafe extern "C" fn ptl_take(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_take(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<TakeParams>(params);
     let (x, idx, out) = (*arg(args, 0), *arg(args, 1), *arg(args, 2));
     let axis = prm.axis as usize;
@@ -988,7 +1001,7 @@ pub unsafe extern "C" fn ptl_take(ctx: *mut PtCtx, args: *mut PtArray, params: *
 }
 
 /// args = [x, y, idx, out(provided, shape of x)]. Duplicate indices accumulate.
-pub unsafe extern "C" fn ptl_inc_take(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_inc_take(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<TakeParams>(params);
     let (x, y, idx, out) = (*arg(args, 0), *arg(args, 1), *arg(args, 2), *arg(args, 3));
     let axis = prm.axis as usize;
@@ -1077,7 +1090,7 @@ pub unsafe extern "C" fn ptl_inc_take(ctx: *mut PtCtx, args: *mut PtArray, param
 }
 
 /// args = [x_0 .. x_{n-1}, out(provided)].
-pub unsafe extern "C" fn ptl_join(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_join(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<JoinParams>(params);
     let (axis, n, isz) = (prm.axis as usize, prm.n as usize, prm.itemsize as usize);
     let out = *arg(args, n);
@@ -1095,7 +1108,7 @@ pub unsafe extern "C" fn ptl_join(_ctx: *mut PtCtx, args: *mut PtArray, params: 
 }
 
 /// args = [x, shape(1-d ints), out]. Output is a declared view (params.view) or allocated.
-pub unsafe extern "C" fn ptl_reshape(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_reshape(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<ReshapeParams>(params);
     let (x, shp) = (*arg(args, 0), *arg(args, 1));
     let o = arg(args, 2);
@@ -1116,7 +1129,8 @@ pub unsafe extern "C" fn ptl_reshape(ctx: *mut PtCtx, args: *mut PtArray, params
         } else if v < 0 {
             return PtCtx::fail(ctx, 2, "reshape: negative dimension");
         } else {
-            known *= v;
+            let Some(k) = known.checked_mul(v) else { return PtCtx::fail(ctx, 2, "reshape: target shape is too big") };
+            known = k;
         }
         shape[d] = v;
     }
@@ -1135,7 +1149,8 @@ pub unsafe extern "C" fn ptl_reshape(ctx: *mut PtCtx, args: *mut PtArray, params
         o.data = x.data;
         return 0;
     }
-    let (data, owner) = PtCtx::alloc(ctx, total as usize * isz as usize);
+    let Some(nbytes) = checked_nbytes(&shape[..nd], isz as usize) else { return PtCtx::fail(ctx, 2, &bad_size("reshape", &shape[..nd])) };
+    let (data, owner) = PtCtx::alloc(ctx, nbytes);
     o.data = data;
     o.owner = owner;
     // copy x in C order into the new buffer
@@ -1192,7 +1207,7 @@ unsafe fn for_each_axis_lane(shape: &[i64], axis: usize, src_st: &[i64], dst_st:
 macro_rules! cum_kernel {
     ($name:ident, $t:ty) => {
         /// args = [x, out(provided)]: cumulative sum or product along `axis`.
-        pub unsafe extern "C" fn $name(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+        pub unsafe extern "C-unwind" fn $name(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
             let prm = p::<CumParams>(params);
             let (x, o) = (*arg(args, 0), *arg(args, 1));
             let axis = prm.axis as usize;
@@ -1230,7 +1245,7 @@ pub struct DiagParams {
 
 /// args = [x, out(view of x)]: numpy.diagonal(x, offset, axis1, axis2) as a view; the
 /// diagonal becomes the last dim.
-pub unsafe extern "C" fn ptl_extract_diag(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_extract_diag(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
     let prm = p::<DiagParams>(params);
     let x = *arg(args, 0);
     let o = arg(args, 1);
