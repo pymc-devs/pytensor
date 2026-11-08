@@ -191,3 +191,23 @@ def test_blockwise_reshape():
         new_y.eval({"x": test_x}, mode=no_rewrites),
         rewritten_y.eval({"x": test_x}, mode=no_rewrites),
     )
+
+
+def test_blockwise_alloc_through_assert():
+    # https://github.com/pymc-devs/pytensor/issues/2618
+    import pytensor.tensor as pt
+    from pytensor import function
+    from pytensor.raise_op import Assert
+
+    x = pt.vector("x")
+    xb = pt.matrix("xb")
+    n = Assert("n must be positive")(x.shape[0], x.shape[0] > 0)
+    vec = vectorize_graph(pt.arange(n), {x: xb})
+
+    fn = function([xb], vec, mode="FAST_RUN")
+    assert not any(isinstance(n.op, Blockwise) for n in fn.maker.fgraph.apply_nodes)
+
+    xb_test = np.zeros((3, 4), dtype=xb.dtype)
+    np.testing.assert_array_equal(fn(xb_test), np.broadcast_to(np.arange(4), (3, 4)))
+    with pytest.raises(AssertionError, match="n must be positive"):
+        fn(np.zeros((3, 0), dtype=xb.dtype))

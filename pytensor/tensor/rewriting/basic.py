@@ -801,6 +801,33 @@ def local_remove_useless_assert(fgraph, node):
         return [new_var]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([CheckAndRaise])
+def local_check_and_raise_alloc(fgraph, node):
+    """Lift an `Alloc` above a `CheckAndRaise`.
+
+    CheckAndRaise(Alloc(v, *shape), *conds) -> Alloc(CheckAndRaise(v, *conds), *shape)
+
+    The conditions are scalars that do not depend on the `Alloc` output, so
+    they can be checked on the (smaller) value instead. This exposes the `Alloc`
+    to rewrites such as `local_blockwise_alloc`.
+    """
+    value, *conds = node.inputs
+    if not (value.owner and isinstance(value.owner.op, Alloc)):
+        return None
+
+    # Only lift if the Alloc is not used elsewhere
+    if len(fgraph.clients[value]) > 1:
+        return None
+
+    alloc_value, *shape = value.owner.inputs
+    new_value = node.op(alloc_value, *conds)
+    new_out = alloc(new_value, *shape)
+    copy_stack_trace(node.outputs[0], [new_value, new_out])
+    return [new_out]
+
+
 @register_infer_shape
 @node_rewriter([Assert])
 def local_remove_all_assert(fgraph, node):
