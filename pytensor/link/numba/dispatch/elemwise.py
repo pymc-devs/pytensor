@@ -1073,8 +1073,8 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         out_idx
         for entry in indexed_outputs
         if entry is not None
-        for out_idx in entry[0]
-        if entry[2] == "inc"
+        for out_idx, mode in zip(entry[0], entry[2], strict=True)
+        if mode == "inc"
     )
     reduced_idxs = frozenset(i for i, r in enumerate(reduced_outputs) if r is not None)
     assert not (inc_outputs & reduced_idxs), (
