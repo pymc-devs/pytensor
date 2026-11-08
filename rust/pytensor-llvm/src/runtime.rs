@@ -192,6 +192,8 @@ pub struct CallState {
     direct_written: Vec<bool>,
     /// byte ranges of the bound inputs (for the overlap check on provided outputs)
     in_ranges: Vec<(usize, usize)>,
+    /// scratch for check_provided (reused: calls don't allocate)
+    out_ranges: Vec<(usize, usize)>,
     /// outputs of the last successful call
     pub outs: Vec<OutArray>,
 }
@@ -1003,6 +1005,7 @@ impl Program {
             prov_var: vec![None; self.graph.vars.len()],
             direct_written: vec![false; self.graph.outputs.len()],
             in_ranges: vec![(0, 0); self.graph.inputs.len()],
+            out_ranges: Vec::with_capacity(self.graph.outputs.len()),
             outs: self.graph.outputs.iter().map(|&v| OutArray::new(self.graph.vars[v].dtype, self.graph.vars[v].ndim())).collect(),
         }
     }
@@ -1310,11 +1313,18 @@ impl Program {
 
     /// Caller memory for outputs: a valid array of the output's ndim, not overlapping
     /// any input or another provided output (kernels write it while reading inputs).
-    fn check_provided(&self, st: &CallState, p: &[PtArray]) -> Result<(), String> {
+    fn check_provided(&self, st: &mut CallState, p: &[PtArray]) -> Result<(), String> {
         if p.len() != self.graph.outputs.len() {
             return Err(format!("expected {} outputs, got {}", self.graph.outputs.len(), p.len()));
         }
-        let mut ranges: Vec<(usize, usize)> = Vec::new();
+        let mut ranges = std::mem::take(&mut st.out_ranges);
+        ranges.clear();
+        let res = self.check_provided_into(st, p, &mut ranges);
+        st.out_ranges = ranges;
+        res
+    }
+
+    fn check_provided_into(&self, st: &CallState, p: &[PtArray], ranges: &mut Vec<(usize, usize)>) -> Result<(), String> {
         for (k, a) in p.iter().enumerate() {
             if a.data.is_null() {
                 continue; // allocate for the caller
