@@ -2159,23 +2159,6 @@ def local_useless_elemwise_comparison(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([Sum, Prod])
-def local_sum_prod_all_to_none(fgraph, node):
-    """
-    Sum{0,1,...N} -> Sum{} or
-    Prod{0,1,...N} -> Prod{}
-
-    """
-    op_type = Sum if isinstance(node.op, Sum) else Prod
-    # if all the axes are named, then use None as a shorthand
-    # this permits more merging
-    if node.op.axis is None:
-        return
-    if set(node.op.axis) == set(range(node.inputs[0].type.ndim)):
-        return [op_type(axis=None, dtype=node.op.dtype)(node.inputs[0])]
-
-
-@register_canonicalize
 @node_rewriter([CAReduce])
 def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     """
@@ -2301,30 +2284,30 @@ def local_reduce_broadcastable(fgraph, node):
     """Remove reduction over broadcastable dimensions."""
     (reduced,) = node.inputs
     odtype = node.outputs[0].dtype
-    if node.op.axis is None:
+    axis = node.op.axis
+    if axis is None:
         if all(reduced.broadcastable):
             return [reduced.dimshuffle().astype(odtype)]
-    else:
-        axis = list(node.op.axis)
-        cuttable = [a for a in axis if reduced.broadcastable[a]]
-        if cuttable:
-            # -- we can remove some axes of summation.
-            new_axis = []
-            pattern = []
-            ii = 0
-            for p in range(reduced.ndim):
-                if p not in cuttable:
-                    if p in axis:
-                        new_axis.append(ii)
-                    pattern.append(p)
-                    ii += 1
-            new_reduced = reduced.dimshuffle(*pattern)
-            if new_axis:
-                # `clone` keeps the other props of the reduction, like `initial`
-                return [node.op.clone(axis=new_axis)(new_reduced)]
-            else:
-                # -- in this case we can remove the reduction completely
-                return [new_reduced.astype(odtype)]
+        axis = range(reduced.ndim)
+    cuttable = [a for a in axis if reduced.broadcastable[a]]
+    if cuttable:
+        # -- we can remove some axes of summation.
+        new_axis = []
+        pattern = []
+        ii = 0
+        for p in range(reduced.ndim):
+            if p not in cuttable:
+                if p in axis:
+                    new_axis.append(ii)
+                pattern.append(p)
+                ii += 1
+        new_reduced = reduced.dimshuffle(*pattern)
+        if new_axis:
+            # `clone` keeps the other props of the reduction, like `initial`
+            return [node.op.clone(axis=new_axis)(new_reduced)]
+        else:
+            # -- in this case we can remove the reduction completely
+            return [new_reduced.astype(odtype)]
 
 
 @register_specialize
