@@ -211,6 +211,11 @@ impl CompiledFunction {
         d.set_item("llvm_cpu_s", s.llvm_cpu_s)?;
         d.set_item("kernel_wall_s", s.wall_s)?;
         d.set_item("link_s", s.link_s)?;
+        d.set_item("irgen_cpu_s", s.irgen_cpu_s)?;
+        d.set_item("opt_cpu_s", s.opt_cpu_s)?;
+        d.set_item("codegen_cpu_s", s.codegen_cpu_s)?;
+        d.set_item("cache_read_s", s.cache_read_s)?;
+        d.set_item("plan_s", s.plan_s)?;
         d.set_item("n_slots", self.prog.n_slots())?;
         d.set_item("n_inplace", self.prog.n_inplace)?;
         d.set_item("schedule", self.prog.kernel_descriptions())?;
