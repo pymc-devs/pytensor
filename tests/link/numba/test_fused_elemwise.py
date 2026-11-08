@@ -267,6 +267,21 @@ class TestIndexedReadFusion:
 class TestIndexedWriteFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
 
+    def test_set_and_inc_shared_index(self):
+        """Writes sharing an index must keep their own set/inc modes."""
+        x = pt.vector("x", shape=(3,))
+        idx = pt.constant(np.array([0, 0, 2]))
+        zeros = pt.zeros(3)
+
+        set_out = zeros[idx].set(x + 1)
+        inc_out = zeros[idx].inc(x * 2)
+        fn = function([x], [set_out, inc_out], mode=NUMBA_MODE)
+        assert_fused(fn)
+
+        got_set, got_inc = fn([1.0, 2.0, 3.0])
+        np.testing.assert_allclose(got_set, [3.0, 0.0, 4.0])
+        np.testing.assert_allclose(got_inc, [6.0, 0.0, 6.0])
+
     def test_no_fusion_when_right_pad_covers_index(self):
         s = pt.scalar("s")
         idx = pt.lvector("idx")

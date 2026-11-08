@@ -66,8 +66,8 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
     ----------
     indexed_inputs : tuple of ((tuple[int, ...], int) | None)
         Per-index: (source input positions, source axis) or None.
-    indexed_outputs : tuple of ((tuple[int, ...], int, str) | None)
-        Per-index: (output positions, axis, mode) or None.
+    indexed_outputs : tuple of ((tuple[int, ...], int, tuple[str, ...]) | None)
+        Per-index: (output positions, axis, per-output modes) or None.
     idx_ndims : tuple of int
         Number of dimensions of each index array.
     """
@@ -1117,8 +1117,8 @@ def _vectorized(
 
     ``indexed_outputs`` has one entry per index array (same length as
     ``indexed_inputs``).  ``None`` means that index is not used for updates.
-    ``((out_0, out_1), source_axis, mode)`` means that index updates outputs
-    out_0 and out_1 with *mode* ``"set"`` or ``"inc"``.
+    ``((out_0, out_1), source_axis, (mode_0, mode_1))`` means that index updates
+    each output with its corresponding mode, ``"set"`` or ``"inc"``.
 
     ``reduce_outputs`` lists ``(output_idx, identity, reducer,
     use_scalar_accumulator, scalar_output)`` entries. Reduction outputs carry ``bc=True`` on
@@ -1172,8 +1172,11 @@ def _vectorized(
         raise TypingError("core_handles_out must be literal")
     core_handles_out = core_handles_out.literal_value
     for entry in indexed_outputs:
-        if entry is not None and entry[2] == "inc":
-            for out_idx in entry[0]:
+        if entry is None:
+            continue
+        sources, _source_axis, modes = entry
+        for out_idx, mode in zip(sources, modes, strict=True):
+            if mode == "inc":
                 output_updates[out_idx] = "Add"
 
     if not isinstance(allow_core_scalar, types.Literal):
@@ -1238,12 +1241,12 @@ def _vectorized(
 
     # Per-output: tuple of (idx_k, source_axis) pairs, or None.
     # Same format as input_read_spec.
-    # indexed_outputs entries are (sources, source_axis, mode) or None.
+    # indexed_outputs entries are (sources, source_axis, modes) or None.
     write_spec_dict: dict[int, list[tuple[int, int]]] = {}
     for k, entry in enumerate(indexed_outputs):
         if entry is None:
             continue
-        sources, source_axis, _mode = entry
+        sources, source_axis, _modes = entry
         for out_idx in sources:
             write_spec_dict.setdefault(out_idx, []).append((k, source_axis))
     # Write target buffers are appended to the outer inputs in ascending output
