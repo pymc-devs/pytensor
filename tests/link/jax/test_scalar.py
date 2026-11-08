@@ -261,13 +261,20 @@ def test_log1mexp():
 
 def test_nnet():
     x = vector("x")
-    x_test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    x_test_value = np.r_[-1e3, -40.0, -17.5, 0.0, 1.0, 17.5, 40.0, 1e3].astype(
+        config.floatX
+    )
 
     out = sigmoid(x)
     compare_jax_and_py([x], [out], [x_test_value])
 
     out = softplus(x)
     compare_jax_and_py([x], [out], [x_test_value])
+
+    x = vector("x", dtype="uint8")
+    compare_jax_and_py(
+        [x], [sigmoid(x), softplus(x)], [np.array([0, 20, 255], dtype="uint8")]
+    )
 
 
 def test_jax_variadic_Scalar():
