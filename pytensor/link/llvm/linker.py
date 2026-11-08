@@ -54,7 +54,7 @@ class LLVMLinker(JITLinker):
     def fgraph_convert(self, fgraph, **kwargs):
         from pytensor.link.llvm.dispatch import fgraph_to_llvm
 
-        self.compiled = fgraph_to_llvm(
+        self.compiled, self.timings = fgraph_to_llvm(
             fgraph,
             fastmath=self.fastmath,
             opt_level=self.opt_level,

@@ -544,6 +544,9 @@ def fgraph_to_llvm(
     Ops without an LLVM implementation run through their numba implementation if
     `numba_fallback` is set (see `numba_fallback.py`).
     """
+    import time
+
+    t0 = time.perf_counter()
     conv = GraphConversion(numba_fallback=numba_fallback)
     b = conv.builder
     for i in fgraph.inputs:
@@ -552,7 +555,8 @@ def fgraph_to_llvm(
         conv.convert_node(node)
     for o in fgraph.outputs:
         b.add_output(conv.var(o))
-    return b.compile(
+    t1 = time.perf_counter()
+    compiled = b.compile(
         fastmath=fastmath,
         opt_level=opt_level,
         cache=cache,
@@ -560,6 +564,10 @@ def fgraph_to_llvm(
         segments=segments,
         segment_max_elems=segment_max_elems,
     )
+    # seconds: graph conversion (Python, incl. numba fallback compiles) and Program
+    # construction (planning + kernel compilation, see CompiledFunction.info())
+    timings = {"convert_s": t1 - t0, "program_s": time.perf_counter() - t1}
+    return compiled, timings
 
 
 # ---------------------------------------------------------------- lowered ops

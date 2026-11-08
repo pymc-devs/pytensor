@@ -344,6 +344,9 @@ fn const_ints(g: &Graph, consts: &[ConstData]) -> crate::segment::ConstInts {
 
 impl Program {
     pub fn new(graph: Graph, consts: Vec<ConstData>, opts: &Options) -> Result<Program, String> {
+        let t_plan = std::time::Instant::now();
+        // compile stats of Scan inner programs, folded into ours below
+        let mut inner_stats: Vec<KernelStats> = Vec::new();
         let graph = if opts.segments {
             let cints = const_ints(&graph, &consts);
             crate::segment::form_segments(graph, opts.segment_max_elems, opts.fastmath, &cints)
@@ -646,6 +649,7 @@ impl Program {
                         None => {
                             let p = Program::new(inner.graph.clone(), inner.consts.clone(), opts)
                                 .map_err(|m| format!("in Scan step function: {m}"))?;
+                            inner_stats.push(p.stats.clone());
                             (Err(Arc::new(p)), "Scan (general path: step is an inner program)".to_string())
                         }
                     };
@@ -863,7 +867,9 @@ impl Program {
             steps.push(Step { node: ni, src, func: None, args, outs: n.outputs.clone(), params, desc, member_descs, release });
         }
 
-        let (addrs, _names, stats) = get_kernels(&specs, opts)?;
+        let plan_before = t_plan.elapsed().as_secs_f64();
+        let (addrs, _names, mut stats) = get_kernels(&specs, opts)?;
+        let t_after = std::time::Instant::now();
         for st in &mut steps {
             st.func = Some(match st.src {
                 // SAFETY: addresses come from the JIT lookup of kernels generated with the KernelFn
@@ -920,6 +926,21 @@ impl Program {
         };
         let in_static = graph.inputs.iter().map(|&v| static_of(v)).collect();
         let out_static = graph.outputs.iter().map(|&v| static_of(v)).collect();
+        stats.plan_s = plan_before + t_after.elapsed().as_secs_f64();
+        for s in &inner_stats {
+            // inner kernel time happened inside our planning: move it over
+            stats.plan_s -= s.wall_s;
+            stats.n_kernels += s.n_kernels;
+            stats.n_compiled += s.n_compiled;
+            stats.n_disk_cache += s.n_disk_cache;
+            stats.llvm_cpu_s += s.llvm_cpu_s;
+            stats.irgen_cpu_s += s.irgen_cpu_s;
+            stats.opt_cpu_s += s.opt_cpu_s;
+            stats.codegen_cpu_s += s.codegen_cpu_s;
+            stats.cache_read_s += s.cache_read_s;
+            stats.wall_s += s.wall_s;
+            stats.link_s += s.link_s;
+        }
         Ok(Program {
             scans,
             keepalive: Vec::new(),
