@@ -30,11 +30,13 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
     # A c_contiguous A reinterpreted as f_contiguous is A^T. potrf(A^T, UPLO='U')
     # produces U where U.T == L (the correct lower factor), even for complex Hermitian
-    # matrices, and the .T return corrects the result. Choosing this from the type
-    # keeps every return path one layout.
-    transposed = A.layout == "C"
+    # matrices, and the .T return corrects the result. Only A-typed inputs need
+    # a runtime layout check. C- and F-typed inputs retain their static layout.
+    c_layout = A.layout == "C"
+    dynamic_layout = A.layout == "A"
 
     def impl(A, lower=False, overwrite_a=False):
+        transposed = c_layout or (dynamic_layout and A.flags.c_contiguous)
         if A.size == 0:
             if transposed:
                 return np.zeros(A.shape, dtype=A.dtype)

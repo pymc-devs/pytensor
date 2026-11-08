@@ -255,7 +255,7 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 
         return _cholesky(a, lower, effective_overwrite_a)
 
-    cache_version = 4
+    cache_version = 5
     return cholesky, cache_version
 
 

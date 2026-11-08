@@ -9,12 +9,13 @@ from numba.np.linalg import _copy_to_fortran_order
 from pytensor.link.numba.dispatch import basic as numba_basic
 
 
-# A LAPACK kernel chooses its working layout from the input types at typing time, so
+# Most LAPACK kernels choose their working layout from the input types, so
 # every return path has one layout and the output is typed "C" or "F", never "A". Where
 # the math allows, a C-typed input is worked on as its transpose, in a buffer from
 # _c_work_array. Every other input goes through _fortran_work_array. A runtime choice
 # between layouts would type both, and Numba unifies them to "A", which every consumer
-# of the result then inherits.
+# of the result then inherits. Cholesky makes this tradeoff for A-typed inputs to
+# avoid copying runtime C-contiguous arrays to Fortran order.
 
 
 def _fortran_work_array(x: np.ndarray, overwrite: bool) -> np.ndarray:

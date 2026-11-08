@@ -270,6 +270,43 @@ class TestDecompositions:
             np.testing.assert_allclose(fn(val_not_contig), res)
             np.testing.assert_array_equal(val_not_contig, val)
 
+    @pytest.mark.parametrize("lower", [True, False])
+    @pytest.mark.parametrize("overwrite_a", [False, True])
+    @pytest.mark.parametrize("is_complex", [False, True])
+    def test_cholesky_dynamic_layout(self, lower, overwrite_a, is_complex):
+        dtype = (
+            ("complex64" if floatX == "float32" else "complex128")
+            if is_complex
+            else floatX
+        )
+        x = pt.matrix("x", dtype=dtype)
+        k = pt.iscalar("k")
+        fn = pytensor.function(
+            [In(x, mutable=overwrite_a), k],
+            cholesky(x[:, :k], lower=lower),
+            mode=numba_inplace_mode,
+            accept_inplace=True,
+        )
+        root = np.array([[2, 1], [0, 3]], dtype=dtype)
+        if is_complex:
+            root[0, 1] += 2j
+        value = root @ root.conj().T
+        expected = scipy.linalg.cholesky(value, lower=lower)
+        for layout_value in (
+            value.copy(order="C"),
+            value.copy(order="F"),
+            np.repeat(value, 2, axis=0)[::2],
+        ):
+            snapshot = layout_value.copy()
+            result = fn(layout_value, 2)
+            np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)
+            reuse = overwrite_a and (
+                layout_value.flags.c_contiguous or layout_value.flags.f_contiguous
+            )
+            assert np.shares_memory(result, layout_value) == reuse
+            if not reuse:
+                np.testing.assert_array_equal(layout_value, snapshot)
+
     def test_cholesky_raises_on_nan_input(self):
         test_value = rng.random(size=(3, 3)).astype(floatX)
         test_value[0, 0] = np.nan
