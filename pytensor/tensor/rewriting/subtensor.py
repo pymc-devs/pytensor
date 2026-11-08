@@ -495,7 +495,7 @@ def _idx_to_int_array(idx):
     return np.arange(n, dtype=np.int64) + off_val
 
 
-def _is_shape_of_x_at(var, x, axis, shape_feature=None):
+def _is_shape_of_x_at(var, x, axis, shape_feature=None) -> bool:
     """``True`` when ``var`` is statically equivalent to ``x.shape[axis]``.
 
     With a ``shape_feature``, ``var`` may also recompute the shape it records for ``x``.
@@ -2132,9 +2132,29 @@ def local_adv_idx_to_diagonal(fgraph, node):
     return [out]
 
 
+def _arange_covers_axis(fgraph, idx, x, axis) -> bool:
+    """Whether ``idx`` is ``arange(x.shape[axis])``, selecting every position in order."""
+    const_match = _constant_is_arange(idx)
+    if const_match is not None:
+        return const_match == (x.type.shape[axis], 0, 1)
+
+    sym_match = _match_arange_0_to_d_plus_offset(idx)
+    if sym_match is None:
+        return False
+    arange_node, offset = sym_match
+    if get_underlying_scalar_constant_value(offset, raise_not_constant=False) != 0:
+        return False
+    return _is_shape_of_x_at(
+        arange_node.owner.inputs[1],
+        x,
+        axis,
+        shape_feature=getattr(fgraph, "shape_feature", None),
+    )
+
+
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
-@node_rewriter([AdvancedSubtensor])
+@node_rewriter([AdvancedSubtensor, AdvancedIncSubtensor])
 def local_adv_idx_to_slice(fgraph, node):
     """Rewrite a single arange-shaped advanced index to a basic slice.
 
@@ -2142,8 +2162,19 @@ def local_adv_idx_to_slice(fgraph, node):
     ``base[..., offset:offset+d, ...]``. Tagged ``shape_unsafe``: the slice
     silently truncates when the gather would be out-of-bounds, masking the
     ``IndexError`` the original ``AdvancedSubtensor`` would raise.
+
+    A ``set`` or ``inc`` is rewritten only when the arange covers its whole axis, so
+    no write is out of bounds:
+
+    .. code::
+
+        x[arange(x.shape[0])].set(v) -> x[:].set(v)
     """
-    var, *idx_inputs = node.inputs
+    is_write = isinstance(node.op, AdvancedIncSubtensor)
+    if is_write:
+        var, value, *idx_inputs = node.inputs
+    else:
+        var, *idx_inputs = node.inputs
     indices = list(indices_from_subtensor(idx_inputs, node.op.idx_list))
     indices += [slice(None)] * (var.type.ndim - len(indices))
 
@@ -2154,6 +2185,16 @@ def local_adv_idx_to_slice(fgraph, node):
         return None
 
     [axis] = adv_axes
+    if is_write:
+        if not _arange_covers_axis(fgraph, indices[axis], var, axis):
+            return None
+        write_op = IncSubtensor(
+            (slice(None),), set_instead_of_inc=node.op.set_instead_of_inc
+        )
+        out = write_op(var, value)
+        copy_stack_trace(node.outputs[0], out)
+        return [out]
+
     sl = _arange_index_to_slice(indices[axis])
     if sl is None:
         return None

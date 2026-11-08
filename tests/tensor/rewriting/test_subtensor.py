@@ -95,6 +95,29 @@ def test_local_useless_inc_subtensor(op, s):
     np.testing.assert_array_equal(f_shape(dx, dy), expected)
 
 
+@pytest.mark.parametrize(
+    "index, covers_axis",
+    [
+        pytest.param(lambda n: pt.arange(n), True, id="arange"),
+        pytest.param(lambda n: slice(None, n), True, id="slice_to_length"),
+        pytest.param(lambda n: pt.arange(n - 1), False, id="partial_arange"),
+    ],
+)
+def test_local_useless_inc_subtensor_of_whole_axis(index, covers_axis):
+    n = pt.lscalar("n")
+    value = pt.vector("value")
+    out = pt.zeros((n,))[index(n)].set(value)
+
+    rewrite_kw = dict(include=("ShapeOpt", "canonicalize"))
+    result = utt.RewriteTester([n, value], [out], **rewrite_kw)
+
+    removals = ("local_adv_idx_to_slice", "local_useless_inc_subtensor")
+    result.assert_graph(
+        value if covers_axis else rewrite_graph(out, **rewrite_kw, exclude=removals)
+    )
+    result.assert_eval(4, np.arange(4.0 if covers_axis else 3.0))
+
+
 def test_local_useless_setsubtensor_alloc_empty():
     """SetSubtensor(AllocEmpty(1, n), y, :1) -> y when y fills the buffer.
 

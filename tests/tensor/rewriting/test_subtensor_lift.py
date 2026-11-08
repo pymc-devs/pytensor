@@ -2486,6 +2486,19 @@ class TestSparseWrites:
             ),
         )
 
+    def test_diagonal_write_of_dynamic_size_sums_to_its_values(self):
+        n = pt.lscalar("n")
+        value = pt.vector("value")
+        positions = pt.arange(n)
+        out = pt.zeros((n, n))[positions, positions].inc(value).sum(axis=0)
+
+        result = RewriteTester(
+            [n, value], [out], include=("ShapeOpt", "canonicalize", "specialize")
+        )
+
+        result.assert_graph(value)
+        result.assert_eval(3, np.array([1.0, 2.0, 3.0]))
+
     def test_transpose_of_paired_write(self):
         result = RewriteTester([self.value], [self.written.T])
 
