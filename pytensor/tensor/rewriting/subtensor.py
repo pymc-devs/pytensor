@@ -6,6 +6,7 @@ import numpy as np
 
 from pytensor import compile
 from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
+from pytensor.assumptions.elemwise import zero_preserving_input_groups
 from pytensor.compile import optdb
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
@@ -16,12 +17,19 @@ from pytensor.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.raise_op import Assert
 from pytensor.scalar import (
     Add,
+    Mul,
+    Neg,
+    Pow,
     ScalarConstant,
     ScalarMinimum,
     Sub,
+    Switch,
+    TrueDiv,
+    UnaryScalarOp,
 )
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
@@ -41,6 +49,7 @@ from pytensor.tensor.basic import (
     moveaxis,
     register_infer_shape,
     switch,
+    zeros,
 )
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.blockwise import _squeeze_left
@@ -48,6 +57,8 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_to, squeeze
 from pytensor.tensor.math import (
+    Dot,
+    Sum,
     add,
     and_,
     eq,
@@ -61,6 +72,7 @@ from pytensor.tensor.math import (
     variadic_add,
 )
 from pytensor.tensor.rewriting.basic import (
+    elemwise_of,
     get_simplified_shape,
     register_canonicalize,
     register_specialize,
@@ -73,6 +85,7 @@ from pytensor.tensor.shape import (
     Shape_i,
     shape_padleft,
     shape_padright,
+    shape_tuple,
 )
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -90,7 +103,7 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
     unflatten_index_variables,
 )
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import TensorType, values_eq_approx_remove_nan
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -1232,6 +1245,15 @@ def local_set_to_inc_subtensor(fgraph, node):
     return [ret]
 
 
+def _is_zero(var) -> bool:
+    return bool(
+        get_underlying_scalar_constant_value(
+            var, elemwise=False, raise_not_constant=False
+        )
+        == 0
+    )
+
+
 @register_canonicalize
 @register_stabilize
 @register_specialize
@@ -1274,12 +1296,7 @@ def local_add_of_sparse_write(fgraph, node):
 
         base, v, *idx_vars = sparse_candidate.owner.inputs
 
-        if (
-            get_underlying_scalar_constant_value(
-                base, elemwise=False, raise_not_constant=False
-            )
-            != 0
-        ):
+        if not _is_zero(base):
             continue
 
         # Only the set->inc conversion needs duplicate-free indices. An inc into
@@ -1400,6 +1417,329 @@ def _canonical_indexing(var, indices, drop_broadcasted_index=False):
         )
 
     return result
+
+
+def _sparse_write_parts(fgraph, var):
+    """Return the base, value and indices of a write into zeros, else ``None``."""
+    if not isinstance(var.owner_op, IncSubtensor | AdvancedIncSubtensor):
+        return None
+    if not _is_zero(var.owner.inputs[0]):
+        return None
+    return _write_parts(fgraph, var)
+
+
+def _write_parts(fgraph, var):
+    """Return the base, value and indices of a write, else ``None``.
+
+    The value is alloc'd to the shape of the region it writes.
+    """
+    if not isinstance(var.owner_op, IncSubtensor | AdvancedIncSubtensor):
+        return None
+
+    base, value, *idx_vars = var.owner.inputs
+    indices = indices_from_subtensor(idx_vars, var.owner.op.idx_list)
+    if any(isinstance(i, TensorVariable) and i.type.dtype == "bool" for i in indices):
+        return None
+    if _non_consecutive_adv_indexing(indices):
+        return None
+
+    # With ``ignore_duplicates`` a repeated ``inc`` keeps only the last value.
+    write_op = var.owner.op
+    if (
+        getattr(write_op, "ignore_duplicates", False)
+        and not write_op.set_instead_of_inc
+        and not _advanced_indices_jointly_unique(indices, fgraph)
+    ):
+        return None
+
+    value = value.astype(base.type.dtype)
+    region = base[tuple(indices)]
+    if value.type.ndim > region.type.ndim:
+        return None
+    # A basic write broadcasts a length-1 value dim at runtime, which its type can't show.
+    if isinstance(write_op, IncSubtensor) and None in value.type.shape:
+        return None
+    if value.type.broadcastable != region.type.broadcastable:
+        value = alloc(value, *shape_tuple(region))
+    return base, value, indices
+
+
+def _same_write_location(write, other_write) -> bool:
+    return (
+        write.owner.op.idx_list == other_write.owner.op.idx_list
+        and equal_computations(write.owner.inputs[2:], other_write.owner.inputs[2:])
+    )
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter(
+    [
+        elemwise_of(Add | Sub | Mul | TrueDiv | Pow | Switch),
+        elemwise_of(OpPattern(UnaryScalarOp, preserves_zero=True)),
+    ]
+)
+def local_elemwise_of_sparse_write(fgraph, node):
+    """Apply an Elemwise that preserves zeros to the written values of sparse inputs.
+
+    .. code::
+
+        mul(zeros[idx].inc(v), y) -> zeros[idx].inc(v * y[idx])
+        switch(c, zeros[idx].set(v), 0) -> zeros[idx].set(switch(c[idx], v, 0))
+        sub(zeros[idx].inc(v), zeros[idx].inc(w)) -> zeros[idx].inc(v - w)
+
+    ``zeros * nan`` is nan on the entries that are not written, and it becomes zero.
+    """
+    [out] = node.outputs
+    scalar_op = node.op.scalar_op
+
+    for group in zero_preserving_input_groups(node):
+        parts_at = {
+            position: parts
+            for position in group
+            if (parts := _sparse_write_parts(fgraph, node.inputs[position])) is not None
+        }
+        if not parts_at or not all(
+            position in parts_at or _is_zero(node.inputs[position])
+            for position in group
+        ):
+            continue
+
+        writes = [node.inputs[position] for position in parts_at]
+        [first_write, *other_writes] = writes
+        if any(
+            write.type.broadcastable != out.type.broadcastable for write in writes
+        ) or not all(
+            _same_write_location(first_write, write) for write in other_writes
+        ):
+            continue
+
+        base, _, indices = next(iter(parts_at.values()))
+        all_set = all(write.owner.op.set_instead_of_inc for write in writes)
+        all_inc = not any(write.owner.op.set_instead_of_inc for write in writes)
+        # Mul and TrueDiv are linear in their write only because each of their groups
+        # holds a single position, so every other operand is read at the write's indices.
+        is_linear = isinstance(scalar_op, Add | Sub | Mul | TrueDiv | Switch | Neg)
+        repeats_are_safe = all_set or (all_inc and is_linear)
+        if not repeats_are_safe and not _advanced_indices_jointly_unique(
+            indices, fgraph
+        ):
+            continue
+
+        new_value = node.op(
+            *(
+                parts_at[position][1]
+                if position in parts_at
+                else _canonical_indexing(inp, indices, drop_broadcasted_index=True)
+                for position, inp in enumerate(node.inputs)
+            )
+        )
+
+        new_write = base.astype(out.type.dtype)[tuple(indices)]
+        new_out = new_write.set(new_value) if all_set else new_write.inc(new_value)
+
+        new_out.tag.values_eq_approx = values_eq_approx_remove_nan
+        copy_stack_trace([out, *writes], new_out)
+        return [new_out]
+
+    return None
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([OpPattern(DimShuffle, is_matrix_transpose=True, input_ndim=2)])
+def local_transpose_of_sparse_write(fgraph, node):
+    """Swap the indices of a transposed write into a zero matrix.
+
+    .. code::
+
+        zeros[i, j].inc(v).T -> zeros[j, i].inc(v)
+        zeros[i].inc(v).T -> zeros[:, i].inc(v.T)
+    """
+    [sparse_input] = node.inputs
+    parts = _sparse_write_parts(fgraph, sparse_input)
+    if parts is None:
+        return None
+    _, value, indices = parts
+
+    indices = (*indices, *(slice(None),) * (2 - len(indices)))
+    is_advanced = [
+        isinstance(idx, TensorVariable) and idx.type.ndim == 1 for idx in indices
+    ]
+    if not all(
+        advanced or isinstance(idx, slice)
+        for advanced, idx in zip(is_advanced, indices, strict=True)
+    ):
+        return None
+
+    if not all(is_advanced):
+        if value.type.ndim == 2:
+            value = value.T
+        elif value.type.ndim != 0:
+            return None
+
+    [out] = node.outputs
+    new_shape = get_simplified_shape(sparse_input, fgraph=fgraph)[::-1]
+    new_write = zeros(new_shape, dtype=out.type.dtype)[tuple(reversed(indices))]
+    is_set = sparse_input.owner.op.set_instead_of_inc
+    new_out = new_write.set(value) if is_set else new_write.inc(value)
+
+    copy_stack_trace(out, new_out)
+    return [new_out]
+
+
+def _written_change(write, base, value, indices):
+    """What a write adds to its base at the written positions."""
+    if write.owner.op.set_instead_of_inc:
+        return value - base[tuple(indices)]
+    return value
+
+
+def _elementwise_written_matrix(fgraph, var):
+    """Return ``(base, rows, columns, values)`` of a matrix written at paired 1d indices."""
+    if var.type.ndim != 2:
+        return None
+
+    parts = _write_parts(fgraph, var)
+    if parts is None:
+        return None
+    base, value, indices = parts
+
+    if len(indices) != 2 or value.type.ndim != 1:
+        return None
+    rows, columns = indices
+    if not all(isinstance(i, TensorVariable) and i.type.ndim == 1 for i in indices):
+        return None
+
+    # Each written entry contributes separately to the product, so a repeated position
+    # would count twice where ``set`` keeps only the last value.
+    if var.owner.op.set_instead_of_inc and not _advanced_indices_jointly_unique(
+        indices, fgraph
+    ):
+        return None
+
+    return base, rows, columns, value
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Dot])
+def local_dot_of_sparse_write(fgraph, node):
+    """Contract a matrix written at paired indices with only the rows it reads.
+
+    .. code::
+
+        dot(zeros[i, j].inc(v), B) -> zeros[i].inc(v[:, None] * B[j])
+        dot(A, zeros[i, j].inc(v)) -> zeros[:, j].inc(A[:, i] * v)
+    """
+    [out] = node.outputs
+    left, right = node.inputs
+
+    written_left = _elementwise_written_matrix(fgraph, left)
+    if written_left is not None and not _is_zero(written_left[0]):
+        written_left = None
+    written_right = (
+        None if written_left is not None else _elementwise_written_matrix(fgraph, right)
+    )
+    if written_right is not None and not _is_zero(written_right[0]):
+        written_right = None
+    if written_left is None and written_right is None:
+        return None
+
+    # Taken from the operands, because ``out.shape`` would retain the replaced product.
+    new_shape = (
+        get_simplified_shape(left, fgraph=fgraph)[0],
+        get_simplified_shape(right, fgraph=fgraph)[1],
+    )
+    new_zeros = zeros(new_shape, dtype=out.type.dtype)
+
+    if written_left is not None:
+        _, rows, columns, value = written_left
+        new_out = new_zeros[rows].inc(value[:, None] * right[columns])
+    else:
+        _, rows, columns, value = written_right
+        new_out = new_zeros[:, columns].inc(left[:, rows] * value)
+
+    new_out.tag.values_eq_approx = values_eq_approx_remove_nan
+    copy_stack_trace(out, new_out)
+    return [new_out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Sum])
+def local_partial_sum_of_elementwise_write(fgraph, node):
+    """Sum a matrix written at paired indices along one axis, keeping the write sparse.
+
+    .. code::
+
+        zeros[i, j].inc(v).sum(axis=0) -> zeros[j].inc(v)
+        zeros[i, j].inc(v).sum(axis=1) -> zeros[i].inc(v)
+        x[i, j].set(v).sum(axis=0) -> x.sum(axis=0)[j].inc(v - x[i, j])
+    """
+    [x] = node.inputs
+    axis = node.op.axis
+    if axis is None or len(axis) != 1:
+        return None
+
+    parts = _elementwise_written_matrix(fgraph, x)
+    if parts is None:
+        return None
+
+    base, rows, columns, value = parts
+    kept, kept_axis = (columns, 1) if axis[0] == 0 else (rows, 0)
+    [out] = node.outputs
+    if _is_zero(base):
+        new_length = get_simplified_shape(x, fgraph=fgraph)[kept_axis]
+        new_out = zeros((new_length,), dtype=out.type.dtype)[kept].inc(value)
+    else:
+        change = _written_change(x, base, value, (rows, columns))
+        new_out = node.op(base)[kept].inc(change.astype(out.type.dtype))
+
+    copy_stack_trace(out, new_out)
+    return [new_out]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Sum])
+def local_sum_of_write(fgraph, node):
+    """Sum a write as its base plus the change it makes.
+
+    .. code::
+
+        zeros[idx].inc(v).sum() -> v.sum()
+        x[idx].inc(v).sum() -> x.sum() + v.sum()
+        x[idx].set(v).sum() -> x.sum() + (v - x[idx]).sum()
+
+    A ``set`` keeps the last of any repeated positions, so it needs unique indices.
+    """
+    [written] = node.inputs
+    if node.op.axis is not None and len(node.op.axis) != written.type.ndim:
+        return None
+
+    parts = _write_parts(fgraph, written)
+    if parts is None:
+        return None
+    base, value, indices = parts
+
+    if written.owner.op.set_instead_of_inc and not _advanced_indices_jointly_unique(
+        indices, fgraph
+    ):
+        return None
+
+    total = node.op.clone(axis=None)
+    if _is_zero(base):
+        new_out = total(value)
+    else:
+        new_out = node.op(base) + total(_written_change(written, base, value, indices))
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize
@@ -2527,15 +2867,7 @@ def local_write_of_write_same_indices(fgraph, node):
             if not _advanced_indices_jointly_unique(indices, fgraph):
                 return
         new_val = a + b
-        if (
-            get_underlying_scalar_constant_value(
-                base, elemwise=False, raise_not_constant=False
-            )
-            == 0
-        ):
-            use_set = False
-        else:
-            use_set = True
+        use_set = not _is_zero(base)
     else:
         # x[idx].inc(a)[idx].inc(b) — always safe (addition is associative).
         new_val = a + b
