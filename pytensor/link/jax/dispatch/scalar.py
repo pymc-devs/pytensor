@@ -352,7 +352,8 @@ def jax_funcify_Softplus(op, node, **kwargs):
 
     def softplus(x):
         x = jnp.asarray(x, dtype=out_dtype)
-        # Branch-free, and exp(-|x|) is shared with Sigmoid
-        return jnp.maximum(x, 0) + jnp.log1p(jnp.exp(-jnp.abs(x)))
+        # Branch-free, and exp(-|x|) is shared with Sigmoid. `where` rather than `maximum`,
+        # whose JAX gradient splits the tie at 0 and would cancel the log1p term's.
+        return jnp.where(x >= 0, x, 0) + jnp.log1p(jnp.exp(-jnp.abs(x)))
 
     return softplus
