@@ -274,14 +274,17 @@ def test_softplus() -> None:
 
     compare_mlx_and_py([x], out, [x_test])
 
+    x = vector("x", dtype="uint8")
+    out = [softplus(x), sigmoid(x)]
+    compare_mlx_and_py([x], out, [np.array([0, 20, 255], dtype="uint8")])
+
 
 def test_softplus_extreme_values() -> None:
-    """Test softplus with extreme values to verify numerical stability"""
+    """Test softplus and sigmoid with extreme values to verify numerical stability"""
     x = vector("x")
-    out = softplus(x)
+    out = [softplus(x), sigmoid(x)]
 
-    # Test with extreme values where different branches of the implementation are used
-    x_test = mx.array([-40.0, -50.0, 20.0, 30.0, 35.0, 50.0])
+    x_test = mx.array([-1e3, -40.0, -50.0, 20.0, 30.0, 35.0, 50.0, 1e3])
 
     # Use relaxed tolerance for extreme values due to numerical precision differences
     relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-4, atol=1e-8)

@@ -575,6 +575,16 @@ class TestSigmoid:
     def test_elemwise(self):
         utt.verify_grad(pt.sigmoid, [np.random.random((3, 4))])
 
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_accuracy(self, dtype):
+        x = pt.vector("x", dtype=dtype)
+        x_test = np.array([-1e3, -700, -40, -17.5, 0, 17.5, 40, 700, 1e3], dtype=dtype)
+        y_th = function([x], pt.sigmoid(x))(x_test)
+        y_np = special.expit(x_test.astype("float64")).astype(dtype)
+        np.testing.assert_allclose(
+            y_th, y_np, rtol=1e-6 if dtype == "float32" else 1e-14
+        )
+
 
 _good_broadcast_unary_softplus = dict(
     copymod(
@@ -603,12 +613,15 @@ class TestSoftplus:
     def test_elemwise(self):
         utt.verify_grad(pt.softplus, [np.random.random((3, 4))])
 
-    def test_accuracy(self):
-        # Test all approximations are working (cutoff points are -37, 18, 33.3)
-        x_test = np.array([-40.0, -17.5, 17.5, 18.5, 40.0])
-        y_th = pt.softplus(x_test).eval()
-        y_np = np.log1p(np.exp(x_test))
-        np.testing.assert_allclose(y_th, y_np, rtol=10e-10)
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_accuracy(self, dtype):
+        x = pt.vector("x", dtype=dtype)
+        x_test = np.array([-1e3, -700, -40, -17.5, 0, 17.5, 40, 700, 1e3], dtype=dtype)
+        y_th = function([x], pt.softplus(x))(x_test)
+        y_np = np.logaddexp(0, x_test.astype("float64")).astype(dtype)
+        np.testing.assert_allclose(
+            y_th, y_np, rtol=1e-6 if dtype == "float32" else 1e-14
+        )
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())

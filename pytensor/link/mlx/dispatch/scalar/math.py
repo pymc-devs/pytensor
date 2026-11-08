@@ -139,26 +139,27 @@ def _lanczos_log_gamma(w, const):
 
 
 @mlx_funcify.register(Sigmoid)
-def mlx_funcify_Sigmoid(op, **kwargs):
-    return mx.sigmoid
+def mlx_funcify_Sigmoid(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
+    def sigmoid(x):
+        z, const, out_dtype = _working_precision(x, dtype)
+        # exp(-|x|) is shared with Softplus, so MLX can reuse it when both are fused
+        e = mx.exp(-mx.abs(z))
+        return (mx.where(z >= 0, const(1.0), e) / (const(1.0) + e)).astype(out_dtype)
+
+    return sigmoid
 
 
 @mlx_funcify.register(Softplus)
-def mlx_funcify_Softplus(op, **kwargs):
+def mlx_funcify_Softplus(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def softplus(x):
-        return mx.where(
-            x < -37.0,
-            mx.exp(x),
-            mx.where(
-                x < 18.0,
-                mx.log1p(mx.exp(x)),
-                mx.where(
-                    x < 33.3,
-                    x + mx.exp(-x),
-                    x,
-                ),
-            ),
-        )
+        z, const, out_dtype = _working_precision(x, dtype)
+        # Branch-free, and exp(-|x|) is shared with Sigmoid
+        out = mx.maximum(z, const(0.0)) + mx.log1p(mx.exp(-mx.abs(z)))
+        return out.astype(out_dtype)
 
     return softplus
 
