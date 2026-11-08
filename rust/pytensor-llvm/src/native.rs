@@ -61,6 +61,8 @@ pub struct ArangeParams {
 pub struct AllocParams {
     pub n_shape: i64,
     pub itemsize: i64,
+    /// 1: the output is provided (static shape, planner slot); 0: kernel-allocated
+    pub provided: i64,
     pub shape_dtypes: [i32; MAX_NDIM],
 }
 
@@ -84,7 +86,7 @@ unsafe fn read_f64(ptr: *const u8, dt: DType) -> f64 {
     }
 }
 
-unsafe fn read_i64(ptr: *const u8, dt: DType) -> i64 {
+pub unsafe fn read_i64(ptr: *const u8, dt: DType) -> i64 {
     match dt {
         DType::Float64 | DType::Float32 => read_f64(ptr, dt) as i64,
         DType::Int64 => *(ptr as *const i64),
@@ -322,12 +324,21 @@ pub unsafe extern "C" fn ptl_alloc(ctx: *mut PtCtx, args: *mut PtArray, params: 
         }
     }
     let total: i64 = shape.iter().product();
-    let (data, owner) = PtCtx::alloc(ctx, total as usize * isz as usize);
     let o = arg(args, 1 + n);
-    o.data = data;
-    o.owner = owner;
-    o.shape_mut().copy_from_slice(shape);
-    c_strides(shape, isz, o.strides_mut());
+    let data = if prm.provided == 0 {
+        let (data, owner) = PtCtx::alloc(ctx, total as usize * isz as usize);
+        o.data = data;
+        o.owner = owner;
+        o.shape_mut().copy_from_slice(shape);
+        c_strides(shape, isz, o.strides_mut());
+        data
+    } else {
+        // provided (static shape): the planner sized it
+        if o.shape() != shape {
+            return PtCtx::fail(ctx, 2, &format!("alloc: shape {:?} differs from the static shape {:?}", shape, o.shape()));
+        }
+        o.data
+    };
     let dst_st = o.strides().to_vec();
     for_each_lane(shape, &src_st[..n], &dst_st, None, |a, b| {
         std::ptr::copy_nonoverlapping(v.data.offset(a), data.offset(b), isz as usize);
@@ -348,8 +359,12 @@ pub unsafe extern "C" fn ptl_alloc_empty(ctx: *mut PtCtx, args: *mut PtArray, pa
         shape[i] = s;
     }
     let total: i64 = shape[..n].iter().product();
-    let (data, owner) = PtCtx::alloc(ctx, total as usize * prm.itemsize as usize);
     let o = arg(args, n);
+    if prm.provided != 0 {
+        // provided (static shape)
+        return if o.shape() == &shape[..n] { 0 } else { PtCtx::fail(ctx, 2, "alloc_empty: shape differs from the static shape") };
+    }
+    let (data, owner) = PtCtx::alloc(ctx, total as usize * prm.itemsize as usize);
     o.data = data;
     o.owner = owner;
     o.shape_mut().copy_from_slice(&shape[..n]);
@@ -391,88 +406,144 @@ pub unsafe extern "C" fn ptl_make_vector(_ctx: *mut PtCtx, args: *mut PtArray, p
 
 // ------------------------------------------------------------------ matmul
 
-/// y[i] = sum_j a[i, j] * x[j]   (strides in elements). Picks the loop order that walks
-/// `a` contiguously.
-#[allow(clippy::too_many_arguments)]
-unsafe fn gemv<T>(m: usize, k: usize, a: *const T, rsa: isize, csa: isize, x: *const T, incx: isize, y: *mut T, incy: isize)
-where
-    T: Copy + Default + std::ops::Add<Output = T> + std::ops::Mul<Output = T>,
-{
-    if csa.abs() <= rsa.abs() {
-        for i in 0..m as isize {
-            let row = a.offset(i * rsa);
-            let mut acc = T::default();
-            if csa == 1 && incx == 1 {
-                for j in 0..k {
-                    acc = acc + *row.add(j) * *x.add(j);
-                }
-            } else {
-                for j in 0..k as isize {
-                    acc = acc + *row.offset(j * csa) * *x.offset(j * incx);
-                }
-            }
-            *y.offset(i * incy) = acc;
-        }
-    } else if m <= 64 {
-        let mut acc = [T::default(); 64];
-        let acc = &mut acc[..m];
-        for j in 0..k as isize {
-            let xj = *x.offset(j * incx);
-            let col = a.offset(j * csa);
-            for (i, ac) in acc.iter_mut().enumerate() {
-                *ac = *ac + *col.offset(i as isize * rsa) * xj;
-            }
-        }
-        for (i, ac) in acc.iter().enumerate() {
-            *y.offset(i as isize * incy) = *ac;
-        }
-    } else {
-        for i in 0..m as isize {
-            *y.offset(i * incy) = T::default();
-        }
-        for j in 0..k as isize {
-            let xj = *x.offset(j * incx);
-            let col = a.offset(j * csa);
-            for i in 0..m as isize {
-                *y.offset(i * incy) = *y.offset(i * incy) + *col.offset(i * rsa) * xj;
-            }
-        }
+/// `rows x cols` view of a 1-d/2-d operand with element strides. A vector is a row
+/// (`as_row`) or a column.
+unsafe fn mat_parts(x: &PtArray, isz: i64, as_row: bool) -> (usize, usize, isize, isize) {
+    let (sh, st) = (x.shape(), x.strides());
+    match (x.ndim, as_row) {
+        (2, _) => (sh[0] as usize, sh[1] as usize, (st[0] / isz) as isize, (st[1] / isz) as isize),
+        (1, true) => (1, sh[0] as usize, 0, (st[0] / isz) as isize),
+        (_, _) => (sh[0] as usize, 1, (st[0] / isz) as isize, 0),
     }
 }
 
+/// Scalars for the hand-written SIMD loops; `madd` is a fused multiply-add when the
+/// caller was compiled with FMA (see `gemv_short_rows`).
+pub trait Real: Copy + Default + std::ops::Add<Output = Self> + std::ops::Mul<Output = Self> {
+    fn madd<const FMA: bool>(self, a: Self, b: Self) -> Self;
+}
+
+impl Real for f64 {
+    #[inline(always)]
+    fn madd<const FMA: bool>(self, a: f64, b: f64) -> f64 {
+        if FMA { a.mul_add(b, self) } else { self + a * b }
+    }
+}
+
+impl Real for f32 {
+    #[inline(always)]
+    fn madd<const FMA: bool>(self, a: f32, b: f32) -> f32 {
+        if FMA { a.mul_add(b, self) } else { self + a * b }
+    }
+}
+
+/// y = A x for A with contiguous, short rows (k small), where general gemv kernels do
+/// poorly: 4 rows at a time, 4 independent lanes along each row (so LLVM vectorizes
+/// without reassociating), x contiguous.
+#[inline(always)]
+unsafe fn gemv_short_rows_impl<T: Real, const FMA: bool>(m: usize, k: usize, a: *const T, rsa: isize, x: *const T, y: *mut T, incy: isize) {
+    const L: usize = 4;
+    let kl = k - k % L;
+    let mut i = 0;
+    while i + 4 <= m {
+        let rows = [0, 1, 2, 3].map(|r| a.offset((i + r) as isize * rsa));
+        let mut acc = [[T::default(); L]; 4];
+        let mut j = 0;
+        while j < kl {
+            for r in 0..4 {
+                for l in 0..L {
+                    acc[r][l] = acc[r][l].madd::<FMA>(*rows[r].add(j + l), *x.add(j + l));
+                }
+            }
+            j += L;
+        }
+        for r in 0..4 {
+            let mut s = (acc[r][0] + acc[r][1]) + (acc[r][2] + acc[r][3]);
+            for j in kl..k {
+                s = s.madd::<FMA>(*rows[r].add(j), *x.add(j));
+            }
+            *y.offset((i + r) as isize * incy) = s;
+        }
+        i += 4;
+    }
+    while i < m {
+        let row = a.offset(i as isize * rsa);
+        let mut s = T::default();
+        for j in 0..k {
+            s = s.madd::<FMA>(*row.add(j), *x.add(j));
+        }
+        *y.offset(i as isize * incy) = s;
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn gemv_short_rows_avx2<T: Real>(m: usize, k: usize, a: *const T, rsa: isize, x: *const T, y: *mut T, incy: isize) {
+    gemv_short_rows_impl::<T, true>(m, k, a, rsa, x, y, incy)
+}
+
+/// The crate is built for baseline x86-64; pick the AVX2+FMA version at runtime.
+unsafe fn gemv_short_rows<T: Real>(m: usize, k: usize, a: *const T, rsa: isize, x: *const T, y: *mut T, incy: isize) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+            return gemv_short_rows_avx2(m, k, a, rsa, x, y, incy);
+        }
+    }
+    gemv_short_rows_impl::<T, false>(m, k, a, rsa, x, y, incy)
+}
+
+/// Rows up to this length go through `gemv_short_rows`; longer ones through faer.
+const SHORT_ROW: usize = 64;
+
 macro_rules! matmul_kernel {
-    ($name:ident, $t:ty, $gemm:path) => {
-        /// args = [a, b, out(provided)]. 1-d/2-d operands.
+    ($name:ident, $t:ty) => {
+        /// args = [a, b, out(provided)]; 1-d/2-d operands (numpy dot semantics).
+        /// faer, sequential.
         pub unsafe extern "C" fn $name(_ctx: *mut PtCtx, args: *mut PtArray, _params: *const c_void) -> i32 {
             let (a, b, c) = (*arg(args, 0), *arg(args, 1), *arg(args, 2));
             let isz = std::mem::size_of::<$t>() as i64;
-            let (na, nb) = (a.ndim, b.ndim);
-            let (ash, ast) = (a.shape(), a.strides());
-            let (bsh, bst) = (b.shape(), b.strides());
-            let (m, k, rsa, csa) = if na == 2 { (ash[0], ash[1], ast[0] / isz, ast[1] / isz) } else { (1, ash[0], 0, ast[0] / isz) };
-            let (n, rsb, csb) = if nb == 2 { (bsh[1], bst[0] / isz, bst[1] / isz) } else { (1, bst[0] / isz, 0) };
-            let cst = c.strides();
-            let (rsc, csc) = match (na, nb) {
-                (2, 2) => (cst[0] / isz, cst[1] / isz),
-                (2, 1) => (cst[0] / isz, 0),
-                (1, 2) => (0, cst[0] / isz),
+            let (m, k, rsa, csa) = mat_parts(&a, isz, true);
+            let (_, n, rsb, csb) = mat_parts(&b, isz, false);
+            let (rsc, csc) = match (a.ndim, b.ndim) {
+                (2, 2) => ((c.strides()[0] / isz) as isize, (c.strides()[1] / isz) as isize),
+                (2, 1) => ((c.strides()[0] / isz) as isize, 0),
+                (1, 2) => (0, (c.strides()[0] / isz) as isize),
                 _ => (0, 0),
             };
-            let (ap, bp, cp) = (a.data as *const $t, b.data as *const $t, c.data as *mut $t);
-            if n == 1 {
-                gemv(m as usize, k as usize, ap, rsa as isize, csa as isize, bp, rsb as isize, cp, rsc as isize);
+            // matrix-vector with contiguous short rows (X @ beta with X row-major)
+            let (gm, gk, ga, grs, gcs, gx, gincx, gincy) = if n == 1 {
+                (m, k, a.data as *const $t, rsa, csa, b.data as *const $t, rsb, rsc)
             } else if m == 1 {
-                gemv(n as usize, k as usize, bp, csb as isize, rsb as isize, ap, csa as isize, cp, csc as isize);
+                (n, k, b.data as *const $t, csb, rsb, a.data as *const $t, csa, csc)
             } else {
-                $gemm(m as usize, k as usize, n as usize, 1.0, ap, rsa as isize, csa as isize, bp, rsb as isize, csb as isize, 0.0, cp, rsc as isize, csc as isize);
+                (0, usize::MAX, std::ptr::null(), 0, 0, std::ptr::null(), 0, 0)
+            };
+            if gcs == 1 && gk <= SHORT_ROW && gm >= 4 {
+                let x = if gincx == 1 {
+                    gx
+                } else {
+                    let tmp = PtCtx::scratch(_ctx, gk * std::mem::size_of::<$t>()) as *mut $t;
+                    for j in 0..gk {
+                        *tmp.add(j) = *gx.offset(j as isize * gincx);
+                    }
+                    tmp as *const $t
+                };
+                gemv_short_rows(gm, gk, ga, grs, x, c.data as *mut $t, gincy);
+                return 0;
             }
+            let lhs = faer::MatRef::<$t>::from_raw_parts(a.data as *const $t, m, k, rsa, csa);
+            let rhs = faer::MatRef::<$t>::from_raw_parts(b.data as *const $t, k, n, rsb, csb);
+            let dst = faer::MatMut::<$t>::from_raw_parts_mut(c.data as *mut $t, m, n, rsc, csc);
+            faer::linalg::matmul::matmul(dst, faer::Accum::Replace, lhs, rhs, 1.0, faer::Par::Seq);
             0
         }
     };
 }
 
-matmul_kernel!(ptl_matmul_f64, f64, matrixmultiply::dgemm);
-matmul_kernel!(ptl_matmul_f32, f32, matrixmultiply::sgemm);
+matmul_kernel!(ptl_matmul_f64, f64);
+matmul_kernel!(ptl_matmul_f32, f32);
 
 // ------------------------------------------------------------------ sort
 
@@ -1073,5 +1144,111 @@ pub unsafe extern "C" fn ptl_reshape(ctx: *mut PtCtx, args: *mut PtArray, params
     for_each_lane(x.shape(), x.strides(), &cst[..x.ndim as usize], None, |a, b| {
         std::ptr::copy_nonoverlapping(x.data.offset(a), data.offset(b), isz as usize);
     });
+    0
+}
+
+// ------------------------------------------------------------------ cumsum / cumprod
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CumParams {
+    pub axis: i64,
+    pub mul: i64,
+}
+
+/// Visit every lane along `axis`: calls f(src offset, dst offset) of the lane start.
+unsafe fn for_each_axis_lane(shape: &[i64], axis: usize, src_st: &[i64], dst_st: &[i64], mut f: impl FnMut(isize, isize)) {
+    let nd = shape.len();
+    if shape.iter().any(|&s| s == 0) {
+        return;
+    }
+    let mut idx = [0i64; MAX_NDIM];
+    loop {
+        let (mut a, mut b) = (0isize, 0isize);
+        for d in 0..nd {
+            a += (idx[d] * src_st[d]) as isize;
+            b += (idx[d] * dst_st[d]) as isize;
+        }
+        f(a, b);
+        // next index over the dims other than `axis`
+        let mut d = nd;
+        loop {
+            if d == 0 {
+                return;
+            }
+            d -= 1;
+            if d == axis {
+                continue;
+            }
+            idx[d] += 1;
+            if idx[d] < shape[d] {
+                break;
+            }
+            idx[d] = 0;
+        }
+    }
+}
+
+macro_rules! cum_kernel {
+    ($name:ident, $t:ty) => {
+        /// args = [x, out(provided)]: cumulative sum or product along `axis`.
+        pub unsafe extern "C" fn $name(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+            let prm = p::<CumParams>(params);
+            let (x, o) = (*arg(args, 0), *arg(args, 1));
+            let axis = prm.axis as usize;
+            let shape = x.shape().to_vec();
+            let (xs, os) = (x.strides().to_vec(), o.strides().to_vec());
+            let (n, sx, so) = (shape[axis], xs[axis] as isize, os[axis] as isize);
+            for_each_axis_lane(&shape, axis, &xs, &os, |a, b| {
+                let (src, dst) = (x.data.offset(a), o.data.offset(b));
+                let mut acc: $t = if prm.mul != 0 { 1 as $t } else { 0 as $t };
+                for k in 0..n as isize {
+                    let v = *(src.offset(k * sx) as *const $t);
+                    acc = if prm.mul != 0 { acc * v } else { acc + v };
+                    *(dst.offset(k * so) as *mut $t) = acc;
+                }
+            });
+            0
+        }
+    };
+}
+
+cum_kernel!(ptl_cum_f64, f64);
+cum_kernel!(ptl_cum_f32, f32);
+cum_kernel!(ptl_cum_i64, i64);
+cum_kernel!(ptl_cum_i32, i32);
+
+// ------------------------------------------------------------------ diagonal view
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DiagParams {
+    pub offset: i64,
+    pub axis1: i64,
+    pub axis2: i64,
+}
+
+/// args = [x, out(view of x)]: numpy.diagonal(x, offset, axis1, axis2) as a view; the
+/// diagonal becomes the last dim.
+pub unsafe extern "C" fn ptl_extract_diag(_ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+    let prm = p::<DiagParams>(params);
+    let x = *arg(args, 0);
+    let o = arg(args, 1);
+    let (a1, a2, k) = (prm.axis1 as usize, prm.axis2 as usize, prm.offset);
+    let (sh, st) = (x.shape(), x.strides());
+    let (n1, n2) = (sh[a1], sh[a2]);
+    let len = if k >= 0 { n1.min(n2 - k) } else { (n1 + k).min(n2) }.max(0);
+    let mut j = 0;
+    for d in 0..sh.len() {
+        if d != a1 && d != a2 {
+            o.shape_mut()[j] = sh[d];
+            o.strides_mut()[j] = st[d];
+            j += 1;
+        }
+    }
+    o.shape_mut()[j] = len;
+    o.strides_mut()[j] = st[a1] + st[a2];
+    let off = if len == 0 { 0 } else if k >= 0 { k * st[a2] } else { -k * st[a1] };
+    o.data = x.data.offset(off as isize);
     0
 }

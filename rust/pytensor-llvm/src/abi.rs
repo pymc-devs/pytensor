@@ -9,7 +9,7 @@
 //!     void *(*alloc)(PtCtx *, size_t bytes, size_t align, PtBuffer **owner);
 //!     void  (*buffer_incref)(PtCtx *, PtBuffer *);
 //!     void  (*buffer_decref)(PtCtx *, PtBuffer *);
-//!     void *(*scratch)(PtCtx *, size_t bytes);    // valid until the kernel returns
+//!     void *(*scratch)(PtCtx *, size_t bytes);    // 64-byte aligned, valid until the kernel returns
 //!     void  (*set_error)(PtCtx *, int32_t code, const char *msg);
 //! } PtRuntime;
 //!
@@ -31,6 +31,12 @@
 //!   and owner. Used when the output shape is only known while running.
 //! * declared view of input i: the kernel fills data, shape and strides pointing into
 //!   input i's memory. The caller sets `owner`; the kernel must not.
+//!
+//! Scratch: `rt->scratch(ctx, n)` hands out temporary memory (e.g. faer's work
+//! space) that is valid until the kernel returns. It comes from an arena owned by the
+//! context (one per call state): the arena keeps its largest size, so after the first
+//! call a kernel's scratch requests don't allocate. Several requests per kernel are
+//! fine; they never move earlier ones.
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_void, CStr};
@@ -122,7 +128,94 @@ pub struct PtCtx {
     pub rt: *const PtRuntime,
     // runtime-private state below; kernels only see `rt`
     pub error: Option<(i32, String)>,
-    scratch: Vec<*mut PtBuffer>,
+    scratch: Scratch,
+}
+
+/// Bump arena behind `rt->scratch`.
+///
+/// One persistent block, used from offset 0 by each kernel call. A request that
+/// doesn't fit gets its own overflow block (so earlier pointers stay valid); when the
+/// kernel ends, the persistent block is regrown to the peak demand, so the next call
+/// fits without allocating.
+struct Scratch {
+    block: *mut u8,
+    cap: usize,
+    off: usize,
+    overflow: Vec<(*mut u8, usize)>,
+    overflow_bytes: usize,
+    peak: usize,
+}
+
+/// Position in the scratch arena, for drivers that call kernels repeatedly (Scan).
+#[derive(Clone, Copy)]
+pub struct ScratchMark {
+    off: usize,
+    n_overflow: usize,
+    overflow_bytes: usize,
+}
+
+const SCRATCH_ALIGN: usize = 64;
+
+impl Scratch {
+    fn new() -> Self {
+        Scratch { block: std::ptr::null_mut(), cap: 0, off: 0, overflow: Vec::new(), overflow_bytes: 0, peak: 0 }
+    }
+
+    fn get(&mut self, bytes: usize) -> *mut u8 {
+        let bytes = bytes.max(1).next_multiple_of(SCRATCH_ALIGN);
+        let p = if self.off + bytes <= self.cap {
+            let p = unsafe { self.block.add(self.off) };
+            self.off += bytes;
+            p
+        } else {
+            let p = unsafe { alloc(Layout::from_size_align(bytes, SCRATCH_ALIGN).expect("bad layout")) };
+            assert!(!p.is_null(), "out of memory allocating {bytes} bytes of scratch");
+            self.overflow.push((p, bytes));
+            self.overflow_bytes += bytes;
+            p
+        };
+        self.peak = self.peak.max(self.off + self.overflow_bytes);
+        p
+    }
+
+    fn mark(&self) -> ScratchMark {
+        ScratchMark { off: self.off, n_overflow: self.overflow.len(), overflow_bytes: self.overflow_bytes }
+    }
+
+    fn release(&mut self, m: ScratchMark) {
+        for (p, n) in self.overflow.drain(m.n_overflow..) {
+            unsafe { dealloc(p, Layout::from_size_align_unchecked(n, SCRATCH_ALIGN)) };
+        }
+        self.overflow_bytes = m.overflow_bytes;
+        self.off = m.off;
+    }
+
+    fn reset(&mut self) {
+        self.release(ScratchMark { off: 0, n_overflow: 0, overflow_bytes: 0 });
+        if self.peak > self.cap {
+            self.free_block();
+            let cap = self.peak.next_power_of_two();
+            self.block = unsafe { alloc(Layout::from_size_align(cap, SCRATCH_ALIGN).expect("bad layout")) };
+            assert!(!self.block.is_null(), "out of memory allocating {cap} bytes of scratch");
+            self.cap = cap;
+        }
+        self.peak = 0;
+    }
+
+    fn free_block(&mut self) {
+        if !self.block.is_null() {
+            unsafe { dealloc(self.block, Layout::from_size_align_unchecked(self.cap, SCRATCH_ALIGN)) };
+            self.block = std::ptr::null_mut();
+            self.cap = 0;
+        }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        self.release(ScratchMark { off: 0, n_overflow: 0, overflow_bytes: 0 });
+        self.free_block();
+    }
 }
 
 unsafe impl Send for PtCtx {}
@@ -142,9 +235,7 @@ unsafe extern "C" fn rt_decref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
 }
 
 unsafe extern "C" fn rt_scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
-    let b = PtBuffer::new(bytes, 64);
-    (*ctx).scratch.push(b);
-    (*b).data
+    (*ctx).scratch.get(bytes)
 }
 
 unsafe extern "C" fn rt_set_error(ctx: *mut PtCtx, code: i32, msg: *const c_char) {
@@ -163,14 +254,27 @@ pub static RUNTIME: PtRuntime = PtRuntime {
 
 impl PtCtx {
     pub fn new() -> Self {
-        PtCtx { rt: &RUNTIME, error: None, scratch: Vec::new() }
+        PtCtx { rt: &RUNTIME, error: None, scratch: Scratch::new() }
     }
 
-    /// Free scratch memory handed out during the last kernel call.
+    /// Scratch handed out during the last kernel call is dead now; keep the memory.
     pub fn end_kernel(&mut self) {
-        for b in self.scratch.drain(..) {
-            unsafe { PtBuffer::decref(b) };
-        }
+        self.scratch.reset();
+    }
+
+    /// For kernels that call other kernels with the same context (Scan): everything
+    /// handed out after `scratch_mark` is released by `scratch_release`.
+    pub fn scratch_mark(&self) -> ScratchMark {
+        self.scratch.mark()
+    }
+
+    pub fn scratch_release(&mut self, m: ScratchMark) {
+        self.scratch.release(m)
+    }
+
+    /// Scratch for Rust kernels (same as `rt->scratch`).
+    pub unsafe fn scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
+        (*ctx).scratch.get(bytes)
     }
 
     /// Convenience for Rust kernels.
@@ -215,3 +319,38 @@ impl Params {
 }
 
 pub const MAX_NDIM: usize = 32;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scratch_arena_grows_to_peak_and_keeps_pointers() {
+        let mut ctx = PtCtx::new();
+        let c: *mut PtCtx = &mut ctx;
+        unsafe {
+            // first call: nothing reserved, everything overflows but stays valid
+            let a = PtCtx::scratch(c, 100);
+            let b = PtCtx::scratch(c, 1000);
+            a.write_bytes(1, 100);
+            b.write_bytes(2, 1000);
+            assert_eq!(*a.add(99), 1);
+            assert_eq!(a as usize % 64, 0);
+            assert_eq!(b as usize % 64, 0);
+            ctx.end_kernel();
+            // second call with the same demand: served from the persistent block
+            let a2 = PtCtx::scratch(c, 100);
+            let b2 = PtCtx::scratch(c, 1000);
+            assert!(ctx.scratch.overflow.is_empty());
+            assert_eq!(b2 as usize - a2 as usize, 128);
+            // nested driver: release to a mark frees only what came after it
+            let m = ctx.scratch_mark();
+            let _ = PtCtx::scratch(c, 1 << 20); // overflow
+            assert_eq!(ctx.scratch.overflow.len(), 1);
+            ctx.scratch_release(m);
+            assert!(ctx.scratch.overflow.is_empty());
+            ctx.end_kernel();
+            assert!(ctx.scratch.cap >= (1 << 20) + 1152);
+        }
+    }
+}

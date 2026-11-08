@@ -11,7 +11,7 @@
 use crate::dtype::DType;
 use crate::ir::{FusedOut, IndexedAxis, ReduceOp, SRef, ScalarGraph};
 use crate::abi::PTARRAY_SIZE;
-use crate::segment::{SegLoc, SegMember, SegmentSpec};
+use crate::segment::{SegLoc, SegMember, SegmentSpec, SliceDim};
 use crate::spec::{KernelSpec, Layout, Operand};
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
@@ -926,8 +926,11 @@ impl<'ctx> Cg<'ctx> {
         // Operands that need their own data pointer: all inputs, plus non-inplace outputs.
         let own_out: Vec<usize> = (0..outputs.len()).filter(|k| inplace[*k].is_none()).collect();
         let n_ops = ni + own_out.len();
-        // out_bcast[d]: every input is broadcastable in d, so the output dim is 1.
-        let out_bcast: Vec<bool> = (0..ndim).map(|d| inputs.iter().all(|o| o.bcast[d])).collect();
+        // out_bcast[d]: the output dim is 1. For PyTensor's Elemwise that's "every input is
+        // broadcastable in d"; a broadcast copy (Alloc in a segment) has a longer output.
+        let out_bcast: Vec<bool> = (0..ndim)
+            .map(|d| out_ops.first().map_or_else(|| inputs.iter().all(|o| o.bcast[d]), |o| o.bcast[d]))
+            .collect();
         // effective broadcast: dims where an input is repeated along the output
         let eff = |o: &Operand, d: usize| o.bcast[d] && !out_bcast[d];
         #[derive(PartialEq, Clone, Copy)]
@@ -951,9 +954,18 @@ impl<'ctx> Cg<'ctx> {
             })
             .collect();
         let any_partial = kinds.iter().any(|k| *k == Kind::Partial);
-        let need_check: Vec<usize> = (0..ni)
+        // operands (index into data/strides, dtype) whose contiguity in the loop order is
+        // only known at runtime: inputs, and outputs that aren't planner-allocated
+        // (e.g. a slice of an array inside a segment)
+        let mut need_check: Vec<(usize, DType)> = (0..ni)
             .filter(|&i| kinds[i] == Kind::Full && !inputs[i].layout.contiguous_as(layout, ndim))
+            .map(|i| (i, inputs[i].dtype))
             .collect();
+        for (pos, &k) in own_out.iter().enumerate() {
+            if out_ops[k].layout == Layout::Any && ndim > 0 {
+                need_check.push((ni + pos, out_ops[k].dtype));
+            }
+        }
         let emit_fast = !any_partial;
         let emit_generic = any_partial || !need_check.is_empty();
 
@@ -1004,8 +1016,8 @@ impl<'ctx> Cg<'ctx> {
             // dispatch
             if emit_fast && emit_generic {
                 let mut ok = self.ctx.bool_type().const_int(1, false);
-                for &i in &need_check {
-                    let isz = inputs[i].dtype.itemsize() as i64;
+                for &(i, dt) in &need_check {
+                    let isz = dt.itemsize() as i64;
                     let mut expected = self.i64c(isz);
                     for &d in order.iter().rev() {
                         let st = self.load_i64_at(strides[i], d)?;
@@ -1364,6 +1376,30 @@ impl<'ctx> Cg<'ctx> {
                     }
                     make_struct(bd, i64_array(&sh)?, i64_array(&st)?, v.ndim)?
                 }
+                SegLoc::Slice { base, dims } => {
+                    let b = vp[*base];
+                    let (bd, bst) = (field(b, 0)?, field(b, 2)?);
+                    let shape = v.shape.as_ref().ok_or("slice without static shape")?;
+                    let mut off = self.i64c(0);
+                    let mut sh = Vec::new();
+                    let mut st = Vec::new();
+                    for (d, sd) in dims.iter().enumerate() {
+                        let s = self.load_i64_at(bst, d)?;
+                        let (start, step) = match sd {
+                            SliceDim::Index(i) => (*i, None),
+                            SliceDim::Range { start, step } => (*start, Some(*step)),
+                        };
+                        if start != 0 {
+                            let o = self.b.build_int_nsw_mul(s, self.i64c(start), "so").map_err(e)?;
+                            off = self.b.build_int_nsw_add(off, o, "off").map_err(e)?;
+                        }
+                        if let Some(step) = step {
+                            sh.push(self.i64c(shape[sh.len()]));
+                            st.push(if step == 1 { s } else { self.b.build_int_nsw_mul(s, self.i64c(step), "ss").map_err(e)? });
+                        }
+                    }
+                    make_struct(self.gep_bytes(bd, off)?, i64_array(&sh)?, i64_array(&st)?, v.ndim)?
+                }
             };
             vp.push(p);
         }
@@ -1490,10 +1526,11 @@ impl<'ctx> Cg<'ctx> {
                     None => Ok(self.i64c(1)),
                 })
                 .collect::<R<_>>()?;
-            // 0-d (scalar) Elemwise inputs are loaded once
+            // inputs that are one value for the whole loop (0-d or broadcast in every dim)
+            // are loaded once: inside the loop, stores to outputs could alias them
             let mut scal: Vec<Option<V>> = vec![None; n_elem];
             for j in 0..n_elem {
-                if reads[j].is_none() && inputs[j].bcast.len() == 0 && ndim > 0 {
+                if reads[j].is_none() && inputs[j].bcast.iter().all(|&b| b) && ndim > 0 {
                     scal[j] = Some(self.load_elem(data[j], inputs[j].dtype)?);
                 }
             }
@@ -1677,28 +1714,6 @@ impl<'ctx> Cg<'ctx> {
                 }
                 Ok(new_accs)
             };
-            // offset of an indexed operand: load idx[i] (cached per iteration), wrap, check
-            let indexed_off = |loaded: &mut Vec<(usize, IntValue<'ctx>)>, i: IntValue<'ctx>, idx: usize, stride: IntValue<'ctx>, len: IntValue<'ctx>| -> R<IntValue<'ctx>> {
-                let raw = match loaded.iter().find(|(x, _)| *x == idx) {
-                    Some((_, v)) => *v,
-                    None => {
-                        let off = self.b.build_int_nsw_mul(i, idx_stride[idx].unwrap(), "io").map_err(e)?;
-                        let v = self.load_elem(self.gep_bytes(data[idx], off)?, inputs[idx].dtype)?;
-                        let v = self.cast(v, inputs[idx].dtype, DType::Int64)?.into_int_value();
-                        loaded.push((idx, v));
-                        v
-                    }
-                };
-                let neg = self.b.build_int_compare(IntPredicate::SLT, raw, zero, "neg").map_err(e)?;
-                let wrapped = self.b.build_int_add(raw, len, "w").map_err(e)?;
-                let v = self.b.build_select(neg, wrapped, raw, "v").map_err(e)?.into_int_value();
-                let ok = self.b.build_int_compare(IntPredicate::ULT, v, len, "ok").map_err(e)?;
-                let cont = self.ctx.append_basic_block(f, "inb");
-                self.b.build_conditional_branch(ok, cont, fail).map_err(e)?;
-                self.b.position_at_end(cont);
-                self.b.build_int_nsw_mul(v, stride, "m").map_err(e)
-            };
-
             if ndim == 0 {
                 let ptrs: Vec<PointerValue> = ops.iter().map(|&a| self.gep_bytes(data[a], zero)).collect::<R<_>>()?;
                 compute(&ptrs, &vec![None; outs.len()], &[])?;
@@ -1721,14 +1736,84 @@ impl<'ctx> Cg<'ctx> {
                             acc_ptrs.push((p, outputs[k].dtype));
                         }
                     }
+                    // operands whose step along this dim is a runtime stride: the loop stride,
+                    // or the stride an index is scaled by (gathers and scatters)
                     let strided: Vec<(usize, IntValue)> = adv
                         .iter()
                         .enumerate()
-                        .filter_map(|(q, a)| if let Adv::Stride(s) = a[d] { Some((q, s)) } else { None })
+                        .filter_map(|(q, a)| match a[d] {
+                            Adv::Stride(s) | Adv::Indexed { stride: s, .. } => Some((q, s)),
+                            Adv::None => None,
+                        })
                         .collect();
+                    // operands indexed along this dim, grouped by index array: each index is
+                    // loaded and checked once per element, against the smallest length
+                    let mut groups: Vec<(usize, Vec<(usize, IntValue<'ctx>)>)> = Vec::new();
+                    for (q, a) in adv.iter().enumerate() {
+                        if let Adv::Indexed { idx, len, .. } = a[d] {
+                            match groups.iter_mut().find(|(x, _)| *x == idx) {
+                                Some((_, g)) => g.push((q, len)),
+                                None => groups.push((idx, vec![(q, len)])),
+                            }
+                        }
+                    }
+                    let mut min_len: Vec<IntValue<'ctx>> = Vec::new();
+                    for (_, g) in &groups {
+                        let mut m = g[0].1;
+                        for &(_, l) in &g[1..] {
+                            let lt = self.b.build_int_compare(IntPredicate::SLT, l, m, "lt").map_err(e)?;
+                            m = self.b.build_select(lt, l, m, "min").map_err(e)?.into_int_value();
+                        }
+                        min_len.push(m);
+                    }
                     let version = |contig: bool| -> R<(Vec<V<'ctx>>, inkwell::basic_block::BasicBlock<'ctx>)> {
                         let accs = self.emit_multi_acc_loop(n, &acc0, &mut |i, accs| {
-                            let mut loaded = Vec::new();
+                            // normalized index value per indexed operand
+                            let mut vidx: Vec<Option<IntValue<'ctx>>> = vec![None; ops.len()];
+                            for (gi, (idx, g)) in groups.iter().enumerate() {
+                                let off = self.b.build_int_nsw_mul(i, idx_stride[*idx].unwrap(), "io").map_err(e)?;
+                                let raw = self.load_elem(self.gep_bytes(data[*idx], off)?, inputs[*idx].dtype)?;
+                                let raw = self.cast(raw, inputs[*idx].dtype, DType::Int64)?.into_int_value();
+                                if g.len() == 1 {
+                                    let (q, len) = g[0];
+                                    let neg = self.b.build_int_compare(IntPredicate::SLT, raw, zero, "neg").map_err(e)?;
+                                    let wrapped = self.b.build_int_add(raw, len, "w").map_err(e)?;
+                                    let v = self.b.build_select(neg, wrapped, raw, "v").map_err(e)?.into_int_value();
+                                    let ok = self.b.build_int_compare(IntPredicate::ULT, v, len, "ok").map_err(e)?;
+                                    let cont = self.ctx.append_basic_block(f, "inb");
+                                    self.b.build_conditional_branch(ok, cont, fail).map_err(e)?;
+                                    self.b.position_at_end(cont);
+                                    vidx[q] = Some(v);
+                                    continue;
+                                }
+                                // fast: 0 <= raw < min length is in range for every operand
+                                let pre = self.b.get_insert_block().unwrap();
+                                let fast = self.b.build_int_compare(IntPredicate::ULT, raw, min_len[gi], "fast").map_err(e)?;
+                                let slow_bb = self.ctx.append_basic_block(f, "idxslow");
+                                let merge = self.ctx.append_basic_block(f, "idxok");
+                                self.b.build_conditional_branch(fast, merge, slow_bb).map_err(e)?;
+                                // slow: negative wrap and check per operand
+                                self.b.position_at_end(slow_bb);
+                                let neg = self.b.build_int_compare(IntPredicate::SLT, raw, zero, "neg").map_err(e)?;
+                                let mut slow_v = Vec::new();
+                                for &(_, len) in g {
+                                    let wrapped = self.b.build_int_add(raw, len, "w").map_err(e)?;
+                                    let v = self.b.build_select(neg, wrapped, raw, "v").map_err(e)?.into_int_value();
+                                    let ok = self.b.build_int_compare(IntPredicate::ULT, v, len, "ok").map_err(e)?;
+                                    let cont = self.ctx.append_basic_block(f, "inb");
+                                    self.b.build_conditional_branch(ok, cont, fail).map_err(e)?;
+                                    self.b.position_at_end(cont);
+                                    slow_v.push(v);
+                                }
+                                let slow_end = self.b.get_insert_block().unwrap();
+                                self.b.build_unconditional_branch(merge).map_err(e)?;
+                                self.b.position_at_end(merge);
+                                for (&(q, _), sv) in g.iter().zip(slow_v) {
+                                    let phi = self.b.build_phi(self.i64t(), "vi").map_err(e)?;
+                                    phi.add_incoming(&[(&raw, pre), (&sv, slow_end)]);
+                                    vidx[q] = Some(phi.as_basic_value().into_int_value());
+                                }
+                            }
                             let mut ptrs = Vec::with_capacity(ops.len());
                             for (q, a) in adv.iter().enumerate() {
                                 ptrs.push(match a[d] {
@@ -1740,9 +1825,13 @@ impl<'ctx> Cg<'ctx> {
                                             self.gep_bytes(bases[q], self.b.build_int_nsw_mul(i, s, "m").map_err(e)?)?
                                         }
                                     }
-                                    Adv::Indexed { idx, stride, len } => {
-                                        let off = indexed_off(&mut loaded, i, idx, stride, len)?;
-                                        self.gep_bytes(bases[q], off)?
+                                    Adv::Indexed { stride, .. } => {
+                                        if contig {
+                                            self.gep_elem(op_dt[q], bases[q], vidx[q].unwrap())?
+                                        } else {
+                                            let off = self.b.build_int_nsw_mul(vidx[q].unwrap(), stride, "m").map_err(e)?;
+                                            self.gep_bytes(bases[q], off)?
+                                        }
                                     }
                                 });
                             }
@@ -1753,7 +1842,7 @@ impl<'ctx> Cg<'ctx> {
                     let finals: Vec<V> = if strided.is_empty() {
                         version(false)?.0
                     } else {
-                        // all unit-strided operands move by exactly one element?
+                        // all operands move by exactly one element per step (or per index)?
                         let mut ok = self.ctx.bool_type().const_int(1, false);
                         for &(q, s) in &strided {
                             let isz = self.i64c(op_dt[q].itemsize() as i64);
