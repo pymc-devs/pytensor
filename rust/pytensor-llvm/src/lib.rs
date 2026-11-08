@@ -1,4 +1,5 @@
-#![allow(unsafe_op_in_unsafe_fn)]
+#![deny(unsafe_op_in_unsafe_fn)]
+#![warn(clippy::undocumented_unsafe_blocks)]
 //! Native code generation and runtime for PyTensor's LLVM backend.
 
 pub mod abi;

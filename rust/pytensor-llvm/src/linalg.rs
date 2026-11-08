@@ -2,6 +2,11 @@
 //!
 //! faer's work space comes from the context's scratch arena (`PtCtx::scratch`), so
 //! steady-state calls don't allocate.
+// Kernel module: every function here is called with the kernel contract (see the
+// Safety section of DESIGN.md: arguments are valid arrays as planned, params are the
+// step's own). Raw-pointer work is the whole body, so unsafe ops aren't wrapped
+// one by one; the preconditions are documented per kernel instead.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::abi::{PtArray, PtCtx};
 use faer::dyn_stack::MemStack;
@@ -48,7 +53,7 @@ macro_rules! linalg_kernels {
         /// args = [a, out(provided)]. LAPACK potrf semantics as in PyTensor's Cholesky:
         /// reads the lower (upper) triangle, zeroes the other one, and fills the result
         /// with NaN if the matrix is not positive definite.
-        pub unsafe extern "C" fn $chol(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+        pub unsafe extern "C-unwind" fn $chol(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
             let lower = (*(params as *const CholeskyParams)).lower != 0;
             let (a, out) = (arg(args, 0), arg(args, 1));
             let isz = std::mem::size_of::<$t>() as i64;
@@ -92,7 +97,7 @@ macro_rules! linalg_kernels {
 
         /// args = [A, b, out(provided)], b 1-d or 2-d. Solves A x = b for triangular A
         /// (LAPACK trtrs semantics: NaN result if A has a zero on the diagonal).
-        pub unsafe extern "C" fn $solve(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
+        pub unsafe extern "C-unwind" fn $solve(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32 {
             let prm = &*(params as *const SolveTriangularParams);
             let (lower, unit) = (prm.lower != 0, prm.unit_diagonal != 0);
             let (a, b, out) = (arg(args, 0), arg(args, 1), arg(args, 2));

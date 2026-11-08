@@ -12,6 +12,8 @@ use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
 use std::sync::Mutex;
 
 struct SendPtr<T>(*mut T);
+// SAFETY: only used to move a buffer reference into a capsule destructor, which may
+// run on any thread; PtBuffer refcounting is atomic.
 unsafe impl<T> Send for SendPtr<T> {}
 
 fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
@@ -29,13 +31,21 @@ fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
 
 /// Wrap an owned output buffer as a numpy array without copying. The array's base is a
 /// capsule that releases our reference when numpy is done with the memory.
+/// Takes over the output's buffer reference (the Python path never provides outputs, so
+/// every output is owned: a buffer the program produced or a fresh copy).
 fn wrap_output<'py>(py: Python<'py>, o: &OutArray) -> PyResult<Bound<'py, PyAny>> {
+    assert!(!o.owner.is_null(), "Python outputs are always owned buffers");
     let owner = SendPtr(o.owner);
+    // SAFETY: the capsule holds the one reference we took over; numpy calls the
+    // destructor once, when the array (its base) is freed.
     let capsule = PyCapsule::new_with_value_and_destructor(py, owner, c"pytensor_llvm.buffer", |b: SendPtr<PtBuffer>, _| unsafe {
         PtBuffer::decref(b.0)
     })?;
     let mut dims: Vec<npy_intp> = o.shape().iter().map(|&s| s as npy_intp).collect();
     let mut strides: Vec<npy_intp> = o.strides().iter().map(|&s| s as npy_intp).collect();
+    // SAFETY: `o` describes a valid array inside the buffer the capsule keeps alive; the
+    // descr reference is stolen by NewFromDescr and the capsule's by SetBaseObject (also
+    // on failure), so no reference is leaked or released twice.
     unsafe {
         let ty = numpy::npyffi::get_type_object(py, NpyTypes::PyArray_Type);
         let arr = PY_ARRAY_API.PyArray_NewFromDescr(
@@ -60,15 +70,84 @@ fn wrap_output<'py>(py: Python<'py>, o: &OutArray) -> PyResult<Bound<'py, PyAny>
 #[pyclass(module = "pytensor_llvm")]
 pub struct CompiledFunction {
     prog: std::sync::Arc<Program>,
-    state: Mutex<CallState>,
+    /// Free call states. A call takes one (or makes a new one) and puts it back: the
+    /// lock is never held across `execute`, so releasing the GIL can't deadlock, and
+    /// concurrent calls from several threads run in parallel.
+    states: Mutex<Vec<CallState>>,
+    profiling: std::sync::atomic::AtomicBool,
     np_asarray: Py<PyAny>,
 }
 
 impl CompiledFunction {
     pub fn new(py: Python<'_>, prog: Program) -> PyResult<Self> {
-        let state = Mutex::new(prog.new_state());
+        let states = Mutex::new(vec![prog.new_state()]);
         let np = py.import("numpy")?;
-        Ok(CompiledFunction { prog: std::sync::Arc::new(prog), state, np_asarray: np.getattr("asarray")?.unbind() })
+        Ok(CompiledFunction {
+            prog: std::sync::Arc::new(prog),
+            states,
+            profiling: false.into(),
+            np_asarray: np.getattr("asarray")?.unbind(),
+        })
+    }
+
+    fn take_state(&self) -> CallState {
+        let pooled = self.states.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        pooled.unwrap_or_else(|| {
+            let mut st = self.prog.new_state();
+            if self.profiling.load(std::sync::atomic::Ordering::Relaxed) {
+                st.profile = Some(vec![0.0; self.prog.n_steps()]);
+            }
+            st
+        })
+    }
+
+    fn put_state(&self, st: CallState) {
+        self.states.lock().unwrap_or_else(|e| e.into_inner()).push(st);
+    }
+}
+
+impl CompiledFunction {
+    fn call_with(&self, py: Python<'_>, st: &mut CallState, args: &Bound<'_, PyTuple>) -> PyResult<Py<PyList>> {
+        let prog: &Program = &self.prog;
+        let mut keep: Vec<Bound<'_, PyAny>> = Vec::with_capacity(args.len());
+        let mut work = 0usize;
+        for (k, a) in args.iter().enumerate() {
+            let a = if a.cast::<PyUntypedArray>().is_ok() { a } else { self.np_asarray.bind(py).call1((a,))? };
+            // kernels read native-endian, aligned data: copy anything else (one copy,
+            // like the conversion of non-arrays above)
+            let a = {
+                let arr = a.cast::<PyUntypedArray>()?;
+                // SAFETY: reading the flags of a live array object
+                let aligned = unsafe { (*arr.as_array_ptr()).fields.flags } & numpy::npyffi::NPY_ARRAY_ALIGNED != 0;
+                if arr.dtype().is_native_byteorder() == Some(false) || !aligned {
+                    let native = arr.dtype().call_method1("newbyteorder", ("=",))?;
+                    a.call_method("astype", (native,), None)?
+                } else {
+                    a
+                }
+            };
+            let arr = a.cast::<PyUntypedArray>()?;
+            let dt = arr.dtype();
+            let dtype = DType::from_numpy(dt.kind(), dt.itemsize());
+            // SAFETY: the data pointer of a live array; `keep` holds the array until after
+            // execute, and set_input validates shape, strides and alignment.
+            let data = unsafe { (*arr.as_array_ptr()).fields.data as *mut u8 };
+            prog.set_input(st, k, data, dtype, arr.shape(), arr.strides()).map_err(PyValueError::new_err)?;
+            work += arr.len();
+            keep.push(a);
+        }
+        // Releasing the GIL costs ~100ns; only worth it when there's real work.
+        let res = if work > 20_000 {
+            // `st` is exclusively ours (taken from the pool) and `keep` holds the input
+            // arrays alive until after `execute`.
+            py.detach(|| prog.execute(st, None))
+        } else {
+            prog.execute(st, None)
+        };
+        drop(keep);
+        res.map_err(runtime_error)?;
+        let arrays: Vec<Bound<'_, PyAny>> = st.outs.iter().map(|o| wrap_output(py, o)).collect::<PyResult<_>>()?;
+        Ok(PyList::new(py, arrays)?.unbind())
     }
 }
 
@@ -80,35 +159,10 @@ impl CompiledFunction {
         if args.len() != prog.n_inputs() {
             return Err(PyValueError::new_err(format!("expected {} inputs, got {}", prog.n_inputs(), args.len())));
         }
-        let mut st = self.state.lock().unwrap();
-        let mut keep: Vec<Bound<'_, PyAny>> = Vec::with_capacity(args.len());
-        let mut work = 0usize;
-        for (k, a) in args.iter().enumerate() {
-            let a = if a.cast::<PyUntypedArray>().is_ok() { a } else { self.np_asarray.bind(py).call1((a,))? };
-            let arr = a.cast::<PyUntypedArray>()?;
-            let dt = arr.dtype();
-            let dtype = DType::from_numpy(dt.kind(), dt.itemsize());
-            let data = unsafe { (*arr.as_array_ptr()).fields.data as *mut u8 };
-            prog.set_input(&mut st, k, data, dtype, arr.shape(), arr.strides()).map_err(PyValueError::new_err)?;
-            work += arr.len();
-            keep.push(a);
-        }
-        // Releasing the GIL costs ~100ns; only worth it when there's real work.
-        let res = if work > 20_000 {
-            let sp = SendPtr(&mut *st as *mut CallState);
-            let pp = SendPtr(prog as *const Program as *mut Program);
-            py.detach(move || {
-                let (sp, pp) = (sp, pp);
-                unsafe { (*pp.0).execute(&mut *sp.0, None) }
-            })
-        } else {
-            prog.execute(&mut st, None)
-        };
-        drop(keep);
-        res.map_err(runtime_error)?;
-        let arrays: Vec<Bound<'_, PyAny>> = st.outs.iter().map(|o| wrap_output(py, o)).collect::<PyResult<_>>()?;
-        drop(st);
-        Ok(PyList::new(py, arrays)?.unbind())
+        let mut st = self.take_state();
+        let res = self.call_with(py, &mut st, args);
+        self.put_state(st);
+        res
     }
 
     /// Address of a new `PtFunction` reference for the C API (release with
@@ -119,16 +173,25 @@ impl CompiledFunction {
 
     /// Turn per-kernel timing on or off. `profile_report()` returns (description, seconds).
     fn set_profiling(&self, on: bool) {
-        let mut st = self.state.lock().unwrap();
-        st.profile = if on { Some(vec![0.0; self.prog.n_steps()]) } else { None };
+        self.profiling.store(on, std::sync::atomic::Ordering::Relaxed);
+        for st in self.states.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
+            st.profile = if on { Some(vec![0.0; self.prog.n_steps()]) } else { None };
+        }
     }
 
+    /// Time per kernel, summed over the call states not in use right now.
     fn profile_report(&self) -> Vec<(String, f64)> {
-        let st = self.state.lock().unwrap();
-        match &st.profile {
-            Some(p) => self.prog.kernel_descriptions().into_iter().zip(p.iter().copied()).collect(),
-            None => vec![],
+        let states = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let mut total = vec![0.0; self.prog.n_steps()];
+        let mut any = false;
+        for p in states.iter().filter_map(|st| st.profile.as_ref()) {
+            any = true;
+            total.iter_mut().zip(p).for_each(|(t, x)| *t += x);
         }
+        if !any {
+            return vec![];
+        }
+        self.prog.kernel_descriptions().into_iter().zip(total).collect()
     }
 
     /// Storage and layout chosen for every node output.
@@ -170,6 +233,7 @@ fn c_header() -> &'static str {
 #[pyfunction]
 fn llvm_version() -> String {
     let (mut a, mut b, mut c) = (0, 0, 0);
+    // SAFETY: plain out-parameters.
     unsafe { llvm_sys::core::LLVMGetVersion(&mut a, &mut b, &mut c) };
     format!("{a}.{b}.{c}")
 }
