@@ -3752,29 +3752,22 @@ class ExtractDiag(COp):
         return (0,)
 
     def pullback(self, inputs, outputs, gout):
-        # Avoid circular import
-        from pytensor.tensor.subtensor import set_subtensor
-
         (x,) = inputs
         (gz,) = gout
 
         axis1, axis2, offset = self.axis1, self.axis2, self.offset
 
-        # Start with zeros (and axes in the front)
-        x_grad = zeros_like(moveaxis(x, (axis1, axis2), (0, 1)))
+        positions = arange(outputs[0].shape[-1])
+        row_offset, column_offset = max(0, -offset), max(0, offset)
+        rows = positions + row_offset if row_offset else positions
+        columns = positions + column_offset if column_offset else positions
 
-        # Fill zeros with output diagonal
-        xdiag = alloc_diag(gz, offset=0, axis1=0, axis2=1)
-        z_len = xdiag.shape[0]
-        if offset >= 0:
-            diag_slices = (slice(None, z_len), slice(offset, offset + z_len))
-        else:
-            diag_slices = (slice(abs(offset), abs(offset) + z_len), slice(None, z_len))
-        x_grad = set_subtensor(x_grad[diag_slices], xdiag)
+        # With the diagonal axes last, the advanced indices leave the diagonal as the
+        # last dimension, which is where ``gz`` has it.
+        x_grad = zeros_like(moveaxis(x, (axis1, axis2), (-2, -1)))
+        x_grad = x_grad[..., rows, columns].inc(gz)
 
-        # Put axes back in their original positions
-        x_grad = moveaxis(x_grad, (0, 1), (axis1, axis2))
-        return [x_grad]
+        return [moveaxis(x_grad, (-2, -1), (axis1, axis2))]
 
     def infer_shape(self, node, shapes):
         from pytensor.tensor.math import clip, minimum
