@@ -3166,16 +3166,7 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         ExtractDiag,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
-    # Post-materialization, the log-det gradient is a diagonal matrix added to
-    # ``L@L.T`` at the matrix level; BlasOpt's GemmOptimizer fuses ``add(dot, C)``
-    # into one Gemm, materializing that diagonal as one extra set-subtensor (7 ops).
-    # Pre-materialization keeps the term in the packed vector's index space, so
-    # there's no matrix-level add to fuse (6 ops). Without Gemm (BlasOpt in the
-    # linker's incompatible_rewrites, e.g. numba) the term never reaches the matrix
-    # and both collapse to 6. All lowerings are correct.
-    blas_rewrites_run = "BlasOpt" not in f.maker.mode.linker.incompatible_rewrites
-    expected_n_idx = 7 if (blas_rewrites_run and not exp_before_materialize) else 6
-    assert n_idx == expected_n_idx
+    assert n_idx == 6
 
     x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
     # Expected values were computed once by running ``f(x)``.

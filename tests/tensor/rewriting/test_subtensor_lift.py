@@ -7,6 +7,7 @@ from pytensor import (
     Mode,
     config,
     function,
+    grad,
     shared,
 )
 from pytensor import scalar as ps
@@ -80,6 +81,14 @@ mode_opt = get_mode(mode_opt)
 
 
 NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
+
+
+def _has_pairwise_node(fgraph):
+    return any(
+        output.type.ndim >= 2 and output.type.shape[:2] == (None, None)
+        for node in fgraph.apply_nodes
+        for output in node.outputs
+    )
 
 
 class TestLocalSubtensorOfBatchDims:
@@ -1277,6 +1286,20 @@ class TestExtractDiagLiftPass:
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         assert_equal_computations([rewritten], [v])
 
+    def test_extract_diag_of_alloc_diag_at_canonicalize(self):
+        v = pt.vector("v", shape=(4,))
+        rewritten = rewrite_graph(pt.diagonal(pt.diag(v)), include=("canonicalize",))
+        assert_equal_computations([rewritten], [v])
+
+    @pytest.mark.parametrize("v_shape", [(3,), (None,)], ids=["static", "dynamic"])
+    def test_extract_diag_of_alloc_diag_offset_past_matrix(self, v_shape):
+        v = pt.vector("v", shape=v_shape)
+        out = pt.diagonal(pt.diag(v), offset=5)
+
+        with config.change_flags(on_opt_error="raise"):
+            result = RewriteTester([v], [out], **self.rewrite_kw)
+        result.assert_eval(np.arange(3.0))
+
     def test_extract_diag_of_alloc_diag_offset_mismatch(self):
         """When offsets differ, the diagonals don't overlap, so the result is zeros."""
         v = pt.vector("v", shape=(4,))
@@ -1574,6 +1597,69 @@ class TestExtractDiagLiftPass:
         )
         result.assert_graph(rewrite_graph(out, **without_diagonal))
         result.assert_eval(np.arange(12.0).reshape(3, 4))
+
+    @pytest.mark.parametrize("order", [1, 2], ids=["first", "second"])
+    @pytest.mark.parametrize(
+        "diagonal_kwargs", [{}, {"offset": 1}], ids=["main_diagonal", "offset"]
+    )
+    def test_gradient_of_diagonal_builds_no_pairwise_node(self, diagonal_kwargs, order):
+        X = pt.matrix("X", shape=(None, 2))
+        lengthscale = pt.scalar("lengthscale")
+        amplitude = pt.scalar("amplitude")
+        distance = pt.sqr(X[:, 0, None] - 1.3 * X[:, 0][None, :])
+        tau = pt.maximum(distance, 0.0) / lengthscale**2
+        kernel = pt.switch(tau > 0.5, pt.exp(-tau) * (1 + tau), pt.exp(-tau))
+
+        out = pt.sum(pt.diagonal(amplitude**2 * kernel, **diagonal_kwargs))
+        for _ in range(order):
+            out = grad(out, lengthscale)
+
+        result = RewriteTester(
+            [X, lengthscale, amplitude],
+            [out],
+            include=("ShapeOpt", "canonicalize", "stabilize", "specialize"),
+            exclude=("fusion", "inplace"),
+        )
+
+        assert not _has_pairwise_node(result.rewr_fg)
+        result.assert_eval(np.random.default_rng(0).normal(size=(6, 2)), 0.7, 1.3)
+
+    def test_value_and_gradient_of_diagonal_build_no_pairwise_node(self):
+        X = pt.matrix("X", shape=(None, 2))
+        lengthscale = pt.scalar("lengthscale")
+        kernel = pt.exp(-pt.sqr(X[:, 0, None] - 1.3 * X[:, 0][None, :]) / lengthscale)
+        value = pt.sum(pt.diagonal(kernel))
+
+        result = RewriteTester(
+            [X, lengthscale],
+            [value, grad(value, lengthscale)],
+            include=("ShapeOpt", "canonicalize", "stabilize", "specialize"),
+            exclude=("fusion", "inplace"),
+        )
+
+        assert not _has_pairwise_node(result.rewr_fg)
+        result.assert_eval(np.random.default_rng(0).normal(size=(6, 2)), 0.7)
+
+    def test_value_and_gradient_of_gram_diagonal_build_no_pairwise_dot22(self):
+        X = pt.matrix("X", shape=(None, 2))
+        lengthscale = pt.scalar("lengthscale")
+        squared_norms = pt.sum(pt.sqr(X), axis=1)
+        distance = squared_norms[:, None] + squared_norms[None, :] - 2 * X @ X.T
+        value = pt.sum(pt.diagonal(pt.exp(-(distance + 0.1) / lengthscale)))
+        outputs = [value, grad(value, lengthscale)]
+
+        # Dot22 only appears once a full CVM compile runs BlasOpt, which RewriteTester
+        # does not apply.
+        fn = function(
+            [X, lengthscale],
+            outputs,
+            mode=get_mode("CVM").excluding("fusion", "inplace"),
+        )
+
+        assert not _has_pairwise_node(fn.maker.fgraph)
+        values = np.random.default_rng(0).normal(size=(6, 2)), 0.7
+        reference = function([X, lengthscale], outputs, mode=NO_OPTIMIZATION_MODE)
+        np.testing.assert_allclose(fn(*values), reference(*values))
 
 
 class TestAdvancedSubtensorOfDot:
