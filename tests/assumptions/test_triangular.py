@@ -1,5 +1,7 @@
+import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
@@ -136,15 +138,41 @@ def test_schur_t_is_upper_triangular_only_for_complex(output, expected):
     assert af.get(Z, UPPER_TRIANGULAR) == FactState.UNKNOWN
 
 
-def test_qz_aa_and_bb_are_upper_triangular():
+@pytest.mark.parametrize(
+    "output, expected",
+    [("complex", True), ("real", False)],
+)
+def test_qz_aa_is_upper_triangular_only_for_complex(output, expected):
+    # Complex QZ form is upper-triangular; real QZ form gives quasi-upper-triangular
+    # AA (2x2 blocks), so it is not claimed. BB is always upper-triangular.
     a = pt.matrix("a", shape=(3, 3))
     b = pt.matrix("b", shape=(3, 3))
-    AA, BB, Q, Z = pt.linalg.qz(a, b)
+    AA, BB, Q, Z = pt.linalg.qz(a, b, output=output)
     _, af = make_fgraph(AA, BB, Q, Z)
-    assert af.check(AA, UPPER_TRIANGULAR)
+    assert af.check(AA, UPPER_TRIANGULAR) is expected
     assert af.check(BB, UPPER_TRIANGULAR)
     assert af.get(Q, UPPER_TRIANGULAR) == FactState.UNKNOWN
     assert af.get(Z, UPPER_TRIANGULAR) == FactState.UNKNOWN
+
+
+def test_qz_complex_inputs_are_upper_triangular():
+    a = pt.cmatrix("a", shape=(3, 3))
+    b = pt.cmatrix("b", shape=(3, 3))
+    AA, BB, Q, Z = pt.linalg.qz(a, b, output="real")
+    _, af = make_fgraph(AA, BB, Q, Z)
+    assert af.check(AA, UPPER_TRIANGULAR)
+    assert af.check(BB, UPPER_TRIANGULAR)
+
+
+def test_qz_real_det_rewrite_issue_2619():
+    rng = np.random.default_rng(0)
+    A, B = rng.normal(size=(4, 4)), rng.normal(size=(4, 4))
+    a, b = pt.matrix("a", shape=(4, 4)), pt.matrix("b", shape=(4, 4))
+
+    AA = pt.linalg.qz(a, b, output="real")[0]
+    fn = pytensor.function([a, b], [AA, pt.linalg.det(AA)])
+    aa, det = fn(A, B)
+    assert np.isclose(det, np.linalg.det(aa))
 
 
 def test_lu_l_is_lower_and_u_is_upper_triangular():

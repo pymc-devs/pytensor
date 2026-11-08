@@ -124,10 +124,17 @@ def _schur_upper(key, op, feature, fgraph, node, input_states):
 
 @register_assumption(UPPER_TRIANGULAR, QZ)
 def _qz_upper(key, op, feature, fgraph, node, input_states):
-    # AA (output 0) and BB (output 1) are upper triangular
+    # AA (output 0) is upper triangular only for complex QZ
+    # Real QZ gives quasi-upper-triangular AA (2x2 blocks)
+    # BB (output 1) is always upper triangular
     n_out = len(node.outputs)
     states = [FactState.UNKNOWN] * n_out
-    states[0] = FactState.TRUE
+    is_complex = op.complex_output or (
+        bool(node.inputs)
+        and any(getattr(inp.type, "dtype", "").startswith("complex") for inp in node.inputs[:2])
+    )
+    if is_complex:
+        states[0] = FactState.TRUE
     states[1] = FactState.TRUE
     return states
 
