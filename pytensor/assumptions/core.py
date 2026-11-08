@@ -2,7 +2,7 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import IntFlag, auto
-from typing import Any
+from typing import Any, ClassVar
 
 from pytensor.graph import Apply, FunctionGraph, Op
 from pytensor.graph.basic import Variable
@@ -94,10 +94,45 @@ class AssumptionKey:
 
     See :func:`register_matrix_property_rules` for the rules a property of the
     trailing two axes needs to survive transposes, reshapes, and indexing.
+
+    A key whose fact is a value other than a :class:`FactState` -- a bound, a set, a
+    pair -- subclasses ``AssumptionKey`` and overrides ``value_type``, ``unknown``,
+    :meth:`join` and :meth:`is_conflict`. ``unknown`` means "nothing proven" and is
+    what inference returns when no rule applies, so it must be correct for every
+    variable.
+
+    .. code-block:: python
+
+        import math
+
+
+        class RankBound(AssumptionKey):
+            value_type = float
+            unknown = math.inf
+
+            def join(self, left, right):
+                return min(left, right)
+
+            def is_conflict(self, value):
+                return False
+
+
+        RANK = RankBound("rank")
     """
 
     name: str
     short_name: str = ""
+
+    value_type: ClassVar[type] = FactState
+    unknown: ClassVar[Any] = FactState.UNKNOWN
+
+    def join(self, left: Any, right: Any) -> Any:
+        """Combine two pieces of evidence about the same variable."""
+        return FactState.join(left, right)
+
+    def is_conflict(self, value: Any) -> bool:
+        """Return True when *value* records contradictory evidence."""
+        return value is FactState.CONFLICT
 
     def __post_init__(self) -> None:
         registered = KEY_REGISTRY.get(self.name)
@@ -178,15 +213,15 @@ class ConflictingAssumptionsError(ValueError):
 
 
 # An inference function takes the active AssumptionKey, the Op, the current AssumptionFeature, the FunctionGraph,
-# the Apply node being analyzed, and the states of the input variables for the current key. It returns a list of
-# FactState with one entry per node output.
+# the Apply node being analyzed, and the values of the input variables for the current key. It returns a list of
+# values of the key's type (a FactState for boolean keys) with one entry per node output.
 InferFactFn = Callable[
-    [AssumptionKey, Op, "AssumptionFeature", FunctionGraph, Apply, list[FactState]],
-    list[FactState],
+    [AssumptionKey, Op, "AssumptionFeature", FunctionGraph, Apply, list[Any]],
+    list[Any],
 ]
 
 # The global inference registry maps (AssumptionKey, Op type) pairs to lists of inference functions.
-# Rules are tried in registration order; the first to return TRUE wins.
+# Rules are tried in registration order, and the first to return a value other than key.unknown wins.
 ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], list[InferFactFn]] = {}
 
 # Every AssumptionKey ever constructed, by name. Downstream libraries join the system
@@ -281,7 +316,7 @@ def register_constant_inference(key: AssumptionKey, fn: ConstantInferFn) -> None
 # Maps (key, Op type) to rules that read a fact about a variable off a node consuming it,
 # such as ``solve(a, b, assume_a="pos")`` promising that ``a`` is positive definite. A rule
 # is called as ``fn(key, op, node, input_index)`` and returns the state of that input.
-ClientInferFn = Callable[[AssumptionKey, Op, Apply, int], FactState]
+ClientInferFn = Callable[[AssumptionKey, Op, Apply, int], Any]
 CLIENT_INFER_REGISTRY: dict[tuple[AssumptionKey, type], ClientInferFn] = {}
 # Keys with at least one client rule. Inference skips the client scan for every other key.
 CLIENT_INFER_KEYS: set[AssumptionKey] = set()
@@ -303,7 +338,7 @@ def register_client_inference(
 
 def infer_assumption_from_client(
     key: AssumptionKey, op: Op, node: Apply, input_index: int
-) -> FactState:
+) -> Any:
     """Return what *node* promises about its input at *input_index* for *key*."""
     # Imported here because pytensor.tensor.rewriting loads this module before tensor.basic,
     # and importing blockwise first trips the compile.builders <-> tensor.basic cycle.
@@ -315,7 +350,7 @@ def infer_assumption_from_client(
         fn = CLIENT_INFER_REGISTRY.get((key, cls))
         if fn is not None:
             return fn(key, op, node, input_index)
-    return FactState.UNKNOWN
+    return key.unknown
 
 
 # The canonical structural-property keys
@@ -360,7 +395,8 @@ def register_assumption(
     """Decorator that registers an inference rule for ``(key, op_type)`` pairs.
 
     The decorated function is called as ``fn(key, op, feature, fgraph, node, input_states)``
-    and must return a list of :class:`FactState` with one entry per node output.
+    and must return a list of the key's values, one per node output. For a boolean key
+    those are :class:`FactState` members.
 
     Parameters
     ----------
@@ -370,8 +406,9 @@ def register_assumption(
         Op classes the rule applies to.
     prepend : bool, optional
         Run this rule ahead of those already registered for the same pair rather than
-        after them. Rules are tried in order until one returns a non-UNKNOWN state, so
-        this is how a key overrides a rule it inherited from a bundle. Default False.
+        after them. Rules are tried in order until one returns a value other than
+        ``key.unknown``, so this is how a key overrides a rule it inherited from a
+        bundle. Default False.
     """
 
     def decorator(fn: InferFactFn) -> InferFactFn:
@@ -397,7 +434,8 @@ def infer_assumption_for_node(
     """Determine the *key* fact for every output of *node*.
 
     Walks the Op's MRO for the most specific :func:`register_assumption` rule and
-    returns the first non-UNKNOWN result. Falls back to ``UNKNOWN`` per output.
+    returns the first result that is not ``key.unknown``. Falls back to
+    ``key.unknown`` per output.
     """
     rules: list[InferFactFn] = []
     for cls in type(op).__mro__:
@@ -414,17 +452,18 @@ def infer_assumption_for_node(
                 f"an assumption rule returned {len(output_states)} states for "
                 f"{n_outputs} outputs on node {node!r}"
             )
-        if any(s is not FactState.UNKNOWN for s in output_states):
+        if any(s != key.unknown for s in output_states):
             return output_states
 
-    return [FactState.UNKNOWN] * n_outputs
+    return [key.unknown] * n_outputs
 
 
 class AssumptionFeature(Feature):
     """``FunctionGraph`` feature that tracks symbolic assumptions about variables.
 
     Assumptions (e.g. "this matrix is diagonal") are represented as ``(variable,
-    AssumptionKey) -> FactState`` mappings. Facts are inferred lazily via per-Op
+    AssumptionKey) -> value`` mappings, where the value is a :class:`FactState` for
+    boolean keys. Facts are inferred lazily via per-Op
     rules registered with :func:`register_assumption`.
 
     Attached lazily by :func:`check_assumption` on first use.
@@ -437,7 +476,7 @@ class AssumptionFeature(Feature):
         if hasattr(fgraph, "assumption_feature"):
             raise AlreadyThere("AssumptionFeature is already attached")
         self.fgraph = fgraph
-        self.cache: dict[tuple[Any, AssumptionKey], FactState] = {}
+        self.cache: dict[tuple[Any, AssumptionKey], Any] = {}
         self._var_to_keys: dict[Any, set[AssumptionKey]] = {}
         self._stale_vars: set = set()
         fgraph.assumption_feature = self
@@ -456,13 +495,13 @@ class AssumptionFeature(Feature):
         # so raising here corrupts the caller's view.
         for key in self._var_to_keys.get(old_var, ()):
             old_state = self.cache.get((old_var, key))
-            if old_state is None or old_state is FactState.UNKNOWN:
+            if old_state is None or old_state == key.unknown:
                 continue
             new_state = self.cache.get((new_var, key))
-            if new_state is None or new_state is FactState.UNKNOWN:
+            if new_state is None or new_state == key.unknown:
                 self.cache[(new_var, key)] = old_state
             else:
-                self.cache[(new_var, key)] = FactState.join(old_state, new_state)
+                self.cache[(new_var, key)] = key.join(old_state, new_state)
             self._var_to_keys.setdefault(new_var, set()).add(key)
             # new_var gained a fact whose implications were cached UNKNOWN before it was
             # known; flag it so the next get() sweep re-derives those stale entries.
@@ -479,17 +518,17 @@ class AssumptionFeature(Feature):
         # follow their variables through the clone since they live as graph nodes).
         return AssumptionFeature()
 
-    def get(self, var: Any, key: AssumptionKey) -> FactState:
-        """Return the inferred :class:`FactState` for ``(var, key)``.
+    def get(self, var: Any, key: AssumptionKey) -> Any:
+        """Return the inferred value for ``(var, key)``, a :class:`FactState` for boolean keys.
 
-        Raise :class:`ConflictingAssumptionsError` when the cached state is
-        :attr:`FactState.CONFLICT` — surfaces conflicts from substitutions or
+        Raise :class:`ConflictingAssumptionsError` when the cached value is a
+        conflict for *key* -- surfaces conflicts from substitutions or
         owner-inferred rules at the point of query, where the graph is stable
         and the caller can react.
         """
         cache_key = (var, key)
         state = self.cache.get(cache_key)
-        if state is None or state is FactState.UNKNOWN:
+        if state is None or state == key.unknown:
             if self._stale_vars:
                 self._drop_unknown_downstream(self._stale_vars)
                 self._stale_vars.clear()
@@ -498,27 +537,31 @@ class AssumptionFeature(Feature):
                 state = self.cache.get(cache_key)
             if state is None:
                 state = self._compute(var, key)
-        if state is FactState.CONFLICT:
+        if key.is_conflict(state):
             raise ConflictingAssumptionsError(
                 f"Conflicting evidence for key {key!r} on {var!r}."
             )
         return state
 
     def check(self, var: Any, key: AssumptionKey) -> bool:
-        """Return ``True`` iff the assumption is definitively TRUE for ``var``."""
+        """Return ``True`` iff the boolean assumption is definitively TRUE for ``var``."""
         return self.get(var, key) is FactState.TRUE
 
-    def _compute(self, var: Any, key: AssumptionKey) -> FactState:
-        """Infer the fact state for ``(var, key)``, caching ancestors inputs-first.
+    def _compute(self, var: Any, key: AssumptionKey) -> Any:
+        """Infer the value for ``(var, key)``, caching ancestors inputs-first.
 
         When the owner says nothing, asks the clients of ``var`` what they promise about it.
         Then walks the ``IMPLIES`` graph in both directions:
           - Forward: a stronger key being TRUE makes this (weaker) key TRUE.
           - Contrapositive: a weaker key being FALSE makes this (stronger) key FALSE.
 
-        Raise :class:`ConflictingAssumptionsError` if owner-inferred rules produce
-        ``FactState.CONFLICT``.
+        The ``IMPLIES`` walk only runs for boolean keys.
+
+        Raise :class:`ConflictingAssumptionsError` if owner-inferred rules produce a
+        conflict for *key*.
         """
+        unknown = key.unknown
+        is_boolean = key.value_type is FactState
 
         def deps(v: Any) -> tuple:
             # Stop descending at cached variables — their facts (and their ancestors')
@@ -532,9 +575,9 @@ class AssumptionFeature(Feature):
             if (v, key) in self.cache:
                 continue
 
-            # Cache UNKNOWN up front so any recursive ``self.get(v, other_key)`` triggered
+            # Cache key.unknown up front so any recursive ``self.get(v, other_key)`` triggered
             # by the IMPLIES checks sees a placeholder instead of recursing back here.
-            self.cache[(v, key)] = FactState.UNKNOWN
+            self.cache[(v, key)] = unknown
             self._var_to_keys.setdefault(v, set()).add(key)
 
             owner = getattr(v, "owner", None)
@@ -547,29 +590,29 @@ class AssumptionFeature(Feature):
             elif isinstance(v, TensorConstant) and key in CONSTANT_INFER_REGISTRY:
                 state = CONSTANT_INFER_REGISTRY[key](v)
             else:
-                state = FactState.UNKNOWN
+                state = unknown
 
-            if state is FactState.UNKNOWN and key in CLIENT_INFER_KEYS:
+            if state == unknown and key in CLIENT_INFER_KEYS:
                 for client, input_index in self.fgraph.clients.get(v, ()):
                     state = infer_assumption_from_client(
                         key, client.op, client, input_index
                     )
-                    if state is not FactState.UNKNOWN:
+                    if state != unknown:
                         break
 
-            if state is FactState.UNKNOWN:
+            if is_boolean and state is FactState.UNKNOWN:
                 for stronger, weaker_list in IMPLIES.items():
                     if key in weaker_list and self.get(v, stronger) is FactState.TRUE:
                         state = FactState.TRUE
                         break
 
-            if state is FactState.UNKNOWN:
+            if is_boolean and state is FactState.UNKNOWN:
                 for weaker in IMPLIES.get(key, ()):
                     if self.get(v, weaker) is FactState.FALSE:
                         state = FactState.FALSE
                         break
 
-            if state is FactState.CONFLICT:
+            if key.is_conflict(state):
                 raise ConflictingAssumptionsError(
                     f"Conflicting evidence for {key} on {v!r} from owner-inferred rules."
                 )
@@ -589,9 +632,7 @@ class AssumptionFeature(Feature):
             var = queue.popleft()
             keys = var_to_keys.get(var)
             if keys:
-                for key in [
-                    k for k in keys if cache.get((var, k)) is FactState.UNKNOWN
-                ]:
+                for key in [k for k in keys if cache.get((var, k)) == k.unknown]:
                     cache.pop((var, key), None)
                     keys.discard(key)
                 if not keys:
@@ -604,35 +645,55 @@ class AssumptionFeature(Feature):
 
 
 def true_if(cond: bool, else_false: bool = False) -> list[FactState]:
-    """``[TRUE]`` when *cond* holds, ``[UNKNOWN]`` (or ``[FALSE]``) otherwise."""
+    """``[TRUE]`` when *cond* holds, ``[UNKNOWN]`` (or ``[FALSE]``) otherwise.
+
+    For boolean keys only.
+    """
     if cond:
         return [FactState.TRUE]
     return [FactState.FALSE] if else_false else [FactState.UNKNOWN]
 
 
 def propagate_first(key, op, feature, fgraph, node, input_states) -> list[FactState]:
-    """Output inherits the assumption iff the first input has it."""
+    """Output inherits the assumption iff the first input has it. For boolean keys only."""
     return true_if(input_states[0] is FactState.TRUE)
 
 
 def all_inputs_have_key(
     key, op, feature, fgraph, node, input_states
 ) -> list[FactState]:
-    """Output inherits the assumption iff *every* input has it."""
+    """Output inherits the assumption iff *every* input has it. For boolean keys only."""
     return true_if(all(s is FactState.TRUE for s in input_states))
+
+
+def _assumption_feature(fgraph: FunctionGraph) -> AssumptionFeature:
+    feature = getattr(fgraph, "assumption_feature", None)
+    if feature is None:
+        feature = AssumptionFeature()
+        fgraph.attach_feature(feature)
+    return feature
 
 
 def check_assumption(
     fgraph: FunctionGraph | None, var: Any, key: AssumptionKey
 ) -> bool:
-    """Return True iff *key* is definitively TRUE for *var* in *fgraph*.
+    """Return True iff the boolean *key* is definitively TRUE for *var* in *fgraph*.
 
     Lazily attaches :class:`AssumptionFeature` to *fgraph* if it is not already present.
     """
     if fgraph is None:
         return False
-    feature = getattr(fgraph, "assumption_feature", None)
-    if feature is None:
-        feature = AssumptionFeature()
-        fgraph.attach_feature(feature)
-    return feature.check(var, key)
+    return _assumption_feature(fgraph).check(var, key)
+
+
+def get_assumption_value(
+    fgraph: FunctionGraph | None, var: Any, key: AssumptionKey
+) -> Any:
+    """Return the value of *key* for *var* in *fgraph*.
+
+    Lazily attaches :class:`AssumptionFeature` to *fgraph* if it is not already present.
+    Without a graph, return ``key.unknown``.
+    """
+    if fgraph is None:
+        return key.unknown
+    return _assumption_feature(fgraph).get(var, key)

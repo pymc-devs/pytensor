@@ -38,6 +38,7 @@ from pytensor.assumptions.core import (
     ConflictingAssumptionsError,
     FactState,
     check_assumption,
+    get_assumption_value,
     register_assumption,
     register_constant_inference,
     register_implies,

@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 import pytensor.tensor as pt
@@ -11,8 +13,10 @@ from pytensor.assumptions import (
     AssumptionKey,
     ConflictingAssumptionsError,
     FactState,
+    get_assumption_value,
     register_assumption,
 )
+from pytensor.assumptions.core import register_client_inference
 from pytensor.assumptions.specify import assume
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
@@ -20,7 +24,7 @@ from pytensor.graph.op import Op
 from pytensor.tensor.basic import Eye
 from pytensor.tensor.rewriting.assumptions import DrainSpecifyAssumptions
 from pytensor.tensor.type import TensorType
-from tests.assumptions.conftest import make_fgraph
+from tests.assumptions.conftest import RankBoundedOp, make_fgraph
 
 
 @pytest.mark.parametrize(
@@ -217,3 +221,65 @@ def test_conflict_during_substitution_does_not_corrupt_graph():
 
     with pytest.raises(ConflictingAssumptionsError):
         af.get(new_false, DIAGONAL)
+
+
+def test_valued_key_reports_rule_value(rank):
+    x = pt.matrix("x", shape=(None, None))
+    y = RankBoundedOp(3)(x)
+    _, af = make_fgraph(y)
+    assert af.get(x, rank) == math.inf
+    assert af.get(y, rank) == 3
+
+
+def test_get_assumption_value_attaches_feature(rank):
+    y = RankBoundedOp(3)(pt.matrix("x"))
+    fg = FunctionGraph(outputs=[y], clone=False)
+    assert get_assumption_value(fg, y, rank) == 3
+    assert get_assumption_value(None, y, rank) == math.inf
+
+
+def test_valued_key_through_matrix_property_rules(rank):
+    y = RankBoundedOp(3)(pt.matrix("x", shape=(4, 4)))
+    batched = y[None]
+    reshaped = y.reshape((2, 8))
+    sliced = y[:2]
+    _, af = make_fgraph(batched, reshaped, sliced)
+    assert af.get(batched, rank) == 3
+    assert af.get(reshaped, rank) == math.inf
+    assert af.get(sliced, rank) == math.inf
+
+
+def test_replace_joins_valued_facts(rank):
+    x = pt.matrix("x")
+    old = RankBoundedOp(2)(x)
+    new = RankBoundedOp(5)(x)
+    sink = pt.sin(old)
+    fg, af = make_fgraph(sink, inputs=[x])
+    assert af.get(old, rank) == 2
+    assert af.get(new, rank) == 5
+
+    fg.replace(old, new, reason="replace")
+    assert af.get(new, rank) == 2
+
+
+def test_valued_key_client_without_rule_stays_unknown(rank):
+    @register_client_inference(rank, RankBoundedOp)
+    def _input_rank_bounded(key, op, node, input_index):
+        return op.bound
+
+    promised = pt.matrix("promised")
+    unpromised = pt.matrix("unpromised")
+    _, af = make_fgraph(RankBoundedOp(4)(promised), pt.sin(unpromised))
+    assert af.get(promised, rank) == 4
+    assert af.get(unpromised, rank) == math.inf
+
+
+def test_replace_reprobes_downstream_valued_unknown(rank):
+    x = pt.matrix("x")
+    z = pt.matrix("z")
+    batched = x[None]
+    fg, af = make_fgraph(batched, inputs=[x, z])
+    assert af.get(batched, rank) == math.inf
+
+    fg.replace(x, RankBoundedOp(3)(z), reason="replace")
+    assert af.get(batched, rank) == 3
