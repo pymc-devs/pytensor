@@ -9,9 +9,57 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import exp, prod
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.rewriting.sort import local_sort_under_reduce
+from pytensor.tensor.rewriting.sort import local_sort_of_alloc, local_sort_under_reduce
 from pytensor.tensor.type import matrix, vector
 from tests.unittest_tools import RewriteTester
+
+
+@pytest.mark.parametrize(
+    "value_shape, shape, axis, value_axis",
+    [
+        ((), (3, 4), 0, None),
+        ((), (3, 4), 1, None),
+        ((3,), (2, 3), 0, None),
+        ((3,), (2, 3), 1, 0),
+        ((3, 1), (3, 4), 1, None),
+        ((3, 1), (3, 4), 0, 0),
+    ],
+)
+def test_local_sort_of_alloc(value_shape, shape, axis, value_axis):
+    value = pt.tensor("value", shape=value_shape)
+    allocated = pt.alloc(value, *shape)
+    out = pt.sort(allocated, axis=axis)
+    result = RewriteTester(
+        [value], [out], include=None, custom_rewrite=local_sort_of_alloc
+    )
+    expected = (
+        allocated
+        if value_axis is None
+        else pt.alloc(pt.sort(value, axis=value_axis), *shape)
+    )
+    result.assert_graph(expected)
+    rng = np.random.default_rng(0)
+    value_test = np.asarray(rng.normal(size=value_shape), dtype=value.dtype)
+    result.assert_eval(value_test)
+
+
+@pytest.mark.parametrize("value_shape, axis", [((), 0), ((), 1), ((4,), 1)])
+def test_local_argsort_of_alloc(value_shape, axis):
+    value = pt.tensor("value", shape=value_shape)
+    allocated = pt.alloc(value, 3, 4)
+    out = pt.argsort(allocated, axis=axis, stable=True)
+    result = RewriteTester(
+        [value], [out], include=None, custom_rewrite=local_sort_of_alloc
+    )
+    if value_shape:
+        expected = pt.alloc(pt.argsort(value, axis=0, stable=True), 3, 4)
+    else:
+        indices = pt.arange((3, 4)[axis], dtype="int64")
+        expected = pt.alloc(pt.expand_dims(indices, axis=1 - axis), 3, 4)
+    result.assert_graph(expected)
+    rng = np.random.default_rng(0)
+    value_test = np.asarray(rng.normal(size=value_shape), dtype=value.dtype)
+    result.assert_eval(value_test)
 
 
 @pytest.mark.parametrize(

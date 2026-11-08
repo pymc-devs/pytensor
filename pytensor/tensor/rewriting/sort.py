@@ -1,8 +1,36 @@
 from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.tensor.basic import Alloc, alloc, arange
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
-from pytensor.tensor.sort import SortOp
+from pytensor.tensor.sort import ArgSortOp, SortOp
 from pytensor.tensor.subtensor import Subtensor, get_constant_idx
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([SortOp, ArgSortOp])
+def local_sort_of_alloc(fgraph, node):
+    """Apply Sort/ArgSort before Alloc to avoid sorting repeated copies.
+
+    Map the sorting axis back to Alloc's value, then broadcast the sorted value
+    or its indices. If Alloc broadcasts the sorting axis, Sort is redundant and
+    ArgSort instead broadcasts a range of indices.
+    """
+    [x] = node.inputs
+    match x.owner_op_and_inputs:
+        case Alloc(), value, *shape:
+            value_axis = node.op.axis - (len(shape) - value.ndim)
+            if value_axis < 0 or value.type.broadcastable[value_axis]:
+                if isinstance(node.op, SortOp):
+                    return [x]
+                # Ties may be returned in any order by an unstable argsort.
+                indices = arange(shape[node.op.axis], dtype=node.outputs[0].dtype)
+                pattern = ["x"] * len(shape)
+                pattern[node.op.axis] = 0
+                return [alloc(indices.dimshuffle(pattern), *shape)]
+            else:
+                sorted_value = type(node.op)(kind=node.op.kind, axis=value_axis)(value)
+                return [alloc(sorted_value, *shape)]
 
 
 def _reversed_axes(node) -> set[int] | None:
