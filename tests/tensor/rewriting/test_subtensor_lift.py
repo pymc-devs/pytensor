@@ -1854,3 +1854,400 @@ class TestDiagOfDot:
             rng.integers(0, 5, (6, 4)).astype("int32"),
             rng.integers(0, 5, (4, 6)).astype("int32"),
         )
+
+
+class TestSparseWrites:
+    """Test ``local_elemwise_of_sparse_write``, ``local_dot_of_sparse_write``,
+    ``local_transpose_of_sparse_write``, ``local_sum_of_write`` and
+    ``local_partial_sum_of_elementwise_write``.
+    """
+
+    rows = pt.constant(np.array([0, 1, 3]))
+    columns = pt.constant(np.array([1, 1, 2]))
+    repeated_rows = pt.constant(np.array([0, 0, 3]))
+    value_array = np.array([1.0, 2.0, 3.0])
+
+    def setup_method(self):
+        self.value = pt.vector("value", shape=(3,))
+        self.zeros = pt.zeros((4, 5))
+        self.written = self.zeros[self.rows, self.columns].inc(self.value)
+
+    def test_mul_reads_other_input_at_written_positions(self):
+        other = pt.matrix("other", shape=(4, 5))
+
+        result = RewriteTester([self.value, other], [self.written * other])
+
+        result.assert_graph(
+            self.zeros[self.rows, self.columns].inc(
+                self.value * other[self.rows, self.columns]
+            )
+        )
+        result.assert_eval(self.value_array, np.arange(20.0).reshape(4, 5))
+
+    def test_mul_drops_index_on_broadcast_dim(self):
+        other = pt.matrix("other", shape=(4, 1))
+
+        result = RewriteTester([self.value, other], [self.written * other])
+
+        result.assert_graph(
+            self.zeros[self.rows, self.columns].inc(
+                self.value * other.squeeze(axis=1)[self.rows]
+            )
+        )
+        result.assert_eval(self.value_array, np.arange(4.0)[:, None])
+
+    @pytest.mark.parametrize("branch", [1, 2], ids=["true_branch", "false_branch"])
+    def test_switch_with_zero_branch(self, branch):
+        condition = pt.matrix("condition", shape=(4, 5), dtype="bool")
+        branches = (self.written, 0.0) if branch == 1 else (0.0, self.written)
+
+        result = RewriteTester(
+            [self.value, condition], [pt.switch(condition, *branches)]
+        )
+
+        zero = pt.constant(np.zeros(1))
+        value_branches = (self.value, zero) if branch == 1 else (zero, self.value)
+        result.assert_graph(
+            self.zeros[self.rows, self.columns].inc(
+                pt.switch(condition[self.rows, self.columns], *value_branches)
+            )
+        )
+        result.assert_eval(self.value_array, np.arange(20).reshape(4, 5) % 2 == 0)
+
+    def test_sub_at_same_location_combines_values(self):
+        other_value = pt.vector("other_value", shape=(3,))
+        other_write = self.zeros[self.rows, self.columns].inc(other_value)
+
+        result = RewriteTester([self.value, other_value], [self.written - other_write])
+
+        result.assert_graph(
+            self.zeros[self.rows, self.columns].inc(self.value - other_value)
+        )
+        result.assert_eval(self.value_array, np.array([4.0, 5.0, 7.0]))
+
+    def test_switch_of_writes_at_same_location_combines_values(self):
+        other_value = pt.vector("other_value", shape=(3,))
+        other_write = self.zeros[self.rows, self.columns].inc(other_value)
+        condition = pt.matrix("condition", shape=(4, 5), dtype="bool")
+
+        result = RewriteTester(
+            [self.value, other_value, condition],
+            [pt.switch(condition, self.written, other_write)],
+        )
+
+        result.assert_graph(
+            self.zeros[self.rows, self.columns].inc(
+                pt.switch(condition[self.rows, self.columns], self.value, other_value)
+            )
+        )
+        result.assert_eval(
+            self.value_array,
+            np.array([4.0, 5.0, 7.0]),
+            np.arange(20).reshape(4, 5) % 2 == 0,
+        )
+
+    def test_set_and_inc_at_unique_positions_become_inc(self):
+        other_value = pt.vector("other_value", shape=(3,))
+        unique_columns = pt.constant(np.array([1, 2, 3]))
+        location = self.zeros[self.rows, unique_columns]
+        condition = pt.matrix("condition", shape=(4, 5), dtype="bool")
+
+        result = RewriteTester(
+            [self.value, other_value, condition],
+            [pt.switch(condition, location.set(self.value), location.inc(other_value))],
+        )
+
+        result.assert_graph(
+            location.inc(
+                pt.switch(condition[self.rows, unique_columns], self.value, other_value)
+            )
+        )
+        result.assert_eval(
+            self.value_array,
+            np.array([4.0, 5.0, 7.0]),
+            np.arange(20).reshape(4, 5) % 2 == 0,
+        )
+
+    def test_sub_at_different_locations_stays_dense(self):
+        other_write = self.zeros[self.columns, self.rows].inc(self.value)
+        out = self.written - other_write
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(out)
+
+    def test_write_in_denominator_stays_dense(self):
+        other = pt.matrix("other", shape=(4, 5))
+        out = other / self.written
+
+        result = RewriteTester([self.value, other], [out])
+
+        result.assert_graph(out)
+
+    def test_set_and_inc_at_repeated_positions_keep_their_values(self):
+        repeated = self.zeros[self.repeated_rows, self.columns]
+        condition = pt.matrix("condition", shape=(4, 5), dtype="bool")
+        out = pt.switch(condition, repeated.set(self.value), repeated.inc(self.value))
+
+        result = RewriteTester([self.value, condition], [out])
+
+        result.assert_graph(out)
+        result.assert_eval(self.value_array, np.zeros((4, 5), dtype=bool))
+
+    def test_switch_of_write_broadcast_along_other_write_keeps_its_values(self):
+        positions = pt.constant(np.array([0, 0])), pt.constant(np.array([1, 2]))
+        value = pt.vector("value", shape=(2,))
+        full_write = pt.zeros((3, 4))[positions].inc(value)
+        broadcast_write = pt.zeros((1, 4))[positions].inc(value)
+        condition = pt.matrix("condition", shape=(3, 4), dtype="bool")
+        out = pt.switch(condition, full_write, broadcast_write)
+
+        result = RewriteTester([value, condition], [out])
+
+        result.assert_eval(np.array([1.0, 2.0]), np.zeros((3, 4), dtype=bool))
+
+    def test_nonlinear_op_needs_positions_written_once(self):
+        repeated = self.zeros[self.repeated_rows, self.columns].inc(self.value)
+        out = pt.sqr(repeated)
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(out)
+        result.assert_eval(self.value_array)
+
+    def test_input_repeated_in_product_with_repeated_positions(self):
+        repeated = self.zeros[self.repeated_rows, self.columns].inc(self.value)
+
+        result = RewriteTester([self.value], [repeated * repeated])
+
+        result.assert_eval(self.value_array)
+
+    def test_power_with_positive_exponent_of_unique_write(self):
+        result = RewriteTester([self.value], [self.written**2.5])
+
+        result.assert_graph(
+            self.zeros[self.rows, self.columns].inc(
+                self.value ** pt.constant(np.array([2.5]))
+            )
+        )
+        result.assert_eval(self.value_array)
+
+    def test_power_with_unknown_exponent_stays_dense(self):
+        exponent = pt.matrix("exponent", shape=(4, 5))
+        out = self.written**exponent
+
+        result = RewriteTester([self.value, exponent], [out])
+
+        result.assert_graph(out)
+
+    def test_nonlinear_op_of_unique_write(self):
+        out = pt.sqr(self.written)
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(self.zeros[self.rows, self.columns].inc(pt.sqr(self.value)))
+        result.assert_eval(self.value_array)
+
+    @pytest.mark.parametrize("write", ["inc", "set"])
+    def test_full_sum_needs_no_zeros(self, write):
+        written = getattr(self.zeros[self.rows, self.columns], write)(self.value)
+
+        result = RewriteTester([self.value], [written.sum()])
+
+        result.assert_graph(self.value.sum())
+        result.assert_eval(self.value_array)
+
+    def test_full_sum_of_repeated_set_keeps_write(self):
+        out = self.zeros[self.repeated_rows, self.repeated_rows].set(self.value).sum()
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(out)
+        result.assert_eval(self.value_array)
+
+    def test_full_sum_of_broadcast_value_counts_every_position(self):
+        written_value = pt.sqr(self.value[0])
+        out = self.zeros[self.rows, self.columns].inc(written_value).sum()
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(pt.alloc(written_value, 3).sum())
+        result.assert_eval(self.value_array)
+
+    @pytest.mark.parametrize("axis, kept", [(0, "columns"), (1, "rows")])
+    def test_partial_sum(self, axis, kept):
+        result = RewriteTester([self.value], [self.written.sum(axis=axis)])
+
+        result.assert_graph(
+            pt.zeros(self.written.type.shape[1 - axis])[getattr(self, kept)].inc(
+                self.value
+            )
+        )
+        result.assert_eval(self.value_array)
+
+    @pytest.mark.parametrize("write", ["inc", "set"])
+    def test_full_sum_of_dense_base(self, write):
+        base = pt.matrix("base", shape=(4, 5))
+        written = getattr(base[self.rows, self.columns], write)(self.value)
+
+        result = RewriteTester([base, self.value], [written.sum()])
+
+        change = self.value
+        if write == "set":
+            change = change - base[self.rows, self.columns]
+        result.assert_graph(base.sum() + change.sum())
+        result.assert_eval(np.arange(20.0).reshape(4, 5), self.value_array)
+
+    @pytest.mark.parametrize("axis, kept", [(0, "columns"), (1, "rows")])
+    def test_partial_sum_of_dense_base(self, axis, kept):
+        base = pt.matrix("base", shape=(4, 5))
+        written = base[self.rows, self.columns].set(self.value)
+
+        result = RewriteTester([base, self.value], [written.sum(axis=axis)])
+
+        change = self.value - base[self.rows, self.columns]
+        result.assert_graph(base.sum(axis=axis)[getattr(self, kept)].inc(change))
+        result.assert_eval(np.arange(20.0).reshape(4, 5), self.value_array)
+
+    def test_partial_sum_of_repeated_set_keeps_write(self):
+        out = self.zeros[self.repeated_rows, self.repeated_rows].set(self.value)
+        out = out.sum(axis=0)
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(out)
+        result.assert_eval(self.value_array)
+
+    def test_slice_write_of_static_value_is_summed(self):
+        value = pt.matrix("value", shape=(3, 4))
+        out = pt.zeros((6, 4))[1:4].inc(value).sum()
+
+        result = RewriteTester([value], [out])
+
+        result.assert_graph(value.sum())
+        result.assert_eval(np.arange(12.0).reshape(3, 4))
+
+    @pytest.mark.parametrize(
+        "consumer",
+        [
+            pytest.param(lambda write: write.sum(), id="sum"),
+            pytest.param(lambda write: write * pt.ones((6, 4)), id="mul"),
+        ],
+    )
+    def test_slice_write_broadcasting_at_runtime(self, consumer):
+        value = pt.matrix("value")
+        out = consumer(pt.zeros((6, 4))[1:4].inc(value))
+
+        result = RewriteTester([value], [out])
+
+        result.assert_eval(np.ones((1, 4)))
+
+    def test_dot_with_write_on_left(self):
+        other = pt.matrix("other", shape=(5, 6))
+
+        result = RewriteTester([self.value, other], [pt.dot(self.written, other)])
+
+        result.assert_graph(
+            pt.zeros((4, 6))[self.rows].inc(self.value[:, None] * other[self.columns])
+        )
+        result.assert_eval(self.value_array, np.arange(30.0).reshape(5, 6))
+
+    def test_dot_with_write_on_right(self):
+        other = pt.matrix("other", shape=(6, 4))
+
+        result = RewriteTester([self.value, other], [other @ self.written])
+
+        result.assert_graph(
+            pt.zeros((6, 5))[:, self.columns].inc(other[:, self.rows] * self.value)
+        )
+        result.assert_eval(self.value_array, np.arange(24.0).reshape(6, 4))
+
+    def test_dot_of_repeated_set_keeps_product(self):
+        other = pt.matrix("other", shape=(5, 6))
+        repeated = self.zeros[self.repeated_rows, self.repeated_rows].set(self.value)
+        out = pt.dot(repeated, other)
+
+        result = RewriteTester([self.value, other], [out])
+
+        result.assert_graph(out)
+        result.assert_eval(self.value_array, np.arange(30.0).reshape(5, 6))
+
+    @pytest.mark.parametrize(
+        "consumer",
+        [
+            pytest.param(lambda write: write.sum(), id="sum"),
+            pytest.param(lambda write: write.sum(axis=1), id="partial_sum"),
+            pytest.param(lambda write: pt.exp(write) * write, id="mul"),
+            pytest.param(lambda write: write.T, id="transpose"),
+        ],
+    )
+    def test_ignore_duplicates_with_repeated_positions_keeps_write(self, consumer):
+        repeated = self.zeros[self.repeated_rows, self.columns].inc(
+            self.value, ignore_duplicates=True
+        )
+        out = consumer(repeated)
+
+        result = RewriteTester([self.value], [out])
+
+        result.assert_graph(out)
+        result.assert_eval(self.value_array)
+
+    def test_ignore_duplicates_with_unique_positions_is_rewritten(self):
+        unique_columns = pt.constant(np.array([1, 2, 3]))
+        written = self.zeros[self.rows, unique_columns].inc(
+            self.value, ignore_duplicates=True
+        )
+
+        result = RewriteTester([self.value], [written.sum()])
+
+        result.assert_graph(self.value.sum())
+        result.assert_eval(self.value_array)
+
+    def test_full_sum_keeps_requested_dtype(self):
+        value = pt.vector("value", shape=(3,), dtype="float32")
+        written = pt.zeros((4, 5), dtype="float32")[self.rows, self.columns].inc(value)
+
+        result = RewriteTester([value], [written.sum(dtype="float64")])
+
+        result.assert_graph(value.sum(dtype="float64"))
+        result.assert_eval(np.array([1.0, 2.0, 3.0], dtype="float32"))
+
+    @pytest.mark.parametrize(
+        "consumer",
+        [
+            pytest.param(lambda write, other: write.T, id="transpose"),
+            pytest.param(lambda write, other: write.sum(axis=0), id="partial_sum"),
+            pytest.param(lambda write, other: pt.dot(write, other), id="dot"),
+        ],
+    )
+    def test_dynamic_shape_without_shape_feature(self, consumer):
+        n_rows, n_columns = pt.lscalar("n_rows"), pt.lscalar("n_columns")
+        other = pt.matrix("other")
+        written = pt.zeros((n_rows, n_columns))[self.rows, self.columns].inc(self.value)
+        out = consumer(written, other)
+
+        rewritten = rewrite_graph(out, include=("canonicalize",))
+
+        inputs = [n_rows, n_columns, self.value, other]
+        values = 4, 5, self.value_array, np.arange(30.0).reshape(5, 6)
+        np.testing.assert_allclose(
+            function(inputs, rewritten, on_unused_input="ignore")(*values),
+            function(inputs, out, on_unused_input="ignore", mode=NO_OPTIMIZATION_MODE)(
+                *values
+            ),
+        )
+
+    def test_transpose_of_paired_write(self):
+        result = RewriteTester([self.value], [self.written.T])
+
+        result.assert_graph(pt.zeros((5, 4))[self.columns, self.rows].inc(self.value))
+        result.assert_eval(self.value_array)
+
+    def test_transpose_of_row_write(self):
+        rows_value = pt.matrix("rows_value", shape=(3, 5))
+        out = self.zeros[self.rows].inc(rows_value).T
+
+        result = RewriteTester([rows_value], [out])
+
+        result.assert_graph(pt.zeros((5, 4))[:, self.rows].inc(rows_value.T))
+        result.assert_eval(np.arange(15.0).reshape(3, 5))
