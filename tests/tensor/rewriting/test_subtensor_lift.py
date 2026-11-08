@@ -190,6 +190,36 @@ class TestLocalSubtensorOfBatchDims:
             out.eval({x: x_test, y: y_test}, **eval_kwargs),
         )
 
+    def test_different_client_arities(self):
+        x, y, z = pt.matrices("x", "y", "z")
+        exp_x = pt.exp(x)
+        outputs = [exp_x[0], exp_x * y, exp_x * y * z]
+
+        result = RewriteTester([x, y, z], outputs, exclude=("local_mul_canonizer",))
+
+        result.assert_graph(*outputs)
+
+    @pytest.mark.parametrize(
+        "read",
+        [lambda x: x[0], lambda x: x[[0, 1], [0, 1]]],
+        ids=["subtensor", "advanced_subtensor"],
+    )
+    def test_multi_output_elemwise_keeps_its_outputs(self, read):
+        scalar_input = ps.float64("scalar_input")
+        multi_output_op = Elemwise(
+            ps.Composite([scalar_input], [ps.exp(scalar_input), ps.log(scalar_input)])
+        )
+        x = pt.matrix("x", shape=(3, 3))
+        first, second = multi_output_op(x)
+
+        result = RewriteTester(
+            [x],
+            [read(first), second],
+            include=("canonicalize", "stabilize", "specialize"),
+        )
+
+        result.assert_graph(read(first), second)
+
     def test_elemwise_multiple_clients(self):
         x = pt.matrix("x", shape=(5, 3))
         y = pt.matrix("y", shape=(5, 3))
