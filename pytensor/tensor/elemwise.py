@@ -1471,33 +1471,17 @@ class CAReduce(COp):
 
         return Apply(op, [input], [output])
 
-    def clone(
-        self,
-        axis=None,
-        dtype=None,
-        acc_dtype=None,
-        upcast_discrete_output=None,
-        **kwargs,
-    ):
-        if axis is None:
-            axis = self.axis
-        if dtype is None:
-            dtype = self.dtype
-        if acc_dtype is None:
-            acc_dtype = self.acc_dtype
-        if upcast_discrete_output is None:
-            upcast_discrete_output = self.upcast_discrete_output
-
-        res = type(self)(
+    def clone(self, **kwargs):
+        return type(self)(
             self.scalar_op,
-            axis=axis,
-            dtype=dtype,
-            acc_dtype=acc_dtype,
-            upcast_discrete_output=None,
+            axis=kwargs.pop("axis", self.axis),
+            dtype=kwargs.pop("dtype", self.dtype),
+            acc_dtype=kwargs.pop("acc_dtype", self.acc_dtype),
+            upcast_discrete_output=kwargs.pop(
+                "upcast_discrete_output", self.upcast_discrete_output
+            ),
             **kwargs,
         )
-
-        return res
 
     def _axis_str(self):
         axis = self.axis
