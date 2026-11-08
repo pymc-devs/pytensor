@@ -2936,7 +2936,7 @@ class TestReduceChain:
     def setup_method(self):
         self.mode = get_default_mode().including("canonicalize", "specialize")
 
-    def test_local_sum_prod_all_to_none(self):
+    def test_all_axes_reductions(self):
         a = tensor3()
         input = np.arange(3 * 4 * 5, dtype=config.floatX).reshape(3, 4, 5)
         # test sum

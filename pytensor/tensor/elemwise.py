@@ -1454,6 +1454,8 @@ class CAReduce(COp):
         assert acc_dtype is not None
 
         axis = normalize_reduce_axis(self.axis, ndim=input.type.ndim)
+        if axis is not None:
+            axis = None if len(axis) == input.ndim else tuple(sorted(axis))
 
         if axis != self.axis or dtype != self.dtype or acc_dtype != self.acc_dtype:
             op = self.clone(axis=axis, dtype=dtype, acc_dtype=acc_dtype)

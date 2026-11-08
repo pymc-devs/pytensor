@@ -703,7 +703,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 [self.op(ps.add, axis=tosum, *d)(x)],
                 [xv],
                 self.op,
-                ["local_cut_useless_reduce"],
+                ["local_cut_useless_reduce", "local_reduce_broadcastable"],
                 warn=0 not in xsh,
             )
 
@@ -727,6 +727,21 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         )
         assert cloned_op != op
         assert cloned_op == CAReduce(ps.add)
+
+    def test_axis_normalization(self):
+        x = pt.tensor3("x")
+        expected = self.op(ps.add, axis=(0, 2))(x).owner.op
+        assert self.op(ps.add, axis=(2, 0))(x).owner.op == expected
+        assert self.op(ps.add, axis=(-1, 0))(x).owner.op == expected
+
+        expected = self.op(ps.add, axis=None)(x).owner.op
+        assert expected.axis is None
+        assert self.op(ps.add, axis=(0, 1, 2))(x).owner.op == expected
+
+        x = scalar("x")
+        expected = self.op(ps.add, axis=None)(x).owner.op
+        assert expected.axis is None
+        assert self.op(ps.add, axis=())(x).owner.op == expected
 
     def test_repeated_axis(self):
         x = vector("x")

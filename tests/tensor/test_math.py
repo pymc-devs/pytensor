@@ -3757,7 +3757,7 @@ def test_tanh_grad_broadcast():
 def test_pprint():
     x = vector("x")
     y = pt_sum(x, axis=0)
-    assert pprint(y) == "sum(x, axis=(0,))"
+    assert pprint(y) == "sum(x, axis=None)"
 
 
 def test_log1mexp_grad_lim():
