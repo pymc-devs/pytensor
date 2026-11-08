@@ -47,6 +47,7 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.rewriting.subtensor import (
+    _canonical_indexing,
     _index_provably_unique,
     _indices_jointly_unique,
     local_adv_idx_to_diagonal,
@@ -76,86 +77,6 @@ from pytensor.tensor.subtensor import (
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
-
-
-def _canonical_indexing(var, indices, drop_broadcasted_index=False):
-    """Index ``var``, squeezing indexed broadcast dims whose index has size 1.
-
-    On a length-1 dim only zero is a valid index, so the index is
-    redundant — squeezing is equivalent and simpler.  If squeezed
-    indices contributed unique output dimensions, those are reinserted
-    via ``expand_dims`` after indexing.
-
-    When ``drop_broadcasted_index`` is set, the index is neutralized on *every*
-    broadcast dim: a size>1 advanced index that would otherwise expand the dim is
-    dropped, and a slice that would otherwise shrink it (e.g. ``[1:]`` -> size 0)
-    is replaced by a full slice. This keeps ``var`` small at the cost of an
-    under-broadcast result; the caller must broadcast it back to the full shape.
-    """
-    squeeze_axes = []
-    kept_indices = []
-    max_drop_ndim = 0
-    max_kept_ndim = 0
-    first_adv_axis = None
-    for axis, (bcast, idx) in enumerate(
-        zip(var.type.broadcastable, indices, strict=False)
-    ):
-        if isinstance(idx, slice):
-            if bcast and drop_broadcasted_index:
-                # Slicing a length-1 dim can shrink it (e.g. [1:] -> size 0);
-                # leave it untouched and let the caller broadcast it back.
-                kept_indices.append(slice(None))
-            else:
-                kept_indices.append(idx)
-        else:
-            if first_adv_axis is None:
-                first_adv_axis = axis
-
-            # np.ndim works for all supported cases: int, numpy arrays, pytensor variables
-            idx_ndim = np.ndim(idx)
-            if bcast:
-                if drop_broadcasted_index:
-                    drop_idx = True
-                else:
-                    match idx:
-                        case Variable():
-                            drop_idx = all(idx.type.broadcastable)
-                        case np.ndarray():
-                            drop_idx = idx.size == 1
-                        case int() | np.integer():
-                            drop_idx = True
-                        case _:
-                            raise AssertionError
-
-                # idx only contributes dummy dimensions (if any), not actual shape
-                # It doesn't really matter what the index was, only valid values are zeros.
-                if drop_idx:
-                    max_drop_ndim = max(max_drop_ndim, idx_ndim)
-                    squeeze_axes.append(axis)
-                    continue
-
-            max_kept_ndim = max(max_kept_ndim, idx_ndim)
-            kept_indices.append(idx)
-
-    # Remove useless trailing slice(None) indices
-    while kept_indices and kept_indices[-1] == slice(None):
-        kept_indices.pop()
-
-    result = var
-
-    if squeeze_axes:
-        result = result.squeeze(axis=tuple(squeeze_axes))
-
-    if kept_indices:
-        result = result[tuple(kept_indices)]
-
-    if (lost := max_drop_ndim - max_kept_ndim) > 0:
-        assert first_adv_axis is not None
-        result = expand_dims(
-            result, tuple(range(first_adv_axis, first_adv_axis + lost))
-        )
-
-    return result
 
 
 def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]:
