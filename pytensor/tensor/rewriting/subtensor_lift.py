@@ -13,7 +13,6 @@ from pytensor.graph import (
     node_rewriter,
     vectorize_graph,
 )
-from pytensor.graph.basic import equal_computations
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     SequentialGraphRewriter,
@@ -54,6 +53,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.rewriting.subtensor import (
     _canonical_indexing,
+    _has_one_distinct_client,
     _index_provably_unique,
     _indices_jointly_unique,
     local_adv_idx_to_diagonal,
@@ -83,17 +83,6 @@ from pytensor.tensor.subtensor import (
 )
 from pytensor.tensor.type import TensorType, values_eq_approx_remove_nan
 from pytensor.tensor.variable import TensorConstant, TensorVariable
-
-
-def _has_one_distinct_client(fgraph: FunctionGraph, var: Variable) -> bool:
-    """Whether every client of ``var`` applies the same Op to the same inputs."""
-    (first_client, _), *other_clients = fgraph.clients[var]
-    return all(
-        client.op == first_client.op
-        and len(client.inputs) == len(first_client.inputs)
-        and equal_computations(client.inputs, first_client.inputs)
-        for client, _ in other_clients
-    )
 
 
 def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]:

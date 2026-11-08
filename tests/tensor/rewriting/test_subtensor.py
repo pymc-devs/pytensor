@@ -322,6 +322,147 @@ def test_local_add_of_sparse_write_dtype():
     result.assert_eval(np.arange(7, dtype="int32"), np.array([1.5, 2.5, 3.5]))
 
 
+class TestElemwiseOfSetSubtensor:
+    rows, columns = (pt.constant(i) for i in np.tril_indices(4, -1))
+    rewrite_kw = dict(include=("canonicalize",))
+
+    def test_chained_writes_into_zeros(self):
+        params = pt.vector("params", shape=(6,))
+        diagonal = tuple(pt.constant(i) for i in np.diag_indices(4))
+        L = pt.zeros((4, 4))[self.rows, self.columns].set(params)[diagonal].set(1.0)
+
+        result = utt.RewriteTester([params], [pt.sqr(L)], **self.rewrite_kw)
+
+        expected = pt.sqr(pt.zeros((4, 4)))[self.rows, self.columns].set(pt.sqr(params))
+        expected = expected[diagonal].set(pt.sqr(pt.constant(1.0)))
+        result.assert_graph(rewrite_graph(expected, **self.rewrite_kw))
+        result.assert_eval(np.arange(1.0, 7.0))
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            pytest.param(pt.exp, id="exp_of_zeros_base"),
+            pytest.param(lambda x: x * 2.0, id="scalar_other_input"),
+        ],
+    )
+    def test_single_valued_base(self, operation):
+        params = pt.vector("params", shape=(6,))
+        base = pt.ones((4, 4))
+        written = base[self.rows, self.columns].set(params)
+
+        result = utt.RewriteTester([params], [operation(written)], **self.rewrite_kw)
+
+        expected = operation(base)[self.rows, self.columns].set(operation(params))
+        result.assert_graph(rewrite_graph(expected, **self.rewrite_kw))
+        result.assert_eval(np.arange(1.0, 7.0))
+
+    @pytest.mark.parametrize(
+        "make_out",
+        [
+            pytest.param(
+                lambda written, x, y: pt.exp(written), id="dense_base_and_value"
+            ),
+            pytest.param(lambda written, x, y: written * y, id="dense_other_input"),
+        ],
+    )
+    def test_is_kept(self, make_out):
+        x = pt.matrix("x", shape=(4, 4))
+        y = pt.matrix("y", shape=(4, 4))
+        params = pt.vector("params", shape=(6,))
+        written = x[self.rows, self.columns].set(params)
+        out = make_out(written, x, y)
+
+        result = utt.RewriteTester([x, y, params], [out], **self.rewrite_kw)
+
+        result.assert_graph(out)
+
+    def test_dense_base_with_single_valued_write(self):
+        x = pt.matrix("x", shape=(4, 4))
+        written = x[self.rows, self.columns].set(1.0)
+
+        result = utt.RewriteTester([x], [pt.exp(written)], **self.rewrite_kw)
+
+        one = pt.constant(1.0, dtype=x.type.dtype)
+        expected = pt.exp(x)[self.rows, self.columns].set(pt.exp(one))
+        result.assert_graph(rewrite_graph(expected, **self.rewrite_kw))
+        result.assert_eval(np.arange(16.0).reshape(4, 4))
+
+    def test_dense_base_read_elsewhere_is_kept(self):
+        x = pt.matrix("x", shape=(4, 4))
+        written = x[self.rows, self.columns].set(1.0)
+        outputs = [pt.exp(written), written]
+
+        result = utt.RewriteTester([x], outputs, **self.rewrite_kw)
+
+        result.assert_graph(*outputs)
+
+    def test_written_values_take_the_base_dtype(self):
+        params = pt.vector("params", shape=(6,), dtype="int64")
+        base = pt.ones((4, 4))
+        out = base[self.rows, self.columns].set(params) / 4.0
+
+        result = utt.RewriteTester([params], [out], **self.rewrite_kw)
+
+        expected = (base / 4.0)[self.rows, self.columns].set(
+            params.astype(base.type.dtype) / 4.0
+        )
+        result.assert_graph(rewrite_graph(expected, **self.rewrite_kw))
+        result.assert_eval(np.arange(1, 7))
+
+    def test_constant_zeros_base(self):
+        params = pt.vector("params", shape=(6,))
+        base = pt.constant(np.zeros((4, 4)))
+
+        result = utt.RewriteTester(
+            [params],
+            [pt.sqr(base[self.rows, self.columns].set(params))],
+            **self.rewrite_kw,
+        )
+
+        expected = pt.sqr(base)[self.rows, self.columns].set(pt.sqr(params))
+        result.assert_graph(rewrite_graph(expected, **self.rewrite_kw))
+        result.assert_eval(np.arange(1.0, 7.0))
+
+    def test_inc_into_non_zero_base_is_kept(self):
+        params = pt.vector("params", shape=(6,))
+        out = pt.exp(pt.ones((4, 4))[self.rows, self.columns].inc(params))
+
+        result = utt.RewriteTester([params], [out], **self.rewrite_kw)
+
+        result.assert_graph(out)
+
+
+class TestIncOfZerosToSet:
+    @pytest.mark.parametrize(
+        "rows, expected_set",
+        [
+            pytest.param([0, 1, 3], True, id="unique"),
+            pytest.param([0, 0, 3], False, id="repeated"),
+        ],
+    )
+    def test_advanced_inc(self, rows, expected_set):
+        value = pt.vector("value", shape=(3,))
+        location = pt.zeros((4, 5))[
+            pt.constant(np.array(rows)), pt.constant(np.array([1, 1, 2]))
+        ]
+
+        result = utt.RewriteTester([value], [location.inc(value)])
+
+        expected = location.set(value) if expected_set else location.inc(value)
+        result.assert_graph(expected)
+        result.assert_eval(np.array([1.0, 2.0, 3.0]))
+
+    def test_basic_inc_into_symbolic_zeros(self):
+        n = pt.lscalar("n")
+        value = pt.vector("value")
+        location = pt.zeros((n,))[1:3]
+
+        result = utt.RewriteTester([n, value], [location.inc(value)])
+
+        result.assert_graph(location.set(value))
+        result.assert_eval(5, np.array([1.0, 2.0]))
+
+
 class TestIndexProvablyUniqueArange:
     """An ``arange`` index is duplicate-free when its entries don't wrap around
     zero, i.e. they all share a sign. ``_index_provably_unique`` proves this for
@@ -1974,9 +2115,9 @@ class TestWriteOfWriteSameIndices:
         rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
         utt.assert_equal_computations([rewritten], [set_subtensor(x[:stop], a + b)])
 
-    def test_inc_of_set_zero_base_emits_inc(self):
-        """When the set base is zero, inc-of-set becomes an inc so that
-        downstream zero-aware rewrites keep firing."""
+    def test_inc_of_set_zero_base_emits_set(self):
+        """When the set base is zero, inc-of-set writes each position once, so it
+        becomes a set."""
         a = matrix("a")
         b = matrix("b")
         stop = iscalar("stop")
@@ -1984,7 +2125,7 @@ class TestWriteOfWriteSameIndices:
 
         out = inc_subtensor(set_subtensor(zeros[:stop], a)[:stop], b)
         rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
-        utt.assert_equal_computations([rewritten], [inc_subtensor(zeros[:stop], a + b)])
+        utt.assert_equal_computations([rewritten], [set_subtensor(zeros[:stop], a + b)])
 
     def test_inc_of_set_advanced_jointly_unique(self):
         """Inc-of-set fires when advanced indices are jointly duplicate-free, even

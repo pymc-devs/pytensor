@@ -1245,6 +1245,17 @@ def local_set_to_inc_subtensor(fgraph, node):
     return [ret]
 
 
+def _has_one_distinct_client(fgraph: FunctionGraph, var: Variable) -> bool:
+    """Whether every client of ``var`` applies the same Op to the same inputs."""
+    (first_client, _), *other_clients = fgraph.clients[var]
+    return all(
+        client.op == first_client.op
+        and len(client.inputs) == len(first_client.inputs)
+        and equal_computations(client.inputs, first_client.inputs)
+        for client, _ in other_clients
+    )
+
+
 def _is_zero(var) -> bool:
     return bool(
         get_underlying_scalar_constant_value(
@@ -1471,6 +1482,78 @@ def _same_write_location(write, other_write) -> bool:
     )
 
 
+def _holds_one_value(var) -> bool:
+    """Whether every entry of ``var`` is the same value."""
+    if all(var.type.broadcastable):
+        return True
+    if isinstance(var.owner_op, Alloc) and all(var.owner.inputs[0].type.broadcastable):
+        return True
+    try:
+        get_underlying_scalar_constant_value(var, elemwise=False)
+    except NotScalarConstantError:
+        return False
+    return True
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Elemwise])
+def local_elemwise_of_set_subtensor(fgraph, node):
+    """Apply an Elemwise to the base and to the written values of a ``set`` separately.
+
+    .. code::
+
+        f(x[idx].set(c)) -> f(x)[idx].set(f(c))
+        f(x[idx].set(c), y) -> f(x, y)[idx].set(f(c, y))
+
+    The other inputs ``y`` must hold one value each, and so must ``x`` or ``c``, so one
+    of the two new Elemwise works on a single value. A dense ``x`` also needs the write
+    to have no other reader, which would keep a second copy of ``x`` alive.
+    """
+    if len(node.outputs) > 1:
+        return None
+    [out] = node.outputs
+
+    for position, write in enumerate(node.inputs):
+        write_op = write.owner_op
+        if not (
+            isinstance(write_op, IncSubtensor | AdvancedIncSubtensor)
+            and write_op.set_instead_of_inc
+        ):
+            continue
+
+        others = [inp for i, inp in enumerate(node.inputs) if i != position]
+        if write.type.broadcastable != out.type.broadcastable or not all(
+            all(other.type.broadcastable) for other in others
+        ):
+            continue
+
+        base, value, *idx_vars = write.owner.inputs
+        if not _holds_one_value(base) and not (
+            _holds_one_value(value) and _has_one_distinct_client(fgraph, write)
+        ):
+            continue
+
+        value = value.astype(base.type.dtype)
+        new_base = node.op(
+            *(base if i == position else inp for i, inp in enumerate(node.inputs))
+        )
+        new_value = node.op(
+            *(
+                value if i == position else inp.squeeze()
+                for i, inp in enumerate(node.inputs)
+            )
+        )
+        indices = indices_from_subtensor(idx_vars, write_op.idx_list)
+        new_out = new_base[tuple(indices)].set(new_value)
+
+        copy_stack_trace(out, new_out)
+        return [new_out]
+
+    return None
+
+
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @register_specialize("shape_unsafe")
@@ -1517,6 +1600,16 @@ def local_elemwise_of_sparse_write(fgraph, node):
 
         base, _, indices = next(iter(parts_at.values()))
         all_set = all(write.owner.op.set_instead_of_inc for write in writes)
+        other_inputs = [
+            inp for position, inp in enumerate(node.inputs) if position not in parts_at
+        ]
+        if (
+            all_set
+            and len(writes) == 1
+            and all(all(inp.type.broadcastable) for inp in other_inputs)
+        ):
+            # local_elemwise_of_set_subtensor handles this without any zero pattern.
+            continue
         all_inc = not any(write.owner.op.set_instead_of_inc for write in writes)
         # Mul and TrueDiv are linear in their write only because each of their groups
         # holds a single position, so every other operand is read at the write's indices.
@@ -2387,24 +2480,27 @@ def local_incsubtensor_of_zeros(fgraph, node):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([IncSubtensor])
+@node_rewriter([IncSubtensor, AdvancedIncSubtensor])
 def local_incsubtensor_of_zeros_to_setsubtensor(fgraph, node):
-    """
-    IncSubtensor(zeros, x, ...) -> SetSubtensor(zeros, x, ...)
-    """
-    if node.op.set_instead_of_inc:
-        return
-    x = node.inputs[0]
+    """Rewrite an ``inc`` into zeros that writes each position once as a ``set``.
 
-    if isinstance(x, Constant) and not np.any(x.data):
-        return [
-            IncSubtensor(
-                node.op.idx_list,
-                node.op.inplace,
-                set_instead_of_inc=True,
-                destroyhandler_tolerate_aliased=node.op.destroyhandler_tolerate_aliased,
-            )(*node.inputs)
-        ]
+    .. code::
+
+        zeros[idx].inc(v) -> zeros[idx].set(v)
+    """
+    if node.op.set_instead_of_inc or not _is_zero(node.inputs[0]):
+        return None
+
+    if isinstance(node.op, AdvancedIncSubtensor):
+        indices = indices_from_subtensor(node.inputs[2:], node.op.idx_list)
+        if not _advanced_indices_jointly_unique(indices, fgraph):
+            return None
+
+    props = node.op._props_dict()
+    props["set_instead_of_inc"] = True
+    new_out = type(node.op)(**props)(*node.inputs)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize("local_setsubtensor_of_allocs")
