@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
 from pytensor.link.llvm_v2.codegen.emit import (
+    advance,
     c_array,
     Array,
     ProvidedOutput,
@@ -145,7 +146,7 @@ def _(op, node, cx, inputs, outputs):
             v = b.add(start_v, b.mul(i, step_v))
         else:
             v = b.fadd(start_v, b.fmul(b.sitofp(i, m.f64), step_v))
-        store(b, out_dtype, cast(b, v, dt, out_dtype), b.gep_bytes(out.data, mul(b, i, out.strides[0])))
+        store(b, out_dtype, cast(b, v, dt, out_dtype), advance(b, out.data, i, out.strides[0], out.dtype))
 
 
 @llvm_outputs.register(Reshape)

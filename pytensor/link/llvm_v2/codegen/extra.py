@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
-from pytensor.link.llvm_v2.codegen.emit import Array, cast, constant, copy, load, mul, store
+from pytensor.link.llvm_v2.codegen.emit import advance, Array, cast, constant, copy, load, mul, store
 from pytensor.link.llvm_v2.codegen.function import llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm_v2.layout import split_layouts
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
@@ -38,16 +38,16 @@ def _(op, node, cx, inputs, outputs):
         if k == len(others):
 
             def step(i, acc):
-                v = cast(b, load(b, x.dtype, b.gep_bytes(px, mul(b, i, x.strides[axis]))), x.dtype, dt)
+                v = cast(b, load(b, x.dtype, advance(b, px, i, x.strides[axis], x.dtype)), x.dtype, dt)
                 new = emit_scalar(combine, b, [(acc, dt), (v, dt)], [dt])[0]
-                store(b, dt, new, b.gep_bytes(po, mul(b, i, out.strides[axis])))
+                store(b, dt, new, advance(b, po, i, out.strides[axis], out.dtype))
                 return [new]
 
             b.fold(x.shape[axis], [init], step)
             return
         a = others[k]
         with b.loop(x.shape[a]) as i:
-            level(k + 1, b.gep_bytes(px, mul(b, i, x.strides[a])), b.gep_bytes(po, mul(b, i, out.strides[a])))
+            level(k + 1, advance(b, px, i, x.strides[a], x.dtype), advance(b, po, i, out.strides[a], out.dtype))
 
     level(0, x.data, out.data)
 

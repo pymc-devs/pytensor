@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from pytensor.link.llvm_v2.codegen.elemwise import identity_value, output_array
 from pytensor.link.llvm_v2.codegen.emit import (
+    advance,
     Array,
     ProvidedOutput,
     ScalarOutput,
@@ -222,7 +223,7 @@ def emit_fused(op, node, cx, inputs, outputs):
     def index_value(k, i):
         """idx[i] for index array input k, wrapped and bounds-checked against `n`."""
         idx = inputs[k]
-        v = load(b, idx.dtype, b.gep_bytes(idx.data, mul(b, i, idx.strides[0])))
+        v = load(b, idx.dtype, advance(b, idx.data, i, idx.strides[0], idx.dtype))
         return cast(b, v, idx.dtype, "int64")
 
     def checked(v, n, what):
@@ -248,7 +249,7 @@ def emit_fused(op, node, cx, inputs, outputs):
             if r is not None:
                 n = x.shape[r.axis]
                 ix = checked(index_value(r.index, loop_index[r.axis]), n, "read")
-                p = b.gep_bytes(p, mul(b, ix, x.strides[r.axis]))
+                p = advance(b, p, ix, x.strides[r.axis], x.dtype)
             args.append((load(b, x.dtype, p), d))
         res = emit_scalar(E.op.scalar_op, b, args, out_dtypes)
         new_accs = {}
@@ -265,7 +266,7 @@ def emit_fused(op, node, cx, inputs, outputs):
                 res_arr = out_arrays[i][0]
                 n = res_arr.shape[spec.axis]
                 ix = checked(index_value(spec.index, loop_index[spec.axis]), n, "write")
-                p = b.gep_bytes(ptr_out[i], mul(b, ix, res_arr.strides[spec.axis]))
+                p = advance(b, ptr_out[i], ix, res_arr.strides[spec.axis], res_arr.dtype)
                 if not spec.set:
                     from pytensor.scalar.basic import add
 
@@ -293,7 +294,7 @@ def emit_fused(op, node, cx, inputs, outputs):
                 init = [load(b, outs[i].acc, po[i]) for i in inner_red]
 
                 def step(i, *accs):
-                    q = [b.gep_bytes(p, mul(b, i, arr.strides[a])) for p, arr in zip(ptrs, arrays, strict=True)]
+                    q = [advance(b, p, i, arr.strides[a], arr.dtype) for p, arr in zip(ptrs, arrays, strict=True)]
                     qi, qo = split(q)
                     new = body(qi, qo, [*index, i], dict(zip(inner_red, accs, strict=True)))
                     return [new[k] for k in inner_red]
@@ -307,7 +308,7 @@ def emit_fused(op, node, cx, inputs, outputs):
                 body(pi, po, index, {})
                 return
             with b.loop(shape[a]) as i:
-                q = [b.gep_bytes(p, mul(b, i, arr.strides[a])) for p, arr in zip(ptrs, arrays, strict=True)]
+                q = [advance(b, p, i, arr.strides[a], arr.dtype) for p, arr in zip(ptrs, arrays, strict=True)]
                 level(a + 1, q, [*index, i])
 
         level(0, [arr.data for arr in arrays], [])
