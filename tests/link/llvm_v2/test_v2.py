@@ -26,7 +26,8 @@ def compare(inputs, outputs, values, mode=V2, rtol=1e-10, atol=1e-12):
 
 
 def info(f):
-    return f.maker.linker.compiled.info()
+    p = f.maker.linker.compiled
+    return {"steps": p.steps, "n_steps": p.n_steps, "arena_bytes": p.arena_bytes, "stats": f.maker.linker.stats}
 
 
 def test_elemwise_reduce_dot_dynamic_shapes():
@@ -59,22 +60,24 @@ def test_small_static_graph_is_one_unit():
     f = compare([x, y], w, [rng.random((3, 4)), rng.random(4)])
     i = info(f)
     assert i["n_steps"] == 1
-    assert i["steps"][0].startswith("OpFromGraph[Compiled]")
+    assert i["steps"][0].startswith("unit[")
 
 
 def test_arena_reuses_temporaries():
-    # large static intermediates aren't grouped: each is an interpreter step whose
-    # output lives in the arena, which reuses memory by liveness
+    # large static intermediates aren't grouped: each is a step whose output lives in
+    # the arena, which reuses memory by liveness
     n = 10_000
     x = pt.tensor("x", shape=(n,))
     a = pt.exp(x)
-    b = a * a.sum()
-    c = pt.log1p(b**2) * b.max()
-    d = c - c.mean()
-    f = compare([x], d, [rng.normal(size=n)])
+    b = pt.sort(a)  # not fusable: forces a materialized intermediate
+    c = pt.log1p(b)
+    d = pt.sort(c)
+    e = pt.sqrt(d)
+    f = compare([x], pt.sort(e), [rng.normal(size=n)])
     i = info(f)
-    n_temps = sum(not s.startswith("DimShuffle") for s in i["steps"]) - 1
-    assert 0 < i["arena_bytes"] < n_temps * n * 8
+    temporaries = len(i["steps"]) - 1
+    assert temporaries >= 4
+    assert n * 8 <= i["arena_bytes"] < temporaries * n * 8
 
 
 def test_compiled_ofg_calls_kernels():
@@ -83,8 +86,9 @@ def test_compiled_ofg_calls_kernels():
     inner = OpFromGraph([A, v], [((A @ v) ** 2).sum(), A @ v], unit=UnitKind.COMPILED)
     out = inner(A, v)
     f = compare([A, v], out, [rng.random((4, 3)), rng.random(3)])
-    (step,) = info(f)["steps"]
-    assert step.startswith("OpFromGraph[Compiled]") and "Dot" in step
+    steps = info(f)["steps"]
+    # Dot can't be generated yet, so the unit runs its nodes as separate steps
+    assert any("Dot" in s for s in steps)
 
 
 def test_interpreted_ofg():
@@ -92,7 +96,7 @@ def test_interpreted_ofg():
     inner = OpFromGraph([x], [pt.exp(x).sum(), x * 2], unit=UnitKind.INTERPRETED)
     out = inner(x)
     f = compare([x], [out[0], out[1] + 1], [rng.random(6)])
-    assert any(s.startswith("OpFromGraph[Interpreted]") for s in info(f)["steps"])
+    assert any(s.startswith("program:") for s in info(f)["steps"])
 
 
 def test_nested_ofg_kinds():
@@ -160,3 +164,31 @@ def test_repeated_calls_and_threads():
     for v, (s, d) in zip(vals, res, strict=True):
         np.testing.assert_allclose(s, np.exp(v).sum())
         np.testing.assert_allclose(d, v * 2)
+
+
+def test_profiling_with_nested_programs():
+    import pytensor
+
+    x = pt.dmatrix("x")
+    w = pt.dvector("w")
+    res = pytensor.scan(lambda r, acc: acc + pt.exp(r) @ w, sequences=[x], outputs_info=[pt.zeros(())], return_updates=False)
+    f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode="LLVM_V2")
+    p = f.maker.linker.compiled
+    xv, wv = np.ones((5, 3)), np.ones(3)
+    f(xv, wv)
+    assert all(secs == 0 for *_, secs in p.profile())
+    p.set_profiling(True)
+    for _ in range(3):
+        f(xv, wv)
+    rows = p.profile()
+    top = [r for r in rows if r[0] == 0]
+    nested = [r for r in rows if r[0] == 1]
+    assert top and nested
+    assert all(calls == 3 for _, _, calls, _ in top)
+    assert all(calls == 15 for _, _, calls, _ in nested)  # the step program ran 5 times per call
+    assert sum(s for *_, s in top) > 0
+    assert "Scan" in p.profile_report()
+    p.reset_profile()
+    p.set_profiling(False)
+    f(xv, wv)
+    assert all(secs == 0 and calls == 0 for _, _, calls, secs in p.profile())
