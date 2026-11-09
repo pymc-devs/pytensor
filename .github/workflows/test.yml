@@ -50,8 +50,7 @@ jobs:
             - 'pytensor/**/*.h'
             - 'tests/**/*.h'
             - '.github/workflows/*.yml'
-            - 'setup.cfg'
-            - 'requirements.txt'
+            - 'pyproject.toml'
             - '.pre-commit-config.yaml'
 
   style:
