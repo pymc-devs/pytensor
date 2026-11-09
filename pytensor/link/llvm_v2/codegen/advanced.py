@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
-from pytensor.link.llvm_v2.codegen.emit import Array, cast, copy, for_each, load, mul, store
+from pytensor.link.llvm_v2.codegen.emit import advance, Array, cast, copy, for_each, load, mul, store
 from pytensor.link.llvm_v2.codegen.function import OutMode, fresh_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.codegen.types import ir, repr_of
@@ -102,7 +102,7 @@ def element(cx, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
         i = b.select(b.icmp(m.ICmp.SLT, i, zero), b.add(i, n), i)
         ok = b.and_(b.icmp(m.ICmp.SGE, i, zero), b.icmp(m.ICmp.SLT, i, n))
         cx.check(ok, f"index out of bounds for axis {axis} ({what})")
-        p = b.gep_bytes(p, mul(b, i, base.strides[axis]))
+        p = advance(b, p, i, base.strides[axis], base.dtype)
     return p
 
 

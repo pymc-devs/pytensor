@@ -185,11 +185,33 @@ def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Arr
     return Array(dtype, data, shape, strides, layout)
 
 
+def advance(b, p, i, stride, dtype):
+    """`p + i * stride` (`stride` in bytes), addressed in elements of `dtype`.
+
+    Loops address their elements with this: LLVM's vectorizer versions a loop on a
+    stride only known at run time by speculating that it is one *element*. With byte
+    offsets it speculates a byte stride of 1, which never holds, and the vectorized loop
+    never runs."""
+    m = ir()
+    isz = itemsize(dtype)
+    c = stride.const_int
+    if c is not None:
+        if c % isz:
+            return b.gep_bytes(p, mul(b, i, stride))
+        es = b.const_int(m.i64, c // isz)
+    elif isz == 1:
+        es = stride
+    else:
+        # strides of arrays are multiples of the itemsize (validated at the boundary)
+        es = b.ashr(stride, b.const_int(m.i64, isz.bit_length() - 1))
+    return b.gep(memory_type(dtype), p, mul(b, i, es))
+
+
 def element_ptr(b, a: Array, index: list):
     """Address of the element at `index` (one i64 per axis)."""
     p = a.data
     for i, st in zip(index, a.strides, strict=True):
-        p = b.gep_bytes(p, mul(b, i, st))
+        p = advance(b, p, i, st, a.dtype)
     return p
 
 
@@ -543,7 +565,7 @@ def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
     axis = order[level]
 
     def at(i):
-        ptrs = [b.gep_bytes(p, mul(b, i, a.strides[axis])) for p, a in zip(base, arrays, strict=True)]
+        ptrs = [advance(b, p, i, a.strides[axis], a.dtype) for p, a in zip(base, arrays, strict=True)]
         _strided(b, shape, arrays, body, order, level + 1, ptrs)
 
     if par is not None and level == 0:
@@ -566,6 +588,7 @@ def copy(cx, src: Array, dst: Array):
 
 __all__ = [
     "Array",
+    "advance",
     "c_array",
     "packed_array",
     "loop_order",
