@@ -635,6 +635,31 @@ class TestDecompositions:
         np.testing.assert_allclose(Z_c, Z_res, atol=1e-6)
 
 
+@pytest.mark.parametrize(
+    "sort, return_eigenvalues",
+    [(None, True), ("lhp", True), ("lhp", False)],
+    ids=["nosort_eig", "sort_eig", "sort_noeig"],
+)
+def test_qz_real_float32(sort, return_eigenvalues):
+    # Regression test: `ALPHAR + 1j * ALPHAI` used to upcast to complex128, which failed to unify with complex64
+    A = pt.matrix("A", dtype="float32")
+    B = pt.matrix("B", dtype="float32")
+    outputs = qz(A, B, sort=sort, return_eigenvalues=return_eigenvalues)
+
+    rng = np.random.default_rng(42)
+    A_val = rng.normal(size=(4, 4)).astype("float32")
+    B_val = rng.normal(size=(4, 4)).astype("float32")
+
+    _, res = compare_numba_and_py(
+        [A, B],
+        outputs,
+        [A_val, B_val],
+        assert_fn=lambda x, y: np.testing.assert_allclose(x, y, atol=1e-4, rtol=1e-4),
+    )
+    if return_eigenvalues:
+        assert res[2].dtype == "complex64"
+
+
 @pytest.mark.parametrize("inverse", [True, False], ids=["p_inv", "p"])
 def test_pivot_to_permutation(inverse):
     rng = np.random.default_rng(123)
