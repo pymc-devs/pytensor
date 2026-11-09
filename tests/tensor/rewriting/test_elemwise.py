@@ -1265,6 +1265,29 @@ class TestFusion:
         values = np.array([-1, 0, 1], dtype=config.floatX)
         np.testing.assert_allclose(f(values), values * np.exp(values + 1))
 
+    @pytest.mark.parametrize("fused", [True, False])
+    def test_numba_perform_fallback(self, fused):
+        from tests.link.numba.test_basic import ArrayFallbackScalarOp
+
+        x = dvector("x")
+        value = (
+            Elemwise(ps.psi)(x + 1)
+            if fused
+            else Elemwise(ArrayFallbackScalarOp())(2, x + 1)
+        )
+        out = x * value
+        fgraph = FunctionGraph([x], [out])
+        Mode(linker="numba", optimizer=self.rewrites).excluding(
+            "inplace"
+        ).optimizer.rewrite(fgraph)
+        assert (
+            any(
+                isinstance(getattr(node.op, "scalar_op", None), Composite)
+                for node in fgraph.toposort()
+            )
+            == fused
+        )
+
     @pytest.mark.parametrize("linker", ["cvm", "py"])
     @pytest.mark.parametrize("inp_dtype", ("floatX", "int32"))
     @pytest.mark.parametrize("axis", [None, 0, 1, (0, 1), (0, 1, 2)])
@@ -1617,12 +1640,12 @@ class TestCompositeCodegen:
 
         self.x = fvector()
 
+    @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
     def test_nested_composite(self):
         y = self.times_2(self.x)
         z = self.times_3(y)
-        f = function([self.x], z)
-        if config.mode != "FAST_COMPILE":
-            assert len(f.maker.fgraph.toposort()) == 1
+        f = function([self.x], z, mode=Mode(linker="cvm", optimizer="fast_run"))
+        assert len(f.maker.fgraph.toposort()) == 1
         fval = f([1, 2, 3])
         assert np.all(fval == [6, 12, 18])
 

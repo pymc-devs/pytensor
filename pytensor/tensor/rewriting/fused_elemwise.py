@@ -6,6 +6,8 @@ subgraphs so the Numba backend can generate a single loop with indirect
 indexing and inline accumulation, eliminating materialised intermediate arrays.
 """
 
+from functools import cache
+
 from pytensor.compile import optdb
 from pytensor.compile.builders import FinalizedOpFromGraph
 from pytensor.graph import node_rewriter
@@ -477,6 +479,16 @@ class FuseElemwise(GraphRewriter):
         return replacements
 
     def apply(self, fgraph):
+        from pytensor.link.numba.dispatch.scalar import numba_funcify_scalar_native
+
+        @cache
+        def supports_numba(scalar_op, input_dtypes):
+            scalar_node = scalar_op.make_node(
+                *(get_scalar_type(dtype)() for dtype in input_dtypes)
+            )
+            func, _ = numba_funcify_scalar_native(scalar_op, scalar_node)
+            return func is not None
+
         # Live reference to the destroy handler's view chain (mutated in place as
         # we rewrite); used to resolve read/write buffers to their roots for the
         # aliasing check below. replace_all_validate requires the destroy handler,
@@ -493,6 +505,10 @@ class FuseElemwise(GraphRewriter):
                 continue
             # If all inputs are scalar (even with dummy dims) it is not Elemwise
             if all(all(inp.type.broadcastable) for inp in node.inputs):
+                continue
+            if not supports_numba(
+                node.op.scalar_op, tuple(inp.dtype for inp in node.inputs)
+            ):
                 continue
 
             idx_groups = {}  # (idx_var, axis) -> (reads: list[int], writes: list[int])

@@ -19,11 +19,16 @@ from pytensor.link.numba.cache import (
 )
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    generate_fallback_impl,
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.linalg.products import _gemm
+from pytensor.link.numba.dispatch.scalar import (
+    _scalar_funcify_with_fallback,
+    numba_funcify_scalar_native,
+)
 from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
@@ -803,11 +808,21 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 @register_funcify_and_cache_key(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
     scalar_node = op.make_scalar_node(*node.inputs)
-    scalar_op_fn, scalar_cache_key = numba_funcify_and_cache_key(
-        op.scalar_op,
-        node=scalar_node,
-        **kwargs,
+    scalar_op_fn, scalar_cache_key = numba_funcify_scalar_native(
+        op.scalar_op, node=scalar_node, **kwargs
     )
+    if scalar_op_fn is None:
+        # Preserve downstream scalar handlers instead of replacing them with nfunc_spec.
+        if (
+            numba_funcify_and_cache_key.dispatch(type(op.scalar_op))
+            is _scalar_funcify_with_fallback
+            and op.nfunc_spec
+            and len(node.inputs) == op.nfunc_spec[1]
+        ):
+            return generate_fallback_impl(op, node=node, **kwargs), None
+        scalar_op_fn, scalar_cache_key = numba_funcify_and_cache_key(
+            op.scalar_op, node=scalar_node, **kwargs
+        )
 
     nout = len(node.outputs)
     core_op_fn = scalar_op_fn

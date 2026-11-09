@@ -35,6 +35,7 @@ from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.traversal import toposort, walk_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
+from pytensor.link.numba.linker import NumbaLinker
 from pytensor.link.vm import VMLinker
 from pytensor.scalar import (
     Add,
@@ -677,6 +678,24 @@ class FusionOptimizer(GraphRewriter):
                             f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
                         )
                     return False
+
+            elif isinstance(linker, NumbaLinker):
+                from pytensor.link.numba.dispatch.scalar import (
+                    numba_funcify_scalar_native,
+                )
+
+                @cache
+                def scalar_op_supports_numba_cached(scalar_op, input_dtypes):
+                    scalar_node = scalar_op.make_node(
+                        *(get_scalar_type(dtype)() for dtype in input_dtypes)
+                    )
+                    func, _ = numba_funcify_scalar_native(scalar_node.op, scalar_node)
+                    return func is not None
+
+                def op_fuseable_in_backend(node: Apply) -> bool:
+                    return scalar_op_supports_numba_cached(
+                        node.op.scalar_op, tuple(inp.dtype for inp in node.inputs)
+                    )
 
             else:
 

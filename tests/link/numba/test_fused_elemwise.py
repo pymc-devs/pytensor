@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import Mode, function, get_mode
@@ -12,9 +13,7 @@ from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
 )
-
-
-numba = pytest.importorskip("numba")
+from tests.link.numba.test_basic import ArrayFallbackScalarOp
 
 
 NUMBA_MODE = get_mode("NUMBA")
@@ -33,6 +32,40 @@ def assert_fused(fn):
     assert any(isinstance(n.op, FusedElemwise) for n in fn.maker.fgraph.toposort()), (
         "FusedElemwise not found in fused graph"
     )
+
+
+@pytest.mark.parametrize("pattern", ["read", "write", "reduce"])
+def test_perform_fallback_stays_unfused(pattern):
+    fallback = Elemwise(ArrayFallbackScalarOp())
+    x = pt.dvector("x")
+    idx = pt.lvector("idx")
+    values = np.array([0.5, 1.0, 2.0, 5.0])
+    indices = np.array([2, 0, 3, 1])
+    if pattern == "read":
+        inputs = [x, idx]
+        args = [values, indices]
+        output = fallback(2, x[idx])
+        expected = scipy.special.polygamma(2, values[indices])
+    elif pattern == "write":
+        target = pt.dvector("target")
+        inputs = [x, idx, target]
+        args = [values, indices, np.zeros(4)]
+        output = pt.set_subtensor(target[idx], fallback(2, x))
+        expected = np.empty(4)
+        expected[indices] = scipy.special.polygamma(2, values)
+    else:
+        inputs = [x]
+        args = [values]
+        output = fallback(2, x).sum()
+        expected = scipy.special.polygamma(2, values).sum()
+
+    with pytest.warns(UserWarning, match="Numba will use object mode") as warnings:
+        fn = function(inputs, output, mode=NUMBA_MODE)
+    assert len(warnings) == 1
+    assert not any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.toposort()
+    )
+    np.testing.assert_allclose(fn(*args), expected)
 
 
 class TestIndexedReadFusion:

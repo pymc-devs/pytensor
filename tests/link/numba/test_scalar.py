@@ -8,11 +8,22 @@ import pytensor.scalar.math as psm
 import pytensor.tensor as pt
 from pytensor import config, function
 from pytensor.graph import Apply
+from pytensor.link.numba.dispatch.basic import (
+    numba_funcify_and_cache_key,
+    numba_njit,
+    register_funcify_and_cache_key,
+)
+from pytensor.link.numba.dispatch.scalar import numba_funcify_scalar_native
 from pytensor.scalar import ScalarLoop, UnaryScalarOp
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import tensor
 from pytensor.tensor.elemwise import Elemwise
-from tests.link.numba.test_basic import compare_numba_and_py, numba_mode, py_mode
+from tests.link.numba.test_basic import (
+    ArrayFallbackScalarOp,
+    compare_numba_and_py,
+    numba_mode,
+    py_mode,
+)
 
 
 rng = np.random.default_rng(42849)
@@ -239,8 +250,14 @@ def test_cython_obj_mode_fallback():
         def impl(self, x):
             return scipy.special.gamma(x).astype("int64")
 
+    scalar_op = IntegerGamma()
+    assert numba_funcify_scalar_native(scalar_op, scalar_op.make_node(ps.int64())) == (
+        None,
+        None,
+    )
+
     x = pt.scalar("x", dtype="int64")
-    g = Elemwise(IntegerGamma())(x)
+    g = Elemwise(scalar_op)(x)
     assert g.type.dtype == "int64"
 
     with pytest.warns(UserWarning, match="Numba will use object mode"):
@@ -249,6 +266,55 @@ def test_cython_obj_mode_fallback():
             [g],
             [np.array(5, dtype="int64")],
         )
+
+
+@pytest.mark.parametrize(
+    "scalar_op, args, supported",
+    [(psm.psi, (), True), (ArrayFallbackScalarOp(), (2,), False)],
+)
+@pytest.mark.parametrize("wrapper", ["scalar", "composite", "loop"])
+def test_scalar_native_dispatch(scalar_op, args, supported, wrapper, recwarn):
+    x = ps.float64("x")
+    value = scalar_op(*args, x)
+    if wrapper == "composite":
+        value = Composite([x], [value])(x)
+    elif wrapper == "loop":
+        value = ScalarLoop(init=[x], update=[value])(ps.int64("n_steps"), x)
+
+    func, _ = numba_funcify_scalar_native(value.owner_op, value.owner)
+    assert (func is not None) == supported
+    assert not recwarn
+
+
+@pytest.mark.parametrize("base", [UnaryScalarOp, psm.Sigmoid])
+@pytest.mark.parametrize("inherited", [False, True])
+def test_scalar_native_dispatch_legacy_registration(base, inherited):
+    class LegacyOp(base):
+        pass
+
+    class InheritedLegacyOp(LegacyOp):
+        pass
+
+    legacy_impl = numba_njit(lambda x: x * 2)
+
+    @register_funcify_and_cache_key(LegacyOp)
+    def legacy_funcify(op, node, **kwargs):
+        return legacy_impl, "legacy-key"
+
+    op_type = InheritedLegacyOp if inherited else LegacyOp
+    op = op_type(psb.upgrade_to_float)
+    node = op.make_node(ps.float64())
+    with pytest.warns(FutureWarning, match="register_scalar_funcify"):
+        assert numba_funcify_scalar_native(op, node) == (None, None)
+    func, key = numba_funcify_and_cache_key(op, node)
+    assert func is legacy_impl
+    assert key == "legacy-key"
+
+    x = pt.dvector("x")
+    with pytest.warns(FutureWarning, match="register_scalar_funcify"):
+        fn = function([x], x * Elemwise(op)(x + 1), mode=numba_mode)
+    values = np.array([-1.0, 1.0, 2.0])
+    np.testing.assert_allclose(fn(values), values * (values + 1) * 2)
 
 
 def test_erf_complex():
@@ -324,7 +390,7 @@ CYTHON_SPECIAL_CASES = [
 )
 def test_cython_special_funcs(op_fn, test_values):
     """Scalar ops backed by ``scipy.special.cython_special`` resolve their C function pointer at
-    runtime (see ``numba_funcify_ScalarOp``), so the funcified kernel is njit-only. Skip the
+    runtime (see ``numba_funcify_scalar_native_default``), so the funcified kernel is njit-only. Skip the
     object-mode eval path, as is done for the LAPACK wrappers."""
     inputs = [pt.vector(f"x{i}", dtype="float64") for i in range(len(test_values))]
     out = op_fn(*inputs)
