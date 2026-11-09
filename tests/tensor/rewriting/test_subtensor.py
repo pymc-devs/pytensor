@@ -13,7 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
-from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
+from pytensor.tensor.basic import Alloc, ExtractDiag, Join, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
@@ -2555,6 +2555,27 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     f_val = np.concatenate([x_val[slice_val] for slice_val in slices_val], axis=axis)
 
     np.testing.assert_array_equal(f(x_val, stop_val), f_val)
+
+
+def test_local_join_subtensors_merges_all_runs_at_once():
+    # A join of many contiguous slices (and an unrelated tensor in between) is merged in one
+    # application, rather than one pair per pass over the whole graph
+    from pytensor.graph.rewriting.basic import MergeOptimizer, dfs_rewriter
+    from pytensor.tensor.rewriting.subtensor import local_join_subtensors
+
+    x, z = pt.dmatrix("x"), pt.dmatrix("z")
+    parts = (
+        [x[i : i + 1] for i in range(6)] + [z] + [x[i : i + 2] for i in range(6, 10, 2)]
+    )
+    fg = FunctionGraph([x, z], [pt.concatenate(parts, axis=0)], clone=False)
+    # equal slice bounds become the same constant, as in a real compile
+    MergeOptimizer().rewrite(fg)
+    dfs_rewriter(local_join_subtensors, ignore_newtrees=True).rewrite(fg)
+    [join] = [n for n in fg.apply_nodes if isinstance(n.op, Join)]
+    assert len(join.inputs) == 3  # x[0:6], z, x[6:10]
+    f = pytensor.function([x, z], fg.outputs[0], mode=Mode("py", optimizer=None))
+    xv, zv = np.arange(40.0).reshape(10, 4), -np.ones((2, 4))
+    np.testing.assert_array_equal(f(xv, zv), np.concatenate([xv[:6], zv, xv[6:10]]))
 
 
 def test_local_uint_constant_indices():
