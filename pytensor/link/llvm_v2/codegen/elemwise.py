@@ -38,10 +38,10 @@ def output_array(out, shape):
     return out.allocate(shape)
 
 
-def broadcast_shape(cx, node, inputs):
+def broadcast_shape(cg, node, inputs):
     """The loop shape of an Elemwise. Broadcasting follows the static types (PyTensor
     doesn't broadcast at run time): non-broadcastable lengths must agree."""
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     out_shape = node.outputs[0].type.shape
     shape = []
     for a, static in enumerate(out_shape):
@@ -53,7 +53,7 @@ def broadcast_shape(cx, node, inputs):
             if length is None:
                 length = ln
             elif not (length.const_int is not None and length.const_int == ln.const_int):
-                cx.check(
+                cg.check(
                     b.icmp(m.ICmp.EQ, length, ln),
                     f"Elemwise: shape mismatch: input {k} has a different length on axis {a}",
                 )
@@ -76,9 +76,9 @@ def _(op, node, in_layouts):
 
 
 @llvm_emit.register(Elemwise)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
-    shape = broadcast_shape(cx, node, inputs)
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
+    shape = broadcast_shape(cg, node, inputs)
     outs = [output_array(o, shape) for o in outputs]
     in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
     out_dtypes = [check_dtype(v.type.dtype) for v in node.outputs]
@@ -101,16 +101,16 @@ def _(op, node, cx, inputs, outputs):
         for k, (v, d) in enumerate(zip(res, out_dtypes, strict=True)):
             store(b, d, v, ptrs[n_in + k])
 
-    for_each(b, shape, operands, body, cx.par(scalar_cost(op.scalar_op)))
+    for_each(b, shape, operands, body, cg.par(scalar_cost(op.scalar_op)))
 
 
 @llvm_emit.register(ps.ScalarOp)
-def _(op, node, cx, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     """A scalar op applied to ScalarType values."""
     args = [(v, check_dtype(var.type.dtype)) for v, var in zip(inputs, node.inputs, strict=True)]
-    res = emit_scalar(op, cx.b, args, [check_dtype(o.type.dtype) for o in node.outputs])
+    res = emit_scalar(op, cg.b, args, [check_dtype(o.type.dtype) for o in node.outputs])
     for out, v in zip(outputs, res, strict=True):
-        out.set(cx.b, v)
+        out.set(cg.b, v)
 
 
 # ------------------------------------------------------------------ CAReduce
@@ -136,8 +136,8 @@ def identity_value(scalar_op, ident, acc_dtype):
 
 
 @llvm_emit.register(CAReduce)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     (x,) = inputs
     (out,) = outputs
     nd = x.ndim
@@ -155,7 +155,7 @@ def _(op, node, cx, inputs, outputs):
         # like numpy: maximum/minimum have no identity for empty reductions
         empty = b.icmp(m.ICmp.EQ, size(b, [x.shape[a] for a in axes]), b.const_int(m.i64, 0))
         some_out = b.icmp(m.ICmp.NE, size(b, out_shape), b.const_int(m.i64, 0))
-        cx.check(b.xor(b.and_(empty, some_out), b.const_bool(True)), "zero-size array to reduction operation which has no identity")
+        cg.check(b.xor(b.and_(empty, some_out), b.const_bool(True)), "zero-size array to reduction operation which has no identity")
     res = output_array(out, out_shape)
 
     if not out_shape:
@@ -165,7 +165,7 @@ def _(op, node, cx, inputs, outputs):
         return
 
     # partial: accumulate into an array of the accumulator dtype
-    acc_arr = res if acc == out_dtype else cx.temporary(acc, out_shape)
+    acc_arr = res if acc == out_dtype else cg.temporary(acc, out_shape)
     for_each(b, out_shape, [acc_arr], lambda p: store(b, acc, init, p[0]))
     acc_strides, k = [], 0
     for r in reduced:
@@ -191,12 +191,12 @@ def _(op, node, cx, inputs, outputs):
     loops = order[:-1] if reduced[inner] else order
     # the outermost loop may run in parallel when each iteration has its own
     # accumulators (it isn't over a reduced axis)
-    par = cx.par(scalar_cost(op.scalar_op)) if loops and not reduced[loops[0]] else None
+    par = cg.par(scalar_cost(op.scalar_op)) if loops and not reduced[loops[0]] else None
     if par is not None and not par.worth_it(size(b, x.shape)):
         par = None
     _strided(b, x.shape, [x, accs], body, loops, par=par)
     if acc != out_dtype:
-        copy(cx, acc_arr, res)
+        copy(cg, acc_arr, res)
 
 
 def reduce_row(b, x: Array, axis, row, init, combine):

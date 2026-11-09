@@ -13,17 +13,17 @@ from pytensor.tensor.basic import ExtractDiag, Split
 from pytensor.tensor.extra_ops import CumOp
 
 
-def _set(out, cx, a: Array):
+def _set(out, cg, a: Array):
     """Make output `out` the array `a`: as a view if it is one, else by copying."""
     if hasattr(out, "set_view") and out.view_of is not None:
         out.set_view(a)
     else:
-        copy(cx, a, output_array(out, a.shape))
+        copy(cg, a, output_array(out, a.shape))
 
 
 @llvm_emit.register(CumOp)
-def _(op, node, cx, inputs, outputs):
-    b = cx.b
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
     x = inputs[0]
     if x.ndim == 0:
         raise NotImplementedError("CumOp on a 0-d input")
@@ -53,8 +53,8 @@ def _(op, node, cx, inputs, outputs):
 
 
 @llvm_emit.register(ExtractDiag)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     i64 = m.i64
     x = inputs[0]
     a1, a2 = op.axis1 % x.ndim, op.axis2 % x.ndim
@@ -70,7 +70,7 @@ def _(op, node, cx, inputs, outputs):
     start = b.select(b.icmp(m.ICmp.SGT, length, zero), start, zero)
     shape = [x.shape[a] for a in range(x.ndim) if a not in (a1, a2)] + [length]
     strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [b.add(x.strides[a1], x.strides[a2])]
-    _set(outputs[0], cx, Array(x.dtype, b.gep_bytes(x.data, start), shape, strides))
+    _set(outputs[0], cg, Array(x.dtype, b.gep_bytes(x.data, start), shape, strides))
 
 
 @llvm_outputs.register(Split)
@@ -79,8 +79,8 @@ def _(op, node, in_layouts):
 
 
 @llvm_emit.register(Split)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     i64 = m.i64
     x, splits = inputs
     axis = op.axis
@@ -89,18 +89,18 @@ def _(op, node, cx, inputs, outputs):
     for k in range(op.len_splits):
         p = b.gep_bytes(splits.data, mul(b, b.const_int(i64, k), splits.strides[0]))
         n = cast(b, load(b, splits.dtype, p), splits.dtype, "int64")
-        cx.check(b.icmp(m.ICmp.SGE, n, b.const_int(i64, 0)), "Split: negative split size")
+        cg.check(b.icmp(m.ICmp.SGE, n, b.const_int(i64, 0)), "Split: negative split size")
         static = node.outputs[k].type.shape[axis]
         if static is not None:
-            cx.check(b.icmp(m.ICmp.EQ, n, b.const_int(i64, static)), "Split: split size differs from the static shape")
+            cg.check(b.icmp(m.ICmp.EQ, n, b.const_int(i64, static)), "Split: split size differs from the static shape")
             n = b.const_int(i64, static)
         parts.append((offset, n))
         offset = b.add(offset, n)
-    cx.check(b.icmp(m.ICmp.EQ, offset, x.shape[axis]), "Split: the split sizes don't add up to the length of the axis")
+    cg.check(b.icmp(m.ICmp.EQ, offset, x.shape[axis]), "Split: the split sizes don't add up to the length of the axis")
     layouts = split_layouts(op, node, x.layout)
     for out, (start, n), lay in zip(outputs, parts, layouts, strict=True):
         shape = list(x.shape)
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
         start = b.select(b.icmp(m.ICmp.SGT, n, b.const_int(i64, 0)), start, b.const_int(i64, 0))
-        _set(out, cx, Array(x.dtype, b.gep_bytes(x.data, mul(b, start, x.strides[axis])), shape, list(x.strides), lay))
+        _set(out, cg, Array(x.dtype, b.gep_bytes(x.data, mul(b, start, x.strides[axis])), shape, list(x.strides), lay))

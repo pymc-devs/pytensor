@@ -9,7 +9,7 @@
 //!     void *(*alloc)(PtCtx *, size_t bytes, size_t align, PtBuffer **owner);
 //!     void  (*buffer_incref)(PtCtx *, PtBuffer *);
 //!     void  (*buffer_decref)(PtCtx *, PtBuffer *);
-//!     void *(*scratch)(PtCtx *, size_t bytes);    // 64-byte aligned, valid until the step ends
+//!     void *(*scratch)(PtCtx *, size_t bytes);    // 64-byte aligned, valid until the task ends
 //!     void  (*set_error)(PtCtx *, int32_t code, const char *msg);
 //!     int64_t (*scratch_mark)(PtCtx *);
 //!     void  (*scratch_release)(PtCtx *, int64_t mark);
@@ -67,7 +67,7 @@ pub const FIELD_STRIDES: usize = 2;
 ///
 /// SAFETY (all four): `shape`/`strides` point to `ndim` readable (writable for the
 /// `_mut` versions) i64s, and nothing else writes them while the slice is alive. The
-/// runtime gives every variable its own shape/stride storage (`CallState::shapes`,
+/// runtime gives every variable its own shape/stride storage (`CallMemory::shapes`,
 /// at `dim_off[v]`), so an input's and an output's arrays never alias; at the C API
 /// boundary `ndim` is checked against the function's types before these are called.
 impl PtArray {
@@ -273,7 +273,7 @@ runtime_functions! {
     alloc: fn(*mut PtCtx, usize, usize, *mut *mut PtBuffer) -> *mut u8 = rt_alloc;
     buffer_incref: fn(*mut PtCtx, *mut PtBuffer) = rt_incref;
     buffer_decref: fn(*mut PtCtx, *mut PtBuffer) = rt_decref;
-    /// Scratch memory (64-byte aligned) until the step ends, or until a
+    /// Scratch memory (64-byte aligned) until the task ends, or until a
     /// `scratch_release` of an earlier mark.
     scratch: fn(*mut PtCtx, usize) -> *mut u8 = rt_scratch;
     set_error: fn(*mut PtCtx, i32, *const c_char) = rt_set_error;
@@ -290,7 +290,7 @@ runtime_functions! {
     rng_beta: fn(*mut PtCtx, f64, f64) -> f64 = crate::random::rng_beta;
     rng_poisson: fn(*mut PtCtx, f64) -> i64 = crate::random::rng_poisson;
     rng_binomial: fn(*mut PtCtx, i64, f64) -> i64 = crate::random::rng_binomial;
-    /// `parallel_for(ctx, n, grain, body, env)`: chunks of `0..n` on the runtime's
+    /// `parallel_for(ctx, n, grain, body, captures)`: chunks of `0..n` on the runtime's
     /// thread pool (`crate::parallel`).
     parallel_for: fn(*mut PtCtx, i64, i64, crate::parallel::BodyFn, *const u8) -> i32 = crate::parallel::rt_parallel_for;
 }
@@ -354,8 +354,8 @@ impl Runtime {
 
 // ------------------------------------------------------------------ the call context
 
-/// The context of a call: per function state (one per thread or chain, owned by the
-/// caller through its call state), shared by everything the call runs, nested programs
+/// The context of a call: per session (one per thread or chain, owned by the
+/// caller through its call state), shared by everything the call runs, subprograms
 /// included. Kernels see only `rt`.
 #[repr(C)]
 pub struct PtCtx {
@@ -365,10 +365,10 @@ pub struct PtCtx {
     scratch: Scratch,
     /// positions handed out by `scratch_mark` (tokens are indices)
     marks: Vec<ScratchMark>,
-    /// the function state's random state: everything the call runs draws from it, in
+    /// the session's random state: everything the call runs draws from it, in
     /// order (`seed` makes the draws reproducible)
     pub rng: rand_xoshiro::Xoshiro256PlusPlus,
-    /// may parallel loops of this function state use the thread pool? (Results are
+    /// may parallel loops of this session use the thread pool? (Results are
     /// the same either way.)
     pub parallel: bool,
 }
@@ -549,7 +549,7 @@ impl PtCtx {
     }
 
     /// Mark the scratch position; `scratch_release(token)` frees everything handed out
-    /// since (and releases later marks). The interpreter marks around every step;
+    /// since (and releases later marks). The interpreter marks around every task;
     /// generated code and kernels that call other code (Scan) mark too.
     pub fn scratch_mark(&mut self) -> i64 {
         self.marks.push(self.scratch.mark());

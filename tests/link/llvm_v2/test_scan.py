@@ -1,5 +1,5 @@
-"""Scan on LLVM_V2: as a generated loop (the step inlined, callees for the rest), and as
-the Rust kernel running the step as a nested program."""
+"""Scan on LLVM_V2: as a generated loop (its body inlined, kernels called for the rest), and as
+the Rust kernel running its body as a subprogram."""
 
 import numpy as np
 import pytest
@@ -23,16 +23,16 @@ def scan(*args, **kwargs):
     return pytensor.scan(*args, return_updates=False, **kwargs)
 
 
-def scan_steps(f):
-    """Descriptions of the program's Scan steps."""
+def scan_tasks(f):
+    """Descriptions of the program's Scan tasks."""
     dump = f.maker.linker.compiled.dump()
-    return [line for line in dump.split("steps:")[1].splitlines() if "Scan" in line]
+    return [line for line in dump.split("tasks:")[1].splitlines() if "Scan" in line]
 
 
 def generated(f):
-    """Are the top-level Scan steps generated loops? (A generated step is described by
+    """Are the top-level Scan tasks generated loops? (A generated task is described by
     the op, "Scan{...}"; the kernel's by just "Scan". Scans inside units are skipped.)"""
-    tops = [s.split(")  ", 1)[1] for s in scan_steps(f) if s.split(")  ", 1)[1].startswith("Scan")]
+    tops = [s.split(")  ", 1)[1] for s in scan_tasks(f) if s.split(")  ", 1)[1].startswith("Scan")]
     return all(t.startswith("Scan{") for t in tops) and any(t.startswith("Scan{") for t in tops) if tops else None
 
 
@@ -49,9 +49,9 @@ def compare(inputs, outputs, values, modes=(GEN, KERNEL)):
         for r, e in zip(res, ref, strict=True):
             assert r.shape == e.shape and r.dtype == e.dtype, (r.shape, e.shape, r.dtype, e.dtype)
             np.testing.assert_allclose(r, e, rtol=1e-12, atol=1e-14)
-        assert scan_steps(f), "no Scan step"
+        assert scan_tasks(f), "no Scan task"
         g = generated(f)
-        assert g is None or g == (mode is not KERNEL), scan_steps(f)
+        assert g is None or g == (mode is not KERNEL), scan_tasks(f)
         fs.append(f)
     return fs
 
@@ -83,7 +83,7 @@ def test_nit_sot_map_over_matrix_rows():
 
 
 def test_nit_sot_rows_of_dynamic_shape():
-    # rows without a static shape: the buffer is allocated by the first step
+    # rows without a static shape: the buffer is allocated by the first iteration
     m = pt.matrix("m")
     k = pt.lscalar("k")
     ys = scan(lambda row, k: pt.sort(row)[:k], sequences=[m], non_sequences=[k])
@@ -126,7 +126,7 @@ def test_gradient_of_scan_mit_mot():
     compare([x0, rho, eps], [logp, *pytensor.grad(logp, [x0, rho, eps])], [np.array(0.3), np.array(0.8), rng.normal(size=60)])
 
 
-def test_kernel_inside_the_step():
+def test_kernel_inside_the_loop_body():
     A = pt.matrix("A")
     x0 = pt.vector("x0")
     seq = pt.matrix("seq")
@@ -163,7 +163,7 @@ def test_nested_scan():
     compare([x], sums, [rng.normal(size=(6, 8))])
 
 
-def test_step_with_an_interpreted_op_from_graph():
+def test_loop_body_with_an_interpreted_op_from_graph():
     from pytensor.compile.builders import OpFromGraph
 
     a = pt.vector("a")
@@ -173,14 +173,14 @@ def test_step_with_an_interpreted_op_from_graph():
     compare([m], ys, [rng.normal(size=(4, 3))])
 
 
-def test_step_with_numba_fallback():
-    # a node without an LLVM implementation inside the step is called through numba
+def test_loop_body_with_a_numba_kernel():
+    # a node without an LLVM implementation in the loop body is a numba kernel
     m = pt.matrix("m")
     ys = scan(lambda row: pt.linalg.norm(pt.outer(row, row), ord="nuc"), sequences=[m])
     compare([m], ys, [rng.normal(size=(3, 4))], modes=(V2,))
 
 
-def test_array_constant_in_the_step():
+def test_array_constant_in_the_loop_body():
     m = pt.matrix("m")
     c = np.arange(4.0)
     ys = scan(lambda row: (row * pt.constant(c)).sum(), sequences=[m])

@@ -42,10 +42,10 @@ def _max(b, x, y):
     return _select(b, b.icmp(m.ICmp.SGT, x, y), x, y)
 
 
-def index(cx, x: Array, entries) -> Array:
+def index(cg, x: Array, entries) -> Array:
     """`x[entries]` as a view: `entries` hold (value, dtype) for integer indices and
     slices of (value, dtype) / None, like `unflatten_index_variables` returns them."""
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     i64 = m.i64
     zero, one = b.const_int(i64, 0), b.const_int(i64, 1)
     offset = zero
@@ -56,7 +56,7 @@ def index(cx, x: Array, entries) -> Array:
         n, st = x.shape[axis], x.strides[axis]
         if isinstance(e, slice):
             step = one if e.step is None else _i64(b, *e.step)
-            cx.check(b.icmp(m.ICmp.NE, step, zero), "slice step cannot be zero")
+            cg.check(b.icmp(m.ICmp.NE, step, zero), "slice step cannot be zero")
             pos = b.icmp(m.ICmp.SGT, step, zero)
             minus1 = b.const_int(i64, -1)
             nm1 = b.sub(n, one)
@@ -89,7 +89,7 @@ def index(cx, x: Array, entries) -> Array:
             i = _i64(b, *e)
             i = _select(b, b.icmp(m.ICmp.SLT, i, zero), b.add(i, n), i)
             ok = b.and_(b.icmp(m.ICmp.SGE, i, zero), b.icmp(m.ICmp.SLT, i, n))
-            cx.check(ok, f"index out of bounds for axis {axis}")
+            cg.check(ok, f"index out of bounds for axis {axis}")
             offset = b.add(offset, mul(b, i, st))
         axis += 1
     shape += x.shape[axis:]
@@ -106,14 +106,14 @@ def _entries(op, node, inputs, first):
 
 
 @llvm_emit.register(Subtensor)
-def _(op, node, cx, inputs, outputs):
-    view = index(cx, inputs[0], _entries(op, node, inputs, 1))
+def _(op, node, cg, inputs, outputs):
+    view = index(cg, inputs[0], _entries(op, node, inputs, 1))
     view.layout = subtensor_layout(op, node, inputs[0].layout)
     out = outputs[0]
     if hasattr(out, "set_view"):
         out.set_view(view)
     else:
-        copy(cx, view, out.array)
+        copy(cg, view, out.array)
 
 
 @llvm_outputs.register(Subtensor)
@@ -127,12 +127,12 @@ def _(op, node, in_layouts):
 
 
 @llvm_emit.register(IncSubtensor)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     x, y = inputs[0], inputs[1]
     out = output_array(outputs[0], x.shape)
-    copy(cx, x, out)
-    view = index(cx, out, _entries(op, node, inputs, 2))
+    copy(cg, x, out)
+    view = index(cg, out, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type
     off = view.ndim - ytype.ndim
@@ -150,7 +150,7 @@ def _(op, node, cx, inputs, outputs):
                 ystrides.append(y.strides[a])
                 continue
             one = b.icmp(m.ICmp.EQ, ln, b.const_int(m.i64, 1))
-            cx.check(
+            cg.check(
                 _or(b, b.icmp(m.ICmp.EQ, ln, vn), one),
                 "IncSubtensor: shape mismatch between the value and the indexed view",
             )

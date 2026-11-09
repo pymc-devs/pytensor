@@ -1,18 +1,18 @@
-"""Scan as generated code: the loop, its buffers and the step in one function.
+"""Scan as generated code: the loop, its buffers and its body in one function.
 
 The conventions are PyTensor's (and the Rust kernel's, rt/scan.rs): every traced output
 (mit-mot, mit-sot, sit-sot) has a buffer whose first rows hold the initial taps; the
-step reads tap `k` at row `(i + lookback + k) % len` and writes at
+body reads tap `k` at row `(i + lookback + k) % len` and writes at
 `(i + lookback + out_tap) % len`. After the loop, buffers shorter than the trace are
-rotated so the last value is at the end, while-loops are truncated to the steps taken,
+rotated so the last value is at the end, while-loops are truncated to the iterations run,
 and unused rows of regular loops are zeroed. nit-sot buffers whose rows have no static
-shape are allocated by the first step.
+shape are allocated by the first iteration.
 
-The step is the inner graph's items emitted into the loop body (`emit_items`): nodes we
-generate are inlined, the others called (kernels, numba, nested programs). Step outputs
+The loop body is the inner graph's items, emitted (`emit_items`): nodes we
+generate are inlined, the others called (kernels, numba, subprograms). Body outputs
 are produced directly in their rows when that is safe (a static buffer length that
-can't make the row coincide with a row the step reads), else copied there. Buffers
-callees allocate and scratch memory are released after every step.
+can't make the row coincide with a row the body reads), else copied there. Buffers
+kernels allocate and scratch memory are released after every iteration.
 """
 
 from __future__ import annotations
@@ -48,10 +48,10 @@ def register():
         ]
 
     @llvm_emit.register(Scan)
-    def _(op, node, cx, inputs, outputs):
-        if cx.planner is None or cx.closure is None or cx.module is None or not scan_supported(op):
+    def _(op, node, cg, inputs, outputs):
+        if cg.planner is None or cg.links is None or cg.module is None or not scan_supported(op):
             raise NotImplementedError(f"generated {op}")
-        emit_scan(op, node, cx, inputs, outputs)
+        emit_scan(op, node, cg, inputs, outputs)
 
 
 def _i64(b, a: Array | object, dtype):
@@ -79,8 +79,8 @@ def _row(b, buf: Array, r, layout=None):
     return Array(buf.dtype, p, list(buf.shape[1:]), list(buf.strides[1:]), layout if layout is not None else Layout.c(nd - 1))
 
 
-def _fill_zero(cx, a: Array):
-    b = cx.b
+def _fill_zero(cg, a: Array):
+    b = cg.b
     zero = constant(b, a.dtype, 0)
     for_each(b, a.shape, [a], lambda p: store(b, a.dtype, zero, p[0]))
 
@@ -107,8 +107,8 @@ class _Traced:
         return b.urem(off, b.select(b.icmp(m.ICmp.SGT, n, one), n, one))
 
     def direct_write_ok(self, k_out):
-        """Can the step produce out tap `k_out` straight into its row? Only if that row
-        is never a row the same step reads (a static length decides it)."""
+        """Can the body produce out tap `k_out` straight into its row? Only if that row
+        is never a row the same iteration reads (a static length decides it)."""
         n = self.static_len()
         if n is None or n < 1:
             return False
@@ -118,10 +118,10 @@ class _Traced:
         return (w % n) not in reads and (w % n) not in others
 
 
-def emit_scan(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def emit_scan(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     info = op.info
-    planner = cx.planner
+    planner = cg.planner
     i64 = m.i64
     n_mm, n_ms, n_ss = len(info.mit_mot_in_slices), len(info.mit_sot_in_slices), len(info.sit_sot_in_slices)
     o_seq = 1
@@ -140,7 +140,7 @@ def emit_scan(op, node, cx, inputs, outputs):
     for k, a in enumerate(seqs):
         if len(a.shape) < 1:
             raise NotImplementedError("a 0-d sequence")
-        cx.check(b.icmp(m.ICmp.SGE, a.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps")
+        cg.check(b.icmp(m.ICmp.SGE, a.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps")
 
     # ---- traced buffers: copies of the outer buffers, allocated into the outputs
     q = 0  # next outer output
@@ -154,7 +154,7 @@ def emit_scan(op, node, cx, inputs, outputs):
             out = outputs[q]
             q += 1
             buf = out.allocate(list(a.shape))
-            copy(cx, a, buf)
+            copy(cg, a, buf)
             in_taps = [int(t) for t in in_taps]
             lookback = -min(min(in_taps, default=0), 0)
             out_taps = [int(t) for t in info.mit_mot_out_slices[j]] if is_mm else [0]
@@ -174,8 +174,8 @@ def emit_scan(op, node, cx, inputs, outputs):
             buf = None
         nit.append([out, length, buf, var])
     q += info.n_nit_sot
-    # ---- untraced states: copies, replaced by every step's output (reallocated when
-    # its shape changes, so read from the output slot in every step)
+    # ---- untraced states: copies, replaced by every iteration's output (reallocated when
+    # its shape changes, so read from the output slot in every iteration)
     untraced = []
     for j in range(info.n_untraced_sit_sot):
         out = outputs[q + j]
@@ -183,52 +183,52 @@ def emit_scan(op, node, cx, inputs, outputs):
         if out is None:  # no data (a random generator)
             untraced.append(None)
             continue
-        copy(cx, a, out.allocate(list(a.shape)))
+        copy(cg, a, out.allocate(list(a.shape)))
         untraced.append(out)
 
-    # ---- the step's graph
+    # ---- the loop body's graph
     fg = op.fgraph
     scope = {}
-    in_keys = []
+    in_ids = []
     for v in fg.inputs:
-        k = planner.new_key(v.type)
+        k = planner.new_value(v.type)
         scope[v] = k
-        in_keys.append(k)
+        in_ids.append(k)
     items = planner.flatten(fg.toposort(), scope, inside_unit=True)
-    out_keys = [planner.key_of(o, scope) for o in fg.outputs]
+    out_ids = [planner.value_of(o, scope) for o in fg.outputs]
     consts = {}
     for it in items:
         for k in it.inputs:
             if k in planner.consts:
                 consts[k] = (planner.types[k], planner.consts[k])
-    for k in out_keys:
+    for k in out_ids:
         if k in planner.consts:
             consts[k] = (planner.types[k], planner.consts[k])
     n_traced_outs = first_nit
 
     def body(i, *acc):
-        mark = b.rt_scratch_mark(cx.ctx)
+        mark = b.rt_scratch_mark(cg.ctx)
         vals, lays = {}, {}
-        bind_constants(cx, consts, vals)
-        keys = iter(in_keys)
+        bind_constants(cg, consts, vals)
+        vids = iter(in_ids)
         for a in seqs:
-            k = next(keys)
+            k = next(vids)
             r = _row(b, a, i, remove_axis(a.layout, 0, a.static_shape(), _isz(a.dtype)))
             vals[k], lays[k] = r, r.layout
         for t in traced:
             for tap in t.in_taps:
-                k = next(keys)
+                k = next(vids)
                 r = _row(b, t.buf, t.row_index(b, i, tap))
                 vals[k], lays[k] = r, r.layout
         cur_untraced = []
         for out in untraced:
-            k = next(keys)
+            k = next(vids)
             cur = None if out is None else out.read()
             cur_untraced.append(cur)
             if cur is not None:
                 vals[k], lays[k] = cur, cur.layout
         for a in inputs[o_ns:]:
-            k = next(keys)
+            k = next(vids)
             if a is not None:
                 vals[k] = a
                 lays[k] = a.layout if isinstance(a, Array) else None
@@ -241,48 +241,48 @@ def emit_scan(op, node, cx, inputs, outputs):
                 r = _row(b, t.buf, t.row_index(b, i, tap))
                 rows.append(r)
                 if t.direct_write_ok(kk):
-                    targets.setdefault(out_keys[oi], Target(array=r, layout=r.layout))
+                    targets.setdefault(out_ids[oi], Target(array=r, layout=r.layout))
                 oi += 1
         for out, length, buf, var in nit:
             if buf is not None:
                 r = _row(b, buf, i)
                 rows.append(r)
-                targets.setdefault(out_keys[oi], Target(array=r, layout=r.layout))
+                targets.setdefault(out_ids[oi], Target(array=r, layout=r.layout))
             else:
                 rows.append(None)
             oi += 1
 
-        written, owned = emit_items(cx, cx.module, f"{cx.name}_step", items, vals, lays, targets, planner.callee_for)
+        written, owned = emit_items(cg, cg.module, f"{cg.name}_body", items, vals, lays, targets, planner.kernel_for)
 
         def value(k):
             if k not in vals:
-                raise ValueError(f"Scan step: no value for output key {k}")
+                raise ValueError(f"Scan body: no value for output vid {k}")
             return vals[k]
 
         # copy what wasn't produced in place into its row
         for oi in range(n_traced_outs):
-            k = out_keys[oi]
+            k = out_ids[oi]
             t = targets.get(k)
             if k in written and t is not None and t.array is rows[oi]:
                 continue
-            copy(cx, value(k), rows[oi])
+            copy(cg, value(k), rows[oi])
         for j, (out, length, buf, var) in enumerate(nit):
-            k = out_keys[n_traced_outs + j]
+            k = out_ids[n_traced_outs + j]
             src = value(k)
             if buf is not None:
                 t = targets.get(k)
                 if not (k in written and t is not None and t.array is rows[n_traced_outs + j]):
-                    copy(cx, src, rows[n_traced_outs + j])
+                    copy(cg, src, rows[n_traced_outs + j])
                 continue
-            # rows without a static shape: the buffer is allocated by the first step
+            # rows without a static shape: the buffer is allocated by the first iteration
             first = b.icmp(m.ICmp.EQ, i, b.const_int(i64, 0))
             with b.if_(first):
                 out.allocate([length, *src.shape])
             cur = out.read()
             for d, n in enumerate(src.shape):
-                cx.check(b.icmp(m.ICmp.EQ, n, cur.shape[1 + d]), "Scan: nit-sot step outputs have different shapes")
-            copy(cx, src, _row(b, cur, i))
-        for out, cur, k in zip(untraced, cur_untraced, out_keys[n_traced_outs + info.n_nit_sot :], strict=False):
+                cg.check(b.icmp(m.ICmp.EQ, n, cur.shape[1 + d]), "Scan: nit-sot body outputs have different shapes")
+            copy(cg, src, _row(b, cur, i))
+        for out, cur, k in zip(untraced, cur_untraced, out_ids[n_traced_outs + info.n_nit_sot :], strict=False):
             if out is None:
                 continue
             src = value(k)
@@ -290,7 +290,7 @@ def emit_scan(op, node, cx, inputs, outputs):
             for d, n in enumerate(src.shape):
                 differs = b.or_(differs, b.icmp(m.ICmp.NE, n, cur.shape[d]))
             if differs.const_int == 0:
-                copy(cx, src, cur)
+                copy(cg, src, cur)
                 continue
             # a new shape: a new buffer (the old one is released after the copy: the
             # output may be a view of it)
@@ -299,15 +299,15 @@ def emit_scan(op, node, cx, inputs, outputs):
             with b.if_(differs):
                 b.store(out.owner(), old)
                 out.allocate(list(src.shape))
-            copy(cx, src, out.read())
-            b.rt_decref(cx.ctx, b.load(m.ptr, old))
+            copy(cg, src, out.read())
+            b.rt_decref(cg.ctx, b.load(m.ptr, old))
         stop = None
         if info.as_while:
-            c = value(out_keys[-1])
+            c = value(out_ids[-1])
             v = load(b, c.dtype, c.data) if isinstance(c, Array) else c
             stop = b.icmp(m.ICmp.NE, cast(b, v, fg.outputs[-1].type.dtype, "int8"), b.const_int(m.i8, 0))
-        release(cx, owned)
-        b.rt_scratch_release(cx.ctx, mark)
+        release(cg, owned)
+        b.rt_scratch_release(cg.ctx, mark)
         if info.as_while:
             return [b.add(acc[0], b.const_int(i64, 1)), stop]
         return []
@@ -331,22 +331,22 @@ def emit_scan(op, node, cx, inputs, outputs):
                 old_owner = out.owner()
                 nb = out.allocate(list(buf.shape))
                 rest = b.sub(n, shift)
-                copy(cx, _rows(b, buf, shift, rest), _rows(b, nb, b.const_int(i64, 0), rest))
-                copy(cx, _rows(b, buf, b.const_int(i64, 0), shift), _rows(b, nb, rest, shift))
-                b.rt_decref(cx.ctx, old_owner)
+                copy(cg, _rows(b, buf, shift, rest), _rows(b, nb, b.const_int(i64, 0), rest))
+                copy(cg, _rows(b, buf, b.const_int(i64, 0), shift), _rows(b, nb, rest, shift))
+                b.rt_decref(cg.ctx, old_owner)
         tail = b.and_(b.xor(rotate, b.const_bool(True)), b.icmp(m.ICmp.SGT, n, used))
         with b.if_(tail):
             if info.as_while:
                 out.set_length(0, used)
             else:
-                _fill_zero(cx, _rows(b, buf, used, b.sub(n, used)))
+                _fill_zero(cg, _rows(b, buf, used, b.sub(n, used)))
 
     for t in traced:
         if t.post_process:
             finish(t.out, t.buf, t.lookback + max(t.out_taps, default=0))
     for out, length, buf, var in nit:
         if buf is None:
-            # allocated by the first step; if none ran: an empty array
+            # allocated by the first iteration; if none ran: an empty array
             none_ran = b.icmp(m.ICmp.EQ, out.data(), b.null())
             with b.if_(none_ran):
                 out.allocate([length, *(b.const_int(i64, 0) for _ in range(var.type.ndim))])

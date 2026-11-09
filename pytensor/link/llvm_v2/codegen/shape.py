@@ -25,8 +25,8 @@ def _(op, node, in_layouts):
 
 
 @llvm_emit.register(DimShuffle)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     x = inputs[0]
     shape, strides = [], []
     for o in op.new_order:
@@ -42,37 +42,37 @@ def _(op, node, cx, inputs, outputs):
 
 
 @llvm_emit.register(ViewOp)
-def _(op, node, cx, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     outputs[0].set_view(inputs[0])
 
 
 @llvm_emit.register(SpecifyShape)
-def _(op, node, cx, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     """Check the given lengths (None inputs: unconstrained axes), then a view."""
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     x = inputs[0]
     for a, (n, var) in enumerate(zip(inputs[1:], node.inputs[1:], strict=True)):
         if n is None:
             continue
         want = cast(b, load(b, n.dtype, n.data) if isinstance(n, Array) else n, var.type.dtype, "int64")
-        cx.check(b.icmp(m.ICmp.EQ, x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
+        cg.check(b.icmp(m.ICmp.EQ, x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
     outputs[0].set_view(x)
 
 
 @llvm_emit.register(DeepCopyOp)
-def _(op, node, cx, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     x = inputs[0]
-    copy(cx, x, output_array(outputs[0], x.shape))
+    copy(cg, x, output_array(outputs[0], x.shape))
 
 
 @llvm_emit.register(ScalarFromTensor)
-def _(op, node, cx, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     x = inputs[0]
-    outputs[0].set(cx.b, load(cx.b, x.dtype, x.data))
+    outputs[0].set(cg.b, load(cg.b, x.dtype, x.data))
 
 
 @llvm_emit.register(TensorFromScalar)
-def _(op, node, cx, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     out = output_array(outputs[0], [])
-    store(cx.b, out.dtype, inputs[0], out.data)
+    store(cg.b, out.dtype, inputs[0], out.data)
 

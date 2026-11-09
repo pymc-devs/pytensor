@@ -388,7 +388,7 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
     """The layouts the planner will (most likely) give `node`'s outputs: what the node's
     `llvm_outputs` declare (provided memory in the layout asked for).
 
-    The planner is authoritative (it knows which steps fall back to numba, for one);
+    The planner is authoritative (it knows which tasks fall back to numba, for one);
     this is its prediction for graph rewrites and inspection."""
     from pytensor.compile.builders import OpFromGraph, UnitKind
     from pytensor.link.llvm_v2.codegen.function import llvm_outputs
@@ -401,7 +401,7 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
             inner = infer_layouts(op.fgraph, in_layouts)
             outs = [inner[o] for o in op.fgraph.outputs]
             if op.unit is UnitKind.INTERPRETED:
-                # an allocated output of a nested program: its value or a C copy
+                # an allocated output of a subprogram: its value or a C copy
                 outs = [
                     None if lay is None else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))
                     for lay, o in zip(outs, node.outputs, strict=True)

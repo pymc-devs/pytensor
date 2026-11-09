@@ -10,7 +10,7 @@ LLVM_V2_REWRITES = (*FUSION_REWRITES, "scan_save_mem_no_prealloc", "llvm_units")
 class LLVMV2Linker(JITLinker):
     """Compile a FunctionGraph with the LLVM backend (second design, see DESIGN.md).
 
-    The graph is planned in Python (`program.py`) into steps that run Rust kernels,
+    The graph is planned in Python (`program.py`) into tasks that run Rust kernels,
     code generated from Python, or numba implementations; a Rust interpreter runs them.
     """
 

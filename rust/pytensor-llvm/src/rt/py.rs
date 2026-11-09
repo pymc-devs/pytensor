@@ -3,7 +3,7 @@
 use super::consts::ConstData;
 use super::kernels::{self, OutMode};
 use super::layout::Layout;
-use super::program::{Abi as RAbi, Kind, OutputMode as ROutMode, Program as RProgram, ProgramSpec, Step, ValueId, ValueSpec};
+use super::program::{Abi as RAbi, Kind, OutputMode as ROutMode, Program as RProgram, ProgramSpec, Task, ValueId, ValueSpec};
 use crate::dtype::DType;
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
@@ -37,10 +37,10 @@ fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
 #[pyclass(module = "pytensor_llvm.rt", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Abi {
-    /// `int32 f(ctx, args, env, ws)`
-    Standard,
-    /// `int32 f(ctx, args, params)`, every output allocated (the numba fallback)
-    Foreign,
+    /// the kernel ABI: `int32 f(ctx, args, config, frame)`
+    Kernel,
+    /// numba kernels: `int32 f(ctx, args, config)`, every output allocated
+    Numba,
 }
 
 #[pyclass(module = "pytensor_llvm.rt", eq, eq_int, frozen, from_py_object)]
@@ -63,21 +63,21 @@ impl OutputMode {
 
 // ------------------------------------------------------------------ kernels
 
-/// A precompiled kernel: a function address and its environment (owned by this object).
+/// A Rust kernel: its address and its config (owned by this object).
 #[pyclass(module = "pytensor_llvm.rt", subclass, frozen)]
-pub struct Kernel {
+pub struct RustKernel {
     address: usize,
-    env: Box<dyn std::any::Any + Send + Sync>,
-    env_ptr: usize,
+    config: Box<dyn std::any::Any + Send + Sync>,
+    config_ptr: usize,
     desc: String,
     /// what the kernel produces (see `outputs`)
     produces: Produces,
-    /// programs the kernel runs (Scan's step), for profiling
+    /// programs the kernel runs (Scan's loop body), for profiling
     programs: Vec<Py<Program>>,
 }
 
 /// How a kernel produces its outputs, declared next to the kernel (the Python planner
-/// asks `Kernel.outputs`).
+/// asks `RustKernel.outputs`).
 pub enum Produces {
     /// new memory per output: provided (written as it is given, in the layout the
     /// planner provides: C) or allocated C-contiguous by the kernel
@@ -86,26 +86,26 @@ pub enum Produces {
     DimShuffle(Vec<Option<usize>>),
 }
 
-impl Kernel {
-    fn new<T: Send + Sync + 'static>(f: usize, env: T, desc: String, produces: Produces) -> Self {
-        let env: Box<T> = Box::new(env);
-        let env_ptr = &*env as *const T as usize;
-        Kernel { address: f, env, env_ptr, desc, produces, programs: vec![] }
+impl RustKernel {
+    fn new<T: Send + Sync + 'static>(f: usize, config: T, desc: String, produces: Produces) -> Self {
+        let config: Box<T> = Box::new(config);
+        let config_ptr = &*config as *const T as usize;
+        RustKernel { address: f, config, config_ptr, desc, produces, programs: vec![] }
     }
 }
 
 #[pymethods]
-impl Kernel {
+impl RustKernel {
     #[getter]
     fn address(&self) -> usize {
         self.address
     }
 
-    /// Pointer to the kernel's environment, valid while this object lives.
+    /// Pointer to the kernel's config, valid while this object lives.
     #[getter]
-    fn env(&self) -> usize {
-        let _ = &self.env;
-        self.env_ptr
+    fn config(&self) -> usize {
+        let _ = &self.config;
+        self.config_ptr
     }
 
     fn __repr__(&self) -> String {
@@ -141,14 +141,14 @@ impl Kernel {
         }
     }
 
-    /// Programs this kernel runs (e.g. Scan's step program).
+    /// Programs this kernel runs (e.g. Scan's loop body).
     #[getter]
     fn programs(&self, py: Python<'_>) -> Vec<Py<Program>> {
         self.programs.iter().map(|p| p.clone_ref(py)).collect()
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct DimShuffle;
 
 #[pymethods]
@@ -159,25 +159,25 @@ impl DimShuffle {
     fn new(order: Vec<Option<usize>>) -> PyClassInitializer<Self> {
         let desc = format!("DimShuffle{order:?}");
         let produces = Produces::DimShuffle(order.clone());
-        let k = Kernel::new(kernels::k_dimshuffle as *const () as usize, kernels::DimShuffleEnv { order }, desc, produces);
+        let k = RustKernel::new(kernels::k_dimshuffle as *const () as usize, kernels::DimShuffleConfig { order }, desc, produces);
         PyClassInitializer::from(k).add_subclass(DimShuffle)
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct Copy;
 
 #[pymethods]
 impl Copy {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
-        let env = kernels::CopyEnv { mode: mode.kernel(), dtype: dtype_of(&dtype)? };
-        let k = Kernel::new(kernels::k_copy as *const () as usize, env, "Copy".into(), Produces::Fresh(vec![mode]));
+        let config = kernels::CopyConfig { mode: mode.kernel(), dtype: dtype_of(&dtype)? };
+        let k = RustKernel::new(kernels::k_copy as *const () as usize, config, "Copy".into(), Produces::Fresh(vec![mode]));
         Ok(PyClassInitializer::from(k).add_subclass(Copy))
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct Dot;
 
 #[pymethods]
@@ -188,22 +188,22 @@ impl Dot {
         if !matches!(dt, DType::Float64 | DType::Float32) {
             return err(format!("Dot of {dt:?}"));
         }
-        let env = kernels::DotEnv { mode: mode.kernel(), dtype: dt };
-        let k = Kernel::new(kernels::k_dot as *const () as usize, env, "Dot".into(), Produces::Fresh(vec![mode]));
+        let config = kernels::DotConfig { mode: mode.kernel(), dtype: dt };
+        let k = RustKernel::new(kernels::k_dot as *const () as usize, config, "Dot".into(), Produces::Fresh(vec![mode]));
         Ok(PyClassInitializer::from(k).add_subclass(Dot))
     }
 }
 
-fn legacy(f: kernels::LegacyFn, params: Vec<i64>, n_in: usize, shape_from: usize, mode: OutputMode, dtype: DType, desc: String) -> PyResult<Kernel> {
+fn legacy(f: kernels::LegacyFn, params: Vec<i64>, n_in: usize, shape_from: usize, mode: OutputMode, dtype: DType, desc: String) -> PyResult<RustKernel> {
     if mode == OutputMode::View {
         return err("this kernel can't produce a view");
     }
-    let env = kernels::LegacyEnv { f, params, n_in, shape_from, mode: mode.kernel(), dtype };
-    Ok(Kernel::new(kernels::k_legacy as *const () as usize, env, desc, Produces::Fresh(vec![mode])))
+    let config = kernels::LegacyConfig { f, params, n_in, shape_from, mode: mode.kernel(), dtype };
+    Ok(RustKernel::new(kernels::k_legacy as *const () as usize, config, desc, Produces::Fresh(vec![mode])))
 }
 
 /// Sort along `axis` (float64, float32, int64), NaNs last.
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct Sort;
 
 #[pymethods]
@@ -223,7 +223,7 @@ impl Sort {
 }
 
 /// Cholesky factor (faer), LAPACK potrf semantics: NaN if not positive definite.
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct Cholesky;
 
 #[pymethods]
@@ -242,7 +242,7 @@ impl Cholesky {
 }
 
 /// Triangular solve (faer), LAPACK trtrs semantics: NaN if the diagonal has a zero.
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct SolveTriangular;
 
 #[pymethods]
@@ -261,15 +261,15 @@ impl SolveTriangular {
     }
 }
 
-/// Scan: a loop around a step program. Every output is allocated by the kernel.
-#[pyclass(module = "pytensor_llvm.rt", extends = Kernel, frozen)]
+/// Scan: a loop around its loop body (a subprogram). Every output is allocated by the kernel.
+#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
 pub struct Scan;
 
 #[pymethods]
 impl Scan {
     #[new]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (n_seqs, mit_mot_in, mit_mot_out, mit_sot_in, sit_sot_in, n_untraced, n_nit_sot, n_non_seqs, as_while, step, outer_in_dtypes, inner_out_dtypes))]
+    #[pyo3(signature = (n_seqs, mit_mot_in, mit_mot_out, mit_sot_in, sit_sot_in, n_untraced, n_nit_sot, n_non_seqs, as_while, body, outer_in_dtypes, inner_out_dtypes))]
     fn new(
         py: Python<'_>,
         n_seqs: usize,
@@ -281,7 +281,7 @@ impl Scan {
         n_nit_sot: usize,
         n_non_seqs: usize,
         as_while: bool,
-        step: Bound<'_, Program>,
+        body: Bound<'_, Program>,
         outer_in_dtypes: Vec<Bound<'_, PyArrayDescr>>,
         inner_out_dtypes: Vec<Bound<'_, PyArrayDescr>>,
     ) -> PyResult<PyClassInitializer<Self>> {
@@ -291,34 +291,34 @@ impl Scan {
         if outer_in_dtypes.len() != n_in {
             return err(format!("Scan: {n_in} outer inputs, got {} dtypes", outer_in_dtypes.len()));
         }
-        let prog = step.get().prog.clone();
-        let n_step_in = n_seqs
+        let prog = body.get().prog.clone();
+        let n_body_in = n_seqs
             + info.mit_mot_in.iter().map(|t| t.len()).sum::<usize>()
             + info.mit_sot_in.iter().map(|t| t.len()).sum::<usize>()
             + info.sit_sot_in.len()
             + n_untraced
             + n_non_seqs;
-        let n_step_out = info.mit_mot_out.iter().map(|t| t.len()).sum::<usize>()
+        let n_body_out = info.mit_mot_out.iter().map(|t| t.len()).sum::<usize>()
             + info.mit_sot_in.len()
             + info.sit_sot_in.len()
             + n_nit_sot
             + n_untraced
             + as_while as usize;
-        if prog.n_inputs() != n_step_in || prog.n_outputs() != n_step_out || inner_out_dtypes.len() != n_step_out {
-            return err("Scan: the step program doesn't match the scan's layout");
+        if prog.n_inputs() != n_body_in || prog.n_outputs() != n_body_out || inner_out_dtypes.len() != n_body_out {
+            return err("Scan: the loop body doesn't match the scan's layout");
         }
-        let env = super::scan::ScanEnv {
+        let config = super::scan::ScanConfig {
             info,
-            step: prog,
+            body: prog,
             outer_in_dtypes: outer_in_dtypes.iter().map(dtype_of).collect::<PyResult<_>>()?,
             inner_out_dtypes: inner_out_dtypes.iter().map(dtype_of).collect::<PyResult<_>>()?,
-            keepalive: step.clone().into_any().unbind(),
+            keepalive: body.clone().into_any().unbind(),
         };
         // every outer output is one of the kernel's C-contiguous buffers
         let n_outer_out = n_mm + n_ms + n_ss + n_nit_sot + n_untraced;
         let produces = Produces::Fresh(vec![OutputMode::Allocated; n_outer_out]);
-        let mut k = Kernel::new(super::scan::k_scan as *const () as usize, env, "Scan".into(), produces);
-        k.programs.push(step.clone().unbind());
+        let mut k = RustKernel::new(super::scan::k_scan as *const () as usize, config, "Scan".into(), produces);
+        k.programs.push(body.clone().unbind());
         let _ = py;
         Ok(PyClassInitializer::from(k).add_subclass(Scan))
     }
@@ -326,12 +326,12 @@ impl Scan {
 
 // ------------------------------------------------------------------ programs
 
-/// Builds a program: values, then steps in execution order, then outputs.
+/// Builds a program: values, then tasks in execution order, then outputs.
 #[pyclass(module = "pytensor_llvm.rt")]
 pub struct ProgramBuilder {
     values: Vec<ValueSpec>,
     n_inputs: usize,
-    steps: Vec<Step>,
+    tasks: Vec<Task>,
     keepalive: Vec<Py<PyAny>>,
     arena_bytes: u64,
     contiguous_inputs: Vec<bool>,
@@ -348,7 +348,7 @@ impl ProgramBuilder {
 impl ProgramBuilder {
     #[new]
     fn new() -> Self {
-        ProgramBuilder { values: vec![], n_inputs: 0, steps: vec![], keepalive: vec![], arena_bytes: 0, contiguous_inputs: vec![] }
+        ProgramBuilder { values: vec![], n_inputs: 0, tasks: vec![], keepalive: vec![], arena_bytes: 0, contiguous_inputs: vec![] }
     }
 
     /// The next graph input. Returns its value id.
@@ -398,30 +398,30 @@ impl ProgramBuilder {
         self.add(&dtype, shape, Kind::View(ValueId(source)))
     }
 
-    /// Append a step. `keepalive` is kept alive as long as the program (the compiled
-    /// module or kernel object the address and env belong to).
-    #[pyo3(signature = (address, env, abi, inputs, outputs, release, workspace_offset, description, keepalive))]
+    /// Append a task. `keepalive` is kept alive as long as the program (the compiled
+    /// module or kernel object the address and config belong to).
+    #[pyo3(signature = (address, config, abi, inputs, outputs, release, frame_offset, description, keepalive))]
     #[allow(clippy::too_many_arguments)]
-    fn step(
+    fn task(
         &mut self,
         address: usize,
-        env: usize,
+        config: usize,
         abi: Abi,
         inputs: Vec<u32>,
         outputs: Vec<u32>,
         release: Vec<u32>,
-        workspace_offset: Option<u64>,
+        frame_offset: Option<u64>,
         description: String,
         keepalive: Py<PyAny>,
     ) {
-        self.steps.push(Step {
+        self.tasks.push(Task {
             func: address,
             abi: match abi {
-                Abi::Standard => RAbi::Standard,
-                Abi::Foreign => RAbi::Foreign,
+                Abi::Kernel => RAbi::Kernel,
+                Abi::Numba => RAbi::Numba,
             },
-            env,
-            ws_offset: workspace_offset,
+            config,
+            frame_offset: frame_offset,
             inputs: inputs.into_iter().map(ValueId).collect(),
             outputs: outputs.into_iter().map(ValueId).collect(),
             release: release.into_iter().map(ValueId).collect(),
@@ -435,7 +435,7 @@ impl ProgramBuilder {
     }
 
     /// Finish with these outputs. `modes` say how each output is produced when the
-    /// program runs as a step of another program (Provided or Allocated).
+    /// program runs as a task of another program (Provided or Allocated).
     fn build(&mut self, outputs: Vec<u32>, modes: Vec<OutputMode>) -> PyResult<Program> {
         let output_modes = modes
             .into_iter()
@@ -448,14 +448,14 @@ impl ProgramBuilder {
         let spec = ProgramSpec {
             values: std::mem::take(&mut self.values),
             n_inputs: self.n_inputs,
-            steps: std::mem::take(&mut self.steps),
+            tasks: std::mem::take(&mut self.tasks),
             outputs: outputs.into_iter().map(ValueId).collect(),
             output_modes,
             arena_bytes: self.arena_bytes,
             contiguous_inputs: std::mem::take(&mut self.contiguous_inputs),
         };
         let prog = RProgram::new(spec).map_err(PyValueError::new_err)?;
-        Ok(Program { prog: Arc::new(prog), keepalive: std::mem::take(&mut self.keepalive), state: std::sync::Mutex::new(None) })
+        Ok(Program { prog: Arc::new(prog), keepalive: std::mem::take(&mut self.keepalive), session: std::sync::Mutex::new(None) })
     }
 }
 
@@ -503,20 +503,20 @@ fn runtime_error(msg: String) -> PyErr {
     }
 }
 
-/// A runnable program: call it with arrays, or use it as a step of another program
-/// (`address` / `env`).
+/// A runnable program: call it with arrays, or use it as a task of another program
+/// (`address` / `config`).
 #[pyclass(module = "pytensor_llvm.rt", frozen)]
 pub struct Program {
     prog: Arc<RProgram>,
     keepalive: Vec<Py<PyAny>>,
-    /// the function state of Python calls: one per function (one random state);
+    /// the session of Python calls: one per function (one random state);
     /// concurrent calls from several threads take turns
-    state: std::sync::Mutex<Option<FnState>>,
+    session: std::sync::Mutex<Option<Session>>,
 }
 
-/// A program's memory for a call plus the caller's context.
-struct FnState {
-    st: super::program::CallState,
+/// A session of Python calls: the program's call memory and the context.
+struct Session {
+    memory: super::program::CallMemory,
     ctx: crate::abi::PtCtx,
 }
 
@@ -529,8 +529,8 @@ impl Program {
             return err(format!("expected {} inputs, got {}", prog.n_inputs(), args.len()));
         }
         let np = py.import("numpy")?;
-        let mut guard = self.lock_state(py);
-        let FnState { st, ctx } = guard.get_or_insert_with(|| FnState { st: prog.take_state(), ctx: crate::abi::PtCtx::new() });
+        let mut guard = self.lock_session(py);
+        let Session { memory: st, ctx } = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::abi::PtCtx::new() });
         let mut keep = Vec::with_capacity(args.len());
         let mut work = 0usize;
         let res = (|| -> PyResult<Vec<super::program::OutArray>> {
@@ -571,7 +571,7 @@ impl Program {
                 work += arr.len();
                 keep.push(a);
             }
-            let run = |st: &mut super::program::CallState, ctx: &mut crate::abi::PtCtx| -> Result<Vec<super::program::OutArray>, String> {
+            let run = |st: &mut super::program::CallMemory, ctx: &mut crate::abi::PtCtx| -> Result<Vec<super::program::OutArray>, String> {
                 let none = vec![None; prog.n_outputs()];
                 prog.execute(st, ctx, &none)?;
                 let outs = (0..prog.n_outputs()).map(|o| prog.take_output(st, ctx, o)).collect::<Result<Vec<_>, _>>();
@@ -580,8 +580,8 @@ impl Program {
             };
             // releasing the GIL costs ~100ns: only worth it with real work
             let r = if work > 20_000 {
-                struct S<'a>(&'a mut super::program::CallState, &'a mut crate::abi::PtCtx);
-                // SAFETY: the state and context are exclusively ours for this call.
+                struct S<'a>(&'a mut super::program::CallMemory, &'a mut crate::abi::PtCtx);
+                // SAFETY: the session and context are exclusively ours for this call.
                 unsafe impl Send for S<'_> {}
                 let s = S(&mut *st, &mut *ctx);
                 py.detach(move || {
@@ -601,7 +601,7 @@ impl Program {
         Ok(PyList::new(py, arrays)?.unbind())
     }
 
-    /// The C ABI entry for running this program as a step.
+    /// The kernel ABI entry for running this program as a subprogram.
     #[getter]
     fn address(&self) -> usize {
         super::program::ptl_program_call as *const () as usize
@@ -609,11 +609,11 @@ impl Program {
 
     /// The environment for `address`: this program (valid while this object lives).
     #[getter]
-    fn env(&self) -> usize {
+    fn config(&self) -> usize {
         Arc::as_ptr(&self.prog) as usize
     }
 
-    /// The program as text (values, storage, steps, releases).
+    /// The program as text (values, storage, tasks, releases).
     fn dump(&self) -> String {
         self.prog.dump()
     }
@@ -623,8 +623,8 @@ impl Program {
     }
 
     #[getter]
-    fn n_steps(&self) -> usize {
-        self.prog.spec().steps.len()
+    fn n_tasks(&self) -> usize {
+        self.prog.spec().tasks.len()
     }
 
     #[getter]
@@ -632,8 +632,8 @@ impl Program {
         self.prog.spec().arena_bytes
     }
 
-    /// Turn per-step timing on or off, here and in nested programs (a step that is a
-    /// program, Scan's step program). Timing costs two clock reads per step.
+    /// Turn per-task timing on or off, here and in subprograms (a task that is a
+    /// subprogram, Scan's loop body). Timing costs two clock reads per task.
     fn set_profiling(&self, py: Python<'_>, on: bool) {
         self.prog.set_profiling(on);
         for c in self.children(py).into_iter().flatten() {
@@ -648,9 +648,9 @@ impl Program {
         }
     }
 
-    /// Rows `(depth, description, calls, seconds)`: each step with its total time,
-    /// followed by the steps of the programs it runs at depth + 1; `calls` is the number
-    /// of runs of the program the step belongs to.
+    /// Rows `(depth, description, calls, seconds)`: each task with its total time,
+    /// followed by the tasks of the programs it runs at depth + 1; `calls` is the number
+    /// of runs of the program the task belongs to.
     fn profile(&self, py: Python<'_>) -> Vec<(usize, String, u64, f64)> {
         let mut rows = vec![];
         self.profile_rows(py, 0, &mut rows);
@@ -663,8 +663,8 @@ impl Program {
         let mut s = String::new();
         let (calls, _) = self.prog.profile();
         let total: f64 = self.prog.profile().1.iter().sum();
-        let _ = writeln!(s, "{calls} calls, {:.3} ms in steps ({:.2} us per call)", total * 1e3, if calls > 0 { total / calls as f64 * 1e6 } else { 0.0 });
-        let _ = writeln!(s, "{:>7} {:>10} {:>10}  step (nested steps indented)", "%", "total ms", "us/call");
+        let _ = writeln!(s, "{calls} calls, {:.3} ms in tasks ({:.2} us per call)", total * 1e3, if calls > 0 { total / calls as f64 * 1e6 } else { 0.0 });
+        let _ = writeln!(s, "{:>7} {:>10} {:>10}  task (subprogram tasks indented)", "%", "total ms", "us/call");
         self.report_into(py, 0, total, calls, &mut s);
         s
     }
@@ -673,17 +673,17 @@ impl Program {
     /// reproducible). The C API seeds each of its call states (`seed` in the table).
     fn seed(&self, py: Python<'_>, seed: u64) {
         let prog = &self.prog;
-        let mut guard = self.lock_state(py);
-        let s = guard.get_or_insert_with(|| FnState { st: prog.take_state(), ctx: crate::abi::PtCtx::new() });
+        let mut guard = self.lock_session(py);
+        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::abi::PtCtx::new() });
         s.ctx.seed(seed);
     }
 
     /// Allow or forbid parallel loops for Python calls (results are the same either
-    /// way). The C API sets this per call state (`set_parallel` in the table).
+    /// way). The C API sets this per session (`set_parallel` in the table).
     fn set_parallel(&self, py: Python<'_>, on: bool) {
         let prog = &self.prog;
-        let mut guard = self.lock_state(py);
-        let s = guard.get_or_insert_with(|| FnState { st: prog.take_state(), ctx: crate::abi::PtCtx::new() });
+        let mut guard = self.lock_session(py);
+        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::abi::PtCtx::new() });
         s.ctx.parallel = on;
     }
 
@@ -702,16 +702,16 @@ impl Program {
     }
 
     #[getter]
-    fn steps(&self) -> Vec<String> {
+    fn tasks(&self) -> Vec<String> {
         let _ = &self.keepalive;
-        self.prog.spec().steps.iter().map(|s| s.desc.clone()).collect()
+        self.prog.spec().tasks.iter().map(|s| s.desc.clone()).collect()
     }
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Abi>()?;
     m.add_class::<OutputMode>()?;
-    m.add_class::<Kernel>()?;
+    m.add_class::<RustKernel>()?;
     m.add_class::<DimShuffle>()?;
     m.add_class::<Copy>()?;
     m.add_class::<Dot>()?;
@@ -735,18 +735,18 @@ fn c_api_table() -> usize {
 }
 
 impl Program {
-    /// The function state, waiting without the GIL if another thread has it.
-    fn lock_state(&self, py: Python<'_>) -> std::sync::MutexGuard<'_, Option<FnState>> {
+    /// The session, waiting without the GIL if another thread has it.
+    fn lock_session(&self, py: Python<'_>) -> std::sync::MutexGuard<'_, Option<Session>> {
         loop {
-            match self.state.try_lock() {
+            match self.session.try_lock() {
                 Ok(g) => return g,
                 Err(std::sync::TryLockError::Poisoned(p)) => return p.into_inner(),
-                Err(std::sync::TryLockError::WouldBlock) => py.detach(|| drop(self.state.lock())),
+                Err(std::sync::TryLockError::WouldBlock) => py.detach(|| drop(self.session.lock())),
             }
         }
     }
 
-    /// For each step, the programs it runs.
+    /// For each task, the programs it runs.
     fn children(&self, py: Python<'_>) -> Vec<Vec<Py<Program>>> {
         self.keepalive
             .iter()
@@ -754,7 +754,7 @@ impl Program {
                 let k = k.bind(py);
                 if let Ok(p) = k.cast::<Program>() {
                     vec![p.clone().unbind()]
-                } else if let Ok(kern) = k.cast::<Kernel>() {
+                } else if let Ok(kern) = k.cast::<RustKernel>() {
                     kern.get().programs.iter().map(|p| p.clone_ref(py)).collect()
                 } else {
                     vec![]
@@ -766,8 +766,8 @@ impl Program {
     fn profile_rows(&self, py: Python<'_>, depth: usize, rows: &mut Vec<(usize, String, u64, f64)>) {
         let (calls, secs) = self.prog.profile();
         let children = self.children(py);
-        for (k, step) in self.prog.spec().steps.iter().enumerate() {
-            rows.push((depth, step.desc.clone(), calls, secs[k]));
+        for (k, task) in self.prog.spec().tasks.iter().enumerate() {
+            rows.push((depth, task.desc.clone(), calls, secs[k]));
             for c in children.get(k).into_iter().flatten() {
                 c.get().profile_rows(py, depth + 1, rows);
             }
@@ -784,7 +784,7 @@ impl Program {
         for k in order {
             let pct = if total > 0.0 { 100.0 * secs[k] / total } else { 0.0 };
             let per = if calls > 0 { secs[k] / calls as f64 * 1e6 } else { 0.0 };
-            let desc: String = self.prog.spec().steps[k].desc.chars().take(100).collect();
+            let desc: String = self.prog.spec().tasks[k].desc.chars().take(100).collect();
             let _ = writeln!(s, "{pct:>6.1}% {:>10.3} {per:>10.2}  {}{desc}", secs[k] * 1e3, "  ".repeat(depth));
             for c in children.get(k).into_iter().flatten() {
                 c.get().report_into(py, depth + 1, total, calls, s);

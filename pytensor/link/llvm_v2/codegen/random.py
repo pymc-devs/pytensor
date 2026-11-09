@@ -30,67 +30,67 @@ def _register():
         return [fresh_output(o) for o in node.outputs]
 
     @llvm_emit.register(RandomVariable)
-    def _(op, node, cx, inputs, outputs):
+    def _(op, node, cg, inputs, outputs):
         spec = SAMPLERS.get(type(op))
         if spec is None or op.ndim_supp != 0:
             raise NotImplementedError(f"LLVM backend: no implementation of the random variable {op}")
-        emit_random(op, node, cx, inputs, outputs, spec)
+        emit_random(op, node, cg, inputs, outputs, spec)
 
     m = ir()
 
     # per distribution: the base draws ("normal", "uniform": filled in one call; None:
-    # the per-element function draws), the per-element function (b, cx, base value,
+    # the per-element function draws), the per-element function (b, cg, base value,
     # parameter values) -> draw, the parameters' dtypes and checks
-    def normal(b, cx, z, p):
+    def normal(b, cg, z, p):
         mu, sigma = p
         return b.fadd(mu, b.fmul(sigma, z))
 
-    def halfnormal(b, cx, z, p):
+    def halfnormal(b, cg, z, p):
         loc, scale = p
         return b.fadd(loc, b.fmul(scale, b.intrinsic(m.Intrinsic.Fabs, [z])))
 
-    def lognormal(b, cx, z, p):
+    def lognormal(b, cg, z, p):
         mean, sigma = p
         return b.intrinsic(m.Intrinsic.Exp, [b.fadd(mean, b.fmul(sigma, z))])
 
-    def uniform(b, cx, u, p):
+    def uniform(b, cg, u, p):
         low, high = p
         return b.fadd(low, b.fmul(b.fsub(high, low), u))
 
-    def exponential(b, cx, u, p):
+    def exponential(b, cg, u, p):
         (scale,) = p
         # 1 - u is in (0, 1]
         return b.fneg(b.fmul(scale, b.libm(m.Libm.Log1p, [b.fneg(u)])))
 
-    def bernoulli(b, cx, u, p):
+    def bernoulli(b, cg, u, p):
         (prob,) = p
         return b.zext(b.fcmp(m.FCmp.OLT, u, prob), m.i64)
 
-    def integers(b, cx, u, p):
+    def integers(b, cg, u, p):
         low, high = p
         span = b.sitofp(b.sub(high, low), m.f64)
         k = b.fptosi(b.intrinsic(m.Intrinsic.Floor, [b.fmul(u, span)]), m.i64)
         return b.add(low, k)
 
-    def gamma(b, cx, _, p):
+    def gamma(b, cg, _, p):
         shape, scale = p
-        return b.fmul(b.rng(m.Rng.Gamma, cx.ctx, [shape]), scale)
+        return b.fmul(b.rng(m.Rng.Gamma, cg.ctx, [shape]), scale)
 
-    def invgamma(b, cx, _, p):
+    def invgamma(b, cg, _, p):
         shape, scale = p
-        return b.fdiv(scale, b.rng(m.Rng.Gamma, cx.ctx, [shape]))
+        return b.fdiv(scale, b.rng(m.Rng.Gamma, cg.ctx, [shape]))
 
-    def beta(b, cx, _, p):
+    def beta(b, cg, _, p):
         a, bb = p
-        return b.rng(m.Rng.Beta, cx.ctx, [a, bb])
+        return b.rng(m.Rng.Beta, cg.ctx, [a, bb])
 
-    def poisson(b, cx, _, p):
+    def poisson(b, cg, _, p):
         (lam,) = p
-        return b.rng(m.Rng.Poisson, cx.ctx, [lam])
+        return b.rng(m.Rng.Poisson, cg.ctx, [lam])
 
-    def binomial(b, cx, _, p):
+    def binomial(b, cg, _, p):
         n, prob = p
-        return b.rng(m.Rng.Binomial, cx.ctx, [n, prob])
+        return b.rng(m.Rng.Binomial, cg.ctx, [n, prob])
 
     zero = 0.0
     SAMPLERS.update(
@@ -125,8 +125,8 @@ class Sampler:
 SAMPLERS: dict = {}
 
 
-def emit_random(op, node, cx, inputs, outputs, spec: Sampler):
-    b, m = cx.b, ir()
+def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
+    b, m = cg.b, ir()
     i64 = m.i64
     size_var, params_vars = node.inputs[1], node.inputs[2:]
     size_arr, params = inputs[1], inputs[2:]
@@ -155,7 +155,7 @@ def emit_random(op, node, cx, inputs, outputs, spec: Sampler):
             if static[a] is not None:
                 p = b.gep_bytes(size_arr.data, mul(b, b.const_int(i64, a), size_arr.strides[0]))
                 n = cast(b, load(b, size_arr.dtype, p), size_arr.dtype, "int64")
-                cx.check(b.icmp(m.ICmp.EQ, n, shape[a]), f"{op}: size differs from the static shape")
+                cg.check(b.icmp(m.ICmp.EQ, n, shape[a]), f"{op}: size differs from the static shape")
 
     # ---- the parameters over the loop (right-aligned, broadcast by their types)
     views = []
@@ -167,7 +167,7 @@ def emit_random(op, node, cx, inputs, outputs, spec: Sampler):
                 strides.append(b.const_int(i64, 0))
             else:
                 if x.shape[pa].const_int is None or shape[a].const_int is None:
-                    cx.check(b.icmp(m.ICmp.EQ, x.shape[pa], shape[a]), f"{op}: parameter {k} has a different length on axis {a}")
+                    cg.check(b.icmp(m.ICmp.EQ, x.shape[pa], shape[a]), f"{op}: parameter {k} has a different length on axis {a}")
                 strides.append(x.strides[pa])
         same_ndim = var.type.ndim == nd and all(s != 1 for s in var.type.shape)
         views.append(Array(x.dtype, x.data, list(shape), strides, x.layout if same_ndim else None))
@@ -179,8 +179,8 @@ def emit_random(op, node, cx, inputs, outputs, spec: Sampler):
     base = None
     if spec.base is not None:
         n = size(b, shape)
-        buf = cx.workspace(mul(b, n, b.const_int(i64, itemsize("float64"))))
-        b.rng(m.Rng.FillNormal if spec.base == "normal" else m.Rng.FillUniform, cx.ctx, [buf, n])
+        buf = cg.temp_memory(mul(b, n, b.const_int(i64, itemsize("float64"))))
+        b.rng(m.Rng.FillNormal if spec.base == "normal" else m.Rng.FillUniform, cg.ctx, [buf, n])
         base = Array("float64", buf, list(shape), c_strides(b, "float64", shape), Layout.c(nd))
         arrays.append(base)
 
@@ -190,12 +190,12 @@ def emit_random(op, node, cx, inputs, outputs, spec: Sampler):
             v = cast(b, load(b, x.dtype, ptrs[k]), x.dtype, dt)
             check = spec.checks[k]
             if check is not None:
-                cx.check(_ok(b, check, v), f"{op}: {check[2]}")
+                cg.check(_ok(b, check, v), f"{op}: {check[2]}")
             vals.append(v)
         if spec.check is not None:
-            cx.check(b.icmp(m.ICmp.SLT, vals[0], vals[1]), f"{op}: {spec.check[1]}")
+            cg.check(b.icmp(m.ICmp.SLT, vals[0], vals[1]), f"{op}: {spec.check[1]}")
         z = load(b, "float64", ptrs[len(views) + 1]) if base is not None else None
-        v = spec.draw(b, cx, z, vals)
+        v = spec.draw(b, cg, z, vals)
         src = "int64" if v.type == m.i64 else "float64"
         store(b, out.dtype, cast(b, v, src, out.dtype), ptrs[len(views)])
 

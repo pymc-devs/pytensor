@@ -29,16 +29,16 @@ def compare(inputs, outputs, values, mode=NO_FALLBACK, rtol=1e-10, atol=1e-12, c
     return f
 
 
-def steps(f):
-    return f.maker.linker.compiled.steps
+def tasks(f):
+    return f.maker.linker.compiled.tasks
 
 
-def test_dump_lists_values_and_steps():
+def test_dump_lists_values_and_tasks():
     x = pt.matrix("x")
     f = compare([x], pt.exp(x).sum(axis=1) + x[:, 0], [rng.random((3, 4))])
     text = f.maker.linker.compiled.dump()
     assert text.startswith("program: 1 inputs, 1 outputs")
-    assert "input 0" in text and "steps:" in text and "outputs:" in text
+    assert "input 0" in text and "tasks:" in text and "outputs:" in text
 
 
 @pytest.mark.parametrize(
@@ -193,7 +193,7 @@ def test_fused_elemwise_patterns():
         (pt.log1p(m) * y[: m.shape[1]]).sum(axis=0),
     ]
     f = compare([x, y, idx, m], outs, [rng.random(10), rng.random(30), rng.integers(0, 10, 30), rng.random((5, 7))])
-    assert any(s.startswith("FusedElemwise") for s in steps(f))
+    assert any(s.startswith("FusedElemwise") for s in tasks(f))
 
 
 def test_scan_sit_sot_mit_sot_nit_sot():
@@ -238,7 +238,7 @@ def test_scalar_loop_for():
     op = ScalarLoop(init=[x0], update=[x0 * c + 1.0], constant=[c])
     n, x, cc = pt.lscalar("n"), pt.dvector("x"), pt.dscalar("c")
     f = pytensor.function([n, x, cc], Elemwise(op)(n, x, cc), mode=NO_FALLBACK)
-    assert f.maker.linker.stats.n_foreign == 0
+    assert f.maker.linker.stats.n_numba == 0
     for steps in (0, 1, 7):
         expected = np.arange(4.0)
         for _ in range(steps):

@@ -55,7 +55,7 @@ fn to_numpy<'py>(py: Python<'py>, dtype: &Bound<'py, PyArrayDescr>, data: *mut u
     }
 }
 
-/// Call a C ABI function (`int32 f(ctx, args, env, ws)`), for tests.
+/// Call a C ABI function (`int32 f(ctx, args, config, frame)`), for tests.
 ///
 /// `inputs` are arrays; `outputs` are arrays (provided memory, written in place) or
 /// `(dtype, ndim)` for outputs the function sets (allocated or views; views of inputs are
@@ -64,14 +64,14 @@ fn to_numpy<'py>(py: Python<'py>, dtype: &Bound<'py, PyArrayDescr>, data: *mut u
 /// # Safety (for the caller)
 /// `address` must be a function with that ABI expecting exactly these arguments.
 #[pyfunction]
-#[pyo3(signature = (address, inputs, outputs, workspace_bytes = 0, env = 0))]
+#[pyo3(signature = (address, inputs, outputs, frame_bytes = 0, config = 0))]
 pub fn call_abi<'py>(
     py: Python<'py>,
     address: usize,
     inputs: Vec<Bound<'py, PyAny>>,
     outputs: Vec<Bound<'py, PyAny>>,
-    workspace_bytes: usize,
-    env: usize,
+    frame_bytes: usize,
+    config: usize,
 ) -> PyResult<Vec<Bound<'py, PyAny>>> {
     let n = inputs.len() + outputs.len();
     let mut storage: Vec<Vec<i64>> = Vec::with_capacity(n);
@@ -114,13 +114,13 @@ pub fn call_abi<'py>(
     #[repr(C, align(64))]
     #[derive(Clone, Copy)]
     struct A64([u8; 64]);
-    let mut ws = vec![A64([0; 64]); workspace_bytes.div_ceil(64).max(1)];
+    let mut frame = vec![A64([0; 64]); frame_bytes.div_ceil(64).max(1)];
     let mut ctx = PtCtx::new();
     // SAFETY: the caller promises `address` has the C ABI for these arguments.
     let f: AbiFn = unsafe { std::mem::transmute::<usize, AbiFn>(address) };
     // SAFETY: as above; arrays describe live numpy memory or empty output slots.
     let mark = ctx.scratch_mark();
-    let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), env as *const u8, ws.as_mut_ptr() as *mut u8) };
+    let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), config as *const u8, frame.as_mut_ptr() as *mut u8) };
     ctx.scratch_release(mark);
     let n_in = inputs.len();
     if rc != 0 {
