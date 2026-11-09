@@ -171,6 +171,12 @@ impl CompiledFunction {
         crate::capi::function_handle(&self.prog) as usize
     }
 
+    /// The address of the `PtFunctionApi` table for functions from `c_function()`.
+    #[staticmethod]
+    fn c_api_table() -> usize {
+        &crate::capi::API as *const _ as usize
+    }
+
     /// Turn per-kernel timing on or off. `profile_report()` returns (description, seconds).
     fn set_profiling(&self, on: bool) {
         self.profiling.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -253,11 +259,14 @@ fn pytensor_llvm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ScalarRef>()?;
     m.add_class::<CompiledFunction>()?;
     m.add("ABI_VERSION", crate::abi::ABI_VERSION)?;
-    let v2 = PyModule::new(m.py(), "v2")?;
-    crate::v2::py::register(&v2)?;
-    m.add_submodule(&v2)?;
-    // make `import pytensor_llvm.v2` work
-    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.v2", &v2)?;
+    let ir = PyModule::new(m.py(), "ir")?;
+    crate::llvmir::register(&ir)?;
+    m.add_submodule(&ir)?;
+    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.ir", &ir)?;
+    let rt = PyModule::new(m.py(), "rt")?;
+    crate::rt::py::register(&rt)?;
+    m.add_submodule(&rt)?;
+    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.rt", &rt)?;
     Ok(())
 }
 

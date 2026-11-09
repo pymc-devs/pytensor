@@ -256,6 +256,8 @@ pub struct PtCtx {
     // runtime-private state below; kernels only see `rt`
     pub error: Option<(i32, String)>,
     scratch: Scratch,
+    /// marks handed to generated code (`ptl_rt_ws_mark`)
+    ws_marks: Vec<ScratchMark>,
 }
 
 /// Bump arena behind `rt->scratch`.
@@ -402,12 +404,29 @@ pub static RUNTIME: PtRuntime = PtRuntime {
 
 impl PtCtx {
     pub fn new() -> Self {
-        PtCtx { rt: &RUNTIME, error: None, scratch: Scratch::new() }
+        PtCtx { rt: &RUNTIME, error: None, scratch: Scratch::new(), ws_marks: Vec::new() }
     }
 
     /// Scratch handed out during the last kernel call is dead now; keep the memory.
     pub fn end_kernel(&mut self) {
+        self.ws_marks.clear();
         self.scratch.reset();
+    }
+
+    /// Mark the dynamic workspace for generated code; returns a token for `ws_release`.
+    pub fn ws_mark(&mut self) -> i64 {
+        self.ws_marks.push(self.scratch.mark());
+        (self.ws_marks.len() - 1) as i64
+    }
+
+    /// Release workspace handed out since `ws_mark` returned `token` (and later marks).
+    /// Unknown tokens are ignored.
+    pub fn ws_release(&mut self, token: i64) {
+        if token >= 0 && (token as usize) < self.ws_marks.len() {
+            let m = self.ws_marks[token as usize];
+            self.ws_marks.truncate(token as usize);
+            self.scratch.release(m);
+        }
     }
 
     /// For kernels that call other kernels with the same context (Scan): everything
