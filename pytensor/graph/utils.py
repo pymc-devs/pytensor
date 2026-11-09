@@ -2,7 +2,7 @@ import linecache
 import sys
 import traceback
 from abc import ABCMeta
-from collections.abc import Sequence
+from functools import lru_cache
 from io import StringIO
 from typing import TYPE_CHECKING, Any, TypeVar, Union
 
@@ -13,8 +13,31 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=Union["Apply", "Variable"])
 
 
+@lru_cache(maxsize=1024)
+def _should_skip_frame(filename: str) -> bool:
+    return any(
+        p in filename
+        for p in (
+            "pytensor/tensor/",
+            "pytensor\\tensor\\",
+            "pytensor/compile/",
+            "pytensor\\compile\\",
+            "pytensor/graph/",
+            "pytensor\\graph\\",
+            "pytensor/scalar/basic.py",
+            "pytensor\\scalar\\basic.py",
+            "pytensor/scan/",
+            "pytensor\\scan\\",
+            "pytensor/sparse/",
+            "pytensor\\sparse\\",
+            "pytensor/typed_list/",
+            "pytensor\\typed_list\\",
+        )
+    )
+
+
 def simple_extract_stack(
-    f=None, limit: int | None = None, skips: Sequence[str] | None = None
+    f=None, limit: int | None = None, skip_internal: bool = True
 ) -> list[tuple[str | None, int, str, str | None]]:
     """This is traceback.extract_stack from python 2.7 with this change:
 
@@ -27,13 +50,10 @@ def simple_extract_stack(
     limit - The number of stack level we want to return. If None, mean
     all what we can.
 
-    skips - partial path of stack level we don't want to keep and count.
-        When we find one level that isn't skipped, we stop skipping.
+    skip_internal - skip package frames before the first caller frame.
+        Once a caller frame is found, all remaining frames are kept.
 
     """
-    if skips is None:
-        skips = []
-
     if f is None:
         f = sys._getframe().f_back
 
@@ -43,30 +63,22 @@ def simple_extract_stack(
     trace: list[tuple[str | None, int, str, str | None]] = []
     n = 0
     while f is not None and (limit is None or n < limit):
-        lineno = f.f_lineno
-        co = f.f_code
+        frame = f
+        f = frame.f_back
+        co = frame.f_code
         filename = co.co_filename
+
+        # Skip only the innermost frames.
+        if skip_internal and not trace and _should_skip_frame(filename):
+            continue
+
+        lineno = frame.f_lineno
         name = co.co_name
-        #        linecache.checkcache(filename)
-        line: str | None = linecache.getline(filename, lineno, f.f_globals)
+        line: str | None = linecache.getline(filename, lineno, frame.f_globals)
         if line:
             line = line.strip()
         else:
             line = None
-        f = f.f_back
-
-        # Just skip inner level
-        if len(trace) == 0:
-            rm = False
-            for p in skips:
-                # The 'tests' exception was added; otherwise, we'd lose the
-                # stack trace during in our test cases. We're not sure this is
-                # the right way to do it, though.
-                if p in filename and "tests" not in filename:
-                    rm = True
-                    break
-            if rm:
-                continue
         trace.append((filename, lineno, name, line))
         n = n + 1
     trace.reverse()
@@ -98,27 +110,9 @@ def add_tag_trace[T: "Apply" | "Variable"](thing: T, user_line: int | None = Non
 
     if user_line == -1:
         user_line = None
-    skips = [
-        "pytensor/tensor/",
-        "pytensor\\tensor\\",
-        "pytensor/compile/",
-        "pytensor\\compile\\",
-        "pytensor/graph/",
-        "pytensor\\graph\\",
-        "pytensor/scalar/basic.py",
-        "pytensor\\scalar\\basic.py",
-        "pytensor/scan/",
-        "pytensor\\scan\\",
-        "pytensor/sparse/",
-        "pytensor\\sparse\\",
-        "pytensor/typed_list/",
-        "pytensor\\typed_list\\",
-    ]
-
-    if config.traceback__compile_limit > 0:
-        skips = []
-
-    tr = simple_extract_stack(limit=user_line, skips=skips)
+    tr = simple_extract_stack(
+        limit=user_line, skip_internal=config.traceback__compile_limit <= 0
+    )
     # Different python version use different semantic for
     # limit. python 2.7 include the call to extrack_stack. The -1 get
     # rid of it.
