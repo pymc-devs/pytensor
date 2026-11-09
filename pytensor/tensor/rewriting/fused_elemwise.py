@@ -200,7 +200,7 @@ class FusedElemwise(FinalizedOpFromGraph):
         self.indexed_outputs = indexed_outputs
         self.reduced_outputs = reduced_outputs
         # A read buffer can occupy multiple input slots (e.g. read through
-        # several indices); construct_nominal_fgraph dedupes those to one
+        # several indices); freezing maps those to one
         # nominal, leaving the extra slots as unused NominalVariables, which is
         # safe because reads don't destroy. Write targets always get their own
         # fresh inner input (see FuseElemwise) so a destroyed buffer is
@@ -262,7 +262,7 @@ class FusedElemwise(FinalizedOpFromGraph):
         return type(self)(
             inputs,
             inner.outputs,
-            fgraph=inner.freeze(),
+            fgraph=inner,
             destroy_map=destroy_map,
             indexed_inputs=self.indexed_inputs,
             indexed_outputs=self.indexed_outputs,

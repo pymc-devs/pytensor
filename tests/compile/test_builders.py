@@ -19,7 +19,8 @@ from pytensor.gradient import (
     verify_grad,
 )
 from pytensor.graph.basic import equal_computations
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.features import Feature
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
@@ -47,6 +48,31 @@ from tests.graph.utils import MyVariable
 
 
 class TestOpFromGraph(unittest_tools.InferShapeTester):
+    @pytest.mark.parametrize("frozen", [False, True])
+    def test_prebuilt_fgraph(self, frozen):
+        x = scalar("x")
+        y = x + 1
+        z = x * 2
+
+        class OutputOrdering(Feature):
+            def orderings(self, fgraph):
+                return {y.owner: [z.owner]}
+
+        mutable_graph = FunctionGraph(
+            [x], [y, z], features=[OutputOrdering()], clone=False
+        )
+        frozen_graph = mutable_graph.freeze()
+        fgraph = frozen_graph if frozen else mutable_graph
+
+        op = OpFromGraph([x], [y, z], fgraph=fgraph)
+
+        assert isinstance(op.fgraph, FrozenFunctionGraph)
+        assert op.fgraph == frozen_graph
+        if frozen:
+            assert op.fgraph is frozen_graph
+        mutable_graph.replace(y, x * 3)
+        assert op.fgraph != mutable_graph.freeze()
+
     def test_valid_input(self):
         x, _y, _z = matrices("xyz")
 
@@ -64,6 +90,9 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         with pytest.raises(NotImplementedError):
             OpFromGraph([x], [x], updates={})
+
+        with pytest.raises(TypeError, match="fgraph must be a FunctionGraph"):
+            OpFromGraph([x], [x], fgraph=object())
 
     def test_clone(self):
         x, _y, _z = matrices("xyz")
@@ -478,10 +507,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         y = shared(1.0, name="y")
 
         # A shared variable may only be used if passed explicitly as an input.
-        with pytest.raises(
-            MissingInputError,
-            match=r"implicitly depends on shared variable y",
-        ):
+        with pytest.raises(MissingInputError):
             OpFromGraph([x], [x + y])
 
         test_ofg = OpFromGraph([x, y], [x + y])

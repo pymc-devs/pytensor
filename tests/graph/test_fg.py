@@ -874,13 +874,16 @@ class TestFrozenFunctionGraph:
         var1 = MyVariable("x")
         orphan = MyVariable("orphan")
         out = op1(var1, orphan)
-        with pytest.raises(ValueError, match=r"Orphan.*orphan"):
+        with pytest.raises(MissingInputError, match=r"Orphan.*orphan"):
             FrozenFunctionGraph.from_io([var1], [out])
 
-    def test_unmapped_output_raises(self):
+    @pytest.mark.parametrize("nominal", [False, True])
+    def test_unmapped_output_raises(self, nominal):
         var1 = MyVariable("x")
-        disconnected = MyVariable("disconnected")
-        with pytest.raises(ValueError, match="could not be mapped"):
+        disconnected = (
+            NominalVariable(1, var1.type) if nominal else MyVariable("disconnected")
+        )
+        with pytest.raises(MissingInputError, match="could not be mapped"):
             FrozenFunctionGraph.from_io([var1], [disconnected])
 
     def test_interned_constant_in_variables(self):
@@ -1067,5 +1070,5 @@ class TestFrozenFunctionGraph:
         x, y = float64("x"), float64("y")
         out = add(mul(x, y), x)  # needs x directly, not only via the product
 
-        with pytest.raises(ValueError):
+        with pytest.raises(MissingInputError):
             FrozenFunctionGraph.from_structural_inputs([mul(x, y)], [out])
