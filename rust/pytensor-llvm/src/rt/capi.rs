@@ -17,7 +17,7 @@ use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-pub const API_VERSION: u32 = 2;
+pub const API_VERSION: u32 = 3;
 
 /// What a `PtFunction*` points to.
 pub struct Function {
@@ -73,6 +73,7 @@ pub struct PtFunctionApi {
     pub last_error: unsafe extern "C" fn(*const PtCallState) -> *const c_char,
     pub buffer_decref: unsafe extern "C" fn(*mut PtBuffer),
     pub seed: unsafe extern "C" fn(*mut PtCallState, u64),
+    pub set_parallel: unsafe extern "C" fn(*mut PtCallState, i32),
 }
 
 // SAFETY contract of every entry point below (pytensor_llvm.h; the caller's
@@ -272,6 +273,11 @@ unsafe extern "C" fn seed(s: *mut PtCallState, seed: u64) {
     unsafe { (*s).ctx.seed(seed) }
 }
 
+unsafe extern "C" fn set_parallel(s: *mut PtCallState, on: i32) {
+    // SAFETY: `s` is live and used by this thread only (contract).
+    unsafe { (*s).ctx.parallel = on != 0 }
+}
+
 unsafe extern "C" fn buffer_decref(b: *mut PtBuffer) {
     if !b.is_null() {
         // SAFETY: the caller releases a reference it got from `call`.
@@ -294,4 +300,5 @@ pub static API: PtFunctionApi = PtFunctionApi {
     last_error,
     buffer_decref,
     seed,
+    set_parallel,
 };

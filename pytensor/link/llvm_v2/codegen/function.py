@@ -197,7 +197,7 @@ class NodeFunction:
 
 
 def build_node_function(
-    module, node, name: str, temporary_outputs=frozenset(), folded=None, in_layouts=None, provided=None
+    module, node, name: str, temporary_outputs=frozenset(), folded=None, in_layouts=None, provided=None, parallel=True
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
 
@@ -216,7 +216,7 @@ def build_node_function(
     b = fn.builder()
     params = fn.params
     ctx, env, ws = params[:3]
-    cx = EmitContext(b, ctx, env, ws)
+    cx = EmitContext(b, ctx, env, ws, parallel=parallel)
     k = 3
     inputs = []
     from pytensor.link.llvm_v2.codegen.types import is_absent

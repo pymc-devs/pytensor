@@ -80,7 +80,7 @@ class Api(ctypes.Structure):
         (name, ctypes.c_void_p)
         for name in [
             "function_incref", "function_decref", "n_inputs", "n_outputs", "input_type", "output_type",
-            "state_new", "state_free", "call", "last_error", "buffer_decref", "seed",
+            "state_new", "state_free", "call", "last_error", "buffer_decref", "seed", "set_parallel",
         ]
     ]
 
@@ -108,7 +108,7 @@ def _model():
 
 def test_api_table_and_introspection():
     a = api()
-    assert a.abi_version == native.ABI_VERSION and a.api_version == 2
+    assert a.abi_version == native.ABI_VERSION and a.api_version == 3
     f, _ = _model()
     fn = f.maker.linker.compiled.c_function()
     n_in = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p)(a.n_inputs)

@@ -290,6 +290,9 @@ runtime_functions! {
     rng_beta: fn(*mut PtCtx, f64, f64) -> f64 = crate::random::rng_beta;
     rng_poisson: fn(*mut PtCtx, f64) -> i64 = crate::random::rng_poisson;
     rng_binomial: fn(*mut PtCtx, i64, f64) -> i64 = crate::random::rng_binomial;
+    /// `parallel_for(ctx, n, grain, body, env)`: chunks of `0..n` on the runtime's
+    /// thread pool (`crate::parallel`).
+    parallel_for: fn(*mut PtCtx, i64, i64, crate::parallel::BodyFn, *const u8) -> i32 = crate::parallel::rt_parallel_for;
 }
 
 /// The process-wide runtime: the function table every context points to, and the
@@ -299,15 +302,50 @@ runtime_functions! {
 pub struct Runtime {
     pub functions: PtRuntime,
     jit: OnceLock<Mutex<crate::jit::Jit>>,
+    /// the thread pool for parallel loops, and its size (0: not chosen yet)
+    pool: OnceLock<rayon::ThreadPool>,
+    n_threads: AtomicUsize,
 }
 
-static RUNTIME: Runtime = Runtime { functions: FUNCTIONS, jit: OnceLock::new() };
+static RUNTIME: Runtime =
+    Runtime { functions: FUNCTIONS, jit: OnceLock::new(), pool: OnceLock::new(), n_threads: AtomicUsize::new(0) };
 
 pub fn runtime() -> &'static Runtime {
     &RUNTIME
 }
 
 impl Runtime {
+    /// The thread pool parallel loops run on. Its size is fixed when first used:
+    /// `set_threads`, else `PYTENSOR_LLVM_THREADS`, else rayon's default (one per CPU).
+    pub fn pool(&self) -> &rayon::ThreadPool {
+        self.pool.get_or_init(|| {
+            let want = self.n_threads.load(Ordering::Relaxed);
+            let env = std::env::var("PYTENSOR_LLVM_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+            let n = if want > 0 { want } else { env };
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(n)
+                .thread_name(|i| format!("pytensor-llvm-{i}"))
+                .build()
+                .expect("failed to create the thread pool");
+            self.n_threads.store(pool.current_num_threads(), Ordering::Relaxed);
+            pool
+        })
+    }
+
+    /// The number of threads parallel loops use.
+    pub fn threads(&self) -> usize {
+        self.pool().current_num_threads()
+    }
+
+    /// Choose the pool's size; only before it is first used.
+    pub fn set_threads(&self, n: usize) -> Result<(), String> {
+        if let Some(p) = self.pool.get() {
+            return if p.current_num_threads() == n { Ok(()) } else { Err(format!("the thread pool already has {} threads", p.current_num_threads())) };
+        }
+        self.n_threads.store(n, Ordering::Relaxed);
+        Ok(())
+    }
+
     /// The JIT all generated code is linked into.
     pub fn jit(&self) -> &Mutex<crate::jit::Jit> {
         self.jit.get_or_init(|| Mutex::new(crate::jit::Jit::new().expect("failed to create LLJIT")))
@@ -330,6 +368,9 @@ pub struct PtCtx {
     /// the function state's random state: everything the call runs draws from it, in
     /// order (`seed` makes the draws reproducible)
     pub rng: rand_xoshiro::Xoshiro256PlusPlus,
+    /// may parallel loops of this function state use the thread pool? (Results are
+    /// the same either way.)
+    pub parallel: bool,
 }
 
 /// Bump arena behind `scratch`.
@@ -494,7 +535,7 @@ unsafe extern "C" fn rt_scratch_release(ctx: *mut PtCtx, token: i64) {
 
 impl PtCtx {
     pub fn new() -> Self {
-        PtCtx { rt: &RUNTIME.functions, error: None, scratch: Scratch::new(), marks: Vec::new(), rng: entropy_rng() }
+        PtCtx { rt: &RUNTIME.functions, error: None, scratch: Scratch::new(), marks: Vec::new(), rng: entropy_rng(), parallel: true }
     }
 
     /// Restart the random state from `seed`.

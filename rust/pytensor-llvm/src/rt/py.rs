@@ -678,6 +678,15 @@ impl Program {
         s.ctx.seed(seed);
     }
 
+    /// Allow or forbid parallel loops for Python calls (results are the same either
+    /// way). The C API sets this per call state (`set_parallel` in the table).
+    fn set_parallel(&self, py: Python<'_>, on: bool) {
+        let prog = &self.prog;
+        let mut guard = self.lock_state(py);
+        let s = guard.get_or_insert_with(|| FnState { st: prog.take_state(), ctx: crate::abi::PtCtx::new() });
+        s.ctx.parallel = on;
+    }
+
     /// A new reference to this program for the C API, as the address of a
     /// `PtFunction` (release it with `function_decref` from `c_api_table()`). It keeps
     /// the compiled code alive on its own.
@@ -713,6 +722,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ProgramBuilder>()?;
     m.add_class::<Program>()?;
     m.add_function(wrap_pyfunction!(c_api_table, m)?)?;
+    m.add_function(wrap_pyfunction!(set_threads, m)?)?;
+    m.add_function(wrap_pyfunction!(threads, m)?)?;
     Ok(())
 }
 
@@ -780,4 +791,17 @@ impl Program {
             }
         }
     }
+}
+
+/// Choose the number of threads parallel loops use (process-wide; only before the
+/// first parallel loop runs). Default: `PYTENSOR_LLVM_THREADS`, else one per CPU.
+#[pyfunction]
+fn set_threads(n: usize) -> PyResult<()> {
+    crate::abi::runtime().set_threads(n).map_err(PyRuntimeError::new_err)
+}
+
+/// The number of threads parallel loops use.
+#[pyfunction]
+fn threads() -> usize {
+    crate::abi::runtime().threads()
 }

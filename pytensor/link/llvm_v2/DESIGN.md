@@ -200,6 +200,33 @@ binomial numbers (`b.rng(ir.Rng.X, ctx, args)`); random variables built from uni
 normal numbers draw them all at once and transform them in a vectorizable loop
 (codegen/random.py). Draws differ from numpy's.
 
+## 5b. Parallel loops and work estimates
+
+`work.py`: `llvm_work(op, node) -> Work` estimates a node's work as a number of items
+(lengths, some known only at run time) times a cost per item, in units of one simple
+float operation (`scalar_cost`: an add is 1, an `exp` 20, `gammaln` 60; Composite: its
+inner graph). Rough on purpose: it separates microseconds from milliseconds.
+
+Generated loops may run in parallel. The builder's `with b.parallel(ctx, n, grain) as
+r:` puts the code of the block into an outlined body function, called per chunk
+`[r.start, r.end)` by the runtime's `parallel_for` on the runtime's rayon pool (the
+process-wide `Runtime`; `pytensor_llvm.rt.set_threads`, `PYTENSOR_LLVM_THREADS`).
+Values of the enclosing function used inside are captured automatically (stored in an
+environment, loaded in the body), and the enclosing `ctx` stands for the chunk's own
+context there: emitters don't change. The loop builder (`for_each`, CAReduce's loops)
+uses a region for its flat loop or its outermost loop when the cost estimate says it's
+worth it (statically when the shapes are; otherwise the runtime runs a single chunk
+directly), with chunks of about `CHUNK_COST`. So far: Elemwise, copies and partial
+reductions over a non-reduced outermost axis; FusedElemwise, full reductions and the
+Rust kernels don't run in parallel yet.
+
+Chunks only depend on `n` and `grain`; each runs with a child context (its own scratch,
+errors: the first failing chunk's is reported; a random state derived from one draw of
+the caller's and the chunk index). Results, random draws included, are therefore the
+same whatever the number of threads, and whether a function state allows parallelism:
+`program.set_parallel(False)`, `api->set_parallel(state, 0)` (C API version 3) run the
+chunks one after the other, e.g. for samplers already running a chain per core.
+
 ## 6. The C ABI
 
 The interpreter, the kernel trampoline, Rust kernels and the C API use
