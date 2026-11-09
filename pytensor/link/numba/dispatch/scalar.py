@@ -414,6 +414,10 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
 
 @register_scalar_funcify(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
+    # SciPy's double-precision kernel is faster, but libm wins for float32.
+    if node.inputs[0].type.dtype != "float32":
+        return numba_funcify_ScalarOp(op, node=node, **kwargs)
+
     @numba_basic.numba_njit
     def gammaln(x):
         return math.lgamma(x)
@@ -447,7 +451,11 @@ def numba_funcify_Erf(op, node, **kwargs):
 
 
 @register_scalar_funcify(Erfc)
-def numba_funcify_Erfc(op, **kwargs):
+def numba_funcify_Erfc(op, node, **kwargs):
+    # SciPy's double-precision kernel is faster, but libm wins for float32.
+    if node.inputs[0].type.dtype != "float32":
+        return numba_funcify_ScalarOp(op, node=node, **kwargs)
+
     @numba_basic.numba_njit
     def erfc(x):
         return math.erfc(x)

@@ -262,6 +262,28 @@ def test_erf_complex():
     )
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int64"])
+@pytest.mark.parametrize(
+    "op_fn, values",
+    [
+        (pt.gammaln, [0, 0.1, 0.5, 1, 2, 5, 13, 100]),
+        (pt.erfc, [-10, -2, -1, 0, 0.1, 0.5, 1, 2, 5, 10]),
+    ],
+    ids=["gammaln", "erfc"],
+)
+def test_special_dtype_dispatch(op_fn, values, dtype):
+    x = pt.vector("x", dtype=dtype)
+    if dtype.startswith("float"):
+        values = [*values, np.inf, np.nan]
+    compare_numba_and_py(
+        [x],
+        op_fn(x),
+        [np.array(values, dtype=dtype)],
+        # Cython needs njit; Python's math.lgamma also raises at zero.
+        eval_obj_mode=False,
+    )
+
+
 CYTHON_SPECIAL_CASES = [
     (pt.erfcx, [np.array([-1.0, 0.0, 1.0, 3.0])]),
     (pt.erfinv, [np.array([-0.5, 0.0, 0.3, 0.9])]),
