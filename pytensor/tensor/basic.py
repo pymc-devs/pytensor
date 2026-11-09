@@ -1528,7 +1528,12 @@ def infer_static_shape(
 
     sh = folded_shape = [check_type(as_tensor_variable(s, ndim=0)) for s in shape]
 
-    if not all(isinstance(s, Constant) for s in folded_shape):
+    if any(s.owner is not None for s in folded_shape):
+        try:
+            return sh, tuple(get_scalar_constant_value(s).item() for s in sh)
+        except NotScalarConstantError:
+            pass
+
         shape_fg = FunctionGraph(outputs=sh, features=[ShapeFeature()], clone=True)
         with config.change_flags(optdb__max_use_ratio=10, cxx=""):
             infer_shape_db.default_query.rewrite(shape_fg)
