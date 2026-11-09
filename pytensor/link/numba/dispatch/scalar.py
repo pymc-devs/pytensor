@@ -33,7 +33,16 @@ from pytensor.scalar.basic import (
     Sign,
     Switch,
 )
-from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.math import (
+    Erf,
+    Erfc,
+    GammaLn,
+    Log1mexp,
+    LogNdtrGrad,
+    Sigmoid,
+    Softplus,
+    erfcx,
+)
 
 
 def scalar_op_cache_key(op, **extra_fields):
@@ -444,6 +453,32 @@ def numba_funcify_Erf(op, node, **kwargs):
         return math.erf(x)
 
     return erf, scalar_op_cache_key(op)
+
+
+@register_scalar_funcify(LogNdtrGrad)
+def numba_funcify_LogNdtrGrad(op, node, **kwargs):
+    erfcx_fn, erfcx_key = numba_funcify_scalar_native(
+        erfcx, node=erfcx.make_node(node.inputs[0])
+    )
+    if erfcx_fn is None:
+        return None, None
+    dtype = np.dtype(node.outputs[0].dtype).type
+    sqrt2 = dtype(np.sqrt(2))
+    sqrt2_pi = dtype(np.sqrt(2 / np.pi))
+    log_sqrt2pi = dtype(np.log(2 * np.pi) / 2)
+    cutoff = dtype(-8)
+
+    @numba_basic.numba_njit
+    def log_ndtr_grad(x, log_cdf):
+        x = dtype(x)
+        if x < cutoff:
+            # logpdf - logcdf loses precision through cancellation in this tail.
+            return np.divide(sqrt2_pi, erfcx_fn(-x / sqrt2))
+        return np.exp(-x * x / 2 - log_sqrt2pi - log_cdf)
+
+    return log_ndtr_grad, scalar_op_cache_key(
+        op, erfcx=erfcx_key, dtype=node.outputs[0].dtype, cache_version=1
+    )
 
 
 @register_scalar_funcify(Erfc)
