@@ -9,6 +9,7 @@ import pytensor.assumptions.orthogonal
 import pytensor.assumptions.permutation
 import pytensor.assumptions.positive_definite
 import pytensor.assumptions.reshape
+import pytensor.assumptions.scan
 import pytensor.assumptions.selection
 import pytensor.assumptions.shape
 import pytensor.assumptions.subtensor
@@ -34,6 +35,7 @@ from pytensor.assumptions.core import (
     UNIT_MAGNITUDE,
     UPPER_TRIANGULAR,
     AssumptionFeature,
+    AssumptionInference,
     AssumptionKey,
     ConflictingAssumptionsError,
     FactState,
@@ -43,6 +45,7 @@ from pytensor.assumptions.core import (
     register_implies,
     register_universal_assumption,
 )
+from pytensor.assumptions.scan import register_scan_assumption
 from pytensor.assumptions.specify import (
     SpecifyAssumptions,
     assume,
@@ -51,7 +54,7 @@ from pytensor.assumptions.specify import (
 from pytensor.graph.fg import FunctionGraph
 
 
-def summarize_assumptions(feature: AssumptionFeature, var) -> str:
+def summarize_assumptions(feature: AssumptionInference, var) -> str:
     """Return a compact ``{...}`` tag of the facts known about *var*.
 
     Each TRUE fact appears as its ``short_name``; each FALSE fact as ``!short_name``.

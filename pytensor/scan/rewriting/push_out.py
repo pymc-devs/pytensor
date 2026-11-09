@@ -18,7 +18,7 @@ import numpy as np
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.rewriting.basic import node_rewriter
@@ -30,6 +30,59 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot
 from pytensor.tensor.shape import shape
 from pytensor.tensor.subtensor import Subtensor, get_idx_list, set_subtensor
+
+
+def _stays_in_loop(op) -> bool:
+    """Whether `scan_push_out_non_seq` keeps a node of *op* in the loop body.
+
+    Markers (``TypeCastingOp``, e.g. ``assume()``) and matrix transposes cost nothing
+    per step, and hoisting them hides structure that inner rewrites and assumption
+    rules match on: a hoisted ``A.T`` turns ``A @ P @ A.T`` into a product of
+    unrelated inputs. Their loop-invariant consumers are still hoisted.
+    """
+    return isinstance(op, TypeCastingOp) or (
+        isinstance(op, DimShuffle) and op.is_matrix_transpose
+    )
+
+
+def _has_pushable_inputs(node, pushable_leaves, removed_nodes) -> bool:
+    """Whether every input of inner *node* can be computed outside the loop.
+
+    A node that stays in the loop is seen through, so the work behind it is not
+    anchored in the loop with it.
+    """
+    return all(
+        x in pushable_leaves
+        or x.owner in removed_nodes
+        or isinstance(x, Constant)
+        or (
+            _stays_in_loop(x.owner_op)
+            and _has_pushable_inputs(x.owner, pushable_leaves, removed_nodes)
+        )
+        for x in node.inputs
+    )
+
+
+def _strip_markers(x):
+    while isinstance(x.owner_op, TypeCastingOp):
+        x = x.owner.inputs[0]
+    return x
+
+
+def _fit_nit_sot_buffer(stacked, nit_sot_size, n_steps):
+    """Lay *stacked*, of length *n_steps*, out as a nit-sot's outer buffer.
+
+    The buffer may be longer than *n_steps*: `Scan.pullback` emits gradient Scans whose
+    nit-sot size is the forward step count while ``n_steps`` is truncated, and its
+    concat padding reads the trailing zeros. The sizes count as equal only when they
+    are the same variable. Otherwise the result is padded with zeros.
+    """
+    if nit_sot_size is n_steps:
+        return stacked
+
+    extra_dims = [stacked.shape[i] for i in range(1, stacked.ndim)]
+    zero_buf = pt.zeros((nit_sot_size, *extra_dims), dtype=stacked.dtype)
+    return set_subtensor(zero_buf[:n_steps], stacked)
 
 
 @node_rewriter([Scan])
@@ -45,8 +98,6 @@ def scan_push_out_non_seq(fgraph, node):
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
     local_fgraph_topo = node.op.fgraph.toposort()
-    local_fgraph_outs_set = set(node_outputs)
-    local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
     to_remove_set = set()
     to_replace_set = set()
@@ -79,21 +130,22 @@ def scan_push_out_non_seq(fgraph, node):
     assert len(inner_non_seqs) == len(outer_non_seqs)
     assert len(inner_seqs) == len(outer_seqs)
 
+    def _outer_input_for(x):
+        # The outer-graph stand-in for a pushable inner input.
+        if x in inner_non_seqs_set:
+            return outer_non_seqs[inner_non_seqs_map[x]]
+        if x in to_replace_set:
+            return replace_with_out[to_replace_map[x]]
+        if isinstance(x, Constant):
+            return x
+        # A node seen through: rebuild it over its argument's outer stand-in.
+        return x.owner.op(*[_outer_input_for(i) for i in x.owner.inputs])
+
     for nd in local_fgraph_topo:
         if (  # we haven't already looked at this node
             nd not in to_remove_set
-            and all(
-                (
-                    (x in inner_non_seqs_set)
-                    or (x.owner in to_remove_set)
-                    or isinstance(x, Constant)
-                )
-                for x in nd.inputs
-            )
-            # We can (supposedly) do this because the assumption is that a
-            # `ViewOp` or `DeepCopyOp` will be just at the end of the
-            # function and not somewhere in the middle
-            and not isinstance(nd.op, ViewOp)
+            and _has_pushable_inputs(nd, inner_non_seqs_set, to_remove_set)
+            and not _stays_in_loop(nd.op)
             and not isinstance(nd.op, DeepCopyOp)
         ):
             # We have a candidate node to remove from the inner-graph
@@ -103,25 +155,13 @@ def scan_push_out_non_seq(fgraph, node):
             # More specifically, the node's current inputs are either
             # a) inner-graph input place-holders for non-sequences,
             # b) the outputs of other nodes being pushed out of the inner-graph,
-            # c) or constants.
+            # c) constants,
+            # d) or nodes kept in the loop wrapping any of these, rebuilt outside.
             to_remove_set.add(nd)
-            new_inputs = []
-            for old_input in nd.inputs:
-                if old_input in inner_non_seqs_set:
-                    # This is case a), so we want to use the corresponding
-                    # outer-graph input as the input to our new pushed-out node
-                    _idx = inner_non_seqs_map[old_input]
-                    new_input = outer_non_seqs[_idx]
-                elif old_input in to_replace_set:
-                    # This is case b), so we want to use the new pushed-out node
-                    # as the input to this new pushed-out node
-                    new_input = replace_with_out[to_replace_map[old_input]]
-                else:
-                    assert isinstance(old_input, Constant)
-                    new_input = old_input
-
-                new_input = old_input.type.filter_variable(new_input)
-                new_inputs.append(new_input)
+            new_inputs = [
+                old_input.type.filter_variable(_outer_input_for(old_input))
+                for old_input in nd.inputs
+            ]
 
             pushed_out_node = nd.op.make_node(*new_inputs)
 
@@ -160,7 +200,19 @@ def scan_push_out_non_seq(fgraph, node):
             clean_replace_with_in.append(replace_with_in[idx])
             clean_replace_with_out.append(replace_with_out[idx])
 
-    if len(clean_to_replace) > 0:
+    # Repeating one value only reproduces nit-sot outputs: a recurrence's buffer also
+    # holds its initial values, and a while loop ends after a run-time number of steps.
+    whole_body_invariant = (
+        not op.info.as_while
+        and op.info.n_nit_sot == len(node.outputs)
+        and all(
+            _stays_in_loop(nd.op)
+            and _has_pushable_inputs(nd, inner_non_seqs_set, to_remove_set)
+            for nd in existent_nodes
+        )
+    )
+
+    if len(clean_to_replace) > 0 and not whole_body_invariant:
         # We can finally put an end to all this madness
         givens = {}
         nw_outer = []
@@ -207,15 +259,19 @@ def scan_push_out_non_seq(fgraph, node):
         replacements = dict(zip(node.outputs, nw_node.outputs, strict=True))
         replacements["remove"] = [node]
         return replacements
-    elif not to_keep_set:
+    elif whole_body_invariant:
         # Nothing in the inner graph should be kept
+        n_steps = node.inputs[0]
+        nit_sot_sizes = op.outer_nitsot(node.inputs)
         replace_with = {}
-        for out, idx in to_replace_map.items():
-            if out in local_fgraph_outs_set:
-                x = node.outputs[local_fgraph_outs_map[out]]
-                y = replace_with_out[idx]
+        for x, out, nit_sot_size in zip(
+            node.outputs, node_outputs, nit_sot_sizes, strict=True
+        ):
+            if out in to_replace_set or _stays_in_loop(out.owner_op):
+                y = _outer_input_for(out)
                 y_shape = list(y.shape)
-                replace_with[x] = pt.alloc(y, node.inputs[0], *y_shape)
+                repeated = pt.alloc(y, n_steps, *y_shape)
+                replace_with[x] = _fit_nit_sot_buffer(repeated, nit_sot_size, n_steps)
 
         # We need to add one extra dimension to the outputs
         # because the scan op expects for a tensor3, to which an
@@ -287,38 +343,34 @@ def scan_push_out_seq(fgraph, node):
     assert len(inner_non_seqs) == len(outer_non_seqs)
     assert len(inner_seqs) == len(outer_seqs)
 
+    pushable_leaves = inner_seqs_set | inner_non_seqs_set
+
+    def _outer_input_for(x):
+        # A marker is dropped: its fact on a slice need not hold for the stack, and a
+        # fact pushed in from the outer sequence is still on that sequence.
+        x = _strip_markers(x)
+        if x in inner_non_seqs_set:
+            return outer_non_seqs[inner_non_seqs_map[x]]
+        if x in inner_seqs_set:
+            return outer_seqs[inner_seqs_map[x]]
+        if x in to_replace_set:
+            return replace_with_out[to_replace_map[x]]
+        if isinstance(x, Constant):
+            return x
+        # A matrix transpose of a non-sequence, which stayed in the loop.
+        return x.owner.op(*[_outer_input_for(i) for i in x.owner.inputs])
+
+    def _comes_from_seqs(x):
+        x = _strip_markers(x)
+        return x in inner_seqs_set or x in to_replace_set
+
     for nd in local_fgraph_topo:
         if (
             nd not in to_remove_set
-            and all(
-                (x in inner_non_seqs_set)
-                or (x.owner in to_remove_set)
-                or isinstance(x, Constant)
-                or (x in inner_seqs_set)
-                for x in nd.inputs
-            )
+            and _has_pushable_inputs(nd, pushable_leaves, to_remove_set)
             and isinstance(nd.op, Elemwise)
         ):
-            outside_ins = []
-            depends_on_seqs = False
-
-            for x in nd.inputs:
-                if x in inner_non_seqs_set:
-                    _idx = inner_non_seqs_map[x]
-                    new_input = outer_non_seqs[_idx]
-                elif x in inner_seqs_set:
-                    new_input = outer_seqs[inner_seqs_map[x]]
-                    depends_on_seqs = True
-                elif x in to_replace_set:
-                    new_input = replace_with_out[to_replace_map[x]]
-                    depends_on_seqs = True
-                else:
-                    assert isinstance(x, Constant)
-                    new_input = x
-
-                outside_ins.append(new_input)
-
-            if not depends_on_seqs:
+            if not any(_comes_from_seqs(x) for x in nd.inputs):
                 # Removing this node from the inner graph of scan
                 # should be handled by the PushOutNonSeqScan
                 # optimization. The current optimization only tries
@@ -328,7 +380,7 @@ def scan_push_out_seq(fgraph, node):
 
             to_remove_set.add(nd)
 
-            nw_outer_node = nd.op.make_node(*outside_ins)
+            nw_outer_node = nd.op.make_node(*map(_outer_input_for, nd.inputs))
 
             # Step 2. Create variables for replacements
             for idx, y in enumerate(nd.outputs):
@@ -340,14 +392,10 @@ def scan_push_out_seq(fgraph, node):
         elif (
             nd not in to_remove_set
             and isinstance(nd.op, DimShuffle)
-            and (nd.inputs[0] in inner_seqs_set or nd.inputs[0].owner in to_remove_set)
+            and _comes_from_seqs(nd.inputs[0])
         ):
             to_remove_set.add(nd)
-            x = nd.inputs[0]
-            if x in inner_seqs_set:
-                outside_ins = outer_seqs[inner_seqs_map[x]]
-            elif x in to_replace_set:
-                outside_ins = replace_with_out[to_replace_map[x]]
+            outside_ins = _outer_input_for(nd.inputs[0])
             new_ord = (0,)
             for old_ord in nd.op.new_order:
                 if old_ord == "x":
@@ -437,7 +485,11 @@ def scan_push_out_seq(fgraph, node):
         replacements["remove"] = [node]
         return replacements
 
-    elif not to_keep_set and not op.info.as_while and not op.outer_mitmot(node.inputs):
+    elif (
+        all(_stays_in_loop(nd.op) for nd in existent_nodes)
+        and not op.info.as_while
+        and not op.outer_mitmot(node.inputs)
+    ):
         # Nothing in the inner graph should be kept.
         n_steps = node.inputs[0]
 
@@ -457,26 +509,9 @@ def scan_push_out_seq(fgraph, node):
                     inp = op.outer_sitsot(node.inputs)[odx]
                     y = set_subtensor(inp[1:], _y)
                 elif out in op.inner_nitsot_outs(ls):
-                    # The pushed-out Elemwise has length == n_steps, but the
-                    # nit_sot's outer buffer size (`outer_nitsot` input) may
-                    # be larger. When it is, folding directly would silently
-                    # drop the trailing zero-initialized slots that any
-                    # downstream consumer reading the full buffer expects --
-                    # e.g., `Scan.pullback` emits grad scans where the
-                    # nit_sot size is the forward's step count while
-                    # `n_steps == grad_steps == min(forward_steps, truncate)`
-                    # and its concat padding depends on those trailing zeros.
-                    # Fold into the direct Elemwise only when the two sizes
-                    # are the same Variable; otherwise pad with zeros via
-                    # set_subtensor.
                     odx = op.inner_nitsot_outs(ls).index(out)
                     nit_sot_size = op.outer_nitsot(node.inputs)[odx]
-                    if nit_sot_size is n_steps:
-                        y = _y
-                    else:
-                        extra_dims = [_y.shape[i] for i in range(1, _y.ndim)]
-                        zero_buf = pt.zeros((nit_sot_size, *extra_dims), dtype=_y.dtype)
-                        y = set_subtensor(zero_buf[:n_steps], _y)
+                    y = _fit_nit_sot_buffer(_y, nit_sot_size, n_steps)
                 else:
                     y = _y[-1]
                 replace_with[x] = y
@@ -737,15 +772,15 @@ def scan_push_out_add(fgraph, node):
                     dot_input.owner.op, Dot
                 )
 
+                inner_dot_inputs = [_strip_markers(x) for x in dot_input.owner.inputs]
                 if (
-                    get_outer_ndim(dot_input.owner.inputs[0], args) == 3
-                    and get_outer_ndim(dot_input.owner.inputs[1], args) == 3
+                    get_outer_ndim(inner_dot_inputs[0], args) == 3
+                    and get_outer_ndim(inner_dot_inputs[1], args) == 3
                 ):
                     # The optimization can be be applied in this case.
 
                     # Move out of scan the two inputs to the Dot and
                     # perform a dot outside of scan on these two inputs
-                    inner_dot_inputs = nd.inputs[dot_in_idx].owner.inputs
                     (
                         outer_dot_inputs,
                         new_scan_args,

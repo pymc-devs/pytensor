@@ -1,15 +1,22 @@
 import numpy as np
+import pytest
 
 import pytensor
 import pytensor.tensor as pt
 from pytensor import function, scan, shared
+from pytensor.assumptions.specify import assume
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.rewriting.push_out import (
+    scan_push_out_add,
+    scan_push_out_non_seq,
+    scan_push_out_seq,
+)
 from pytensor.scan.utils import until
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import shape
@@ -329,6 +336,166 @@ class TestPushOutNonSeqScan:
             res, np.array([0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 0.0])
         )
 
+    def test_pushout_through_assumption_marker(self):
+        """A marker op such as ``assume()`` stays in the loop, but loop-invariant work
+        behind it is still hoisted out."""
+        X = matrix("X")
+        ys = tensor3("ys")
+        out = scan(
+            lambda yt, X: pt.exp(assume(X, diagonal=True)) @ yt,
+            sequences=[ys],
+            non_sequences=[X],
+            return_updates=False,
+        )
+        f = function([X, ys], out, mode=get_default_mode().including("scan"))
+
+        [scan_node] = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+        inner_nodes = scan_node.op.fgraph.toposort()
+        assert not any(isinstance(n.op, Elemwise) for n in inner_nodes)
+
+    def test_matrix_transpose_stays_but_its_consumers_are_hoisted(self):
+        """``A.T`` stays in the loop so ``A @ y @ A.T`` keeps its structure, while
+        the loop-invariant ``A.T @ Q`` behind it is still hoisted out."""
+        A = matrix("A")
+        Q = matrix("Q")
+        ys = tensor3("ys")
+        out = scan(
+            lambda yt, A, Q: A @ yt @ A.T + A.T @ Q,
+            sequences=[ys],
+            non_sequences=[A, Q],
+            return_updates=False,
+        )
+        f = function([A, Q, ys], out, mode=get_default_mode().including("scan"))
+
+        def is_transpose(var):
+            return (
+                isinstance(var.owner_op, DimShuffle)
+                and var.owner_op.is_matrix_transpose
+            )
+
+        [scan_node] = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+        [kept, hoisted] = scan_node.op.outer_non_seqs(scan_node.inputs)
+        assert kept is A
+        assert is_transpose(hoisted.owner.inputs[0])
+        inner_vars = [out for n in scan_node.op.fgraph.toposort() for out in n.outputs]
+        assert sum(map(is_transpose, inner_vars)) == 1
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            lambda A: pt.exp(A.T @ A),
+            lambda A: A.T,
+            lambda A: (A @ A).T,
+            lambda A: pt.exp(assume(A.T, symmetric=True)),
+            lambda A: assume(pt.exp(A), symmetric=True),
+        ],
+        ids=["consumer", "transpose", "transposed-consumer", "marker", "marker-output"],
+    )
+    def test_invariant_body_removes_scan(self, body):
+        """Nodes that stay in a loop must not keep a Scan alive once nothing per-step
+        is left: the value is computed once and repeated."""
+        A = dmatrix("A")
+        out = scan(body, non_sequences=[A], n_steps=3, return_updates=False)
+        rewrite = utt.RewriteTester(
+            [A], [out], include=None, custom_rewrite=scan_push_out_non_seq
+        )
+
+        value = body(A)
+        rewrite.assert_graph(pt.alloc(value, pt.constant(3), *value.shape))
+        rewrite.assert_eval(np.array([[1.0, 2.0], [3.0, 4.0]]))
+
+    def test_invariant_body_with_nitsot_buffer_larger_than_nsteps(self):
+        """Repeating an invariant value gives ``n_steps`` rows, and the rest of a longer
+        nit-sot buffer stays zero, as ``Scan.pullback`` relies on under
+        ``truncate_gradient``."""
+        info = ScanInfo(
+            n_seqs=0,
+            mit_mot_in_slices=(),
+            mit_mot_out_slices=(),
+            mit_sot_in_slices=(),
+            sit_sot_in_slices=(),
+            n_nit_sot=1,
+            n_untraced_sit_sot=0,
+            n_non_seqs=1,
+            as_while=False,
+        )
+        inner_x = pt.dvector("inner_x")
+        scan_op = Scan(inputs=[inner_x], outputs=[pt.exp(inner_x)], info=info)
+
+        x = pt.dvector("x")
+        n_steps = pt.lscalar("n_steps")
+        nit_sot_size = pt.lscalar("nit_sot_size")
+        out = scan_op(n_steps, nit_sot_size, x)
+        rewrite = utt.RewriteTester(
+            [x, n_steps, nit_sot_size],
+            [out],
+            include=None,
+            custom_rewrite=scan_push_out_non_seq,
+        )
+
+        assert not any(isinstance(n.op, Scan) for n in rewrite.rewr_fg.apply_nodes)
+        rewrite.assert_eval(np.ones(2), np.array(2), np.array(4))
+
+    @pytest.mark.parametrize(
+        "body, outputs_info",
+        [
+            (lambda _, A: pt.exp(A), lambda x: [x[0]]),
+            (lambda _, A: A.T @ A, lambda x: [x[0]]),
+            (
+                lambda _2, _1, A: pt.exp(A),
+                lambda x: [dict(initial=x, taps=[-2, -1])],
+            ),
+            (lambda A: (pt.exp(A), until(pt.all(A > 1e9))), lambda x: None),
+            (lambda A: (pt.exp(A), until(pt.all(A < 1e9))), lambda x: None),
+        ],
+        ids=["sit-sot", "sit-sot-transpose", "mit-sot", "until-false", "until-true"],
+    )
+    def test_invariant_body_with_state_or_condition(self, body, outputs_info):
+        """An invariant body does not make a Scan's output a repeated value: a
+        recurrence's buffer holds its initial values, and ``until`` sets its length."""
+        A = dmatrix("A")
+        x = pt.dtensor3("x")
+        out = scan(
+            body,
+            outputs_info=outputs_info(x),
+            non_sequences=[A],
+            n_steps=5,
+            return_updates=False,
+        )
+        rewrite = utt.RewriteTester(
+            [A, x], [out], include=None, custom_rewrite=scan_push_out_non_seq
+        )
+
+        A_value = np.eye(2) + 0.1
+        rewrite.assert_eval(A_value, np.stack([A_value, A_value]))
+
+    @pytest.mark.parametrize(
+        "body, expected",
+        [
+            (
+                lambda s, B: pt.exp(assume(s, symmetric=True)) + B,
+                lambda x, A: pt.exp(x) + A,
+            ),
+            (lambda s, B: s + B.T, lambda x, A: x + A.T),
+            (
+                lambda s, B: assume(s, symmetric=True).T * B,
+                lambda x, A: x.transpose(0, 2, 1) * A,
+            ),
+        ],
+        ids=["marker", "non-sequence-transpose", "transposed-marker"],
+    )
+    def test_seq_pushout_sees_through_kept_nodes(self, body, expected):
+        """A marker or transpose left in the loop must not block vectorizing a body
+        that depends only on sequences. A marker is dropped, since its fact on a slice
+        need not hold for the stack."""
+        A = dmatrix("A")
+        x = pt.dtensor3("x", shape=(4, None, None))
+        out = scan(body, sequences=[x], non_sequences=[A], return_updates=False)
+        rewrite = utt.RewriteTester([x, A], [out], custom_rewrite=scan_push_out_seq)
+
+        rewrite.assert_graph(expected(x, A))
+        rewrite.assert_eval(np.ones((4, 2, 2)), np.eye(2))
+
     def test_dot_not_output(self):
         """
         Test the case where the vector input to the dot is not already an
@@ -537,6 +704,31 @@ class TestPushOutAddScan:
         vA = rng.uniform(size=(5, 5)).astype(config.floatX)
         vB = rng.uniform(size=(5, 5)).astype(config.floatX)
         utt.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
+
+    def test_sum_dot_sees_through_marker(self):
+        """A marker on a sequence must not hide it from the replacement of an
+        accumulated dot with a dot of the stacked sequences."""
+        A = pt.dtensor3("A")
+        B = pt.dtensor3("B")
+        init = dmatrix("init")
+        S = scan(
+            lambda x1, x2, u: u + dot(assume(x1, symmetric=True), x2),
+            sequences=[A, B],
+            outputs_info=[init],
+            return_updates=False,
+        )
+        result = utt.RewriteTester(
+            [A, B, init],
+            [S.owner.inputs[0][-1]],
+            include=None,
+            custom_rewrite=scan_push_out_add,
+        )
+
+        assert not any(isinstance(n.op, Scan) for n in result.rewr_fg.apply_nodes)
+        rng = np.random.default_rng(utt.fetch_seed())
+        result.assert_eval(
+            rng.uniform(size=(3, 2, 2)), rng.uniform(size=(3, 2, 2)), np.eye(2)
+        )
 
     def test_machine_translation(self):
         """
