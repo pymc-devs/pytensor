@@ -15,7 +15,9 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm_v2.codegen.function import OutMode, llvm_output_modes
+from pytensor.link.llvm_v2.codegen.function import OutMode, Output, llvm_outputs
+from pytensor.link.llvm_v2.codegen.types import repr_of
+from pytensor.link.llvm_v2.layout import Layout
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import SpecifyShape
@@ -117,10 +119,10 @@ def _register_more():
             return None
         return rt().SolveTriangular(rt_mode(modes[0]), dt, bool(op.lower), bool(op.unit_diagonal))
 
-    @llvm_output_modes.register(Scan)
-    def _(op, node):
-        # the Scan kernel allocates every output
-        return [(OutMode.ALLOCATED, None) for _ in node.outputs]
+    @llvm_outputs.register(Scan)
+    def _(op, node, in_layouts):
+        # the Scan kernel allocates every output, C-contiguous
+        return [Output(repr_of(o.type, Layout.c(o.type.ndim)), OutMode.ALLOCATED) for o in node.outputs]
 
     @llvm_kernel.register(Scan)
     def _(op, node, modes, in_layouts=None):

@@ -17,6 +17,7 @@ from pytensor.link.llvm_v2.codegen.emit import (
     pack,
     unpack,
 )
+from pytensor.link.llvm_v2.layout import Layout
 from pytensor.link.llvm_v2.codegen.types import (
     PTARRAY_SIZE,
     ScalarRepr,
@@ -46,6 +47,19 @@ class Output:
     view_of: int | None = None
 
     @property
+    def layout(self):
+        """The output's layout (None for scalars): for PROVIDED the memory the op asks
+        for (the provider may give it other memory, see `with_layout`), for ALLOCATED
+        what the code allocates, for VIEW what the view has."""
+        return getattr(self.repr, "layout", None)
+
+    def with_layout(self, layout):
+        """The same output with another layout (e.g. the memory actually provided)."""
+        from dataclasses import replace
+
+        return replace(self, repr=TensorRepr(self.repr.dtype, self.repr.shape, layout))
+
+    @property
     def ir_type(self):
         m = ir()
         if self.mode is OutMode.PROVIDED:
@@ -70,22 +84,53 @@ class Signature:
 
 
 @singledispatch
-def llvm_output_modes(op, node) -> list[tuple[OutMode, int | None]]:
-    """How each output of `node` comes to be. The default follows the types and the
-    op's view_map: views, scalars, provided memory for static shapes, else allocated."""
+def llvm_outputs(op, node, in_layouts) -> list[Output]:
+    """How each output of `node` comes to be, and its layout (layout.py), given the
+    inputs' layouts (`known_layouts` fills in the unknown ones).
+
+    The default follows the types and the op's view_map: a view of unknown layout,
+    scalars, provided memory for static shapes, else allocated; memory C-contiguous.
+    Ops register their own to describe views (DimShuffle, Subtensor, ...) or to choose
+    where and how their outputs are produced (e.g. Elemwise allocating its output in
+    its inputs' memory order). The code must produce what is declared: ALLOCATED
+    outputs in the layout given (`SlotOutput.allocate` does that), VIEW outputs with
+    the layout claimed. PROVIDED memory is what the op asks for; the provider may give
+    other memory (the code reads the actual layout from the signature)."""
     view_map = getattr(op, "view_map", {}) or {}
-    modes = []
-    for k, out in enumerate(node.outputs):
-        r = repr_of(out.type)
-        if isinstance(r, ScalarRepr):
-            modes.append((OutMode.SCALAR, None))
-        elif k in view_map:
-            modes.append((OutMode.VIEW, view_map[k][0]))
-        elif r.static:
-            modes.append((OutMode.PROVIDED, None))
-        else:
-            modes.append((OutMode.ALLOCATED, None))
-    return modes
+    return [
+        Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.VIEW, view_map[k][0])
+        if k in view_map and not isinstance(repr_of(o.type), ScalarRepr)
+        else fresh_output(o)
+        for k, o in enumerate(node.outputs)
+    ]
+
+
+def fresh_output(var, layout=None) -> Output:
+    """An output in new memory: SCALAR, PROVIDED for static shapes, else ALLOCATED; in
+    `layout` (default C-contiguous)."""
+    r = repr_of(var.type)
+    if isinstance(r, ScalarRepr):
+        return Output(r, OutMode.SCALAR)
+    lay = layout if layout is not None else Layout.c(var.type.ndim)
+    return Output(repr_of(var.type, lay), OutMode.PROVIDED if r.static else OutMode.ALLOCATED)
+
+
+def view_output(var, layout, view_of=0) -> Output:
+    return Output(repr_of(var.type, layout), OutMode.VIEW, view_of)
+
+
+def known_layouts(node, in_layouts) -> list:
+    """`in_layouts` with DYNAMIC for tensors whose layout isn't known."""
+    if in_layouts is None:
+        in_layouts = [None] * len(node.inputs)
+    return [
+        lay if lay is not None or not hasattr(i.type, "ndim") else Layout.dynamic(i.type.ndim)
+        for i, lay in zip(node.inputs, in_layouts, strict=True)
+    ]
+
+
+def node_outputs(node, in_layouts=None) -> list[Output]:
+    return llvm_outputs(node.op, node, known_layouts(node, in_layouts))
 
 
 def skipped_inputs(node, folded=frozenset()):
@@ -95,12 +140,13 @@ def skipped_inputs(node, folded=frozenset()):
     return frozenset(folded) | {k for k, i in enumerate(node.inputs) if is_absent(i.type)}
 
 
-def node_signature(node, folded=frozenset(), in_layouts=None, out_layouts=None) -> Signature:
+def node_signature(node, folded=frozenset(), in_layouts=None, provided=None) -> Signature:
     """`folded`: positions of inputs that are constants folded into the code (not
     arguments). None inputs aren't arguments either.
 
-    `in_layouts`: the `Layout` of each input; `out_layouts`: of the memory provided for
-    each PROVIDED output (None: nothing known, any strides)."""
+    `in_layouts`: the `Layout` of each input; outputs as `llvm_outputs` declares them,
+    except PROVIDED ones: their layout is that of the memory actually provided,
+    `provided[k]` (None: any strides)."""
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
@@ -114,13 +160,16 @@ def node_signature(node, folded=frozenset(), in_layouts=None, out_layouts=None) 
             raise NotImplementedError("a view of a folded constant")
         return pos - sum(1 for p in folded if p < pos)
 
-    if out_layouts is None:
-        out_layouts = [None] * len(node.outputs)
-    outputs = tuple(
-        Output(repr_of(o.type, lay if mode is OutMode.PROVIDED else None), mode, arg_index(view_of))
-        for o, (mode, view_of), lay in zip(node.outputs, llvm_output_modes(node.op, node), out_layouts, strict=True)
-    )
-    return Signature(inputs, outputs)
+    outputs = []
+    for k, o in enumerate(node_outputs(node, in_layouts)):
+        if o.mode is OutMode.PROVIDED:
+            # the memory's layout is the provider's to state; unstated: any strides
+            lay = provided[k] if provided is not None else None
+            o = o.with_layout(lay if lay is not None else Layout.dynamic(o.repr.ndim))
+        if o.view_of is not None:
+            o = Output(o.repr, o.mode, arg_index(o.view_of))
+        outputs.append(o)
+    return Signature(inputs, tuple(outputs))
 
 
 @singledispatch
@@ -142,7 +191,7 @@ class NodeFunction:
 
 
 def build_node_function(
-    module, node, name: str, temporary_outputs=frozenset(), folded=None, in_layouts=None, out_layouts=None
+    module, node, name: str, temporary_outputs=frozenset(), folded=None, in_layouts=None, provided=None
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
 
@@ -155,7 +204,7 @@ def build_node_function(
 
     m = ir()
     folded = folded or {}
-    sig = node_signature(node, frozenset(folded), in_layouts, out_layouts)
+    sig = node_signature(node, frozenset(folded), in_layouts, provided)
     sig_inputs = iter(sig.inputs)
     fn = module.function(name, sig.param_types(), m.i32, inline=m.Inline.Always)
     b = fn.builder()
@@ -201,6 +250,9 @@ def build_node_function(
                     o.repr.ndim,
                     view_of=o.view_of,
                     temporary=len(outputs) in temporary_outputs and o.mode in (OutMode.ALLOCATED, OutMode.VIEW),
+                    # what `allocate` produces: the declared layout (a view that copies
+                    # instead, like Reshape, declares C)
+                    layout=o.layout if o.layout.fully_packed(o.repr.shape) else None,
                 )
             )
     llvm_emit(node.op, node, cx, inputs, outputs)
@@ -347,7 +399,11 @@ __all__ = [
     "build_node_function",
     "compile_node",
     "llvm_emit",
-    "llvm_output_modes",
+    "fresh_output",
+    "known_layouts",
+    "llvm_outputs",
+    "node_outputs",
+    "view_output",
     "node_signature",
     "pack",
 ]

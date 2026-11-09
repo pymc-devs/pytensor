@@ -48,6 +48,9 @@ pub struct ValueSpec {
     pub dtype: DType,
     pub shape: Vec<Option<u64>>,
     pub kind: Kind,
+    /// memory order of memory the program provides (arena, fresh), outermost axis
+    /// first; empty: C order
+    pub order: Vec<usize>,
 }
 
 impl ValueSpec {
@@ -171,6 +174,20 @@ pub fn is_c_contiguous(shape: &[i64], strides: &[i64], itemsize: usize) -> bool 
     true
 }
 
+/// Strides of an array packed in axis `order` (outermost first; empty: C order).
+pub fn packed_strides(shape: &[i64], itemsize: i64, order: &[usize]) -> Vec<i64> {
+    if order.is_empty() {
+        return c_strides(shape, itemsize);
+    }
+    let mut st = vec![0i64; shape.len()];
+    let mut acc = itemsize;
+    for &a in order.iter().rev() {
+        st[a] = acc;
+        acc = acc.saturating_mul(shape[a].max(1));
+    }
+    st
+}
+
 pub fn c_strides(shape: &[i64], itemsize: i64) -> Vec<i64> {
     let mut st = vec![0i64; shape.len()];
     let mut acc = itemsize;
@@ -212,6 +229,16 @@ impl Program {
         };
         let mut produced = vec![false; n];
         for (k, v) in spec.values.iter().enumerate() {
+            if !v.order.is_empty() {
+                let mut seen = v.order.clone();
+                seen.sort_unstable();
+                if seen != (0..v.ndim()).collect::<Vec<_>>() {
+                    return Err(format!("value {k}: memory order {:?} isn't a permutation of the axes", v.order));
+                }
+                if !matches!(v.kind, Kind::Arena(_)) {
+                    return Err(format!("value {k}: only arena values have a memory order"));
+                }
+            }
             match &v.kind {
                 Kind::Input(i) => {
                     if *i >= spec.n_inputs {
@@ -295,7 +322,7 @@ impl Program {
             let nd = v.ndim();
             let mut s = vec![0i64; 2 * nd].into_boxed_slice();
             if let Some(shape) = v.static_shape() {
-                let st = c_strides(&shape, v.dtype.itemsize() as i64);
+                let st = packed_strides(&shape, v.dtype.itemsize() as i64, &v.order);
                 s[..nd].copy_from_slice(&shape);
                 s[nd..].copy_from_slice(&st);
             }
@@ -635,6 +662,7 @@ impl Program {
                 Kind::Input(i) if self.input_contiguous(*i) => format!("input {i} (C-contiguous)"),
                 Kind::Input(i) => format!("input {i}"),
                 Kind::Const(_) => "constant".to_string(),
+                Kind::Arena(off) if !v.order.is_empty() => format!("arena +{off}, order {:?}", v.order),
                 Kind::Arena(off) => format!("arena +{off}"),
                 Kind::Fresh => "fresh (output)".to_string(),
                 Kind::Allocated => "allocated by its step".to_string(),

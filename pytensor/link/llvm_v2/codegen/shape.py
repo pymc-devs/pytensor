@@ -5,12 +5,23 @@ from __future__ import annotations
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
 from pytensor.link.llvm_v2.codegen.emit import Array, cast, copy, load, store
-from pytensor.link.llvm_v2.codegen.function import llvm_emit
+from pytensor.link.llvm_v2.codegen.function import llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm_v2.codegen.types import ir
-from pytensor.link.llvm_v2.layout import llvm_view_layout
+from pytensor.link.llvm_v2.layout import dimshuffle_layout, same_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape
+
+
+@llvm_outputs.register(DimShuffle)
+def _(op, node, in_layouts):
+    return [view_output(node.outputs[0], dimshuffle_layout(op, node, in_layouts[0]))]
+
+
+@llvm_outputs.register(ViewOp)
+@llvm_outputs.register(SpecifyShape)
+def _(op, node, in_layouts):
+    return [view_output(node.outputs[0], same_layout(node, in_layouts[0]))]
 
 
 @llvm_emit.register(DimShuffle)
@@ -25,8 +36,8 @@ def _(op, node, cx, inputs, outputs):
         else:
             shape.append(x.shape[o])
             strides.append(x.strides[o])
-    # the view's layout follows from the input's (the same rule the planner uses)
-    layout = llvm_view_layout(op, node, [x.layout])[0]
+    # the view's layout follows from the input's (the same rule `llvm_outputs` uses)
+    layout = dimshuffle_layout(op, node, x.layout)
     outputs[0].set_view(Array(x.dtype, x.data, shape, strides, layout))
 
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
 from pytensor.link.llvm_v2.codegen.emit import Array, cast, copy, for_each, load, mul, store
-from pytensor.link.llvm_v2.codegen.function import OutMode, llvm_emit, llvm_output_modes
+from pytensor.link.llvm_v2.codegen.function import fresh_output, llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm_v2.layout import subtensor_layout
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.codegen.types import ir
 from pytensor.scalar.basic import add as scalar_add
@@ -114,11 +115,14 @@ def _(op, node, cx, inputs, outputs):
         copy(cx, view, out.array)
 
 
-@llvm_output_modes.register(IncSubtensor)
-def _(op, node):
-    out = node.outputs[0]
-    static = all(s is not None for s in out.type.shape)
-    return [(OutMode.PROVIDED if static else OutMode.ALLOCATED, None)]
+@llvm_outputs.register(Subtensor)
+def _(op, node, in_layouts):
+    return [view_output(node.outputs[0], subtensor_layout(op, node, in_layouts[0]))]
+
+
+@llvm_outputs.register(IncSubtensor)
+def _(op, node, in_layouts):
+    return [fresh_output(node.outputs[0])]
 
 
 @llvm_emit.register(IncSubtensor)

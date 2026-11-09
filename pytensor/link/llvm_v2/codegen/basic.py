@@ -17,7 +17,8 @@ from pytensor.link.llvm_v2.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm_v2.codegen.function import llvm_emit
+from pytensor.link.llvm_v2.codegen.function import llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm_v2.layout import Layout, same_layout
 from pytensor.link.llvm_v2.codegen.types import ir, is_float
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import ARange, Alloc, AllocEmpty, Join, MakeVector
@@ -147,6 +148,12 @@ def _(op, node, cx, inputs, outputs):
         store(b, out_dtype, cast(b, v, dt, out_dtype), b.gep_bytes(out.data, mul(b, i, out.strides[0])))
 
 
+@llvm_outputs.register(Reshape)
+def _(op, node, in_layouts):
+    # a view of a C-contiguous input, else a C-contiguous copy: C either way
+    return [view_output(node.outputs[0], Layout.c(node.outputs[0].type.ndim))]
+
+
 @llvm_emit.register(Reshape)
 def _(op, node, cx, inputs, outputs):
     """A view if the input is contiguous, else a copy (C order)."""
@@ -251,6 +258,11 @@ def _(op, node, cx, inputs, outputs):
         dst = Array(out.dtype, b.gep_bytes(out.data, mul(b, offset, out.strides[axis])), x.shape, out.strides)
         copy(cx, x, dst)
         offset = b.add(offset, x.shape[axis]) if offset.const_int is None or x.shape[axis].const_int is None else b.const_int(m.i64, offset.const_int + x.shape[axis].const_int)
+
+
+@llvm_outputs.register(CheckAndRaise)
+def _(op, node, in_layouts):
+    return [view_output(node.outputs[0], same_layout(node, in_layouts[0]))]
 
 
 @llvm_emit.register(CheckAndRaise)

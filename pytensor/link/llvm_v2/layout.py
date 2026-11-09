@@ -19,18 +19,18 @@ its strides. They come from how a value is produced:
 
 * memory the planner provides (arena, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
-* views get theirs from their input's (`llvm_view_layout`, per op);
+* views get theirs from their input's (the op's `llvm_outputs`, with the helpers below);
 * graph inputs and values from numba fall-backs are DYNAMIC unless checked.
 
-`infer_output_layouts` is the one place that decides; the planner and the
-`LayoutFeature` (for rewrites and inspection) both use it.
+How each output comes to be, and with which layout, is declared per op by
+`llvm_outputs` (codegen/function.py); the planner and the `LayoutFeature` (for rewrites
+and inspection) both use it.
 """
 
 from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from functools import singledispatch
 
 import numpy as np
 
@@ -272,162 +272,117 @@ def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
     return Layout.make([shape[a] for a in keep], order, [strides[a] for a in keep])
 
 
-# ------------------------------------------------------------------ view rules
+# ------------------------------------------------------------------ layouts of views
+# (used by the ops' `llvm_outputs`, next to their emitters)
 
 
-@singledispatch
-def llvm_view_layout(op, node, in_layouts) -> list[Layout | None]:
-    """Layouts of the outputs of `node` that are views of an input (None for the
-    others). The default knows nothing about a view."""
-    return [Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs]
+def same_layout(node, x: Layout) -> Layout:
+    """A view that is its input (ViewOp, SpecifyShape, ...): the input's layout, for the
+    output's (possibly more static) shape."""
+    return Layout.make(shape_of(node.outputs[0]), x.order, x.strides)
 
 
-def _register_rules():
-    from pytensor.compile.ops import ViewOp
-    from pytensor.graph.basic import Constant
-    from pytensor.raise_op import CheckAndRaise
-    from pytensor.tensor.basic import Split
-    from pytensor.tensor.elemwise import DimShuffle
-    from pytensor.tensor.shape import Reshape, SpecifyShape
-    from pytensor.tensor.subtensor import Subtensor, unflatten_index_variables
-
-    @llvm_view_layout.register(ViewOp)
-    @llvm_view_layout.register(SpecifyShape)
-    @llvm_view_layout.register(CheckAndRaise)
-    def _(op, node, in_layouts):
-        x = in_layouts[0]
-        return [Layout.make(shape_of(node.outputs[0]), x.order, x.strides)]
-
-    @llvm_view_layout.register(Reshape)
-    def _(op, node, in_layouts):
-        # a view of a C-contiguous input, else a C-contiguous copy
-        return [Layout.c(node.outputs[0].type.ndim)]
-
-    @llvm_view_layout.register(DimShuffle)
-    def _(op, node, in_layouts):
-        x = in_layouts[0]
-        new_order = op.new_order
-        out_of = {}  # input axis -> output axis
-        strides = []
-        for j, o in enumerate(new_order):
-            if o == "x":
-                strides.append(PACKED)
-            else:
-                out_of[int(o)] = j
-                strides.append(x.strides[int(o)])
-        order = [j for j, o in enumerate(new_order) if o == "x"] + [out_of[a] for a in x.order if a in out_of]
-        return [Layout.make(shape_of(node.outputs[0]), order, strides)]
-
-    def static_int(var):
-        if var is None:
-            return None
-        if isinstance(var, Constant):
-            return int(np.asarray(var.data))
-        return "dynamic"
-
-    @llvm_view_layout.register(Subtensor)
-    def _(op, node, in_layouts):
-        x = in_layouts[0]
-        xv = node.inputs[0]
-        shape, isz = shape_of(xv), itemsize_of(xv)
-        out_shape = shape_of(node.outputs[0])
-        entries = unflatten_index_variables(node.inputs[1:], op.idx_list)
-        demoted, removed, stepped = set(), [], {}
-        for a, e in enumerate(entries):
-            if not isinstance(e, slice):
-                # the axis disappears: packed axes outside it now skip its length
-                removed.append(a)
-                demoted.update(outer_in_block(x, a, shape))
-                continue
-            step = static_int(e.step)
-            if e.start is None and e.stop is None and step in (None, 1):
-                continue
-            n_out = out_shape[a - len(removed)]
-            if not (shape[a] is not None and n_out == shape[a]):
-                demoted.update(outer_in_block(x, a, shape))
-            if step not in (None, 1):
-                st = x.static_stride(a, shape, isz)
-                stepped[a] = DYNAMIC if step == "dynamic" or st is None else st * step
-                demoted.update(outer_in_block(x, a, shape))
-        strides = demote(x, demoted, shape, isz)
-        for a, st in stepped.items():
-            strides[a] = st
-        keep = [a for a in range(x.ndim) if a not in removed]
-        renumber = {a: k for k, a in enumerate(keep)}
-        order = [renumber[a] for a in x.order if a in renumber]
-        return [Layout.make(out_shape, order, [strides[a] for a in keep])]
-
-    @llvm_view_layout.register(Split)
-    def _(op, node, in_layouts):
-        x = in_layouts[0]
-        xv = node.inputs[0]
-        shape, isz = shape_of(xv), itemsize_of(xv)
-        a = int(op.axis) % x.ndim
-        outs = []
-        for o in node.outputs:
-            os = shape_of(o)
-            if os[a] is not None and os[a] == shape[a]:
-                outs.append(Layout.make(os, x.order, x.strides))
-            else:
-                outs.append(Layout.make(os, x.order, demote(x, outer_in_block(x, a, shape), shape, isz)))
-        return outs
-
-
-_register_rules()
-
-
-# ------------------------------------------------------------------ inference
-
-
-def infer_output_layouts(node, modes, in_layouts, provided=None, allocated=None) -> list[Layout | None]:
-    """Layouts of `node`'s outputs given how they are produced.
-
-    * `modes`: `OutMode` per output (PROVIDED, ALLOCATED, VIEW, SCALAR);
-    * `in_layouts`: per input (None for non-tensors);
-    * `provided`: the layout of the memory provided per output (default C-contiguous,
-      what the planner provides);
-    * `allocated`: the layout of ALLOCATED outputs: C-contiguous for generated code,
-      Rust kernels and Scan (the default), DYNAMIC for numba fall-backs.
-    """
-    from pytensor.link.llvm_v2.codegen.function import OutMode
-
-    views = None
-    out = []
-    for k, (o, mode) in enumerate(zip(node.outputs, modes, strict=True)):
-        if mode is OutMode.SCALAR or not hasattr(o.type, "ndim"):
-            out.append(None)
-        elif mode is OutMode.PROVIDED:
-            lay = provided[k] if provided is not None else None
-            out.append(lay if lay is not None else Layout.c(o.type.ndim))
-        elif mode is OutMode.ALLOCATED:
-            out.append(Layout.c(o.type.ndim) if allocated is None else allocated)
+def dimshuffle_layout(op, node, x: Layout) -> Layout:
+    out_of = {}  # input axis -> output axis
+    strides = []
+    for j, o in enumerate(op.new_order):
+        if o == "x":
+            strides.append(PACKED)
         else:
-            if views is None:
-                in_layouts = [
-                    lay if lay is not None or not hasattr(i.type, "ndim") else Layout.dynamic(i.type.ndim)
-                    for i, lay in zip(node.inputs, in_layouts, strict=True)
-                ]
-                views = llvm_view_layout(node.op, node, in_layouts)
-            out.append(views[k] if views[k] is not None else Layout.dynamic(o.type.ndim))
-    return out
+            out_of[int(o)] = j
+            strides.append(x.strides[int(o)])
+    order = [j for j, o in enumerate(op.new_order) if o == "x"] + [out_of[a] for a in x.order if a in out_of]
+    return Layout.make(shape_of(node.outputs[0]), order, strides)
 
 
-def tensor_layouts(variables, default) -> list[Layout | None]:
-    return [default(v.type.ndim) if hasattr(v.type, "ndim") else None for v in variables]
+def _static_int(var):
+    from pytensor.graph.basic import Constant
+
+    if var is None:
+        return None
+    if isinstance(var, Constant):
+        return int(np.asarray(var.data))
+    return "dynamic"
 
 
+def subtensor_layout(op, node, x: Layout) -> Layout:
+    from pytensor.tensor.subtensor import unflatten_index_variables
+
+    xv = node.inputs[0]
+    shape, isz = shape_of(xv), itemsize_of(xv)
+    out_shape = shape_of(node.outputs[0])
+    entries = unflatten_index_variables(node.inputs[1:], op.idx_list)
+    demoted, removed, stepped = set(), [], {}
+    for a, e in enumerate(entries):
+        if not isinstance(e, slice):
+            # the axis disappears: packed axes outside it now skip its length
+            removed.append(a)
+            demoted.update(outer_in_block(x, a, shape))
+            continue
+        step = _static_int(e.step)
+        if e.start is None and e.stop is None and step in (None, 1):
+            continue
+        n_out = out_shape[a - len(removed)]
+        if not (shape[a] is not None and n_out == shape[a]):
+            demoted.update(outer_in_block(x, a, shape))
+        if step not in (None, 1):
+            st = x.static_stride(a, shape, isz)
+            stepped[a] = DYNAMIC if step == "dynamic" or st is None else st * step
+            demoted.update(outer_in_block(x, a, shape))
+    strides = demote(x, demoted, shape, isz)
+    for a, st in stepped.items():
+        strides[a] = st
+    keep = [a for a in range(x.ndim) if a not in removed]
+    renumber = {a: k for k, a in enumerate(keep)}
+    order = [renumber[a] for a in x.order if a in renumber]
+    return Layout.make(out_shape, order, [strides[a] for a in keep])
+
+
+def split_layouts(op, node, x: Layout) -> list[Layout]:
+    xv = node.inputs[0]
+    shape, isz = shape_of(xv), itemsize_of(xv)
+    a = int(op.axis) % x.ndim
+    outs = []
+    for o in node.outputs:
+        os = shape_of(o)
+        if os[a] is not None and os[a] == shape[a]:
+            outs.append(Layout.make(os, x.order, x.strides))
+        else:
+            outs.append(Layout.make(os, x.order, demote(x, outer_in_block(x, a, shape), shape, isz)))
+    return outs
+
+
+def common_order(layouts, shape) -> list[int] | None:
+    """The memory order (outermost first) most of `layouts` are packed in over the axes
+    of `shape` that aren't statically 1, if one covers them all (else None)."""
+    real = [a for a in range(len(shape)) if not _is_one(shape[a])]
+    votes = {}
+    for lay in layouts:
+        if lay is None or lay.ndim != len(shape):
+            continue
+        block = tuple(a for a in lay.packed_block(shape) if a in real)
+        if block:
+            votes[block] = votes.get(block, 0) + len(block)
+    if not votes:
+        return None
+    block = max(votes, key=votes.get)
+    if sorted(block) != real:
+        return None
+    rest = [a for a in range(len(shape)) if a not in block]
+    return rest + list(reversed(block))
 
 
 # ------------------------------------------------------------------ graph analysis
 
 
 def predict_layouts(node, in_layouts) -> list[Layout | None]:
-    """The layouts the planner will (most likely) give `node`'s outputs.
+    """The layouts the planner will (most likely) give `node`'s outputs: what the node's
+    `llvm_outputs` declare (provided memory in the layout asked for).
 
     The planner is authoritative (it knows which steps fall back to numba, for one);
     this is its prediction for graph rewrites and inspection."""
     from pytensor.compile.builders import OpFromGraph, UnitKind
-    from pytensor.link.llvm_v2.codegen.function import llvm_output_modes
+    from pytensor.link.llvm_v2.codegen.function import llvm_outputs
 
     op = node.op
     try:
@@ -443,8 +398,7 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
                     for lay, o in zip(outs, node.outputs, strict=True)
                 ]
             return outs
-        modes = [m for m, _ in llvm_output_modes(op, node)]
-        return infer_output_layouts(node, modes, in_layouts)
+        return [o.layout for o in llvm_outputs(op, node, in_layouts)]
     except NotImplementedError:
         return [Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs]
 
@@ -552,7 +506,10 @@ __all__ = [
     "Layout",
     "LayoutFeature",
     "infer_layouts",
-    "infer_output_layouts",
-    "llvm_view_layout",
+    "common_order",
+    "dimshuffle_layout",
+    "same_layout",
+    "split_layouts",
+    "subtensor_layout",
     "predict_layouts",
 ]

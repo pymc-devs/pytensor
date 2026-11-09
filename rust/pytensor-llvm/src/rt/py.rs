@@ -292,7 +292,7 @@ pub struct ProgramBuilder {
 
 impl ProgramBuilder {
     fn add(&mut self, dtype: &Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, kind: Kind) -> PyResult<u32> {
-        self.values.push(ValueSpec { dtype: dtype_of(dtype)?, shape, kind });
+        self.values.push(ValueSpec { dtype: dtype_of(dtype)?, shape, kind, order: vec![] });
         Ok((self.values.len() - 1) as u32)
     }
 }
@@ -323,13 +323,17 @@ impl ProgramBuilder {
         let bytes: Vec<u8> = native.call_method0("tobytes")?.extract()?;
         let shape: Vec<i64> = array.shape().iter().map(|&n| n as i64).collect();
         let c = ConstData::new(dt, shape.clone(), &bytes).map_err(PyValueError::new_err)?;
-        self.values.push(ValueSpec { dtype: dt, shape: shape.iter().map(|&n| Some(n as u64)).collect(), kind: Kind::Const(Arc::new(c)) });
+        self.values.push(ValueSpec { dtype: dt, shape: shape.iter().map(|&n| Some(n as u64)).collect(), kind: Kind::Const(Arc::new(c)), order: vec![] });
         Ok((self.values.len() - 1) as u32)
     }
 
     /// A static temporary at `offset` in the arena (provided to its producer).
-    fn arena(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<u64>, offset: u64) -> PyResult<u32> {
-        self.add(&dtype, shape.into_iter().map(Some).collect(), Kind::Arena(offset))
+    /// `order`: the memory order (outermost axis first) the value is packed in; default C.
+    #[pyo3(signature = (dtype, shape, offset, order = None))]
+    fn arena(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<u64>, offset: u64, order: Option<Vec<usize>>) -> PyResult<u32> {
+        let k = self.add(&dtype, shape.into_iter().map(Some).collect(), Kind::Arena(offset))?;
+        self.values[k as usize].order = order.unwrap_or_default();
+        Ok(k)
     }
 
     /// A static graph output: a fresh buffer per call, provided to its producer.

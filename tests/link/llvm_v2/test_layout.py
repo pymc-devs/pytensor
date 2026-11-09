@@ -13,7 +13,8 @@ from pytensor.compile.mode import get_mode
 ir = pytest.importorskip("pytensor_llvm.ir")
 
 from pytensor.link.llvm_v2.codegen.function import build_abi_wrapper, build_node_function  # noqa: E402
-from pytensor.link.llvm_v2.layout import DYNAMIC, PACKED, Layout, llvm_view_layout  # noqa: E402
+from pytensor.link.llvm_v2.codegen.function import node_outputs  # noqa: E402
+from pytensor.link.llvm_v2.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
 
 V2 = get_mode("LLVM_V2")
@@ -23,7 +24,10 @@ rng = np.random.default_rng(3)
 
 
 def view_layout(out, *ins):
-    return llvm_view_layout(out.owner.op, out.owner, list(ins))[0]
+    """The layout `llvm_outputs` declares for `out` given its node's input layouts."""
+    node = out.owner
+    ins = list(ins) + [None] * (len(node.inputs) - len(ins))
+    return node_outputs(node, ins)[node.outputs.index(out)].layout
 
 
 # ------------------------------------------------------------------ rules
@@ -246,3 +250,36 @@ def test_code_follows_memory_order():
     v = rng.normal(size=(7, 5))
     check_against_numpy([x], outs, [v], mode=CHECKED.clone(link_kwargs={"input_layout": "c"}))
     check_against_numpy([x], outs, [v[:, ::2]], mode=CHECKED)
+
+
+def test_elemwise_output_follows_its_inputs():
+    x = pt.dmatrix("x")
+    y = pt.dmatrix("y")
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
+    # allocated output: transposed like its inputs (one flat loop), not C with a strided loop
+    f = pytensor.function([x, y], pt.exp(x.T) * y.T, mode=mode)
+    xv, yv = rng.normal(size=(4, 6)), rng.normal(size=(4, 6))
+    r = f(xv, yv)
+    np.testing.assert_allclose(r, np.exp(xv.T) * yv.T)
+    assert r.flags.f_contiguous and not r.flags.c_contiguous
+    # static shapes: the temporary is an arena value in the inputs' order
+    s = pt.tensor("s", shape=(4, 6))
+    f = pytensor.function([s], (pt.exp(s.T) + 1).sum(axis=0), mode=mode.clone(link_kwargs={"input_layout": "c"}))
+    np.testing.assert_allclose(f(xv), (np.exp(xv.T) + 1).sum(axis=0))
+    # mixed: the majority decides, the result is still right
+    z = pt.dmatrix("z")
+    g = pytensor.function([x, y, z], pt.exp(x.T) + y.T - z, mode=mode)
+    zv = rng.normal(size=(6, 4))
+    np.testing.assert_allclose(g(xv, yv, zv), np.exp(xv.T) + yv.T - zv)
+
+
+def test_declared_outputs():
+    from pytensor.link.llvm_v2.codegen.function import OutMode
+
+    x = pt.dmatrix("x")
+    (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
+    assert o.mode is OutMode.ALLOCATED and str(o.layout) == "[P0, P1]"
+    (o,) = node_outputs((pt.exp(x.T)).owner, [None])
+    assert o.layout == C(2)
+    (o,) = node_outputs(x.T.owner, [C(2)])
+    assert o.mode is OutMode.VIEW and o.view_of == 0 and o.layout == T2
