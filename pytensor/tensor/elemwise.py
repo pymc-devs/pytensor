@@ -475,8 +475,7 @@ class Elemwise(OpenMPOp):
     def make_scalar_node(self, *inputs):
         """Create a scalar Apply node matching the dtypes of tensor inputs.
 
-        Used by grad and backend dispatchers to obtain
-        the scalar-level graph corresponding to this Elemwise operation.
+        Used by backend dispatchers when the scalar-level graph is needed.
         """
         return self.scalar_op.make_node(
             *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
@@ -652,9 +651,9 @@ class Elemwise(OpenMPOp):
 
         scalar_inputs = list(map(as_scalar, inputs))
         scalar_ograds = list(map(as_scalar, ograds))
-        scalar_outputs = self.scalar_op.make_node(
-            *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
-        ).outputs
+        scalar_outputs = [
+            get_scalar_type(out.type.dtype).make_variable() for out in outputs
+        ]
         scalar_igrads = self.scalar_op.pullback(
             scalar_inputs, scalar_outputs, scalar_ograds
         )
