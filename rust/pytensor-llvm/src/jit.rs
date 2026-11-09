@@ -86,7 +86,7 @@ impl Jit {
             let es = LLVMOrcLLJITGetExecutionSession(jit);
             let mut pairs: Vec<LLVMOrcCSymbolMapPair> = native::scalar_symbols()
                 .into_iter()
-                .chain(crate::v2::unit::runtime_symbols())
+                .chain(crate::llvmir::runtime::runtime_symbols())
                 .map(|(name, addr)| {
                     let c = CString::new(name).unwrap();
                     LLVMOrcCSymbolMapPair {
@@ -111,6 +111,19 @@ impl Jit {
 
     pub fn has(&self, name: &str) -> Option<usize> {
         self.symbols.get(name).copied()
+    }
+
+    /// Address of a symbol of an object added earlier.
+    pub fn lookup(&mut self, name: &str) -> Result<usize, String> {
+        if let Some(a) = self.symbols.get(name) {
+            return Ok(*a);
+        }
+        let n = CString::new(name).map_err(|e| e.to_string())?;
+        let mut addr: LLVMOrcExecutorAddress = 0;
+        // SAFETY: looking up a symbol in the live JIT.
+        unsafe { check(LLVMOrcLLJITLookup(self.jit, &mut addr, n.as_ptr()), "lookup")? };
+        self.symbols.insert(name.to_string(), addr as usize);
+        Ok(addr as usize)
     }
 
     /// Link an object file and return the address of `name`.

@@ -3,8 +3,13 @@
  *
  * A consumer (e.g. a sampler written in Rust or C) gets two things from Python:
  *
- *     api = pytensor_llvm.c_api_table()            # address of a PtFunctionApi
  *     fn  = compiled.c_function()                  # address of a PtFunction (new reference)
+ *     api = compiled.c_api_table()                 # address of the matching PtFunctionApi
+ *
+ * where `compiled` is `f.maker.linker.compiled` of a function compiled with mode "LLVM"
+ * or "LLVM_V2". The two backends have separate tables (pytensor_llvm.c_api_table() and
+ * pytensor_llvm.rt.c_api_table()) with this same interface; use the table that belongs
+ * to the function.
  *
  * Everything else goes through the function table, so nothing has to link against the
  * extension. Typical use from one sampler thread:
