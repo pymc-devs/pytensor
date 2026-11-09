@@ -26,6 +26,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<builder::FCmp>()?;
     m.add_class::<builder::Intrinsic>()?;
     m.add_class::<builder::Libm>()?;
+    m.add_class::<builder::Rng>()?;
     m.add_class::<builder::RustMath>()?;
     for (name, t) in [
         ("void", Ty::Void),

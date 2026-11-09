@@ -10,14 +10,14 @@
 //! [`CallState`]. Every entry point catches panics so they never unwind into C.
 
 use super::program::{c_strides, copy_strided, CallState, Program};
-use crate::abi::{overlaps, validate_array, PtArray, PtBuffer, ABI_VERSION};
+use crate::abi::{overlaps, validate_array, PtArray, PtBuffer, PtCtx, ABI_VERSION};
 use crate::capi::PtTypeInfo;
 use pyo3::prelude::*;
 use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 /// What a `PtFunction*` points to.
 pub struct Function {
@@ -48,6 +48,8 @@ impl Function {
 pub struct PtCallState {
     f: Arc<Function>,
     st: CallState,
+    /// the function state's context: scratch, errors, the random state
+    ctx: PtCtx,
     /// byte ranges of the inputs and of the provided outputs of the current call
     in_ranges: Vec<(usize, usize)>,
     out_ranges: Vec<(usize, usize)>,
@@ -70,6 +72,7 @@ pub struct PtFunctionApi {
     pub call: unsafe extern "C" fn(*mut PtCallState, *const PtArray, *mut PtArray) -> i32,
     pub last_error: unsafe extern "C" fn(*const PtCallState) -> *const c_char,
     pub buffer_decref: unsafe extern "C" fn(*mut PtBuffer),
+    pub seed: unsafe extern "C" fn(*mut PtCallState, u64),
 }
 
 // SAFETY contract of every entry point below (pytensor_llvm.h; the caller's
@@ -131,7 +134,7 @@ unsafe extern "C" fn state_new(f: *const Function) -> *mut PtCallState {
         Arc::from_raw(f)
     };
     let st = f.prog.take_state();
-    let s = PtCallState { f, st, in_ranges: vec![], out_ranges: vec![], provided: vec![], err: CString::default() };
+    let s = PtCallState { f, st, ctx: PtCtx::new(), in_ranges: vec![], out_ranges: vec![], provided: vec![], err: CString::default() };
     Box::into_raw(Box::new(s))
 }
 
@@ -214,14 +217,14 @@ fn run(s: &mut PtCallState, inputs: *const PtArray, outputs: *mut PtArray) -> Re
         let direct = prog.writes_in_place(o) && strides == c_strides(shape, isz as i64).as_slice();
         s.provided.push(direct.then_some(a.data));
     }
-    let mut ctx = std::mem::take(&mut s.st.ctx);
+    let ctx = &mut s.ctx;
     let r = (|| -> Result<(), String> {
-        prog.execute(&mut s.st, &mut ctx, &s.provided)?;
+        prog.execute(&mut s.st, ctx, &s.provided)?;
         let mut taken: Vec<(usize, *mut PtBuffer)> = vec![];
         let r = (|| -> Result<(), String> {
             for (o, a) in outs.iter_mut().enumerate() {
                 if a.data.is_null() {
-                    let out = prog.take_output(&s.st, &mut ctx, o)?;
+                    let out = prog.take_output(&s.st, ctx, o)?;
                     taken.push((o, out.owner));
                     a.data = out.data;
                     a.owner = out.owner;
@@ -256,13 +259,17 @@ fn run(s: &mut PtCallState, inputs: *const PtArray, outputs: *mut PtArray) -> Re
         r
     })();
     prog.finish(&mut s.st);
-    s.st.ctx = ctx;
     r
 }
 
 unsafe extern "C" fn last_error(s: *const PtCallState) -> *const c_char {
     // SAFETY: `s` is live; the string lives until the next call on `s`.
     unsafe { (*s).err.as_ptr() }
+}
+
+unsafe extern "C" fn seed(s: *mut PtCallState, seed: u64) {
+    // SAFETY: `s` is live and used by this thread only (contract).
+    unsafe { (*s).ctx.seed(seed) }
 }
 
 unsafe extern "C" fn buffer_decref(b: *mut PtBuffer) {
@@ -286,4 +293,5 @@ pub static API: PtFunctionApi = PtFunctionApi {
     call,
     last_error,
     buffer_decref,
+    seed,
 };

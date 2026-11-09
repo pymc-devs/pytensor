@@ -133,7 +133,9 @@ impl Profile {
 #[repr(C, align(64))]
 struct Align64([u8; 64]);
 
-/// Per-call memory; not shared between concurrent calls.
+/// Per-call memory of one program; not shared between concurrent calls. (The context,
+/// `PtCtx`, belongs to the caller's function state: nested programs run with their
+/// caller's.)
 pub struct CallState {
     vals: Vec<PtArray>,
     /// shape ++ strides of every value
@@ -141,7 +143,6 @@ pub struct CallState {
     owned: Vec<bool>,
     arena: Vec<Align64>,
     args: Vec<PtArray>,
-    pub ctx: PtCtx,
 }
 
 // SAFETY: the raw pointers in a CallState point into its own storage and arena, into
@@ -348,7 +349,7 @@ impl Program {
             let strides = unsafe { st.add(nd) };
             vals.push(PtArray { data, shape: st, strides, owner: std::ptr::null_mut(), ndim: nd as i64 });
         }
-        CallState { vals, storage, owned: vec![false; self.spec.values.len()], arena, args: vec![], ctx: PtCtx::new() }
+        CallState { vals, storage, owned: vec![false; self.spec.values.len()], arena, args: vec![] }
     }
 
     pub fn take_state(&self) -> CallState {
@@ -413,11 +414,15 @@ impl Program {
 
     /// Run all steps. `provided[o]` is C-contiguous memory for static graph output `o`.
     pub fn execute(&self, st: &mut CallState, ctx: &mut PtCtx, provided: &[Option<*mut u8>]) -> R<()> {
+        // whatever happens, the call's scratch is released (a panic skips the steps' own
+        // releases)
+        let base = ctx.scratch_mark();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.execute_inner(st, ctx, provided)))
             .unwrap_or_else(|p| {
                 let msg = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
                 Err(format!("internal error (panic): {}", msg.unwrap_or_default()))
             });
+        ctx.scratch_release(base);
         if r.is_err() {
             self.release_all(st);
         }
@@ -477,6 +482,9 @@ impl Program {
             // `func` has the declared ABI (Python built the step from a compiled
             // function or a kernel handle).
             let t0 = profiling.then(std::time::Instant::now);
+            // the step's scratch lives until it returns (also inside a nested program:
+            // marks, not a reset, so the caller's scratch survives)
+            let mark = ctx.scratch_mark();
             let rc = unsafe {
                 match step.abi {
                     Abi::Standard => {
@@ -492,7 +500,7 @@ impl Program {
             if let Some(t0) = t0 {
                 self.profile.step_ns[k_step].fetch_add(t0.elapsed().as_nanos() as u64, Relaxed);
             }
-            ctx.end_kernel();
+            ctx.scratch_release(mark);
             let n_in = step.inputs.len();
             for (k, &v) in step.outputs.iter().enumerate() {
                 let a = st.args[n_in + k];

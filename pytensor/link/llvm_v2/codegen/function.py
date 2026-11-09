@@ -20,6 +20,7 @@ from pytensor.link.llvm_v2.codegen.emit import (
 from pytensor.link.llvm_v2.layout import Layout
 from pytensor.link.llvm_v2.codegen.types import (
     PTARRAY_SIZE,
+    NoneRepr,
     ScalarRepr,
     TensorRepr,
     ir,
@@ -37,6 +38,8 @@ class OutMode(enum.Enum):
     VIEW = "view"
     #: a ScalarType output, stored through a pointer
     SCALAR = "scalar"
+    #: no value (a random generator token): no argument
+    ABSENT = "absent"
 
 
 @dataclass(frozen=True)
@@ -74,7 +77,8 @@ class Signature:
 
     def param_types(self):
         m = ir()
-        return [m.ptr, m.ptr, m.ptr, *(r.ir_type for r in self.inputs), *(o.ir_type for o in self.outputs)]
+        outs = [o.ir_type for o in self.outputs if o.mode is not OutMode.ABSENT]
+        return [m.ptr, m.ptr, m.ptr, *(r.ir_type for r in self.inputs), *outs]
 
     @property
     def has_scalars(self):
@@ -100,7 +104,7 @@ def llvm_outputs(op, node, in_layouts) -> list[Output]:
     view_map = getattr(op, "view_map", {}) or {}
     return [
         Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.VIEW, view_map[k][0])
-        if k in view_map and not isinstance(repr_of(o.type), ScalarRepr)
+        if k in view_map and isinstance(repr_of(o.type), TensorRepr)
         else fresh_output(o)
         for k, o in enumerate(node.outputs)
     ]
@@ -108,8 +112,10 @@ def llvm_outputs(op, node, in_layouts) -> list[Output]:
 
 def fresh_output(var, layout=None) -> Output:
     """An output in new memory: SCALAR, PROVIDED for static shapes, else ALLOCATED; in
-    `layout` (default C-contiguous)."""
+    `layout` (default C-contiguous). ABSENT for values without data."""
     r = repr_of(var.type)
+    if isinstance(r, NoneRepr):
+        return Output(r, OutMode.ABSENT)
     if isinstance(r, ScalarRepr):
         return Output(r, OutMode.SCALAR)
     lay = layout if layout is not None else Layout.c(var.type.ndim)
@@ -235,6 +241,9 @@ def build_node_function(
         inputs.append(v if isinstance(r, ScalarRepr) else unpack(b, r, v))
     outputs = []
     for o in sig.outputs:
+        if o.mode is OutMode.ABSENT:
+            outputs.append(None)
+            continue
         v = params[k]
         k += 1
         if o.mode is OutMode.PROVIDED:
@@ -272,6 +281,8 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
     (for testing the layout inference; costs a few compares per call)."""
     m = ir()
     sig = nf.signature
+    # (outputs without a value have no argument)
+    present = [o for o in sig.outputs if o.mode is not OutMode.ABSENT]
     if sig.has_scalars:
         raise ValueError("functions with ScalarType inputs or outputs have no C ABI")
     pa = ptarray_type()
@@ -306,8 +317,8 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
         from pytensor.link.llvm_v2.codegen.emit import EmitContext
 
         cx = EmitContext(b, ctx, env, ws)
-        reprs = [*sig.inputs, *(o.repr for o in sig.outputs if o.mode is OutMode.PROVIDED)]
-        positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(sig.outputs) if o.mode is OutMode.PROVIDED)]
+        reprs = [*sig.inputs, *(o.repr for o in present if o.mode is OutMode.PROVIDED)]
+        positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(present) if o.mode is OutMode.PROVIDED)]
         for k, r in zip(positions, reprs, strict=True):
             if isinstance(r, TensorRepr) and r.ndim > 0 and len(r.stride_axes) < r.ndim:
                 _check_layout(cx, arg(k), r, k)
@@ -316,7 +327,7 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
     call_args = [ctx, env, ws]
     call_args += [read(k, r) for k, r in enumerate(sig.inputs)]
     slots = []
-    for k, o in enumerate(sig.outputs):
+    for k, o in enumerate(present):
         if o.mode is OutMode.PROVIDED:
             call_args.append(read(n_in + k, o.repr))
         else:

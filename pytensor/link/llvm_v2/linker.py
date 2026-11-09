@@ -61,8 +61,10 @@ class LLVMV2Linker(JITLinker):
         from pytensor.link.llvm_v2.program import Options, build_program
 
         opts = Options(**{k: getattr(self, k) for k in self.OPTIONS})
-        self.compiled, self.stats = build_program(fgraph, opts)
-        return self.compiled
+        fn, self.stats = build_program(fgraph, opts)
+        # the rt.Program (fn wraps it when generators are passed through)
+        self.compiled = getattr(fn, "program", fn)
+        return fn
 
     def jit_compile(self, fn):
         return fn

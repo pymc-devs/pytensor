@@ -4,6 +4,7 @@
 
 pub mod abi;
 pub mod capi;
+pub mod random;
 pub mod codegen;
 pub mod compile;
 pub mod dtype;

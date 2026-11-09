@@ -122,6 +122,48 @@ impl Intrinsic {
     }
 }
 
+/// Random numbers from the call context (the runtime functions `ptl_rt_rng_*`,
+/// `crate::random`).
+#[pyclass(module = "pytensor_llvm.ir", eq, eq_int, frozen, from_py_object)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Rng {
+    /// () -> i64: 64 random bits
+    U64,
+    /// () -> f64 on [0, 1)
+    Uniform,
+    /// () -> f64, standard normal
+    Normal,
+    /// (ptr out, i64 n): n uniforms on [0, 1)
+    FillUniform,
+    /// (ptr out, i64 n): n standard normals
+    FillNormal,
+    /// (f64 shape) -> f64, scale 1
+    Gamma,
+    /// (f64 a, f64 b) -> f64
+    Beta,
+    /// (f64 rate) -> i64
+    Poisson,
+    /// (i64 n, f64 p) -> i64
+    Binomial,
+}
+
+impl Rng {
+    fn signature(self) -> (&'static str, Vec<Ty>, Ty) {
+        use Ty::*;
+        match self {
+            Rng::U64 => ("ptl_rt_rng_u64", vec![], Int(64)),
+            Rng::Uniform => ("ptl_rt_rng_uniform", vec![], F64),
+            Rng::Normal => ("ptl_rt_rng_normal", vec![], F64),
+            Rng::FillUniform => ("ptl_rt_rng_fill_uniform", vec![Ptr, Int(64)], Void),
+            Rng::FillNormal => ("ptl_rt_rng_fill_normal", vec![Ptr, Int(64)], Void),
+            Rng::Gamma => ("ptl_rt_rng_gamma", vec![F64], F64),
+            Rng::Beta => ("ptl_rt_rng_beta", vec![F64, F64], F64),
+            Rng::Poisson => ("ptl_rt_rng_poisson", vec![F64], Int(64)),
+            Rng::Binomial => ("ptl_rt_rng_binomial", vec![Int(64), F64], Int(64)),
+        }
+    }
+}
+
 /// libm functions (glibc). All have SIMD variants in libmvec, which we advertise.
 #[pyclass(module = "pytensor_llvm.ir", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -891,6 +933,26 @@ impl Builder {
 
     /// A libm function (`f`-suffixed for float). Advertises libmvec SIMD variants so the
     /// loop vectorizer can use them.
+    /// Draw from the call context's random state: `b.rng(ir.Rng.Normal, ctx)`,
+    /// `b.rng(ir.Rng.Gamma, ctx, [shape])`, ... Returns the value (None for the fills).
+    #[pyo3(signature = (which, ctx, args = vec![]))]
+    fn rng(&self, which: Rng, ctx: Value, args: Vec<Value>) -> PyResult<Option<Value>> {
+        self.open()?;
+        let (name, params, ret) = which.signature();
+        if ctx.ty != Ty::Ptr || args.len() != params.len() || args.iter().zip(&params).any(|(a, t)| a.ty != *t) {
+            let want: Vec<String> = params.iter().map(|t| t.to_string()).collect();
+            return err(format!("{name}(ctx: ptr, {})", want.join(", ")));
+        }
+        let mut all = vec![Ty::Ptr];
+        all.extend(params);
+        let (f, fnty) = self.declare(name, &all, &ret, false);
+        let mut raw = vec![self.v(&ctx)?];
+        for a in &args {
+            raw.push(self.v(a)?);
+        }
+        Ok(self.call_raw(fnty, f, &mut raw, &ret))
+    }
+
     fn libm(&self, which: Libm, args: Vec<Value>) -> PyResult<Value> {
         self.open()?;
         if args.len() != which.arity() {
@@ -961,8 +1023,10 @@ impl Builder {
             return err("ctx must be a ptr");
         }
         let msg = self.cstr(message)?;
-        let (f, fnty) = self.declare("ptl_rt_fail", &[Ty::Ptr, Ty::Ptr], &Ty::Void, false);
-        let mut raw = [self.v(&ctx)?, self.v(&msg)?];
+        // SAFETY: an integer constant of this module's context.
+        let code = self.mk(unsafe { c::LLVMConstInt(self.lt(&Ty::Int(32)), 1, 0) }, Ty::Int(32));
+        let (f, fnty) = self.declare("ptl_rt_set_error", &[Ty::Ptr, Ty::Int(32), Ty::Ptr], &Ty::Void, false);
+        let mut raw = [self.v(&ctx)?, self.v(&code)?, self.v(&msg)?];
         self.call_raw(fnty, f, &mut raw, &Ty::Void);
         Ok(())
     }
@@ -974,41 +1038,43 @@ impl Builder {
         if ctx.ty != Ty::Ptr || nbytes.ty != Ty::Int(64) || owner_slot.ty != Ty::Ptr {
             return err("rt_alloc(ctx: ptr, nbytes: i64, owner_slot: ptr)");
         }
-        let (f, fnty) = self.declare("ptl_rt_alloc", &[Ty::Ptr, Ty::Int(64), Ty::Ptr], &Ty::Ptr, false);
-        let mut raw = [self.v(&ctx)?, self.v(&nbytes)?, self.v(&owner_slot)?];
+        // SAFETY: an integer constant of this module's context.
+        let align = self.mk(unsafe { c::LLVMConstInt(self.lt(&Ty::Int(64)), 64, 0) }, Ty::Int(64));
+        let (f, fnty) = self.declare("ptl_rt_alloc", &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr], &Ty::Ptr, false);
+        let mut raw = [self.v(&ctx)?, self.v(&nbytes)?, self.v(&align)?, self.v(&owner_slot)?];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
     }
 
-    /// Dynamic workspace: `nbytes` (i64), 64-byte aligned, valid until the caller ends
-    /// the call or releases an earlier mark. Null on failure, with the error set.
-    fn rt_ws_alloc(&self, ctx: Value, nbytes: Value) -> PyResult<Value> {
+    /// Scratch memory: `nbytes` (i64), 64-byte aligned, valid until the step ends or an
+    /// earlier mark is released. Null on failure, with the error set.
+    fn rt_scratch(&self, ctx: Value, nbytes: Value) -> PyResult<Value> {
         self.open()?;
         if ctx.ty != Ty::Ptr || nbytes.ty != Ty::Int(64) {
-            return err("rt_ws_alloc(ctx: ptr, nbytes: i64)");
+            return err("rt_scratch(ctx: ptr, nbytes: i64)");
         }
-        let (f, fnty) = self.declare("ptl_rt_ws_alloc", &[Ty::Ptr, Ty::Int(64)], &Ty::Ptr, false);
+        let (f, fnty) = self.declare("ptl_rt_scratch", &[Ty::Ptr, Ty::Int(64)], &Ty::Ptr, false);
         let mut raw = [self.v(&ctx)?, self.v(&nbytes)?];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
     }
 
-    /// Mark the dynamic workspace (an i64 token).
-    fn rt_ws_mark(&self, ctx: Value) -> PyResult<Value> {
+    /// Mark the scratch position (an i64 token for `rt_scratch_release`).
+    fn rt_scratch_mark(&self, ctx: Value) -> PyResult<Value> {
         self.open()?;
         if ctx.ty != Ty::Ptr {
             return err("ctx must be a ptr");
         }
-        let (f, fnty) = self.declare("ptl_rt_ws_mark", &[Ty::Ptr], &Ty::Int(64), false);
+        let (f, fnty) = self.declare("ptl_rt_scratch_mark", &[Ty::Ptr], &Ty::Int(64), false);
         let mut raw = [self.v(&ctx)?];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Int(64)).unwrap())
     }
 
-    /// Release dynamic workspace allocated after `mark`.
-    fn rt_ws_release(&self, ctx: Value, mark: Value) -> PyResult<()> {
+    /// Release the scratch handed out since `mark`.
+    fn rt_scratch_release(&self, ctx: Value, mark: Value) -> PyResult<()> {
         self.open()?;
         if ctx.ty != Ty::Ptr || mark.ty != Ty::Int(64) {
-            return err("rt_ws_release(ctx: ptr, mark: i64)");
+            return err("rt_scratch_release(ctx: ptr, mark: i64)");
         }
-        let (f, fnty) = self.declare("ptl_rt_ws_release", &[Ty::Ptr, Ty::Int(64)], &Ty::Void, false);
+        let (f, fnty) = self.declare("ptl_rt_scratch_release", &[Ty::Ptr, Ty::Int(64)], &Ty::Void, false);
         let mut raw = [self.v(&ctx)?, self.v(&mark)?];
         self.call_raw(fnty, f, &mut raw, &Ty::Void);
         Ok(())

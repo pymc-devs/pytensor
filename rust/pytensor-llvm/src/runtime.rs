@@ -184,7 +184,7 @@ pub struct CallState {
     owners: Vec<*mut PtBuffer>,
     slots: Vec<SlotBuf>,
     args: Vec<PtArray>,
-    ctx: PtCtx,
+    pub(crate) ctx: PtCtx,
     /// Per-step accumulated seconds, if profiling is on.
     pub profile: Option<Vec<f64>>,
     /// caller-provided output k for a variable, during a call
@@ -1401,7 +1401,7 @@ impl Program {
             Err(p) => {
                 let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
                 // the kernel was interrupted: its scratch and error state are dead
-                st.ctx.end_kernel();
+                st.ctx.scratch_release(0);
                 st.ctx.error = None;
                 Err(format!("internal error (panic in a kernel): {msg}"))
             }
@@ -1502,13 +1502,14 @@ impl Program {
                 self.check_step(st, step, &args, provided, true)?;
             }
             let t = st.profile.as_ref().map(|_| std::time::Instant::now());
+            let mark = st.ctx.scratch_mark();
             let ctx: *mut PtCtx = &mut st.ctx;
             // SAFETY: the kernel contract (DESIGN.md, Safety): every argument is a valid array of
             // the planned dtype/ndim with inferred shapes, outputs are sized by the planner or
             // allocated by the kernel as its mode says, params belong to this step, and `ctx` is
             // ours for the call.
             let rc = unsafe { f(ctx, args.as_mut_ptr(), step.params.as_ptr()) };
-            st.ctx.end_kernel();
+            st.ctx.scratch_release(mark);
             if let (Some(t), Some(p)) = (t, st.profile.as_mut()) {
                 p[si] += t.elapsed().as_secs_f64();
             }
