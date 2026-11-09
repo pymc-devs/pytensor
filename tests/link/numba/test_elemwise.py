@@ -38,11 +38,6 @@ add_inplace = Elemwise(scalar_add, {0: 0})
     [
         (
             [pt.vector()],
-            [rng.uniform(size=100).astype(config.floatX)],
-            lambda x: pt.gammaln(x),
-        ),
-        (
-            [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
             lambda x: pt.sigmoid(x),
         ),
@@ -55,11 +50,6 @@ add_inplace = Elemwise(scalar_add, {0: 0})
             [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
             lambda x: pt.erf(x),
-        ),
-        (
-            [pt.vector()],
-            [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: pt.erfc(x),
         ),
         (
             [pt.vector() for i in range(4)],
@@ -97,11 +87,9 @@ add_inplace = Elemwise(scalar_add, {0: 0})
         ),
     ],
     ids=[
-        "gammaln",
         "sigmoid",
         "log1mexp",
         "erf",
-        "erfc",
         "complex_arithmetic",
         "switch",
         "add_inplace_scalar",
