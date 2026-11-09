@@ -147,14 +147,15 @@ def skipped_inputs(node, folded=frozenset()):
     return frozenset(folded) | {k for k, i in enumerate(node.inputs) if is_absent(i.type)}
 
 
-def node_signature(node, folded=frozenset(), in_layouts=None, provided=None) -> Signature:
+def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, declared=None) -> Signature:
     """`folded`: positions of inputs that are constants folded into the code (not
     arguments). None inputs aren't arguments either.
 
     `in_layouts`: the `Layout` of each input; outputs as `llvm_outputs` declares them.
     The declared layout of a PROVIDED output is binding: whoever provides the memory
     provides it in that layout. `provided[k]` replaces the declaration, for a caller
-    that generates a function for memory it fixes (tests writing into a slice)."""
+    that generates a function for memory it fixes (tests writing into a slice).
+    `declared`: the outputs instead of `llvm_outputs` (a callee's, see call.py)."""
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
@@ -169,7 +170,7 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None) -> 
         return pos - sum(1 for p in folded if p < pos)
 
     outputs = []
-    for k, o in enumerate(node_outputs(node, in_layouts)):
+    for k, o in enumerate(declared if declared is not None else node_outputs(node, in_layouts)):
         if o.mode is OutMode.PROVIDED and provided is not None and provided[k] is not None:
             o = o.with_layout(provided[k])
         if o.view_of is not None:
@@ -194,29 +195,50 @@ class NodeFunction:
     signature: Signature
     #: bytes of static workspace
     workspace: int
+    #: the callees it calls (call.py; its table is the env to call it with), or None
+    closure: object = None
 
 
 def build_node_function(
-    module, node, name: str, temporary_outputs=frozenset(), folded=None, in_layouts=None, provided=None, parallel=True
+    module,
+    node,
+    name: str,
+    temporary_outputs=frozenset(),
+    folded=None,
+    in_layouts=None,
+    provided=None,
+    parallel=True,
+    callee=None,
+    closure=None,
+    planner=None,
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
 
     * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
       they go into the workspace instead of runtime buffers;
-    * `folded`: {input position: value} for 0-d constant inputs compiled into the code.
+    * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
+    * `callee`: a `Callee` implementing the node (a kernel, numba, a program): the
+      function calls it (call.py); its handle goes into `closure`, whose table is the
+      env the function must be called with. Generated code nested in the node (loops)
+      adds its callees to `closure` too.
     """
     from pytensor.link.llvm_v2.codegen.emit import c_array, constant, store
     from pytensor.link.llvm_v2.codegen.types import memory_type
 
     m = ir()
     folded = folded or {}
-    sig = node_signature(node, frozenset(folded), in_layouts, provided)
+    sig = node_signature(node, frozenset(folded), in_layouts, provided, callee.outputs if callee is not None else None)
     sig_inputs = iter(sig.inputs)
     fn = module.function(name, sig.param_types(), m.i32, inline=m.Inline.Always)
     b = fn.builder()
     params = fn.params
     ctx, env, ws = params[:3]
-    cx = EmitContext(b, ctx, env, ws, parallel=parallel)
+    cx = EmitContext(b, ctx, env, ws, parallel=parallel, closure=closure, planner=planner, module=module, name=name)
+    # Aliasing (DESIGN.md): the memory a step writes (provided or allocated outputs)
+    # never overlaps its inputs or its other outputs; views are never written.
+    b.alias_domain(name)
+    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutMode.PROVIDED, OutMode.ALLOCATED, OutMode.VIEW)]
+    marked_inputs = []
     k = 3
     inputs = []
     from pytensor.link.llvm_v2.codegen.types import is_absent
@@ -238,7 +260,13 @@ def build_node_function(
         v = params[k]
         k += 1
         r = next(sig_inputs)
-        inputs.append(v if isinstance(r, ScalarRepr) else unpack(b, r, v))
+        if isinstance(r, ScalarRepr):
+            inputs.append(v)
+        else:
+            a = unpack(b, r, v)
+            b.mark_array(a.data, f"i{pos}", written)
+            marked_inputs.append(f"i{pos}")
+            inputs.append(a)
     outputs = []
     for o in sig.outputs:
         if o.mode is OutMode.ABSENT:
@@ -246,8 +274,12 @@ def build_node_function(
             continue
         v = params[k]
         k += 1
+        j = len(outputs)
+        alias = (f"o{j}", marked_inputs + [w for w in written if w != f"o{j}"])
         if o.mode is OutMode.PROVIDED:
-            outputs.append(ProvidedOutput(unpack(b, o.repr, v)))
+            a = unpack(b, o.repr, v)
+            b.mark_array(a.data, *alias)
+            outputs.append(ProvidedOutput(a))
         elif o.mode is OutMode.SCALAR:
             outputs.append(ScalarOutput(v, o.repr.dtype))
         else:
@@ -263,15 +295,24 @@ def build_node_function(
                     # instead, like Reshape, declares C)
                     layout=o.layout if o.layout.fully_packed(o.repr.shape) else None,
                     declared=o.layout if o.mode is OutMode.VIEW else None,
+                    alias=alias,
                 )
             )
-    llvm_emit(node.op, node, cx, inputs, outputs)
+    if callee is not None:
+        from pytensor.link.llvm_v2.codegen.call import emit_call
+
+        if closure is None:
+            raise ValueError("a node function calling a callee needs a closure")
+        ins = [(a, getattr(var.type, "dtype", None)) for a, var in zip(inputs, node.inputs, strict=True)]
+        emit_call(cx, callee, closure.add(callee), ins, outputs)
+    else:
+        llvm_emit(node.op, node, cx, inputs, outputs)
     if not b.terminated:
         for k, out in enumerate(outputs):
             if isinstance(out, SlotOutput | ScalarOutput) and not out.done:
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(b.const_int(m.i32, 0))
-    return NodeFunction(fn, sig, cx.ws_static)
+    return NodeFunction(fn, sig, cx.ws_static, closure)
 
 
 def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool = False):

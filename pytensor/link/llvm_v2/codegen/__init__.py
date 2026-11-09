@@ -12,7 +12,9 @@
 * `basic`: Shape, Shape_i, MakeVector, Alloc, AllocEmpty, ARange, Reshape, Join, CheckAndRaise;
 * `shape`: views (DimShuffle, ViewOp, SpecifyShape) and DeepCopyOp;
 * `random`: random variables (draws from the call context's random state);
-* `unit`: compiled units (several nodes in one function).
+* `unit`: compiled units (several nodes in one function);
+* `call`: calls from generated code to kernels, numba and nested programs;
+* `scan`: Scan as a generated loop.
 """
 
 from pytensor.link.llvm_v2.codegen import (  # noqa: F401 (registers emitters)
@@ -23,6 +25,7 @@ from pytensor.link.llvm_v2.codegen import (  # noqa: F401 (registers emitters)
     fused,
     random,
     scalar,
+    scan,
     shape,
     subtensor,
 )
@@ -36,3 +39,5 @@ from pytensor.link.llvm_v2.codegen.function import (
     view_output,
     node_signature,
 )
+
+scan.register()

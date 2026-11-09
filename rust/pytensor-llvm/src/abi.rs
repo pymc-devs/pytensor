@@ -501,6 +501,10 @@ unsafe extern "C" fn rt_incref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
 }
 
 unsafe extern "C" fn rt_decref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
+    // (null: nothing held, e.g. a view; generated code releases slots unconditionally)
+    if b.is_null() {
+        return;
+    }
     // SAFETY: as above, and the kernel gives up a reference it holds.
     unsafe { PtBuffer::decref(b) }
 }

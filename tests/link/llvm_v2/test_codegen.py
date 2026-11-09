@@ -273,3 +273,18 @@ def test_empty_arrays():
     for e in [pt.max(x, axis=0), pt.max(x)]:
         with pytest.raises(RuntimeError, match="zero-size array"):
             run_node(e.owner, z)
+
+
+def test_alias_metadata_on_array_accesses():
+    # inputs and written outputs get scopes and TBAA tags; the gather's inner row copy
+    # then doesn't reload the index (and vectorizes)
+    from pytensor.link.llvm_v2.codegen.function import build_node_function
+
+    x = pt.matrix("x")
+    i = pt.vector("i", dtype="int32")
+    node = x[i].owner
+    m = ir.Module("alias_test")
+    build_node_function(m, node, "gather")
+    text = m.ir()
+    assert "!alias.scope" in text and "!noalias" in text and "!tbaa" in text
+    assert "pt.alias_test.gather.i0" in text and "pt.alias_test.gather.o0" in text

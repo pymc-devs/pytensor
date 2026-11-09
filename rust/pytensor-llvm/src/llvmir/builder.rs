@@ -7,7 +7,7 @@
 use super::module::{add_fn_attr, cstring, err, ModuleInner, Value};
 use super::ty::{PyType, Ty};
 use llvm_sys::core as c;
-use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMBuilderRef, LLVMTypeRef, LLVMValueRef};
+use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMBuilderRef, LLVMMetadataRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::{LLVMIntPredicate as IP, LLVMRealPredicate as RP};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
@@ -257,6 +257,23 @@ pub struct Builder {
     depth: RefCell<usize>,
     /// open parallel regions, innermost last
     regions: RefCell<Vec<RegionFrame>>,
+    /// alias information for this function's array accesses (`alias_domain`)
+    alias: RefCell<Option<AliasInfo>>,
+}
+
+/// Alias information of a node function (DESIGN.md, "Aliasing"): pointers into arrays
+/// (`mark_array`, and everything derived from them by GEPs or captured into parallel
+/// bodies) carry an alias scope, the scopes they don't alias, and type-based (TBAA)
+/// tags per accessed type. Domain and TBAA root are per function: claims never cross
+/// node functions, which may share memory (inlined into one unit) in other dtypes.
+struct AliasInfo {
+    domain: LLVMMetadataRef,
+    tbaa_root: LLVMMetadataRef,
+    prefix: String,
+    scopes: std::collections::HashMap<String, LLVMMetadataRef>,
+    tbaa: std::collections::HashMap<Ty, LLVMValueRef>,
+    /// raw pointer -> (alias.scope list, noalias list)
+    arrays: std::collections::HashMap<usize, (LLVMValueRef, LLVMValueRef)>,
 }
 
 /// An open parallel region: its body function, and how to get back to its parent.
@@ -308,6 +325,7 @@ impl Builder {
                 ret: RefCell::new(ret),
                 depth: RefCell::new(0),
                 regions: RefCell::new(vec![]),
+                alias: RefCell::new(None),
             })
         }
     }
@@ -371,6 +389,7 @@ impl Builder {
             };
             frame.captures.push((raw, ty.clone()));
             frame.map.insert(raw as usize, loaded);
+            self.derive(raw, loaded);
             raw = loaded;
         }
         Ok(raw)
@@ -386,6 +405,81 @@ impl Builder {
 
     fn lt(&self, t: &Ty) -> LLVMTypeRef {
         self.m.llvm_type(t)
+    }
+
+    /// `derived` points into the same array as `base` (a GEP of it, or its capture).
+    fn derive(&self, base: LLVMValueRef, derived: LLVMValueRef) {
+        if let Some(a) = self.alias.borrow_mut().as_mut() {
+            if let Some(&tags) = a.arrays.get(&(base as usize)) {
+                a.arrays.insert(derived as usize, tags);
+            }
+        }
+    }
+
+    fn md_string(&self, s: &str) -> LLVMMetadataRef {
+        // SAFETY: an MDString in the module's context (copied by LLVM).
+        unsafe { c::LLVMMDStringInContext2(self.m.ctx, s.as_ptr() as *const _, s.len()) }
+    }
+
+    fn md_node(&self, ops: &mut [LLVMMetadataRef]) -> LLVMMetadataRef {
+        // SAFETY: a uniqued metadata tuple of valid operands.
+        unsafe { c::LLVMMDNodeInContext2(self.m.ctx, ops.as_mut_ptr(), ops.len()) }
+    }
+
+    fn md_value(&self, md: LLVMMetadataRef) -> LLVMValueRef {
+        // SAFETY: wrapping metadata of the module's context as a value.
+        unsafe { c::LLVMMetadataAsValue(self.m.ctx, md) }
+    }
+
+    fn md_kind(&self, name: &str) -> u32 {
+        // SAFETY: looking up (or registering) a metadata kind by name.
+        unsafe { c::LLVMGetMDKindIDInContext(self.m.ctx, name.as_ptr() as *const _, name.len() as u32) }
+    }
+
+    /// Scope metadata for scope `name` of the function's domain.
+    fn scope(&self, a: &mut AliasInfo, name: &str) -> LLVMMetadataRef {
+        if let Some(&s) = a.scopes.get(name) {
+            return s;
+        }
+        let id = self.md_string(&format!("{}.{name}", a.prefix));
+        let s = self.md_node(&mut [id, a.domain]);
+        a.scopes.insert(name.to_string(), s);
+        s
+    }
+
+    /// TBAA access tag for a scalar access of type `ty` (None: no tag, e.g. vectors).
+    fn tbaa_tag(&self, a: &mut AliasInfo, ty: &Ty) -> Option<LLVMValueRef> {
+        if !matches!(ty, Ty::Int(_) | Ty::F32 | Ty::F64 | Ty::Ptr) {
+            return None;
+        }
+        if let Some(&t) = a.tbaa.get(ty) {
+            return Some(t);
+        }
+        // SAFETY: an i64 constant as metadata.
+        let zero = unsafe { c::LLVMValueAsMetadata(c::LLVMConstInt(self.lt(&Ty::Int(64)), 0, 0)) };
+        let name = self.md_string(&format!("{ty}"));
+        let node = self.md_node(&mut [name, a.tbaa_root, zero]);
+        let tag = self.md_node(&mut [node, node, zero]);
+        let v = self.md_value(tag);
+        a.tbaa.insert(ty.clone(), v);
+        Some(v)
+    }
+
+    /// Alias metadata on load or store `inst` through `ptr` (accessing a `ty`), if `ptr`
+    /// points into a marked array.
+    fn annotate(&self, inst: LLVMValueRef, ptr: LLVMValueRef, ty: &Ty) {
+        let mut guard = self.alias.borrow_mut();
+        let Some(a) = guard.as_mut() else { return };
+        let Some(&(scope, noalias)) = a.arrays.get(&(ptr as usize)) else { return };
+        let tag = self.tbaa_tag(a, ty);
+        // SAFETY: attaching metadata of the module's context to an instruction.
+        unsafe {
+            c::LLVMSetMetadata(inst, self.md_kind("alias.scope"), scope);
+            c::LLVMSetMetadata(inst, self.md_kind("noalias"), noalias);
+            if let Some(t) = tag {
+                c::LLVMSetMetadata(inst, self.md_kind("tbaa"), t);
+            }
+        }
     }
 
     fn fast(&self, v: LLVMValueRef) {
@@ -839,6 +933,44 @@ impl Builder {
 
     // ------------------------------------------------------------ memory
 
+    /// Start alias information for this function (DESIGN.md, "Aliasing"): a scope
+    /// domain and a TBAA root named after `name` (unique in the module).
+    fn alias_domain(&self, name: &str) -> PyResult<()> {
+        self.open()?;
+        let prefix = format!("pt.{}.{name}", self.m.name);
+        let d = self.md_string(&prefix);
+        let domain = self.md_node(&mut [d]);
+        let r = self.md_string(&format!("{prefix}.tbaa"));
+        let tbaa_root = self.md_node(&mut [r]);
+        *self.alias.borrow_mut() = Some(AliasInfo {
+            domain,
+            tbaa_root,
+            prefix,
+            scopes: Default::default(),
+            tbaa: Default::default(),
+            arrays: Default::default(),
+        });
+        Ok(())
+    }
+
+    /// `ptr` points into an array in scope `scope` that doesn't overlap the arrays of
+    /// scopes `noalias`. Loads and stores through it (and through pointers derived from
+    /// it) get scoped-alias and type-based alias metadata. The caller guarantees the
+    /// claim (written outputs of a step never overlap its inputs or each other).
+    fn mark_array(&self, ptr: Value, scope: &str, noalias: Vec<String>) -> PyResult<()> {
+        let p = self.v(&ptr)?;
+        let mut guard = self.alias.borrow_mut();
+        let Some(a) = guard.as_mut() else {
+            return err("mark_array before alias_domain");
+        };
+        let s = self.scope(a, scope);
+        let mut others: Vec<_> = noalias.iter().map(|n| self.scope(a, n)).collect();
+        let scope_list = self.md_value(self.md_node(&mut [s]));
+        let noalias_list = self.md_value(self.md_node(&mut others));
+        a.arrays.insert(p as usize, (scope_list, noalias_list));
+        Ok(())
+    }
+
     /// Load a value of type `ty`. `align` in bytes (default: the type's ABI alignment).
     #[pyo3(signature = (ty, ptr, align = None))]
     fn load(&self, ty: PyType, ptr: Value, align: Option<u32>) -> PyResult<Value> {
@@ -847,11 +979,13 @@ impl Builder {
             return err(format!("load of {} through {}", ty.0, ptr.ty));
         }
         // SAFETY: a load of a first-class type through a pointer value.
-        let r = unsafe { c::LLVMBuildLoad2(self.b, self.lt(&ty.0), self.v(&ptr)?, NONAME) };
+        let p = self.v(&ptr)?;
+        let r = unsafe { c::LLVMBuildLoad2(self.b, self.lt(&ty.0), p, NONAME) };
         if let Some(a) = align {
             // SAFETY: setting the alignment of the load just built.
             unsafe { c::LLVMSetAlignment(r, a) };
         }
+        self.annotate(r, p, &ty.0);
         Ok(self.mk(r, ty.0))
     }
 
@@ -862,11 +996,13 @@ impl Builder {
             return err(format!("store through {}", ptr.ty));
         }
         // SAFETY: a store of a first-class value through a pointer.
-        let r = unsafe { c::LLVMBuildStore(self.b, self.v(&value)?, self.v(&ptr)?) };
+        let p = self.v(&ptr)?;
+        let r = unsafe { c::LLVMBuildStore(self.b, self.v(&value)?, p) };
         if let Some(a) = align {
             // SAFETY: setting the alignment of the store just built.
             unsafe { c::LLVMSetAlignment(r, a) };
         }
+        self.annotate(r, p, &value.ty);
         Ok(())
     }
 
@@ -878,7 +1014,9 @@ impl Builder {
         }
         let mut idx = [self.v(&index)?];
         // SAFETY: an inbounds GEP over a first-class element type.
-        let r = unsafe { c::LLVMBuildInBoundsGEP2(self.b, self.lt(&elem.0), self.v(&ptr)?, idx.as_mut_ptr(), 1, NONAME) };
+        let base = self.v(&ptr)?;
+        let r = unsafe { c::LLVMBuildInBoundsGEP2(self.b, self.lt(&elem.0), base, idx.as_mut_ptr(), 1, NONAME) };
+        self.derive(base, r);
         Ok(self.mk(r, Ty::Ptr))
     }
 
@@ -968,6 +1106,24 @@ impl Builder {
         f.signature_matches(&args)?;
         let mut raw: Vec<LLVMValueRef> = args.iter().map(|a| self.v(a)).collect::<PyResult<_>>()?;
         Ok(self.call_raw(f.fnty, f.raw, &mut raw, &f.ret))
+    }
+
+    /// Call the function at address `f` (a ptr value) with `args`, returning `ret`
+    /// (None: void). For functions outside the module (kernels), whose address is only
+    /// known at run time (loaded from the env, not part of the IR).
+    #[pyo3(signature = (f, args, ret = None))]
+    fn call_ptr(&self, f: Value, args: Vec<Value>, ret: Option<PyType>) -> PyResult<Option<Value>> {
+        self.open()?;
+        if f.ty != Ty::Ptr {
+            return err(format!("call through {}", f.ty));
+        }
+        let ret = ret.map(|t| t.0).unwrap_or(Ty::Void);
+        let mut ps: Vec<LLVMTypeRef> = args.iter().map(|a| self.lt(&a.ty)).collect();
+        // SAFETY: a function type of first-class parameter types.
+        let fnty = unsafe { c::LLVMFunctionType(self.lt(&ret), ps.as_mut_ptr(), ps.len() as u32, 0) };
+        let mut raw: Vec<LLVMValueRef> = args.iter().map(|a| self.v(a)).collect::<PyResult<_>>()?;
+        let fp = self.v(&f)?;
+        Ok(self.call_raw(fnty, fp, &mut raw, &ret))
     }
 
     /// A float intrinsic, overloaded on the operands' type.
@@ -1118,6 +1274,18 @@ impl Builder {
         let (f, fnty) = self.declare("ptl_rt_scratch", &[Ty::Ptr, Ty::Int(64)], &Ty::Ptr, false);
         let mut raw = [self.v(&ctx)?, self.v(&nbytes)?];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
+    }
+
+    /// Give up a buffer reference (`buffer`: a PtBuffer pointer, may be null).
+    fn rt_decref(&self, ctx: Value, buffer: Value) -> PyResult<()> {
+        self.open()?;
+        if ctx.ty != Ty::Ptr || buffer.ty != Ty::Ptr {
+            return err("rt_decref(ctx: ptr, buffer: ptr)");
+        }
+        let (f, fnty) = self.declare("ptl_rt_buffer_decref", &[Ty::Ptr, Ty::Ptr], &Ty::Void, false);
+        let mut raw = [self.v(&ctx)?, self.v(&buffer)?];
+        self.call_raw(fnty, f, &mut raw, &Ty::Void);
+        Ok(())
     }
 
     /// Mark the scratch position (an i64 token for `rt_scratch_release`).

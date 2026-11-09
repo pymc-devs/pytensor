@@ -34,6 +34,9 @@ from pytensor.link.llvm_v2.codegen.function import (
 from pytensor.link.llvm_v2.codegen.function import skipped_inputs
 from pytensor.link.llvm_v2.codegen.types import ScalarRepr, is_absent, repr_of
 from pytensor.link.llvm_v2.codegen.unit import Item, build_unit_function
+from pytensor.link.llvm_v2.codegen.call import Closure
+from pytensor.link.llvm_v2.codegen.scan import scan_supported
+from pytensor.scan.op import Scan
 from pytensor.link.llvm_v2.kernels import kernel_outputs, llvm_kernel
 from pytensor.link.llvm_v2.layout import Layout
 from pytensor.scalar.basic import ScalarType
@@ -68,6 +71,9 @@ class Options:
     #: generated steps verify the layouts their signatures claim (for testing; also
     #: turned on by PYTENSOR_LLVM_CHECK_LAYOUTS=1)
     check_layouts: bool = False
+    #: generate Scan loops (False: always the Rust kernel running the step as a
+    #: nested program)
+    generate_scan: bool = True
 
     def __post_init__(self):
         import os
@@ -182,7 +188,8 @@ class Planner:
                 outs = [self.new_key(o.type) for o in node.outputs]
                 scope.update(zip(node.outputs, outs, strict=True))
                 items.append(Item(node, ins, outs))
-            elif isinstance(op, OpFromGraph) and (unit is None or (inside_unit and unit is UnitKind.COMPILED)):
+            elif isinstance(op, OpFromGraph) and (unit is None or inside_unit):
+                # (inside generated code every OpFromGraph is inlined)
                 inner = op.fgraph
                 sub = {iv: self.key_of(ov, scope) for iv, ov in zip(inner.inputs, node.inputs, strict=True)}
                 items += self.flatten(inner.toposort(), sub, inside_unit)
@@ -209,8 +216,6 @@ class Planner:
                     outs.append((self.key_of(io, sub), k))
                 items.append(UnitItem(inner_items, self._unit_inputs(inner_items), outs, str(op)))
             elif isinstance(op, OpFromGraph) and unit is UnitKind.INTERPRETED:
-                if inside_unit:
-                    raise NotImplementedError("an interpreted OpFromGraph inside a compiled unit")
                 ins = [self.key_of(i, scope) for i in node.inputs]
                 outs = [self.new_key(o.type) for o in node.outputs]
                 scope.update(zip(node.outputs, outs, strict=True))
@@ -258,7 +263,6 @@ class Planner:
 
     def group_scalars(self, items, graph_outputs):
         """Group items that touch ScalarType values into compiled units."""
-        items = self._tensorize_scalar_inputs(items)
         is_scalar = {k for k, t in self.types.items() if isinstance(t, ScalarType)}
 
         def touches(it):
@@ -339,28 +343,6 @@ class Planner:
             result.append(UnitItem(sub, self._unit_inputs(sub), outputs, "scalars"))
         return toposort_items(result)
 
-    def _tensorize_scalar_inputs(self, items):
-        """Nodes we don't generate (Rust kernels such as Scan, numba) can't sit in a
-        compiled unit. When one reads a ScalarType value (e.g. Scan's `n_steps` from a
-        ScalarFromTensor), it reads a 0-d tensor instead, made by a `TensorFromScalar`
-        that joins the scalar unit."""
-        from pytensor.tensor.basic import tensor_from_scalar
-
-        out = []
-        for it in items:
-            if not isinstance(it, Item) or _generated(it.node.op):
-                out.append(it)
-                continue
-            ins = list(it.inputs)
-            for pos, (k, var) in enumerate(zip(it.inputs, it.node.inputs, strict=True)):
-                if isinstance(self.types.get(k), ScalarType) and k not in self.consts:
-                    conv = tensor_from_scalar(var).owner
-                    t = self.new_key(conv.outputs[0].type)
-                    out.append(Item(conv, [k], [t]))
-                    ins[pos] = t
-            out.append(Item(it.node, ins, it.outputs) if ins != it.inputs else it)
-        return out
-
     # ------------------------------------------------------------ steps
 
     def provide(self, keys, declared):
@@ -402,6 +384,8 @@ class Planner:
                 input_layouts=in_lays,
                 output_layouts=[Layout.c(self.types[o].ndim) for _, o in it.outputs],
                 parallel=self.opts.parallel,
+                callee_for=self.callee_for,
+                planner=self,
             )
             build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
             # provided memory is C-contiguous, and so is what a unit allocates
@@ -409,7 +393,7 @@ class Planner:
             self.stats.n_units += 1
             return Step(it.inputs, [o for _, o in it.outputs], modes, [None] * len(modes), workspace=nf.workspace,
                         description=f"unit[{len(it.items)}]: " + ", ".join(str(s.node.op) for s in it.items if isinstance(s, Item))[:120],
-                        module=module)
+                        module=module, env=nf.closure.env, keepalive=nf.closure.keepalive)
         if isinstance(it, ProgramItem):
             node = it.node
             modes = [
@@ -449,8 +433,10 @@ class Planner:
             raise NotImplementedError("scalar node outside a unit")
         present = [k for k, var in zip(it.inputs, node.inputs, strict=True) if not is_absent(var.type)]
         in_lays = [self.lay(k) for k in it.inputs]
-        # the implementation first, then what it says it produces
-        k = None if folded else llvm_kernel(node.op, node, in_lays)
+        # the implementation first, then what it says it produces (a Scan we generate
+        # rather than run the kernel: its step is inlined into the loop)
+        generate_first = isinstance(node.op, Scan) and scan_supported(node.op) and self.opts.generate_scan
+        k = None if folded or generate_first else llvm_kernel(node.op, node, in_lays)
         if k is not None:
             declared = kernel_outputs(k, node, in_lays)
             modes = [o.mode for o in declared]
@@ -462,7 +448,10 @@ class Planner:
             return Step(present, outs, modes, views, address=k.address, env=k.env, description=repr(k), keepalive=k)
         try:
             module = ir.Module(f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath)
-            nf = build_node_function(module, node, "node", folded=folded, in_layouts=in_lays, parallel=self.opts.parallel)
+            closure = Closure()
+            nf = build_node_function(
+                module, node, "node", folded=folded, in_layouts=in_lays, parallel=self.opts.parallel, closure=closure, planner=self
+            )
             build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
             skipped = skipped_inputs(node, folded)
             inputs = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
@@ -473,11 +462,86 @@ class Planner:
             self.set_layouts(outs, [o.layout for o in nf.signature.outputs])
             outs, modes, vmap = _present_outputs(nf.signature.outputs, outs, modes, vmap)
             desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
-            return Step(inputs, outs, modes, vmap, workspace=nf.workspace, description=desc, module=module)
+            return Step(inputs, outs, modes, vmap, workspace=nf.workspace, description=desc, module=module,
+                        env=closure.env, keepalive=closure.keepalive)
         except NotImplementedError:
+            if generate_first:
+                k = llvm_kernel(node.op, node, in_lays)
+                if k is not None:
+                    declared = kernel_outputs(k, node, in_lays)
+                    outs = self.provide(it.outputs, declared)
+                    self.set_layouts(outs, [o.layout for o in declared])
+                    outs, modes, views = _present_outputs(declared, outs, [o.mode for o in declared], [o.view_of for o in declared])
+                    self.stats.n_kernels += 1
+                    return Step(present, outs, modes, views, address=k.address, env=k.env, description=repr(k), keepalive=k)
             if not self.opts.numba_fallback:
                 raise
         return self.foreign_step(it)
+
+    def callee_for(self, node, in_layouts):
+        """How a node inside generated code (a unit, a loop) is implemented: None to
+        generate it (inlined: preferred), else the `Callee` it calls: its Rust kernel,
+        or the numba implementation."""
+        from pytensor.link.llvm_v2.codegen.call import Callee
+        from pytensor.link.llvm_v2.codegen.function import Output, llvm_emit
+
+        if isinstance(node.op, OpFromGraph) and getattr(node.op, "unit", None) is UnitKind.INTERPRETED:
+            return self._program_callee(node, in_layouts)
+        if isinstance(node.op, Scan) and self.opts.generate_scan and scan_supported(node.op):
+            return None  # generated (everything inside can be called)
+        if llvm_emit.dispatch(type(node.op)) is not llvm_emit.dispatch(object) and self._can_generate(node, in_layouts):
+            return None
+        k = llvm_kernel(node.op, node, in_layouts)
+        if k is not None:
+            self.stats.n_kernels += 1
+            return Callee(k.address, k.env, "standard", kernel_outputs(k, node, in_layouts), repr(k), k)
+        if not self.opts.numba_fallback:
+            raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
+        from pytensor.link.llvm.numba_fallback import numba_fallback_kernel
+        from pytensor.tensor.random.type import RandomType
+
+        if any(isinstance(v.type, RandomType) for v in (*node.inputs, *node.outputs)):
+            raise NotImplementedError(f"LLVM backend: no implementation of the random variable {node.op}")
+        kernel = numba_fallback_kernel(node)
+        self.stats.n_foreign += 1
+        self.stats.foreign.append(str(node.op))
+        outs = [Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.ALLOCATED) for o in node.outputs]
+        return Callee(kernel.address, 0, "foreign", outs, f"numba: {node.op}", kernel)
+
+    def _program_callee(self, node, in_layouts):
+        """A nested program for an OpFromGraph, called from generated code."""
+        from pytensor.link.llvm_v2.codegen.call import Callee
+        from pytensor.link.llvm_v2.codegen.function import Output
+
+        if any(isinstance(o.type, ScalarType) for o in node.outputs):
+            raise NotImplementedError("a nested program with ScalarType outputs")
+        modes = [
+            OutMode.ABSENT if is_absent(o.type) else OutMode.PROVIDED if repr_of(o.type).static else OutMode.ALLOCATED
+            for o in node.outputs
+        ]
+        sub = Planner(self.opts)
+        prog = sub.plan(node.op.fgraph, output_modes=modes, input_layouts=in_layouts)
+        self.stats.n_nested += 1
+        outs = []
+        for o, mode, lay in zip(node.outputs, modes, sub.output_layouts, strict=True):
+            if mode is OutMode.ABSENT:
+                outs.append(Output(repr_of(o.type), mode))
+            elif mode is OutMode.PROVIDED:
+                outs.append(Output(repr_of(o.type, Layout.c(o.type.ndim)), mode))
+            else:
+                # an allocated output is the inner value if it owns a buffer, else a C copy
+                lay = Layout.c(o.type.ndim) if lay is None else lay.join(Layout.c(o.type.ndim), _shape(o.type), _isz(o.type))
+                outs.append(Output(repr_of(o.type, lay), mode))
+        return Callee(prog.address, prog.env, "standard", outs, f"program: {node.op}", prog)
+
+    def _can_generate(self, node, in_layouts) -> bool:
+        """Can we generate code for `node`? (Tried in a scratch module, so a failure
+        leaves no half-built function behind.)"""
+        try:
+            build_node_function(_ir().Module("probe"), node, "probe", in_layouts=in_layouts, parallel=False)
+            return True
+        except NotImplementedError:
+            return False
 
     def foreign_step(self, it):
         from pytensor.link.llvm.numba_fallback import numba_fallback_kernel
@@ -554,7 +618,7 @@ class Planner:
             compiled = _ir().compile_many(modules, opt_level=self.opts.opt_level, cache=self.opts.cache)
             for s, c in zip([s for s in steps if s.module is not None], compiled, strict=True):
                 s.address = c.address("abi")
-                s.keepalive = c
+                s.keepalive = (s.keepalive, c)  # (the closure table, if any)
                 s.module = None
         self.stats.n_modules = len(modules)
         t2 = time.perf_counter()
@@ -728,13 +792,6 @@ def _outputs_of(it):
     if isinstance(it, UnitItem):
         return [o for _, o in it.outputs]
     return it.outputs
-
-
-def _generated(op) -> bool:
-    """Whether we generate code for `op` (so it can be part of a compiled unit)."""
-    from pytensor.link.llvm_v2.codegen.function import llvm_emit
-
-    return llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
 
 
 def toposort_items(items):

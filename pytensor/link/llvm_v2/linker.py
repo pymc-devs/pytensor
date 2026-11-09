@@ -24,7 +24,7 @@ class LLVMV2Linker(JITLinker):
     )
 
     #: options passed on to the planner (program.Options)
-    OPTIONS = ("fastmath", "opt_level", "cache", "numba_fallback", "input_layout", "check_layouts", "parallel")
+    OPTIONS = ("fastmath", "opt_level", "cache", "numba_fallback", "input_layout", "check_layouts", "parallel", "generate_scan")
 
     def __init__(
         self,
@@ -35,6 +35,7 @@ class LLVMV2Linker(JITLinker):
         input_layout="any",
         check_layouts=False,
         parallel=True,
+        generate_scan=True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -45,6 +46,7 @@ class LLVMV2Linker(JITLinker):
         self.input_layout = input_layout
         self.check_layouts = check_layouts
         self.parallel = parallel
+        self.generate_scan = generate_scan
         self.compiled = None
         self.stats = None
 

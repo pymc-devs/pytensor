@@ -172,7 +172,9 @@ def test_profiling_with_nested_programs():
     x = pt.dmatrix("x")
     w = pt.dvector("w")
     res = pytensor.scan(lambda r, acc: acc + pt.exp(r) @ w, sequences=[x], outputs_info=[pt.zeros(())], return_updates=False)
-    f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode="LLVM_V2")
+    # the Scan kernel runs its step as a nested program (a generated Scan has none)
+    mode = get_mode("LLVM_V2").clone(link_kwargs={"generate_scan": False})
+    f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode=mode)
     p = f.maker.linker.compiled
     xv, wv = np.ones((5, 3)), np.ones(3)
     f(xv, wv)
