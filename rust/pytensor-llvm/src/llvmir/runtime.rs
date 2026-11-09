@@ -64,13 +64,14 @@ fn to_numpy<'py>(py: Python<'py>, dtype: &Bound<'py, PyArrayDescr>, data: *mut u
 /// # Safety (for the caller)
 /// `address` must be a function with that ABI expecting exactly these arguments.
 #[pyfunction]
-#[pyo3(signature = (address, inputs, outputs, workspace_bytes = 0))]
+#[pyo3(signature = (address, inputs, outputs, workspace_bytes = 0, env = 0))]
 pub fn call_abi<'py>(
     py: Python<'py>,
     address: usize,
     inputs: Vec<Bound<'py, PyAny>>,
     outputs: Vec<Bound<'py, PyAny>>,
     workspace_bytes: usize,
+    env: usize,
 ) -> PyResult<Vec<Bound<'py, PyAny>>> {
     let n = inputs.len() + outputs.len();
     let mut storage: Vec<Vec<i64>> = Vec::with_capacity(n);
@@ -119,7 +120,7 @@ pub fn call_abi<'py>(
     let f: AbiFn = unsafe { std::mem::transmute::<usize, AbiFn>(address) };
     // SAFETY: as above; arrays describe live numpy memory or empty output slots.
     let mark = ctx.scratch_mark();
-    let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), std::ptr::null(), ws.as_mut_ptr() as *mut u8) };
+    let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), env as *const u8, ws.as_mut_ptr() as *mut u8) };
     ctx.scratch_release(mark);
     let n_in = inputs.len();
     if rc != 0 {

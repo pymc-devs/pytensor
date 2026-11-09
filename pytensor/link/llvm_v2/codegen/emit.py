@@ -277,6 +277,8 @@ class SlotOutput:
     layout: Layout = None
     #: for a view: the layout `llvm_outputs` declared (`set_view` checks it)
     declared: Layout = None
+    #: (scope, noalias scopes) for the memory `allocate` returns (`Builder.mark_array`)
+    alias: tuple | None = None
     done: bool = False
 
     def _write(self, data, shape, strides):
@@ -297,6 +299,7 @@ class SlotOutput:
         if self.temporary:
             a = cx.temporary(self.dtype, shape, self.layout)
             self._write(a.data, a.shape, a.strides)
+            self._mark(a)
             self.done = True
             return a
         nbytes = mul(b, size(b, shape), b.const_int(m.i64, itemsize(self.dtype)))
@@ -305,8 +308,35 @@ class SlotOutput:
         cx.check(b.icmp(m.ICmp.NE, data, b.null()), None)
         a = packed_array(b, self.dtype, data, shape, self.layout)
         self._write(data, shape, a.strides)
+        self._mark(a)
         self.done = True
         return a
+
+    def data(self):
+        """The data pointer in the slot (null until set)."""
+        b, m = self.cx.b, ir()
+        return b.load(m.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 0))
+
+    def owner(self):
+        """The buffer reference in the slot (null for views)."""
+        b, m = self.cx.b, ir()
+        return b.load(m.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 3))
+
+    def read(self) -> Array:
+        """The array in the slot (after `allocate`), in the slot's layout."""
+        lay = self.layout if self.layout is not None else Layout.c(self.ndim)
+        return read_slot(self.cx.b, self.slot, self.dtype, [None] * self.ndim, lay)
+
+    def set_length(self, axis, n):
+        """Shorten axis `axis` of the array in the slot to `n` (i64) -- a view of the
+        same memory with the same strides."""
+        b, m = self.cx.b, ir()
+        lp = b.field_ptr(_slot_type(self.ndim), self.slot, 1)
+        b.store(n, b.gep(m.i64, lp, b.const_int(m.i64, axis)))
+
+    def _mark(self, a: Array):
+        if self.alias is not None:
+            self.cx.b.mark_array(a.data, *self.alias)
 
     def set_view(self, a: Array):
         """The output is `a`, which lies in the memory of input `view_of` (the caller
@@ -357,6 +387,15 @@ class EmitContext:
     ws_static: int = 0
     #: may loops run in parallel (`Options.parallel`)?
     parallel: bool = True
+    #: the callees of the function being generated (call.py); None: no calls
+    closure: object = None
+    #: the planner (program.py), for code that plans nested graphs (Scan); None: no
+    #: nested graphs
+    planner: object = None
+    #: the module being built, and the name of the function being built in it (nested
+    #: functions are named after it)
+    module: object = None
+    name: str = ""
     _checks: int = field(default=0)
 
     def par(self, per_item: float) -> Parallel | None:
