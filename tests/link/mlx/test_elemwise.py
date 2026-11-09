@@ -2,8 +2,9 @@ from functools import partial
 
 import numpy as np
 import pytest
+from scipy.special import expit
 
-from pytensor import config
+from pytensor import config, function
 from pytensor.tensor.basic import switch
 from pytensor.tensor.math import (
     ProdWithoutZeros,
@@ -36,8 +37,8 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.special import log_softmax, softmax
-from pytensor.tensor.type import matrix, tensor, vector, vectors
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from pytensor.tensor.type import matrix, scalar, tensor, vector, vectors
+from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
 mx = pytest.importorskip("mlx.core")
@@ -290,6 +291,24 @@ def test_softplus_extreme_values() -> None:
     relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-4, atol=1e-8)
 
     compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
+
+
+@pytest.mark.parametrize("op", [sigmoid, softplus])
+def test_sigmoid_softplus_mlx_autodiff(op):
+    # MLX autodiff of the lowered formulas, as with an MLX gradient backend
+    x = scalar("x", dtype="float32")
+    mlx_fn = function([x], op(x), mode=mlx_mode).vm.jit_fn
+    d1 = mx.grad(lambda v: mlx_fn(v)[0])
+    d2 = mx.grad(d1)
+    x_test = np.array([0.0, -0.0, 20.0, -20.0, 80.0, -80.0])
+    s, sm = expit(x_test), expit(-x_test)
+    expected = [s, s * sm] if op is softplus else [s * sm, s * sm * (sm - s)]
+    for d, expected_d in zip((d1, d2), expected):
+        np.testing.assert_allclose(
+            [d(mx.array(v, dtype=mx.float32)).item() for v in x_test],
+            expected_d,
+            rtol=1e-5,
+        )
 
 
 @pytest.mark.parametrize("op", [add, mul], ids=["add", "mul"])

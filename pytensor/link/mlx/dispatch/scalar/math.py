@@ -144,8 +144,9 @@ def mlx_funcify_Sigmoid(op, node, **kwargs):
 
     def sigmoid(x):
         z, const, out_dtype = _working_precision(x, dtype)
-        # exp(-|x|) is shared with Softplus, so MLX can reuse it when both are fused
-        e = mx.exp(-mx.abs(z))
+        # exp(-|x|) is shared with Softplus, so MLX can reuse it when both are fused.
+        # |x| as `where`: MLX's gradient of `abs` is 0 at 0, which would zero sigmoid'(0)
+        e = mx.exp(-mx.where(z >= 0, z, -z))
         return (mx.where(z >= 0, const(1.0), e) / (const(1.0) + e)).astype(out_dtype)
 
     return sigmoid
@@ -157,8 +158,11 @@ def mlx_funcify_Softplus(op, node, **kwargs):
 
     def softplus(x):
         z, const, out_dtype = _working_precision(x, dtype)
-        # Branch-free, and exp(-|x|) is shared with Sigmoid
-        out = mx.maximum(z, const(0.0)) + mx.log1p(mx.exp(-mx.abs(z)))
+        # Branch-free, and exp(-|x|) is shared with Sigmoid. `where` rather than `maximum`
+        # and `abs`, whose MLX gradients are 0 at 0
+        out = mx.where(z >= 0, z, const(0.0)) + mx.log1p(
+            mx.exp(-mx.where(z >= 0, z, -z))
+        )
         return out.astype(out_dtype)
 
     return softplus
