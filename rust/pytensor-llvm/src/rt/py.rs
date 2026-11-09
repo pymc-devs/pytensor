@@ -455,7 +455,7 @@ impl ProgramBuilder {
             contiguous_inputs: std::mem::take(&mut self.contiguous_inputs),
         };
         let prog = RProgram::new(spec).map_err(PyValueError::new_err)?;
-        Ok(Program { prog: Arc::new(prog), keepalive: std::mem::take(&mut self.keepalive) })
+        Ok(Program { prog: Arc::new(prog), keepalive: std::mem::take(&mut self.keepalive), state: std::sync::Mutex::new(None) })
     }
 }
 
@@ -509,6 +509,15 @@ fn runtime_error(msg: String) -> PyErr {
 pub struct Program {
     prog: Arc<RProgram>,
     keepalive: Vec<Py<PyAny>>,
+    /// the function state of Python calls: one per function (one random state);
+    /// concurrent calls from several threads take turns
+    state: std::sync::Mutex<Option<FnState>>,
+}
+
+/// A program's memory for a call plus the caller's context.
+struct FnState {
+    st: super::program::CallState,
+    ctx: crate::abi::PtCtx,
 }
 
 #[pymethods]
@@ -520,7 +529,8 @@ impl Program {
             return err(format!("expected {} inputs, got {}", prog.n_inputs(), args.len()));
         }
         let np = py.import("numpy")?;
-        let mut st = prog.take_state();
+        let mut guard = self.lock_state(py);
+        let FnState { st, ctx } = guard.get_or_insert_with(|| FnState { st: prog.take_state(), ctx: crate::abi::PtCtx::new() });
         let mut keep = Vec::with_capacity(args.len());
         let mut work = 0usize;
         let res = (|| -> PyResult<Vec<super::program::OutArray>> {
@@ -557,11 +567,10 @@ impl Program {
                 let data = unsafe { (*arr.as_array_ptr()).fields.data as *mut u8 };
                 let shape: Vec<i64> = arr.shape().iter().map(|&n| n as i64).collect();
                 let strides: Vec<i64> = arr.strides().iter().map(|&s| s as i64).collect();
-                prog.set_input(&mut st, k, data, &shape, &strides).map_err(PyValueError::new_err)?;
+                prog.set_input(st, k, data, &shape, &strides).map_err(PyValueError::new_err)?;
                 work += arr.len();
                 keep.push(a);
             }
-            let mut ctx = std::mem::take(&mut st.ctx);
             let run = |st: &mut super::program::CallState, ctx: &mut crate::abi::PtCtx| -> Result<Vec<super::program::OutArray>, String> {
                 let none = vec![None; prog.n_outputs()];
                 prog.execute(st, ctx, &none)?;
@@ -574,19 +583,18 @@ impl Program {
                 struct S<'a>(&'a mut super::program::CallState, &'a mut crate::abi::PtCtx);
                 // SAFETY: the state and context are exclusively ours for this call.
                 unsafe impl Send for S<'_> {}
-                let s = S(&mut st, &mut ctx);
+                let s = S(&mut *st, &mut *ctx);
                 py.detach(move || {
                     let s = s;
                     run(s.0, s.1)
                 })
             } else {
-                run(&mut st, &mut ctx)
+                run(st, ctx)
             };
-            st.ctx = ctx;
             r.map_err(runtime_error)
         })();
         drop(keep);
-        prog.put_state(st);
+        drop(guard);
         let outs = res?;
         let arrays: Vec<Bound<'_, PyAny>> =
             outs.iter().enumerate().map(|(o, a)| wrap_output(py, prog.output_dtype(o), a)).collect::<PyResult<_>>()?;
@@ -661,6 +669,15 @@ impl Program {
         s
     }
 
+    /// Restart the random state of Python calls from `seed` (draws are then
+    /// reproducible). The C API seeds each of its call states (`seed` in the table).
+    fn seed(&self, py: Python<'_>, seed: u64) {
+        let prog = &self.prog;
+        let mut guard = self.lock_state(py);
+        let s = guard.get_or_insert_with(|| FnState { st: prog.take_state(), ctx: crate::abi::PtCtx::new() });
+        s.ctx.seed(seed);
+    }
+
     /// A new reference to this program for the C API, as the address of a
     /// `PtFunction` (release it with `function_decref` from `c_api_table()`). It keeps
     /// the compiled code alive on its own.
@@ -707,6 +724,17 @@ fn c_api_table() -> usize {
 }
 
 impl Program {
+    /// The function state, waiting without the GIL if another thread has it.
+    fn lock_state(&self, py: Python<'_>) -> std::sync::MutexGuard<'_, Option<FnState>> {
+        loop {
+            match self.state.try_lock() {
+                Ok(g) => return g,
+                Err(std::sync::TryLockError::Poisoned(p)) => return p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => py.detach(|| drop(self.state.lock())),
+            }
+        }
+    }
+
     /// For each step, the programs it runs.
     fn children(&self, py: Python<'_>) -> Vec<Vec<Py<Program>>> {
         self.keepalive

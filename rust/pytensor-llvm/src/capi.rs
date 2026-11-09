@@ -10,7 +10,7 @@ use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 #[repr(C)]
 pub struct PtTypeInfo {
@@ -40,6 +40,7 @@ pub struct PtFunctionApi {
     pub call: unsafe extern "C" fn(*mut PtCallState, *const PtArray, *mut PtArray) -> i32,
     pub last_error: unsafe extern "C" fn(*const PtCallState) -> *const c_char,
     pub buffer_decref: unsafe extern "C" fn(*mut PtBuffer),
+    pub seed: unsafe extern "C" fn(*mut PtCallState, u64),
 }
 
 /// Hand out a new reference to `prog` as a `PtFunction*`.
@@ -190,6 +191,11 @@ unsafe extern "C" fn last_error(s: *const PtCallState) -> *const c_char {
     unsafe { (*s).err.as_ptr() }
 }
 
+unsafe extern "C" fn seed(s: *mut PtCallState, seed: u64) {
+    // SAFETY: `s` is live and used by this thread only (contract).
+    unsafe { (*s).st.ctx.seed(seed) }
+}
+
 unsafe extern "C" fn buffer_decref(b: *mut PtBuffer) {
     if !b.is_null() {
         // SAFETY: the caller releases a reference it got from `call`
@@ -211,4 +217,5 @@ pub static API: PtFunctionApi = PtFunctionApi {
     call,
     last_error,
     buffer_decref,
+    seed,
 };

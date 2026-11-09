@@ -9,8 +9,11 @@
 //!     void *(*alloc)(PtCtx *, size_t bytes, size_t align, PtBuffer **owner);
 //!     void  (*buffer_incref)(PtCtx *, PtBuffer *);
 //!     void  (*buffer_decref)(PtCtx *, PtBuffer *);
-//!     void *(*scratch)(PtCtx *, size_t bytes);    // 64-byte aligned, valid until the kernel returns
+//!     void *(*scratch)(PtCtx *, size_t bytes);    // 64-byte aligned, valid until the step ends
 //!     void  (*set_error)(PtCtx *, int32_t code, const char *msg);
+//!     int64_t (*scratch_mark)(PtCtx *);
+//!     void  (*scratch_release)(PtCtx *, int64_t mark);
+//!     ...                                          // see `runtime_functions!`
 //! } PtRuntime;
 //!
 //! typedef struct {
@@ -38,6 +41,7 @@
 //! call a kernel's scratch requests don't allocate. Several requests per kernel are
 //! fine; they never move earlier ones.
 
+use std::sync::{Mutex, OnceLock};
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -238,34 +242,101 @@ impl Drop for OwnedBuf {
     }
 }
 
-// ------------------------------------------------------------------ context
+// ------------------------------------------------------------------ the runtime
 
-#[repr(C)]
-pub struct PtRuntime {
-    pub version: u32,
-    pub alloc: unsafe extern "C" fn(*mut PtCtx, usize, usize, *mut *mut PtBuffer) -> *mut u8,
-    pub buffer_incref: unsafe extern "C" fn(*mut PtCtx, *mut PtBuffer),
-    pub buffer_decref: unsafe extern "C" fn(*mut PtCtx, *mut PtBuffer),
-    pub scratch: unsafe extern "C" fn(*mut PtCtx, usize) -> *mut u8,
-    pub set_error: unsafe extern "C" fn(*mut PtCtx, i32, *const c_char),
+/// Defines the runtime function table (`PtRuntime`, what kernels reach through
+/// `ctx->rt`), its static instance, and the JIT symbol names (`ptl_rt_<name>`) that
+/// generated code links against: one list, so the two can't drift. Append only: numba
+/// fall-backs read `alloc` at a fixed offset.
+macro_rules! runtime_functions {
+    ($($(#[$doc:meta])* $name:ident: fn($($arg:ty),*) $(-> $ret:ty)? = $f:path;)*) => {
+        #[repr(C)]
+        pub struct PtRuntime {
+            pub version: u32,
+            $($(#[$doc])* pub $name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
+        }
+
+        const FUNCTIONS: PtRuntime = PtRuntime { version: ABI_VERSION, $($name: $f,)* };
+
+        impl PtRuntime {
+            /// `(ptl_rt_<name>, address)` for every function, for the JIT.
+            pub fn symbols(&self) -> Vec<(&'static str, usize)> {
+                vec![$((concat!("ptl_rt_", stringify!($name)), self.$name as *const () as usize),)*]
+            }
+        }
+    };
 }
 
+runtime_functions! {
+    /// A new buffer of `bytes` (aligned to `align`); `*owner` gets its one reference.
+    /// NULL with the error set if it can't be allocated.
+    alloc: fn(*mut PtCtx, usize, usize, *mut *mut PtBuffer) -> *mut u8 = rt_alloc;
+    buffer_incref: fn(*mut PtCtx, *mut PtBuffer) = rt_incref;
+    buffer_decref: fn(*mut PtCtx, *mut PtBuffer) = rt_decref;
+    /// Scratch memory (64-byte aligned) until the step ends, or until a
+    /// `scratch_release` of an earlier mark.
+    scratch: fn(*mut PtCtx, usize) -> *mut u8 = rt_scratch;
+    set_error: fn(*mut PtCtx, i32, *const c_char) = rt_set_error;
+    /// The current scratch position; `scratch_release` frees what was taken since.
+    scratch_mark: fn(*mut PtCtx) -> i64 = rt_scratch_mark;
+    scratch_release: fn(*mut PtCtx, i64) = rt_scratch_release;
+    /// Random numbers from the context's random state (`crate::random`).
+    rng_u64: fn(*mut PtCtx) -> u64 = crate::random::rng_u64;
+    rng_uniform: fn(*mut PtCtx) -> f64 = crate::random::rng_uniform;
+    rng_normal: fn(*mut PtCtx) -> f64 = crate::random::rng_normal;
+    rng_fill_uniform: fn(*mut PtCtx, *mut f64, i64) = crate::random::rng_fill_uniform;
+    rng_fill_normal: fn(*mut PtCtx, *mut f64, i64) = crate::random::rng_fill_normal;
+    rng_gamma: fn(*mut PtCtx, f64) -> f64 = crate::random::rng_gamma;
+    rng_beta: fn(*mut PtCtx, f64, f64) -> f64 = crate::random::rng_beta;
+    rng_poisson: fn(*mut PtCtx, f64) -> i64 = crate::random::rng_poisson;
+    rng_binomial: fn(*mut PtCtx, i64, f64) -> i64 = crate::random::rng_binomial;
+}
+
+/// The process-wide runtime: the function table every context points to, and the
+/// process-wide state behind it (the JIT; later e.g. device contexts). Starts with the
+/// table, so `ctx->rt` is both.
+#[repr(C)]
+pub struct Runtime {
+    pub functions: PtRuntime,
+    jit: OnceLock<Mutex<crate::jit::Jit>>,
+}
+
+static RUNTIME: Runtime = Runtime { functions: FUNCTIONS, jit: OnceLock::new() };
+
+pub fn runtime() -> &'static Runtime {
+    &RUNTIME
+}
+
+impl Runtime {
+    /// The JIT all generated code is linked into.
+    pub fn jit(&self) -> &Mutex<crate::jit::Jit> {
+        self.jit.get_or_init(|| Mutex::new(crate::jit::Jit::new().expect("failed to create LLJIT")))
+    }
+}
+
+// ------------------------------------------------------------------ the call context
+
+/// The context of a call: per function state (one per thread or chain, owned by the
+/// caller through its call state), shared by everything the call runs, nested programs
+/// included. Kernels see only `rt`.
 #[repr(C)]
 pub struct PtCtx {
     pub rt: *const PtRuntime,
-    // runtime-private state below; kernels only see `rt`
+    // runtime-private state below
     pub error: Option<(i32, String)>,
     scratch: Scratch,
-    /// marks handed to generated code (`ptl_rt_ws_mark`)
-    ws_marks: Vec<ScratchMark>,
+    /// positions handed out by `scratch_mark` (tokens are indices)
+    marks: Vec<ScratchMark>,
+    /// the function state's random state: everything the call runs draws from it, in
+    /// order (`seed` makes the draws reproducible)
+    pub rng: rand_xoshiro::Xoshiro256PlusPlus,
 }
 
-/// Bump arena behind `rt->scratch`.
+/// Bump arena behind `scratch`.
 ///
-/// One persistent block, used from offset 0 by each kernel call. A request that
-/// doesn't fit gets its own overflow block (so earlier pointers stay valid); when the
-/// kernel ends, the persistent block is regrown to the peak demand, so the next call
-/// fits without allocating.
+/// One persistent block. A request that doesn't fit gets its own overflow block (so
+/// earlier pointers stay valid); when everything is released, the persistent block is
+/// regrown to the peak demand, so the next use fits without allocating.
 struct Scratch {
     block: *mut u8,
     cap: usize,
@@ -275,9 +346,8 @@ struct Scratch {
     peak: usize,
 }
 
-/// Position in the scratch arena, for drivers that call kernels repeatedly (Scan).
 #[derive(Clone, Copy)]
-pub struct ScratchMark {
+struct ScratchMark {
     off: usize,
     n_overflow: usize,
     overflow_bytes: usize,
@@ -320,10 +390,13 @@ impl Scratch {
         }
         self.overflow_bytes = m.overflow_bytes;
         self.off = m.off;
+        if self.off == 0 && self.overflow.is_empty() {
+            self.regrow();
+        }
     }
 
-    fn reset(&mut self) {
-        self.release(ScratchMark { off: 0, n_overflow: 0, overflow_bytes: 0 });
+    /// Nothing is in use: make the block as big as the peak demand.
+    fn regrow(&mut self) {
         if self.peak > self.cap {
             self.free_block();
             let cap = self.peak.next_power_of_two();
@@ -337,7 +410,7 @@ impl Scratch {
 
     fn free_block(&mut self) {
         if !self.block.is_null() {
-            // SAFETY: allocated in `reset` with this size and alignment; reset to null after.
+            // SAFETY: allocated in `regrow` with this size and alignment; reset to null after.
             unsafe { dealloc(self.block, Layout::from_size_align_unchecked(self.cap, SCRATCH_ALIGN)) };
             self.block = std::ptr::null_mut();
             self.cap = 0;
@@ -347,21 +420,32 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        self.release(ScratchMark { off: 0, n_overflow: 0, overflow_bytes: 0 });
+        for (p, n) in self.overflow.drain(..) {
+            // SAFETY: allocated in `get` with this size and alignment.
+            unsafe { dealloc(p, Layout::from_size_align_unchecked(n, SCRATCH_ALIGN)) };
+        }
         self.free_block();
     }
 }
 
-// SAFETY: a context belongs to one CallState (one thread at a time); `rt` points to a
+// SAFETY: a context belongs to one call state (one thread at a time); `rt` points to a
 // static and the scratch arena owns its memory.
 unsafe impl Send for PtCtx {}
 
-// The runtime table, called by kernels (generated, numba, Rust). `ctx` is always the
+// The runtime functions, called by kernels (generated, numba, Rust). `ctx` is always the
 // context the kernel was called with: valid and exclusively the kernel's for the call.
 // These are "C" (not "C-unwind") because generated and numba frames can't be unwound;
 // a panic here (out of memory) aborts.
 
-unsafe extern "C" fn rt_alloc(_ctx: *mut PtCtx, bytes: usize, align: usize, owner: *mut *mut PtBuffer) -> *mut u8 {
+unsafe extern "C" fn rt_alloc(ctx: *mut PtCtx, bytes: usize, align: usize, owner: *mut *mut PtBuffer) -> *mut u8 {
+    if bytes > isize::MAX as usize {
+        // SAFETY: `owner` is writable and `ctx` live (the contract).
+        unsafe {
+            *owner = std::ptr::null_mut();
+            (*ctx).error = Some((1, format!("could not allocate {} bytes", bytes as isize)));
+        }
+        return std::ptr::null_mut();
+    }
     let b = PtBuffer::new(bytes, align);
     // SAFETY: `owner` points to the kernel's output slot (a PtArray field); `b` is live.
     unsafe {
@@ -381,6 +465,11 @@ unsafe extern "C" fn rt_decref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
 }
 
 unsafe extern "C" fn rt_scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
+    if bytes > isize::MAX as usize {
+        // SAFETY: `ctx` is live.
+        unsafe { (*ctx).error = Some((1, format!("could not allocate {} bytes of scratch", bytes as isize))) };
+        return std::ptr::null_mut();
+    }
     // SAFETY: see above for `ctx`.
     unsafe { (*ctx).scratch.get(bytes) }
 }
@@ -393,50 +482,42 @@ unsafe extern "C" fn rt_set_error(ctx: *mut PtCtx, code: i32, msg: *const c_char
     }
 }
 
-pub static RUNTIME: PtRuntime = PtRuntime {
-    version: ABI_VERSION,
-    alloc: rt_alloc,
-    buffer_incref: rt_incref,
-    buffer_decref: rt_decref,
-    scratch: rt_scratch,
-    set_error: rt_set_error,
-};
+unsafe extern "C" fn rt_scratch_mark(ctx: *mut PtCtx) -> i64 {
+    // SAFETY: see above for `ctx`.
+    unsafe { (*ctx).scratch_mark() }
+}
+
+unsafe extern "C" fn rt_scratch_release(ctx: *mut PtCtx, token: i64) {
+    // SAFETY: see above for `ctx`.
+    unsafe { (*ctx).scratch_release(token) }
+}
 
 impl PtCtx {
     pub fn new() -> Self {
-        PtCtx { rt: &RUNTIME, error: None, scratch: Scratch::new(), ws_marks: Vec::new() }
+        PtCtx { rt: &RUNTIME.functions, error: None, scratch: Scratch::new(), marks: Vec::new(), rng: entropy_rng() }
     }
 
-    /// Scratch handed out during the last kernel call is dead now; keep the memory.
-    pub fn end_kernel(&mut self) {
-        self.ws_marks.clear();
-        self.scratch.reset();
+    /// Restart the random state from `seed`.
+    pub fn seed(&mut self, seed: u64) {
+        use rand_core::SeedableRng;
+        self.rng = rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(seed);
     }
 
-    /// Mark the dynamic workspace for generated code; returns a token for `ws_release`.
-    pub fn ws_mark(&mut self) -> i64 {
-        self.ws_marks.push(self.scratch.mark());
-        (self.ws_marks.len() - 1) as i64
+    /// Mark the scratch position; `scratch_release(token)` frees everything handed out
+    /// since (and releases later marks). The interpreter marks around every step;
+    /// generated code and kernels that call other code (Scan) mark too.
+    pub fn scratch_mark(&mut self) -> i64 {
+        self.marks.push(self.scratch.mark());
+        (self.marks.len() - 1) as i64
     }
 
-    /// Release workspace handed out since `ws_mark` returned `token` (and later marks).
-    /// Unknown tokens are ignored.
-    pub fn ws_release(&mut self, token: i64) {
-        if token >= 0 && (token as usize) < self.ws_marks.len() {
-            let m = self.ws_marks[token as usize];
-            self.ws_marks.truncate(token as usize);
+    /// Release back to the mark `token`. Unknown tokens are ignored.
+    pub fn scratch_release(&mut self, token: i64) {
+        if token >= 0 && (token as usize) < self.marks.len() {
+            let m = self.marks[token as usize];
+            self.marks.truncate(token as usize);
             self.scratch.release(m);
         }
-    }
-
-    /// For kernels that call other kernels with the same context (Scan): everything
-    /// handed out after `scratch_mark` is released by `scratch_release`.
-    pub fn scratch_mark(&self) -> ScratchMark {
-        self.scratch.mark()
-    }
-
-    pub fn scratch_release(&mut self, m: ScratchMark) {
-        self.scratch.release(m)
     }
 
     // Helpers for Rust kernels. SAFETY (all three): `ctx` is the kernel's context
@@ -461,6 +542,16 @@ impl PtCtx {
         let p = unsafe { ((*(*ctx).rt).alloc)(ctx, bytes, 64, &mut owner) };
         (p, owner)
     }
+}
+
+/// A random state seeded from the process's hash randomness (std's per-instance
+/// random keys), for contexts nobody seeded.
+fn entropy_rng() -> rand_xoshiro::Xoshiro256PlusPlus {
+    use rand_core::SeedableRng;
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_usize(&h as *const _ as usize);
+    rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(h.finish())
 }
 
 impl Default for PtCtx {

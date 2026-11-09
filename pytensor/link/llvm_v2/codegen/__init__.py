@@ -11,6 +11,7 @@
 * `fused`: FusedElemwise (indexed reads/writes and reductions in one loop);
 * `basic`: Shape, Shape_i, MakeVector, Alloc, AllocEmpty, ARange, Reshape, Join, CheckAndRaise;
 * `shape`: views (DimShuffle, ViewOp, SpecifyShape) and DeepCopyOp;
+* `random`: random variables (draws from the call context's random state);
 * `unit`: compiled units (several nodes in one function).
 """
 
@@ -20,6 +21,7 @@ from pytensor.link.llvm_v2.codegen import (  # noqa: F401 (registers emitters)
     elemwise,
     extra,
     fused,
+    random,
     scalar,
     shape,
     subtensor,

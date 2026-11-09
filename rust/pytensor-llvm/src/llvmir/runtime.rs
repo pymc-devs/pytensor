@@ -1,4 +1,4 @@
-//! Runtime functions generated code calls, and a runner for C ABI functions.
+//! A runner for C ABI functions (tests).
 
 use crate::abi::{PtArray, PtBuffer, PtCtx};
 use crate::dtype::DType;
@@ -8,80 +8,7 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyCapsule;
 
-/// # Safety
-/// `ctx` is the live call context; `msg` a NUL-terminated string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_rt_fail(ctx: *mut PtCtx, msg: *const std::ffi::c_char) {
-    // SAFETY: the function's contract.
-    unsafe {
-        let m = std::ffi::CStr::from_ptr(msg).to_string_lossy();
-        PtCtx::fail(ctx, 1, &m);
-    }
-}
-
-/// # Safety
-/// `ctx` is the live call context and `owner` writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_rt_alloc(ctx: *mut PtCtx, bytes: i64, owner: *mut *mut PtBuffer) -> *mut u8 {
-    // SAFETY: the function's contract.
-    unsafe {
-        if bytes < 0 {
-            *owner = std::ptr::null_mut();
-            PtCtx::fail(ctx, 1, &format!("negative allocation size {bytes}"));
-            return std::ptr::null_mut();
-        }
-        let (data, buf) = PtCtx::alloc(ctx, bytes as usize);
-        *owner = buf;
-        if data.is_null() {
-            PtCtx::fail(ctx, 1, &format!("could not allocate {bytes} bytes"));
-        }
-        data
-    }
-}
-
-/// # Safety
-/// `ctx` is the live call context.
-#[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_rt_ws_alloc(ctx: *mut PtCtx, bytes: i64) -> *mut u8 {
-    // SAFETY: the function's contract.
-    unsafe {
-        if bytes < 0 {
-            PtCtx::fail(ctx, 1, &format!("negative workspace size {bytes}"));
-            return std::ptr::null_mut();
-        }
-        let p = PtCtx::scratch(ctx, bytes as usize);
-        if p.is_null() {
-            PtCtx::fail(ctx, 1, &format!("could not allocate {bytes} bytes of workspace"));
-        }
-        p
-    }
-}
-
-/// # Safety
-/// `ctx` is the live call context.
-#[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_rt_ws_mark(ctx: *mut PtCtx) -> i64 {
-    // SAFETY: the function's contract.
-    unsafe { (*ctx).ws_mark() }
-}
-
-/// # Safety
-/// `ctx` is the live call context; `mark` came from `ptl_rt_ws_mark` in this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_rt_ws_release(ctx: *mut PtCtx, mark: i64) {
-    // SAFETY: the function's contract.
-    unsafe { (*ctx).ws_release(mark) }
-}
-
-pub fn runtime_symbols() -> Vec<(&'static str, usize)> {
-    vec![
-        ("ptl_rt_fail", ptl_rt_fail as *const () as usize),
-        ("ptl_rt_alloc", ptl_rt_alloc as *const () as usize),
-        ("ptl_rt_ws_alloc", ptl_rt_ws_alloc as *const () as usize),
-        ("ptl_rt_ws_mark", ptl_rt_ws_mark as *const () as usize),
-        ("ptl_rt_ws_release", ptl_rt_ws_release as *const () as usize),
-    ]
-}
+// Generated code calls the runtime functions of `crate::abi::runtime()` (`ptl_rt_*`).
 
 // ------------------------------------------------------------------ running C ABI functions
 
@@ -191,8 +118,9 @@ pub fn call_abi<'py>(
     // SAFETY: the caller promises `address` has the C ABI for these arguments.
     let f: AbiFn = unsafe { std::mem::transmute::<usize, AbiFn>(address) };
     // SAFETY: as above; arrays describe live numpy memory or empty output slots.
+    let mark = ctx.scratch_mark();
     let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), std::ptr::null(), ws.as_mut_ptr() as *mut u8) };
-    ctx.end_kernel();
+    ctx.scratch_release(mark);
     let n_in = inputs.len();
     if rc != 0 {
         for a in &arrays[n_in..] {

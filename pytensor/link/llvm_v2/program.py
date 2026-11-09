@@ -376,20 +376,30 @@ class Planner:
                         module=module)
         if isinstance(it, ProgramItem):
             node = it.node
-            modes = [OutMode.PROVIDED if repr_of(o.type).static else OutMode.ALLOCATED for o in node.outputs]
+            modes = [
+                OutMode.ABSENT if is_absent(o.type)
+                else OutMode.PROVIDED if repr_of(o.type).static
+                else OutMode.ALLOCATED
+                for o in node.outputs
+            ]
             sub = Planner(self.opts)
             prog = sub.plan(node.op.fgraph, output_modes=modes, input_layouts=[self.lay(k) for k in it.inputs])
+            # (values without data aren't arguments of the nested program either)
+            ins = [k for k, i in zip(it.inputs, node.inputs, strict=True) if not is_absent(i.type)]
+            present = [j for j, m in enumerate(modes) if m is not OutMode.ABSENT]
             # an allocated output is the inner value if it owns a buffer, else a C copy
             self.set_layouts(
                 it.outputs,
                 [
-                    Layout.c(o.type.ndim) if m is OutMode.PROVIDED or lay is None else lay.join(Layout.c(o.type.ndim), _shape(o.type), _isz(o.type))
+                    None if m is OutMode.ABSENT
+                    else Layout.c(o.type.ndim) if m is OutMode.PROVIDED or lay is None
+                    else lay.join(Layout.c(o.type.ndim), _shape(o.type), _isz(o.type))
                     for o, m, lay in zip(node.outputs, modes, sub.output_layouts, strict=True)
                 ],
             )
             self.stats.n_nested += 1
-            return Step(it.inputs, it.outputs, modes, [None] * len(modes), address=prog.address, env=prog.env,
-                        description=f"program: {node.op}", keepalive=prog)
+            return Step(ins, [it.outputs[j] for j in present], [modes[j] for j in present], [None] * len(present),
+                        address=prog.address, env=prog.env, description=f"program: {node.op}", keepalive=prog)
         node = it.node
         # constant scalar inputs are folded into the code
         folded = {
@@ -412,6 +422,7 @@ class Planner:
             self.stats.n_kernels += 1
             outs = self.provide(it.outputs, declared)
             self.set_layouts(outs, [o.layout for o in declared])
+            outs, modes, views = _present_outputs(declared, outs, modes, views)
             return Step(present, outs, modes, views, address=k.address, env=k.env, description=repr(k), keepalive=k)
         try:
             module = ir.Module(f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath)
@@ -424,6 +435,7 @@ class Planner:
             vmap = [o.view_of for o in nf.signature.outputs]  # (counts the step's inputs)
             outs = self.provide(it.outputs, nf.signature.outputs)
             self.set_layouts(outs, [o.layout for o in nf.signature.outputs])
+            outs, modes, vmap = _present_outputs(nf.signature.outputs, outs, modes, vmap)
             desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
             return Step(inputs, outs, modes, vmap, workspace=nf.workspace, description=desc, module=module)
         except NotImplementedError:
@@ -435,6 +447,10 @@ class Planner:
         from pytensor.link.llvm.numba_fallback import numba_fallback_kernel
 
         node = it.node
+        from pytensor.tensor.random.type import RandomType
+
+        if any(isinstance(v.type, RandomType) for v in (*node.inputs, *node.outputs)):
+            raise NotImplementedError(f"LLVM backend: no implementation of the random variable {node.op}")
         kernel = numba_fallback_kernel(node)
         self.stats.n_foreign += 1
         self.stats.foreign.append(str(node.op))
@@ -494,7 +510,17 @@ class Planner:
         self.stats.n_modules = len(modules)
         t2 = time.perf_counter()
 
-        prog = self.build(steps, in_keys, out_keys, output_modes or [OutMode.ALLOCATED] * len(out_keys))
+        # values without data (random generators) aren't inputs or outputs of the program
+        self.program_inputs = [pos for pos, v in enumerate(fgraph.inputs) if not is_absent(v.type)]
+        self.program_outputs = [pos for pos, v in enumerate(fgraph.outputs) if not is_absent(v.type)]
+        modes = output_modes or [OutMode.ALLOCATED] * len(out_keys)
+        self.input_contiguous = [self.input_contiguous[pos] for pos in self.program_inputs]
+        prog = self.build(
+            steps,
+            [in_keys[pos] for pos in self.program_inputs],
+            [out_keys[pos] for pos in self.program_outputs],
+            [modes[pos] for pos in self.program_outputs],
+        )
         self.stats.codegen_s = t1 - t0
         self.stats.compile_s = t2 - t1
         self.stats.plan_s = time.perf_counter() - t2
@@ -677,6 +703,12 @@ def toposort_items(items):
     return order
 
 
+def _present_outputs(declared, keys, modes, views):
+    """Drop the outputs without a value (random generators): they aren't step outputs."""
+    keep = [j for j, o in enumerate(declared) if o.mode is not OutMode.ABSENT]
+    return [keys[j] for j in keep], [modes[j] for j in keep], [views[j] for j in keep]
+
+
 def _shape(t):
     return tuple(None if s is None else int(s) for s in t.shape)
 
@@ -704,7 +736,47 @@ def _copy_node(t):
 
 
 def build_program(fgraph, options: Options | None = None):
-    """Plan and compile `fgraph`; returns (program, stats)."""
+    """Plan and compile `fgraph`; returns (callable, stats). The callable is the program,
+    or, when the graph has random generator inputs or outputs (values without data, see
+    `is_absent`), a wrapper that leaves them out of the call and returns each generator
+    output as the generator it came from (draws come from the program's own random
+    state)."""
     planner = Planner(options or Options())
     prog = planner.plan(fgraph)
-    return prog, planner.stats
+    n_in, n_out = len(fgraph.inputs), len(fgraph.outputs)
+    if planner.program_inputs == list(range(n_in)) and planner.program_outputs == list(range(n_out)):
+        return prog, planner.stats
+    ins, outs = planner.program_inputs, planner.program_outputs
+    sources = {pos: _generator_source(fgraph, o) for pos, o in enumerate(fgraph.outputs) if pos not in outs}
+
+    def call(*args):
+        res = prog(*[args[k] for k in ins])
+        full = [None] * n_out
+        for k, r in zip(outs, res, strict=True):
+            full[k] = r
+        for pos, src in sources.items():
+            full[pos] = None if src is None else args[src]
+        return full
+
+    call.program = prog
+    return call, planner.stats
+
+
+def _generator_source(fgraph, var):
+    """The position of the graph input a generator output passes on (through random
+    variables and copies), or None."""
+    seen = set()
+    while var.owner is not None and var not in seen:
+        seen.add(var)
+        node = var.owner
+        rng_inputs = [i for i in node.inputs if is_absent(i.type) and not _is_none_type(i.type)]
+        if not rng_inputs:
+            return None
+        var = rng_inputs[0]
+    return fgraph.inputs.index(var) if var in fgraph.inputs else None
+
+
+def _is_none_type(t):
+    from pytensor.tensor.type_other import NoneTypeT
+
+    return isinstance(t, NoneTypeT)

@@ -11,7 +11,7 @@ use llvm_sys::orc2::lljit::*;
 use llvm_sys::orc2::*;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 pub struct Jit {
     jit: LLVMOrcLLJITRef,
@@ -24,7 +24,6 @@ pub struct Jit {
 // the Mutex in `jit()`.
 unsafe impl Send for Jit {}
 
-static JIT: OnceLock<Mutex<Jit>> = OnceLock::new();
 
 /// SAFETY: `err` is a live LLVMErrorRef; this consumes it.
 unsafe fn err_to_string(err: LLVMErrorRef) -> String {
@@ -46,12 +45,13 @@ fn check(err: LLVMErrorRef, what: &str) -> Result<(), String> {
     }
 }
 
+/// The process-wide JIT (it lives in the runtime, `crate::abi::runtime()`).
 pub fn jit() -> &'static Mutex<Jit> {
-    JIT.get_or_init(|| Mutex::new(Jit::new().expect("failed to create LLJIT")))
+    crate::abi::runtime().jit()
 }
 
 impl Jit {
-    fn new() -> Result<Self, String> {
+    pub(crate) fn new() -> Result<Self, String> {
         crate::compile::init_llvm();
         // SAFETY: LLVM C API calls on handles created right here; every error is
         // checked before a handle is used.
@@ -86,7 +86,7 @@ impl Jit {
             let es = LLVMOrcLLJITGetExecutionSession(jit);
             let mut pairs: Vec<LLVMOrcCSymbolMapPair> = native::scalar_symbols()
                 .into_iter()
-                .chain(crate::llvmir::runtime::runtime_symbols())
+                .chain(crate::abi::runtime().functions.symbols())
                 .map(|(name, addr)| {
                     let c = CString::new(name).unwrap();
                     LLVMOrcCSymbolMapPair {

@@ -360,7 +360,7 @@ class EmitContext:
             off = self.ws_static
             self.ws_static += max(64, -(-n // 64) * 64)
             return b.gep_bytes(self.ws, b.const_int(m.i64, off))
-        p = b.rt_ws_alloc(self.ctx, nbytes)
+        p = b.rt_scratch(self.ctx, nbytes)
         self.check(b.icmp(m.ICmp.NE, p, b.null()), None)
         return p
 

@@ -131,13 +131,21 @@ def slot_type(ndim):
 
 @dataclass(frozen=True)
 class NoneRepr:
-    """NoneTypeT (e.g. unconstrained axes of SpecifyShape): no argument at all."""
+    """No value at all (NoneTypeT, random generators): no argument."""
+
+    @property
+    def ndim(self):
+        return None
 
 
 def is_absent(t) -> bool:
+    """Types whose values aren't passed at all: NoneTypeT, and random generators (random
+    numbers come from the call context, see DESIGN.md: the graph's rng values are
+    tokens without data)."""
+    from pytensor.tensor.random.type import RandomType
     from pytensor.tensor.type_other import NoneTypeT
 
-    return isinstance(t, NoneTypeT)
+    return isinstance(t, NoneTypeT | RandomType)
 
 
 def repr_of(t, layout: Layout | None = None):
