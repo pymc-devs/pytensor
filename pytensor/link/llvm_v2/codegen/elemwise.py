@@ -22,7 +22,8 @@ from pytensor.link.llvm_v2.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm_v2.codegen.function import llvm_emit
+from pytensor.link.llvm_v2.codegen.function import fresh_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm_v2.layout import PACKED, Layout, common_order
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.codegen.types import check_dtype, ir
 from pytensor.tensor.elemwise import CAReduce, Elemwise
@@ -56,6 +57,20 @@ def broadcast_shape(cx, node, inputs):
                 )
         shape.append(length if length is not None else b.const_int(m.i64, 1))
     return shape
+
+
+@llvm_outputs.register(Elemwise)
+def _(op, node, in_layouts):
+    """New memory in the memory order most inputs are packed in (C if there is none):
+    then all operands share one order and the loop is flat. Elemwise on transposed
+    inputs gives a transposed output instead of a strided loop."""
+    outs = []
+    for o in node.outputs:
+        shape = tuple(None if s is None else int(s) for s in o.type.shape)
+        order = common_order(in_layouts, shape)
+        lay = None if order is None else Layout.make(shape, order, [PACKED] * len(shape))
+        outs.append(fresh_output(o, lay))
+    return outs
 
 
 @llvm_emit.register(Elemwise)

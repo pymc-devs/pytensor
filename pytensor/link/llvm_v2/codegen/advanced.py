@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
 from pytensor.link.llvm_v2.codegen.emit import Array, cast, copy, for_each, load, mul, store
-from pytensor.link.llvm_v2.codegen.function import OutMode, llvm_emit, llvm_output_modes
+from pytensor.link.llvm_v2.codegen.function import OutMode, fresh_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.codegen.types import ir, repr_of
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, unflatten_index_variables
@@ -106,11 +106,10 @@ def element(cx, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
     return p
 
 
-@llvm_output_modes.register(AdvancedSubtensor)
-@llvm_output_modes.register(AdvancedIncSubtensor)
-def _(op, node):
-    r = repr_of(node.outputs[0].type)
-    return [(OutMode.PROVIDED if r.static else OutMode.ALLOCATED, None)]
+@llvm_outputs.register(AdvancedSubtensor)
+@llvm_outputs.register(AdvancedIncSubtensor)
+def _(op, node, in_layouts):
+    return [fresh_output(node.outputs[0])]
 
 
 @llvm_emit.register(AdvancedSubtensor)

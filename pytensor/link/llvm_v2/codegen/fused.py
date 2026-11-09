@@ -31,7 +31,7 @@ from pytensor.link.llvm_v2.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm_v2.codegen.function import OutMode, llvm_emit, llvm_output_modes
+from pytensor.link.llvm_v2.codegen.function import OutMode, fresh_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.layout import Layout
 from pytensor.link.llvm_v2.codegen.types import ScalarRepr, check_dtype, ir, repr_of
@@ -124,16 +124,9 @@ def fused_spec(op, node):
 def _register():
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
-    @llvm_output_modes.register(FusedElemwise)
-    def _(op, node):
-        modes = []
-        for o in node.outputs:
-            r = repr_of(o.type)
-            if isinstance(r, ScalarRepr):
-                modes.append((OutMode.SCALAR, None))
-            else:
-                modes.append((OutMode.PROVIDED if r.static else OutMode.ALLOCATED, None))
-        return modes
+    @llvm_outputs.register(FusedElemwise)
+    def _(op, node, in_layouts):
+        return [fresh_output(o) for o in node.outputs]
 
     @llvm_emit.register(FusedElemwise)
     def _(op, node, cx, inputs, outputs):

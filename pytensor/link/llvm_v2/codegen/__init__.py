@@ -28,6 +28,9 @@ from pytensor.link.llvm_v2.codegen.function import (
     OutMode,
     compile_node,
     llvm_emit,
-    llvm_output_modes,
+    fresh_output,
+    llvm_outputs,
+    node_outputs,
+    view_output,
     node_signature,
 )

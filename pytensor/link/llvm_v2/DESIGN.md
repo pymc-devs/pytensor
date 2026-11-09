@@ -42,11 +42,12 @@ don't matter and are always packed. C-contiguous is "all packed, identity order"
 Layouts are claims the code relies on (packed strides aren't passed, they're computed),
 so they come only from how a value is produced:
 
-* memory the planner provides (arena, fresh outputs) and every buffer generated code,
-  Rust kernels and Scan allocate is C-contiguous; constants are stored C-contiguous;
-* a view gets its layout from its input's by a rule per op (`llvm_view_layout`:
-  DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...); a view without a rule is
-  DYNAMIC;
+* new memory has the layout the op's `llvm_outputs` declares (default C-contiguous;
+  Elemwise follows its inputs); Rust kernels and Scan allocate C-contiguous, graph
+  outputs the planner provides are C-contiguous, constants are stored C-contiguous;
+* a view's layout follows from its input's, as the op's `llvm_outputs` declares it
+  (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; helpers in layout.py); a
+  view nothing is declared for is DYNAMIC;
 * numba fall-backs and graph inputs are DYNAMIC. With `input_layout="c"` the inputs are
   C-contiguous: Python calls copy other arrays, the C API rejects them.
 
@@ -108,8 +109,17 @@ in the caller and disappear after inlining.
 
 ## 3. Outputs
 
-Each output has a mode, decided by the node's dispatch when the function is generated
-(the default follows the types and `view_map`):
+How each output comes to be is declared per op by one dispatch,
+`llvm_outputs(op, node, in_layouts) -> [Output(repr, mode, view_of)]`: the mode and the
+layout (section 1a), from the input layouts. The default follows the types and
+`view_map` (C-contiguous new memory, views of unknown layout); ops register their own
+to describe views or to choose their outputs' layout (Elemwise allocates its output in
+the memory order most of its inputs share). The code must produce what is declared:
+allocated outputs in the declared layout, views with the declared layout. For a
+provided output the declared layout is a request: the provider (planner, compiled unit)
+decides what memory it gives, and the signature carries that layout (unstated: any
+strides). Rust kernels write provided memory as it is and allocate C-contiguous;
+numba fall-backs allocate with unknown layout.
 
 | mode | argument | the caller | the callee |
 |---|---|---|---|
@@ -125,7 +135,8 @@ views the caller sets the owner from the input the view lies in.
 
 **Layout.** Nothing is contiguous unless the signature says so (section 1a). A provided
 output's layout is part of the signature: by default any strides (e.g. a slice of a
-larger array); the planner always provides C-contiguous memory and says so. A callee
+larger array); the planner provides memory in the layout the op asks for when it is
+packed (arena values can have any memory order), C-contiguous for graph outputs. A callee
 allocating an output chooses its strides, and the layout inference records what it
 chooses (generated code and the Rust kernels allocate C-contiguous). Code reading an
 array checks contiguity at run time only where its layout doesn't settle it.

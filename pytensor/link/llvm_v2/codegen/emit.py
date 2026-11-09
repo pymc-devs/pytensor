@@ -58,6 +58,18 @@ def c_array(dtype, data, shape, strides) -> Array:
     return Array(dtype, data, list(shape), list(strides), Layout.c(len(shape)))
 
 
+def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
+    """An array at `data` packed in `layout` (all axes packed; default C-contiguous)."""
+    nd = len(shape)
+    static = [n.const_int for n in shape]
+    if layout is None:
+        layout = Layout.c(nd)
+    layout = Layout.make(static, layout.order, layout.strides)
+    if not layout.fully_packed(static):
+        raise ValueError(f"can't allocate an array of layout {layout}")
+    return Array(dtype, data, list(shape), layout.stride_values(b, itemsize(dtype), shape, {}), layout)
+
+
 def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
     """`a` iterated over the loop `shape`: axes of static length 1 in `a` (broadcast)
     and `zero_axes` get stride 0; the layout records that."""
@@ -238,6 +250,8 @@ class SlotOutput:
     #: allocate in the workspace instead of a runtime buffer (a temporary inside a
     #: compiled unit): the slot gets no owner
     temporary: bool = False
+    #: the (packed) layout `allocate` produces; default C-contiguous
+    layout: Layout = None
     done: bool = False
 
     def _write(self, data, shape, strides):
@@ -251,12 +265,12 @@ class SlotOutput:
             b.store(strides[a], b.gep(m.i64, sp, b.const_int(m.i64, a)))
 
     def allocate(self, shape: list) -> Array:
-        """A fresh C-contiguous buffer of `shape`; the slot owns it. (A view output may
-        allocate too, e.g. a reshape of a non-contiguous array: the owner it sets then
-        takes precedence over the viewed input's.)"""
+        """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
+        owns it. (A view output may allocate too, e.g. a reshape of a non-contiguous
+        array: the owner it sets then takes precedence over the viewed input's.)"""
         cx, b, m = self.cx, self.cx.b, ir()
         if self.temporary:
-            a = cx.temporary(self.dtype, shape)
+            a = cx.temporary(self.dtype, shape, self.layout)
             self._write(a.data, a.shape, a.strides)
             self.done = True
             return a
@@ -264,10 +278,10 @@ class SlotOutput:
         owner = b.field_ptr(_slot_type(self.ndim), self.slot, 3)
         data = b.rt_alloc(cx.ctx, nbytes, owner)
         cx.check(b.icmp(m.ICmp.NE, data, b.null()), None)
-        strides = c_strides(b, self.dtype, shape)
-        self._write(data, shape, strides)
+        a = packed_array(b, self.dtype, data, shape, self.layout)
+        self._write(data, shape, a.strides)
         self.done = True
-        return c_array(self.dtype, data, shape, strides)
+        return a
 
     def set_view(self, a: Array):
         """The output is `a`, which lies in the memory of input `view_of` (the caller
@@ -341,12 +355,12 @@ class EmitContext:
         self.check(b.icmp(m.ICmp.NE, p, b.null()), None)
         return p
 
-    def temporary(self, dtype, shape) -> Array:
-        """A C-contiguous temporary array in the workspace."""
+    def temporary(self, dtype, shape, layout: Layout | None = None) -> Array:
+        """A temporary array in the workspace, packed in `layout` (default C)."""
         b, m = self.b, ir()
         nbytes = mul(b, size(b, shape), b.const_int(m.i64, itemsize(dtype)))
         data = self.workspace(nbytes)
-        return c_array(dtype, data, shape, c_strides(b, dtype, shape))
+        return packed_array(b, dtype, data, shape, layout)
 
 
 # ------------------------------------------------------------------ loops
@@ -469,6 +483,7 @@ def copy(cx, src: Array, dst: Array):
 __all__ = [
     "Array",
     "c_array",
+    "packed_array",
     "loop_order",
     "loop_view",
     "EmitContext",
