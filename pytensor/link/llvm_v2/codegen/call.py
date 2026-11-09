@@ -1,15 +1,15 @@
-"""Calls from generated code to functions with the C ABI (DESIGN.md, section 2a).
+"""Calls from generated code to other kernels (DESIGN.md, section 2a).
 
-Rust kernels, numba implementations and nested programs all have the C ABI the
-interpreter calls (section 6). Generated code calls them the same way: it packs the
-arguments into `PtArray`s, calls the function through its handle and reads back what
-the callee wrote. A node implemented by such a function then has a node function like
-any other (`build_node_function(..., callee=...)`), so units and generated loops can
+Rust kernels, numba kernels and subprograms all have the kernel ABI the interpreter
+calls (section 6). Generated code calls them the same way: it packs the arguments into
+`PtArray`s, calls the kernel through its entry in the link table and reads back what
+the kernel wrote. A node implemented by such a kernel then has a node function like
+any other (`build_node_function(..., kernel=...)`), so units and generated loops can
 contain it.
 
-The handles (function address and the callee's env) aren't part of the IR, which must
-not depend on the process (the compile cache is keyed on it): they are in the calling
-function's `env`, two pointers per callee, in the order of a `Closure`.
+The addresses (of the kernel and of its config) aren't part of the IR, which must not
+depend on the process (the compile cache is keyed on it): they are entries of the
+calling kernel's link table, which is its config.
 """
 
 from __future__ import annotations
@@ -22,12 +22,14 @@ from pytensor.link.llvm_v2.codegen.types import PTARRAY_SIZE, ir, memory_type, p
 
 
 @dataclass
-class Callee:
-    """A function with the C ABI that generated code calls for a node."""
+class Kernel:
+    """A kernel that generated code calls for a node: a Rust kernel, a numba kernel or a
+    subprogram."""
 
     address: int
-    env: int
-    #: "standard" (ctx, args, env, ws) or "foreign" (ctx, args, env)
+    #: the kernel's config (`const void* config` of the kernel ABI)
+    config: int
+    #: "kernel" (ctx, args, config, frame) or "numba" (ctx, args, config)
     abi: str
     #: what it produces, per node output (`Output`s, `view_of` counting node inputs)
     outputs: list
@@ -36,39 +38,41 @@ class Callee:
 
 
 @dataclass
-class Closure:
-    """What a generated function finds in its `env`: pointer-sized slots holding the
-    handles of its callees (function, env: two slots) and the data of array constants
-    (one slot). The IR only refers to slot positions."""
+class LinkTable:
+    """The config of a generated kernel: pointer-sized entries holding the kernels it
+    calls (address, then their config: two entries) and the contents of its array
+    constants (one entry). The IR only refers to entry positions."""
 
-    slots: list = field(default_factory=list)
+    entries: list = field(default_factory=list)
     _keep: list = field(default_factory=list)
     _table: object = None
 
-    def add(self, callee: Callee) -> int:
-        """Slot of `callee`'s handle (its env follows in the next slot)."""
-        self.slots += [callee.address, callee.env]
-        self._keep.append(callee.keepalive)
-        return len(self.slots) - 2
+    def link_kernel(self, kernel: Kernel) -> int:
+        """The entry of `kernel`'s address (its config is in the next entry)."""
+        self.entries += [kernel.address, kernel.config]
+        self._keep.append(kernel.keepalive)
+        return len(self.entries) - 2
 
-    def add_data(self, array: np.ndarray) -> int:
-        """Slot holding the address of `array`'s data (kept alive with the closure)."""
-        self.slots.append(array.ctypes.data)
+    def link_array(self, array: np.ndarray) -> int:
+        """The entry holding the address of `array`'s contents (kept alive with the
+        table)."""
+        self.entries.append(array.ctypes.data)
         self._keep.append(array)
-        return len(self.slots) - 1
+        return len(self.entries) - 1
 
     @property
     def table(self):
-        """The env: the slots as a uint64 array (None if empty). Keep it (and
-        `keepalive`) alive while the code runs."""
-        if not self.slots:
+        """The entries as a uint64 array (None if empty). Keep it (and `keepalive`)
+        alive while the code runs."""
+        if not self.entries:
             return None
-        if self._table is None or len(self._table) != len(self.slots):
-            self._table = np.array(self.slots, dtype=np.uint64)
+        if self._table is None or len(self._table) != len(self.entries):
+            self._table = np.array(self.entries, dtype=np.uint64)
         return self._table
 
     @property
-    def env(self) -> int:
+    def address(self) -> int:
+        """The table's address: the config of the kernel it belongs to (0 if empty)."""
         t = self.table
         return 0 if t is None else t.ctypes.data
 
@@ -77,26 +81,26 @@ class Closure:
         return (self.table, self._keep)
 
 
-def load_slot(cx, index: int):
-    """The pointer in slot `index` of the env."""
-    b, m = cx.b, ir()
-    return b.load(m.ptr, b.gep_bytes(cx.env, b.const_int(m.i64, 8 * index)))
+def linked(cg, index: int):
+    """The pointer in entry `index` of the link table."""
+    b, m = cg.b, ir()
+    return b.load(m.ptr, b.gep_bytes(cg.config, b.const_int(m.i64, 8 * index)))
 
 
-def emit_call(cx, callee: Callee, index: int, inputs: list, outputs: list) -> None:
-    """Call `callee` (handle in env slot `index`, see `Closure.add`) with `inputs` ((Array or scalar value
-    or None for absent ones, dtype) pairs) and `outputs` (ProvidedOutput, SlotOutput,
-    or None).
+def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> None:
+    """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
+    with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
+    `outputs` (ProvidedOutput, SlotOutput, or None).
 
-    Allocated and view outputs land in their slots, owner included, also when the call
-    fails (the caller releases them); a failure returns its code (the callee set the
-    message). The callee's scratch is released after the call."""
+    Allocated and view outputs land in their output slots, owner included, also when the
+    call fails (the caller releases them); a failure returns its code (the kernel set
+    the message). The kernel's scratch is released after the call."""
     from pytensor.link.llvm_v2.codegen.emit import Array, ProvidedOutput, SlotOutput, store
 
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     pa = ptarray_type()
     i64 = m.i64
-    entries = []  # (data, shape ptr, strides ptr, ndim, slot output or None)
+    args_of = []  # per argument: (data, shape ptr, strides ptr, ndim, SlotOutput or None)
 
     def storage(values):
         p = b.alloca(m.Type.array(i64, max(len(values), 1)))
@@ -108,26 +112,26 @@ def emit_call(cx, callee: Callee, index: int, inputs: list, outputs: list) -> No
         if a is None:
             continue
         if isinstance(a, Array):
-            entries.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
+            args_of.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
         else:  # a scalar: a 0-d array
             p = b.alloca(memory_type(dtype))
             store(b, dtype, a, p)
-            entries.append((p, storage([]), storage([]), 0, None))
+            args_of.append((p, storage([]), storage([]), 0, None))
     for o in outputs:
         if o is None:
             continue
         if isinstance(o, ProvidedOutput):
             a = o.array
-            entries.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
+            args_of.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
         elif isinstance(o, SlotOutput):
             st = slot_type(o.ndim)
-            entries.append((b.null(), b.field_ptr(st, o.slot, 1), b.field_ptr(st, o.slot, 2), o.ndim, o))
+            args_of.append((b.null(), b.field_ptr(st, o.slot, 1), b.field_ptr(st, o.slot, 2), o.ndim, o))
         else:
-            raise NotImplementedError(f"{callee.description}: a {type(o).__name__} output")
+            raise NotImplementedError(f"{kernel.description}: a {type(o).__name__} output")
 
-    args = b.alloca(m.Type.array(pa, max(len(entries), 1)))
+    args = b.alloca(m.Type.array(pa, max(len(args_of), 1)))
     ptrs = []
-    for k, (data, shape, strides, nd, _) in enumerate(entries):
+    for k, (data, shape, strides, nd, _) in enumerate(args_of):
         p = b.gep_bytes(args, b.const_int(i64, k * PTARRAY_SIZE))
         b.store(data, b.field_ptr(pa, p, 0))
         b.store(shape, b.field_ptr(pa, p, 1))
@@ -136,14 +140,14 @@ def emit_call(cx, callee: Callee, index: int, inputs: list, outputs: list) -> No
         b.store(b.const_int(i64, nd), b.field_ptr(pa, p, 4))
         ptrs.append(p)
 
-    fn = load_slot(cx, index)
-    fenv = load_slot(cx, index + 1)
-    mark = b.rt_scratch_mark(cx.ctx)
-    call_args = [cx.ctx, args, fenv] + ([b.null()] if callee.abi == "standard" else [])
+    fn = linked(cg, index)
+    config = linked(cg, index + 1)
+    mark = b.rt_scratch_mark(cg.ctx)
+    call_args = [cg.ctx, args, config] + ([b.null()] if kernel.abi == "kernel" else [])
     rc = b.call_ptr(fn, call_args, m.i32)
-    b.rt_scratch_release(cx.ctx, mark)
+    b.rt_scratch_release(cg.ctx, mark)
 
-    for p, (_, _, _, _, o) in zip(ptrs, entries, strict=True):
+    for p, (_, _, _, _, o) in zip(ptrs, args_of, strict=True):
         if o is None:
             continue
         st = slot_type(o.ndim)
@@ -154,4 +158,4 @@ def emit_call(cx, callee: Callee, index: int, inputs: list, outputs: list) -> No
         b.ret(rc)
 
 
-__all__ = ["Callee", "Closure", "emit_call", "load_slot"]
+__all__ = ["Kernel", "LinkTable", "call_kernel", "linked"]

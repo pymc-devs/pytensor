@@ -95,7 +95,7 @@ def test_views_feed_specialized_code():
     ]
     values = [rng.normal(size=(6, 7)), rng.normal(size=(6, 7))]
     check_against_numpy([x, y], outs, values)
-    # with C-contiguous inputs, views of them are known too: steps are specialized
+    # with C-contiguous inputs, views of them are known too: tasks are specialized
     f = check_against_numpy([x, y], outs, values, mode=CHECKED.clone(link_kwargs={"input_layout": "c"}))
     dump = f.maker.linker.compiled.dump()
     assert "[?, P0]" in dump and "[P0, P1]" in dump, dump
@@ -122,7 +122,7 @@ def test_c_inputs_are_checked_by_the_c_api():
     assert "(C-contiguous)" in p.dump()
     fn = p.c_function()
     a = Api.from_address(p.c_api_table())
-    new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.state_new)
+    new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.session_new)
     call = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.POINTER(PtArray))(a.call)
     err = ctypes.CFUNCTYPE(ctypes.c_char_p, ctypes.c_void_p)(a.last_error)
     st = new(fn)
@@ -134,11 +134,11 @@ def test_c_inputs_are_checked_by_the_c_api():
     ins, k1 = as_ptarrays([v[:5]])
     assert call(st, ins, outs) == 0
     np.testing.assert_allclose(out, np.exp(v[:5]))
-    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.state_free)(st)
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.session_free)(st)
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)
 
 
-def test_scan_step_gets_row_layouts():
+def test_scan_body_gets_row_layouts():
     x = pt.dmatrix("x")
     w = pt.dvector("w")
     res = pytensor.scan(
@@ -159,10 +159,10 @@ def test_layout_check_catches_a_wrong_claim():
     build_abi_wrapper(m, nf, "abi", check_layouts=True)
     c = m.compile(cache=False)
     v = rng.normal(size=(3, 4))
-    (r,) = ir.call_abi(c.address("abi"), [v], [(np.dtype("float64"), 2)], nf.workspace)
+    (r,) = ir.call_abi(c.address("abi"), [v], [(np.dtype("float64"), 2)], nf.frame_size)
     np.testing.assert_allclose(r, np.exp(v))
     with pytest.raises(Exception, match="layout check"):
-        ir.call_abi(c.address("abi"), [v.T], [(np.dtype("float64"), 2)], nf.workspace)
+        ir.call_abi(c.address("abi"), [v.T], [(np.dtype("float64"), 2)], nf.frame_size)
 
 
 def test_specialized_signature_passes_fewer_strides():
@@ -290,7 +290,7 @@ def test_provided_layouts_are_binding():
     t = pt.tensor("t", shape=(4, 6))
     mode = CHECKED.clone(link_kwargs={"input_layout": "c", "numba_fallback": False})
     out = pt.exp(s.T) * t.T  # declared: provided memory in the inputs' (transposed) order
-    # as steps of the program (inside a compiled unit the unit does the same)
+    # as tasks of the program (inside a compiled unit the unit does the same)
     f = pytensor.function([s, t], out, mode=mode.excluding("llvm_units"))
     g = pytensor.function([s, t], out, mode=mode)
     p = f.maker.linker.compiled
@@ -340,17 +340,17 @@ def test_view_layout_is_checked_when_generating():
 
 def test_kernels_declare_their_outputs():
     from pytensor.link.llvm_v2.codegen.function import OutMode
-    from pytensor.link.llvm_v2.kernels import kernel_outputs, llvm_kernel
+    from pytensor.link.llvm_v2.kernels import rust_kernel_outputs, rust_kernel
 
     x = pt.dmatrix("x")
     node = x.T.owner
-    k = llvm_kernel(node.op, node, [C(2)])
-    (o,) = kernel_outputs(k, node, [C(2)])
+    k = rust_kernel(node.op, node, [C(2)])
+    (o,) = rust_kernel_outputs(k, node, [C(2)])
     assert o.mode is OutMode.VIEW and o.view_of == 0 and o.layout == T2
     # the Rust declaration agrees with the one for generated code
     assert o.layout == node_outputs(node, [C(2)])[0].layout
     a = pt.tensor("a", shape=(3, 4))
     for out, mode in [(pt.dot(x, x), OutMode.ALLOCATED), (pt.dot(a, a.T), OutMode.PROVIDED)]:
         node = out.owner
-        (o,) = kernel_outputs(llvm_kernel(node.op, node, None), node, None)
+        (o,) = rust_kernel_outputs(rust_kernel(node.op, node, None), node, None)
         assert o.mode is mode and o.layout == C(2)

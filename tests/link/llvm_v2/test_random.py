@@ -142,8 +142,8 @@ def test_c_api_seed():
     p = f.maker.linker.compiled
     fn = p.c_function()
     a = Api.from_address(p.c_api_table())
-    new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.state_new)
-    free = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.state_free)
+    new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.session_new)
+    free = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.session_free)
     seed = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint64)(a.seed)
     call = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.POINTER(PtArray))(a.call)
 

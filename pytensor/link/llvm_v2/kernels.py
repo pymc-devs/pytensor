@@ -1,10 +1,10 @@
 """Precompiled Rust kernels for nodes the interpreter runs directly.
 
-`llvm_kernel(op, node, in_layouts)` returns a `pytensor_llvm.rt.Kernel` (function
+`rust_kernel(op, node, in_layouts)` returns a `pytensor_llvm.rt.RustKernel` (function
 address + environment) or None when the node has no Rust kernel; `in_layouts` are the
 inputs' layouts (layout.py; None where unknown). A kernel declares how it produces its
 outputs and in which layouts (`Kernel.outputs`, in Rust next to the kernel; the
-counterpart of `llvm_outputs` for generated code): `kernel_outputs` reads that.
+counterpart of `llvm_outputs` for generated code): `rust_kernel_outputs` reads that.
 """
 
 from __future__ import annotations
@@ -35,13 +35,13 @@ def fresh_mode(out):
 
 
 @singledispatch
-def llvm_kernel(op, node, in_layouts=None):
+def rust_kernel(op, node, in_layouts=None):
     """A Rust kernel for `node`, or None. The kernel chooses how its outputs are
     produced and declares it (`Kernel.outputs`, next to the kernel in Rust)."""
     return None
 
 
-def kernel_outputs(kernel, node, in_layouts) -> list[Output]:
+def rust_kernel_outputs(kernel, node, in_layouts) -> list[Output]:
     """What `kernel` declares about its outputs, as the `Output`s of a signature."""
     from pytensor.link.llvm_v2.codegen.function import known_layouts
 
@@ -55,13 +55,13 @@ def kernel_outputs(kernel, node, in_layouts) -> list[Output]:
     return outs
 
 
-@llvm_kernel.register(DimShuffle)
+@rust_kernel.register(DimShuffle)
 def _(op, node, in_layouts=None):
     return rt().DimShuffle([None if o == "x" else int(o) for o in op.new_order])
 
 
-@llvm_kernel.register(ViewOp)
-@llvm_kernel.register(SpecifyShape)
+@rust_kernel.register(ViewOp)
+@rust_kernel.register(SpecifyShape)
 def _(op, node, in_layouts=None):
     from pytensor.link.llvm_v2.codegen.types import is_absent
 
@@ -70,13 +70,13 @@ def _(op, node, in_layouts=None):
     return rt().DimShuffle(list(range(node.outputs[0].type.ndim)))
 
 
-@llvm_kernel.register(DeepCopyOp)
+@rust_kernel.register(DeepCopyOp)
 def _(op, node, in_layouts=None):
     out = node.outputs[0]
     return rt().Copy(fresh_mode(out), np.dtype(out.type.dtype))
 
 
-@llvm_kernel.register(Dot)
+@rust_kernel.register(Dot)
 def _(op, node, in_layouts=None):
     a, b = node.inputs
     out = node.outputs[0]
@@ -101,7 +101,7 @@ def _register_more():
     from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
     from pytensor.tensor.sort import SortOp
 
-    @llvm_kernel.register(SortOp)
+    @rust_kernel.register(SortOp)
     def _(op, node, in_layouts=None):
         x = node.inputs[0]
         if x.type.ndim == 0 or x.type.dtype not in ("float64", "float32", "int64"):
@@ -109,36 +109,36 @@ def _register_more():
         axis = int(op.axis) % x.type.ndim
         return rt().Sort(fresh_mode(node.outputs[0]), np.dtype(x.type.dtype), axis, op.kind in ("mergesort", "stable"))
 
-    @llvm_kernel.register(Cholesky)
+    @rust_kernel.register(Cholesky)
     def _(op, node, in_layouts=None):
         dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2:
             return None
         return rt().Cholesky(fresh_mode(node.outputs[0]), dt, bool(op.lower))
 
-    @llvm_kernel.register(SolveTriangular)
+    @rust_kernel.register(SolveTriangular)
     def _(op, node, in_layouts=None):
         dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2 or node.inputs[1].type.ndim not in (1, 2):
             return None
         return rt().SolveTriangular(fresh_mode(node.outputs[0]), dt, bool(op.lower), bool(op.unit_diagonal))
 
-    @llvm_kernel.register(Scan)
+    @rust_kernel.register(Scan)
     def _(op, node, in_layouts=None):
         import dataclasses
 
         from pytensor.link.llvm_v2.program import Planner, current_options
 
         info = op.info
-        # the step's inputs aren't graph inputs: their layouts come from the kernel
+        # the body's inputs aren't graph inputs: their layouts come from the kernel
         planner = Planner(dataclasses.replace(current_options(), input_layout="any"))
-        # the step program returns every output allocated; static ones use memory the
+        # the loop body returns every output allocated; static ones use memory the
         # Scan kernel provides
-        step_modes = [
+        body_modes = [
             OutMode.PROVIDED if all(s is not None for s in getattr(o.type, "shape", (None,))) else OutMode.ALLOCATED
             for o in op.fgraph.outputs
         ]
-        step = planner.plan(op.fgraph, output_modes=step_modes, input_layouts=_step_input_layouts(op, node, in_layouts))
+        body = planner.plan(op.fgraph, output_modes=body_modes, input_layouts=_body_input_layouts(op, node, in_layouts))
 
         def taps(slices):
             return [[int(t) for t in s] for s in slices]
@@ -153,14 +153,14 @@ def _register_more():
             info.n_nit_sot,
             info.n_non_seqs,
             bool(info.as_while),
-            step,
+            body,
             [np.dtype(i.type.dtype) for i in node.inputs],
             [np.dtype(o.type.dtype) for o in op.fgraph.outputs],
         )
 
 
-def _step_input_layouts(op, node, in_layouts):
-    """What the Scan kernel passes the step program: rows of the sequences, rows of its
+def _body_input_layouts(op, node, in_layouts):
+    """What the Scan kernel passes the loop body: rows of the sequences, rows of its
     own C-contiguous state buffers, whole untraced buffers (C-contiguous) and the
     non-sequences as they are."""
     from pytensor.link.llvm_v2.layout import Layout, remove_axis, shape_of, itemsize_of

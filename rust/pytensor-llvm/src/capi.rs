@@ -1,6 +1,6 @@
 //! C API for calling compiled functions without Python. See `include/pytensor_llvm.h`.
 //!
-//! A `PtFunction*` is `Arc::into_raw` of the `Program`; a `PtCallState*` owns a clone of
+//! A `PtFunction*` is `Arc::into_raw` of the `Program`; a `PtSession*` owns a clone of
 //! that Arc plus the per-thread `CallState`. Every entry point catches panics so they
 //! never unwind into C.
 
@@ -19,7 +19,7 @@ pub struct PtTypeInfo {
     pub static_shape: *const i64,
 }
 
-pub struct PtCallState {
+pub struct PtSession {
     prog: Arc<Program>,
     st: CallState,
     err: CString,
@@ -35,13 +35,13 @@ pub struct PtFunctionApi {
     pub n_outputs: unsafe extern "C" fn(*const Program) -> usize,
     pub input_type: unsafe extern "C" fn(*const Program, usize, *mut PtTypeInfo) -> i32,
     pub output_type: unsafe extern "C" fn(*const Program, usize, *mut PtTypeInfo) -> i32,
-    pub state_new: unsafe extern "C" fn(*const Program) -> *mut PtCallState,
-    pub state_free: unsafe extern "C" fn(*mut PtCallState),
-    pub call: unsafe extern "C" fn(*mut PtCallState, *const PtArray, *mut PtArray) -> i32,
-    pub last_error: unsafe extern "C" fn(*const PtCallState) -> *const c_char,
+    pub session_new: unsafe extern "C" fn(*const Program) -> *mut PtSession,
+    pub session_free: unsafe extern "C" fn(*mut PtSession),
+    pub call: unsafe extern "C" fn(*mut PtSession, *const PtArray, *mut PtArray) -> i32,
+    pub last_error: unsafe extern "C" fn(*const PtSession) -> *const c_char,
     pub buffer_decref: unsafe extern "C" fn(*mut PtBuffer),
-    pub seed: unsafe extern "C" fn(*mut PtCallState, u64),
-    pub set_parallel: unsafe extern "C" fn(*mut PtCallState, i32),
+    pub seed: unsafe extern "C" fn(*mut PtSession, u64),
+    pub set_parallel: unsafe extern "C" fn(*mut PtSession, i32),
 }
 
 /// Hand out a new reference to `prog` as a `PtFunction*`.
@@ -53,7 +53,7 @@ pub fn function_handle(prog: &Arc<Program>) -> *const Program {
 // in pytensor_llvm.h; the caller's responsibility, not checkable here):
 // - `f` is a live `PtFunction*`: from `c_function()` / `function_incref`, not yet
 //   released. It is `Arc::into_raw` of a `Program`.
-// - `s` is a live `PtCallState*` from `state_new`, used by one thread at a time.
+// - `s` is a live `PtSession*` from `session_new`, used by one thread at a time.
 // - out-pointers point to writable memory of the right type.
 // Within that contract the functions are sound: everything they read through the
 // arrays passed to `call` is validated first (see `call`).
@@ -108,7 +108,7 @@ unsafe extern "C" fn output_type(f: *const Program, i: usize, out: *mut PtTypeIn
     0
 }
 
-unsafe extern "C" fn state_new(f: *const Program) -> *mut PtCallState {
+unsafe extern "C" fn session_new(f: *const Program) -> *mut PtSession {
     // a new strong reference, owned by the state
     // SAFETY: `f` is live; the state owns the new reference.
     let prog = unsafe {
@@ -116,12 +116,12 @@ unsafe extern "C" fn state_new(f: *const Program) -> *mut PtCallState {
         Arc::from_raw(f)
     };
     let st = prog.new_state();
-    Box::into_raw(Box::new(PtCallState { prog, st, err: CString::default() }))
+    Box::into_raw(Box::new(PtSession { prog, st, err: CString::default() }))
 }
 
-unsafe extern "C" fn state_free(s: *mut PtCallState) {
+unsafe extern "C" fn session_free(s: *mut PtSession) {
     if !s.is_null() {
-        // SAFETY: `s` came from state_new and is freed once.
+        // SAFETY: `s` came from session_new and is freed once.
         drop(unsafe { Box::from_raw(s) });
     }
 }
@@ -130,7 +130,7 @@ unsafe extern "C" fn state_free(s: *mut PtCallState) {
 /// caller pointer, the input/output counts come from the Program and each array's
 /// `ndim` and shape/stride pointers are checked; `set_input_raw` and `execute` then
 /// validate data, shapes, strides, alignment and output overlap.
-unsafe extern "C" fn call(s: *mut PtCallState, inputs: *const PtArray, outputs: *mut PtArray) -> i32 {
+unsafe extern "C" fn call(s: *mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> i32 {
     // SAFETY: `s` is live and used by this thread only (contract).
     let s = unsafe { &mut *s };
     let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
@@ -187,17 +187,17 @@ unsafe extern "C" fn call(s: *mut PtCallState, inputs: *const PtArray, outputs: 
     1
 }
 
-unsafe extern "C" fn last_error(s: *const PtCallState) -> *const c_char {
+unsafe extern "C" fn last_error(s: *const PtSession) -> *const c_char {
     // SAFETY: `s` is live; the string lives until the next call on `s`.
     unsafe { (*s).err.as_ptr() }
 }
 
-unsafe extern "C" fn seed(s: *mut PtCallState, seed: u64) {
+unsafe extern "C" fn seed(s: *mut PtSession, seed: u64) {
     // SAFETY: `s` is live and used by this thread only (contract).
     unsafe { (*s).st.ctx.seed(seed) }
 }
 
-unsafe extern "C" fn set_parallel(s: *mut PtCallState, on: i32) {
+unsafe extern "C" fn set_parallel(s: *mut PtSession, on: i32) {
     // SAFETY: `s` is live and used by this thread only (contract).
     unsafe { (*s).st.ctx.parallel = on != 0 }
 }
@@ -218,8 +218,8 @@ pub static API: PtFunctionApi = PtFunctionApi {
     n_outputs,
     input_type,
     output_type,
-    state_new,
-    state_free,
+    session_new,
+    session_free,
     call,
     last_error,
     buffer_decref,

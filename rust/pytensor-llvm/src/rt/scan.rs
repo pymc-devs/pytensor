@@ -1,15 +1,15 @@
-//! Scan as a kernel: a Rust loop around the step function, which is a nested program.
+//! Scan as a kernel: a Rust loop around the loop body, which is a subprogram.
 //!
 //! Buffer conventions follow PyTensor's Scan (and its numba implementation): every
 //! traced output (mit-mot, mit-sot, sit-sot) has a buffer whose first rows hold the
-//! initial taps; the step reads tap `k` at row `(i + lookback + k) % len` and writes at
+//! initial taps; the body reads tap `k` at row `(i + lookback + k) % len` and writes at
 //! `(i + lookback + out_tap) % len`. After the loop, buffers shorter than the full trace
-//! are rotated so the last value is at the end, while-loops are truncated to the steps
-//! taken, and unused rows of regular loops are zeroed. nit-sot buffers are allocated once
-//! the first step's output shape is known.
+//! are rotated so the last value is at the end, while-loops are truncated to the iterations
+//! run, and unused rows of regular loops are zeroed. nit-sot buffers are allocated once
+//! the first iteration's output shape is known.
 //!
-//! Step outputs with static shapes are written into memory this kernel provides; the
-//! others come back as buffers of the step program. Either way they are copied into
+//! Body outputs with static shapes are written into memory this kernel provides; the
+//! others come back as buffers of the loop body. Either way they are copied into
 //! their rows, so a circular buffer whose output row coincides with an input tap is
 //! still correct.
 
@@ -31,12 +31,12 @@ pub struct ScanInfo {
     pub as_while: bool,
 }
 
-pub struct ScanEnv {
+pub struct ScanConfig {
     pub info: ScanInfo,
-    pub step: Arc<Program>,
+    pub body: Arc<Program>,
     pub outer_in_dtypes: Vec<DType>,
     pub inner_out_dtypes: Vec<DType>,
-    /// the Python step program: keeps its compiled code and kernels alive
+    /// the Python loop body: keeps its compiled code and kernels alive
     pub keepalive: pyo3::Py<pyo3::PyAny>,
 }
 
@@ -99,12 +99,12 @@ impl Buf {
 
     /// Copy a valid array of this buffer's row shape into row `r`.
     fn write_row(&self, r: i64, src: &PtArray) -> Result<(), String> {
-        // SAFETY: `src` is a valid array (a step output or input).
+        // SAFETY: `src` is a valid array (a body output or input).
         let (sh, st) = unsafe { (src.shape(), src.strides()) };
         if sh != &self.shape[1..] {
-            return Err(format!("Scan: step output has shape {sh:?}, expected {:?}", &self.shape[1..]));
+            return Err(format!("Scan: body output has shape {sh:?}, expected {:?}", &self.shape[1..]));
         }
-        // SAFETY: row r has this shape (C-contiguous) and doesn't overlap `src` (step
+        // SAFETY: row r has this shape (C-contiguous) and doesn't overlap `src` (body
         // outputs are fresh or provided temporaries).
         unsafe { copy_strided(src.data, sh, st, self.row(r), &self.strides[1..], self.itemsize as usize) };
         Ok(())
@@ -129,10 +129,10 @@ struct Traced {
 /// args = outer inputs ++ outer outputs (all allocated by this kernel).
 ///
 /// # Safety
-/// The kernel ABI; `env` is a `ScanEnv` matching the arguments.
-pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, env: *const u8, _ws: *mut u8) -> i32 {
+/// The kernel ABI; `config` is a `ScanConfig` matching the arguments.
+pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
     // SAFETY: the function's contract.
-    let (d, c) = unsafe { (&*(env as *const ScanEnv), &mut *ctx) };
+    let (d, c) = unsafe { (&*(config as *const ScanConfig), &mut *ctx) };
     let mut owned: Vec<OwnedBuf> = Vec::new();
     // SAFETY: the function's contract.
     match unsafe { run(c, args, d, &mut owned) } {
@@ -150,7 +150,7 @@ pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, env:
 
 /// # Safety
 /// As for `k_scan`.
-unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<OwnedBuf>) -> Result<(), String> {
+unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut Vec<OwnedBuf>) -> Result<(), String> {
     let info = &d.info;
     // SAFETY: args holds every outer input and output (the contract).
     let arg = |i: usize| unsafe { *args.add(i) };
@@ -165,7 +165,7 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
     let n_outer_in = o_ns + info.n_non_seqs;
     // SAFETY: n_steps is a valid 0-d integer array.
     let n_steps = unsafe { read_int(&arg(0), d.outer_in_dtypes[0]) }.max(0);
-    let step = &*d.step;
+    let body = &*d.body;
 
     // ---- buffers: copies of the outer buffers (the loop writes into them)
     let copy_of = |a: PtArray, dt: DType, owned: &mut Vec<OwnedBuf>| -> Result<Buf, String> {
@@ -200,7 +200,7 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
         // SAFETY: nit-sot lengths are valid 0-d integer arrays.
         let len = unsafe { read_int(&arg(o_nit + j), d.outer_in_dtypes[o_nit + j]) }.max(0);
         nit_len.push(len);
-        nit.push(match step.output_static_shape(first_nit_out + j) {
+        nit.push(match body.output_static_shape(first_nit_out + j) {
             Some(s) => {
                 let mut shape = vec![len];
                 shape.extend(s);
@@ -210,24 +210,24 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
         });
     }
 
-    // ---- step outputs with static shapes go into temporaries we provide
+    // ---- body outputs with static shapes go into temporaries we provide
     let mut temps: Vec<Option<Buf>> = Vec::new();
     let mut temp_owned = Vec::new();
-    for o in 0..step.n_outputs() {
-        temps.push(match step.output_static_shape(o) {
+    for o in 0..body.n_outputs() {
+        temps.push(match body.output_static_shape(o) {
             Some(s) => Some(Buf::new(s, d.inner_out_dtypes[o].itemsize() as i64, &mut temp_owned)?),
             None => None,
         });
     }
     let provided: Vec<Option<*mut u8>> = temps.iter().map(|t| t.as_ref().map(|b| b.data)).collect();
 
-    let mut st = step.take_state();
-    let mut step_in: Vec<PtArray> = Vec::new();
+    let mut st = body.take_memory();
+    let mut body_in: Vec<PtArray> = Vec::new();
     let mut i: i64 = 0;
     let mut stop = false;
     let mut result: Result<(), String> = Ok(());
     while i < n_steps && !stop {
-        step_in.clear();
+        body_in.clear();
         for k in 0..info.n_seqs {
             let a = arg(o_seq + k);
             // SAFETY: sequences are valid arrays.
@@ -237,7 +237,7 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
                 break;
             }
             // SAFETY: row i of a sequence (i < its length) and its trailing axes.
-            step_in.push(unsafe {
+            body_in.push(unsafe {
                 PtArray { data: a.data.offset((i * sts[0]) as isize), shape: a.shape.add(1), strides: a.strides.add(1), owner: std::ptr::null_mut(), ndim: a.ndim - 1 }
             });
         }
@@ -248,33 +248,33 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
             let len = t.buf.len().max(1);
             for k in 0..t.in_taps.len() {
                 let r = (i + t.lookback + t.in_taps[k]).rem_euclid(len);
-                step_in.push(t.buf.view(Some(r)));
+                body_in.push(t.buf.view(Some(r)));
             }
         }
         for u in untraced.iter_mut() {
-            step_in.push(u.view(None));
+            body_in.push(u.view(None));
         }
         for k in 0..info.n_non_seqs {
-            step_in.push(arg(o_ns + k));
+            body_in.push(arg(o_ns + k));
         }
 
-        // run the step
+        // run the body
         let r = (|| -> Result<(), String> {
-            for (k, a) in step_in.iter().enumerate() {
+            for (k, a) in body_in.iter().enumerate() {
                 // SAFETY: valid arrays (views into live buffers or outer inputs).
                 let (sh, sts) = unsafe { (a.shape().to_vec(), a.strides().to_vec()) };
-                step.set_input(&mut st, k, a.data, &sh, &sts)?;
+                body.set_input(&mut st, k, a.data, &sh, &sts)?;
             }
-            step.execute(&mut st, ctx, &provided)
+            body.execute(&mut st, ctx, &provided)
         })();
         if let Err(m) = r {
-            result = Err(format!("in Scan step: {m}"));
-            step.finish(&mut st);
+            result = Err(format!("in a Scan iteration: {m}"));
+            body.finish(&mut st);
             break;
         }
-        let outs: Vec<PtArray> = (0..step.n_outputs()).map(|o| step.output_view(&st, o)).collect();
+        let outs: Vec<PtArray> = (0..body.n_outputs()).map(|o| body.output_view(&st, o)).collect();
 
-        // write the step outputs into their rows
+        // write the body outputs into their rows
         let mut q = 0;
         let mut r: Result<(), String> = Ok(());
         for t in traced.iter_mut() {
@@ -287,7 +287,7 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
         }
         for j in 0..info.n_nit_sot {
             if nit[j].is_none() {
-                // SAFETY: a step output.
+                // SAFETY: a body output.
                 let mut shape = vec![nit_len[j]];
                 shape.extend(unsafe { outs[q].shape() });
                 nit[j] = Some(Buf::new(shape, d.inner_out_dtypes[first_nit_out + j].itemsize() as i64, owned)?);
@@ -299,28 +299,28 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
             q += 1;
         }
         for u in untraced.iter_mut() {
-            // an untraced state becomes the step output (its shape may change)
-            // SAFETY: a step output.
+            // an untraced state becomes the body output (its shape may change)
+            // SAFETY: a body output.
             let (sh, sts) = unsafe { (outs[q].shape().to_vec(), outs[q].strides().to_vec()) };
             if sh != u.shape {
                 *u = Buf::new(sh.clone(), u.itemsize, owned)?;
             }
-            // SAFETY: a valid step output and a buffer of its shape.
+            // SAFETY: a valid body output and a buffer of its shape.
             unsafe { copy_strided(outs[q].data, &sh, &sts, u.data, &u.strides, u.itemsize as usize) };
             q += 1;
         }
         if info.as_while {
-            // SAFETY: the condition is a valid 0-d bool step output.
+            // SAFETY: the condition is a valid 0-d bool body output.
             stop = unsafe { *outs[q].data } != 0;
         }
-        step.finish(&mut st);
+        body.finish(&mut st);
         if let Err(m) = r {
             result = Err(m);
             break;
         }
         i += 1;
     }
-    step.put_state(st);
+    body.put_memory(st);
     drop(temp_owned);
     result?;
 
@@ -358,9 +358,9 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanEnv, owned: &mut Vec<
     }
     for (j, b) in nit.iter_mut().enumerate() {
         if b.is_none() {
-            // no step ran and the shape isn't static: an empty array
+            // no iteration ran and the shape isn't static: an empty array
             let mut shape = vec![nit_len[j]];
-            shape.extend(std::iter::repeat_n(0, step.output_ndim(first_nit_out + j)));
+            shape.extend(std::iter::repeat_n(0, body.output_ndim(first_nit_out + j)));
             *b = Some(Buf::new(shape, d.inner_out_dtypes[first_nit_out + j].itemsize() as i64, owned)?);
         }
         finish(b.as_mut().unwrap(), 0, owned)?;

@@ -130,12 +130,12 @@ def _register():
         return [fresh_output(o) for o in node.outputs]
 
     @llvm_emit.register(FusedElemwise)
-    def _(op, node, cx, inputs, outputs):
-        emit_fused(op, node, cx, inputs, outputs)
+    def _(op, node, cg, inputs, outputs):
+        emit_fused(op, node, cg, inputs, outputs)
 
 
-def emit_fused(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def emit_fused(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     i64 = m.i64
     E, n_elem, reads, outs = fused_spec(op, node)
     nd = E.outputs[0].type.ndim
@@ -167,7 +167,7 @@ def emit_fused(op, node, cx, inputs, outputs):
         n = b.const_int(i64, static[a]) if static[a] is not None else (cand[0] if cand else b.const_int(i64, 1))
         for c in cand:
             if not (c.const_int is not None and c.const_int == n.const_int):
-                cx.check(b.icmp(m.ICmp.EQ, c, n), f"FusedElemwise: shape mismatch on axis {a}")
+                cg.check(b.icmp(m.ICmp.EQ, c, n), f"FusedElemwise: shape mismatch on axis {a}")
         shape.append(n)
 
     # ---- outputs (ScalarType outputs are computed into a 0-d temporary)
@@ -175,7 +175,7 @@ def emit_fused(op, node, cx, inputs, outputs):
     outputs = list(outputs)
     for i, out in enumerate(outputs):
         if isinstance(out, ScalarOutput):
-            tmp = cx.temporary(out.dtype, [])
+            tmp = cg.temporary(out.dtype, [])
             scalar_outs[i] = (out, tmp)
             outputs[i] = ProvidedOutput(tmp)
     out_arrays = []
@@ -183,14 +183,14 @@ def emit_fused(op, node, cx, inputs, outputs):
         if isinstance(spec, Reduce):
             oshape = [shape[a] for a in range(nd) if a not in spec.axes]
             res = output_array(out, oshape)
-            acc = res if spec.acc == res.dtype else cx.temporary(spec.acc, oshape)
+            acc = res if spec.acc == res.dtype else cg.temporary(spec.acc, oshape)
             init = constant(b, spec.acc, identity_value(spec.scalar_op, spec.identity, spec.acc))
             for_each(b, oshape, [acc], lambda p, init=init, spec=spec: store(b, spec.acc, init, p[0]))
             out_arrays.append((res, acc))
         elif isinstance(spec, Write):
             t = inputs[spec.target]
             res = output_array(out, t.shape)
-            copy(cx, t, res)
+            copy(cg, t, res)
             out_arrays.append((res, None))
         else:
             out_arrays.append((output_array(out, shape), None))
@@ -229,7 +229,7 @@ def emit_fused(op, node, cx, inputs, outputs):
     def checked(v, n, what):
         v = b.select(b.icmp(m.ICmp.SLT, v, zero), b.add(v, n), v)
         ok = b.and_(b.icmp(m.ICmp.SGE, v, zero), b.icmp(m.ICmp.SLT, v, n))
-        cx.check(ok, f"FusedElemwise: index out of bounds ({what})")
+        cg.check(ok, f"FusedElemwise: index out of bounds ({what})")
         return v
 
     def body(ptr_in, ptr_out, loop_index, accs):
@@ -324,7 +324,7 @@ def emit_fused(op, node, cx, inputs, outputs):
     )
     if not flat_ok:
         nest()
-        _finish(cx, outs, out_arrays, scalar_outs)
+        _finish(cg, outs, out_arrays, scalar_outs)
         return
 
     # every operand packed in the same axis order (from the layouts, so only operands
@@ -357,7 +357,7 @@ def emit_fused(op, node, cx, inputs, outputs):
         nest()
     else:
         b.if_else(contig, flat, nest)
-    _finish(cx, outs, out_arrays, scalar_outs)
+    _finish(cg, outs, out_arrays, scalar_outs)
 
 
 def reduced_view(b, acc: Array, shape, axes) -> Array:
@@ -375,15 +375,15 @@ def reduced_view(b, acc: Array, shape, axes) -> Array:
     return Array(acc.dtype, acc.data, list(shape), strides, Layout.make([n.const_int for n in shape], order, kinds))
 
 
-def _finish(cx, outs, out_arrays, scalar_outs):
+def _finish(cg, outs, out_arrays, scalar_outs):
     """Convert reductions accumulated in another dtype; set scalar outputs."""
     for i, spec in enumerate(outs):
         if isinstance(spec, Reduce):
             res, acc = out_arrays[i]
             if acc is not res:
-                copy(cx, acc, res)
+                copy(cg, acc, res)
     for out, tmp in scalar_outs.values():
-        out.set(cx.b, load(cx.b, tmp.dtype, tmp.data))
+        out.set(cg.b, load(cg.b, tmp.dtype, tmp.data))
 
 
 _register()

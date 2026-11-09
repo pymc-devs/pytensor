@@ -1,4 +1,4 @@
-"""Helpers for generating code: arrays, outputs, errors, workspace, casts, loops."""
+"""Helpers for generating code: arrays, outputs, errors, temporary memory, casts, loops."""
 
 from __future__ import annotations
 
@@ -98,10 +98,10 @@ def c_strides(b, dtype, shape):
 def mul(b, x, y):
     """i64 product, folded when both are constants."""
     m = ir()
-    cx, cy = x.const_int, y.const_int
-    if cx is not None and cy is not None:
-        return b.const_int(m.i64, cx * cy)
-    if cx == 1:
+    cg, cy = x.const_int, y.const_int
+    if cg is not None and cy is not None:
+        return b.const_int(m.i64, cg * cy)
+    if cg == 1:
         return y
     if cy == 1:
         return x
@@ -165,7 +165,7 @@ def store(b, dtype, value, ptr):
 
 
 def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Array:
-    """The array a callee wrote into an output slot (static lengths stay constants;
+    """The array a kernel wrote into an output slot (static lengths stay constants;
     with a known `layout`, only its dynamic strides are read)."""
     m = ir()
     nd = len(static_shape)
@@ -263,14 +263,14 @@ class ProvidedOutput:
 
 @dataclass
 class SlotOutput:
-    """An output the callee sets through a slot (allocated, or a view of input `view_of`)."""
+    """An output the kernel sets through a slot (allocated, or a view of input `view_of`)."""
 
-    cx: "EmitContext"
+    cg: "Codegen"
     slot: object
     dtype: str
     ndim: int
     view_of: int | None = None
-    #: allocate in the workspace instead of a runtime buffer (a temporary inside a
+    #: allocate in temporary memory instead of a runtime buffer (a temporary inside a
     #: compiled unit): the slot gets no owner
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
@@ -282,7 +282,7 @@ class SlotOutput:
     done: bool = False
 
     def _write(self, data, shape, strides):
-        b = self.cx.b
+        b = self.cg.b
         t = _slot_type(self.ndim)
         b.store(data, b.field_ptr(t, self.slot, 0))
         lp, sp = b.field_ptr(t, self.slot, 1), b.field_ptr(t, self.slot, 2)
@@ -295,17 +295,17 @@ class SlotOutput:
         """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
         owns it. (A view output may allocate too, e.g. a reshape of a non-contiguous
         array: the owner it sets then takes precedence over the viewed input's.)"""
-        cx, b, m = self.cx, self.cx.b, ir()
+        cg, b, m = self.cg, self.cg.b, ir()
         if self.temporary:
-            a = cx.temporary(self.dtype, shape, self.layout)
+            a = cg.temporary(self.dtype, shape, self.layout)
             self._write(a.data, a.shape, a.strides)
             self._mark(a)
             self.done = True
             return a
         nbytes = mul(b, size(b, shape), b.const_int(m.i64, itemsize(self.dtype)))
         owner = b.field_ptr(_slot_type(self.ndim), self.slot, 3)
-        data = b.rt_alloc(cx.ctx, nbytes, owner)
-        cx.check(b.icmp(m.ICmp.NE, data, b.null()), None)
+        data = b.rt_alloc(cg.ctx, nbytes, owner)
+        cg.check(b.icmp(m.ICmp.NE, data, b.null()), None)
         a = packed_array(b, self.dtype, data, shape, self.layout)
         self._write(data, shape, a.strides)
         self._mark(a)
@@ -314,29 +314,29 @@ class SlotOutput:
 
     def data(self):
         """The data pointer in the slot (null until set)."""
-        b, m = self.cx.b, ir()
+        b, m = self.cg.b, ir()
         return b.load(m.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 0))
 
     def owner(self):
         """The buffer reference in the slot (null for views)."""
-        b, m = self.cx.b, ir()
+        b, m = self.cg.b, ir()
         return b.load(m.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 3))
 
     def read(self) -> Array:
         """The array in the slot (after `allocate`), in the slot's layout."""
         lay = self.layout if self.layout is not None else Layout.c(self.ndim)
-        return read_slot(self.cx.b, self.slot, self.dtype, [None] * self.ndim, lay)
+        return read_slot(self.cg.b, self.slot, self.dtype, [None] * self.ndim, lay)
 
     def set_length(self, axis, n):
         """Shorten axis `axis` of the array in the slot to `n` (i64) -- a view of the
         same memory with the same strides."""
-        b, m = self.cx.b, ir()
+        b, m = self.cg.b, ir()
         lp = b.field_ptr(_slot_type(self.ndim), self.slot, 1)
         b.store(n, b.gep(m.i64, lp, b.const_int(m.i64, axis)))
 
     def _mark(self, a: Array):
         if self.alias is not None:
-            self.cx.b.mark_array(a.data, *self.alias)
+            self.cg.b.mark_array(a.data, *self.alias)
 
     def set_view(self, a: Array):
         """The output is `a`, which lies in the memory of input `view_of` (the caller
@@ -375,22 +375,25 @@ def _slot_type(ndim):
 
 
 @dataclass
-class EmitContext:
-    """What generated code needs besides the builder: the runtime context, the
-    environment, the workspace."""
+class Codegen:
+    """The state of generating one kernel's code: the builder and the kernel's
+    parameters (`ctx`, its `config` = link table, its `frame`), and what nested code
+    needs (link table, planner, module)."""
 
     b: object
     ctx: object
-    env: object
-    ws: object
-    #: bytes of static workspace used so far
-    ws_static: int = 0
+    #: the kernel's config: its link table (call.py)
+    config: object
+    #: the kernel's frame: fixed-size memory for one call (DESIGN.md, section 4)
+    frame: object
+    #: bytes of the frame used so far
+    frame_size: int = 0
     #: may loops run in parallel (`Options.parallel`)?
     parallel: bool = True
-    #: the callees of the function being generated (call.py); None: no calls
-    closure: object = None
-    #: the planner (program.py), for code that plans nested graphs (Scan); None: no
-    #: nested graphs
+    #: the link table of the kernel being generated (call.py); None: it calls nothing
+    links: object = None
+    #: the planner (program.py), for code that plans inner graphs (Scan); None: no
+    #: inner graphs
     planner: object = None
     #: the module being built, and the name of the function being built in it (nested
     #: functions are named after it)
@@ -404,7 +407,7 @@ class EmitContext:
         return Parallel(self, per_item) if self.parallel and per_item > 0 else None
 
     def fail(self, message: str | None):
-        """Report `message` (unless the callee already did) and return 1."""
+        """Report `message` (unless a called kernel already did) and return 1."""
         m = ir()
         if message is not None:
             self.b.rt_fail(self.ctx, message)
@@ -420,24 +423,25 @@ class EmitContext:
         with self.b.if_(not_ok):
             self.fail(message)
 
-    def workspace(self, nbytes):
-        """Temporary memory of `nbytes` (i64), 64-byte aligned, valid during this call."""
+    def temp_memory(self, nbytes):
+        """Temporary memory of `nbytes` (i64), 64-byte aligned, valid during this call:
+        from the frame if `nbytes` is a constant, else scratch."""
         m = ir()
         b = self.b
         n = nbytes.const_int
         if n is not None:
-            off = self.ws_static
-            self.ws_static += max(64, -(-n // 64) * 64)
-            return b.gep_bytes(self.ws, b.const_int(m.i64, off))
+            off = self.frame_size
+            self.frame_size += max(64, -(-n // 64) * 64)
+            return b.gep_bytes(self.frame, b.const_int(m.i64, off))
         p = b.rt_scratch(self.ctx, nbytes)
         self.check(b.icmp(m.ICmp.NE, p, b.null()), None)
         return p
 
     def temporary(self, dtype, shape, layout: Layout | None = None) -> Array:
-        """A temporary array in the workspace, packed in `layout` (default C)."""
+        """A temporary array (`temp_memory`), packed in `layout` (default C)."""
         b, m = self.b, ir()
         nbytes = mul(b, size(b, shape), b.const_int(m.i64, itemsize(dtype)))
-        data = self.workspace(nbytes)
+        data = self.temp_memory(nbytes)
         return packed_array(b, dtype, data, shape, layout)
 
 
@@ -519,7 +523,7 @@ MIN_PARALLEL_COST = 2 * CHUNK_COST
 class Parallel:
     """A loop whose iterations may run in parallel: the context, the cost of one item."""
 
-    cx: EmitContext
+    cg: Codegen
     per_item: float
 
     def worth_it(self, n_items) -> bool:
@@ -543,10 +547,10 @@ class Parallel:
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
         m = ir()
-        with b.parallel(self.cx.ctx, n, self.grain(b, items_per_iteration)) as r:
+        with b.parallel(self.cg.ctx, n, self.grain(b, items_per_iteration)) as r:
             with b.loop(b.sub(r.end, r.start)) as j:
                 body(b.add(r.start, j))
-        self.cx.check(b.icmp(m.ICmp.EQ, r.result, b.const_int(m.i32, 0)), None)
+        self.cg.check(b.icmp(m.ICmp.EQ, r.result, b.const_int(m.i32, 0)), None)
 
 
 def for_each(b, shape, arrays, body, par: Parallel | None = None):
@@ -615,14 +619,14 @@ def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
         at(i)
 
 
-def copy(cx, src: Array, dst: Array):
+def copy(cg, src: Array, dst: Array):
     """Copy (and convert) `src` into `dst` of the same shape."""
-    b = cx.b
+    b = cg.b
 
     def body(p):
         store(b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1])
 
-    for_each(b, dst.shape, [src, dst], body, cx.par(1.0))
+    for_each(b, dst.shape, [src, dst], body, cg.par(1.0))
 
 
 __all__ = [
@@ -632,7 +636,7 @@ __all__ = [
     "packed_array",
     "loop_order",
     "loop_view",
-    "EmitContext",
+    "Codegen",
     "ProvidedOutput",
     "ScalarOutput",
     "ScalarRepr",

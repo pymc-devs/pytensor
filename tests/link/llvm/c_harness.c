@@ -27,10 +27,10 @@ static double now_ns(void) {
 /* One call; outputs as given by the caller (provided or data == NULL). */
 int pt_run_once(const PtFunctionApi *api, const PtFunction *fn, const PtArray *inputs,
                 PtArray *outputs, char *err, size_t errlen) {
-    PtCallState *st = api->state_new(fn);
-    int rc = api->call(st, inputs, outputs);
-    if (rc != 0) snprintf(err, errlen, "%s", api->last_error(st));
-    api->state_free(st);
+    PtSession *s = api->session_new(fn);
+    int rc = api->call(s, inputs, outputs);
+    if (rc != 0) snprintf(err, errlen, "%s", api->last_error(s));
+    api->session_free(s);
     return rc;
 }
 
@@ -49,7 +49,7 @@ double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *i
     int64_t *shapes = calloc(nout * MAXD, sizeof(int64_t));
     int64_t *strides = calloc(nout * MAXD, sizeof(int64_t));
     void **bufs = calloc(nout, sizeof(void *));
-    PtCallState *st = api->state_new(fn);
+    PtSession *s = api->session_new(fn);
     double result = -1;
 
     for (size_t k = 0; k < nout; k++) {
@@ -60,8 +60,8 @@ double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *i
         outs[k].strides = strides + k * MAXD;
     }
     /* first call with runtime-allocated outputs tells us the output shapes */
-    if (api->call(st, inputs, outs) != 0) {
-        snprintf(err, errlen, "%s", api->last_error(st));
+    if (api->call(s, inputs, outs) != 0) {
+        snprintf(err, errlen, "%s", api->last_error(s));
         goto done;
     }
     for (size_t k = 0; k < nout; k++) {
@@ -84,8 +84,8 @@ double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *i
         double t0 = now_ns();
         long n = warm ? iters : iters / 10 + 1;
         for (long i = 0; i < n; i++) {
-            if (api->call(st, inputs, outs) != 0) {
-                snprintf(err, errlen, "%s", api->last_error(st));
+            if (api->call(s, inputs, outs) != 0) {
+                snprintf(err, errlen, "%s", api->last_error(s));
                 goto done;
             }
             if (!provided) {
@@ -99,7 +99,7 @@ double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *i
         result = (now_ns() - t0) / (double)n;
     }
 done:
-    api->state_free(st);
+    api->session_free(s);
     for (size_t k = 0; k < nout; k++) free(bufs[k]);
     free(bufs);
     free(outs);

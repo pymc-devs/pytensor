@@ -91,11 +91,11 @@ def test_fallback_through_c_api_without_gil():
     new_t = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
     free_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
     # ctypes.CFUNCTYPE callables release the GIL while the native call runs
-    st = new_t(a.state_new)(fn)
+    st = new_t(a.session_new)(fn)
     ins, keep = as_ptarrays([v])
     res = np.empty(7, dtype="int64")
     outs, keep2 = as_ptarrays([res])
     assert call_t(a.call)(st, ins, outs) == 0
     np.testing.assert_allclose(res, (np.argsort(v, axis=1) * 2).sum(axis=0))
-    free_t(a.state_free)(st)
+    free_t(a.session_free)(st)
     free_t(a.function_decref)(fn)

@@ -14,18 +14,18 @@
  * Everything else goes through the function table, so nothing has to link against the
  * extension. Typical use from one sampler thread:
  *
- *     PtCallState *st = api->state_new(fn);        // per thread; owns reusable buffers
+ *     PtSession *s = api->session_new(fn);          // one per caller (e.g. per chain)
  *     for (...) {
- *         if (api->call(st, inputs, outputs) != 0)
- *             fprintf(stderr, "%s\n", api->last_error(st));
+ *         if (api->call(s, inputs, outputs) != 0)
+ *             fprintf(stderr, "%s\n", api->last_error(s));
  *     }
- *     api->state_free(st);
+ *     api->session_free(s);
  *     api->function_decref(fn);
  *
- * Threads: a PtFunction is immutable and may be shared; a PtCallState must only be used
- * by one thread at a time. No Python or GIL is involved in `call`. A PtCallState is the
- * function's state for one caller (e.g. one sampler chain): its memory, scratch space
- * and random state (see `seed`).
+ * Threads: a PtFunction is immutable and may be shared; a PtSession must only be used by
+ * one thread at a time. No Python or GIL is involved in `call`. A session is everything
+ * one caller (e.g. one sampler chain) needs to run the function: the memory of its
+ * calls and its context (scratch space, errors, the random state; see `seed`).
  */
 #ifndef PYTENSOR_LLVM_H
 #define PYTENSOR_LLVM_H
@@ -54,7 +54,7 @@ enum {
 
 typedef struct PtBuffer PtBuffer;       /* refcounted memory owned by the runtime */
 typedef struct PtFunction PtFunction;   /* a compiled function, refcounted, immutable */
-typedef struct PtCallState PtCallState; /* per-thread call state */
+typedef struct PtSession PtSession;     /* one caller's session (memory, context) */
 
 /* Same struct as in the kernel ABI. Strides are in bytes. */
 typedef struct {
@@ -85,12 +85,12 @@ typedef struct {
     int32_t (*input_type)(const PtFunction *fn, size_t i, PtTypeInfo *out);
     int32_t (*output_type)(const PtFunction *fn, size_t i, PtTypeInfo *out);
 
-    /* The state keeps a reference to fn. */
-    PtCallState *(*state_new)(const PtFunction *fn);
-    void (*state_free)(PtCallState *st);
+    /* The session keeps a reference to fn. */
+    PtSession *(*session_new)(const PtFunction *fn);
+    void (*session_free)(PtSession *s);
 
     /*
-     * Run the function. Returns 0 on success; on failure see last_error(st).
+     * Run the function. Returns 0 on success; on failure see last_error(s).
      *
      * inputs[i]: data, shape and strides of input i. Checked: ndim, static shapes,
      *   non-negative lengths, non-NULL data for non-empty arrays, alignment of data and
@@ -108,26 +108,27 @@ typedef struct {
      *     arrays of length ndim; the runtime fills them, sets data, and sets owner to a
      *     new reference the caller releases with buffer_decref.
      */
-    int32_t (*call)(PtCallState *st, const PtArray *inputs, PtArray *outputs);
+    int32_t (*call)(PtSession *s, const PtArray *inputs, PtArray *outputs);
 
-    /* Message of the last failed call on this state (valid until the next call). */
-    const char *(*last_error)(const PtCallState *st);
+    /* Message of the last failed call in this session (valid until the next call). */
+    const char *(*last_error)(const PtSession *s);
 
     void (*buffer_decref)(PtBuffer *buf);
 
     /*
-     * Restart the random state of `st` from `seed` (api_version >= 2). A call state
+     * Restart the random state of session `s` from `seed` (api_version >= 2). A session
      * has one random state: everything a call runs draws from it, in order, so calls
-     * on a seeded state are reproducible. Unseeded states start from process entropy.
+     * in a seeded session are reproducible. Unseeded sessions start from process
+     * entropy.
      */
-    void (*seed)(PtCallState *st, uint64_t seed);
+    void (*seed)(PtSession *s, uint64_t seed);
 
     /*
      * Allow (nonzero, the default) or forbid parallel loops on the runtime's thread
-     * pool for calls on `st` (api_version >= 3), e.g. forbid when every core already
+     * pool for calls in session `s` (api_version >= 3), e.g. forbid when every core already
      * runs a chain. Results, random draws included, are the same either way.
      */
-    void (*set_parallel)(PtCallState *st, int32_t on);
+    void (*set_parallel)(PtSession *s, int32_t on);
 } PtFunctionApi;
 
 #ifdef __cplusplus

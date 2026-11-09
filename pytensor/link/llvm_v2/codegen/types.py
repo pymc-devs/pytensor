@@ -111,7 +111,7 @@ class TensorRepr:
 
     @property
     def slot_type(self):
-        """The output slot a callee fills: `{ptr, [n x i64] lengths, [n x i64] strides, ptr owner}`."""
+        """The output slot a kernel fills: `{ptr, [n x i64] lengths, [n x i64] strides, ptr owner}`."""
         return slot_type(self.ndim)
 
 
@@ -163,7 +163,7 @@ def repr_of(t, layout: Layout | None = None):
     raise NotImplementedError(f"LLVM backend: no representation for {t}")
 
 
-#: The C ABI array: `{data, shape*, strides*, owner, ndim}` (40 bytes).
+#: The kernel ABI array: `{data, shape*, strides*, owner, ndim}` (40 bytes).
 def ptarray_type():
     m = ir()
     return m.Type.struct_([m.ptr, m.ptr, m.ptr, m.ptr, m.i64])

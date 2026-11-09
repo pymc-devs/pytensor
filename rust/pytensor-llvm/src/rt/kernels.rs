@@ -1,7 +1,7 @@
-//! Precompiled Rust kernels with the C ABI of generated functions:
-//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* env, void* ws)`.
+//! Rust kernels, with the kernel ABI:
+//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* config, void* frame)`.
 //!
-//! A kernel's env holds its parameters and the mode of each output, which Python
+//! A kernel's config holds its parameters and the mode of each output, which Python
 //! chooses per node (the kernel never infers it from the arguments).
 
 use crate::abi::{checked_nbytes, PtArray, PtCtx};
@@ -102,16 +102,16 @@ fn finish(ctx: *mut PtCtx, r: Result<(), String>) -> i32 {
 
 // ------------------------------------------------------------------ DimShuffle
 
-pub struct DimShuffleEnv {
+pub struct DimShuffleConfig {
     /// output axis -> input axis, or None for a new length-1 axis
     pub order: Vec<Option<usize>>,
 }
 
 /// # Safety
-/// The kernel ABI; `env` is a `DimShuffleEnv`; one input, one view output.
-pub unsafe extern "C-unwind" fn k_dimshuffle(ctx: *mut PtCtx, args: *mut PtArray, env: *const u8, _ws: *mut u8) -> i32 {
+/// The kernel ABI; `config` is a `DimShuffleConfig`; one input, one view output.
+pub unsafe extern "C-unwind" fn k_dimshuffle(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
     // SAFETY: the function's contract.
-    let (e, mut a) = unsafe { (&*(env as *const DimShuffleEnv), Args::new(args, 1, 1)) };
+    let (e, mut a) = unsafe { (&*(config as *const DimShuffleConfig), Args::new(args, 1, 1)) };
     let (shape, strides): (Vec<i64>, Vec<i64>) = e
         .order
         .iter()
@@ -137,16 +137,16 @@ pub unsafe extern "C-unwind" fn k_dimshuffle(ctx: *mut PtCtx, args: *mut PtArray
 
 // ------------------------------------------------------------------ DeepCopy
 
-pub struct CopyEnv {
+pub struct CopyConfig {
     pub mode: OutMode,
     pub dtype: DType,
 }
 
 /// # Safety
-/// The kernel ABI; `env` is a `CopyEnv`.
-pub unsafe extern "C-unwind" fn k_copy(ctx: *mut PtCtx, args: *mut PtArray, env: *const u8, _ws: *mut u8) -> i32 {
+/// The kernel ABI; `config` is a `CopyConfig`.
+pub unsafe extern "C-unwind" fn k_copy(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
     // SAFETY: the function's contract.
-    let (e, mut a, c) = unsafe { (&*(env as *const CopyEnv), Args::new(args, 1, 1), &mut *ctx) };
+    let (e, mut a, c) = unsafe { (&*(config as *const CopyConfig), Args::new(args, 1, 1), &mut *ctx) };
     let r = (|| {
         let shape = a.shape(0).to_vec();
         let src_strides = a.strides(0).to_vec();
@@ -162,7 +162,7 @@ pub unsafe extern "C-unwind" fn k_copy(ctx: *mut PtCtx, args: *mut PtArray, env:
 
 // ------------------------------------------------------------------ Dot
 
-pub struct DotEnv {
+pub struct DotConfig {
     pub mode: OutMode,
     pub dtype: DType,
 }
@@ -170,10 +170,10 @@ pub struct DotEnv {
 /// numpy dot of 1-d/2-d float operands, via faer.
 ///
 /// # Safety
-/// The kernel ABI; `env` is a `DotEnv`.
-pub unsafe extern "C-unwind" fn k_dot(ctx: *mut PtCtx, args: *mut PtArray, env: *const u8, _ws: *mut u8) -> i32 {
+/// The kernel ABI; `config` is a `DotConfig`.
+pub unsafe extern "C-unwind" fn k_dot(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
     // SAFETY: the function's contract.
-    let (e, mut a, c) = unsafe { (&*(env as *const DotEnv), Args::new(args, 2, 1), &mut *ctx) };
+    let (e, mut a, c) = unsafe { (&*(config as *const DotConfig), Args::new(args, 2, 1), &mut *ctx) };
     let r = (|| {
         let (sa, sb) = (a.shape(0).to_vec(), a.shape(1).to_vec());
         if sa.last() != sb.first() {
@@ -209,7 +209,7 @@ pub type LegacyFn = unsafe extern "C-unwind" fn(*mut PtCtx, *mut PtArray, *const
 
 /// Runs an older single-output kernel: allocates the output (shaped like input
 /// `shape_from`) unless it is provided, then calls the kernel with its parameters.
-pub struct LegacyEnv {
+pub struct LegacyConfig {
     pub f: LegacyFn,
     pub params: Vec<i64>,
     pub n_in: usize,
@@ -219,10 +219,10 @@ pub struct LegacyEnv {
 }
 
 /// # Safety
-/// The kernel ABI; `env` is a `LegacyEnv` whose function expects these arguments.
-pub unsafe extern "C-unwind" fn k_legacy(ctx: *mut PtCtx, args: *mut PtArray, env: *const u8, _ws: *mut u8) -> i32 {
+/// The kernel ABI; `config` is a `LegacyConfig` whose function expects these arguments.
+pub unsafe extern "C-unwind" fn k_legacy(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
     // SAFETY: the function's contract.
-    let (e, mut a, c) = unsafe { (&*(env as *const LegacyEnv), Args::new(args, (*(env as *const LegacyEnv)).n_in, 1), &mut *ctx) };
+    let (e, mut a, c) = unsafe { (&*(config as *const LegacyConfig), Args::new(args, (*(config as *const LegacyConfig)).n_in, 1), &mut *ctx) };
     let shape = a.shape(e.shape_from).to_vec();
     if let Err(m) = a.output(c, 0, e.mode, e.dtype, &shape) {
         return finish(ctx, Err(m));
