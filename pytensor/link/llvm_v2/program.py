@@ -37,6 +37,8 @@ from pytensor.link.llvm_v2.codegen.unit import Item, build_unit_function
 from pytensor.link.llvm_v2.kernels import kernel_outputs, llvm_kernel
 from pytensor.link.llvm_v2.layout import Layout
 from pytensor.scalar.basic import ScalarType
+from pytensor.tensor.basic import scalar_from_tensor
+from pytensor.tensor.type import TensorType
 
 
 def _ir():
@@ -256,6 +258,7 @@ class Planner:
 
     def group_scalars(self, items, graph_outputs):
         """Group items that touch ScalarType values into compiled units."""
+        items = self._tensorize_scalar_inputs(items)
         is_scalar = {k for k, t in self.types.items() if isinstance(t, ScalarType)}
 
         def touches(it):
@@ -266,68 +269,97 @@ class Planner:
 
         if not any(touches(it) for it in items):
             return items
-        # union items connected through scalar values
-        parent = list(range(len(items)))
+        from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 
-        def find(i):
-            while parent[i] != i:
-                parent[i] = parent[parent[i]]
-                i = parent[i]
-            return i
-
-        producer = {}
-        for i, it in enumerate(items):
-            for k in getattr(it, "outputs", []):
-                producer[k[1] if isinstance(k, tuple) else k] = i
-        for i, it in enumerate(items):
+        # Greedy convex groups in program order (like the `llvm_units` rewrite): an item
+        # touching scalars joins the current group unless it depends on an item outside
+        # the group that depends on the group; then a new group starts. A scalar made in
+        # an earlier group crosses into a later one as a 0-d tensor.
+        groups = []  # lists of items
+        made_in = {}  # scalar key -> index of the group producing it
+        as_tensor = {}  # scalar key -> 0-d tensor key carrying it out of its group
+        out = []  # items outside groups, and group placeholders (ints)
+        produced, tainted = set(), set()
+        for it in items:
             if not touches(it):
-                continue
-            for k in (*it.inputs, *it.outputs):
-                if k in is_scalar:
-                    if k in producer:
-                        parent[find(i)] = find(producer[k])
-                    elif k not in self.consts:
-                        raise NotImplementedError("a ScalarType graph input")
-        groups = {}
-        for i, it in enumerate(items):
-            if touches(it):
-                groups.setdefault(find(i), []).append(i)
-        members = {i: root for root, idx in groups.items() for i in idx}
-        out = []
-        done = set()
-        consumers = {}
-        for i, it in enumerate(items):
-            for k in it.inputs:
-                consumers.setdefault(k, set()).add(i)
-        for i, it in enumerate(items):
-            root = members.get(i)
-            if root is None:
+                if any(k in produced or k in tainted for k in it.inputs):
+                    tainted.update(o[1] if isinstance(o, tuple) else o for o in it.outputs)
                 out.append(it)
                 continue
-            if root in done:
+            if not groups or any(k in tainted for k in it.inputs):
+                groups.append([])
+                out.append(len(groups) - 1)
+                produced, tainted = set(), set()
+            g = len(groups) - 1
+            ins = list(it.inputs)
+            for pos, k in enumerate(ins):
+                if k not in is_scalar or k in self.consts:
+                    continue
+                if k not in made_in:
+                    raise NotImplementedError("a ScalarType graph input")
+                if made_in[k] == g:
+                    continue
+                if k not in as_tensor:
+                    conv = tensor_from_scalar(self.types[k]()).owner
+                    t = self.new_key(conv.outputs[0].type)
+                    groups[made_in[k]].append(Item(conv, [k], [t]))
+                    as_tensor[k] = t
+                t = as_tensor[k]
+                back = scalar_from_tensor(self.types[t]()).owner
+                k2 = self.new_key(self.types[k])
+                groups[g].append(Item(back, [t], [k2]))
+                made_in[k2] = g
+                produced.add(k2)
+                ins[pos] = k2
+            it = Item(it.node, ins, it.outputs) if ins != it.inputs else it
+            groups[g].append(it)
+            for k in it.outputs:
+                produced.add(k)
+                if k in is_scalar:
+                    made_in[k] = g
+        consumers = {}
+        for x in out:
+            for s in groups[x] if isinstance(x, int) else [x]:
+                for k in s.inputs:
+                    consumers.setdefault(k, set()).add(id(s))
+        result = []
+        for x in out:
+            if not isinstance(x, int):
+                result.append(x)
                 continue
-            done.add(root)
-            idx = groups[root]
-            # convex? every item between the group's first and last that depends on
-            # the group and feeds it would have to be inside
-            sub = [items[j] for j in idx]
-            produced = {k for s in sub for k in s.outputs}
+            sub = groups[x]
+            inside = {id(s) for s in sub}
             outputs = []
             for s in sub:
                 for k in s.outputs:
-                    outside = any(c not in idx for c in consumers.get(k, ())) or k in graph_outputs
-                    if outside:
+                    if k in graph_outputs or any(c not in inside for c in consumers.get(k, ())):
                         if k in is_scalar:
                             raise NotImplementedError("a ScalarType value used outside its compiled unit")
                         outputs.append((k, k))
-            for j in range(min(idx), max(idx) + 1):
-                if j not in idx and any(k in produced for k in items[j].inputs):
-                    for k in getattr(items[j], "outputs", []):
-                        kk = k[1] if isinstance(k, tuple) else k
-                        if any(c in idx for c in consumers.get(kk, ())):
-                            raise NotImplementedError("scalar operations interleaved with other nodes")
-            out.append(UnitItem(sub, self._unit_inputs(sub), outputs, "scalars"))
-        return toposort_items(out)
+            result.append(UnitItem(sub, self._unit_inputs(sub), outputs, "scalars"))
+        return toposort_items(result)
+
+    def _tensorize_scalar_inputs(self, items):
+        """Nodes we don't generate (Rust kernels such as Scan, numba) can't sit in a
+        compiled unit. When one reads a ScalarType value (e.g. Scan's `n_steps` from a
+        ScalarFromTensor), it reads a 0-d tensor instead, made by a `TensorFromScalar`
+        that joins the scalar unit."""
+        from pytensor.tensor.basic import tensor_from_scalar
+
+        out = []
+        for it in items:
+            if not isinstance(it, Item) or _generated(it.node.op):
+                out.append(it)
+                continue
+            ins = list(it.inputs)
+            for pos, (k, var) in enumerate(zip(it.inputs, it.node.inputs, strict=True)):
+                if isinstance(self.types.get(k), ScalarType) and k not in self.consts:
+                    conv = tensor_from_scalar(var).owner
+                    t = self.new_key(conv.outputs[0].type)
+                    out.append(Item(conv, [k], [t]))
+                    ins[pos] = t
+            out.append(Item(it.node, ins, it.outputs) if ins != it.inputs else it)
+        return out
 
     # ------------------------------------------------------------ steps
 
@@ -412,7 +444,7 @@ class Planner:
             if k in self.consts and isinstance(var.type, ScalarType)
         }
         if any(isinstance(repr_of(o.type), ScalarRepr) for o in node.outputs) or any(
-            isinstance(repr_of(i.type), ScalarRepr) for pos, i in enumerate(node.inputs) if pos not in folded
+            isinstance(repr_of(self.types[k]), ScalarRepr) for pos, k in enumerate(it.inputs) if pos not in folded
         ):
             raise NotImplementedError("scalar node outside a unit")
         present = [k for k, var in zip(it.inputs, node.inputs, strict=True) if not is_absent(var.type)]
@@ -479,7 +511,18 @@ class Planner:
         t0 = time.perf_counter()
         scope = {}
         in_keys = []
+        scalar_inputs = []
         for pos, v in enumerate(fgraph.inputs):
+            if isinstance(v.type, ScalarType):
+                # scalars don't cross the C ABI: the input is a 0-d array, read into the
+                # scalar by a ScalarFromTensor (which joins the scalars' compiled unit)
+                t = self.new_key(TensorType(v.type.dtype, shape=()))
+                k = self.new_key(v.type)
+                scalar_inputs.append((t, k))
+                in_keys.append(t)
+                self.layouts[t] = Layout.c(0)
+                scope[v] = k
+                continue
             k = self.new_key(v.type)
             scope[v] = k
             in_keys.append(k)
@@ -491,7 +534,9 @@ class Planner:
         self.input_contiguous = [
             input_layouts is None and self.opts.input_layout == "c" and hasattr(v.type, "ndim") for v in fgraph.inputs
         ]
-        items = self.flatten(fgraph.toposort(), scope)
+        items = [
+            Item(scalar_from_tensor(self.types[t]()).owner, [t], [k]) for t, k in scalar_inputs
+        ] + self.flatten(fgraph.toposort(), scope)
         out_keys = [self.key_of(o, scope) for o in fgraph.outputs]
         self.graph_outputs = set(out_keys)
         items = self.group_scalars(items, set(out_keys))
@@ -683,6 +728,13 @@ def _outputs_of(it):
     if isinstance(it, UnitItem):
         return [o for _, o in it.outputs]
     return it.outputs
+
+
+def _generated(op) -> bool:
+    """Whether we generate code for `op` (so it can be part of a compiled unit)."""
+    from pytensor.link.llvm_v2.codegen.function import llvm_emit
+
+    return llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
 
 
 def toposort_items(items):
