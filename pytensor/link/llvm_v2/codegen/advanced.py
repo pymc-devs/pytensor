@@ -28,8 +28,8 @@ class Pattern:
     view_shape: list  # shape of x[indices]
 
 
-def pattern(cx, x: Array, node, index_values, index_vars, op) -> Pattern:
-    b, m = cx.b, ir()
+def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
+    b, m = cg.b, ir()
     entries = unflatten_index_variables(list(zip(index_values, index_vars, strict=True)), op.idx_list)
     first = None
     indices = []
@@ -62,17 +62,17 @@ def pattern(cx, x: Array, node, index_values, index_vars, op) -> Pattern:
             if bshape[off + d] is None:
                 bshape[off + d] = n
             elif not (n.const_int is not None and n.const_int == bshape[off + d].const_int):
-                cx.check(b.icmp(m.ICmp.EQ, n, bshape[off + d]), "shape mismatch: indexing arrays could not be broadcast together")
+                cg.check(b.icmp(m.ICmp.EQ, n, bshape[off + d]), "shape mismatch: indexing arrays could not be broadcast together")
     bshape = [n if n is not None else b.const_int(m.i64, 1) for n in bshape]
     k = len(indices)
     view_shape = list(x.shape[:first]) + bshape + list(x.shape[first + k :])
     return Pattern(first, indices, bshape, view_shape)
 
 
-def operands(cx, base: Array, pat: Pattern):
+def operands(cg, base: Array, pat: Pattern):
     """`base` with strides over the view's loop axes (0 on the index axes), and the index
     arrays with strides over the same axes."""
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     zero = b.const_int(m.i64, 0)
     k, nb = len(pat.indices), len(pat.bshape)
     first = pat.first
@@ -89,10 +89,10 @@ def operands(cx, base: Array, pat: Pattern):
     return base_op, idx_ops
 
 
-def element(cx, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
+def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
     """Pointer to the indexed element of `base`: base_ptr plus the index offsets
     (negative indices wrap; out-of-range ones fail)."""
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     zero = b.const_int(m.i64, 0)
     p = base_ptr
     for j, ((arr, var), ip) in enumerate(zip(pat.indices, idx_ptrs, strict=True)):
@@ -101,7 +101,7 @@ def element(cx, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
         i = cast(b, load(b, arr.dtype, ip), arr.dtype, "int64")
         i = b.select(b.icmp(m.ICmp.SLT, i, zero), b.add(i, n), i)
         ok = b.and_(b.icmp(m.ICmp.SGE, i, zero), b.icmp(m.ICmp.SLT, i, n))
-        cx.check(ok, f"index out of bounds for axis {axis} ({what})")
+        cg.check(ok, f"index out of bounds for axis {axis} ({what})")
         p = advance(b, p, i, base.strides[axis], base.dtype)
     return p
 
@@ -113,29 +113,29 @@ def _(op, node, in_layouts):
 
 
 @llvm_emit.register(AdvancedSubtensor)
-def _(op, node, cx, inputs, outputs):
-    b = cx.b
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
     x = inputs[0]
-    pat = pattern(cx, x, node, inputs[1:], node.inputs[1:], op)
+    pat = pattern(cg, x, node, inputs[1:], node.inputs[1:], op)
     out = output_array(outputs[0], pat.view_shape)
-    base_op, idx_ops = operands(cx, x, pat)
+    base_op, idx_ops = operands(cg, x, pat)
     k = len(idx_ops)
 
     def body(p):
-        src = element(cx, x, pat, p[0], p[1 : 1 + k], "read")
+        src = element(cg, x, pat, p[0], p[1 : 1 + k], "read")
         store(b, out.dtype, load(b, x.dtype, src), p[-1])
 
     for_each(b, pat.view_shape, [base_op, *idx_ops, out], body)
 
 
 @llvm_emit.register(AdvancedIncSubtensor)
-def _(op, node, cx, inputs, outputs):
-    b, m = cx.b, ir()
+def _(op, node, cg, inputs, outputs):
+    b, m = cg.b, ir()
     x, y = inputs[0], inputs[1]
     out = output_array(outputs[0], x.shape)
-    copy(cx, x, out)
-    pat = pattern(cx, out, node, inputs[2:], node.inputs[2:], op)
-    base_op, idx_ops = operands(cx, out, pat)
+    copy(cg, x, out)
+    pat = pattern(cg, out, node, inputs[2:], node.inputs[2:], op)
+    base_op, idx_ops = operands(cg, out, pat)
     # y broadcasts against the indexed view, aligned on the right; like numpy, a
     # length-1 axis broadcasts even when its type doesn't say so
     vs = pat.view_shape
@@ -154,14 +154,14 @@ def _(op, node, cx, inputs, outputs):
             yst.append(y.strides[a])
             continue
         one = b.icmp(m.ICmp.EQ, ln, b.const_int(m.i64, 1))
-        cx.check(b.or_(b.icmp(m.ICmp.EQ, ln, vn), one), "shape mismatch: value array could not be broadcast to the indexing result")
+        cg.check(b.or_(b.icmp(m.ICmp.EQ, ln, vn), one), "shape mismatch: value array could not be broadcast to the indexing result")
         yst.append(b.select(one, zero, y.strides[a]))
     ys = Array(y.dtype, y.data, vs, yst)
     k = len(idx_ops)
     dt = out.dtype
 
     def body(p):
-        dst = element(cx, out, pat, p[0], p[1 : 1 + k], "write")
+        dst = element(cg, out, pat, p[0], p[1 : 1 + k], "write")
         v = cast(b, load(b, y.dtype, p[-1]), y.dtype, dt)
         if not op.set_instead_of_inc:
             v = emit_scalar(ps.add, b, [(load(b, dt, dst), dt), (v, dt)], [dt])[0]

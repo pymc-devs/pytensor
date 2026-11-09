@@ -30,7 +30,7 @@ def run_node(node, *values, provided=None, provided_layouts=None):
     it = iter(values)
     for i in node.inputs:
         ins.append(np.asarray(i.data if isinstance(i, Constant) else next(it), dtype=i.type.dtype))
-    return ir.call_abi(c.address, ins, outs, c.workspace)
+    return ir.call_abi(c.address, ins, outs, c.frame_size)
 
 
 def reference(out, inputs, values):
@@ -223,10 +223,10 @@ def test_provided_output_with_any_strides():
     assert res is view
 
 
-def test_scalar_type_nodes_have_no_c_abi():
+def test_scalar_type_nodes_have_no_kernel_abi():
     a = ps.float64("a")
     node = ps.exp(a).owner
-    with pytest.raises(ValueError, match="no C ABI"):
+    with pytest.raises(ValueError, match="no kernel ABI"):
         compile_node(node)
 
 
@@ -253,12 +253,12 @@ def test_careduce_bool_and_int_accumulators():
     check(pt.max(y), [y], [yv])
 
 
-def test_careduce_acc_dtype_uses_workspace():
+def test_careduce_acc_dtype_uses_the_frame():
     x = pt.tensor("x", shape=(30, 4), dtype="float32")
     e = pt.sum(x, axis=0, acc_dtype="float64")
     node = e.owner
     c = compile_node(node)
-    assert c.workspace >= 4 * 8
+    assert c.frame_size >= 4 * 8
     xv = rng.random((30, 4)).astype("float32")
     (res,) = run_node(node, xv)
     np.testing.assert_allclose(res, xv.astype("float64").sum(0), rtol=1e-6)

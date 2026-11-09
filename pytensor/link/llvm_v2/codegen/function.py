@@ -1,4 +1,4 @@
-"""Generated functions: signatures, node functions and C ABI wrappers.
+"""Generated functions: signatures, node functions and kernel ABI wrappers.
 
 See DESIGN.md, sections 2, 3 and 6.
 """
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import singledispatch
 
 from pytensor.link.llvm_v2.codegen.emit import (
-    EmitContext,
+    Codegen,
     ProvidedOutput,
     ScalarOutput,
     SlotOutput,
@@ -32,9 +32,9 @@ from pytensor.link.llvm_v2.codegen.types import (
 class OutMode(enum.Enum):
     #: the caller provides the memory (with its own strides)
     PROVIDED = "provided"
-    #: the callee allocates and hands over one reference through the slot
+    #: the kernel allocates and hands over one reference through the slot
     ALLOCATED = "allocated"
-    #: the callee returns a view of an input through the slot
+    #: the kernel returns a view of an input through the slot
     VIEW = "view"
     #: a ScalarType output, stored through a pointer
     SCALAR = "scalar"
@@ -155,7 +155,7 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
     The declared layout of a PROVIDED output is binding: whoever provides the memory
     provides it in that layout. `provided[k]` replaces the declaration, for a caller
     that generates a function for memory it fixes (tests writing into a slice).
-    `declared`: the outputs instead of `llvm_outputs` (a callee's, see call.py)."""
+    `declared`: the outputs instead of `llvm_outputs` (a kernel's, see call.py)."""
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
@@ -180,7 +180,7 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
 
 
 @singledispatch
-def llvm_emit(op, node, cx: EmitContext, inputs: list, outputs: list) -> None:
+def llvm_emit(op, node, cg: Codegen, inputs: list, outputs: list) -> None:
     """Emit the code of `node`.
 
     `inputs` are `Array`s (tensors) or values (scalars); `outputs` are `ProvidedOutput`,
@@ -193,10 +193,10 @@ def llvm_emit(op, node, cx: EmitContext, inputs: list, outputs: list) -> None:
 class NodeFunction:
     function: object
     signature: Signature
-    #: bytes of static workspace
-    workspace: int
-    #: the callees it calls (call.py; its table is the env to call it with), or None
-    closure: object = None
+    #: bytes of its frame (the fixed-size memory of one call)
+    frame_size: int
+    #: its link table (call.py): the config to call it with, or None
+    links: object = None
 
 
 def build_node_function(
@@ -208,32 +208,32 @@ def build_node_function(
     in_layouts=None,
     provided=None,
     parallel=True,
-    callee=None,
-    closure=None,
+    kernel=None,
+    links=None,
     planner=None,
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
 
     * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
-      they go into the workspace instead of runtime buffers;
+      they go into temporary memory instead of runtime buffers;
     * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
-    * `callee`: a `Callee` implementing the node (a kernel, numba, a program): the
-      function calls it (call.py); its handle goes into `closure`, whose table is the
-      env the function must be called with. Generated code nested in the node (loops)
-      adds its callees to `closure` too.
+    * `kernel`: a `Kernel` implementing the node (a Rust kernel, a numba kernel, a
+      subprogram): the function calls it (call.py), through an entry of `links`, the
+      link table that is the config of the kernel being generated. Code nested in the
+      node (a Scan's loop body) links its kernels there too.
     """
     from pytensor.link.llvm_v2.codegen.emit import c_array, constant, store
     from pytensor.link.llvm_v2.codegen.types import memory_type
 
     m = ir()
     folded = folded or {}
-    sig = node_signature(node, frozenset(folded), in_layouts, provided, callee.outputs if callee is not None else None)
+    sig = node_signature(node, frozenset(folded), in_layouts, provided, kernel.outputs if kernel is not None else None)
     sig_inputs = iter(sig.inputs)
     fn = module.function(name, sig.param_types(), m.i32, inline=m.Inline.Always)
     b = fn.builder()
     params = fn.params
-    ctx, env, ws = params[:3]
-    cx = EmitContext(b, ctx, env, ws, parallel=parallel, closure=closure, planner=planner, module=module, name=name)
+    ctx, config, frame = params[:3]
+    cg = Codegen(b, ctx, config, frame, parallel=parallel, links=links, planner=planner, module=module, name=name)
     # Aliasing (DESIGN.md): the memory a step writes (provided or allocated outputs)
     # never overlaps its inputs or its other outputs; views are never written.
     b.alias_domain(name)
@@ -285,7 +285,7 @@ def build_node_function(
         else:
             outputs.append(
                 SlotOutput(
-                    cx,
+                    cg,
                     v,
                     o.repr.dtype,
                     o.repr.ndim,
@@ -298,25 +298,26 @@ def build_node_function(
                     alias=alias,
                 )
             )
-    if callee is not None:
-        from pytensor.link.llvm_v2.codegen.call import emit_call
+    if kernel is not None:
+        from pytensor.link.llvm_v2.codegen.call import call_kernel
 
-        if closure is None:
-            raise ValueError("a node function calling a callee needs a closure")
+        if links is None:
+            raise ValueError("a node function calling a kernel needs a links")
         ins = [(a, getattr(var.type, "dtype", None)) for a, var in zip(inputs, node.inputs, strict=True)]
-        emit_call(cx, callee, closure.add(callee), ins, outputs)
+        call_kernel(cg, kernel, links.link_kernel(kernel), ins, outputs)
     else:
-        llvm_emit(node.op, node, cx, inputs, outputs)
+        llvm_emit(node.op, node, cg, inputs, outputs)
     if not b.terminated:
         for k, out in enumerate(outputs):
             if isinstance(out, SlotOutput | ScalarOutput) and not out.done:
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(b.const_int(m.i32, 0))
-    return NodeFunction(fn, sig, cx.ws_static, closure)
+    return NodeFunction(fn, sig, cg.frame_size, links)
 
 
 def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool = False):
-    """`int32 name(PtCtx*, PtArray* args, const void* env, void* ws)` around `nf`.
+    """`int32 name(PtCtx*, PtArray* args, const void* config, void* frame)` around `nf`:
+    the kernel ABI.
 
     `check_layouts`: verify that the arrays passed have the layouts the signature claims
     (for testing the layout inference; costs a few compares per call)."""
@@ -325,11 +326,11 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
     # (outputs without a value have no argument)
     present = [o for o in sig.outputs if o.mode is not OutMode.ABSENT]
     if sig.has_scalars:
-        raise ValueError("functions with ScalarType inputs or outputs have no C ABI")
+        raise ValueError("functions with ScalarType inputs or outputs have no kernel ABI")
     pa = ptarray_type()
     fn = module.function(name, [m.ptr, m.ptr, m.ptr, m.ptr], m.i32, exported=True)
     b = fn.builder()
-    ctx, args, env, ws = fn.params
+    ctx, args, config, frame = fn.params
 
     def arg(k):
         return b.gep_bytes(args, b.const_int(m.i64, k * PTARRAY_SIZE))
@@ -355,17 +356,17 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
         )
 
     if check_layouts:
-        from pytensor.link.llvm_v2.codegen.emit import EmitContext
+        from pytensor.link.llvm_v2.codegen.emit import Codegen
 
-        cx = EmitContext(b, ctx, env, ws)
+        cg = Codegen(b, ctx, config, frame)
         reprs = [*sig.inputs, *(o.repr for o in present if o.mode is OutMode.PROVIDED)]
         positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(present) if o.mode is OutMode.PROVIDED)]
         for k, r in zip(positions, reprs, strict=True):
             if isinstance(r, TensorRepr) and r.ndim > 0 and len(r.stride_axes) < r.ndim:
-                _check_layout(cx, arg(k), r, k)
+                _check_layout(cg, arg(k), r, k)
 
     n_in = len(sig.inputs)
-    call_args = [ctx, env, ws]
+    call_args = [ctx, config, frame]
     call_args += [read(k, r) for k, r in enumerate(sig.inputs)]
     slots = []
     for k, o in enumerate(present):
@@ -390,7 +391,7 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
             b.store(b.load(m.i64, b.gep(m.i64, sp, i)), b.gep(m.i64, strides_p, i))
         owner = b.load(m.ptr, b.field_ptr(st, slot, 3))
         if o.mode is OutMode.VIEW:
-            # a view lies in the input's buffer, unless the callee allocated one
+            # a view lies in the input's buffer, unless the kernel allocated one
             mine = b.icmp(m.ICmp.NE, owner, b.null())
             owner = b.select(mine, owner, field(arg(o.view_of), 3))
         b.store(owner, b.field_ptr(pa, p, 3))
@@ -398,13 +399,13 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
     return fn
 
 
-def _check_layout(cx, p, r: TensorRepr, k):
+def _check_layout(cg, p, r: TensorRepr, k):
     """Fail unless the PtArray at `p` has layout `r.layout` (numpy's rules: length-1 axes
     and empty arrays don't count)."""
     from pytensor.link.llvm_v2.codegen.emit import _and
     from pytensor.link.llvm_v2.codegen.types import itemsize
 
-    b, m = cx.b, ir()
+    b, m = cg.b, ir()
     pa = ptarray_type()
     shape_p = b.load(m.ptr, b.field_ptr(pa, p, 1))
     strides_p = b.load(m.ptr, b.field_ptr(pa, p, 2))
@@ -418,14 +419,14 @@ def _check_layout(cx, p, r: TensorRepr, k):
         same = b.icmp(m.ICmp.EQ, actual[a], expected[a])
         ok = _and(b, ok, b.or_(one, same))
         empty = b.or_(empty, b.icmp(m.ICmp.EQ, shape[a], b.const_int(m.i64, 0)))
-    cx.check(b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}")
+    cg.check(b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}")
 
 
 @dataclass
 class CompiledNode:
     compiled: object
     signature: Signature
-    workspace: int
+    frame_size: int
 
     @property
     def address(self):
@@ -433,14 +434,14 @@ class CompiledNode:
 
 
 def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None) -> CompiledNode:
-    """Compile one node as a C ABI function (for tests and one-node units).
+    """Compile one node as a kernel (for tests and one-node units).
     `provided`: layouts of the memory the caller will provide (default: as declared)."""
     m = ir()
     module = m.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
     nf = build_node_function(module, node, "node", provided=provided)
     build_abi_wrapper(module, nf, "abi")
     compiled = module.compile(opt_level=opt_level, cache=cache)
-    return CompiledNode(compiled, nf.signature, nf.workspace)
+    return CompiledNode(compiled, nf.signature, nf.frame_size)
 
 
 __all__ = [

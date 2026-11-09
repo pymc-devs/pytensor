@@ -256,7 +256,7 @@ pub struct Builder {
     /// blocks of open `with` contexts, innermost last (for error messages)
     depth: RefCell<usize>,
     /// open parallel regions, innermost last
-    regions: RefCell<Vec<RegionFrame>>,
+    regions: RefCell<Vec<Region>>,
     /// alias information for this function's array accesses (`alias_domain`)
     alias: RefCell<Option<AliasInfo>>,
 }
@@ -277,14 +277,14 @@ struct AliasInfo {
 }
 
 /// An open parallel region: its body function, and how to get back to its parent.
-struct RegionFrame {
+struct Region {
     parent_func: LLVMValueRef,
     parent_allocas: LLVMBuilderRef,
     parent_ret: Ty,
     body: LLVMValueRef,
     body_allocas: LLVMBuilderRef,
-    /// the body's `env` parameter (captured values, 8-byte slots)
-    env: LLVMValueRef,
+    /// the body's `captures` parameter (the captured values, 8-byte slots)
+    captures_param: LLVMValueRef,
     /// parent value -> the body's (the parent's ctx maps to the body's own)
     map: std::collections::HashMap<usize, LLVMValueRef>,
     /// captured parent values, in slot order
@@ -350,7 +350,7 @@ impl Builder {
     }
 
     /// The raw value, if it may be used here. Inside a parallel region, values of the
-    /// enclosing functions are captured (passed to the body through its `env`).
+    /// enclosing functions are captured (passed to the body through its `captures`).
     fn v(&self, v: &Value) -> PyResult<LLVMValueRef> {
         if !Rc::ptr_eq(&v.m, &self.m) {
             return err("value from a different module");
@@ -362,7 +362,7 @@ impl Builder {
     }
 
     /// `raw` (of type `ty`) from function `owner`, an enclosing function of an open
-    /// parallel region, as a value of the current function: loaded from the env slot of
+    /// parallel region, as a value of the current function: loaded from the captures slot of
     /// each region in between (in its body's entry block).
     fn capture(&self, raw: LLVMValueRef, ty: &Ty, owner: LLVMValueRef) -> PyResult<LLVMValueRef> {
         let mut regions = self.regions.borrow_mut();
@@ -373,22 +373,22 @@ impl Builder {
             return err(format!("a parallel region can't use a value of type {ty} from outside"));
         }
         let mut raw = raw;
-        for frame in regions[first..].iter_mut() {
-            if let Some(&r) = frame.map.get(&(raw as usize)) {
+        for region in regions[first..].iter_mut() {
+            if let Some(&r) = region.map.get(&(raw as usize)) {
                 raw = r;
                 continue;
             }
-            let slot = frame.captures.len();
+            let slot = region.captures.len();
             // SAFETY: a GEP and a load in the body's entry block (before its terminator);
-            // `env` holds a slot per capture, filled by the parent before the call.
+            // `captures` holds a slot per capture, filled by the parent before the call.
             let loaded = unsafe {
                 let i8t = c::LLVMInt8TypeInContext(self.m.ctx);
                 let mut off = c::LLVMConstInt(self.lt(&Ty::Int(64)), 8 * slot as u64, 0);
-                let p = c::LLVMBuildInBoundsGEP2(frame.body_allocas, i8t, frame.env, &mut off, 1, NONAME);
-                c::LLVMBuildLoad2(frame.body_allocas, self.lt(ty), p, NONAME)
+                let p = c::LLVMBuildInBoundsGEP2(region.body_allocas, i8t, region.captures_param, &mut off, 1, NONAME);
+                c::LLVMBuildLoad2(region.body_allocas, self.lt(ty), p, NONAME)
             };
-            frame.captures.push((raw, ty.clone()));
-            frame.map.insert(raw as usize, loaded);
+            region.captures.push((raw, ty.clone()));
+            region.map.insert(raw as usize, loaded);
             self.derive(raw, loaded);
             raw = loaded;
         }
@@ -1110,7 +1110,7 @@ impl Builder {
 
     /// Call the function at address `f` (a ptr value) with `args`, returning `ret`
     /// (None: void). For functions outside the module (kernels), whose address is only
-    /// known at run time (loaded from the env, not part of the IR).
+    /// known at run time (loaded from the link table, not part of the IR).
     #[pyo3(signature = (f, args, ret = None))]
     fn call_ptr(&self, f: Value, args: Vec<Value>, ret: Option<PyType>) -> PyResult<Option<Value>> {
         self.open()?;
@@ -1598,7 +1598,7 @@ impl Parallel {
             let ctx_raw = b.v(&me.ctx)?;
             me.parent_block = Some(b.block());
             let m = &b.m;
-            // SAFETY: a new internal function i32(ptr ctx, ptr env, i64 start, i64 end) in
+            // SAFETY: a new internal function i32(ptr ctx, ptr captures, i64 start, i64 end) in
             // this module, with its entry and body blocks like `Builder::new`; the
             // builder is then positioned in it (the parent's position is saved).
             let (body, body_allocas, params) = unsafe {
@@ -1620,17 +1620,17 @@ impl Parallel {
                 c::LLVMPositionBuilderAtEnd(b.b, blk);
                 (f, tmp, params)
             };
-            let frame = RegionFrame {
+            let region = Region {
                 parent_func: b.func.get(),
                 parent_allocas: b.allocas.get(),
                 parent_ret: b.ret.borrow().clone(),
                 body,
                 body_allocas,
-                env: params[1],
+                captures_param: params[1],
                 map: std::collections::HashMap::from([(ctx_raw as usize, params[0])]),
                 captures: vec![],
             };
-            b.regions.borrow_mut().push(frame);
+            b.regions.borrow_mut().push(region);
             b.func.set(body);
             b.allocas.set(body_allocas);
             *b.ret.borrow_mut() = Ty::Int(32);
@@ -1665,18 +1665,18 @@ impl Parallel {
             // SAFETY: i32 0 in the body's open block.
             unsafe { c::LLVMBuildRet(b.b, c::LLVMConstInt(b.lt(&Ty::Int(32)), 0, 0)) };
         }
-        let frame = b.regions.borrow_mut().pop().expect("an open region");
+        let region = b.regions.borrow_mut().pop().expect("an open region");
         // SAFETY: the body's alloca builder isn't used any more.
-        unsafe { c::LLVMDisposeBuilder(frame.body_allocas) };
-        b.func.set(frame.parent_func);
-        b.allocas.set(frame.parent_allocas);
-        *b.ret.borrow_mut() = frame.parent_ret;
+        unsafe { c::LLVMDisposeBuilder(region.body_allocas) };
+        b.func.set(region.parent_func);
+        b.allocas.set(region.parent_allocas);
+        *b.ret.borrow_mut() = region.parent_ret;
         b.position(self.parent_block.take().expect("saved at entry"));
         if exc_type.is_some() {
             return Ok(false);
         }
-        // in the parent: the env (one 8-byte slot per capture), then the runtime call
-        let k = frame.captures.len().max(1);
+        // in the parent: the captures (one 8-byte slot per capture), then the runtime call
+        let k = region.captures.len().max(1);
         // SAFETY: an array alloca in the parent's entry, stores of the captured parent
         // values into their slots, and the call of the runtime's parallel_for with the
         // body's address, all in the parent's open block.
@@ -1684,15 +1684,15 @@ impl Parallel {
             let i8t = c::LLVMInt8TypeInContext(b.m.ctx);
             let i64t = b.lt(&Ty::Int(64));
             let cnt = c::LLVMConstInt(i64t, k as u64, 0);
-            let env = c::LLVMBuildArrayAlloca(b.allocas.get(), i64t, cnt, NONAME);
-            c::LLVMSetAlignment(env, 64);
-            for (slot, (raw, _ty)) in frame.captures.iter().enumerate() {
+            let captures = c::LLVMBuildArrayAlloca(b.allocas.get(), i64t, cnt, NONAME);
+            c::LLVMSetAlignment(captures, 64);
+            for (slot, (raw, _ty)) in region.captures.iter().enumerate() {
                 let mut off = c::LLVMConstInt(i64t, 8 * slot as u64, 0);
-                let p = c::LLVMBuildInBoundsGEP2(b.b, i8t, env, &mut off, 1, NONAME);
+                let p = c::LLVMBuildInBoundsGEP2(b.b, i8t, captures, &mut off, 1, NONAME);
                 c::LLVMBuildStore(b.b, *raw, p);
             }
             let (f, fnty) = b.declare("ptl_rt_parallel_for", &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr, Ty::Ptr], &Ty::Int(32), false);
-            let mut args = [b.v(&self.ctx)?, b.v(&self.n)?, b.v(&self.grain)?, frame.body, env];
+            let mut args = [b.v(&self.ctx)?, b.v(&self.n)?, b.v(&self.grain)?, region.body, captures];
             c::LLVMBuildCall2(b.b, fnty, f, args.as_mut_ptr(), 5, NONAME)
         };
         self.result = Some(b.mk(rc, Ty::Int(32)));

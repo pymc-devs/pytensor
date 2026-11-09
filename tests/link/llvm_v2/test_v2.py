@@ -27,7 +27,7 @@ def compare(inputs, outputs, values, mode=V2, rtol=1e-10, atol=1e-12):
 
 def info(f):
     p = f.maker.linker.compiled
-    return {"steps": p.steps, "n_steps": p.n_steps, "arena_bytes": p.arena_bytes, "stats": f.maker.linker.stats}
+    return {"tasks": p.tasks, "n_tasks": p.n_tasks, "arena_bytes": p.arena_bytes, "stats": f.maker.linker.stats}
 
 
 def test_elemwise_reduce_dot_dynamic_shapes():
@@ -59,8 +59,8 @@ def test_small_static_graph_is_one_unit():
     w = pt.sum(pt.exp(x) * y) * 2 + pt.max(x)
     f = compare([x, y], w, [rng.random((3, 4)), rng.random(4)])
     i = info(f)
-    assert i["n_steps"] == 1
-    assert i["steps"][0].startswith("unit[")
+    assert i["n_tasks"] == 1
+    assert i["tasks"][0].startswith("unit[")
 
 
 def test_arena_reuses_temporaries():
@@ -75,7 +75,7 @@ def test_arena_reuses_temporaries():
     e = pt.sqrt(d)
     f = compare([x], pt.sort(e), [rng.normal(size=n)])
     i = info(f)
-    temporaries = len(i["steps"]) - 1
+    temporaries = len(i["tasks"]) - 1
     assert temporaries >= 4
     assert n * 8 <= i["arena_bytes"] < temporaries * n * 8
 
@@ -86,9 +86,9 @@ def test_compiled_ofg_calls_kernels():
     inner = OpFromGraph([A, v], [((A @ v) ** 2).sum(), A @ v], unit=UnitKind.COMPILED)
     out = inner(A, v)
     f = compare([A, v], out, [rng.random((4, 3)), rng.random(3)])
-    steps = info(f)["steps"]
-    # Dot can't be generated yet, so the unit runs its nodes as separate steps
-    assert any("Dot" in s for s in steps)
+    tasks = info(f)["tasks"]
+    # Dot can't be generated yet, so the unit runs its nodes as separate tasks
+    assert any("Dot" in s for s in tasks)
 
 
 def test_interpreted_ofg():
@@ -96,7 +96,7 @@ def test_interpreted_ofg():
     inner = OpFromGraph([x], [pt.exp(x).sum(), x * 2], unit=UnitKind.INTERPRETED)
     out = inner(x)
     f = compare([x], [out[0], out[1] + 1], [rng.random(6)])
-    assert any(s.startswith("program:") for s in info(f)["steps"])
+    assert any(s.startswith("program:") for s in info(f)["tasks"])
 
 
 def test_nested_ofg_kinds():
@@ -143,7 +143,7 @@ def test_outputs_alias_inputs_views_and_each_other():
     np.testing.assert_allclose(f(X)[2], np.exp(X))
 
 
-def test_callee_outputs_of_units():
+def test_kernel_outputs_of_units():
     # dynamic shapes inside a compiled unit: outputs are allocated by the unit
     x = pt.vector("x")
     inner = OpFromGraph([x], [pt.exp(x), x.sum()], unit=UnitKind.COMPILED)
@@ -166,13 +166,13 @@ def test_repeated_calls_and_threads():
         np.testing.assert_allclose(d, v * 2)
 
 
-def test_profiling_with_nested_programs():
+def test_profiling_with_subprograms():
     import pytensor
 
     x = pt.dmatrix("x")
     w = pt.dvector("w")
     res = pytensor.scan(lambda r, acc: acc + pt.exp(r) @ w, sequences=[x], outputs_info=[pt.zeros(())], return_updates=False)
-    # the Scan kernel runs its step as a nested program (a generated Scan has none)
+    # the Scan kernel runs its loop body as a subprogram (a generated Scan has none)
     mode = get_mode("LLVM_V2").clone(link_kwargs={"generate_scan": False})
     f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode=mode)
     p = f.maker.linker.compiled
@@ -187,7 +187,7 @@ def test_profiling_with_nested_programs():
     nested = [r for r in rows if r[0] == 1]
     assert top and nested
     assert all(calls == 3 for _, _, calls, _ in top)
-    assert all(calls == 15 for _, _, calls, _ in nested)  # the step program ran 5 times per call
+    assert all(calls == 15 for _, _, calls, _ in nested)  # the loop body ran 5 times per call
     assert sum(s for *_, s in top) > 0
     assert "Scan" in p.profile_report()
     p.reset_profile()

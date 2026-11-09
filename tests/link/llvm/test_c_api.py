@@ -80,7 +80,7 @@ class Api(ctypes.Structure):
         (name, ctypes.c_void_p)
         for name in [
             "function_incref", "function_decref", "n_inputs", "n_outputs", "input_type", "output_type",
-            "state_new", "state_free", "call", "last_error", "buffer_decref", "seed", "set_parallel",
+            "session_new", "session_free", "call", "last_error", "buffer_decref", "seed", "set_parallel",
         ]
     ]
 
