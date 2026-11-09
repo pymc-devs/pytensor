@@ -192,3 +192,65 @@ def test_profiling_with_nested_programs():
     p.set_profiling(False)
     f(xv, wv)
     assert all(secs == 0 and calls == 0 for _, _, calls, secs in p.profile())
+
+
+def test_scalars_around_a_scan():
+    # scalars computed from `n` are used before the Scan (x[:n]) and after it (the
+    # gradient's IncSubtensor): they can't be one compiled unit with the Scan in between
+    x = pt.vector("x")
+    n = pt.iscalar("n")
+    ys = pytensor.scan(
+        lambda xt, acc: acc * 0.5 + xt, sequences=[x[:n]], outputs_info=[pt.zeros(())], return_updates=False
+    )
+    compare([x, n], [ys.sum(), pt.grad(ys.sum(), x)], [np.arange(5.0), np.int32(3)])
+
+
+def test_kernel_reading_a_scalar():
+    # a Rust kernel (Scan) reading a ScalarType value (here a non-sequence, as rewrites
+    # produce for merged gradient scans) gets it as a 0-d tensor, made in the scalars'
+    # compiled unit
+    from pytensor.compile.mode import Mode
+    from pytensor.graph.replace import clone_replace
+    from pytensor.scalar import ScalarType, bool as scalar_bool
+    from pytensor.scan.op import Scan
+    from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
+
+    x = pt.vector("x")
+    ys = pytensor.scan(
+        lambda acc, f: pt.switch(f, acc * 0.5 + 1, acc - 1),
+        outputs_info=[pt.zeros(())],
+        non_sequences=[pt.gt(x.sum(), 0)],
+        n_steps=4,
+        return_updates=False,
+    )
+    node = ys.owner.inputs[0].owner
+    while not isinstance(node.op, Scan):
+        node = next(i.owner for i in node.inputs if i.owner is not None)
+    op = node.op
+    # the same Scan with the flag as a ScalarType non-sequence
+    s = scalar_bool()
+    inner = op.fgraph.unfreeze()
+    inner_in = list(inner.inputs)
+    inner_out = clone_replace(list(inner.outputs), {inner_in[-1]: tensor_from_scalar(s)})
+    new_op = Scan([*inner_in[:-1], s], inner_out, op.info, mode=op.mode)
+    flag = scalar_from_tensor(node.inputs[-1])
+    new = new_op(*node.inputs[:-1], flag, return_list=True)
+    out = new[0][1:].sum() + x.sum()
+
+    f = pytensor.function([x], out, mode=Mode(linker=V2.linker, optimizer=None))
+    scans = [nd for nd in f.maker.fgraph.toposort() if isinstance(nd.op, Scan)]
+    assert any(isinstance(i.type, ScalarType) for i in scans[0].inputs)
+    g = pytensor.function([x], out, mode=REF)
+    for v in (np.arange(3.0), -np.arange(3.0)):
+        np.testing.assert_allclose(f(v), g(v))
+
+
+def test_scalar_graph_input():
+    from pytensor.scalar import float64
+    from pytensor.tensor.basic import tensor_from_scalar
+
+    s = float64("s")
+    x = pt.vector("x")
+    out = x * tensor_from_scalar(s * 2)
+    f = pytensor.function([s, x], out, mode=V2)
+    np.testing.assert_allclose(f(1.5, np.arange(3.0)), np.arange(3.0) * 3)
