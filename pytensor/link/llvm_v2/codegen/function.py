@@ -94,8 +94,9 @@ def llvm_outputs(op, node, in_layouts) -> list[Output]:
     where and how their outputs are produced (e.g. Elemwise allocating its output in
     its inputs' memory order). The code must produce what is declared: ALLOCATED
     outputs in the layout given (`SlotOutput.allocate` does that), VIEW outputs with
-    the layout claimed. PROVIDED memory is what the op asks for; the provider may give
-    other memory (the code reads the actual layout from the signature)."""
+    the layout claimed (`SlotOutput.set_view` checks). PROVIDED memory has the declared
+    layout (packed, or any strides); a provider that can't give it writes the output
+    other memory only through a temporary and a copy."""
     view_map = getattr(op, "view_map", {}) or {}
     return [
         Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.VIEW, view_map[k][0])
@@ -144,9 +145,10 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None) -> 
     """`folded`: positions of inputs that are constants folded into the code (not
     arguments). None inputs aren't arguments either.
 
-    `in_layouts`: the `Layout` of each input; outputs as `llvm_outputs` declares them,
-    except PROVIDED ones: their layout is that of the memory actually provided,
-    `provided[k]` (None: any strides)."""
+    `in_layouts`: the `Layout` of each input; outputs as `llvm_outputs` declares them.
+    The declared layout of a PROVIDED output is binding: whoever provides the memory
+    provides it in that layout. `provided[k]` replaces the declaration, for a caller
+    that generates a function for memory it fixes (tests writing into a slice)."""
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
@@ -162,10 +164,8 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None) -> 
 
     outputs = []
     for k, o in enumerate(node_outputs(node, in_layouts)):
-        if o.mode is OutMode.PROVIDED:
-            # the memory's layout is the provider's to state; unstated: any strides
-            lay = provided[k] if provided is not None else None
-            o = o.with_layout(lay if lay is not None else Layout.dynamic(o.repr.ndim))
+        if o.mode is OutMode.PROVIDED and provided is not None and provided[k] is not None:
+            o = o.with_layout(provided[k])
         if o.view_of is not None:
             o = Output(o.repr, o.mode, arg_index(o.view_of))
         outputs.append(o)
@@ -253,6 +253,7 @@ def build_node_function(
                     # what `allocate` produces: the declared layout (a view that copies
                     # instead, like Reshape, declares C)
                     layout=o.layout if o.layout.fully_packed(o.repr.shape) else None,
+                    declared=o.layout if o.mode is OutMode.VIEW else None,
                 )
             )
     llvm_emit(node.op, node, cx, inputs, outputs)
@@ -379,11 +380,12 @@ class CompiledNode:
         return self.compiled.address("abi")
 
 
-def compile_node(node, *, fastmath=True, opt_level=3, cache=True) -> CompiledNode:
-    """Compile one node as a C ABI function (for tests and one-node units)."""
+def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None) -> CompiledNode:
+    """Compile one node as a C ABI function (for tests and one-node units).
+    `provided`: layouts of the memory the caller will provide (default: as declared)."""
     m = ir()
     module = m.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
-    nf = build_node_function(module, node, "node")
+    nf = build_node_function(module, node, "node", provided=provided)
     build_abi_wrapper(module, nf, "abi")
     compiled = module.compile(opt_level=opt_level, cache=cache)
     return CompiledNode(compiled, nf.signature, nf.workspace)

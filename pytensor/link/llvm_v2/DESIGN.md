@@ -109,17 +109,25 @@ in the caller and disappear after inlining.
 
 ## 3. Outputs
 
-How each output comes to be is declared per op by one dispatch,
-`llvm_outputs(op, node, in_layouts) -> [Output(repr, mode, view_of)]`: the mode and the
-layout (section 1a), from the input layouts. The default follows the types and
-`view_map` (C-contiguous new memory, views of unknown layout); ops register their own
-to describe views or to choose their outputs' layout (Elemwise allocates its output in
-the memory order most of its inputs share). The code must produce what is declared:
-allocated outputs in the declared layout, views with the declared layout. For a
-provided output the declared layout is a request: the provider (planner, compiled unit)
-decides what memory it gives, and the signature carries that layout (unstated: any
-strides). Rust kernels write provided memory as it is and allocate C-contiguous;
-numba fall-backs allocate with unknown layout.
+How each output comes to be is declared by the implementation that produces it: for
+generated code by one dispatch per op, `llvm_outputs(op, node, in_layouts) ->
+[Output(repr, mode, view_of)]`, the mode and the layout (section 1a) from the input
+layouts; for a Rust kernel by the kernel itself (`Kernel.outputs`, in Rust next to the
+kernel); a numba fall-back allocates with unknown layout. The planner picks the
+implementation first, then asks it.
+
+The default `llvm_outputs` follows the types and `view_map`: C-contiguous new memory,
+views of unknown layout (always true, so always safe). Ops register their own to
+describe their views or to choose their outputs' layout (Elemwise uses the memory
+order most of its inputs share). Declarations are binding:
+
+* provided: whoever provides the memory provides it in the declared layout. The
+  planner's arena memory can have any packed order. A graph output must be
+  C-contiguous; one declared otherwise is written to an arena temporary and copied. A
+  compiled unit does the same with its own outputs;
+* allocated: `SlotOutput.allocate` and temporaries allocate in the declared layout;
+* view: `SlotOutput.set_view` checks, when generating the code, that the view array's
+  layout implies the declared one (view emitters attach layouts to their arrays).
 
 | mode | argument | the caller | the callee |
 |---|---|---|---|
@@ -133,13 +141,11 @@ An output slot is `{ ptr data, [ndim x i64] lengths, [ndim x i64] strides, ptr o
 (all lengths: the caller needs them). Representations don't carry buffer owners, so for
 views the caller sets the owner from the input the view lies in.
 
-**Layout.** Nothing is contiguous unless the signature says so (section 1a). A provided
-output's layout is part of the signature: by default any strides (e.g. a slice of a
-larger array); the planner provides memory in the layout the op asks for when it is
-packed (arena values can have any memory order), C-contiguous for graph outputs. A callee
-allocating an output chooses its strides, and the layout inference records what it
-chooses (generated code and the Rust kernels allocate C-contiguous). Code reading an
-array checks contiguity at run time only where its layout doesn't settle it.
+**Layout.** Nothing is contiguous unless the signature says so (section 1a). Every
+output's layout is part of the signature, as declared (above); a provided output can
+be declared with any strides (e.g. to write into a slice of a larger array), but the
+default is C-contiguous. Code reading an array checks contiguity at run time only where
+its layout doesn't settle it.
 
 ## 4. Workspace
 
