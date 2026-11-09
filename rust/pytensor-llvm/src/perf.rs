@@ -54,9 +54,7 @@ pub fn register_object(obj: &[u8], name: &str, addr: usize, label: &str) {
             continue;
         }
         let Ok(sym) = s.name() else { continue };
-        // Readable names: the wrapper gets the kernel description, helpers keep
-        // their own name, both with the kernel hash for matching against the plan.
-        let pretty = if sym == name { format!("{name} [{label}]") } else { format!("{name}::{sym}") };
+        let pretty = pretty_name(name, sym, label);
         lines.push_str(&format!("{:x} {:x} {}\n", base + s.address(), s.size(), pretty));
     }
     if lines.is_empty() {
@@ -67,6 +65,31 @@ pub fn register_object(obj: &[u8], name: &str, addr: usize, label: &str) {
         let _ = f.write_all(lines.as_bytes());
         let _ = f.flush();
     }
+}
+
+/// Readable perf-map names. Code from `pytensor_llvm.ir` has symbols `pt<hash>_<fn>`:
+/// shown as `<label>::<fn> [<hash prefix>]`. Other code (the first backend) shows the
+/// entry point with its kernel description, helpers as `<entry>::<helper>`.
+fn pretty_name(entry: &str, sym: &str, label: &str) -> String {
+    let label: String = label.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    if let Some((hash, func)) = split_ir_symbol(sym) {
+        return format!("{label}::{func} [{}]", &hash[..8]);
+    }
+    if let Some((hash, _)) = split_ir_symbol(entry) {
+        return format!("{label}::{sym} [{}]", &hash[..8]);
+    }
+    if sym == entry {
+        format!("{entry} [{label}]")
+    } else {
+        format!("{entry}::{sym}")
+    }
+}
+
+/// `pt<32 hex>_<fn>` -> (hash, fn)
+fn split_ir_symbol(sym: &str) -> Option<(&str, &str)> {
+    let rest = sym.strip_prefix("pt")?;
+    let (hash, func) = (rest.get(..32)?, rest.get(32..)?.strip_prefix('_')?);
+    hash.bytes().all(|b| b.is_ascii_hexdigit()).then_some((hash, func))
 }
 
 /// Function attributes for generated code when profiling.
