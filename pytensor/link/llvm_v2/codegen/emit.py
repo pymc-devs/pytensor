@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from pytensor.link.llvm_v2.layout import DYNAMIC, PACKED, Layout
@@ -332,7 +333,14 @@ class EmitContext:
     ws: object
     #: bytes of static workspace used so far
     ws_static: int = 0
+    #: may loops run in parallel (`Options.parallel`)?
+    parallel: bool = True
     _checks: int = field(default=0)
+
+    def par(self, per_item: float) -> Parallel | None:
+        """How loops of items costing `per_item` (layout of `work.py`) may run in
+        parallel, or None."""
+        return Parallel(self, per_item) if self.parallel and per_item > 0 else None
 
     def fail(self, message: str | None):
         """Report `message` (unless the callee already did) and return 1."""
@@ -436,7 +444,51 @@ def loop_order(shape, arrays) -> list[int]:
     return rest + list(reversed(block))
 
 
-def for_each(b, shape, arrays, body):
+# ------------------------------------------------------------------ parallel loops
+
+#: cost (work.py units) of one chunk of a parallel loop: enough to make the overhead
+#: of a parallel region (microseconds) small
+CHUNK_COST = 50_000
+#: loops cheaper than this stay serial (decided when generating the code when the
+#: shapes are static; at run time by the runtime otherwise: one chunk runs directly)
+MIN_PARALLEL_COST = 2 * CHUNK_COST
+
+
+@dataclass
+class Parallel:
+    """A loop whose iterations may run in parallel: the context, the cost of one item."""
+
+    cx: EmitContext
+    per_item: float
+
+    def worth_it(self, n_items) -> bool:
+        """False if the loop is statically too small for a parallel region."""
+        n = n_items.const_int
+        return n is None or n * self.per_item >= MIN_PARALLEL_COST
+
+    def grain(self, b, items_per_iteration):
+        """Iterations per chunk (i64), for iterations of `items_per_iteration` items."""
+        m = ir()
+        per = items_per_iteration.const_int
+        if per is not None:
+            return b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / (self.per_item * max(per, 1)))))
+        target = b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / self.per_item)))
+        one = b.const_int(m.i64, 1)
+        per = b.select(b.icmp(m.ICmp.SGT, items_per_iteration, one), items_per_iteration, one)
+        g = b.sdiv(target, per)
+        return b.select(b.icmp(m.ICmp.SGT, g, one), g, one)
+
+    def range(self, b, n, items_per_iteration, body):
+        """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
+        chunk fail the function."""
+        m = ir()
+        with b.parallel(self.cx.ctx, n, self.grain(b, items_per_iteration)) as r:
+            with b.loop(b.sub(r.end, r.start)) as j:
+                body(b.add(r.start, j))
+        self.cx.check(b.icmp(m.ICmp.EQ, r.result, b.const_int(m.i32, 0)), None)
+
+
+def for_each(b, shape, arrays, body, par: Parallel | None = None):
     """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
 
     `arrays` have strides over `shape` (0 where broadcast). The loops follow memory order
@@ -444,39 +496,62 @@ def for_each(b, shape, arrays, body):
     element indices (what the vectorizer likes). The layouts decide that when they can;
     only arrays whose layout leaves it open are checked at run time, and then both the
     flat loop and the nest are generated.
+
+    With `par`, the loop (the flat one, or the nest's outermost) runs in chunks that may
+    run in parallel when there's enough work. Iterations must not depend on each other.
     """
     order = loop_order(shape, arrays)
+    if par is not None and not par.worth_it(size(b, shape)):
+        par = None
     contig = b.const_bool(True)
     for a in arrays:
         contig = _and(b, contig, is_contiguous(b, shape, a, order))
     c = contig.const_int
     if c == 1:
-        _flat(b, shape, arrays, body)
+        _flat(b, shape, arrays, body, par)
     elif c == 0:
-        _strided(b, shape, arrays, body, order)
+        _strided(b, shape, arrays, body, order, par=par)
     else:
         b.if_else(
-            contig, lambda: _flat(b, shape, arrays, body) or [], lambda: _strided(b, shape, arrays, body, order) or []
+            contig,
+            lambda: _flat(b, shape, arrays, body, par) or [],
+            lambda: _strided(b, shape, arrays, body, order, par=par) or [],
         )
 
 
-def _flat(b, shape, arrays, body):
+def _flat(b, shape, arrays, body, par=None):
     n = size(b, shape)
-    with b.loop(n) as i:
+
+    def at(i):
         body([b.gep(memory_type(a.dtype), a.data, i) for a in arrays])
 
+    if par is not None:
+        par.range(b, n, b.const_int(ir().i64, 1), at)
+        return
+    with b.loop(n) as i:
+        at(i)
 
-def _strided(b, shape, arrays, body, order, level=0, base=None):
-    """Loops over the axes in `order` (outermost first; may be a subset of the axes)."""
+
+def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
+    """Loops over the axes in `order` (outermost first; may be a subset of the axes).
+    With `par`, the outermost loop runs in chunks that may run in parallel."""
     if base is None:
         base = [a.data for a in arrays]
     if level == len(order):
         body(base)
         return
     axis = order[level]
-    with b.loop(shape[axis]) as i:
+
+    def at(i):
         ptrs = [b.gep_bytes(p, mul(b, i, a.strides[axis])) for p, a in zip(base, arrays, strict=True)]
         _strided(b, shape, arrays, body, order, level + 1, ptrs)
+
+    if par is not None and level == 0:
+        inner = size(b, [shape[a] for a in order[1:]])
+        par.range(b, shape[axis], inner, at)
+        return
+    with b.loop(shape[axis]) as i:
+        at(i)
 
 
 def copy(cx, src: Array, dst: Array):
@@ -486,7 +561,7 @@ def copy(cx, src: Array, dst: Array):
     def body(p):
         store(b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1])
 
-    for_each(b, dst.shape, [src, dst], body)
+    for_each(b, dst.shape, [src, dst], body, cx.par(1.0))
 
 
 __all__ = [

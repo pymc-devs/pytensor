@@ -54,7 +54,7 @@ class Item:
 
 
 def build_unit_function(
-    module, name, inputs, outputs, items, constants, input_layouts=None, output_layouts=None
+    module, name, inputs, outputs, items, constants, input_layouts=None, output_layouts=None, parallel=True
 ) -> NodeFunction:
     """A function computing `outputs` from `inputs` by running `items` in order.
 
@@ -85,7 +85,7 @@ def build_unit_function(
     b = fn.builder()
     params = fn.params
     ctx, env, ws = params[:3]
-    cx = EmitContext(b, ctx, env, ws)
+    cx = EmitContext(b, ctx, env, ws, parallel=parallel)
 
     vals = {}  # key -> Array (tensors) or value (scalars)
     k = 3
@@ -154,6 +154,7 @@ def build_unit_function(
             f"{name}_n{n}",
             temporary_outputs=frozenset(temporaries),
             in_layouts=in_lays,
+            parallel=parallel,
         )
         args = [ctx, env, _ws_part(cx, nf.workspace)]
         present = [key for key, var in zip(item.inputs, node.inputs, strict=True) if not is_absent(var.type)]

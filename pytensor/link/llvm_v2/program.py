@@ -60,6 +60,9 @@ class Options:
     #: what generated code may assume about the graph inputs: "any" strides, or "c"
     #: (C-contiguous: Python calls copy other arrays, the C API rejects them)
     input_layout: str = "any"
+    #: may generated loops run in parallel (chunks on the runtime's thread pool, when
+    #: there is enough work; see work.py)
+    parallel: bool = True
     #: generated steps verify the layouts their signatures claim (for testing; also
     #: turned on by PYTENSOR_LLVM_CHECK_LAYOUTS=1)
     check_layouts: bool = False
@@ -366,6 +369,7 @@ class Planner:
                 consts,
                 input_layouts=in_lays,
                 output_layouts=[Layout.c(self.types[o].ndim) for _, o in it.outputs],
+                parallel=self.opts.parallel,
             )
             build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
             # provided memory is C-contiguous, and so is what a unit allocates
@@ -426,7 +430,7 @@ class Planner:
             return Step(present, outs, modes, views, address=k.address, env=k.env, description=repr(k), keepalive=k)
         try:
             module = ir.Module(f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath)
-            nf = build_node_function(module, node, "node", folded=folded, in_layouts=in_lays)
+            nf = build_node_function(module, node, "node", folded=folded, in_layouts=in_lays, parallel=self.opts.parallel)
             build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
             skipped = skipped_inputs(node, folded)
             inputs = [k for pos, k in enumerate(it.inputs) if pos not in skipped]

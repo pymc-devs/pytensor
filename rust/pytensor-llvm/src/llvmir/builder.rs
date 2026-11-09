@@ -11,7 +11,7 @@ use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMBuilderRef, LLVMTypeRef, LLVMValu
 use llvm_sys::{LLVMIntPredicate as IP, LLVMRealPredicate as RP};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 type BuildFn = unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, *const std::ffi::c_char) -> LLVMValueRef;
@@ -246,20 +246,43 @@ impl RustMath {
 pub struct Builder {
     m: Rc<ModuleInner>,
     b: LLVMBuilderRef,
-    /// positioned before the entry block's terminator: allocas go there
-    allocas: LLVMBuilderRef,
-    func: LLVMValueRef,
-    ret: Ty,
+    /// positioned before the entry block's terminator of the current function: allocas
+    /// go there
+    allocas: Cell<LLVMBuilderRef>,
+    /// the function code goes into: the builder's own, or the body of the innermost open
+    /// parallel region (`b.parallel`)
+    func: Cell<LLVMValueRef>,
+    ret: RefCell<Ty>,
     /// blocks of open `with` contexts, innermost last (for error messages)
     depth: RefCell<usize>,
+    /// open parallel regions, innermost last
+    regions: RefCell<Vec<RegionFrame>>,
+}
+
+/// An open parallel region: its body function, and how to get back to its parent.
+struct RegionFrame {
+    parent_func: LLVMValueRef,
+    parent_allocas: LLVMBuilderRef,
+    parent_ret: Ty,
+    body: LLVMValueRef,
+    body_allocas: LLVMBuilderRef,
+    /// the body's `env` parameter (captured values, 8-byte slots)
+    env: LLVMValueRef,
+    /// parent value -> the body's (the parent's ctx maps to the body's own)
+    map: std::collections::HashMap<usize, LLVMValueRef>,
+    /// captured parent values, in slot order
+    captures: Vec<(LLVMValueRef, Ty)>,
 }
 
 impl Drop for Builder {
     fn drop(&mut self) {
-        // SAFETY: we own both builders.
+        // SAFETY: we own these builders (regions left open by an error included).
         unsafe {
             c::LLVMDisposeBuilder(self.b);
-            c::LLVMDisposeBuilder(self.allocas);
+            c::LLVMDisposeBuilder(self.allocas.get());
+            for f in self.regions.borrow().iter() {
+                c::LLVMDisposeBuilder(f.parent_allocas);
+            }
         }
     }
 }
@@ -277,7 +300,15 @@ impl Builder {
             let allocas = c::LLVMCreateBuilderInContext(m.ctx);
             c::LLVMPositionBuilderBefore(allocas, br);
             c::LLVMPositionBuilderAtEnd(b, body);
-            Ok(Builder { m, b, allocas, func, ret, depth: RefCell::new(0) })
+            Ok(Builder {
+                m,
+                b,
+                allocas: Cell::new(allocas),
+                func: Cell::new(func),
+                ret: RefCell::new(ret),
+                depth: RefCell::new(0),
+                regions: RefCell::new(vec![]),
+            })
         }
     }
 
@@ -300,21 +331,53 @@ impl Builder {
         Ok(())
     }
 
-    /// The raw value, if it may be used here.
+    /// The raw value, if it may be used here. Inside a parallel region, values of the
+    /// enclosing functions are captured (passed to the body through its `env`).
     fn v(&self, v: &Value) -> PyResult<LLVMValueRef> {
         if !Rc::ptr_eq(&v.m, &self.m) {
             return err("value from a different module");
         }
-        if let Some(f) = v.func {
-            if f != self.func {
-                return err("value from a different function");
-            }
+        match v.func {
+            Some(f) if f != self.func.get() => self.capture(v.raw, &v.ty, f),
+            _ => Ok(v.raw),
         }
-        Ok(v.raw)
+    }
+
+    /// `raw` (of type `ty`) from function `owner`, an enclosing function of an open
+    /// parallel region, as a value of the current function: loaded from the env slot of
+    /// each region in between (in its body's entry block).
+    fn capture(&self, raw: LLVMValueRef, ty: &Ty, owner: LLVMValueRef) -> PyResult<LLVMValueRef> {
+        let mut regions = self.regions.borrow_mut();
+        let Some(first) = regions.iter().position(|f| f.parent_func == owner) else {
+            return err("value from a different function");
+        };
+        if !matches!(ty, Ty::Int(_) | Ty::F32 | Ty::F64 | Ty::Ptr) {
+            return err(format!("a parallel region can't use a value of type {ty} from outside"));
+        }
+        let mut raw = raw;
+        for frame in regions[first..].iter_mut() {
+            if let Some(&r) = frame.map.get(&(raw as usize)) {
+                raw = r;
+                continue;
+            }
+            let slot = frame.captures.len();
+            // SAFETY: a GEP and a load in the body's entry block (before its terminator);
+            // `env` holds a slot per capture, filled by the parent before the call.
+            let loaded = unsafe {
+                let i8t = c::LLVMInt8TypeInContext(self.m.ctx);
+                let mut off = c::LLVMConstInt(self.lt(&Ty::Int(64)), 8 * slot as u64, 0);
+                let p = c::LLVMBuildInBoundsGEP2(frame.body_allocas, i8t, frame.env, &mut off, 1, NONAME);
+                c::LLVMBuildLoad2(frame.body_allocas, self.lt(ty), p, NONAME)
+            };
+            frame.captures.push((raw, ty.clone()));
+            frame.map.insert(raw as usize, loaded);
+            raw = loaded;
+        }
+        Ok(raw)
     }
 
     fn mk(&self, raw: LLVMValueRef, ty: Ty) -> Value {
-        Value { m: self.m.clone(), raw, ty, func: Some(self.func) }
+        Value { m: self.m.clone(), raw, ty, func: Some(self.func.get()) }
     }
 
     fn konst(&self, raw: LLVMValueRef, ty: Ty) -> Value {
@@ -431,7 +494,7 @@ impl Builder {
 
     fn new_block(&self, name: &std::ffi::CStr) -> LLVMBasicBlockRef {
         // SAFETY: appending a block to this function.
-        unsafe { c::LLVMAppendBasicBlockInContext(self.m.ctx, self.func, name.as_ptr()) }
+        unsafe { c::LLVMAppendBasicBlockInContext(self.m.ctx, self.func.get(), name.as_ptr()) }
     }
 
     fn position(&self, bb: LLVMBasicBlockRef) {
@@ -845,10 +908,10 @@ impl Builder {
         // SAFETY: the alloca builder sits before the entry block's terminator.
         let r = unsafe {
             let r = if count == 1 {
-                c::LLVMBuildAlloca(self.allocas, self.lt(&ty.0), NONAME)
+                c::LLVMBuildAlloca(self.allocas.get(), self.lt(&ty.0), NONAME)
             } else {
                 let n = c::LLVMConstInt(self.lt(&Ty::Int(64)), count as u64, 0);
-                c::LLVMBuildArrayAlloca(self.allocas, self.lt(&ty.0), n, NONAME)
+                c::LLVMBuildArrayAlloca(self.allocas.get(), self.lt(&ty.0), n, NONAME)
             };
             c::LLVMSetAlignment(r, 64);
             r
@@ -1086,7 +1149,7 @@ impl Builder {
     #[pyo3(signature = (value = None))]
     fn ret(&self, value: Option<Value>) -> PyResult<()> {
         self.open()?;
-        match (value, &self.ret) {
+        match (value, &*self.ret.borrow()) {
             (None, Ty::Void) => {
                 // SAFETY: the function returns void.
                 unsafe { c::LLVMBuildRetVoid(self.b) };
@@ -1112,6 +1175,30 @@ impl Builder {
             }
         }
         Ok(Loop { b: slf, n, state: None })
+    }
+
+    /// `with b.parallel(ctx, n, grain) as r:` a loop over `0..n` split into chunks of
+    /// `grain` (i64s) that may run in parallel (the runtime's `parallel_for`). Inside the
+    /// block, code goes into an outlined body function, called per chunk with its own
+    /// context; `r.start`, `r.end` are the chunk's bounds. Values of the enclosing
+    /// function used inside are captured automatically, and `ctx` stands for the
+    /// chunk's context there. After the block, `r.result` (i32) is the runtime's result:
+    /// nonzero if a chunk failed (the error is set on `ctx`).
+    ///
+    /// Chunks must not write memory another chunk reads or writes. Captured values must
+    /// be scalars or pointers.
+    fn parallel(slf: Py<Self>, py: Python<'_>, ctx: Value, n: Value, grain: Value) -> PyResult<Parallel> {
+        {
+            let b = slf.borrow(py);
+            b.open()?;
+            for (what, v, t) in [("ctx", &ctx, Ty::Ptr), ("n", &n, Ty::Int(64)), ("grain", &grain, Ty::Int(64))] {
+                b.v(v)?;
+                if v.ty != t {
+                    return err(format!("parallel: {what} must be {t}"));
+                }
+            }
+        }
+        Ok(Parallel { b: slf, ctx, n, grain, parent_block: None, start: None, end: None, result: None })
     }
 
     /// `with b.if_(cond):` runs the body if `cond` (i1) is true.
@@ -1312,6 +1399,135 @@ impl Loop {
             }
         }
         b.position(exit);
+        Ok(false)
+    }
+}
+
+/// `with b.parallel(ctx, n, grain) as r:`
+#[pyclass(module = "pytensor_llvm.ir", unsendable)]
+pub struct Parallel {
+    b: Py<Builder>,
+    ctx: Value,
+    n: Value,
+    grain: Value,
+    /// where the parent's code continues after the region
+    parent_block: Option<LLVMBasicBlockRef>,
+    start: Option<Value>,
+    end: Option<Value>,
+    result: Option<Value>,
+}
+
+#[pymethods]
+impl Parallel {
+    fn __enter__(slf: Py<Self>, py: Python<'_>) -> PyResult<Py<Self>> {
+        {
+            let mut me = slf.borrow_mut(py);
+            if me.start.is_some() || me.result.is_some() {
+                return err("a parallel region can be entered once");
+            }
+            let b = me.b.clone_ref(py);
+            let b = b.borrow(py);
+            let ctx_raw = b.v(&me.ctx)?;
+            me.parent_block = Some(b.block());
+            let m = &b.m;
+            // SAFETY: a new internal function i32(ptr ctx, ptr env, i64 start, i64 end) in
+            // this module, with its entry and body blocks like `Builder::new`; the
+            // builder is then positioned in it (the parent's position is saved).
+            let (body, body_allocas, params) = unsafe {
+                let (i32t, ptr, i64t) = (b.lt(&Ty::Int(32)), b.lt(&Ty::Ptr), b.lt(&Ty::Int(64)));
+                let mut ps = [ptr, ptr, i64t, i64t];
+                let fnty = c::LLVMFunctionType(i32t, ps.as_mut_ptr(), 4, 0);
+                let parent_name = std::ffi::CStr::from_ptr(c::LLVMGetValueName2(b.func.get(), &mut 0)).to_string_lossy().into_owned();
+                let name = cstring(&format!("{parent_name}.par"));
+                let f = c::LLVMAddFunction(m.module, name.as_ptr(), fnty);
+                c::LLVMSetLinkage(f, llvm_sys::LLVMLinkage::LLVMInternalLinkage);
+                add_fn_attr(m, f, "noinline");
+                let entry = c::LLVMAppendBasicBlockInContext(m.ctx, f, c"entry".as_ptr());
+                let blk = c::LLVMAppendBasicBlockInContext(m.ctx, f, c"body".as_ptr());
+                let tmp = c::LLVMCreateBuilderInContext(m.ctx);
+                c::LLVMPositionBuilderAtEnd(tmp, entry);
+                let br = c::LLVMBuildBr(tmp, blk);
+                c::LLVMPositionBuilderBefore(tmp, br);
+                let params: Vec<LLVMValueRef> = (0..4).map(|k| c::LLVMGetParam(f, k)).collect();
+                c::LLVMPositionBuilderAtEnd(b.b, blk);
+                (f, tmp, params)
+            };
+            let frame = RegionFrame {
+                parent_func: b.func.get(),
+                parent_allocas: b.allocas.get(),
+                parent_ret: b.ret.borrow().clone(),
+                body,
+                body_allocas,
+                env: params[1],
+                map: std::collections::HashMap::from([(ctx_raw as usize, params[0])]),
+                captures: vec![],
+            };
+            b.regions.borrow_mut().push(frame);
+            b.func.set(body);
+            b.allocas.set(body_allocas);
+            *b.ret.borrow_mut() = Ty::Int(32);
+            me.start = Some(b.mk(params[2], Ty::Int(64)));
+            me.end = Some(b.mk(params[3], Ty::Int(64)));
+            *b.depth.borrow_mut() += 1;
+        }
+        Ok(slf)
+    }
+
+    #[getter]
+    fn start(&self) -> PyResult<Value> {
+        self.start.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("enter the region first"))
+    }
+
+    #[getter]
+    fn end(&self) -> PyResult<Value> {
+        self.end.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("enter the region first"))
+    }
+
+    /// The runtime's result (i32, 0 on success), after the block.
+    #[getter]
+    fn result(&self) -> PyResult<Value> {
+        self.result.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leave the region first"))
+    }
+
+    fn __exit__(&mut self, py: Python<'_>, exc_type: Option<Py<PyAny>>, _v: Option<Py<PyAny>>, _tb: Option<Py<PyAny>>) -> PyResult<bool> {
+        let b = self.b.borrow(py);
+        *b.depth.borrow_mut() -= 1;
+        // the body ends with success unless it already returned
+        if exc_type.is_none() && !b.is_terminated() {
+            // SAFETY: i32 0 in the body's open block.
+            unsafe { c::LLVMBuildRet(b.b, c::LLVMConstInt(b.lt(&Ty::Int(32)), 0, 0)) };
+        }
+        let frame = b.regions.borrow_mut().pop().expect("an open region");
+        // SAFETY: the body's alloca builder isn't used any more.
+        unsafe { c::LLVMDisposeBuilder(frame.body_allocas) };
+        b.func.set(frame.parent_func);
+        b.allocas.set(frame.parent_allocas);
+        *b.ret.borrow_mut() = frame.parent_ret;
+        b.position(self.parent_block.take().expect("saved at entry"));
+        if exc_type.is_some() {
+            return Ok(false);
+        }
+        // in the parent: the env (one 8-byte slot per capture), then the runtime call
+        let k = frame.captures.len().max(1);
+        // SAFETY: an array alloca in the parent's entry, stores of the captured parent
+        // values into their slots, and the call of the runtime's parallel_for with the
+        // body's address, all in the parent's open block.
+        let rc = unsafe {
+            let i8t = c::LLVMInt8TypeInContext(b.m.ctx);
+            let i64t = b.lt(&Ty::Int(64));
+            let cnt = c::LLVMConstInt(i64t, k as u64, 0);
+            let env = c::LLVMBuildArrayAlloca(b.allocas.get(), i64t, cnt, NONAME);
+            c::LLVMSetAlignment(env, 64);
+            for (slot, (raw, _ty)) in frame.captures.iter().enumerate() {
+                let mut off = c::LLVMConstInt(i64t, 8 * slot as u64, 0);
+                let p = c::LLVMBuildInBoundsGEP2(b.b, i8t, env, &mut off, 1, NONAME);
+                c::LLVMBuildStore(b.b, *raw, p);
+            }
+            let (f, fnty) = b.declare("ptl_rt_parallel_for", &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr, Ty::Ptr], &Ty::Int(32), false);
+            let mut args = [b.v(&self.ctx)?, b.v(&self.n)?, b.v(&self.grain)?, frame.body, env];
+            c::LLVMBuildCall2(b.b, fnty, f, args.as_mut_ptr(), 5, NONAME)
+        };
+        self.result = Some(b.mk(rc, Ty::Int(32)));
         Ok(false)
     }
 }
