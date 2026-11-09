@@ -62,7 +62,7 @@ jobs:
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.12", "3.15"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -86,7 +86,7 @@ jobs:
       matrix:
         # default-mode: "NUMBA" is actually a no-op, to make sure we're testing default config settings
         default-mode: ["CVM", "NUMBA", "FAST_COMPILE"]
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.12", "3.15"]
         os: ["ubuntu-latest"]
         install-jax: [0]
         install-torch: [0]
@@ -133,7 +133,7 @@ jobs:
           - part: ["xtensor", "tests/xtensor"]
             install-xarray: 1
             default-mode: "CVM"
-            python-version: "3.14"
+            python-version: "3.15"
             os: "ubuntu-latest"
           - part: ["mlx link", "tests/link/mlx"]
             install-mlx: 1
@@ -142,7 +142,7 @@ jobs:
             os: "macos-15"
           - part: ["macos smoke test", "tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py tests/tensor/test_blas.py"]
             default-mode: "CVM"
-            python-version: "3.14"
+            python-version: "3.15"
             os: "macos-15"
           # conftest's pytest_sessionfinish asserts the GIL was never re-enabled.
           - part: ["free-threading smoke test", "tests/tensor/test_math_scipy.py"]
@@ -197,7 +197,8 @@ jobs:
             # mkl/mkl-service have no free-threaded (cp*t) builds, so rely on the default (openblas) BLAS.
             micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy scipy "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx rich;
           else
-            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG numpy scipy "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
+            # conda-forge's python stopped pulling in libpython at 3.15, and the C backend links -lpython3.x on Linux.
+            micromamba install --yes -q "python=${PYTHON_VERSION}" $FT_PKG libpython numpy scipy "numba==${NUMBA_VERSION}" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service rich;
           fi
           if [[ $FREE_THREADING == "1" ]]; then python -c 'import sysconfig; assert sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "Expected a free-threaded interpreter"'; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python=${PYTHON_VERSION}" && pip install "jax>=0.8,<0.9.1" jaxlib numpyro equinox tfp-nightly; fi
