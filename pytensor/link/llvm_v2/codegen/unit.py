@@ -40,7 +40,7 @@ from pytensor.link.llvm_v2.codegen.function import (
     node_signature,
 )
 from pytensor.link.llvm_v2.layout import Layout
-from pytensor.link.llvm_v2.codegen.types import ScalarRepr, TensorRepr, ir, is_absent, repr_of, slot_type
+from pytensor.link.llvm_v2.codegen.types import ScalarRepr, TensorRepr, ir, is_absent, itemsize, repr_of, slot_type
 
 
 @dataclass
@@ -114,21 +114,21 @@ def build_unit_function(
     for n, item in enumerate(items):
         node = item.node
         in_lays = [lays.get(key) for key in item.inputs]
-        declared = node_outputs(node, in_lays)
-        # provided outputs: the unit's own output memory (with its layout) the first
-        # time a unit output is produced, else a temporary in the layout asked for
-        in_place, provided = {}, []
-        for j, (key, o) in enumerate(zip(item.outputs, declared, strict=True)):
-            lay = None
+        nsig = node_signature(node, frozenset(), in_lays)
+        # provided outputs: the unit's own output memory the first time a unit output is
+        # produced, if its layout is the declared one; else a temporary in the declared
+        # layout (copied into the unit's output at the end)
+        in_place = {}
+        for j, (key, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True)):
             if o.mode is OutMode.PROVIDED:
                 target = unit_out.get(key)
-                if target is not None and isinstance(target[1], ProvidedOutput) and key not in written:
+                if (
+                    target is not None
+                    and isinstance(target[1], ProvidedOutput)
+                    and key not in written
+                    and outs[target[0]].repr.layout.implies(o.layout, o.repr.shape, itemsize(o.repr.dtype))
+                ):
                     in_place[j] = target[1].array
-                    lay = outs[target[0]].repr.layout
-                else:
-                    lay = o.layout if o.layout.fully_packed(o.repr.shape) else Layout.c(o.repr.ndim)
-            provided.append(lay)
-        nsig = node_signature(node, frozenset(), in_lays, provided)
         for key, o in zip(item.outputs, nsig.outputs, strict=True):
             if o.layout is not None:
                 lays[key] = o.layout
@@ -154,7 +154,6 @@ def build_unit_function(
             f"{name}_n{n}",
             temporary_outputs=frozenset(temporaries),
             in_layouts=in_lays,
-            provided=provided,
         )
         args = [ctx, env, _ws_part(cx, nf.workspace)]
         present = [key for key, var in zip(item.inputs, node.inputs, strict=True) if not is_absent(var.type)]
@@ -170,7 +169,8 @@ def build_unit_function(
                     a = in_place[j]
                     written.add(key)
                 else:
-                    a = cx.temporary(var.type.dtype, [b.const_int(m.i64, s) for s in var.type.shape], o.layout)
+                    lay = o.layout if o.layout.fully_packed(o.repr.shape) else None  # (C implies any)
+                    a = cx.temporary(var.type.dtype, [b.const_int(m.i64, s) for s in var.type.shape], lay)
                 vals[key] = a
                 args.append(pack(b, o.repr, a))
             elif o.mode is OutMode.SCALAR:
