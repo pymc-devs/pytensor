@@ -6,6 +6,7 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm_v2.codegen.emit import (
+    advance,
     loop_order,
     loop_view,
     Array,
@@ -209,7 +210,7 @@ def reduce_row(b, x: Array, axis, row, init, combine):
         return b.fold(n, [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep(et, row, i)))])
 
     def strided():
-        return b.fold(n, [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep_bytes(row, mul(b, i, st))))])
+        return b.fold(n, [init], lambda i, a: [combine(a, load(b, x.dtype, advance(b, row, i, st, x.dtype)))])
 
     isz = b.const_int(m.i64, np.dtype(x.dtype).itemsize)
     if st.const_int is not None:
@@ -231,7 +232,7 @@ def reduce_all(b, x: Array, init, combine):
         def level(axis, p, a):
             if axis == x.ndim:
                 return combine(a, load(b, x.dtype, p))
-            (r,) = b.fold(x.shape[axis], [a], lambda i, acc: [level(axis + 1, b.gep_bytes(p, mul(b, i, x.strides[axis])), acc)])
+            (r,) = b.fold(x.shape[axis], [a], lambda i, acc: [level(axis + 1, advance(b, p, i, x.strides[axis], x.dtype), acc)])
             return r
 
         return [level(0, x.data, init)]
