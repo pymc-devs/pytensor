@@ -23,7 +23,9 @@
  *     api->function_decref(fn);
  *
  * Threads: a PtFunction is immutable and may be shared; a PtCallState must only be used
- * by one thread at a time. No Python or GIL is involved in `call`.
+ * by one thread at a time. No Python or GIL is involved in `call`. A PtCallState is the
+ * function's state for one caller (e.g. one sampler chain): its memory, scratch space
+ * and random state (see `seed`).
  */
 #ifndef PYTENSOR_LLVM_H
 #define PYTENSOR_LLVM_H
@@ -36,7 +38,7 @@ extern "C" {
 #endif
 
 #define PT_ABI_VERSION 1
-#define PT_API_VERSION 1
+#define PT_API_VERSION 2
 
 /* dtype codes */
 enum {
@@ -112,6 +114,13 @@ typedef struct {
     const char *(*last_error)(const PtCallState *st);
 
     void (*buffer_decref)(PtBuffer *buf);
+
+    /*
+     * Restart the random state of `st` from `seed` (api_version >= 2). A call state
+     * has one random state: everything a call runs draws from it, in order, so calls
+     * on a seeded state are reproducible. Unseeded states start from process entropy.
+     */
+    void (*seed)(PtCallState *st, uint64_t seed);
 } PtFunctionApi;
 
 #ifdef __cplusplus

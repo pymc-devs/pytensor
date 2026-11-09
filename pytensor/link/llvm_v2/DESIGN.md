@@ -97,7 +97,8 @@ output:
 define internal i32 @f(ptr %ctx, ptr %env, ptr %ws, <inputs>, <outputs>)
 ```
 
-* `ctx`: the runtime context (errors, allocation, dynamic workspace).
+* `ctx`: the call context (section 5a): runtime functions, errors, scratch memory, the
+  random state.
 * `env`: the function's closure: large constants and handles of called kernels.
 * `ws`: the static workspace, provided by the caller (see 4).
 * Inputs: by value, in their representation.
@@ -154,18 +155,50 @@ much memory (64-byte aligned) as `ws`; the interpreter takes it from its arena, 
 temporaries are reused by liveness like any other value. Static temporaries are fixed
 offsets into `ws`.
 
-Dynamically sized temporaries come from the context:
+Dynamically sized temporaries come from the context's scratch memory:
 
-* `ptl_ws_alloc(ctx, bytes) -> ptr`: 64-byte aligned, valid until the caller ends the
-  call (or releases a mark);
-* `ptl_ws_mark(ctx) -> mark`, `ptl_ws_release(ctx, mark)`: reuse inside loops.
+* `ptl_rt_scratch(ctx, bytes) -> ptr`: 64-byte aligned, valid until the step ends (or
+  an earlier mark is released);
+* `ptl_rt_scratch_mark(ctx) -> mark`, `ptl_rt_scratch_release(ctx, mark)`: reuse inside
+  loops. The interpreter marks around every step; Rust kernels use the same marks
+  (Scan around its step program), so nested calls never release their caller's scratch.
+
+"Workspace" is the planned, static part; "scratch" the dynamic part.
 
 ## 5. Errors
 
 On failure a function returns nonzero after setting the message
-(`ptl_fail(ctx, msg)`). It does not clean up: workspace memory belongs to the caller,
+(`ptl_rt_set_error(ctx, code, msg)`). It does not clean up: workspace memory belongs to the caller,
 and the caller releases every non-null owner in the output slots. A function therefore
 only has to fill a slot's owner as soon as it allocates.
+
+## 5a. Runtime, function state, context
+
+Three levels of state:
+
+* **The runtime**, one per process (`abi::runtime()`): the table of runtime functions
+  and the process-wide state behind it (the JIT; later e.g. device contexts). The
+  functions are defined once (`runtime_functions!`): the C table kernels reach through
+  `ctx->rt` (numba fall-backs, older kernels) and the JIT symbols `ptl_rt_<name>`
+  generated code links against come from the same list.
+* **The function state**, one per function per caller, owned by the caller: the C API's
+  `PtCallState` (e.g. one per sampler chain), one per compiled Python function (calls
+  from several threads take turns). It holds the program's memory for a call and the
+  context.
+* **The context** (`PtCtx`), part of the function state: errors, scratch memory and the
+  random state. Everything a call runs uses it, nested programs included (Scan's step,
+  interpreted OpFromGraphs have their own memory but their caller's context).
+
+**Random numbers.** A function state has one random state (Xoshiro256++), advanced by
+every draw, in order: a seeded state gives reproducible draws (`program.seed(n)` in
+Python, `api->seed(state, n)` in C); unseeded states start from process entropy.
+PyTensor's random generator values are tokens without data here (like `NoneTypeT`): no
+argument, no value, a generator output is passed back as the generator it came from,
+and two random variables never share draws. The runtime functions `ptl_rt_rng_*` draw
+uniform, normal (also many at once, into scratch memory), gamma, beta, poisson and
+binomial numbers (`b.rng(ir.Rng.X, ctx, args)`); random variables built from uniform or
+normal numbers draw them all at once and transform them in a vectorizable loop
+(codegen/random.py). Draws differ from numpy's.
 
 ## 6. The C ABI
 
@@ -232,7 +265,7 @@ whose until flag is set and returns the flag as its last output.
 `pytensor_llvm.rt.c_api_table()` (also `program.c_api_table()`) the matching
 `PtFunctionApi`; the header is `pytensor_llvm.c_header()`, the same as for the first
 backend, with the same contract (per-thread `PtCallState`, provided or runtime-allocated
-outputs, `last_error`, no GIL). The handle holds the program and the objects that own
+outputs, `last_error`, no GIL; `seed(state, n)` since API version 2). The handle holds the program and the objects that own
 its machine code, so it outlives the Python function. Memory provided for an output is
 written directly by the producing step when the output has a static shape and the
 caller's strides are C-contiguous; otherwise the result is copied there.
