@@ -36,10 +36,10 @@ from pytensor.link.llvm_v2.codegen.function import (
     Output,
     Signature,
     build_node_function,
-    llvm_output_modes,
+    node_outputs,
     node_signature,
 )
-from pytensor.link.llvm_v2.layout import Layout, infer_output_layouts
+from pytensor.link.llvm_v2.layout import Layout
 from pytensor.link.llvm_v2.codegen.types import ScalarRepr, TensorRepr, ir, is_absent, repr_of, slot_type
 
 
@@ -60,7 +60,7 @@ def build_unit_function(
 
     * `inputs`: [(key, PyTensor type)] -- tensors only;
     * `input_layouts`: a `Layout` per input (None: nothing known); the layouts of the
-      values inside follow from how they are produced (`infer_output_layouts`);
+      values inside follow from how they are produced (`llvm_outputs`);
     * `output_layouts`: the layout of the memory provided for each PROVIDED output
       (None: any strides);
     * `outputs`: [(key, PyTensor type, OutMode)] with modes PROVIDED or ALLOCATED;
@@ -114,28 +114,39 @@ def build_unit_function(
     for n, item in enumerate(items):
         node = item.node
         in_lays = [lays.get(key) for key in item.inputs]
-        modes = [mode for mode, _ in llvm_output_modes(node.op, node)]
+        declared = node_outputs(node, in_lays)
         # provided outputs: the unit's own output memory (with its layout) the first
-        # time a unit output is produced, else a C-contiguous temporary
-        in_place, out_lays = {}, []
-        for j, (key, var, mode) in enumerate(zip(item.outputs, node.outputs, modes, strict=True)):
+        # time a unit output is produced, else a temporary in the layout asked for
+        in_place, provided = {}, []
+        for j, (key, o) in enumerate(zip(item.outputs, declared, strict=True)):
             lay = None
-            if mode is OutMode.PROVIDED:
+            if o.mode is OutMode.PROVIDED:
                 target = unit_out.get(key)
                 if target is not None and isinstance(target[1], ProvidedOutput) and key not in written:
                     in_place[j] = target[1].array
                     lay = outs[target[0]].repr.layout
                 else:
-                    lay = Layout.c(var.type.ndim)
-            out_lays.append(lay)
-        nsig = node_signature(node, frozenset(), in_lays, out_lays)
-        for key, lay in zip(item.outputs, infer_output_layouts(node, modes, in_lays, provided=out_lays), strict=True):
-            if lay is not None:
-                lays[key] = lay
+                    lay = o.layout if o.layout.fully_packed(o.repr.shape) else Layout.c(o.repr.ndim)
+            provided.append(lay)
+        nsig = node_signature(node, frozenset(), in_lays, provided)
+        for key, o in zip(item.outputs, nsig.outputs, strict=True):
+            if o.layout is not None:
+                lays[key] = o.layout
+
+        def into_unit_slot(key, o):
+            # an allocated unit output (C-contiguous) can be allocated straight into the
+            # unit's slot if the node allocates it C-contiguous
+            return (
+                o.mode is OutMode.ALLOCATED
+                and _unit_alloc_target(unit_out, key) is not None
+                and key not in written
+                and o.layout.is_c(o.repr.shape)
+            )
+
         temporaries = {
             j
             for j, (key, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True))
-            if (o.mode is OutMode.ALLOCATED and not _unit_alloc_target(unit_out, key)) or o.mode is OutMode.VIEW
+            if (o.mode is OutMode.ALLOCATED and not into_unit_slot(key, o)) or o.mode is OutMode.VIEW
         }
         nf = build_node_function(
             module,
@@ -143,7 +154,7 @@ def build_unit_function(
             f"{name}_n{n}",
             temporary_outputs=frozenset(temporaries),
             in_layouts=in_lays,
-            out_layouts=out_lays,
+            provided=provided,
         )
         args = [ctx, env, _ws_part(cx, nf.workspace)]
         present = [key for key, var in zip(item.inputs, node.inputs, strict=True) if not is_absent(var.type)]
@@ -159,7 +170,7 @@ def build_unit_function(
                     a = in_place[j]
                     written.add(key)
                 else:
-                    a = cx.temporary(var.type.dtype, [b.const_int(m.i64, s) for s in var.type.shape])
+                    a = cx.temporary(var.type.dtype, [b.const_int(m.i64, s) for s in var.type.shape], o.layout)
                 vals[key] = a
                 args.append(pack(b, o.repr, a))
             elif o.mode is OutMode.SCALAR:
@@ -167,9 +178,8 @@ def build_unit_function(
                 args.append(slot)
                 reads.append((key, slot, "scalar", o))
             else:
-                target = _unit_alloc_target(unit_out, key)
-                if target is not None and o.mode is OutMode.ALLOCATED and key not in written:
-                    slot = target
+                if into_unit_slot(key, o):
+                    slot = _unit_alloc_target(unit_out, key)
                     written.add(key)
                 else:
                     slot = b.alloca(slot_type(o.repr.ndim))

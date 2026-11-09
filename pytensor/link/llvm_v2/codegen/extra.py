@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm_v2.codegen.elemwise import output_array
 from pytensor.link.llvm_v2.codegen.emit import Array, cast, constant, copy, load, mul, store
-from pytensor.link.llvm_v2.codegen.function import llvm_emit
+from pytensor.link.llvm_v2.codegen.function import llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm_v2.layout import split_layouts
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.codegen.types import ir
 from pytensor.tensor.basic import ExtractDiag, Split
@@ -70,6 +71,11 @@ def _(op, node, cx, inputs, outputs):
     shape = [x.shape[a] for a in range(x.ndim) if a not in (a1, a2)] + [length]
     strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [b.add(x.strides[a1], x.strides[a2])]
     _set(outputs[0], cx, Array(x.dtype, b.gep_bytes(x.data, start), shape, strides))
+
+
+@llvm_outputs.register(Split)
+def _(op, node, in_layouts):
+    return [view_output(o, lay) for o, lay in zip(node.outputs, split_layouts(op, node, in_layouts[0]), strict=True)]
 
 
 @llvm_emit.register(Split)

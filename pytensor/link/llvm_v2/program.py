@@ -29,13 +29,13 @@ from pytensor.link.llvm_v2.codegen.function import (
     OutMode,
     build_abi_wrapper,
     build_node_function,
-    llvm_output_modes,
+    node_outputs,
 )
 from pytensor.link.llvm_v2.codegen.function import skipped_inputs
 from pytensor.link.llvm_v2.codegen.types import ScalarRepr, is_absent, repr_of
 from pytensor.link.llvm_v2.codegen.unit import Item, build_unit_function
 from pytensor.link.llvm_v2.kernels import llvm_kernel
-from pytensor.link.llvm_v2.layout import Layout, infer_output_layouts
+from pytensor.link.llvm_v2.layout import Layout
 from pytensor.scalar.basic import ScalarType
 
 
@@ -135,6 +135,9 @@ class Planner:
         self._next = 0
         self.stats = Stats()
         self.layouts = {}  # key -> Layout of tensor values (see layout.py)
+        #: key -> packed layout of the memory the planner provides (arena, fresh)
+        self.memory_layouts = {}
+        self.graph_outputs = set()
         #: layouts of the program's outputs (after `plan`)
         self.output_layouts = []
 
@@ -221,6 +224,10 @@ class Planner:
                     continue
                 ins.append(k)
         return ins
+
+    def _memory_order(self, k):
+        lay = self.memory_layouts.get(k)
+        return None if lay is None else [int(a) for a in lay.order]
 
     def lay(self, k):
         """The layout of value `k` (None for non-tensors)."""
@@ -319,8 +326,13 @@ class Planner:
 
     # ------------------------------------------------------------ steps
 
-    def default_modes(self, node):
-        return [mode for mode, _ in llvm_output_modes(node.op, node)]
+    def provided_layout(self, key, out):
+        """The memory the planner provides for output `key` declared as `out`: what the
+        op asks for if it is packed (arena memory can have any packed order), C for
+        graph outputs (callers get, and the C API provides, C-contiguous memory)."""
+        if key in self.graph_outputs or not out.layout.fully_packed(out.repr.shape):
+            return Layout.c(out.repr.ndim)
+        return out.layout
 
     def step_for_item(self, it):
         ir = _ir()
@@ -363,9 +375,6 @@ class Planner:
             return Step(it.inputs, it.outputs, modes, [None] * len(modes), address=prog.address, env=prog.env,
                         description=f"program: {node.op}", keepalive=prog)
         node = it.node
-        modes_views = llvm_output_modes(node.op, node)
-        modes = [m for m, _ in modes_views]
-        views = [v for _, v in modes_views]
         # constant scalar inputs are folded into the code
         folded = {
             pos: self.consts[k].item()
@@ -378,21 +387,39 @@ class Planner:
             raise NotImplementedError("scalar node outside a unit")
         present = [k for k, var in zip(it.inputs, node.inputs, strict=True) if not is_absent(var.type)]
         in_lays = [self.lay(k) for k in it.inputs]
+        declared = node_outputs(node, in_lays)
+        modes = [o.mode for o in declared]
+        views = [o.view_of for o in declared]
+        provided = [
+            self.provided_layout(key, o) if o.mode is OutMode.PROVIDED else None
+            for key, o in zip(it.outputs, declared, strict=True)
+        ]
+        for key, lay in zip(it.outputs, provided, strict=True):
+            if lay is not None:
+                self.memory_layouts[key] = lay
         k = None if folded else llvm_kernel(node.op, node, modes, in_lays)
         if k is not None:
             self.stats.n_kernels += 1
-            self.set_layouts(it.outputs, infer_output_layouts(node, modes, in_lays))
+            # kernels write provided memory as it is and allocate C-contiguous
+            self.set_layouts(
+                it.outputs,
+                [
+                    provided[j] if o.mode is OutMode.PROVIDED
+                    else Layout.c(o.repr.ndim) if o.mode is OutMode.ALLOCATED
+                    else o.layout
+                    for j, o in enumerate(declared)
+                ],
+            )
             return Step(present, it.outputs, modes, views, address=k.address, env=k.env, description=repr(k), keepalive=k)
         try:
             module = ir.Module(f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath)
-            provided = [Layout.c(o.type.ndim) if m is OutMode.PROVIDED else None for o, m in zip(node.outputs, modes, strict=True)]
-            nf = build_node_function(module, node, "node", folded=folded, in_layouts=in_lays, out_layouts=provided)
+            nf = build_node_function(module, node, "node", folded=folded, in_layouts=in_lays, provided=provided)
             build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
             skipped = skipped_inputs(node, folded)
             inputs = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
             # view_of counts the step's inputs
             vmap = [None if v is None else v - sum(1 for p in skipped if p < v) for v in views]
-            self.set_layouts(it.outputs, infer_output_layouts(node, modes, in_lays))
+            self.set_layouts(it.outputs, [o.layout for o in nf.signature.outputs])
             desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
             return Step(inputs, it.outputs, modes, vmap, workspace=nf.workspace, description=desc, module=module)
         except NotImplementedError:
@@ -442,6 +469,7 @@ class Planner:
         ]
         items = self.flatten(fgraph.toposort(), scope)
         out_keys = [self.key_of(o, scope) for o in fgraph.outputs]
+        self.graph_outputs = set(out_keys)
         items = self.group_scalars(items, set(out_keys))
         steps = self.steps_for(items)
         self.output_layouts = [self.lay(k) for k in out_keys]
@@ -487,7 +515,8 @@ class Planner:
     def copy_step(self, src, dst):
         node = _copy_node(self.types[dst])
         self.layouts[dst] = Layout.c(self.types[dst].ndim)
-        mode = self.default_modes(node)[0]
+        self.memory_layouts[dst] = Layout.c(self.types[dst].ndim)
+        mode = node_outputs(node)[0].mode
         k = llvm_kernel(node.op, node, [mode], [self.lay(src)])
         return Step([src], [dst], [mode], [None], address=k.address, env=k.env, description="copy", keepalive=k)
 
@@ -576,7 +605,7 @@ class Planner:
                 if k in first_out:
                     ids[k] = pb.fresh(dtype(k), shape(k))
                 else:
-                    ids[k] = pb.arena(dtype(k), shape(k), offsets[("value", k)])
+                    ids[k] = pb.arena(dtype(k), shape(k), offsets[("value", k)], self._memory_order(k))
             elif what == "allocated":
                 ids[k] = pb.allocated(dtype(k), shape(k))
             elif what == "view":
