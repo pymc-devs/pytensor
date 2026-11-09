@@ -10,12 +10,25 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import Mode, get_mode
 from pytensor.link.llvm.linker import LLVMLinker
 
 
 native = pytest.importorskip("pytensor_llvm")
-LLVM = Mode(linker=LLVMLinker(), optimizer="fast_run")
+
+# Both backends implement the same C API (same header); each has its own table.
+BACKENDS = {
+    "LLVM": (lambda: Mode(linker=LLVMLinker(), optimizer="fast_run"), lambda: native.c_api_table()),
+    "LLVM_V2": (lambda: get_mode("LLVM_V2"), lambda: native.rt.c_api_table()),
+}
+
+
+@pytest.fixture(params=list(BACKENDS), autouse=True)
+def backend(request):
+    global LLVM, _table
+    mode, table = BACKENDS[request.param]
+    LLVM, _table = mode(), table
+    return request.param
 
 
 class PtArray(ctypes.Structure):
@@ -73,7 +86,12 @@ class Api(ctypes.Structure):
 
 
 def api():
-    return Api.from_address(native.c_api_table())
+    return Api.from_address(_table())
+
+
+def test_table_from_the_compiled_function():
+    f, _ = _model()
+    assert f.maker.linker.compiled.c_api_table() == _table()
 
 
 def _model():
@@ -227,4 +245,21 @@ def test_c_boundary_checks(harness):
     outs, k2 = as_ptarrays([out])
     assert run(ins, outs)[0] == 0
     np.testing.assert_allclose(out, xv * 2)
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)
+
+
+@pytest.mark.parametrize("static", [True, False])
+def test_provided_output_with_other_strides(harness, static):
+    shape = (3, 4) if static else (None, None)
+    x = pt.tensor("x", dtype="float64", shape=shape)
+    f = pytensor.function([x], pt.exp(x) + 1, mode=LLVM)
+    fn = f.maker.linker.compiled.c_function()
+    a = api()
+    xv = np.random.default_rng(1).normal(size=(3, 4))
+    out = np.asfortranarray(np.zeros((3, 4)))
+    ins, k1 = as_ptarrays([xv])
+    outs, k2 = as_ptarrays([out])
+    err = ctypes.create_string_buffer(512)
+    assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, err.value
+    np.testing.assert_allclose(out, np.exp(xv) + 1)
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)

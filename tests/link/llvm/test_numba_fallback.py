@@ -78,7 +78,7 @@ def test_fallback_can_be_disabled():
 
 
 def test_fallback_through_c_api_without_gil():
-    from tests.link.llvm.test_c_api import PtArray, api, as_ptarrays  # noqa: F401
+    from tests.link.llvm.test_c_api import Api, PtArray, as_ptarrays
 
     x = pt.matrix("x")
     out = (pt.argsort(x, axis=1) * 2).sum(axis=0)
@@ -86,7 +86,7 @@ def test_fallback_through_c_api_without_gil():
     assert foreign_steps(f)
     v = rng.normal(size=(30, 7))
     fn = compiled(f).c_function()
-    a = api()
+    a = Api.from_address(compiled(f).c_api_table())
     call_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.POINTER(PtArray))
     new_t = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
     free_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
