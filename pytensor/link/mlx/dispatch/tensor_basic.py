@@ -11,6 +11,7 @@ from pytensor.tensor.basic import (
     Eye,
     Join,
     MakeVector,
+    Nonzero,
     ScalarFromTensor,
     Split,
     TensorFromScalar,
@@ -204,6 +205,23 @@ def mlx_funcify_ARange(op, node, **kwargs):
         return mx.arange(start, stop, step, dtype=dtype)
 
     return arange
+
+
+@mlx_funcify.register(Nonzero)
+def mlx_funcify_Nonzero(op, node, **kwargs):
+    ndim = node.inputs[0].type.ndim
+
+    def nonzero(a):
+        # How many entries are selected is data-dependent, so `a` has to be
+        # counted on the host. `MLXLinker` keeps graphs containing `Nonzero` out
+        # of `mx.compile`, which forbids the evaluation this needs.
+        indices = np.nonzero(np.asarray(a))
+        if ndim == 1:
+            return mx.array(indices[0])
+
+        return [mx.array(index) for index in indices]
+
+    return nonzero
 
 
 def _extract_static_dims(shape_inputs):
