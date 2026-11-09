@@ -17,6 +17,13 @@ from pytensor.link.numba.dispatch.linalg.utils import (
 )
 
 
+def _imaginary_unit(dtype):
+    # A bare `1j` literal is complex128 and would upcast float32 arrays
+    if _get_underlying_float(dtype) == np.float32:
+        return np.complex64(1j)
+    return np.complex128(1j)
+
+
 @numba_basic.numba_njit
 def _lhp(alpha, beta):
     out = np.empty(alpha.shape, dtype=np.int32)
@@ -308,6 +315,7 @@ def qz_real_nosort_eig_impl(A, B, overwrite_a, overwrite_b):
 
     dtype = A.dtype
     numba_gges = _LAPACK().numba_xgges(dtype)
+    imag_unit = _imaginary_unit(dtype)
 
     def impl(A, B, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
@@ -398,7 +406,7 @@ def qz_real_nosort_eig_impl(A, B, overwrite_a, overwrite_b):
             VSL[:] = np.nan
             VSR[:] = np.nan
 
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
         return A_copy, B_copy, alpha, BETA, VSL.T, VSR.T
 
     return impl
@@ -412,6 +420,7 @@ def qz_real_sort_noeig_impl(A, B, sort, overwrite_a, overwrite_b):
 
     dtype = A.dtype
     numba_gges = _LAPACK().numba_xgges(dtype)
+    imag_unit = _imaginary_unit(dtype)
     numba_tgsen = _LAPACK().numba_tgsen(dtype)
 
     def impl(A, B, sort, overwrite_a, overwrite_b):
@@ -505,7 +514,7 @@ def qz_real_sort_noeig_impl(A, B, sort, overwrite_a, overwrite_b):
             return A_copy, B_copy, VSL.T, VSR.T
 
         # Apply sorting via tgsen
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
 
         if sort == "lhp":
             select = _lhp(alpha, BETA)
@@ -578,6 +587,7 @@ def qz_real_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
 
     dtype = A.dtype
     numba_gges = _LAPACK().numba_xgges(dtype)
+    imag_unit = _imaginary_unit(dtype)
     numba_tgsen = _LAPACK().numba_tgsen(dtype)
 
     def impl(A, B, sort, overwrite_a, overwrite_b):
@@ -668,11 +678,11 @@ def qz_real_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
             B_copy[:] = np.nan
             VSL[:] = np.nan
             VSR[:] = np.nan
-            alpha = ALPHAR + 1j * ALPHAI
+            alpha = ALPHAR + imag_unit * ALPHAI
             return A_copy, B_copy, alpha, BETA, VSL.T, VSR.T
 
         # Apply sorting via tgsen
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
 
         if sort == "lhp":
             select = _lhp(alpha, BETA)
@@ -733,7 +743,7 @@ def qz_real_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
             VSR[:] = np.nan
 
         # Recompute alpha after tgsen
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
         return A_copy, B_copy, alpha, BETA, VSL.T, VSR.T
 
     return impl
