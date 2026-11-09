@@ -24,6 +24,7 @@ from pytensor.link.llvm_v2.codegen.emit import (
 )
 from pytensor.link.llvm_v2.codegen.function import fresh_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm_v2.layout import PACKED, Layout, common_order
+from pytensor.link.llvm_v2.work import scalar_cost
 from pytensor.link.llvm_v2.codegen.scalar import emit_scalar
 from pytensor.link.llvm_v2.codegen.types import check_dtype, ir
 from pytensor.tensor.elemwise import CAReduce, Elemwise
@@ -99,7 +100,7 @@ def _(op, node, cx, inputs, outputs):
         for k, (v, d) in enumerate(zip(res, out_dtypes, strict=True)):
             store(b, d, v, ptrs[n_in + k])
 
-    for_each(b, shape, operands, body)
+    for_each(b, shape, operands, body, cx.par(scalar_cost(op.scalar_op)))
 
 
 @llvm_emit.register(ps.ScalarOp)
@@ -186,7 +187,13 @@ def _(op, node, cx, inputs, outputs):
             new = combine(cur, load(b, x.dtype, p[0]))
         store(b, acc, new, p[1])
 
-    _strided(b, x.shape, [x, accs], body, order[:-1] if reduced[inner] else order)
+    loops = order[:-1] if reduced[inner] else order
+    # the outermost loop may run in parallel when each iteration has its own
+    # accumulators (it isn't over a reduced axis)
+    par = cx.par(scalar_cost(op.scalar_op)) if loops and not reduced[loops[0]] else None
+    if par is not None and not par.worth_it(size(b, x.shape)):
+        par = None
+    _strided(b, x.shape, [x, accs], body, loops, par=par)
     if acc != out_dtype:
         copy(cx, acc_arr, res)
 

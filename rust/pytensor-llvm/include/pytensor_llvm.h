@@ -38,7 +38,7 @@ extern "C" {
 #endif
 
 #define PT_ABI_VERSION 1
-#define PT_API_VERSION 2
+#define PT_API_VERSION 3
 
 /* dtype codes */
 enum {
@@ -121,6 +121,13 @@ typedef struct {
      * on a seeded state are reproducible. Unseeded states start from process entropy.
      */
     void (*seed)(PtCallState *st, uint64_t seed);
+
+    /*
+     * Allow (nonzero, the default) or forbid parallel loops on the runtime's thread
+     * pool for calls on `st` (api_version >= 3), e.g. forbid when every core already
+     * runs a chain. Results, random draws included, are the same either way.
+     */
+    void (*set_parallel)(PtCallState *st, int32_t on);
 } PtFunctionApi;
 
 #ifdef __cplusplus
