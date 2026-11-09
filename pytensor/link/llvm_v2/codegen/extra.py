@@ -97,9 +97,10 @@ def _(op, node, cx, inputs, outputs):
         parts.append((offset, n))
         offset = b.add(offset, n)
     cx.check(b.icmp(m.ICmp.EQ, offset, x.shape[axis]), "Split: the split sizes don't add up to the length of the axis")
-    for out, (start, n) in zip(outputs, parts, strict=True):
+    layouts = split_layouts(op, node, x.layout)
+    for out, (start, n), lay in zip(outputs, parts, layouts, strict=True):
         shape = list(x.shape)
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
         start = b.select(b.icmp(m.ICmp.SGT, n, b.const_int(i64, 0)), start, b.const_int(i64, 0))
-        _set(out, cx, Array(x.dtype, b.gep_bytes(x.data, mul(b, start, x.strides[axis])), shape, list(x.strides)))
+        _set(out, cx, Array(x.dtype, b.gep_bytes(x.data, mul(b, start, x.strides[axis])), shape, list(x.strides), lay))

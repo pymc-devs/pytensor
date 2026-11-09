@@ -1,11 +1,10 @@
 """Precompiled Rust kernels for nodes the interpreter runs directly.
 
-`llvm_kernel(op, node, modes, in_layouts)` returns a `pytensor_llvm.rt.Kernel` (function
-address + environment) or None when the node has no Rust kernel. `modes` are the output
-modes the planner chose (`OutMode` per output); a kernel that can't produce them returns
-None. `in_layouts` are the inputs' layouts (layout.py; None where unknown).
-
-Kernels allocate C-contiguous outputs (layout.py relies on it).
+`llvm_kernel(op, node, in_layouts)` returns a `pytensor_llvm.rt.Kernel` (function
+address + environment) or None when the node has no Rust kernel; `in_layouts` are the
+inputs' layouts (layout.py; None where unknown). A kernel declares how it produces its
+outputs and in which layouts (`Kernel.outputs`, in Rust next to the kernel; the
+counterpart of `llvm_outputs` for generated code): `kernel_outputs` reads that.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm_v2.codegen.function import OutMode, Output, llvm_outputs
+from pytensor.link.llvm_v2.codegen.function import OutMode, Output
 from pytensor.link.llvm_v2.codegen.types import repr_of
 from pytensor.link.llvm_v2.layout import Layout
 from pytensor.tensor.elemwise import DimShuffle
@@ -29,61 +28,68 @@ def rt():
     return rt
 
 
-def rt_mode(mode: OutMode):
+def fresh_mode(out):
+    """New memory for `out`: provided for a static shape, else allocated by the kernel."""
     m = rt().OutputMode
-    return {OutMode.PROVIDED: m.Provided, OutMode.ALLOCATED: m.Allocated, OutMode.VIEW: m.View}[mode]
+    return m.Provided if all(s is not None for s in out.type.shape) else m.Allocated
 
 
 @singledispatch
-def llvm_kernel(op, node, modes, in_layouts=None):
+def llvm_kernel(op, node, in_layouts=None):
+    """A Rust kernel for `node`, or None. The kernel chooses how its outputs are
+    produced and declares it (`Kernel.outputs`, next to the kernel in Rust)."""
     return None
 
 
+def kernel_outputs(kernel, node, in_layouts) -> list[Output]:
+    """What `kernel` declares about its outputs, as the `Output`s of a signature."""
+    from pytensor.link.llvm_v2.codegen.function import known_layouts
+
+    ins = [None if lay is None else lay.to_spec() for lay in known_layouts(node, in_layouts)]
+    decls = kernel.outputs(ins, [o.type.ndim for o in node.outputs])
+    modes = {"provided": OutMode.PROVIDED, "allocated": OutMode.ALLOCATED, "view": OutMode.VIEW}
+    outs = []
+    for o, (mode, view_of, spec) in zip(node.outputs, decls, strict=True):
+        shape = tuple(None if s is None else int(s) for s in o.type.shape)
+        outs.append(Output(repr_of(o.type, Layout.from_spec(spec, shape)), modes[mode], view_of))
+    return outs
+
+
 @llvm_kernel.register(DimShuffle)
-def _(op, node, modes, in_layouts=None):
-    if modes[0] is not OutMode.VIEW:
-        return None
+def _(op, node, in_layouts=None):
     return rt().DimShuffle([None if o == "x" else int(o) for o in op.new_order])
 
 
 @llvm_kernel.register(ViewOp)
 @llvm_kernel.register(SpecifyShape)
-def _(op, node, modes, in_layouts=None):
+def _(op, node, in_layouts=None):
     from pytensor.link.llvm_v2.codegen.types import is_absent
 
-    if modes[0] is not OutMode.VIEW:
-        return None
     if any(not is_absent(i.type) for i in node.inputs[1:]):
         return None  # lengths to check: generated code
     return rt().DimShuffle(list(range(node.outputs[0].type.ndim)))
 
 
 @llvm_kernel.register(DeepCopyOp)
-def _(op, node, modes, in_layouts=None):
-    if modes[0] not in (OutMode.PROVIDED, OutMode.ALLOCATED):
-        return None
-    return rt().Copy(rt_mode(modes[0]), np.dtype(node.outputs[0].type.dtype))
+def _(op, node, in_layouts=None):
+    out = node.outputs[0]
+    return rt().Copy(fresh_mode(out), np.dtype(out.type.dtype))
 
 
 @llvm_kernel.register(Dot)
-def _(op, node, modes, in_layouts=None):
+def _(op, node, in_layouts=None):
     a, b = node.inputs
     out = node.outputs[0]
     if not (1 <= a.type.ndim <= 2 and 1 <= b.type.ndim <= 2):
         return None
     if not (a.type.dtype == b.type.dtype == out.type.dtype in ("float64", "float32")):
         return None
-    if modes[0] not in (OutMode.PROVIDED, OutMode.ALLOCATED):
-        return None
-    return rt().Dot(rt_mode(modes[0]), np.dtype(out.type.dtype))
+    return rt().Dot(fresh_mode(out), np.dtype(out.type.dtype))
 
 
-def _float_mode(node, modes):
-    """The output's dtype if the kernel can produce mode `modes[0]` with all inputs of the
-    output's float dtype, else None."""
+def _float_dtype(node):
+    """The output's dtype if all inputs have it and it is a float, else None."""
     out = node.outputs[0]
-    if modes[0] not in (OutMode.PROVIDED, OutMode.ALLOCATED):
-        return None
     if out.type.dtype not in ("float64", "float32") or any(i.type.dtype != out.type.dtype for i in node.inputs):
         return None
     return np.dtype(out.type.dtype)
@@ -96,36 +102,29 @@ def _register_more():
     from pytensor.tensor.sort import SortOp
 
     @llvm_kernel.register(SortOp)
-    def _(op, node, modes, in_layouts=None):
+    def _(op, node, in_layouts=None):
         x = node.inputs[0]
         if x.type.ndim == 0 or x.type.dtype not in ("float64", "float32", "int64"):
             return None
-        if modes[0] not in (OutMode.PROVIDED, OutMode.ALLOCATED):
-            return None
         axis = int(op.axis) % x.type.ndim
-        return rt().Sort(rt_mode(modes[0]), np.dtype(x.type.dtype), axis, op.kind in ("mergesort", "stable"))
+        return rt().Sort(fresh_mode(node.outputs[0]), np.dtype(x.type.dtype), axis, op.kind in ("mergesort", "stable"))
 
     @llvm_kernel.register(Cholesky)
-    def _(op, node, modes, in_layouts=None):
-        dt = _float_mode(node, modes)
+    def _(op, node, in_layouts=None):
+        dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2:
             return None
-        return rt().Cholesky(rt_mode(modes[0]), dt, bool(op.lower))
+        return rt().Cholesky(fresh_mode(node.outputs[0]), dt, bool(op.lower))
 
     @llvm_kernel.register(SolveTriangular)
-    def _(op, node, modes, in_layouts=None):
-        dt = _float_mode(node, modes)
+    def _(op, node, in_layouts=None):
+        dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2 or node.inputs[1].type.ndim not in (1, 2):
             return None
-        return rt().SolveTriangular(rt_mode(modes[0]), dt, bool(op.lower), bool(op.unit_diagonal))
-
-    @llvm_outputs.register(Scan)
-    def _(op, node, in_layouts):
-        # the Scan kernel allocates every output, C-contiguous
-        return [Output(repr_of(o.type, Layout.c(o.type.ndim)), OutMode.ALLOCATED) for o in node.outputs]
+        return rt().SolveTriangular(fresh_mode(node.outputs[0]), dt, bool(op.lower), bool(op.unit_diagonal))
 
     @llvm_kernel.register(Scan)
-    def _(op, node, modes, in_layouts=None):
+    def _(op, node, in_layouts=None):
         import dataclasses
 
         from pytensor.link.llvm_v2.program import Planner, current_options

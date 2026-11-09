@@ -2,6 +2,7 @@
 
 use super::consts::ConstData;
 use super::kernels::{self, OutMode};
+use super::layout::Layout;
 use super::program::{Abi as RAbi, Kind, OutputMode as ROutMode, Program as RProgram, ProgramSpec, Step, ValueId, ValueSpec};
 use crate::dtype::DType;
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
@@ -69,15 +70,27 @@ pub struct Kernel {
     env: Box<dyn std::any::Any + Send + Sync>,
     env_ptr: usize,
     desc: String,
+    /// what the kernel produces (see `outputs`)
+    produces: Produces,
     /// programs the kernel runs (Scan's step), for profiling
     programs: Vec<Py<Program>>,
 }
 
+/// How a kernel produces its outputs, declared next to the kernel (the Python planner
+/// asks `Kernel.outputs`).
+pub enum Produces {
+    /// new memory per output: provided (written as it is given, in the layout the
+    /// planner provides: C) or allocated C-contiguous by the kernel
+    Fresh(Vec<OutputMode>),
+    /// one view of input 0, its axes rearranged (DimShuffle, also identity views)
+    DimShuffle(Vec<Option<usize>>),
+}
+
 impl Kernel {
-    fn new<T: Send + Sync + 'static>(f: usize, env: T, desc: String) -> Self {
+    fn new<T: Send + Sync + 'static>(f: usize, env: T, desc: String, produces: Produces) -> Self {
         let env: Box<T> = Box::new(env);
         let env_ptr = &*env as *const T as usize;
-        Kernel { address: f, env, env_ptr, desc, programs: vec![] }
+        Kernel { address: f, env, env_ptr, desc, produces, programs: vec![] }
     }
 }
 
@@ -99,6 +112,35 @@ impl Kernel {
         self.desc.clone()
     }
 
+    /// How each output comes to be, given the inputs' layouts (`(order, strides)`, None
+    /// where unknown): `[(mode, view_of, layout)]` with mode "provided", "allocated" or
+    /// "view" (the Python side's `llvm_outputs`, for this kernel).
+    /// `out_ndims`: the number of axes of each output.
+    fn outputs(&self, in_layouts: Vec<Option<Layout>>, out_ndims: Vec<usize>) -> PyResult<Vec<(&'static str, Option<usize>, Layout)>> {
+        match &self.produces {
+            Produces::Fresh(modes) => {
+                if modes.len() != out_ndims.len() {
+                    return err(format!("{}: {} outputs, got {} ndims", self.desc, modes.len(), out_ndims.len()));
+                }
+                Ok(modes
+                    .iter()
+                    .zip(&out_ndims)
+                    .map(|(m, &nd)| (if *m == OutputMode::Provided { "provided" } else { "allocated" }, None, Layout::c(nd)))
+                    .collect())
+            }
+            Produces::DimShuffle(order) => {
+                let x = match in_layouts.first() {
+                    Some(Some(l)) => l.clone(),
+                    _ => {
+                        let nd = order.iter().flatten().map(|a| a + 1).max().unwrap_or(0);
+                        Layout::dynamic(nd)
+                    }
+                };
+                Ok(vec![("view", Some(0), x.dimshuffle(order))])
+            }
+        }
+    }
+
     /// Programs this kernel runs (e.g. Scan's step program).
     #[getter]
     fn programs(&self, py: Python<'_>) -> Vec<Py<Program>> {
@@ -116,7 +158,8 @@ impl DimShuffle {
     #[new]
     fn new(order: Vec<Option<usize>>) -> PyClassInitializer<Self> {
         let desc = format!("DimShuffle{order:?}");
-        let k = Kernel::new(kernels::k_dimshuffle as *const () as usize, kernels::DimShuffleEnv { order }, desc);
+        let produces = Produces::DimShuffle(order.clone());
+        let k = Kernel::new(kernels::k_dimshuffle as *const () as usize, kernels::DimShuffleEnv { order }, desc, produces);
         PyClassInitializer::from(k).add_subclass(DimShuffle)
     }
 }
@@ -129,7 +172,7 @@ impl Copy {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
         let env = kernels::CopyEnv { mode: mode.kernel(), dtype: dtype_of(&dtype)? };
-        let k = Kernel::new(kernels::k_copy as *const () as usize, env, "Copy".into());
+        let k = Kernel::new(kernels::k_copy as *const () as usize, env, "Copy".into(), Produces::Fresh(vec![mode]));
         Ok(PyClassInitializer::from(k).add_subclass(Copy))
     }
 }
@@ -146,7 +189,7 @@ impl Dot {
             return err(format!("Dot of {dt:?}"));
         }
         let env = kernels::DotEnv { mode: mode.kernel(), dtype: dt };
-        let k = Kernel::new(kernels::k_dot as *const () as usize, env, "Dot".into());
+        let k = Kernel::new(kernels::k_dot as *const () as usize, env, "Dot".into(), Produces::Fresh(vec![mode]));
         Ok(PyClassInitializer::from(k).add_subclass(Dot))
     }
 }
@@ -156,7 +199,7 @@ fn legacy(f: kernels::LegacyFn, params: Vec<i64>, n_in: usize, shape_from: usize
         return err("this kernel can't produce a view");
     }
     let env = kernels::LegacyEnv { f, params, n_in, shape_from, mode: mode.kernel(), dtype };
-    Ok(Kernel::new(kernels::k_legacy as *const () as usize, env, desc))
+    Ok(Kernel::new(kernels::k_legacy as *const () as usize, env, desc, Produces::Fresh(vec![mode])))
 }
 
 /// Sort along `axis` (float64, float32, int64), NaNs last.
@@ -243,6 +286,7 @@ impl Scan {
         inner_out_dtypes: Vec<Bound<'_, PyArrayDescr>>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let info = super::scan::ScanInfo { n_seqs, mit_mot_in, mit_mot_out, mit_sot_in, sit_sot_in, n_untraced, n_nit_sot, n_non_seqs, as_while };
+        let (n_mm, n_ms, n_ss) = (info.mit_mot_in.len(), info.mit_sot_in.len(), info.sit_sot_in.len());
         let n_in = 1 + n_seqs + info.mit_mot_in.len() + info.mit_sot_in.len() + info.sit_sot_in.len() + n_untraced + n_nit_sot + n_non_seqs;
         if outer_in_dtypes.len() != n_in {
             return err(format!("Scan: {n_in} outer inputs, got {} dtypes", outer_in_dtypes.len()));
@@ -270,7 +314,10 @@ impl Scan {
             inner_out_dtypes: inner_out_dtypes.iter().map(dtype_of).collect::<PyResult<_>>()?,
             keepalive: step.clone().into_any().unbind(),
         };
-        let mut k = Kernel::new(super::scan::k_scan as *const () as usize, env, "Scan".into());
+        // every outer output is one of the kernel's C-contiguous buffers
+        let n_outer_out = n_mm + n_ms + n_ss + n_nit_sot + n_untraced;
+        let produces = Produces::Fresh(vec![OutputMode::Allocated; n_outer_out]);
+        let mut k = Kernel::new(super::scan::k_scan as *const () as usize, env, "Scan".into(), produces);
         k.programs.push(step.clone().unbind());
         let _ = py;
         Ok(PyClassInitializer::from(k).add_subclass(Scan))

@@ -283,3 +283,74 @@ def test_declared_outputs():
     assert o.layout == C(2)
     (o,) = node_outputs(x.T.owner, [C(2)])
     assert o.mode is OutMode.VIEW and o.view_of == 0 and o.layout == T2
+
+
+def test_provided_layouts_are_binding():
+    s = pt.tensor("s", shape=(4, 6))
+    t = pt.tensor("t", shape=(4, 6))
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c", "numba_fallback": False})
+    out = pt.exp(s.T) * t.T  # declared: provided memory in the inputs' (transposed) order
+    # as steps of the program (inside a compiled unit the unit does the same)
+    f = pytensor.function([s, t], out, mode=mode.excluding("llvm_units"))
+    g = pytensor.function([s, t], out, mode=mode)
+    p = f.maker.linker.compiled
+    dump = p.dump()
+    # a graph output must be C-contiguous: the node writes an arena temporary in its
+    # declared order, which is copied into the output
+    assert "arena +0, order [1, 0]" in dump and ") -> (%5)  copy" in dump, dump
+    sv, tv = rng.normal(size=(4, 6)), rng.normal(size=(4, 6))
+    for fn in (f, g):
+        r = fn(sv, tv)
+        np.testing.assert_allclose(r, np.exp(sv.T) * tv.T)
+        assert r.flags.c_contiguous
+
+
+def test_view_layout_is_checked_when_generating():
+    from pytensor.graph.basic import Apply
+    from pytensor.graph.op import Op
+    from pytensor.link.llvm_v2.codegen.emit import Array
+    from pytensor.link.llvm_v2.codegen.function import build_node_function, llvm_emit, llvm_outputs, view_output
+
+    class BadTranspose(Op):
+        """Claims its view is C-contiguous, but returns the transpose."""
+
+        view_map = {0: [0]}
+
+        def make_node(self, x):
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, out):
+            out[0][0] = inputs[0].T
+
+    @llvm_outputs.register(BadTranspose)
+    def _(op, node, in_layouts):
+        return [view_output(node.outputs[0], C(2))]
+
+    @llvm_emit.register(BadTranspose)
+    def _(op, node, cx, inputs, outputs):
+        x = inputs[0]
+        lay = Layout.make([None, None], (1, 0), (PACKED, PACKED))
+        outputs[0].set_view(Array(x.dtype, x.data, x.shape[::-1], x.strides[::-1], lay))
+
+    x = pt.dmatrix("x")
+    node = BadTranspose()(x).owner
+    with pytest.raises(ValueError, match="declared"):
+        build_node_function(ir.Module("bad"), node, "node", in_layouts=[C(2)])
+
+
+def test_kernels_declare_their_outputs():
+    from pytensor.link.llvm_v2.codegen.function import OutMode
+    from pytensor.link.llvm_v2.kernels import kernel_outputs, llvm_kernel
+
+    x = pt.dmatrix("x")
+    node = x.T.owner
+    k = llvm_kernel(node.op, node, [C(2)])
+    (o,) = kernel_outputs(k, node, [C(2)])
+    assert o.mode is OutMode.VIEW and o.view_of == 0 and o.layout == T2
+    # the Rust declaration agrees with the one for generated code
+    assert o.layout == node_outputs(node, [C(2)])[0].layout
+    a = pt.tensor("a", shape=(3, 4))
+    for out, mode in [(pt.dot(x, x), OutMode.ALLOCATED), (pt.dot(a, a.T), OutMode.PROVIDED)]:
+        node = out.owner
+        (o,) = kernel_outputs(llvm_kernel(node.op, node, None), node, None)
+        assert o.mode is mode and o.layout == C(2)

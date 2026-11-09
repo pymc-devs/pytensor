@@ -108,6 +108,7 @@ def _entries(op, node, inputs, first):
 @llvm_emit.register(Subtensor)
 def _(op, node, cx, inputs, outputs):
     view = index(cx, inputs[0], _entries(op, node, inputs, 1))
+    view.layout = subtensor_layout(op, node, inputs[0].layout)
     out = outputs[0]
     if hasattr(out, "set_view"):
         out.set_view(view)

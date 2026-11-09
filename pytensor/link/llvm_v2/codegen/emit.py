@@ -252,6 +252,8 @@ class SlotOutput:
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
     layout: Layout = None
+    #: for a view: the layout `llvm_outputs` declared (`set_view` checks it)
+    declared: Layout = None
     done: bool = False
 
     def _write(self, data, shape, strides):
@@ -288,6 +290,13 @@ class SlotOutput:
         sets the owner)."""
         if self.view_of is None:
             raise ValueError("not a view output")
+        if self.declared is not None:
+            shape = a.static_shape()
+            if not a.layout.implies(self.declared, shape, itemsize(self.dtype)):
+                raise ValueError(
+                    f"the view has layout {a.layout.describe(shape)}, but llvm_outputs declared "
+                    f"{self.declared.describe(shape)}"
+                )
         self._write(a.data, a.shape, a.strides)
         self.done = True
 

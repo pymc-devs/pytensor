@@ -208,6 +208,15 @@ class Layout:
         rest = [a for a in range(self.ndim) if a not in common]
         return Layout.make(shape, (*rest, *reversed(common)), strides)
 
+    def to_spec(self):
+        """`(order, strides)` with strides "P", "?" or bytes: how Rust exchanges layouts."""
+        return (list(self.order), ["P" if s is PACKED else "?" if s is DYNAMIC else int(s) for s in self.strides])
+
+    @staticmethod
+    def from_spec(spec, shape) -> Layout:
+        order, strides = spec
+        return Layout.make(shape, order, [PACKED if s == "P" else DYNAMIC if s == "?" else int(s) for s in strides])
+
     def describe(self, shape) -> str:
         """Like str(), with static length-1 axes shown as `1`."""
         if self.is_c(shape):

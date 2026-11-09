@@ -15,9 +15,9 @@ from pytensor.link.llvm_v2.codegen import OutMode, compile_node  # noqa: E402
 rng = np.random.default_rng(42)
 
 
-def run_node(node, *values, provided=None):
+def run_node(node, *values, provided=None, provided_layouts=None):
     """Compile `node` alone and call its C ABI wrapper on `values`."""
-    c = compile_node(node)
+    c = compile_node(node, provided=provided_layouts)
     outs = []
     for k, (o, spec) in enumerate(zip(node.outputs, c.signature.outputs, strict=True)):
         if spec.mode is OutMode.PROVIDED:
@@ -208,13 +208,16 @@ def test_elemwise_shape_mismatch_raises():
         run_node((x + y).owner, np.ones(3), np.ones(4))
 
 
-def test_static_shape_output_is_provided_with_any_strides():
+def test_provided_output_with_any_strides():
+    from pytensor.link.llvm_v2.layout import Layout
+
     x = pt.tensor("x", shape=(4, 6))
     node = pt.exp(x).owner
     big = np.zeros((8, 12))
     view = big[::2, ::2]  # a strided slice of a larger array
     xv = rng.random((4, 6))
-    (res,) = run_node(node, xv, provided=[view])
+    # code generated for provided memory of any strides
+    (res,) = run_node(node, xv, provided=[view], provided_layouts=[Layout.dynamic(2)])
     np.testing.assert_allclose(big[::2, ::2], np.exp(xv))
     assert big[1::2].sum() == 0 and big[:, 1::2].sum() == 0
     assert res is view
