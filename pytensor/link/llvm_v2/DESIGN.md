@@ -54,8 +54,8 @@ so they come only from how a value is produced:
 The planner is authoritative: it propagates layouts while it picks each step, so they
 reflect what actually runs (a numba fall-back gives DYNAMIC outputs). It specializes
 every generated step for its inputs' layouts, and compiled units do the same for the
-values inside them. Scan's step program gets the layouts of what the Scan kernel
-passes it (rows of the sequences, rows of its own C buffers, the non-sequences).
+values inside them. A Scan's step gets the layouts of what the loop passes it (rows of
+the sequences, rows of its own C buffers, the non-sequences).
 `program.dump()` shows the layouts a step is specialized for, e.g.
 `Sum{axis=0} {[P0, P1]}`.
 
@@ -99,7 +99,8 @@ define internal i32 @f(ptr %ctx, ptr %env, ptr %ws, <inputs>, <outputs>)
 
 * `ctx`: the call context (section 5a): runtime functions, errors, scratch memory, the
   random state.
-* `env`: the function's closure: large constants and handles of called kernels.
+* `env`: the function's closure (section 2a): handles of the functions it calls and
+  array constants.
 * `ws`: the static workspace, provided by the caller (see 4).
 * Inputs: by value, in their representation.
 * Outputs: by mode (see 3).
@@ -107,6 +108,52 @@ define internal i32 @f(ptr %ctx, ptr %env, ptr %ws, <inputs>, <outputs>)
 
 Generated functions call each other with this signature. The output slots are allocas
 in the caller and disappear after inlining.
+
+### 2a. Calls from generated code
+
+Rust kernels, numba implementations and nested programs have the C ABI the interpreter
+calls (section 6), and generated code calls them the same way (`codegen/call.py`): it
+packs `PtArray`s, calls through the function's handle, and copies what the callee wrote
+for allocated and view outputs (owner included) into the node's slots. A node
+implemented by such a *callee* gets a node function like any other
+(`build_node_function(..., callee=...)`), so units and generated loops can contain
+every kind of node. The callee's scratch is released after the call; an error returns
+its code (the callee set the message).
+
+Handles and constant data aren't part of the IR, which must not depend on the process
+(the compile cache is keyed on it). A `Closure` collects them as pointer-sized slots:
+two per callee (function, env), one per array constant (its data, a C-contiguous copy
+kept alive with the closure). The IR loads slot `k` from `env`; the step's env is the
+closure's table.
+
+Inside generated code the planner decides per node (`Planner.callee_for`, given the
+input layouts): generate it if we can (inlined: preferred; tried in a scratch module,
+so a failure leaves nothing behind), else its Rust kernel, else numba. Interpreted
+OpFromGraphs are nested programs when they are steps of their own, and inlined inside
+generated code. A unit releases the buffers callees allocate for values inside it when
+it returns (also on errors).
+
+### Aliasing
+
+The memory a step writes (its provided or allocated outputs) never overlaps its inputs
+or its other outputs: the `inplace` rewrites are excluded, the arena never places an
+output over a value live during the step, workspace temporaries aren't reused within a
+function, and the C API requires (and checks) that provided outputs don't overlap the
+inputs or each other. Views are never written.
+
+Node functions tell LLVM: `Builder.alias_domain(name)` starts a scope domain and a TBAA
+root for the function, and `Builder.mark_array(ptr, scope, noalias)` marks the data
+pointer of each input (`i<pos>`) and of each written output (`o<j>`, not aliasing the
+inputs and other outputs). Pointers derived from a marked one (GEPs, captures into
+parallel bodies) inherit the marks; loads and stores through them get `!alias.scope`,
+`!noalias` and a `!tbaa` tag of the accessed type. Accesses through anything else
+(slots, shapes, pointers through phis or selects) get none, which is always safe.
+
+Domains and TBAA roots are per node function, so claims never cross nodes: after
+inlining into a unit, memory may be reused for values of other dtypes (tags of different
+roots may alias). This lets LLVM hoist loads of index arrays out of loops that store
+into outputs (gathers, scatters, fused indexed reads), and drop run-time overlap checks
+before vectorized loops.
 
 ## 3. Outputs
 
@@ -160,8 +207,9 @@ Dynamically sized temporaries come from the context's scratch memory:
 * `ptl_rt_scratch(ctx, bytes) -> ptr`: 64-byte aligned, valid until the step ends (or
   an earlier mark is released);
 * `ptl_rt_scratch_mark(ctx) -> mark`, `ptl_rt_scratch_release(ctx, mark)`: reuse inside
-  loops. The interpreter marks around every step; Rust kernels use the same marks
-  (Scan around its step program), so nested calls never release their caller's scratch.
+  loops. The interpreter marks around every step; generated code around every call and
+  every Scan step, Rust kernels around nested programs, so nested calls never release
+  their caller's scratch.
 
 "Workspace" is the planned, static part; "scratch" the dynamic part.
 
@@ -278,8 +326,20 @@ release points; all generated modules compile in one parallel batch.
 constant, arena offset, fresh output, allocated by its step, view of another value),
 then every step with its arguments, workspace and releases.
 
-Scan is a Rust kernel that runs its step function, a nested program, once per step;
-the interpreter itself has no control flow.
+Scan is generated (`codegen/scan.py`): one function holds the loop, the buffers and
+the step, whose inner graph is emitted into the loop body like a unit's items (nodes
+we generate inlined, the others called). The buffer conventions are PyTensor's: traced
+outputs (mit-mot, mit-sot, sit-sot) are circular buffers whose first rows hold the
+initial taps, read at `(i + lookback + tap) % len`; after the loop short buffers are
+rotated, while-loops truncated, unused rows zeroed. Step outputs are produced straight
+into their rows when the row can't be one the same step reads (a static buffer length
+decides), else copied there; nit-sot buffers whose rows have no static shape are
+allocated by the first step; untraced states are read from their output slot in every
+step and reallocated when a step changes their shape. Callee buffers and scratch are
+released after every step. The interpreter itself has no control flow.
+
+The Rust Scan kernel (`rt/scan.rs`), running the step as a nested program, remains for
+`generate_scan=False` and as the fallback if generating fails.
 
 `ScalarLoop` (inside Elemwise or FusedElemwise) is generated like Composite: the loop
 is a `b.fold(n, init, body, until=...)` whose body is the inner scalar graph emitted
