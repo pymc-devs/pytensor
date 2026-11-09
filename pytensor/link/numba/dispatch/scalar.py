@@ -1,5 +1,27 @@
+"""Numba scalar lowerings and their registration.
+
+``numba_funcify_scalar_native`` dispatches to native lowerings. Its default,
+``numba_funcify_scalar_native_default``, uses ``nfunc_spec`` to call NumPy or
+SciPy Cython functions. Specific handlers can call this default directly.
+Lowerings return ``(function, cache_key)`` or ``(None, None)`` if unsupported,
+so fusion can leave unsupported Ops unfused and Elemwise can use array fallback.
+
+``register_scalar_funcify`` registers dtype-preserving native handlers and
+installs ``_scalar_funcify_with_fallback`` in ``numba_funcify_and_cache_key``.
+This bridge adds ``perform`` fallback for general dispatch callers. The general
+dispatcher was the original registration point for scalar lowerings, so native
+scalar dispatch recognizes downstream registrations there for compatibility.
+Registrations made only there are treated as lacking native support; their
+handlers remain available through general dispatch and trigger a FutureWarning.
+``register_scalar_funcify`` opts a lowering into both dispatch paths.
+``_scalar_graph_supports_numba`` checks inner Ops before Composite or ScalarLoop
+attempt native lowering.
+"""
+
 import math
+from functools import cache, singledispatch
 from hashlib import sha256
+from warnings import warn
 
 import numba
 import numpy as np
@@ -37,69 +59,23 @@ from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
 
 
 def scalar_op_cache_key(op, **extra_fields):
+    """Build a cache key for a scalar lowering and its specialization details."""
     # Scalar Ops don't have _props, because of their weird outputs_types_preference function
     # So we create hash differently
     return sha256(str((type(op), tuple(extra_fields.items()))).encode()).hexdigest()
 
 
-def register_scalar_funcify(op_type):
-    """Register a scalar lowering and preserve its declared output dtypes.
+def numba_funcify_scalar_native_default(op, node, **kwargs):
+    """Lower ``nfunc_spec`` natively using NumPy or SciPy Cython.
 
-    The lowering returns a Numba function and its cache key. Registration wraps
-    that function to narrow promoted results, e.g. int8 * int8 to int64, back to
-    each output's dtype. Elemwise normally enforces this when storing into its
-    output array; native scalar graphs need the cast explicitly.
-
-    The decorated name still refers to the original lowering, so lowerings can
-    reuse each other without nesting these casting wrappers.
+    This is the default implementation of ``numba_funcify_scalar_native``;
+    specific handlers such as Sign and Erf also reuse it directly. Return
+    ``(function, cache_key)`` or ``(None, None)`` if unsupported. Fusion and
+    Elemwise inspect this result; ``_scalar_funcify_with_fallback`` supplies
+    perform fallback for general dispatch callers.
     """
-
-    def register(funcify):
-        @register_funcify_and_cache_key(op_type)
-        def typed_funcify(op, node, **kwargs):
-            func, cache_key = funcify(op, node=node, **kwargs)
-            out_dtypes = tuple(out.type.dtype for out in node.outputs)
-            if all(
-                dtype in {"bool", "int64", "uint64", "float64", "complex128"}
-                for dtype in out_dtypes
-            ):
-                return func, cache_key
-
-            input_names = ", ".join(f"x{i}" for i in range(len(node.inputs)))
-            call = f"func({input_names})"
-            if len(out_dtypes) == 1:
-                body = f"return direct_cast({call}, np.dtype({out_dtypes[0]!r}))"
-            else:
-                casts = ", ".join(
-                    f"direct_cast(res[{i}], np.dtype({dtype!r}))"
-                    for i, dtype in enumerate(out_dtypes)
-                )
-                body = f"res = {call}\n    return ({casts},)"
-            wrapped = compile_numba_function_src(
-                src=f"def cast_scalar_outputs({input_names}):\n    {body}\n",
-                function_name="cast_scalar_outputs",
-                global_env={
-                    "np": np,
-                    "func": func,
-                    "direct_cast": numba_basic.direct_cast,
-                },
-            )
-            if cache_key is not None:
-                cache_version = 1
-                cache_key = sha256(
-                    str((cache_key, cache_version, out_dtypes)).encode()
-                ).hexdigest()
-            return numba_basic.numba_njit(wrapped), cache_key
-
-        return funcify
-
-    return register
-
-
-@register_scalar_funcify(ScalarOp)
-def numba_funcify_ScalarOp(op, node, **kwargs):
     if not hasattr(op, "nfunc_spec"):
-        return generate_fallback_impl(op, node=node, **kwargs), None
+        return None, None
 
     scalar_func_path = op.nfunc_spec[0]
     scalar_func_numba = None
@@ -141,7 +117,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
                 output_inner_dtype = scalar_func_numba.output_dtype
 
     if scalar_func_numba is None:
-        return generate_fallback_impl(op, node, **kwargs), None
+        return None, None
 
     scalar_op_fn_name = get_name_for_object(scalar_func_numba)
     prefix = "x" if scalar_func_name != "x" else "y"
@@ -226,6 +202,122 @@ def {scalar_op_fn_name}({input_signature}):
     return numba_basic.numba_njit(scalar_op_fn), cache_key
 
 
+numba_funcify_scalar_native = singledispatch(numba_funcify_scalar_native_default)
+
+
+def _scalar_graph_supports_numba(fgraph):
+    """Check native dispatch for each inner Op before lowering Composite/ScalarLoop.
+
+    An unsupported inner Op makes the enclosing scalar Op decline native
+    lowering, allowing the general dispatcher to supply perform fallback.
+    """
+
+    @cache
+    def supports(op, input_types):
+        scalar_node = op.make_node(*(inp_type() for inp_type in input_types))
+        func, _ = numba_funcify_scalar_native(op, node=scalar_node)
+        return func is not None
+
+    return all(
+        supports(inner.op, tuple(inp.type for inp in inner.inputs))
+        for inner in fgraph.toposort()
+    )
+
+
+def _scalar_funcify_with_fallback(op, node, **kwargs):
+    """Add perform fallback to native scalar dispatch for general callers.
+
+    ``register_scalar_funcify`` installs this bridge in the general dispatcher.
+    It recognizes the bridge by identity to distinguish its own registration
+    from downstream-only registrations, which native dispatch must decline.
+    """
+    func, key = numba_funcify_scalar_native(op, node=node, **kwargs)
+    if func is None:
+        return generate_fallback_impl(op, node=node, **kwargs), None
+    return func, key
+
+
+def register_scalar_funcify(op_type):
+    """Register a scalar lowering in both dispatchers and preserve output dtypes.
+
+    The native dispatcher receives a dtype-preserving wrapper; the general
+    dispatcher receives ``_scalar_funcify_with_fallback``. For compatibility
+    with the original registration path, native wrappers decline when a
+    downstream handler is registered only on the general dispatcher. General
+    callers still use that handler, while fusion leaves the Op unfused.
+
+    The lowering returns a Numba function and its cache key. Registration wraps
+    that function to narrow promoted results, e.g. int8 * int8 to int64, back to
+    each output's dtype. Elemwise normally enforces this when storing into its
+    output array; native scalar graphs need the cast explicitly.
+
+    The decorated name still refers to the original lowering, so lowerings can
+    reuse each other without nesting these casting wrappers.
+    Lowerings registered here must produce native code. Return ``(None, None)``
+    when native lowering is unavailable instead of constructing an object-mode
+    fallback; the bridge supplies perform fallback for general dispatch callers.
+    """
+
+    def register(funcify):
+        def typed_funcify(op, node, **kwargs):
+            legacy_funcify = numba_funcify_and_cache_key.dispatch(type(op))
+            if legacy_funcify is not _scalar_funcify_with_fallback:
+                warn(
+                    f"The Numba lowering for {type(op).__name__} uses the legacy scalar "
+                    "registration path, which will be removed in a future release. "
+                    "Use pytensor.link.numba.dispatch.scalar.register_scalar_funcify "
+                    "instead, returning (None, None) when native lowering is unavailable.",
+                    FutureWarning,
+                    stacklevel=3,
+                )
+                return None, None
+            func, cache_key = funcify(op, node=node, **kwargs)
+            out_dtypes = tuple(out.type.dtype for out in node.outputs)
+            if func is None or all(
+                dtype in {"bool", "int64", "uint64", "float64", "complex128"}
+                for dtype in out_dtypes
+            ):
+                return func, cache_key
+
+            input_names = ", ".join(f"x{i}" for i in range(len(node.inputs)))
+            call = f"func({input_names})"
+            if len(out_dtypes) == 1:
+                body = f"return direct_cast({call}, np.dtype({out_dtypes[0]!r}))"
+            else:
+                casts = ", ".join(
+                    f"direct_cast(res[{i}], np.dtype({dtype!r}))"
+                    for i, dtype in enumerate(out_dtypes)
+                )
+                body = f"res = {call}\n    return ({casts},)"
+            wrapped = compile_numba_function_src(
+                src=f"def cast_scalar_outputs({input_names}):\n    {body}\n",
+                function_name="cast_scalar_outputs",
+                global_env={
+                    "np": np,
+                    "func": func,
+                    "direct_cast": numba_basic.direct_cast,
+                },
+            )
+            if cache_key is not None:
+                cache_version = 1
+                cache_key = sha256(
+                    str((cache_key, cache_version, out_dtypes)).encode()
+                ).hexdigest()
+            return numba_basic.numba_njit(wrapped), cache_key
+
+        numba_funcify_scalar_native.register(op_type)(typed_funcify)  # Native path
+        # The shared bridge looks up typed_funcify in the native registry above,
+        # reaching this user funcify indirectly and adding perform fallback if needed.
+        register_funcify_and_cache_key(op_type)(_scalar_funcify_with_fallback)
+        return funcify
+
+    return register
+
+
+# Apply the dtype and compatibility wrappers to the default ScalarOp lowering too.
+register_scalar_funcify(ScalarOp)(numba_funcify_scalar_native_default)
+
+
 @register_scalar_funcify(Sign)
 def numba_funcify_Sign(op, node, **kwargs):
     dtype = node.inputs[0].type.dtype
@@ -238,7 +330,7 @@ def numba_funcify_Sign(op, node, **kwargs):
 
         return unsigned_sign, scalar_op_cache_key(op, unsigned_dtype=dtype)
     if not node.inputs[0].type.dtype.startswith("complex"):
-        return numba_funcify_ScalarOp(op, node, **kwargs)
+        return numba_funcify_scalar_native_default(op, node, **kwargs)
 
     complex_dtype = np.dtype(node.outputs[0].type.dtype).type
 
@@ -356,6 +448,8 @@ def numba_funcify_Clip(op, **kwargs):
 
 @register_scalar_funcify(Composite)
 def numba_funcify_Composite(op, node, **kwargs):
+    if not _scalar_graph_supports_numba(op.fgraph):
+        return None, None
     _ = kwargs.pop("storage_map", None)
 
     composite_fn, fgraph_key = numba_funcify_and_cache_key(
@@ -437,7 +531,7 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
 def numba_funcify_Erf(op, node, **kwargs):
     if node.inputs[0].type.dtype.startswith("complex"):
         # Complex not supported by numba
-        return numba_funcify_ScalarOp(op, node=node, **kwargs)
+        return numba_funcify_scalar_native_default(op, node=node, **kwargs)
 
     @numba_basic.numba_njit
     def erf(x):
@@ -483,6 +577,8 @@ def numba_funcify_Softplus(op, node, **kwargs):
 
 @register_scalar_funcify(ScalarLoop)
 def numba_funcify_ScalarLoop(op, node, **kwargs):
+    if not _scalar_graph_supports_numba(op.fgraph):
+        return None, None
     inner_fn, inner_fn_cache_key = numba_funcify_and_cache_key(op.fgraph)
     if inner_fn_cache_key is None:
         loop_cache_key = None

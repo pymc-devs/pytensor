@@ -21,6 +21,7 @@ from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
     dfs_rewriter,
+    get_active_mode,
     in2out,
     node_rewriter,
     out2in,
@@ -33,6 +34,9 @@ from pytensor.graph.rewriting.reachability import (
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.traversal import toposort, walk_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.link.c.basic import CLinker, OpWiseCLinker
+from pytensor.link.numba.linker import NumbaLinker
+from pytensor.link.vm import VMLinker
 from pytensor.scalar import (
     Add,
     Composite,
@@ -630,6 +634,10 @@ class FusionOptimizer(GraphRewriter):
         )
 
     def apply(self, fgraph):
+        linker = get_active_mode(fgraph).linker
+        require_c_code = isinstance(linker, CLinker | OpWiseCLinker) or (
+            isinstance(linker, VMLinker) and linker.c_thunks
+        )
         if fgraph.profile:
             validate_before = fgraph.profile.validate_time
             callbacks_before = fgraph.execute_callbacks_times.copy()
@@ -642,8 +650,8 @@ class FusionOptimizer(GraphRewriter):
 
             In general, there is no single solution. We try to find large subgraphs eagerly
 
-            Any two consecutive Elemwise nodes that have the same broadcasting pattern,
-            and a C-implementation (historical accident that should be revisited), are potentially fuseable.
+            Any two consecutive Elemwise nodes that have the same broadcasting pattern
+            are potentially fuseable. Linkers that use C thunks also require C implementations.
 
             However, not all collections of fuseable pairs make a valid fused subgraph.
             A valid fused subgraph must be "convex", meaning that no two nodes in the subgraph
@@ -657,26 +665,50 @@ class FusionOptimizer(GraphRewriter):
             This function yields subgraph in reverse topological order so they can be safely replaced one at a time
             """
 
-            @cache
-            def elemwise_scalar_op_has_c_code(
-                node: Apply, optimizer_verbose=config.optimizer_verbose
-            ) -> bool:
-                # TODO: This should not play a role in non-c backends!
-                if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
-                    return True
-                elif optimizer_verbose:
-                    warn(
-                        f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+            if require_c_code:
+
+                @cache
+                def op_fuseable_in_backend(
+                    node: Apply, optimizer_verbose=config.optimizer_verbose
+                ) -> bool:
+                    if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
+                        return True
+                    elif optimizer_verbose:
+                        warn(
+                            f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+                        )
+                    return False
+
+            elif isinstance(linker, NumbaLinker):
+                from pytensor.link.numba.dispatch.scalar import (
+                    numba_funcify_scalar_native,
+                )
+
+                @cache
+                def scalar_op_supports_numba_cached(scalar_op, input_dtypes):
+                    scalar_node = scalar_op.make_node(
+                        *(get_scalar_type(dtype)() for dtype in input_dtypes)
                     )
-                return False
+                    func, _ = numba_funcify_scalar_native(scalar_node.op, scalar_node)
+                    return func is not None
+
+                def op_fuseable_in_backend(node: Apply) -> bool:
+                    return scalar_op_supports_numba_cached(
+                        node.op.scalar_op, tuple(inp.dtype for inp in node.inputs)
+                    )
+
+            else:
+
+                def op_fuseable_in_backend(node: Apply) -> bool:
+                    return True
 
             # Create a map from node to a set of fuseable client (successor) nodes
             # A node and a client are fuseable if they are both single output Elemwise
-            # (with C-implementation) and have the same output broadcastable pattern
+            # and have the same output broadcastable pattern
             # Nodes that have no fuseable clients are not included
             fuseable_clients: dict[Apply, set[Apply]] = {}
             # We also create a set with candidate nodes from which to start a subgraph expansion
-            # These are Single output Elemwise nodes (with C-implementation) that may or not
+            # These are single-output Elemwise nodes that may or may not
             # have fuseable ancestors/clients at the start.
             candidate_starting_nodes = set()
             fg_clients = fg.clients
@@ -687,7 +719,7 @@ class FusionOptimizer(GraphRewriter):
                     out_node is not None
                     and len(out_node.outputs) == 1
                     and isinstance(out_node.op, Elemwise)
-                    and elemwise_scalar_op_has_c_code(out_node)
+                    and op_fuseable_in_backend(out_node)
                 ):
                     continue
 
@@ -700,7 +732,7 @@ class FusionOptimizer(GraphRewriter):
                         len(client.outputs) == 1
                         and isinstance(client.op, Elemwise)
                         and out_bcast == client.outputs[0].type.broadcastable
-                        and elemwise_scalar_op_has_c_code(client)
+                        and op_fuseable_in_backend(client)
                     )
                 }
                 if out_fuseable_clients:

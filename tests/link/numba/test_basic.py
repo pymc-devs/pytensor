@@ -6,13 +6,10 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import numba
 import numpy as np
 import pytest
-
-from pytensor.tensor import scalar_from_tensor
-
-
-numba = pytest.importorskip("numba")
+import scipy.special
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
@@ -37,6 +34,7 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.scalar.basic import Composite, ScalarOp, as_scalar
+from pytensor.tensor import scalar_from_tensor
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.utils import hash_from_ndarray
 
@@ -59,6 +57,22 @@ class MyType(Type):
 class MyOp(Op):
     def perform(self, *args):
         pass
+
+
+def array_only_polygamma(order, x):
+    return scipy.special.polygamma(order, x)
+
+
+class ArrayFallbackScalarOp(ps.BinaryScalarOp):
+    # Keep this path independent of SciPy's future native dispatch support.
+    nfunc_spec = ("tests.link.numba.test_basic.array_only_polygamma", 2, 1)
+
+    @staticmethod
+    def output_types_preference(order_type, x_type):
+        return ps.upgrade_to_float_no_complex(x_type)
+
+    def impl(self, order, x):
+        return array_only_polygamma(order, x)
 
 
 class MySingleOut(Op):

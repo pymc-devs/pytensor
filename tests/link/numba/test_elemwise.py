@@ -3,11 +3,12 @@ from math import comb
 
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
-from pytensor import config, function
+from pytensor import In, config, function
 from pytensor.compile import get_mode
 from pytensor.compile.mode import Mode
 from pytensor.compile.ops import deep_copy_op
@@ -21,6 +22,7 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax
 from tests.link.numba.test_basic import (
+    ArrayFallbackScalarOp,
     compare_numba_and_py,
     numba_mode,
     scalar_my_multi_out,
@@ -31,6 +33,32 @@ from tests.tensor.test_elemwise import check_elemwise_runtime_broadcast
 rng = np.random.default_rng(42849)
 
 add_inplace = Elemwise(scalar_add, {0: 0})
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.parametrize("inplace", [False, True])
+def test_array_function_perform_fallback(dtype, inplace):
+    class VectorizedOnlyOp(ArrayFallbackScalarOp):
+        def impl(self, *inputs):
+            pytest.fail("The vectorized function should replace the scalar perform")
+
+    order = pt.lscalar("order")
+    x = pt.matrix("x", dtype=dtype)
+    op = Elemwise(VectorizedOnlyOp(), {0: 1} if inplace else {})
+    with pytest.warns(UserWarning, match="Numba will use object mode") as warnings:
+        fn = function(
+            [order, In(x, mutable=inplace)],
+            op(order, x),
+            mode=numba_mode,
+            accept_inplace=inplace,
+        )
+    assert len(warnings) == 1
+    for value in (0.5, 1.5):
+        values = (np.arange(12, dtype=dtype) + value).reshape(2, 6)[:, ::2]
+        expected = scipy.special.polygamma(2, values).astype(dtype)
+        np.testing.assert_allclose(fn(2, values), expected, rtol=1e-6, strict=True)
+        if inplace:
+            np.testing.assert_array_equal(values, expected)
 
 
 @pytest.mark.parametrize(

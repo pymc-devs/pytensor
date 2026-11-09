@@ -17,6 +17,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.link.vm import VMLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import EQ, Composite, float64
 from pytensor.tensor.basic import MakeVector
@@ -1222,18 +1223,30 @@ class TestFusion:
         assert np.allclose(res[0], [1, 2, 3])
         assert np.allclose(res[1], np.cos([1, 2, 3]) + np.array([0, 1, 2]))
 
-    @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
-    def test_no_c_code(self):
-        r"""Make sure we avoid fusions for `Op`\s without C code implementations."""
+    @pytest.mark.parametrize(
+        "linker, require_c_code",
+        [
+            ("cvm", True),
+            ("c|py", True),
+            ("py", False),
+            pytest.param(VMLinker(c_thunks=False), False, id="vm_py"),
+            ("numba", False),
+        ],
+    )
+    def test_no_c_code(self, linker, require_c_code):
+        if require_c_code and not config.cxx:
+            pytest.skip("No cxx compiler")
 
         # This custom `Op` has no `c_code` method
         class NoCCodeOp(ps.basic.UnaryScalarOp):
+            nfunc_spec = ("exp", 1, 1)
+
             def impl(self, x):
-                return x * 2
+                return np.exp(x)
 
         no_c_code_op = Elemwise(NoCCodeOp(ps.basic.upgrade_to_float))
 
-        mode = Mode(linker="cvm")
+        mode = Mode(linker=linker)
         mode._optimizer = mode._optimizer.including(
             "fusion",
             "canonicalize",
@@ -1244,9 +1257,35 @@ class TestFusion:
         out = x * no_c_code_op(x + 1)
         f = function([x], out, mode=mode)
 
-        assert not any(
+        fused = any(
             isinstance(getattr(n.op, "scalar_op"), ps.basic.Composite)
             for n in f.maker.fgraph.toposort()
+        )
+        assert fused == (not require_c_code)
+        values = np.array([-1, 0, 1], dtype=config.floatX)
+        np.testing.assert_allclose(f(values), values * np.exp(values + 1))
+
+    @pytest.mark.parametrize("fused", [True, False])
+    def test_numba_perform_fallback(self, fused):
+        from tests.link.numba.test_basic import ArrayFallbackScalarOp
+
+        x = dvector("x")
+        value = (
+            Elemwise(ps.psi)(x + 1)
+            if fused
+            else Elemwise(ArrayFallbackScalarOp())(2, x + 1)
+        )
+        out = x * value
+        fgraph = FunctionGraph([x], [out])
+        Mode(linker="numba", optimizer=self.rewrites).excluding(
+            "inplace"
+        ).optimizer.rewrite(fgraph)
+        assert (
+            any(
+                isinstance(getattr(node.op, "scalar_op", None), Composite)
+                for node in fgraph.toposort()
+            )
+            == fused
         )
 
     @pytest.mark.parametrize("linker", ["cvm", "py"])
@@ -1601,12 +1640,12 @@ class TestCompositeCodegen:
 
         self.x = fvector()
 
+    @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
     def test_nested_composite(self):
         y = self.times_2(self.x)
         z = self.times_3(y)
-        f = function([self.x], z)
-        if config.mode != "FAST_COMPILE":
-            assert len(f.maker.fgraph.toposort()) == 1
+        f = function([self.x], z, mode=Mode(linker="cvm", optimizer="fast_run"))
+        assert len(f.maker.fgraph.toposort()) == 1
         fval = f([1, 2, 3])
         assert np.all(fval == [6, 12, 18])
 
