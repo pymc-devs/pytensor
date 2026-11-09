@@ -234,7 +234,7 @@ class OpFromGraph(HasInnerFunction, Op):
         strict: bool = False,
         name: str | None = None,
         destroy_map: dict[int, tuple[int, ...]] | None = None,
-        fgraph: FrozenFunctionGraph | None = None,
+        fgraph: FunctionGraph | FrozenFunctionGraph | None = None,
         **kwargs,
     ):
         """
@@ -303,6 +303,10 @@ class OpFromGraph(HasInnerFunction, Op):
             provided as explicit inputs; implicitly captured shared variables raise.
         name : str, optional
             A name for debugging purposes.
+        fgraph : FunctionGraph or FrozenFunctionGraph, optional
+            A prebuilt inner graph with the same input and output types as
+            ``inputs`` and ``outputs``. Frozen graphs are reused directly;
+            mutable graphs are frozen with their existing node ordering.
         **kwargs
             Additional arguments passed to :func:`pytensor.function`. Only used when
             ``inline=False``.
@@ -331,17 +335,14 @@ class OpFromGraph(HasInnerFunction, Op):
 
         self.is_inline = inline
 
-        if fgraph is not None:
-            # Caller supplies an already-nominalized frozen inner graph (built,
-            # e.g., with construct_nominal_fgraph + a substitution). ``inputs``/
-            # ``outputs`` are still passed for the outer input/output types.
+        if fgraph is None:
+            self.fgraph = FrozenFunctionGraph.from_io(inputs, outputs)
+        elif isinstance(fgraph, FrozenFunctionGraph):
             self.fgraph = fgraph
+        elif isinstance(fgraph, FunctionGraph):
+            self.fgraph = fgraph.freeze()
         else:
-            inner_fgraph = construct_nominal_fgraph(inputs, outputs)
-            # The inner graph is stored immutable. The default freeze (no dedup)
-            # keeps distinct buffers for inplace ``destroy_map`` ops; structural
-            # folding would alias them. See ``FunctionGraph.freeze``.
-            self.fgraph = inner_fgraph.freeze()
+            raise TypeError("fgraph must be a FunctionGraph or FrozenFunctionGraph")
 
         # `compile_kwargs` used to control how the inner graph was compiled.
         # That is now the job of the `ofg_inner_graph` rewrite (which
