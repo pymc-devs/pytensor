@@ -85,6 +85,7 @@ kanren = [
     "miniKanren",
     "cons",
 ]
+pyodide = ["pyodide-build>=0.29.2"]
 
 [tool.setuptools.packages.find]
 include = ["pytensor*"]
