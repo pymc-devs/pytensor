@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import statistics
 import subprocess
 import sys
@@ -241,6 +242,7 @@ def run_worker(command, env, source, result, interval):
             with lock:
                 if phase is not None:
                     record = memory["phases"][phase]
+                    record["sample_count"] += 1
                     record["peak_rss_bytes"] = max(record["peak_rss_bytes"], rss)
             stop.wait(interval)
 
@@ -259,6 +261,7 @@ def run_worker(command, env, source, result, interval):
                             memory["phases"][phase] = {
                                 "baseline_rss_bytes": rss,
                                 "peak_rss_bytes": rss,
+                                "sample_count": 0,
                             }
                         else:
                             record = memory["phases"][marker["phase"]]
@@ -334,9 +337,13 @@ def compare(args):
 
         def environment(label, cache):
             env = dict(os.environ)
+            # PYTENSOR_FLAGS uses POSIX shlex even on Windows. Raw backslashes
+            # would be consumed as escapes and silently change the cache path.
+            base = shlex.quote((cache / "pytensor").as_posix())
+            compiledir = shlex.quote((cache / "pytensor" / "c").as_posix())
             env.update(
                 PYTHONPATH=str(sources[label]),
-                PYTENSOR_FLAGS=f"cxx=,blas__ldflags=,base_compiledir={cache / 'pytensor'},compiledir={cache / 'pytensor' / 'c'},numba__cache=True",
+                PYTENSOR_FLAGS=f"cxx=,blas__ldflags=,base_compiledir={base},compiledir={compiledir},numba__cache=True",
                 NUMBA_CACHE_DIR=str(cache / "numba"),
                 OPENBLAS_NUM_THREADS="1",
                 OMP_NUM_THREADS="1",
