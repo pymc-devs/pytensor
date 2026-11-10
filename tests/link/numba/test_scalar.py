@@ -262,12 +262,63 @@ def test_erf_complex():
     )
 
 
+def test_gammaln_psi():
+    # mpmath at 40 digits; next to the zeros of both too
+    x = pt.vector("x", dtype="float64")
+    fn = function([x], [pt.gammaln(x), pt.psi(x)], mode=numba_mode)
+    xs = [1e-300, 1e-10, 0.3, 1 - 2**-53, 1.0, 1 + 2**-52, 1.4616321449683622]
+    xs += [1.75, 2.0, 2.5, 3.999, 17.5, 63.99, 64.0, 1e5, 1e300]
+    gammaln_ref = [
+        690.7755278982137,
+        23.025850929882736,
+        1.0957979948180756,
+        6.408381213480008e-17,
+        0.0,
+        -1.2816762426960008e-16,
+        -0.12148629053584961,
+        -0.08440112102048555,
+        0.0,
+        0.2846828704729192,
+        1.790503493484443,
+        32.08111489594735,
+        200.96780668432012,
+        201.00931639928152,
+        1051287.7089736569,
+        6.897755278982137e302,
+    ]
+    psi_ref = [
+        -9.999999999999999e299,
+        -10000000000.577215,
+        -3.502524222200133,
+        -0.5772156649015331,
+        -0.5772156649015329,
+        -0.5772156649015325,
+        -9.241265521729427e-17,
+        0.24747245354686118,
+        0.42278433509846713,
+        0.7031566406452432,
+        1.2558338054487181,
+        2.8333574322286843,
+        4.1508927493430345,
+        4.1510502388042365,
+        11.512920464961896,
+        690.7755278982137,
+    ]
+    gammaln, psi = fn(np.array(xs))
+    np.testing.assert_array_max_ulp(gammaln, gammaln_ref, maxulp=2)
+    np.testing.assert_array_max_ulp(psi, psi_ref, maxulp=3)
+    # libm's lgamma and scipy's psi below 0, as before
+    edges = np.array([-2.5, -1.0, -0.0, 0.0, np.inf, np.nan])
+    gammaln, psi = fn(edges)
+    np.testing.assert_allclose(gammaln, [-0.056243716497674054, *[np.inf] * 4, np.nan])
+    np.testing.assert_equal(psi, scipy.special.psi(edges))
+
+
 CYTHON_SPECIAL_CASES = [
     (pt.erfcx, [np.array([-1.0, 0.0, 1.0, 3.0])]),
     (pt.erfinv, [np.array([-0.5, 0.0, 0.3, 0.9])]),
     (pt.erfcinv, [np.array([0.2, 0.7, 1.0, 1.5])]),
     (pt.ndtri_exp, [np.array([-745.0, -100.0, -5.0, -0.5])]),
-    (pt.psi, [np.array([0.5, 1.0, 3.7, 12.3])]),
     (pt.gamma, [np.array([0.5, 1.0, 3.7, 5.2])]),
     (pt.j0, [np.array([0.1, 1.0, 5.0, 9.0])]),
     (pt.j1, [np.array([0.1, 1.0, 5.0, 9.0])]),
@@ -303,7 +354,6 @@ CYTHON_SPECIAL_CASES = [
         "erfinv",
         "erfcinv",
         "ndtri_exp",
-        "psi",
         "gamma",
         "j0",
         "j1",
