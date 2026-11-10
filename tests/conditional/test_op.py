@@ -1,19 +1,19 @@
 from copy import deepcopy
-from functools import reduce
 
 import numpy as np
 import pytest
 
 import pytensor
-import pytensor.ifelse
 import pytensor.sparse
 import pytensor.tensor.basic as ptb
 from pytensor import function
-from pytensor.compile.mode import Mode, get_mode
+from pytensor.compile.mode import Mode
+from pytensor.conditional.op import IfElse, LazyIfElse, ifelse
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.ifelse import IfElse, ifelse
 from pytensor.link.c.type import generic
+from pytensor.raise_op import CheckAndRaise
+from pytensor.sparse import matrix as sparse_matrix
 from pytensor.tensor.math import eq
 from pytensor.tensor.type import (
     col,
@@ -26,6 +26,31 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.conditional.utils import IfElseCompatibilityTests
+
+
+@pytest.mark.parametrize("views", [False, True])
+def test_lazy_ifelse_output_aliases(views):
+    mode = Mode("py", "fast_run").including("lazy_ifelse")
+    IfElseCompatibilityTests.check_output_aliases(mode, views)
+
+
+def test_lazy_ifelse_perform_and_shape():
+    c, x, y = iscalar("c"), vector("x"), vector("y")
+    checked = CheckAndRaise(ValueError, "selected invalid branch")(x, (x > 0).all())
+    mode = Mode("py", "fast_run").including("lazy_ifelse")
+    fn = function([c, x, y], ifelse(c, checked, y * 2), mode=mode)
+    [node] = fn.maker.fgraph.toposort()
+    assert isinstance(node.op, LazyIfElse)
+    shape_fn = function(fn.maker.fgraph.inputs, node.outputs[0].shape, mode=mode)
+    xv, yv = np.array([-1.0, 2.0], dtype=x.dtype), np.ones(3, dtype=y.dtype)
+    np.testing.assert_array_equal(fn(False, xv, yv), yv * 2)
+    with pytest.raises(ValueError, match="selected invalid branch"):
+        fn(True, xv, yv)
+    for condition in (False, True):
+        np.testing.assert_array_equal(
+            shape_fn(condition, xv, yv), [2 if condition else 3]
+        )
 
 
 class TestIfelse(utt.OptimizationTestMixin):
@@ -75,38 +100,6 @@ class TestIfelse(utt.OptimizationTestMixin):
         assert np.allclose(vx, f(1, vx, vy))
         assert np.allclose(vy, f(0, vx, vy))
 
-    def test_not_lazy_if_inplace(self):
-        # Tests that if the outputs are scalars and the graph is big,
-        # we disable the inplace opt to speed up optimization
-        x = vector("x", dtype=self.dtype)
-        y = vector("y", dtype=self.dtype)
-        c = iscalar("c")
-        mode = get_mode(self.mode).excluding(
-            # Disable many opt to keep the graph big enough to disable
-            # the opt.
-            "fusion",
-            "local_add_canonizer",
-            "inplace",
-            "constant_folding",
-            "constant_folding",
-        )
-        y2 = reduce(lambda x, y: x + y, [y, *range(200)])
-        f = function([c, x, y], ifelse(c, x, y2), mode=mode)
-        # For not inplace ifelse
-        ifnode = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse)]
-        assert len(ifnode) == 1
-        assert not ifnode[0].op.as_view
-        rng = np.random.default_rng(utt.fetch_seed())
-
-        xlen = rng.integers(200)
-        ylen = rng.integers(200)
-
-        vx = np.asarray(rng.uniform(size=(xlen,)), self.dtype)
-        vy = np.asarray(rng.uniform(size=(ylen,)), self.dtype)
-
-        assert np.allclose(vx, f(1, vx, vy))
-        assert np.allclose(vy + sum(range(200)), f(0, vx, vy))
-
     def test_mixed_dtype(self):
         x1 = vector("x1", dtype="int32")
         x2 = vector("x2", dtype=self.dtype)
@@ -155,7 +148,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         f = function(
             [c, x, y], [self.cast_output(gx), self.cast_output(gy)], mode=self.mode
         )
-        self.assertFunctionContains(f, self.get_ifelse(1), min=2, max=3)
+        self.assertFunctionContainsClass(f, (IfElse, LazyIfElse), min=2, max=3)
         rng = np.random.default_rng(utt.fetch_seed())
 
         xlen = rng.integers(200)
@@ -278,7 +271,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         f = function(
             [ften0, fmat1, ften2, fmat3], [], updates=new_updates, mode=self.mode
         )
-        self.assertFunctionContains1(f, self.get_ifelse(4))
+        self.assertFunctionContainsClassN(f, (IfElse, LazyIfElse), 1)
 
         i1 = np.asarray(np.random.random([19, 4, 8]), dtype=self.dtype)
         i2 = np.asarray(np.random.random([19, 8]), dtype=self.dtype)
@@ -326,13 +319,11 @@ class TestIfelse(utt.OptimizationTestMixin):
             ifelse(cond, y, x)
 
     def test_sparse_conversions(self):
-        from pytensor.sparse import matrix
-
         rng = np.random.default_rng(utt.fetch_seed())
         data = rng.random((2, 3)).astype(self.dtype)
         x = self.shared(data)
-        y = matrix("csc", dtype=self.dtype, name="y")
-        z = matrix("csr", dtype=self.dtype, name="z")
+        y = sparse_matrix("csc", dtype=self.dtype, name="y")
+        z = sparse_matrix("csr", dtype=self.dtype, name="z")
         cond = iscalar("cond")
 
         with pytest.raises(TypeError, match=r".*do not match."):
@@ -347,156 +338,6 @@ class TestIfelse(utt.OptimizationTestMixin):
             ifelse(cond, y, z)
         with pytest.raises(TypeError):
             ifelse(cond, z, y)
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_merge(self):
-        x = vector("x")
-        y = vector("y")
-        c = iscalar("c")
-        z1 = ifelse(c, x + 1, y + 1)
-        z2 = ifelse(c, x + 2, y + 2)
-        z = z1 + z2
-        f = function([c, x, y], z)
-        assert (
-            len([n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse)]) == 1
-        )
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_remove_useless_inputs1(self):
-        x = vector("x")
-        y = vector("y")
-        c = iscalar("c")
-        z = ifelse(c, (x, x), (y, y))
-        f = function([c, x, y], z)
-
-        ifnode = next(n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse))
-        assert len(ifnode.inputs) == 3
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_remove_useless_inputs2(self):
-        x1 = vector("x1")
-        x2 = vector("x2")
-        y1 = vector("y1")
-        y2 = vector("y2")
-        c = iscalar("c")
-        z = ifelse(c, (x1, x1, x1, x2, x2), (y1, y1, y2, y2, y2))
-        f = function([c, x1, x2, y1, y2], z)
-
-        ifnode = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, IfElse))
-        assert len(ifnode.outputs) == 3
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_pushout1(self):
-        x1 = scalar("x1")
-        x2 = scalar("x2")
-        y1 = scalar("y1")
-        y2 = scalar("y2")
-        w1 = scalar("w1")
-        w2 = scalar("w2")
-        c = iscalar("c")
-        x, y = ifelse(c, (x1, y1), (x2, y2), name="f1")
-        z = ifelse(c, w1, w2, name="f2")
-        out = x * z * y
-
-        f = function([x1, x2, y1, y2, w1, w2, c], out, allow_input_downcast=True)
-        assert isinstance(f.maker.fgraph.toposort()[-1].op, IfElse)
-        rng = np.random.default_rng(utt.fetch_seed())
-        vx1 = rng.uniform()
-        vx2 = rng.uniform()
-        vy1 = rng.uniform()
-        vy2 = rng.uniform()
-        vw1 = rng.uniform()
-        vw2 = rng.uniform()
-
-        assert np.allclose(f(vx1, vx2, vy1, vy2, vw1, vw2, 1), vx1 * vy1 * vw1)
-        assert np.allclose(f(vx1, vx2, vy1, vy2, vw1, vw2, 0), vx2 * vy2 * vw2)
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_pushout3(self):
-        x1 = scalar("x1")
-        y1 = scalar("x2")
-        y2 = scalar("y2")
-        c = iscalar("c")
-        two = np.asarray(2, dtype=pytensor.config.floatX)
-        x, y = ifelse(c, (x1, y1), (two, y2), name="f1")
-        o3 = np.asarray(0.3, dtype=pytensor.config.floatX)
-        o2 = np.asarray(0.2, dtype=pytensor.config.floatX)
-        z = ifelse(c, o3, o2, name="f2")
-        out = x * z * y
-
-        f = function([x1, y1, y2, c], out, allow_input_downcast=True)
-        assert isinstance(f.maker.fgraph.toposort()[-1].op, IfElse)
-        rng = np.random.default_rng(utt.fetch_seed())
-        vx1 = rng.uniform()
-        vy1 = rng.uniform()
-        vy2 = rng.uniform()
-
-        assert np.allclose(f(vx1, vy1, vy2, 1), vx1 * vy1 * 0.3)
-        assert np.allclose(f(vx1, vy1, vy2, 0), 2 * vy2 * 0.2)
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_pushout2(self):
-        x1 = scalar("x1")
-        x2 = scalar("x2")
-        y1 = scalar("y1")
-        y2 = scalar("y2")
-        w1 = scalar("w1")
-        w2 = scalar("w2")
-        c = iscalar("c")
-        x, y = ifelse(c, (x1, y1), (x2, y2), name="f1")
-        z = ifelse(x > y, w1, w2, name="f2")
-        out = x * z * y
-
-        f = function([x1, x2, y1, y2, w1, w2, c], out, allow_input_downcast=True)
-        assert isinstance(f.maker.fgraph.toposort()[-1].op, IfElse)
-        rng = np.random.default_rng(utt.fetch_seed())
-        vx1 = rng.uniform()
-        vx2 = rng.uniform()
-        vy1 = rng.uniform()
-        vy2 = rng.uniform()
-        vw1 = rng.uniform()
-        vw2 = rng.uniform()
-        if vx1 > vy1:
-            vw = vw1
-        else:
-            vw = vw2
-        assert np.allclose(f(vx1, vx2, vy1, vy2, vw1, vw2, 1), vx1 * vy1 * vw)
-
-        if vx2 > vy2:
-            vw = vw1
-        else:
-            vw = vw2
-        assert np.allclose(f(vx1, vx2, vy1, vy2, vw1, vw2, 0), vx2 * vy2 * vw)
-
-    @pytest.mark.skip(reason="Optimization temporarily disabled")
-    def test_merge_ifs_true_false(self):
-        x1 = scalar("x1")
-        x2 = scalar("x2")
-        y1 = scalar("y1")
-        y2 = scalar("y2")
-        w1 = scalar("w1")
-        w2 = scalar("w2")
-        c = iscalar("c")
-
-        out = ifelse(
-            c,
-            ifelse(c, x1, x2) + ifelse(c, y1, y2) + w1,
-            ifelse(c, x1, x2) + ifelse(c, y1, y2) + w2,
-        )
-        f = function([x1, x2, y1, y2, w1, w2, c], out, allow_input_downcast=True)
-        assert (
-            len([x for x in f.maker.fgraph.toposort() if isinstance(x.op, IfElse)]) == 1
-        )
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        vx1 = rng.uniform()
-        vx2 = rng.uniform()
-        vy1 = rng.uniform()
-        vy2 = rng.uniform()
-        vw1 = rng.uniform()
-        vw2 = rng.uniform()
-        assert np.allclose(f(vx1, vx2, vy1, vy2, vw1, vw2, 1), vx1 + vy1 + vw1)
-        assert np.allclose(f(vx1, vx2, vy1, vy2, vw1, vw2, 0), vx2 + vy2 + vw2)
 
     def test_grad_int_value(self):
         w = pytensor.shared(np.random.random(10))

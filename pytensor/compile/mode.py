@@ -256,7 +256,9 @@ optdb.register(
 optdb.register("specialize", EquilibriumDB(), "fast_run", "fast_compile", position=2)
 
 # misc special cases for speed that break canonicalization
-optdb.register("uncanonicalize", EquilibriumDB(), "fast_run", position=3)
+optdb.register(
+    "uncanonicalize", EquilibriumDB(), "fast_run", "fast_compile", position=3
+)
 
 # especially constant merge
 optdb.register("merge2", MergeOptimizer(), "fast_run", "merge", position=49)

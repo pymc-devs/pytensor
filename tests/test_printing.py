@@ -4,6 +4,7 @@ Tests of printing functionality
 
 import importlib.util
 import io
+import json
 import logging
 import re
 from io import StringIO
@@ -19,25 +20,29 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import deep_copy_op
+from pytensor.conditional.op import LazyIfElse
 from pytensor.printing import (
     PatternPrinter,
     PPrinter,
     Print,
     _try_pydot_import,
+    build_graph_model,
     char_from_number,
     debugprint,
     default_printer,
     get_node_by_id,
+    iter_graph_nodes,
     min_informative_str,
     pp,
     pydotprint,
 )
 from pytensor.scalar import Composite, float64
-from pytensor.tensor import as_tensor_variable
+from pytensor.tensor import as_tensor_variable, scalars
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.linalg import inv
+from pytensor.tensor.linalg import inv, slogdet
 from pytensor.tensor.math import maximum
-from pytensor.tensor.type import dmatrix, dvector, matrix
+from pytensor.tensor.type import dmatrix, dvector, iscalar, lvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
 
 
@@ -502,6 +507,94 @@ MyInnerGraphOp [id C]
         assert exp_line.strip() == res_line.strip()
 
 
+def test_debugprint_lazy_ifelse():
+    c, x = iscalar("c"), dvector("x")
+    true_branch = OpFromGraph([x], [x * 2])
+    false_branch = OpFromGraph([x], [x * 3])
+    op = LazyIfElse(true_branch, false_branch, [x.type])
+    # Both branch graphs render directly, without a synthetic selection graph.
+    output = debugprint(op(c, x), file="str")
+    assert output == dedent(
+        """\
+        LazyIfElse [id A]
+         ├─ c [id B]
+         └─ x [id C]
+
+        Inner graphs:
+
+        LazyIfElse [id A]
+         true_branch:
+            ← Mul [id D]
+               ├─ i0 [id E]
+               └─ ExpandDims{axis=0} [id F]
+                  └─ 2 [id G]
+         false_branch:
+            ← Mul [id H]
+               ├─ i0 [id E]
+               └─ ExpandDims{axis=0} [id I]
+                  └─ 3 [id J]
+        """
+    )
+
+
+def test_debugprint_blockwise_opfromgraph():
+    x, y, v = dmatrix("x"), dmatrix("y"), dvector("v")
+    op = OpFromGraph([v], [v + 1], name="inner")
+    blockwise = Blockwise(op, signature="(t)->(t)")
+    out = blockwise(x) + blockwise(y)
+    assert debugprint(out, file="str") == dedent(
+        """\
+        Add [id A]
+         ├─ Blockwise{inner{inline=False}, (t)->(t)} [id B]
+         │  └─ x [id C]
+         └─ Blockwise{inner{inline=False}, (t)->(t)} [id D]
+            └─ y [id E]
+
+        Inner graphs:
+
+        Blockwise{inner{inline=False}, (t)->(t)} [id B, D]
+         ← inner{inline=False} [id F]
+            └─ <Vector(float64, shape=(?,))> [id G]
+
+        inner{inline=False} [id F]
+         ← Add [id H]
+            ├─ i0 [id I]
+            └─ ExpandDims{axis=0} [id J]
+               └─ 1 [id K]
+        """
+    )
+
+
+def test_debugprint_blockwise_scan():
+    x, v = dmatrix("x"), dvector("v")
+    scan_out = pytensor.scan(
+        lambda s: s + 1, sequences=[v], name="inner", return_updates=False
+    )
+    n = lvector("n")
+    out = Blockwise(scan_out.owner_op, signature="(),(t),()->(t)")(n, x, n)
+    assert debugprint(out, file="str") == dedent(
+        """\
+        Blockwise{Scan{inner, while_loop=False, inplace=none}, (),(t),()->(t)} [id A]
+         ├─ n [id B]
+         ├─ x [id C]
+         └─ n [id B]
+
+        Inner graphs:
+
+        Blockwise{Scan{inner, while_loop=False, inplace=none}, (),(t),()->(t)} [id A]
+         ← Scan{inner, while_loop=False, inplace=none} [id D]
+            ├─ <Scalar(int64, shape=())> [id E]
+            ├─ <Vector(float64, shape=(?,))> [id F]
+            └─ <Scalar(int64, shape=())> [id G]
+
+        Scan{inner, while_loop=False, inplace=none} [id D]
+         ← Add [id H]
+            ├─ i0 [id I] -> [id F]
+            └─ 1 [id J]
+        """
+    )
+
+
 def test_debugprint_inner_graph_shared():
     """Inner-graph `Op`s that compare equal share a single printed body, whose
     header lists every node id it applies to (deduped, instead of one body per
@@ -816,6 +909,22 @@ class TestDebugprintRich:
         inner_section = tree.children[1]
         assert len(inner_section.children) >= 1
 
+    def test_lazy_ifelse_expands_both_branches(self):
+        c, x = iscalar("c"), dvector("x")
+        nested = OpFromGraph([x], [x * 2], name="nested")
+        true_branch = OpFromGraph([x], [nested(x)])
+        false_branch = OpFromGraph([x], [x * 3])
+        op = LazyIfElse(true_branch, false_branch, [x.type])
+        tree = debugprint(op(c, x), file="rich")
+        inner_section = tree.children[1]
+        lazy_tree = inner_section.children[0]
+        assert [str(child.label) for child in lazy_tree.children] == [
+            "true_branch:",
+            "false_branch:",
+        ]
+        # An OFG nested inside the true graph still gets its own inner body.
+        assert any("nested" in str(child.label) for child in inner_section.children[1:])
+
     def test_inner_graph_header_is_bold(self):
         # The "Inner graphs:" header should be bold.
         x = dvector("x")
@@ -960,3 +1069,181 @@ class TestDebugprintRich:
         sentinels = [l for l in found if "···" in l]
         assert colored, "canonical shared node should be colored"
         assert sentinels, "second occurrence should produce a ··· sentinel"
+
+
+def test_iter_graph_nodes_stable_keys():
+    """Keys are first-visit order, shared across occurrences."""
+    x, y = dvector("x"), dvector("y")
+    u = x * y
+    records = list(iter_graph_nodes(u + u))
+
+    by_var = {}
+    for r in records:
+        by_var.setdefault(r.var, set()).add(r.key)
+        if r.var.owner is not None:
+            assert r.owner_key is not None
+        else:
+            assert r.owner_key is None
+
+    # Four distinct variables, keys assigned in first-visit order:
+    # Add, Mul (u), x, y
+    assert sorted(k for keys in by_var.values() for k in keys) == [
+        "n0",
+        "n1",
+        "n2",
+        "n3",
+    ]
+    # u is yielded twice as a label record (two input slots of Add),
+    # plus once as a "···" sentinel for the second slot
+    assert sum(r.var is u and not r.is_repeat for r in records) == 2
+
+
+def test_iter_graph_nodes_owner_key_multi_output():
+    """Outputs of one Apply share owner_key; leaves have none."""
+    x = matrix("x")
+    sign, logabsdet = slogdet(x)
+
+    (sign_rec,) = [r for r in iter_graph_nodes(sign) if r.var is sign]
+    (logabsdet_rec,) = [r for r in iter_graph_nodes(logabsdet) if r.var is logabsdet]
+    assert sign_rec.owner_key is not None
+    assert logabsdet_rec.owner_key == sign_rec.owner_key
+
+
+def test_graph_model_reconstructs_dag():
+    """Reference resolution reproduces the exact DAG edge set."""
+    x, y = dvector("x"), dvector("y")
+    u = x * y
+    sign, _ = slogdet(matrix("m"))
+    outputs = [u + u, sign]
+
+    model = build_graph_model(outputs)
+    nodes = model.flattened()
+    key2var = {}
+    node_keys: dict = {}
+    owner_keys: dict = {}
+    for out in outputs:
+        for r in iter_graph_nodes(out, node_keys=node_keys, owner_keys=owner_keys):
+            key2var[r.key] = r.var
+
+    # Repeat occurrences share the key of the canonical occurrence, which
+    # keeps its expanded children in the flattened table
+    diamond_root = model.roots[0]
+    canonical, mul_ref = diamond_root.children
+    assert mul_ref.key == canonical.key
+    assert mul_ref.is_reference
+    assert nodes[mul_ref.key]["children"]
+
+    def resolve(entry):
+        if entry.get("reference") and entry["kind"] == "node":
+            # Resolve to the canonical expansion of the same owner
+            owner = entry["owner_key"]
+            canonical_entry = next(
+                e
+                for e in nodes.values()
+                if not e.get("reference") and e["owner_key"] == owner
+            )
+            return canonical_entry["children"]
+        return entry["children"]
+
+    edges = set()
+    for key, entry in nodes.items():
+        for child in resolve(entry):
+            edges.add((id(key2var[key]), id(key2var[child])))
+
+    ground_truth = set()
+    for out in outputs:
+        for r in iter_graph_nodes(out, node_keys=node_keys, owner_keys=owner_keys):
+            if r.var.owner is None:
+                continue
+            for inp in r.var.owner.inputs:
+                ground_truth.add((id(r.var), id(inp)))
+
+    assert edges == ground_truth
+
+
+def test_graph_model_deterministic():
+    """Two independent builds give identical dumps (golden-file proxy)."""
+    x = dvector("x")
+    a, b = scalars("a", "b")
+    ofg = OpFromGraph([a, b], [a + b, a * b])
+    z0, z1 = ofg(x.sum(), x.sum())
+    graph = z0 + z1
+
+    dumps = [
+        json.dumps(build_graph_model(graph, print_type=True).flattened(), indent=2)
+        for _ in range(2)
+    ]
+    assert dumps[0] == dumps[1]
+
+
+def test_graph_model_multi_output_and_inner_graphs():
+    """Outputs of one Apply share owner_key; inner graphs back-link to them."""
+    x = dvector("x")
+    a, b = scalars("a", "b")
+    ofg = OpFromGraph([a, b], [a + b, a * b])
+    z0, z1 = ofg(x.sum(), x.sum())
+    graph = z0 + z1
+
+    model = build_graph_model(graph)
+    nodes = model.flattened()
+
+    # Both outputs of the OpFromGraph Apply share their owner_key
+    ofg_entries = [e for e in nodes.values() if e.get("op_type") == "OpFromGraph"]
+    assert len(ofg_entries) == 2
+    z0_entry = next(e for e in ofg_entries if not e.get("reference"))
+    z1_entry = next(e for e in ofg_entries if e.get("reference"))
+    assert z0_entry["owner_key"] == z1_entry["owner_key"]
+
+    # The inner graph links back to the outer node
+    assert len(model.inner_graphs) == 1
+    (header,) = model.inner_graphs
+    assert header.meta["outer_node"] == z0_entry["key"]
+    # Inner outputs appear as children of the header
+    assert len(header.children) == 2
+    assert header.children[0].label.startswith("Add")
+
+
+def test_graph_model_depth():
+    """Depth limits propagate to the model."""
+    x = dvector("x")
+    model = build_graph_model(x * x + x, depth=1)
+    (root,) = model.roots
+    assert root.children == []
+
+
+def test_graph_model_structured_meta():
+    """Consumers can group by op type and dtype without parsing reprs."""
+    x = dvector("x")
+    sign, _ = slogdet(matrix("m"))
+    model = build_graph_model([x * x + x, sign])
+
+    nodes = model.flattened()
+    by_op_type = {}
+    by_op = {}
+    for entry in nodes.values():
+        if entry["kind"] == "node":
+            by_op_type.setdefault(entry["op_type"], []).append(entry)
+            by_op.setdefault(entry["op"], []).append(entry)
+            assert entry["dtype"] == "float64"
+
+    # Coarse families: Elemwise for the vector ops, Blockwise for Det
+    assert {"Elemwise", "Blockwise"} == set(by_op_type)
+    # Specific ops, without parsing the repr
+    assert {"Add", "Mul"} <= set(by_op)
+
+
+def test_graph_model_shared_keys():
+    """Shared registries keep node identity across separate builds."""
+    x = dvector("x")
+    node_keys: dict = {}
+    first = build_graph_model(x + 1, node_keys=node_keys)
+    second = build_graph_model(x * 2, node_keys=node_keys)
+
+    first_flat, second_flat = first.flattened(), second.flattened()
+    x_key = next(k for k, e in first_flat.items() if e["name"] == "x")
+    # Surviving variables keep their keys across builds
+    assert second_flat[x_key]["name"] == "x"
+    # A fresh registry would re-assign by traversal position
+    fresh = build_graph_model(2 * x)
+    fresh_key = next(k for k, e in fresh.flattened().items() if e["name"] == "x")
+    assert fresh_key != x_key

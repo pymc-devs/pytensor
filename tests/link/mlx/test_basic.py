@@ -14,16 +14,20 @@ from pytensor import config
 from pytensor import tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import MLX, Mode
+from pytensor.conditional.op import ifelse
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable
-from pytensor.ifelse import ifelse
 from pytensor.link.mlx import MLXLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor.type import vector
 
 
 mx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_typify
+from pytensor.link.mlx.dispatch.basic import (
+    convert_dtype_to_mlx,
+    mlx_funcify,
+    mlx_typify,
+)
 
 
 optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
@@ -93,6 +97,12 @@ def compare_mlx_and_py(
         assert_fn(mlx_res, py_res)
 
     return pytensor_mlx_fn, mlx_res
+
+
+def funcify_from_graph(fn, *dtypes):
+    """Dispatch the node ``fn`` builds over vectors of ``dtypes``, off the graph."""
+    node = fn(*(vector(dtype=dtype) for dtype in dtypes)).owner
+    return mlx_funcify(node.op, node=node)
 
 
 def test_scalar_from_tensor_matrix_indexing():

@@ -4,6 +4,7 @@ from pytensor import tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
+    ORTHOGONAL,
     SYMMETRIC,
     UPPER_TRIANGULAR,
     check_assumption,
@@ -12,12 +13,20 @@ from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import alloc_diag, atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh, eigh
+from pytensor.tensor.linalg.decomposition.eigen import (
+    Eig,
+    Eigh,
+    Eigvalsh,
+    eigh,
+    eigvalsh,
+)
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
+from pytensor.tensor.linalg.products import KroneckerProduct, kron
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -161,48 +170,252 @@ def svd_uv_merge(fgraph, node):
                     return [atleast_Nd(s, n=own_s.type.ndim)]
 
 
+def _svd_of_orthogonal(X, op):
+    """svd(Q) -> (Q, ones, I) for orthogonal Q (unitary, for complex Q)."""
+    new_s = pt.ones(X.shape[:-1])
+    if not op.compute_uv:
+        return [new_s]
+
+    new_Vh = pt.broadcast_to(pt.eye(X.shape[-1]), X.shape)
+    return [X, new_s, new_Vh]
+
+
+def _svd_of_diag(X, op):
+    """Closed-form svd of an m x n diagonal matrix D with diagonal d.
+
+    The singular values are abs(d) sorted descending. Column j of U is the standard
+    basis vector e_{idx[j]}, where idx is that sort order, and row j of Vh is the same
+    vector scaled by the phase d / abs(d) of the matching diagonal entry (1 where it is
+    zero). With full_matrices, the remaining columns of U and rows of Vh are the unused
+    basis vectors, in order.
+    """
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+    abs_diag = pt.abs(diag_vals)
+
+    if not op.compute_uv:
+        return [pt.sort(abs_diag, axis=-1)[..., ::-1]]
+
+    m, n = X.shape[-2], X.shape[-1]
+
+    idx = pt.argsort(abs_diag, axis=-1)[..., ::-1]
+    sorted_diag = pt.take_along_axis(diag_vals, idx, axis=-1)
+    new_s = pt.take_along_axis(abs_diag, idx, axis=-1)
+    phases = pt.where(pt.eq(sorted_diag, 0), 1, pt.sign(sorted_diag))
+
+    if op.full_matrices:
+        u_order = _complete_permutation(idx, size=m)
+        vh_order = _complete_permutation(idx, size=n)
+        padding = pt.ones(
+            (*phases.shape[:-1], n - phases.shape[-1]), dtype=phases.dtype
+        )
+        phases = pt.concatenate([phases, padding], axis=-1)
+    else:
+        u_order = vh_order = idx
+
+    new_U = pt.eye(m)[u_order].mT
+    new_Vh = pt.eye(n)[vh_order] * pt.expand_dims(phases, -1)
+    return [new_U, new_s, new_Vh]
+
+
+def _svd_of_symmetric(X, op):
+    """svd(X) from eigh(X) for real symmetric X.
+
+    For X = V @ diag(w) @ V.T, the singular values are abs(w) and the singular vectors
+    are U = V, Vh = (V * sign(w)).T, all sorted by descending abs(w).
+    """
+    if not op.compute_uv:
+        return [pt.sort(pt.abs(eigvalsh(X)), axis=-1)[..., ::-1]]
+
+    w, V = eigh(X)
+    abs_w = pt.abs(w)
+    idx = pt.argsort(abs_w, axis=-1)[..., ::-1]
+    column_idx = pt.expand_dims(idx, -2)
+    signs = pt.where(w < 0, -1, 1).astype(w.dtype)
+
+    new_s = pt.take_along_axis(abs_w, idx, axis=-1)
+    new_U = pt.take_along_axis(V, column_idx, axis=-1)
+    new_Vh = pt.take_along_axis(V * pt.expand_dims(signs, -2), column_idx, axis=-1).mT
+    return [new_U, new_s, new_Vh]
+
+
+def _svd_of_orthogonal_product(product, Q, other, op, *, q_on_left):
+    """svd(Q @ X) -> (Q @ U, s, Vh) and svd(X @ Q) -> (U, s, Vh @ Q), Q orthogonal.
+
+    Q is unitary for complex Q. Each application peels one orthogonal factor, so
+    Q1 @ X @ Q2 is handled in two.
+    """
+
+    def broadcast_batch(var, core_ndim):
+        if var.type.broadcastable[:-core_ndim] == product.type.broadcastable[:-2]:
+            return var
+        return pt.broadcast_to(var, (*product.shape[:-2], *var.shape[-core_ndim:]))
+
+    if not op.compute_uv:
+        return [broadcast_batch(svd(other, compute_uv=False), core_ndim=1)]
+
+    U, s, Vh = svd(other, full_matrices=op.full_matrices)
+    if q_on_left:
+        U, Vh = Q @ U, broadcast_batch(Vh, core_ndim=2)
+    else:
+        U, Vh = broadcast_batch(U, core_ndim=2), Vh @ Q
+    return [U, broadcast_batch(s, core_ndim=1), Vh]
+
+
+def _complete_permutation(first, size):
+    """Order ``arange(size)`` as ``first``, then the unused positions ascending."""
+    p = first.shape[-1]
+    positions = pt.arange(size)
+    is_at = pt.eq(positions[:, None], pt.expand_dims(first, -2))
+    key = pt.where(pt.any(is_at, axis=-1), pt.argmax(is_at, axis=-1), p + positions)
+    return pt.argsort(key, axis=-1)
+
+
+def _svd_of_kron_or_block_diag(core, factors, op, *, transposed, is_kron):
+    """svd(kron(A, B)) and svd(block_diag(A_1, ..., A_p)) from the svd of each factor.
+
+    Both matrices are U_big @ S @ Vh_big, where U_big and Vh_big are the kron (or
+    block_diag) of the factors' U and Vh. S holds the factors' singular values, combined
+    (pairwise products for kron, concatenated for block_diag), at most one per row and
+    column. Rectangular factors make S rectangular and add zero singular values.
+    """
+    factor_shapes = [factor.type.shape[-2:] for factor in factors]
+    shapes_known = all(dim is not None for shape in factor_shapes for dim in shape)
+    all_square = shapes_known and all(m == n for m, n in factor_shapes)
+    same_orientation = shapes_known and (
+        all(m >= n for m, n in factor_shapes) or all(m <= n for m, n in factor_shapes)
+    )
+
+    # A reduced svd from reduced factor svds is only diagonal when the factors share an
+    # orientation. Otherwise the zero singular values need full factor bases.
+    if op.compute_uv and not (op.full_matrices or same_orientation):
+        return None
+
+    # Positions (rows, cols) of the singular values in S, needed only when S is not the
+    # square diagonal matrix diag(s_vals)
+    needs_positions = op.compute_uv and op.full_matrices and not all_square
+    if is_kron:
+        a, b = factors
+        if op.compute_uv:
+            U_a, s_a, Vh_a = svd(a, full_matrices=op.full_matrices)
+            U_b, s_b, Vh_b = svd(b, full_matrices=op.full_matrices)
+            U_big, Vh_big = kron(U_a, U_b), kron(Vh_a, Vh_b)
+        else:
+            s_a, s_b = svd(a, compute_uv=False), svd(b, compute_uv=False)
+        s_vals = pt.outer(s_a, s_b).ravel()
+        if needs_positions:
+            a_idx = pt.arange(s_a.shape[-1])[:, None]
+            b_idx = pt.arange(s_b.shape[-1])[None, :]
+            rows = (a_idx * b.shape[-2] + b_idx).ravel()
+            cols = (a_idx * b.shape[-1] + b_idx).ravel()
+    else:
+        if op.compute_uv:
+            block_svds = [
+                svd(block, full_matrices=op.full_matrices) for block in factors
+            ]
+            U_big = block_diag(*[U for U, _, _ in block_svds])
+            Vh_big = block_diag(*[Vh for _, _, Vh in block_svds])
+            s_blocks = [s for _, s, _ in block_svds]
+        else:
+            s_blocks = [svd(block, compute_uv=False) for block in factors]
+        batch_shape = tuple(core.shape[:-2])
+        if batch_shape:
+            s_blocks = [
+                pt.broadcast_to(s, (*batch_shape, s.shape[-1])) for s in s_blocks
+            ]
+        s_vals = pt.concatenate(s_blocks, axis=-1)
+        if needs_positions:
+            row_offset = col_offset = 0
+            block_rows, block_cols = [], []
+            for block, s in zip(factors, s_blocks, strict=True):
+                positions = pt.arange(s.shape[-1])
+                block_rows.append(row_offset + positions)
+                block_cols.append(col_offset + positions)
+                row_offset = row_offset + block.shape[-2]
+                col_offset = col_offset + block.shape[-1]
+            rows = pt.concatenate(block_rows)
+            cols = pt.concatenate(block_cols)
+
+    M, N = core.shape[-2], core.shape[-1]
+
+    def pad_with_zeros(values):
+        n_zeros = pt.minimum(M, N) - values.shape[-1]
+        zeros = pt.zeros((*values.shape[:-1], n_zeros), dtype=values.dtype)
+        return pt.concatenate([values, zeros], axis=-1)
+
+    if not op.compute_uv:
+        if not all_square:
+            s_vals = pad_with_zeros(s_vals)
+        return [pt.sort(s_vals, axis=-1)[..., ::-1]]
+
+    order = pt.argsort(s_vals, axis=-1)[..., ::-1]
+    new_s = pt.take_along_axis(s_vals, order, axis=-1)
+    if needs_positions:
+        new_s = pad_with_zeros(new_s)
+        row_perm = _complete_permutation(rows[order], size=M)
+        col_perm = _complete_permutation(cols[order], size=N)
+    else:
+        row_perm = col_perm = order
+
+    new_U = pt.take_along_axis(U_big, pt.expand_dims(row_perm, -2), axis=-1)
+    new_Vh = pt.take_along_axis(Vh_big, pt.expand_dims(col_perm, -1), axis=-2)
+    if transposed:
+        new_U, new_Vh = new_Vh.mT, new_U.mT
+
+    return [new_U, new_s, new_Vh]
+
+
 @register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(SVD)])
-def svd_of_diag(fgraph, node):
-    """
-    svd(D) has three return values:
-        - S = diag(sort(abs(d)))
-        - U = I
-        - V = diag(sign(sort(d)))
+def svd_of_structured(fgraph, node):
+    """Rewrite svd(X) of structured X as a closed form or as cheaper decompositions.
 
-    Where d is the diagonal of D and sort is in descending order. U and V are also permuted to match the sorted order
-    of the diagonal of D.
+    X may be orthogonal, diagonal, real symmetric, a product with an orthogonal factor,
+    a kron or a block_diag.
     """
     [X] = node.inputs
+    op = node.op.core_op
+    core, transposed = strip_left_expand_dims_and_transpose(X)
 
-    if not check_assumption(fgraph, X, DIAGONAL):
+    # Assumption arms are ordered cheapest first: an orthogonal diagonal matrix needs no
+    # sort, and a diagonal symmetric matrix needs no eigh
+    match core.owner_op_and_inputs:
+        case _ if check_assumption(fgraph, X, ORTHOGONAL):
+            new_outputs = _svd_of_orthogonal(X, op)
+        case _ if check_assumption(fgraph, X, DIAGONAL):
+            new_outputs = _svd_of_diag(X, op)
+        case _ if not X.type.dtype.startswith("complex") and check_assumption(
+            fgraph, X, SYMMETRIC
+        ):
+            new_outputs = _svd_of_symmetric(X, op)
+        case (Blockwise(Dot()) | Dot(), Q, rest) if core is X and check_assumption(
+            fgraph, Q, ORTHOGONAL
+        ):
+            new_outputs = _svd_of_orthogonal_product(X, Q, rest, op, q_on_left=True)
+        case (Blockwise(Dot()) | Dot(), rest, Q) if core is X and check_assumption(
+            fgraph, Q, ORTHOGONAL
+        ):
+            new_outputs = _svd_of_orthogonal_product(X, Q, rest, op, q_on_left=False)
+        case (KroneckerProduct(), a, b) if a.type.ndim == 2 and b.type.ndim == 2:
+            new_outputs = _svd_of_kron_or_block_diag(
+                core, [a, b], op, transposed=transposed, is_kron=True
+            )
+        case (Blockwise(BlockDiagonal()), *blocks):
+            new_outputs = _svd_of_kron_or_block_diag(
+                core, blocks, op, transposed=transposed, is_kron=False
+            )
+        case _:
+            return None
+
+    if new_outputs is None:
         return None
 
-    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
-
-    # Singular values are abs of diagonal, sorted descending
-    abs_diag = pt.abs(diag_vals)
-    idx = pt.argsort(-abs_diag)
-    new_s = abs_diag[idx]
-
-    if not node.op.core_op.compute_uv:
-        [s] = node.outputs
-        copy_stack_trace(s, new_s)
-        return [new_s]
-
-    n = X.shape[-1]
-    new_U = pt.eye(n)[:, idx]
-    # Vh = diag(sign(d_sorted)) @ P, where P = I[idx, :]
-    sorted_signs = pt.sign(diag_vals[idx])
-    new_Vh = alloc_diag(sorted_signs, axis1=-1, axis2=-2)[:, idx]
-    u, s, vh = node.outputs
-
-    copy_stack_trace(u, new_U)
-    copy_stack_trace(s, new_s)
-    copy_stack_trace(vh, new_Vh)
-
-    return [new_U, new_s, new_Vh]
+    new_outputs = [
+        atleast_Nd(new, n=old.type.ndim).astype(old.type.dtype)
+        for new, old in zip(new_outputs, node.outputs, strict=True)
+    ]
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
 
 
 @register_canonicalize
@@ -246,9 +459,9 @@ def eigh_of_diag(fgraph, node):
         if not check_assumption(fgraph, X, DIAGONAL):
             return None
         diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
-        sort_idx = pt.argsort(diag_vals)
-        new_w = diag_vals[sort_idx]
-        new_v = pt.eye(X.shape[-1])[:, sort_idx]
+        sort_idx = pt.argsort(diag_vals, axis=-1)
+        new_w = pt.take_along_axis(diag_vals, sort_idx, axis=-1)
+        new_v = pt.eye(X.shape[-1])[sort_idx].mT
     elif len(node.inputs) == 2:
         A, B = node.inputs
         if not check_assumption(fgraph, A, DIAGONAL):
@@ -258,10 +471,11 @@ def eigh_of_diag(fgraph, node):
         diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
         diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
         eigvals = diag_a / diag_b
-        sort_idx = pt.argsort(eigvals)
-        new_w = eigvals[sort_idx]
+        sort_idx = pt.argsort(eigvals, axis=-1)
+        new_w = pt.take_along_axis(eigvals, sort_idx, axis=-1)
         # B-orthonormal eigenvectors: column j is e_{sort_idx[j]} / sqrt(b[sort_idx[j]]).
-        new_v = pt.eye(A.shape[-1])[:, sort_idx] / pt.sqrt(diag_b[sort_idx])
+        sorted_b = pt.take_along_axis(diag_b, sort_idx, axis=-1)
+        new_v = pt.eye(A.shape[-1])[sort_idx].mT / pt.expand_dims(pt.sqrt(sorted_b), -2)
     else:
         return None
 

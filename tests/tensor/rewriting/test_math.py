@@ -110,6 +110,7 @@ from pytensor.tensor.rewriting.math import (
     is_1pexp,
     local_add_canonizer,
     local_batched_matmul_to_core_matmul_with_reshape,
+    local_careduce_of_dimshuffle,
     local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
@@ -936,9 +937,9 @@ class TestAlgebraicCanonizer:
         # a = pt.pt_abs(x)
 
         if config.mode == "FAST_COMPILE":
-            mode = get_mode("FAST_RUN").excluding("local_elemwise_fusion")
+            mode = get_mode("FAST_RUN").excluding("local_elemwise_fusion", "scalarize")
         else:
-            mode = get_default_mode().excluding("local_elemwise_fusion")
+            mode = get_default_mode().excluding("local_elemwise_fusion", "scalarize")
 
         f = function([x], [(4 * x) / abs(2 * x)], mode=mode)
         f(0.1)
@@ -2937,7 +2938,7 @@ class TestReduceChain:
     def setup_method(self):
         self.mode = get_default_mode().including("canonicalize", "specialize")
 
-    def test_local_sum_prod_all_to_none(self):
+    def test_all_axes_reductions(self):
         a = tensor3()
         input = np.arange(3 * 4 * 5, dtype=config.floatX).reshape(3, 4, 5)
         # test sum
@@ -3658,7 +3659,7 @@ class TestLocalSumProd:
         """Test that stack trace is copied over correctly for `local_sum_prod_mul_by_scalar`."""
         m0 = (
             get_default_mode()
-            .excluding("inplace_elemwise_opt")
+            .excluding("inplace_elemwise_opt", "scalarize")
             .including("canonicalize", "specialize")
         )
 
@@ -3936,6 +3937,78 @@ class TestLocalReduce:
         result.assert_eval(np.zeros((1, 0)))
 
 
+class TestLocalCAReduceOfDimShuffle:
+    rewrite_kwargs = {
+        "include": None,
+        "custom_rewrite": local_careduce_of_dimshuffle,
+    }
+
+    @pytest.mark.parametrize(
+        "op, dtype",
+        [
+            (Sum, "int64"),
+            (Prod, "int64"),
+            (Max, "int64"),
+            (Min, "int64"),
+            (All, "bool"),
+            (Any, "bool"),
+        ],
+    )
+    def test_removes_dimshuffle(self, op, dtype):
+        x = pt.tensor3("x", dtype=dtype)
+        out = op(axis=None)(x.dimshuffle(2, "x", 0, 1))
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(op(axis=(0, 1, 2))(x), strict_dtype=True)
+        x_test = np.random.default_rng(1).integers(0, 3, size=(2, 3, 4)).astype(dtype)
+        result.assert_eval(x_test)
+
+    @pytest.mark.parametrize(
+        "shuffle, axis, new_axis",
+        [
+            ((2, 1, 0), (0, 1), (1, 2)),
+            ((0, "x", 2, 1), (1, 3), (1,)),
+            ((2, 0, "x", 1), (0, 2), (2,)),
+        ],
+    )
+    def test_removes_dimshuffle_when_kept_dims_in_order(self, shuffle, axis, new_axis):
+        x = pt.tensor3("x")
+        out = pt_sum(x.dimshuffle(*shuffle), axis=axis)
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(pt_sum(x, axis=new_axis))
+        x_test = np.random.default_rng(2).normal(size=(2, 3, 4))
+        result.assert_eval(x_test)
+
+    def test_generic_careduce(self):
+        x = pt.matrix("x", dtype="int8")
+        out = CAReduce(ps.add, axis=None, upcast_discrete_output=True)(
+            x.dimshuffle("x", 1, 0)
+        )
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        expected = CAReduce(ps.add, axis=(0, 1), upcast_discrete_output=True)(x)
+        result.assert_graph(expected, strict_dtype=True)
+        result.assert_eval(np.full((2, 3), 100, dtype="int8"))
+
+    @pytest.mark.parametrize(
+        "shuffle, axis",
+        [
+            ((1, 0, 2), 2),  # kept dims are transposed
+            ((2, 1, 0), 1),  # kept dims are transposed
+            ((0, "x", 1, 2), (0, 2)),  # kept new broadcastable dimension
+        ],
+    )
+    def test_kept_when_dimshuffle_changes_output(self, shuffle, axis):
+        x = pt.tensor3("x")
+        out = pt_sum(x.dimshuffle(*shuffle), axis=axis)
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(out)
+
+    def test_kept_when_dimshuffle_drops_dims(self):
+        x = pt.tensor("x", shape=(1, None, None))
+        out = pt_sum(x.dimshuffle(2, 1))
+        result = RewriteTester([x], [out], **self.rewrite_kwargs)
+        result.assert_graph(out)
+
+
 class TestReduceJoin:
     def setup_method(self):
         self.mode = get_default_mode().including(
@@ -4206,7 +4279,11 @@ def test_local_mul_exp_to_exp_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
     # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
-    mode = get_default_mode().excluding("fusion").including("local_mul_exp_to_exp_add")
+    mode = (
+        get_default_mode()
+        .excluding("fusion", "scalarize")
+        .including("local_mul_exp_to_exp_add")
+    )
 
     x = scalar("x")
     y = scalar("y")
@@ -4316,7 +4393,7 @@ def test_local_mul_pow_to_pow_add():
     # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
     mode = (
         get_default_mode()
-        .excluding("fusion")
+        .excluding("fusion", "scalarize")
         .including("local_mul_exp_to_exp_add")
         .including("local_mul_pow_to_pow_add")
     )
@@ -4584,7 +4661,7 @@ class TestSigmoidRewrites:
         f(data)
 
     def test_local_1msigmoid(self):
-        m = self.get_mode(excluding=["fusion", "inplace"])
+        m = self.get_mode(excluding=["fusion", "inplace", "scalarize"])
         x = fscalar()
         xd = dscalar()
 
@@ -4817,7 +4894,7 @@ class TestSoftplusRewrites:
     def test_log1p_neg_sigmoid_to_softpuls(self):
         x = scalar()
         out = log1p(-sigmoid(x))
-        f = pytensor.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m.excluding("scalarize"))
 
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
@@ -5294,15 +5371,13 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
         == 1
     )
 
-    # For now we do not rewrite only the case of unbatched outer
-    core_outer = (not batched) and (a_shape == (3, 1)) and (b_shape == (1, 3))
     rewritten_out = rewrite_graph(out)
     assert rewritten_out.type.shape == out.type.shape
-    assert sum(
+    assert not any(
         isinstance(var.owner.op, (Blockwise | Dot))
         for var in ancestors([rewritten_out])
         if var.owner
-    ) == (1 if core_outer else 0)
+    )
 
     a_test = np.random.normal(size=a.type.shape).astype(a.type.dtype)
     b_test = np.random.normal(size=b.type.shape).astype(b.type.dtype)

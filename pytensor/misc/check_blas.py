@@ -35,7 +35,6 @@ def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order=
         print("    blas__ldflags=", config.blas__ldflags)
         print("    compiledir=", config.compiledir)
         print("    floatX=", config.floatX)
-        print("    device=", config.device)
         print("Some OS information:")
         print("    sys.platform=", sys.platform)
         print("    sys.version=", sys.version)

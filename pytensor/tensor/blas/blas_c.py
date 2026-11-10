@@ -6,9 +6,8 @@ from pytensor.tensor.blas.c_code.blas_headers import (
     blas_header_text,
     blas_header_version,
 )
-from pytensor.tensor.blas.c_code.codegen import gemv_c_code, ger_c_code
+from pytensor.tensor.blas.c_code.codegen import gemv_c_code
 from pytensor.tensor.blas.gemv import Gemv
-from pytensor.tensor.blas.ger import Ger
 
 
 class BaseBLAS(COp):
@@ -26,29 +25,6 @@ class BaseBLAS(COp):
 
     def c_support_code(self, **kwargs):
         return blas_header_text()
-
-
-# ##### ####### #######
-# GER
-# ##### ####### #######
-
-
-class CGer(BaseBLAS, Ger):
-    """C implementation of GER (rank-1 update): Z = A + alpha * outer(x, y)."""
-
-    params_type = ParamsType(
-        destructive=bool_t,
-    )
-
-    def c_code(self, node, name, inp, out, sub):
-        return ger_c_code(node, name, inp, out, sub)
-
-    def c_code_cache_version(self):
-        return (11, blas_header_version())
-
-
-cger_inplace = CGer(True)
-cger_no_inplace = CGer(False)
 
 
 # ##### ####### #######

@@ -1,14 +1,13 @@
-from collections.abc import Callable
-
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.helpers import (
     _exp,
     _metal_constants,
+    _metal_unary_call,
     _working_precision,
 )
-from pytensor.scalar.math import Erfc, Erfcx
+from pytensor.scalar.math import Erf, Erfc, Erfcx
 
 
 # W. J. Cody, "Rational Chebyshev Approximation for the Error Function" (Math. Comp. 23,
@@ -168,54 +167,11 @@ _METAL_ERFCX_SOURCE = """
 _METAL_SOURCES = {"erfc": _METAL_ERFC_SOURCE, "erfcx": _METAL_ERFCX_SOURCE}
 
 
-_METAL_KERNELS: dict[str, Callable | None] = {}
-
-
-def _metal_erf_kernel(name):
-    """Build and cache the Metal kernel for ``name``, or None if it cannot be built."""
-    if name not in _METAL_KERNELS:
-        try:
-            _METAL_KERNELS[name] = mx.fast.metal_kernel(
-                name=f"pytensor_{name}",
-                input_names=["x"],
-                output_names=["out"],
-                header=_METAL_HEADER,
-                source=_METAL_SOURCES[name],
-            )
-        except Exception:
-            _METAL_KERNELS[name] = None
-    return _METAL_KERNELS[name]
-
-
 def _metal_erf_call(name, x):
-    """Evaluate ``name`` through its Metal kernel, or return None to fall back.
-
-    Metal has no float64 and the kernel needs the GPU stream, which between them leave
-    exactly the case the vectorized path handles least well and float64 needs least: the
-    default device at single precision.
-    """
-    if (
-        x.dtype != mx.float32
-        or not mx.metal.is_available()
-        or mx.default_device() != mx.gpu
-    ):
-        return None
-    kernel = _metal_erf_kernel(name)
-    if kernel is None:
-        return None
-    # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
-    # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
-    # it fails to compile. Reshaping covers every rank at once
-    flat = x.reshape(-1)
-    (out,) = kernel(
-        inputs=[flat],
-        template=[("T", flat.dtype)],
-        grid=(flat.size, 1, 1),
-        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
-        output_shapes=[flat.shape],
-        output_dtypes=[flat.dtype],
+    """Evaluate ``name`` through its Metal kernel, or return None to fall back."""
+    return _metal_unary_call(
+        x, name=name, header=_METAL_HEADER, source=_METAL_SOURCES[name]
     )
-    return out.reshape(x.shape)
 
 
 def _erf_series(x, const):
@@ -287,34 +243,68 @@ def _erfc_positive(y, const):
     return mx.where(y <= thresh, near, _erfc_tail(mx.maximum(y, thresh), const))
 
 
+def _erf(z, const):
+    """erf at the working precision of ``z``."""
+    thresh = const(_ERF_THRESH)
+    y = mx.abs(z)
+    # The series is odd, so clipping rather than taking |z| keeps the sign of a zero
+    small = _erf_series(mx.clip(z, -thresh, thresh), const)
+    # erfc is below 0.51 past the threshold, so 1 - erfc loses at most a bit there
+    large = const(1.0) - _erfc_tail(mx.maximum(y, thresh), const)
+    large = mx.where(z < const(0.0), -large, large)
+    return mx.where(y <= thresh, small, large)
+
+
+@mlx_funcify.register(Erf)
+def mlx_funcify_Erf(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
+    def erf(x):
+        z, const, out_dtype = _working_precision(x, dtype)
+        # mx.erf is a float32 kernel whatever it is handed, which single and half
+        # precision need no more than, and it takes one pass where the series takes both
+        # branches for every element
+        if z.dtype != mx.float64:
+            return mx.erf(z).astype(out_dtype)
+        return _erf(z, const)
+
+    return erf
+
+
+def _erfc(z, const):
+    """erfc at the working precision of ``z``."""
+    y = mx.abs(z)
+
+    # Both branches evaluate erfc(|x|); erfc(-y) = 2 - erfc(y) restores the sign
+    pos = _erfc_positive(y, const)
+    return mx.where(z >= const(0.0), pos, const(2.0) - pos)
+
+
 @mlx_funcify.register(Erfc)
-def mlx_funcify_Erfc(op, **kwargs):
+def mlx_funcify_Erfc(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def erfc(x):
-        x = mx.array(x)
-        fast = _metal_erf_call("erfc", x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_erf_call("erfc", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
 
-        z, const, out_dtype = _working_precision(x)
-        y = mx.abs(z)
-
-        # Both branches evaluate erfc(|x|); erfc(-y) = 2 - erfc(y) restores the sign
-        pos = _erfc_positive(y, const)
-        out = mx.where(z >= const(0.0), pos, const(2.0) - pos)
-        return out.astype(out_dtype)
+        return _erfc(z, const).astype(out_dtype)
 
     return erfc
 
 
 @mlx_funcify.register(Erfcx)
-def mlx_funcify_Erfcx(op, **kwargs):
+def mlx_funcify_Erfcx(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def erfcx(x):
-        x = mx.array(x)
-        fast = _metal_erf_call("erfcx", x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_erf_call("erfcx", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
 
-        z, const, out_dtype = _working_precision(x)
         y = mx.abs(z)
 
         pos = _erfcx_positive(y, const)

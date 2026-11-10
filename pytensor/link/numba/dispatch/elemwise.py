@@ -23,6 +23,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.link.numba.dispatch.linalg.products import _gemm
 from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
@@ -46,6 +47,7 @@ from pytensor.scalar.basic import (
     Maximum,
     Minimum,
     Mul,
+    ScalarType,
     Sub,
     TrueDiv,
 )
@@ -53,6 +55,7 @@ from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, Dot, MulWithoutZeros
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+from pytensor.tensor.rewriting.scalarize import ScalarCAReduce, ScalarizedElemwise
 
 
 @singledispatch
@@ -241,6 +244,7 @@ def create_multiaxis_reducer(
     ndim,
     acc_dtype=None,
     out_dtype,
+    scalar_out=False,
 ):
     r"""Construct a function that reduces multiple axes.
 
@@ -505,10 +509,11 @@ def create_multiaxis_reducer(
 
     if n_kept == 0:
         # Full reduction: Use scalar accumulation
-        if complex_to_real:
-            return_obj = f"np.array(res).real.astype({out_dtype_str})"
+        result = "res.real" if complex_to_real else "res"
+        if scalar_out:
+            return_obj = f"{out_dtype_str}({result})"
         else:
-            return_obj = f"np.array(res, dtype={out_dtype_str})"
+            return_obj = f"np.array({result}, dtype={out_dtype_str})"
 
         def _emit_flat_reduce(code):
             """Emit flat buffer iteration via _flat_view helper."""
@@ -897,14 +902,35 @@ def _reduce_identity(identity, acc_dtype):
     return acc_dtype.type(identity)
 
 
-def _build_reduce_impl_src(nout, post_specs):
-    """Build the ``@overload`` impl source for a fused op with reduction outputs.
+def _build_reduce_impl_src(nout, post_specs, scalar_positions, n_outer):
+    """Build the ``@overload`` impl source for a fused op.
 
     Calls ``_vectorized`` (which produces a keepdims, size-1-on-reduced-axes
     buffer in ``acc_dtype``) then, per reduction output, squeezes the reduced
     axes back out and casts to the true output dtype.  ``post_specs[i]`` is
-    ``None`` for a passthrough output, else ``(kept_axes, out_dtype, cast_needed)``.
+    ``None`` for a passthrough output, else
+    ``(kept_axes, out_dtype, cast_needed, scalar_out)``; ``scalar_out`` returns a
+    full reduction as a scalar register rather than a 0-d array.
+
+    ``scalar_positions`` lists the outer input positions that are ``ScalarType``
+    and so are handed to ``_vectorized`` as native scalar ``constant_inputs``
+    rather than as arrays to be iterated.
     """
+    if scalar_positions:
+        scalar_expr = create_tuple_string(
+            tuple(f"outer_inputs[{p}]" for p in scalar_positions)
+        )
+        array_expr = create_tuple_string(
+            tuple(
+                f"outer_inputs[{p}]"
+                for p in range(n_outer)
+                if p not in scalar_positions
+            )
+        )
+    else:
+        scalar_expr = "()"
+        array_expr = "outer_inputs"
+
     code: list[str | CODE_TOKEN] = [
         "def fused_elemwise_impl(*outer_inputs):",
         CODE_TOKEN.INDENT,
@@ -916,8 +942,8 @@ def _build_reduce_impl_src(nout, post_specs):
         "output_dtypes_enc,",
         "inplace_pattern_enc,",
         "True,",
-        "(),",
-        "outer_inputs,",
+        f"{scalar_expr},",
+        f"{array_expr},",
         "core_output_shapes,",
         "NO_SIZE,",
         "indexed_inputs_enc,",
@@ -940,16 +966,29 @@ def _build_reduce_impl_src(nout, post_specs):
         if spec is None:
             code.append(f"{sym} = {src}")
             continue
-        kept_axes, out_dtype, cast_needed = spec
+        kept_axes, out_dtype, cast_needed, scalar_out = spec
         np_dtype = "bool_" if out_dtype == "bool" else out_dtype
         if not kept_axes:
-            # Full reduction → 0-d array of the single accumulated value.
-            code.append(f"{sym} = np.array({src}.ravel()[0], dtype=np.{np_dtype})")
+            expr = f"as_strided({src}, shape=(), strides=())"
+            if scalar_out:
+                expr = f"{expr}[()]"
+                if cast_needed:
+                    expr = f"np.{np_dtype}({expr})"
+            elif cast_needed:
+                expr = f"np.array({expr}[()], dtype=np.{np_dtype})"
+            code.append(f"{sym} = {expr}")
         else:
+            # Partial reduction: squeeze the size-1 reduced axes back out with the
+            # same as_strided trick DimShuffle uses -- pure stride arithmetic,
+            # whereas reshape emits a runtime numba_attempt_nocopy_reshape call and
+            # only works on contiguous input.
             shape_expr = create_tuple_string(
                 tuple(f"{src}.shape[{k}]" for k in kept_axes)
             )
-            expr = f"{src}.reshape({shape_expr})"
+            strides_expr = create_tuple_string(
+                tuple(f"{src}.strides[{k}]" for k in kept_axes)
+            )
+            expr = f"as_strided({src}, shape={shape_expr}, strides={strides_expr})"
             if cast_needed:
                 expr = f"{expr}.astype(np.{np_dtype})"
             code.append(f"{sym} = {expr}")
@@ -982,7 +1021,7 @@ def _single_cell_reduction_outputs(
         if spec is not None
         and i not in write_outputs
         and i not in elemwise_node.op.inplace_pattern
-        and all(out.type.broadcastable)
+        and (isinstance(out.type, ScalarType) or all(out.type.broadcastable))
         and type(spec[0]) in supported_reducers
         and np.dtype(spec[3]).kind
         in ("iuf" if type(spec[0]) in (Add, Mul, Maximum, Minimum) else "iub")
@@ -990,14 +1029,17 @@ def _single_cell_reduction_outputs(
 
 
 @register_funcify_and_cache_key(FusedElemwise)
+@register_funcify_and_cache_key(ScalarizedElemwise)
 def numba_funcify_FusedElemwise(op, node, **kwargs):
-    """Generate fused Elemwise Numba code with indexed reads and updates.
+    """Lower prepared Elemwise graphs with scalar inputs, indexing or reductions.
 
-    Reads indexed_inputs/indexed_outputs specs stored on the Op by the
-    rewriting pass, and generates a single vectorized loop with indirect
-    indexing.
+    Native scalar arguments go through ``_vectorized``'s ``constant_inputs``,
+    allowing their producers to avoid allocating 0-d arrays. LLVM can already
+    hoist invariant array loads, so the loop's memory accesses may be unchanged.
 
-    fgraph inputs are ordered as::
+    ``ScalarizedElemwise`` has no indexing or reduction specs. ``FusedElemwise``
+    stores these specs on the Op, with fgraph inputs ordered as::
+
 
         [elemwise_inputs..., idx_0, idx_1, ..., update_target_0, ...]
     """
@@ -1008,12 +1050,16 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         elemwise_node.op.scalar_op, node=scalar_node, **kwargs
     )
 
-    indexed_inputs = op.indexed_inputs
-    indexed_outputs = op.indexed_outputs
+    if isinstance(op, ScalarizedElemwise):
+        indexed_inputs = indexed_outputs = reduced_outputs = ()
+    else:
+        indexed_inputs = op.indexed_inputs
+        indexed_outputs = op.indexed_outputs
+        reduced_outputs = op.reduced_outputs
     n_indices = len(indexed_inputs)
     nin_elemwise = len(elemwise_node.inputs)
     nout = len(elemwise_node.outputs)
-    reduced_outputs = op.reduced_outputs or ((None,) * nout)
+    reduced_outputs = reduced_outputs or ((None,) * nout)
 
     scalar_reduction_outputs = (
         ()
@@ -1035,10 +1081,32 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         "An output cannot be both an indexed write and a reduction"
     )
 
+    # Broadcast patterns, indexed reads and inplace destinations refer only to
+    # array inputs; remap their positions after separating native scalar inputs.
+    scalar_positions = tuple(
+        i
+        for i, inp in enumerate(node.inputs[:nin_elemwise])
+        if isinstance(inp.type, ScalarType)
+    )
+    array_positions = [i for i in range(nin_elemwise) if i not in scalar_positions]
+    array_pos_map = {old: new for new, old in enumerate(array_positions)}
+
     core_op_fn = scalar_op_fn
+    if scalar_positions:
+        inputs = [f"i{i}" for i in range(nin_elemwise)]
+        ordered = [inputs[i] for i in scalar_positions] + [
+            inputs[i] for i in array_pos_map
+        ]
+        src = f"def scalar_core({', '.join(ordered)}):\n    return core_op_fn({', '.join(inputs)})\n"
+        core_fn = compile_numba_function_src(
+            src, "scalar_core", {"core_op_fn": core_op_fn}
+        )
+        core_op_fn = numba_basic.numba_njit(core_fn)
     core_handles_out = getattr(core_op_fn, "handles_out", False)
 
-    input_bc_patterns = tuple(inp.type.broadcastable for inp in elemwise_node.inputs)
+    input_bc_patterns = tuple(
+        elemwise_node.inputs[p].type.broadcastable for p in array_pos_map
+    )
 
     # Reduction outputs keep their reduced axes as bc=True (size-1, keepdims) and
     # are accumulated in acc_dtype; post_specs squeezes + casts them back to the
@@ -1061,15 +1129,30 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
             bc[ax] = True
         output_bc_patterns_list.append(tuple(bc))
         output_dtypes_list.append(str(np.dtype(acc_dtype)))
-        reduce_identities.append((i, _reduce_identity(identity, acc_dtype)))
         kept_axes = tuple(d for d in range(len(bc)) if d not in axes)
         out_dtype = node.outputs[i].type.dtype
         cast_needed = np.dtype(acc_dtype) != np.dtype(out_dtype)
-        post_specs.append((kept_axes, out_dtype, cast_needed))
+        scalar_output = isinstance(node.outputs[i].type, ScalarType)
+        reduce_identities.append(
+            (i, _reduce_identity(identity, acc_dtype), scalar_output)
+        )
+        post_specs.append((kept_axes, out_dtype, cast_needed, scalar_output))
 
     output_bc_patterns = tuple(output_bc_patterns_list)
     output_dtypes = tuple(output_dtypes_list)
     inplace_pattern = tuple(elemwise_node.op.inplace_pattern.items())
+    if scalar_positions:
+        # Scalars are passed separately to _vectorized. For inputs (scalar, x),
+        # its array inputs are (x,), so inplace on input 1 becomes inplace on input 0.
+        inplace_pattern = tuple(
+            (out_idx, array_pos_map[inp_idx]) for out_idx, inp_idx in inplace_pattern
+        )
+        indexed_inputs = tuple(
+            None
+            if entry is None
+            else (tuple(array_pos_map[src] for src in entry[0]), *entry[1:])
+            for entry in indexed_inputs
+        )
     core_output_shapes = tuple(() for _ in range(nout))
 
     idx_broadcastable = tuple(
@@ -1089,8 +1172,9 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 identity,
                 type(reduced_outputs[i][0]).__name__,
                 i in scalar_reduction_outputs,
+                scalar_output,
             )
-            for i, identity in reduce_identities
+            for i, identity, scalar_output in reduce_identities
         )
     )
 
@@ -1104,7 +1188,8 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         res = op.fn(*outer_inputs)
         return res[0] if len(res) == 1 else tuple(res)
 
-    if not has_reductions:
+    # Scalar inputs need generated constant-index accesses into outer_inputs.
+    if not has_reductions and not scalar_positions:
 
         @overload(fused_elemwise_fn, jit_options=_jit_options())
         def ov_fused_elemwise_fn(*outer_inputs):
@@ -1128,7 +1213,9 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
 
             return impl
     else:
-        impl_src = _build_reduce_impl_src(nout, post_specs)
+        impl_src = _build_reduce_impl_src(
+            nout, post_specs, scalar_positions, len(node.inputs)
+        )
         impl_fn = compile_numba_function_src(
             impl_src,
             "fused_elemwise_impl",
@@ -1151,10 +1238,13 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 10
+    cache_version = 12
     if scalar_cache_key is None:
         key = None
     else:
+        # Include each output's scalar-vs-array kind: a ScalarType reduced output
+        # generates a different (scalar-returning, stack-buffer) reduction epilogue.
+        out_kinds = tuple(isinstance(o.type, ScalarType) for o in node.outputs)
         reduced_key = tuple(
             (type(r[0]).__name__, r[1], str(np.dtype(r[3]))) if r is not None else None
             for r in reduced_outputs
@@ -1165,11 +1255,13 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 "FusedElemwise",
                 cache_version,
                 inplace_pattern,
+                scalar_positions,
                 input_bc_patterns,
                 indexed_inputs,
                 idx_broadcastable,
                 indexed_outputs,
                 reduced_key,
+                out_kinds,
                 scalar_cache_key,
             )
         )
@@ -1179,7 +1271,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
 
 
 @register_funcify_and_cache_key(CAReduce)
-def numba_funcify_CAReduce(op, node, **kwargs):
+def numba_funcify_CAReduce(op, node, scalar_out=False, **kwargs):
     axes = op.axis
     if axes is None:
         axes = list(range(node.inputs[0].ndim))
@@ -1199,10 +1291,11 @@ def numba_funcify_CAReduce(op, node, **kwargs):
         ndim=ndim,
         acc_dtype=acc_dtype,
         out_dtype=out_dtype,
+        scalar_out=scalar_out,
     )
     careduce_fn = numba_basic.numba_njit(careduce_py_fn, boundscheck=False)
 
-    cache_version = 7
+    cache_version = 8
     careduce_key = sha256(
         str(
             (
@@ -1213,11 +1306,21 @@ def numba_funcify_CAReduce(op, node, **kwargs):
                 acc_dtype,
                 op.scalar_op.identity,
                 MAX_CAREDUCE_LOOPS,
+                # Selects a register value vs a 0-d array in the generated source.
+                scalar_out,
                 cache_version,
             )
         ).encode()
     ).hexdigest()
     return careduce_fn, careduce_key
+
+
+@register_funcify_and_cache_key(ScalarCAReduce)
+def numba_funcify_ScalarCAReduce(op, node, **kwargs):
+    [careduce_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, CAReduce)]
+    return numba_funcify_CAReduce(
+        careduce_node.op, careduce_node, scalar_out=True, **kwargs
+    )
 
 
 def _dimshuffle_out_layout(
@@ -1416,7 +1519,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
 @register_funcify_default_op_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
-    # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
+    # Numba's BLAS kernels require floating-point or complex operands.
     x, y = node.inputs
     [out] = node.outputs
 
@@ -1425,7 +1528,6 @@ def numba_funcify_Dot(op, node, **kwargs):
 
     numba_dot_dtype = out_dtype = out.type.numpy_dtype
     if out_dtype.kind not in "fc":
-        # Numba alawys returns non-integral outputs, we need to cast to float
         numba_dot_dtype = np.dtype(
             f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
         )
@@ -1438,53 +1540,30 @@ def numba_funcify_Dot(op, node, **kwargs):
             f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
         )
 
-    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
+    cast_x = x_dtype != numba_dot_dtype
+    cast_y = y_dtype != numba_dot_dtype
 
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y))
-            np.dot(x, y, out)
-            return out
+    @numba_basic.numba_njit
+    def dot(x, y, out=None):
+        if out is None:
+            out = np.empty((x.shape[0], y.shape[1]), dtype=numba_dot_dtype)
+        if cast_x:
+            x = x.astype(numba_dot_dtype)
+        if cast_y:
+            y = y.astype(numba_dot_dtype)
+        return _gemm(x, y, out)
 
-    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
-            np.dot(x, y.astype(numba_dot_dtype), out)
-            return out
-
-    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
-            np.dot(x.astype(numba_dot_dtype), y, out)
-            return out
-
-    else:
-
-        @numba_basic.numba_njit
-        def dot(x, y, out=None):
-            if out is None:
-                return np.asarray(
-                    np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
-                )
-            np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype), out)
-            return out
-
-    cache_version = 2
+    # Bump whenever `_gemm` changes, because its source is not part of this key.
+    cache_version = 5
 
     if out_dtype == numba_dot_dtype:
-        # np.dot can write straight into the pre-allocated batch output slice.
+        # The product writes straight into the pre-allocated batch output slice.
         dot.handles_out = True
         return dot, cache_version
 
     else:
-        # Output needs a dtype cast that np.dot cannot do in place.
+        # Output needs a dtype cast the product can't do in place, so fall back to
+        # the copying store_core_outputs wrapper.
         @numba_basic.numba_njit
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)
@@ -1496,17 +1575,19 @@ def numba_funcify_Dot(op, node, **kwargs):
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
 
+    # Numba does not support 3D matmul (numba#3804), so loop over the batch.
     @numba_basic.numba_njit
     def batched_dot(x, y, out=None):
-        # Numba does not support 3D matmul
-        # https://github.com/numba/numba/issues/3804
         if out is None:
             shape = x.shape[:-1] + y.shape[2:]
             out = np.empty(shape, dtype=dtype)
         for i in range(out.shape[0]):
-            out[i] = np.dot(x[i], y[i])
+            # Writes into out[i] directly and reads an F-ordered slice without a copy
+            _gemm(x[i], y[i], out[i])
 
         return out
 
     batched_dot.handles_out = True
-    return batched_dot, 1
+    # Bump whenever `_gemm` changes, because its source is not part of this key.
+    cache_version = 4
+    return batched_dot, cache_version

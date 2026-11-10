@@ -145,7 +145,7 @@ def mlx_funcify_PivotToPermutations(op, **kwargs):
 
     def pivot_to_permutations(pivots):
         with mx.stream(mx.cpu):
-            pivots = mx.array(pivots)
+            pivots = mx.asarray(pivots)
             n = pivots.shape[0]
             p_inv = mx.arange(n, dtype=mx.int32)
             for i in range(n):

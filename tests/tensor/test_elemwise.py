@@ -703,7 +703,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 [self.op(ps.add, axis=tosum, *d)(x)],
                 [xv],
                 self.op,
-                ["local_cut_useless_reduce"],
+                ["local_cut_useless_reduce", "local_reduce_broadcastable"],
                 warn=0 not in xsh,
             )
 
@@ -712,6 +712,36 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         assert str(op) == "CAReduce{add, axes=None}"
         op = CAReduce(ps.add, axis=(1,))
         assert str(op) == "CAReduce{add, axis=1}"
+
+    def test_clone(self):
+        op = CAReduce(
+            ps.add,
+            axis=(1,),
+            dtype="int64",
+            acc_dtype="float64",
+            upcast_discrete_output=True,
+        )
+        assert op.clone() == op
+        cloned_op = op.clone(
+            axis=None, dtype=None, acc_dtype=None, upcast_discrete_output=False
+        )
+        assert cloned_op != op
+        assert cloned_op == CAReduce(ps.add)
+
+    def test_axis_normalization(self):
+        x = pt.tensor3("x")
+        expected = self.op(ps.add, axis=(0, 2))(x).owner.op
+        assert self.op(ps.add, axis=(2, 0))(x).owner.op == expected
+        assert self.op(ps.add, axis=(-1, 0))(x).owner.op == expected
+
+        expected = self.op(ps.add, axis=None)(x).owner.op
+        assert expected.axis is None
+        assert self.op(ps.add, axis=(0, 1, 2))(x).owner.op == expected
+
+        x = scalar("x")
+        expected = self.op(ps.add, axis=None)(x).owner.op
+        assert expected.axis is None
+        assert self.op(ps.add, axis=())(x).owner.op == expected
 
     def test_repeated_axis(self):
         x = vector("x")
@@ -1210,3 +1240,35 @@ def test_perform_raises_with_too_many_operands():
 
     with pytest.raises(NotImplementedError, match="more than 32 operands"):
         op.perform(node, [np.ones(3) for _ in range(40)], [[None]])
+
+
+@pytest.mark.parametrize("shape", [(), (5,), (3, 4)])
+@pytest.mark.parametrize(
+    "in_dtype, out_dtype",
+    [
+        ("float64", "int64"),
+        ("float64", "float32"),
+        ("float64", "bool"),
+        ("int64", "float64"),
+        ("int64", "uint8"),
+        ("int8", "bool"),
+        ("bool", "int16"),
+        ("complex128", "complex64"),
+    ],
+)
+def test_elemwise_cast_python_mode(in_dtype, out_dtype, shape):
+    x = pt.tensor("x", dtype=in_dtype, shape=shape)
+    out = x.astype(out_dtype)
+    assert isinstance(out.owner.op, Elemwise)
+    assert isinstance(out.owner.op.scalar_op, ps.Cast)
+
+    rng = np.random.default_rng(0)
+    x_val = np.asarray(rng.integers(0, 100, size=shape) / 3).astype(in_dtype)
+    fn = pytensor.function([x], out, mode=Mode(linker="py", optimizer=None))
+
+    res = fn(x_val)
+    assert res.dtype == np.dtype(out_dtype)
+    assert res.shape == x_val.shape
+    assert not np.shares_memory(res, x_val)
+    expected = np.vectorize(out.owner.op.scalar_op.impl, otypes=[out_dtype])(x_val)
+    np.testing.assert_array_equal(res, expected)

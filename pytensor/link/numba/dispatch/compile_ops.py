@@ -7,7 +7,7 @@ import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.ifelse import IfElse
+from pytensor.conditional.op import IfElse, LazyIfElse
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -95,6 +95,28 @@ def numba_funcify_type_casting(op, **kwargs):
         return x
 
     return identity
+
+
+@register_funcify_and_cache_key(LazyIfElse)
+def numba_funcify_LazyIfElse(op, **kwargs):
+    true_fn, true_key = numba_basic.numba_funcify_ensure_cache(op.true_branch, **kwargs)
+    false_fn, false_key = numba_basic.numba_funcify_ensure_cache(
+        op.false_branch, **kwargs
+    )
+
+    @numba_basic.numba_njit
+    def lazy_ifelse(condition, *args):
+        if condition:
+            return true_fn(*args)
+        else:
+            return false_fn(*args)
+
+    cache_key = (
+        sha256(str(("LazyIfElse", 1, true_key, false_key)).encode()).hexdigest()
+        if true_key is not None and false_key is not None
+        else None
+    )
+    return lazy_ifelse, cache_key
 
 
 @register_funcify_default_op_cache_key(DeepCopyOp)

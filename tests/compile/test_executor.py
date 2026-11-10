@@ -12,7 +12,9 @@ from pytensor.compile.maker import UnusedInputError, function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.fg import FrozenFunctionGraph
+from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.basic import Container
 from pytensor.printing import debugprint
@@ -650,6 +652,35 @@ class TestFunction:
         for key, val in func.vm.storage_map.items():
             if not isinstance(key, Constant):
                 assert val[0] is None
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            Mode("vm", optimizer=None),
+            DebugMode(
+                optimizer=None,
+                check_c_code=False,
+                check_preallocated_output=["c_contiguous"],
+            ),
+        ],
+    )
+    def test_graph_only_op(self, mode):
+        x = vector("x")
+
+        class GraphOnlyOp(Op, HasInnerGraph):
+            fgraph = FrozenFunctionGraph.from_io([x], [x * 2])
+
+            def make_node(self, value):
+                return Apply(self, [value], [value.type()])
+
+            def perform(self, node, inputs, outputs):
+                outputs[0][0] = inputs[0] * 2
+
+        # Inspection does not require a compiled fn or an Op clone method.
+        fn = function([x], GraphOnlyOp()(x), mode=mode)
+        np.testing.assert_array_equal(fn([1, 2]), [2, 4])
+        fn.vm.allow_gc = False
+        fn.free()
 
     def test_check_for_aliased_inputs(self):
         b = np.random.random((5, 4))

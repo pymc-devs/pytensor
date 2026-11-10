@@ -2,7 +2,11 @@ import mlx.core as mx
 import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.scalar.helpers import _working_precision
+from pytensor.link.mlx.dispatch.scalar.helpers import (
+    _metal_constants,
+    _metal_unary_call,
+    _working_precision,
+)
 from pytensor.scalar.math import (
     GammaLn,
     Log1mexp,
@@ -42,6 +46,83 @@ _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
 _PSI_SHIFTS_SINGLE = 6
 
 
+# Both functions are a chain of elementwise ops on the vectorized path, long enough that
+# mx.compile splits it into several kernel launches. A kernel is one launch, and it can
+# branch: small positive arguments shift up rather than reflect, and the psi recurrence
+# stops once the argument is large enough for the asymptotic series. Metal's sinpi and
+# tanpi reduce the argument themselves, so the reflections need no half-angle detour.
+_METAL_MATH_HEADER = (
+    _metal_constants(LG_LANCZOS=_LANCZOS_COEFFS, PSI_C=_PSI_COEFFS_SINGLE)
+    + f"""
+#define LG_LANCZOS_N      {len(_LANCZOS_COEFFS)}
+#define LG_LANCZOS_T      {_LANCZOS_G + 0.5}f
+#define LG_LOG_SQRT_2PI   {float(0.5 * np.log(2.0 * np.pi))!r}f
+#define LG_LOG_PI         {float(np.log(np.pi))!r}f
+#define PSI_TERMS         {len(_PSI_COEFFS_SINGLE)}
+#define PSI_MIN           {float(_PSI_SHIFTS_SINGLE)}f
+
+// log Gamma(w + 1) for w >= -0.5
+static inline float lg_lgamma1p(float w) {{
+    float series = LG_LANCZOS[0];
+    for (int i = 1; i < LG_LANCZOS_N; ++i) series += LG_LANCZOS[i] / (w + (float)i);
+    float t = w + LG_LANCZOS_T;
+    return LG_LOG_SQRT_2PI + (w + 0.5f) * log(t) - t + log(series);
+}}
+"""
+)
+
+
+_METAL_GAMMALN_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float z = (float)x[i];
+    float res;
+    if (isinf(z)) {
+        // the series forms inf - inf at either end, where both limits are +inf
+        res = INFINITY;
+    } else if (z >= 0.5f) {
+        res = lg_lgamma1p(z - 1.0f);
+    } else if (z > 0.0f) {
+        res = lg_lgamma1p(z) - log(z);
+    } else {
+        // log|sin(pi z)| is -inf at the poles, which makes the result +inf there
+        float log_sin = log(fabs(sinpi(z)));
+        res = LG_LOG_PI - log_sin - lg_lgamma1p(-z);
+    }
+    out[i] = (T)res;
+"""
+
+
+_METAL_PSI_SOURCE = """
+    uint i = thread_position_in_grid.x;
+    float z = (float)x[i];
+    float y = (z < 0.0f) ? 1.0f - z : z;
+    float res = 0.0f;
+    while (y < PSI_MIN) {
+        res -= 1.0f / y;
+        y += 1.0f;
+    }
+    float r2 = 1.0f / (y * y);
+    float series = PSI_C[PSI_TERMS - 1];
+    for (int k = PSI_TERMS - 2; k >= 0; --k) series = PSI_C[k] + series * r2;
+    res += log(y) - 0.5f / y - series * r2;
+    if (z < 0.0f) {
+        // the tangent lands on a true zero at every pole, so those come back infinite
+        res -= M_PI_F / tanpi(z - rint(z));
+    }
+    out[i] = (T)res;
+"""
+
+
+_METAL_SOURCES = {"gammaln": _METAL_GAMMALN_SOURCE, "psi": _METAL_PSI_SOURCE}
+
+
+def _metal_math_call(name, x):
+    """Evaluate ``name`` through its Metal kernel, or return None to fall back."""
+    return _metal_unary_call(
+        x, name=name, header=_METAL_MATH_HEADER, source=_METAL_SOURCES[name]
+    )
+
+
 def _lanczos_log_gamma(w, const):
     """``log Gamma(w + 1)`` by the Lanczos series, for ``w`` at or above ``-0.5``."""
     series = const(_LANCZOS_COEFFS[0])
@@ -58,26 +139,31 @@ def _lanczos_log_gamma(w, const):
 
 
 @mlx_funcify.register(Sigmoid)
-def mlx_funcify_Sigmoid(op, **kwargs):
-    return mx.sigmoid
+def mlx_funcify_Sigmoid(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
+    def sigmoid(x):
+        z, const, out_dtype = _working_precision(x, dtype)
+        # exp(-|x|) is shared with Softplus, so MLX can reuse it when both are fused.
+        # |x| as `where`: MLX's gradient of `abs` is 0 at 0, which would zero sigmoid'(0)
+        e = mx.exp(-mx.where(z >= 0, z, -z))
+        return (mx.where(z >= 0, const(1.0), e) / (const(1.0) + e)).astype(out_dtype)
+
+    return sigmoid
 
 
 @mlx_funcify.register(Softplus)
-def mlx_funcify_Softplus(op, **kwargs):
+def mlx_funcify_Softplus(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def softplus(x):
-        return mx.where(
-            x < -37.0,
-            mx.exp(x),
-            mx.where(
-                x < 18.0,
-                mx.log1p(mx.exp(x)),
-                mx.where(
-                    x < 33.3,
-                    x + mx.exp(-x),
-                    x,
-                ),
-            ),
+        z, const, out_dtype = _working_precision(x, dtype)
+        # Branch-free, and exp(-|x|) is shared with Sigmoid. `where` rather than `maximum`
+        # and `abs`, whose MLX gradients are 0 at 0
+        out = mx.where(z >= 0, z, const(0.0)) + mx.log1p(
+            mx.exp(-mx.where(z >= 0, z, -z))
         )
+        return out.astype(out_dtype)
 
     return softplus
 
@@ -91,9 +177,14 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
 
 
 @mlx_funcify.register(GammaLn)
-def mlx_funcify_GammaLn(op, **kwargs):
+def mlx_funcify_GammaLn(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def gammaln(x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_math_call("gammaln", mx.asarray(x).astype(out_dtype))
+        if fast is not None:
+            return fast
 
         double = z.dtype == mx.float64
         half = const(0.5)
@@ -113,10 +204,11 @@ def mlx_funcify_GammaLn(op, **kwargs):
         w = mx.where(reflect, one - y, y) - one
         lanczos = _lanczos_log_gamma(w, const)
 
-        # Reducing the argument keeps log|sin(pi x)| accurate at large |x|, and taking
-        # the sine from the tangent by the half-angle identity keeps it off mx.sin,
-        # which is a float32 kernel at any dtype where mx.tan is not
-        tan_half = mx.tan(const(0.5 * np.pi) * (y - mx.floor(y)))
+        # Reducing by the nearest integer is exact, where subtracting floor(y) rounds
+        # once y is small and negative, and it keeps log|sin(pi x)| accurate at large
+        # |x|. Taking the sine from the tangent by the half-angle identity keeps it off
+        # mx.sin, which is a float32 kernel at any dtype where mx.tan is not
+        tan_half = mx.tan(const(0.5 * np.pi) * (y - mx.round(y)))
         log_sin = mx.log(const(2.0) * mx.abs(tan_half)) - mx.log1p(tan_half * tan_half)
         out = mx.where(reflect, const(np.log(np.pi)) - log_sin - lanczos, lanczos)
         if double:
@@ -131,9 +223,14 @@ def mlx_funcify_GammaLn(op, **kwargs):
 
 
 @mlx_funcify.register(Psi)
-def mlx_funcify_Psi(op, **kwargs):
+def mlx_funcify_Psi(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def psi(x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
+        fast = _metal_math_call("psi", mx.asarray(x).astype(out_dtype))
+        if fast is not None:
+            return fast
 
         double = z.dtype == mx.float64
         n_shifts = _PSI_SHIFTS if double else _PSI_SHIFTS_SINGLE

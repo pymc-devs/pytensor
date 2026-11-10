@@ -557,17 +557,18 @@ def block_diag_solve_to_block_diag_solves(fgraph, node):
 @register_stabilize
 @node_rewriter([blockwise_of(SolveBase)])
 def orthogonal_solve_to_transpose_matmul(fgraph, node):
-    """Replace solve(Q, b) with Q.T @ b when Q is orthogonal."""
+    """Replace solve(Q, b) with Q.conj().T @ b when Q is orthogonal (or unitary)."""
     A, b = node.inputs
 
     if not check_assumption(fgraph, A, ORTHOGONAL):
         return None
 
+    A_inv = A.conj().mT
     b_ndim = node.op.core_op.b_ndim
     if b_ndim == 1:
-        new_out = (A.mT @ b[..., :, None])[..., 0]
+        new_out = (A_inv @ b[..., :, None])[..., 0]
     else:
-        new_out = A.mT @ b
+        new_out = A_inv @ b
 
     old_out = node.outputs[0]
     copy_stack_trace(old_out, new_out)

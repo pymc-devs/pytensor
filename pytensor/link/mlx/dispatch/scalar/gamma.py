@@ -19,9 +19,11 @@ def _gamma_positive(z, const):
 
 
 @mlx_funcify.register(Gamma)
-def mlx_funcify_Gamma(op, **kwargs):
+def mlx_funcify_Gamma(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def gamma(x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
         zero = const(0.0)
 
         # Both branches are evaluated for every element, so the one that will be

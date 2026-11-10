@@ -120,6 +120,7 @@ class InplaceGraphOptimizer(GraphRewriter):
         if not candidate_pairs:
             return node
 
+        failed_pattern = None
         # Try in-placing all outputs at once
         tried_inputs = set()
         inplace_pattern = {}
@@ -134,7 +135,7 @@ class InplaceGraphOptimizer(GraphRewriter):
             try:
                 fgraph.replace_all_validate(replacements, reason=reason)
             except InconsistencyError:
-                pass
+                failed_pattern = inplace_pattern
             else:
                 copy_stack_trace(node.outputs, inplace_node.outputs)
                 return inplace_node
@@ -147,6 +148,11 @@ class InplaceGraphOptimizer(GraphRewriter):
             if o not in inplace_pattern and i not in tried_inputs:
                 inplace_pattern[o] = [i]
                 tried_inputs.add(i)
+
+                if node is original_node and inplace_pattern == failed_pattern:
+                    inplace_pattern.pop(o)
+                    tried_inputs.discard(i)
+                    continue
 
                 inplace_node = self.create_inplace_node(node, inplace_pattern)
                 if inplace_node.op.destroy_map != inplace_pattern:

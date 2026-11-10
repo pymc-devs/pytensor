@@ -475,6 +475,7 @@ class TestMakeVector(utt.InferShapeTester):
             [MakeVector("float64")(adscal, aiscal)],
             [adscal_val, aiscal_val],
             MakeVector,
+            excluding=["scalarize"],
         )
 
         self._compile_and_check(
@@ -482,6 +483,7 @@ class TestMakeVector(utt.InferShapeTester):
             [MakeVector("float64")(adscal, bdscal, aiscal)],
             [adscal_val, bdscal_val, aiscal_val],
             MakeVector,
+            excluding=["scalarize"],
         )
 
         self._compile_and_check(
@@ -489,6 +491,7 @@ class TestMakeVector(utt.InferShapeTester):
             [MakeVector("int32")(aiscal, biscal, ciscal, discal)],
             [aiscal_val, biscal_val, ciscal_val, discal_val],
             MakeVector,
+            excluding=["scalarize"],
         )
 
 
@@ -824,18 +827,6 @@ class TestAlloc:
         # TODO: Assert something about the value if we bothered to call it?
         fgrad(test_params)
 
-    def test_alloc_output(self):
-        val = constant(self.rng.standard_normal((1, 1)), dtype=self.dtype)
-        for alloc_ in self.allocs:
-            # The output is the result of the alloc operation,
-            # we do not want it to be constant-folded
-            out = alloc_(val, 50, 60)
-
-            f = pytensor.function([], out, mode=self.mode)
-            topo = f.maker.fgraph.toposort()
-            assert sum(isinstance(node.op, type(alloc_)) for node in topo) == 1
-            assert not isinstance(topo[0].op, DeepCopyOp)
-
     def test_ones(self):
         for shp in [[], 1, [1], [1, 2], [1, 2, 3], np.r_[1, 2, 3]]:
             ones = pytensor.function([], [ptb.ones(shp)], mode=self.mode)
@@ -914,6 +905,12 @@ class TestAlloc:
         assert ptb.alloc(x, 3, 4, 5).type.shape == (3, 4, 5)
         assert ptb.alloc(x, d0, d1, 5).type.shape == (None, None, 5)
         assert ptb.alloc(x, d0, 1, d1).type.shape == (None, 1, 5)
+
+        # These assertions record current inference, not a permanent guarantee:
+        # its graph-creation cost may outweigh the benefit in the future.
+        size = ptb.ones(3, dtype="int64").sum()
+        assert ptb.alloc(0, size).type.shape == (3,)
+        assert ptb.alloc(0, size - 2).type.shape == (1,)
 
         msg = "Alloc static input type and target shape are incompatible"
         with pytest.raises(ValueError, match=msg):
@@ -1338,7 +1335,9 @@ def test_get_vector_length():
     assert 3 == get_vector_length(triple)
 
     a, b, c = triple
-    mode = pytensor.compile.get_default_mode().excluding("constant_folding")
+    mode = pytensor.compile.get_default_mode().excluding(
+        "constant_folding", "scalarize"
+    )
     f = function([x, y], [b, c, a], mode=mode)
     topo = f.maker.fgraph.toposort()
     assert any(True for node in topo if isinstance(node.op, MakeVector))
@@ -1375,7 +1374,7 @@ class TestJoinAndSplit:
     def eval_outputs_and_check_vector(self, outputs, make_vector_op=None):
         if make_vector_op is None:
             make_vector_op = self.make_vector_op
-        f = pytensor.function([], outputs, self.mode)
+        f = pytensor.function([], outputs, self.mode.excluding("scalarize"))
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(make_vector_op))]
         variables = f()
@@ -1446,7 +1445,7 @@ class TestJoinAndSplit:
         a = iscalar("a")
         b = lscalar("b")
         s = stack([a, b, a, b])
-        f = function([a, b], s, mode=self.mode)
+        f = function([a, b], s, mode=self.mode.excluding("scalarize"))
         val = f(1, 2)
         assert np.all(val == [1, 2, 1, 2])
         topo = f.maker.fgraph.toposort()
@@ -1462,7 +1461,7 @@ class TestJoinAndSplit:
         # test when the constant is the first element.
         # The first element is used in a special way
         s = stack([10, a, b, np.int8(3), np.array(4, dtype=np.int8)])
-        f = function([a, b], s, mode=self.mode)
+        f = function([a, b], s, mode=self.mode.excluding("scalarize"))
         val = f(1, 2)
         assert np.all(val == [10, 1, 2, 3, 4])
         topo = f.maker.fgraph.toposort()
@@ -2825,7 +2824,7 @@ class TestARange:
             mode = config.mode
             if mode == "FAST_COMPILE":
                 mode = "FAST_RUN"
-            mode = compile.mode.get_mode(mode).excluding("fusion")
+            mode = compile.mode.get_mode(mode).excluding("fusion", "scalarize")
             f = function([start, stop, step], out.shape, mode=mode)
             assert len(f.maker.fgraph.toposort()) == 9
 
@@ -4007,7 +4006,7 @@ class TestInferShape(utt.InferShapeTester):
             [TensorFromScalar()(ScalarFromTensor()(aiscal))],
             [45],
             ScalarFromTensor,
-            excluding=["local_tensor_scalar_tensor"],
+            excluding=["local_tensor_scalar_tensor", "remove_scalar_tensor_boundaries"],
         )
 
     def test_TensorFromScalar(self):

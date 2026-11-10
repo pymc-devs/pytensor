@@ -6,11 +6,11 @@ import pytest
 from pytensor.compile.io import In
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_mode
+from pytensor.conditional.op import ifelse
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.ifelse import ifelse
 from pytensor.link.c.basic import OpWiseCLinker
 from pytensor.link.utils import map_storage
 from pytensor.link.vm import VM, Loop, Stack, VMLinker

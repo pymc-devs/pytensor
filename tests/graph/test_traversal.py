@@ -2,6 +2,8 @@ import pytest
 
 from pytensor import shared
 from pytensor import tensor as pt
+from pytensor.compile.builders import OpFromGraph
+from pytensor.conditional.op import LazyIfElse
 from pytensor.graph import Apply, ancestors, graph_inputs
 from pytensor.graph.basic import Variable
 from pytensor.graph.traversal import (
@@ -419,3 +421,13 @@ def test_get_var_by_name():
 
     exp_res = igo.fgraph.outputs[0]
     assert res == exp_res
+
+
+def test_get_var_by_name_multiple_inner_graphs():
+    c, x = pt.iscalar("c"), pt.dvector("x")
+    branches = [OpFromGraph([x], [x * scale]) for scale in (2, 3)]
+    output = LazyIfElse(*branches, [x.type])(c, x)
+    # Each name lives in a different branch of the same outer Op.
+    for branch in branches:
+        inner_output = branch.fgraph.outputs[0]
+        assert get_var_by_name([output], inner_output.auto_name) == (inner_output,)

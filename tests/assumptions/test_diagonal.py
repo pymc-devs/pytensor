@@ -133,12 +133,23 @@ def test_matmul_diagonal_generic_is_unknown():
     assert af.get(y, DIAGONAL) == FactState.UNKNOWN
 
 
-def test_dot_orthogonal_xxt_is_diagonal():
-    x = pt.dmatrix("x")
+@pytest.mark.parametrize("transpose_first", [False, True], ids=["xxh", "xhx"])
+@pytest.mark.parametrize(
+    "dtype, conjugate, expected",
+    [
+        ("float64", False, FactState.TRUE),
+        ("complex128", True, FactState.TRUE),
+        ("complex128", False, FactState.UNKNOWN),
+    ],
+    ids=["real", "complex_conj_transpose", "complex_transpose"],
+)
+def test_dot_orthogonal_xxt_is_diagonal(dtype, conjugate, expected, transpose_first):
+    x = pt.matrix("x", dtype=dtype)
     x_orth = assume(x, orthogonal=True)
-    y = pt.dot(x_orth, x_orth.T)
+    x_t = x_orth.conj().T if conjugate else x_orth.T
+    y = pt.dot(x_t, x_orth) if transpose_first else pt.dot(x_orth, x_t)
     _, af = make_fgraph(y)
-    assert af.check(y, DIAGONAL)
+    assert af.get(y, DIAGONAL) == expected
 
 
 class TestSubtensorDiagonalPreservation:

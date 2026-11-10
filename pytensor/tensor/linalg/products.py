@@ -84,7 +84,15 @@ expm = Blockwise(Expm())
 
 
 class KroneckerProduct(TensorSymbolicOp):
-    """Kronecker product Op."""
+    """Kronecker product Op.
+
+    This is not a `FusibleSymbolicOp`: its body has only one broadcasting `mul`,
+    so there are no elementwise operations to fuse internally. The output `reshape`
+    also blocks fusion with downstream operations.
+
+    Keeping this op opaque also preserves native `kron` dispatch in JAX, PyTorch
+    and MLX.
+    """
 
     def build_inner_graph(self, a, b):
         if a.ndim + b.ndim <= 2:

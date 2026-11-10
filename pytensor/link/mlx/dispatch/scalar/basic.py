@@ -114,8 +114,8 @@ def mlx_funcify_Identity(op, **kwargs):
 @mlx_funcify.register(Second)
 def mlx_funcify_Second(op, **kwargs):
     def second(x, y):
-        x = mx.array(x)
-        y = mx.array(y)
+        x = mx.asarray(x)
+        y = mx.asarray(y)
         _, out = mx.broadcast_arrays(x, y)
         return out
 

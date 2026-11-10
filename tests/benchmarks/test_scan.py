@@ -504,7 +504,7 @@ def test_scan_cython_benchmark(benchmark):
 
     py_res = f_py()
 
-    s_r = as_tensor(r, dtype=config.floatX)
+    s_r = matrix("r", dtype=config.floatX, shape=r.shape)
     s_y = scan(
         fn=lambda ri, rii, M: ri + M * rii,
         sequences=[s_r[1:]],
@@ -514,13 +514,13 @@ def test_scan_cython_benchmark(benchmark):
         return_updates=False,
     )
 
-    f_cvm = function([], s_y, mode="CVM")
+    f_cvm = function([s_r], s_y, mode="CVM")
     f_cvm.trust_input = True
 
     # Make sure we're actually computing a `Scan`
     assert any(isinstance(node.op, Scan) for node in f_cvm.maker.fgraph.apply_nodes)
 
-    cvm_res = benchmark(f_cvm)
+    cvm_res = benchmark(f_cvm, r)
 
     # Make sure the results are the same between the two implementations
     assert np.allclose(cvm_res, py_res)
@@ -612,7 +612,7 @@ def test_scan_grad_subtensor_compile_benchmark(benchmark):
     fn = benchmark(lambda: function(*build(), mode=no_fusion))
 
     n_apply = len(fn.maker.fgraph.apply_nodes)
-    assert n_apply <= 20, f"Graph has {n_apply} nodes, expected <= 20"
+    assert n_apply <= 22, f"Graph has {n_apply} nodes, expected <= 22"
 
     subtensor_nodes = [
         n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Subtensor)

@@ -295,13 +295,14 @@ def test_lift_linalg_through_expand_dims():
     assert_equal_computations([rewritten], [expected])
 
 
-def test_inv_of_orthogonal_to_transpose():
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_inv_of_orthogonal_to_transpose(dtype):
     n = 5
     rewrites = ("canonicalize", "stabilize", "ShapeOpt")
 
-    x = pt.dmatrix("x", shape=(n, n))
+    x = pt.matrix("x", shape=(n, n), dtype=dtype)
     x_orth = assume(x, orthogonal=True)
     out = pt.linalg.inv(x_orth)
     rewritten = rewrite_graph(out, include=rewrites)
-    expected = rewrite_graph(x_orth.mT, include=rewrites)
+    expected = rewrite_graph(x_orth.conj().mT, include=rewrites)
     assert_equal_computations([rewritten], [expected])

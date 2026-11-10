@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import numpy as np
@@ -6,14 +7,13 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.scalar.math import GammaLn, Psi
 from pytensor.tensor.math import log1mexp, sigmoid, softplus
 from pytensor.tensor.type import vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.link.mlx.dispatch.scalar.math import _metal_math_call
 
 
 # float32 and float64 take deliberately different paths through both dispatches, so
@@ -32,8 +32,11 @@ from pytensor.link.mlx.dispatch import mlx_funcify
         # where mx.sin is a float32 kernel whatever it is handed, so float64 holds here
         # rather than sharing single precision's ceiling
         (-5.4, -0.6, {"float32": (1e-3, 1e-3), "float64": (1e-11, 1e-11)}),
+        # Just below zero the reflection argument has to be reduced exactly, which
+        # subtracting floor(x) does not do once x is far smaller than one
+        (-1e-3, -1e-7, {"float32": (1e-5, 0.0), "float64": (1e-11, 0.0)}),
     ],
-    ids=["moderate", "tiny", "large", "negative"],
+    ids=["moderate", "tiny", "large", "negative", "negative-near-zero"],
 )
 def test_gammaln(low, high, tolerances, dtype):
     rtol, atol = tolerances[dtype]
@@ -78,7 +81,7 @@ def test_gammaln_float64_precision(low, high):
     x_test_value = np.linspace(low, high, 201)
 
     with mlx.stream(mlx.cpu):
-        gammaln = mlx_funcify(GammaLn())
+        gammaln = funcify_from_graph(pt.gammaln, "float64")
         res = np.asarray(gammaln(mlx.array(x_test_value, dtype=mlx.float64)))
 
     np.testing.assert_allclose(
@@ -93,6 +96,48 @@ def test_gammaln_grad(dtype):
     x_test_value = np.random.default_rng(13).uniform(0.1, 20.0, 51).astype(dtype)
 
     compare_mlx_and_py([x], [pt.grad(pt.gammaln(x).sum(), x)], [x_test_value])
+
+
+@pytest.mark.parametrize(
+    "op",
+    [pt.gammaln, pt.psi, pt.gamma, pt.erf, pt.erfc, pt.erfcx, pt.i0, pt.i1],
+    ids=["gammaln", "psi", "gamma", "erf", "erfc", "erfcx", "i0", "i1"],
+)
+@pytest.mark.parametrize("dtype", ["int8", "int32", "uint64"], ids=str)
+def test_special_integer_input(op, dtype):
+    # The series runs at the float dtype the graph declares. Run at the integer dtype
+    # it is handed, every coefficient truncates
+    x = vector("x", dtype=dtype)
+    out = op(x)
+
+    _, [res] = compare_mlx_and_py([x], [out], [np.array([3, 4, 5], dtype=dtype)])
+    assert np.asarray(res).dtype == out.dtype
+
+
+@pytest.mark.parametrize(
+    "op, n_shapes", [(pt.gammainc, 1), (pt.betainc, 2)], ids=["gammainc", "betainc"]
+)
+@pytest.mark.parametrize(
+    "x_test_value",
+    [np.array([0.25, 0.5], dtype="float32"), np.array([0, 1], dtype="int8")],
+    ids=["float32", "int8"],
+)
+def test_special_mixed_input_dtypes(op, n_shapes, x_test_value):
+    # The output dtype is the upcast of every input, so float64 shape parameters carry
+    # a narrower x up with them. The tolerance is float64's, which a float32 evaluation
+    # cast up at the end would miss
+    shapes = [vector(f"a{i}", dtype="float64") for i in range(n_shapes)]
+    x = vector("x", dtype=x_test_value.dtype)
+    out = op(*shapes, x)
+    test_values = [np.array([2.0, 3.0])] * n_shapes + [x_test_value]
+
+    _, [res] = compare_mlx_and_py(
+        [*shapes, x],
+        [out],
+        test_values,
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-10),
+    )
+    assert np.asarray(res).dtype == out.dtype == "float64"
 
 
 @pytest.mark.parametrize("op", [pt.gammaln, pt.psi], ids=["gammaln", "psi"])
@@ -167,12 +212,148 @@ def test_psi_float64_precision(low, high):
     x_test_value = np.linspace(low, high, 201)
 
     with mlx.stream(mlx.cpu):
-        psi = mlx_funcify(Psi())
+        psi = funcify_from_graph(pt.psi, "float64")
         res = np.asarray(psi(mlx.array(x_test_value, dtype=mlx.float64)))
 
     np.testing.assert_allclose(
         res, scipy.special.psi(x_test_value), rtol=1e-12, atol=1e-14
     )
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize(
+    "dtype, tolerance",
+    [("float32", 1e-5), ("float16", 1e-3), ("bfloat16", 8e-3)],
+    ids=["float32", "float16", "bfloat16"],
+)
+@pytest.mark.parametrize("name", ["gammaln", "psi"])
+def test_gammaln_psi_paths_agree(name, dtype, tolerance):
+    # Both functions are implemented twice: a Metal kernel, taken for single and half
+    # precision on the GPU stream, and the vectorized fallback taken everywhere else --
+    # which is every float64 graph, since Metal has no float64 at all. Only the fallback
+    # runs on CI, so this is the only thing standing between the kernel and a silent drift.
+    #
+    # The uniform sample never lands near a pole, so points within 1e-1 and 1e-3 of the
+    # first few are appended, and -1e-6 besides, where reducing the reflection argument
+    # by hand is inexact. The edges are where the kernel handles infinities and poles
+    # separately, and a 0-d input has to survive the kernel flattening its buffer.
+    poles = -np.array([0.0, 1.0, 2.0, 5.0])
+    offsets = np.array([1e-1, 1e-3])
+    near_poles = np.concatenate(
+        [
+            (poles[:, None] + offsets).ravel(),
+            (poles[:, None] - offsets).ravel(),
+            [-1e-6],
+        ]
+    )
+    x_test_value = np.concatenate(
+        [np.random.default_rng(43).uniform(-9.9, 30.0, 1001), near_poles]
+    ).astype("float32")
+    edges = np.array(
+        [0.0, -0.0, -1.0, -2.0, np.inf, -np.inf, np.nan, 0.5, 4.0, -1.5, 1e-30],
+        dtype="float32",
+    )
+    scalar_value = np.float32(2.5)
+
+    # NumPy has no bfloat16, so inputs are cast in MLX and results come back as float32
+    def as_input(value):
+        return mlx.array(value).astype(getattr(mlx, dtype))
+
+    def as_result(value):
+        return np.asarray(value.astype(mlx.float32))
+
+    with mlx.stream(mlx.gpu):
+        # Without this the test compares the fallback against itself and passes whatever
+        # the kernel does
+        kernel = _metal_math_call(name, as_input(x_test_value))
+        assert kernel is not None, (
+            "the Metal kernel did not engage, so this comparison proves nothing"
+        )
+        metal = as_result(kernel)
+        metal_edges = as_result(_metal_math_call(name, as_input(edges)))
+        metal_scalar = as_result(_metal_math_call(name, as_input(scalar_value)))
+    with mlx.stream(mlx.cpu):
+        # PyTensor has no bfloat16, so that case dispatches from a float32 graph
+        fallback = funcify_from_graph(
+            getattr(pt, name), "float32" if dtype == "bfloat16" else dtype
+        )
+        vectorized = as_result(fallback(as_input(x_test_value)))
+        vectorized_edges = as_result(fallback(as_input(edges)))
+        vectorized_scalar = as_result(fallback(as_input(scalar_value)))
+
+    # Both compute in float32 and round once to the dtype. At float32 they disagree by
+    # 1.6e-6 at worst, and at half precision by at most one unit in the last place, so
+    # each bound sits a little above that spread. The absolute term carries the zeros
+    np.testing.assert_allclose(metal, vectorized, rtol=tolerance, atol=tolerance)
+    np.testing.assert_allclose(metal_edges, vectorized_edges, rtol=tolerance)
+    assert metal_scalar.shape == ()
+    np.testing.assert_allclose(metal_scalar, vectorized_scalar, rtol=tolerance)
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize("name", ["gammaln", "psi"])
+def test_gammaln_psi_dispatch_reaches_kernel(name):
+    # test_gammaln_psi_paths_agree calls the kernel directly, and everything that goes
+    # through the registered dispatch runs on the CPU stream the conftest pins. So
+    # removing the kernel from the dispatch would leave the whole suite green while every
+    # GPU graph silently took the path that costs several launches.
+    x_test_value = np.random.default_rng(7).uniform(-9.9, 30.0, 1001).astype("float32")
+
+    with mlx.stream(mlx.gpu):
+        dispatch = funcify_from_graph(getattr(pt, name), "float32")
+        dispatched = np.asarray(dispatch(mlx.array(x_test_value)))
+        kernel = _metal_math_call(name, mlx.array(x_test_value))
+        assert kernel is not None, "the Metal kernel refused this input"
+        kernel = np.asarray(kernel)
+    with mlx.stream(mlx.cpu):
+        vectorized = np.asarray(dispatch(mlx.array(x_test_value)))
+
+    # Bit equality is only a discriminator while the two paths actually differ; if they
+    # ever agree exactly this test would pass without checking anything
+    assert not np.array_equal(kernel, vectorized), (
+        "the two paths agree bitwise, so this test cannot tell them apart"
+    )
+    np.testing.assert_array_equal(dispatched, kernel)
+
+
+@pytest.mark.parametrize(
+    "op, n_inputs",
+    [
+        (pt.gammaln, 1),
+        (pt.psi, 1),
+        (pt.erfc, 1),
+        (pt.erfcx, 1),
+        (pt.gammainc, 2),
+        (pt.betainc, 3),
+        (pt.second, 2),
+    ],
+    ids=["gammaln", "psi", "erfc", "erfcx", "gammainc", "betainc", "second"],
+)
+@pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
+def test_dispatch_does_not_copy_its_input(op, n_inputs, dtype, tmp_path):
+    # Since MLX 0.32, mx.array copies an input that is already an mx.array, and the copy
+    # survives mx.compile as an AsType node of its own. Every value lies in (0, 1), where
+    # each of these functions is defined
+    x_value = mlx.array(np.linspace(0.1, 0.9, 7), dtype=getattr(mlx, dtype))
+    mlx.eval(x_value)
+    graph = tmp_path / "graph.dot"
+
+    # The assertion below searches MLX's graph dump for a primitive name, so first
+    # confirm the dump still spells a cast that way
+    mlx.export_to_dot(str(graph), mlx.compile(lambda x: x.astype(mlx.float16))(x_value))
+    assert "AsType" in graph.read_text()
+
+    dispatch = funcify_from_graph(op, *[dtype] * n_inputs)
+    outputs = mlx.compile(dispatch)(*[x_value] * n_inputs)
+    mlx.export_to_dot(str(graph), outputs)
+
+    assert "AsType" not in graph.read_text()
 
 
 def test_log1mexp():
@@ -194,11 +375,11 @@ def test_nnet():
 
 
 @pytest.mark.parametrize(
-    "scalar_op, reference",
-    [(GammaLn, scipy.special.gammaln), (Psi, scipy.special.digamma)],
+    "op, reference",
+    [(pt.gammaln, scipy.special.gammaln), (pt.psi, scipy.special.digamma)],
     ids=["gammaln", "psi"],
 )
-def test_reflection_near_the_poles(scalar_op, reference):
+def test_reflection_near_the_poles(op, reference):
     # Both reflections divide by something that vanishes at every negative integer, and
     # both grow without bound approaching one. Every other range here samples uniformly
     # and so never lands near a pole, which is how a reflection that was 45% wrong
@@ -214,8 +395,7 @@ def test_reflection_near_the_poles(scalar_op, reference):
     x_test_value = x_test_value[x_test_value < 0.0]
 
     with mlx.stream(mlx.cpu):
-        res = np.asarray(
-            mlx_funcify(scalar_op())(mlx.array(x_test_value, dtype=mlx.float64))
-        )
+        dispatch = funcify_from_graph(op, "float64")
+        res = np.asarray(dispatch(mlx.array(x_test_value, dtype=mlx.float64)))
 
     np.testing.assert_allclose(res, reference(x_test_value), rtol=1e-5)

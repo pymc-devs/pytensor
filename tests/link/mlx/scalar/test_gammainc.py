@@ -6,13 +6,12 @@ import pytest
 import scipy.special
 
 import pytensor.tensor as pt
-from pytensor.scalar.math import Erfc, GammaInc, GammaIncC
 from pytensor.tensor.type import vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.link.mlx.dispatch.scalar.erf import _erfc
 from pytensor.link.mlx.dispatch.scalar.gammainc import (
     _TEMME_MAX_RATIO,
     _TEMME_MIN_A,
@@ -92,8 +91,12 @@ def test_incomplete_gamma_float64_precision(shape_range, ratio_range):
     with mlx.stream(mlx.cpu):
         a_mlx = mlx.array(a_test_value, dtype=mlx.float64)
         x_mlx = mlx.array(x_test_value, dtype=mlx.float64)
-        lower = np.asarray(mlx_funcify(GammaInc())(a_mlx, x_mlx))
-        upper = np.asarray(mlx_funcify(GammaIncC())(a_mlx, x_mlx))
+        lower = np.asarray(
+            funcify_from_graph(pt.gammainc, "float64", "float64")(a_mlx, x_mlx)
+        )
+        upper = np.asarray(
+            funcify_from_graph(pt.gammaincc, "float64", "float64")(a_mlx, x_mlx)
+        )
 
     # Past 1e-290 a tail has run out of exponent rather than of accuracy, so those
     # elements are dropped instead of carrying a relative claim about a denormal
@@ -114,7 +117,7 @@ def test_incomplete_gamma_small_tail():
 
     with mlx.stream(mlx.cpu):
         lower = np.asarray(
-            mlx_funcify(GammaInc())(
+            funcify_from_graph(pt.gammainc, "float64", "float64")(
                 mlx.array(a_test_value, dtype=mlx.float64),
                 mlx.array(x_test_value, dtype=mlx.float64),
             )
@@ -145,8 +148,12 @@ def test_incomplete_gamma_branch_boundaries():
     with mlx.stream(mlx.cpu):
         a_mlx = mlx.array(a_test_value, dtype=mlx.float64)
         x_mlx = mlx.array(x_test_value, dtype=mlx.float64)
-        lower = np.asarray(mlx_funcify(GammaInc())(a_mlx, x_mlx))
-        upper = np.asarray(mlx_funcify(GammaIncC())(a_mlx, x_mlx))
+        lower = np.asarray(
+            funcify_from_graph(pt.gammainc, "float64", "float64")(a_mlx, x_mlx)
+        )
+        upper = np.asarray(
+            funcify_from_graph(pt.gammaincc, "float64", "float64")(a_mlx, x_mlx)
+        )
 
     np.testing.assert_allclose(
         lower, scipy.special.gammainc(a_test_value, x_test_value), rtol=1e-10
@@ -204,10 +211,14 @@ def test_incomplete_gamma_paths_agree(lower):
         metal = np.asarray(kernel)
 
     with mlx.stream(mlx.cpu):
-        z, const, _ = _working_precision(mlx.array(x_test_value))
+        z, const, _ = _working_precision(mlx.array(x_test_value), "float32")
         vectorized = np.asarray(
             _incomplete_gamma(
-                mlx.array(a_test_value), z, const, mlx_funcify(Erfc()), lower=lower
+                mlx.array(a_test_value),
+                z,
+                const,
+                partial(_erfc, const=const),
+                lower=lower,
             )
         )
 
@@ -225,9 +236,9 @@ def test_incomplete_gamma_paths_agree(lower):
     reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
 )
 @pytest.mark.parametrize(
-    "op_class, lower", [(GammaInc, True), (GammaIncC, False)], ids=["P", "Q"]
+    "op, lower", [(pt.gammainc, True), (pt.gammaincc, False)], ids=["P", "Q"]
 )
-def test_incomplete_gamma_dispatch_reaches_kernel(op_class, lower):
+def test_incomplete_gamma_dispatch_reaches_kernel(op, lower):
     # Everything else that exercises the kernel calls it directly, and everything that
     # goes through the registered dispatch runs on the CPU stream the conftest pins. So
     # removing the kernel from the dispatch would leave the whole suite green while every
@@ -241,16 +252,21 @@ def test_incomplete_gamma_dispatch_reaches_kernel(op_class, lower):
     with mlx.stream(mlx.gpu):
         a_mlx = mlx.array(a_test_value)
         x_mlx = mlx.array(x_test_value)
-        dispatched = np.asarray(mlx_funcify(op_class())(a_mlx, x_mlx))
+        dispatch = funcify_from_graph(op, "float32", "float32")
+        dispatched = np.asarray(dispatch(a_mlx, x_mlx))
         kernel = _metal_gammainc_call(a_mlx, x_mlx, lower)
         assert kernel is not None, "the Metal kernel refused this input"
         kernel = np.asarray(kernel)
 
     with mlx.stream(mlx.cpu):
-        z, const, _ = _working_precision(mlx.array(x_test_value))
+        z, const, _ = _working_precision(mlx.array(x_test_value), "float32")
         vectorized = np.asarray(
             _incomplete_gamma(
-                mlx.array(a_test_value), z, const, mlx_funcify(Erfc()), lower=lower
+                mlx.array(a_test_value),
+                z,
+                const,
+                partial(_erfc, const=const),
+                lower=lower,
             )
         )
 
@@ -313,8 +329,10 @@ def test_incomplete_gamma_complement():
     with mlx.stream(mlx.cpu):
         a_mlx = mlx.array(a_test_value, dtype=mlx.float64)
         x_mlx = mlx.array(x_test_value, dtype=mlx.float64)
-        total = np.asarray(mlx_funcify(GammaInc())(a_mlx, x_mlx)) + np.asarray(
-            mlx_funcify(GammaIncC())(a_mlx, x_mlx)
+        total = np.asarray(
+            funcify_from_graph(pt.gammainc, "float64", "float64")(a_mlx, x_mlx)
+        ) + np.asarray(
+            funcify_from_graph(pt.gammaincc, "float64", "float64")(a_mlx, x_mlx)
         )
 
     np.testing.assert_allclose(total, 1.0, rtol=1e-12)

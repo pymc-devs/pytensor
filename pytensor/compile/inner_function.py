@@ -72,13 +72,3 @@ class HasInnerFunction(HasInnerGraph):
         return super().make_thunk(
             node, storage_map, compute_map, no_recycling, impl=impl
         )
-
-    @property
-    def inner_inputs(self):
-        # Read-only views of the immutable inner graph, as lists so callers
-        # that concatenate inputs/outputs keep list semantics.
-        return list(self.fgraph.inputs)
-
-    @property
-    def inner_outputs(self):
-        return list(self.fgraph.outputs)

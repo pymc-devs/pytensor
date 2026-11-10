@@ -200,6 +200,21 @@ class TestReassociateChain:
             rng.normal(size=(7, 6, 4)),
         )
 
+    def test_batched_outer_product_link(self):
+        A = pt.tensor3("A", shape=(3, 5, 5))
+        g = pt.tensor3("g", shape=(3, 5, 1))
+        v = pt.matrix("v", shape=(1, 5))
+
+        # A @ (g @ v) costs 450 against 150, with v broadcast over the batch
+        result = _reassociate([A, g, v], [A @ (g @ v)])
+        result.assert_graph(*_canonical((A @ g) @ v))
+        rng = np.random.default_rng(0)
+        result.assert_eval(
+            rng.normal(size=(3, 5, 5)),
+            rng.normal(size=(3, 5, 1)),
+            rng.normal(size=(1, 5)),
+        )
+
     def test_symbolic_gp_gradient_chain(self):
         # The Cholesky pullback of L @ v builds L.T @ (g @ v.T) with a square L: n^3 + n^2
         # against 2n^2 for (L.T @ g) @ v.T
@@ -210,6 +225,20 @@ class TestReassociateChain:
 
         result = _reassociate([L.owner.inputs[0], n, g, v], [L.T @ (g @ v)])
         result.assert_graph(*_canonical((L.T @ g) @ v))
+
+    def test_row_times_column_product_link(self):
+        # Mul commutes, so v * g is still the length-1 contraction g @ v
+        n = pt.lscalar("n")
+        L = pt.specify_shape(pt.matrix("L"), (n, n))
+        g = pt.matrix("g", shape=(None, 1))
+        v = pt.matrix("v", shape=(1, None))
+
+        result = _reassociate([L.owner.inputs[0], n, g, v], [L.T @ (v * g)])
+        result.assert_graph(*_canonical((L.T @ g) @ v))
+        rng = np.random.default_rng(0)
+        result.assert_eval(
+            rng.normal(size=(4, 4)), 4, rng.normal(size=(4, 1)), rng.normal(size=(1, 4))
+        )
 
     def test_mixed_static_and_symbolic_proof(self):
         # A @ (B @ C) costs 9 + 9n, (A @ B) @ C costs 6n, cheaper for every n >= 1

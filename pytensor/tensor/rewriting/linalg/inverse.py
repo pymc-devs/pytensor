@@ -109,11 +109,11 @@ def inv_of_inv(fgraph, node):
 @register_stabilize
 @node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
 def inv_of_orthogonal_to_transpose(fgraph, node):
-    """inv(Q) -> Q.T when Q is orthogonal."""
+    """inv(Q) -> Q.conj().T when Q is orthogonal (unitary, for complex Q)."""
     [X] = node.inputs
     if not check_assumption(fgraph, X, ORTHOGONAL):
         return None
-    return [X.mT]
+    return [X.conj().mT]
 
 
 @register_canonicalize

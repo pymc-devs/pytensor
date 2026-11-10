@@ -108,10 +108,6 @@ class ScalarLoop(ScalarInnerGraphOp):
     def clone(self, name=None, **kwargs):
         return self  # Op is immutable
 
-    @property
-    def fn(self):
-        raise NotImplementedError
-
     def make_node(self, n_steps, *inputs):
         assert len(inputs) == self.nin - 1
 

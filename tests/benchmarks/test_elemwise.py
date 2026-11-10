@@ -1,7 +1,8 @@
 import numpy as np
+from scipy.special import expit
 
 from pytensor import function, shared
-from pytensor.tensor import exp, grad, matrix, vector
+from pytensor.tensor import exp, grad, matrix, sigmoid, softplus, vector
 
 
 def _test_simple_elemwise_benchmark(mode, benchmark):
@@ -48,3 +49,16 @@ def test_fused_elemwise_benchmark_c(benchmark):
 
 def test_fused_elemwise_benchmark_numba(benchmark):
     _test_fused_elemwise_benchmark("NUMBA", benchmark)
+
+
+def test_shared_exp_benchmark(benchmark):
+    x = vector("x", dtype="float64")
+    x_val = np.random.default_rng(42).normal(size=100_000)
+    out = softplus(x) + softplus(-x) + sigmoid(x)
+    expected = np.logaddexp(0, x_val) + np.logaddexp(0, -x_val) + expit(x_val)
+
+    func = function([x], out, mode="NUMBA", trust_input=True)
+    assert len(func.maker.fgraph.apply_nodes) == 1
+    np.testing.assert_allclose(func(x_val), expected)
+
+    benchmark(func, x_val)

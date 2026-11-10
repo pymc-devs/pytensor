@@ -23,7 +23,7 @@
 
 ## Type of change
 <!--- Select one of the categories below by typing an `x` in the box -->
-- [ ] New feature / enhancement
+- [ ] New feature
 - [ ] Bug fix
 - [ ] Documentation
 - [ ] Maintenance

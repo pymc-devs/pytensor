@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
+from functools import reduce
 from textwrap import dedent
 from typing import Literal
 
@@ -18,8 +19,8 @@ from pytensor.link.c.op import COp, OpenMPOp
 from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
+from pytensor.scalar.basic import Add, Cast, Mul, upcast
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -704,6 +705,29 @@ class Elemwise(OpenMPOp):
             self.nfunc = import_func_from_string(self.nfunc_spec[0])
 
         if (
+            impl == "py"
+            and isinstance(self.scalar_op, Add | Mul)
+            and len(node.inputs) > 2
+        ):
+            # Variadic Add/Mul fold their binary NumPy ufunc, much faster than
+            # `np.frompyfunc` on the scalar op's Python `impl`
+            nfunc = self.nfunc
+
+            def ufunc(*args):
+                return reduce(nfunc, args)
+
+            ufunc.nout = 1
+            node.tag.ufunc = ufunc
+        elif impl == "py" and isinstance(self.scalar_op, Cast):
+            # `astype` is much faster than `np.frompyfunc` on `Cast.impl`
+            out_dtype = np.dtype(self.scalar_op.o_type.dtype)
+
+            def ufunc(x):
+                return np.asarray(x).astype(out_dtype, copy=True)
+
+            ufunc.nout = 1
+            node.tag.ufunc = ufunc
+        elif (
             (len(node.inputs) + len(node.outputs)) <= 32
             and (self.nfunc is None or self.scalar_op.nin != len(node.inputs))
             and self.ufunc is None
@@ -1430,6 +1454,8 @@ class CAReduce(COp):
         assert acc_dtype is not None
 
         axis = normalize_reduce_axis(self.axis, ndim=input.type.ndim)
+        if axis is not None:
+            axis = None if len(axis) == input.ndim else tuple(sorted(axis))
 
         if axis != self.axis or dtype != self.dtype or acc_dtype != self.acc_dtype:
             op = self.clone(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
@@ -1447,33 +1473,17 @@ class CAReduce(COp):
 
         return Apply(op, [input], [output])
 
-    def clone(
-        self,
-        axis=None,
-        dtype=None,
-        acc_dtype=None,
-        upcast_discrete_output=None,
-        **kwargs,
-    ):
-        if axis is None:
-            axis = self.axis
-        if dtype is None:
-            dtype = self.dtype
-        if acc_dtype is None:
-            acc_dtype = self.acc_dtype
-        if upcast_discrete_output is None:
-            upcast_discrete_output = self.upcast_discrete_output
-
-        res = type(self)(
+    def clone(self, **kwargs):
+        return type(self)(
             self.scalar_op,
-            axis=axis,
-            dtype=dtype,
-            acc_dtype=acc_dtype,
-            upcast_discrete_output=None,
+            axis=kwargs.pop("axis", self.axis),
+            dtype=kwargs.pop("dtype", self.dtype),
+            acc_dtype=kwargs.pop("acc_dtype", self.acc_dtype),
+            upcast_discrete_output=kwargs.pop(
+                "upcast_discrete_output", self.upcast_discrete_output
+            ),
             **kwargs,
         )
-
-        return res
 
     def _axis_str(self):
         axis = self.axis
@@ -1685,9 +1695,15 @@ class CAReduce(COp):
         # Sometimes, Elemwise's c_code is returned, so we need its headers
         return ["<vector>", "<algorithm>"]
 
+    def c_header_dirs(self, **kwargs):
+        return self.scalar_op.c_header_dirs(**kwargs)
+
+    def c_support_code(self, **kwargs):
+        return self.scalar_op.c_support_code(**kwargs)
+
     def c_code_cache_version_apply(self, node):
         # the version corresponding to the c code in this Op
-        version = [11]
+        version = [13]
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(

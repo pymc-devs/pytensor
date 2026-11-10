@@ -7,7 +7,7 @@ from pytensor.compile.aliasing import (
     add_supervisor_to_fgraph,
     insert_deepcopy,
 )
-from pytensor.compile.builders import OpFromGraph, SymbolicOp
+from pytensor.compile.builders import FinalizedOpFromGraph, OpFromGraph, SymbolicOp
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Apply, Variable
@@ -170,14 +170,11 @@ def functional_rewrite_ofg_inner_graph(linker, op, node, inner, *, mode):
 
 @graph_rewriter
 def ofg_inner_graph(fgraph):
-    # ``OpWithCoreShape`` is imported lazily: at module import time
-    # ``pytensor.tensor.random`` is only partially initialized. ``*WithCoreShape``
-    # are leaf backend ops with dedicated dispatch; re-optimizing them would loop.
-    from pytensor.tensor.random.op import OpWithCoreShape
-
     rewrite_inner_graph(
         fgraph,
-        lambda op: isinstance(op, OpFromGraph) and not isinstance(op, OpWithCoreShape),
+        lambda op: (
+            isinstance(op, OpFromGraph) and not isinstance(op, FinalizedOpFromGraph)
+        ),
         rewrite_ofg_inner_graph,
     )
 

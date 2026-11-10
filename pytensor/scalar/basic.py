@@ -3939,18 +3939,6 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
                 )
 
     @property
-    def fn(self):
-        return None
-
-    @property
-    def inner_inputs(self):
-        return self.fgraph.inputs
-
-    @property
-    def inner_outputs(self):
-        return self.fgraph.outputs
-
-    @property
     def py_perform_fn(self):
         if hasattr(self, "_py_perform_fn"):
             return self._py_perform_fn

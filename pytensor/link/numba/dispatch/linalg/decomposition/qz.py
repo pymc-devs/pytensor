@@ -2,7 +2,7 @@ import numpy as np
 import scipy.linalg as scipy_linalg
 from numba.core.extending import overload
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import ensure_lapack
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -11,7 +11,17 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
+
+
+def _imaginary_unit(dtype):
+    # A bare `1j` literal is complex128 and would upcast float32 arrays
+    if _get_underlying_float(dtype) == np.float32:
+        return np.complex64(1j)
+    return np.complex128(1j)
 
 
 @numba_basic.numba_njit
@@ -206,15 +216,9 @@ def qz_real_nosort_noeig_impl(A, B, overwrite_a, overwrite_b):
     def impl(A, B, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -311,19 +315,14 @@ def qz_real_nosort_eig_impl(A, B, overwrite_a, overwrite_b):
 
     dtype = A.dtype
     numba_gges = _LAPACK().numba_xgges(dtype)
+    imag_unit = _imaginary_unit(dtype)
 
     def impl(A, B, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -407,7 +406,7 @@ def qz_real_nosort_eig_impl(A, B, overwrite_a, overwrite_b):
             VSL[:] = np.nan
             VSR[:] = np.nan
 
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
         return A_copy, B_copy, alpha, BETA, VSL.T, VSR.T
 
     return impl
@@ -421,20 +420,15 @@ def qz_real_sort_noeig_impl(A, B, sort, overwrite_a, overwrite_b):
 
     dtype = A.dtype
     numba_gges = _LAPACK().numba_xgges(dtype)
+    imag_unit = _imaginary_unit(dtype)
     numba_tgsen = _LAPACK().numba_tgsen(dtype)
 
     def impl(A, B, sort, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -520,7 +514,7 @@ def qz_real_sort_noeig_impl(A, B, sort, overwrite_a, overwrite_b):
             return A_copy, B_copy, VSL.T, VSR.T
 
         # Apply sorting via tgsen
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
 
         if sort == "lhp":
             select = _lhp(alpha, BETA)
@@ -593,20 +587,15 @@ def qz_real_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
 
     dtype = A.dtype
     numba_gges = _LAPACK().numba_xgges(dtype)
+    imag_unit = _imaginary_unit(dtype)
     numba_tgsen = _LAPACK().numba_tgsen(dtype)
 
     def impl(A, B, sort, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -689,11 +678,11 @@ def qz_real_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
             B_copy[:] = np.nan
             VSL[:] = np.nan
             VSR[:] = np.nan
-            alpha = ALPHAR + 1j * ALPHAI
+            alpha = ALPHAR + imag_unit * ALPHAI
             return A_copy, B_copy, alpha, BETA, VSL.T, VSR.T
 
         # Apply sorting via tgsen
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
 
         if sort == "lhp":
             select = _lhp(alpha, BETA)
@@ -754,7 +743,7 @@ def qz_real_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
             VSR[:] = np.nan
 
         # Recompute alpha after tgsen
-        alpha = ALPHAR + 1j * ALPHAI
+        alpha = ALPHAR + imag_unit * ALPHAI
         return A_copy, B_copy, alpha, BETA, VSL.T, VSR.T
 
     return impl
@@ -773,15 +762,9 @@ def qz_complex_nosort_noeig_impl(A, B, overwrite_a, overwrite_b):
     def impl(A, B, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -883,15 +866,9 @@ def qz_complex_nosort_eig_impl(A, B, overwrite_a, overwrite_b):
     def impl(A, B, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -994,15 +971,9 @@ def qz_complex_sort_noeig_impl(A, B, sort, overwrite_a, overwrite_b):
     def impl(A, B, sort, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)
@@ -1164,15 +1135,9 @@ def qz_complex_sort_eig_impl(A, B, sort, overwrite_a, overwrite_b):
     def impl(A, B, sort, overwrite_a, overwrite_b):
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
+        A_copy = _fortran_work_array(A, overwrite_a)
 
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order(B)
+        B_copy = _fortran_work_array(B, overwrite_b)
 
         WORK = np.empty(1, dtype=dtype)
         LWORK = val_to_int_ptr(-1)

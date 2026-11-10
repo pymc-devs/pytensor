@@ -18,6 +18,25 @@ from tests.link.numba.test_basic import compare_numba_and_py, numba_mode, py_mod
 rng = np.random.default_rng(42849)
 
 
+def test_scalar_dispatch_output_dtype():
+    # Widen after each Op so its rounding and overflow remain observable.
+    x, y = ps.int8(), ps.int8()
+    compare_numba_and_py(
+        [x, y],
+        (x * y).astype("float64"),
+        [np.int8(100), np.int8(2)],
+        assert_fn=np.testing.assert_equal,
+    )
+
+    x = ps.float32()
+    compare_numba_and_py(
+        [x],
+        psm.sigmoid(x).astype("float64"),
+        [np.float32(0.5)],
+        assert_fn=np.testing.assert_equal,
+    )
+
+
 @pytest.mark.parametrize(
     "x, y",
     [

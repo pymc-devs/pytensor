@@ -64,6 +64,12 @@ class TypedListConstant(_typed_list_py_operators, Constant):
 
     """
 
+    def signature(self):
+        element_type = self.type.ttype
+        return self.type, tuple(
+            element_type.make_constant(value).signature() for value in self.data
+        )
+
 
 TypedListType.constant_type = TypedListConstant
 

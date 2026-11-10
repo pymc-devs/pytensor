@@ -1,5 +1,9 @@
+from collections.abc import Callable
+
 import mlx.core as mx
 import numpy as np
+
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
 
 
 def _exp(t, const):
@@ -31,16 +35,20 @@ def _exp(t, const):
 _LN2 = 0.6931471805599453
 
 
-def _working_precision(x):
-    """Set up a series approximation over ``x``.
+def _working_precision(x, dtype):
+    """Set up a series approximation over ``x`` for an op whose output is ``dtype``.
 
-    Half precision is widened to float32, having too few mantissa bits for series
-    coefficients to mean anything.
+    The approximation runs at the output dtype the graph declares, never at the dtype
+    of ``x``, which is how an integer input reaches a float result. Half precision is
+    widened to float32, having too few mantissa bits for series coefficients to mean
+    anything.
 
     Parameters
     ----------
     x : mx.array
         Input to the approximation.
+    dtype : str
+        Output dtype of the op's node.
 
     Returns
     -------
@@ -51,15 +59,16 @@ def _working_precision(x):
         weak-types Python floats to float32, which would otherwise silently pin a
         float64 approximation to float32 accuracy.
     out_dtype : MLX dtype
-        The dtype the result should be cast back to.
+        The dtype the result should be cast back to: ``dtype``, narrowed to float32
+        where the default device has no float64.
     """
-    x = mx.array(x)
-    working_dtype = mx.float32 if x.dtype in (mx.float16, mx.bfloat16) else x.dtype
+    out_dtype = convert_dtype_to_mlx(dtype)
+    working_dtype = mx.float32 if out_dtype in (mx.float16, mx.bfloat16) else out_dtype
 
     def const(value):
         return mx.array(value, dtype=working_dtype)
 
-    return x.astype(working_dtype), const, x.dtype
+    return mx.asarray(x).astype(working_dtype), const, out_dtype
 
 
 # The floor a continued fraction puts under its own denominators. It has to be a normal
@@ -134,3 +143,72 @@ static inline float log1p_deficit(float z, float one_plus_z) {{
 }}
 """
 )
+
+
+_METAL_UNARY_KERNELS: dict[tuple[str, str, str], Callable] = {}
+
+
+def _metal_unary_kernel(name, header, source):
+    """Build and cache the one-input Metal kernel ``name``.
+
+    Metal compiles the source lazily, so a malformed source fails when the kernel is
+    first evaluated rather than here.
+    """
+    key = (name, header, source)
+    if key not in _METAL_UNARY_KERNELS:
+        _METAL_UNARY_KERNELS[key] = mx.fast.metal_kernel(
+            name=f"pytensor_{name}",
+            input_names=["x"],
+            output_names=["out"],
+            header=header,
+            source=source,
+        )
+    return _METAL_UNARY_KERNELS[key]
+
+
+def _metal_unary_call(x, *, name, header, source):
+    """Evaluate an elementwise Metal kernel over ``x``, or return None to fall back.
+
+    Metal has no float64 and the kernel needs the GPU stream, which between them leave
+    exactly the case the vectorized path handles least well and float64 needs least: the
+    default device at single or half precision. The kernel reads half precision directly
+    and computes in float32, so a half-precision input is rounded once, on the way out.
+
+    Parameters
+    ----------
+    x : mx.array
+        Input, of any rank.
+    name : str
+        Kernel name.
+    header : str
+        Metal source placed ahead of the kernel body.
+    source : str
+        Kernel body. It reads ``x[i]`` and writes ``out[i]`` for the thread index ``i``,
+        computing in ``float`` and casting the result to ``T``, the dtype of ``x``.
+
+    Returns
+    -------
+    out : mx.array or None
+        The result at the shape and dtype of ``x``, or None where the kernel does not
+        apply.
+    """
+    if (
+        x.dtype not in (mx.float32, mx.float16, mx.bfloat16)
+        or not mx.metal.is_available()
+        or mx.default_device() != mx.gpu
+    ):
+        return None
+    kernel = _metal_unary_kernel(name, header, source)
+    # The kernel indexes a flat buffer, so a 0-d input has to be raised to 1-d before it
+    # is passed: Metal binds a scalar as a value rather than a pointer, and subscripting
+    # it fails to compile. Reshaping covers every rank at once
+    flat = x.reshape(-1)
+    (out,) = kernel(
+        inputs=[flat],
+        template=[("T", flat.dtype)],
+        grid=(flat.size, 1, 1),
+        threadgroup=(min(256, max(flat.size, 1)), 1, 1),
+        output_shapes=[flat.shape],
+        output_dtypes=[flat.dtype],
+    )
+    return out.reshape(x.shape)

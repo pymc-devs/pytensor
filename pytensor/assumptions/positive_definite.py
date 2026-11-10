@@ -5,17 +5,22 @@ from pytensor.assumptions.core import (
     all_inputs_have_key,
     propagate_first,
     register_assumption,
+    register_client_inference,
     true_if,
 )
-from pytensor.assumptions.dimshuffle import left_expand_dims_propagates_matrix_property
+from pytensor.assumptions.dimshuffle import (
+    conjugate_transpose_input,
+    left_expand_dims_propagates_matrix_property,
+)
 from pytensor.assumptions.dot import match_congruence
 from pytensor.assumptions.subtensor import subtensor_propagates_matrix_property
-from pytensor.scalar.basic import Add, Conj, Mul
+from pytensor.scalar.basic import Add, Mul
 from pytensor.tensor.basic import AllocDiag, Eye
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
 )
@@ -42,6 +47,12 @@ register_assumption(POSITIVE_DEFINITE, BlockDiagonal)(all_inputs_have_key)
 register_assumption(POSITIVE_DEFINITE, MatrixInverse)(propagate_first)
 register_assumption(POSITIVE_DEFINITE, KroneckerProduct)(all_inputs_have_key)
 register_assumption(POSITIVE_DEFINITE, Subtensor)(subtensor_propagates_matrix_property)
+
+
+@register_client_inference(POSITIVE_DEFINITE, Solve)
+def _solve_promises_positive_definite(key, op, node, input_index):
+    """``assume_a="pos"`` promises a positive definite ``a``."""
+    return true_if(input_index == 0 and op.assume_a == "pos")[0]
 
 
 def _is_psd_full_shape(inp, feature) -> bool:
@@ -87,25 +98,6 @@ def _elemwise(key, op, feature, fgraph, node, input_states):
     return [FactState.UNKNOWN] * len(node.outputs)
 
 
-def _is_conjugate_transpose_of(y, x):
-    """Check if y is the conjugate transpose of x (x.T.conj() or x.conj().T)."""
-    match y.owner_op_and_inputs:
-        case (Elemwise(scalar_op=Conj()), y_inner):  # x.T.conj()
-            match y_inner.owner_op_and_inputs:
-                case (DimShuffle(is_left_expanded_matrix_transpose=True), inner) if (
-                    inner is x
-                ):
-                    return True
-        case (
-            DimShuffle(is_left_expanded_matrix_transpose=True),
-            y_inner,
-        ):  # x.conj().T
-            match y_inner.owner_op_and_inputs:
-                case (Elemwise(scalar_op=Conj()), inner) if inner is x:
-                    return True
-    return False
-
-
 @register_assumption(POSITIVE_DEFINITE, DimShuffle)
 def _dimshuffle(key, op, feature, fgraph, node, input_states):
     """PSD survives matrix transpose and left-expand-dims (batch broadcast)."""
@@ -134,16 +126,8 @@ def _dot(key, op, feature, fgraph, node, input_states):
     x, y = node.inputs
     is_complex = x.type.dtype.startswith("complex")
 
-    for left, right in [(x, y), (y, x)]:
-        if is_complex:
-            if _is_conjugate_transpose_of(right, left):
-                return [FactState.TRUE]
-        else:
-            match right.owner_op_and_inputs:
-                case (DimShuffle(is_left_expanded_matrix_transpose=True), inner) if (
-                    inner is left
-                ):
-                    return [FactState.TRUE]
+    if conjugate_transpose_input(y) is x or conjugate_transpose_input(x) is y:
+        return [FactState.TRUE]
 
     # Congruence: M @ S @ M.T (or its mirror) is PSD when S is PSD. Only valid
     # for real matrices here -- the complex analogue requires M^H, which would

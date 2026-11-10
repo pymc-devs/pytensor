@@ -5,6 +5,7 @@ import numpy as np
 
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.array_utils import _copyto
 from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
@@ -14,6 +15,7 @@ from pytensor.link.numba.dispatch.string_codegen import (
     build_source_code,
     create_tuple_string,
 )
+from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -27,6 +29,7 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
+from pytensor.tensor.rewriting.scalarize import ScalarizedJoin
 
 
 @register_funcify_default_op_cache_key(AllocEmpty)
@@ -313,6 +316,49 @@ def numba_funcify_Join(op, node, **kwargs):
     return numba_basic.numba_njit(join_fn, boundscheck=False), cache_key
 
 
+@register_funcify_and_cache_key(ScalarizedJoin)
+def numba_funcify_ScalarizedJoin(op, node, **kwargs):
+    # Same allocate-and-write shape as the 1-d ``Join`` above, but each entry may
+    # be a bare scalar (which contributes a single element) rather than an array,
+    # so it is written directly without ever being boxed.
+    dtype = np.dtype(node.outputs[0].type.dtype)
+    is_scalar = [isinstance(inp.type, ScalarType) for inp in node.inputs]
+    names = [f"i{i}" for i in range(len(node.inputs))]
+    length = " + ".join(
+        "1" if scalar else f"{name}.shape[0]"
+        for name, scalar in zip(names, is_scalar, strict=True)
+    )
+    code: list[str | CODE_TOKEN] = [
+        f"def scalar_join({', '.join(names)}):",
+        CODE_TOKEN.INDENT,
+        f"out = np.empty({length}, dtype=dtype)",
+        "offset = 0",
+    ]
+    for name, scalar in zip(names, is_scalar, strict=True):
+        if scalar:
+            code.extend([f"out[offset] = {name}", "offset += 1"])
+        else:
+            code.extend(
+                [
+                    f"for k in range({name}.shape[0]):",
+                    CODE_TOKEN.INDENT,
+                    f"out[offset] = {name}[k]",
+                    "offset += 1",
+                    CODE_TOKEN.DEDENT,
+                ]
+            )
+    code.extend(["return out", CODE_TOKEN.DEDENT])
+    scalar_join = compile_numba_function_src(
+        build_source_code(code),
+        "scalar_join",
+        global_env=globals() | {"np": np, "dtype": dtype},
+    )
+    key = sha256(
+        str(("ScalarizedJoin", 1, str(dtype), tuple(is_scalar))).encode()
+    ).hexdigest()
+    return numba_basic.numba_njit(scalar_join), key
+
+
 @register_funcify_default_op_cache_key(Split)
 def numba_funcify_Split(op, **kwargs):
     outputs = create_tuple_string([f"outputs[{i}]" for i in range(op.len_splits)])
@@ -377,10 +423,10 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
                     new_entry = x[(*leading_dims, i, *middle_dims, i + offset)]
                 else:
                     new_entry = x[(*leading_dims, i - offset, *middle_dims, i)]
-                out[..., i] = new_entry
+                _copyto(out[..., i], new_entry)
             return out
 
-    cache_version = 1
+    cache_version = 2
     return extract_diag, cache_version
 
 
@@ -437,9 +483,10 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
 def numba_funcify_ScalarFromTensor(op, **kwargs):
     @numba_basic.numba_njit
     def scalar_from_tensor(x):
-        return x.item()
+        return x[()]
 
-    return scalar_from_tensor
+    cache_version = 1
+    return scalar_from_tensor, cache_version
 
 
 @register_funcify_default_op_cache_key(Nonzero)

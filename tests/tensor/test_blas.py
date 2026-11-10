@@ -24,7 +24,6 @@ from pytensor.tensor.blas import (
     Dot22Scalar,
     Gemm,
     Gemv,
-    Ger,
     _batched_dot,
     _dot22,
     _dot22scalar,
@@ -34,24 +33,17 @@ from pytensor.tensor.blas import (
     gemv,
     gemv_inplace,
     gemv_no_inplace,
-    ger,
-    ger_destructive,
 )
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import Dot, dot, mean, mul, outer, sigmoid
-from pytensor.tensor.rewriting.blas import local_dot22_to_dot22scalar, local_gemm_to_ger
+from pytensor.tensor.math import Dot, dot, mean, mul, sigmoid
+from pytensor.tensor.rewriting.blas import local_dot22_to_dot22scalar
 from pytensor.tensor.type import (
-    cmatrix,
     cscalar,
     dmatrix,
     drow,
     dscalar,
     fmatrix,
-    fscalar,
-    imatrix,
     int_dtypes,
-    iscalar,
-    ivector,
     matrices,
     matrix,
     scalar,
@@ -60,8 +52,6 @@ from pytensor.tensor.type import (
     tensor3,
     vector,
     vectors,
-    zmatrix,
-    zscalar,
 )
 from tests import unittest_tools
 from tests import unittest_tools as utt
@@ -1638,307 +1628,6 @@ class TestDgemv(BaseGemv, unittest_tools.OptimizationTestMixin):
 # class TestZgemv(BaseGemv):
 #    dtype = complex128
 
-###############################################################################
-# Tests for Ger
-###############################################################################
-
-
-class TestGerMakeNode:
-    def setup_method(self):
-        self.iv = tensor(dtype="int32", shape=(None,))
-        self.fv = tensor(dtype="float32", shape=(None,))
-        self.fv1 = tensor(dtype="float32", shape=(1,))
-        self.dv = tensor(dtype="float64", shape=(None,))
-        self.dv1 = tensor(dtype="float64", shape=(1,))
-        self.cv = tensor(dtype="complex64", shape=(None,))
-        self.zv = tensor(dtype="complex128", shape=(None,))
-
-        self.fv_2 = tensor(dtype="float32", shape=(None,))
-        self.fv1_2 = tensor(dtype="float32", shape=(1,))
-        self.dv_2 = tensor(dtype="float64", shape=(None,))
-        self.dv1_2 = tensor(dtype="float64", shape=(1,))
-        self.cv_2 = tensor(dtype="complex64", shape=(None,))
-        self.zv_2 = tensor(dtype="complex128", shape=(None,))
-
-        self.fm = fmatrix()
-        self.dm = dmatrix()
-        self.cm = cmatrix()
-        self.zm = zmatrix()
-
-        self.fa = fscalar()
-        self.da = dscalar()
-        self.ca = cscalar()
-        self.za = zscalar()
-
-    def test_works_on_all_valid_dtypes(self):
-        assert self.fm.type == ger(self.fm, self.fa, self.fv, self.fv_2).type
-        assert self.fm.type == ger(self.fm, self.fa, self.fv, self.fv_2).type
-        assert self.fm.type == ger(self.fm, self.fa, self.fv, self.fv_2).type
-        assert self.fm.type == ger(self.fm, self.fa, self.fv, self.fv_2).type
-
-    def test_fails_on_invalid_dtypes(self):
-        with pytest.raises(TypeError):
-            ger(imatrix(), iscalar(), ivector(), ivector())
-
-    def test_fails_for_nonscalar_alpha(self):
-        with pytest.raises(TypeError):
-            ger(self.fm, self.fm, self.fv, self.fv_2)
-        # boundary case - fv1 has the right dtype and could be dimshuffled to a
-        # scalar, but that's not make_node's job.
-        with pytest.raises(TypeError):
-            ger(self.fm, self.fv1, self.fv, self.fv_2)
-        # actually doing the aforementioned dimshuffle makes it work
-        assert (
-            self.fm.type == ger(self.fm, self.fv1.dimshuffle(), self.fv, self.fv_2).type
-        )
-
-    def test_fails_for_nonmatrix_A(self):
-        with pytest.raises(TypeError):
-            ger(self.fv, self.fa, self.fv, self.fv_2)
-
-    def test_fails_for_nonvector_x_or_y(self):
-        with pytest.raises(TypeError):
-            ger(self.fm, self.fa, self.fv.dimshuffle("x", 0), self.fv_2)
-        with pytest.raises(TypeError):
-            ger(self.fm, self.fa, self.fv, self.fv_2.dimshuffle("x", 0))
-
-    def test_fails_for_mixed_dtypes(self):
-        with pytest.raises(TypeError):
-            ger(self.dm, self.fa, self.fv, self.fv_2)
-        with pytest.raises(TypeError):
-            ger(self.fm, self.da, self.fv, self.fv_2)
-        with pytest.raises(TypeError):
-            ger(self.fm, self.fa, self.dv, self.fv_2)
-        with pytest.raises(TypeError):
-            ger(self.fm, self.fa, self.fv, self.dv_2)
-        with pytest.raises(TypeError):
-            ger(self.cm, self.fa, self.fv, self.dv_2)
-        with pytest.raises(TypeError):
-            ger(self.cm, self.fa, self.fv, self.zv_2)
-
-
-class TestGerOpContract(unittest_tools.OpContractTestMixin):
-    def setup_method(self):
-        self.ops = [ger, ger_destructive]
-
-    def clone(self, op):
-        return Ger(op.destructive)
-
-
-class TestGer(unittest_tools.OptimizationTestMixin):
-    shared = staticmethod(shared)
-
-    def setup_method(self):
-        self.mode = get_mode("cvm").excluding("c_blas", "scipy_blas")
-        dtype = self.dtype = "float64"  # optimization isn't dtype-dependent
-        self.A = tensor(dtype=dtype, shape=(None, None))
-        self.a = tensor(dtype=dtype, shape=())
-        self.x = tensor(dtype=dtype, shape=(None,))
-        self.y = tensor(dtype=dtype, shape=(None,))
-        self.ger = ger
-        self.ger_destructive = ger_destructive
-        self.gemm = gemm_no_inplace
-
-    def function(self, inputs, outputs, updates=None):
-        if updates is None:
-            updates = []
-        return function(inputs, outputs, self.mode, updates=updates)
-
-    def b(self, bval):
-        return pt.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
-
-    def test_b_0_triggers_ger(self):
-        # test local_gemm_to_ger opt
-        assert local_gemm_to_ger.transform(
-            None,
-            gemm_no_inplace(
-                self.A,
-                self.a,
-                self.x.dimshuffle(0, "x"),
-                self.y.dimshuffle("x", 0),
-                self.b(0),
-            ).owner,
-        )
-
-    def test_b_1_triggers_ger(self):
-        # test local_gemm_to_ger opt
-        assert local_gemm_to_ger.transform(
-            None,
-            gemm_no_inplace(
-                self.A,
-                self.a,
-                self.x.dimshuffle(0, "x"),
-                self.y.dimshuffle("x", 0),
-                self.b(1),
-            ).owner,
-        )
-
-    def test_b_other_does_not_triggers_ger(self):
-        # test local_gemm_to_ger opt
-        assert not local_gemm_to_ger.transform(
-            None,
-            gemm_no_inplace(
-                self.A,
-                self.a,
-                self.x.dimshuffle(0, "x"),
-                self.y.dimshuffle("x", 0),
-                self.b(1.5),
-            ).owner,
-        )
-
-    def test_b_nonconst_does_not_triggers_ger(self):
-        # test local_gemm_to_ger opt
-        assert not local_gemm_to_ger.transform(
-            None,
-            gemm_no_inplace(
-                self.A,
-                self.a,
-                self.x.dimshuffle(0, "x"),
-                self.y.dimshuffle("x", 0),
-                self.a,
-            ).owner,
-        )
-
-    def test_outer(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        f = self.function([self.x, self.y], outer(self.x, self.y))
-        self.assertFunctionContains(f, self.ger_destructive)
-        f(
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-
-    def test_A_plus_outer(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        f = self.function([self.A, self.x, self.y], self.A + outer(self.x, self.y))
-        self.assertFunctionContains(f, self.ger)
-        f(
-            rng.random((5, 4)).astype(self.dtype),
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-        f(
-            rng.random((5, 4)).astype(self.dtype)[::-1, ::-1],
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-
-    def test_A_plus_scaled_outer(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        f = self.function(
-            [self.A, self.x, self.y], self.A + 0.1 * outer(self.x, self.y)
-        )
-        self.assertFunctionContains(f, self.ger)
-        f(
-            rng.random((5, 4)).astype(self.dtype),
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-        f(
-            rng.random((5, 4)).astype(self.dtype)[::-1, ::-1],
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-
-    def test_scaled_A_plus_scaled_outer(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        f = self.function(
-            [self.A, self.x, self.y],
-            np.asarray(0.2, self.dtype) * self.A
-            + np.asarray(0.1, self.dtype) * outer(self.x, self.y),
-        )
-        # Why gemm? This make the graph simpler did we test that it
-        # make it faster?
-        self.assertFunctionContains(f, self.gemm)
-        f(
-            rng.random((5, 4)).astype(self.dtype),
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-        f(
-            rng.random((5, 4)).astype(self.dtype)[::-1, ::-1],
-            rng.random(5).astype(self.dtype),
-            rng.random(4).astype(self.dtype),
-        ).shape == (5, 4)
-
-    def given_dtype(self, dtype, M, N, *, destructive=True):
-        # test corner case shape and dtype
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-
-        A = tensor(dtype=dtype, shape=(None, None))
-        x = tensor(dtype=dtype, shape=(None,))
-        y = tensor(dtype=dtype, shape=(None,))
-
-        f = self.function([A, x, y], A + 0.1 * outer(x, y))
-        self.assertFunctionContains(
-            f, self.ger_destructive if destructive else self.ger
-        )
-        f(
-            rng.random((M, N)).astype(dtype),
-            rng.random(M).astype(dtype),
-            rng.random(N).astype(dtype),
-        ).shape == (5, 4)
-        f(
-            rng.random((M, N)).astype(dtype)[::-1, ::-1],
-            rng.random(M).astype(dtype),
-            rng.random(N).astype(dtype),
-        ).shape == (5, 4)
-
-    def test_f32_0_0(self):
-        return self.given_dtype("float32", 0, 0, destructive=config.floatX != "float32")
-
-    def test_f32_1_0(self):
-        return self.given_dtype("float32", 1, 0, destructive=config.floatX != "float32")
-
-    def test_f32_0_1(self):
-        return self.given_dtype("float32", 0, 1, destructive=config.floatX != "float32")
-
-    def test_f32_1_1(self):
-        return self.given_dtype("float32", 1, 1, destructive=config.floatX != "float32")
-
-    def test_f32_4_4(self):
-        return self.given_dtype("float32", 4, 4, destructive=config.floatX != "float32")
-
-    def test_f32_7_1(self):
-        return self.given_dtype("float32", 7, 1, destructive=config.floatX != "float32")
-
-    def test_f32_1_2(self):
-        return self.given_dtype("float32", 1, 2, destructive=config.floatX != "float32")
-
-    def test_f64_4_5(self):
-        return self.given_dtype("float64", 4, 5, destructive=False)
-
-    def test_c64_7_1(self):
-        return self.given_dtype("complex64", 7, 1)
-
-    def test_c128_1_9(self):
-        return self.given_dtype("complex128", 1, 9)
-
-    def test_inplace(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        A = shared(rng.random((4, 5)).astype(self.dtype))
-        f = self.function(
-            [self.x, self.y],
-            [],
-            updates=[
-                (A, A + pt.constant(0.1, dtype=self.dtype) * outer(self.x, self.y))
-            ],
-        )
-        self.assertFunctionContains(f, self.ger_destructive)
-        # TODO: Test something about the updated value of `A`
-        f(
-            rng.random(4).astype(self.dtype),
-            rng.random(5).astype(self.dtype),
-        )
-
-        A.set_value(
-            A.get_value(borrow=True, return_internal_type=True)[::-1, ::-1], borrow=True
-        )
-        f(
-            rng.random(4).astype(self.dtype),
-            rng.random(5).astype(self.dtype),
-        )
-
 
 class TestBlasStrides:
     dtype = "float64"
@@ -2249,64 +1938,6 @@ class TestBlasStrides:
         self.cmp_gemv(1, (1, 0), 0, rng)
         self.cmp_gemv(0, (0, 0), 0, rng)
 
-    def cmp_ger(self, a_shp, b_shp, c_shp, rng):
-        av = self.random(*a_shp, rng=rng)
-        bv = self.random(b_shp, rng=rng)
-        cv = self.random(c_shp, rng=rng)
-        l = np.float32(0.2)
-
-        a = shared(av, "a")
-        b = shared(bv, "b")
-        c = shared(cv, "c")
-        a_t = shared(av.T, "a.T")
-
-        a_dev = a.get_value(borrow=False, return_internal_type=True)
-        b_dev = b.get_value(borrow=False, return_internal_type=True)
-        c_dev = c.get_value(borrow=False, return_internal_type=True)
-
-        f_n = function([], [], updates=[(a, (a + l * outer(b, c)))], mode=self.mode)
-
-        f_t = function(
-            [], [], updates=[(a_t, (a_t + l * outer(b, c).T))], mode=self.mode
-        )
-
-        # Try with all stride patterns, and all transposed patterns
-        for step_signs in product((1, -1), repeat=4):
-            for step in (1, 2):
-                a_step1, a_step2, b_step, c_step = (s * step for s in step_signs)
-
-                a.set_value(a_dev.copy()[::a_step1, ::a_step2], borrow=True)
-                a_t.set_value(
-                    np.transpose(a_dev.copy())[::a_step1, ::a_step2], borrow=True
-                )
-                b.set_value(b_dev.copy()[::b_step], borrow=True)
-                c.set_value(c_dev.copy()[::c_step], borrow=True)
-
-                f_n()
-                n_n = av[::a_step1, ::a_step2] + l * np.outer(
-                    bv[::b_step], cv[::c_step]
-                )
-                assert np.allclose(a.get_value(), n_n), (a.get_value(), n_n)
-
-                f_t()
-                n_t = (
-                    av.T[::a_step1, ::a_step2]
-                    + l * np.outer(bv[::b_step], cv[::c_step]).T
-                )
-                assert np.allclose(a_t.get_value(), n_t), (a_t.get_value(), n_t)
-
-    def test_ger_strides(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        self.cmp_ger((3, 5), 3, 5, rng)
-        self.cmp_ger((1, 5), 1, 5, rng)
-        self.cmp_ger((3, 1), 3, 1, rng)
-        self.cmp_ger((1, 1), 1, 1, rng)
-        self.cmp_ger((0, 5), 0, 5, rng)
-        self.cmp_ger((3, 0), 3, 0, rng)
-        self.cmp_ger((0, 1), 0, 1, rng)
-        self.cmp_ger((1, 0), 1, 0, rng)
-        self.cmp_ger((0, 0), 0, 0, rng)
-
     def test_gemm_non_contiguous(self):
         # test_gemm_non_contiguous: Test if GEMM works well with non-contiguous matrices.
         aval = np.ones((6, 2))
@@ -2426,23 +2057,6 @@ class TestInferShape(unittest_tools.InferShapeTester):
                 np.asarray(0.5, dtype=config.floatX),
             ],
             Gemv,
-        )
-
-    def test_ger(self):
-        rng = np.random.default_rng(unittest_tools.fetch_seed())
-        A = matrix("A")
-        x, y = vectors("xy")
-        a = scalar("a")
-        self._compile_and_check(
-            [A, a, x, y],
-            [ger(A, a, x, y)],
-            [
-                rng.random((2, 3)).astype(config.floatX),
-                np.asarray(0.5, dtype=config.floatX),
-                rng.random((2,)).astype(config.floatX),
-                rng.random((3,)).astype(config.floatX),
-            ],
-            Ger,
         )
 
 

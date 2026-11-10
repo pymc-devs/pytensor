@@ -119,6 +119,16 @@ def val_to_zptr(typingctx, data):
 
 
 @intrinsic
+def val_to_cptr(typingctx, data):
+    def impl(context, builder, signature, args):
+        ptr = cgutils.alloca_once_value(builder, args[0])
+        return ptr
+
+    sig = types.CPointer(types.complex64)(types.complex64)
+    return sig, impl
+
+
+@intrinsic
 def val_to_dptr(typingctx, data):
     def impl(context, builder, signature, args):
         ptr = cgutils.alloca_once_value(builder, args[0])

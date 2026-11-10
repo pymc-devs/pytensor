@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
+from scipy.special import expit
 
 import pytensor.scalar.basic as ps
 import pytensor.tensor as pt
+from pytensor import function
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
@@ -31,7 +33,7 @@ from pytensor.tensor.math import (
     tri_gamma,
 )
 from pytensor.tensor.type import matrix, scalar, vector
-from tests.link.jax.test_basic import compare_jax_and_py
+from tests.link.jax.test_basic import compare_jax_and_py, jax_mode
 
 
 jax = pytest.importorskip("jax")
@@ -261,13 +263,37 @@ def test_log1mexp():
 
 def test_nnet():
     x = vector("x")
-    x_test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    x_test_value = np.r_[-1e3, -40.0, -17.5, 0.0, 1.0, 17.5, 40.0, 1e3].astype(
+        config.floatX
+    )
 
     out = sigmoid(x)
     compare_jax_and_py([x], [out], [x_test_value])
 
     out = softplus(x)
     compare_jax_and_py([x], [out], [x_test_value])
+
+    x = vector("x", dtype="uint8")
+    compare_jax_and_py(
+        [x], [sigmoid(x), softplus(x)], [np.array([0, 20, 255], dtype="uint8")]
+    )
+
+
+@pytest.mark.parametrize("op", [sigmoid, softplus])
+def test_sigmoid_softplus_jax_autodiff(op):
+    # JAX autodiff of the lowered formulas, as with a JAX gradient backend
+    x = scalar("x", dtype="float64")
+    jax_fn = function([x], op(x), mode=jax_mode).vm.jit_fn
+    d1 = jax.grad(lambda v: jax_fn(v)[0])
+    d2 = jax.grad(d1)
+
+    x_test = np.array([0.0, 1e-8, -1e-8, 20.0, -20.0, 800.0, -800.0])
+    s, sm = expit(x_test), expit(-x_test)
+    expected = [s, s * sm] if op is softplus else [s * sm, s * sm * (sm - s)]
+    for d, expected_d in zip((d1, d2), expected):
+        np.testing.assert_allclose(
+            [d(v) for v in x_test], expected_d, rtol=1e-7, atol=1e-15
+        )
 
 
 def test_jax_variadic_Scalar():

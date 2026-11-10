@@ -7,13 +7,11 @@ import scipy.special
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.scalar.math import BetaInc
 from pytensor.tensor.type import vector
-from tests.link.mlx.test_basic import compare_mlx_and_py
+from tests.link.mlx.test_basic import compare_mlx_and_py, funcify_from_graph
 
 
 mlx = pytest.importorskip("mlx.core")
-from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.link.mlx.dispatch.scalar.beta import (
     _C0_MIN_ETA,
     _TEMME_MAX_ETA,
@@ -57,12 +55,13 @@ def _sample(rng, shape_range, ratio_range, n):
 
 def _direct(a, b, x, dtype):
     """The dispatch on its own, off the graph, so a tolerance can be tight."""
+    betainc = funcify_from_graph(pt.betainc, dtype, dtype, dtype)
     with mlx.stream(mlx.cpu):
         return np.asarray(
-            mlx_funcify(BetaInc())(
-                mlx.array(a, dtype=dtype),
-                mlx.array(b, dtype=dtype),
-                mlx.array(x, dtype=dtype),
+            betainc(
+                mlx.array(a, dtype=getattr(mlx, dtype)),
+                mlx.array(b, dtype=getattr(mlx, dtype)),
+                mlx.array(x, dtype=getattr(mlx, dtype)),
             )
         )
 
@@ -150,7 +149,7 @@ def test_betainc_float64_precision(shape_range, ratio_range, temme_share):
     else:
         assert not in_temme.any(), "this row was meant to stay on the fraction"
 
-    got = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
+    got = _direct(a_test_value, b_test_value, x_test_value, "float64")
 
     # Past 1e-290 a tail has run out of exponent rather than of accuracy, so those
     # elements are dropped instead of carrying a relative claim about a denormal
@@ -177,7 +176,7 @@ def test_betainc_uncovered_corner():
 
     truth = scipy.special.betainc(a_test_value, b_test_value, x_test_value)
     keep = truth > 1e-290
-    got = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
+    got = _direct(a_test_value, b_test_value, x_test_value, "float64")
     np.testing.assert_allclose(got[keep], truth[keep], rtol=1e-5)
 
 
@@ -202,7 +201,7 @@ def test_betainc_float32_precision(shape_range, ratio_range, tolerance):
     a_test_value = a_test_value.astype("float32")
     b_test_value = b_test_value.astype("float32")
     x_test_value = x_test_value.astype("float32")
-    got = _direct(a_test_value, b_test_value, x_test_value, mlx.float32)
+    got = _direct(a_test_value, b_test_value, x_test_value, "float32")
 
     # float32 runs out of exponent long before float64 does, so the comparison stops at
     # its smallest normal rather than carrying a relative claim about a denormal
@@ -220,7 +219,7 @@ def test_betainc_deep_tail():
     # came out 17% high. eta is odd under the swap and is negated instead.
     truth = scipy.special.betainc(*_DEEP_TAIL)
     assert truth.max() < 1e-10, "these points have to sit in the tail to test anything"
-    np.testing.assert_allclose(_direct(*_DEEP_TAIL, mlx.float64), truth, rtol=1e-9)
+    np.testing.assert_allclose(_direct(*_DEEP_TAIL, "float64"), truth, rtol=1e-9)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
@@ -235,7 +234,7 @@ def test_betainc_extreme_ratio(dtype):
     b_test_value = np.concatenate([ratios, np.ones_like(ratios), [1e-3, 1e5]])
     x_test_value = np.full(a_test_value.size, 0.5)
 
-    got = _direct(a_test_value, b_test_value, x_test_value, getattr(mlx, dtype))
+    got = _direct(a_test_value, b_test_value, x_test_value, dtype)
     assert not np.isnan(got).any(), "an extreme parameter ratio returned nan"
     np.testing.assert_allclose(
         got,
@@ -267,7 +266,7 @@ def test_betainc_lopsided_parameters(dtype):
     moves = (truth > 1e-6) & (truth < 1.0 - 1e-6)
     assert moves.mean() > 0.6, "most points have to land off the saturated ends"
 
-    got = _direct(a_test_value, b_test_value, x_test_value, getattr(mlx, dtype))
+    got = _direct(a_test_value, b_test_value, x_test_value, dtype)
     assert not np.isnan(got).any(), "a lopsided parameter pair returned nan"
     keep = truth > np.finfo(dtype).tiny
     # float32 is loose here for the reason it is loose everywhere the parameters are
@@ -305,7 +304,7 @@ def test_betainc_temme_boundary():
     x_test_value = np.array(values)
 
     np.testing.assert_allclose(
-        _direct(a_test_value, b_test_value, x_test_value, mlx.float64),
+        _direct(a_test_value, b_test_value, x_test_value, "float64"),
         scipy.special.betainc(a_test_value, b_test_value, x_test_value),
         rtol=1e-8,
     )
@@ -337,7 +336,7 @@ def test_betainc_c0_threshold():
         np.array(v) for v in (shapes, others, values)
     )
 
-    got = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
+    got = _direct(a_test_value, b_test_value, x_test_value, "float64")
     np.testing.assert_allclose(
         got,
         scipy.special.betainc(a_test_value, b_test_value, x_test_value),
@@ -347,7 +346,7 @@ def test_betainc_c0_threshold():
 
 def test_betainc_edge_cases():
     np.testing.assert_allclose(
-        _direct(*_EDGE_CASES, mlx.float64),
+        _direct(*_EDGE_CASES, "float64"),
         scipy.special.betainc(*_EDGE_CASES),
         rtol=1e-9,
         atol=0.0,
@@ -369,8 +368,8 @@ def test_betainc_reflection_identity():
     x_test_value = x_test_value[exact]
     assert exact.mean() > 0.5, "the sample has to keep enough points to test anything"
 
-    left = _direct(a_test_value, b_test_value, x_test_value, mlx.float64)
-    right = _direct(b_test_value, a_test_value, 1.0 - x_test_value, mlx.float64)
+    left = _direct(a_test_value, b_test_value, x_test_value, "float64")
+    right = _direct(b_test_value, a_test_value, 1.0 - x_test_value, "float64")
     np.testing.assert_allclose(left + right, 1.0, rtol=0.0, atol=1e-9)
 
 
@@ -471,9 +470,9 @@ def test_betainc_paths_agree():
         assert kernel is not None, "the kernel did not engage, so this test is vacuous"
         from_kernel = np.asarray(kernel).astype("float64")
 
-    from_fallback = _direct(
-        a_test_value, b_test_value, x_test_value, mlx.float32
-    ).astype("float64")
+    from_fallback = _direct(a_test_value, b_test_value, x_test_value, "float32").astype(
+        "float64"
+    )
 
     # A nan is how the two paths diverge when one of them loses a parameter, so it fails
     # here rather than being masked out below

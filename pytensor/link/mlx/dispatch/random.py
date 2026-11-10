@@ -74,8 +74,8 @@ def mlx_sample_fn(op, node):
 def mlx_sample_fn_normal(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        loc = mx.array(loc, dtype=mlx_dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        loc = mx.asarray(loc, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
         return loc + scale * mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
 
@@ -86,8 +86,8 @@ def mlx_sample_fn_normal(op, node):
 def mlx_sample_fn_laplace(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        loc = mx.array(loc, dtype=mlx_dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        loc = mx.asarray(loc, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
         return loc + scale * mx.random.laplace(
             shape=shape, dtype=mlx_dtype, key=rng_key
@@ -100,8 +100,8 @@ def mlx_sample_fn_laplace(op, node):
 def mlx_sample_fn_gumbel(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        loc = mx.array(loc, dtype=mlx_dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        loc = mx.asarray(loc, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
         return loc + scale * mx.random.gumbel(shape=shape, dtype=mlx_dtype, key=rng_key)
 
@@ -112,8 +112,8 @@ def mlx_sample_fn_gumbel(op, node):
 def mlx_sample_fn_uniform(op, node):
     def sample_fn(rng_key, size, dtype, low, high):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        low = mx.array(low, dtype=mlx_dtype)
-        high = mx.array(high, dtype=mlx_dtype)
+        low = mx.asarray(low, dtype=mlx_dtype)
+        high = mx.asarray(high, dtype=mlx_dtype)
         shape = _shape_from_size(size, low, high)
         return mx.random.uniform(
             low=low, high=high, shape=shape, dtype=mlx_dtype, key=rng_key
@@ -125,8 +125,8 @@ def mlx_sample_fn_uniform(op, node):
 @mlx_sample_fn.register(ptr.IntegersRV)
 def mlx_sample_fn_integers(op, node):
     def sample_fn(rng_key, size, dtype, low, high):
-        low = mx.array(low)
-        high = mx.array(high)
+        low = mx.asarray(low)
+        high = mx.asarray(high)
         shape = _shape_from_size(size, low, high)
         # Sample at full int64 width and cast the result: PyTensor casts the
         # output, not the bounds, so narrow/wide dtypes don't corrupt the range.
@@ -140,7 +140,7 @@ def mlx_sample_fn_integers(op, node):
 @mlx_sample_fn.register(ptr.BernoulliRV)
 def mlx_sample_fn_bernoulli(op, node):
     def sample_fn(rng_key, size, dtype, p):
-        p = mx.array(p)
+        p = mx.asarray(p)
         shape = mlx_to_list_shape(size) if size is not None else None
         # MLX draws bool; PyTensor declares an int dtype.
         return mx.random.bernoulli(p=p, shape=shape, key=rng_key).astype(
@@ -153,7 +153,7 @@ def mlx_sample_fn_bernoulli(op, node):
 @mlx_sample_fn.register(ptr.CategoricalRV)
 def mlx_sample_fn_categorical(op, node):
     def sample_fn(rng_key, size, dtype, p):
-        logits = mx.log(mx.array(p))
+        logits = mx.log(mx.asarray(p))
         shape = mlx_to_list_shape(size) if size is not None else None
         # MLX draws uint32; PyTensor declares an int dtype.
         return mx.random.categorical(
@@ -169,8 +169,8 @@ def mlx_sample_fn_mvnormal(op, node):
 
     def sample_fn(rng_key, size, dtype, mean, cov):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        mean = mx.array(mean, dtype=mlx_dtype)
-        cov = mx.array(cov, dtype=mlx_dtype)
+        mean = mx.asarray(mean, dtype=mlx_dtype)
+        cov = mx.asarray(cov, dtype=mlx_dtype)
 
         n = cov.shape[-1]
         if size is not None:
@@ -215,8 +215,8 @@ def mlx_sample_fn_permutation(op, node):
 def mlx_sample_fn_lognormal(op, node):
     def sample_fn(rng_key, size, dtype, mu, sigma):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        mu = mx.array(mu, dtype=mlx_dtype)
-        sigma = mx.array(sigma, dtype=mlx_dtype)
+        mu = mx.asarray(mu, dtype=mlx_dtype)
+        sigma = mx.asarray(sigma, dtype=mlx_dtype)
         shape = _shape_from_size(size, mu, sigma)
         z = mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
         return mx.exp(mu + sigma * z)
@@ -228,8 +228,8 @@ def mlx_sample_fn_lognormal(op, node):
 def mlx_sample_fn_halfnormal(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        loc = mx.array(loc, dtype=mlx_dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        loc = mx.asarray(loc, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
         z = mx.random.normal(shape=shape, dtype=mlx_dtype, key=rng_key)
         return loc + scale * mx.abs(z)
@@ -241,7 +241,7 @@ def mlx_sample_fn_halfnormal(op, node):
 def mlx_sample_fn_exponential(op, node):
     def sample_fn(rng_key, size, dtype, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, scale)
         u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
         # log1p(-u) avoids -inf when u=0 (u is in [0, 1))
@@ -254,8 +254,8 @@ def mlx_sample_fn_exponential(op, node):
 def mlx_sample_fn_logistic(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        loc = mx.array(loc, dtype=mlx_dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        loc = mx.asarray(loc, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
         u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
         return loc + scale * mx.log(u / (1 - u))
@@ -267,8 +267,8 @@ def mlx_sample_fn_logistic(op, node):
 def mlx_sample_fn_cauchy(op, node):
     def sample_fn(rng_key, size, dtype, loc, scale):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        loc = mx.array(loc, dtype=mlx_dtype)
-        scale = mx.array(scale, dtype=mlx_dtype)
+        loc = mx.asarray(loc, dtype=mlx_dtype)
+        scale = mx.asarray(scale, dtype=mlx_dtype)
         shape = _shape_from_size(size, loc, scale)
         u = mx.random.uniform(shape=shape, dtype=mlx_dtype, key=rng_key)
         return loc + scale * mx.tan(mx.pi * (u - 0.5))

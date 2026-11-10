@@ -265,6 +265,11 @@ class TestDecompositions:
         np.testing.assert_allclose(res_not_contig, res)
         np.testing.assert_allclose(val_not_contig, val)
 
+        if not overwrite_a:
+            val_not_contig.flags.writeable = False
+            np.testing.assert_allclose(fn(val_not_contig), res)
+            np.testing.assert_array_equal(val_not_contig, val)
+
     def test_cholesky_raises_on_nan_input(self):
         test_value = rng.random(size=(3, 3)).astype(floatX)
         test_value[0, 0] = np.nan
@@ -470,7 +475,7 @@ class TestDecompositions:
         np.testing.assert_allclose(val_not_contig, A_val)
 
     @pytest.mark.parametrize(
-        "decomp_op", (cholesky, lu, lu_factor), ids=lambda x: x.__name__
+        "decomp_op", (cholesky, lu, lu_factor, svd), ids=lambda x: x.__name__
     )
     def test_empty(self, decomp_op):
         x = pt.matrix("x")
@@ -481,6 +486,13 @@ class TestDecompositions:
             [x],
             outs,
             [np.zeros((0, 0), dtype=floatX)],
+        )
+
+    def test_cholesky_empty_non_square(self):
+        x = pt.matrix("x")
+        fn = pytensor.function([x], cholesky(x), mode="NUMBA")
+        np.testing.assert_array_equal(
+            fn(np.zeros((3, 0), dtype=floatX)), np.zeros((3, 0))
         )
 
     @pytest.mark.parametrize("output", ["real", "complex"], ids=lambda x: f"output_{x}")
@@ -628,6 +640,31 @@ class TestDecompositions:
         np.testing.assert_allclose(BB_c, BB_res, atol=1e-6)
         np.testing.assert_allclose(Q_c, Q_res, atol=1e-6)
         np.testing.assert_allclose(Z_c, Z_res, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "sort, return_eigenvalues",
+    [(None, True), ("lhp", True), ("lhp", False)],
+    ids=["nosort_eig", "sort_eig", "sort_noeig"],
+)
+def test_qz_real_float32(sort, return_eigenvalues):
+    # Regression test: `ALPHAR + 1j * ALPHAI` used to upcast to complex128, which failed to unify with complex64
+    A = pt.matrix("A", dtype="float32")
+    B = pt.matrix("B", dtype="float32")
+    outputs = qz(A, B, sort=sort, return_eigenvalues=return_eigenvalues)
+
+    rng = np.random.default_rng(42)
+    A_val = rng.normal(size=(4, 4)).astype("float32")
+    B_val = rng.normal(size=(4, 4)).astype("float32")
+
+    _, res = compare_numba_and_py(
+        [A, B],
+        outputs,
+        [A_val, B_val],
+        assert_fn=lambda x, y: np.testing.assert_allclose(x, y, atol=1e-4, rtol=1e-4),
+    )
+    if return_eigenvalues:
+        assert res[2].dtype == "complex64"
 
 
 @pytest.mark.parametrize("inverse", [True, False], ids=["p_inv", "p"])

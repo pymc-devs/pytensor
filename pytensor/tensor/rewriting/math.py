@@ -468,28 +468,11 @@ def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
 @register_specialize
 @node_rewriter([_matmul, Dot])
 def local_dot_to_mul(fgraph, node):
-    """Rewrite dots that correspond to multiplication without summation.
-
-    We don't touch outer product without batch-dimensions, to allow rewriting into GER,
-    which seems more performant in that case.
-
-    # TODO: Once we blockwise Blas operations we shouldn't do it for outer product with batch-dimensions either
-    # TODO: We may still want to canonicalize outer dot as mul, and detect that for GER.
-    """
+    """Rewrite dots that correspond to multiplication without summation."""
     a, b = node.inputs
-    a_static_shape = a.type.shape
-    b_static_shape = b.type.shape
 
     # Check if we have matrix-matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
-    if not (a_static_shape[-1] == 1 or b_static_shape[-2] == 1):
-        return None
-
-    # If it's a core Dot we only rewrite if there's no outer product
-    # (1, 1) * (1, n) or (m, 1) * (1, 1)
-    # Otherwise we leave as is, so GER can be used instead
-    if isinstance(node.op, Dot) and not (
-        a_static_shape[-2] == 1 or b_static_shape[-1] == 1
-    ):
+    if not (a.type.shape[-1] == 1 or b.type.shape[-2] == 1):
         return None
 
     # Add specify_shape for unknown dimensions that must be 1
@@ -2186,23 +2169,6 @@ def local_useless_elemwise_comparison(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([Sum, Prod])
-def local_sum_prod_all_to_none(fgraph, node):
-    """
-    Sum{0,1,...N} -> Sum{} or
-    Prod{0,1,...N} -> Prod{}
-
-    """
-    op_type = Sum if isinstance(node.op, Sum) else Prod
-    # if all the axes are named, then use None as a shorthand
-    # this permits more merging
-    if node.op.axis is None:
-        return
-    if set(node.op.axis) == set(range(node.inputs[0].type.ndim)):
-        return [op_type(axis=None, dtype=node.op.dtype)(node.inputs[0])]
-
-
-@register_canonicalize
 @node_rewriter([CAReduce])
 def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
     """
@@ -2328,30 +2294,73 @@ def local_reduce_broadcastable(fgraph, node):
     """Remove reduction over broadcastable dimensions."""
     (reduced,) = node.inputs
     odtype = node.outputs[0].dtype
-    if node.op.axis is None:
+    axis = node.op.axis
+    if axis is None:
         if all(reduced.broadcastable):
             return [reduced.dimshuffle().astype(odtype)]
-    else:
-        axis = list(node.op.axis)
-        cuttable = [a for a in axis if reduced.broadcastable[a]]
-        if cuttable:
-            # -- we can remove some axes of summation.
-            new_axis = []
-            pattern = []
-            ii = 0
-            for p in range(reduced.ndim):
-                if p not in cuttable:
-                    if p in axis:
-                        new_axis.append(ii)
-                    pattern.append(p)
-                    ii += 1
-            new_reduced = reduced.dimshuffle(*pattern)
-            if new_axis:
-                # `clone` keeps the other props of the reduction, like `initial`
-                return [node.op.clone(axis=new_axis)(new_reduced)]
-            else:
-                # -- in this case we can remove the reduction completely
-                return [new_reduced.astype(odtype)]
+        axis = range(reduced.ndim)
+    cuttable = [a for a in axis if reduced.broadcastable[a]]
+    if cuttable:
+        # -- we can remove some axes of summation.
+        new_axis = []
+        pattern = []
+        ii = 0
+        for p in range(reduced.ndim):
+            if p not in cuttable:
+                if p in axis:
+                    new_axis.append(ii)
+                pattern.append(p)
+                ii += 1
+        new_reduced = reduced.dimshuffle(*pattern)
+        if new_axis:
+            # `clone` keeps the other props of the reduction, like `initial`
+            return [node.op.clone(axis=new_axis)(new_reduced)]
+        else:
+            # -- in this case we can remove the reduction completely
+            return [new_reduced.astype(odtype)]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([CAReduce])
+def local_careduce_of_dimshuffle(fgraph, node):
+    """Remove a `DimShuffle` feeding a reduction, when it does nothing to the output.
+
+    ``CAReduce{axis}(DimShuffle(x)) -> CAReduce{new_axis}(x)``
+
+    The reduced dimensions can be in any order, and `DimShuffle` can add
+    broadcastable dimensions among them, because the reduction combines all their
+    elements anyway. The dimensions that are kept must reach the output in the same
+    relative order as in ``x``, and must not be new broadcastable dimensions.
+    """
+    x_ds = node.inputs[0]
+    # Reject dropped dimensions to avoid undoing `local_reduce_broadcastable`
+    # and creating a rewrite loop.
+    match x_ds.owner_op_and_inputs:
+        case (DimShuffle(drop=()) as dimshuffle, x):
+            pass
+        case _:
+            return None
+
+    axis = node.op.axis
+    reduced = set(range(x_ds.ndim)) if axis is None else set(axis)
+    # Remap reduced axes; kept axes must be original dimensions in their original order.
+    new_axis = []
+    kept = []
+    for out_dim, in_dim in enumerate(dimshuffle.new_order):
+        if out_dim in reduced:
+            if in_dim != "x":
+                new_axis.append(in_dim)
+        elif in_dim == "x":
+            # TODO: Keep required expansions while removing permutations of reduced axes.
+            return None
+        else:
+            kept.append(in_dim)
+
+    if kept != sorted(kept):
+        return None
+
+    return [node.op.clone(axis=new_axis)(x)]
 
 
 @register_specialize

@@ -24,7 +24,7 @@ def mlx_funcify_Convolve1d(op, node, **kwargs):
         if runtime_mode_static:
             runtime_mode = full_mode
         else:
-            runtime_full_mode = mx.array(runtime_full_mode)
+            runtime_full_mode = mx.asarray(runtime_full_mode)
             runtime_mode = bool(runtime_full_mode.reshape(-1)[0])
 
         mode = "full" if runtime_mode else "valid"

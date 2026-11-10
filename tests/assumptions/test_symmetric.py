@@ -112,3 +112,19 @@ class TestSymmetricElemwiseAssumptions:
         z = s + s
         _, af = make_fgraph(z)
         assert not af.check(z, SYMMETRIC)
+
+
+@pytest.mark.parametrize(
+    "assume_a, dtype, expected",
+    [
+        ("sym", "float64", FactState.TRUE),
+        ("pos", "float64", FactState.TRUE),
+        ("her", "float64", FactState.TRUE),
+        ("her", "complex128", FactState.UNKNOWN),
+        ("gen", "float64", FactState.UNKNOWN),
+    ],
+)
+def test_solve_assume_a_symmetric(assume_a, dtype, expected):
+    a, b = pt.matrix("a", dtype=dtype), pt.matrix("b", dtype=dtype)
+    _, af = make_fgraph(pt.linalg.solve(a, b, assume_a=assume_a))
+    assert af.get(a, SYMMETRIC) == expected

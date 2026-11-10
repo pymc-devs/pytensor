@@ -757,12 +757,19 @@ def get_var_by_name(
     A ``tuple`` containing all the `Variable`\s that match `target_var_id`.
 
     """
-    from pytensor.graph.op import HasInnerGraph
+    from pytensor.graph.op import HasMultipleInnerGraph
 
     def expand(r: Variable) -> list[Variable] | None:
         if (apply := r.owner) is not None:
-            if isinstance(apply.op, HasInnerGraph):
-                return [*apply.inputs, *apply.op.inner_outputs]
+            if isinstance(apply.op, HasMultipleInnerGraph):
+                return [
+                    *apply.inputs,
+                    *(
+                        out
+                        for fg in apply.op.inner_graphs.values()
+                        for out in fg.outputs
+                    ),
+                ]
             else:
                 # Mypy doesn't know these will never be None
                 return apply.inputs  # type: ignore

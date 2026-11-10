@@ -25,7 +25,7 @@ from pytensor.compile.builders import SymbolicOp
 from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
@@ -42,7 +42,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     get_vector_length,
 )
-from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
+from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import (
     DimShuffle,
     Elemwise,
@@ -1512,7 +1512,7 @@ def infer_static_shape(
     ``None``/``int`` values that can be used as `TensorType.shape` values.
 
     """
-    from pytensor.tensor.rewriting.basic import topo_constant_folding
+    from pytensor.tensor.rewriting.basic import topo_alloc_constant_folding
     from pytensor.tensor.rewriting.shape import ShapeFeature
 
     def check_type(s):
@@ -1533,7 +1533,7 @@ def infer_static_shape(
         with config.change_flags(optdb__max_use_ratio=10, cxx=""):
             infer_shape_db.default_query.rewrite(shape_fg)
             if not all(isinstance(s, Constant) for s in shape_fg.outputs):
-                topo_constant_folding.rewrite(shape_fg)
+                topo_alloc_constant_folding.rewrite(shape_fg)
         folded_shape = shape_fg.outputs
 
     static_shape = tuple(
@@ -1758,54 +1758,8 @@ class Alloc(COp):
         return self(eval_points[0], *inputs[1:], return_list=True)
 
     def do_constant_folding(self, fgraph, node):
-        clients = fgraph.clients[node.outputs[0]]
-
-        if not clients:
-            return False
-
-        from pytensor.tensor.blas import CGemv, CGer, Gemv, Ger
-        from pytensor.tensor.subtensor import (
-            AdvancedIncSubtensor,
-            IncSubtensor,
-            Subtensor,
-        )
-
-        for client, idx in clients:
-            client_op = client.op
-            if isinstance(client_op, Output):
-                # If the output is a constant, it will have to be deepcopied
-                # each time the function is called.  So we do not fold.
-                return False
-            # Op's through which Alloc can be lifted. ``Subtensor`` is
-            # included because ``local_subtensor_of_alloc`` rewrites
-            # ``alloc(val, *shape)[idx]`` into ``alloc(val[...], *new_shape)``,
-            # preserving the Alloc structure that downstream rewrites
-            # (e.g. ``local_blockwise_alloc_inputs``) rely on. Folding the
-            # Alloc here would short-circuit that lift and produce a
-            # broadcast-equivalent constant whose batch dim is no longer
-            # type-broadcastable.
-            elif isinstance(
-                client_op, Elemwise | DimShuffle | Alloc | Join | Subtensor
-            ):
-                return False
-            # Same for Blockwise, unless it has no batch_dims
-            elif isinstance(client_op, Blockwise) and client.op.batch_ndim(client):
-                return False
-            elif (
-                # The following ops work inplace of their input id 0.
-                idx == 0
-                and isinstance(
-                    client_op,
-                    IncSubtensor | AdvancedIncSubtensor | Gemv | CGemv | Ger | CGer,
-                )
-            ):
-                # Ops that will work inplace on the Alloc. So if they
-                # get constant_folded, they would copy the constant
-                # and this is less efficient.
-                # Not doing the constant folding could also lower the
-                # peak memory use, as the "constant" won't always exist.
-                return False
-        return True
+        # Materializing Alloc is a graph-level decision made by local_alloc_constant_folding.
+        return False
 
 
 alloc = Alloc()
@@ -3901,7 +3855,10 @@ def trace(a, offset=0, axis1=0, axis2=1):
 
 
 class AllocDiag(SymbolicOp):
-    """Allocate a diagonal matrix from a vector."""
+    """Allocate a diagonal matrix from a vector.
+
+    Inlined by `late_inline_OpFromGraph` during the specialization pass.
+    """
 
     __props__ = ("axis1", "axis2", "offset")
 

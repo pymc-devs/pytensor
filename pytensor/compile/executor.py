@@ -11,11 +11,11 @@ import numpy as np
 import pytensor
 from pytensor.compile.debug import profiling
 from pytensor.compile.debug.profiling import ProfileStats
+from pytensor.compile.inner_function import HasInnerFunction
 from pytensor.compile.io import In, SymbolicOutput
 from pytensor.configdefaults import config
 from pytensor.graph.basic import clone_get_equiv
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import HasInnerGraph
 from pytensor.graph.utils import get_variable_trace_string
 from pytensor.link.basic import Container
 from pytensor.link.utils import raise_with_op
@@ -263,7 +263,7 @@ class Function:
         self._nodes_with_inner_function = [
             node
             for node in self.maker.fgraph.apply_nodes
-            if isinstance(node.op, HasInnerGraph)
+            if isinstance(node.op, HasInnerFunction)
         ]
 
     def __copy__(self):

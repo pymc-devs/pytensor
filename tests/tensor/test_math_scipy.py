@@ -357,6 +357,36 @@ def test_gammainc_ddk_tabulated_values():
         )
 
 
+def test_gammainc_gammaincc_ddk_mpmath_values():
+    # Large k and x near k, where the earlier Stan-based series were off by up to
+    # 60% or diverged. Values from mpmath at 50 digits; dQ/dk = -dP/dk.
+    k, x = pt.vectors("k", "x")
+    f_grad = function(
+        [k, x],
+        [pt.grad(pt.gammainc(k, x).sum(), k), pt.grad(pt.gammaincc(k, x).sum(), k)],
+    )
+    test_k, test_x, expected_ddk = np.array(
+        [
+            (5.0, 5.0, -0.18141910926729707),
+            (20.0, 10.0, -0.0026082181812469643),
+            (20.0, 20.0, -0.08957920553912253),
+            (50.0, 10.0, -3.012283857252289e-19),
+            (50.0, 20.0, -1.1690273381623859e-08),
+            (50.0, 50.0, -0.05651312752336055),
+            (100.0, 20.0, -5.641007519768254e-37),
+            (100.0, 50.0, -2.2638123183014524e-10),
+            (100.0, 100.0, -0.03992749785778605),
+            (0.5, 50.0, -8.98375272649672e-23),
+            (1000.0, 990.0, -0.012057749285283054),
+            (1000.0, 1010.0, -0.011945731337225441),
+        ]
+    ).T
+    ddk_p, ddk_q = f_grad(test_k.astype(k.dtype), test_x.astype(x.dtype))
+    rtol = 5e-12 if config.floatX == "float64" else 1e-3
+    np.testing.assert_allclose(ddk_p, expected_ddk, rtol=rtol)
+    np.testing.assert_allclose(ddk_q, -expected_ddk, rtol=rtol)
+
+
 TestGammaUBroadcast = makeBroadcastTester(
     op=pt.gammau,
     expected=expected_gammau,
@@ -545,6 +575,16 @@ class TestSigmoid:
     def test_elemwise(self):
         utt.verify_grad(pt.sigmoid, [np.random.random((3, 4))])
 
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_accuracy(self, dtype):
+        x = pt.vector("x", dtype=dtype)
+        x_test = np.array([-1e3, -700, -40, -17.5, 0, 17.5, 40, 700, 1e3], dtype=dtype)
+        y_th = function([x], pt.sigmoid(x))(x_test)
+        y_np = special.expit(x_test.astype("float64")).astype(dtype)
+        np.testing.assert_allclose(
+            y_th, y_np, rtol=1e-6 if dtype == "float32" else 1e-14
+        )
+
 
 _good_broadcast_unary_softplus = dict(
     copymod(
@@ -573,12 +613,15 @@ class TestSoftplus:
     def test_elemwise(self):
         utt.verify_grad(pt.softplus, [np.random.random((3, 4))])
 
-    def test_accuracy(self):
-        # Test all approximations are working (cutoff points are -37, 18, 33.3)
-        x_test = np.array([-40.0, -17.5, 17.5, 18.5, 40.0])
-        y_th = pt.softplus(x_test).eval()
-        y_np = np.log1p(np.exp(x_test))
-        np.testing.assert_allclose(y_th, y_np, rtol=10e-10)
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_accuracy(self, dtype):
+        x = pt.vector("x", dtype=dtype)
+        x_test = np.array([-1e3, -700, -40, -17.5, 0, 17.5, 40, 700, 1e3], dtype=dtype)
+        y_th = function([x], pt.softplus(x))(x_test)
+        y_np = np.logaddexp(0, x_test.astype("float64")).astype(dtype)
+        np.testing.assert_allclose(
+            y_th, y_np, rtol=1e-6 if dtype == "float32" else 1e-14
+        )
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -906,7 +949,11 @@ class TestHyp2F1Grad:
         wrt_vars = [v for i, v in enumerate((a1, a2, b1, z)) if i in wrt]
         hyp2f1_grad = pt.grad(hyp2f1_out, wrt=wrt_vars)
 
-        mode = get_default_mode().including("local_useless_2f1grad_loop")
+        mode = (
+            get_default_mode()
+            .including("local_useless_2f1grad_loop")
+            .excluding("scalarize")
+        )
         f_grad = function([a1, a2, b1, z], hyp2f1_grad, mode=mode)
 
         if len(wrt) == 3 and "py_only" in mode.linker.required_rewrites:

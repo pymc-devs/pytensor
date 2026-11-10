@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
 
+import pytensor
 from pytensor import config, printing
 from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, disconnected_type
@@ -435,7 +436,7 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
             for(int i=0;i<PyArray_NDIM({iname});i++){{
                 if(PyArray_DIMS({iname})[i]==0 && tosum[i]){{
                     PyErr_Format(PyExc_ValueError,
-                        "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %%d",i);
+                        "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %d",i);
                     {sub["fail"]};
                 }}
             }}
@@ -2849,8 +2850,6 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
         Compute the median along this axis of the tensor.
         None means all axes (like numpy).
     """
-    from pytensor.ifelse import ifelse
-
     x = as_tensor_variable(x)
     x_ndim = x.type.ndim
     if axis is None:
@@ -2876,7 +2875,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
     even_median = (k_values + km1_values) / 2.0
     odd_median = k_values.astype(even_median.type.dtype)
     even_k = eq(mod(raveled_size, 2), 0)
-    return ifelse(even_k, even_median, odd_median, name="median")
+    return pytensor.ifelse(even_k, even_median, odd_median, name="median")
 
 
 @scalar_elemwise
@@ -3109,8 +3108,6 @@ class Dot(Op):
     -----
     Matrix-matrix products are sometimes optimized to Dot22 or Gemm ops
     (see tensor.blas).
-    Vector-vector products are sometimes optimized to Ger or CGer (see
-    tensor.blas).
     Matrix-vector products are sometimes optimized to Gemv, CGemv (see
     tensor.blas).
 
@@ -3260,8 +3257,6 @@ def dense_dot(a, b):
     -----
     Matrix-matrix products are sometimes optimized to Dot22 or Gemm ops
     (see tensor.blas).
-    Vector-vector products are sometimes optimized to Ger or CGer (see
-    tensor.blas).
     Matrix-vector products are sometimes optimized to Gemv, CGemv (see
     tensor.blas).
 

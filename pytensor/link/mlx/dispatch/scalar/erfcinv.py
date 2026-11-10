@@ -130,9 +130,11 @@ def _ndtri_of_half(x, const):
 
 
 @mlx_funcify.register(Erfcinv)
-def mlx_funcify_Erfcinv(op, **kwargs):
+def mlx_funcify_Erfcinv(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
     def erfcinv(x):
-        z, const, out_dtype = _working_precision(x)
+        z, const, out_dtype = _working_precision(x, dtype)
 
         # erfc(y) = 2 ndtr(-y sqrt(2)), so y = -ndtri(x / 2) / sqrt(2)
         out = -_ndtri_of_half(z, const) / const(_SQRT_2)

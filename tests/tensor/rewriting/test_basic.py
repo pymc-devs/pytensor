@@ -36,6 +36,7 @@ from pytensor.tensor.basic import (
     join,
     tile,
 )
+from pytensor.tensor.blas import Gemm, Gemv
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import (
     add,
@@ -793,6 +794,105 @@ class TestConstantFolding:
         assert isinstance(fg.outputs[0].owner.op, OpNoPerform)
 
 
+class TestAllocConstantFolding:
+    def test_excluding(self):
+        allocated = pt.alloc(np.float64(0), 5)
+        out = allocated[1:4].inc(np.array([1.0, 2.0, 3.0]))
+        for exclude in (
+            "constant_folding",
+            "topo_constant_folding",
+            "local_alloc_constant_folding",
+        ):
+            result = utt.RewriteTester([], [out], include="o3", exclude=[exclude])
+            result.assert_graph(out)
+
+    def test_folding_stages(self):
+        """Generic folding preserves Alloc, while late folding replaces it and its sum with a constant."""
+        out = pt.alloc(np.float64(2), 5).sum()
+
+        result = utt.RewriteTester(
+            [], [out], include=None, custom_rewrite=topo_constant_folding
+        )
+        result.assert_graph(out)
+
+        optdb["uncanonicalize"].query("+topo_constant_folding").rewrite(result.rewr_fg)
+        result.assert_graph(pt.constant(10.0, dtype=out.dtype))
+        result.assert_eval()
+
+    def test_view_consumer(self):
+        """An output view preserves Alloc, while its constant sum folds both Alloc and the view."""
+        # Keep the views intact so this checks folding rather than allocation lifting.
+        cfg = dict(
+            include="o3",
+            exclude=("local_subtensor_of_alloc", "extract_diag_lift_pass"),
+        )
+        out = pt.alloc(np.float64(2), 5)[:3][None]
+        result = utt.RewriteTester([], [out], **cfg)
+        result.assert_graph(out)
+
+        result = utt.RewriteTester([], [out.sum()], **cfg)
+        result.assert_graph(pt.constant(np.float64(6)))
+
+    def test_shared_consumers(self):
+        """A returned Alloc stays symbolic, while its final consumers fold."""
+        # Keep Sum visible until the folding pass to exercise consumer splitting.
+        cfg = dict(include="o3", exclude=("local_careduce_of_alloc",))
+        out = pt.alloc(np.float64(2), 6)
+        result = utt.RewriteTester([], [out], **cfg)
+        result.assert_graph(out)
+
+        result = utt.RewriteTester(
+            [], [out.sum(), out, out.reshape((2, 3)).sum()], **cfg
+        )
+        result.assert_graph(
+            pt.constant(np.float64(12)), out, pt.constant(np.float64(12))
+        )
+        result.assert_eval()
+
+    @pytest.mark.parametrize(
+        "consumer, value, size",
+        [
+            pytest.param(pt.exp, np.exp(2.0), 5, id="elemwise"),
+            pytest.param(lambda a: a[:3], np.float64(2), 3, id="subtensor"),
+        ],
+    )
+    def test_fold_after_structural_rewrites(self, consumer, value, size):
+        """Consumer rewrites produce an Alloc of the transformed value or sliced size instead of a dense constant."""
+        out = consumer(pt.alloc(np.float64(2), 5))
+        result = utt.RewriteTester([], [out], include="o3")
+        result.assert_graph(pt.alloc(value, size))
+
+    def test_inc_subtensor(self):
+        """Constant increments fold away, while symbolic increments preserve Alloc and IncSubtensor."""
+        a = pt.alloc(pt.constant(0, dtype=config.floatX), 5)
+        increments = pt.constant([1, 2, 3], dtype=config.floatX)
+        out = a[1:4].inc(increments)
+        result = utt.RewriteTester([], [out], include="o3")
+        result.assert_graph(pt.constant([0, 1, 2, 3, 0], dtype=config.floatX))
+
+        increments = vector("increments", dtype=config.floatX)
+        out = a[1:4].inc(increments)
+        result = utt.RewriteTester([increments], [out], include="o3")
+        result.assert_graph(out)
+
+    @pytest.mark.parametrize(
+        "op, shape", [(Gemv(inplace=False), (3,)), (Gemm(inplace=False), (3, 3))]
+    )
+    def test_blas_buffer(self, op, shape):
+        """Constant BLAS consumers fold away, while symbolic consumers preserve their Alloc buffer."""
+        # Keep the tested BLAS Op instead of selecting a platform-specific backend.
+        cfg = dict(include="o3", exclude=("c_blas",))
+        x = tensor("x", shape=(None,) * len(shape), dtype="float64")
+        buffer = pt.alloc(np.float64(0), *shape)
+        out = op(buffer, np.float64(1), np.eye(3), np.ones(shape), np.float64(1))
+        result = utt.RewriteTester([], [out], **cfg)
+        result.assert_graph(pt.constant(np.ones(shape)))
+
+        out = op(buffer, np.float64(1), np.eye(3), x, np.float64(1))
+        result = utt.RewriteTester([x], [out], **cfg)
+        result.assert_graph(out)
+
+
 class TestLocalSwitchSink:
     def setup_method(self):
         # condition values
@@ -921,7 +1021,7 @@ class TestLocalSwitchSink:
 
 class TestLocalUselessSwitch:
     def setup_method(self):
-        self.mode = rewrite_mode.excluding("constant_folding")
+        self.mode = rewrite_mode
 
     @pytest.mark.parametrize(
         "dtype1",
@@ -1592,7 +1692,7 @@ def test_assert_op_gradient():
 def test_local_merge_alloc():
     # Add this rewrite to the default mode; otherwise, FAST_COMPILE fails.
     default_mode = get_default_mode()
-    rewrite_mode = default_mode.including("local_merge_alloc")
+    rewrite_mode = default_mode.including("local_merge_alloc").excluding("scalarize")
 
     x = iscalar("x")
     y = iscalar("y")

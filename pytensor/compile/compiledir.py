@@ -112,6 +112,8 @@ def print_compiledir_content():
     table_multiple_ops = []
     table_op_class = Counter()
     zeros_op = 0
+    missing_modules = Counter()
+    unreadable_keys = 0
     big_key_files = []
     total_key_sizes = 0
     nb_keys = Counter()
@@ -153,9 +155,10 @@ def print_compiledir_content():
                     big_key_files.append((dir, size, ops))
 
                 nb_keys[len(keydata.keys)] += 1
-            except OSError:
-                pass
-            except AttributeError:
+            except ImportError as exc:
+                missing_modules[(exc.name or "unknown").split(".")[0]] += 1
+            except (OSError, AttributeError, EOFError, pickle.UnpicklingError):
+                unreadable_keys += 1
                 _logger.error(f"Could not read key file '{filename}'.")
 
     print_title(f"PyTensor cache: {compiledir}", overline="=", underline="=")
@@ -221,6 +224,15 @@ def print_compiledir_content():
         f"Skipped {int(zeros_op)} files that contained 0 op "
         "(are they always pytensor.scalar ops?)"
     )
+    if missing_modules:
+        modules = ", ".join(
+            f"{name} ({count})" for name, count in sorted(missing_modules.items())
+        )
+        print(  # noqa: T201
+            f"Skipped {sum(missing_modules.values())} key files from unavailable modules: {modules}"
+        )
+    if unreadable_keys:
+        print(f"Skipped {unreadable_keys} unreadable key files")  # noqa: T201
 
 
 def compiledir_purge():

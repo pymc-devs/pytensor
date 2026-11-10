@@ -20,6 +20,7 @@ import numpy as np
 import pytensor
 from pytensor.compile.aliasing import infer_reuse_pattern
 from pytensor.compile.executor import Function
+from pytensor.compile.inner_function import HasInnerFunction
 from pytensor.compile.maker import FunctionMaker
 from pytensor.compile.mode import Mode, register_mode
 from pytensor.compile.ops import ViewOp
@@ -32,7 +33,7 @@ from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import AlreadyThere, BadOptimization, Feature
 from pytensor.graph.fg import Output
-from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.op import Op
 from pytensor.graph.traversal import io_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.link.basic import Container, LocalLinker
@@ -971,7 +972,7 @@ def _check_preallocated_output(
     # disable memory checks in that mode, since they were already run.
     try:
         changed_inner_mode = False
-        if isinstance(node.op, HasInnerGraph):
+        if isinstance(node.op, HasInnerFunction):
             fn = node.op.fn
             if not (fn and hasattr(fn, "maker") and hasattr(fn.maker, "mode")):
                 _logger.warning(f"Expected pytensor function not found in {node.op}.fn")

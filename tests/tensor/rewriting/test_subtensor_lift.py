@@ -1472,7 +1472,9 @@ class TestExtractDiagLiftPass:
     )
     def test_extract_diag_of_write(self):
         """Diagonal reads collapse fully-covered diagonal writes and keep partial-coverage writes."""
-        A = pt.full((2, 6, 6), np.nan)
+        # Keep the fill symbolic so constant folding cannot replace diagonal lifting.
+        fill_value = pt.scalar("fill_value")
+        A = pt.full((2, 6, 6), fill_value)
         rows = pt.arange(A.shape[-2])
         cols = pt.arange(A.shape[-1])
         write_offsets = [-2, -1, 0, 1, 2]
@@ -1486,7 +1488,7 @@ class TestExtractDiagLiftPass:
             else:
                 offset = -offset
                 A = A[..., rows[offset:], cols[:-offset]].set(value)
-        # Partial write along offset 3
+        # Partial write along offset 3.
         A = A[..., rows[1:-3], cols[4:]].set(np.pi)
 
         read_offsets = [-2, -1, 0, 1, 2, 3]
@@ -1494,19 +1496,20 @@ class TestExtractDiagLiftPass:
             A.diagonal(offset=offset, axis1=-2, axis2=-1) for offset in read_offsets
         ]
 
-        f_on = function([], outs)
+        f_on = function([fill_value], outs)
         f_off = function(
-            [],
+            [fill_value],
             outs,
             mode=get_default_mode().excluding("extract_diag_lift_pass"),
         )
 
-        # The partial-coverage read at offset=3 keeps exactly one scatter write of pi.
+        # The partial-coverage read at offset=3 keeps exactly one scatter write.
         on_topo = f_on.maker.fgraph.toposort()
         n_writes = sum(isinstance(n.op, AdvancedIncSubtensor) for n in on_topo)
         assert n_writes == 1
 
-        for got, ref in zip(f_on(), f_off(), strict=True):
+        value = np.asarray(np.nan, dtype=fill_value.dtype)
+        for got, ref in zip(f_on(value), f_off(value), strict=True):
             np.testing.assert_allclose(got, ref, equal_nan=True)
 
 

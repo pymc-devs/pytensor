@@ -218,11 +218,12 @@ def core_MvNormalRV(op, node):
 
         out = rng.normal(size=cov.shape[-1])
         # out argument not working correctly: https://github.com/numba/numba/issues/9924
-        out[:] = np.dot(A, out)
+        # The generator returns float64 noise even for a float32 covariance.
+        out[:] = np.dot(np.asarray(A, dtype=out.dtype), out)
         out += mean
         return out
 
-    return random_fn
+    return random_fn, 2
 
 
 @numba_core_rv_funcify.register(ptr.DirichletRV)
@@ -381,31 +382,27 @@ def core_ChoiceWithoutReplacement(op: ptr.ChoiceWithoutReplacement, node):
             if implicit_arange:
                 return idx
             else:
-                # Numba doesn't support advanced indexing, so we ravel index and reshape
+                # Numba requires one-dimensional advanced indices.
                 return a[idx.ravel()].reshape(core_shape + a.shape[1:])
 
     else:
 
         @numba_basic.numba_njit
         def random_fn(rng, a, core_shape):
-            # Until Numba supports generator.choice we use a poor implementation
-            # that permutates the whole arange array and takes the first `size` elements
-            # This is widely inefficient when size << a.shape[0]
-            size = np.prod(core_shape)
-            core_shape = numba_ndarray.to_fixed_tuple(core_shape, core_shape_len)
-            idx = rng.permutation(size)[:size]
-
-            # Numba doesn't support advanced indexing so index on the flat dimension and reshape
-            # idx = idx.reshape(core_shape)
-            # if implicit_arange:
-            #     return idx
-            # else:
-            #     return a[idx]
+            n_draws = np.prod(core_shape)
+            sample_shape = numba_ndarray.to_fixed_tuple(core_shape, core_shape_len)
+            if implicit_arange:
+                pop_size = a
+            else:
+                pop_size = a.shape[0]
+            flat_idx = rng.permutation(pop_size)[:n_draws]
 
             if implicit_arange:
-                return idx.reshape(core_shape)
+                return flat_idx.reshape(sample_shape)
             else:
-                return a[idx].reshape(core_shape + a.shape[1:])
+                return a[flat_idx].reshape(sample_shape + a.shape[1:])
+
+        return random_fn, 1
 
     return random_fn
 

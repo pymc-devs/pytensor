@@ -918,11 +918,12 @@ class GetItem2Lists(Op):
 
         Parameters
         ----------
-        x
+        x : sparse matrix
             Sparse matrix.
-        index
-            List of two lists, first list indicating the row of each element and second
-            list indicating its column.
+        ind1 : vector of integers
+            Row index of each selected element.
+        ind2 : vector of integers
+            Column index of each selected element.
 
         """
         x = as_sparse_variable(x)

@@ -1,19 +1,31 @@
 import numpy as np
-from numba.core.extending import overload
+from numba.core import types
+from numba.core.extending import intrinsic, overload
+from numba.core.imputils import impl_ret_borrowed
 from numba.core.types import Complex, Float
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import ensure_blas, ensure_lapack
 from scipy import linalg
 
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.array_utils import _copyto
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
+from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,
     int_ptr_to_val,
+    val_to_cptr,
+    val_to_dptr,
     val_to_int_ptr,
+    val_to_sptr,
+    val_to_zptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import (
+    _check_linalg_matrix,
+    _fortran_work_array,
+)
+from pytensor.tensor.blas._core import must_initialize_y_gemv
 from pytensor.tensor.linalg.products import Expm
 
 
@@ -134,8 +146,17 @@ def _expm_impl(A, overwrite_a):
         )
     )
 
+    # expm(X.T) = expm(X).T, so a C-typed A runs the kernel on A.T, an f-contig view of
+    # its buffer. Choosing this from the type keeps every return path one layout.
+    transposed = A.layout == "C"
+
     def impl(A, overwrite_a):
         n = A.shape[-1]
+        if n == 0:
+            empty = np.zeros((n, n), dtype=A.dtype)
+            if transposed:
+                return empty
+            return empty.T
 
         A_L1 = np.linalg.norm(A, 1)
 
@@ -144,18 +165,10 @@ def _expm_impl(A, overwrite_a):
         else:
             s = 0
 
-        # expm(X.T) = expm(X).T -- run the kernel on A.T when A is c-contig so
-        # we get an f-contig view of the input buffer for free.
-        transposed = False
-        if A.flags.c_contiguous:
+        if transposed:
             A_s = A.T if overwrite_a else A.copy().T
-            transposed = True
-        elif overwrite_a and A.flags.f_contiguous:
-            A_s = A
         else:
-            A_s = _copy_to_fortran_order(A)
-
-        A_s = np.asfortranarray(A_s)
+            A_s = _fortran_work_array(A, overwrite_a)
 
         if s > 0:
             A_s /= real_dtype.type(2.0) ** s
@@ -291,13 +304,14 @@ def _expm_impl(A, overwrite_a):
         if int_ptr_to_val(INFO_RF) != 0 or int_ptr_to_val(INFO_RS) != 0:
             R[:] = np.nan
 
-        if s > 0:
-            A2[:] = R
-            R = A2
-            R_buf = U
-            for _ in range(s):
-                np.dot(R, R, R_buf)
-                R, R_buf = R_buf, R
+        # R is Fortran-ordered, so squaring its C-ordered transpose view needs no copy:
+        # (R^T)^2 = (R^2)^T
+        R_t = R.T
+        R_t_buf = U
+        for _ in range(s):
+            np.dot(R_t, R_t, R_t_buf)
+            R_t, R_t_buf = R_t_buf, R_t
+        R = R_t.T
 
         if transposed:
             return R.T
@@ -320,11 +334,360 @@ def numba_funcify_Expm(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def expm(a):
-        if a.size == 0:
-            return np.zeros(a.shape, dtype=out_dtype)
         if discrete_input:
             a = a.astype(out_dtype)
         return _expm(a, effective_overwrite_a)
 
-    cache_version = 1
+    cache_version = 3
     return expm, cache_version
+
+
+@intrinsic
+def _array_ctypes_at(typingctx, array, address):
+    """Adjust an array's ctypes pointer while retaining its memory owner."""
+    signature = types.ArrayCTypes(array)(array, address)
+
+    def codegen(context, builder, sig, args):
+        owner = context.make_array(sig.args[0])(context, builder, args[0])
+        pointer = context.make_helper(builder, sig.return_type)
+        pointer.data = builder.inttoptr(args[1], owner.data.type)
+        pointer.meminfo = owner.meminfo
+        return impl_ret_borrowed(context, builder, sig.return_type, pointer._getvalue())
+
+    return signature, codegen
+
+
+@numba_basic.numba_njit(inline="always")
+def _leading_dim(unit_stride, other_stride, unit_extent, other_extent, itemsize):
+    """Leading dimension BLAS can walk the matrix with, or 0 when it cannot."""
+    if unit_extent != 1 and unit_stride != itemsize:
+        return 0
+    if other_extent == 1:
+        return max(1, unit_extent)
+    if other_stride <= 0 or other_stride % itemsize != 0:
+        return 0
+    ld = other_stride // itemsize
+    return ld if ld >= unit_extent else 0
+
+
+@numba_basic.numba_njit(inline="always")
+def _column_major_ld(X):
+    return _leading_dim(X.strides[0], X.strides[1], X.shape[0], X.shape[1], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _row_major_ld(X):
+    return _leading_dim(X.strides[1], X.strides[0], X.shape[1], X.shape[0], X.itemsize)
+
+
+@numba_basic.numba_njit(inline="always")
+def _blas_abs_layout(X):
+    return bool(
+        _leading_dim(
+            abs(X.strides[0]), abs(X.strides[1]), X.shape[0], X.shape[1], X.itemsize
+        )
+        or _leading_dim(
+            abs(X.strides[1]), abs(X.strides[0]), X.shape[1], X.shape[0], X.itemsize
+        )
+    )
+
+
+@numba_basic.numba_njit(inline="always")
+def _is_reversed(X, axis):
+    return X.shape[axis] > 1 and X.strides[axis] < 0
+
+
+@numba_basic.numba_njit
+def _blas_operand_generic(X):
+    """Return the buffer, BLAS transpose flag and leading dimension that read ``X``."""
+    ld = _column_major_ld(X)
+    if ld:
+        return X, False, np.int32(ld)
+    # A row-major buffer is its own transpose to BLAS
+    ld = _row_major_ld(X)
+    if ld:
+        return X, True, np.int32(ld)
+    return np.ascontiguousarray(X), True, np.int32(max(1, X.shape[1]))
+
+
+def _blas_operand(X):
+    return _blas_operand_generic(X)
+
+
+@overload(_blas_operand, inline="always")
+def _blas_operand_impl(X):
+    if isinstance(X, types.Array) and X.ndim == 2 and X.layout in ("C", "F"):
+        column_major = X.layout == "F"
+
+        def impl(X):
+            extent = X.shape[0] if column_major else X.shape[1]
+            return X, not column_major, np.int32(max(1, extent))
+
+        return impl
+
+    def impl_generic(X):
+        return _blas_operand_generic(X)
+
+    return impl_generic
+
+
+# Stack slots; a one-element array would cost a heap allocation per call
+_SCALAR_PTR_INTRINSICS = {
+    types.float32: val_to_sptr,
+    types.float64: val_to_dptr,
+    types.complex64: val_to_cptr,
+    types.complex128: val_to_zptr,
+}
+
+
+@numba_basic.numba_njit(inline="always")
+def _cheapest_copies(rows, inner, cols, cost_a, cost_b, cost_c):
+    """Choose the cheapest of A, B and C to copy so every conflicting pair has a copy."""
+    # `rows`, `inner` and `cols` flag conflicts between A and C, A and B, and B and C,
+    # so this is a minimum-weight vertex cover of a triangle.
+    if rows and inner and cols:
+        if cost_a >= cost_b and cost_a >= cost_c:
+            return False, True, True
+        if cost_b >= cost_c:
+            return True, False, True
+        return True, True, False
+    if rows and inner:
+        copy_a = cost_a <= cost_b + cost_c
+        return copy_a, not copy_a, not copy_a
+    if inner and cols:
+        copy_b = cost_b <= cost_a + cost_c
+        return not copy_b, copy_b, not copy_b
+    if rows and cols:
+        copy_c = cost_c <= cost_a + cost_b
+        return not copy_c, not copy_c, copy_c
+    if rows:
+        return cost_a <= cost_c, False, cost_a > cost_c
+    if inner:
+        return cost_a <= cost_b, cost_a > cost_b, False
+    if cols:
+        return False, cost_b <= cost_c, cost_b > cost_c
+    return False, False, False
+
+
+@numba_basic.numba_njit
+def _normalize_gemm_strides(A, B, C):
+    """Reverse paired axes of A, B and C so the fewest elements need a BLAS copy."""
+    ar, ak = _is_reversed(A, 0), _is_reversed(A, 1)
+    bk, bc = _is_reversed(B, 0), _is_reversed(B, 1)
+    cr, cc = _is_reversed(C, 0), _is_reversed(C, 1)
+    if not (ar or ak or bk or bc or cr or cc):
+        return A, B, C
+
+    # Operands with no unit-stride axis are copied whatever their direction.
+    forced_a = not _blas_abs_layout(A)
+    forced_b = not _blas_abs_layout(B)
+    forced_c = not _blas_abs_layout(C)
+    copy_a, copy_b, copy_c = _cheapest_copies(
+        ar != cr and not (forced_a or forced_c),
+        ak != bk and not (forced_a or forced_b),
+        bc != cc and not (forced_b or forced_c),
+        A.size,
+        B.size,
+        C.size,
+    )
+    copied_a = forced_a or copy_a
+    copied_b = forced_b or copy_b
+    copied_c = forced_c or copy_c
+
+    # Reversing the rows of A and C, the contraction axis of A and B, or the columns
+    # of B and C together leaves the product unchanged. Each pair follows the side
+    # read in place, and `_blas_operand` or the C writeback copies the other.
+    if (ar and not copied_a) or (cr and not copied_c):
+        A = A[::-1]
+        C = C[::-1]
+    if (ak and not copied_a) or (bk and not copied_b):
+        A = A[:, ::-1]
+        B = B[::-1]
+    if (bc and not copied_b) or (cc and not copied_c):
+        B = B[:, ::-1]
+        C = C[:, ::-1]
+    return A, B, C
+
+
+@numba_basic.numba_njit(inline="always")
+def _keep_operands(A, B, C):
+    return A, B, C
+
+
+def _gemm(A, B, C):
+    """
+    Overwrite ``C`` with the matrix product of ``A`` and ``B``.
+
+    Parameters
+    ----------
+    A, B, C : ndarray
+        2-d arrays of one dtype. ``C`` is the output and is returned. Its incoming
+        contents are never read.
+
+    Returns
+    -------
+    C : ndarray
+    """
+    C[:] = A @ B
+    return C
+
+
+@overload(_gemm)
+def _gemm_impl(A, B, C):
+    ensure_blas()
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="gemm")
+    _check_linalg_matrix(B, ndim=2, dtype=A.dtype, func_name="gemm")
+    _check_linalg_matrix(C, ndim=2, dtype=A.dtype, func_name="gemm")
+
+    if all(array.layout in ("C", "F") for array in (A, B, C)):
+        # Contiguous types have no reversed axis to cancel
+        output_layout = C.layout
+        normalize = _keep_operands
+    else:
+        output_layout = "A"
+        normalize = _normalize_gemm_strides
+    dtype = A.dtype
+    numba_gemm = _BLAS().numba_xgemm(dtype)
+    numba_gemv = _BLAS().numba_xgemv(dtype)
+    scalar_ptr = _SCALAR_PTR_INTRINSICS[dtype]
+    # Some BLAS builds read y even when beta is zero
+    zero_y_first = must_initialize_y_gemv()
+
+    def impl(A, B, C):
+        out = C
+        M = np.int32(A.shape[0])
+        K = np.int32(A.shape[1])
+        N = np.int32(B.shape[1])
+
+        # BLAS trusts the extents it is handed, so a mismatch here reads past the end
+        # of an operand rather than failing.
+        if B.shape[0] != K:
+            raise ValueError("gemm: operands have mismatched contraction dimensions")
+        if C.shape[0] != M or C.shape[1] != N:
+            raise ValueError("gemm: output shape does not match the product")
+
+        if M == 0 or N == 0:
+            return out
+        if K == 0:
+            C[:] = 0
+            return out
+
+        A, B, C = normalize(A, B, C)
+        # General layouts can require signed vector strides. Prepare GEMV before
+        # GEMM's matrix-layout checks can pack the input or output vector.
+        if output_layout == "A" and (N == 1 or M == 1):
+            if N == 1:
+                matrix, trans, ld = _blas_operand(A)
+                rows, cols = (K, M) if trans else (M, K)
+                vector, x_stride = B, B.strides[0]
+                y_stride, y_length = C.strides[0], M
+            else:
+                matrix, trans, ld = _blas_operand(B)
+                rows, cols = (N, K) if trans else (K, N)
+                trans = not trans
+                vector, x_stride = A, A.strides[1]
+                y_stride, y_length = C.strides[1], N
+            C_work = C
+            if K != 1 and (x_stride == 0 or x_stride % A.itemsize):
+                vector = vector.copy()
+                x_stride = A.itemsize
+            if y_length != 1 and (y_stride == 0 or y_stride % A.itemsize):
+                C_work = np.empty(C.shape, dtype=dtype)
+                y_stride = A.itemsize
+            # BLAS expects the lowest address, then applies the signed step.
+            x_address = np.intp(vector.ctypes.data)
+            y_address = np.intp(C_work.ctypes.data)
+            if x_stride < 0:
+                x_address += (K - 1) * x_stride
+            if y_stride < 0:
+                y_address += (y_length - 1) * y_stride
+            x_ptr = _array_ctypes_at(vector, x_address)
+            y_ptr = _array_ctypes_at(C_work, y_address)
+            incx = np.int32(1 if K == 1 else x_stride // A.itemsize)
+            incy = np.int32(1 if y_length == 1 else y_stride // A.itemsize)
+        else:
+            A_work, A_trans, LDA = _blas_operand(A)
+            B_work, B_trans, LDB = _blas_operand(B)
+
+            # A row-major C is C^T to BLAS, and C^T = op(B)^T op(A)^T, so the operands
+            # swap places and each flag flips. A C with no unit-stride axis goes through
+            # a copy.
+            if output_layout == "F":
+                C_work = C
+                LDC = max(1, C.shape[0])
+                swap = False
+            elif output_layout == "C":
+                C_work = C
+                LDC = max(1, C.shape[1])
+                swap = True
+            else:
+                LDC = _column_major_ld(C)
+                if LDC:
+                    C_work = C
+                    swap = False
+                else:
+                    LDC = _row_major_ld(C)
+                    swap = True
+                    if LDC:
+                        C_work = C
+                    else:
+                        C_work = np.empty(C.shape, dtype=dtype)
+                        LDC = max(1, C.shape[1])
+
+            if swap:
+                A_work, B_work = B_work, A_work
+                A_trans, B_trans = not B_trans, not A_trans
+                LDA, LDB = LDB, LDA
+                M, N = N, M
+
+            if N != 1 and M != 1:
+                numba_gemm(
+                    val_to_int_ptr(ord("T") if A_trans else ord("N")),
+                    val_to_int_ptr(ord("T") if B_trans else ord("N")),
+                    val_to_int_ptr(M),
+                    val_to_int_ptr(N),
+                    val_to_int_ptr(K),
+                    scalar_ptr(1.0),
+                    A_work.ctypes,
+                    val_to_int_ptr(LDA),
+                    B_work.ctypes,
+                    val_to_int_ptr(LDB),
+                    scalar_ptr(0.0),
+                    C_work.ctypes,
+                    val_to_int_ptr(LDC),
+                )
+                if output_layout == "A" and C_work is not C:
+                    _copyto(C, C_work)
+                return out
+
+            # Only known-contiguous vectors reach GEMV through this path.
+            if N == 1:
+                trans, matrix, ld, vector = A_trans, A_work, LDA, B_work
+                rows, cols = (K, M) if A_trans else (M, K)
+            else:
+                trans, matrix, ld, vector = not B_trans, B_work, LDB, A_work
+                rows, cols = (N, K) if B_trans else (K, N)
+            x_ptr = vector.ctypes
+            y_ptr = C_work.ctypes
+            incx = incy = np.int32(1)
+
+        if zero_y_first:
+            C_work[:] = 0
+        numba_gemv(
+            val_to_int_ptr(ord("T") if trans else ord("N")),
+            val_to_int_ptr(rows),
+            val_to_int_ptr(cols),
+            scalar_ptr(1.0),
+            matrix.ctypes,
+            val_to_int_ptr(ld),
+            x_ptr,
+            val_to_int_ptr(incx),
+            scalar_ptr(0.0),
+            y_ptr,
+            val_to_int_ptr(incy),
+        )
+        if output_layout == "A" and C_work is not C:
+            _copyto(C, C_work)
+        return out
+
+    return impl
