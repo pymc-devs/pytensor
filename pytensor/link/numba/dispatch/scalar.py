@@ -1,4 +1,5 @@
 import math
+from functools import cache
 from hashlib import sha256
 
 import numba
@@ -8,6 +9,7 @@ from numba.core.extending import get_cython_function_address
 
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
+from pytensor.link.numba.dispatch import _gamma_tables as gamma_tables
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
@@ -33,7 +35,15 @@ from pytensor.scalar.basic import (
     Sign,
     Switch,
 )
-from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.math import (
+    Erf,
+    Erfc,
+    GammaLn,
+    Log1mexp,
+    Psi,
+    Sigmoid,
+    Softplus,
+)
 
 
 def scalar_op_cache_key(op, **extra_fields):
@@ -412,13 +422,113 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
     return sigmoid, scalar_op_cache_key(op, cache_version=2)
 
 
-@register_scalar_funcify(GammaLn)
-def numba_funcify_GammaLn(op, node, **kwargs):
-    @numba_basic.numba_njit
+_LGAMMA = gamma_tables.LGAMMA
+_PSI = gamma_tables.PSI
+_X0_HI = gamma_tables.X0_HI
+_X0_LO = gamma_tables.X0_LO
+_STIRLING_C = gamma_tables.STIRLING_C
+_A0, _A1, _A2, _A3 = gamma_tables.STIRLING
+# d/dx sum_k A_k x^-(2k + 1) = -x^-2 sum_k (2k + 1) A_k x^-2k
+_B0, _B1, _B2, _B3 = gamma_tables.STIRLING * np.arange(1, 9, 2)
+_INV_POW2 = np.array([1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125])
+
+
+@cache
+def _gamma_kernels(njit):
+    """float64 lgamma and digamma (for x > 0) from the panels in _gamma_tables.
+
+    [1, 64) is a table lookup and a degree-7 polynomial, with no libm call; below
+    1, lgamma(x + 1) - log(x) and psi(x + 1) - 1 / x; from 64, Stirling's series.
+    Within 2 ulp (lgamma) and 3 (digamma) of mpmath, next to the zeros at 1, 2
+    and 1.4616 too. Only fma contraction is allowed, and LLVM inlines them, so the
+    caller's fastmath flags do not reach them: reassociation would drop X0_LO.
+    """
+
+    def strict(fn):
+        return njit(fn, fastmath={"contract"}, forceinline=True)
+
+    @strict
+    def panel_series(table, y):
+        # Panel m of octave e of y in [1, 64), 32 panels an octave
+        e = int(y >= 2.0) + int(y >= 4.0) + int(y >= 8.0) + int(y >= 16.0)
+        e += int(y >= 32.0)
+        u = (y * _INV_POW2[e] - 1.0) * 32.0
+        m = int(u)
+        s = 2.0 * (u - m) - 1.0
+        row = 32 * e + m
+        p = table[row, 7]
+        for k in range(6, -1, -1):
+            p = p * s + table[row, k]
+        return p
+
+    @strict
     def gammaln(x):
+        if x >= 64.0:
+            inv = 1.0 / x
+            p = inv * inv
+            series = inv * (_A0 + p * (_A1 + p * (_A2 + p * _A3)))
+            return (x - 0.5) * (np.log(x) - 1.0) + _STIRLING_C + series
+        if x > 0.0:
+            # the table holds lgamma / ((x - 1) (x - 2)) on [1, 4)
+            f = panel_series(_LGAMMA, x if x >= 1.0 else x + 1.0)
+            if x >= 4.0:
+                return f
+            if x >= 1.0:
+                return (x - 1.0) * (x - 2.0) * f
+            return x * (x - 1.0) * f - np.log(x)
         return math.lgamma(x)
 
-    return gammaln, scalar_op_cache_key(op)
+    @strict
+    def psi_positive(x):
+        if x >= 64.0:
+            inv = 1.0 / x
+            p = inv * inv
+            series = p * (_B0 + p * (_B1 + p * (_B2 + p * _B3)))
+            return np.log(x) - 0.5 * inv - series
+        y = x if x >= 1.0 else x + 1.0
+        r = panel_series(_PSI, y)
+        if y < 2.0:
+            # r (y - x0) with x0 in two parts; y - _X0_HI is exact
+            r = r * (y - _X0_HI) - r * _X0_LO
+        return r if x >= 1.0 else r - 1.0 / x
+
+    return gammaln, psi_positive
+
+
+@register_scalar_funcify(GammaLn)
+def numba_funcify_GammaLn(op, node, **kwargs):
+    if node.outputs[0].type.dtype != "float64":
+
+        @numba_basic.numba_njit
+        def gammaln(x):
+            return math.lgamma(x)
+
+        return gammaln, scalar_op_cache_key(op)
+
+    # keyed on numba_njit too, which the pure-Python test path patches
+    gammaln_f64, _ = _gamma_kernels(numba_basic.numba_njit)
+
+    @numba_basic.numba_njit
+    def gammaln(x):
+        return gammaln_f64(np.float64(x))
+
+    return gammaln, scalar_op_cache_key(op, cache_version=1)
+
+
+@register_scalar_funcify(Psi)
+def numba_funcify_Psi(op, node, **kwargs):
+    scipy_psi, scipy_key = numba_funcify_ScalarOp(op, node=node, **kwargs)
+    if node.outputs[0].type.dtype != "float64":
+        return scipy_psi, scipy_key
+
+    _, psi_positive = _gamma_kernels(numba_basic.numba_njit)
+
+    @numba_basic.numba_njit
+    def psi(x):
+        x = np.float64(x)
+        return psi_positive(x) if x > 0.0 else scipy_psi(x)
+
+    return psi, scalar_op_cache_key(op, cache_version=1, scipy=scipy_key)
 
 
 @register_scalar_funcify(Log1mexp)
