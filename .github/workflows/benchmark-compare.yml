@@ -17,19 +17,16 @@ on:
         default: scripts/benchmarks/special.py
       runners:
         description: Runner labels as a JSON array (select one to retry a platform)
-        default: '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-26"]'
-  # Temporary macOS-only validation while the ARM pool has no capacity.
-  push:
-    branches: [ci/benchmark-template-2647]
+        default: '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-15"]'
 
 permissions:
   contents: read
 
 env:
-  BENCH_REPOSITORY: ${{ inputs.repository || 'pymc-devs/pytensor' }}
-  BENCH_BASE: ${{ inputs.base_ref || '6cc22d53b303ecdddc2d39927b7ce33361c094d0' }}
-  BENCH_HEAD: ${{ inputs.head_ref || '18b1d004bbe32c924756dbf4ec9a614e14fe540f' }}
-  BENCH_CASE: ${{ inputs.case_file || 'scripts/benchmarks/special.py' }}
+  BENCH_REPOSITORY: ${{ inputs.repository }}
+  BENCH_BASE: ${{ inputs.base_ref }}
+  BENCH_HEAD: ${{ inputs.head_ref }}
+  BENCH_CASE: ${{ inputs.case_file }}
 
 jobs:
   resolve:
@@ -52,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.runners || '["macos-26-intel"]') }}
+        os: ${{ fromJSON(inputs.runners) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -62,7 +59,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.13'
-      - name: Install the same wheels on every platform
+      - name: Install pinned dependencies
         run: >-
           python -m pip install --only-binary=:all:
           -r scripts/benchmarks/requirements.txt

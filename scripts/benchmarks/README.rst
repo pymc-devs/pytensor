@@ -14,6 +14,9 @@ To retry only one platform, pass e.g. ``-f runners='["macos-26"]'``.
 The default runs all four platforms. If GitHub reports runner-capacity
 failures before any steps start, that is a scheduling failure; retry the
 platform or select another supported image (e.g. ``macos-15`` for ARM64).
+Runner overrides need binary wheels for every pinned dependency. macOS Intel
+currently has no Numba 0.68.1 wheel, so that override fails installation;
+the workflow preserves equal versions rather than silently downgrading.
 
 To reuse it, add a case file exposing ``cases(size)``. Each yielded item is
 ``(unique_name, build, points, check)``: ``build()`` constructs an uncalled
@@ -97,10 +100,16 @@ Using the unmerged template branch
 ----------------------------------
 
 GitHub normally requires a manual workflow to exist on the default branch
-before ``workflow_dispatch`` works. Until this template is merged, rerun its
-existing four-platform comparison without changing the default branch::
+before ``workflow_dispatch`` works. Until this template is merged, rerun
+the existing validation jobs without changing the default branch::
 
     gh run rerun 42866657816 --repo ricardoV94/pytensor
+    gh run rerun 42872497462 --repo ricardoV94/pytensor
+
+The first run passed Linux x86-64, Linux ARM64 and Windows x86-64;
+macOS 26 ARM never acquired a runner due to GitHub capacity constraints.
+The second run passed the same measurements and checks on macOS 15 ARM.
+The default runner list therefore uses the tested macOS 15 image.
 
 That reruns the exact workflow commit and its original revisions. To compare
 different refs immediately, check out ``ci/benchmark-template-2647`` and use
