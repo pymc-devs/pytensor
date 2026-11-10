@@ -3,7 +3,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.builders import OpFromGraph, UnitKind
+from pytensor.compile.builders import OpFromGraph, Execution
 from pytensor.compile.mode import get_mode
 
 
@@ -26,7 +26,7 @@ def compare(inputs, outputs, values, mode=LLVM, rtol=1e-10, atol=1e-12):
 
 
 def info(f):
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     return {"tasks": p.tasks, "n_tasks": p.n_tasks, "arena_bytes": p.arena_bytes, "stats": f.maker.linker.stats}
 
 
@@ -83,7 +83,7 @@ def test_arena_reuses_temporaries():
 def test_compiled_ofg_calls_kernels():
     A = pt.matrix("A")
     v = pt.vector("v")
-    inner = OpFromGraph([A, v], [((A @ v) ** 2).sum(), A @ v], unit=UnitKind.COMPILED)
+    inner = OpFromGraph([A, v], [((A @ v) ** 2).sum(), A @ v], execution=Execution.COMPILED)
     out = inner(A, v)
     f = compare([A, v], out, [rng.random((4, 3)), rng.random(3)])
     tasks = info(f)["tasks"]
@@ -93,7 +93,7 @@ def test_compiled_ofg_calls_kernels():
 
 def test_interpreted_ofg():
     x = pt.vector("x")
-    inner = OpFromGraph([x], [pt.exp(x).sum(), x * 2], unit=UnitKind.INTERPRETED)
+    inner = OpFromGraph([x], [pt.exp(x).sum(), x * 2], execution=Execution.INTERPRETED)
     out = inner(x)
     f = compare([x], [out[0], out[1] + 1], [rng.random(6)])
     assert any(s.startswith("program:") for s in info(f)["tasks"])
@@ -101,25 +101,25 @@ def test_interpreted_ofg():
 
 def test_nested_ofg_kinds():
     x = pt.vector("x")
-    compiled = OpFromGraph([x], [pt.exp(x) + 1], unit=UnitKind.COMPILED)
+    compiled = OpFromGraph([x], [pt.exp(x) + 1], execution=Execution.COMPILED)
     y = pt.vector("y")
-    interp = OpFromGraph([y], [compiled(y).sum() * pt.log1p(y)], unit=UnitKind.INTERPRETED)
+    interp = OpFromGraph([y], [compiled(y).sum() * pt.log1p(y)], execution=Execution.INTERPRETED)
     z = pt.vector("z")
-    outer = OpFromGraph([z], [interp(z) - 1], unit=UnitKind.COMPILED)
+    outer = OpFromGraph([z], [interp(z) - 1], execution=Execution.COMPILED)
     compare([z], outer(z), [rng.random(5)])
 
 
 def test_numba_fallback_inside_compiled_unit():
     x = pt.vector("x")
     # cumsum has no native implementation yet: called from the unit via the trampoline
-    inner = OpFromGraph([x], [pt.cumsum(pt.exp(x)) * 2], unit=UnitKind.COMPILED)
+    inner = OpFromGraph([x], [pt.cumsum(pt.exp(x)) * 2], execution=Execution.COMPILED)
     compare([x], inner(x), [rng.random(8)])
 
 
 def test_shape_error_inside_unit_and_function_still_works():
     x = pt.vector("x")
     y = pt.vector("y")
-    inner = OpFromGraph([x, y], [pt.exp(x) + y, (x * y).sum()], unit=UnitKind.COMPILED)
+    inner = OpFromGraph([x, y], [pt.exp(x) + y, (x * y).sum()], execution=Execution.COMPILED)
     f = pytensor.function([x, y], inner(x, y), mode=LLVM)
     with pytest.raises(Exception, match="shape mismatch"):
         f(np.ones(3), np.ones(4))
@@ -146,7 +146,7 @@ def test_outputs_alias_inputs_views_and_each_other():
 def test_kernel_outputs_of_units():
     # dynamic shapes inside a compiled unit: outputs are allocated by the unit
     x = pt.vector("x")
-    inner = OpFromGraph([x], [pt.exp(x), x.sum()], unit=UnitKind.COMPILED)
+    inner = OpFromGraph([x], [pt.exp(x), x.sum()], execution=Execution.COMPILED)
     f = compare([x], inner(x), [rng.random(11)])
     for n in [0, 1, 1000]:
         r = f(np.ones(n))
@@ -175,7 +175,7 @@ def test_profiling_with_subprograms():
     # the Scan kernel runs its loop body as a subprogram (a generated Scan has none)
     mode = get_mode("LLVM").clone(link_kwargs={"generate_scan": False})
     f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode=mode)
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     xv, wv = np.ones((5, 3)), np.ones(3)
     f(xv, wv)
     assert all(secs == 0 for *_, secs in p.profile())

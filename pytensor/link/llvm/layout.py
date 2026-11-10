@@ -20,7 +20,7 @@ its strides. They come from how a value is produced:
 * memory the planner provides (arena, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
 * views get theirs from their input's (the op's `llvm_outputs`, with the helpers below);
-* graph inputs and values from numba fall-backs are DYNAMIC unless checked.
+* graph inputs and values from numba kernels are DYNAMIC unless checked.
 
 How each output comes to be, and with which layout, is declared per op by
 `llvm_outputs` (codegen/function.py); the planner and the `LayoutFeature` (for rewrites
@@ -35,7 +35,7 @@ from dataclasses import dataclass
 import numpy as np
 
 
-class Kind(enum.Enum):
+class StrideKind(enum.Enum):
     PACKED = "P"
     DYNAMIC = "?"
 
@@ -43,10 +43,10 @@ class Kind(enum.Enum):
         return self.value
 
 
-PACKED = Kind.PACKED
-DYNAMIC = Kind.DYNAMIC
+PACKED = StrideKind.PACKED
+DYNAMIC = StrideKind.DYNAMIC
 
-Stride = int | Kind
+Stride = int | StrideKind
 
 
 def _is_one(n) -> bool:
@@ -167,7 +167,7 @@ class Layout:
             if shape[a] != 1:
                 if s is PACKED and strides[a] != acc:
                     return False
-                if isinstance(s, int) and not isinstance(s, Kind) and strides[a] != s:
+                if isinstance(s, int) and not isinstance(s, StrideKind) and strides[a] != s:
                     return False
             if s is PACKED:
                 acc *= shape[a]
@@ -183,7 +183,7 @@ class Layout:
             return False
         for a in range(self.ndim):
             s = other.strides[a]
-            if isinstance(s, int) and not isinstance(s, Kind) and not _is_one(shape[a]):
+            if isinstance(s, int) and not isinstance(s, StrideKind) and not _is_one(shape[a]):
                 if self.static_stride(a, shape, itemsize) != s:
                     return False
         return True
@@ -390,17 +390,17 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
 
     The planner is authoritative (it knows which tasks fall back to numba, for one);
     this is its prediction for graph rewrites and inspection."""
-    from pytensor.compile.builders import OpFromGraph, UnitKind
+    from pytensor.compile.builders import OpFromGraph, Execution
     from pytensor.link.llvm.codegen.function import llvm_outputs
 
     op = node.op
     try:
         if isinstance(op, OpFromGraph):
-            if op.unit is UnitKind.COMPILED:
+            if getattr(op, "execution", None) is Execution.COMPILED:
                 return [Layout.c(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs]
             inner = infer_layouts(op.fgraph, in_layouts)
             outs = [inner[o] for o in op.fgraph.outputs]
-            if op.unit is UnitKind.INTERPRETED:
+            if getattr(op, "execution", None) is Execution.INTERPRETED:
                 # an allocated output of a subprogram: its value or a C copy
                 outs = [
                     None if lay is None else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))

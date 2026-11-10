@@ -1,7 +1,7 @@
 """Precompiled Rust kernels for nodes the interpreter runs directly.
 
-`rust_kernel(op, node, in_layouts)` returns a `pytensor_llvm.rt.RustKernel` (function
-address + environment) or None when the node has no Rust kernel; `in_layouts` are the
+`rust_kernel(op, node, in_layouts)` returns a `pytensor_llvm.interp.RustKernel` (function
+address + config) or None when the node has no Rust kernel; `in_layouts` are the
 inputs' layouts (layout.py; None where unknown). A kernel declares how it produces its
 outputs and in which layouts (`Kernel.outputs`, in Rust next to the kernel; the
 counterpart of `llvm_outputs` for generated code): `rust_kernel_outputs` reads that.
@@ -14,7 +14,7 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm.codegen.function import OutMode, Output
+from pytensor.link.llvm.codegen.function import OutputMode, Output
 from pytensor.link.llvm.codegen.types import repr_of
 from pytensor.link.llvm.layout import Layout
 from pytensor.tensor.elemwise import DimShuffle
@@ -22,15 +22,15 @@ from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import SpecifyShape
 
 
-def rt():
-    from pytensor_llvm import rt
+def interp():
+    from pytensor_llvm import interp
 
-    return rt
+    return interp
 
 
 def fresh_mode(out):
     """New memory for `out`: provided for a static shape, else allocated by the kernel."""
-    m = rt().OutputMode
+    m = interp().OutputMode
     return m.Provided if all(s is not None for s in out.type.shape) else m.Allocated
 
 
@@ -47,7 +47,7 @@ def rust_kernel_outputs(kernel, node, in_layouts) -> list[Output]:
 
     ins = [None if lay is None else lay.to_spec() for lay in known_layouts(node, in_layouts)]
     decls = kernel.outputs(ins, [o.type.ndim for o in node.outputs])
-    modes = {"provided": OutMode.PROVIDED, "allocated": OutMode.ALLOCATED, "view": OutMode.VIEW}
+    modes = {"provided": OutputMode.PROVIDED, "allocated": OutputMode.ALLOCATED, "view": OutputMode.VIEW}
     outs = []
     for o, (mode, view_of, spec) in zip(node.outputs, decls, strict=True):
         shape = tuple(None if s is None else int(s) for s in o.type.shape)
@@ -57,7 +57,7 @@ def rust_kernel_outputs(kernel, node, in_layouts) -> list[Output]:
 
 @rust_kernel.register(DimShuffle)
 def _(op, node, in_layouts=None):
-    return rt().DimShuffle([None if o == "x" else int(o) for o in op.new_order])
+    return interp().DimShuffle([None if o == "x" else int(o) for o in op.new_order])
 
 
 @rust_kernel.register(ViewOp)
@@ -67,13 +67,13 @@ def _(op, node, in_layouts=None):
 
     if any(not is_absent(i.type) for i in node.inputs[1:]):
         return None  # lengths to check: generated code
-    return rt().DimShuffle(list(range(node.outputs[0].type.ndim)))
+    return interp().DimShuffle(list(range(node.outputs[0].type.ndim)))
 
 
 @rust_kernel.register(DeepCopyOp)
 def _(op, node, in_layouts=None):
     out = node.outputs[0]
-    return rt().Copy(fresh_mode(out), np.dtype(out.type.dtype))
+    return interp().Copy(fresh_mode(out), np.dtype(out.type.dtype))
 
 
 @rust_kernel.register(Dot)
@@ -84,7 +84,7 @@ def _(op, node, in_layouts=None):
         return None
     if not (a.type.dtype == b.type.dtype == out.type.dtype in ("float64", "float32")):
         return None
-    return rt().Dot(fresh_mode(out), np.dtype(out.type.dtype))
+    return interp().Dot(fresh_mode(out), np.dtype(out.type.dtype))
 
 
 def _float_dtype(node):
@@ -107,21 +107,21 @@ def _register_more():
         if x.type.ndim == 0 or x.type.dtype not in ("float64", "float32", "int64"):
             return None
         axis = int(op.axis) % x.type.ndim
-        return rt().Sort(fresh_mode(node.outputs[0]), np.dtype(x.type.dtype), axis, op.kind in ("mergesort", "stable"))
+        return interp().Sort(fresh_mode(node.outputs[0]), np.dtype(x.type.dtype), axis, op.kind in ("mergesort", "stable"))
 
     @rust_kernel.register(Cholesky)
     def _(op, node, in_layouts=None):
         dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2:
             return None
-        return rt().Cholesky(fresh_mode(node.outputs[0]), dt, bool(op.lower))
+        return interp().Cholesky(fresh_mode(node.outputs[0]), dt, bool(op.lower))
 
     @rust_kernel.register(SolveTriangular)
     def _(op, node, in_layouts=None):
         dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2 or node.inputs[1].type.ndim not in (1, 2):
             return None
-        return rt().SolveTriangular(fresh_mode(node.outputs[0]), dt, bool(op.lower), bool(op.unit_diagonal))
+        return interp().SolveTriangular(fresh_mode(node.outputs[0]), dt, bool(op.lower), bool(op.unit_diagonal))
 
     @rust_kernel.register(Scan)
     def _(op, node, in_layouts=None):
@@ -135,7 +135,7 @@ def _register_more():
         # the loop body returns every output allocated; static ones use memory the
         # Scan kernel provides
         body_modes = [
-            OutMode.PROVIDED if all(s is not None for s in getattr(o.type, "shape", (None,))) else OutMode.ALLOCATED
+            OutputMode.PROVIDED if all(s is not None for s in getattr(o.type, "shape", (None,))) else OutputMode.ALLOCATED
             for o in op.fgraph.outputs
         ]
         body = planner.plan(op.fgraph, output_modes=body_modes, input_layouts=_body_input_layouts(op, node, in_layouts))
@@ -143,7 +143,7 @@ def _register_more():
         def taps(slices):
             return [[int(t) for t in s] for s in slices]
 
-        return rt().Scan(
+        return interp().Scan(
             info.n_seqs,
             taps(info.mit_mot_in_slices),
             taps(info.mit_mot_out_slices),

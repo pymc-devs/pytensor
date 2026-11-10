@@ -10,7 +10,7 @@ import pytensor.tensor as pt
 from pytensor.compile.mode import get_mode
 
 
-native = pytest.importorskip("pytensor_llvm")
+pytensor_llvm = pytest.importorskip("pytensor_llvm")
 pytest.importorskip("numba")
 
 LLVM = get_mode("LLVM")
@@ -18,14 +18,14 @@ rng = np.random.default_rng(3)
 
 
 def compiled(f):
-    return f.maker.linker.compiled
+    return f.maker.linker.program
 
 
 def numba_tasks(f):
     return [d for d in compiled(f).tasks if "numba:" in d]
 
 
-def test_numba_ops_mixed_with_native_kernels():
+def test_numba_ops_mixed_with_rust_kernels():
     x = pt.matrix("x")
     s = pt.lvector("s")
     outs = [

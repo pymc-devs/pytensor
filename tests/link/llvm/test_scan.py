@@ -25,7 +25,7 @@ def scan(*args, **kwargs):
 
 def scan_tasks(f):
     """Descriptions of the program's Scan tasks."""
-    dump = f.maker.linker.compiled.dump()
+    dump = f.maker.linker.program.dump()
     return [line for line in dump.split("tasks:")[1].splitlines() if "Scan" in line]
 
 

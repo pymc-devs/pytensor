@@ -32,7 +32,7 @@ from pytensor.link.llvm.codegen.emit import (
 )
 from pytensor.link.llvm.codegen.function import (
     NodeFunction,
-    OutMode,
+    OutputMode,
     Output,
     Signature,
     build_node_function,
@@ -75,9 +75,9 @@ def build_unit_function(
       values inside follow from how they are produced (`llvm_outputs`);
     * `output_layouts`: the layout of the memory provided for each PROVIDED output
       (None: any strides);
-    * `outputs`: [(vid, PyTensor type, OutMode)] with modes PROVIDED or ALLOCATED;
+    * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or ALLOCATED;
     * `constants`: {vid: (type, ndarray)} (0-d ones folded, arrays from the link table);
-    * `kernel_for(node, in_layouts)`: a `Kernel` for a node the unit calls instead of
+    * `kernel_for(node, in_layouts)`: a `CalledKernel` for a node the unit calls instead of
       generating (a kernel, numba, ...), or None; its handle goes into `links` (the
       returned function's `links`: call it with that config). Buffers kernels allocate
       for values inside the unit are released when it returns.
@@ -93,12 +93,12 @@ def build_unit_function(
     lays = {vid: r.layout for (vid, _), r in zip(inputs, in_reprs, strict=True)}
     if output_layouts is None:
         output_layouts = [None] * len(outputs)
-    outs = [Output(repr_of(t, lay if mode is OutMode.PROVIDED else None), mode) for (_, t, mode), lay in zip(outputs, output_layouts, strict=True)]
+    outs = [Output(repr_of(t, lay if mode is OutputMode.PROVIDED else None), mode) for (_, t, mode), lay in zip(outputs, output_layouts, strict=True)]
     for r in [*in_reprs, *(o.repr for o in outs)]:
         if isinstance(r, ScalarRepr):
             raise NotImplementedError("ScalarType values can't cross a unit's boundary")
     for o in outs:
-        if o.mode not in (OutMode.PROVIDED, OutMode.ALLOCATED):
+        if o.mode not in (OutputMode.PROVIDED, OutputMode.ALLOCATED):
             raise NotImplementedError(f"unit outputs can't be {o.mode}")
     sig = Signature(tuple(in_reprs), tuple(outs))
     fn = module.function(name, sig.param_types(), m.i32, inline=m.Inline.Always)
@@ -111,15 +111,15 @@ def build_unit_function(
     for (vid, _), r in zip(inputs, in_reprs, strict=True):
         vals[vid] = unpack(b, r, params[k])
         k += 1
-    targets = {}  # vid -> Target, first occurrence
+    targets = {}  # vid -> Destination, first occurrence
     out_targets = []
     for (vid, _, mode), o in zip(outputs, outs, strict=True):
         v = params[k]
         k += 1
-        if mode is OutMode.PROVIDED:
-            t = Target(array=unpack(b, o.repr, v), layout=o.repr.layout)
+        if mode is OutputMode.PROVIDED:
+            t = Destination(array=unpack(b, o.repr, v), layout=o.repr.layout)
         else:
-            t = Target(slot=v)
+            t = Destination(slot=v)
         out_targets.append(t)
         targets.setdefault(vid, t)
     bind_constants(cg, constants, vals)
@@ -131,7 +131,7 @@ def build_unit_function(
         if vid in written and targets[vid] is target:
             continue
         src = vals[vid]
-        if mode is OutMode.PROVIDED:
+        if mode is OutputMode.PROVIDED:
             copy(cg, src, target.array)
         else:
             out = SlotOutput(cg, target.slot, t.dtype, t.ndim)
@@ -142,7 +142,7 @@ def build_unit_function(
 
 
 @dataclass
-class Target:
+class Destination:
     """Where a value may be produced directly: memory (`array`, in `layout`), or an
     output slot (`slot`) for a value allocated C-contiguous."""
 
@@ -192,7 +192,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
     * `vals`: vid -> Array (tensors) or value (scalars); must hold every value the
       items read but don't produce; filled with what they produce;
     * `lays`: vid -> Layout of the values (filled too);
-    * `targets`: vid -> `Target`: where a value may be produced directly (PROVIDED
+    * `targets`: vid -> `Destination`: where a value may be produced directly (PROVIDED
       outputs whose declared layout the target's implies; ALLOCATED C-contiguous
       ones into a slot); other values go into temporary memory or kernel buffers;
     * `on_fail()`: emits the caller's cleanup before an error is returned.
@@ -216,7 +216,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
         for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True)):
             t = targets.get(vid)
             if (
-                o.mode is OutMode.PROVIDED
+                o.mode is OutputMode.PROVIDED
                 and t is not None
                 and t.array is not None
                 and vid not in written
@@ -233,7 +233,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
             # node allocates it C-contiguous
             t = targets.get(vid)
             return (
-                o.mode is OutMode.ALLOCATED
+                o.mode is OutputMode.ALLOCATED
                 and t is not None
                 and t.slot is not None
                 and vid not in written
@@ -243,7 +243,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
         temporaries = {
             j
             for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True))
-            if (o.mode is OutMode.ALLOCATED and not into_slot(vid, o)) or o.mode is OutMode.VIEW
+            if (o.mode is OutputMode.ALLOCATED and not into_slot(vid, o)) or o.mode is OutputMode.VIEW
         }
         nf = build_node_function(
             module,
@@ -265,9 +265,9 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
             args.append(v if isinstance(r, ScalarRepr) else pack(b, r, v))
         reads = []  # (vid, slot, how)
         for j, (vid, var, o) in enumerate(zip(item.outputs, node.outputs, nsig.outputs, strict=True)):
-            if o.mode is OutMode.ABSENT:
+            if o.mode is OutputMode.ABSENT:
                 continue
-            if o.mode is OutMode.PROVIDED:
+            if o.mode is OutputMode.PROVIDED:
                 if j in in_place:
                     a = in_place[j]
                     written.add(vid)
@@ -276,7 +276,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
                     a = cg.temporary(var.type.dtype, [b.const_int(m.i64, s) for s in var.type.shape], lay)
                 vals[vid] = a
                 args.append(pack(b, o.repr, a))
-            elif o.mode is OutMode.SCALAR:
+            elif o.mode is OutputMode.SCALAR:
                 slot = b.alloca(o.repr.ir_type)
                 args.append(slot)
                 reads.append((vid, slot, "scalar", o))
@@ -323,4 +323,4 @@ def _mem_type(dtype):
     return memory_type(dtype)
 
 
-__all__ = ["NodeItem", "Target", "TensorRepr", "bind_constants", "build_unit_function", "emit_items", "release"]
+__all__ = ["NodeItem", "Destination", "TensorRepr", "bind_constants", "build_unit_function", "emit_items", "release"]

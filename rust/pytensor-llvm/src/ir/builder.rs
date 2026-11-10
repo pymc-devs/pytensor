@@ -956,7 +956,7 @@ impl Builder {
     /// `ptr` points into an array in scope `scope` that doesn't overlap the arrays of
     /// scopes `noalias`. Loads and stores through it (and through pointers derived from
     /// it) get scoped-alias and type-based alias metadata. The caller guarantees the
-    /// claim (written outputs of a step never overlap its inputs or each other).
+    /// claim (written outputs of a task never overlap its inputs or each other).
     fn mark_array(&self, ptr: Value, scope: &str, noalias: Vec<String>) -> PyResult<()> {
         let p = self.v(&ptr)?;
         let mut guard = self.alias.borrow_mut();
@@ -1264,7 +1264,7 @@ impl Builder {
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
     }
 
-    /// Scratch memory: `nbytes` (i64), 64-byte aligned, valid until the step ends or an
+    /// Scratch memory: `nbytes` (i64), 64-byte aligned, valid until the task ends or an
     /// earlier mark is released. Null on failure, with the error set.
     fn rt_scratch(&self, ctx: Value, nbytes: Value) -> PyResult<Value> {
         self.open()?;

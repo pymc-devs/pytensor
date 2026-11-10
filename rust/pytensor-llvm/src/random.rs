@@ -2,11 +2,11 @@
 //! table `ctx->rt`, linked into generated code as `ptl_rt_rng_*`).
 //!
 //! All draw from the call context's random state (`PtCtx::rng`, Xoshiro256++): one
-//! state per function state, advanced by every draw, so a seeded state gives
+//! state per session, advanced by every draw, so a seeded state gives
 //! reproducible draws. Distributions come from `rand_distr`. Parameters are valid
 //! (generated code checks them first); invalid ones give NaN (or -1 for counts).
 
-use crate::abi::PtCtx;
+use crate::runtime::PtCtx;
 use rand_core::Rng;
 use rand_distr::{Beta, Binomial, Distribution, Gamma, Poisson, StandardNormal, StandardUniform};
 

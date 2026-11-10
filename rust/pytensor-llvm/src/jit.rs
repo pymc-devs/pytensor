@@ -5,7 +5,7 @@
 //! here. That's what makes the disk cache trivial: a cache hit skips LLVM codegen
 //! entirely, and the JIT only links.
 
-use crate::native;
+use crate::math;
 use llvm_sys::error::*;
 use llvm_sys::orc2::lljit::*;
 use llvm_sys::orc2::*;
@@ -45,9 +45,9 @@ fn check(err: LLVMErrorRef, what: &str) -> Result<(), String> {
     }
 }
 
-/// The process-wide JIT (it lives in the runtime, `crate::abi::runtime()`).
+/// The process-wide JIT (it lives in the runtime, `crate::runtime::runtime()`).
 pub fn jit() -> &'static Mutex<Jit> {
-    crate::abi::runtime().jit()
+    crate::runtime::runtime().jit()
 }
 
 impl Jit {
@@ -84,9 +84,9 @@ impl Jit {
 
             // precompiled Rust scalar functions
             let es = LLVMOrcLLJITGetExecutionSession(jit);
-            let mut pairs: Vec<LLVMOrcCSymbolMapPair> = native::scalar_symbols()
+            let mut pairs: Vec<LLVMOrcCSymbolMapPair> = math::scalar_symbols()
                 .into_iter()
-                .chain(crate::abi::runtime().functions.symbols())
+                .chain(crate::runtime::runtime().functions.symbols())
                 .map(|(name, addr)| {
                     let c = CString::new(name).unwrap();
                     LLVMOrcCSymbolMapPair {

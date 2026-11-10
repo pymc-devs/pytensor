@@ -5,11 +5,11 @@
 //! the chunks `[k * grain, min(n, (k + 1) * grain))` of `0..n`. The chunks only depend
 //! on `n` and `grain`, and each gets its own context with a random state derived from
 //! (one draw of the caller's state, chunk index): results, random draws included, are
-//! the same whatever the number of threads, and whether the function state allows
+//! the same whatever the number of threads, and whether the session allows
 //! parallelism at all (`PtCtx::parallel`; chunks then run one after the other). A single
 //! chunk runs directly on the caller's context.
 
-use crate::abi::{runtime, PtCtx};
+use crate::runtime::{runtime, PtCtx};
 use rand_core::Rng;
 use rayon::prelude::*;
 use std::cell::RefCell;

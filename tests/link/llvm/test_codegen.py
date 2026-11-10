@@ -9,7 +9,7 @@ from pytensor.graph.basic import Constant
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen import OutMode, compile_node  # noqa: E402
+from pytensor.link.llvm.codegen import OutputMode, compile_node  # noqa: E402
 
 
 rng = np.random.default_rng(42)
@@ -20,7 +20,7 @@ def run_node(node, *values, provided=None, provided_layouts=None):
     c = compile_node(node, provided=provided_layouts)
     outs = []
     for k, (o, spec) in enumerate(zip(node.outputs, c.signature.outputs, strict=True)):
-        if spec.mode is OutMode.PROVIDED:
+        if spec.mode is OutputMode.PROVIDED:
             arr = None if provided is None else provided[k]
             outs.append(np.empty(o.type.shape, dtype=o.type.dtype) if arr is None else arr)
         else:
@@ -30,7 +30,7 @@ def run_node(node, *values, provided=None, provided_layouts=None):
     it = iter(values)
     for i in node.inputs:
         ins.append(np.asarray(i.data if isinstance(i, Constant) else next(it), dtype=i.type.dtype))
-    return ir.call_abi(c.address, ins, outs, c.frame_size)
+    return ir.call_kernel(c.address, ins, outs, c.frame_size)
 
 
 def reference(out, inputs, values):
