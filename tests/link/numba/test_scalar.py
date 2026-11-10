@@ -314,6 +314,28 @@ def test_gammaln_psi():
     np.testing.assert_equal(psi, scipy.special.psi(edges))
 
 
+def test_gammaln_psi_float32():
+    x = pt.vector("x", dtype="float32")
+    fn = function([x], [pt.gammaln(x), pt.psi(x)], mode=numba_mode)
+    xs = [1e-30, 0.3, 1 - 2**-24, 1.0, 1 + 2**-23, 1.4616321, 1.75, 2.0, 2.5]
+    xs = np.array([*xs, 3.999, 17.5, 63.99, 64.0, 1e5, 1e30], dtype="float32")
+    gammaln, psi = fn(xs)
+    assert gammaln.dtype == psi.dtype == "float32"
+    # against the float64 kernels, which are within 2 and 3 ulp of mpmath
+    x64 = pt.vector("x64", dtype="float64")
+    gammaln_ref, psi_ref = function(
+        [x64], [pt.gammaln(x64), pt.psi(x64)], mode=numba_mode
+    )(xs.astype("float64"))
+    np.testing.assert_array_max_ulp(gammaln, gammaln_ref.astype("float32"), maxulp=3)
+    np.testing.assert_array_max_ulp(psi, psi_ref.astype("float32"), maxulp=3)
+    edges = np.array([-2.5, -1.0, -0.0, 0.0, np.inf, np.nan], dtype="float32")
+    gammaln, psi = fn(edges)
+    np.testing.assert_allclose(
+        gammaln, [-0.056243716497674054, *[np.inf] * 4, np.nan], rtol=1e-6
+    )
+    np.testing.assert_allclose(psi, scipy.special.psi(edges), rtol=1e-6)
+
+
 CYTHON_SPECIAL_CASES = [
     (pt.erfcx, [np.array([-1.0, 0.0, 1.0, 3.0])]),
     (pt.erfinv, [np.array([-0.5, 0.0, 0.3, 0.9])]),
