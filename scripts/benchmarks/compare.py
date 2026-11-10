@@ -524,7 +524,7 @@ def compare(args):
             status = (
                 f"{row['base_cache_status']}/{row['head_cache_status']}"
                 if row["cache_state"] == "reload"
-                else "—"
+                else "-"
             )
             summary += f"| {row['case']} / {row['cache_state']} | {row['base_build_seconds']:.3f} | {row['head_build_seconds']:.3f} | {row['base_first_call_seconds']:.3f} | {row['head_first_call_seconds']:.3f} | {status} |\n"
         summary += "\nRSS is sampled from the parent; peaks are approximate, absolute RSS includes shared pages. Evaluation memory comes from the fresh reload process.\n\n"

@@ -57,7 +57,8 @@ process CPU affinity through psutil.
 A reused directory does not prove a full cache hit. Artifacts save top-level
 dispatcher hit/miss counters and fresh ``numba:compile`` events, including
 function names and phases. ``full_hit`` requires a top-level hit, no misses
-and zero fresh native compilations. A hit with fresh helper compilation is
+and zero fresh dispatcher compile events. This does not imply zero LLVM
+linking or runtime initialization. A hit with fresh helper compilation is
 ``partial_hit``; missing/uncacheable cases retain that label. In the #2647
 comparison, the baseline SciPy pointer resolver can compile on reload even
 when the graph cache hits. A partially cached reload may therefore still
@@ -74,7 +75,10 @@ These are process measurements, not function-object sizes. RSS includes
 shared pages; short allocations between samples may be missed, and a zero
 increase does not mean no allocation. A lifetime high-water mark is not
 reused as an evaluation peak. ``setup-summary.*`` contains phase/RSS summaries;
-per-worker ``*.json``, ``*.memory.json`` and logs retain the evidence.
+per-worker ``*.json``, ``*.memory.json`` and logs retain the evidence,
+including the number of RSS samples in each phase. These scopes address
+the cached-function memory concerns raised in
+`model-catalogue PR #9 <https://github.com/pymc-devs/pymc-model-catalogue/pull/9#pullrequestreview-4947277231>`_.
 
 Ratios compare revisions within one machine: above one means the head is
 faster. Hosted runner noise and different CPUs mean absolute timings across
@@ -91,7 +95,7 @@ GitHub normally requires a manual workflow to exist on the default branch
 before ``workflow_dispatch`` works. Until this template is merged, rerun its
 existing four-platform comparison without changing the default branch::
 
-    gh run rerun 42798595487 --repo ricardoV94/pytensor
+    gh run rerun 42866657816 --repo ricardoV94/pytensor
 
 That reruns the exact workflow commit and its original revisions. To compare
 different refs immediately, check out ``ci/benchmark-template-2647`` and use
