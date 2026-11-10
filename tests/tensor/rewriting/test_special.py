@@ -188,6 +188,27 @@ def test_logsumexp_gradient_reuses_exponential():
     assert sum(node.op == exp for node in nodes) == 1
 
 
+def test_shared_exponential():
+    x = matrix("x", shape=(2, 3))
+    coeff = vector("coeff", shape=(3,))
+    p = softmax(x, axis=1)
+    log_p = log_softmax(x, axis=1)
+    value = logsumexp(x, axis=1)
+    grad_p = pytensor.grad((p * coeff).sum(), x)
+    grad_log_p = pytensor.grad((log_p * coeff).sum(), x)
+    grad_value = pytensor.grad(value.sum(), x)
+    out = [p, log_p, value, grad_p, grad_log_p, grad_value]
+    result = RewriteTester(
+        [x, coeff],
+        out,
+        include="o3",
+        exclude=["composite_elemwise_fusion"],
+    )
+    nodes = result.rewr_fg.apply_nodes
+    assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
+    assert sum(node.op == exp for node in nodes) == 1
+
+
 @pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
 def test_local_log_add_exp(mode):
     m = get_mode(mode).excluding("fusion")
@@ -313,3 +334,5 @@ def test_local_log_sum_exp_inf(mode):
     assert f([-np.inf, -np.inf]) == -np.inf
     assert f([np.inf, np.inf]) == np.inf
     assert f([-np.inf, np.inf]) == np.inf
+    assert f([np.inf, 1.0]) == np.inf
+    assert f([1.0, -np.inf]) == 1.0

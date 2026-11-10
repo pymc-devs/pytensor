@@ -186,11 +186,17 @@ def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
 def test_softmax_stability(constructor, scipy_fn, mode):
     """The helpers must be stable in any mode, whatever graph they end up emitting."""
     x = matrix("x")
-    x_val = np.array([[800.0, 805.0]], dtype=config.floatX)
+    x_val = np.array(
+        [[800.0, 805.0], [1.0, -np.inf], [-np.inf, -np.inf], [np.inf, 1.0]],
+        dtype=config.floatX,
+    )
 
     f = function([x], constructor(x, axis=-1), mode=mode)
 
-    np.testing.assert_allclose(f(x_val), scipy_fn(x_val, axis=-1), rtol=1e-6)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = f(x_val)
+        np.testing.assert_allclose(out[:2], scipy_fn(x_val[:2], axis=-1), rtol=1e-6)
+    assert np.isnan(out[2:]).all()
 
 
 def test_logaddexp():
