@@ -1,6 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::undocumented_unsafe_blocks)]
-//! Native code generation and runtime for PyTensor's LLVM backend (`pytensor/link/llvm_v2`).
+//! Native code generation and runtime for PyTensor's LLVM backend (`pytensor/link/llvm`).
 //!
 //! * `llvmir`: the IR builder Python generates code with, modules, compilation;
 //! * `rt`: the program interpreter, Rust kernels, the C API;
