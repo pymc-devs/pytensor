@@ -59,6 +59,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
     extract_diag_lift_pass,
     local_advanced_subtensor_of_dot,
     local_subtensor_make_vector,
+    local_subtensor_of_adv_subtensor,
     local_subtensor_of_batch_dims,
     local_subtensor_of_expand_dims,
     local_subtensor_shape_constant,
@@ -67,7 +68,6 @@ from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedSubtensor,
     Subtensor,
 )
 from tests.unittest_tools import RewriteTester, assert_equal_computations
@@ -1147,54 +1147,89 @@ def test_local_subtensor_shape_constant():
 
 
 @pytest.mark.parametrize(
-    "original_fn, supported",
+    "original_fn, expected_fn",
     [
-        # Use non-constant-step index permutations ([2, 0, 1] not [1, 0]) so
-        # ``local_adv_idx_to_slice`` doesn't rewrite the
-        # AdvancedSubtensor to a Subtensor before this rewrite gets a chance
-        # to fire.
-        (lambda x: x[:, [2, 0, 1]][0], True),
-        (lambda x: x[:, [2, 0, 1], [0, 0, 0]][1:], True),
-        (lambda x: x[:, [[2, 0], [0, 1]]][1:], True),
-        (lambda x: x[:, None, [2, 0, 1]][0], True),
-        # Not supported, basic indexing on advanced indexing dim
-        (lambda x: x[[0, 1]][0], False),
-        # Not supported, basic indexing on the right of advanced indexing
-        (lambda x: x[[0, 1]][:, 0], False),
+        # Basic indices on the left of the advanced indices
+        (
+            lambda x, iv, jv, im: x[:, [2, 0, 1]][0],
+            lambda x, iv, jv, im: x[0][[2, 0, 1]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, [2, 0, 1], [0, 0, 0]][1:],
+            lambda x, iv, jv, im: x[1:][:, [2, 0, 1], [0, 0, 0]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, [[2, 0], [0, 1]]][1:],
+            lambda x, iv, jv, im: x[1:][:, [[2, 0], [0, 1]]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, None, [2, 0, 1]][0],
+            lambda x, iv, jv, im: x[:, None][0][:, [2, 0, 1]],
+        ),
+        # Basic indices on the right of the advanced indices
+        (lambda x, iv, jv, im: x[iv][:, 1:3], lambda x, iv, jv, im: x[:, 1:3][iv]),
+        (lambda x, iv, jv, im: x[iv][:, -1], lambda x, iv, jv, im: x[:, -1][iv]),
+        (
+            lambda x, iv, jv, im: x[:, iv][:, :, 2:],
+            lambda x, iv, jv, im: x[:, :, 2:][:, iv],
+        ),
+        (
+            lambda x, iv, jv, im: x[iv, jv][:, 1],
+            lambda x, iv, jv, im: x[:, :, 1][iv, jv],
+        ),
+        (
+            lambda x, iv, jv, im: x[im][:, :, :, ::-1],
+            lambda x, iv, jv, im: x[:, :, ::-1][im],
+        ),
+        # Basic index on the advanced dim: indexes a vector index directly
+        (lambda x, iv, jv, im: x[iv][1:, 1:], lambda x, iv, jv, im: x[:, 1:][iv[1:]]),
+        (lambda x, iv, jv, im: x[iv][::-1], lambda x, iv, jv, im: x[iv[::-1]]),
+        (
+            lambda x, iv, jv, im: x[:, iv][1, 2, 2],
+            lambda x, iv, jv, im: x[1, :, 2][iv[2]],
+        ),
+        (
+            lambda x, iv, jv, im: x[[0, 1]][0],
+            lambda x, iv, jv, im: x[pt.as_tensor([0, 1])[0]],
+        ),
+        # Basic index on the advanced dims of a matrix index: stays after it
+        (
+            lambda x, iv, jv, im: x[im][1:, :, 1:],
+            lambda x, iv, jv, im: x[:, 1:][im][1:],
+        ),
+        # AdvancedSubtensor with several clients: only when they read disjoint ranges
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 2:4])(x[iv]),
+            lambda x, iv, jv, im: x[:, :2][iv] * x[:, 2:4][iv],
+        ),
+        (lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 1:3])(x[iv]), None),
+        (lambda x, iv, jv, im: (lambda adv: adv[:, :1] * adv.sum())(x[iv]), None),
         # Not implemented, complex flavors of advanced indexing
-        (lambda x: x[:, 5:, [0, 1]][0], False),
-        (lambda x: x[:, :, np.array([True, False, False])][0], False),
-        (lambda x: x[[0, 1], :, [0, 1]][:, 0], False),
+        (lambda x, iv, jv, im: x[:, 1:, jv][0], None),
+        (lambda x, iv, jv, im: x[x[:, 0, 0] > 0][:, 1:], None),
+        (lambda x, iv, jv, im: x[iv, :, jv][:, 1:], None),
     ],
 )
-def test_local_subtensor_of_adv_subtensor(original_fn, supported):
+def test_local_subtensor_of_adv_subtensor(original_fn, expected_fn):
     rng = np.random.default_rng(257)
     x = pt.tensor3("x", shape=(7, 5, 3))
-    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+    iv, jv, im = pt.lvector("iv"), pt.lvector("jv"), pt.lmatrix("im")
+    test_values = {
+        x: rng.normal(size=x.type.shape).astype(x.dtype),
+        iv: np.array([3, 0, 0, 2]),
+        jv: np.array([1, 2, 2, 0]),
+        im: np.array([[1, 4], [4, 0]]),
+    }
 
-    out = original_fn(x)
-    opt_out = rewrite_graph(
-        out,
-        include=("canonicalize", "local_subtensor_of_adv_subtensor"),
-        exclude=(
-            "local_advanced_read_of_write_constant_indices",
-            "local_adv_idx_to_slice",
-        ),
+    out = original_fn(x, iv, jv, im)
+    result = RewriteTester(
+        [x, iv, jv, im],
+        [out],
+        include=None,
+        custom_rewrite=local_subtensor_of_adv_subtensor,
     )
-    toposort = FunctionGraph(outputs=[opt_out], clone=False).toposort()
-    [idx_subtensor] = [
-        i for i, node in enumerate(toposort) if isinstance(node.op, Subtensor)
-    ]
-    [idx_adv_subtensor] = [
-        i for i, node in enumerate(toposort) if isinstance(node.op, AdvancedSubtensor)
-    ]
-    swapped = idx_subtensor < idx_adv_subtensor
-    correct = swapped if supported else not swapped
-    assert correct, debugprint(opt_out, print_type=True)
-    np.testing.assert_allclose(
-        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
-        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
-    )
+    result.assert_graph(out if expected_fn is None else expected_fn(x, iv, jv, im))
+    result.assert_eval(*(test_values[inp] for inp in (x, iv, jv, im)))
 
 
 @pytest.mark.parametrize(
