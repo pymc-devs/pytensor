@@ -114,7 +114,7 @@ def test_non_contiguous_inputs(input_layout):
 
 
 def test_c_inputs_are_checked_by_the_c_api():
-    from tests.link.llvm.test_c_api import Api, PtArray, as_ptarrays
+    from tests.link.llvm_v2.test_c_api import Api, PtArray, as_ptarrays
 
     x = pt.dvector("x")
     f = pytensor.function([x], pt.exp(x), mode=V2.clone(link_kwargs={"input_layout": "c"}))

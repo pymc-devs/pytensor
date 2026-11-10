@@ -10,25 +10,16 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import Mode, get_mode
-from pytensor.link.llvm.linker import LLVMLinker
+from pytensor.compile.mode import get_mode
 
 
 native = pytest.importorskip("pytensor_llvm")
 
-# Both backends implement the same C API (same header); each has its own table.
-BACKENDS = {
-    "LLVM": (lambda: Mode(linker=LLVMLinker(), optimizer="fast_run"), lambda: native.c_api_table()),
-    "LLVM_V2": (lambda: get_mode("LLVM_V2"), lambda: native.rt.c_api_table()),
-}
+LLVM = get_mode("LLVM_V2")
 
 
-@pytest.fixture(params=list(BACKENDS), autouse=True)
-def backend(request):
-    global LLVM, _table
-    mode, table = BACKENDS[request.param]
-    LLVM, _table = mode(), table
-    return request.param
+def _table():
+    return native.rt.c_api_table()
 
 
 class PtArray(ctypes.Structure):

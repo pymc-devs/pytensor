@@ -500,12 +500,12 @@ class Planner:
             return Kernel(k.address, k.config, "kernel", rust_kernel_outputs(k, node, in_layouts), repr(k), k)
         if not self.opts.numba_fallback:
             raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
-        from pytensor.link.llvm.numba_fallback import numba_fallback_kernel
+        from pytensor.link.llvm_v2.numba_kernels import numba_kernel
         from pytensor.tensor.random.type import RandomType
 
         if any(isinstance(v.type, RandomType) for v in (*node.inputs, *node.outputs)):
             raise NotImplementedError(f"LLVM backend: no implementation of the random variable {node.op}")
-        kernel = numba_fallback_kernel(node)
+        kernel = numba_kernel(node)
         self.stats.n_numba += 1
         self.stats.numba.append(str(node.op))
         outs = [Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.ALLOCATED) for o in node.outputs]
@@ -547,14 +547,14 @@ class Planner:
             return False
 
     def numba_task(self, it):
-        from pytensor.link.llvm.numba_fallback import numba_fallback_kernel
+        from pytensor.link.llvm_v2.numba_kernels import numba_kernel
 
         node = it.node
         from pytensor.tensor.random.type import RandomType
 
         if any(isinstance(v.type, RandomType) for v in (*node.inputs, *node.outputs)):
             raise NotImplementedError(f"LLVM backend: no implementation of the random variable {node.op}")
-        kernel = numba_fallback_kernel(node)
+        kernel = numba_kernel(node)
         self.stats.n_numba += 1
         self.stats.numba.append(str(node.op))
         n = len(node.outputs)

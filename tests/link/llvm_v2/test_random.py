@@ -135,7 +135,7 @@ def test_nested_program_draws_from_the_callers_state():
 
 
 def test_c_api_seed():
-    from tests.link.llvm.test_c_api import Api, PtArray, as_ptarrays
+    from tests.link.llvm_v2.test_c_api import Api, PtArray, as_ptarrays
 
     rng = pytensor.shared(np.random.default_rng(0))
     f = pytensor.function([], rb.normal(0, 1, size=(6,), rng=rng), mode=MODE)

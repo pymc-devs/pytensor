@@ -1,7 +1,8 @@
-"""Run Ops the LLVM backend doesn't implement through their numba implementation.
+"""Numba kernels: Ops we don't implement, run through their numba implementation.
 
 For such an Op we take PyTensor's numba implementation (``numba_funcify``) and wrap it in
-a numba ``cfunc`` with the kernel ABI ``int32(PtCtx *ctx, PtArray *args, void *params)``:
+a numba ``cfunc`` with the kernel ABI without a frame, ``int32(PtCtx *ctx, PtArray *args,
+void *config)``:
 
 * inputs become numba arrays that view the caller's memory (data, shape, strides; no copy),
   or plain scalars for inputs of ``ScalarType``,
@@ -151,10 +152,10 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype):
 _SIG = types.int32(types.voidptr, types.voidptr, types.voidptr)
 
 # bump when the generated wrapper changes
-FALLBACK_VERSION = 2
+CACHE_VERSION = 3
 
 
-def numba_fallback_kernel(node):
+def numba_kernel(node):
     """Compile a cfunc kernel for `node`; returns the numba cfunc object (keep it alive)."""
     from pytensor import config
     from pytensor.link.numba.cache import compile_numba_function_src
@@ -196,6 +197,6 @@ def numba_fallback_kernel(node):
         types_sig = ",".join(str(v.type) for v in (*node.inputs, *node.outputs))
         # hashed: the key ends up in a file name
         digest = hashlib.sha256(f"{op_key}|{types_sig}|fastmath{int(config.numba__fastmath)}".encode()).hexdigest()
-        cache_key = f"llvm_fallback_v{FALLBACK_VERSION}_{digest}"
+        cache_key = f"llvm_numba_kernel_v{CACHE_VERSION}_{digest}"
     kernel = compile_numba_function_src(src, "kernel", global_env=env, cache_key=cache_key)
     return numba.cfunc(_SIG, nopython=True, cache=cache_key is not None)(kernel)
