@@ -1,0 +1,8 @@
+# Keep the same wheel versions on every runner; change these together.
+numpy==2.5.4
+scipy==1.18.1
+numba==0.68.1
+llvmlite==0.50.0
+psutil==7.2.2
+setuptools==84.2.1
+filelock==4.2.7
