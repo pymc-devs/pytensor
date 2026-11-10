@@ -3,6 +3,7 @@
 # ruff: noqa: T201
 import argparse
 import csv
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -46,7 +47,7 @@ def worker(args):
     import pytensor
 
     source = Path(args.source).resolve()
-    assert Path(pytensor.__file__).is_relative_to(source), pytensor.__file__
+    assert Path(pytensor.__file__).resolve().is_relative_to(source), pytensor.__file__
     process = psutil.Process()
     affinity = None
     if hasattr(process, "cpu_affinity"):
@@ -111,6 +112,11 @@ def compare(args):
                     )
             return
         (output / "revisions.json").write_text(json.dumps(revisions, indent=2))
+        configuration = vars(args) | {
+            "case_sha256": hashlib.sha256(case_file.read_bytes()).hexdigest(),
+            "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        }
+        (output / "configuration.json").write_text(json.dumps(configuration, indent=2))
         sources = {}
         for label, revision in revisions.items():
             source = temporary / label
