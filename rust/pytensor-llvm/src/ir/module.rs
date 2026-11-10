@@ -305,7 +305,7 @@ impl Module {
     /// Verify, optimize, generate machine code and link it into the JIT. The object is
     /// cached by a hash of the IR and the target. Afterwards the module can't change.
     #[pyo3(signature = (opt_level = 3, cache = true))]
-    fn compile(&self, py: Python<'_>, opt_level: u32, cache: bool) -> PyResult<Compiled> {
+    fn compile(&self, py: Python<'_>, opt_level: u32, cache: bool) -> PyResult<CompiledModule> {
         let mut r = compile_modules(py, &[self], opt_level, cache)?;
         Ok(r.remove(0))
     }
@@ -362,7 +362,7 @@ struct Prepared {
 
 /// Compile several modules: prepared one by one, optimized and code-generated in
 /// parallel (without the GIL), linked one by one.
-pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cache: bool) -> PyResult<Vec<Compiled>> {
+pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cache: bool) -> PyResult<Vec<CompiledModule>> {
     use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let prepared: Vec<Prepared> = modules.iter().map(|m| m.prepare(opt_level)).collect::<PyResult<_>>()?;
@@ -424,7 +424,7 @@ pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cach
         }
         let mut st = stats[i].clone();
         st.total_s = total;
-        out.push(Compiled { key: p.key, addresses, stats: st });
+        out.push(CompiledModule { key: p.key, addresses, stats: st });
     }
     Ok(out)
 }
@@ -432,7 +432,7 @@ pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cach
 /// Compile several modules in parallel (see `Module.compile`).
 #[pyfunction]
 #[pyo3(signature = (modules, opt_level = 3, cache = true))]
-pub fn compile_many(py: Python<'_>, modules: Vec<PyRef<'_, Module>>, opt_level: u32, cache: bool) -> PyResult<Vec<Compiled>> {
+pub fn compile_many(py: Python<'_>, modules: Vec<PyRef<'_, Module>>, opt_level: u32, cache: bool) -> PyResult<Vec<CompiledModule>> {
     let refs: Vec<&Module> = modules.iter().map(|m| &**m).collect();
     compile_modules(py, &refs, opt_level, cache)
 }
@@ -449,7 +449,7 @@ pub struct CompileStats {
 
 /// A compiled module: addresses of its exported functions.
 #[pyclass(module = "pytensor_llvm.ir", frozen)]
-pub struct Compiled {
+pub struct CompiledModule {
     #[pyo3(get)]
     key: String,
     addresses: HashMap<String, usize>,
@@ -457,7 +457,7 @@ pub struct Compiled {
 }
 
 #[pymethods]
-impl Compiled {
+impl CompiledModule {
     fn address(&self, name: &str) -> PyResult<usize> {
         self.addresses.get(name).copied().ok_or_else(|| PyValueError::new_err(format!("no exported function {name}")))
     }
@@ -591,7 +591,7 @@ fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
             llvm_sys::error::LLVMDisposeErrorMessage(msg);
             return Err(format!("optimization failed: {s}"));
         }
-        if let Ok(dir) = std::env::var("PTLLVM_DUMP_IR") {
+        if let Ok(dir) = std::env::var("PYTENSOR_LLVM_DUMP_IR") {
             let _ = std::fs::create_dir_all(&dir);
             let name = CStr::from_ptr(c::LLVMGetModuleIdentifier(m, &mut 0)).to_string_lossy().into_owned();
             let _ = std::fs::write(std::path::Path::new(&dir).join(format!("{name}.opt.ll")), print_module(m));

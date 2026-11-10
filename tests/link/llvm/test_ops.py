@@ -30,13 +30,13 @@ def compare(inputs, outputs, values, mode=NO_FALLBACK, rtol=1e-10, atol=1e-12, c
 
 
 def tasks(f):
-    return f.maker.linker.compiled.tasks
+    return f.maker.linker.program.tasks
 
 
 def test_dump_lists_values_and_tasks():
     x = pt.matrix("x")
     f = compare([x], pt.exp(x).sum(axis=1) + x[:, 0], [rng.random((3, 4))])
-    text = f.maker.linker.compiled.dump()
+    text = f.maker.linker.program.dump()
     assert text.startswith("program: 1 inputs, 1 outputs")
     assert "input 0" in text and "tasks:" in text and "outputs:" in text
 

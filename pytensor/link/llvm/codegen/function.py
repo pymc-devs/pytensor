@@ -29,7 +29,7 @@ from pytensor.link.llvm.codegen.types import (
 )
 
 
-class OutMode(enum.Enum):
+class OutputMode(enum.Enum):
     #: the caller provides the memory (with its own strides)
     PROVIDED = "provided"
     #: the kernel allocates and hands over one reference through the slot
@@ -45,7 +45,7 @@ class OutMode(enum.Enum):
 @dataclass(frozen=True)
 class Output:
     repr: TensorRepr | ScalarRepr
-    mode: OutMode
+    mode: OutputMode
     #: the input a VIEW output lies in
     view_of: int | None = None
 
@@ -65,7 +65,7 @@ class Output:
     @property
     def ir_type(self):
         m = ir()
-        if self.mode is OutMode.PROVIDED:
+        if self.mode is OutputMode.PROVIDED:
             return self.repr.ir_type
         return m.ptr
 
@@ -77,7 +77,7 @@ class Signature:
 
     def param_types(self):
         m = ir()
-        outs = [o.ir_type for o in self.outputs if o.mode is not OutMode.ABSENT]
+        outs = [o.ir_type for o in self.outputs if o.mode is not OutputMode.ABSENT]
         return [m.ptr, m.ptr, m.ptr, *(r.ir_type for r in self.inputs), *outs]
 
     @property
@@ -103,27 +103,27 @@ def llvm_outputs(op, node, in_layouts) -> list[Output]:
     other memory only through a temporary and a copy."""
     view_map = getattr(op, "view_map", {}) or {}
     return [
-        Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.VIEW, view_map[k][0])
+        Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutputMode.VIEW, view_map[k][0])
         if k in view_map and isinstance(repr_of(o.type), TensorRepr)
-        else fresh_output(o)
+        else new_output(o)
         for k, o in enumerate(node.outputs)
     ]
 
 
-def fresh_output(var, layout=None) -> Output:
+def new_output(var, layout=None) -> Output:
     """An output in new memory: SCALAR, PROVIDED for static shapes, else ALLOCATED; in
     `layout` (default C-contiguous). ABSENT for values without data."""
     r = repr_of(var.type)
     if isinstance(r, NoneRepr):
-        return Output(r, OutMode.ABSENT)
+        return Output(r, OutputMode.ABSENT)
     if isinstance(r, ScalarRepr):
-        return Output(r, OutMode.SCALAR)
+        return Output(r, OutputMode.SCALAR)
     lay = layout if layout is not None else Layout.c(var.type.ndim)
-    return Output(repr_of(var.type, lay), OutMode.PROVIDED if r.static else OutMode.ALLOCATED)
+    return Output(repr_of(var.type, lay), OutputMode.PROVIDED if r.static else OutputMode.ALLOCATED)
 
 
 def view_output(var, layout, view_of=0) -> Output:
-    return Output(repr_of(var.type, layout), OutMode.VIEW, view_of)
+    return Output(repr_of(var.type, layout), OutputMode.VIEW, view_of)
 
 
 def known_layouts(node, in_layouts) -> list:
@@ -171,7 +171,7 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
 
     outputs = []
     for k, o in enumerate(declared if declared is not None else node_outputs(node, in_layouts)):
-        if o.mode is OutMode.PROVIDED and provided is not None and provided[k] is not None:
+        if o.mode is OutputMode.PROVIDED and provided is not None and provided[k] is not None:
             o = o.with_layout(provided[k])
         if o.view_of is not None:
             o = Output(o.repr, o.mode, arg_index(o.view_of))
@@ -217,7 +217,7 @@ def build_node_function(
     * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
       they go into temporary memory instead of runtime buffers;
     * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
-    * `kernel`: a `Kernel` implementing the node (a Rust kernel, a numba kernel, a
+    * `kernel`: a `CalledKernel` implementing the node (a Rust kernel, a numba kernel, a
       subprogram): the function calls it (call.py), through an entry of `links`, the
       link table that is the config of the kernel being generated. Code nested in the
       node (a Scan's loop body) links its kernels there too.
@@ -237,7 +237,7 @@ def build_node_function(
     # Aliasing (DESIGN.md): the memory a step writes (provided or allocated outputs)
     # never overlaps its inputs or its other outputs; views are never written.
     b.alias_domain(name)
-    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutMode.PROVIDED, OutMode.ALLOCATED, OutMode.VIEW)]
+    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.ALLOCATED, OutputMode.VIEW)]
     marked_inputs = []
     k = 3
     inputs = []
@@ -269,18 +269,18 @@ def build_node_function(
             inputs.append(a)
     outputs = []
     for o in sig.outputs:
-        if o.mode is OutMode.ABSENT:
+        if o.mode is OutputMode.ABSENT:
             outputs.append(None)
             continue
         v = params[k]
         k += 1
         j = len(outputs)
         alias = (f"o{j}", marked_inputs + [w for w in written if w != f"o{j}"])
-        if o.mode is OutMode.PROVIDED:
+        if o.mode is OutputMode.PROVIDED:
             a = unpack(b, o.repr, v)
             b.mark_array(a.data, *alias)
             outputs.append(ProvidedOutput(a))
-        elif o.mode is OutMode.SCALAR:
+        elif o.mode is OutputMode.SCALAR:
             outputs.append(ScalarOutput(v, o.repr.dtype))
         else:
             outputs.append(
@@ -290,11 +290,11 @@ def build_node_function(
                     o.repr.dtype,
                     o.repr.ndim,
                     view_of=o.view_of,
-                    temporary=len(outputs) in temporary_outputs and o.mode in (OutMode.ALLOCATED, OutMode.VIEW),
+                    temporary=len(outputs) in temporary_outputs and o.mode in (OutputMode.ALLOCATED, OutputMode.VIEW),
                     # what `allocate` produces: the declared layout (a view that copies
                     # instead, like Reshape, declares C)
                     layout=o.layout if o.layout.fully_packed(o.repr.shape) else None,
-                    declared=o.layout if o.mode is OutMode.VIEW else None,
+                    declared=o.layout if o.mode is OutputMode.VIEW else None,
                     alias=alias,
                 )
             )
@@ -315,7 +315,7 @@ def build_node_function(
     return NodeFunction(fn, sig, cg.frame_size, links)
 
 
-def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool = False):
+def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool = False):
     """`int32 name(PtCtx*, PtArray* args, const void* config, void* frame)` around `nf`:
     the kernel ABI.
 
@@ -324,7 +324,7 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
     m = ir()
     sig = nf.signature
     # (outputs without a value have no argument)
-    present = [o for o in sig.outputs if o.mode is not OutMode.ABSENT]
+    present = [o for o in sig.outputs if o.mode is not OutputMode.ABSENT]
     if sig.has_scalars:
         raise ValueError("functions with ScalarType inputs or outputs have no kernel ABI")
     pa = ptarray_type()
@@ -359,8 +359,8 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
         from pytensor.link.llvm.codegen.emit import Codegen
 
         cg = Codegen(b, ctx, config, frame)
-        reprs = [*sig.inputs, *(o.repr for o in present if o.mode is OutMode.PROVIDED)]
-        positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(present) if o.mode is OutMode.PROVIDED)]
+        reprs = [*sig.inputs, *(o.repr for o in present if o.mode is OutputMode.PROVIDED)]
+        positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(present) if o.mode is OutputMode.PROVIDED)]
         for k, r in zip(positions, reprs, strict=True):
             if isinstance(r, TensorRepr) and r.ndim > 0 and len(r.stride_axes) < r.ndim:
                 _check_layout(cg, arg(k), r, k)
@@ -370,7 +370,7 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
     call_args += [read(k, r) for k, r in enumerate(sig.inputs)]
     slots = []
     for k, o in enumerate(present):
-        if o.mode is OutMode.PROVIDED:
+        if o.mode is OutputMode.PROVIDED:
             call_args.append(read(n_in + k, o.repr))
         else:
             slot = b.alloca(o.repr.slot_type)
@@ -390,7 +390,7 @@ def build_abi_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool =
             b.store(b.load(m.i64, b.gep(m.i64, lp, i)), b.gep(m.i64, shape_p, i))
             b.store(b.load(m.i64, b.gep(m.i64, sp, i)), b.gep(m.i64, strides_p, i))
         owner = b.load(m.ptr, b.field_ptr(st, slot, 3))
-        if o.mode is OutMode.VIEW:
+        if o.mode is OutputMode.VIEW:
             # a view lies in the input's buffer, unless the kernel allocated one
             mine = b.icmp(m.ICmp.NE, owner, b.null())
             owner = b.select(mine, owner, field(arg(o.view_of), 3))
@@ -430,7 +430,7 @@ class CompiledNode:
 
     @property
     def address(self):
-        return self.compiled.address("abi")
+        return self.compiled.address("kernel")
 
 
 def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None) -> CompiledNode:
@@ -439,7 +439,7 @@ def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None)
     m = ir()
     module = m.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
     nf = build_node_function(module, node, "node", provided=provided)
-    build_abi_wrapper(module, nf, "abi")
+    build_kernel_wrapper(module, nf, "kernel")
     compiled = module.compile(opt_level=opt_level, cache=cache)
     return CompiledNode(compiled, nf.signature, nf.frame_size)
 
@@ -447,14 +447,14 @@ def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None)
 __all__ = [
     "CompiledNode",
     "NodeFunction",
-    "OutMode",
+    "OutputMode",
     "Output",
     "Signature",
-    "build_abi_wrapper",
+    "build_kernel_wrapper",
     "build_node_function",
     "compile_node",
     "llvm_emit",
-    "fresh_output",
+    "new_output",
     "known_layouts",
     "llvm_outputs",
     "node_outputs",

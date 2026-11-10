@@ -1,7 +1,7 @@
 """How much work a node does: estimates for decisions like running a loop in parallel.
 
-`llvm_work(op, node) -> Work` per op: a number of items (a product of lengths, some only
-known at run time) times a cost per item. Costs are in units of one simple float
+`llvm_work(op, node) -> Work` per op: a number of elements (a product of lengths, some only
+known at run time) times a cost per element. Costs are in units of one simple float
 operation (an add or a multiply, about a nanosecond or less): an `exp` is about 20, a
 `gammaln` about 60. They are rough on purpose: they decide between "a few microseconds"
 and "milliseconds", not between similar alternatives.
@@ -21,26 +21,26 @@ import pytensor.scalar.math as psm
 
 @dataclass(frozen=True)
 class Work:
-    #: cost of one item
-    per_item: float
-    #: the number of items as a product of factors; None where only known at run time
-    items: tuple = ()
+    #: cost of one element
+    per_element: float
+    #: the number of elements as a product of factors; None where only known at run time
+    elements: tuple = ()
 
     @property
-    def n_items(self) -> int | None:
-        if any(f is None for f in self.items):
+    def n_elements(self) -> int | None:
+        if any(f is None for f in self.elements):
             return None
-        return math.prod(self.items)
+        return math.prod(self.elements)
 
     @property
     def total(self) -> float | None:
         """The estimate, if the shapes are static."""
-        n = self.n_items
-        return None if n is None else n * self.per_item
+        n = self.n_elements
+        return None if n is None else n * self.per_element
 
     def describe(self) -> str:
-        items = " x ".join("?" if f is None else str(f) for f in self.items) or "1"
-        return f"{items} x {self.per_item:g}"
+        elements = " x ".join("?" if f is None else str(f) for f in self.elements) or "1"
+        return f"{elements} x {self.per_element:g}"
 
 
 def lengths(var) -> tuple:
@@ -108,12 +108,12 @@ _register_loop()
 @singledispatch
 def llvm_work(op, node) -> Work:
     """The default: producing the outputs, one unit per element."""
-    items = ()
+    elements = ()
     for o in node.outputs:
         if hasattr(o.type, "shape"):
-            items = lengths(o)
+            elements = lengths(o)
             break
-    return Work(1.0, items)
+    return Work(1.0, elements)
 
 
 def _register():
@@ -136,8 +136,8 @@ def _register():
     @llvm_work.register(FusedElemwise)
     def _(op, node):
         biggest = max((i for i in node.inputs if hasattr(i.type, "shape")), key=lambda v: v.type.ndim, default=None)
-        items = lengths(biggest) if biggest is not None else lengths(node.outputs[0])
-        return Work(scalar_cost(op.scalar_op) + 1, items)
+        elements = lengths(biggest) if biggest is not None else lengths(node.outputs[0])
+        return Work(scalar_cost(op.scalar_op) + 1, elements)
 
     @llvm_work.register(CAReduce)
     def _(op, node):

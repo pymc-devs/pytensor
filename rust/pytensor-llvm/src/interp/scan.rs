@@ -14,7 +14,8 @@
 //! still correct.
 
 use super::program::{copy_strided, Program};
-use crate::abi::{OwnedBuf, PtArray, PtBuffer, PtCtx};
+use crate::abi::{OwnedBuf, PtArray, PtBuffer};
+use crate::runtime::{PtCtx};
 use crate::dtype::DType;
 use std::sync::Arc;
 

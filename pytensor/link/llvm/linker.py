@@ -49,7 +49,7 @@ class LLVMLinker(JITLinker):
         self.check_layouts = check_layouts
         self.parallel = parallel
         self.generate_scan = generate_scan
-        self.compiled = None
+        self.program = None
         self.stats = None
 
     def clone(self, allow_gc=None, **options):
@@ -60,7 +60,7 @@ class LLVMLinker(JITLinker):
             if k not in self.OPTIONS:
                 raise TypeError(f"Unknown LLVMLinker option {k!r}")
             setattr(new, k, v)
-        new.compiled = new.stats = None
+        new.program = new.stats = None
         return new
 
     def fgraph_convert(self, fgraph, **kwargs):
@@ -68,8 +68,8 @@ class LLVMLinker(JITLinker):
 
         opts = Options(**{k: getattr(self, k) for k in self.OPTIONS})
         fn, self.stats = build_program(fgraph, opts)
-        # the rt.Program (fn wraps it when generators are passed through)
-        self.compiled = getattr(fn, "program", fn)
+        # the interp.Program (fn wraps it when generators are passed through)
+        self.program = getattr(fn, "program", fn)
         return fn
 
     def jit_compile(self, fn):

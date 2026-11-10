@@ -1,6 +1,6 @@
 //! The C API (`include/pytensor_llvm.h`) for compiled programs.
 //!
-//! Get the table with `pytensor_llvm.rt.c_api_table()` (or `program.c_api_table()`), and
+//! Get the table with `pytensor_llvm.interp.c_api_table()` (or `program.c_api_table()`), and
 //! a function with `program.c_function()`.
 //!
 //! A `PtFunction*` is `Arc::into_raw` of a [`Function`]: the program plus the Python
@@ -9,7 +9,8 @@
 //! [`CallMemory`]. Every entry point catches panics so they never unwind into C.
 
 use super::program::{c_strides, copy_strided, CallMemory, Program};
-use crate::abi::{overlaps, validate_array, PtArray, PtBuffer, PtCtx, ABI_VERSION};
+use crate::abi::{overlaps, validate_array, PtArray, PtBuffer, ABI_VERSION};
+use crate::runtime::{PtCtx};
 use pyo3::prelude::*;
 use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};

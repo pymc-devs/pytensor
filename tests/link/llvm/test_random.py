@@ -1,4 +1,4 @@
-"""Random variables: draws from the function state's random state."""
+"""Random variables: draws from the session's random state."""
 
 import ctypes
 
@@ -22,7 +22,7 @@ def draw(rv_fn, *params, size=(N,), seed=1):
     rng = pytensor.shared(np.random.default_rng(0))
     x = rv_fn(*params, size=size, rng=rng)
     f = pytensor.function([], x, mode=MODE)
-    f.maker.linker.compiled.seed(seed)
+    f.maker.linker.program.seed(seed)
     return f()
 
 
@@ -59,7 +59,7 @@ def test_seeded_draws_are_reproducible():
     rng = pytensor.shared(np.random.default_rng(0))
     x = rb.normal(0, 1, size=(5,), rng=rng)
     f = pytensor.function([], x, mode=MODE)
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     p.seed(42)
     a, b = f(), f()
     assert not np.array_equal(a, b)  # the state advances
@@ -118,16 +118,16 @@ def test_generator_as_explicit_input():
 
 
 def test_nested_program_draws_from_the_callers_state():
-    from pytensor.compile.builders import OpFromGraph, UnitKind
+    from pytensor.compile.builders import OpFromGraph, Execution
 
     a = pt.dscalar("a")
     r = pt.random.type.random_generator_type("r")
-    inner = OpFromGraph([a, r], [a + rb.normal(0, 1, size=(4,), rng=r)], unit=UnitKind.INTERPRETED)
+    inner = OpFromGraph([a, r], [a + rb.normal(0, 1, size=(4,), rng=r)], execution=Execution.INTERPRETED)
     x = pt.dscalar("x")
     rng = pytensor.shared(np.random.default_rng(0))
     f = pytensor.function([x], inner(x, rng), mode=MODE)
-    assert "program:" in f.maker.linker.compiled.dump()
-    p = f.maker.linker.compiled
+    assert "program:" in f.maker.linker.program.dump()
+    p = f.maker.linker.program
     p.seed(7)
     r1 = f(0.0)
     p.seed(7)
@@ -139,7 +139,7 @@ def test_c_api_seed():
 
     rng = pytensor.shared(np.random.default_rng(0))
     f = pytensor.function([], rb.normal(0, 1, size=(6,), rng=rng), mode=MODE)
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     fn = p.c_function()
     a = Api.from_address(p.c_api_table())
     new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.session_new)

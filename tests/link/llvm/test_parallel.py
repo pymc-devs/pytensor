@@ -10,7 +10,7 @@ from pytensor.compile.mode import get_mode
 
 
 ir = pytest.importorskip("pytensor_llvm.ir")
-rt = pytest.importorskip("pytensor_llvm.rt")
+pytensor_llvm = pytest.importorskip("pytensor_llvm")
 
 MODE = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
 
@@ -35,7 +35,7 @@ def test_region_captures_and_results():
     b.ret(b.zext(b.xor(ok, b.const_bool(True)), ir.i32))
     c = m.compile(cache=False)
     xv = np.arange(100.0)
-    (res,) = ir.call_abi(c.address("f"), [xv], [np.empty(100)], 0)
+    (res,) = ir.call_kernel(c.address("f"), [xv], [np.empty(100)], 0)
     np.testing.assert_allclose(res, 3.0 * xv + 1.0)
 
 
@@ -65,7 +65,7 @@ def test_large_elemwise_and_reductions(static):
     np.testing.assert_allclose(res[1], np.exp(xv).sum(axis=1))
     np.testing.assert_allclose(res[2], (xv * 3).T + 1)
     # the same without parallelism
-    f.maker.linker.compiled.set_parallel(False)
+    f.maker.linker.program.set_parallel(False)
     for r, e in zip(f(xv), res, strict=True):
         np.testing.assert_array_equal(r, e)
 
@@ -86,7 +86,7 @@ def test_random_draws_dont_depend_on_parallelism():
     a = pt.dvector("a")
     x = rb.gamma(a, 1.0, size=(500, 2000), rng=rng)  # a per-element sampler in the loop
     f = pytensor.function([a], x, mode=MODE)
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     av = np.linspace(0.5, 5, 2000)
     p.seed(3)
     r1 = f(av)
@@ -109,6 +109,6 @@ def test_errors_in_a_chunk():
 
 
 def test_thread_count():
-    assert rt.threads() >= 1
+    assert pytensor_llvm.threads() >= 1
     with pytest.raises(RuntimeError, match="already has"):
-        rt.set_threads(rt.threads() + 1)
+        pytensor_llvm.set_threads(pytensor_llvm.threads() + 1)

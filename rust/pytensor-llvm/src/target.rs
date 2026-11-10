@@ -13,7 +13,7 @@ pub fn init_llvm() {
     INIT.call_once(|| {
         Target::initialize_native(&InitializationConfig::default()).expect("init native target");
         // Must happen before any pass pipeline is built. Process-global, so decided once.
-        let veclib = std::env::var("PTLLVM_NO_VECLIB").is_err();
+        let veclib = std::env::var("PYTENSOR_LLVM_NO_VECLIB").is_err();
         if veclib {
             let args = [c"ptllvm".as_ptr(), c"-vector-library=LIBMVEC-X86".as_ptr()];
             // SAFETY: two valid NUL-terminated strings; called once (inside INIT), before
@@ -29,10 +29,10 @@ pub fn veclib_enabled() -> bool {
     VECLIB.load(std::sync::atomic::Ordering::Acquire)
 }
 
-/// Target CPU and features: the host, or `PTLLVM_CPU` (e.g. "haswell" to run the
+/// Target CPU and features: the host, or `PYTENSOR_LLVM_CPU` (e.g. "haswell" to run the
 /// generated code under valgrind, which has no AVX-512). Part of the cache key.
 pub fn target_cpu() -> (String, String) {
-    match std::env::var("PTLLVM_CPU") {
+    match std::env::var("PYTENSOR_LLVM_CPU") {
         Ok(cpu) if !cpu.is_empty() => (cpu, String::new()),
         _ => (TargetMachine::get_host_cpu_name().to_string(), TargetMachine::get_host_cpu_features().to_string()),
     }
@@ -76,9 +76,9 @@ pub fn target_machine(opt: u32) -> Result<TargetMachine, String> {
 }
 
 pub fn cache_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("PTLLVM_CACHE_DIR") {
+    if let Ok(d) = std::env::var("PYTENSOR_LLVM_CACHE_DIR") {
         return PathBuf::from(d);
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".cache").join("pytensor-llvm-poc")
+    PathBuf::from(home).join(".cache").join("pytensor-llvm")
 }

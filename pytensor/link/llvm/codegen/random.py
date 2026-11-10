@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import Array, c_strides, cast, for_each, load, mul, size, store
-from pytensor.link.llvm.codegen.function import fresh_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
 from pytensor.link.llvm.layout import Layout
 
@@ -27,7 +27,7 @@ def _register():
     @llvm_outputs.register(RandomVariable)
     def _(op, node, in_layouts):
         # (next generator: no value, draws: new memory)
-        return [fresh_output(o) for o in node.outputs]
+        return [new_output(o) for o in node.outputs]
 
     @llvm_emit.register(RandomVariable)
     def _(op, node, cg, inputs, outputs):

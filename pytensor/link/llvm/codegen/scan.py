@@ -1,6 +1,6 @@
 """Scan as generated code: the loop, its buffers and its body in one function.
 
-The conventions are PyTensor's (and the Rust kernel's, rt/scan.rs): every traced output
+The conventions are PyTensor's (and the Rust kernel's, interp/scan.rs): every traced output
 (mit-mot, mit-sot, sit-sot) has a buffer whose first rows hold the initial taps; the
 body reads tap `k` at row `(i + lookback + k) % len` and writes at
 `(i + lookback + out_tap) % len`. After the loop, buffers shorter than the trace are
@@ -18,9 +18,9 @@ kernels allocate and scratch memory are released after every iteration.
 from __future__ import annotations
 
 from pytensor.link.llvm.codegen.emit import Array, cast, constant, copy, for_each, load, store, advance
-from pytensor.link.llvm.codegen.function import OutMode, Output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import OutputMode, Output, llvm_emit, llvm_outputs
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
-from pytensor.link.llvm.codegen.unit import Target, bind_constants, emit_items, release
+from pytensor.link.llvm.codegen.unit import Destination, bind_constants, emit_items, release
 from pytensor.link.llvm.layout import Layout, remove_axis
 
 
@@ -41,9 +41,9 @@ def register():
     def _(op, node, in_layouts):
         # buffers allocated by the loop, C-contiguous (as the Rust kernel's)
         return [
-            Output(repr_of(o.type), OutMode.ABSENT)
+            Output(repr_of(o.type), OutputMode.ABSENT)
             if is_absent(o.type)
-            else Output(repr_of(o.type, Layout.c(o.type.ndim)), OutMode.ALLOCATED)
+            else Output(repr_of(o.type, Layout.c(o.type.ndim)), OutputMode.ALLOCATED)
             for o in node.outputs
         ]
 
@@ -241,13 +241,13 @@ def emit_scan(op, node, cg, inputs, outputs):
                 r = _row(b, t.buf, t.row_index(b, i, tap))
                 rows.append(r)
                 if t.direct_write_ok(kk):
-                    targets.setdefault(out_ids[oi], Target(array=r, layout=r.layout))
+                    targets.setdefault(out_ids[oi], Destination(array=r, layout=r.layout))
                 oi += 1
         for out, length, buf, var in nit:
             if buf is not None:
                 r = _row(b, buf, i)
                 rows.append(r)
-                targets.setdefault(out_ids[oi], Target(array=r, layout=r.layout))
+                targets.setdefault(out_ids[oi], Destination(array=r, layout=r.layout))
             else:
                 rows.append(None)
             oi += 1

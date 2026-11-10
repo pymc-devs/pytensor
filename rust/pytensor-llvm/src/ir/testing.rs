@@ -1,6 +1,7 @@
-//! A runner for C ABI functions (tests).
+//! A runner for kernels (tests): `ir.call_kernel`.
 
-use crate::abi::{PtArray, PtBuffer, PtCtx};
+use crate::abi::{PtArray, PtBuffer};
+use crate::runtime::{PtCtx};
 use crate::dtype::DType;
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
@@ -8,11 +9,11 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyCapsule;
 
-// Generated code calls the runtime functions of `crate::abi::runtime()` (`ptl_rt_*`).
+// Generated code calls the runtime functions of `crate::runtime::runtime()` (`ptl_rt_*`).
 
 // ------------------------------------------------------------------ running C ABI functions
 
-type AbiFn = unsafe extern "C-unwind" fn(*mut PtCtx, *mut PtArray, *const u8, *mut u8) -> i32;
+use crate::abi::KernelFn;
 
 fn dtype_of(d: &Bound<'_, PyArrayDescr>) -> PyResult<DType> {
     DType::from_numpy(d.kind(), d.itemsize()).ok_or_else(|| PyTypeError::new_err(format!("dtype {d} is not supported")))
@@ -65,7 +66,7 @@ fn to_numpy<'py>(py: Python<'py>, dtype: &Bound<'py, PyArrayDescr>, data: *mut u
 /// `address` must be a function with that ABI expecting exactly these arguments.
 #[pyfunction]
 #[pyo3(signature = (address, inputs, outputs, frame_bytes = 0, config = 0))]
-pub fn call_abi<'py>(
+pub fn call_kernel<'py>(
     py: Python<'py>,
     address: usize,
     inputs: Vec<Bound<'py, PyAny>>,
@@ -117,7 +118,7 @@ pub fn call_abi<'py>(
     let mut frame = vec![A64([0; 64]); frame_bytes.div_ceil(64).max(1)];
     let mut ctx = PtCtx::new();
     // SAFETY: the caller promises `address` has the C ABI for these arguments.
-    let f: AbiFn = unsafe { std::mem::transmute::<usize, AbiFn>(address) };
+    let f: KernelFn = unsafe { std::mem::transmute::<usize, KernelFn>(address) };
     // SAFETY: as above; arrays describe live numpy memory or empty output slots.
     let mark = ctx.scratch_mark();
     let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), config as *const u8, frame.as_mut_ptr() as *mut u8) };

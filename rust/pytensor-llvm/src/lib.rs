@@ -2,24 +2,31 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
 //! Native code generation and runtime for PyTensor's LLVM backend (`pytensor/link/llvm`).
 //!
-//! * `llvmir`: the IR builder Python generates code with, modules, compilation;
-//! * `rt`: the program interpreter, Rust kernels, the C API;
-//! * `abi`: the kernel ABI, buffers, the runtime functions and the context;
+//! * `ir` (Python: `pytensor_llvm.ir`): the IR builder Python generates code with,
+//!   modules, compilation;
+//! * `interp` (Python: `pytensor_llvm.interp`): the program interpreter, Rust kernels,
+//!   the C API;
+//! * `abi`: the kernel ABI (arrays, buffers);
+//! * `runtime`: the process-wide runtime (runtime functions, JIT, thread pool) and the
+//!   context of a call;
 //! * `jit`, `target`: the JIT and LLVM setup; `perf`: perf maps;
-//! * `linalg`, `native`, `random`, `parallel`: what kernels and generated code call.
+//! * `math`, `random`, `parallel`: what generated code calls;
+//! * `linalg`, `legacy_kernels`: Rust kernels with the legacy kernel ABI.
 
 use pyo3::prelude::*;
 
 pub mod abi;
 pub mod dtype;
+pub mod interp;
+pub mod ir;
 pub mod jit;
 pub mod linalg;
-pub mod llvmir;
-pub mod native;
+pub mod legacy_kernels;
+pub mod math;
 pub mod parallel;
 pub mod perf;
 pub mod random;
-pub mod rt;
+pub mod runtime;
 pub mod target;
 
 /// Contents of the C header (include/pytensor_llvm.h).
@@ -41,13 +48,16 @@ fn pytensor_llvm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(llvm_version, m)?)?;
     m.add_function(wrap_pyfunction!(c_header, m)?)?;
     m.add("ABI_VERSION", abi::ABI_VERSION)?;
-    let ir = PyModule::new(m.py(), "ir")?;
-    llvmir::register(&ir)?;
-    m.add_submodule(&ir)?;
-    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.ir", &ir)?;
-    let rt = PyModule::new(m.py(), "rt")?;
-    rt::py::register(&rt)?;
-    m.add_submodule(&rt)?;
-    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.rt", &rt)?;
+    let ir_mod = PyModule::new(m.py(), "ir")?;
+    ir::register(&ir_mod)?;
+    m.add_submodule(&ir_mod)?;
+    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.ir", &ir_mod)?;
+    let interp_mod = PyModule::new(m.py(), "interp")?;
+    interp::py::register(&interp_mod)?;
+    m.add_submodule(&interp_mod)?;
+    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.interp", &interp_mod)?;
+    // the process-wide runtime
+    m.add_function(wrap_pyfunction!(interp::py::set_threads, m)?)?;
+    m.add_function(wrap_pyfunction!(interp::py::threads, m)?)?;
     Ok(())
 }

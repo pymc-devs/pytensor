@@ -23,7 +23,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import fresh_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.work import scalar_cost
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -71,7 +71,7 @@ def _(op, node, in_layouts):
         shape = tuple(None if s is None else int(s) for s in o.type.shape)
         order = common_order(in_layouts, shape)
         lay = None if order is None else Layout.make(shape, order, [PACKED] * len(shape))
-        outs.append(fresh_output(o, lay))
+        outs.append(new_output(o, lay))
     return outs
 
 

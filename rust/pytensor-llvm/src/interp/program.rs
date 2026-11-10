@@ -12,7 +12,8 @@
 //! static types) and cleans up on errors.
 
 use super::consts::ConstData;
-use crate::abi::{validate_array, PtArray, PtBuffer, PtCtx};
+use crate::abi::{validate_array, PtArray, PtBuffer};
+use crate::runtime::{PtCtx};
 use crate::dtype::DType;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
@@ -29,7 +30,7 @@ impl ValueId {
 }
 
 #[derive(Clone, Debug)]
-pub enum Kind {
+pub enum ValueKind {
     /// graph input `k`
     Input(usize),
     Const(Arc<ConstData>),
@@ -47,7 +48,7 @@ pub enum Kind {
 pub struct ValueSpec {
     pub dtype: DType,
     pub shape: Vec<Option<u64>>,
-    pub kind: Kind,
+    pub kind: ValueKind,
     /// memory order of memory the program provides (arena, fresh), outermost axis
     /// first; empty: C order
     pub order: Vec<usize>,
@@ -68,16 +69,8 @@ impl ValueSpec {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Abi {
-    /// `int32 f(PtCtx*, PtArray*, const void* config, void* frame)`
-    Kernel,
-    /// `int32 f(PtCtx*, PtArray*, const void* config)`; allocates every output
-    Numba,
-}
-
-type KernelFn = unsafe extern "C-unwind" fn(*mut PtCtx, *mut PtArray, *const u8, *mut u8) -> i32;
-type NumbaFn = unsafe extern "C-unwind" fn(*mut PtCtx, *mut PtArray, *const u8) -> i32;
+pub use crate::abi::{Abi, OutputMode};
+use crate::abi::{KernelFn, NumbaFn};
 
 pub struct Task {
     pub func: usize,
@@ -90,18 +83,14 @@ pub struct Task {
     pub desc: String,
 }
 
-/// How a graph output is produced when the program runs as a task of another program.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputMode {
-    Provided,
-    Allocated,
-}
 
 pub struct ProgramSpec {
     pub values: Vec<ValueSpec>,
     pub n_inputs: usize,
     pub tasks: Vec<Task>,
     pub outputs: Vec<ValueId>,
+    /// how each graph output is produced when the program runs as a task of another
+    /// program: provided or allocated (never a view)
     pub output_modes: Vec<OutputMode>,
     pub arena_bytes: u64,
     /// inputs the generated code assumes C-contiguous (checked by `set_input`)
@@ -236,34 +225,34 @@ impl Program {
                 if seen != (0..v.ndim()).collect::<Vec<_>>() {
                     return Err(format!("value {k}: memory order {:?} isn't a permutation of the axes", v.order));
                 }
-                if !matches!(v.kind, Kind::Arena(_)) {
+                if !matches!(v.kind, ValueKind::Arena(_)) {
                     return Err(format!("value {k}: only arena values have a memory order"));
                 }
             }
             match &v.kind {
-                Kind::Input(i) => {
+                ValueKind::Input(i) => {
                     if *i >= spec.n_inputs {
                         return Err(format!("value {k}: input {i} out of range"));
                     }
                     produced[k] = true;
                 }
-                Kind::Const(c) => {
+                ValueKind::Const(c) => {
                     if c.dtype != v.dtype || c.shape.len() != v.ndim() {
                         return Err(format!("value {k}: constant doesn't match its type"));
                     }
                     produced[k] = true;
                 }
-                Kind::Arena(off) => {
+                ValueKind::Arena(off) => {
                     let nb = v.static_nbytes().ok_or(format!("value {k}: arena value without static size"))? as u64;
                     if off % 64 != 0 || off + nb > spec.arena_bytes {
                         return Err(format!("value {k}: arena placement {off}+{nb} outside the arena"));
                     }
                 }
-                Kind::Fresh => {
+                ValueKind::Fresh => {
                     v.static_nbytes().ok_or(format!("value {k}: fresh value without static size"))?;
                 }
-                Kind::View(src) => ok(*src)?,
-                Kind::Allocated => {}
+                ValueKind::View(src) => ok(*src)?,
+                ValueKind::Allocated => {}
             }
         }
         for s in &spec.tasks {
@@ -285,10 +274,10 @@ impl Program {
             }
             for &v in &s.outputs {
                 ok(v)?;
-                if produced[v.i()] || matches!(spec.values[v.i()].kind, Kind::Input(_) | Kind::Const(_)) {
+                if produced[v.i()] || matches!(spec.values[v.i()].kind, ValueKind::Input(_) | ValueKind::Const(_)) {
                     return Err(format!("task {}: value {} produced twice", s.desc, v.0));
                 }
-                if s.abi == Abi::Numba && !matches!(spec.values[v.i()].kind, Kind::Allocated) {
+                if s.abi == Abi::Numba && !matches!(spec.values[v.i()].kind, ValueKind::Allocated) {
                     return Err(format!("task {}: foreign kernels allocate their outputs", s.desc));
                 }
                 produced[v.i()] = true;
@@ -327,7 +316,7 @@ impl Program {
                 s[..nd].copy_from_slice(&shape);
                 s[nd..].copy_from_slice(&st);
             }
-            if let Kind::Const(c) = &v.kind {
+            if let ValueKind::Const(c) = &v.kind {
                 s[..nd].copy_from_slice(&c.shape);
                 s[nd..].copy_from_slice(&c.strides);
             }
@@ -340,9 +329,9 @@ impl Program {
             let nd = v.ndim();
             let st = storage[k].as_mut_ptr();
             let data = match &v.kind {
-                Kind::Const(c) => c.data() as *mut u8,
+                ValueKind::Const(c) => c.data() as *mut u8,
                 // SAFETY: arena placements were checked to lie inside the arena.
-                Kind::Arena(off) => unsafe { base.add(*off as usize) },
+                ValueKind::Arena(off) => unsafe { base.add(*off as usize) },
                 _ => std::ptr::null_mut(),
             };
             // SAFETY: the storage has 2 * ndim entries.
@@ -362,7 +351,7 @@ impl Program {
     }
 
     fn input_value(&self, k: usize) -> ValueId {
-        let i = self.spec.values.iter().position(|v| matches!(v.kind, Kind::Input(j) if j == k));
+        let i = self.spec.values.iter().position(|v| matches!(v.kind, ValueKind::Input(j) if j == k));
         ValueId(i.expect("every input has a value") as u32)
     }
 
@@ -444,7 +433,7 @@ impl Program {
             for &v in &task.outputs {
                 let mut a = st.vals[v.i()];
                 match values[v.i()].kind {
-                    Kind::Fresh => match self.fresh_output[v.i()].and_then(|o| provided.get(o).copied().flatten()) {
+                    ValueKind::Fresh => match self.fresh_output[v.i()].and_then(|o| provided.get(o).copied().flatten()) {
                         Some(p) => {
                             a.data = p;
                             a.owner = std::ptr::null_mut();
@@ -461,7 +450,7 @@ impl Program {
                             st.owned[v.i()] = true;
                         }
                     },
-                    Kind::Allocated | Kind::View(_) => {
+                    ValueKind::Allocated | ValueKind::View(_) => {
                         a.data = std::ptr::null_mut();
                         a.owner = std::ptr::null_mut();
                     }
@@ -505,12 +494,12 @@ impl Program {
             for (k, &v) in task.outputs.iter().enumerate() {
                 let a = st.args[n_in + k];
                 match values[v.i()].kind {
-                    Kind::Allocated => {
+                    ValueKind::Allocated => {
                         st.vals[v.i()].data = a.data;
                         st.vals[v.i()].owner = a.owner;
                         st.owned[v.i()] = !a.owner.is_null();
                     }
-                    Kind::View(src) => {
+                    ValueKind::View(src) => {
                         st.vals[v.i()].data = a.data;
                         st.vals[v.i()].owner = a.owner;
                         // a fresh buffer instead of a view is ours to release
@@ -524,7 +513,7 @@ impl Program {
                 return Err(format!("{}: {msg}", task.desc));
             }
             for (k, &v) in task.outputs.iter().enumerate() {
-                if matches!(values[v.i()].kind, Kind::Allocated | Kind::View(_)) {
+                if matches!(values[v.i()].kind, ValueKind::Allocated | ValueKind::View(_)) {
                     // SAFETY: the storage holds ndim entries, written by the kernel.
                     let shape = unsafe { st.vals[v.i()].shape() };
                     check_shape(&values[v.i()], shape).map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
@@ -576,7 +565,7 @@ impl Program {
     }
 
     /// Run as a task of another program (the kernel ABI, see `ptl_program_call`).
-    fn call_abi(&self, ctx: &mut PtCtx, args: *mut PtArray) -> R<()> {
+    fn call_as_kernel(&self, ctx: &mut PtCtx, args: *mut PtArray) -> R<()> {
         let n_in = self.spec.n_inputs;
         let n_out = self.spec.outputs.len();
         // SAFETY: the caller passes n_in + n_out arrays (the contract of the task).
@@ -592,7 +581,7 @@ impl Program {
             let provided: Vec<Option<*mut u8>> = (0..n_out)
                 .map(|o| match self.spec.output_modes[o] {
                     OutputMode::Provided => Some(args[n_in + o].data),
-                    OutputMode::Allocated => None,
+                    OutputMode::Allocated | OutputMode::View => None,
                 })
                 .collect();
             self.execute(&mut st, ctx, &provided)?;
@@ -611,7 +600,7 @@ impl Program {
                             }
                         }
                     }
-                    OutputMode::Allocated => {
+                    OutputMode::Allocated | OutputMode::View => {
                         let out = self.take_output(&st, ctx, o)?;
                         // SAFETY: the output's shape/strides storage has ndim entries.
                         unsafe {
@@ -667,14 +656,14 @@ impl Program {
             let shape: Vec<String> = v.shape.iter().map(|d| d.map_or("?".to_string(), |n| n.to_string())).collect();
             let ty = format!("{}[{}]", v.dtype.numpy_name(), shape.join(", "));
             let kind = match &v.kind {
-                Kind::Input(i) if self.input_contiguous(*i) => format!("input {i} (C-contiguous)"),
-                Kind::Input(i) => format!("input {i}"),
-                Kind::Const(_) => "constant".to_string(),
-                Kind::Arena(off) if !v.order.is_empty() => format!("arena +{off}, order {:?}", v.order),
-                Kind::Arena(off) => format!("arena +{off}"),
-                Kind::Fresh => "fresh (output)".to_string(),
-                Kind::Allocated => "allocated by its task".to_string(),
-                Kind::View(src) => format!("view of %{}", src.0),
+                ValueKind::Input(i) if self.input_contiguous(*i) => format!("input {i} (C-contiguous)"),
+                ValueKind::Input(i) => format!("input {i}"),
+                ValueKind::Const(_) => "constant".to_string(),
+                ValueKind::Arena(off) if !v.order.is_empty() => format!("arena +{off}, order {:?}", v.order),
+                ValueKind::Arena(off) => format!("arena +{off}"),
+                ValueKind::Fresh => "fresh (output)".to_string(),
+                ValueKind::Allocated => "allocated by its task".to_string(),
+                ValueKind::View(src) => format!("view of %{}", src.0),
             };
             let _ = writeln!(s, "  %{k:<4} {ty:<24} {kind}");
         }
@@ -732,9 +721,9 @@ impl Program {
     }
 }
 
-impl Kind {
+impl ValueKind {
     fn is_fresh(&self) -> bool {
-        matches!(self, Kind::Fresh)
+        matches!(self, ValueKind::Fresh)
     }
 }
 
@@ -757,7 +746,7 @@ pub unsafe extern "C-unwind" fn ptl_program_call(ctx: *mut PtCtx, args: *mut PtA
     // SAFETY: the function's contract.
     unsafe {
         let p = &*(config as *const Program);
-        match p.call_abi(&mut *ctx, args) {
+        match p.call_as_kernel(&mut *ctx, args) {
             Ok(()) => 0,
             Err(m) => PtCtx::fail(ctx, 1, &m),
         }

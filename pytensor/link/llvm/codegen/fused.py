@@ -32,7 +32,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import OutMode, fresh_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import OutputMode, new_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.codegen.types import ScalarRepr, check_dtype, ir, repr_of
@@ -127,7 +127,7 @@ def _register():
 
     @llvm_outputs.register(FusedElemwise)
     def _(op, node, in_layouts):
-        return [fresh_output(o) for o in node.outputs]
+        return [new_output(o) for o in node.outputs]
 
     @llvm_emit.register(FusedElemwise)
     def _(op, node, cg, inputs, outputs):

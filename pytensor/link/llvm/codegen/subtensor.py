@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, mul, store
-from pytensor.link.llvm.codegen.function import fresh_output, llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import ir
@@ -123,7 +123,7 @@ def _(op, node, in_layouts):
 
 @llvm_outputs.register(IncSubtensor)
 def _(op, node, in_layouts):
-    return [fresh_output(node.outputs[0])]
+    return [new_output(node.outputs[0])]
 
 
 @llvm_emit.register(IncSubtensor)

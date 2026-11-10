@@ -1,6 +1,6 @@
 //! Support for profiling generated code with Linux `perf`.
 //!
-//! Enabled by `PYTENSOR_ENABLE_PERF=1` (read once per process). Then:
+//! Enabled by `PYTENSOR_LLVM_PERF=1` (read once per process). Then:
 //!
 //! * generated functions keep a frame pointer (`"frame-pointer"="all"`), so
 //!   `perf record -g` can walk the stack through them; this is part of the
@@ -18,7 +18,7 @@ use std::sync::{Mutex, OnceLock};
 
 pub fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| matches!(std::env::var("PYTENSOR_ENABLE_PERF").as_deref(), Ok(v) if !v.is_empty() && v != "0"))
+    *ON.get_or_init(|| matches!(std::env::var("PYTENSOR_LLVM_PERF").as_deref(), Ok(v) if !v.is_empty() && v != "0"))
 }
 
 fn map_file() -> Option<&'static Mutex<File>> {

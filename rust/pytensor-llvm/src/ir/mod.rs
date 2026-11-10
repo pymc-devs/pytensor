@@ -6,7 +6,7 @@
 
 pub mod builder;
 pub mod module;
-pub mod runtime;
+pub mod testing;
 pub mod ty;
 
 use pyo3::prelude::*;
@@ -17,7 +17,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<module::Module>()?;
     m.add_class::<module::Function>()?;
     m.add_class::<module::Value>()?;
-    m.add_class::<module::Compiled>()?;
+    m.add_class::<module::CompiledModule>()?;
     m.add_class::<module::Inline>()?;
     m.add_class::<builder::Builder>()?;
     m.add_class::<builder::Loop>()?;
@@ -42,7 +42,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     ] {
         m.add(name, PyType(t))?;
     }
-    m.add_function(wrap_pyfunction!(runtime::call_abi, m)?)?;
+    m.add_function(wrap_pyfunction!(testing::call_kernel, m)?)?;
     m.add_function(wrap_pyfunction!(module::compile_many, m)?)?;
     Ok(())
 }

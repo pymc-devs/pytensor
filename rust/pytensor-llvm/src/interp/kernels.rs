@@ -4,15 +4,11 @@
 //! A kernel's config holds its parameters and the mode of each output, which Python
 //! chooses per node (the kernel never infers it from the arguments).
 
-use crate::abi::{checked_nbytes, PtArray, PtCtx};
+use crate::abi::{checked_nbytes, PtArray};
+use crate::runtime::{PtCtx};
 use crate::dtype::DType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutMode {
-    Provided,
-    Allocated,
-    View,
-}
+pub use crate::abi::{LegacyFn, OutputMode};
 
 /// Inputs and outputs of one call.
 pub struct Args<'a> {
@@ -55,10 +51,10 @@ impl<'a> Args<'a> {
 
     /// Memory for output `o` of `shape`: the provided memory (whose shape must match)
     /// or a fresh C-contiguous buffer. Returns (data, byte strides).
-    pub fn output(&mut self, ctx: &mut PtCtx, o: usize, mode: OutMode, dtype: DType, shape: &[i64]) -> Result<(*mut u8, Vec<i64>), String> {
+    pub fn output(&mut self, ctx: &mut PtCtx, o: usize, mode: OutputMode, dtype: DType, shape: &[i64]) -> Result<(*mut u8, Vec<i64>), String> {
         let a = self.out(o);
         match mode {
-            OutMode::Provided => {
+            OutputMode::Provided => {
                 // SAFETY: provided outputs are valid arrays (the constructor's contract).
                 let (have, strides) = unsafe { (a.shape(), a.strides().to_vec()) };
                 if have != shape {
@@ -66,7 +62,7 @@ impl<'a> Args<'a> {
                 }
                 Ok((a.data, strides))
             }
-            OutMode::Allocated | OutMode::View => {
+            OutputMode::Allocated | OutputMode::View => {
                 let n = checked_nbytes(shape, dtype.itemsize()).ok_or_else(|| crate::abi::bad_size("output", shape))?;
                 // SAFETY: ctx is the live context.
                 let (data, owner) = unsafe { PtCtx::alloc(ctx, n) };
@@ -138,7 +134,7 @@ pub unsafe extern "C-unwind" fn k_dimshuffle(ctx: *mut PtCtx, args: *mut PtArray
 // ------------------------------------------------------------------ DeepCopy
 
 pub struct CopyConfig {
-    pub mode: OutMode,
+    pub mode: OutputMode,
     pub dtype: DType,
 }
 
@@ -163,7 +159,7 @@ pub unsafe extern "C-unwind" fn k_copy(ctx: *mut PtCtx, args: *mut PtArray, conf
 // ------------------------------------------------------------------ Dot
 
 pub struct DotConfig {
-    pub mode: OutMode,
+    pub mode: OutputMode,
     pub dtype: DType,
 }
 
@@ -188,8 +184,8 @@ pub unsafe extern "C-unwind" fn k_dot(ctx: *mut PtCtx, args: *mut PtArray, confi
         }
         a.output(c, 0, e.mode, e.dtype, &shape)?;
         let f = match e.dtype {
-            DType::Float64 => crate::native::ptl_matmul_f64,
-            DType::Float32 => crate::native::ptl_matmul_f32,
+            DType::Float64 => crate::legacy_kernels::ptl_matmul_f64,
+            DType::Float32 => crate::legacy_kernels::ptl_matmul_f32,
             _ => return Err("Dot: unsupported dtype".into()),
         };
         // SAFETY: args = [a, b, out] with the output memory set above; the matmul kernel
@@ -204,17 +200,14 @@ pub unsafe extern "C-unwind" fn k_dot(ctx: *mut PtCtx, args: *mut PtArray, confi
 
 // ------------------------------------------------------------------ adapters
 
-/// The older kernel ABI (`args = [inputs..., provided output]` and a parameter block).
-pub type LegacyFn = unsafe extern "C-unwind" fn(*mut PtCtx, *mut PtArray, *const std::ffi::c_void) -> i32;
-
-/// Runs an older single-output kernel: allocates the output (shaped like input
+/// Runs a legacy kernel (`abi::LegacyFn`): allocates the output (shaped like input
 /// `shape_from`) unless it is provided, then calls the kernel with its parameters.
 pub struct LegacyConfig {
     pub f: LegacyFn,
     pub params: Vec<i64>,
     pub n_in: usize,
     pub shape_from: usize,
-    pub mode: OutMode,
+    pub mode: OutputMode,
     pub dtype: DType,
 }
 
