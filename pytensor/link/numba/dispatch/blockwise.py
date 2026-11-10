@@ -11,6 +11,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
+    NO_BASIC_OUTPUTS,
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
     NO_REDUCE_OUTPUTS,
@@ -96,6 +97,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
                 NO_SIZE,
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
+                NO_BASIC_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
                 core_handles_out,
             )
@@ -106,7 +108,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         # If the core op cannot be cached, the Blockwise wrapper cannot be cached either
         blockwise_key = None
     else:
-        blockwise_cache_version = 3
+        blockwise_cache_version = 4
         blockwise_key = "_".join(
             map(
                 str,

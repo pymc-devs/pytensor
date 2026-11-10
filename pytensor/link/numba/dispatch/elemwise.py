@@ -30,6 +30,7 @@ from pytensor.link.numba.dispatch.string_codegen import (
     create_tuple_string,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
+    NO_BASIC_OUTPUTS,
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
     NO_REDUCE_OUTPUTS,
@@ -861,6 +862,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                 NO_SIZE,
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
+                NO_BASIC_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
                 core_handles_out,
             )
@@ -874,7 +876,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         elemwise_key = str(
             (
                 type(op),
-                2,  # codegen cache version
+                3,  # codegen cache version
                 tuple(op.inplace_pattern.items()),
                 input_bc_patterns,
                 scalar_cache_key,
@@ -948,6 +950,7 @@ def _build_reduce_impl_src(nout, post_specs, scalar_positions, n_outer):
         "NO_SIZE,",
         "indexed_inputs_enc,",
         "indexed_outputs_enc,",
+        "basic_outputs_enc,",
         "reduce_outputs_enc,",
         "core_handles_out,",
         CODE_TOKEN.DEDENT,
@@ -1051,10 +1054,11 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     )
 
     if isinstance(op, ScalarizedElemwise):
-        indexed_inputs = indexed_outputs = reduced_outputs = ()
+        indexed_inputs = indexed_outputs = basic_outputs = reduced_outputs = ()
     else:
         indexed_inputs = op.indexed_inputs
         indexed_outputs = op.indexed_outputs
+        basic_outputs = op.basic_outputs
         reduced_outputs = op.reduced_outputs
     n_indices = len(indexed_inputs)
     nin_elemwise = len(elemwise_node.inputs)
@@ -1165,6 +1169,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     inplace_pattern_enc = encode_literals(inplace_pattern)
     indexed_inputs_enc = encode_literals((indexed_inputs, idx_broadcastable))
     indexed_outputs_enc = encode_literals(indexed_outputs)
+    basic_outputs_enc = encode_literals(basic_outputs)
     reduce_outputs_enc = encode_literals(
         tuple(
             (
@@ -1207,6 +1212,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                     NO_SIZE,
                     indexed_inputs_enc,
                     indexed_outputs_enc,
+                    basic_outputs_enc,
                     reduce_outputs_enc,
                     core_handles_out,
                 )
@@ -1229,6 +1235,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 "core_output_shapes": core_output_shapes,
                 "indexed_inputs_enc": indexed_inputs_enc,
                 "indexed_outputs_enc": indexed_outputs_enc,
+                "basic_outputs_enc": basic_outputs_enc,
                 "reduce_outputs_enc": reduce_outputs_enc,
                 "core_handles_out": core_handles_out,
             },
@@ -1238,7 +1245,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         def ov_fused_elemwise_fn(*outer_inputs):
             return impl_fn
 
-    cache_version = 12
+    cache_version = 15
     if scalar_cache_key is None:
         key = None
     else:
@@ -1260,6 +1267,7 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
                 indexed_inputs,
                 idx_broadcastable,
                 indexed_outputs,
+                basic_outputs,
                 reduced_key,
                 out_kinds,
                 scalar_cache_key,
