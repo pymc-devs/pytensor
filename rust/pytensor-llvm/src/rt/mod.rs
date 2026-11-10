@@ -1,4 +1,4 @@
-//! The runtime of the second design: programs planned in Python, Rust kernels.
+//! The runtime: programs planned in Python, Rust kernels, the C API.
 
 pub mod capi;
 pub mod consts;

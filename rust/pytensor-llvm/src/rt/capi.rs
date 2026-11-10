@@ -1,4 +1,4 @@
-//! The C API (`include/pytensor_llvm.h`) for programs of the new runtime.
+//! The C API (`include/pytensor_llvm.h`) for compiled programs.
 //!
 //! Get the table with `pytensor_llvm.rt.c_api_table()` (or `program.c_api_table()`), and
 //! a function with `program.c_function()`.
