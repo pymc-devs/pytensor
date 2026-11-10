@@ -20,19 +20,31 @@ def cases(size):
             ("gammaln", pt.gammaln, sc.gammaln),
             ("psi", pt.psi, sc.digamma),
         ):
-            function = pytensor.function([x], operation(x), mode="NUMBA")
+            expression = operation(x)
+            points = {}
             for lower, upper in ((0.01, 1), (1, 13), (13, 64), (64, 1024)):
                 values = rng.uniform(lower, upper, size).astype(dtype)
-                np.testing.assert_allclose(
-                    function(values), reference(values), **tolerance
-                )
-                yield f"{name}/{dtype}/[{lower},{upper})", function, (values,)
+                points[f"[{lower},{upper})"] = (values,)
+
+            def build(x=x, expression=expression):
+                return pytensor.function([x], expression, mode="NUMBA")
+
+            def check(result, inputs, reference=reference, tolerance=tolerance):
+                np.testing.assert_allclose(result, reference(inputs[0]), **tolerance)
+
+            yield f"{name}/{dtype}", build, points, check
         total = pt.gammaln(x).sum()
-        function = pytensor.function([x], [total, pt.grad(total, x)], mode="NUMBA")
+        outputs = [total, pt.grad(total, x)]
         values = rng.uniform(0.01, 64, size).astype(dtype)
-        value, gradient = function(values)
-        np.testing.assert_allclose(
-            value, sc.gammaln(values).sum(dtype=value.dtype), **tolerance
-        )
-        np.testing.assert_allclose(gradient, sc.digamma(values), **tolerance)
-        yield f"gammaln_value_gradient/{dtype}/[0.01,64)", function, (values,)
+
+        def build(x=x, outputs=outputs):
+            return pytensor.function([x], outputs, mode="NUMBA")
+
+        def check(result, inputs, tolerance=tolerance):
+            value, gradient = result
+            np.testing.assert_allclose(
+                value, sc.gammaln(inputs[0]).sum(dtype=value.dtype), **tolerance
+            )
+            np.testing.assert_allclose(gradient, sc.digamma(inputs[0]), **tolerance)
+
+        yield f"gammaln_value_gradient/{dtype}", build, {"[0.01,64)": (values,)}, check
