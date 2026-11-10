@@ -18,7 +18,7 @@ on:
       runners:
         description: Runner labels as a JSON array (select one to retry a platform)
         default: '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-26"]'
-  # Temporary macOS-only validation after macos-26 could not acquire a runner.
+  # Temporary macOS-only validation while the ARM pool has no capacity.
   push:
     branches: [ci/benchmark-template-2647]
 
@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.runners || '["macos-15"]') }}
+        os: ${{ fromJSON(inputs.runners || '["macos-26-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
