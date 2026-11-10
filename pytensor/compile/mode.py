@@ -28,7 +28,6 @@ from pytensor.graph.rewriting.db import (
 from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
-from pytensor.link.llvm.linker import LLVM_REWRITES, LLVMLinker
 from pytensor.link.llvm_v2.linker import LLVM_V2_REWRITES, LLVMV2Linker
 from pytensor.link.mlx.linker import MLXLinker
 from pytensor.link.numba.linker import NumbaLinker
@@ -55,7 +54,6 @@ predefined_linkers = {
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
-    "llvm": LLVMLinker(),
     "llvm_v2": LLVMV2Linker(),
 }
 
@@ -520,15 +518,6 @@ NUMBA = Mode(
     RewriteDatabaseQuery(include=["fast_run", "numba"]),
 )
 
-LLVM = Mode(
-    LLVMLinker(),
-    RewriteDatabaseQuery(
-        # FusedElemwise (indexed reads/writes and reductions fused into one
-        # loop) and the scan save-memory rewrite for JIT linkers
-        include=["fast_run", *LLVM_REWRITES]
-    ),
-)
-
 LLVM_V2 = Mode(
     LLVMV2Linker(),
     RewriteDatabaseQuery(include=["fast_run", *LLVM_V2_REWRITES]),
@@ -569,7 +558,6 @@ predefined_modes = {
     "CVM": CVM,
     "JAX": JAX,
     "NUMBA": NUMBA,
-    "LLVM": LLVM,
     "LLVM_V2": LLVM_V2,
     "PYTORCH": PYTORCH,
     "MLX": MLX,

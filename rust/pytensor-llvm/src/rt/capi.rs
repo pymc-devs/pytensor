@@ -1,8 +1,7 @@
 //! The C API (`include/pytensor_llvm.h`) for programs of the new runtime.
 //!
-//! Same header, same contract as the first backend's table; get the matching table with
-//! `pytensor_llvm.rt.c_api_table()` (or `program.c_api_table()`), and a function with
-//! `program.c_function()`.
+//! Get the table with `pytensor_llvm.rt.c_api_table()` (or `program.c_api_table()`), and
+//! a function with `program.c_function()`.
 //!
 //! A `PtFunction*` is `Arc::into_raw` of a [`Function`]: the program plus the Python
 //! objects that own its machine code and kernel environments, so the function outlives
@@ -11,13 +10,20 @@
 
 use super::program::{c_strides, copy_strided, CallMemory, Program};
 use crate::abi::{overlaps, validate_array, PtArray, PtBuffer, PtCtx, ABI_VERSION};
-use crate::capi::PtTypeInfo;
 use pyo3::prelude::*;
 use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
 pub const API_VERSION: u32 = 3;
+
+/// The type of an input or output (`input_type` / `output_type`).
+#[repr(C)]
+pub struct PtTypeInfo {
+    pub dtype: i32,
+    pub ndim: i32,
+    pub static_shape: *const i64,
+}
 
 /// What a `PtFunction*` points to.
 pub struct Function {

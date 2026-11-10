@@ -415,8 +415,10 @@ each module with its task (`ptl:<task description>`), and functions appear as
 `ptl:<task>::<function> [<hash prefix>]`, e.g.
 `ptl:FusedElemwise{Exp, reduce[add@(0,)]}::abi [39ddfa22]`.
 
-## 11. Relation to the first backend
+## 11. History
 
-The first backend (mode `"LLVM"`, `pytensor/link/llvm`) still exists and shares the
-JIT, the Rust kernels (`native.rs`, `linalg.rs`) and the perf support with this
-one. The earlier Rust-side graph (`src/v2`) has been removed.
+A first backend (mode `"LLVM"`, `pytensor/link/llvm`) described the graph to Rust as an
+op specification and generated and interpreted the code there, so the supported ops
+were fixed in Rust. This design replaced it: ops are registered in Python, Rust only
+provides the compiler, the interpreter and the Rust kernels. The first backend was
+removed; it is in the git history.

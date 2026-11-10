@@ -68,8 +68,8 @@ pub fn register_object(obj: &[u8], name: &str, addr: usize, label: &str) {
 }
 
 /// Readable perf-map names. Code from `pytensor_llvm.ir` has symbols `pt<hash>_<fn>`:
-/// shown as `<label>::<fn> [<hash prefix>]`. Other code (the first backend) shows the
-/// entry point with its kernel description, helpers as `<entry>::<helper>`.
+/// shown as `<label>::<fn> [<hash prefix>]`. Other code shows the entry point with its
+/// label, helpers as `<entry>::<helper>`.
 fn pretty_name(entry: &str, sym: &str, label: &str) -> String {
     let label: String = label.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     if let Some((hash, func)) = split_ir_symbol(sym) {
@@ -90,19 +90,5 @@ fn split_ir_symbol(sym: &str) -> Option<(&str, &str)> {
     let rest = sym.strip_prefix("pt")?;
     let (hash, func) = (rest.get(..32)?, rest.get(32..)?.strip_prefix('_')?);
     hash.bytes().all(|b| b.is_ascii_hexdigit()).then_some((hash, func))
-}
-
-/// Function attributes for generated code when profiling.
-pub fn add_frame_pointers(module: &inkwell::module::Module) {
-    if !enabled() {
-        return;
-    }
-    let ctx = module.get_context();
-    let attr = ctx.create_string_attribute("frame-pointer", "all");
-    for f in module.get_functions() {
-        if f.count_basic_blocks() > 0 {
-            f.add_attribute(inkwell::attributes::AttributeLoc::Function, attr);
-        }
-    }
 }
 
