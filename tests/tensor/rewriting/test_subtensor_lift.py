@@ -23,6 +23,7 @@ from pytensor.graph import (
 )
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
+from pytensor.graph.traversal import graph_inputs
 from pytensor.printing import debugprint
 from pytensor.tensor import (
     add,
@@ -57,6 +58,7 @@ from pytensor.tensor.rewriting.subtensor import (
 from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
     extract_diag_lift_pass,
+    local_adv_inc_subtensor_of_inc_subtensor,
     local_advanced_subtensor_of_dot,
     local_subtensor_make_vector,
     local_subtensor_of_adv_subtensor,
@@ -1230,6 +1232,133 @@ def test_local_subtensor_of_adv_subtensor(original_fn, expected_fn):
     )
     result.assert_graph(out if expected_fn is None else expected_fn(x, iv, jv, im))
     result.assert_eval(*(test_values[inp] for inp in (x, iv, jv, im)))
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[:, 1:3].inc(g)),
+            lambda z, y, g, v, iv: z[iv].inc(y)[iv, 1:3].inc(g),
+        ),
+        (
+            lambda z, y, g, v, iv: z[iv, :].inc(y[:, 1].inc(v)),
+            lambda z, y, g, v, iv: z[iv, :].inc(y)[iv, 1].inc(v),
+        ),
+        # Basic index on the advanced dim
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[1:, 1:3].inc(g[1:])),
+            lambda z, y, g, v, iv: z[iv].inc(y)[iv[1:], 1:3].inc(g[1:]),
+        ),
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[1, 1:].inc(v)),
+            lambda z, y, g, v, iv: z[iv].inc(y)[iv[1], 1:].inc(v),
+        ),
+        # Increment into zeros: nothing else to write
+        (
+            lambda z, y, g, v, iv: z[iv].inc(pt.zeros((3, 4))[:, 1:3].inc(g)),
+            lambda z, y, g, v, iv: z[iv, 1:3].inc(g),
+        ),
+        # Not an increment
+        (lambda z, y, g, v, iv: z[iv].inc(y[:, 1:3].set(g)), None),
+        (lambda z, y, g, v, iv: z[iv].set(y[:, 1:3].inc(g)), None),
+        # Inner increment has other clients
+        (
+            lambda z, y, g, v, iv: (lambda y_inc: z[iv].inc(y_inc) + y_inc.sum())(
+                y[:, 1:3].inc(g)
+            ),
+            None,
+        ),
+        # Inner increment is broadcast by the outer one, along a sliced dim
+        (
+            lambda z, y, g, v, iv: z[iv].inc(
+                pt.matrix("y_bcast", shape=(None, 1))[:, 0:1].inc(g[:, :1])
+            ),
+            None,
+        ),
+        (
+            lambda z, y, g, v, iv: z[iv].inc(
+                pt.matrix("y_row", shape=(1, None))[:1, 1:3].inc(g[:1])
+            ),
+            None,
+        ),
+        # Inner increment is broadcast by the outer one, from the left
+        (
+            lambda z, y, g, v, iv: pt.tensor3("z3")[iv].inc(
+                pt.matrix("y_low")[:, 0:1].inc(pt.matrix("g_low"))
+            ),
+            None,
+        ),
+        # Inner increment happens in a narrower dtype
+        (
+            lambda z, y, g, v, iv: z[iv].inc(
+                pt.fmatrix("y_f32")[:, 1:3].inc(pt.fmatrix("g_f32"))
+            ),
+            None,
+        ),
+    ],
+)
+def test_local_adv_inc_subtensor_of_inc_subtensor(original_fn, expected_fn):
+    rng = np.random.default_rng(257)
+    z, y, g = pt.matrix("z"), pt.matrix("y"), pt.matrix("g")
+    v, iv = pt.vector("v"), pt.lvector("iv")
+    test_shapes = {
+        "z": (5, 4),
+        "y": (3, 4),
+        "g": (3, 2),
+        "v": (3,),
+        "y_bcast": (3, 1),
+        "y_row": (1, 4),
+        "z3": (5, 2, 2),
+        "y_low": (2, 2),
+        "g_low": (2, 1),
+        "y_f32": (3, 4),
+        "g_f32": (3, 2),
+    }
+
+    out = original_fn(z, y, g, v, iv)
+    inputs = [inp for inp in graph_inputs([out]) if not isinstance(inp, Constant)]
+    result = RewriteTester(
+        inputs,
+        [out],
+        include=None,
+        custom_rewrite=local_adv_inc_subtensor_of_inc_subtensor,
+    )
+    result.assert_graph(out if expected_fn is None else expected_fn(z, y, g, v, iv))
+    # Repeated indices, so that increments must accumulate
+    result.assert_eval(
+        *(
+            np.array([4, 0, 0])
+            if inp is iv
+            else rng.normal(size=test_shapes[inp.name]).astype(inp.dtype)
+            for inp in inputs
+        )
+    )
+
+
+def test_sliced_gather_gradient_does_not_materialize_the_gather():
+    rng = np.random.default_rng(0)
+    x = pt.matrix("x", shape=(7, 12))
+    idx = rng.integers(0, 7, 50)
+    gathered = x[idx]
+    blocks = [
+        (slice(None), slice(0, 2)),
+        (slice(None), slice(2, 7)),
+        (slice(10, None), slice(7, 12)),
+    ]
+    cost = sum(((gathered[b] - k) ** 2).sum() for k, b in enumerate(blocks))
+    outs = [cost, pt.grad(cost, x)]
+    f = function([x], outs, mode=mode_opt)
+    assert not any(
+        getattr(o.type, "shape", None) == (50, 12)
+        for n in f.maker.fgraph.apply_nodes
+        for o in n.outputs
+    )
+    x_test = rng.normal(size=(7, 12))
+    for res, ref in zip(
+        f(x_test), function([x], outs, mode=NO_OPTIMIZATION_MODE)(x_test)
+    ):
+        np.testing.assert_allclose(res, ref)
 
 
 @pytest.mark.parametrize(

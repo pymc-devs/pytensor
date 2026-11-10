@@ -66,11 +66,13 @@ from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
+    IncSubtensor,
     Subtensor,
     _non_consecutive_adv_indexing,
     as_index_literal,
     get_constant_idx,
     get_idx_list,
+    inc_subtensor,
     indexed_result_shape,
     indices_from_subtensor,
 )
@@ -1464,4 +1466,84 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
     if kept_idxs:
         new_out = new_out[kept_idxs]
         copy_stack_trace(basic_subtensor, new_out)
+    return [new_out]
+
+
+@register_specialize
+@node_rewriter([AdvancedIncSubtensor])
+def local_adv_inc_subtensor_of_inc_subtensor(fgraph, node):
+    """Increment directly into the entries written by a nested basic increment.
+
+    z[vec_idx].inc(y[:, i:j].inc(g)) -> z[vec_idx].inc(y)[vec_idx, i:j].inc(g)
+    z[vec_idx].inc(zeros[:, i:j].inc(g)) -> z[vec_idx, i:j].inc(g)
+
+    This is the counterpart of `local_subtensor_of_adv_subtensor` for the gradient of
+    ``x[vec_idx][:, i:j]``, which shows up as an increment of ``g`` padded with zeros.
+    """
+    if node.op.set_instead_of_inc:
+        return None
+
+    z, y, *adv_index_vars = node.inputs
+
+    if not (
+        y.owner
+        and isinstance(y.owner.op, IncSubtensor)
+        and not y.owner.op.set_instead_of_inc
+    ):
+        return None
+
+    if len(fgraph.clients[y]) > 1:
+        # The inner increment is needed elsewhere
+        return None
+
+    if y.type.dtype != z.type.dtype:
+        # The inner increment happens in the dtype of y, we would do it in the dtype of z
+        return None
+
+    adv_idxs = indices_from_subtensor(adv_index_vars, node.op.idx_list)
+    adv_idxs_info = _consecutive_integer_adv_idxs(adv_idxs)
+    if adv_idxs_info is None:
+        return None
+    n_left, n_adv, adv_ndim = adv_idxs_info
+
+    if y.type.ndim != z.type.ndim - n_adv + adv_ndim:
+        # y is broadcast from the left by the outer increment
+        return None
+
+    y_base, g, *idxs = y.owner.inputs
+    basic_idxs = indices_from_subtensor(idxs, y.owner.op.idx_list)
+    lifted_idxs = _lift_basic_idxs_over_adv_idxs(adv_idxs, *adv_idxs_info, basic_idxs)
+    if lifted_idxs is None:
+        return None
+    left_idxs, new_adv_idxs, kept_idxs, right_idxs = lifted_idxs
+
+    if kept_idxs or any(idx != slice(None) for idx in left_idxs):
+        # Not implemented: basic indices that don't end up to the right of the advanced ones
+        return None
+
+    if any(y_base.type.broadcastable[n_left:]):
+        # y is broadcast by the outer increment, which spreads g beyond the entries it indexes
+        return None
+
+    new_idxs = (*new_adv_idxs, *right_idxs)
+    if _non_consecutive_adv_indexing(new_idxs):
+        # An integer index after a slice would move the advanced dims to the front
+        return None
+
+    [old_out] = node.outputs
+    if (
+        get_underlying_scalar_constant_value(
+            y_base, elemwise=False, raise_not_constant=False
+        )
+        == 0
+    ):
+        new_z = z
+    else:
+        new_z = node.op(z, y_base, *adv_index_vars)
+        copy_stack_trace(old_out, new_z)
+
+    new_out = inc_subtensor(
+        new_z[new_idxs], g, ignore_duplicates=node.op.ignore_duplicates
+    )
+    copy_stack_trace(old_out, new_out)
     return [new_out]
