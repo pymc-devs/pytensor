@@ -1,4 +1,4 @@
-"""Group small nodes into compiled units (for the LLVM_V2 backend).
+"""Group small nodes into compiled units (for the LLVM backend).
 
 A late rewrite that wraps runs of small, statically shaped nodes in
 ``OpFromGraph(unit=UnitKind.COMPILED)``: the backend generates each group as one
@@ -83,5 +83,5 @@ class GroupIntoUnits(GraphRewriter):
             fgraph.replace_all(list(zip(outs, new, strict=True)), reason="llvm_units")
 
 
-# opt-in by name (the LLVM_V2 mode includes it)
+# opt-in by name (the LLVM mode includes it)
 optdb.register("llvm_units", GroupIntoUnits(), position=99)

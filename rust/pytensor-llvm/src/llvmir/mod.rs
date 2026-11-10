@@ -2,7 +2,7 @@
 //!
 //! Code generation happens in Python (one dispatch function per PyTensor op); this
 //! module gives it modules, functions, values and a checked instruction builder, and
-//! compiles finished modules into the JIT. See pytensor/link/llvm_v2/DESIGN.md.
+//! compiles finished modules into the JIT. See pytensor/link/llvm/DESIGN.md.
 
 pub mod builder;
 pub mod module;

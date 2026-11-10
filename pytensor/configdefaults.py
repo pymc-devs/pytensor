@@ -49,7 +49,7 @@ def _filter_mode(val):
         "NUMBA",
         "PYTORCH",
         "MLX",
-        "LLVM_V2",
+        "LLVM",
     ]
     if val in str_options:
         return val

@@ -1,4 +1,4 @@
-//! Layouts as the kernels declare them (the Python side, `llvm_v2/layout.py`, has the
+//! Layouts as the kernels declare them (the Python side, `llvm/layout.py`, has the
 //! full story): an axis order (outermost first) and per axis a packed, static or
 //! dynamic stride. Exchanged with Python as `(order, strides)`, a stride being `"P"`,
 //! `"?"` or a number of bytes.
