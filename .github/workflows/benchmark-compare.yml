@@ -15,18 +15,15 @@ on:
       case_file:
         description: Case file from this workflow's checkout
         default: scripts/benchmarks/special.py
-  # Temporary smoke trigger, removed after testing this template.
-  push:
-    branches: [ci/benchmark-template-2647]
 
 permissions:
   contents: read
 
 env:
-  BENCH_REPOSITORY: ${{ inputs.repository || 'pymc-devs/pytensor' }}
-  BENCH_BASE: ${{ inputs.base_ref || '6cc22d53b303ecdddc2d39927b7ce33361c094d0' }}
-  BENCH_HEAD: ${{ inputs.head_ref || '18b1d004bbe32c924756dbf4ec9a614e14fe540f' }}
-  BENCH_CASE: ${{ inputs.case_file || 'scripts/benchmarks/special.py' }}
+  BENCH_REPOSITORY: ${{ inputs.repository }}
+  BENCH_BASE: ${{ inputs.base_ref }}
+  BENCH_HEAD: ${{ inputs.head_ref }}
+  BENCH_CASE: ${{ inputs.case_file }}
 
 jobs:
   resolve:
