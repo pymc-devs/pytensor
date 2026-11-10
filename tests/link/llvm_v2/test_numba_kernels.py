@@ -1,4 +1,4 @@
-"""Ops without an LLVM implementation run through their numba implementation."""
+"""Ops without an LLVM implementation run as numba kernels."""
 
 import ctypes
 
@@ -7,14 +7,13 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import Mode
-from pytensor.link.llvm.linker import LLVMLinker
+from pytensor.compile.mode import get_mode
 
 
 native = pytest.importorskip("pytensor_llvm")
 pytest.importorskip("numba")
 
-LLVM = Mode(linker=LLVMLinker(), optimizer="fast_run")
+LLVM = get_mode("LLVM_V2")
 rng = np.random.default_rng(3)
 
 
@@ -22,34 +21,34 @@ def compiled(f):
     return f.maker.linker.compiled
 
 
-def foreign_steps(f):
-    return [d for d in compiled(f).info()["schedule"] if d.startswith("foreign:")]
+def numba_tasks(f):
+    return [d for d in compiled(f).tasks if "numba:" in d]
 
 
-def test_fallback_ops_mixed_with_native_kernels():
+def test_numba_ops_mixed_with_native_kernels():
     x = pt.matrix("x")
     s = pt.lvector("s")
     outs = [
-        pt.repeat(x[:, 0], s[:4]) * 2,  # numba -> native Elemwise, in place on the numba result
-        pt.repeat(x[0], s[:5]).sum(),  # numba -> native Reduce
+        pt.repeat(x[:, 0], s[:4]) * 2,  # numba -> generated Elemwise
+        pt.repeat(x[0], s[:5]).sum(),  # numba -> generated reduction
         pt.argmax(x, axis=1),
-        pt.argsort(pt.exp(x), axis=1),  # native Elemwise feeding a numba op
+        pt.argsort(pt.exp(x), axis=1),  # generated Elemwise feeding a numba kernel
         pt.linalg.det(x[:4, :4]),
     ]
     f = pytensor.function([x, s], outs, mode=LLVM)
-    assert len(foreign_steps(f)) >= 4
+    assert len(numba_tasks(f)) >= 3
     v = rng.normal(size=(4, 5))
     sv = np.array([1, 0, 3, 2, 1])
     res = f(v, sv)
     ref = pytensor.function([x, s], outs, mode="FAST_COMPILE")(v, sv)
     for r, e in zip(res, ref, strict=True):
         np.testing.assert_allclose(r, e)
-    # strided input into a numba op
+    # strided input into a numba kernel
     vt = rng.normal(size=(5, 4)).T
     np.testing.assert_allclose(f(vt, sv)[1], np.repeat(vt[0], sv).sum())
 
 
-def test_fallback_scalar_inputs_and_outputs():
+def test_numba_scalar_inputs_and_outputs():
     x = pt.vector("x")
     k = pt.lscalar("k")
     f = pytensor.function([x, k], [x[k], x[k:] * x[k]], mode=LLVM)
@@ -59,31 +58,31 @@ def test_fallback_scalar_inputs_and_outputs():
     np.testing.assert_allclose(b, v[2:] * v[2])
 
 
-def test_fallback_exception_is_reported():
+def test_numba_exception_is_reported():
     x = pt.vector("x")
     s = pt.lvector("s")
     f = pytensor.function([x, s], pt.repeat(x, s) * 2, mode=LLVM)
-    assert foreign_steps(f)
+    assert numba_tasks(f)
     np.testing.assert_allclose(f(np.arange(3.0), np.array([1, 0, 2])), [0.0, 4.0, 4.0])
-    with pytest.raises(Exception, match="Repeat.*numba"):
+    with pytest.raises(Exception, match="numba: Repeat"):
         f(np.arange(3.0), np.array([1, 2]))
     np.testing.assert_allclose(f(np.arange(2.0), np.array([0, 2])), [2.0, 2.0])
 
 
-def test_fallback_can_be_disabled():
+def test_numba_can_be_disabled():
     x = pt.matrix("x")
-    mode = Mode(linker=LLVMLinker(numba_fallback=False), optimizer="fast_run")
+    mode = get_mode("LLVM_V2").clone(link_kwargs={"numba_fallback": False})
     with pytest.raises(NotImplementedError, match="No LLVM"):
         pytensor.function([x], pt.argmax(x, axis=0), mode=mode)
 
 
-def test_fallback_through_c_api_without_gil():
-    from tests.link.llvm.test_c_api import Api, PtArray, as_ptarrays
+def test_numba_through_c_api_without_gil():
+    from tests.link.llvm_v2.test_c_api import Api, PtArray, as_ptarrays
 
     x = pt.matrix("x")
     out = (pt.argsort(x, axis=1) * 2).sum(axis=0)
     f = pytensor.function([x], out, mode=LLVM)
-    assert foreign_steps(f)
+    assert numba_tasks(f)
     v = rng.normal(size=(30, 7))
     fn = compiled(f).c_function()
     a = Api.from_address(compiled(f).c_api_table())

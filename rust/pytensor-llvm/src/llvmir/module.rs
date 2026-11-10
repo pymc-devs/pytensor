@@ -2,7 +2,7 @@
 
 use super::builder::Builder;
 use super::ty::{PyType, Ty};
-use crate::compile::{cache_dir, init_llvm, target_cpu, target_machine, vfabi_variants};
+use crate::target::{cache_dir, init_llvm, target_cpu, target_machine, vfabi_variants};
 use llvm_sys::analysis::{LLVMVerifierFailureAction, LLVMVerifyModule};
 use llvm_sys::core as c;
 use llvm_sys::prelude::{LLVMContextRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};

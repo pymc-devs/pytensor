@@ -1,9 +1,11 @@
 from pytensor.link.basic import JITLinker
-from pytensor.link.llvm.linker import FUSION_REWRITES
 
 
 # Rewrites the LLVM_V2 mode includes on top of fast_run: FusedElemwise, the save-memory
 # scan rewrite for linkers without preallocated outputs, and grouping into units.
+# Fusion of indexed reads/writes and reductions into Elemwise loops (FusedElemwise).
+# Included by name: their tag ("numba") would pull in other numba-only rewrites.
+FUSION_REWRITES = ("fuse_indexed_into_elemwise", "fuse_elemwise", "wrap_reduced_gather_in_elemwise")
 LLVM_V2_REWRITES = (*FUSION_REWRITES, "scan_save_mem_no_prealloc", "llvm_units")
 
 

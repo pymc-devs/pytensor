@@ -52,7 +52,7 @@ pub fn jit() -> &'static Mutex<Jit> {
 
 impl Jit {
     pub(crate) fn new() -> Result<Self, String> {
-        crate::compile::init_llvm();
+        crate::target::init_llvm();
         // SAFETY: LLVM C API calls on handles created right here; every error is
         // checked before a handle is used.
         unsafe {

@@ -58,11 +58,6 @@ pub struct PtArray {
     pub ndim: i64,
 }
 
-pub const PTARRAY_SIZE: usize = std::mem::size_of::<PtArray>();
-pub const FIELD_DATA: usize = 0;
-pub const FIELD_SHAPE: usize = 1;
-pub const FIELD_STRIDES: usize = 2;
-
 /// Shape and strides as slices.
 ///
 /// SAFETY (all four): `shape`/`strides` point to `ndim` readable (writable for the
