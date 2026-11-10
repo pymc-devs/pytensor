@@ -15,15 +15,21 @@ on:
       case_file:
         description: Case file from this workflow's checkout
         default: scripts/benchmarks/special.py
+      runners:
+        description: Runner labels as a JSON array (select one to retry a platform)
+        default: '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-26"]'
+  # Temporary macOS-only validation after macos-26 could not acquire a runner.
+  push:
+    branches: [ci/benchmark-template-2647]
 
 permissions:
   contents: read
 
 env:
-  BENCH_REPOSITORY: ${{ inputs.repository }}
-  BENCH_BASE: ${{ inputs.base_ref }}
-  BENCH_HEAD: ${{ inputs.head_ref }}
-  BENCH_CASE: ${{ inputs.case_file }}
+  BENCH_REPOSITORY: ${{ inputs.repository || 'pymc-devs/pytensor' }}
+  BENCH_BASE: ${{ inputs.base_ref || '6cc22d53b303ecdddc2d39927b7ce33361c094d0' }}
+  BENCH_HEAD: ${{ inputs.head_ref || '18b1d004bbe32c924756dbf4ec9a614e14fe540f' }}
+  BENCH_CASE: ${{ inputs.case_file || 'scripts/benchmarks/special.py' }}
 
 jobs:
   resolve:
@@ -46,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-26]
+        os: ${{ fromJSON(inputs.runners || '["macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

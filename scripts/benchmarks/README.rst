@@ -10,6 +10,11 @@ For example, once the workflow is on the default branch::
       --ref main -f base_ref=6cc22d53b303ecdddc2d39927b7ce33361c094d0 \
       -f head_ref=refs/pull/2647/head
 
+To retry only one platform, pass e.g. ``-f runners='["macos-26"]'``.
+The default runs all four platforms. If GitHub reports runner-capacity
+failures before any steps start, that is a scheduling failure; retry the
+platform or select another supported image (e.g. ``macos-15`` for ARM64).
+
 To reuse it, add a case file exposing ``cases(size)``. Each yielded item is
 ``(unique_name, build, points, check)``: ``build()`` constructs an uncalled
 PyTensor function, ``points`` maps input-range names to positional input
