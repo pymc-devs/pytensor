@@ -266,6 +266,48 @@ class Erfcinv(UnaryScalarOp):
 erfcinv = Erfcinv(upgrade_to_float_no_complex, name="erfcinv")
 
 
+class LogNdtrGrad(BinaryScalarOp):
+    """Standard normal inverse Mills ratio, reusing the log-CDF when accurate."""
+
+    def impl(self, x, log_cdf):
+        x = float(x)
+        if x < -8:
+            return np.sqrt(2 / np.pi) / special.erfcx(-x / np.sqrt(2))
+        return np.exp(-x * x / 2 - np.log(2 * np.pi) / 2 - log_cdf)
+
+    def pullback(self, inputs, outputs, grads):
+        x, _ = inputs
+        (ratio,) = outputs
+        (gz,) = grads
+        tail = x < -8
+        return [
+            gz * switch(tail, -ratio * (x + ratio), -x * ratio),
+            gz * switch(tail, ratio.zeros_like(), -ratio),
+        ]
+
+
+log_ndtr_grad = LogNdtrGrad(upgrade_to_float_no_complex, name="log_ndtr_grad")
+
+
+class LogNdtr(UnaryScalarOp):
+    """Logarithm of the standard normal CDF, with a tail-stable pullback."""
+
+    monotonic_increasing = True
+    nfunc_spec = ("scipy.special.log_ndtr", 1, 1)
+
+    def impl(self, x):
+        return special.log_ndtr(x)
+
+    def pullback(self, inputs, outputs, grads):
+        (x,) = inputs
+        (log_cdf,) = outputs
+        (gz,) = grads
+        return [gz * log_ndtr_grad(x, log_cdf)]
+
+
+log_ndtr = LogNdtr(upgrade_to_float_no_complex, name="log_ndtr")
+
+
 class NdtriExp(UnaryScalarOp):
     """
     Implements the inverse of the standard normal CDF evaluated at the

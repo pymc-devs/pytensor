@@ -2440,6 +2440,11 @@ def erfcinv(a):
 
 
 @scalar_elemwise
+def log_ndtr(a):
+    """Logarithm of the standard normal CDF, evaluated accurately in the tails."""
+
+
+@scalar_elemwise
 def ndtri_exp(a):
     """inverse standard normal cdf of the exponent of a"""
 
@@ -4332,6 +4337,7 @@ __all__ = [
     "log1pexp",
     "log2",
     "log10",
+    "log_ndtr",
     "lt",
     "matmul",
     "matvec",
