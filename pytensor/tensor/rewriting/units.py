@@ -1,7 +1,7 @@
 """Group small nodes into compiled units (for the LLVM backend).
 
 A late rewrite that wraps runs of small, statically shaped nodes in
-``OpFromGraph(unit=UnitKind.COMPILED)``: the backend generates each group as one
+``OpFromGraph(execution=Execution.COMPILED)``: the backend generates each group as one
 function, so a chain of tiny Elemwise / CAReduce / DimShuffle nodes doesn't become one
 interpreter step (and one compiled function) per node.
 
@@ -10,7 +10,7 @@ Groups are convex: no path leaves a group and comes back into it.
 
 from __future__ import annotations
 
-from pytensor.compile.builders import OpFromGraph, UnitKind
+from pytensor.compile.builders import OpFromGraph, Execution
 from pytensor.compile import optdb
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import GraphRewriter
@@ -78,7 +78,7 @@ class GroupIntoUnits(GraphRewriter):
             ]
             if not outs:
                 continue
-            op = OpFromGraph(inputs, outs, inline=False, unit=UnitKind.COMPILED, name="unit")
+            op = OpFromGraph(inputs, outs, inline=False, execution=Execution.COMPILED, name="unit")
             new = op(*inputs, return_list=True)
             fgraph.replace_all(list(zip(outs, new, strict=True)), reason="llvm_units")
 

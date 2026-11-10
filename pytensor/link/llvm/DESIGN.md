@@ -7,8 +7,9 @@ wrapper, the compiler (optimization, machine code, JIT, object cache), the runti
 (interpreter, memory, buffers, C API) and Rust kernels for the hard ops.
 
 How much is compiled together is decided in the graph: an `OpFromGraph` with
-`unit=UnitKind.COMPILED` becomes one function, `UnitKind.INTERPRETED` runs node by
-node, and the `llvm_units` rewrite groups small nodes into compiled units.
+`execution=Execution.COMPILED` becomes a unit (one kernel), one with
+`Execution.INTERPRETED` a subprogram (run node by node), and the `llvm_units` rewrite
+groups small nodes into units.
 
 ## Glossary
 
@@ -21,6 +22,10 @@ node, and the `llvm_units` rewrite groups small nodes into compiled units.
 * **emitter**: the code generation of one op (`llvm_emit`), working with a `Codegen`
   (the builder and the parameters of the kernel being generated).
 * **node function**: the LLVM function generated for one node, inlined into kernels.
+* **kernel wrapper**: the function with the kernel ABI generated around a node or unit
+  function (its symbol is `kernel`).
+* **output mode** (`OutputMode`): how an output comes to be: provided, allocated or a
+  view (section 3); in generated code also scalar or absent.
 
 *Run time*
 
@@ -30,13 +35,20 @@ node, and the `llvm_units` rewrite groups small nodes into compiled units.
   node or a unit), a **Rust kernel**, a **numba kernel**, or a **subprogram** (a nested
   program). Each has a **config**: its read-only data, made when planning (a Rust
   kernel's parameters, a subprogram's `Program`, a generated kernel's link table).
+* **legacy kernel**: a Rust kernel with the earlier ABI (one provided output, a
+  parameter block: `abi::LegacyFn`), run through a kernel that adapts it (`k_legacy`).
+  Sort, matmul and the faer linear algebra are still legacy kernels.
 * **link table**: a generated kernel's config: the addresses of the kernels it calls
   (each followed by its config) and of its array constants (section 2a).
-* **session**: everything one caller (e.g. one sampler chain) needs to run a compiled
-  function: the memory of its calls and its context (C: `PtSession`).
+* **session**: everything one caller (e.g. one sampler chain) needs to run a program:
+  the memory of its calls and its context (C: `PtSession`).
+* **function** (`PtFunction`): what the C API calls a program, together with the
+  objects that keep its machine code alive. In Python it is always a program.
 * **context** (`PtCtx`): a session's errors, scratch memory and random state; everything
   a call runs uses it.
-* **runtime**: the process-wide part: the runtime functions, the JIT, the thread pool.
+* **runtime** (`runtime.rs`): the process-wide part: the runtime functions (`ctx->rt`,
+  `ptl_rt_*`), the JIT, the thread pool.
+* **interpreter** (`interp/`, Python `pytensor_llvm.interp`): runs programs.
 
 *Memory*
 
@@ -89,11 +101,11 @@ so they come only from how a value is produced:
 * a view's layout follows from its input's, as the op's `llvm_outputs` declares it
   (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; helpers in layout.py); a
   view nothing is declared for is DYNAMIC;
-* numba fall-backs and graph inputs are DYNAMIC. With `input_layout="c"` the inputs are
+* numba kernels and graph inputs are DYNAMIC. With `input_layout="c"` the inputs are
   C-contiguous: Python calls copy other arrays, the C API rejects them.
 
 The planner is authoritative: it propagates layouts while it picks each kernel, so they
-reflect what actually runs (a numba fall-back gives DYNAMIC outputs). It specializes
+reflect what actually runs (a numba kernel gives DYNAMIC outputs). It specializes
 every generated kernel for its inputs' layouts, and compiled units do the same for the
 values inside them. A Scan's loop body gets the layouts of what the loop passes it (rows of
 the sequences, rows of its own C buffers, the non-sequences).
@@ -203,7 +215,7 @@ How each output comes to be is declared by the implementation that produces it: 
 generated code by one dispatch per op, `llvm_outputs(op, node, in_layouts) ->
 [Output(repr, mode, view_of)]`, the mode and the layout (section 1a) from the input
 layouts; for a Rust kernel by the kernel itself (`Kernel.outputs`, in Rust next to the
-kernel); a numba fall-back allocates with unknown layout. The planner picks the
+kernel); a numba kernel allocates with unknown layout. The planner picks the
 implementation first, then asks it.
 
 The default `llvm_outputs` follows the types and `view_map`: C-contiguous new memory,
@@ -224,8 +236,8 @@ order most of its inputs share). Declarations are binding:
 | provided | the representation, like an input | owns the memory, chooses lengths and strides | writes the elements |
 | allocated | `ptr` to an output slot | zero-initializes the slot | allocates, fills the slot (one new reference) |
 | view of input *i* | `ptr` to an output slot | zero-initializes the slot; sets the owner to input *i*'s | fills data, lengths, strides |
-| in place of input *i* | none | passes input *i* as overwritable | writes into input *i* |
 | scalar | `ptr` to the value | | stores the value |
+| absent | none | | (a value without data: a random generator) |
 
 An output slot is `{ ptr data, [ndim x i64] lengths, [ndim x i64] strides, ptr owner }`
 (all lengths: the caller needs them). Representations don't carry buffer owners, so for
@@ -266,10 +278,10 @@ only has to fill a slot's owner as soon as it allocates.
 
 Three levels of state:
 
-* **The runtime**, one per process (`abi::runtime()`): the table of runtime functions
+* **The runtime**, one per process (`runtime::runtime()`): the table of runtime functions
   and the process-wide state behind it (the JIT; later e.g. device contexts). The
   functions are defined once (`runtime_functions!`): the C table kernels reach through
-  `ctx->rt` (numba fall-backs, older kernels) and the JIT symbols `ptl_rt_<name>`
+  `ctx->rt` (numba kernels, Rust kernels) and the JIT symbols `ptl_rt_<name>`
   generated code links against come from the same list.
 * **The session**, one per function per caller, owned by the caller: the C API's
   `PtSession` (e.g. one per sampler chain), one per compiled Python function (calls
@@ -281,7 +293,7 @@ Three levels of state:
 
 **Random numbers.** A session has one random state (Xoshiro256++), advanced by
 every draw, in order: a seeded state gives reproducible draws (`program.seed(n)` in
-Python, `api->seed(state, n)` in C); unseeded states start from process entropy.
+Python, `api->seed(session, n)` in C); unseeded states start from process entropy.
 PyTensor's random generator values are tokens without data here (like `NoneTypeT`): no
 argument, no value, a generator output is passed back as the generator it came from,
 and two random variables never share draws. The runtime functions `ptl_rt_rng_*` draw
@@ -292,15 +304,15 @@ normal numbers draw them all at once and transform them in a vectorizable loop
 
 ## 5b. Parallel loops and work estimates
 
-`work.py`: `llvm_work(op, node) -> Work` estimates a node's work as a number of items
-(lengths, some known only at run time) times a cost per item, in units of one simple
+`work.py`: `llvm_work(op, node) -> Work` estimates a node's work as a number of elements
+(lengths, some known only at run time) times a cost per element, in units of one simple
 float operation (`scalar_cost`: an add is 1, an `exp` 20, `gammaln` 60; Composite: its
 inner graph). Rough on purpose: it separates microseconds from milliseconds.
 
 Generated loops may run in parallel. The builder's `with b.parallel(ctx, n, grain) as
 r:` puts the code of the block into an outlined body function, called per chunk
 `[r.start, r.end)` by the runtime's `parallel_for` on the runtime's rayon pool (the
-process-wide `Runtime`; `pytensor_llvm.rt.set_threads`, `PYTENSOR_LLVM_THREADS`).
+process-wide `Runtime`; `pytensor_llvm.set_threads`, `PYTENSOR_LLVM_THREADS`).
 Values of the enclosing function used inside are captured automatically (stored in an
 environment, loaded in the body), and the enclosing `ctx` stands for the chunk's own
 context there: emitters don't change. The loop builder (`for_each`, CAReduce's loops)
@@ -314,7 +326,7 @@ Chunks only depend on `n` and `grain`; each runs with a child context (its own s
 errors: the first failing chunk's is reported; a random state derived from one draw of
 the caller's and the chunk index). Results, random draws included, are therefore the
 same whatever the number of threads, and whether a session allows parallelism:
-`program.set_parallel(False)`, `api->set_parallel(state, 0)` (C API version 3) run the
+`program.set_parallel(False)`, `api->set_parallel(session, 0)` (C API version 3) run the
 chunks one after the other, e.g. for samplers already running a chain per core.
 
 ## 6. The kernel ABI
@@ -337,7 +349,7 @@ compiled unit (conversion inserts 0-d tensors at unit boundaries where needed).
 **Contract.** The caller guarantees dtypes, static lengths, layouts the type promises,
 valid memory, and that provided outputs don't overlap inputs. The function checks what
 types don't promise (equal dynamic lengths for broadcasting, index bounds). With
-`PTLLVM_CHECKED=1` the wrapper verifies the contract on every call.
+`PYTENSOR_LLVM_CHECKED=1` the wrapper verifies the contract on every call.
 
 ## 7. `pytensor_llvm.ir`
 
@@ -357,10 +369,10 @@ A small LLVM wrapper (`rust/pytensor-llvm/src/ir`) on top of `llvm-sys`:
 ## 8. Programs
 
 `program.py` plans a FunctionGraph into a program, a list of tasks for the Rust
-interpreter (`rust/pytensor-llvm/src/rt`): OpFromGraphs without a unit are inlined,
+interpreter (`rust/pytensor-llvm/src/interp`): OpFromGraphs without a unit are inlined,
 compiled ones become units, interpreted ones subprograms; nodes touching ScalarType
 values are grouped into units; FusedElemwise stays one node when its pattern is
-supported. Each node's task then runs a Rust kernel (`kernels.py`), a generated kernel
+supported. Each node's task then runs a Rust kernel (`rust_kernels.py`), a generated kernel
 (`codegen/`), or a numba kernel. Python assigns arena offsets by liveness (static
 temporaries and frames) and release points; all generated modules compile in one
 parallel batch.
@@ -382,7 +394,7 @@ every iteration and reallocated when an iteration changes their shape. Buffers o
 called kernels and scratch are released after every iteration. The interpreter itself
 has no control flow.
 
-The Rust Scan kernel (`rt/scan.rs`), running the loop body as a subprogram, remains for
+The Rust Scan kernel (`interp/scan.rs`), running the loop body as a subprogram, remains for
 `generate_scan=False` and as the fallback if generating fails.
 
 `ScalarLoop` (inside Elemwise or FusedElemwise) is generated like Composite: the loop
@@ -393,9 +405,8 @@ iteration whose until flag is set and returns the flag as its last output.
 ## 9. Calling from C
 
 `program.c_function()` returns a new `PtFunction*` reference and
-`pytensor_llvm.rt.c_api_table()` (also `program.c_api_table()`) the matching
-`PtFunctionApi`; the header is `pytensor_llvm.c_header()`, the same as for the first
-backend, with the same contract (a `PtSession` per caller, provided or runtime-allocated
+`pytensor_llvm.interp.c_api_table()` (also `program.c_api_table()`) the matching
+`PtFunctionApi`; the header is `pytensor_llvm.c_header()` (a `PtSession` per caller, provided or runtime-allocated
 outputs, `last_error`, no GIL; `seed(session, n)` since API version 2). The handle holds the program and the objects that own
 its machine code, so it outlives the Python function. Memory provided for an output is
 written directly by the producing task when the output has a static shape and the
@@ -409,11 +420,11 @@ returns rows `(depth, description, calls, seconds)`, `program.profile_report()` 
 slowest first; `reset_profile()` clears the counters. Counters are atomics on the
 program, so calls from several threads (or through the C API) add up.
 
-With `PYTENSOR_ENABLE_PERF=1` generated functions keep frame pointers (part of the cache
+With `PYTENSOR_LLVM_PERF=1` generated functions keep frame pointers (part of the cache
 key) and every linked object is written to `/tmp/perf-<pid>.map`. The planner labels
 each module with its task (`ptl:<task description>`), and functions appear as
 `ptl:<task>::<function> [<hash prefix>]`, e.g.
-`ptl:FusedElemwise{Exp, reduce[add@(0,)]}::abi [39ddfa22]`.
+`ptl:FusedElemwise{Exp, reduce[add@(0,)]}::kernel [39ddfa22]`.
 
 ## 11. History
 

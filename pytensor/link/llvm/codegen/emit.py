@@ -401,10 +401,10 @@ class Codegen:
     name: str = ""
     _checks: int = field(default=0)
 
-    def par(self, per_item: float) -> Parallel | None:
-        """How loops of items costing `per_item` (layout of `work.py`) may run in
+    def par(self, per_element: float) -> ParallelPolicy | None:
+        """How loops of items costing `per_element` (layout of `work.py`) may run in
         parallel, or None."""
-        return Parallel(self, per_item) if self.parallel and per_item > 0 else None
+        return ParallelPolicy(self, per_element) if self.parallel and per_element > 0 else None
 
     def fail(self, message: str | None):
         """Report `message` (unless a called kernel already did) and return 1."""
@@ -520,40 +520,40 @@ MIN_PARALLEL_COST = 2 * CHUNK_COST
 
 
 @dataclass
-class Parallel:
+class ParallelPolicy:
     """A loop whose iterations may run in parallel: the context, the cost of one item."""
 
     cg: Codegen
-    per_item: float
+    per_element: float
 
-    def worth_it(self, n_items) -> bool:
+    def worth_it(self, n_elements) -> bool:
         """False if the loop is statically too small for a parallel region."""
-        n = n_items.const_int
-        return n is None or n * self.per_item >= MIN_PARALLEL_COST
+        n = n_elements.const_int
+        return n is None or n * self.per_element >= MIN_PARALLEL_COST
 
-    def grain(self, b, items_per_iteration):
-        """Iterations per chunk (i64), for iterations of `items_per_iteration` items."""
+    def grain(self, b, elements_per_iteration):
+        """Iterations per chunk (i64), for iterations of `elements_per_iteration` items."""
         m = ir()
-        per = items_per_iteration.const_int
+        per = elements_per_iteration.const_int
         if per is not None:
-            return b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / (self.per_item * max(per, 1)))))
-        target = b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / self.per_item)))
+            return b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1)))))
+        target = b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / self.per_element)))
         one = b.const_int(m.i64, 1)
-        per = b.select(b.icmp(m.ICmp.SGT, items_per_iteration, one), items_per_iteration, one)
+        per = b.select(b.icmp(m.ICmp.SGT, elements_per_iteration, one), elements_per_iteration, one)
         g = b.sdiv(target, per)
         return b.select(b.icmp(m.ICmp.SGT, g, one), g, one)
 
-    def range(self, b, n, items_per_iteration, body):
+    def range(self, b, n, elements_per_iteration, body):
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
         m = ir()
-        with b.parallel(self.cg.ctx, n, self.grain(b, items_per_iteration)) as r:
+        with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as r:
             with b.loop(b.sub(r.end, r.start)) as j:
                 body(b.add(r.start, j))
         self.cg.check(b.icmp(m.ICmp.EQ, r.result, b.const_int(m.i32, 0)), None)
 
 
-def for_each(b, shape, arrays, body, par: Parallel | None = None):
+def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
     """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
 
     `arrays` have strides over `shape` (0 where broadcast). The loops follow memory order

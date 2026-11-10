@@ -1,9 +1,10 @@
-//! `pytensor_llvm.rt`: programs and Rust kernels for Python.
+//! `pytensor_llvm.interp`: programs and Rust kernels for Python.
 
 use super::consts::ConstData;
-use super::kernels::{self, OutMode};
+use super::kernels;
 use super::layout::Layout;
-use super::program::{Abi as RAbi, Kind, OutputMode as ROutMode, Program as RProgram, ProgramSpec, Task, ValueId, ValueSpec};
+use super::program::{Program as RProgram, ProgramSpec, Task, ValueId, ValueKind, ValueSpec};
+use crate::abi::{Abi, OutputMode};
 use crate::dtype::DType;
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
@@ -34,37 +35,10 @@ fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", eq, eq_int, frozen, from_py_object)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Abi {
-    /// the kernel ABI: `int32 f(ctx, args, config, frame)`
-    Kernel,
-    /// numba kernels: `int32 f(ctx, args, config)`, every output allocated
-    Numba,
-}
-
-#[pyclass(module = "pytensor_llvm.rt", eq, eq_int, frozen, from_py_object)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum OutputMode {
-    Provided,
-    Allocated,
-    View,
-}
-
-impl OutputMode {
-    fn kernel(self) -> OutMode {
-        match self {
-            OutputMode::Provided => OutMode::Provided,
-            OutputMode::Allocated => OutMode::Allocated,
-            OutputMode::View => OutMode::View,
-        }
-    }
-}
-
 // ------------------------------------------------------------------ kernels
 
 /// A Rust kernel: its address and its config (owned by this object).
-#[pyclass(module = "pytensor_llvm.rt", subclass, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", subclass, frozen)]
 pub struct RustKernel {
     address: usize,
     config: Box<dyn std::any::Any + Send + Sync>,
@@ -148,7 +122,7 @@ impl RustKernel {
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct DimShuffle;
 
 #[pymethods]
@@ -164,20 +138,20 @@ impl DimShuffle {
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct Copy;
 
 #[pymethods]
 impl Copy {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
-        let config = kernels::CopyConfig { mode: mode.kernel(), dtype: dtype_of(&dtype)? };
+        let config = kernels::CopyConfig { mode, dtype: dtype_of(&dtype)? };
         let k = RustKernel::new(kernels::k_copy as *const () as usize, config, "Copy".into(), Produces::Fresh(vec![mode]));
         Ok(PyClassInitializer::from(k).add_subclass(Copy))
     }
 }
 
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct Dot;
 
 #[pymethods]
@@ -188,7 +162,7 @@ impl Dot {
         if !matches!(dt, DType::Float64 | DType::Float32) {
             return err(format!("Dot of {dt:?}"));
         }
-        let config = kernels::DotConfig { mode: mode.kernel(), dtype: dt };
+        let config = kernels::DotConfig { mode, dtype: dt };
         let k = RustKernel::new(kernels::k_dot as *const () as usize, config, "Dot".into(), Produces::Fresh(vec![mode]));
         Ok(PyClassInitializer::from(k).add_subclass(Dot))
     }
@@ -198,12 +172,12 @@ fn legacy(f: kernels::LegacyFn, params: Vec<i64>, n_in: usize, shape_from: usize
     if mode == OutputMode::View {
         return err("this kernel can't produce a view");
     }
-    let config = kernels::LegacyConfig { f, params, n_in, shape_from, mode: mode.kernel(), dtype };
+    let config = kernels::LegacyConfig { f, params, n_in, shape_from, mode, dtype };
     Ok(RustKernel::new(kernels::k_legacy as *const () as usize, config, desc, Produces::Fresh(vec![mode])))
 }
 
 /// Sort along `axis` (float64, float32, int64), NaNs last.
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct Sort;
 
 #[pymethods]
@@ -212,9 +186,9 @@ impl Sort {
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, axis: i64, stable: bool) -> PyResult<PyClassInitializer<Self>> {
         let dt = dtype_of(&dtype)?;
         let f: kernels::LegacyFn = match dt {
-            DType::Float64 => crate::native::ptl_sort_f64,
-            DType::Float32 => crate::native::ptl_sort_f32,
-            DType::Int64 => crate::native::ptl_sort_i64,
+            DType::Float64 => crate::legacy_kernels::ptl_sort_f64,
+            DType::Float32 => crate::legacy_kernels::ptl_sort_f32,
+            DType::Int64 => crate::legacy_kernels::ptl_sort_i64,
             _ => return err(format!("Sort of {dt:?}")),
         };
         let k = legacy(f, vec![axis, stable as i64], 1, 0, mode, dt, format!("Sort(axis={axis})"))?;
@@ -223,7 +197,7 @@ impl Sort {
 }
 
 /// Cholesky factor (faer), LAPACK potrf semantics: NaN if not positive definite.
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct Cholesky;
 
 #[pymethods]
@@ -242,7 +216,7 @@ impl Cholesky {
 }
 
 /// Triangular solve (faer), LAPACK trtrs semantics: NaN if the diagonal has a zero.
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct SolveTriangular;
 
 #[pymethods]
@@ -262,7 +236,7 @@ impl SolveTriangular {
 }
 
 /// Scan: a loop around its loop body (a subprogram). Every output is allocated by the kernel.
-#[pyclass(module = "pytensor_llvm.rt", extends = RustKernel, frozen)]
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
 pub struct Scan;
 
 #[pymethods]
@@ -327,7 +301,7 @@ impl Scan {
 // ------------------------------------------------------------------ programs
 
 /// Builds a program: values, then tasks in execution order, then outputs.
-#[pyclass(module = "pytensor_llvm.rt")]
+#[pyclass(module = "pytensor_llvm.interp")]
 pub struct ProgramBuilder {
     values: Vec<ValueSpec>,
     n_inputs: usize,
@@ -338,7 +312,7 @@ pub struct ProgramBuilder {
 }
 
 impl ProgramBuilder {
-    fn add(&mut self, dtype: &Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, kind: Kind) -> PyResult<u32> {
+    fn add(&mut self, dtype: &Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, kind: ValueKind) -> PyResult<u32> {
         self.values.push(ValueSpec { dtype: dtype_of(dtype)?, shape, kind, order: vec![] });
         Ok((self.values.len() - 1) as u32)
     }
@@ -359,7 +333,7 @@ impl ProgramBuilder {
         let k = self.n_inputs;
         self.n_inputs += 1;
         self.contiguous_inputs.push(contiguous);
-        self.add(&dtype, shape, Kind::Input(k))
+        self.add(&dtype, shape, ValueKind::Input(k))
     }
 
     fn constant(&mut self, array: &Bound<'_, PyUntypedArray>) -> PyResult<u32> {
@@ -370,7 +344,7 @@ impl ProgramBuilder {
         let bytes: Vec<u8> = native.call_method0("tobytes")?.extract()?;
         let shape: Vec<i64> = array.shape().iter().map(|&n| n as i64).collect();
         let c = ConstData::new(dt, shape.clone(), &bytes).map_err(PyValueError::new_err)?;
-        self.values.push(ValueSpec { dtype: dt, shape: shape.iter().map(|&n| Some(n as u64)).collect(), kind: Kind::Const(Arc::new(c)), order: vec![] });
+        self.values.push(ValueSpec { dtype: dt, shape: shape.iter().map(|&n| Some(n as u64)).collect(), kind: ValueKind::Const(Arc::new(c)), order: vec![] });
         Ok((self.values.len() - 1) as u32)
     }
 
@@ -378,24 +352,24 @@ impl ProgramBuilder {
     /// `order`: the memory order (outermost axis first) the value is packed in; default C.
     #[pyo3(signature = (dtype, shape, offset, order = None))]
     fn arena(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<u64>, offset: u64, order: Option<Vec<usize>>) -> PyResult<u32> {
-        let k = self.add(&dtype, shape.into_iter().map(Some).collect(), Kind::Arena(offset))?;
+        let k = self.add(&dtype, shape.into_iter().map(Some).collect(), ValueKind::Arena(offset))?;
         self.values[k as usize].order = order.unwrap_or_default();
         Ok(k)
     }
 
     /// A static graph output: a fresh buffer per call, provided to its producer.
     fn fresh(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<u64>) -> PyResult<u32> {
-        self.add(&dtype, shape.into_iter().map(Some).collect(), Kind::Fresh)
+        self.add(&dtype, shape.into_iter().map(Some).collect(), ValueKind::Fresh)
     }
 
     /// A value its producer allocates.
     fn allocated(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>) -> PyResult<u32> {
-        self.add(&dtype, shape, Kind::Allocated)
+        self.add(&dtype, shape, ValueKind::Allocated)
     }
 
     /// A value its producer sets as a view into the memory of `source`.
     fn view(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, source: u32) -> PyResult<u32> {
-        self.add(&dtype, shape, Kind::View(ValueId(source)))
+        self.add(&dtype, shape, ValueKind::View(ValueId(source)))
     }
 
     /// Append a task. `keepalive` is kept alive as long as the program (the compiled
@@ -416,10 +390,7 @@ impl ProgramBuilder {
     ) {
         self.tasks.push(Task {
             func: address,
-            abi: match abi {
-                Abi::Kernel => RAbi::Kernel,
-                Abi::Numba => RAbi::Numba,
-            },
+            abi,
             config,
             frame_offset: frame_offset,
             inputs: inputs.into_iter().map(ValueId).collect(),
@@ -437,14 +408,10 @@ impl ProgramBuilder {
     /// Finish with these outputs. `modes` say how each output is produced when the
     /// program runs as a task of another program (Provided or Allocated).
     fn build(&mut self, outputs: Vec<u32>, modes: Vec<OutputMode>) -> PyResult<Program> {
-        let output_modes = modes
-            .into_iter()
-            .map(|m| match m {
-                OutputMode::Provided => Ok(ROutMode::Provided),
-                OutputMode::Allocated => Ok(ROutMode::Allocated),
-                OutputMode::View => Err(PyValueError::new_err("program outputs can't be views")),
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+        if modes.contains(&OutputMode::View) {
+            return Err(PyValueError::new_err("program outputs can't be views"));
+        }
+        let output_modes = modes;
         let spec = ProgramSpec {
             values: std::mem::take(&mut self.values),
             n_inputs: self.n_inputs,
@@ -505,7 +472,7 @@ fn runtime_error(msg: String) -> PyErr {
 
 /// A runnable program: call it with arrays, or use it as a task of another program
 /// (`address` / `config`).
-#[pyclass(module = "pytensor_llvm.rt", frozen)]
+#[pyclass(module = "pytensor_llvm.interp", frozen)]
 pub struct Program {
     prog: Arc<RProgram>,
     keepalive: Vec<Py<PyAny>>,
@@ -517,7 +484,7 @@ pub struct Program {
 /// A session of Python calls: the program's call memory and the context.
 struct Session {
     memory: super::program::CallMemory,
-    ctx: crate::abi::PtCtx,
+    ctx: crate::runtime::PtCtx,
 }
 
 #[pymethods]
@@ -530,7 +497,7 @@ impl Program {
         }
         let np = py.import("numpy")?;
         let mut guard = self.lock_session(py);
-        let Session { memory: st, ctx } = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::abi::PtCtx::new() });
+        let Session { memory: st, ctx } = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::runtime::PtCtx::new() });
         let mut keep = Vec::with_capacity(args.len());
         let mut work = 0usize;
         let res = (|| -> PyResult<Vec<super::program::OutArray>> {
@@ -571,7 +538,7 @@ impl Program {
                 work += arr.len();
                 keep.push(a);
             }
-            let run = |st: &mut super::program::CallMemory, ctx: &mut crate::abi::PtCtx| -> Result<Vec<super::program::OutArray>, String> {
+            let run = |st: &mut super::program::CallMemory, ctx: &mut crate::runtime::PtCtx| -> Result<Vec<super::program::OutArray>, String> {
                 let none = vec![None; prog.n_outputs()];
                 prog.execute(st, ctx, &none)?;
                 let outs = (0..prog.n_outputs()).map(|o| prog.take_output(st, ctx, o)).collect::<Result<Vec<_>, _>>();
@@ -580,7 +547,7 @@ impl Program {
             };
             // releasing the GIL costs ~100ns: only worth it with real work
             let r = if work > 20_000 {
-                struct S<'a>(&'a mut super::program::CallMemory, &'a mut crate::abi::PtCtx);
+                struct S<'a>(&'a mut super::program::CallMemory, &'a mut crate::runtime::PtCtx);
                 // SAFETY: the session and context are exclusively ours for this call.
                 unsafe impl Send for S<'_> {}
                 let s = S(&mut *st, &mut *ctx);
@@ -670,11 +637,11 @@ impl Program {
     }
 
     /// Restart the random state of Python calls from `seed` (draws are then
-    /// reproducible). The C API seeds each of its call states (`seed` in the table).
+    /// reproducible). The C API seeds each of its sessions (`seed` in the table).
     fn seed(&self, py: Python<'_>, seed: u64) {
         let prog = &self.prog;
         let mut guard = self.lock_session(py);
-        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::abi::PtCtx::new() });
+        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::runtime::PtCtx::new() });
         s.ctx.seed(seed);
     }
 
@@ -683,7 +650,7 @@ impl Program {
     fn set_parallel(&self, py: Python<'_>, on: bool) {
         let prog = &self.prog;
         let mut guard = self.lock_session(py);
-        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::abi::PtCtx::new() });
+        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::runtime::PtCtx::new() });
         s.ctx.parallel = on;
     }
 
@@ -722,8 +689,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ProgramBuilder>()?;
     m.add_class::<Program>()?;
     m.add_function(wrap_pyfunction!(c_api_table, m)?)?;
-    m.add_function(wrap_pyfunction!(set_threads, m)?)?;
-    m.add_function(wrap_pyfunction!(threads, m)?)?;
     Ok(())
 }
 
@@ -796,12 +761,12 @@ impl Program {
 /// Choose the number of threads parallel loops use (process-wide; only before the
 /// first parallel loop runs). Default: `PYTENSOR_LLVM_THREADS`, else one per CPU.
 #[pyfunction]
-fn set_threads(n: usize) -> PyResult<()> {
-    crate::abi::runtime().set_threads(n).map_err(PyRuntimeError::new_err)
+pub fn set_threads(n: usize) -> PyResult<()> {
+    crate::runtime::runtime().set_threads(n).map_err(PyRuntimeError::new_err)
 }
 
 /// The number of threads parallel loops use.
 #[pyfunction]
-fn threads() -> usize {
-    crate::abi::runtime().threads()
+pub fn threads() -> usize {
+    crate::runtime::runtime().threads()
 }

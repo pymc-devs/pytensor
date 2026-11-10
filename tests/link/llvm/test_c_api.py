@@ -13,13 +13,13 @@ import pytensor.tensor as pt
 from pytensor.compile.mode import get_mode
 
 
-native = pytest.importorskip("pytensor_llvm")
+pytensor_llvm = pytest.importorskip("pytensor_llvm")
 
 LLVM = get_mode("LLVM")
 
 
 def _table():
-    return native.rt.c_api_table()
+    return pytensor_llvm.interp.c_api_table()
 
 
 class PtArray(ctypes.Structure):
@@ -42,7 +42,7 @@ def harness(tmp_path_factory):
     if cc is None:
         pytest.skip("no C compiler")
     d = tmp_path_factory.mktemp("capi")
-    (d / "pytensor_llvm.h").write_text(native.c_header())
+    (d / "pytensor_llvm.h").write_text(pytensor_llvm.c_header())
     lib = d / "libharness.so"
     src = Path(__file__).with_name("c_harness.c")
     subprocess.run([cc, "-O2", "-shared", "-fPIC", f"-I{d}", str(src), "-o", str(lib)], check=True)
@@ -82,7 +82,7 @@ def api():
 
 def test_table_from_the_compiled_function():
     f, _ = _model()
-    assert f.maker.linker.compiled.c_api_table() == _table()
+    assert f.maker.linker.program.c_api_table() == _table()
 
 
 def _model():
@@ -99,9 +99,9 @@ def _model():
 
 def test_api_table_and_introspection():
     a = api()
-    assert a.abi_version == native.ABI_VERSION and a.api_version == 3
+    assert a.abi_version == pytensor_llvm.ABI_VERSION and a.api_version == 3
     f, _ = _model()
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     n_in = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p)(a.n_inputs)
     n_out = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p)(a.n_outputs)
     in_type = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(PtTypeInfo))(a.input_type)
@@ -117,7 +117,7 @@ def test_api_table_and_introspection():
 def test_call_from_c(harness, provided):
     f, vals = _model()
     ref = f(*vals)
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     a = api()
     ins, keep = as_ptarrays(vals)
     if provided:
@@ -153,7 +153,7 @@ def test_c_errors_are_reported(harness):
     x = pt.vector("x")
     y = pt.vector("y")
     f = pytensor.function([x, y], x + y, mode=LLVM)
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     a = api()
     ins, keep = as_ptarrays([np.zeros(3), np.zeros(4)])
     out_np = np.empty(3)
@@ -172,7 +172,7 @@ def test_c_errors_are_reported(harness):
 def test_function_outlives_python_object(harness):
     f, vals = _model()
     ref = f(*vals)
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     del f
     import gc
 
@@ -189,7 +189,7 @@ def test_function_outlives_python_object(harness):
 
 def test_bench_runs(harness):
     f, vals = _model()
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     a = api()
     ins, keep = as_ptarrays(vals)
     err = ctypes.create_string_buffer(512)
@@ -202,7 +202,7 @@ def test_bench_runs(harness):
 def test_c_boundary_checks(harness):
     x = pt.vector("x")
     f = pytensor.function([x], x * 2, mode=LLVM)
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     a = api()
     err = ctypes.create_string_buffer(512)
 
@@ -244,7 +244,7 @@ def test_provided_output_with_other_strides(harness, static):
     shape = (3, 4) if static else (None, None)
     x = pt.tensor("x", dtype="float64", shape=shape)
     f = pytensor.function([x], pt.exp(x) + 1, mode=LLVM)
-    fn = f.maker.linker.compiled.c_function()
+    fn = f.maker.linker.program.c_function()
     a = api()
     xv = np.random.default_rng(1).normal(size=(3, 4))
     out = np.asfortranarray(np.zeros((3, 4)))

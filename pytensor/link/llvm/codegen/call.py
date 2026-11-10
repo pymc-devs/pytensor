@@ -22,7 +22,7 @@ from pytensor.link.llvm.codegen.types import PTARRAY_SIZE, ir, memory_type, ptar
 
 
 @dataclass
-class Kernel:
+class CalledKernel:
     """A kernel that generated code calls for a node: a Rust kernel, a numba kernel or a
     subprogram."""
 
@@ -47,7 +47,7 @@ class LinkTable:
     _keep: list = field(default_factory=list)
     _table: object = None
 
-    def link_kernel(self, kernel: Kernel) -> int:
+    def link_kernel(self, kernel: CalledKernel) -> int:
         """The entry of `kernel`'s address (its config is in the next entry)."""
         self.entries += [kernel.address, kernel.config]
         self._keep.append(kernel.keepalive)
@@ -87,7 +87,7 @@ def linked(cg, index: int):
     return b.load(m.ptr, b.gep_bytes(cg.config, b.const_int(m.i64, 8 * index)))
 
 
-def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> None:
+def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: list) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
     `outputs` (ProvidedOutput, SlotOutput, or None).
@@ -158,4 +158,4 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
         b.ret(rc)
 
 
-__all__ = ["Kernel", "LinkTable", "call_kernel", "linked"]
+__all__ = ["CalledKernel", "LinkTable", "call_kernel", "linked"]

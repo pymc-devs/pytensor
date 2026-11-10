@@ -12,7 +12,7 @@ from pytensor.compile.mode import get_mode
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.function import build_abi_wrapper, build_node_function  # noqa: E402
+from pytensor.link.llvm.codegen.function import build_kernel_wrapper, build_node_function  # noqa: E402
 from pytensor.link.llvm.codegen.function import node_outputs  # noqa: E402
 from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
@@ -97,7 +97,7 @@ def test_views_feed_specialized_code():
     check_against_numpy([x, y], outs, values)
     # with C-contiguous inputs, views of them are known too: tasks are specialized
     f = check_against_numpy([x, y], outs, values, mode=CHECKED.clone(link_kwargs={"input_layout": "c"}))
-    dump = f.maker.linker.compiled.dump()
+    dump = f.maker.linker.program.dump()
     assert "[?, P0]" in dump and "[P0, P1]" in dump, dump
 
 
@@ -118,7 +118,7 @@ def test_c_inputs_are_checked_by_the_c_api():
 
     x = pt.dvector("x")
     f = pytensor.function([x], pt.exp(x), mode=LLVM.clone(link_kwargs={"input_layout": "c"}))
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     assert "(C-contiguous)" in p.dump()
     fn = p.c_function()
     a = Api.from_address(p.c_api_table())
@@ -156,13 +156,13 @@ def test_layout_check_catches_a_wrong_claim():
     node = pt.exp(x).owner
     m = ir.Module("wrong_claim")
     nf = build_node_function(m, node, "node", in_layouts=[C(2)])
-    build_abi_wrapper(m, nf, "abi", check_layouts=True)
+    build_kernel_wrapper(m, nf, "kernel", check_layouts=True)
     c = m.compile(cache=False)
     v = rng.normal(size=(3, 4))
-    (r,) = ir.call_abi(c.address("abi"), [v], [(np.dtype("float64"), 2)], nf.frame_size)
+    (r,) = ir.call_kernel(c.address("kernel"), [v], [(np.dtype("float64"), 2)], nf.frame_size)
     np.testing.assert_allclose(r, np.exp(v))
     with pytest.raises(Exception, match="layout check"):
-        ir.call_abi(c.address("abi"), [v.T], [(np.dtype("float64"), 2)], nf.frame_size)
+        ir.call_kernel(c.address("kernel"), [v.T], [(np.dtype("float64"), 2)], nf.frame_size)
 
 
 def test_specialized_signature_passes_fewer_strides():
@@ -274,15 +274,15 @@ def test_elemwise_output_follows_its_inputs():
 
 
 def test_declared_outputs():
-    from pytensor.link.llvm.codegen.function import OutMode
+    from pytensor.link.llvm.codegen.function import OutputMode
 
     x = pt.dmatrix("x")
     (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
-    assert o.mode is OutMode.ALLOCATED and str(o.layout) == "[P0, P1]"
+    assert o.mode is OutputMode.ALLOCATED and str(o.layout) == "[P0, P1]"
     (o,) = node_outputs((pt.exp(x.T)).owner, [None])
     assert o.layout == C(2)
     (o,) = node_outputs(x.T.owner, [C(2)])
-    assert o.mode is OutMode.VIEW and o.view_of == 0 and o.layout == T2
+    assert o.mode is OutputMode.VIEW and o.view_of == 0 and o.layout == T2
 
 
 def test_provided_layouts_are_binding():
@@ -293,7 +293,7 @@ def test_provided_layouts_are_binding():
     # as tasks of the program (inside a compiled unit the unit does the same)
     f = pytensor.function([s, t], out, mode=mode.excluding("llvm_units"))
     g = pytensor.function([s, t], out, mode=mode)
-    p = f.maker.linker.compiled
+    p = f.maker.linker.program
     dump = p.dump()
     # a graph output must be C-contiguous: the node writes an arena temporary in its
     # declared order, which is copied into the output
@@ -339,18 +339,18 @@ def test_view_layout_is_checked_when_generating():
 
 
 def test_kernels_declare_their_outputs():
-    from pytensor.link.llvm.codegen.function import OutMode
-    from pytensor.link.llvm.kernels import rust_kernel_outputs, rust_kernel
+    from pytensor.link.llvm.codegen.function import OutputMode
+    from pytensor.link.llvm.rust_kernels import rust_kernel_outputs, rust_kernel
 
     x = pt.dmatrix("x")
     node = x.T.owner
     k = rust_kernel(node.op, node, [C(2)])
     (o,) = rust_kernel_outputs(k, node, [C(2)])
-    assert o.mode is OutMode.VIEW and o.view_of == 0 and o.layout == T2
+    assert o.mode is OutputMode.VIEW and o.view_of == 0 and o.layout == T2
     # the Rust declaration agrees with the one for generated code
     assert o.layout == node_outputs(node, [C(2)])[0].layout
     a = pt.tensor("a", shape=(3, 4))
-    for out, mode in [(pt.dot(x, x), OutMode.ALLOCATED), (pt.dot(a, a.T), OutMode.PROVIDED)]:
+    for out, mode in [(pt.dot(x, x), OutputMode.ALLOCATED), (pt.dot(a, a.T), OutputMode.PROVIDED)]:
         node = out.owner
         (o,) = rust_kernel_outputs(rust_kernel(node.op, node, None), node, None)
         assert o.mode is mode and o.layout == C(2)

@@ -173,7 +173,7 @@ def numba_kernel(node):
         elif isinstance(t, TensorType):
             env[f"in{i}"] = array_input(i, t.ndim, np.dtype(t.dtype))
         else:
-            raise NotImplementedError(f"numba fallback: input type {t}")
+            raise NotImplementedError(f"numba kernel: input type {t}")
         lines.append(f"        x{i} = in{i}(args)")
         names.append(f"x{i}")
     lines.append(f"        r = op_fn({', '.join(names)})")
@@ -181,7 +181,7 @@ def numba_kernel(node):
     for k, out in enumerate(node.outputs):
         t = out.type
         if not isinstance(t, ScalarType | TensorType):
-            raise NotImplementedError(f"numba fallback: output type {t}")
+            raise NotImplementedError(f"numba kernel: output type {t}")
         ndim = 0 if isinstance(t, ScalarType) else t.ndim
         env[f"out{k}"] = allocated_output(n_in + k, ndim, np.dtype(t.dtype))
         val = "r" if len(node.outputs) == 1 else f"r[{k}]"

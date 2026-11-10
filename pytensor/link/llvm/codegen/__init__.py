@@ -30,10 +30,10 @@ from pytensor.link.llvm.codegen import (  # noqa: F401 (registers emitters)
     subtensor,
 )
 from pytensor.link.llvm.codegen.function import (
-    OutMode,
+    OutputMode,
     compile_node,
     llvm_emit,
-    fresh_output,
+    new_output,
     llvm_outputs,
     node_outputs,
     view_output,

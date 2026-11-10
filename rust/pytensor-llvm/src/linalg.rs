@@ -4,11 +4,12 @@
 //! steady-state calls don't allocate.
 // Kernel module: every function here is called with the kernel contract (see the
 // Safety section of DESIGN.md: arguments are valid arrays as planned, params are the
-// step's own). Raw-pointer work is the whole body, so unsafe ops aren't wrapped
+// task's own). Raw-pointer work is the whole body, so unsafe ops aren't wrapped
 // one by one; the preconditions are documented per kernel instead.
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use crate::abi::{PtArray, PtCtx};
+use crate::abi::{PtArray};
+use crate::runtime::{PtCtx};
 use faer::dyn_stack::MemStack;
 use faer::linalg::cholesky::llt::factor::{cholesky_in_place, cholesky_in_place_scratch, LltRegularization};
 use faer::linalg::triangular_solve as tri;

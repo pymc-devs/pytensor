@@ -1,4 +1,4 @@
-//! The runtime: programs planned in Python, Rust kernels, the C API.
+//! The interpreter: programs planned in Python, the Rust kernels they run, the C API.
 
 pub mod capi;
 pub mod consts;

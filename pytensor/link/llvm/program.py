@@ -1,7 +1,7 @@
 """Planning programs: a FunctionGraph becomes a list of tasks for the Rust interpreter.
 
 1. Flatten: OpFromGraphs without a `unit` are inlined (with their own variable scope);
-   OpFromGraphs with `unit=COMPILED` become compiled units; `unit=INTERPRETED` become
+   OpFromGraphs with `execution=COMPILED` become compiled units; `execution=INTERPRETED` become
    subprograms. Nodes touching ScalarType values are grouped into implicit compiled
    units, since scalars never cross the kernel ABI.
 2. Each remaining node becomes a task running a kernel: a Rust kernel (`rust_kernel`),
@@ -21,13 +21,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from pytensor.compile.builders import OpFromGraph, UnitKind
+from pytensor.compile.builders import OpFromGraph, Execution
 from pytensor.graph.basic import Constant
 import pytensor.link.llvm.codegen  # noqa: F401 (registers the emitters)
 from pytensor.link.llvm.codegen.fused import fused_spec
 from pytensor.link.llvm.codegen.function import (
-    OutMode,
-    build_abi_wrapper,
+    OutputMode,
+    build_kernel_wrapper,
     build_node_function,
     node_outputs,
 )
@@ -37,7 +37,7 @@ from pytensor.link.llvm.codegen.unit import NodeItem, build_unit_function
 from pytensor.link.llvm.codegen.call import LinkTable
 from pytensor.link.llvm.codegen.scan import scan_supported
 from pytensor.scan.op import Scan
-from pytensor.link.llvm.kernels import rust_kernel_outputs, rust_kernel
+from pytensor.link.llvm.rust_kernels import rust_kernel_outputs, rust_kernel
 from pytensor.link.llvm.layout import Layout
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import scalar_from_tensor
@@ -50,10 +50,10 @@ def _ir():
     return ir
 
 
-def _rt():
-    from pytensor_llvm import rt
+def _interp():
+    from pytensor_llvm import interp
 
-    return rt
+    return interp
 
 
 @dataclass
@@ -116,7 +116,7 @@ class Task:
 
     inputs: list
     outputs: list
-    modes: list  # OutMode per output
+    modes: list  # OutputMode per output
     view_of: list  # input index per output (VIEW), else None
     abi: str = "kernel"
     address: int = 0
@@ -184,21 +184,21 @@ class Planner:
         items = []
         for node in nodes:
             op = node.op
-            unit = getattr(op, "unit", None) if isinstance(op, OpFromGraph) else None
-            if isinstance(op, OpFromGraph) and unit is None and fusable(op, node):
+            execution = getattr(op, "execution", None) if isinstance(op, OpFromGraph) else None
+            if isinstance(op, OpFromGraph) and execution is None and fusable(op, node):
                 # a FusedElemwise we can generate as one loop: keep it as one node
                 ins = [self.value_of(i, scope) for i in node.inputs]
                 outs = [self.new_value(o.type) for o in node.outputs]
                 scope.update(zip(node.outputs, outs, strict=True))
                 items.append(NodeItem(node, ins, outs))
-            elif isinstance(op, OpFromGraph) and (unit is None or inside_unit):
+            elif isinstance(op, OpFromGraph) and (execution is None or inside_unit):
                 # (inside generated code every OpFromGraph is inlined)
                 inner = op.fgraph
                 sub = {iv: self.value_of(ov, scope) for iv, ov in zip(inner.inputs, node.inputs, strict=True)}
                 items += self.flatten(inner.toposort(), sub, inside_unit)
                 for io, oo in zip(inner.outputs, node.outputs, strict=True):
                     scope[oo] = self.value_of(io, sub)
-            elif isinstance(op, OpFromGraph) and unit is UnitKind.COMPILED:
+            elif isinstance(op, OpFromGraph) and execution is Execution.COMPILED:
                 inner = op.fgraph
                 sub = {iv: self.value_of(ov, scope) for iv, ov in zip(inner.inputs, node.inputs, strict=True)}
                 inner_scope = dict(sub)
@@ -218,7 +218,7 @@ class Planner:
                     scope[oo] = k
                     outs.append((self.value_of(io, sub), k))
                 items.append(UnitItem(inner_items, self._unit_inputs(inner_items), outs, str(op)))
-            elif isinstance(op, OpFromGraph) and unit is UnitKind.INTERPRETED:
+            elif isinstance(op, OpFromGraph) and execution is Execution.INTERPRETED:
                 ins = [self.value_of(i, scope) for i in node.inputs]
                 outs = [self.new_value(o.type) for o in node.outputs]
                 scope.update(zip(node.outputs, outs, strict=True))
@@ -357,7 +357,7 @@ class Planner:
         task writes."""
         out_ids = []
         for vid, o in zip(vids, declared, strict=True):
-            if o.mode is not OutMode.PROVIDED:
+            if o.mode is not OutputMode.PROVIDED:
                 out_ids.append(vid)
                 continue
             packed = o.layout.fully_packed(o.repr.shape)
@@ -373,7 +373,7 @@ class Planner:
     def task_for_item(self, it):
         ir = _ir()
         if isinstance(it, UnitItem):
-            modes = [OutMode.PROVIDED if repr_of(self.types[o]).static else OutMode.ALLOCATED for _, o in it.outputs]
+            modes = [OutputMode.PROVIDED if repr_of(self.types[o]).static else OutputMode.ALLOCATED for _, o in it.outputs]
             module = ir.Module(f"unit_{len(it.items)}", fastmath=self.opts.fastmath)
             consts = {k: (self.types[k], self.consts[k]) for s in it.items for k in s.inputs if self._folded(k)}
             in_lays = [self.lay(k) for k in it.inputs]
@@ -390,7 +390,7 @@ class Planner:
                 kernel_for=self.kernel_for,
                 planner=self,
             )
-            build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
+            build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)
             # provided memory is C-contiguous, and so is what a unit allocates
             self.set_layouts([o for _, o in it.outputs], [Layout.c(self.types[o].ndim) for _, o in it.outputs])
             self.stats.n_units += 1
@@ -400,22 +400,22 @@ class Planner:
         if isinstance(it, SubprogramItem):
             node = it.node
             modes = [
-                OutMode.ABSENT if is_absent(o.type)
-                else OutMode.PROVIDED if repr_of(o.type).static
-                else OutMode.ALLOCATED
+                OutputMode.ABSENT if is_absent(o.type)
+                else OutputMode.PROVIDED if repr_of(o.type).static
+                else OutputMode.ALLOCATED
                 for o in node.outputs
             ]
             sub = Planner(self.opts)
             prog = sub.plan(node.op.fgraph, output_modes=modes, input_layouts=[self.lay(k) for k in it.inputs])
             # (values without data aren't arguments of the subprogram either)
             ins = [k for k, i in zip(it.inputs, node.inputs, strict=True) if not is_absent(i.type)]
-            present = [j for j, m in enumerate(modes) if m is not OutMode.ABSENT]
+            present = [j for j, m in enumerate(modes) if m is not OutputMode.ABSENT]
             # an allocated output is the inner value if it owns a buffer, else a C copy
             self.set_layouts(
                 it.outputs,
                 [
-                    None if m is OutMode.ABSENT
-                    else Layout.c(o.type.ndim) if m is OutMode.PROVIDED or lay is None
+                    None if m is OutputMode.ABSENT
+                    else Layout.c(o.type.ndim) if m is OutputMode.PROVIDED or lay is None
                     else lay.join(Layout.c(o.type.ndim), _shape(o.type), _isz(o.type))
                     for o, m, lay in zip(node.outputs, modes, sub.output_layouts, strict=True)
                 ],
@@ -455,7 +455,7 @@ class Planner:
             nf = build_node_function(
                 module, node, "node", folded=folded, in_layouts=in_lays, parallel=self.opts.parallel, links=links, planner=self
             )
-            build_abi_wrapper(module, nf, "abi", self.opts.check_layouts)
+            build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)
             skipped = skipped_inputs(node, folded)
             inputs = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
             # view_of counts the task's inputs
@@ -483,12 +483,12 @@ class Planner:
 
     def kernel_for(self, node, in_layouts):
         """How a node inside generated code (a unit, a loop) is implemented: None to
-        generate it (inlined: preferred), else the `Kernel` it calls: its Rust kernel,
+        generate it (inlined: preferred), else the `CalledKernel` it calls: its Rust kernel,
         or the numba implementation."""
-        from pytensor.link.llvm.codegen.call import Kernel
+        from pytensor.link.llvm.codegen.call import CalledKernel
         from pytensor.link.llvm.codegen.function import Output, llvm_emit
 
-        if isinstance(node.op, OpFromGraph) and getattr(node.op, "unit", None) is UnitKind.INTERPRETED:
+        if isinstance(node.op, OpFromGraph) and getattr(node.op, "execution", None) is Execution.INTERPRETED:
             return self._subprogram_kernel(node, in_layouts)
         if isinstance(node.op, Scan) and self.opts.generate_scan and scan_supported(node.op):
             return None  # generated (everything inside can be called)
@@ -497,7 +497,7 @@ class Planner:
         k = rust_kernel(node.op, node, in_layouts)
         if k is not None:
             self.stats.n_rust_kernels += 1
-            return Kernel(k.address, k.config, "kernel", rust_kernel_outputs(k, node, in_layouts), repr(k), k)
+            return CalledKernel(k.address, k.config, "kernel", rust_kernel_outputs(k, node, in_layouts), repr(k), k)
         if not self.opts.numba_fallback:
             raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
         from pytensor.link.llvm.numba_kernels import numba_kernel
@@ -508,18 +508,18 @@ class Planner:
         kernel = numba_kernel(node)
         self.stats.n_numba += 1
         self.stats.numba.append(str(node.op))
-        outs = [Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutMode.ALLOCATED) for o in node.outputs]
-        return Kernel(kernel.address, 0, "numba", outs, f"numba: {node.op}", kernel)
+        outs = [Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutputMode.ALLOCATED) for o in node.outputs]
+        return CalledKernel(kernel.address, 0, "numba", outs, f"numba: {node.op}", kernel)
 
     def _subprogram_kernel(self, node, in_layouts):
         """A subprogram for an OpFromGraph, called from generated code."""
-        from pytensor.link.llvm.codegen.call import Kernel
+        from pytensor.link.llvm.codegen.call import CalledKernel
         from pytensor.link.llvm.codegen.function import Output
 
         if any(isinstance(o.type, ScalarType) for o in node.outputs):
             raise NotImplementedError("a subprogram with ScalarType outputs")
         modes = [
-            OutMode.ABSENT if is_absent(o.type) else OutMode.PROVIDED if repr_of(o.type).static else OutMode.ALLOCATED
+            OutputMode.ABSENT if is_absent(o.type) else OutputMode.PROVIDED if repr_of(o.type).static else OutputMode.ALLOCATED
             for o in node.outputs
         ]
         sub = Planner(self.opts)
@@ -527,15 +527,15 @@ class Planner:
         self.stats.n_subprograms += 1
         outs = []
         for o, mode, lay in zip(node.outputs, modes, sub.output_layouts, strict=True):
-            if mode is OutMode.ABSENT:
+            if mode is OutputMode.ABSENT:
                 outs.append(Output(repr_of(o.type), mode))
-            elif mode is OutMode.PROVIDED:
+            elif mode is OutputMode.PROVIDED:
                 outs.append(Output(repr_of(o.type, Layout.c(o.type.ndim)), mode))
             else:
                 # an allocated output is the inner value if it owns a buffer, else a C copy
                 lay = Layout.c(o.type.ndim) if lay is None else lay.join(Layout.c(o.type.ndim), _shape(o.type), _isz(o.type))
                 outs.append(Output(repr_of(o.type, lay), mode))
-        return Kernel(prog.address, prog.config, "kernel", outs, f"program: {node.op}", prog)
+        return CalledKernel(prog.address, prog.config, "kernel", outs, f"program: {node.op}", prog)
 
     def _can_generate(self, node, in_layouts) -> bool:
         """Can we generate code for `node`? (Tried in a scratch module, so a failure
@@ -560,7 +560,7 @@ class Planner:
         n = len(node.outputs)
         # numba may return any layout
         self.set_layouts(it.outputs, [Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs])
-        return Task(it.inputs, it.outputs, [OutMode.ALLOCATED] * n, [None] * n, abi="numba", address=kernel.address,
+        return Task(it.inputs, it.outputs, [OutputMode.ALLOCATED] * n, [None] * n, abi="numba", address=kernel.address,
                     description=f"numba: {node.op}", keepalive=kernel)
 
     # ------------------------------------------------------------ the program
@@ -620,7 +620,7 @@ class Planner:
         if modules:
             compiled = _ir().compile_many(modules, opt_level=self.opts.opt_level, cache=self.opts.cache)
             for s, c in zip([s for s in tasks if s.module is not None], compiled, strict=True):
-                s.address = c.address("abi")
+                s.address = c.address("kernel")
                 s.keepalive = (s.keepalive, c)  # (the links table, if any)
                 s.module = None
         self.stats.n_modules = len(modules)
@@ -629,7 +629,7 @@ class Planner:
         # values without data (random generators) aren't inputs or outputs of the program
         self.program_inputs = [pos for pos, v in enumerate(fgraph.inputs) if not is_absent(v.type)]
         self.program_outputs = [pos for pos, v in enumerate(fgraph.outputs) if not is_absent(v.type)]
-        modes = output_modes or [OutMode.ALLOCATED] * len(out_ids)
+        modes = output_modes or [OutputMode.ALLOCATED] * len(out_ids)
         self.input_contiguous = [self.input_contiguous[pos] for pos in self.program_inputs]
         prog = self.build(
             tasks,
@@ -669,7 +669,7 @@ class Planner:
         return Task([src], [dst], [mode], [None], address=k.address, config=k.config, description="copy", keepalive=k)
 
     def build(self, tasks, in_ids, out_ids, output_modes):
-        rt = _rt()
+        interp = _interp()
         n_tasks = len(tasks)
         INF = n_tasks + 1
         kind = {}  # vid -> ("input"|"const"|"provided"|"allocated"|"view", source)
@@ -688,9 +688,9 @@ class Planner:
             for j, (k, mode) in enumerate(zip(s.outputs, s.modes, strict=True)):
                 defined[k] = i
                 end.setdefault(k, i)
-                if mode is OutMode.VIEW:
+                if mode is OutputMode.VIEW:
                     kind[k] = ("view", s.inputs[s.view_of[j]])
-                elif mode is OutMode.PROVIDED:
+                elif mode is OutputMode.PROVIDED:
                     kind[k] = ("provided", None)
                 else:
                     kind[k] = ("allocated", None)
@@ -732,7 +732,7 @@ class Planner:
             offsets[what] = off
             arena = max(arena, off + size)
 
-        pb = rt.ProgramBuilder()
+        pb = interp.ProgramBuilder()
         ids = {}
 
         def dtype(k):
@@ -766,7 +766,7 @@ class Planner:
             pb.task(
                 s.address,
                 s.config,
-                rt.Abi.Numba if s.abi == "numba" else rt.Abi.Kernel,
+                interp.Abi.Numba if s.abi == "numba" else interp.Abi.Kernel,
                 [ids[k] for k in s.inputs],
                 [ids[k] for k in s.outputs],
                 release[i],
@@ -775,7 +775,7 @@ class Planner:
                 s.keepalive,
             )
         pb.set_arena_bytes(arena)
-        modes = [rt.OutputMode.Provided if m is OutMode.PROVIDED else rt.OutputMode.Allocated for m in output_modes]
+        modes = [interp.OutputMode.Provided if m is OutputMode.PROVIDED else interp.OutputMode.Allocated for m in output_modes]
         return pb.build([ids[k] for k in out_ids], modes)
 
 
@@ -821,7 +821,7 @@ def toposort_items(items):
 
 def _present_outputs(declared, vids, modes, views):
     """Drop the outputs without a value (random generators): they aren't task outputs."""
-    keep = [j for j, o in enumerate(declared) if o.mode is not OutMode.ABSENT]
+    keep = [j for j, o in enumerate(declared) if o.mode is not OutputMode.ABSENT]
     return [vids[j] for j in keep], [modes[j] for j in keep], [views[j] for j in keep]
 
 
