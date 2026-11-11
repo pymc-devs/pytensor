@@ -1,4 +1,4 @@
-"""CumOp, ExtractDiag, Split, Argmax."""
+"""CumOp, ExtractDiag, Split, Argmax, Nonzero."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import operator
 from pytensor.link.llvm.codegen.emit import Array, constant, set_output, size
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
+from pytensor.link.llvm.codegen.types import ir
 from pytensor.link.llvm.layout import split_layouts
-from pytensor.tensor.basic import ExtractDiag, Split
+from pytensor.tensor.basic import ExtractDiag, Nonzero, Split
 from pytensor.tensor.extra_ops import CumOp
 from pytensor.tensor.math import Argmax
 
@@ -160,3 +161,40 @@ def _(op, node, cg, inputs, outputs):
             dst.store(b, walk(src, [start, b.i64(0), b.i64(0)])[1])
 
     level(x, out, kept)
+
+
+@llvm_emit.register(Nonzero)
+def _(op, node, cg, inputs, outputs):
+    """numpy.nonzero: per axis, the indices of the non-zero elements (NaN is non-zero),
+    in C order. One pass counts them, for the length of the outputs; the other writes
+    them."""
+    b = cg.b
+    (x,) = inputs
+
+    def nonzero(v: Num) -> Num:
+        return v if v.dtype == "bool" else v.ne(0)
+
+    def walk(a: Array, carried, index, visit):
+        """Fold `visit(index, element, *carried)` over the elements of `a`, in C order."""
+        if a.ndim == 0:
+            return visit(index, a.load(b), *carried)
+        return b.fold(
+            a.shape[0],
+            carried,
+            lambda i, *c: walk(a.at(b, i), list(c), [*index, i], visit),
+        )
+
+    def count(index, v, n):
+        return [b.add(n, b.zext(nonzero(v).value, ir.i64))]
+
+    (n,) = walk(x, [b.i64(0)], [], count)
+    outs = [o.allocate([n]) for o in outputs]
+
+    def write(index, v, k):
+        take = nonzero(v).value
+        with b.if_(take):
+            for out, i in zip(outs, index, strict=True):
+                out.store(b, i, k)
+        return [b.add(k, b.zext(take, ir.i64))]
+
+    walk(x, [b.i64(0)], [], write)

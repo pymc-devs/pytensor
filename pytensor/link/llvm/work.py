@@ -162,6 +162,7 @@ def llvm_work(op, node) -> Work:
 def _register():
     from pytensor.compile.ops import DeepCopyOp, ViewOp
     from pytensor.scan.op import Scan
+    from pytensor.tensor.basic import Nonzero
     from pytensor.tensor.blockwise import Blockwise
     from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
     from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -192,6 +193,10 @@ def _register():
         return Work(scalar_cost(op.scalar_op), lengths(node.inputs[0]))
 
     @llvm_work.register(Argmax)
+    def _(op, node):
+        return Work(3.0, lengths(node.inputs[0]))
+
+    @llvm_work.register(Nonzero)
     def _(op, node):
         return Work(3.0, lengths(node.inputs[0]))
 
