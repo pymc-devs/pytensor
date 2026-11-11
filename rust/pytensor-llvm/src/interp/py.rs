@@ -942,7 +942,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ProgramBuilder>()?;
     m.add_class::<Program>()?;
     m.add_function(wrap_pyfunction!(c_api_table, m)?)?;
+    m.add_function(wrap_pyfunction!(numba_entry, m)?)?;
     Ok(())
+}
+
+/// The address of the kernel that runs a numba kernel: the task's config is the address
+/// of the numba cfunc (`kernel::numba_entry`).
+#[pyfunction]
+fn numba_entry() -> usize {
+    crate::kernel::numba_entry as *const () as usize
 }
 
 /// The address of the `PtFunctionApi` table for functions from `Program.c_function()`

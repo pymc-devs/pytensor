@@ -103,6 +103,39 @@ pub fn address<K: Kernel>() -> usize {
     entry::<K> as *const () as usize
 }
 
+/// A numba kernel as the kernel of a task: `config` is the address of the numba
+/// cfunc, which has the kernel ABI but returns 1 when it succeeds. numba's cfunc
+/// wrapper prints an exception as "unraisable" and returns 0, which must not pass for
+/// success.
+///
+/// # Safety
+/// The kernel contract, with `config` the address of such a cfunc.
+pub unsafe extern "C-unwind" fn numba_entry(
+    ctx: *mut PtCtx,
+    args: *mut PtArray,
+    n_inputs: i32,
+    n_outputs: i32,
+    config: *const u8,
+) -> i32 {
+    type NumbaFn = unsafe extern "C" fn(*mut PtCtx, *mut PtArray, i32, i32, *const u8) -> i32;
+    // SAFETY: the function's contract: `config` is such a cfunc, which gets the call's
+    // arguments (and no config).
+    let rc = unsafe {
+        let f: NumbaFn = std::mem::transmute(config);
+        f(ctx, args, n_inputs, n_outputs, std::ptr::null())
+    };
+    // SAFETY: the function's contract.
+    let ctx = unsafe { &mut *ctx };
+    if rc == 1 {
+        0
+    } else {
+        ctx.fail(
+            1,
+            "the numba implementation raised an exception (printed above as unraisable)",
+        )
+    }
+}
+
 /// The arguments of one call.
 pub struct Args<'a> {
     pub inputs: Inputs<'a>,
