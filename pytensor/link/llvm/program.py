@@ -66,6 +66,11 @@ class Options:
     #: may generated loops run in parallel (chunks on the runtime's thread pool, when
     #: there is enough work; see work.py)
     parallel: bool = True
+    #: may Dot and the linear algebra kernels use faer's parallelism, on the runtime's
+    #: thread pool (for large enough inputs, when the session allows parallelism; see
+    #: `faer_kernels!` in linalg.rs). Results can differ from the sequential ones in the
+    #: last bits.
+    linalg_parallel: bool = False
     #: generated tasks verify the layouts their signatures claim (for testing; also
     #: turned on by PYTENSOR_LLVM_CHECK_LAYOUTS=1)
     check_layouts: bool = False

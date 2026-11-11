@@ -135,3 +135,24 @@ def test_thread_count():
     assert pytensor_llvm.threads() >= 1
     with pytest.raises(RuntimeError, match="already has"):
         pytensor_llvm.set_threads(pytensor_llvm.threads() + 1)
+
+
+def test_linalg_parallel():
+    """faer kernels on the thread pool are right for inputs below and above the size
+    limit."""
+    mode = MODE.clone(link_kwargs={"linalg_parallel": True})
+    x, y = pt.dmatrix("x"), pt.dmatrix("y")
+    f = pytensor.function(
+        [x, y], [x @ y, pt.linalg.cholesky(x), pt.linalg.solve(x, y)], mode=mode
+    )
+    rng = np.random.default_rng(0)
+    for n in (3, 100):
+        a = rng.normal(size=(n, n))
+        a = a @ a.T + n * np.eye(n)
+        b = rng.normal(size=(n, n))
+        for res, expected in zip(
+            f(a, b),
+            [a @ b, np.linalg.cholesky(a), np.linalg.solve(a, b)],
+            strict=True,
+        ):
+            np.testing.assert_allclose(res, expected, rtol=1e-10, atol=1e-12)
