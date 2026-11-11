@@ -296,6 +296,8 @@ class NodeFunction:
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: object = None
+    #: does it take scratch memory (`Codegen.uses_scratch`)?
+    uses_scratch: bool = False
 
 
 def build_node_function(
@@ -309,7 +311,7 @@ def build_node_function(
     parallel=True,
     kernel=None,
     links=None,
-    scan_body=None,
+    body=None,
     inplace=None,
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
@@ -320,8 +322,8 @@ def build_node_function(
     * `kernel`: a `CalledKernel` implementing the node (a Rust kernel, a numba kernel, a
       subprogram): the function calls it (call.py), through an entry of `links`, the
       link table that is the config of the kernel being generated. Code nested in the
-      node (a Scan's loop body) links its kernels there too;
-    * `scan_body`: for a Scan, its resolved loop body (`plan.resolve.Body`);
+      node (a Scan's loop body, a Blockwise's core) links its kernels there too;
+    * `body`: for a Scan or a Blockwise, its resolved inner graph (`plan.resolve.Body`);
     * `inplace`: {output: input} for outputs that overwrite an input (`node_outputs`).
     """
     from pytensor.link.llvm.codegen.emit import c_array, constant, store
@@ -347,7 +349,7 @@ def build_node_function(
         config,
         parallel=parallel,
         links=links,
-        scan_body=scan_body,
+        body=body,
         module=module,
         name=name,
     )
@@ -459,10 +461,16 @@ def build_node_function(
 
         if links is None:
             raise ValueError("a node function calling a kernel needs a links")
-        ins = [
-            (a, getattr(var.type, "dtype", None))
-            for a, var in zip(inputs, node.inputs, strict=True)
-        ]
+        from pytensor.link.llvm.codegen.emit import Array, copy
+
+        ins = []
+        for pos, (a, var) in enumerate(zip(inputs, node.inputs, strict=True)):
+            if pos in kernel.destroys and isinstance(a, Array):
+                # (the kernel would overwrite memory it wasn't given)
+                mine = cg.temporary(a.dtype, a.shape)
+                copy(cg, a, mine)
+                a = mine
+            ins.append((a, getattr(var.type, "dtype", None)))
         call_kernel(cg, kernel, links.link_kernel(kernel), ins, outputs)
     else:
         llvm_emit(node.op, node, cg, inputs, outputs)
@@ -474,7 +482,7 @@ def build_node_function(
             ):
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(0)
-    return NodeFunction(fn, sig, links)
+    return NodeFunction(fn, sig, links, cg.uses_scratch)
 
 
 def build_kernel_wrapper(

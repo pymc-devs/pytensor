@@ -119,6 +119,18 @@ def test_errors_in_a_chunk():
     f(np.ones(2000))  # still usable
 
 
+def test_blockwise_batch_in_parallel():
+    x = pt.tensor3("x")
+    f = pytensor.function([x], pt.linalg.cholesky(x), mode=MODE)
+    assert "ptl_rt_parallel_for" in f.maker.linker.ir()
+    xv = big((2000, 20, 20))
+    xv = xv @ xv.transpose(0, 2, 1) + 20 * np.eye(20)
+    res = f(xv)
+    np.testing.assert_allclose(res, np.linalg.cholesky(xv))
+    f.maker.linker.program.set_parallel(False)
+    np.testing.assert_array_equal(f(xv), res)
+
+
 def test_thread_count():
     assert pytensor_llvm.threads() >= 1
     with pytest.raises(RuntimeError, match="already has"):

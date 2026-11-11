@@ -171,7 +171,7 @@ def build_unit_function(
         b.if_else(inside, view, copied)
     release(cg, owned)
     b.ret(0)
-    return NodeFunction(fn, sig, links)
+    return NodeFunction(fn, sig, links, cg.uses_scratch)
 
 
 def _bounds(b, a: Array):
@@ -320,8 +320,9 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
             parallel=cg.parallel,
             kernel=kernel,
             links=cg.links,
-            scan_body=r.body,
+            body=r.body,
         )
+        cg.uses_scratch |= nf.uses_scratch
         args = [ctx, config]
         present = [
             vid

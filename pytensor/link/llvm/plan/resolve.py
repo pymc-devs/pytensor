@@ -24,6 +24,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from pytensor.compile.builders import Execution, OpFromGraph
+from pytensor.graph.basic import Constant
+from pytensor.graph.traversal import io_toposort
+from pytensor.link.llvm.codegen.blockwise import (
+    blockwise_core,
+    blockwise_core_layouts,
+)
 from pytensor.link.llvm.codegen.call import CalledKernel
 from pytensor.link.llvm.codegen.function import (
     Output,
@@ -33,7 +39,7 @@ from pytensor.link.llvm.codegen.function import (
     llvm_emit,
     node_signature,
 )
-from pytensor.link.llvm.codegen.scan import scan_body_layouts, scan_supported
+from pytensor.link.llvm.codegen.scan import scan_body_layouts
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
 from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.plan.flatten import flatten
@@ -41,6 +47,7 @@ from pytensor.link.llvm.plan.values import NodeItem, Values
 from pytensor.link.llvm.rust_kernels import rust_kernel, rust_kernel_outputs
 from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
+from pytensor.tensor.blockwise import Blockwise
 
 
 @dataclass
@@ -80,11 +87,18 @@ class Resolver:
 
     def generates_scan(self, node) -> bool:
         """A Scan whose loop we generate (its body is inlined into the loop)."""
-        return (
-            isinstance(node.op, Scan)
-            and self.opts.generate_scan
-            and scan_supported(node.op)
-        )
+        return isinstance(node.op, Scan) and self.opts.generate_scan
+
+    def has_body(self, node) -> bool:
+        """A node whose generated code runs a resolved inner graph (`Body`): a Scan
+        whose loop we generate, or a Blockwise (its core node)."""
+        return self.generates_scan(node) or isinstance(node.op, Blockwise)
+
+    def body(self, node, in_layouts) -> Body:
+        """The resolved inner graph of a node that `has_body`."""
+        if isinstance(node.op, Blockwise):
+            return self.blockwise_body(node, in_layouts)
+        return self.scan_body(node, in_layouts)
 
     def rust(self, node, in_layouts) -> CalledKernel | None:
         """The node's Rust kernel, if it has one."""
@@ -117,7 +131,15 @@ class Resolver:
             )
             for o in node.outputs
         ]
-        return CalledKernel(kernel.address, 0, outs, f"numba: {node.op}", kernel)
+        destroyed = getattr(node.op, "destroy_map", None) or {}
+        return CalledKernel(
+            kernel.address,
+            0,
+            outs,
+            f"numba: {node.op}",
+            kernel,
+            frozenset(i for ins in destroyed.values() for i in ins),
+        )
 
     def fallback(self, node, in_layouts) -> CalledKernel:
         """The kernel for a node we don't generate: Rust, else numba."""
@@ -187,6 +209,11 @@ class Resolver:
             return self.subprogram(node, in_layouts), None
         if self.generates_scan(node):
             return None, self.scan_body(node, in_layouts)
+        if isinstance(node.op, Blockwise):
+            try:
+                return None, self.blockwise_body(node, in_layouts)
+            except NotImplementedError:
+                return self.fallback(node, in_layouts), None
         if self.can_generate(node, in_layouts):
             return None, None
         return self.fallback(node, in_layouts), None
@@ -210,6 +237,31 @@ class Resolver:
                     layouts[vid] = o.layout
             resolved.append(Resolved(item, in_layouts, kernel, signature, body))
         return resolved
+
+    def blockwise_body(self, node, in_layouts) -> Body:
+        """The core of a Blockwise: its core graph, resolved for the layouts its inputs
+        have in the generated loop (the inputs at one batch index)."""
+        values = self.values
+        core_inputs, core_outputs = blockwise_core(node)
+        scope = {}
+        # (constant core inputs are the Blockwise's constants: values of the body)
+        in_ids = [
+            values.of(v, scope) if isinstance(v, Constant) else values.new(v.type)
+            for v in core_inputs
+        ]
+        scope.update(zip(core_inputs, in_ids, strict=True))
+        nodes = io_toposort(core_inputs, core_outputs)
+        items = flatten(values, nodes, scope, inside_unit=True)
+        out_ids = [values.of(o, scope) for o in core_outputs]
+        layouts = {
+            k: lay
+            for k, lay in zip(
+                in_ids, blockwise_core_layouts(node, in_layouts), strict=True
+            )
+            if lay is not None
+        }
+        resolved = self.resolve_items(items, layouts)
+        return Body(in_ids, out_ids, resolved, values.constants_of(items, out_ids))
 
     def scan_body(self, node, in_layouts) -> Body:
         """The loop body of a generated Scan: the inner graph's items, resolved for the

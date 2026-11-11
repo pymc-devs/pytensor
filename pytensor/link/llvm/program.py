@@ -316,19 +316,21 @@ class Planner:
             if pos not in folded
         ):
             raise NotImplementedError("scalar node outside a unit")
-        # A Rust kernel first: there is nothing to compile. Not for a Scan whose loop we
-        # generate (its body is inlined into the loop), and not with folded constants
-        # (a kernel would need them as arguments).
-        scan = self.resolver.generates_scan(node)
+        # A Rust kernel first: there is nothing to compile. Not for a Scan or Blockwise
+        # whose loop we generate (its body is inlined into the loop), and not with
+        # folded constants (a kernel would need them as arguments).
+        nested = self.resolver.has_body(node)
         inplace = self.grant_inplace(it, folded)
-        if not folded and not scan and not inplace:
+        if not folded and not nested and not inplace:
             kernel = self.resolver.rust(node, in_layouts)
             if kernel is not None:
                 return self.kernel_task(it, kernel)
         try:
             return self.generated_task(it, folded, in_layouts, inplace)
         except NotImplementedError:
-            if scan:
+            # (a kernel doesn't overwrite its inputs: it can stand in for an in-place
+            # node too)
+            if nested or inplace:
                 kernel = self.resolver.rust(node, in_layouts)
                 if kernel is not None:
                     return self.kernel_task(it, kernel)
@@ -385,8 +387,8 @@ class Planner:
         overwrite an input (`grant_inplace`)."""
         node = it.node
         body = (
-            self.resolver.scan_body(node, in_layouts)
-            if self.resolver.generates_scan(node)
+            self.resolver.body(node, in_layouts)
+            if self.resolver.has_body(node)
             else None
         )
         module = ir.Module(
@@ -401,7 +403,7 @@ class Planner:
             in_layouts=in_layouts,
             parallel=self.opts.parallel,
             links=links,
-            scan_body=body,
+            body=body,
             inplace=inplace,
         )
         build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)

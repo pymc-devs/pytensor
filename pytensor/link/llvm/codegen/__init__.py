@@ -14,12 +14,14 @@
 * `random`: random variables (draws from the call context's random state);
 * `unit`: compiled units (several nodes in one function);
 * `call`: calls from generated code to kernels, numba and subprograms;
-* `scan`: Scan as a generated loop.
+* `scan`: Scan as a generated loop;
+* `blockwise`: Blockwise as a generated loop over the batch, running the core node.
 """
 
 from pytensor.link.llvm.codegen import (
     advanced,
     basic,
+    blockwise,
     elemwise,
     extra,
     fused,

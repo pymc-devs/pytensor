@@ -162,6 +162,7 @@ def llvm_work(op, node) -> Work:
 def _register():
     from pytensor.compile.ops import DeepCopyOp, ViewOp
     from pytensor.scan.op import Scan
+    from pytensor.tensor.blockwise import Blockwise
     from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
     from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
     from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
@@ -244,6 +245,16 @@ def _register():
             "BinomialRV",
         )
         return Work(60.0 if heavy else 20.0, lengths(node.outputs[1]))
+
+    @llvm_work.register(Blockwise)
+    def _(op, node):
+        # the core's work times the batch
+        from pytensor.link.llvm.codegen.blockwise import blockwise_core
+
+        core = blockwise_core(node)[1][0].owner
+        w = llvm_work(core.op, core)
+        batch = lengths(node.outputs[0])[: op.batch_ndim(node)]
+        return Work(w.per_element, (*batch, *w.elements))
 
     @llvm_work.register(Scan)
     def _(op, node):

@@ -303,10 +303,11 @@ nothing else can see the memory:
   values whose memory it may lie in (from the tasks' alias declarations);
 * if the output is a graph output and the memory is the planner's, it is C-contiguous.
 
-Nodes inside units, in inlined inner graphs and in Scan bodies never work in place. A
-numba kernel does what PyTensor's numba implementation does, which overwrites
-destroyed inputs; where the conditions above don't hold the planner gives it a copy
-to overwrite (`Planner.keep_destroyed`).
+Nodes inside units, in inlined inner graphs, in Scan bodies and Blockwise cores never
+work in place. A numba kernel does what PyTensor's numba implementation does, which
+overwrites destroyed inputs; where the conditions above don't hold the planner gives it
+a copy to overwrite (`Planner.keep_destroyed`), and inside generated code it always
+gets copies (`CalledKernel.destroys`).
 
 For the interpreter an in-place output is not a new value: the task's output id is
 one of its inputs' (`plan/memory.py` maps it to the value it overwrites, which then
@@ -542,11 +543,11 @@ of `plan/` with its own data, so that each can be read (and tested) alone:
    grouped into units; FusedElemwise stays one node when its pattern is supported.
 2. **Resolve** (`plan/resolve.py`): which implementation runs each item, given the
    layouts of its inputs: generated code (`codegen/`), a Rust kernel
-   (`rust_kernels.py`), a numba kernel, a subprogram. For a unit or the body of a
-   generated Scan this resolves all the items inside, in order, layouts flowing from
-   one to the next: the result (`Resolved`, `Body`) is everything code generation
-   needs. `build_unit_function` and the Scan emitter take it as an argument and never
-   ask the planner.
+   (`rust_kernels.py`), a numba kernel, a subprogram. For a unit, the body of a
+   generated Scan or the core of a Blockwise this resolves all the items inside, in
+   order, layouts flowing from one to the next: the result (`Resolved`, `Body`) is
+   everything code generation needs. `build_unit_function` and the Scan and Blockwise
+   emitters take it as an argument (`Codegen.body`) and never ask the planner.
 3. **Tasks** (`Planner.task`): one task per item, with its inputs, outputs, how each
    output comes to be and what it may alias (section 3). This is where memory is
    provided, layouts are recorded and in-place work is granted.
@@ -578,6 +579,15 @@ has no control flow.
 
 The Rust Scan kernel (`interp/scan.rs`), running the loop body as a subprogram, remains for
 `generate_scan=False` and as the fallback if generating fails.
+
+Blockwise is generated the same way (`codegen/blockwise.py`): a loop over the batch
+whose body is the core graph (the core op's node and what its `make_node` adds),
+resolved for the inputs at one batch index. The outputs are allocated before the loop
+when their core lengths are static or named by an input in the signature; then core
+outputs are produced straight into their rows, and the loop may run in parallel
+(estimated by the core's `llvm_work`). A core length only the core knows (`(m,n)->(k)`)
+comes from the first iteration, which allocates the output; that loop is serial, and
+an empty batch fails, as the length isn't known.
 
 `ScalarLoop` (inside Elemwise or FusedElemwise) is generated like Composite: the loop
 is a `b.fold(n, init, body, until=...)` whose body is the inner scalar graph emitted

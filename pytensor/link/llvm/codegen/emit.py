@@ -566,7 +566,7 @@ def _slot_type(ndim):
 class Codegen:
     """The state of generating one kernel's code: the builder and the kernel's
     parameters (`ctx`, its `config` = link table), and what nested code
-    needs (link table, module, a Scan's resolved body)."""
+    needs (link table, module, a Scan's or Blockwise's resolved body)."""
 
     b: object
     ctx: object
@@ -578,13 +578,16 @@ class Codegen:
     parallel: bool = True
     #: the link table of the kernel being generated (call.py); None: it calls nothing
     links: object = None
-    #: for a Scan: its resolved loop body (`plan.resolve.Body`); None: the Scan can't
-    #: be generated here
-    scan_body: object = None
+    #: for a Scan or a Blockwise: its resolved inner graph (`plan.resolve.Body`), what
+    #: one iteration runs; None: the node can't be generated here
+    body: object = None
     #: the module being built, and the name of the function being built in it (nested
     #: functions are named after it)
     module: object = None
     name: str = ""
+    #: has the code emitted so far taken scratch memory (`temp_memory`, or a nested
+    #: function that does)? A loop releases it per iteration only then.
+    uses_scratch: bool = False
     _checks: int = field(default=0)
 
     def par(self, per_element: float) -> ParallelPolicy | None:
@@ -628,6 +631,7 @@ class Codegen:
             if self.stack_bytes + rounded <= STACK_BUDGET_BYTES:
                 self.stack_bytes += rounded
                 return b.alloca(ir.Type.array(ir.i8, max(n, 1)))
+        self.uses_scratch = True
         p = b.rt_scratch(self.ctx, nbytes)
         self.check(b.ne(p, b.null()), None)
         return p
