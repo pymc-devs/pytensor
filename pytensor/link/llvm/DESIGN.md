@@ -641,6 +641,39 @@ each module with its task (`ptl:<task description>`), and functions appear as
 `ptl:<task>::<function> [<hash prefix>]`, e.g.
 `ptl:FusedElemwise{Exp, reduce[add@(0,)]}::kernel [39ddfa22]`.
 
+The same functions, with their machine code, go to a jitdump, `jit-<pid>.dump` in
+`PYTENSOR_LLVM_JITDUMP_DIR` (default `/tmp`), for `perf annotate`. With debug
+information (section 10a) each function also gets its source lines: a jitdump holds one
+file:line per address, so of the Python call stack in the debug information, the line
+of the innermost frame outside the generic helpers (`emit.py`, `num.py`, `types.py`),
+usually the op's emitter. The line tables are read from the object's DWARF (`gimli`,
+relocations applied, `addr2line` for the inlined frames). Usage:
+
+```
+PYTENSOR_LLVM_PERF=1 PYTENSOR_LLVM_DEBUG_INFO=1 perf record -k 1 -g python script.py
+perf inject --jit -i perf.data -o perf.jit.data
+perf report -i perf.jit.data        # perf annotate -i perf.jit.data: the Python lines
+```
+
+## 10a. Reading the generated code
+
+* `linker.ir()` is the IR as generated, `linker.ir(optimized=True)` after the
+  optimization pipeline (recomputed from the IR, per module also
+  `stats.modules[k].optimized_ir()`).
+* `remarks=True` starts each module with LLVM's optimization remarks (what the loop
+  vectorizer did or why not, inlining, unrolling...), each under the instruction of
+  the unoptimized IR it is about. The C API passes on remarks of every pass, unlabeled;
+  they need LLVM's process-wide `-pass-remarks*` options, which are switched on only
+  while one module is optimized for them, with other compilations held off.
+* The `debug_info` option (or `PYTENSOR_LLVM_DEBUG_INFO=1`) gives the generated code
+  debug information (`ir/debug.rs`): every function a subprogram named after its node
+  (unit, parallel body), every instruction the Python call stack that emitted it, as
+  Python functions inlined into each other, up to the `build_*_function` that built
+  the LLVM function. Node functions are inlined, and LLVM keeps the chain, so in the
+  optimized code every instruction still knows its Python code and its node.
+  `locations=True` prints that as a comment above the instructions (`with_locations`);
+  the remarks show it too. It is part of the IR, so of the cache key.
+
 ## 11. History
 
 An earlier version of this backend described the graph to Rust as an op specification

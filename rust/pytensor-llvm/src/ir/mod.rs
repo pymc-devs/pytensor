@@ -5,6 +5,7 @@
 //! compiles finished modules into the JIT. See pytensor/link/llvm/DESIGN.md.
 
 pub mod builder;
+pub mod debug;
 pub mod module;
 pub mod testing;
 pub mod ty;

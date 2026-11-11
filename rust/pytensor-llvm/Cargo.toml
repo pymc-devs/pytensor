@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+addr2line = { version = "0.27.1", default-features = false }
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon"] }
+gimli = { version = "0.34.0", default-features = false, features = ["read"] }
 hex = "0.4.3"
 inkwell = { version = "0.11.0", features = ["llvm23-1"] }
+libc = "0.2.191"
 libm = "0.2.16"
 llvm-sys = { version = "231", features = ["prefer-static"] }
 numpy = "0.30.0"

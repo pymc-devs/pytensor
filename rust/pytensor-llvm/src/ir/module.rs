@@ -40,6 +40,8 @@ pub struct ModuleInner {
     /// libmvec declarations that must survive until the vectorizer ran
     pub vector_decls: RefCell<Vec<LLVMValueRef>>,
     types: RefCell<HashMap<Ty, LLVMTypeRef>>,
+    /// debug information, if asked for (`debug.rs`)
+    pub debug: Option<super::debug::DebugInfo>,
 }
 
 impl ModuleInner {
@@ -62,6 +64,8 @@ impl ModuleInner {
 
 impl Drop for ModuleInner {
     fn drop(&mut self) {
+        // (its DIBuilder refers to the module)
+        drop(self.debug.take());
         // SAFETY: we own the module and its context; nothing refers to them anymore
         // (every Value/Function/Builder holds an Rc to this).
         unsafe {
@@ -240,9 +244,11 @@ pub struct Module {
 
 #[pymethods]
 impl Module {
+    /// `debug_info`: give every instruction a debug location, the Python code that
+    /// emitted it (see `debug.rs`); functions are named by their `debug_name`.
     #[new]
-    #[pyo3(signature = (name, fastmath = true))]
-    fn new(name: &str, fastmath: bool) -> Self {
+    #[pyo3(signature = (name, fastmath = true, debug_info = false))]
+    fn new(name: &str, fastmath: bool, debug_info: bool) -> Self {
         init_llvm();
         // SAFETY: creating a fresh context and a module in it.
         let (ctx, module) = unsafe {
@@ -258,6 +264,7 @@ impl Module {
             finished: Cell::new(false),
             vector_decls: RefCell::new(vec![]),
             types: RefCell::new(HashMap::new()),
+            debug: debug_info.then(|| super::debug::DebugInfo::new(ctx, module, name)),
         };
         Module {
             m: Rc::new(m),
@@ -286,8 +293,9 @@ impl Module {
     }
 
     /// Add a function. `exported` functions keep a symbol after compilation (their
-    /// address can be looked up); the others are internal.
-    #[pyo3(signature = (name, params, ret, exported = false, inline = Inline::Default))]
+    /// address can be looked up); the others are internal. `debug_name`: what the
+    /// function is called in debug information (default: `name`).
+    #[pyo3(signature = (name, params, ret, exported = false, inline = Inline::Default, debug_name = None))]
     fn function(
         &self,
         name: &str,
@@ -295,6 +303,7 @@ impl Module {
         ret: PyType,
         exported: bool,
         inline: Inline,
+        debug_name: Option<&str>,
     ) -> PyResult<Function> {
         self.m.check_open()?;
         if self.functions.borrow().iter().any(|(n, _, _)| n == name) {
@@ -335,6 +344,9 @@ impl Module {
             }
             (f, fnty)
         };
+        if let Some(d) = &self.m.debug {
+            d.add_function(raw, debug_name.unwrap_or(name), name);
+        }
         self.functions
             .borrow_mut()
             .push((name.to_string(), raw, exported));
@@ -585,10 +597,19 @@ impl CompiledModule {
     /// `opt_level`). Computed on demand from `ir`, so it is the same whether the object
     /// was compiled, read from the disk cache or already in the process. Exported
     /// functions keep their plain names here (compiled, they get a unique symbol).
-    #[pyo3(signature = (opt_level = None))]
-    fn optimized_ir(&self, py: Python<'_>, opt_level: Option<u32>) -> PyResult<String> {
+    ///
+    /// `remarks`: start with LLVM's optimization remarks (of every pass: what the loop
+    /// vectorizer did or why it didn't, what was inlined, unrolled...), as comments.
+    /// Each names the instruction of `ir` it is about (e.g. the branch into a loop).
+    #[pyo3(signature = (opt_level = None, remarks = false))]
+    fn optimized_ir(
+        &self,
+        py: Python<'_>,
+        opt_level: Option<u32>,
+        remarks: bool,
+    ) -> PyResult<String> {
         let level = opt_level.unwrap_or(self.opt_level);
-        py.detach(|| optimized_text(&self.ir, level))
+        py.detach(|| optimized_text(&self.ir, level, remarks))
             .map_err(PyRuntimeError::new_err)
     }
 
@@ -651,6 +672,9 @@ fn print_module(m: LLVMModuleRef) -> String {
 }
 
 fn verify(m: &ModuleInner) -> PyResult<()> {
+    if let Some(d) = &m.debug {
+        d.finalize(m);
+    }
     // SAFETY: verifying a live module; the message is freed.
     unsafe {
         let mut msg = std::ptr::null_mut();
@@ -707,8 +731,137 @@ fn salt(opt_level: u32) -> String {
     )
 }
 
+/// Compilations hold this shared. Collecting optimization remarks holds it alone: that
+/// switches on LLVM's process-wide `-pass-remarks*` options, and a compilation running
+/// meanwhile would print its remarks to stderr.
+static REMARKS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Set LLVM's `-pass-remarks`, `-pass-remarks-missed` and `-pass-remarks-analysis` to
+/// `pattern` (passes whose remarks are produced).
+fn set_remark_passes(pattern: &str) {
+    let args: Vec<CString> = [
+        "pytensor-llvm",
+        "-pass-remarks",
+        "-pass-remarks-missed",
+        "-pass-remarks-analysis",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(k, a)| {
+        cstring(&if k == 0 {
+            a.to_string()
+        } else {
+            format!("{a}={pattern}")
+        })
+    })
+    .collect();
+    let ptrs: Vec<*const std::ffi::c_char> = args.iter().map(|a| a.as_ptr()).collect();
+    // SAFETY: NUL-terminated arguments that outlive the call.
+    unsafe {
+        llvm_sys::support::LLVMParseCommandLineOptions(
+            ptrs.len() as i32,
+            ptrs.as_ptr(),
+            c"".as_ptr(),
+        )
+    };
+}
+
+/// Diagnostic handler of the context remarks are collected in: `out` is a `Vec<String>`.
+extern "C" fn collect_diagnostic(
+    d: llvm_sys::prelude::LLVMDiagnosticInfoRef,
+    out: *mut std::ffi::c_void,
+) {
+    // SAFETY: `out` is the vector `optimized_text` set up for this context; the
+    // description is freed.
+    unsafe {
+        let s = c::LLVMGetDiagInfoDescription(d);
+        (*(out as *mut Vec<String>)).push(CStr::from_ptr(s).to_string_lossy().trim().to_string());
+        c::LLVMDisposeMessage(s);
+    }
+}
+
+/// "@function %block: instruction" for every instruction of `m`, in the order the
+/// `debugify` pass numbers them (its line numbers, from 1).
+///
+/// # Safety
+/// `m` is a live module used only by this thread.
+unsafe fn instruction_lines(m: LLVMModuleRef) -> Vec<String> {
+    let name = |v: LLVMValueRef| {
+        let mut n = 0;
+        // SAFETY: names of values of `m`, copied.
+        String::from_utf8_lossy(unsafe {
+            std::slice::from_raw_parts(c::LLVMGetValueName2(v, &mut n) as *const u8, n)
+        })
+        .into_owned()
+    };
+    let mut lines = Vec::new();
+    // SAFETY: walking the functions, blocks and instructions of `m`; printed values are
+    // freed.
+    unsafe {
+        let mut f = c::LLVMGetFirstFunction(m);
+        while !f.is_null() {
+            let mut bb = c::LLVMGetFirstBasicBlock(f);
+            while !bb.is_null() {
+                let block = name(c::LLVMBasicBlockAsValue(bb));
+                let mut i = c::LLVMGetFirstInstruction(bb);
+                while !i.is_null() {
+                    let s = c::LLVMPrintValueToString(i);
+                    let text = CStr::from_ptr(s).to_string_lossy().trim().to_string();
+                    c::LLVMDisposeMessage(s);
+                    let text: String = text
+                        .split(", !dbg")
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(80)
+                        .collect();
+                    let loc = llvm_sys::debuginfo::LLVMInstructionGetDebugLoc(i);
+                    let at = if loc.is_null() {
+                        String::new()
+                    } else {
+                        let ctx = c::LLVMGetModuleContext(m);
+                        format!("\n;     at {}", super::debug::describe(ctx, loc))
+                    };
+                    lines.push(format!("@{} %{block}: {text}{at}", name(f)));
+                    i = c::LLVMGetNextInstruction(i);
+                }
+                bb = c::LLVMGetNextBasicBlock(bb);
+            }
+            f = c::LLVMGetNextFunction(f);
+        }
+    }
+    lines
+}
+
+/// A remark ("ir:<line>:<col>: <message>", the line from `debugify`) with the
+/// instruction it is about.
+fn located(remark: &str, lines: &[String]) -> String {
+    let mut parts = remark.splitn(4, ':');
+    if let (Some("ir"), Some(line), Some(_col), Some(msg)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+        && let Some(at) = line
+            .parse::<usize>()
+            .ok()
+            .and_then(|l| lines.get(l.wrapping_sub(1)))
+    {
+        return format!("{at}\n;     {}", msg.trim());
+    }
+    remark.to_string()
+}
+
 /// Set the target of `m` and run the optimization pipeline of `opt_level` on it.
 fn optimize(m: LLVMModuleRef, tmr: tm::LLVMTargetMachineRef, opt_level: u32) -> Result<(), String> {
+    run_pipeline(m, tmr, opt_level, false)
+}
+
+/// `optimize`, after `debugify` (which gives every instruction a line number: its
+/// position in the module) if `debugify`.
+fn run_pipeline(
+    m: LLVMModuleRef,
+    tmr: tm::LLVMTargetMachineRef,
+    opt_level: u32,
+    debugify: bool,
+) -> Result<(), String> {
     // SAFETY: `m` is a module used only by this thread; `tmr` is a live target machine;
     // messages are freed.
     unsafe {
@@ -724,7 +877,12 @@ fn optimize(m: LLVMModuleRef, tmr: tm::LLVMTargetMachineRef, opt_level: u32) -> 
         pb::LLVMPassBuilderOptionsSetSLPVectorization(opts, 1);
         pb::LLVMPassBuilderOptionsSetLoopInterleaving(opts, 1);
         pb::LLVMPassBuilderOptionsSetLoopUnrolling(opts, 1);
-        let passes = cstring(&format!("default<O{}>", opt_level.min(3)));
+        let passes = format!("default<O{}>", opt_level.min(3));
+        let passes = cstring(&if debugify {
+            format!("debugify,{passes}")
+        } else {
+            passes
+        });
         let e = pb::LLVMRunPasses(m, passes.as_ptr(), tmr, opts);
         pb::LLVMDisposePassBuilderOptions(opts);
         if !e.is_null() {
@@ -739,10 +897,31 @@ fn optimize(m: LLVMModuleRef, tmr: tm::LLVMTargetMachineRef, opt_level: u32) -> 
 
 /// The IR of a module as the compiler sees it after optimization: `ir` (as printed
 /// before compiling) parsed into a fresh context and run through the same pipeline.
-fn optimized_text(ir: &str, opt_level: u32) -> Result<String, String> {
+/// With `remarks`, LLVM's optimization remarks first, as comments (see `optimized_ir`).
+fn optimized_text(ir: &str, opt_level: u32, remarks: bool) -> Result<String, String> {
     init_llvm();
     let machine = target_machine(opt_level)?;
     let tmr = machine.as_mut_ptr();
+    let mut text = String::new();
+    if remarks {
+        text.push_str("; optimization remarks, each after the instruction of the IR before\n");
+        text.push_str("; optimization it is about\n");
+        for remark in with_module(ir, |ctx, m| collect_remarks(ctx, m, tmr, opt_level))? {
+            text.push_str(&format!("; {remark}\n"));
+        }
+        text.push('\n');
+    }
+    with_module(ir, |_, m| {
+        let _shared = REMARKS.read().unwrap_or_else(|e| e.into_inner());
+        optimize(m, tmr, opt_level).map(|()| text + &print_module(m))
+    })
+}
+
+/// `f(ctx, module)` with `ir` parsed into a fresh context, disposed after.
+fn with_module<T>(
+    ir: &str,
+    f: impl FnOnce(LLVMContextRef, LLVMModuleRef) -> Result<T, String>,
+) -> Result<T, String> {
     let text = cstring(ir);
     let name = cstring("ir");
     // SAFETY: a private context and module, disposed on every path; parsing consumes the
@@ -762,15 +941,51 @@ fn optimized_text(ir: &str, opt_level: u32) -> Result<String, String> {
             c::LLVMContextDispose(ctx);
             return Err(format!("can't parse the IR: {s}"));
         }
-        let r = optimize(module, tmr, opt_level).map(|()| print_module(module));
+        let r = f(ctx, module);
         c::LLVMDisposeModule(module);
         c::LLVMContextDispose(ctx);
         r
     }
 }
 
+/// The optimization remarks of running the pipeline on `m` (in `ctx`, used for nothing
+/// else), each with the instruction it is about.
+fn collect_remarks(
+    ctx: LLVMContextRef,
+    m: LLVMModuleRef,
+    tmr: tm::LLVMTargetMachineRef,
+    opt_level: u32,
+) -> Result<Vec<String>, String> {
+    // SAFETY: `m` is a live module of `ctx`, both only used here. (`debugify` only
+    // numbers the instructions of a module without debug information.)
+    let lines = unsafe {
+        let lines = instruction_lines(m);
+        llvm_sys::debuginfo::LLVMStripModuleDebugInfo(m);
+        lines
+    };
+    let mut collected: Vec<String> = Vec::new();
+    // SAFETY: `collected` outlives the pipeline run, the only use of the handler.
+    unsafe {
+        c::LLVMContextSetDiagnosticHandler(
+            ctx,
+            Some(collect_diagnostic),
+            &mut collected as *mut Vec<String> as *mut std::ffi::c_void,
+        )
+    };
+    {
+        let _alone = REMARKS.write().unwrap_or_else(|e| e.into_inner());
+        set_remark_passes(".*");
+        let r = run_pipeline(m, tmr, opt_level, true);
+        // a pattern nothing matches: off again
+        set_remark_passes("a^");
+        r?;
+    }
+    Ok(collected.iter().map(|r| located(r, &lines)).collect())
+}
+
 /// Optimize a module and generate an object file.
 fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
+    let _shared = REMARKS.read().unwrap_or_else(|e| e.into_inner());
     let machine = target_machine(opt_level)?;
     let tmr = machine.as_mut_ptr();
     optimize(m, tmr, opt_level)?;

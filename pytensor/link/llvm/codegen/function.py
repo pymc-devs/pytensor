@@ -298,6 +298,13 @@ class NodeFunction:
     links: object = None
 
 
+def debug_name(node) -> str:
+    """What the function of `node` is called in debug information: the node, with its
+    inputs' names (shortened)."""
+    text = str(node)
+    return text if len(text) <= 200 else text[:197] + "..."
+
+
 def build_node_function(
     module,
     node,
@@ -337,7 +344,13 @@ def build_node_function(
         inplace,
     )
     sig_inputs = iter(sig.inputs)
-    fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
+    fn = module.function(
+        name,
+        sig.param_types(),
+        ir.i32,
+        inline=ir.Inline.Always,
+        debug_name=debug_name(node),
+    )
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]
@@ -671,6 +684,7 @@ __all__ = [
     "Output",
     "OutputMode",
     "Signature",
+    "debug_name",
     "build_kernel_wrapper",
     "build_node_function",
     "compile_node",
