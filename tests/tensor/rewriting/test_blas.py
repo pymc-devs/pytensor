@@ -30,6 +30,7 @@ from pytensor.tensor.rewriting.blas import (
     res_is_a,
     specialize_matmul_to_batched_dot,
 )
+from tests.unittest_tools import RewriteTester
 
 
 def XYZab():
@@ -89,6 +90,20 @@ def test_specialize_matmul_to_batched_dot(aligned):
         vectorize_pt(x_test, y_test),
         vectorize_np(x_test, y_test),
     )
+
+
+def test_batched_matmul_empty_dimensions():
+    x, y = [tensor(shape=(None,) * 4) for _ in range(2)]
+    result = RewriteTester(
+        [x, y],
+        [x @ y],
+        include=None,
+        custom_rewrite=specialize_matmul_to_batched_dot,
+    )
+
+    a = np.empty((2, 3, 3, 0), dtype=x.dtype)
+    b = np.empty((2, 3, 0, 5), dtype=y.dtype)
+    result.assert_eval(a, b)
 
 
 def test_gemm_factor():
