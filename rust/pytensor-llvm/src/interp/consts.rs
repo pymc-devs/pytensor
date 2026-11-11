@@ -1,8 +1,9 @@
 //! Constant arrays owned by programs.
 
 use crate::dtype::DType;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, FromBytes, IntoBytes, Immutable)]
 #[repr(C, align(64))]
 struct Align64([u8; 64]);
 
@@ -21,8 +22,7 @@ impl ConstData {
             return Err(format!("constant of shape {shape:?} needs {n} bytes, got {}", bytes.len()));
         }
         let mut buf = vec![Align64([0; 64]); n.div_ceil(64).max(1)];
-        // SAFETY: `buf` holds at least `n` bytes; the regions don't overlap.
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.as_mut_ptr() as *mut u8, n) };
+        buf.as_mut_bytes()[..n].copy_from_slice(bytes);
         let mut strides = vec![0i64; shape.len()];
         let mut acc = dtype.itemsize() as i64;
         for d in (0..shape.len()).rev() {
@@ -33,7 +33,7 @@ impl ConstData {
     }
 
     pub fn data(&self) -> *const u8 {
-        self.buf.as_ptr() as *const u8
+        self.buf.as_bytes().as_ptr()
     }
 }
 
