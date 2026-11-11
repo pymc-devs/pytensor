@@ -401,7 +401,8 @@ mod tests {
         let mut ctx = PtCtx::new();
         let c: *mut PtCtx = &mut ctx;
         unsafe {
-            // first call: nothing reserved, everything overflows but stays valid
+            // first task: nothing reserved, everything overflows but stays valid
+            let task = ctx.scratch_mark();
             let a = PtCtx::scratch(c, 100);
             let b = PtCtx::scratch(c, 1000);
             a.write_bytes(1, 100);
@@ -409,8 +410,9 @@ mod tests {
             assert_eq!(*a.add(99), 1);
             assert_eq!(a as usize % 64, 0);
             assert_eq!(b as usize % 64, 0);
-            ctx.end_kernel();
-            // second call with the same demand: served from the persistent block
+            ctx.scratch_release(task);
+            // second task with the same demand: served from the persistent block
+            let task = ctx.scratch_mark();
             let a2 = PtCtx::scratch(c, 100);
             let b2 = PtCtx::scratch(c, 1000);
             assert!(ctx.scratch.overflow.is_empty());
@@ -421,7 +423,7 @@ mod tests {
             assert_eq!(ctx.scratch.overflow.len(), 1);
             ctx.scratch_release(m);
             assert!(ctx.scratch.overflow.is_empty());
-            ctx.end_kernel();
+            ctx.scratch_release(task);
             assert!(ctx.scratch.cap >= (1 << 20) + 1152);
         }
     }
