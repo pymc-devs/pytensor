@@ -17,7 +17,7 @@
 * `scan`: Scan as a generated loop.
 """
 
-from pytensor.link.llvm.codegen import (  # noqa: F401 (registers emitters)
+from pytensor.link.llvm.codegen import (
     advanced,
     basic,
     elemwise,
@@ -33,10 +33,11 @@ from pytensor.link.llvm.codegen.function import (
     OutputMode,
     compile_node,
     llvm_emit,
-    new_output,
     llvm_layout,
+    new_output,
     node_outputs,
     node_signature,
 )
+
 
 scan.register()

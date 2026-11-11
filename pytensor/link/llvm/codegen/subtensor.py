@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.emit import Array, cast, for_each, load, set_output, store
+from pytensor.link.llvm.codegen.emit import (
+    Array,
+    cast,
+    for_each,
+    load,
+    set_output,
+    store,
+)
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
-from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
+from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.scalar.basic import add as scalar_add
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor, unflatten_index_variables
 
@@ -35,14 +42,18 @@ def index(cg, x: Array, entries) -> Array:
                 if v is None:
                     return default
                 v = _i64(b, *v)
-                return b.select(b.slt(v, 0), b.smax(b.add(v, n), lower), b.smin(v, upper))
+                return b.select(
+                    b.slt(v, 0), b.smax(b.add(v, n), lower), b.smin(v, upper)
+                )
 
             start = bound(e.start, b.select(pos, lower, upper))
             stop = bound(e.stop, b.select(pos, upper, lower))
             # length = ceil((stop - start) / step), at least 0
             span = b.select(pos, b.sub(stop, start), b.sub(start, stop))
             astep = b.select(pos, step, b.neg(step))
-            length = b.select(b.sgt(span, 0), b.add(b.sdiv(b.sub(span, 1), astep), 1), 0)
+            length = b.select(
+                b.sgt(span, 0), b.add(b.sdiv(b.sub(span, 1), astep), 1), 0
+            )
             empty = b.or_(empty, b.eq(length, 0))
             offset = b.add(offset, b.mul(start, st, nsw=True))
             shape.append(length)
@@ -50,7 +61,9 @@ def index(cg, x: Array, entries) -> Array:
         else:
             i = _i64(b, *e)
             i = b.select(b.slt(i, 0), b.add(i, n), i)
-            cg.check(b.and_(b.sge(i, 0), b.slt(i, n)), f"index out of bounds for axis {axis}")
+            cg.check(
+                b.and_(b.sge(i, 0), b.slt(i, n)), f"index out of bounds for axis {axis}"
+            )
             offset = b.add(offset, b.mul(i, st, nsw=True))
         axis += 1
     shape += x.shape[axis:]
@@ -62,7 +75,10 @@ def index(cg, x: Array, entries) -> Array:
 
 
 def _entries(op, node, inputs, first):
-    values = [(v, var.type.dtype) for v, var in zip(inputs[first:], node.inputs[first:], strict=True)]
+    values = [
+        (v, var.type.dtype)
+        for v, var in zip(inputs[first:], node.inputs[first:], strict=True)
+    ]
     return unflatten_index_variables(values, op.idx_list)
 
 

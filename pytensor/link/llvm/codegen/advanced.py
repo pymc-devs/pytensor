@@ -12,10 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytensor.scalar.basic as ps
-from pytensor.link.llvm.codegen.emit import advance, Array, cast, for_each, load, store
+from pytensor.link.llvm.codegen.emit import Array, advance, cast, for_each, load, store
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace
 from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, unflatten_index_variables
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedSubtensor,
+    unflatten_index_variables,
+)
 
 
 @dataclass
@@ -28,7 +32,9 @@ class Pattern:
 
 def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
     b = cg.b
-    entries = unflatten_index_variables(list(zip(index_values, index_vars, strict=True)), op.idx_list)
+    entries = unflatten_index_variables(
+        list(zip(index_values, index_vars, strict=True)), op.idx_list
+    )
     first = None
     indices = []
     for a, e in enumerate(entries):
@@ -59,8 +65,13 @@ def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
             n = arr.shape[d]
             if bshape[off + d] is None:
                 bshape[off + d] = n
-            elif not (n.const_int is not None and n.const_int == bshape[off + d].const_int):
-                cg.check(b.eq(n, bshape[off + d]), "shape mismatch: indexing arrays could not be broadcast together")
+            elif not (
+                n.const_int is not None and n.const_int == bshape[off + d].const_int
+            ):
+                cg.check(
+                    b.eq(n, bshape[off + d]),
+                    "shape mismatch: indexing arrays could not be broadcast together",
+                )
     bshape = [n if n is not None else b.i64(1) for n in bshape]
     k = len(indices)
     view_shape = list(x.shape[:first]) + bshape + list(x.shape[first + k :])
@@ -138,7 +149,9 @@ def _(op, node, cg, inputs, outputs):
     yt = node.inputs[1].type
     off = len(vs) - yt.ndim
     if off < 0:
-        raise NotImplementedError("advanced inc/set: the value has more axes than the indexed view")
+        raise NotImplementedError(
+            "advanced inc/set: the value has more axes than the indexed view"
+        )
     zero = b.i64(0)
     yst = [zero] * off
     for a in range(yt.ndim):
@@ -150,7 +163,10 @@ def _(op, node, cg, inputs, outputs):
             yst.append(y.strides[a])
             continue
         one = b.eq(ln, b.i64(1))
-        cg.check(b.or_(b.eq(ln, vn), one), "shape mismatch: value array could not be broadcast to the indexing result")
+        cg.check(
+            b.or_(b.eq(ln, vn), one),
+            "shape mismatch: value array could not be broadcast to the indexing result",
+        )
         yst.append(b.select(one, zero, y.strides[a]))
     ys = Array(y.dtype, y.data, vs, yst)
     k = len(idx_ops)

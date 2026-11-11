@@ -72,8 +72,14 @@ def array_input(index: int, ndim: int, dtype: np.dtype):
             shp = _field(builder, base, index, 1, _i64)
             strd = _field(builder, base, index, 2, _i64)
             shp, strd = builder.inttoptr(shp, _i64p), builder.inttoptr(strd, _i64p)
-            shape = [builder.load(builder.gep(shp, [ir.Constant(_i64, d)])) for d in range(ndim)]
-            strides = [builder.load(builder.gep(strd, [ir.Constant(_i64, d)])) for d in range(ndim)]
+            shape = [
+                builder.load(builder.gep(shp, [ir.Constant(_i64, d)]))
+                for d in range(ndim)
+            ]
+            strides = [
+                builder.load(builder.gep(strd, [ir.Constant(_i64, d)]))
+                for d in range(ndim)
+            ]
             return _make_array(context, builder, arrty, data, shape, strides)
 
         return arrty(args), codegen
@@ -113,7 +119,15 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype):
 
         def codegen(context, builder, sig, llargs):
             ctx_p, base, shape_v = llargs
-            dims = [context.cast(builder, builder.extract_value(shape_v, d), sig.args[2][d], types.int64) for d in range(ndim)]
+            dims = [
+                context.cast(
+                    builder,
+                    builder.extract_value(shape_v, d),
+                    sig.args[2][d],
+                    types.int64,
+                )
+                for d in range(ndim)
+            ]
             n = ir.Constant(_i64, itemsize)
             for d in dims:
                 n = builder.mul(n, d)
@@ -123,12 +137,18 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype):
             fptr_p = builder.gep(rt, [ir.Constant(_i64, RUNTIME_ALLOC_OFFSET)])
             fptr = builder.load(builder.bitcast(fptr_p, fnty.as_pointer().as_pointer()))
             owner = cgutils.alloca_once(builder, _i8p)
-            data = builder.call(fptr, [builder.bitcast(ctx_p, _i8p), n, ir.Constant(_i64, 64), owner])
+            data = builder.call(
+                fptr, [builder.bitcast(ctx_p, _i8p), n, ir.Constant(_i64, 64), owner]
+            )
             # fill the PtArray: data, owner, shape, strides
-            entry = builder.gep(builder.bitcast(base, _i8p), [ir.Constant(_i64, index * PTARRAY_SIZE)])
+            entry = builder.gep(
+                builder.bitcast(base, _i8p), [ir.Constant(_i64, index * PTARRAY_SIZE)]
+            )
 
             def slot(k, ty):
-                return builder.bitcast(builder.gep(entry, [ir.Constant(_i64, 8 * k)]), ty.as_pointer())
+                return builder.bitcast(
+                    builder.gep(entry, [ir.Constant(_i64, 8 * k)]), ty.as_pointer()
+                )
 
             builder.store(data, slot(0, _i8p))
             builder.store(builder.load(owner), slot(3, _i8p))
@@ -196,7 +216,11 @@ def numba_kernel(node):
     if op_key is not None and config.numba__cache:
         types_sig = ",".join(str(v.type) for v in (*node.inputs, *node.outputs))
         # hashed: the key ends up in a file name
-        digest = hashlib.sha256(f"{op_key}|{types_sig}|fastmath{int(config.numba__fastmath)}".encode()).hexdigest()
+        digest = hashlib.sha256(
+            f"{op_key}|{types_sig}|fastmath{int(config.numba__fastmath)}".encode()
+        ).hexdigest()
         cache_key = f"llvm_numba_kernel_v{CACHE_VERSION}_{digest}"
-    kernel = compile_numba_function_src(src, "kernel", global_env=env, cache_key=cache_key)
+    kernel = compile_numba_function_src(
+        src, "kernel", global_env=env, cache_key=cache_key
+    )
     return numba.cfunc(_SIG, nopython=True, cache=cache_key is not None)(kernel)
