@@ -1,5 +1,6 @@
 //! Dense linear algebra kernels on top of faer (sequential: `Par::Seq`): Dot, Cholesky,
-//! SolveTriangular.
+//! SolveTriangular, Solve, CholeskySolve, MatrixInverse, Det, SLogDet, LUFactor, LU,
+//! PivotToPermutations, Eigh/Eigvalsh, SVD, QR and MatrixPinv.
 //!
 //! faer's work space is scratch memory of the context, so steady-state calls don't
 //! allocate.
@@ -9,9 +10,17 @@ use crate::kernel::{Args, Array, ArrayMut, Element, Kernel, scratch};
 use crate::runtime::PtCtx;
 use faer::Par;
 use faer::dyn_stack::MemStack;
+use faer::dyn_stack::StackReq;
 use faer::linalg::cholesky::llt::factor::{cholesky_in_place, cholesky_in_place_scratch};
+use faer::linalg::cholesky::llt::solve as llt_solve;
+use faer::linalg::lu::partial_pivoting::{factor as lu, inverse as lu_inverse, solve as lu_solve};
+use faer::linalg::qr::no_pivoting::factor as qr;
 use faer::linalg::triangular_solve as tri;
-use faer::prelude::ReborrowMut;
+use faer::linalg::{evd, householder, svd, temp_mat_scratch, temp_mat_zeroed};
+use faer::mat::AsMatMut;
+use faer::perm::PermRef;
+use faer::prelude::{Reborrow, ReborrowMut};
+use faer::{Conj, MatMut};
 use std::marker::PhantomData;
 
 /// float32 and float64.
@@ -21,9 +30,20 @@ pub trait Float:
     + Default
     + std::ops::Add<Output = Self>
     + std::ops::Mul<Output = Self>
+    + std::ops::Div<Output = Self>
+    + std::ops::Neg<Output = Self>
+    + std::ops::AddAssign
+    + std::ops::MulAssign
+    + PartialOrd
 {
     const NAN: Self;
     const ZERO: Self;
+    const ONE: Self;
+    const NEG_INFINITY: Self;
+
+    fn abs(self) -> Self;
+    fn ln(self) -> Self;
+    fn from_f64(x: f64) -> Self;
 
     /// `self + a * b`, fused when the caller was compiled with FMA (see
     /// `gemv_short_rows`).
@@ -35,6 +55,23 @@ macro_rules! float {
         impl Float for $t {
             const NAN: Self = <$t>::NAN;
             const ZERO: Self = 0.0;
+            const ONE: Self = 1.0;
+            const NEG_INFINITY: Self = <$t>::NEG_INFINITY;
+
+            #[inline(always)]
+            fn abs(self) -> Self {
+                <$t>::abs(self)
+            }
+
+            #[inline(always)]
+            fn ln(self) -> Self {
+                <$t>::ln(self)
+            }
+
+            #[inline(always)]
+            fn from_f64(x: f64) -> Self {
+                x as $t
+            }
 
             #[inline(always)]
             fn madd<const FMA: bool>(self, a: Self, b: Self) -> Self {
@@ -354,6 +391,849 @@ impl<T: Float> Kernel for SolveTriangular<T> {
             (false, false) => tri::solve_upper_triangular_in_place(matrix, x, Par::Seq),
             (false, true) => tri::solve_unit_upper_triangular_in_place(matrix, x, Par::Seq),
         }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ shared
+
+/// Scratch memory for `req`, as a stack of temporaries.
+fn stack_for(ctx: &mut PtCtx, req: StackReq) -> &mut MemStack {
+    MemStack::new(scratch::<u8>(ctx, req.unaligned_bytes_required()))
+}
+
+/// The size of a square matrix.
+fn square<T: Element>(a: &Array<T>) -> Result<usize, String> {
+    match *a.shape() {
+        [n, m] if n == m => Ok(n as usize),
+        ref shape => Err(format!("expected a square matrix, got shape {shape:?}")),
+    }
+}
+
+/// The shape of a matrix.
+fn matrix_shape<T: Element>(a: &Array<T>) -> Result<(usize, usize), String> {
+    match *a.shape() {
+        [m, n] => Ok((m as usize, n as usize)),
+        ref shape => Err(format!("expected a matrix, got shape {shape:?}")),
+    }
+}
+
+/// Checks that `b` is a right-hand side (vector or matrix) for an `n` x `n` system.
+fn check_rhs<T: Element>(n: usize, b: &Array<T>) -> Result<(), String> {
+    if !matches!(b.ndim(), 1 | 2) || b.shape()[0] as usize != n {
+        return Err(format!(
+            "shapes of A ({n}x{n}) and b ({:?}) are incompatible",
+            b.shape()
+        ));
+    }
+    Ok(())
+}
+
+/// `n` indices from `stack`, each set to its position.
+fn indices(stack: &mut MemStack, n: usize) -> (&mut [usize], &mut MemStack) {
+    let (memory, stack) = stack.make_uninit::<usize>(n);
+    for (i, x) in memory.iter_mut().enumerate() {
+        x.write(i);
+    }
+    // SAFETY: all `n` elements were just initialized.
+    let values = unsafe { &mut *(memory as *mut [std::mem::MaybeUninit<usize>] as *mut [usize]) };
+    (values, stack)
+}
+
+/// Scratch for `lu_in_place` of an `n` x `n` matrix, its permutation included.
+fn lu_scratch<T: Float>(n: usize) -> StackReq {
+    StackReq::all_of(&[
+        StackReq::new::<usize>(n).array(2),
+        lu::lu_in_place_scratch::<usize, T>(n, n, Par::Seq, Default::default()),
+    ])
+}
+
+/// LU factorization with partial pivoting (getrf) of the square `a`, in place: the
+/// row permutation is returned (row i of PA is row `perm[i]` of A), with the number of
+/// row swaps, or None for the swaps if a pivot is exactly zero (A is singular).
+fn lu_in_place<'s, T: Float>(
+    mut a: MatMut<T>,
+    stack: &'s mut MemStack,
+) -> (PermRef<'s, usize>, Option<usize>, &'s mut MemStack) {
+    let n = a.nrows();
+    let (perm, stack) = indices(stack, n);
+    let (perm_inv, stack) = indices(stack, n);
+    let (info, _) = lu::lu_in_place(
+        a.rb_mut(),
+        perm,
+        perm_inv,
+        Par::Seq,
+        stack,
+        Default::default(),
+    );
+    // a zero pivot stays on U's diagonal: the later steps don't change its row
+    let swaps = (!(0..n).any(|i| a[(i, i)] == T::ZERO)).then_some(info.transposition_count);
+    (PermRef::new_checked(perm, perm_inv, n), swaps, stack)
+}
+
+// ------------------------------------------------------------------ Solve
+
+/// What Solve assumes about A.
+#[derive(Clone, Copy, Debug)]
+pub enum Assume {
+    /// general (gesv): LU with partial pivoting
+    General,
+    /// symmetric (sysv): only the lower (upper) triangle is read
+    Symmetric { lower: bool },
+    /// positive definite (posv): Cholesky of the lower (upper) triangle
+    PositiveDefinite { lower: bool },
+}
+
+/// Solves A x = b for square A and a vector or matrix b, with scipy.linalg.solve
+/// semantics as in PyTensor's Solve: NaN if A is singular (not positive definite).
+pub struct Solve<T> {
+    pub mode: OutputMode,
+    pub assume: Assume,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for Solve<T> {
+    fn arity(&self) -> (usize, usize) {
+        (2, 1)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let (a, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
+        let n = square(&a)?;
+        check_rhs(n, &b)?;
+        let mut out = args.outputs.array::<T>(ctx, 0, self.mode, b.shape())?;
+        out.copy_from(&b)?;
+        let mut x = out.matrix_mut(false);
+        let source = a.matrix(false);
+        let k = x.ncols();
+        let solved = match self.assume {
+            Assume::PositiveDefinite { lower } => {
+                let req = StackReq::all_of(&[
+                    temp_mat_scratch::<T>(n, n),
+                    cholesky_in_place_scratch::<T>(n, Par::Seq, Default::default()),
+                ]);
+                let (mut l, stack) = temp_mat_zeroed::<T, _, _>(n, n, stack_for(ctx, req));
+                let mut l = l.as_mat_mut();
+                l.copy_from_triangular_lower(if lower { source } else { source.transpose() });
+                let ok = cholesky_in_place(
+                    l.rb_mut(),
+                    Default::default(),
+                    Par::Seq,
+                    stack,
+                    Default::default(),
+                )
+                .is_ok();
+                if ok {
+                    llt_solve::solve_in_place(l.rb(), x.rb_mut(), Par::Seq, stack);
+                }
+                ok
+            }
+            Assume::General | Assume::Symmetric { .. } => {
+                let req = StackReq::all_of(&[
+                    temp_mat_scratch::<T>(n, n),
+                    lu_scratch::<T>(n),
+                    lu_solve::solve_in_place_scratch::<usize, T>(n, k, Par::Seq),
+                ]);
+                let (mut factor, stack) = temp_mat_zeroed::<T, _, _>(n, n, stack_for(ctx, req));
+                let mut factor = factor.as_mat_mut();
+                match self.assume {
+                    Assume::Symmetric { lower } => {
+                        // the full matrix, from the triangle that is read
+                        let half = if lower { source } else { source.transpose() };
+                        for j in 0..n {
+                            for i in j..n {
+                                factor[(i, j)] = half[(i, j)];
+                                factor[(j, i)] = half[(i, j)];
+                            }
+                        }
+                    }
+                    _ => factor.copy_from(source),
+                }
+                let (perm, swaps, stack) = lu_in_place(factor.rb_mut(), stack);
+                if swaps.is_some() {
+                    lu_solve::solve_in_place(
+                        factor.rb(),
+                        factor.rb(),
+                        perm,
+                        x.rb_mut(),
+                        Par::Seq,
+                        stack,
+                    );
+                }
+                swaps.is_some()
+            }
+        };
+        if !solved {
+            x.fill(T::NAN);
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ CholeskySolve
+
+/// Solves A x = b given the Cholesky factor of A (lower: A = C C^T, else A = C^T C),
+/// with LAPACK potrs semantics: only that triangle of C is read.
+pub struct CholeskySolve<T> {
+    pub mode: OutputMode,
+    pub lower: bool,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for CholeskySolve<T> {
+    fn arity(&self) -> (usize, usize) {
+        (2, 1)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let (c, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
+        let n = square(&c)?;
+        check_rhs(n, &b)?;
+        let mut out = args.outputs.array::<T>(ctx, 0, self.mode, b.shape())?;
+        out.copy_from(&b)?;
+        let factor = if self.lower {
+            c.matrix(false)
+        } else {
+            c.matrix(false).transpose()
+        };
+        llt_solve::solve_in_place(
+            factor,
+            out.matrix_mut(false),
+            Par::Seq,
+            MemStack::new(&mut []),
+        );
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ MatrixInverse
+
+/// The inverse of a square matrix (numpy.linalg.inv): fails if it is singular.
+pub struct MatrixInverse<T> {
+    pub mode: OutputMode,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for MatrixInverse<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, 1)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let n = square(&a)?;
+        let mut out = args.outputs.array::<T>(ctx, 0, self.mode, a.shape())?;
+        let req = StackReq::all_of(&[
+            temp_mat_scratch::<T>(n, n),
+            lu_scratch::<T>(n),
+            lu_inverse::inverse_scratch::<usize, T>(n, Par::Seq),
+        ]);
+        let (mut factor, stack) = temp_mat_zeroed::<T, _, _>(n, n, stack_for(ctx, req));
+        let mut factor = factor.as_mat_mut();
+        factor.copy_from(a.matrix(false));
+        let (perm, swaps, stack) = lu_in_place(factor.rb_mut(), stack);
+        if swaps.is_none() {
+            return Err("singular matrix".into());
+        }
+        lu_inverse::inverse(
+            out.matrix_mut(false),
+            factor.rb(),
+            factor.rb(),
+            perm,
+            Par::Seq,
+            stack,
+        );
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ Det, SLogDet
+
+/// (determinant, sign, log of the absolute determinant) of a square matrix, by LU
+/// (numpy.linalg.det and slogdet): (0, 0, -inf) if it is singular.
+fn determinant<T: Float>(ctx: &mut PtCtx, a: &Array<T>) -> Result<(T, T, T), String> {
+    let n = square(a)?;
+    let req = StackReq::all_of(&[temp_mat_scratch::<T>(n, n), lu_scratch::<T>(n)]);
+    let (mut factor, stack) = temp_mat_zeroed::<T, _, _>(n, n, stack_for(ctx, req));
+    let mut factor = factor.as_mat_mut();
+    factor.copy_from(a.matrix(false));
+    let (_, swaps, _) = lu_in_place(factor.rb_mut(), stack);
+    let Some(swaps) = swaps else {
+        return Ok((T::ZERO, T::ZERO, T::NEG_INFINITY));
+    };
+    let one = if swaps % 2 == 0 { T::ONE } else { -T::ONE };
+    let (mut det, mut sign, mut log) = (one, one, T::ZERO);
+    for i in 0..n {
+        let u = factor[(i, i)];
+        det *= u;
+        if u < T::ZERO {
+            sign = -sign;
+        }
+        log += u.abs().ln();
+    }
+    Ok((det, sign, log))
+}
+
+/// The determinant of a square matrix (numpy.linalg.det).
+pub struct Det<T> {
+    pub mode: OutputMode,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for Det<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, 1)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let (det, _, _) = determinant(ctx, &a)?;
+        args.outputs
+            .array::<T>(ctx, 0, self.mode, &[])?
+            .matrix_mut(false)[(0, 0)] = det;
+        Ok(())
+    }
+}
+
+/// The sign and the log of the absolute value of the determinant (numpy.linalg.slogdet).
+pub struct SLogDet<T> {
+    pub modes: [OutputMode; 2],
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for SLogDet<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, 2)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let (_, sign, log) = determinant(ctx, &a)?;
+        let [s, l] = args.outputs.slots([0, 1])?;
+        s.array::<T>(ctx, self.modes[0], &[])?.matrix_mut(false)[(0, 0)] = sign;
+        l.array::<T>(ctx, self.modes[1], &[])?.matrix_mut(false)[(0, 0)] = log;
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ LUFactor, LU
+
+/// The LU factorization of a square matrix as LAPACK getrf (scipy.linalg.lu_factor):
+/// L and U packed in one matrix and the pivots (row i was swapped with row piv[i]),
+/// the matrix NaN if A is singular, as PyTensor's LUFactor.
+pub struct LUFactor<T> {
+    pub modes: [OutputMode; 2],
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for LUFactor<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, 2)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let n = square(&a)?;
+        let [lu_out, piv_out] = args.outputs.slots([0, 1])?;
+        let mut packed = lu_out.array::<T>(ctx, self.modes[0], a.shape())?;
+        let mut piv = piv_out.array::<i32>(ctx, self.modes[1], &[n as i64])?;
+        packed.copy_from(&a)?;
+        let req = StackReq::all_of(&[lu_scratch::<T>(n), StackReq::new::<usize>(n).array(2)]);
+        let mut factor = packed.matrix_mut(false);
+        let (perm, swaps, stack) = lu_in_place(factor.rb_mut(), stack_for(ctx, req));
+        // the row swaps that give the permutation: at step i, the row now at
+        // position piv[i] comes to i
+        let (row_at, stack) = indices(stack, n);
+        let (position_of, _) = indices(stack, n);
+        let (forward, _) = perm.arrays();
+        let mut piv = piv.matrix_mut(false);
+        for i in 0..n {
+            let (row, j) = (forward[i], position_of[forward[i]]);
+            piv[(i, 0)] = j as i32;
+            let other = row_at[i];
+            (row_at[i], row_at[j]) = (row, other);
+            (position_of[row], position_of[other]) = (i, j);
+        }
+        if swaps.is_none() {
+            factor.fill(T::NAN);
+        }
+        Ok(())
+    }
+}
+
+/// What LU returns besides L and U.
+#[derive(Clone, Copy, Debug)]
+pub enum LuForm {
+    /// (P, L, U) with A = P L U and P a matrix
+    Matrix,
+    /// (p, L, U) with p the row indices: A = L[p] U
+    Indices,
+    /// (P L, U)
+    PermuteL,
+}
+
+/// The LU decomposition of a square matrix (scipy.linalg.lu).
+pub struct LU<T> {
+    pub modes: Vec<OutputMode>,
+    pub form: LuForm,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for LU<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, self.modes.len())
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let n = square(&a)?;
+        let shape = a.shape();
+        let (p_out, l_out, u_out, modes) = match self.form {
+            LuForm::PermuteL => {
+                let [l, u] = args.outputs.slots([0, 1])?;
+                (None, l, u, [self.modes[0], self.modes[1]])
+            }
+            _ => {
+                let [p, l, u] = args.outputs.slots([0, 1, 2])?;
+                (Some(p), l, u, [self.modes[1], self.modes[2]])
+            }
+        };
+        let p_out = match (p_out, self.form) {
+            (Some(p), LuForm::Indices) => {
+                Some(Err(p.array::<i32>(ctx, self.modes[0], &[n as i64])?))
+            }
+            (Some(p), _) => Some(Ok(p.array::<T>(ctx, self.modes[0], shape)?)),
+            (None, _) => None,
+        };
+        let mut l_out = l_out.array::<T>(ctx, modes[0], shape)?;
+        let mut u_out = u_out.array::<T>(ctx, modes[1], shape)?;
+        let req = StackReq::all_of(&[temp_mat_scratch::<T>(n, n), lu_scratch::<T>(n)]);
+        let (mut factor, stack) = temp_mat_zeroed::<T, _, _>(n, n, stack_for(ctx, req));
+        let mut factor = factor.as_mat_mut();
+        factor.copy_from(a.matrix(false));
+        let (perm, _, _) = lu_in_place(factor.rb_mut(), stack);
+        let (forward, inverse) = perm.arrays();
+        let (mut l, mut u) = (l_out.matrix_mut(false), u_out.matrix_mut(false));
+        let permute_l = matches!(self.form, LuForm::PermuteL);
+        for i in 0..n {
+            // P L: row forward[i] of A is row i of L U
+            let row = if permute_l { forward[i] } else { i };
+            for j in 0..n {
+                l[(row, j)] = match i.cmp(&j) {
+                    std::cmp::Ordering::Greater => factor[(i, j)],
+                    std::cmp::Ordering::Equal => T::ONE,
+                    std::cmp::Ordering::Less => T::ZERO,
+                };
+                u[(i, j)] = if i <= j { factor[(i, j)] } else { T::ZERO };
+            }
+        }
+        match p_out {
+            Some(Ok(mut p)) => {
+                let mut p = p.matrix_mut(false);
+                p.fill(T::ZERO);
+                for (i, &row) in forward.iter().enumerate() {
+                    p[(row, i)] = T::ONE;
+                }
+            }
+            Some(Err(mut p)) => {
+                let mut p = p.matrix_mut(false);
+                for (row, &i) in inverse.iter().enumerate() {
+                    p[(row, 0)] = i as i32;
+                }
+            }
+            None => {}
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ PivotToPermutations
+
+/// The permutation of LAPACK pivots (row i swapped with row piv[i], in order): its
+/// inverse (the rows of A in the order of P A), or the permutation itself.
+pub struct PivotToPermutations<I> {
+    pub mode: OutputMode,
+    pub inverse: bool,
+    pub element: PhantomData<I>,
+}
+
+impl<I: Element + TryInto<usize>> Kernel for PivotToPermutations<I> {
+    fn arity(&self) -> (usize, usize) {
+        (1, 1)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let pivots = args.inputs.array::<I>(0)?;
+        let &[n] = pivots.shape() else {
+            return Err("expected a vector".into());
+        };
+        let n = n as usize;
+        let mut out = args.outputs.array::<i64>(ctx, 0, self.mode, &[n as i64])?;
+        let pivots = pivots.matrix(false);
+        let p_inv = scratch::<i64>(ctx, n);
+        for (i, p) in p_inv.iter_mut().enumerate() {
+            p.write(i as i64);
+        }
+        // SAFETY: all `n` elements were just initialized.
+        let p_inv = unsafe { &mut *(p_inv as *mut [std::mem::MaybeUninit<i64>] as *mut [i64]) };
+        for i in 0..n {
+            let j = pivots[(i, 0)]
+                .try_into()
+                .ok()
+                .filter(|&j| j < n)
+                .ok_or_else(|| format!("pivot {i} is out of range"))?;
+            p_inv.swap(i, j);
+        }
+        let mut out = out.matrix_mut(false);
+        for (i, &p) in p_inv.iter().enumerate() {
+            if self.inverse {
+                out[(i, 0)] = p;
+            } else {
+                out[(p as usize, 0)] = i as i64;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ Eigh
+
+/// Eigenvalues (ascending) and, if `vectors`, eigenvectors of a symmetric matrix of
+/// which the lower (upper) triangle is read (scipy.linalg.eigh / eigvalsh without b).
+pub struct Eigh<T> {
+    pub modes: Vec<OutputMode>,
+    pub lower: bool,
+    pub vectors: bool,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for Eigh<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, if self.vectors { 2 } else { 1 })
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let n = square(&a)?;
+        let source = if self.lower {
+            a.matrix(false)
+        } else {
+            a.matrix(false).transpose()
+        };
+        let compute = if self.vectors {
+            evd::ComputeEigenvectors::Yes
+        } else {
+            evd::ComputeEigenvectors::No
+        };
+        let req = evd::self_adjoint_evd_scratch::<T>(n, compute, Par::Seq, Default::default());
+        let result = if self.vectors {
+            let [w, v] = args.outputs.slots([0, 1])?;
+            let mut w = w.array::<T>(ctx, self.modes[0], &[n as i64])?;
+            let mut v = v.array::<T>(ctx, self.modes[1], a.shape())?;
+            evd::self_adjoint_evd(
+                source,
+                w.matrix_mut(false).col_mut(0).as_diagonal_mut(),
+                Some(v.matrix_mut(false)),
+                Par::Seq,
+                stack_for(ctx, req),
+                Default::default(),
+            )
+        } else {
+            let mut w = args
+                .outputs
+                .array::<T>(ctx, 0, self.modes[0], &[n as i64])?;
+            evd::self_adjoint_evd(
+                source,
+                w.matrix_mut(false).col_mut(0).as_diagonal_mut(),
+                None,
+                Par::Seq,
+                stack_for(ctx, req),
+                Default::default(),
+            )
+        };
+        result.map_err(|_| "the eigenvalue algorithm did not converge".into())
+    }
+}
+
+// ------------------------------------------------------------------ SVD
+
+/// The singular value decomposition A = U diag(s) V^T (numpy.linalg.svd), singular
+/// values in descending order.
+pub struct Svd<T> {
+    pub modes: Vec<OutputMode>,
+    pub full_matrices: bool,
+    pub compute_uv: bool,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for Svd<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, if self.compute_uv { 3 } else { 1 })
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let (m, n) = matrix_shape(&a)?;
+        let k = m.min(n);
+        let failed = |_| "the algorithm did not converge".to_string();
+        if !self.compute_uv {
+            let mut s = args
+                .outputs
+                .array::<T>(ctx, 0, self.modes[0], &[k as i64])?;
+            let no = svd::ComputeSvdVectors::No;
+            let req = svd::svd_scratch::<T>(m, n, no, no, Par::Seq, Default::default());
+            return svd::svd(
+                a.matrix(false),
+                s.matrix_mut(false).col_mut(0).as_diagonal_mut(),
+                None,
+                None,
+                Par::Seq,
+                stack_for(ctx, req),
+                Default::default(),
+            )
+            .map_err(failed);
+        }
+        let (kind, u_cols, v_rows) = if self.full_matrices {
+            (svd::ComputeSvdVectors::Full, m, n)
+        } else {
+            (svd::ComputeSvdVectors::Thin, k, k)
+        };
+        let [u, s, vt] = args.outputs.slots([0, 1, 2])?;
+        let mut u = u.array::<T>(ctx, self.modes[0], &[m as i64, u_cols as i64])?;
+        let mut s = s.array::<T>(ctx, self.modes[1], &[k as i64])?;
+        let mut vt = vt.array::<T>(ctx, self.modes[2], &[v_rows as i64, n as i64])?;
+        let (mut u, mut v) = (u.matrix_mut(false), vt.matrix_mut(false).transpose_mut());
+        if k == 0 {
+            // (faer leaves the vectors of an empty matrix alone)
+            for (mut x, d) in [(u.rb_mut(), m), (v.rb_mut(), n)] {
+                x.fill(T::ZERO);
+                for i in 0..d.min(x.ncols()) {
+                    x[(i, i)] = T::ONE;
+                }
+            }
+            return Ok(());
+        }
+        let req = svd::svd_scratch::<T>(m, n, kind, kind, Par::Seq, Default::default());
+        svd::svd(
+            a.matrix(false),
+            s.matrix_mut(false).col_mut(0).as_diagonal_mut(),
+            Some(u),
+            Some(v),
+            Par::Seq,
+            stack_for(ctx, req),
+            Default::default(),
+        )
+        .map_err(failed)
+    }
+}
+
+// ------------------------------------------------------------------ QR
+
+/// What QR returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QrMode {
+    /// Q (m x m), R (m x n)
+    Full,
+    /// Q (m x k), R (k x n), k = min(m, n)
+    Economic,
+    /// R (m x n)
+    R,
+}
+
+/// The QR decomposition by Householder reflections (scipy.linalg.qr without pivoting).
+pub struct Qr<T> {
+    pub modes: Vec<OutputMode>,
+    pub mode: QrMode,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for Qr<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, if self.mode == QrMode::R { 1 } else { 2 })
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let (m, n) = matrix_shape(&a)?;
+        let k = m.min(n);
+        let (q_cols, r_rows) = match self.mode {
+            QrMode::Economic => (k, k),
+            _ => (m, m),
+        };
+        let (q, r) = if self.mode == QrMode::R {
+            let r = args
+                .outputs
+                .array::<T>(ctx, 0, self.modes[0], &[m as i64, n as i64]);
+            (None, r?)
+        } else {
+            let [q, r] = args.outputs.slots([0, 1])?;
+            let q = q.array::<T>(ctx, self.modes[0], &[m as i64, q_cols as i64])?;
+            let r = r.array::<T>(ctx, self.modes[1], &[r_rows as i64, n as i64])?;
+            (Some(q), r)
+        };
+        let mut r = r;
+        let bs = qr::recommended_block_size::<T>(m, n);
+        let req = StackReq::all_of(&[
+            temp_mat_scratch::<T>(m, n),
+            temp_mat_scratch::<T>(bs, k),
+            StackReq::any_of(&[
+                qr::qr_in_place_scratch::<T>(m, n, bs, Par::Seq, Default::default()),
+                householder::apply_block_householder_sequence_on_the_left_in_place_scratch::<T>(
+                    m, bs, q_cols,
+                ),
+            ]),
+        ]);
+        let (mut factor, stack) = temp_mat_zeroed::<T, _, _>(m, n, stack_for(ctx, req));
+        let mut factor = factor.as_mat_mut();
+        let (mut coeff, stack) = temp_mat_zeroed::<T, _, _>(bs, k, stack);
+        let mut coeff = coeff.as_mat_mut();
+        factor.copy_from(a.matrix(false));
+        if k > 0 {
+            qr::qr_in_place(
+                factor.rb_mut(),
+                coeff.rb_mut(),
+                Par::Seq,
+                stack,
+                Default::default(),
+            );
+        }
+        let mut r = r.matrix_mut(false);
+        for i in 0..r_rows {
+            for j in 0..n {
+                r[(i, j)] = if i <= j && i < m {
+                    factor[(i, j)]
+                } else {
+                    T::ZERO
+                };
+            }
+        }
+        if let Some(mut q) = q {
+            let mut q = q.matrix_mut(false);
+            q.fill(T::ZERO);
+            for i in 0..q_cols {
+                q[(i, i)] = T::ONE;
+            }
+            if k > 0 {
+                householder::apply_block_householder_sequence_on_the_left_in_place_with_conj(
+                    factor.rb().get(.., ..k),
+                    coeff.rb(),
+                    Conj::No,
+                    q,
+                    Par::Seq,
+                    stack,
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ MatrixPinv
+
+/// numpy.linalg.pinv's default cutoff, relative to the largest singular value.
+const PINV_RCOND: f64 = 1e-15;
+
+/// The pseudo-inverse (numpy.linalg.pinv): from the SVD, or for `hermitian` from the
+/// eigendecomposition of the lower triangle; singular values up to 1e-15 times the
+/// largest count as zero.
+pub struct MatrixPinv<T> {
+    pub mode: OutputMode,
+    pub hermitian: bool,
+    pub element: PhantomData<T>,
+}
+
+impl<T: Float> Kernel for MatrixPinv<T> {
+    fn arity(&self) -> (usize, usize) {
+        (1, 1)
+    }
+
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let a = args.inputs.array::<T>(0)?;
+        let (m, n) = if self.hermitian {
+            let n = square(&a)?;
+            (n, n)
+        } else {
+            matrix_shape(&a)?
+        };
+        let mut out = args
+            .outputs
+            .array::<T>(ctx, 0, self.mode, &[n as i64, m as i64])?;
+        let k = m.min(n);
+        if k == 0 {
+            return Ok(());
+        }
+        // pinv = V diag(1 / s) U^T, from (U, s, V) with the small s dropped; for a
+        // symmetric matrix U = V the eigenvectors and s the eigenvalues
+        let req = StackReq::all_of(&[
+            temp_mat_scratch::<T>(m, k),
+            temp_mat_scratch::<T>(n, k),
+            temp_mat_scratch::<T>(k, 1),
+            if self.hermitian {
+                evd::self_adjoint_evd_scratch::<T>(
+                    n,
+                    evd::ComputeEigenvectors::Yes,
+                    Par::Seq,
+                    Default::default(),
+                )
+            } else {
+                let thin = svd::ComputeSvdVectors::Thin;
+                svd::svd_scratch::<T>(m, n, thin, thin, Par::Seq, Default::default())
+            },
+        ]);
+        let (mut u, stack) = temp_mat_zeroed::<T, _, _>(m, k, stack_for(ctx, req));
+        let mut u = u.as_mat_mut();
+        let (mut v, stack) = temp_mat_zeroed::<T, _, _>(n, k, stack);
+        let mut v = v.as_mat_mut();
+        let (mut s, stack) = temp_mat_zeroed::<T, _, _>(k, 1, stack);
+        let mut s = s.as_mat_mut();
+        let diag = s.rb_mut().col_mut(0).as_diagonal_mut();
+        let source = a.matrix(false);
+        if self.hermitian {
+            evd::self_adjoint_evd(
+                source,
+                diag,
+                Some(u.rb_mut()),
+                Par::Seq,
+                stack,
+                Default::default(),
+            )
+            .map_err(|_| "the algorithm did not converge")?;
+            v.copy_from(u.rb());
+        } else {
+            svd::svd(
+                source,
+                diag,
+                Some(u.rb_mut()),
+                Some(v.rb_mut()),
+                Par::Seq,
+                stack,
+                Default::default(),
+            )
+            .map_err(|_| "the algorithm did not converge")?;
+        }
+        let largest = (0..k)
+            .map(|j| s[(j, 0)].abs())
+            .fold(T::ZERO, |a, b| if b > a { b } else { a });
+        let cutoff = T::from_f64(PINV_RCOND) * largest;
+        for j in 0..k {
+            let x = s[(j, 0)];
+            let scale = if x.abs() > cutoff {
+                T::ONE / x
+            } else {
+                T::ZERO
+            };
+            for i in 0..n {
+                v[(i, j)] *= scale;
+            }
+        }
+        faer::linalg::matmul::matmul(
+            out.matrix_mut(false),
+            faer::Accum::Replace,
+            v.rb(),
+            u.rb().transpose(),
+            T::ONE,
+            Par::Seq,
+        );
         Ok(())
     }
 }

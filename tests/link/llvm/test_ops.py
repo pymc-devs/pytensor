@@ -11,7 +11,23 @@ from pytensor.raise_op import Assert
 from pytensor.tensor.basic import ExtractDiag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.extra_ops import CumOp
-from pytensor.tensor.linalg import cholesky, solve_triangular
+from pytensor.tensor.linalg import (
+    cho_solve,
+    cholesky,
+    det,
+    eigh,
+    eigvalsh,
+    inv,
+    lu,
+    lu_factor,
+    lu_solve,
+    pinv,
+    qr,
+    slogdet,
+    solve,
+    solve_triangular,
+    svd,
+)
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
 
 
@@ -250,6 +266,80 @@ def test_cholesky_and_solve_triangular(lower):
     compare([a, b, bv], outs, [spd, rng.random((5, 3)), rng.random(5)], rtol=1e-8)
     f = pytensor.function([a], cholesky(a, lower=lower), mode=NO_FALLBACK)
     assert np.isnan(f(-np.eye(3))).all()
+
+
+@pytest.mark.parametrize("dtype", ["float64", "float32", "int64", "uint8", "bool"])
+def test_argmax(dtype):
+    x = pt.tensor3("x", dtype=dtype)
+    outs = [
+        pt.argmax(x),
+        pt.argmax(x, axis=-1),
+        pt.argmax(x, axis=(0, 2)),
+        pt.argmax(x[:, ::-2], axis=1),
+        pt.argmax(x.transpose(2, 0, 1), axis=(1, 2)),
+    ]
+    v = (rng.normal(size=(3, 5, 4)) * 3).astype(dtype)
+    if dtype.startswith("float"):
+        v[1, 2, 0] = v[2, 4, 3] = np.nan  # the first NaN wins
+    compare([x], outs, [v])
+    m = pt.matrix("m")
+    f = pytensor.function([m], pt.argmax(m, axis=0), mode=NO_FALLBACK)
+    assert f(np.zeros((3, 0))).shape == (0,)
+    with pytest.raises(Exception, match="argmax of an empty sequence"):
+        f(np.zeros((0, 3)))
+
+
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_linalg(dtype):
+    """The faer kernels against scipy/numpy; eigenvectors and singular vectors (unique
+    up to sign) by reconstruction."""
+    a, s = pt.matrix("a", dtype=dtype), pt.matrix("s", dtype=dtype)
+    b = pt.vector("b", dtype=dtype)
+    m = rng.normal(size=(5, 5))
+    av, sv = (
+        rng.normal(size=(5, 5)).astype(dtype),
+        (m @ m.T + 5 * np.eye(5)).astype(dtype),
+    )
+    bv = rng.normal(size=5).astype(dtype)
+    outs = [
+        solve(a, b),
+        solve(s, a, assume_a="sym", lower=True),
+        solve(pt.triu(s), a, assume_a="sym"),
+        solve(s, b, assume_a="pos"),
+        cho_solve((cholesky(s, lower=False), False), a),
+        inv(a),
+        det(a),
+        *slogdet(a),
+        *lu(a),
+        *lu(a, p_indices=True),
+        *lu(a, permute_l=True),
+        *lu_factor(a),
+        lu_solve(lu_factor(a), b),
+        eigvalsh(s, None),
+        eigh(s)[0],
+        svd(a, compute_uv=False),
+        svd(a[:3], compute_uv=False),
+        pinv(a[:3]),
+        pinv(s, hermitian=True),
+        qr(a[:, :3], mode="r"),
+        *qr(a[:, :3]),
+        *qr(a[:3], mode="economic"),
+    ]
+    tol = 1e-8 if dtype == "float64" else 1e-3
+    compare([a, s, b], outs, [av, sv, bv], rtol=tol, atol=tol)
+
+    f = pytensor.function([a, s], [*svd(a[:, :3]), *eigh(s)], mode=NO_FALLBACK)
+    u, sing, vt, w, v = f(av, sv)
+    np.testing.assert_allclose(u[:, :3] * sing @ vt, av[:, :3], atol=tol)
+    np.testing.assert_allclose(u.T @ u, np.eye(5), atol=tol)
+    np.testing.assert_allclose(v * w @ v.T, sv, atol=10 * tol)
+
+    singular = np.array([[1, 2], [2, 4]], dtype=dtype)
+    f = pytensor.function([a], [solve(a, a[0]), det(a), *slogdet(a)], mode=NO_FALLBACK)
+    x, d, sign, logdet = f(singular)
+    assert np.isnan(x).all() and d == 0 and sign == 0 and logdet == -np.inf
+    with pytest.raises(Exception, match="singular matrix"):
+        pytensor.function([a], inv(a), mode=NO_FALLBACK)(singular)
 
 
 def test_blockwise():
