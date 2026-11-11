@@ -19,6 +19,11 @@ from pytensor.link.llvm.codegen.types import (
 )
 
 
+#: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
+#: as long as one generated function has no more than the budget of them.
+STACK_TEMPORARY_BYTES = 1024
+STACK_BUDGET_BYTES = 16 * 1024
+
 # ------------------------------------------------------------------ arrays
 
 
@@ -312,7 +317,8 @@ class SlotOutput:
         array: the owner it sets then takes precedence over the viewed input's.)"""
         cg, b = self.cg, self.cg.b
         if self.temporary:
-            a = cg.temporary(self.dtype, shape, self.layout)
+            # read by the unit after this node's function returned
+            a = cg.temporary(self.dtype, shape, self.layout, escapes=True)
             self._write(a.data, a.shape, a.strides)
             self._mark(a)
             self.done = True
@@ -403,6 +409,8 @@ class Codegen:
     frame: object
     #: bytes of the frame used so far
     frame_size: int = 0
+    #: bytes of stack temporaries so far (`temp_memory`)
+    stack_bytes: int = 0
     #: may loops run in parallel (`Options.parallel`)?
     parallel: bool = True
     #: the link table of the kernel being generated (call.py); None: it calls nothing
@@ -436,24 +444,35 @@ class Codegen:
         with self.b.if_(not_ok):
             self.fail(message)
 
-    def temp_memory(self, nbytes):
-        """Temporary memory of `nbytes` (i64), 64-byte aligned, valid during this call:
-        from the frame if `nbytes` is a constant, else scratch."""
+    def temp_memory(self, nbytes, escapes: bool = False):
+        """Temporary memory of `nbytes` (i64), 64-byte aligned, uninitialized.
+
+        Small memory of static size is on the stack of the function being generated:
+        LLVM sees all of it, and may keep it in registers. Everything else is scratch
+        memory of the context (`rt_scratch`), which is valid until the task ends.
+
+        `escapes`: the memory is used after the function being generated returns (an
+        output that is a temporary of the unit around it); then it is never on the stack.
+
+        Each call is a new piece of scratch: ask before a loop, not inside it."""
         b = self.b
         n = nbytes.const_int
-        if n is not None:
-            off = self.frame_size
-            self.frame_size += max(64, -(-n // 64) * 64)
-            return b.gep_bytes(self.frame, b.i64(off))
+        if n is not None and not escapes and n <= STACK_TEMPORARY_BYTES:
+            rounded = max(64, -(-n // 64) * 64)
+            if self.stack_bytes + rounded <= STACK_BUDGET_BYTES:
+                self.stack_bytes += rounded
+                return b.alloca(ir.Type.array(ir.i8, max(n, 1)))
         p = b.rt_scratch(self.ctx, nbytes)
         self.check(b.ne(p, b.null()), None)
         return p
 
-    def temporary(self, dtype, shape, layout: Layout | None = None) -> Array:
-        """A temporary array (`temp_memory`), packed in `layout` (default C)."""
+    def temporary(self, dtype, shape, layout: Layout | None = None, escapes: bool = False) -> Array:
+        """A temporary array (`temp_memory`), packed in `layout` (default C). `shape`:
+        i64 values or Python ints."""
         b = self.b
+        shape = [b.i64(n) if isinstance(n, int) else n for n in shape]
         nbytes = b.mul(size(b, shape), b.i64(itemsize(dtype)), nsw=True)
-        data = self.temp_memory(nbytes)
+        data = self.temp_memory(nbytes, escapes)
         return packed_array(b, dtype, data, shape, layout)
 
 
