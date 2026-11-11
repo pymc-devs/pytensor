@@ -82,13 +82,13 @@ def test_inc_and_set_subtensor_broadcasting():
         compare([x, y, i], outs, [rng.normal(size=(5, 4)), rng.normal(size=4), 2])
 
 
-@pytest.mark.parametrize("idx_dtype", ["int64", "int32", "uint8"])
+@pytest.mark.parametrize("idx_dtype", ["int64", "int32", "uint8", "uint16"])
 def test_take_patterns(idx_dtype):
     x = pt.tensor3("x")
     v = pt.vector("v", dtype=idx_dtype)
     m = pt.matrix("m", dtype=idx_dtype)
     outs = [x[v], x[:, v], x[:, :, v], x[m], x[:, m], x[v, v], x[:, m, m]]
-    vi = [0, 2, 1, 2] if idx_dtype == "uint8" else [0, 2, -1, 2]
+    vi = [0, 2, 1, 2] if idx_dtype.startswith("uint") else [0, 2, -1, 2]
     vals = [
         rng.normal(size=(5, 4, 3)),
         np.array(vi, dtype=idx_dtype),
@@ -119,6 +119,21 @@ def test_constant_indices_checked_when_generating_code():
     f = compare([x, y], outs, [rng.random(5), rng.random(4)])
     ir = "".join(m.optimized_ir() for m in f.maker.linker.stats.modules)
     assert "out of bounds" not in ir
+
+
+def test_boolean_masks_become_unsigned_indices():
+    x = pt.matrix("x", shape=(5, 3))
+    y = pt.vector("y")
+    mask = rng.random((5, 3)) > 0.5
+    outs = [x[mask] * 2, pt.set_subtensor(x[mask], y), pt.inc_subtensor(x[~mask], 1.0)]
+    f = compare([x, y], outs, [rng.random((5, 3)), rng.random(mask.sum())])
+    idx_dtypes = {
+        i.type.dtype
+        for node in f.maker.fgraph.apply_nodes
+        for i in node.inputs[1:]
+        if isinstance(i, pt.TensorConstant) and i.type.ndim == 1
+    }
+    assert idx_dtypes == {"uint8"}
 
 
 @pytest.mark.parametrize("set_", [False, True])
@@ -428,7 +443,9 @@ def test_betainc_grad_uses_scalar_loop():
         np.testing.assert_allclose(r, e, rtol=1e-10)
 
 
-@pytest.mark.parametrize("dtype", ["int8", "int16", "int32", "int64", "uint8"])
+@pytest.mark.parametrize(
+    "dtype", ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint64"]
+)
 def test_integer_pow(dtype):
     x, e = pt.vector(dtype=dtype), pt.vector(dtype=dtype)
     f = pytensor.function([x, e], x**e, mode=NO_FALLBACK)

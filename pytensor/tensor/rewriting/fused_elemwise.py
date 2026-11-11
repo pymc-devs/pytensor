@@ -103,6 +103,7 @@ optdb.register(
     "fuse_indexed_into_elemwise",
     fused_elemwise_optdb,
     "numba",
+    "llvm",
     # symbolic_op_recognition is excluded from OpFromGraph inner-graph
     # compilation, preventing recursive fusion.
     "symbolic_op_recognition",
@@ -115,6 +116,7 @@ fused_elemwise_optdb.register(
     "wrap_reduced_gather_in_elemwise",
     dfs_rewriter(wrap_reduced_gather_in_elemwise),
     "numba",
+    "llvm",
     position=-0.5,
 )
 
@@ -957,4 +959,6 @@ class FuseElemwise(GraphRewriter):
                 continue
 
 
-fused_elemwise_optdb.register("fuse_elemwise", FuseElemwise(), "numba", position=0)
+fused_elemwise_optdb.register(
+    "fuse_elemwise", FuseElemwise(), "numba", "llvm", position=0
+)

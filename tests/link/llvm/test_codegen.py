@@ -158,7 +158,9 @@ def test_elemwise_float_ops(dtype):
         check(e, [x, y], [xv, yv], **tol)
 
 
-@pytest.mark.parametrize("dtype", ["int64", "int32", "int8", "uint8"])
+@pytest.mark.parametrize(
+    "dtype", ["int64", "int32", "int8", "uint8", "uint16", "uint32", "uint64"]
+)
 def test_elemwise_int_ops(dtype):
     x = pt.vector("x", dtype=dtype)
     y = pt.vector("y", dtype=dtype)

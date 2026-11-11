@@ -53,7 +53,7 @@ macro_rules! element {
         }
     )*};
 }
-element!(f64 => Float64, f32 => Float32, i64 => Int64, i32 => Int32, i16 => Int16, i8 => Int8, u8 => Uint8);
+element!(f64 => Float64, f32 => Float32, i64 => Int64, i32 => Int32, i16 => Int16, i8 => Int8, u8 => Uint8, u16 => Uint16, u32 => Uint32, u64 => Uint64);
 
 /// A Rust kernel: its parameters, and what it computes.
 pub trait Kernel: Send + Sync + 'static {
