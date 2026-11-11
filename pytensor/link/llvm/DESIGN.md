@@ -6,6 +6,8 @@ node — its types, constants, `view_map`/`destroy_map`, `infer_shape`. Rust pro
 wrapper, the compiler (optimization, machine code, JIT, object cache), the runtime
 (interpreter, memory, buffers, C API) and Rust kernels for the hard ops.
 
+`TUTORIAL.md` shows how to implement an op.
+
 How much is compiled together is decided in the graph: an `OpFromGraph` with
 `execution=Execution.COMPILED` becomes a unit (one kernel), one with
 `Execution.INTERPRETED` a subprogram (run node by node), and the `llvm_units` rewrite
