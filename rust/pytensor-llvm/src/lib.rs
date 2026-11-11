@@ -11,7 +11,8 @@
 //!   context of a call;
 //! * `jit`, `target`: the JIT and LLVM setup; `perf`: perf maps;
 //! * `math`, `random`, `parallel`: what generated code calls;
-//! * `linalg`, `legacy_kernels`: Rust kernels with the legacy kernel ABI.
+//! * `kernel`: what Rust kernels are written with; `linalg`, `sort`, `interp::kernels`,
+//!   `interp::scan`: the kernels.
 
 use pyo3::prelude::*;
 
@@ -20,13 +21,14 @@ pub mod dtype;
 pub mod interp;
 pub mod ir;
 pub mod jit;
+pub mod kernel;
 pub mod linalg;
-pub mod legacy_kernels;
 pub mod math;
 pub mod parallel;
 pub mod perf;
 pub mod random;
 pub mod runtime;
+pub mod sort;
 pub mod target;
 
 /// Contents of the C header (include/pytensor_llvm.h).

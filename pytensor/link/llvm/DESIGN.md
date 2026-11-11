@@ -39,9 +39,6 @@ groups small nodes into units.
   node or a unit), a **Rust kernel**, a **numba kernel**, or a **subprogram** (a nested
   program). Each has a **config**: its read-only data, made when planning (a Rust
   kernel's parameters, a subprogram's `Program`, a generated kernel's link table).
-* **legacy kernel**: a Rust kernel with the earlier ABI (one provided output, a
-  parameter block: `abi::LegacyFn`), run through a kernel that adapts it (`k_legacy`).
-  Sort, matmul and the faer linear algebra are still legacy kernels.
 * **link table**: a generated kernel's config: the addresses of the kernels it calls
   (each followed by its config) and of its array constants (section 2a).
 * **session**: everything one caller (e.g. one sampler chain) needs to run a program:
@@ -435,6 +432,17 @@ compiled unit (conversion inserts 0-d tensors at unit boundaries where needed).
 valid memory, and that provided outputs don't overlap inputs. The function checks what
 types don't promise (equal dynamic lengths for broadcasting, index bounds). With
 `PYTENSOR_LLVM_CHECKED=1` the wrapper verifies the contract on every call.
+
+**Rust kernels** are written with `src/kernel.rs`: a kernel is a type holding its
+parameters that implements `Kernel` (`arity`, and a safe `run(ctx, args)`), and
+`entry::<K>` is its function with the ABI above, with a `K` as its config. `Args`
+turns the `PtArray`s into views with safe methods: typed arrays (also as faer
+matrices, or lane by lane along an axis), provided or newly allocated outputs, views
+of an input, scratch memory. The contract above is what makes them safe, and the
+raw-pointer work is in that one module; a kernel only promises to ask for the element
+types it was made for (`unsafe impl Kernel`). Two exceptions keep raw pointers of
+their own: the hand-vectorized matrix-vector loop in `linalg.rs` and the Scan kernel
+(`interp/scan.rs`).
 
 ## 7. `pytensor_llvm.ir`
 

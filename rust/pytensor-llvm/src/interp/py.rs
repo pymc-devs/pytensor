@@ -6,6 +6,9 @@ use super::layout::Layout;
 use super::program::{Program as RProgram, ProgramSpec, Task, ValueId, ValueKind, ValueSpec};
 use crate::abi::OutputMode;
 use crate::dtype::DType;
+use crate::kernel::Kernel;
+use crate::linalg;
+use std::marker::PhantomData;
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
@@ -61,6 +64,19 @@ pub enum Produces {
 }
 
 impl RustKernel {
+    /// A kernel written with `crate::kernel`: its own function, and itself as config.
+    fn of<K: Kernel>(kernel: K, desc: String, produces: Produces) -> Self {
+        RustKernel::new(crate::kernel::address::<K>(), kernel, desc, produces)
+    }
+
+    /// One that writes a single output, in new memory.
+    fn writing<K: Kernel>(kernel: K, mode: OutputMode, desc: String) -> PyResult<Self> {
+        if mode == OutputMode::View {
+            return err(format!("{desc} can't produce a view"));
+        }
+        Ok(RustKernel::of(kernel, desc, Produces::Fresh(vec![mode])))
+    }
+
     fn new<T: Send + Sync + 'static>(f: usize, config: T, desc: String, produces: Produces) -> Self {
         let config: Box<T> = Box::new(config);
         let config_ptr = &*config as *const T as usize;
@@ -133,7 +149,7 @@ impl DimShuffle {
     fn new(order: Vec<Option<usize>>) -> PyClassInitializer<Self> {
         let desc = format!("DimShuffle{order:?}");
         let produces = Produces::DimShuffle(order.clone());
-        let k = RustKernel::new(kernels::k_dimshuffle as *const () as usize, kernels::DimShuffleConfig { order }, desc, produces);
+        let k = RustKernel::of(kernels::DimShuffle { order }, desc, produces);
         PyClassInitializer::from(k).add_subclass(DimShuffle)
     }
 }
@@ -145,8 +161,7 @@ pub struct Copy;
 impl Copy {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
-        let config = kernels::CopyConfig { mode, dtype: dtype_of(&dtype)? };
-        let k = RustKernel::new(kernels::k_copy as *const () as usize, config, "Copy".into(), Produces::Fresh(vec![mode]));
+        let k = RustKernel::writing(kernels::Copy { mode, dtype: dtype_of(&dtype)? }, mode, "Copy".into())?;
         Ok(PyClassInitializer::from(k).add_subclass(Copy))
     }
 }
@@ -158,22 +173,14 @@ pub struct Dot;
 impl Dot {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
-        let dt = dtype_of(&dtype)?;
-        if !matches!(dt, DType::Float64 | DType::Float32) {
-            return err(format!("Dot of {dt:?}"));
-        }
-        let config = kernels::DotConfig { mode, dtype: dt };
-        let k = RustKernel::new(kernels::k_dot as *const () as usize, config, "Dot".into(), Produces::Fresh(vec![mode]));
+        let desc = "Dot".to_string();
+        let k = match dtype_of(&dtype)? {
+            DType::Float64 => RustKernel::writing(linalg::Dot::<f64> { mode, element: PhantomData }, mode, desc)?,
+            DType::Float32 => RustKernel::writing(linalg::Dot::<f32> { mode, element: PhantomData }, mode, desc)?,
+            dt => return err(format!("Dot of {dt:?}")),
+        };
         Ok(PyClassInitializer::from(k).add_subclass(Dot))
     }
-}
-
-fn legacy(f: kernels::LegacyFn, params: Vec<i64>, n_in: usize, shape_from: usize, mode: OutputMode, dtype: DType, desc: String) -> PyResult<RustKernel> {
-    if mode == OutputMode::View {
-        return err("this kernel can't produce a view");
-    }
-    let config = kernels::LegacyConfig { f, params, n_in, shape_from, mode, dtype };
-    Ok(RustKernel::new(kernels::k_legacy as *const () as usize, config, desc, Produces::Fresh(vec![mode])))
 }
 
 /// Sort along `axis` (float64, float32, int64), NaNs last.
@@ -183,15 +190,17 @@ pub struct Sort;
 #[pymethods]
 impl Sort {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, axis: i64, stable: bool) -> PyResult<PyClassInitializer<Self>> {
-        let dt = dtype_of(&dtype)?;
-        let f: kernels::LegacyFn = match dt {
-            DType::Float64 => crate::legacy_kernels::ptl_sort_f64,
-            DType::Float32 => crate::legacy_kernels::ptl_sort_f32,
-            DType::Int64 => crate::legacy_kernels::ptl_sort_i64,
-            _ => return err(format!("Sort of {dt:?}")),
+    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, axis: usize, stable: bool) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("Sort(axis={axis})");
+        fn sort<T: crate::sort::Sortable>(mode: OutputMode, axis: usize, stable: bool, desc: String) -> PyResult<RustKernel> {
+            RustKernel::writing(crate::sort::Sort::<T> { mode, axis, stable, element: PhantomData }, mode, desc)
+        }
+        let k = match dtype_of(&dtype)? {
+            DType::Float64 => sort::<f64>(mode, axis, stable, desc)?,
+            DType::Float32 => sort::<f32>(mode, axis, stable, desc)?,
+            DType::Int64 => sort::<i64>(mode, axis, stable, desc)?,
+            dt => return err(format!("Sort of {dt:?}")),
         };
-        let k = legacy(f, vec![axis, stable as i64], 1, 0, mode, dt, format!("Sort(axis={axis})"))?;
         Ok(PyClassInitializer::from(k).add_subclass(Sort))
     }
 }
@@ -204,13 +213,12 @@ pub struct Cholesky;
 impl Cholesky {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, lower: bool) -> PyResult<PyClassInitializer<Self>> {
-        let dt = dtype_of(&dtype)?;
-        let f: kernels::LegacyFn = match dt {
-            DType::Float64 => crate::linalg::ptl_cholesky_f64,
-            DType::Float32 => crate::linalg::ptl_cholesky_f32,
-            _ => return err(format!("Cholesky of {dt:?}")),
+        let desc = format!("Cholesky(lower={lower})");
+        let k = match dtype_of(&dtype)? {
+            DType::Float64 => RustKernel::writing(linalg::Cholesky::<f64> { mode, lower, element: PhantomData }, mode, desc)?,
+            DType::Float32 => RustKernel::writing(linalg::Cholesky::<f32> { mode, lower, element: PhantomData }, mode, desc)?,
+            dt => return err(format!("Cholesky of {dt:?}")),
         };
-        let k = legacy(f, vec![lower as i64], 1, 0, mode, dt, format!("Cholesky(lower={lower})"))?;
         Ok(PyClassInitializer::from(k).add_subclass(Cholesky))
     }
 }
@@ -223,14 +231,15 @@ pub struct SolveTriangular;
 impl SolveTriangular {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, lower: bool, unit_diagonal: bool) -> PyResult<PyClassInitializer<Self>> {
-        let dt = dtype_of(&dtype)?;
-        let f: kernels::LegacyFn = match dt {
-            DType::Float64 => crate::linalg::ptl_solve_triangular_f64,
-            DType::Float32 => crate::linalg::ptl_solve_triangular_f32,
-            _ => return err(format!("SolveTriangular of {dt:?}")),
-        };
         let desc = format!("SolveTriangular(lower={lower}, unit_diagonal={unit_diagonal})");
-        let k = legacy(f, vec![lower as i64, unit_diagonal as i64], 2, 1, mode, dt, desc)?;
+        fn solve<T: linalg::Float>(mode: OutputMode, lower: bool, unit_diagonal: bool, desc: String) -> PyResult<RustKernel> {
+            RustKernel::writing(linalg::SolveTriangular::<T> { mode, lower, unit_diagonal, element: PhantomData }, mode, desc)
+        }
+        let k = match dtype_of(&dtype)? {
+            DType::Float64 => solve::<f64>(mode, lower, unit_diagonal, desc)?,
+            DType::Float32 => solve::<f32>(mode, lower, unit_diagonal, desc)?,
+            dt => return err(format!("SolveTriangular of {dt:?}")),
+        };
         Ok(PyClassInitializer::from(k).add_subclass(SolveTriangular))
     }
 }
