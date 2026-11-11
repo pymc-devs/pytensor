@@ -807,6 +807,7 @@ dependencies = [
  "rand_xoshiro",
  "rayon",
  "sha2",
+ "zerocopy",
 ]
 
 [[package]]
