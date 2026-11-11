@@ -3,6 +3,14 @@
 //! Every method checks its operands before calling LLVM: values must come from this
 //! module and function, have the right types, and the current block must be open.
 //! LLVM's own checks are assertions, which release builds don't have.
+//!
+//! Operands may be Python literals (`b.add(i, 1)`, `b.select(c, x, 0.0)`): a literal
+//! takes the type of the other operand, or the type the method asks for (`b.loop(4)`).
+//!
+//! Integer arithmetic simplifies what it can see: constants fold (LLVM's builder does
+//! that), and so do `x + 0`, `x * 1`, `x * 0`, `x & 0`, a select on a constant
+//! condition, ... The result of such a call may be one of its operands or a constant
+//! (`value.const_int`), which is how emitters keep static shapes static.
 
 use super::module::{add_fn_attr, cstring, err, ModuleInner, Value};
 use super::ty::{PyType, Ty};
@@ -18,6 +26,37 @@ type BuildFn = unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, 
 type CastFn = unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, *const std::ffi::c_char) -> LLVMValueRef;
 
 const NONAME: *const std::ffi::c_char = c"".as_ptr();
+
+/// An operand: a value, or a Python literal that becomes a constant of the type the
+/// operation needs (the other operand's type, or the one the method asks for).
+#[derive(FromPyObject)]
+pub enum Operand {
+    Value(Value),
+    Bool(bool),
+    Int(i128),
+    Float(f64),
+}
+
+impl Operand {
+    fn ty(&self) -> Option<&Ty> {
+        match self {
+            Operand::Value(v) => Some(&v.ty),
+            _ => None,
+        }
+    }
+}
+
+/// The values a body returned: None (no values), one value, or a sequence of values.
+fn values_of(py: Python<'_>, r: Py<PyAny>) -> PyResult<Vec<Value>> {
+    let r = r.bind(py);
+    if r.is_none() {
+        return Ok(vec![]);
+    }
+    if let Ok(v) = r.extract::<Value>() {
+        return Ok(vec![v]);
+    }
+    r.extract()
+}
 
 const FAST: u32 = llvm_sys::LLVMFastMathAllowReassoc
     | llvm_sys::LLVMFastMathNoSignedZeros
@@ -259,6 +298,9 @@ pub struct Builder {
     regions: RefCell<Vec<Region>>,
     /// alias information for this function's array accesses (`alias_domain`)
     alias: RefCell<Option<AliasInfo>>,
+    /// the `if` that just ended: its conditional branch and the block after it
+    /// (`else_` may follow while nothing was added there)
+    last_if: Cell<Option<(LLVMValueRef, LLVMBasicBlockRef)>>,
 }
 
 /// Alias information of a node function (DESIGN.md, "Aliasing"): pointers into arrays
@@ -326,6 +368,7 @@ impl Builder {
                 depth: RefCell::new(0),
                 regions: RefCell::new(vec![]),
                 alias: RefCell::new(None),
+                last_if: Cell::new(None),
             })
         }
     }
@@ -396,7 +439,126 @@ impl Builder {
     }
 
     fn mk(&self, raw: LLVMValueRef, ty: Ty) -> Value {
-        Value { m: self.m.clone(), raw, ty, func: Some(self.func.get()) }
+        // SAFETY: `raw` is a live value of this module. A folded result is a constant:
+        // it belongs to no function (so parallel regions don't capture it).
+        let konst = unsafe { !c::LLVMIsAConstantInt(raw).is_null() || !c::LLVMIsAConstantFP(raw).is_null() };
+        Value { m: self.m.clone(), raw, ty, func: if konst { None } else { Some(self.func.get()) } }
+    }
+
+    /// `x` as a value of type `ty`: itself, or the literal as a constant of `ty`.
+    fn lit(&self, what: &str, x: Operand, ty: &Ty) -> PyResult<Value> {
+        match x {
+            Operand::Value(v) => Ok(v),
+            Operand::Bool(v) if ty.is_int() => self.const_int(PyType(ty.clone()), v as i128),
+            Operand::Int(v) if ty.is_int() => self.const_int(PyType(ty.clone()), v),
+            Operand::Int(v) if ty.is_float() => self.const_float(PyType(ty.clone()), v as f64),
+            Operand::Float(v) if ty.is_float() => self.const_float(PyType(ty.clone()), v),
+            Operand::Bool(v) => err(format!("{what}: the literal {v} can't be a {ty}")),
+            Operand::Int(v) => err(format!("{what}: the literal {v} can't be a {ty}")),
+            Operand::Float(v) => err(format!("{what}: the literal {v} can't be a {ty} (convert it explicitly)")),
+        }
+    }
+
+    /// Two operands of one type: a literal takes the type of the other operand.
+    fn pair(&self, what: &str, a: Operand, b: Operand) -> PyResult<(Value, Value)> {
+        let Some(ty) = a.ty().or(b.ty()).cloned() else {
+            return err(format!("{what}: one operand must be a value (a literal takes the other operand's type)"));
+        };
+        Ok((self.lit(what, a, &ty)?, self.lit(what, b, &ty)?))
+    }
+
+    /// Operands of one type: literals take the type of the first value.
+    fn many(&self, what: &str, args: Vec<Operand>) -> PyResult<Vec<Value>> {
+        let Some(ty) = args.iter().find_map(|a| a.ty()).cloned() else {
+            return err(format!("{what}: one argument must be a value (literals take its type)"));
+        };
+        args.into_iter().map(|a| self.lit(what, a, &ty)).collect()
+    }
+
+    /// The integer constant `v` is (booleans: 0 or 1; others sign-extended).
+    fn ci(v: &Value) -> Option<i64> {
+        v.const_int_value()
+    }
+
+    /// All bits set?
+    fn all_ones(v: &Value) -> bool {
+        match Self::ci(v) {
+            Some(1) if v.ty.is_bool() => true,
+            Some(-1) if !v.ty.is_bool() => true,
+            _ => false,
+        }
+    }
+
+    /// Checked operands of an integer operation.
+    fn int_pair(&self, what: &str, a: Operand, b: Operand) -> PyResult<(Value, Value)> {
+        self.open()?;
+        let (a, b) = self.pair(what, a, b)?;
+        self.same_type(what, &a, &b)?;
+        if !a.ty.is_int() {
+            return err(format!("{what} needs integers, got {}", a.ty));
+        }
+        self.v(&a)?;
+        self.v(&b)?;
+        Ok((a, b))
+    }
+
+    fn int_op(&self, f: BuildFn, a: &Value, b: &Value) -> PyResult<Value> {
+        // SAFETY: two integer values of the same type in this function (`int_pair`).
+        let r = unsafe { f(self.b, self.v(a)?, self.v(b)?, NONAME) };
+        Ok(self.mk(r, a.ty.clone()))
+    }
+
+    fn compare(&self, pred: ICmp, a: Operand, b: Operand) -> PyResult<Value> {
+        self.open()?;
+        let (a, b) = self.pair("icmp", a, b)?;
+        self.same_type("icmp", &a, &b)?;
+        if !(a.ty.is_int() || a.ty == Ty::Ptr) {
+            return err(format!("icmp of {}", a.ty));
+        }
+        let p = match pred {
+            ICmp::EQ => IP::LLVMIntEQ,
+            ICmp::NE => IP::LLVMIntNE,
+            ICmp::SLT => IP::LLVMIntSLT,
+            ICmp::SLE => IP::LLVMIntSLE,
+            ICmp::SGT => IP::LLVMIntSGT,
+            ICmp::SGE => IP::LLVMIntSGE,
+            ICmp::ULT => IP::LLVMIntULT,
+            ICmp::ULE => IP::LLVMIntULE,
+            ICmp::UGT => IP::LLVMIntUGT,
+            ICmp::UGE => IP::LLVMIntUGE,
+        };
+        // SAFETY: two integer (or pointer) values of the same type.
+        let r = unsafe { c::LLVMBuildICmp(self.b, p, self.v(&a)?, self.v(&b)?, NONAME) };
+        Ok(self.mk(r, Ty::Int(1)))
+    }
+
+    fn pick(&self, cond: &Value, a: Value, b: Value) -> PyResult<Value> {
+        self.same_type("select", &a, &b)?;
+        let (cr, ar, br) = (self.v(cond)?, self.v(&a)?, self.v(&b)?);
+        match Self::ci(cond) {
+            Some(0) => return Ok(b),
+            Some(_) => return Ok(a),
+            None if a.raw == b.raw => return Ok(a),
+            None => {}
+        }
+        // SAFETY: an i1 condition and two values of the same type.
+        let r = unsafe { c::LLVMBuildSelect(self.b, cr, ar, br, NONAME) };
+        Ok(self.mk(r, a.ty))
+    }
+
+    fn min_max(&self, what: &str, pred: ICmp, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair(what, a, b)?;
+        let c = self.compare(pred, Operand::Value(a.clone()), Operand::Value(b.clone()))?;
+        self.pick(&c, a, b)
+    }
+
+    /// An i64 operand (a count, a size, an index).
+    fn i64_of(&self, what: &str, x: Operand) -> PyResult<Value> {
+        let v = self.lit(what, x, &Ty::Int(64))?;
+        if v.ty != Ty::Int(64) {
+            return err(format!("{what} must be i64, got {}", v.ty));
+        }
+        Ok(v)
     }
 
     fn konst(&self, raw: LLVMValueRef, ty: Ty) -> Value {
@@ -500,19 +662,10 @@ impl Builder {
         Ok(())
     }
 
-    fn int_binop(&self, what: &str, f: BuildFn, a: &Value, b: &Value) -> PyResult<Value> {
+    fn float_binop(&self, what: &str, f: BuildFn, a: Operand, b: Operand) -> PyResult<Value> {
         self.open()?;
-        self.same_type(what, a, b)?;
-        if !a.ty.is_int() {
-            return err(format!("{what} needs integers, got {}", a.ty));
-        }
-        // SAFETY: two integer values of the same type in this function.
-        let r = unsafe { f(self.b, self.v(a)?, self.v(b)?, NONAME) };
-        Ok(self.mk(r, a.ty.clone()))
-    }
-
-    fn float_binop(&self, what: &str, f: BuildFn, a: &Value, b: &Value) -> PyResult<Value> {
-        self.open()?;
+        let (a, b) = self.pair(what, a, b)?;
+        let (a, b) = (&a, &b);
         self.same_type(what, a, b)?;
         if !a.ty.is_float() {
             return err(format!("{what} needs floats, got {}", a.ty));
@@ -652,6 +805,31 @@ impl Builder {
         Ok(self.konst(r, ty.0))
     }
 
+    /// An i64 constant.
+    fn i64(&self, value: i128) -> PyResult<Value> {
+        self.const_int(PyType(Ty::Int(64)), value)
+    }
+
+    /// An i32 constant.
+    fn i32(&self, value: i128) -> PyResult<Value> {
+        self.const_int(PyType(Ty::Int(32)), value)
+    }
+
+    /// An i8 constant.
+    fn i8(&self, value: i128) -> PyResult<Value> {
+        self.const_int(PyType(Ty::Int(8)), value)
+    }
+
+    /// A double constant.
+    fn f64(&self, value: f64) -> PyResult<Value> {
+        self.const_float(PyType(Ty::F64), value)
+    }
+
+    /// A float constant.
+    fn f32(&self, value: f64) -> PyResult<Value> {
+        self.const_float(PyType(Ty::F32), value)
+    }
+
     fn const_bool(&self, value: bool) -> Value {
         // SAFETY: an i1 constant.
         let r = unsafe { c::LLVMConstInt(self.lt(&Ty::Int(1)), value as u64, 0) };
@@ -697,59 +875,137 @@ impl Builder {
 
     /// `nsw`: the result doesn't overflow as a signed integer (lets LLVM simplify).
     #[pyo3(signature = (a, b, nsw = false))]
-    fn add(&self, a: Value, b: Value, nsw: bool) -> PyResult<Value> {
-        self.int_binop("add", if nsw { c::LLVMBuildNSWAdd } else { c::LLVMBuildAdd }, &a, &b)
+    fn add(&self, a: Operand, b: Operand, nsw: bool) -> PyResult<Value> {
+        let (a, b) = self.int_pair("add", a, b)?;
+        match (Self::ci(&a), Self::ci(&b)) {
+            (Some(0), _) => Ok(b),
+            (_, Some(0)) => Ok(a),
+            _ => self.int_op(if nsw { c::LLVMBuildNSWAdd } else { c::LLVMBuildAdd }, &a, &b),
+        }
     }
 
     #[pyo3(signature = (a, b, nsw = false))]
-    fn sub(&self, a: Value, b: Value, nsw: bool) -> PyResult<Value> {
-        self.int_binop("sub", if nsw { c::LLVMBuildNSWSub } else { c::LLVMBuildSub }, &a, &b)
+    fn sub(&self, a: Operand, b: Operand, nsw: bool) -> PyResult<Value> {
+        let (a, b) = self.int_pair("sub", a, b)?;
+        match Self::ci(&b) {
+            Some(0) => Ok(a),
+            _ => self.int_op(if nsw { c::LLVMBuildNSWSub } else { c::LLVMBuildSub }, &a, &b),
+        }
     }
 
     #[pyo3(signature = (a, b, nsw = false))]
-    fn mul(&self, a: Value, b: Value, nsw: bool) -> PyResult<Value> {
-        self.int_binop("mul", if nsw { c::LLVMBuildNSWMul } else { c::LLVMBuildMul }, &a, &b)
+    fn mul(&self, a: Operand, b: Operand, nsw: bool) -> PyResult<Value> {
+        let (a, b) = self.int_pair("mul", a, b)?;
+        let (ca, cb) = (Self::ci(&a), Self::ci(&b));
+        if ca == Some(0) || cb == Some(1) {
+            return Ok(a);
+        }
+        if cb == Some(0) || ca == Some(1) {
+            return Ok(b);
+        }
+        self.int_op(if nsw { c::LLVMBuildNSWMul } else { c::LLVMBuildMul }, &a, &b)
     }
 
     /// Signed division. Division by zero (or MIN / -1) is undefined: check first.
-    fn sdiv(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("sdiv", c::LLVMBuildSDiv, &a, &b)
+    fn sdiv(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("sdiv", a, b)?;
+        match Self::ci(&b) {
+            Some(1) if !a.ty.is_bool() => Ok(a),
+            _ => self.int_op(c::LLVMBuildSDiv, &a, &b),
+        }
     }
 
-    fn udiv(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("udiv", c::LLVMBuildUDiv, &a, &b)
+    fn udiv(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("udiv", a, b)?;
+        match Self::ci(&b) {
+            Some(1) => Ok(a),
+            _ => self.int_op(c::LLVMBuildUDiv, &a, &b),
+        }
     }
 
-    fn srem(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("srem", c::LLVMBuildSRem, &a, &b)
+    fn srem(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("srem", a, b)?;
+        self.int_op(c::LLVMBuildSRem, &a, &b)
     }
 
-    fn urem(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("urem", c::LLVMBuildURem, &a, &b)
+    fn urem(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("urem", a, b)?;
+        self.int_op(c::LLVMBuildURem, &a, &b)
     }
 
-    fn shl(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("shl", c::LLVMBuildShl, &a, &b)
+    fn shl(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("shl", a, b)?;
+        match Self::ci(&b) {
+            Some(0) => Ok(a),
+            _ => self.int_op(c::LLVMBuildShl, &a, &b),
+        }
     }
 
-    fn lshr(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("lshr", c::LLVMBuildLShr, &a, &b)
+    fn lshr(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("lshr", a, b)?;
+        match Self::ci(&b) {
+            Some(0) => Ok(a),
+            _ => self.int_op(c::LLVMBuildLShr, &a, &b),
+        }
     }
 
-    fn ashr(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("ashr", c::LLVMBuildAShr, &a, &b)
+    fn ashr(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("ashr", a, b)?;
+        match Self::ci(&b) {
+            Some(0) => Ok(a),
+            _ => self.int_op(c::LLVMBuildAShr, &a, &b),
+        }
     }
 
-    fn and_(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("and", c::LLVMBuildAnd, &a, &b)
+    fn and_(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("and", a, b)?;
+        if Self::ci(&a) == Some(0) || Self::all_ones(&b) || a.raw == b.raw {
+            return Ok(a);
+        }
+        if Self::ci(&b) == Some(0) || Self::all_ones(&a) {
+            return Ok(b);
+        }
+        self.int_op(c::LLVMBuildAnd, &a, &b)
     }
 
-    fn or_(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("or", c::LLVMBuildOr, &a, &b)
+    fn or_(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("or", a, b)?;
+        if Self::ci(&b) == Some(0) || Self::all_ones(&a) || a.raw == b.raw {
+            return Ok(a);
+        }
+        if Self::ci(&a) == Some(0) || Self::all_ones(&b) {
+            return Ok(b);
+        }
+        self.int_op(c::LLVMBuildOr, &a, &b)
     }
 
-    fn xor(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.int_binop("xor", c::LLVMBuildXor, &a, &b)
+    fn xor(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        let (a, b) = self.int_pair("xor", a, b)?;
+        match (Self::ci(&a), Self::ci(&b)) {
+            (Some(0), _) => Ok(b),
+            (_, Some(0)) => Ok(a),
+            _ => self.int_op(c::LLVMBuildXor, &a, &b),
+        }
+    }
+
+    /// The smaller of two signed integers.
+    fn smin(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.min_max("smin", ICmp::SLT, a, b)
+    }
+
+    /// The larger of two signed integers.
+    fn smax(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.min_max("smax", ICmp::SGT, a, b)
+    }
+
+    /// The smaller of two unsigned integers.
+    fn umin(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.min_max("umin", ICmp::ULT, a, b)
+    }
+
+    /// The larger of two unsigned integers.
+    fn umax(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.min_max("umax", ICmp::UGT, a, b)
     }
 
     fn not_(&self, a: Value) -> PyResult<Value> {
@@ -774,24 +1030,24 @@ impl Builder {
 
     // ------------------------------------------------------------ float arithmetic
 
-    fn fadd(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.float_binop("fadd", c::LLVMBuildFAdd, &a, &b)
+    fn fadd(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.float_binop("fadd", c::LLVMBuildFAdd, a, b)
     }
 
-    fn fsub(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.float_binop("fsub", c::LLVMBuildFSub, &a, &b)
+    fn fsub(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.float_binop("fsub", c::LLVMBuildFSub, a, b)
     }
 
-    fn fmul(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.float_binop("fmul", c::LLVMBuildFMul, &a, &b)
+    fn fmul(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.float_binop("fmul", c::LLVMBuildFMul, a, b)
     }
 
-    fn fdiv(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.float_binop("fdiv", c::LLVMBuildFDiv, &a, &b)
+    fn fdiv(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.float_binop("fdiv", c::LLVMBuildFDiv, a, b)
     }
 
-    fn frem(&self, a: Value, b: Value) -> PyResult<Value> {
-        self.float_binop("frem", c::LLVMBuildFRem, &a, &b)
+    fn frem(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.float_binop("frem", c::LLVMBuildFRem, a, b)
     }
 
     fn fneg(&self, a: Value) -> PyResult<Value> {
@@ -807,31 +1063,63 @@ impl Builder {
 
     // ------------------------------------------------------------ comparisons
 
-    fn icmp(&self, pred: ICmp, a: Value, b: Value) -> PyResult<Value> {
-        self.open()?;
-        self.same_type("icmp", &a, &b)?;
-        if !(a.ty.is_int() || a.ty == Ty::Ptr) {
-            return err(format!("icmp of {}", a.ty));
-        }
-        let p = match pred {
-            ICmp::EQ => IP::LLVMIntEQ,
-            ICmp::NE => IP::LLVMIntNE,
-            ICmp::SLT => IP::LLVMIntSLT,
-            ICmp::SLE => IP::LLVMIntSLE,
-            ICmp::SGT => IP::LLVMIntSGT,
-            ICmp::SGE => IP::LLVMIntSGE,
-            ICmp::ULT => IP::LLVMIntULT,
-            ICmp::ULE => IP::LLVMIntULE,
-            ICmp::UGT => IP::LLVMIntUGT,
-            ICmp::UGE => IP::LLVMIntUGE,
-        };
-        // SAFETY: two integer (or pointer) values of the same type.
-        let r = unsafe { c::LLVMBuildICmp(self.b, p, self.v(&a)?, self.v(&b)?, NONAME) };
-        Ok(self.mk(r, Ty::Int(1)))
+    fn icmp(&self, pred: ICmp, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(pred, a, b)
     }
 
-    fn fcmp(&self, pred: FCmp, a: Value, b: Value) -> PyResult<Value> {
+    /// `a == b` (integers or pointers).
+    fn eq(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::EQ, a, b)
+    }
+
+    /// `a != b` (integers or pointers).
+    fn ne(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::NE, a, b)
+    }
+
+    /// `a < b`, signed.
+    fn slt(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::SLT, a, b)
+    }
+
+    /// `a <= b`, signed.
+    fn sle(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::SLE, a, b)
+    }
+
+    /// `a > b`, signed.
+    fn sgt(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::SGT, a, b)
+    }
+
+    /// `a >= b`, signed.
+    fn sge(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::SGE, a, b)
+    }
+
+    /// `a < b`, unsigned.
+    fn ult(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::ULT, a, b)
+    }
+
+    /// `a <= b`, unsigned.
+    fn ule(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::ULE, a, b)
+    }
+
+    /// `a > b`, unsigned.
+    fn ugt(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::UGT, a, b)
+    }
+
+    /// `a >= b`, unsigned.
+    fn uge(&self, a: Operand, b: Operand) -> PyResult<Value> {
+        self.compare(ICmp::UGE, a, b)
+    }
+
+    fn fcmp(&self, pred: FCmp, a: Operand, b: Operand) -> PyResult<Value> {
         self.open()?;
+        let (a, b) = self.pair("fcmp", a, b)?;
         self.same_type("fcmp", &a, &b)?;
         if !a.ty.is_float() {
             return err(format!("fcmp of {}", a.ty));
@@ -857,15 +1145,14 @@ impl Builder {
         Ok(self.mk(r, Ty::Int(1)))
     }
 
-    fn select(&self, cond: Value, a: Value, b: Value) -> PyResult<Value> {
+    /// `a` if `cond` else `b`. A constant condition picks its operand.
+    fn select(&self, cond: Value, a: Operand, b: Operand) -> PyResult<Value> {
         self.open()?;
         if !cond.ty.is_bool() {
             return err(format!("select condition of type {}", cond.ty));
         }
-        self.same_type("select", &a, &b)?;
-        // SAFETY: an i1 condition and two values of the same type.
-        let r = unsafe { c::LLVMBuildSelect(self.b, self.v(&cond)?, self.v(&a)?, self.v(&b)?, NONAME) };
-        Ok(self.mk(r, a.ty))
+        let (a, b) = self.pair("select", a, b)?;
+        self.pick(&cond, a, b)
     }
 
     // ------------------------------------------------------------ casts
@@ -1007,8 +1294,9 @@ impl Builder {
     }
 
     /// Address of element `index` of an array of `elem` starting at `ptr` (inbounds).
-    fn gep(&self, elem: PyType, ptr: Value, index: Value) -> PyResult<Value> {
+    fn gep(&self, elem: PyType, ptr: Value, index: Operand) -> PyResult<Value> {
         self.open()?;
+        let index = self.lit("gep", index, &Ty::Int(64))?;
         if ptr.ty != Ty::Ptr || !index.ty.is_int() || !elem.0.is_first_class() {
             return err(format!("gep of {} with {} index", ptr.ty, index.ty));
         }
@@ -1021,7 +1309,7 @@ impl Builder {
     }
 
     /// `ptr + offset` bytes (inbounds).
-    fn gep_bytes(&self, ptr: Value, offset: Value) -> PyResult<Value> {
+    fn gep_bytes(&self, ptr: Value, offset: Operand) -> PyResult<Value> {
         self.gep(PyType(Ty::Int(8)), ptr, offset)
     }
 
@@ -1098,11 +1386,15 @@ impl Builder {
     // ------------------------------------------------------------ calls
 
     /// Call a function of this module.
-    fn call(&self, f: PyRef<'_, super::module::Function>, args: Vec<Value>) -> PyResult<Option<Value>> {
+    fn call(&self, f: PyRef<'_, super::module::Function>, args: Vec<Operand>) -> PyResult<Option<Value>> {
         self.open()?;
         if !Rc::ptr_eq(&f.m, &self.m) {
             return err("function from a different module");
         }
+        if args.len() != f.params.len() {
+            return err(format!("{} takes {} arguments, got {}", f.name, f.params.len(), args.len()));
+        }
+        let args: Vec<Value> = args.into_iter().zip(&f.params).map(|(a, t)| self.lit("call", a, t)).collect::<PyResult<_>>()?;
         f.signature_matches(&args)?;
         let mut raw: Vec<LLVMValueRef> = args.iter().map(|a| self.v(a)).collect::<PyResult<_>>()?;
         Ok(self.call_raw(f.fnty, f.raw, &mut raw, &f.ret))
@@ -1127,8 +1419,9 @@ impl Builder {
     }
 
     /// A float intrinsic, overloaded on the operands' type.
-    fn intrinsic(&self, which: Intrinsic, args: Vec<Value>) -> PyResult<Value> {
+    fn intrinsic(&self, which: Intrinsic, args: Vec<Operand>) -> PyResult<Value> {
         self.open()?;
+        let args = self.many(which.name(), args)?;
         if args.len() != which.arity() {
             return err(format!("{} takes {} arguments", which.name(), which.arity()));
         }
@@ -1172,8 +1465,9 @@ impl Builder {
         Ok(self.call_raw(fnty, f, &mut raw, &ret))
     }
 
-    fn libm(&self, which: Libm, args: Vec<Value>) -> PyResult<Value> {
+    fn libm(&self, which: Libm, args: Vec<Operand>) -> PyResult<Value> {
         self.open()?;
+        let args = self.many(which.c_name(), args)?;
         if args.len() != which.arity() {
             return err(format!("{} takes {} arguments", which.c_name(), which.arity()));
         }
@@ -1252,8 +1546,9 @@ impl Builder {
 
     /// A new buffer of `nbytes` (i64), 64-byte aligned. Writes the owning reference to
     /// `owner_slot` and returns the data pointer (null on failure, with the error set).
-    fn rt_alloc(&self, ctx: Value, nbytes: Value, owner_slot: Value) -> PyResult<Value> {
+    fn rt_alloc(&self, ctx: Value, nbytes: Operand, owner_slot: Value) -> PyResult<Value> {
         self.open()?;
+        let nbytes = self.i64_of("rt_alloc nbytes", nbytes)?;
         if ctx.ty != Ty::Ptr || nbytes.ty != Ty::Int(64) || owner_slot.ty != Ty::Ptr {
             return err("rt_alloc(ctx: ptr, nbytes: i64, owner_slot: ptr)");
         }
@@ -1266,8 +1561,9 @@ impl Builder {
 
     /// Scratch memory: `nbytes` (i64), 64-byte aligned, valid until the task ends or an
     /// earlier mark is released. Null on failure, with the error set.
-    fn rt_scratch(&self, ctx: Value, nbytes: Value) -> PyResult<Value> {
+    fn rt_scratch(&self, ctx: Value, nbytes: Operand) -> PyResult<Value> {
         self.open()?;
+        let nbytes = self.i64_of("rt_scratch nbytes", nbytes)?;
         if ctx.ty != Ty::Ptr || nbytes.ty != Ty::Int(64) {
             return err("rt_scratch(ctx: ptr, nbytes: i64)");
         }
@@ -1315,9 +1611,16 @@ impl Builder {
 
     /// Return from the function. Ends the current block.
     #[pyo3(signature = (value = None))]
-    fn ret(&self, value: Option<Value>) -> PyResult<()> {
+    fn ret(&self, value: Option<Operand>) -> PyResult<()> {
         self.open()?;
-        match (value, &*self.ret.borrow()) {
+        let ret_ty = self.ret.borrow().clone();
+        let value = match value {
+            Some(x) if ret_ty != Ty::Void => Some(self.lit("ret", x, &ret_ty)?),
+            Some(Operand::Value(v)) => Some(v),
+            Some(_) => return err("ret of a literal in a function returning void"),
+            None => None,
+        };
+        match (value, &ret_ty) {
             (None, Ty::Void) => {
                 // SAFETY: the function returns void.
                 unsafe { c::LLVMBuildRetVoid(self.b) };
@@ -1333,15 +1636,14 @@ impl Builder {
 
     /// `with b.loop(n) as i:` runs the body for i = 0 .. n-1 (i64).
     #[pyo3(name = "loop")]
-    fn loop_(slf: Py<Self>, py: Python<'_>, n: Value) -> PyResult<Loop> {
-        {
+    fn loop_(slf: Py<Self>, py: Python<'_>, n: Operand) -> PyResult<Loop> {
+        let n = {
             let b = slf.borrow(py);
             b.open()?;
+            let n = b.i64_of("loop count", n)?;
             b.v(&n)?;
-            if n.ty != Ty::Int(64) {
-                return err(format!("loop count of type {}", n.ty));
-            }
-        }
+            n
+        };
         Ok(Loop { b: slf, n, state: None })
     }
 
@@ -1355,17 +1657,20 @@ impl Builder {
     ///
     /// Chunks must not write memory another chunk reads or writes. Captured values must
     /// be scalars or pointers.
-    fn parallel(slf: Py<Self>, py: Python<'_>, ctx: Value, n: Value, grain: Value) -> PyResult<Parallel> {
-        {
+    fn parallel(slf: Py<Self>, py: Python<'_>, ctx: Value, n: Operand, grain: Operand) -> PyResult<Parallel> {
+        let (n, grain) = {
             let b = slf.borrow(py);
             b.open()?;
+            let n = b.i64_of("parallel: n", n)?;
+            let grain = b.i64_of("parallel: grain", grain)?;
             for (what, v, t) in [("ctx", &ctx, Ty::Ptr), ("n", &n, Ty::Int(64)), ("grain", &grain, Ty::Int(64))] {
                 b.v(v)?;
                 if v.ty != t {
                     return err(format!("parallel: {what} must be {t}"));
                 }
             }
-        }
+            (n, grain)
+        };
         Ok(Parallel { b: slf, ctx, n, grain, parent_block: None, start: None, end: None, result: None })
     }
 
@@ -1380,21 +1685,45 @@ impl Builder {
                 return err(format!("if condition of type {}", cond.ty));
             }
         }
-        Ok(If { b: slf, cond, done: None })
+        Ok(If { b: slf, cond, done: None, branch: None })
+    }
+
+    /// `with b.else_():` right after a `with b.if_(cond):` block runs the body if `cond`
+    /// was false.
+    #[pyo3(name = "else_")]
+    fn else_(slf: Py<Self>, py: Python<'_>) -> PyResult<Else> {
+        let done = {
+            let b = slf.borrow(py);
+            b.m.check_open()?;
+            let Some((branch, done)) = b.last_if.take() else {
+                return err("else_ must directly follow a `with b.if_(...)` block");
+            };
+            // SAFETY: `done` is a live block of this function, `branch` the conditional
+            // branch of the if that ended in it.
+            let fresh = unsafe { b.block() == done && c::LLVMGetFirstInstruction(done).is_null() };
+            if !fresh {
+                return err("else_ must directly follow a `with b.if_(...)` block");
+            }
+            let other = b.new_block(c"else");
+            // SAFETY: successor 1 of a conditional branch is its false target.
+            unsafe { c::LLVMSetSuccessor(branch, 1, other) };
+            b.position(other);
+            done
+        };
+        Ok(Else { b: slf, done: Some(done) })
     }
 
     /// Loop with carried values: `acc = init; for i in 0..n: acc = body(i, *acc)`;
-    /// returns the final values. `body` returns a list of values of the init types.
+    /// returns the final values (a list). `body` returns the new values: a sequence of
+    /// the init types, or the value itself if there is one.
     ///
     /// With `until=True` the body returns one more value, an i1 stop flag; the loop
     /// ends after the first step that sets it, and the flag is returned last (false
     /// when no step ran).
     #[pyo3(signature = (n, init, body, until=false))]
-    fn fold(&self, py: Python<'_>, n: Value, init: Vec<Value>, body: Py<PyAny>, until: bool) -> PyResult<Vec<Value>> {
+    fn fold(&self, py: Python<'_>, n: Operand, init: Vec<Value>, body: Py<PyAny>, until: bool) -> PyResult<Vec<Value>> {
         self.open()?;
-        if n.ty != Ty::Int(64) {
-            return err(format!("fold count of type {}", n.ty));
-        }
+        let n = self.i64_of("fold count", n)?;
         let nr = self.v(&n)?;
         let tys: Vec<Ty> = init.iter().map(|v| v.ty.clone()).collect();
         let init_raw: Vec<LLVMValueRef> = init.iter().map(|v| self.v(v)).collect::<PyResult<_>>()?;
@@ -1420,7 +1749,7 @@ impl Builder {
         *self.depth.borrow_mut() += 1;
         let res = body.call1(py, PyTuple::new(py, args)?);
         *self.depth.borrow_mut() -= 1;
-        let mut new: Vec<Value> = res?.extract(py)?;
+        let mut new: Vec<Value> = values_of(py, res?)?;
         let stop = if until {
             match new.pop() {
                 Some(f) if f.ty.is_bool() => Some(self.v(&f)?),
@@ -1468,8 +1797,10 @@ impl Builder {
         Ok(out)
     }
 
-    /// `then()` if `cond` else `else_()`; both return lists of values of the same types,
-    /// which are merged and returned.
+    /// `then()` if `cond` else `else_()`; both return values of the same types (a
+    /// sequence, one value, or None for none), which are merged and returned as a list.
+    /// For branches without values, `with b.if_(cond): ...` and `with b.else_(): ...`
+    /// read better.
     fn if_else(&self, py: Python<'_>, cond: Value, then: Py<PyAny>, else_: Py<PyAny>) -> PyResult<Vec<Value>> {
         self.open()?;
         if !cond.ty.is_bool() {
@@ -1485,7 +1816,7 @@ impl Builder {
             *self.depth.borrow_mut() += 1;
             let r = f.call0(py);
             *self.depth.borrow_mut() -= 1;
-            let vals: Vec<Value> = r?.extract(py)?;
+            let vals: Vec<Value> = values_of(py, r?)?;
             for v in &vals {
                 self.v(v)?;
             }
@@ -1706,6 +2037,40 @@ pub struct If {
     b: Py<Builder>,
     cond: Value,
     done: Option<LLVMBasicBlockRef>,
+    /// the conditional branch into the body
+    branch: Option<LLVMValueRef>,
+}
+
+/// `with b.else_():`
+#[pyclass(module = "pytensor_llvm.ir", unsendable)]
+pub struct Else {
+    b: Py<Builder>,
+    done: Option<LLVMBasicBlockRef>,
+}
+
+#[pymethods]
+impl Else {
+    fn __enter__(&mut self, py: Python<'_>) -> PyResult<()> {
+        if self.done.is_none() {
+            return err("an else can be entered once");
+        }
+        *self.b.borrow(py).depth.borrow_mut() += 1;
+        Ok(())
+    }
+
+    fn __exit__(&mut self, py: Python<'_>, exc_type: Option<Py<PyAny>>, _v: Option<Py<PyAny>>, _tb: Option<Py<PyAny>>) -> PyResult<bool> {
+        let b = self.b.borrow(py);
+        *b.depth.borrow_mut() -= 1;
+        let Some(done) = self.done.take() else {
+            return Ok(false);
+        };
+        if exc_type.is_some() {
+            return Ok(false);
+        }
+        b.br(done);
+        b.position(done);
+        Ok(false)
+    }
 }
 
 #[pymethods]
@@ -1718,7 +2083,8 @@ impl If {
         b.open()?;
         let then = b.new_block(c"then");
         let done = b.new_block(c"endif");
-        b.cond_br(b.v(&self.cond)?, then, done);
+        // SAFETY: `cond` is an i1 of this function; the blocks belong to it.
+        self.branch = Some(unsafe { c::LLVMBuildCondBr(b.b, b.v(&self.cond)?, then, done) });
         b.position(then);
         self.done = Some(done);
         *b.depth.borrow_mut() += 1;
@@ -1736,6 +2102,7 @@ impl If {
         }
         b.br(done);
         b.position(done);
+        b.last_if.set(self.branch.take().map(|br| (br, done)));
         Ok(false)
     }
 }
