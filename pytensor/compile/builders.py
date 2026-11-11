@@ -250,6 +250,7 @@ class OpFromGraph(HasInnerFunction, Op):
         name: str | None = None,
         destroy_map: dict[int, tuple[int, ...]] | None = None,
         fgraph: FunctionGraph | FrozenFunctionGraph | None = None,
+        view_map: dict[int, tuple[int, ...]] | None = None,
         **kwargs,
     ):
         """
@@ -415,6 +416,7 @@ class OpFromGraph(HasInnerFunction, Op):
             assert isinstance(name, str), "name must be None or string object"
         self.name = name
         self.destroy_map = destroy_map if destroy_map is not None else {}
+        self.view_map = view_map if view_map is not None else {}
 
         self._frozen_lop = None
         self._frozen_rop = None
@@ -511,6 +513,7 @@ class OpFromGraph(HasInnerFunction, Op):
             or self.is_inline != other.is_inline
             or getattr(self, "execution", None) != getattr(other, "execution", None)
             or self.destroy_map != other.destroy_map
+            or self.view_map != other.view_map
         ):
             return False
         # Identical override objects (e.g. a clone from ``clone_with_inner_graph``)
