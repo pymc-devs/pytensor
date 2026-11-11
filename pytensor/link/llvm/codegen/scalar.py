@@ -290,6 +290,7 @@ def _rust_op(name):
 register(psm.GammaLn)(_rust_op("GammaLn"))
 register(psm.Gamma)(_rust_op("Gamma"))
 register(psm.Psi)(_rust_op("Psi"))
+register(psm.Erfcx)(_rust_op("Erfcx"))
 
 
 @register(psm.Sigmoid)

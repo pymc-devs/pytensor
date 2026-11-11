@@ -151,11 +151,22 @@ def test_elemwise_float_ops(dtype):
         pt.softplus(x - 1),
         pt.gammaln(x),
         pt.erf(x - 1),
+        pt.erfcx(4 * x - 3),
         pt.switch(x > y, x, y),
         x // y,
         x % y,
     ]:
         check(e, [x, y], [xv, yv], **tol)
+
+
+def test_erfcx():
+    """Both sides of the switch to the asymptotic series at 12, overflow and the
+    special values. (scipy, the reference, is itself off by up to 6e-14 for large
+    negative x.)"""
+    x = pt.vector("x")
+    special = [11.9999999, 12.0, 1e300, -27.0, np.inf, -np.inf, np.nan]
+    values = np.concatenate([np.linspace(-26.5, 40, 1001), special])
+    check(pt.erfcx(x), [x], [values], rtol=1e-13, atol=0)
 
 
 @pytest.mark.parametrize(

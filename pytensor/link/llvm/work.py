@@ -117,7 +117,7 @@ _set(
 )
 _set(25, psm.Softplus, psm.Log1mexp, ps.ArcSin, ps.ArcCos, ps.ArcTan)
 _set(30, ps.Pow, ps.ArcTan2, ps.ArcSinh, ps.ArcCosh, ps.ArcTanh)
-_set(60, psm.Gamma, psm.GammaLn, psm.Psi)
+_set(60, psm.Gamma, psm.GammaLn, psm.Psi, psm.Erfcx)
 
 
 @singledispatch

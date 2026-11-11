@@ -313,9 +313,10 @@ impl<T: Float> Kernel for Cholesky<T> {
         if !self.lower {
             (source, factor) = (source.transpose(), factor.transpose_mut());
         }
+        // (all of it: faer's small-matrix code reads whole rows, the output may be fresh)
         for j in 0..n {
-            for i in j..n {
-                factor[(i, j)] = source[(i, j)];
+            for i in 0..n {
+                factor[(i, j)] = if i >= j { source[(i, j)] } else { T::ZERO };
             }
         }
         let work = cholesky_in_place_scratch::<T>(n, Par::Seq, Default::default());
@@ -925,7 +926,12 @@ impl<T: Float> Kernel for Eigh<T> {
         } else {
             evd::ComputeEigenvectors::No
         };
-        let req = evd::self_adjoint_evd_scratch::<T>(n, compute, Par::Seq, Default::default());
+        // (the scratch of an empty matrix underflows in faer)
+        let req = if n == 0 {
+            StackReq::EMPTY
+        } else {
+            evd::self_adjoint_evd_scratch::<T>(n, compute, Par::Seq, Default::default())
+        };
         let result = if self.vectors {
             let [w, v] = args.outputs.slots([0, 1])?;
             let mut w = w.array::<T>(ctx, self.modes[0], &[n as i64])?;
@@ -1237,3 +1243,6 @@ impl<T: Float> Kernel for MatrixPinv<T> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
