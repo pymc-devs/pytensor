@@ -23,7 +23,13 @@ as a condition (`if x < y:`) raises; that decision belongs to the generated code
 from __future__ import annotations
 
 from pytensor.link.llvm.codegen.emit import cast, constant
-from pytensor.link.llvm.codegen.types import check_dtype, ir, is_float, is_signed
+from pytensor.link.llvm.codegen.types import (
+    check_dtype,
+    ir,
+    is_float,
+    is_signed,
+    value_type,
+)
 
 
 class Num:
@@ -56,8 +62,8 @@ class Num:
         c = self.value.const_int
         if c is not None and self.dtype == "bool":
             return bool(c)
-        if c is not None and self.dtype == "uint8":
-            return c % 256
+        if c is not None and self.dtype.startswith("uint"):
+            return c % 2 ** value_type(self.dtype).bits
         return c
 
     # ------------------------------------------------------------ plumbing

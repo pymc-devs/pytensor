@@ -88,6 +88,19 @@ pub unsafe fn read_scalar(p: *const u8, dt: DType) -> (f64, i64) {
                 let v = *p as i64;
                 (v as f64, v)
             }
+            DType::Uint16 => {
+                let v = *(p as *const u16) as i64;
+                (v as f64, v)
+            }
+            DType::Uint32 => {
+                let v = *(p as *const u32) as i64;
+                (v as f64, v)
+            }
+            DType::Uint64 => {
+                // the i64 wraps above i64::MAX
+                let v = *(p as *const u64);
+                (v as f64, v as i64)
+            }
         }
     }
 }

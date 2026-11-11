@@ -37,7 +37,19 @@ class PtArray(ctypes.Structure):
 DTYPE_CODES = {
     name: code
     for code, name in enumerate(
-        ["float64", "float32", "int64", "int32", "int16", "int8", "uint8", "bool"]
+        [
+            "float64",
+            "float32",
+            "int64",
+            "int32",
+            "int16",
+            "int8",
+            "uint8",
+            "bool",
+            "uint16",
+            "uint32",
+            "uint64",
+        ]
     )
 }
 

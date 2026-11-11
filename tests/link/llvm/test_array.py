@@ -47,7 +47,7 @@ def test_load_and_store_follow_the_strides():
     np.testing.assert_array_equal(out, 2 * x.T)
 
 
-@pytest.mark.parametrize("dtype", ["float32", "int16", "uint8", "bool"])
+@pytest.mark.parametrize("dtype", ["float32", "int16", "uint8", "uint32", "bool"])
 def test_elements_are_nums_of_the_dtype(dtype):
     x = (np.arange(1, 6) * 50).astype(dtype)
     out = np.zeros(5, dtype=dtype)

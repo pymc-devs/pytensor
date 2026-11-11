@@ -48,6 +48,9 @@ enum {
     PT_INT8 = 5,
     PT_UINT8 = 6,
     PT_BOOL = 7, /* one byte, 0 or 1 */
+    PT_UINT16 = 8,
+    PT_UINT32 = 9,
+    PT_UINT64 = 10,
 };
 
 typedef struct PtBuffer PtBuffer;       /* refcounted memory owned by the runtime */

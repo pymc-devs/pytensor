@@ -21,6 +21,9 @@ CTYPES = {
     "int16": ctypes.c_int16,
     "int8": ctypes.c_int8,
     "uint8": ctypes.c_uint8,
+    "uint16": ctypes.c_uint16,
+    "uint32": ctypes.c_uint32,
+    "uint64": ctypes.c_uint64,
     "bool": ctypes.c_bool,
 }
 
@@ -224,5 +227,6 @@ def test_constants_stay_constants():
     assert (n < 7).const_value is True and (n < 7).select(n, 0).const_value == 6
     assert (
         Num.const(b, "uint8", 255).const_value == 255
+        and Num.const(b, "uint64", 2**64 - 1).const_value == 2**64 - 1
         and Num.const(b, "float64", 0.5).const_value == 0.5
     )

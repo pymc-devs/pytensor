@@ -9,14 +9,17 @@ pub enum DType {
     Int8,
     Uint8,
     Bool,
+    Uint16,
+    Uint32,
+    Uint64,
 }
 
 impl DType {
     pub fn itemsize(self) -> usize {
         match self {
-            DType::Float64 | DType::Int64 => 8,
-            DType::Float32 | DType::Int32 => 4,
-            DType::Int16 => 2,
+            DType::Float64 | DType::Int64 | DType::Uint64 => 8,
+            DType::Float32 | DType::Int32 | DType::Uint32 => 4,
+            DType::Int16 | DType::Uint16 => 2,
             DType::Int8 | DType::Uint8 | DType::Bool => 1,
         }
     }
@@ -55,6 +58,9 @@ impl DType {
             5 => DType::Int8,
             6 => DType::Uint8,
             7 => DType::Bool,
+            8 => DType::Uint16,
+            9 => DType::Uint32,
+            10 => DType::Uint64,
             _ => return None,
         })
     }
@@ -69,6 +75,9 @@ impl DType {
             DType::Int8 => "int8",
             DType::Uint8 => "uint8",
             DType::Bool => "bool",
+            DType::Uint16 => "uint16",
+            DType::Uint32 => "uint32",
+            DType::Uint64 => "uint64",
         }
     }
 
@@ -81,6 +90,9 @@ impl DType {
             (b'i', 2) => DType::Int16,
             (b'i', 1) => DType::Int8,
             (b'u', 1) => DType::Uint8,
+            (b'u', 2) => DType::Uint16,
+            (b'u', 4) => DType::Uint32,
+            (b'u', 8) => DType::Uint64,
             (b'b', 1) => DType::Bool,
             _ => return None,
         })
@@ -93,10 +105,10 @@ mod tests {
 
     #[test]
     fn codes_round_trip() {
-        for code in 0..8 {
+        for code in 0..11 {
             assert_eq!(DType::from_code(code).unwrap().code(), code);
         }
-        assert!(DType::from_code(8).is_none());
+        assert!(DType::from_code(11).is_none());
         assert!(DType::from_code(-1).is_none());
     }
 }

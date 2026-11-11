@@ -2969,6 +2969,7 @@ compile.optdb.register(
     dfs_rewriter(local_uint_constant_indices),
     # We don't include in the Python / C because those always cast indices to int64 internally.
     "numba",
+    "llvm",
     "jax",
     # After specialization and uncanonicalization
     # Other rewrites don't worry about the dtype of the indices
@@ -3194,6 +3195,7 @@ optdb["specialize"].register(
     bool_idx_to_nonzero.__name__,
     bool_idx_to_nonzero,
     "numba",
+    "llvm",
     "shape_unsafe",  # It can mask invalid mask sizes
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )

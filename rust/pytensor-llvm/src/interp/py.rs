@@ -39,6 +39,9 @@ fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
         DType::Int8 => numpy::dtype::<i8>(py),
         DType::Uint8 => numpy::dtype::<u8>(py),
         DType::Bool => numpy::dtype::<bool>(py),
+        DType::Uint16 => numpy::dtype::<u16>(py),
+        DType::Uint32 => numpy::dtype::<u32>(py),
+        DType::Uint64 => numpy::dtype::<u64>(py),
     }
 }
 

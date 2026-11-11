@@ -37,6 +37,9 @@ SUPPORTED_DTYPES = (
     "int8",
     "uint8",
     "bool",
+    "uint16",
+    "uint32",
+    "uint64",
 )
 
 
@@ -62,6 +65,9 @@ def value_type(dtype: str):
         "int16": ir.i16,
         "int8": ir.i8,
         "uint8": ir.i8,
+        "uint16": ir.i16,
+        "uint32": ir.i32,
+        "uint64": ir.i64,
         "bool": ir.i1,
     }[check_dtype(dtype)]
 

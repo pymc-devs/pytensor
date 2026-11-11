@@ -139,7 +139,7 @@ def int_pow(b, x, e, dtype):
     """x**e by squaring (wrapping like numpy). A negative e gives 1 for x == 1,
     +-1 for x == -1 and 0 otherwise, as an integer truncation of the real power."""
     one, zero = constant(b, dtype, 1), constant(b, dtype, 0)
-    bits = int(dtype.lstrip("uint") or 8) if dtype not in ("int8", "uint8") else 8
+    bits = value_type(dtype).bits
 
     def step(_i, acc, base, k):
         odd = b.ne(b.and_(k, one), zero)
