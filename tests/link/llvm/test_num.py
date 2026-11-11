@@ -161,6 +161,28 @@ def test_astype(src, dst):
     check(src, lambda x, y: x.astype(dst), lambda x, y: x, out=dst, skip=skip)
 
 
+@pytest.mark.parametrize("src", ["float64", "float32"])
+@pytest.mark.parametrize("dst", INTS)
+def test_float_to_int_saturates(src, dst):
+    info = np.iinfo(dst)
+    cf = compile_binary(src, lambda x, y: x.astype(dst), out=dst)
+    values = [0.0, -0.5, 0.9, -1.0, 127.9, 200.5, 300.0, -300.0, 4e4, -4e4, 3e9, -3e9]
+    values += [1e30, -1e30, np.inf, -np.inf, np.nan, info.min, info.max]
+    for v in values:
+        x = np.dtype(src).type(v).item()
+        # out of range (or infinite) saturates, NaN gives 0, the rest truncates
+        want = (
+            0
+            if np.isnan(x)
+            else info.max
+            if x == np.inf
+            else info.min
+            if x == -np.inf
+            else int(x)
+        )
+        assert cf(x, x) == min(max(want, info.min), info.max), (src, dst, x)
+
+
 def test_mistakes_raise():
     m = ir.Module("num")
     f = m.function("f", [ir.i64, ir.f64, ir.i32], ir.i64)

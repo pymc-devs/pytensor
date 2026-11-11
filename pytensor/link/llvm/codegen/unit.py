@@ -135,7 +135,7 @@ def build_unit_function(
             out = SlotOutput(cg, target.slot, t.dtype, t.ndim)
             copy(cg, src, out.allocate(src.shape))
     release(cg, owned)
-    b.ret(b.i32(0))
+    b.ret(0)
     return NodeFunction(fn, sig, links)
 
 
@@ -300,9 +300,7 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                     lay = (
                         o.layout if o.layout.fully_packed(o.repr.shape) else None
                     )  # (C implies any)
-                    a = cg.temporary(
-                        var.type.dtype, [b.i64(s) for s in var.type.shape], lay
-                    )
+                    a = cg.temporary(var.type.dtype, list(var.type.shape), lay)
                 vals[vid] = a
                 args.append(pack(b, o.repr, a))
             elif o.mode is OutputMode.SCALAR:
@@ -321,7 +319,7 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                 args.append(slot)
                 reads.append((vid, slot, "array", o))
         rc = b.call(nf.function, args)
-        failed = b.ne(rc, b.i32(0))
+        failed = b.ne(rc, 0)
         with b.if_(failed):
             release(cg, owned)
             if on_fail is not None:

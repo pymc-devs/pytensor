@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import operator
 
-from pytensor.link.llvm.codegen.emit import Array, cast, constant, load, set_output
+from pytensor.link.llvm.codegen.emit import Array, constant, set_output
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.layout import split_layouts
@@ -47,18 +47,16 @@ def _(op, node, cg, inputs, outputs):
     a1, a2 = op.axis1 % x.ndim, op.axis2 % x.ndim
     off = int(op.offset)
     n1, n2 = x.shape[a1], x.shape[a2]
-    zero = b.i64(0)
     # length = max(0, min(n1 - max(0, -off), n2 - max(0, off)))
-    l1 = b.sub(n1, b.i64(max(0, -off)))
-    l2 = b.sub(n2, b.i64(max(0, off)))
-    length = b.select(b.slt(l1, l2), l1, l2)
-    length = b.select(b.sgt(length, zero), length, zero)
+    l1 = b.sub(n1, max(0, -off))
+    l2 = b.sub(n2, max(0, off))
+    length = b.smax(b.smin(l1, l2), 0)
     start = (
-        b.mul(b.i64(off), x.strides[a2], nsw=True)
+        b.mul(x.strides[a2], off, nsw=True)
         if off >= 0
-        else b.mul(b.i64(-off), x.strides[a1], nsw=True)
+        else b.mul(x.strides[a1], -off, nsw=True)
     )
-    start = b.select(b.sgt(length, zero), start, zero)
+    start = b.select(b.sgt(length, 0), start, 0)
     shape = [x.shape[a] for a in range(x.ndim) if a not in (a1, a2)] + [length]
     strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [
         b.add(x.strides[a1], x.strides[a2])
@@ -79,13 +77,12 @@ def _(op, node, cg, inputs, outputs):
     offset = b.i64(0)
     parts = []
     for k in range(op.len_splits):
-        p = b.gep_bytes(splits.data, b.mul(b.i64(k), splits.strides[0], nsw=True))
-        n = cast(b, load(b, splits.dtype, p), splits.dtype, "int64")
-        cg.check(b.sge(n, b.i64(0)), "Split: negative split size")
+        n = splits.load(b, k).astype("int64").value
+        cg.check(b.sge(n, 0), "Split: negative split size")
         static = node.outputs[k].type.shape[axis]
         if static is not None:
             cg.check(
-                b.eq(n, b.i64(static)),
+                b.eq(n, static),
                 "Split: split size differs from the static shape",
             )
             n = b.i64(static)
@@ -100,7 +97,7 @@ def _(op, node, cg, inputs, outputs):
         shape = list(x.shape)
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
-        start = b.select(b.sgt(n, b.i64(0)), start, b.i64(0))
+        start = b.select(b.sgt(n, 0), start, 0)
         set_output(
             cg,
             out,

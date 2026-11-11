@@ -71,7 +71,9 @@ def _register():
     def integers(b, cg, u, p):
         low, high = p
         span = b.sitofp(b.sub(high, low), ir.f64)
-        k = b.fptosi(b.intrinsic(ir.Intrinsic.Floor, [b.fmul(u, span)]), ir.i64)
+        k = cast(
+            b, b.intrinsic(ir.Intrinsic.Floor, [b.fmul(u, span)]), "float64", "int64"
+        )
         return b.add(low, k)
 
     def gamma(b, cg, _, p):
@@ -237,7 +239,7 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
     base = None
     if spec.base is not None:
         n = size(b, shape)
-        buf = cg.temp_memory(b.mul(n, b.i64(itemsize("float64")), nsw=True))
+        buf = cg.temp_memory(b.mul(n, itemsize("float64"), nsw=True))
         b.rng(
             ir.Rng.FillNormal if spec.base == "normal" else ir.Rng.FillUniform,
             cg.ctx,
@@ -269,14 +271,12 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
 def _ok(b, check, v):
     kind, bound, _ = check
     if kind == "unit":
-        ge = b.fcmp(ir.FCmp.OGE, v, b.f64(0.0))
-        le = b.fcmp(ir.FCmp.OLE, v, b.f64(1.0))
+        ge = b.fcmp(ir.FCmp.OGE, v, 0.0)
+        le = b.fcmp(ir.FCmp.OLE, v, 1.0)
         return b.and_(ge, le)
     if v.type == ir.i64:
-        c = b.i64(int(bound))
-        return b.icmp(ir.ICmp.SGE if kind == "ge" else ir.ICmp.SGT, v, c)
-    c = b.f64(float(bound))
-    return b.fcmp(ir.FCmp.OGE if kind == "ge" else ir.FCmp.OGT, v, c)
+        return b.icmp(ir.ICmp.SGE if kind == "ge" else ir.ICmp.SGT, v, int(bound))
+    return b.fcmp(ir.FCmp.OGE if kind == "ge" else ir.FCmp.OGT, v, float(bound))
 
 
 _register()
