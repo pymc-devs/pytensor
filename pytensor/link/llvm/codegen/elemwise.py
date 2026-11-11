@@ -19,7 +19,6 @@ from pytensor.link.llvm.codegen.emit import (
     is_contiguous,
     load,
     memory_type,
-    mul,
     size,
     store,
 )
@@ -41,11 +40,11 @@ def output_array(out, shape):
 def broadcast_shape(cg, node, inputs):
     """The loop shape of an Elemwise. Broadcasting follows the static types (PyTensor
     doesn't broadcast at run time): non-broadcastable lengths must agree."""
-    b, m = cg.b, ir()
+    b = cg.b
     out_shape = node.outputs[0].type.shape
     shape = []
     for a, static in enumerate(out_shape):
-        length = b.const_int(m.i64, static) if static is not None else None
+        length = b.i64(static) if static is not None else None
         for k, (var, x) in enumerate(zip(node.inputs, inputs, strict=True)):
             if var.type.shape[a] == 1:
                 continue
@@ -54,10 +53,10 @@ def broadcast_shape(cg, node, inputs):
                 length = ln
             elif not (length.const_int is not None and length.const_int == ln.const_int):
                 cg.check(
-                    b.icmp(m.ICmp.EQ, length, ln),
+                    b.eq(length, ln),
                     f"Elemwise: shape mismatch: input {k} has a different length on axis {a}",
                 )
-        shape.append(length if length is not None else b.const_int(m.i64, 1))
+        shape.append(length if length is not None else b.i64(1))
     return shape
 
 
@@ -77,7 +76,7 @@ def _(op, node, in_layouts):
 
 @llvm_emit.register(Elemwise)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     shape = broadcast_shape(cg, node, inputs)
     outs = [output_array(o, shape) for o in outputs]
     in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
@@ -137,7 +136,7 @@ def identity_value(scalar_op, ident, acc_dtype):
 
 @llvm_emit.register(CAReduce)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     (x,) = inputs
     (out,) = outputs
     nd = x.ndim
@@ -153,8 +152,8 @@ def _(op, node, cg, inputs, outputs):
     out_shape = [x.shape[a] for a in range(nd) if not reduced[a]]
     if isinstance(op.scalar_op, NO_EMPTY_REDUCTION):
         # like numpy: maximum/minimum have no identity for empty reductions
-        empty = b.icmp(m.ICmp.EQ, size(b, [x.shape[a] for a in axes]), b.const_int(m.i64, 0))
-        some_out = b.icmp(m.ICmp.NE, size(b, out_shape), b.const_int(m.i64, 0))
+        empty = b.eq(size(b, [x.shape[a] for a in axes]), b.i64(0))
+        some_out = b.ne(size(b, out_shape), b.i64(0))
         cg.check(b.xor(b.and_(empty, some_out), b.const_bool(True)), "zero-size array to reduction operation which has no identity")
     res = output_array(out, out_shape)
 
@@ -170,7 +169,7 @@ def _(op, node, cg, inputs, outputs):
     acc_strides, k = [], 0
     for r in reduced:
         if r:
-            acc_strides.append(b.const_int(m.i64, 0))
+            acc_strides.append(b.i64(0))
         else:
             acc_strides.append(acc_arr.strides[k])
             k += 1
@@ -202,7 +201,6 @@ def _(op, node, cg, inputs, outputs):
 def reduce_row(b, x: Array, axis, row, init, combine):
     """Combine the elements along `axis` of `x`, starting at `row`, into `init`. A unit
     stride gets its own loop: the vectorizer would otherwise use gathers."""
-    m = ir()
     n, st = x.shape[axis], x.strides[axis]
     et = memory_type(x.dtype)
 
@@ -212,17 +210,16 @@ def reduce_row(b, x: Array, axis, row, init, combine):
     def strided():
         return b.fold(n, [init], lambda i, a: [combine(a, load(b, x.dtype, advance(b, row, i, st, x.dtype)))])
 
-    isz = b.const_int(m.i64, np.dtype(x.dtype).itemsize)
+    isz = b.i64(np.dtype(x.dtype).itemsize)
     if st.const_int is not None:
         return (unit() if st.const_int == isz.const_int else strided())[0]
-    return b.if_else(b.icmp(m.ICmp.EQ, st, isz), unit, strided)[0]
+    return b.if_else(b.eq(st, isz), unit, strided)[0]
 
 
 def reduce_all(b, x: Array, init, combine):
     """Combine all elements of `x` into one value: a flat loop if `x` is contiguous in
     any axis order (the order doesn't matter here), a nest of folds otherwise (both,
     chosen at run time, when the layout doesn't settle it)."""
-    m = ir()
 
     def flat():
         (r,) = b.fold(size(b, x.shape), [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep(memory_type(x.dtype), x.data, i)))])

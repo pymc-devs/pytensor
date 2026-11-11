@@ -98,34 +98,31 @@ def _(b, args, out):
 
 def _floor_adjust(b, r, y):
     """For a C-style remainder r of a division by y: does floor rounding differ?"""
-    m = ir()
     z = b.const_int(r.type, 0)
-    rnz = b.icmp(m.ICmp.NE, r, z)
-    differ = b.xor(b.icmp(m.ICmp.SLT, r, z), b.icmp(m.ICmp.SLT, y, z))
+    rnz = b.ne(r, z)
+    differ = b.xor(b.slt(r, z), b.slt(y, z))
     return b.and_(rnz, differ)
 
 
 def _safe_divisor(b, y):
     """(y with 0 replaced by 1, is-zero flag): integer division by zero is undefined."""
-    m = ir()
     z = b.const_int(y.type, 0)
-    yz = b.icmp(m.ICmp.EQ, y, z)
+    yz = b.eq(y, z)
     return b.select(yz, b.const_int(y.type, 1), y), yz
 
 
 @register(ps.IntDiv)
 def _(b, args, out):
     """Python floor division; x // 0 == 0 for integers, like numpy."""
-    m = ir()
     x, y = conv(b, args, 0, out), conv(b, args, 1, out)
     if is_float(out):
-        return b.intrinsic(m.Intrinsic.Floor, [b.fdiv(x, y)])
+        return b.intrinsic(ir.Intrinsic.Floor, [b.fdiv(x, y)])
     y1, yz = _safe_divisor(b, y)
     zero = b.const_int(x.type, 0)
     if not is_signed(out):
         return b.select(yz, zero, b.udiv(x, y1))
     # x // -1 is -x; computing it as a division would overflow for MIN (numpy wraps)
-    minus1 = b.icmp(m.ICmp.EQ, y1, b.const_int(x.type, -1))
+    minus1 = b.eq(y1, b.const_int(x.type, -1))
     y1 = b.select(minus1, b.const_int(x.type, 1), y1)
     q = b.sdiv(x, y1)
     r = b.srem(x, y1)
@@ -137,17 +134,16 @@ def _(b, args, out):
 @register(ps.Mod)
 def _(b, args, out):
     """Python modulo (sign of the divisor); x % 0 == 0 for integers, like numpy."""
-    m = ir()
     x, y = conv(b, args, 0, out), conv(b, args, 1, out)
     if is_float(out):
-        q = b.intrinsic(m.Intrinsic.Floor, [b.fdiv(x, y)])
+        q = b.intrinsic(ir.Intrinsic.Floor, [b.fdiv(x, y)])
         return b.fsub(x, b.fmul(q, y))
     y1, yz = _safe_divisor(b, y)
     zero = b.const_int(x.type, 0)
     if not is_signed(out):
         return b.select(yz, zero, b.urem(x, y1))
     # x % -1 == 0 (and MIN % -1 would overflow)
-    minus1 = b.icmp(m.ICmp.EQ, y1, b.const_int(x.type, -1))
+    minus1 = b.eq(y1, b.const_int(x.type, -1))
     y1 = b.select(minus1, b.const_int(x.type, 1), y1)
     r = b.srem(x, y1)
     r = b.select(_floor_adjust(b, r, y1), b.add(r, y1), r)
@@ -166,41 +162,39 @@ def _(b, args, out):
 def int_pow(b, x, e, dtype):
     """x**e by squaring (wrapping like numpy). A negative e gives 1 for x == 1,
     +-1 for x == -1 and 0 otherwise, as an integer truncation of the real power."""
-    m = ir()
     one, zero = constant(b, dtype, 1), constant(b, dtype, 0)
     bits = int(dtype.lstrip("uint") or 8) if dtype not in ("int8", "uint8") else 8
 
     def step(_i, acc, base, k):
-        odd = b.icmp(m.ICmp.NE, b.and_(k, one), zero)
+        odd = b.ne(b.and_(k, one), zero)
         k2 = b.lshr(k, one)
-        return [b.select(odd, b.mul(acc, base), acc), b.mul(base, base), k2, b.icmp(m.ICmp.EQ, k2, zero)]
+        return [b.select(odd, b.mul(acc, base), acc), b.mul(base, base), k2, b.eq(k2, zero)]
 
     acc, _, _, _ = b.fold(constant(b, "int64", bits), [one, x, e], step, until=True)
     if not is_signed(dtype):
         return acc
-    neg = b.icmp(m.ICmp.SLT, e, zero)
+    neg = b.slt(e, zero)
     minus_one = constant(b, dtype, -1)
-    odd_e = b.icmp(m.ICmp.NE, b.and_(e, one), zero)
+    odd_e = b.ne(b.and_(e, one), zero)
     at_neg = b.select(
-        b.icmp(m.ICmp.EQ, x, one),
+        b.eq(x, one),
         one,
-        b.select(b.icmp(m.ICmp.EQ, x, minus_one), b.select(odd_e, minus_one, one), zero),
+        b.select(b.eq(x, minus_one), b.select(odd_e, minus_one, one), zero),
     )
     return b.select(neg, at_neg, acc)
 
 
 def ir_intrinsic(b, name, *xs):
-    return b.intrinsic(getattr(ir().Intrinsic, name), list(xs))
+    return b.intrinsic(getattr(ir.Intrinsic, name), list(xs))
 
 
 def maxmin(b, is_max, x, y, dtype):
     """NaN-propagating for floats, like numpy.maximum / numpy.minimum."""
-    m = ir()
     if is_float(dtype):
         return ir_intrinsic(b, "Maximum" if is_max else "Minimum", x, y)
     if dtype == "bool":
         return b.or_(x, y) if is_max else b.and_(x, y)
-    pred = (m.ICmp.SGT if is_max else m.ICmp.SLT) if is_signed(dtype) else (m.ICmp.UGT if is_max else m.ICmp.ULT)
+    pred = (ir.ICmp.SGT if is_max else ir.ICmp.SLT) if is_signed(dtype) else (ir.ICmp.UGT if is_max else ir.ICmp.ULT)
     return b.select(b.icmp(pred, x, y), x, y)
 
 
@@ -228,26 +222,24 @@ def _(b, args, out):
 
 @register(ps.Abs)
 def _(b, args, out):
-    m = ir()
     x = conv(b, args, 0, out)
     if is_float(out):
         return ir_intrinsic(b, "Fabs", x)
     if is_signed(out):
-        return b.select(b.icmp(m.ICmp.SLT, x, b.const_int(x.type, 0)), b.neg(x), x)
+        return b.select(b.slt(x, b.const_int(x.type, 0)), b.neg(x), x)
     return x
 
 
 @register(ps.Sign)
 def _(b, args, out):
-    m = ir()
     x = conv(b, args, 0, out)
     zero, one = constant(b, out, 0), constant(b, out, 1)
     if is_float(out):
-        pos, neg = b.fcmp(m.FCmp.OGT, x, zero), b.fcmp(m.FCmp.OLT, x, zero)
+        pos, neg = b.fcmp(ir.FCmp.OGT, x, zero), b.fcmp(ir.FCmp.OLT, x, zero)
         minus = b.fneg(one)
     else:
-        pos = b.icmp(m.ICmp.SGT if is_signed(out) else m.ICmp.UGT, x, zero)
-        neg = b.icmp(m.ICmp.SLT, x, zero) if is_signed(out) else b.const_bool(False)
+        pos = b.icmp(ir.ICmp.SGT if is_signed(out) else ir.ICmp.UGT, x, zero)
+        neg = b.slt(x, zero) if is_signed(out) else b.const_bool(False)
         minus = b.neg(one)
     return b.select(pos, one, b.select(neg, minus, x))  # keeps 0 and NaN
 
@@ -296,7 +288,7 @@ for _cls, _name in [
 def _libm_op(name, arity=1):
     def fn(b, args, out):
         require_float(out, name)
-        return b.libm(getattr(ir().Libm, name), [conv(b, args, k, out) for k in range(arity)])
+        return b.libm(getattr(ir.Libm, name), [conv(b, args, k, out) for k in range(arity)])
 
     return fn
 
@@ -324,7 +316,7 @@ register(ps.ArcTan2)(_libm_op("Atan2", 2))
 def _rust_op(name):
     def fn(b, args, out):
         require_float(out, name)
-        return b.rust_math(getattr(ir().RustMath, name), conv(b, args, 0, out))
+        return b.rust_math(getattr(ir.RustMath, name), conv(b, args, 0, out))
 
     return fn
 
@@ -345,27 +337,25 @@ def _(b, args, out):
 @register(psm.Softplus)
 def _(b, args, out):
     """The same branches as pytensor.scalar.math.Softplus."""
-    m = ir()
     require_float(out, "softplus")
     x = conv(b, args, 0, out)
     ex = ir_intrinsic(b, "Exp", x)
-    log1pex = b.libm(m.Libm.Log1p, [ex])
+    log1pex = b.libm(ir.Libm.Log1p, [ex])
     x_plus = b.fadd(x, ir_intrinsic(b, "Exp", b.fneg(x)))
 
     def lt(c):
-        return b.fcmp(m.FCmp.OLT, x, constant(b, out, c))
+        return b.fcmp(ir.FCmp.OLT, x, constant(b, out, c))
 
     return b.select(lt(-37.0), ex, b.select(lt(18.0), log1pex, b.select(lt(33.3), x_plus, x)))
 
 
 @register(psm.Log1mexp)
 def _(b, args, out):
-    m = ir()
     require_float(out, "log1mexp")
     x = conv(b, args, 0, out)
-    small = b.libm(m.Libm.Log1p, [b.fneg(ir_intrinsic(b, "Exp", x))])
-    large = ir_intrinsic(b, "Log", b.fneg(b.libm(m.Libm.Expm1, [x])))
-    return b.select(b.fcmp(m.FCmp.OLT, x, constant(b, out, math.log(0.5))), small, large)
+    small = b.libm(ir.Libm.Log1p, [b.fneg(ir_intrinsic(b, "Exp", x))])
+    large = ir_intrinsic(b, "Log", b.fneg(b.libm(ir.Libm.Expm1, [x])))
+    return b.select(b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))), small, large)
 
 
 # ------------------------------------------------------------------ comparisons & logic
@@ -373,13 +363,12 @@ def _(b, args, out):
 
 def _comparison(fpred, spred, upred):
     def fn(b, args, out):
-        m = ir()
         ct = _upcast(args[0][1], args[1][1])
         x, y = conv(b, args, 0, ct), conv(b, args, 1, ct)
         if is_float(ct):
-            c = b.fcmp(getattr(m.FCmp, fpred), x, y)
+            c = b.fcmp(getattr(ir.FCmp, fpred), x, y)
         else:
-            c = b.icmp(getattr(m.ICmp, spred if is_signed(ct) else upred), x, y)
+            c = b.icmp(getattr(ir.ICmp, spred if is_signed(ct) else upred), x, y)
         return cast(b, c, "bool", out)
 
     return fn
@@ -395,20 +384,18 @@ register(ps.NEQ)(_comparison("UNE", "NE", "NE"))
 
 @register(ps.IsNan)
 def _(b, args, out):
-    m = ir()
     x, d = args[0]
     if not is_float(d):
         return constant(b, out, 0)
-    return cast(b, b.fcmp(m.FCmp.UNO, x, x), "bool", out)
+    return cast(b, b.fcmp(ir.FCmp.UNO, x, x), "bool", out)
 
 
 @register(ps.IsInf)
 def _(b, args, out):
-    m = ir()
     x, d = args[0]
     if not is_float(d):
         return constant(b, out, 0)
-    c = b.fcmp(m.FCmp.OEQ, ir_intrinsic(b, "Fabs", x), constant(b, d, math.inf))
+    c = b.fcmp(ir.FCmp.OEQ, ir_intrinsic(b, "Fabs", x), constant(b, d, math.inf))
     return cast(b, c, "bool", out)
 
 

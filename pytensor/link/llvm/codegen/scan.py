@@ -60,12 +60,6 @@ def _i64(b, a: Array | object, dtype):
     return cast(b, v, dtype, "int64")
 
 
-def _smax0(b, v):
-    m = ir()
-    zero = b.const_int(m.i64, 0)
-    return b.select(b.icmp(m.ICmp.SGT, v, zero), v, zero)
-
-
 def _rows(b, buf: Array, start, count):
     """Rows `start .. start + count` of a C-contiguous buffer."""
     p = advance(b, buf.data, start, buf.strides[0], buf.dtype)
@@ -98,13 +92,12 @@ class _Traced:
         return self.buf.shape[0].const_int
 
     def row_index(self, b, i, tap):
-        m = ir()
         n = self.buf.shape[0]
-        off = b.add(i, b.const_int(m.i64, self.lookback + tap))
+        off = b.add(i, b.i64(self.lookback + tap))
         if n.const_int is not None:
-            return b.urem(off, b.const_int(m.i64, max(n.const_int, 1)))
-        one = b.const_int(m.i64, 1)
-        return b.urem(off, b.select(b.icmp(m.ICmp.SGT, n, one), n, one))
+            return b.urem(off, b.i64(max(n.const_int, 1)))
+        one = b.i64(1)
+        return b.urem(off, b.select(b.sgt(n, one), n, one))
 
     def direct_write_ok(self, k_out):
         """Can the body produce out tap `k_out` straight into its row? Only if that row
@@ -119,10 +112,9 @@ class _Traced:
 
 
 def emit_scan(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     info = op.info
     planner = cg.planner
-    i64 = m.i64
     n_mm, n_ms, n_ss = len(info.mit_mot_in_slices), len(info.mit_sot_in_slices), len(info.sit_sot_in_slices)
     o_seq = 1
     o_mm = o_seq + info.n_seqs
@@ -133,14 +125,14 @@ def emit_scan(op, node, cg, inputs, outputs):
     o_ns = o_nit + info.n_nit_sot
     dt = [getattr(v.type, "dtype", None) for v in node.inputs]
 
-    n_steps = _smax0(b, _i64(b, inputs[0], dt[0]))
+    n_steps = b.smax(_i64(b, inputs[0], dt[0]), 0)
 
     # ---- sequences: long enough?
     seqs = inputs[o_seq:o_mm]
     for k, a in enumerate(seqs):
         if len(a.shape) < 1:
             raise NotImplementedError("a 0-d sequence")
-        cg.check(b.icmp(m.ICmp.SGE, a.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps")
+        cg.check(b.sge(a.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps")
 
     # ---- traced buffers: copies of the outer buffers, allocated into the outputs
     q = 0  # next outer output
@@ -166,10 +158,10 @@ def emit_scan(op, node, cg, inputs, outputs):
     nit = []  # (out SlotOutput, length, buf Array or None, inner output var)
     for j in range(info.n_nit_sot):
         out = outputs[q + j]
-        length = _smax0(b, _i64(b, inputs[o_nit + j], dt[o_nit + j]))
+        length = b.smax(_i64(b, inputs[o_nit + j], dt[o_nit + j]), 0)
         var = inner_outs[first_nit + j]
         if all(s is not None for s in var.type.shape):
-            buf = out.allocate([length, *(b.const_int(i64, s) for s in var.type.shape)])
+            buf = out.allocate([length, *(b.i64(s) for s in var.type.shape)])
         else:
             buf = None
         nit.append([out, length, buf, var])
@@ -275,12 +267,12 @@ def emit_scan(op, node, cg, inputs, outputs):
                     copy(cg, src, rows[n_traced_outs + j])
                 continue
             # rows without a static shape: the buffer is allocated by the first iteration
-            first = b.icmp(m.ICmp.EQ, i, b.const_int(i64, 0))
+            first = b.eq(i, b.i64(0))
             with b.if_(first):
                 out.allocate([length, *src.shape])
             cur = out.read()
             for d, n in enumerate(src.shape):
-                cg.check(b.icmp(m.ICmp.EQ, n, cur.shape[1 + d]), "Scan: nit-sot body outputs have different shapes")
+                cg.check(b.eq(n, cur.shape[1 + d]), "Scan: nit-sot body outputs have different shapes")
             copy(cg, src, _row(b, cur, i))
         for out, cur, k in zip(untraced, cur_untraced, out_ids[n_traced_outs + info.n_nit_sot :], strict=False):
             if out is None:
@@ -288,32 +280,32 @@ def emit_scan(op, node, cg, inputs, outputs):
             src = value(k)
             differs = b.const_bool(False)
             for d, n in enumerate(src.shape):
-                differs = b.or_(differs, b.icmp(m.ICmp.NE, n, cur.shape[d]))
+                differs = b.or_(differs, b.ne(n, cur.shape[d]))
             if differs.const_int == 0:
                 copy(cg, src, cur)
                 continue
             # a new shape: a new buffer (the old one is released after the copy: the
             # output may be a view of it)
-            old = b.alloca(m.ptr)
+            old = b.alloca(ir.ptr)
             b.store(b.null(), old)
             with b.if_(differs):
                 b.store(out.owner(), old)
                 out.allocate(list(src.shape))
             copy(cg, src, out.read())
-            b.rt_decref(cg.ctx, b.load(m.ptr, old))
+            b.rt_decref(cg.ctx, b.load(ir.ptr, old))
         stop = None
         if info.as_while:
             c = value(out_ids[-1])
             v = load(b, c.dtype, c.data) if isinstance(c, Array) else c
-            stop = b.icmp(m.ICmp.NE, cast(b, v, fg.outputs[-1].type.dtype, "int8"), b.const_int(m.i8, 0))
+            stop = b.ne(cast(b, v, fg.outputs[-1].type.dtype, "int8"), b.i8(0))
         release(cg, owned)
         b.rt_scratch_release(cg.ctx, mark)
         if info.as_while:
-            return [b.add(acc[0], b.const_int(i64, 1)), stop]
+            return [b.add(acc[0], b.i64(1)), stop]
         return []
 
     if info.as_while:
-        res = b.fold(n_steps, [b.const_int(i64, 0)], body, until=True)
+        res = b.fold(n_steps, [b.i64(0)], body, until=True)
         taken = res[0]
     else:
         b.fold(n_steps, [], body)
@@ -322,19 +314,19 @@ def emit_scan(op, node, cg, inputs, outputs):
     # ---- post-processing
     def finish(out, buf, max_offset):
         n = buf.shape[0]
-        used = b.add(taken, b.const_int(i64, max_offset))
-        one = b.const_int(i64, 1)
-        rotate = b.and_(b.icmp(m.ICmp.SGT, n, one), b.icmp(m.ICmp.SLT, n, used))
+        used = b.add(taken, b.i64(max_offset))
+        one = b.i64(1)
+        rotate = b.and_(b.sgt(n, one), b.slt(n, used))
         with b.if_(rotate):
             shift = b.urem(used, n)
-            with b.if_(b.icmp(m.ICmp.SGT, shift, b.const_int(i64, 0))):
+            with b.if_(b.sgt(shift, b.i64(0))):
                 old_owner = out.owner()
                 nb = out.allocate(list(buf.shape))
                 rest = b.sub(n, shift)
-                copy(cg, _rows(b, buf, shift, rest), _rows(b, nb, b.const_int(i64, 0), rest))
-                copy(cg, _rows(b, buf, b.const_int(i64, 0), shift), _rows(b, nb, rest, shift))
+                copy(cg, _rows(b, buf, shift, rest), _rows(b, nb, b.i64(0), rest))
+                copy(cg, _rows(b, buf, b.i64(0), shift), _rows(b, nb, rest, shift))
                 b.rt_decref(cg.ctx, old_owner)
-        tail = b.and_(b.xor(rotate, b.const_bool(True)), b.icmp(m.ICmp.SGT, n, used))
+        tail = b.and_(b.xor(rotate, b.const_bool(True)), b.sgt(n, used))
         with b.if_(tail):
             if info.as_while:
                 out.set_length(0, used)
@@ -347,9 +339,9 @@ def emit_scan(op, node, cg, inputs, outputs):
     for out, length, buf, var in nit:
         if buf is None:
             # allocated by the first iteration; if none ran: an empty array
-            none_ran = b.icmp(m.ICmp.EQ, out.data(), b.null())
+            none_ran = b.eq(out.data(), b.null())
             with b.if_(none_ran):
-                out.allocate([length, *(b.const_int(i64, 0) for _ in range(var.type.ndim))])
+                out.allocate([length, *(b.i64(0) for _ in range(var.type.ndim))])
             buf = out.read()
         finish(out, buf, 0)
 
