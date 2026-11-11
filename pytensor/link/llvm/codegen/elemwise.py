@@ -26,7 +26,7 @@ from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outp
 from pytensor.link.llvm.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.work import scalar_cost
 from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.link.llvm.codegen.types import check_dtype, ir
+from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 
 

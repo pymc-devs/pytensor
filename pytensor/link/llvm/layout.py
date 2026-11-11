@@ -140,7 +140,6 @@ class Layout:
 
     def stride_values(self, b, itemsize: int, shape_vals, passed: dict):
         """i64 stride values: constants, products of lengths (packed) or `passed[axis]`."""
-        from pytensor.link.llvm.codegen.types import ir
 
         out = [None] * self.ndim
         acc = b.i64(itemsize)

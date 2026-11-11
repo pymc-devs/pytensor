@@ -8,7 +8,6 @@ from pytensor.link.llvm.codegen.emit import advance, Array, cast, constant, copy
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm.layout import split_layouts
 from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.link.llvm.codegen.types import ir
 from pytensor.tensor.basic import ExtractDiag, Split
 from pytensor.tensor.extra_ops import CumOp
 

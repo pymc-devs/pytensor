@@ -21,7 +21,6 @@ from pytensor.link.llvm.codegen.emit import (
     c_array,
     Array,
     Codegen,
-    ProvidedOutput,
     SlotOutput,
     constant,
     copy,
@@ -36,11 +35,10 @@ from pytensor.link.llvm.codegen.function import (
     Output,
     Signature,
     build_node_function,
-    node_outputs,
     node_signature,
 )
 from pytensor.link.llvm.layout import Layout
-from pytensor.link.llvm.codegen.types import ScalarRepr, TensorRepr, ir, is_absent, itemsize, repr_of, slot_type
+from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, repr_of, ScalarRepr, Slot, slot_type, TensorRepr
 
 
 @dataclass
@@ -153,7 +151,7 @@ class Destination:
 def release(cg, owned):
     """Give up the buffers kernels allocated into `owned` slots ([(slot, ndim)])."""
     for slot, nd in owned:
-        cg.b.rt_decref(cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, 3)))
+        cg.b.rt_decref(cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, Slot.OWNER)))
 
 
 def bind_constants(cg, constants, vals):

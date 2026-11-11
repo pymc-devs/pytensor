@@ -19,13 +19,15 @@ from pytensor.link.llvm.codegen.emit import (
 )
 from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.codegen.types import (
-    PTARRAY_SIZE,
-    NoneRepr,
-    ScalarRepr,
-    TensorRepr,
     ir,
+    NoneRepr,
+    PtArray,
+    PTARRAY_SIZE,
     ptarray_type,
     repr_of,
+    ScalarRepr,
+    Slot,
+    TensorRepr,
 )
 
 
@@ -378,19 +380,19 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     for k, o, slot in slots:
         p = arg(n_in + k)
         st = o.repr.slot_type
-        b.store(b.load(ir.ptr, b.field_ptr(st, slot, 0)), b.field_ptr(pa, p, 0))
+        b.store(b.load(ir.ptr, b.field_ptr(st, slot, Slot.DATA)), b.field_ptr(pa, p, PtArray.DATA))
         shape_p, strides_p = field(p, 1), field(p, 2)
-        lp, sp = b.field_ptr(st, slot, 1), b.field_ptr(st, slot, 2)
+        lp, sp = b.field_ptr(st, slot, Slot.LENGTHS), b.field_ptr(st, slot, Slot.STRIDES)
         for a in range(o.repr.ndim):
             i = b.i64(a)
             b.store(b.load(ir.i64, b.gep(ir.i64, lp, i)), b.gep(ir.i64, shape_p, i))
             b.store(b.load(ir.i64, b.gep(ir.i64, sp, i)), b.gep(ir.i64, strides_p, i))
-        owner = b.load(ir.ptr, b.field_ptr(st, slot, 3))
+        owner = b.load(ir.ptr, b.field_ptr(st, slot, Slot.OWNER))
         if o.mode is OutputMode.VIEW:
             # a view lies in the input's buffer, unless the kernel allocated one
             mine = b.ne(owner, b.null())
             owner = b.select(mine, owner, field(arg(o.view_of), 3))
-        b.store(owner, b.field_ptr(pa, p, 3))
+        b.store(owner, b.field_ptr(pa, p, PtArray.OWNER))
     b.ret(rc)
     return fn
 
@@ -402,8 +404,8 @@ def _check_layout(cg, p, r: TensorRepr, k):
 
     b = cg.b
     pa = ptarray_type()
-    shape_p = b.load(ir.ptr, b.field_ptr(pa, p, 1))
-    strides_p = b.load(ir.ptr, b.field_ptr(pa, p, 2))
+    shape_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.SHAPE))
+    strides_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.STRIDES))
     shape = [b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in range(r.ndim)]
     actual = [b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in range(r.ndim)]
     expected = r.layout.stride_values(b, itemsize(r.dtype), shape, dict(enumerate(actual)))

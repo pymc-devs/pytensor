@@ -1,19 +1,23 @@
 """Scalar ops: one emitter per PyTensor scalar op class.
 
 An emitter gets the builder, the arguments as (value, dtype) pairs and the output dtypes
-PyTensor computed, and returns the output values. Most ops compute in the output dtype.
+PyTensor computed, and returns the output values. Most ops compute in the output dtype:
+`nums(b, args, out)` gives the arguments as `Num`s of that dtype, whose operators pick
+the instructions.
 """
 
 from __future__ import annotations
 
 import math
-from functools import singledispatch
+import operator
+from functools import reduce, singledispatch
 
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as psm
 from pytensor.graph.basic import Constant
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.link.llvm.codegen.emit import cast, constant
+from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import check_dtype, ir, is_float, is_signed, value_type
 
 
@@ -29,10 +33,16 @@ def emit_scalar(op, b, args, out_dtypes):
 
 
 def _single(fn):
-    """Register helper: fn(b, args, out_dtype) -> value."""
+    """Register helper: fn(b, args, out_dtype) -> value (or a Num of the output dtype)."""
 
     def wrapper(op, b, args, out_dtypes):
-        return [fn(b, args, out_dtypes[0])]
+        (out,) = out_dtypes
+        r = fn(b, args, out)
+        if isinstance(r, Num):
+            if r.dtype != out:
+                raise AssertionError(f"scalar op {op}: emitted {r.dtype} for an output of {out}")
+            r = r.value
+        return [r]
 
     return wrapper
 
@@ -52,6 +62,11 @@ def conv(b, args, k, dtype):
     return cast(b, v, d, dtype)
 
 
+def nums(b, args, dtype) -> list[Num]:
+    """The arguments converted to `dtype`."""
+    return [Num(b, v, d).astype(dtype) for v, d in args]
+
+
 def require_float(dtype, what):
     if not is_float(dtype):
         raise NotImplementedError(f"LLVM backend: {what} with output dtype {dtype}")
@@ -68,86 +83,39 @@ def _upcast(*dtypes):
 
 @register(ps.Add)
 def _(b, args, out):
-    acc = conv(b, args, 0, out)
-    for k in range(1, len(args)):
-        x = conv(b, args, k, out)
-        acc = b.fadd(acc, x) if is_float(out) else (b.or_(acc, x) if out == "bool" else b.add(acc, x))
-    return acc
+    return reduce(operator.add, nums(b, args, out))
 
 
 @register(ps.Mul)
 def _(b, args, out):
-    acc = conv(b, args, 0, out)
-    for k in range(1, len(args)):
-        x = conv(b, args, k, out)
-        acc = b.fmul(acc, x) if is_float(out) else (b.and_(acc, x) if out == "bool" else b.mul(acc, x))
-    return acc
+    return reduce(operator.mul, nums(b, args, out))
 
 
 @register(ps.Sub)
 def _(b, args, out):
-    x, y = conv(b, args, 0, out), conv(b, args, 1, out)
-    return b.fsub(x, y) if is_float(out) else b.sub(x, y)
+    x, y = nums(b, args, out)
+    return x - y
 
 
 @register(ps.TrueDiv)
 def _(b, args, out):
     require_float(out, "true_div")
-    return b.fdiv(conv(b, args, 0, out), conv(b, args, 1, out))
-
-
-def _floor_adjust(b, r, y):
-    """For a C-style remainder r of a division by y: does floor rounding differ?"""
-    z = b.const_int(r.type, 0)
-    rnz = b.ne(r, z)
-    differ = b.xor(b.slt(r, z), b.slt(y, z))
-    return b.and_(rnz, differ)
-
-
-def _safe_divisor(b, y):
-    """(y with 0 replaced by 1, is-zero flag): integer division by zero is undefined."""
-    z = b.const_int(y.type, 0)
-    yz = b.eq(y, z)
-    return b.select(yz, b.const_int(y.type, 1), y), yz
+    x, y = nums(b, args, out)
+    return x / y
 
 
 @register(ps.IntDiv)
 def _(b, args, out):
     """Python floor division; x // 0 == 0 for integers, like numpy."""
-    x, y = conv(b, args, 0, out), conv(b, args, 1, out)
-    if is_float(out):
-        return b.intrinsic(ir.Intrinsic.Floor, [b.fdiv(x, y)])
-    y1, yz = _safe_divisor(b, y)
-    zero = b.const_int(x.type, 0)
-    if not is_signed(out):
-        return b.select(yz, zero, b.udiv(x, y1))
-    # x // -1 is -x; computing it as a division would overflow for MIN (numpy wraps)
-    minus1 = b.eq(y1, b.const_int(x.type, -1))
-    y1 = b.select(minus1, b.const_int(x.type, 1), y1)
-    q = b.sdiv(x, y1)
-    r = b.srem(x, y1)
-    q = b.select(_floor_adjust(b, r, y1), b.sub(q, b.const_int(x.type, 1)), q)
-    q = b.select(minus1, b.neg(x), q)
-    return b.select(yz, zero, q)
+    x, y = nums(b, args, out)
+    return x // y
 
 
 @register(ps.Mod)
 def _(b, args, out):
     """Python modulo (sign of the divisor); x % 0 == 0 for integers, like numpy."""
-    x, y = conv(b, args, 0, out), conv(b, args, 1, out)
-    if is_float(out):
-        q = b.intrinsic(ir.Intrinsic.Floor, [b.fdiv(x, y)])
-        return b.fsub(x, b.fmul(q, y))
-    y1, yz = _safe_divisor(b, y)
-    zero = b.const_int(x.type, 0)
-    if not is_signed(out):
-        return b.select(yz, zero, b.urem(x, y1))
-    # x % -1 == 0 (and MIN % -1 would overflow)
-    minus1 = b.eq(y1, b.const_int(x.type, -1))
-    y1 = b.select(minus1, b.const_int(x.type, 1), y1)
-    r = b.srem(x, y1)
-    r = b.select(_floor_adjust(b, r, y1), b.add(r, y1), r)
-    return b.select(yz, zero, r)
+    x, y = nums(b, args, out)
+    return x % y
 
 
 @register(ps.Pow)
@@ -188,72 +156,53 @@ def ir_intrinsic(b, name, *xs):
     return b.intrinsic(getattr(ir.Intrinsic, name), list(xs))
 
 
-def maxmin(b, is_max, x, y, dtype):
-    """NaN-propagating for floats, like numpy.maximum / numpy.minimum."""
-    if is_float(dtype):
-        return ir_intrinsic(b, "Maximum" if is_max else "Minimum", x, y)
-    if dtype == "bool":
-        return b.or_(x, y) if is_max else b.and_(x, y)
-    pred = (ir.ICmp.SGT if is_max else ir.ICmp.SLT) if is_signed(dtype) else (ir.ICmp.UGT if is_max else ir.ICmp.ULT)
-    return b.select(b.icmp(pred, x, y), x, y)
-
-
 @register(ps.Maximum, ps.ScalarMaximum)
 def _(b, args, out):
-    return maxmin(b, True, conv(b, args, 0, out), conv(b, args, 1, out), out)
+    x, y = nums(b, args, out)
+    return x.maximum(y)
 
 
 @register(ps.Minimum, ps.ScalarMinimum)
 def _(b, args, out):
-    return maxmin(b, False, conv(b, args, 0, out), conv(b, args, 1, out), out)
+    x, y = nums(b, args, out)
+    return x.minimum(y)
 
 
 @register(ps.Clip)
 def _(b, args, out):
-    x = maxmin(b, True, conv(b, args, 0, out), conv(b, args, 1, out), out)
-    return maxmin(b, False, x, conv(b, args, 2, out), out)
+    x, lo, hi = nums(b, args, out)
+    return x.maximum(lo).minimum(hi)
 
 
 @register(ps.Neg)
 def _(b, args, out):
-    x = conv(b, args, 0, out)
-    return b.fneg(x) if is_float(out) else b.neg(x)
+    (x,) = nums(b, args, out)
+    return -x
 
 
 @register(ps.Abs)
 def _(b, args, out):
-    x = conv(b, args, 0, out)
-    if is_float(out):
-        return ir_intrinsic(b, "Fabs", x)
-    if is_signed(out):
-        return b.select(b.slt(x, b.const_int(x.type, 0)), b.neg(x), x)
-    return x
+    (x,) = nums(b, args, out)
+    return abs(x)
 
 
 @register(ps.Sign)
 def _(b, args, out):
-    x = conv(b, args, 0, out)
-    zero, one = constant(b, out, 0), constant(b, out, 1)
-    if is_float(out):
-        pos, neg = b.fcmp(ir.FCmp.OGT, x, zero), b.fcmp(ir.FCmp.OLT, x, zero)
-        minus = b.fneg(one)
-    else:
-        pos = b.icmp(ir.ICmp.SGT if is_signed(out) else ir.ICmp.UGT, x, zero)
-        neg = b.slt(x, zero) if is_signed(out) else b.const_bool(False)
-        minus = b.neg(one)
-    return b.select(pos, one, b.select(neg, minus, x))  # keeps 0 and NaN
+    (x,) = nums(b, args, out)
+    return (x > 0).select(1, (x < 0).select(-1, x))  # keeps 0 and NaN
 
 
 @register(ps.Sqr)
 def _(b, args, out):
-    x = conv(b, args, 0, out)
-    return b.fmul(x, x) if is_float(out) else b.mul(x, x)
+    (x,) = nums(b, args, out)
+    return x * x
 
 
 @register(ps.Reciprocal)
 def _(b, args, out):
     require_float(out, "reciprocal")
-    return b.fdiv(constant(b, out, 1.0), conv(b, args, 0, out))
+    (x,) = nums(b, args, out)
+    return 1.0 / x
 
 
 # ------------------------------------------------------------------ math functions
@@ -361,25 +310,20 @@ def _(b, args, out):
 # ------------------------------------------------------------------ comparisons & logic
 
 
-def _comparison(fpred, spred, upred):
+def _comparison(compare):
     def fn(b, args, out):
-        ct = _upcast(args[0][1], args[1][1])
-        x, y = conv(b, args, 0, ct), conv(b, args, 1, ct)
-        if is_float(ct):
-            c = b.fcmp(getattr(ir.FCmp, fpred), x, y)
-        else:
-            c = b.icmp(getattr(ir.ICmp, spred if is_signed(ct) else upred), x, y)
-        return cast(b, c, "bool", out)
+        x, y = nums(b, args, _upcast(args[0][1], args[1][1]))
+        return compare(x, y).astype(out)
 
     return fn
 
 
-register(ps.LT)(_comparison("OLT", "SLT", "ULT"))
-register(ps.GT)(_comparison("OGT", "SGT", "UGT"))
-register(ps.LE)(_comparison("OLE", "SLE", "ULE"))
-register(ps.GE)(_comparison("OGE", "SGE", "UGE"))
-register(ps.EQ)(_comparison("OEQ", "EQ", "EQ"))
-register(ps.NEQ)(_comparison("UNE", "NE", "NE"))
+register(ps.LT)(_comparison(operator.lt))
+register(ps.GT)(_comparison(operator.gt))
+register(ps.LE)(_comparison(operator.le))
+register(ps.GE)(_comparison(operator.ge))
+register(ps.EQ)(_comparison(Num.eq))
+register(ps.NEQ)(_comparison(Num.ne))
 
 
 @register(ps.IsNan)
@@ -401,28 +345,23 @@ def _(b, args, out):
 
 @register(ps.Switch)
 def _(b, args, out):
-    return b.select(conv(b, args, 0, "bool"), conv(b, args, 1, out), conv(b, args, 2, out))
+    x, y = nums(b, args[1:], out)
+    return Num(b, *args[0]).astype("bool").select(x, y)
 
 
-def _bitwise(method):
+def _bitwise(op):
     def fn(b, args, out):
         if is_float(out):
             raise NotImplementedError(f"LLVM backend: bitwise op on {out}")
-        return getattr(b, method)(conv(b, args, 0, out), conv(b, args, 1, out))
+        return op(*nums(b, args, out))
 
     return fn
 
 
-register(ps.AND)(_bitwise("and_"))
-register(ps.OR)(_bitwise("or_"))
-register(ps.XOR)(_bitwise("xor"))
-
-
-@register(ps.Invert)
-def _(b, args, out):
-    if is_float(out):
-        raise NotImplementedError(f"LLVM backend: invert on {out}")
-    return b.not_(conv(b, args, 0, out))
+register(ps.AND)(_bitwise(operator.and_))
+register(ps.OR)(_bitwise(operator.or_))
+register(ps.XOR)(_bitwise(operator.xor))
+register(ps.Invert)(_bitwise(operator.invert))
 
 
 @register(ps.Identity, ps.Cast)
