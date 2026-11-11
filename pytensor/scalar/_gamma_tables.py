@@ -1,4 +1,4 @@
-"""Chebyshev panels of lgamma and digamma for the Numba GammaLn and Psi kernels.
+"""Chebyshev panels of lgamma and digamma for the Numba and LLVM GammaLn and Psi kernels.
 
 Fitted in mpmath at 40 digits by the gammaln generator of chebax
 (https://github.com/andreshernandez-spec/chebax). Each octave [2**e, 2**(e + 1))

@@ -245,6 +245,9 @@ class Builder:
     def const_bool(self, value: bool) -> Value: ...
     def const_float(self, ty: Type, value: float) -> Value: ...
     def const_int(self, ty: Type, value: int) -> Value: ...
+    def const_array(self, ty: Type, values: Sequence[float]) -> Value:
+        """Pointer to a private constant array of `ty` (a float or integer type) holding
+        `values`."""
     def cstr(self, s: str) -> Value:
         """Pointer to a constant NUL-terminated string."""
     def else_(self) -> Else:
@@ -379,6 +382,10 @@ class Builder:
         """Release the scratch handed out since `mark`."""
     def rust_math(self, which: RustMath, x: Value) -> Value:
         """A scalar function precompiled in Rust."""
+    def strict_fp(self, on: bool) -> bool:
+        """Give float instructions built from now on only `contract` (`on`), or the
+        module's flags again; returns the previous setting. For code whose accuracy
+        depends on evaluation order, like split constants."""
     def sdiv(self, a: Operand, b: Operand) -> Value:
         """Signed division. Division by zero (or MIN / -1) is undefined: check first."""
     def select(self, cond: Value, a: Operand, b: Operand) -> Value:

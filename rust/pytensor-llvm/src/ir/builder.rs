@@ -321,6 +321,8 @@ pub struct Builder {
     /// the `if` that just ended: its conditional branch and the block after it
     /// (`else_` may follow while nothing was added there)
     last_if: Cell<Option<(LLVMValueRef, LLVMBasicBlockRef)>>,
+    /// float instructions get only `contract`, not the module's fast-math flags
+    strict_fp: Cell<bool>,
 }
 
 /// Alias information of a node function (DESIGN.md, "Aliasing"): pointers into arrays
@@ -389,6 +391,7 @@ impl Builder {
                 regions: RefCell::new(vec![]),
                 alias: RefCell::new(None),
                 last_if: Cell::new(None),
+                strict_fp: Cell::new(false),
             };
             builder.update_location();
             Ok(builder)
@@ -713,10 +716,15 @@ impl Builder {
 
     fn fast(&self, v: LLVMValueRef) {
         if self.m.fastmath {
+            let flags = if self.strict_fp.get() {
+                llvm_sys::LLVMFastMathAllowContract
+            } else {
+                FAST
+            };
             // SAFETY: `v` is a floating-point instruction (callers ensure it).
             unsafe {
                 if c::LLVMCanValueUseFastMathFlags(v) != 0 {
-                    c::LLVMSetFastMathFlags(v, FAST);
+                    c::LLVMSetFastMathFlags(v, flags);
                 }
             }
         }
@@ -972,6 +980,43 @@ impl Builder {
         // SAFETY: creates a private global in this module.
         let r = unsafe { c::LLVMBuildGlobalStringPtr(self.b, s.as_ptr(), c"str".as_ptr()) };
         Ok(self.konst(r, Ty::Ptr))
+    }
+
+    /// Pointer to a private constant array of `ty` (a float or integer type) holding
+    /// `values`.
+    fn const_array(&self, ty: PyType, values: Vec<f64>) -> PyResult<Value> {
+        self.open()?;
+        let t = self.lt(&ty.0);
+        let mut vals: Vec<LLVMValueRef> = if ty.0.is_float() {
+            // SAFETY: float constants of a float type of this module's context.
+            values.iter().map(|&v| unsafe { c::LLVMConstReal(t, v) }).collect()
+        } else if ty.0.is_int() {
+            // SAFETY: integer constants of an integer type of this module's context.
+            values
+                .iter()
+                .map(|&v| unsafe { c::LLVMConstInt(t, v as i64 as u64, 1) })
+                .collect()
+        } else {
+            return err(format!("const_array of {}", ty.0));
+        };
+        // SAFETY: creates a private constant global in this module.
+        let g = unsafe {
+            let arr = c::LLVMConstArray2(t, vals.as_mut_ptr(), vals.len() as u64);
+            let g = c::LLVMAddGlobal(self.m.module, c::LLVMTypeOf(arr), c"table".as_ptr());
+            c::LLVMSetInitializer(g, arr);
+            c::LLVMSetGlobalConstant(g, 1);
+            c::LLVMSetLinkage(g, llvm_sys::LLVMLinkage::LLVMPrivateLinkage);
+            c::LLVMSetUnnamedAddress(g, llvm_sys::LLVMUnnamedAddr::LLVMGlobalUnnamedAddr);
+            g
+        };
+        Ok(self.konst(g, Ty::Ptr))
+    }
+
+    /// Give float instructions built from now on only `contract` (`on`), or the
+    /// module's flags again; returns the previous setting. For code whose accuracy
+    /// depends on evaluation order, like split constants.
+    fn strict_fp(&self, on: bool) -> bool {
+        self.strict_fp.replace(on)
     }
 
     // ------------------------------------------------------------ integer arithmetic
