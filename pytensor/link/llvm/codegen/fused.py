@@ -18,7 +18,6 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     ProvidedOutput,
     ScalarOutput,
-    _and,
     cast,
     constant,
     copy,
@@ -28,7 +27,6 @@ from pytensor.link.llvm.codegen.emit import (
     loop_view,
     load,
     memory_type,
-    mul,
     size,
     store,
 )
@@ -135,8 +133,7 @@ def _register():
 
 
 def emit_fused(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
-    i64 = m.i64
+    b = cg.b
     E, n_elem, reads, outs = fused_spec(op, node)
     nd = E.outputs[0].type.ndim
     in_dtypes = [check_dtype(v.type.dtype) for v in E.inputs]
@@ -164,10 +161,10 @@ def emit_fused(op, node, cg, inputs, outputs):
     shape = []
     for a in range(nd):
         cand = lengths[a]
-        n = b.const_int(i64, static[a]) if static[a] is not None else (cand[0] if cand else b.const_int(i64, 1))
+        n = b.i64(static[a]) if static[a] is not None else (cand[0] if cand else b.i64(1))
         for c in cand:
             if not (c.const_int is not None and c.const_int == n.const_int):
-                cg.check(b.icmp(m.ICmp.EQ, c, n), f"FusedElemwise: shape mismatch on axis {a}")
+                cg.check(b.eq(c, n), f"FusedElemwise: shape mismatch on axis {a}")
         shape.append(n)
 
     # ---- outputs (ScalarType outputs are computed into a 0-d temporary)
@@ -196,7 +193,7 @@ def emit_fused(op, node, cg, inputs, outputs):
             out_arrays.append((output_array(out, shape), None))
 
     # ---- operands with loop strides (and their layouts)
-    zero = b.const_int(i64, 0)
+    zero = b.i64(0)
 
     plain_in = {}
     fixed = {}  # inputs that are one element for the whole loop: read once, before it
@@ -227,8 +224,8 @@ def emit_fused(op, node, cg, inputs, outputs):
         return cast(b, v, idx.dtype, "int64")
 
     def checked(v, n, what):
-        v = b.select(b.icmp(m.ICmp.SLT, v, zero), b.add(v, n), v)
-        ok = b.and_(b.icmp(m.ICmp.SGE, v, zero), b.icmp(m.ICmp.SLT, v, n))
+        v = b.select(b.slt(v, zero), b.add(v, n), v)
+        ok = b.and_(b.sge(v, zero), b.slt(v, n))
         cg.check(ok, f"FusedElemwise: index out of bounds ({what})")
         return v
 
@@ -333,7 +330,7 @@ def emit_fused(op, node, cg, inputs, outputs):
     order = loop_order(shape, flat_arrays)
     contig = b.const_bool(True)
     for arr in flat_arrays:
-        contig = _and(b, contig, is_contiguous(b, shape, arr, order))
+        contig = b.and_(contig, is_contiguous(b, shape, arr, order))
 
     def flat():
         red = [i for i in out_keys if isinstance(outs[i], Reduce)]
@@ -363,10 +360,9 @@ def emit_fused(op, node, cg, inputs, outputs):
 def reduced_view(b, acc: Array, shape, axes) -> Array:
     """The accumulator of a reduction over `axes` iterated over the full loop `shape`:
     stride 0 on the reduced axes, the accumulator's own strides (and layout) elsewhere."""
-    m = ir()
     nd = len(shape)
     kept = [a for a in range(nd) if a not in axes]
-    strides = [b.const_int(m.i64, 0)] * nd
+    strides = [b.i64(0)] * nd
     kinds = [0] * nd
     for k, a in enumerate(kept):
         strides[a] = acc.strides[k]

@@ -26,13 +26,13 @@ def _(op, node, in_layouts):
 
 @llvm_emit.register(DimShuffle)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     x = inputs[0]
     shape, strides = [], []
     for o in op.new_order:
         if o == "x":
-            shape.append(b.const_int(m.i64, 1))
-            strides.append(b.const_int(m.i64, 0))
+            shape.append(b.i64(1))
+            strides.append(b.i64(0))
         else:
             shape.append(x.shape[o])
             strides.append(x.strides[o])
@@ -49,13 +49,13 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(SpecifyShape)
 def _(op, node, cg, inputs, outputs):
     """Check the given lengths (None inputs: unconstrained axes), then a view."""
-    b, m = cg.b, ir()
+    b = cg.b
     x = inputs[0]
     for a, (n, var) in enumerate(zip(inputs[1:], node.inputs[1:], strict=True)):
         if n is None:
             continue
         want = cast(b, load(b, n.dtype, n.data) if isinstance(n, Array) else n, var.type.dtype, "int64")
-        cg.check(b.icmp(m.ICmp.EQ, x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
+        cg.check(b.eq(x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
     outputs[0].set_view(x)
 
 

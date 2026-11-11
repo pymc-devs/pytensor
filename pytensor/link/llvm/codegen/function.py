@@ -64,10 +64,9 @@ class Output:
 
     @property
     def ir_type(self):
-        m = ir()
         if self.mode is OutputMode.PROVIDED:
             return self.repr.ir_type
-        return m.ptr
+        return ir.ptr
 
 
 @dataclass(frozen=True)
@@ -76,9 +75,8 @@ class Signature:
     outputs: tuple[Output, ...]
 
     def param_types(self):
-        m = ir()
         outs = [o.ir_type for o in self.outputs if o.mode is not OutputMode.ABSENT]
-        return [m.ptr, m.ptr, m.ptr, *(r.ir_type for r in self.inputs), *outs]
+        return [ir.ptr, ir.ptr, ir.ptr, *(r.ir_type for r in self.inputs), *outs]
 
     @property
     def has_scalars(self):
@@ -225,11 +223,10 @@ def build_node_function(
     from pytensor.link.llvm.codegen.emit import c_array, constant, store
     from pytensor.link.llvm.codegen.types import memory_type
 
-    m = ir()
     folded = folded or {}
     sig = node_signature(node, frozenset(folded), in_layouts, provided, kernel.outputs if kernel is not None else None)
     sig_inputs = iter(sig.inputs)
-    fn = module.function(name, sig.param_types(), m.i32, inline=m.Inline.Always)
+    fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
     b = fn.builder()
     params = fn.params
     ctx, config, frame = params[:3]
@@ -311,7 +308,7 @@ def build_node_function(
         for k, out in enumerate(outputs):
             if isinstance(out, SlotOutput | ScalarOutput) and not out.done:
                 raise ValueError(f"{node.op}: output {k} was never set")
-        b.ret(b.const_int(m.i32, 0))
+        b.ret(b.i32(0))
     return NodeFunction(fn, sig, cg.frame_size, links)
 
 
@@ -321,22 +318,21 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
 
     `check_layouts`: verify that the arrays passed have the layouts the signature claims
     (for testing the layout inference; costs a few compares per call)."""
-    m = ir()
     sig = nf.signature
     # (outputs without a value have no argument)
     present = [o for o in sig.outputs if o.mode is not OutputMode.ABSENT]
     if sig.has_scalars:
         raise ValueError("functions with ScalarType inputs or outputs have no kernel ABI")
     pa = ptarray_type()
-    fn = module.function(name, [m.ptr, m.ptr, m.ptr, m.ptr], m.i32, exported=True)
+    fn = module.function(name, [ir.ptr, ir.ptr, ir.ptr, ir.ptr], ir.i32, exported=True)
     b = fn.builder()
     ctx, args, config, frame = fn.params
 
     def arg(k):
-        return b.gep_bytes(args, b.const_int(m.i64, k * PTARRAY_SIZE))
+        return b.gep_bytes(args, b.i64(k * PTARRAY_SIZE))
 
     def field(p, f):
-        return b.load(m.ptr, b.field_ptr(pa, p, f))
+        return b.load(ir.ptr, b.field_ptr(pa, p, f))
 
     def read(k, r: TensorRepr):
         p = arg(k)
@@ -344,14 +340,14 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
         if r.ndim == 0:
             return data
         shape_p, strides_p = field(p, 1), field(p, 2)
-        lengths = [b.load(m.i64, b.gep(m.i64, shape_p, b.const_int(m.i64, a))) for a in r.dynamic_axes]
-        strides = [b.load(m.i64, b.gep(m.i64, strides_p, b.const_int(m.i64, a))) for a in r.stride_axes]
+        lengths = [b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in r.dynamic_axes]
+        strides = [b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in r.stride_axes]
         return b.aggregate(
             r.ir_type,
             [
                 data,
-                b.aggregate(m.Type.array(m.i64, len(lengths)), lengths),
-                b.aggregate(m.Type.array(m.i64, len(strides)), strides),
+                b.aggregate(ir.Type.array(ir.i64, len(lengths)), lengths),
+                b.aggregate(ir.Type.array(ir.i64, len(strides)), strides),
             ],
         )
 
@@ -382,17 +378,17 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     for k, o, slot in slots:
         p = arg(n_in + k)
         st = o.repr.slot_type
-        b.store(b.load(m.ptr, b.field_ptr(st, slot, 0)), b.field_ptr(pa, p, 0))
+        b.store(b.load(ir.ptr, b.field_ptr(st, slot, 0)), b.field_ptr(pa, p, 0))
         shape_p, strides_p = field(p, 1), field(p, 2)
         lp, sp = b.field_ptr(st, slot, 1), b.field_ptr(st, slot, 2)
         for a in range(o.repr.ndim):
-            i = b.const_int(m.i64, a)
-            b.store(b.load(m.i64, b.gep(m.i64, lp, i)), b.gep(m.i64, shape_p, i))
-            b.store(b.load(m.i64, b.gep(m.i64, sp, i)), b.gep(m.i64, strides_p, i))
-        owner = b.load(m.ptr, b.field_ptr(st, slot, 3))
+            i = b.i64(a)
+            b.store(b.load(ir.i64, b.gep(ir.i64, lp, i)), b.gep(ir.i64, shape_p, i))
+            b.store(b.load(ir.i64, b.gep(ir.i64, sp, i)), b.gep(ir.i64, strides_p, i))
+        owner = b.load(ir.ptr, b.field_ptr(st, slot, 3))
         if o.mode is OutputMode.VIEW:
             # a view lies in the input's buffer, unless the kernel allocated one
-            mine = b.icmp(m.ICmp.NE, owner, b.null())
+            mine = b.ne(owner, b.null())
             owner = b.select(mine, owner, field(arg(o.view_of), 3))
         b.store(owner, b.field_ptr(pa, p, 3))
     b.ret(rc)
@@ -402,23 +398,22 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
 def _check_layout(cg, p, r: TensorRepr, k):
     """Fail unless the PtArray at `p` has layout `r.layout` (numpy's rules: length-1 axes
     and empty arrays don't count)."""
-    from pytensor.link.llvm.codegen.emit import _and
     from pytensor.link.llvm.codegen.types import itemsize
 
-    b, m = cg.b, ir()
+    b = cg.b
     pa = ptarray_type()
-    shape_p = b.load(m.ptr, b.field_ptr(pa, p, 1))
-    strides_p = b.load(m.ptr, b.field_ptr(pa, p, 2))
-    shape = [b.load(m.i64, b.gep(m.i64, shape_p, b.const_int(m.i64, a))) for a in range(r.ndim)]
-    actual = [b.load(m.i64, b.gep(m.i64, strides_p, b.const_int(m.i64, a))) for a in range(r.ndim)]
+    shape_p = b.load(ir.ptr, b.field_ptr(pa, p, 1))
+    strides_p = b.load(ir.ptr, b.field_ptr(pa, p, 2))
+    shape = [b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in range(r.ndim)]
+    actual = [b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in range(r.ndim)]
     expected = r.layout.stride_values(b, itemsize(r.dtype), shape, dict(enumerate(actual)))
     ok = b.const_bool(True)
     empty = b.const_bool(False)
     for a in range(r.ndim):
-        one = b.icmp(m.ICmp.EQ, shape[a], b.const_int(m.i64, 1))
-        same = b.icmp(m.ICmp.EQ, actual[a], expected[a])
-        ok = _and(b, ok, b.or_(one, same))
-        empty = b.or_(empty, b.icmp(m.ICmp.EQ, shape[a], b.const_int(m.i64, 0)))
+        one = b.eq(shape[a], b.i64(1))
+        same = b.eq(actual[a], expected[a])
+        ok = b.and_(ok, b.or_(one, same))
+        empty = b.or_(empty, b.eq(shape[a], b.i64(0)))
     cg.check(b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}")
 
 
@@ -436,8 +431,7 @@ class CompiledNode:
 def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None) -> CompiledNode:
     """Compile one node as a kernel (for tests and one-node units).
     `provided`: layouts of the memory the caller will provide (default: as declared)."""
-    m = ir()
-    module = m.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
+    module = ir.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
     nf = build_node_function(module, node, "node", provided=provided)
     build_kernel_wrapper(module, nf, "kernel")
     compiled = module.compile(opt_level=opt_level, cache=cache)

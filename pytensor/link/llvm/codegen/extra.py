@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm.codegen.elemwise import output_array
-from pytensor.link.llvm.codegen.emit import advance, Array, cast, constant, copy, load, mul, store
+from pytensor.link.llvm.codegen.emit import advance, Array, cast, constant, copy, load, store
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm.layout import split_layouts
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -54,20 +54,19 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_emit.register(ExtractDiag)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
-    i64 = m.i64
+    b = cg.b
     x = inputs[0]
     a1, a2 = op.axis1 % x.ndim, op.axis2 % x.ndim
     off = int(op.offset)
     n1, n2 = x.shape[a1], x.shape[a2]
-    zero = b.const_int(i64, 0)
+    zero = b.i64(0)
     # length = max(0, min(n1 - max(0, -off), n2 - max(0, off)))
-    l1 = b.sub(n1, b.const_int(i64, max(0, -off)))
-    l2 = b.sub(n2, b.const_int(i64, max(0, off)))
-    length = b.select(b.icmp(m.ICmp.SLT, l1, l2), l1, l2)
-    length = b.select(b.icmp(m.ICmp.SGT, length, zero), length, zero)
-    start = mul(b, b.const_int(i64, off), x.strides[a2]) if off >= 0 else mul(b, b.const_int(i64, -off), x.strides[a1])
-    start = b.select(b.icmp(m.ICmp.SGT, length, zero), start, zero)
+    l1 = b.sub(n1, b.i64(max(0, -off)))
+    l2 = b.sub(n2, b.i64(max(0, off)))
+    length = b.select(b.slt(l1, l2), l1, l2)
+    length = b.select(b.sgt(length, zero), length, zero)
+    start = b.mul(b.i64(off), x.strides[a2], nsw=True) if off >= 0 else b.mul(b.i64(-off), x.strides[a1], nsw=True)
+    start = b.select(b.sgt(length, zero), start, zero)
     shape = [x.shape[a] for a in range(x.ndim) if a not in (a1, a2)] + [length]
     strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [b.add(x.strides[a1], x.strides[a2])]
     _set(outputs[0], cg, Array(x.dtype, b.gep_bytes(x.data, start), shape, strides))
@@ -80,27 +79,26 @@ def _(op, node, in_layouts):
 
 @llvm_emit.register(Split)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
-    i64 = m.i64
+    b = cg.b
     x, splits = inputs
     axis = op.axis
-    offset = b.const_int(i64, 0)
+    offset = b.i64(0)
     parts = []
     for k in range(op.len_splits):
-        p = b.gep_bytes(splits.data, mul(b, b.const_int(i64, k), splits.strides[0]))
+        p = b.gep_bytes(splits.data, b.mul(b.i64(k), splits.strides[0], nsw=True))
         n = cast(b, load(b, splits.dtype, p), splits.dtype, "int64")
-        cg.check(b.icmp(m.ICmp.SGE, n, b.const_int(i64, 0)), "Split: negative split size")
+        cg.check(b.sge(n, b.i64(0)), "Split: negative split size")
         static = node.outputs[k].type.shape[axis]
         if static is not None:
-            cg.check(b.icmp(m.ICmp.EQ, n, b.const_int(i64, static)), "Split: split size differs from the static shape")
-            n = b.const_int(i64, static)
+            cg.check(b.eq(n, b.i64(static)), "Split: split size differs from the static shape")
+            n = b.i64(static)
         parts.append((offset, n))
         offset = b.add(offset, n)
-    cg.check(b.icmp(m.ICmp.EQ, offset, x.shape[axis]), "Split: the split sizes don't add up to the length of the axis")
+    cg.check(b.eq(offset, x.shape[axis]), "Split: the split sizes don't add up to the length of the axis")
     layouts = split_layouts(op, node, x.layout)
     for out, (start, n), lay in zip(outputs, parts, layouts, strict=True):
         shape = list(x.shape)
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
-        start = b.select(b.icmp(m.ICmp.SGT, n, b.const_int(i64, 0)), start, b.const_int(i64, 0))
-        _set(out, cg, Array(x.dtype, b.gep_bytes(x.data, mul(b, start, x.strides[axis])), shape, list(x.strides), lay))
+        start = b.select(b.sgt(n, b.i64(0)), start, b.i64(0))
+        _set(out, cg, Array(x.dtype, b.gep_bytes(x.data, b.mul(start, x.strides[axis], nsw=True)), shape, list(x.strides), lay))

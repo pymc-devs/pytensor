@@ -140,21 +140,19 @@ class Layout:
 
     def stride_values(self, b, itemsize: int, shape_vals, passed: dict):
         """i64 stride values: constants, products of lengths (packed) or `passed[axis]`."""
-        from pytensor.link.llvm.codegen.emit import mul
         from pytensor.link.llvm.codegen.types import ir
 
-        m = ir()
         out = [None] * self.ndim
-        acc = b.const_int(m.i64, itemsize)
+        acc = b.i64(itemsize)
         for a in reversed(self.order):
             s = self.strides[a]
             if s is PACKED:
                 out[a] = acc
-                acc = mul(b, acc, shape_vals[a])
+                acc = b.mul(acc, shape_vals[a], nsw=True)
             elif s is DYNAMIC:
                 out[a] = passed[a]
             else:
-                out[a] = b.const_int(m.i64, s)
+                out[a] = b.i64(s)
         return out
 
     def satisfied_by(self, shape, strides, itemsize) -> bool:
