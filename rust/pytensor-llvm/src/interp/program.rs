@@ -272,7 +272,12 @@ impl Program {
             }
             for &v in &s.outputs {
                 ok(v)?;
-                if produced[v.i()] || matches!(spec.values[v.i()].kind, ValueKind::Input(_) | ValueKind::Const(_)) {
+                // (an output that is also an input: the task works in place)
+                let in_place = s.inputs.contains(&v);
+                if in_place && matches!(spec.values[v.i()].kind, ValueKind::Const(_)) {
+                    return Err(format!("task {}: a constant can't be overwritten", s.desc));
+                }
+                if !in_place && (produced[v.i()] || matches!(spec.values[v.i()].kind, ValueKind::Input(_) | ValueKind::Const(_))) {
                     return Err(format!("task {}: value {} produced twice", s.desc, v.0));
                 }
                 produced[v.i()] = true;
@@ -426,6 +431,11 @@ impl Program {
             }
             for &v in &task.outputs {
                 let mut a = st.vals[v.i()];
+                if task.inputs.contains(&v) {
+                    // in place: the output is the input's memory, as it is now
+                    st.args.push(a);
+                    continue;
+                }
                 match values[v.i()].kind {
                     ValueKind::Fresh => match self.fresh_output[v.i()].and_then(|o| provided.get(o).copied().flatten()) {
                         Some(p) => {
@@ -474,6 +484,9 @@ impl Program {
             let n_in = task.inputs.len();
             for (k, &v) in task.outputs.iter().enumerate() {
                 let a = st.args[n_in + k];
+                if task.inputs.contains(&v) {
+                    continue; // in place: the value is what it was
+                }
                 if let ValueKind::Returned(sources) = &values[v.i()].kind {
                     st.vals[v.i()].data = a.data;
                     st.vals[v.i()].owner = a.owner;

@@ -19,6 +19,9 @@ class NodeItem:
     node: object
     inputs: list
     outputs: list
+    #: a node of the graph being planned itself (not of an inlined inner graph): what
+    #: its op may destroy was validated there (the graph's DestroyHandler)
+    of_the_graph: bool = False
 
 
 @dataclass
@@ -46,6 +49,9 @@ class Values:
     def __init__(self):
         self.types = {}  # vid -> PyTensor type
         self.consts = {}  # vid -> numpy data
+        #: values that stand for several variables (an inlined OpFromGraph passing an
+        #: input through): never overwritten in place
+        self.shared = set()
         self._next = 0
 
     def new(self, t) -> int:

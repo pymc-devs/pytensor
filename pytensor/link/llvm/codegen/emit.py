@@ -298,6 +298,35 @@ class ProvidedOutput:
         """The memory of the output (the caller's; `shape` is what it has)."""
         return self.array
 
+    def overwrite(self, cg, x: Array) -> Array:
+        """The memory of the output, holding the values of `x` (here: a copy)."""
+        copy(cg, x, self.array)
+        return self.array
+
+
+@dataclass
+class InplaceOutput:
+    """An output that is the memory of an input the op destroys (`llvm_inplace`): the
+    result overwrites the input."""
+
+    #: the input's memory, writable
+    array: Array
+    #: the input
+    source: Array
+    done: bool = False
+
+    def allocate(self, shape: list) -> Array:
+        """The memory of the output: the input's, still holding the input's values."""
+        self.done = True
+        return self.array
+
+    def overwrite(self, cg, x: Array) -> Array:
+        """The memory of the output, holding the values of `x`: `x` itself."""
+        if x is not self.source:
+            raise ValueError(f"this output overwrites input {self.source.base}, not the array given")
+        self.done = True
+        return self.array
+
 
 @dataclass
 class SlotOutput:
@@ -350,6 +379,12 @@ class SlotOutput:
         self._write(data, shape, a.strides)
         self._mark(a)
         self.done = True
+        return a
+
+    def overwrite(self, cg, x: Array) -> Array:
+        """The memory of the output, holding the values of `x` (here: a copy)."""
+        a = self.allocate(x.shape)
+        copy(self.cg, x, a)
         return a
 
     def data(self):
