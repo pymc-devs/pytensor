@@ -44,7 +44,7 @@ from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
 from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.plan.flatten import flatten
 from pytensor.link.llvm.plan.values import NodeItem, Values
-from pytensor.link.llvm.rust_kernels import rust_kernel, rust_kernel_outputs
+from pytensor.link.llvm.rust_kernels import interp, rust_kernel, rust_kernel_outputs
 from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise
@@ -133,8 +133,8 @@ class Resolver:
         ]
         destroyed = getattr(node.op, "destroy_map", None) or {}
         return CalledKernel(
+            interp().numba_entry(),
             kernel.address,
-            0,
             outs,
             f"numba: {node.op}",
             kernel,

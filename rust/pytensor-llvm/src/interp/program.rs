@@ -548,6 +548,8 @@ impl Program {
                     ValueKind::Returned(_) => {
                         a.data = std::ptr::null_mut();
                         a.owner = std::ptr::null_mut();
+                        // unset until the kernel writes it (checked after the call)
+                        st.storage[v.i()][..values[v.i()].ndim()].fill(-1);
                     }
                     _ => {}
                 }
@@ -616,11 +618,13 @@ impl Program {
                 if matches!(values[v.i()].kind, ValueKind::Returned(_)) {
                     // (the kernel wrote the shape there, through `vals[v].shape`)
                     let shape = &st.storage[v.i()][..values[v.i()].ndim()];
-                    check_shape(&values[v.i()], shape)
-                        .map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
-                    if st.vals[v.i()].data.is_null() && shape.iter().product::<i64>() != 0 {
+                    let null = st.vals[v.i()].data.is_null();
+                    if null && (shape.iter().any(|&n| n < 0) || shape.iter().product::<i64>() != 0)
+                    {
                         return Err(format!("{}: output {k} was not set", task.desc));
                     }
+                    check_shape(&values[v.i()], shape)
+                        .map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
                 }
             }
             for &v in &task.release {

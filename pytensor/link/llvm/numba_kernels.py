@@ -1,15 +1,17 @@
 """Numba kernels: Ops we don't implement, run through their numba implementation.
 
 For such an Op we take PyTensor's numba implementation (``numba_funcify``) and wrap it in
-a numba ``cfunc`` with the kernel ABI, ``int32(PtCtx *ctx, PtArray *args,
-int32 n_inputs, int32 n_outputs, void *config)``:
+a numba ``cfunc`` with the arguments of the kernel ABI, ``int32(PtCtx *ctx, PtArray *args,
+int32 n_inputs, int32 n_outputs, void *config)``, run by the runtime's ``numba_entry``
+kernel (the task's config is the cfunc's address):
 
 * inputs become numba arrays that view the caller's memory (data, shape, strides; no copy),
   or plain scalars for inputs of ``ScalarType``,
 * every output is *kernel-allocated*: the wrapper calls ``ctx->rt->alloc`` through the
   runtime table and copies numba's result into that buffer, so ownership stays with our
   runtime,
-* exceptions raised by the numba code are caught and reported as a nonzero return code.
+* it returns 1 on success. numba's cfunc wrapper prints an exception as "unraisable"
+  and returns 0, which ``numba_entry`` reports as an error.
 
 The wrapper needs no Python or GIL when the numba implementation is in nopython mode
 (numba's object-mode fallbacks take the GIL themselves).
@@ -23,7 +25,9 @@ import numba
 import numpy as np
 from llvmlite import ir
 from numba import types
-from numba.core import cgutils
+from numba.core import cgutils, sigutils
+from numba.core.ccallback import CFunc
+from numba.core.compiler_lock import global_compiler_lock
 from numba.extending import intrinsic
 from numba.np.arrayobj import populate_array
 
@@ -173,8 +177,36 @@ _SIG = types.int32(
     types.voidptr, types.voidptr, types.int32, types.int32, types.voidptr
 )
 
+
+class _CFunc(CFunc):
+    """numba's CFunc, but keeping its CompileResult.
+
+    The code of a cfunc refers to the environments of the functions compiled into it
+    (globals and constants: what object mode needs to box values). numba's
+    `CFunc.compile` keeps only the library, and the environments rebuilt when loading
+    from the cache are held by nothing else (`Environment._memo` is weak), so they are
+    freed at once: object mode then fails ("'descr' is NULL"), or worse. A fresh compile
+    happens to work, as the callees' dispatchers keep their environments alive.
+    """
+
+    @global_compiler_lock
+    def compile(self):
+        cres = self._cache.load_overload(self._sig, self._targetdescr.target_context)
+        if cres is None:
+            cres = self._compile_uncached()
+            self._cache.save_overload(self._sig, cres)
+        else:
+            self._cache_hits += 1
+        self._cres = cres
+        self._library = cres.library
+        self._wrapper_name = cres.fndesc.llvm_cfunc_wrapper_name
+        self._wrapper_address = self._library.get_pointer_to_function(
+            self._wrapper_name
+        )
+
+
 # bump when the generated wrapper changes
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 
 
 def numba_kernel(node):
@@ -186,7 +218,7 @@ def numba_kernel(node):
     op_fn, op_key = numba_funcify_ensure_cache(node.op, node=node)
     # module globals give numba a real module (`__name__`) to rebuild cached environments from
     env = globals() | {"op_fn": op_fn, "np": np}
-    lines = ["def kernel(ctx, args, n_inputs, n_outputs, params):", "    try:"]
+    lines = ["def kernel(ctx, args, n_inputs, n_outputs, params):"]
     names = []
     for i, inp in enumerate(node.inputs):
         t = inp.type
@@ -196,9 +228,9 @@ def numba_kernel(node):
             env[f"in{i}"] = array_input(i, t.ndim, np.dtype(t.dtype))
         else:
             raise NotImplementedError(f"numba kernel: input type {t}")
-        lines.append(f"        x{i} = in{i}(args)")
+        lines.append(f"    x{i} = in{i}(args)")
         names.append(f"x{i}")
-    lines.append(f"        r = op_fn({', '.join(names)})")
+    lines.append(f"    r = op_fn({', '.join(names)})")
     n_in = len(node.inputs)
     for k, out in enumerate(node.outputs):
         t = out.type
@@ -207,10 +239,12 @@ def numba_kernel(node):
         ndim = 0 if isinstance(t, ScalarType) else t.ndim
         env[f"out{k}"] = allocated_output(n_in + k, ndim, np.dtype(t.dtype))
         val = "r" if len(node.outputs) == 1 else f"r[{k}]"
-        lines.append(f"        v{k} = np.asarray({val})")
-        lines.append(f"        o{k} = out{k}(ctx, args, v{k}.shape)")
-        lines.append(f"        o{k}[...] = v{k}")
-    lines += ["        return 0", "    except Exception:", "        return 1"]
+        lines.append(f"    v{k} = np.asarray({val})")
+        lines.append(f"    o{k} = out{k}(ctx, args, v{k}.shape)")
+        lines.append(f"    o{k}[...] = v{k}")
+    # no try/except: numba lets execution go on after an object mode exception inside
+    # one (with an empty result); uncaught, its cfunc wrapper reports it and returns 0
+    lines.append("    return 1")
     src = "\n".join(lines)
     # Cache the wrapper on disk through PyTensor's numba cache, keyed by the Op's own
     # cache key and the variable types (the wrapper is fully determined by those).
@@ -225,4 +259,9 @@ def numba_kernel(node):
     kernel = compile_numba_function_src(
         src, "kernel", global_env=env, cache_key=cache_key
     )
-    return numba.cfunc(_SIG, nopython=True, cache=cache_key is not None)(kernel)
+    sig = sigutils.normalize_signature(_SIG)
+    cfunc = _CFunc(kernel, sig, locals={}, options={"nopython": True})
+    if cache_key is not None:
+        cfunc.enable_caching()
+    cfunc.compile()
+    return cfunc
