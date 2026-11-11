@@ -12,10 +12,20 @@ from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.type import TensorType
 
 
-def ir():
-    from pytensor_llvm import ir
+class _IR:
+    """`pytensor_llvm.ir`, imported when first used (the extension is optional, and
+    PyTensor must import without it)."""
 
-    return ir
+    def __getattr__(self, name):
+        from pytensor_llvm import ir as module
+
+        value = getattr(module, name)
+        setattr(self, name, value)
+        return value
+
+
+#: the IR builder's module: `ir.i64`, `ir.Module(...)`, `ir.Libm.Erf`
+ir = _IR()
 
 
 SUPPORTED_DTYPES = ("float64", "float32", "int64", "int32", "int16", "int8", "uint8", "bool")
@@ -29,22 +39,21 @@ def check_dtype(dtype: str) -> str:
 
 def value_type(dtype: str):
     """The LLVM type of a value of `dtype` in registers (bool is i1)."""
-    m = ir()
     return {
-        "float64": m.f64,
-        "float32": m.f32,
-        "int64": m.i64,
-        "int32": m.i32,
-        "int16": m.i16,
-        "int8": m.i8,
-        "uint8": m.i8,
-        "bool": m.i1,
+        "float64": ir.f64,
+        "float32": ir.f32,
+        "int64": ir.i64,
+        "int32": ir.i32,
+        "int16": ir.i16,
+        "int8": ir.i8,
+        "uint8": ir.i8,
+        "bool": ir.i1,
     }[check_dtype(dtype)]
 
 
 def memory_type(dtype: str):
     """The LLVM type of an element of `dtype` in memory (bool is a byte)."""
-    return ir().i8 if dtype == "bool" else value_type(dtype)
+    return ir.i8 if dtype == "bool" else value_type(dtype)
 
 
 def itemsize(dtype: str) -> int:
@@ -117,16 +126,14 @@ class TensorRepr:
 
 @cache
 def _tensor_ir_type(ndim, n_lengths, n_strides):
-    m = ir()
     if ndim == 0:
-        return m.ptr
-    return m.Type.struct_([m.ptr, m.Type.array(m.i64, n_lengths), m.Type.array(m.i64, n_strides)])
+        return ir.ptr
+    return ir.Type.struct_([ir.ptr, ir.Type.array(ir.i64, n_lengths), ir.Type.array(ir.i64, n_strides)])
 
 
 @cache
 def slot_type(ndim):
-    m = ir()
-    return m.Type.struct_([m.ptr, m.Type.array(m.i64, ndim), m.Type.array(m.i64, ndim), m.ptr])
+    return ir.Type.struct_([ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr])
 
 
 @dataclass(frozen=True)
@@ -165,8 +172,7 @@ def repr_of(t, layout: Layout | None = None):
 
 #: The kernel ABI array: `{data, shape*, strides*, owner, ndim}` (40 bytes).
 def ptarray_type():
-    m = ir()
-    return m.Type.struct_([m.ptr, m.ptr, m.ptr, m.ptr, m.i64])
+    return ir.Type.struct_([ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.i64])
 
 
 PTARRAY_SIZE = 40

@@ -86,7 +86,6 @@ def build_unit_function(
 
     if links is None:
         links = LinkTable()
-    m = ir()
     if input_layouts is None:
         input_layouts = [None] * len(inputs)
     in_reprs = [repr_of(t, lay) for (_, t), lay in zip(inputs, input_layouts, strict=True)]
@@ -101,7 +100,7 @@ def build_unit_function(
         if o.mode not in (OutputMode.PROVIDED, OutputMode.ALLOCATED):
             raise NotImplementedError(f"unit outputs can't be {o.mode}")
     sig = Signature(tuple(in_reprs), tuple(outs))
-    fn = module.function(name, sig.param_types(), m.i32, inline=m.Inline.Always)
+    fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
     b = fn.builder()
     params = fn.params
     ctx, config, frame = params[:3]
@@ -137,7 +136,7 @@ def build_unit_function(
             out = SlotOutput(cg, target.slot, t.dtype, t.ndim)
             copy(cg, src, out.allocate(src.shape))
     release(cg, owned)
-    b.ret(b.const_int(m.i32, 0))
+    b.ret(b.i32(0))
     return NodeFunction(fn, sig, cg.frame_size, links)
 
 
@@ -153,15 +152,14 @@ class Destination:
 
 def release(cg, owned):
     """Give up the buffers kernels allocated into `owned` slots ([(slot, ndim)])."""
-    m = ir()
     for slot, nd in owned:
-        cg.b.rt_decref(cg.ctx, cg.b.load(m.ptr, cg.b.field_ptr(slot_type(nd), slot, 3)))
+        cg.b.rt_decref(cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, 3)))
 
 
 def bind_constants(cg, constants, vals):
     """Values of `constants` ({vid: (type, ndarray)}): 0-d ones folded into the code,
     arrays from the links (C-contiguous copies kept alive with it)."""
-    b, m = cg.b, ir()
+    b = cg.b
     for vid, (t, data) in constants.items():
         r = repr_of(t)
         data = np.asarray(data, dtype=t.dtype)
@@ -180,8 +178,8 @@ def bind_constants(cg, constants, vals):
 
             arr = np.ascontiguousarray(data)
             ptr = linked(cg, cg.links.link_array(arr))
-            shape = [b.const_int(m.i64, n) for n in arr.shape]
-            strides = [b.const_int(m.i64, st) for st in arr.strides]
+            shape = [b.i64(n) for n in arr.shape]
+            strides = [b.i64(st) for st in arr.strides]
             vals[vid] = c_array(t.dtype, ptr, shape, strides)
 
 
@@ -200,7 +198,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
     Returns (written, owned): the vids produced in their targets, and the slots of
     buffers kernels allocated for other values, for the caller to `release` when they
     are no longer used (on failure, they are released here)."""
-    b, m = cg.b, ir()
+    b = cg.b
     ctx, config = cg.ctx, cg.config
     targets = targets or {}
     written = set()
@@ -273,7 +271,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
                     written.add(vid)
                 else:
                     lay = o.layout if o.layout.fully_packed(o.repr.shape) else None  # (C implies any)
-                    a = cg.temporary(var.type.dtype, [b.const_int(m.i64, s) for s in var.type.shape], lay)
+                    a = cg.temporary(var.type.dtype, [b.i64(s) for s in var.type.shape], lay)
                 vals[vid] = a
                 args.append(pack(b, o.repr, a))
             elif o.mode is OutputMode.SCALAR:
@@ -292,7 +290,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
                 args.append(slot)
                 reads.append((vid, slot, "array", o))
         rc = b.call(nf.function, args)
-        failed = b.icmp(m.ICmp.NE, rc, b.const_int(m.i32, 0))
+        failed = b.ne(rc, b.i32(0))
         with b.if_(failed):
             release(cg, owned)
             if on_fail is not None:
@@ -309,12 +307,11 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
 
 def _frame_part(cg, nbytes):
     """A part of the unit's frame for one inner node."""
-    m = ir()
     if nbytes == 0:
         return cg.b.null()
     off = cg.frame_size
     cg.frame_size += -(-nbytes // 64) * 64
-    return cg.b.gep_bytes(cg.frame, cg.b.const_int(m.i64, off))
+    return cg.b.gep_bytes(cg.frame, cg.b.i64(off))
 
 
 def _mem_type(dtype):

@@ -14,7 +14,6 @@ from pytensor.link.llvm.codegen.emit import (
     for_each,
     is_contiguous,
     load,
-    mul,
     size,
     store,
 )
@@ -41,60 +40,60 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_emit.register(Shape)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     x = inputs[0]
-    out = output_array(outputs[0], [b.const_int(m.i64, x.ndim)])
+    out = output_array(outputs[0], [b.i64(x.ndim)])
     for a, n in enumerate(x.shape):
-        p = b.gep_bytes(out.data, mul(b, b.const_int(m.i64, a), out.strides[0]))
+        p = b.gep_bytes(out.data, b.mul(b.i64(a), out.strides[0], nsw=True))
         store(b, out.dtype, cast(b, n, "int64", out.dtype), p)
 
 
 @llvm_emit.register(MakeVector)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
-    out = output_array(outputs[0], [b.const_int(m.i64, len(inputs))])
+    b = cg.b
+    out = output_array(outputs[0], [b.i64(len(inputs))])
     for k, x in enumerate(inputs):
-        p = b.gep_bytes(out.data, mul(b, b.const_int(m.i64, k), out.strides[0]))
+        p = b.gep_bytes(out.data, b.mul(b.i64(k), out.strides[0], nsw=True))
         store(b, out.dtype, cast(b, _scalar(b, x), x.dtype, out.dtype), p)
 
 
 def _shape_from(cg, node, values, first):
     """Output lengths from 0-d integer inputs, checked against the static type."""
-    b, m = cg.b, ir()
+    b = cg.b
     shape = []
     static = node.outputs[0].type.shape
     for a, x in enumerate(values[first:]):
         n = cast(b, _scalar(b, x), x.dtype, "int64")
-        cg.check(b.icmp(m.ICmp.SGE, n, b.const_int(m.i64, 0)), "negative dimensions are not allowed")
+        cg.check(b.sge(n, b.i64(0)), "negative dimensions are not allowed")
         if static[a] is not None:
             cg.check(
-                b.icmp(m.ICmp.EQ, n, b.const_int(m.i64, static[a])),
+                b.eq(n, b.i64(static[a])),
                 f"the shape on axis {a} doesn't match the static shape {static[a]}",
             )
-            n = b.const_int(m.i64, static[a])
+            n = b.i64(static[a])
         shape.append(n)
     return shape
 
 
 @llvm_emit.register(Alloc)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     v = inputs[0]
     shape = _shape_from(cg, node, inputs, 1)
     out = output_array(outputs[0], shape)
     # the value broadcasts against the output, aligned on the right
     off = len(shape) - v.ndim
     vt = node.inputs[0].type
-    strides = [b.const_int(m.i64, 0)] * off
+    strides = [b.i64(0)] * off
     for a in range(v.ndim):
         ln, on = v.shape[a], shape[off + a]
         if vt.shape[a] == 1:
-            strides.append(b.const_int(m.i64, 0))
+            strides.append(b.i64(0))
             continue
         if not (ln.const_int is not None and ln.const_int == on.const_int):
-            one = b.icmp(m.ICmp.EQ, ln, b.const_int(m.i64, 1))
-            cg.check(b.or_(b.icmp(m.ICmp.EQ, ln, on), one), "Alloc: the value can't be broadcast to the shape")
-            strides.append(b.select(one, b.const_int(m.i64, 0), v.strides[a]))
+            one = b.eq(ln, b.i64(1))
+            cg.check(b.or_(b.eq(ln, on), one), "Alloc: the value can't be broadcast to the shape")
+            strides.append(b.select(one, b.i64(0), v.strides[a]))
         else:
             strides.append(v.strides[a])
     src = Array(v.dtype, v.data, shape, strides)
@@ -112,40 +111,39 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_emit.register(ARange)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     start, stop, step = (_scalar(b, x) for x in inputs)
     dts = [x.dtype for x in inputs]
     out_dtype = node.outputs[0].type.dtype
-    i64 = m.i64
+    i64 = ir.i64
     if all(not is_float(d) for d in dts):
         start, stop, step = (cast(b, v, d, "int64") for v, d in zip((start, stop, step), dts, strict=True))
-        cg.check(b.icmp(m.ICmp.NE, step, b.const_int(i64, 0)), "arange: step can't be zero")
+        cg.check(b.ne(step, b.i64(0)), "arange: step can't be zero")
         # length = ceil((stop - start) / step), at least 0
         span = b.sub(stop, start)
-        pos = b.icmp(m.ICmp.SGT, step, b.const_int(i64, 0))
-        adj = b.select(pos, b.sub(step, b.const_int(i64, 1)), b.add(step, b.const_int(i64, 1)))
+        pos = b.sgt(step, b.i64(0))
+        adj = b.select(pos, b.sub(step, b.i64(1)), b.add(step, b.i64(1)))
         n = b.sdiv(b.add(span, adj), step)
-        n = b.select(b.icmp(m.ICmp.SGT, n, b.const_int(i64, 0)), n, b.const_int(i64, 0))
+        n = b.select(b.sgt(n, b.i64(0)), n, b.i64(0))
         start_v, step_v, dt = start, step, "int64"
     else:
-        f64 = m.f64
         start, stop, step = (cast(b, v, d, "float64") for v, d in zip((start, stop, step), dts, strict=True))
-        cg.check(b.fcmp(m.FCmp.UNE, step, b.const_float(f64, 0.0)), "arange: step can't be zero")
-        q = b.intrinsic(m.Intrinsic.Ceil, [b.fdiv(b.fsub(stop, start), step)])
-        ok = b.fcmp(m.FCmp.OLT, b.intrinsic(m.Intrinsic.Fabs, [q]), b.const_float(f64, 2.0**62))
+        cg.check(b.fcmp(ir.FCmp.UNE, step, b.f64(0.0)), "arange: step can't be zero")
+        q = b.intrinsic(ir.Intrinsic.Ceil, [b.fdiv(b.fsub(stop, start), step)])
+        ok = b.fcmp(ir.FCmp.OLT, b.intrinsic(ir.Intrinsic.Fabs, [q]), b.f64(2.0**62))
         cg.check(ok, "arange: invalid or too large range")
-        q = b.select(b.fcmp(m.FCmp.OGT, q, b.const_float(f64, 0.0)), q, b.const_float(f64, 0.0))
+        q = b.select(b.fcmp(ir.FCmp.OGT, q, b.f64(0.0)), q, b.f64(0.0))
         n = b.fptosi(q, i64)
         start_v, step_v, dt = start, step, "float64"
     static = node.outputs[0].type.shape[0]
     if static is not None:
-        cg.check(b.icmp(m.ICmp.EQ, n, b.const_int(i64, static)), "arange: length differs from the static shape")
+        cg.check(b.eq(n, b.i64(static)), "arange: length differs from the static shape")
     out = output_array(outputs[0], [n])
     with b.loop(n) as i:
         if dt == "int64":
             v = b.add(start_v, b.mul(i, step_v))
         else:
-            v = b.fadd(start_v, b.fmul(b.sitofp(i, m.f64), step_v))
+            v = b.fadd(start_v, b.fmul(b.sitofp(i, ir.f64), step_v))
         store(b, out_dtype, cast(b, v, dt, out_dtype), advance(b, out.data, i, out.strides[0], out.dtype))
 
 
@@ -158,34 +156,34 @@ def _(op, node, in_layouts):
 @llvm_emit.register(Reshape)
 def _(op, node, cg, inputs, outputs):
     """A view if the input is contiguous, else a copy (C order)."""
-    b, m = cg.b, ir()
-    i64 = m.i64
+    b = cg.b
+    i64 = ir.i64
     x, shp = inputs
     total = size(b, x.shape)
     static = node.outputs[0].type.shape
     raw = []
     for a in range(op.ndim):
-        p = b.gep_bytes(shp.data, mul(b, b.const_int(i64, a), shp.strides[0]))
+        p = b.gep_bytes(shp.data, b.mul(b.i64(a), shp.strides[0], nsw=True))
         raw.append(cast(b, load(b, shp.dtype, p), shp.dtype, "int64"))
     # one -1 is inferred from the size
-    minus1 = b.const_int(i64, -1)
-    known = b.const_int(i64, 1)
-    n_infer = b.const_int(i64, 0)
+    minus1 = b.i64(-1)
+    known = b.i64(1)
+    n_infer = b.i64(0)
     for v in raw:
-        neg = b.icmp(m.ICmp.EQ, v, minus1)
+        neg = b.eq(v, minus1)
         known = b.select(neg, known, b.mul(known, v))
         n_infer = b.add(n_infer, b.zext(neg, i64))
-        cg.check(b.icmp(m.ICmp.SGE, v, minus1), "reshape: negative length")
-    cg.check(b.icmp(m.ICmp.SLE, n_infer, b.const_int(i64, 1)), "reshape: can only infer one length")
-    nz = b.icmp(m.ICmp.NE, known, b.const_int(i64, 0))
-    inferred = b.select(nz, b.sdiv(total, b.select(nz, known, b.const_int(i64, 1))), b.const_int(i64, 0))
+        cg.check(b.sge(v, minus1), "reshape: negative length")
+    cg.check(b.sle(n_infer, b.i64(1)), "reshape: can only infer one length")
+    nz = b.ne(known, b.i64(0))
+    inferred = b.select(nz, b.sdiv(total, b.select(nz, known, b.i64(1))), b.i64(0))
     shape = []
     for a, v in enumerate(raw):
-        n = b.select(b.icmp(m.ICmp.EQ, v, minus1), inferred, v)
+        n = b.select(b.eq(v, minus1), inferred, v)
         if static[a] is not None:
-            n = b.const_int(i64, static[a])
+            n = b.i64(static[a])
         shape.append(n)
-    cg.check(b.icmp(m.ICmp.EQ, size(b, shape), total), "cannot reshape: the total size changes")
+    cg.check(b.eq(size(b, shape), total), "cannot reshape: the total size changes")
     out = outputs[0]
     if isinstance(out, ProvidedOutput):
         copy(cg, x, out.array)
@@ -214,15 +212,15 @@ def _(op, node, cg, inputs, outputs):
 
 def _copy_reshaped(cg, src: Array, dst: Array):
     """Copy `src` into contiguous `dst` (same size, other shape), in C order."""
-    b, m = cg.b, ir()
-    k = [b.const_int(m.i64, 0)]
+    b = cg.b
+    k = [b.i64(0)]
 
     def body(p):
-        i = b.load(m.i64, kptr)
+        i = b.load(ir.i64, kptr)
         store(b, dst.dtype, load(b, src.dtype, p[0]), b.gep(_mem(dst.dtype), dst.data, i))
-        b.store(b.add(i, b.const_int(m.i64, 1)), kptr)
+        b.store(b.add(i, b.i64(1)), kptr)
 
-    kptr = b.alloca(m.i64)
+    kptr = b.alloca(ir.i64)
     b.store(k[0], kptr)
     for_each(b, src.shape, [Array(src.dtype, src.data, src.shape, src.strides)], body)
 
@@ -235,7 +233,7 @@ def _mem(dtype):
 
 @llvm_emit.register(Join)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     axis = op.axis
     first = inputs[0]
     nd = first.ndim
@@ -246,19 +244,19 @@ def _(op, node, cg, inputs, outputs):
             p, q = x.shape[a], first.shape[a]
             if not (p.const_int is not None and p.const_int == q.const_int):
                 cg.check(
-                    b.icmp(m.ICmp.EQ, p, q),
+                    b.eq(p, q),
                     f"Join: all inputs must have the same shape except on the join axis (input {k} differs on axis {a})",
                 )
     total = first.shape[axis]
     for x in inputs[1:]:
-        total = b.add(total, x.shape[axis], nsw=True) if total.const_int is None or x.shape[axis].const_int is None else b.const_int(m.i64, total.const_int + x.shape[axis].const_int)
+        total = b.add(total, x.shape[axis], nsw=True) if total.const_int is None or x.shape[axis].const_int is None else b.i64(total.const_int + x.shape[axis].const_int)
     shape = [total if a == axis else first.shape[a] for a in range(nd)]
     out = output_array(outputs[0], shape)
-    offset = b.const_int(m.i64, 0)
+    offset = b.i64(0)
     for x in inputs:
-        dst = Array(out.dtype, b.gep_bytes(out.data, mul(b, offset, out.strides[axis])), x.shape, out.strides)
+        dst = Array(out.dtype, b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)), x.shape, out.strides)
         copy(cg, x, dst)
-        offset = b.add(offset, x.shape[axis]) if offset.const_int is None or x.shape[axis].const_int is None else b.const_int(m.i64, offset.const_int + x.shape[axis].const_int)
+        offset = b.add(offset, x.shape[axis]) if offset.const_int is None or x.shape[axis].const_int is None else b.i64(offset.const_int + x.shape[axis].const_int)
 
 
 @llvm_outputs.register(CheckAndRaise)
@@ -268,7 +266,7 @@ def _(op, node, in_layouts):
 
 @llvm_emit.register(CheckAndRaise)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     for c, var in zip(inputs[1:], node.inputs[1:], strict=True):
         v = _scalar(b, c)
         dt = var.type.dtype

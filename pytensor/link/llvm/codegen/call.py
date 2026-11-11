@@ -83,8 +83,8 @@ class LinkTable:
 
 def linked(cg, index: int):
     """The pointer in entry `index` of the link table."""
-    b, m = cg.b, ir()
-    return b.load(m.ptr, b.gep_bytes(cg.config, b.const_int(m.i64, 8 * index)))
+    b = cg.b
+    return b.load(ir.ptr, b.gep_bytes(cg.config, b.i64(8 * index)))
 
 
 def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: list) -> None:
@@ -97,15 +97,15 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
     the message). The kernel's scratch is released after the call."""
     from pytensor.link.llvm.codegen.emit import Array, ProvidedOutput, SlotOutput, store
 
-    b, m = cg.b, ir()
+    b = cg.b
     pa = ptarray_type()
-    i64 = m.i64
+    i64 = ir.i64
     args_of = []  # per argument: (data, shape ptr, strides ptr, ndim, SlotOutput or None)
 
     def storage(values):
-        p = b.alloca(m.Type.array(i64, max(len(values), 1)))
+        p = b.alloca(ir.Type.array(i64, max(len(values), 1)))
         for k, v in enumerate(values):
-            b.store(v, b.gep(i64, p, b.const_int(i64, k)))
+            b.store(v, b.gep(i64, p, b.i64(k)))
         return p
 
     for a, dtype in inputs:
@@ -129,32 +129,32 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
         else:
             raise NotImplementedError(f"{kernel.description}: a {type(o).__name__} output")
 
-    args = b.alloca(m.Type.array(pa, max(len(args_of), 1)))
+    args = b.alloca(ir.Type.array(pa, max(len(args_of), 1)))
     ptrs = []
     for k, (data, shape, strides, nd, _) in enumerate(args_of):
-        p = b.gep_bytes(args, b.const_int(i64, k * PTARRAY_SIZE))
+        p = b.gep_bytes(args, b.i64(k * PTARRAY_SIZE))
         b.store(data, b.field_ptr(pa, p, 0))
         b.store(shape, b.field_ptr(pa, p, 1))
         b.store(strides, b.field_ptr(pa, p, 2))
         b.store(b.null(), b.field_ptr(pa, p, 3))
-        b.store(b.const_int(i64, nd), b.field_ptr(pa, p, 4))
+        b.store(b.i64(nd), b.field_ptr(pa, p, 4))
         ptrs.append(p)
 
     fn = linked(cg, index)
     config = linked(cg, index + 1)
     mark = b.rt_scratch_mark(cg.ctx)
     call_args = [cg.ctx, args, config] + ([b.null()] if kernel.abi == "kernel" else [])
-    rc = b.call_ptr(fn, call_args, m.i32)
+    rc = b.call_ptr(fn, call_args, ir.i32)
     b.rt_scratch_release(cg.ctx, mark)
 
     for p, (_, _, _, _, o) in zip(ptrs, args_of, strict=True):
         if o is None:
             continue
         st = slot_type(o.ndim)
-        b.store(b.load(m.ptr, b.field_ptr(pa, p, 0)), b.field_ptr(st, o.slot, 0))
-        b.store(b.load(m.ptr, b.field_ptr(pa, p, 3)), b.field_ptr(st, o.slot, 3))
+        b.store(b.load(ir.ptr, b.field_ptr(pa, p, 0)), b.field_ptr(st, o.slot, 0))
+        b.store(b.load(ir.ptr, b.field_ptr(pa, p, 3)), b.field_ptr(st, o.slot, 3))
         o.done = True
-    with b.if_(b.icmp(m.ICmp.NE, rc, b.const_int(m.i32, 0))):
+    with b.if_(b.ne(rc, b.i32(0))):
         b.ret(rc)
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pytensor.link.llvm.codegen.elemwise import output_array
-from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, mul, store
+from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, store
 from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -16,38 +16,11 @@ def _i64(b, v, dtype):
     return cast(b, v, dtype, "int64")
 
 
-def _select(b, c, x, y):
-    if c.const_int is not None:
-        return x if c.const_int else y
-    return b.select(c, x, y)
-
-
-def _min(b, x, y):
-    m = ir()
-    return _select(b, b.icmp(m.ICmp.SLT, x, y), x, y)
-
-
-def _or(b, x, y):
-    if x.const_int == 1 or y.const_int == 1:
-        return b.const_bool(True)
-    if x.const_int == 0:
-        return y
-    if y.const_int == 0:
-        return x
-    return b.or_(x, y)
-
-
-def _max(b, x, y):
-    m = ir()
-    return _select(b, b.icmp(m.ICmp.SGT, x, y), x, y)
-
-
 def index(cg, x: Array, entries) -> Array:
     """`x[entries]` as a view: `entries` hold (value, dtype) for integer indices and
     slices of (value, dtype) / None, like `unflatten_index_variables` returns them."""
-    b, m = cg.b, ir()
-    i64 = m.i64
-    zero, one = b.const_int(i64, 0), b.const_int(i64, 1)
+    b = cg.b
+    zero, one = b.i64(0), b.i64(1)
     offset = zero
     shape, strides = [], []
     empty = b.const_bool(False)
@@ -56,46 +29,45 @@ def index(cg, x: Array, entries) -> Array:
         n, st = x.shape[axis], x.strides[axis]
         if isinstance(e, slice):
             step = one if e.step is None else _i64(b, *e.step)
-            cg.check(b.icmp(m.ICmp.NE, step, zero), "slice step cannot be zero")
-            pos = b.icmp(m.ICmp.SGT, step, zero)
-            minus1 = b.const_int(i64, -1)
+            cg.check(b.ne(step, zero), "slice step cannot be zero")
+            pos = b.sgt(step, zero)
+            minus1 = b.i64(-1)
             nm1 = b.sub(n, one)
-            lower = _select(b, pos, zero, minus1)
-            upper = _select(b, pos, n, nm1)
+            lower = b.select(pos, zero, minus1)
+            upper = b.select(pos, n, nm1)
 
             def bound(v, default):
                 if v is None:
                     return default
                 v = _i64(b, *v)
-                neg = b.icmp(m.ICmp.SLT, v, zero)
-                return _select(b, neg, _max(b, b.add(v, n), lower), _min(b, v, upper))
+                neg = b.slt(v, zero)
+                return b.select(neg, b.smax(b.add(v, n), lower), b.smin(v, upper))
 
-            start = bound(e.start, _select(b, pos, lower, upper))
-            stop = bound(e.stop, _select(b, pos, upper, lower))
+            start = bound(e.start, b.select(pos, lower, upper))
+            stop = bound(e.stop, b.select(pos, upper, lower))
             # length = ceil((stop - start) / step), at least 0
-            span = _select(b, pos, b.sub(stop, start), b.sub(start, stop))
-            astep = _select(b, pos, step, b.neg(step))
-            length = _select(
-                b,
-                b.icmp(m.ICmp.SGT, span, zero),
+            span = b.select(pos, b.sub(stop, start), b.sub(start, stop))
+            astep = b.select(pos, step, b.neg(step))
+            length = b.select(
+                b.sgt(span, zero),
                 b.add(b.sdiv(b.sub(span, one), astep), one),
                 zero,
             )
-            empty = _or(b, empty, b.icmp(m.ICmp.EQ, length, zero))
-            offset = b.add(offset, mul(b, start, st))
+            empty = b.or_(empty, b.eq(length, zero))
+            offset = b.add(offset, b.mul(start, st, nsw=True))
             shape.append(length)
-            strides.append(mul(b, st, step))
+            strides.append(b.mul(st, step, nsw=True))
         else:
             i = _i64(b, *e)
-            i = _select(b, b.icmp(m.ICmp.SLT, i, zero), b.add(i, n), i)
-            ok = b.and_(b.icmp(m.ICmp.SGE, i, zero), b.icmp(m.ICmp.SLT, i, n))
+            i = b.select(b.slt(i, zero), b.add(i, n), i)
+            ok = b.and_(b.sge(i, zero), b.slt(i, n))
             cg.check(ok, f"index out of bounds for axis {axis}")
-            offset = b.add(offset, mul(b, i, st))
+            offset = b.add(offset, b.mul(i, st, nsw=True))
         axis += 1
     shape += x.shape[axis:]
     strides += x.strides[axis:]
     # an empty view may start out of range: keep the pointer inside the array
-    offset = _select(b, empty, zero, offset)
+    offset = b.select(empty, zero, offset)
     data = x.data if offset.const_int == 0 else b.gep_bytes(x.data, offset)
     return Array(x.dtype, data, shape, strides)
 
@@ -128,7 +100,7 @@ def _(op, node, in_layouts):
 
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
-    b, m = cg.b, ir()
+    b = cg.b
     x, y = inputs[0], inputs[1]
     out = output_array(outputs[0], x.shape)
     copy(cg, x, out)
@@ -138,23 +110,23 @@ def _(op, node, cg, inputs, outputs):
     off = view.ndim - ytype.ndim
     if off < 0:
         raise NotImplementedError("IncSubtensor: y has more axes than the indexed view")
-    ystrides = [b.const_int(m.i64, 0)] * off
+    ystrides = [b.i64(0)] * off
     for a, s in enumerate(ytype.shape):
         va = off + a
         if s == 1:
-            ystrides.append(b.const_int(m.i64, 0))
+            ystrides.append(b.i64(0))
         else:
             # like numpy, a length-1 axis of y broadcasts even if its type doesn't say so
             ln, vn = y.shape[a], view.shape[va]
             if ln.const_int is not None and ln.const_int == vn.const_int:
                 ystrides.append(y.strides[a])
                 continue
-            one = b.icmp(m.ICmp.EQ, ln, b.const_int(m.i64, 1))
+            one = b.eq(ln, b.i64(1))
             cg.check(
-                _or(b, b.icmp(m.ICmp.EQ, ln, vn), one),
+                b.or_(b.eq(ln, vn), one),
                 "IncSubtensor: shape mismatch between the value and the indexed view",
             )
-            ystrides.append(_select(b, one, b.const_int(m.i64, 0), y.strides[a]))
+            ystrides.append(b.select(one, b.i64(0), y.strides[a]))
     ys = Array(y.dtype, y.data, view.shape, ystrides)
     dt = out.dtype
 

@@ -74,8 +74,7 @@ def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
 def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
     """`a` iterated over the loop `shape`: axes of static length 1 in `a` (broadcast)
     and `zero_axes` get stride 0; the layout records that."""
-    m = ir()
-    zero = b.const_int(m.i64, 0)
+    zero = b.i64(0)
     static = a.static_shape()
     bcast = {ax for ax in range(a.ndim) if ax in zero_axes or (static[ax] == 1 and shape[ax].const_int != 1)}
     strides = [zero if ax in bcast else st for ax, st in enumerate(a.strides)]
@@ -86,39 +85,23 @@ def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
 
 def c_strides(b, dtype, shape):
     """C-contiguous byte strides for `shape` (i64 values)."""
-    m = ir()
     strides = [None] * len(shape)
-    acc = b.const_int(m.i64, itemsize(dtype))
+    acc = b.i64(itemsize(dtype))
     for a in reversed(range(len(shape))):
         strides[a] = acc
-        acc = mul(b, acc, shape[a])
+        acc = b.mul(acc, shape[a], nsw=True)
     return strides
 
 
-def mul(b, x, y):
-    """i64 product, folded when both are constants."""
-    m = ir()
-    cg, cy = x.const_int, y.const_int
-    if cg is not None and cy is not None:
-        return b.const_int(m.i64, cg * cy)
-    if cg == 1:
-        return y
-    if cy == 1:
-        return x
-    return b.mul(x, y, nsw=True)
-
-
 def size(b, shape):
-    m = ir()
-    n = b.const_int(m.i64, 1)
+    n = b.i64(1)
     for s in shape:
-        n = mul(b, n, s)
+        n = b.mul(n, s, nsw=True)
     return n
 
 
 def unpack(b, r: TensorRepr, value) -> Array:
     """The Array of a tensor value in its representation."""
-    m = ir()
     if r.ndim == 0:
         return Array(r.dtype, value, [], [], Layout.c(0))
     data = b.extract(value, 0)
@@ -129,7 +112,7 @@ def unpack(b, r: TensorRepr, value) -> Array:
             shape.append(b.extract(lengths, k))
             k += 1
         else:
-            shape.append(b.const_int(m.i64, s))
+            shape.append(b.i64(s))
     passed = {}
     if r.stride_axes:
         st = b.extract(value, 2)
@@ -140,47 +123,43 @@ def unpack(b, r: TensorRepr, value) -> Array:
 
 def pack(b, r: TensorRepr, a: Array):
     """A tensor value in its representation."""
-    m = ir()
     if r.ndim == 0:
         return a.data
-    lengths = b.aggregate(m.Type.array(m.i64, len(r.dynamic_axes)), [a.shape[k] for k in r.dynamic_axes])
-    strides = b.aggregate(m.Type.array(m.i64, len(r.stride_axes)), [a.strides[k] for k in r.stride_axes])
+    lengths = b.aggregate(ir.Type.array(ir.i64, len(r.dynamic_axes)), [a.shape[k] for k in r.dynamic_axes])
+    strides = b.aggregate(ir.Type.array(ir.i64, len(r.stride_axes)), [a.strides[k] for k in r.stride_axes])
     return b.aggregate(r.ir_type, [a.data, lengths, strides])
 
 
 def load(b, dtype, ptr):
     """Load an element; bools become i1."""
-    m = ir()
     v = b.load(memory_type(dtype), ptr)
     if dtype == "bool":
-        return b.icmp(m.ICmp.NE, v, b.const_int(m.i8, 0))
+        return b.ne(v, b.i8(0))
     return v
 
 
 def store(b, dtype, value, ptr):
-    m = ir()
     if dtype == "bool":
-        value = b.zext(value, m.i8)
+        value = b.zext(value, ir.i8)
     b.store(value, ptr)
 
 
 def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Array:
     """The array a kernel wrote into an output slot (static lengths stay constants;
     with a known `layout`, only its dynamic strides are read)."""
-    m = ir()
     nd = len(static_shape)
     t = _slot_type(nd)
-    data = b.load(m.ptr, b.field_ptr(t, slot, 0))
+    data = b.load(ir.ptr, b.field_ptr(t, slot, 0))
     lp, sp = b.field_ptr(t, slot, 1), b.field_ptr(t, slot, 2)
     shape = [
-        b.const_int(m.i64, s) if s is not None else b.load(m.i64, b.gep(m.i64, lp, b.const_int(m.i64, a)))
+        b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, b.i64(a)))
         for a, s in enumerate(static_shape)
     ]
     if layout is None:
         layout = Layout.make(static_shape, range(nd), (DYNAMIC,) * nd)
     else:
         layout = Layout.make(static_shape, layout.order, layout.strides)
-    passed = {a: b.load(m.i64, b.gep(m.i64, sp, b.const_int(m.i64, a))) for a in layout.dynamic_axes}
+    passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, b.i64(a))) for a in layout.dynamic_axes}
     strides = layout.stride_values(b, itemsize(dtype), shape, passed)
     return Array(dtype, data, shape, strides, layout)
 
@@ -192,19 +171,18 @@ def advance(b, p, i, stride, dtype):
     stride only known at run time by speculating that it is one *element*. With byte
     offsets it speculates a byte stride of 1, which never holds, and the vectorized loop
     never runs."""
-    m = ir()
     isz = itemsize(dtype)
     c = stride.const_int
     if c is not None:
         if c % isz:
-            return b.gep_bytes(p, mul(b, i, stride))
-        es = b.const_int(m.i64, c // isz)
+            return b.gep_bytes(p, b.mul(i, stride, nsw=True))
+        es = b.i64(c // isz)
     elif isz == 1:
         es = stride
     else:
         # strides of arrays are multiples of the itemsize (validated at the boundary)
-        es = b.ashr(stride, b.const_int(m.i64, isz.bit_length() - 1))
-    return b.gep(memory_type(dtype), p, mul(b, i, es))
+        es = b.ashr(stride, b.i64(isz.bit_length() - 1))
+    return b.gep(memory_type(dtype), p, b.mul(i, es, nsw=True))
 
 
 def element_ptr(b, a: Array, index: list):
@@ -219,7 +197,6 @@ def element_ptr(b, a: Array, index: list):
 
 
 def constant(b, dtype, value):
-    m = ir()
     if is_float(dtype):
         return b.const_float(value_type(dtype), float(value))
     if dtype == "bool":
@@ -229,14 +206,13 @@ def constant(b, dtype, value):
 
 def cast(b, v, src: str, dst: str):
     """Convert a value like numpy's astype."""
-    m = ir()
     if src == dst:
         return v
     st, dt = value_type(src), value_type(dst)
     if dst == "bool":
         if is_float(src):
-            return b.fcmp(m.FCmp.UNE, v, b.const_float(st, 0.0))
-        return b.icmp(m.ICmp.NE, v, b.const_int(st, 0))
+            return b.fcmp(ir.FCmp.UNE, v, b.const_float(st, 0.0))
+        return b.ne(v, b.const_int(st, 0))
     if is_float(src) and is_float(dst):
         return b.fpext(v, dt) if dt.bits > st.bits else b.fptrunc(v, dt)
     if is_float(dst):
@@ -286,26 +262,25 @@ class SlotOutput:
         t = _slot_type(self.ndim)
         b.store(data, b.field_ptr(t, self.slot, 0))
         lp, sp = b.field_ptr(t, self.slot, 1), b.field_ptr(t, self.slot, 2)
-        m = ir()
         for a in range(self.ndim):
-            b.store(shape[a], b.gep(m.i64, lp, b.const_int(m.i64, a)))
-            b.store(strides[a], b.gep(m.i64, sp, b.const_int(m.i64, a)))
+            b.store(shape[a], b.gep(ir.i64, lp, b.i64(a)))
+            b.store(strides[a], b.gep(ir.i64, sp, b.i64(a)))
 
     def allocate(self, shape: list) -> Array:
         """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
         owns it. (A view output may allocate too, e.g. a reshape of a non-contiguous
         array: the owner it sets then takes precedence over the viewed input's.)"""
-        cg, b, m = self.cg, self.cg.b, ir()
+        cg, b = self.cg, self.cg.b
         if self.temporary:
             a = cg.temporary(self.dtype, shape, self.layout)
             self._write(a.data, a.shape, a.strides)
             self._mark(a)
             self.done = True
             return a
-        nbytes = mul(b, size(b, shape), b.const_int(m.i64, itemsize(self.dtype)))
+        nbytes = b.mul(size(b, shape), b.i64(itemsize(self.dtype)), nsw=True)
         owner = b.field_ptr(_slot_type(self.ndim), self.slot, 3)
         data = b.rt_alloc(cg.ctx, nbytes, owner)
-        cg.check(b.icmp(m.ICmp.NE, data, b.null()), None)
+        cg.check(b.ne(data, b.null()), None)
         a = packed_array(b, self.dtype, data, shape, self.layout)
         self._write(data, shape, a.strides)
         self._mark(a)
@@ -314,13 +289,13 @@ class SlotOutput:
 
     def data(self):
         """The data pointer in the slot (null until set)."""
-        b, m = self.cg.b, ir()
-        return b.load(m.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 0))
+        b = self.cg.b
+        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 0))
 
     def owner(self):
         """The buffer reference in the slot (null for views)."""
-        b, m = self.cg.b, ir()
-        return b.load(m.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 3))
+        b = self.cg.b
+        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 3))
 
     def read(self) -> Array:
         """The array in the slot (after `allocate`), in the slot's layout."""
@@ -330,9 +305,9 @@ class SlotOutput:
     def set_length(self, axis, n):
         """Shorten axis `axis` of the array in the slot to `n` (i64) -- a view of the
         same memory with the same strides."""
-        b, m = self.cg.b, ir()
+        b = self.cg.b
         lp = b.field_ptr(_slot_type(self.ndim), self.slot, 1)
-        b.store(n, b.gep(m.i64, lp, b.const_int(m.i64, axis)))
+        b.store(n, b.gep(ir.i64, lp, b.i64(axis)))
 
     def _mark(self, a: Array):
         if self.alias is not None:
@@ -408,14 +383,12 @@ class Codegen:
 
     def fail(self, message: str | None):
         """Report `message` (unless a called kernel already did) and return 1."""
-        m = ir()
         if message is not None:
             self.b.rt_fail(self.ctx, message)
-        self.b.ret(self.b.const_int(m.i32, 1))
+        self.b.ret(self.b.i32(1))
 
     def check(self, ok, message: str | None):
         """Fail with `message` unless `ok` (i1). Constant conditions fold."""
-        m = ir()
         c = ok.const_int
         if c == 1:
             return
@@ -426,21 +399,20 @@ class Codegen:
     def temp_memory(self, nbytes):
         """Temporary memory of `nbytes` (i64), 64-byte aligned, valid during this call:
         from the frame if `nbytes` is a constant, else scratch."""
-        m = ir()
         b = self.b
         n = nbytes.const_int
         if n is not None:
             off = self.frame_size
             self.frame_size += max(64, -(-n // 64) * 64)
-            return b.gep_bytes(self.frame, b.const_int(m.i64, off))
+            return b.gep_bytes(self.frame, b.i64(off))
         p = b.rt_scratch(self.ctx, nbytes)
-        self.check(b.icmp(m.ICmp.NE, p, b.null()), None)
+        self.check(b.ne(p, b.null()), None)
         return p
 
     def temporary(self, dtype, shape, layout: Layout | None = None) -> Array:
         """A temporary array (`temp_memory`), packed in `layout` (default C)."""
-        b, m = self.b, ir()
-        nbytes = mul(b, size(b, shape), b.const_int(m.i64, itemsize(dtype)))
+        b = self.b
+        nbytes = b.mul(size(b, shape), b.i64(itemsize(dtype)), nsw=True)
         data = self.temp_memory(nbytes)
         return packed_array(b, dtype, data, shape, layout)
 
@@ -451,7 +423,6 @@ class Codegen:
 def is_contiguous(b, shape, a: Array, order=None):
     """i1: is `a` packed over `shape` in axis `order` (outermost first; default C)? A
     constant when the layout settles it; else checked at run time."""
-    m = ir()
     nd = len(shape)
     order = list(range(nd)) if order is None else list(order)
     static = [n.const_int for n in shape]
@@ -465,7 +436,7 @@ def is_contiguous(b, shape, a: Array, order=None):
         if not all(st.const_int is not None for st in a.strides):
             return b.const_bool(False)
     ok = b.const_bool(True)
-    expect = b.const_int(m.i64, itemsize(a.dtype))
+    expect = b.i64(itemsize(a.dtype))
     for ax in reversed(order):
         if static[ax] == 1:
             continue
@@ -473,22 +444,12 @@ def is_contiguous(b, shape, a: Array, order=None):
         if st.const_int is not None and expect.const_int is not None:
             same = b.const_bool(st.const_int == expect.const_int)
         else:
-            eq = b.icmp(m.ICmp.EQ, st, expect)
-            one = b.icmp(m.ICmp.EQ, shape[ax], b.const_int(m.i64, 1))
+            eq = b.eq(st, expect)
+            one = b.eq(shape[ax], b.i64(1))
             same = b.or_(eq, one)
-        ok = _and(b, ok, same)
-        expect = mul(b, expect, shape[ax])
+        ok = b.and_(ok, same)
+        expect = b.mul(expect, shape[ax], nsw=True)
     return ok
-
-
-def _and(b, x, y):
-    if x.const_int == 1:
-        return y
-    if y.const_int == 1:
-        return x
-    if x.const_int == 0 or y.const_int == 0:
-        return b.const_bool(False)
-    return b.and_(x, y)
 
 
 def loop_order(shape, arrays) -> list[int]:
@@ -533,24 +494,22 @@ class ParallelPolicy:
 
     def grain(self, b, elements_per_iteration):
         """Iterations per chunk (i64), for iterations of `elements_per_iteration` items."""
-        m = ir()
         per = elements_per_iteration.const_int
         if per is not None:
-            return b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1)))))
-        target = b.const_int(m.i64, max(1, math.ceil(CHUNK_COST / self.per_element)))
-        one = b.const_int(m.i64, 1)
-        per = b.select(b.icmp(m.ICmp.SGT, elements_per_iteration, one), elements_per_iteration, one)
+            return b.i64(max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1)))))
+        target = b.i64(max(1, math.ceil(CHUNK_COST / self.per_element)))
+        one = b.i64(1)
+        per = b.select(b.sgt(elements_per_iteration, one), elements_per_iteration, one)
         g = b.sdiv(target, per)
-        return b.select(b.icmp(m.ICmp.SGT, g, one), g, one)
+        return b.select(b.sgt(g, one), g, one)
 
     def range(self, b, n, elements_per_iteration, body):
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
-        m = ir()
         with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as r:
             with b.loop(b.sub(r.end, r.start)) as j:
                 body(b.add(r.start, j))
-        self.cg.check(b.icmp(m.ICmp.EQ, r.result, b.const_int(m.i32, 0)), None)
+        self.cg.check(b.eq(r.result, b.i32(0)), None)
 
 
 def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
@@ -570,7 +529,7 @@ def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
         par = None
     contig = b.const_bool(True)
     for a in arrays:
-        contig = _and(b, contig, is_contiguous(b, shape, a, order))
+        contig = b.and_(contig, is_contiguous(b, shape, a, order))
     c = contig.const_int
     if c == 1:
         _flat(b, shape, arrays, body, par)
@@ -591,7 +550,7 @@ def _flat(b, shape, arrays, body, par=None):
         body([b.gep(memory_type(a.dtype), a.data, i) for a in arrays])
 
     if par is not None:
-        par.range(b, n, b.const_int(ir().i64, 1), at)
+        par.range(b, n, b.i64(1), at)
         return
     with b.loop(n) as i:
         at(i)
