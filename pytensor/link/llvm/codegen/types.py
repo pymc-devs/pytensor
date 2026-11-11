@@ -40,6 +40,12 @@ SUPPORTED_DTYPES = (
 )
 
 
+def dtype_code(dtype: str) -> int:
+    """The code of `dtype` in the kernel ABI (`PtArray.dtype`; `PT_FLOAT64` etc. in the C
+    header, `DType::code` in Rust)."""
+    return SUPPORTED_DTYPES.index(check_dtype(dtype))
+
+
 def check_dtype(dtype: str) -> str:
     if dtype not in SUPPORTED_DTYPES:
         raise NotImplementedError(f"LLVM backend: dtype {dtype} is not supported")
@@ -199,12 +205,20 @@ def repr_of(t, layout: Layout | None = None):
 class PtArray:
     """Fields of the kernel ABI array (`ptarray_type`)."""
 
-    DATA, SHAPE, STRIDES, OWNER, NDIM = range(5)
+    DATA, SHAPE, STRIDES, OWNER, NDIM, DTYPE = range(6)
 
 
-#: The kernel ABI array: `{data, shape*, strides*, owner, ndim}` (40 bytes).
+#: The kernel ABI array: `{data, shape*, strides*, owner, i32 ndim, i32 dtype}` (40
+#: bytes). The caller of a kernel sets `ndim` and `dtype` (`dtype_code`) of every
+#: argument; kernels don't write them.
 def ptarray_type():
-    return ir.Type.struct_([ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.i64])
+    return ir.Type.struct_([ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.i32, ir.i32])
+
+
+#: The arguments of a kernel: `(PtCtx* ctx, PtArray* args, i32 n_inputs, i32 n_outputs,
+#: const void* config)`.
+def kernel_params():
+    return [ir.ptr, ir.ptr, ir.i32, ir.i32, ir.ptr]
 
 
 PTARRAY_SIZE = 40

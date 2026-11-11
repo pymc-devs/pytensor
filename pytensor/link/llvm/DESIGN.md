@@ -169,7 +169,7 @@ in the caller and disappear after inlining.
 
 Every kernel has the kernel ABI the interpreter calls (section 6), and generated code
 calls Rust kernels, numba kernels and subprograms the same way (`codegen/call.py`): it
-packs `PtArray`s, calls the kernel, and copies what it wrote for allocated and view
+packs `PtArray`s (with the number of axes and the dtype of each), calls the kernel, and copies what it wrote for allocated and view
 outputs (owner included) into the node's output slots. A node implemented by such a
 kernel gets a node function like any other (`build_node_function(..., kernel=...)`),
 so units and generated loops can contain every kind of node. The called kernel's
@@ -416,33 +416,80 @@ chunks one after the other, e.g. for samplers already running a chain per core.
 Every kernel (generated, Rust, numba, subprogram) is called as
 
 ```c
-int32_t kernel(PtCtx *ctx, PtArray *args /* inputs, then outputs */, const void *config);
+typedef struct {
+    char *data;
+    int64_t *shape, *strides;   /* ndim entries each; strides in bytes */
+    PtBuffer *owner;
+    int32_t ndim;
+    int32_t dtype;              /* a dtype code */
+} PtArray;                      /* 40 bytes */
+
+int32_t kernel(PtCtx *ctx, PtArray *args /* inputs, then outputs */,
+               int32_t n_inputs, int32_t n_outputs, const void *config);
 ```
 
-with `PtArray { data, shape, strides, owner, ndim }`. A wrapper is generated from the
-LLVM function when needed: it unpacks each `PtArray` into its representation (loading
-only dynamic lengths and non-fixed strides), calls the function (inlined), and copies
-output slots back into their `PtArray`s, also on failure.
+A wrapper is generated from the LLVM function when needed: it unpacks each `PtArray`
+into its representation (loading only dynamic lengths and non-fixed strides), calls the
+function (inlined), and copies output slots back into their `PtArray`s, also on
+failure.
 
 `ScalarType` values never cross the kernel ABI: functions with scalar inputs or outputs have
 no wrapper. The interpreter only ever holds tensors; every scalar variable lives inside a
 compiled unit (conversion inserts 0-d tensors at unit boundaries where needed).
 
-**Contract.** The caller guarantees dtypes, static lengths, layouts the type promises,
-valid memory, and that provided outputs don't overlap inputs. The function checks what
-types don't promise (equal dynamic lengths for broadcasting, index bounds). With
-`PYTENSOR_LLVM_CHECKED=1` the wrapper verifies the contract on every call.
+**What a call says about itself.** The caller fills in `ndim`, `dtype` and the `shape`
+and `strides` pointers of every argument, outputs included, and passes the number of
+inputs and outputs. Kernels never write these. An output has `data` if the caller
+provides its memory, and a NULL `data` if the kernel is to return it (allocated, or a
+view). So a kernel can tell whether it is called with the arguments it was made for.
+Generated kernels know their arguments from their signature and don't look (with
+`check_layouts`, or `PYTENSOR_LLVM_CHECK_LAYOUTS=1`, the wrapper does, on every call:
+the counts, every `ndim` and `dtype`, and the layouts the signature claims). Rust
+kernels always look.
+
+**Contract.** The caller guarantees what can't be looked at: valid memory for what
+the arguments describe, the layouts the types promise, and that provided outputs
+overlap no input and no other output (unless the kernel works in place, which only
+generated kernels do). The function checks what types don't promise (equal dynamic
+lengths for broadcasting, index bounds).
+
+**In Rust**, a `PtArray` is only the layout (`src/abi.rs`): it has no methods. Code
+works with the types of `src/array.rs`, each of which has an invariant, an `unsafe`
+constructor that takes the invariant on trust (or checks the part of it that can be
+checked), and safe methods:
+
+| type | what it is | made by |
+|---|---|---|
+| `PtArrayRef<'a>` | an array to read: valid, aligned memory of its dtype that nothing writes during `'a` | `from_raw`; `from_raw_checked` / `checked` for arrays from outside (the C API, numpy) |
+| `PtArrayMut<'a>` | an array to write, that nothing else uses during `'a` | `from_raw_checked`; an `OutSlot` |
+| `OutSlot<'a>` | an output still to produce: `provided()` memory, `alloc(ctx, shape)`, `set(owned_array)` or a view | `from_raw` |
+| `OwnedArray` | an array in a buffer we hold a reference to (`OwnedBuf`); writable while nobody else holds the buffer | safe constructors (`zeros`, `copy_of`, `in_buffer`, which checks that the array lies in the buffer) |
+
+The constructor calls are where something is taken on trust, and there are few of
+them: the kernel entry (`kernel::entry`, for the arguments of the call), the C API and
+the numpy boundary (arrays from outside, checked), and the interpreter (the values it
+keeps for a call, which it knows from the plan). Buffers are `OwnedBuf`s (one
+reference each, released when dropped); raw `PtBuffer*`s only exist in `PtArray`s and
+at the C and numpy boundaries.
 
 **Rust kernels** are written with `src/kernel.rs`: a kernel is a type holding its
-parameters that implements `Kernel` (`arity`, and a safe `run(ctx, args)`), and
-`entry::<K>` is its function with the ABI above, with a `K` as its config. `Args`
-turns the `PtArray`s into views with safe methods: typed arrays (also as faer
-matrices, or lane by lane along an axis), provided or newly allocated outputs, views
-of an input, scratch memory. The contract above is what makes them safe, and the
-raw-pointer work is in that one module; a kernel only promises to ask for the element
-types it was made for (`unsafe impl Kernel`). Two exceptions keep raw pointers of
-their own: the hand-vectorized matrix-vector loop in `linalg.rs` and the Scan kernel
-(`interp/scan.rs`).
+parameters that implements `Kernel` (`arity`, and `run(ctx, args)`), and `entry::<K>`
+is its function with the ABI above, with a `K` as its config. Writing one needs no
+`unsafe`. `Args` hands out the inputs as `PtArrayRef`s and the outputs as `OutSlot`s,
+and typed arrays on top (`Array<T>`, `ArrayMut<T>`: also as faer matrices, or lane by
+lane along an axis). Asking for input `i` as an array of `T` checks its dtype; asking
+for an output checks its dtype, number of axes, and that it is provided or to be
+returned as the kernel's mode says; `entry` checks the number of arguments. A kernel
+called with other arguments than it was made for fails with an error. Scan
+(`interp/scan.rs`) and subprograms (`impl Kernel for Program`) are kernels like the
+others. One kernel keeps raw pointers of its own: the hand-vectorized matrix-vector
+loop in `linalg.rs`.
+
+**The interpreter** runs a call as `program.begin(memory)` -> `Call` (`set_input`,
+`provide` memory for outputs) -> `run(ctx)` -> `Done` (`output`, `take_output`). The
+arrays of the call are borrowed until the `Done` is dropped, which also releases what
+the call holds. Tasks are `KernelHandle`s: the function and its config, vouched for
+once, when the task is added.
 
 ## 7. `pytensor_llvm.ir`
 

@@ -15,8 +15,7 @@ pub struct DimShuffle {
     pub order: Vec<Option<usize>>,
 }
 
-// SAFETY: asks for no typed arrays; one input, one output.
-unsafe impl Kernel for DimShuffle {
+impl Kernel for DimShuffle {
     fn arity(&self) -> (usize, usize) {
         (1, 1)
     }
@@ -32,16 +31,15 @@ pub struct Copy {
     pub dtype: DType,
 }
 
-// SAFETY: asks for no typed arrays; one input, one output.
-unsafe impl Kernel for Copy {
+impl Kernel for Copy {
     fn arity(&self) -> (usize, usize) {
         (1, 1)
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
-        let source = args.inputs.bytes(0, self.dtype.itemsize());
+        let source = args.inputs.get(0)?;
         args.outputs
-            .bytes(ctx, 0, self.mode, self.dtype.itemsize(), source.shape())?
+            .untyped(ctx, 0, self.mode, self.dtype, source.shape())?
             .copy_from(&source)
     }
 }

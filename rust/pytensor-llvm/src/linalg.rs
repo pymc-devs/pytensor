@@ -53,15 +53,13 @@ pub struct Dot<T> {
     pub element: PhantomData<T>,
 }
 
-// SAFETY: two inputs and one output, arrays of `T` (`interp::py::Dot` picks `T` from
-// the node's dtype).
-unsafe impl<T: Float> Kernel for Dot<T> {
+impl<T: Float> Kernel for Dot<T> {
     fn arity(&self) -> (usize, usize) {
         (2, 1)
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
-        let (a, b) = (args.inputs.array::<T>(0), args.inputs.array::<T>(1));
+        let (a, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
         let (sa, sb) = (a.shape(), b.shape());
         if !matches!(sa.len(), 1 | 2) || !matches!(sb.len(), 1 | 2) {
             return Err(format!(
@@ -255,15 +253,13 @@ pub struct Cholesky<T> {
     pub element: PhantomData<T>,
 }
 
-// SAFETY: one input and one output, arrays of `T` (`interp::py::Cholesky` picks `T`
-// from the node's dtype).
-unsafe impl<T: Float> Kernel for Cholesky<T> {
+impl<T: Float> Kernel for Cholesky<T> {
     fn arity(&self) -> (usize, usize) {
         (1, 1)
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
-        let a = args.inputs.array::<T>(0);
+        let a = args.inputs.array::<T>(0)?;
         let &[n, columns] = a.shape() else {
             return Err(format!(
                 "Cholesky: input must be a matrix, got {} axes",
@@ -320,15 +316,13 @@ pub struct SolveTriangular<T> {
     pub element: PhantomData<T>,
 }
 
-// SAFETY: two inputs and one output, arrays of `T` (`interp::py::SolveTriangular`
-// picks `T` from the node's dtype).
-unsafe impl<T: Float> Kernel for SolveTriangular<T> {
+impl<T: Float> Kernel for SolveTriangular<T> {
     fn arity(&self) -> (usize, usize) {
         (2, 1)
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
-        let (a, b) = (args.inputs.array::<T>(0), args.inputs.array::<T>(1));
+        let (a, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
         let &[n, columns] = a.shape() else {
             return Err(format!(
                 "SolveTriangular: A must be a matrix, got {} axes",

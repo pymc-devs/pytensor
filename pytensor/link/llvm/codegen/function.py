@@ -25,7 +25,9 @@ from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     Slot,
     TensorRepr,
+    dtype_code,
     ir,
+    kernel_params,
     ptarray_type,
     repr_of,
 )
@@ -478,11 +480,16 @@ def build_node_function(
 def build_kernel_wrapper(
     module, nf: NodeFunction, name: str, check_layouts: bool = False
 ):
-    """`int32 name(PtCtx*, PtArray* args, const void* config)` around `nf`:
-    the kernel ABI.
+    """`int32 name(PtCtx*, PtArray* args, int32 n_inputs, int32 n_outputs, const void*
+    config)` around `nf`: the kernel ABI.
 
-    `check_layouts`: verify that the arrays passed have the layouts the signature claims
-    (for testing the layout inference; costs a few compares per call)."""
+    The generated code knows its arguments from the signature, and doesn't look at
+    their number, or at the `ndim` and `dtype` of the `PtArray`s.
+
+    `check_layouts`: verify what the caller promises and can be looked at: the number
+    of arguments, their `ndim` and `dtype`, and that the arrays passed have the layouts
+    the signature claims (for testing the planner and the layout inference; costs a few
+    compares per call)."""
     sig = nf.signature
     # (outputs without a value have no argument)
     present = [o for o in sig.outputs if o.mode is not OutputMode.ABSENT]
@@ -491,9 +498,9 @@ def build_kernel_wrapper(
             "functions with ScalarType inputs or outputs have no kernel ABI"
         )
     pa = ptarray_type()
-    fn = module.function(name, [ir.ptr, ir.ptr, ir.ptr], ir.i32, exported=True)
+    fn = module.function(name, kernel_params(), ir.i32, exported=True)
     b = fn.builder()
-    ctx, args, config = fn.params
+    ctx, args, n_inputs, n_outputs, config = fn.params
 
     def arg(k):
         return b.gep_bytes(args, k * PTARRAY_SIZE)
@@ -522,6 +529,27 @@ def build_kernel_wrapper(
         from pytensor.link.llvm.codegen.emit import Codegen
 
         cg = Codegen(b, ctx, config)
+        cg.check(
+            b.and_(
+                b.eq(n_inputs, b.i32(len(sig.inputs))),
+                b.eq(n_outputs, b.i32(len(present))),
+            ),
+            f"argument check: the kernel takes {len(sig.inputs)} inputs and "
+            f"{len(present)} outputs",
+        )
+        for k, r in enumerate([*sig.inputs, *(o.repr for o in present)]):
+            p = arg(k)
+            ok = b.and_(
+                b.eq(b.load(ir.i32, b.field_ptr(pa, p, PtArray.NDIM)), b.i32(r.ndim)),
+                b.eq(
+                    b.load(ir.i32, b.field_ptr(pa, p, PtArray.DTYPE)),
+                    b.i32(dtype_code(r.dtype)),
+                ),
+            )
+            cg.check(
+                ok,
+                f"argument check: argument {k} isn't a {r.ndim}-d array of {r.dtype}",
+            )
         reprs = [
             *sig.inputs,
             *(o.repr for o in present if o.mode is OutputMode.PROVIDED),

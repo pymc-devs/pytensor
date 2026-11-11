@@ -7,24 +7,29 @@
 //! ```ignore
 //! pub struct Negate<T> { mode: OutputMode, _t: PhantomData<T> }
 //!
-//! unsafe impl<T: Element + Neg<Output = T>> Kernel for Negate<T> {
+//! impl<T: Element + Neg<Output = T>> Kernel for Negate<T> {
 //!     fn arity(&self) -> (usize, usize) { (1, 1) }
-//!     fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String> {
-//!         let x = args.inputs.array::<T>(0);
+//!     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+//!         let x = args.inputs.array::<T>(0)?;
 //!         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, x.shape())?;
 //!         zip_lanes(&x, &mut out, 0, |x, mut out| { ... })
 //!     }
 //! }
 //! ```
 //!
-//! All the raw-pointer work of a kernel is here: `Args` turns the `PtArray`s of a call
-//! into views (`Array`, `ArrayMut`: typed; `Bytes`, `BytesMut`: any element type) whose
-//! methods are safe. What makes them safe is the contract of the call, which `entry`
-//! takes on (the arrays are valid and are what the kernel was planned for), and one
-//! promise of the kernel: it asks for the element types it was planned with (that is
-//! why `Kernel` is an unsafe trait, and the only `unsafe` a kernel needs).
+//! Writing a kernel needs no `unsafe`. `Args` hands out the arguments of the call as
+//! the views of `crate::array`, and as typed arrays (`Array<T>`, `ArrayMut<T>`) on top
+//! of those. What a kernel asks for is checked against what it was called with: the
+//! number of inputs and outputs, the dtype of every array it wants as an array of `T`,
+//! the number of axes and whether an output is provided or to be produced. A kernel
+//! that was planned for other arguments than it gets fails with an error.
+//!
+//! What can't be checked is that the memory the arguments describe is there. That is
+//! the contract of the call, which `entry` takes on (see there); it is the one place
+//! that turns the raw arguments into `Args`.
 
-use crate::abi::{OutputMode, PtArray, bad_size, checked_nbytes};
+use crate::abi::{OutputMode, PtArray};
+use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
 use crate::runtime::PtCtx;
 use faer::{MatMut, MatRef};
@@ -51,12 +56,7 @@ macro_rules! element {
 element!(f64 => Float64, f32 => Float32, i64 => Int64, i32 => Int32, i16 => Int16, i8 => Int8, u8 => Uint8);
 
 /// A Rust kernel: its parameters, and what it computes.
-///
-/// # Safety
-/// `run` asks `args` only for arrays of the element types the kernel is planned with
-/// (whoever makes the kernel for a node, `interp/py.rs`, picks the type from the
-/// node's dtypes), and for no more inputs and outputs than `arity` says.
-pub unsafe trait Kernel: Send + Sync + 'static {
+pub trait Kernel: Send + Sync + 'static {
     /// (number of inputs, number of outputs)
     fn arity(&self) -> (usize, usize);
 
@@ -66,36 +66,35 @@ pub unsafe trait Kernel: Send + Sync + 'static {
 /// The kernel `K` with the kernel ABI (`abi::KernelFn`).
 ///
 /// # Safety
-/// The kernel contract: `ctx` is the live context of the call, `config` points to a
-/// `K`, and `args` holds the arrays `K` was planned for: valid inputs of its element
-/// types, then outputs as their modes say (provided: valid writable memory that
-/// overlaps no input and no other output; otherwise writable shape and strides
-/// storage of the output's ndim). Strides are multiples of the itemsize and data is
-/// aligned (the C API checks both for what comes from outside).
+/// The kernel contract: `ctx` is the live context of the call, used by nobody else
+/// during it, `config` points to a `K`, and `args` holds `n_inputs` arrays, then
+/// `n_outputs` outputs (see `Args::from_raw`).
 pub unsafe extern "C-unwind" fn entry<K: Kernel>(
     ctx: *mut PtCtx,
     args: *mut PtArray,
+    n_inputs: i32,
+    n_outputs: i32,
     config: *const u8,
 ) -> i32 {
     // SAFETY: the function's contract.
-    let (kernel, c) = unsafe { (&*(config as *const K), &mut *ctx) };
-    let (n_in, n_out) = kernel.arity();
-    // SAFETY: `args` holds n_in + n_out arrays (the function's contract), and nothing
-    // else uses them during the call.
-    let arrays = unsafe { std::slice::from_raw_parts_mut(args, n_in + n_out) };
-    let (inputs, outputs) = arrays.split_at_mut(n_in);
-    match kernel.run(
-        c,
-        Args {
-            inputs: Inputs { arrays: inputs },
-            outputs: Outputs { arrays: outputs },
-        },
-    ) {
-        Ok(()) => 0,
-        Err(message) => {
-            c.error = Some((1, message));
-            1
+    let (kernel, ctx) = unsafe { (&*(config as *const K), &mut *ctx) };
+    // SAFETY: the function's contract.
+    let result = unsafe { Args::from_raw(args, n_inputs, n_outputs) }.and_then(|args| {
+        let arity = (args.inputs.len(), args.outputs.len());
+        if arity != kernel.arity() {
+            return Err(format!(
+                "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
+                kernel.arity().0,
+                kernel.arity().1,
+                arity.0,
+                arity.1
+            ));
         }
+        kernel.run(ctx, args)
+    });
+    match result {
+        Ok(()) => 0,
+        Err(message) => ctx.fail(1, &message),
     }
 }
 
@@ -110,6 +109,43 @@ pub struct Args<'a> {
     pub outputs: Outputs<'a>,
 }
 
+impl<'a> Args<'a> {
+    /// The arguments of a call with the kernel ABI.
+    ///
+    /// # Safety
+    /// `args` points to `n_inputs + n_outputs` `PtArray`s (if that is more than
+    /// none), ours alone during `'a`:
+    /// * the first `n_inputs` are arrays to read (`PtArrayRef::from_raw`),
+    /// * the others are outputs to produce (`OutSlot::from_raw`), and memory that is
+    ///   provided for an output overlaps no input and no other output.
+    pub unsafe fn from_raw(
+        args: *mut PtArray,
+        n_inputs: i32,
+        n_outputs: i32,
+    ) -> Result<Args<'a>, String> {
+        if n_inputs < 0 || n_outputs < 0 {
+            return Err(format!(
+                "a call with {n_inputs} inputs and {n_outputs} outputs"
+            ));
+        }
+        let (n_inputs, n_outputs) = (n_inputs as usize, n_outputs as usize);
+        let arrays: &mut [PtArray] = if n_inputs + n_outputs == 0 {
+            &mut []
+        } else if args.is_null() {
+            return Err("the arguments of the call are NULL".into());
+        } else {
+            // SAFETY: the function's contract.
+            unsafe { std::slice::from_raw_parts_mut(args, n_inputs + n_outputs) }
+        };
+        let (inputs, outputs) = arrays.split_at_mut(n_inputs);
+        Ok(Args {
+            inputs: Inputs { arrays: inputs },
+            outputs: Outputs { arrays: outputs },
+        })
+    }
+}
+
+/// The inputs of a call. (Invariant: every one is an array as `Args::from_raw` asks.)
 pub struct Inputs<'a> {
     arrays: &'a [PtArray],
 }
@@ -124,100 +160,124 @@ impl<'a> Inputs<'a> {
     }
 
     /// Input `i`, whatever its elements are.
-    pub fn bytes(&self, i: usize, itemsize: usize) -> Bytes<'a> {
-        let a = &self.arrays[i];
-        // SAFETY: inputs are valid arrays (`entry`'s contract): shape and strides have
-        // `ndim` entries, which nothing writes during the call.
-        let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-        Bytes {
-            data: a.data,
-            shape,
-            strides,
-            itemsize,
+    #[inline]
+    pub fn get(&self, i: usize) -> Result<PtArrayRef<'a>, String> {
+        let Some(raw) = self.arrays.get(i) else {
+            return Err(no_argument("input", i, self.arrays.len()));
+        };
+        // SAFETY: the type's invariant.
+        match unsafe { PtArrayRef::from_raw(raw) } {
+            Ok(array) => Ok(array),
+            Err(e) => Err(argument_error("input", i, e)),
         }
     }
 
-    /// Input `i`, an array of `T` (the kernel's promise: it is one).
-    pub fn array<T: Element>(&self, i: usize) -> Array<'a, T> {
-        Array {
-            bytes: self.bytes(i, size_of::<T>()),
-            _t: PhantomData,
+    /// Input `i`, an array of `T`.
+    #[inline]
+    pub fn array<T: Element>(&self, i: usize) -> Result<Array<'a, T>, String> {
+        match Array::new(self.get(i)?) {
+            Ok(array) => Ok(array),
+            Err(e) => Err(argument_error("input", i, e)),
         }
     }
 }
 
+// (Errors are rare, and what leads to them is on the way of every kernel call: they
+// are made apart.)
+
+#[cold]
+#[inline(never)]
+fn no_argument(what: &str, i: usize, n: usize) -> String {
+    format!("no {what} {i}: the call has {n}")
+}
+
+#[cold]
+#[inline(never)]
+fn argument_error(what: &str, i: usize, e: String) -> String {
+    format!("{what} {i}: {e}")
+}
+
+fn output_error(o: usize, e: String) -> String {
+    argument_error("output", o, e)
+}
+
+/// The outputs of a call. (Invariant: every one is an output as `Args::from_raw`
+/// asks, until it is produced.)
 pub struct Outputs<'a> {
     arrays: &'a mut [PtArray],
 }
 
-impl Outputs<'_> {
-    /// Memory for output `o` of `shape`: the provided memory (whose shape must match),
-    /// or a new C-contiguous buffer.
-    pub fn bytes(
+impl<'a> Outputs<'a> {
+    pub fn len(&self) -> usize {
+        self.arrays.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.arrays.is_empty()
+    }
+
+    /// Output `o`, to produce.
+    #[inline]
+    pub fn slot(&mut self, o: usize) -> Result<OutSlot<'_>, String> {
+        let n = self.arrays.len();
+        let Some(raw) = self.arrays.get_mut(o) else {
+            return Err(no_argument("output", o, n));
+        };
+        // SAFETY: the type's invariant.
+        match unsafe { OutSlot::from_raw(raw) } {
+            Ok(slot) => Ok(slot),
+            Err(e) => Err(output_error(o, e)),
+        }
+    }
+
+    /// All outputs, to produce, in order.
+    pub fn into_slots(self) -> impl Iterator<Item = Result<OutSlot<'a>, String>> {
+        self.arrays.iter_mut().enumerate().map(|(o, raw)| {
+            // SAFETY: the type's invariant.
+            unsafe { OutSlot::from_raw(raw) }.map_err(|e| output_error(o, e))
+        })
+    }
+
+    /// Memory for output `o`, an array of `dtype` and `shape`: the provided memory
+    /// (whose shape must match), or a new C-contiguous buffer.
+    #[inline]
+    pub fn untyped(
         &mut self,
         ctx: &mut PtCtx,
         o: usize,
         mode: OutputMode,
-        itemsize: usize,
+        dtype: DType,
         shape: &[i64],
-    ) -> Result<BytesMut<'_>, String> {
-        let a = &mut self.arrays[o];
+    ) -> Result<PtArrayMut<'_>, String> {
+        let slot = self.slot(o)?;
+        if slot.dtype() != dtype {
+            return Err(output_error(
+                o,
+                format!(
+                    "it is an array of {}, the kernel writes one of {}",
+                    slot.dtype().numpy_name(),
+                    dtype.numpy_name()
+                ),
+            ));
+        }
         match mode {
-            OutputMode::Provided => {
-                // SAFETY: provided outputs are valid arrays (`entry`'s contract).
-                let (have, strides) = unsafe { (a.shape(), a.strides()) };
-                if have != shape {
-                    return Err(format!("output {o} has shape {have:?}, expected {shape:?}"));
-                }
-                Ok(BytesMut {
-                    data: a.data,
-                    shape: have,
-                    strides,
-                    itemsize,
-                })
-            }
-            OutputMode::Allocated => {
-                if a.ndim as usize != shape.len() {
-                    return Err(format!(
-                        "output {o} has {} axes, expected {}",
-                        a.ndim,
-                        shape.len()
-                    ));
-                }
-                let n = checked_nbytes(shape, itemsize).ok_or_else(|| bad_size("output", shape))?;
-                // SAFETY: ctx is the live context.
-                let (data, owner) = unsafe { PtCtx::alloc(ctx, n) };
-                if data.is_null() {
-                    return Err(format!("could not allocate {n} bytes"));
-                }
-                // SAFETY: the output has shape storage of its ndim (`entry`'s contract;
-                // ndim checked above), ours for the call.
-                unsafe { a.shape_mut() }.copy_from_slice(shape);
-                // SAFETY: as above, for the strides.
-                let strides = unsafe { a.strides_mut() };
-                let mut acc = itemsize as i64;
-                for d in (0..shape.len()).rev() {
-                    strides[d] = acc;
-                    acc *= shape[d].max(1);
-                }
-                a.data = data;
-                a.owner = owner;
-                // SAFETY: as above; only read from here on.
-                let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-                Ok(BytesMut {
-                    data,
-                    shape,
-                    strides,
-                    itemsize,
-                })
-            }
-            OutputMode::View => Err(format!(
-                "output {o}: this kernel writes its outputs, it can't return a view"
+            OutputMode::Provided => match slot.provided() {
+                Ok(array) if array.shape() == shape => Ok(array),
+                Ok(array) => Err(output_error(
+                    o,
+                    format!("it has shape {:?}, expected {shape:?}", array.shape()),
+                )),
+                Err(e) => Err(output_error(o, e)),
+            },
+            OutputMode::Allocated => slot.alloc(ctx, shape).map_err(|e| output_error(o, e)),
+            OutputMode::View => Err(output_error(
+                o,
+                "this kernel writes its outputs, it can't return a view".into(),
             )),
         }
     }
 
-    /// Memory for output `o`, an array of `T` (the kernel's promise: it is one).
+    /// Memory for output `o`, an array of `T` and `shape`.
     pub fn array<T: Element>(
         &mut self,
         ctx: &mut PtCtx,
@@ -226,119 +286,64 @@ impl Outputs<'_> {
         shape: &[i64],
     ) -> Result<ArrayMut<'_, T>, String> {
         Ok(ArrayMut {
-            bytes: self.bytes(ctx, o, mode, size_of::<T>(), shape)?,
+            raw: self.untyped(ctx, o, mode, T::DTYPE, shape)?,
             _t: PhantomData,
         })
     }
 
-    /// Output `o` is a view of input `i`: its memory, seen with `shape` and `strides`
-    /// (per output axis, the input axis it is, or None for a new axis of length 1).
+    /// Output `o` is a view of input `i`: its memory, seen with other axes (per output
+    /// axis, the input axis it is, or None for a new axis of length 1).
     pub fn view(
         &mut self,
         o: usize,
-        inputs: &Inputs,
+        inputs: &Inputs<'a>,
         i: usize,
         axes: &[Option<usize>],
     ) -> Result<(), String> {
-        let (out, source) = (&mut self.arrays[o], &inputs.arrays[i]);
-        if out.ndim as usize != axes.len() {
-            return Err(format!(
-                "output {o} has {} axes, expected {}",
-                out.ndim,
-                axes.len()
-            ));
-        }
-        // SAFETY: a valid input (`entry`'s contract).
-        let (shape, strides) = unsafe { (source.shape(), source.strides()) };
-        // SAFETY: the output has shape storage of its ndim (`entry`'s contract; ndim
-        // checked above), ours for the call.
-        for (length, axis) in unsafe { out.shape_mut() }.iter_mut().zip(axes) {
-            *length = axis.map_or(1, |axis| shape[axis]);
-        }
-        // SAFETY: as above, for the strides.
-        for (stride, axis) in unsafe { out.strides_mut() }.iter_mut().zip(axes) {
-            *stride = axis.map_or(0, |axis| strides[axis]);
-        }
-        out.data = source.data;
-        out.owner = source.owner;
-        Ok(())
+        let source = inputs.get(i)?;
+        // SAFETY: `source` is an input of the call this is an output of (`Args` makes
+        // both, with the same `'a`): the caller keeps it alive with the view.
+        unsafe { self.slot(o)?.set_view(&source, axes) }.map_err(|e| output_error(o, e))
     }
 }
 
-// ------------------------------------------------------------------ views
+// ------------------------------------------------------------------ typed arrays
 
-/// An array to read, of elements of some size: valid memory for its shape and
-/// strides (in bytes), not written while this lives.
-#[derive(Clone, Copy)]
-pub struct Bytes<'a> {
-    data: *const u8,
-    shape: &'a [i64],
-    strides: &'a [i64],
-    itemsize: usize,
-}
-
-/// An array to write; nothing else reads or writes its memory while this lives.
-pub struct BytesMut<'a> {
-    data: *mut u8,
-    shape: &'a [i64],
-    strides: &'a [i64],
-    itemsize: usize,
-}
-
-impl<'a> Bytes<'a> {
-    pub fn shape(&self) -> &'a [i64] {
-        self.shape
-    }
-
-    pub fn strides(&self) -> &'a [i64] {
-        self.strides
-    }
-}
-
-impl BytesMut<'_> {
-    pub fn shape(&self) -> &[i64] {
-        self.shape
-    }
-
-    /// Copy the elements of `source`, an array of the same shape and element size.
-    pub fn copy_from(&mut self, source: &Bytes) -> Result<(), String> {
-        if source.shape != self.shape || source.itemsize != self.itemsize {
-            return Err(format!(
-                "can't copy an array of shape {:?} into one of shape {:?}",
-                source.shape, self.shape
-            ));
-        }
-        // SAFETY: both are valid memory of this shape with their strides, and memory
-        // to write overlaps nothing else (the invariants of the two types).
-        unsafe {
-            crate::interp::program::copy_strided(
-                source.data,
-                self.shape,
-                source.strides,
-                self.data,
-                self.strides,
-                self.itemsize,
-            )
-        };
-        Ok(())
-    }
-}
-
-/// An array of `T` to read.
+/// An array of `T` to read. (Invariant: the dtype of `raw` is `T`'s.)
 #[derive(Clone, Copy)]
 pub struct Array<'a, T> {
-    bytes: Bytes<'a>,
+    raw: PtArrayRef<'a>,
     _t: PhantomData<&'a T>,
 }
 
-/// An array of `T` to write.
+/// An array of `T` to write. (Invariant: the dtype of `raw` is `T`'s.)
 pub struct ArrayMut<'a, T> {
-    bytes: BytesMut<'a>,
+    raw: PtArrayMut<'a>,
     _t: PhantomData<&'a mut T>,
+}
+
+#[inline]
+fn check_dtype<T: Element>(dtype: DType) -> Result<(), String> {
+    if dtype != T::DTYPE {
+        return Err(other_dtype(T::DTYPE, dtype));
+    }
+    Ok(())
+}
+
+#[cold]
+#[inline(never)]
+fn other_dtype(expected: DType, dtype: DType) -> String {
+    format!(
+        "an array of {} is expected, got one of {}",
+        expected.numpy_name(),
+        dtype.numpy_name()
+    )
 }
 
 /// (rows, columns, row stride, column stride) of a vector or matrix, strides in
 /// elements. A vector is a column, or a row if `as_row`; a scalar is 1 x 1.
+/// (Inlined: `itemsize` is a constant where this is used, and dividing by it a shift.)
+#[inline(always)]
 fn matrix_parts(
     shape: &[i64],
     strides: &[i64],
@@ -361,27 +366,39 @@ fn matrix_parts(
 }
 
 impl<'a, T: Element> Array<'a, T> {
+    /// `raw` as an array of `T`, if that is what it is.
+    #[inline]
+    pub fn new(raw: PtArrayRef<'a>) -> Result<Array<'a, T>, String> {
+        check_dtype::<T>(raw.dtype())?;
+        Ok(Array {
+            raw,
+            _t: PhantomData,
+        })
+    }
+
     pub fn shape(&self) -> &'a [i64] {
-        self.bytes.shape
+        self.raw.shape()
     }
 
     pub fn ndim(&self) -> usize {
-        self.bytes.shape.len()
+        self.raw.ndim()
     }
 
-    pub fn bytes(&self) -> &Bytes<'a> {
-        &self.bytes
+    /// The array, whatever its elements are.
+    pub fn raw(&self) -> &PtArrayRef<'a> {
+        &self.raw
     }
 
     /// A vector or matrix as a faer matrix. A vector is a column, or a row if `as_row`.
+    #[inline]
     pub fn matrix(&self, as_row: bool) -> MatRef<'a, T> {
         let (rows, cols, row_stride, col_stride) =
-            matrix_parts(self.bytes.shape, self.bytes.strides, size_of::<T>(), as_row);
+            matrix_parts(self.raw.shape(), self.raw.strides(), size_of::<T>(), as_row);
         // SAFETY: valid, aligned memory of `T` for this shape and these strides, not
-        // written while 'a lasts (the type's invariant).
+        // written while 'a lasts (the invariants of `PtArrayRef` and of this type).
         unsafe {
             MatRef::from_raw_parts(
-                self.bytes.data as *const T,
+                self.raw.as_ptr() as *const T,
                 rows,
                 cols,
                 row_stride,
@@ -392,13 +409,14 @@ impl<'a, T: Element> Array<'a, T> {
 
     /// The elements of a vector whose elements are adjacent in memory, else None.
     pub fn as_slice(&self) -> Option<&'a [T]> {
-        match (self.bytes.shape, self.bytes.strides) {
+        match (self.raw.shape(), self.raw.strides()) {
             (&[n], &[stride]) if n <= 1 || stride == size_of::<T>() as i64 => {
-                // SAFETY: n adjacent, aligned, valid `T`s, not written while 'a lasts.
                 Some(if n == 0 {
                     &[]
                 } else {
-                    unsafe { std::slice::from_raw_parts(self.bytes.data as *const T, n as usize) }
+                    // SAFETY: n adjacent, aligned, valid `T`s, not written while 'a
+                    // lasts (the invariants of `PtArrayRef` and of this type).
+                    unsafe { std::slice::from_raw_parts(self.raw.as_ptr() as *const T, n as usize) }
                 })
             }
             _ => None,
@@ -406,24 +424,35 @@ impl<'a, T: Element> Array<'a, T> {
     }
 }
 
-impl<T: Element> ArrayMut<'_, T> {
+impl<'a, T: Element> ArrayMut<'a, T> {
+    /// `raw` as an array of `T`, if that is what it is.
+    pub fn new(raw: PtArrayMut<'a>) -> Result<ArrayMut<'a, T>, String> {
+        check_dtype::<T>(raw.dtype())?;
+        Ok(ArrayMut {
+            raw,
+            _t: PhantomData,
+        })
+    }
+
     pub fn shape(&self) -> &[i64] {
-        self.bytes.shape
+        self.raw.shape()
     }
 
     pub fn copy_from(&mut self, source: &Array<T>) -> Result<(), String> {
-        self.bytes.copy_from(&source.bytes)
+        self.raw.copy_from(&source.raw)
     }
 
     /// A vector or matrix as a faer matrix. A vector is a column, or a row if `as_row`.
+    #[inline]
     pub fn matrix_mut(&mut self, as_row: bool) -> MatMut<'_, T> {
         let (rows, cols, row_stride, col_stride) =
-            matrix_parts(self.bytes.shape, self.bytes.strides, size_of::<T>(), as_row);
+            matrix_parts(self.raw.shape(), self.raw.strides(), size_of::<T>(), as_row);
         // SAFETY: valid, aligned memory of `T` for this shape and these strides that
-        // nothing else uses while `self` is borrowed (the type's invariant).
+        // nothing else uses while `self` is borrowed (the invariants of `PtArrayMut`
+        // and of this type).
         unsafe {
             MatMut::from_raw_parts_mut(
-                self.bytes.data as *mut T,
+                self.raw.as_mut_ptr() as *mut T,
                 rows,
                 cols,
                 row_stride,
@@ -494,11 +523,12 @@ pub fn zip_lanes<T: Element>(
     axis: usize,
     mut f: impl FnMut(Lane<T>, LaneMut<T>),
 ) -> Result<(), String> {
-    let shape = source.bytes.shape;
-    if shape != target.bytes.shape {
+    let shape = source.raw.shape();
+    if shape != target.raw.shape() {
         return Err(format!(
             "arrays of shape {:?} and {:?} don't have the same lanes",
-            shape, target.bytes.shape
+            shape,
+            target.raw.shape()
         ));
     }
     if axis >= shape.len() {
@@ -507,7 +537,8 @@ pub fn zip_lanes<T: Element>(
     if shape.contains(&0) {
         return Ok(());
     }
-    let (s, t) = (source.bytes.strides, target.bytes.strides);
+    let (s, t) = (source.raw.strides(), target.raw.strides());
+    let (source_data, target_data) = (source.raw.as_ptr(), target.raw.as_mut_ptr());
     let len = shape[axis] as usize;
     let mut index = vec![0i64; shape.len()];
     let (mut source_offset, mut target_offset) = (0isize, 0isize);
@@ -518,13 +549,13 @@ pub fn zip_lanes<T: Element>(
         let (lane, lane_mut) = unsafe {
             (
                 Lane {
-                    first: source.bytes.data.offset(source_offset) as *const T,
+                    first: source_data.offset(source_offset) as *const T,
                     len,
                     stride: s[axis] as isize,
                     _t: PhantomData,
                 },
                 LaneMut {
-                    first: target.bytes.data.offset(target_offset) as *mut T,
+                    first: target_data.offset(target_offset) as *mut T,
                     len,
                     stride: t[axis] as isize,
                     _t: PhantomData,
@@ -559,11 +590,165 @@ pub fn zip_lanes<T: Element>(
 
 /// Temporary memory for `n` values of `T`, valid until the task ends.
 pub fn scratch<T: Element>(ctx: &mut PtCtx, n: usize) -> &mut [MaybeUninit<T>] {
-    let bytes = n
-        .checked_mul(size_of::<T>())
-        .expect("scratch size overflows");
-    // SAFETY: `ctx` is a live context. Scratch memory is aligned for every element
-    // type, at least `bytes` long, distinct from everything else, and stays valid
-    // until the task ends, which outlives the borrow of `ctx`.
-    unsafe { std::slice::from_raw_parts_mut(PtCtx::scratch(ctx, bytes) as *mut MaybeUninit<T>, n) }
+    ctx.scratch(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abi::OwnedBuf;
+
+    /// Doubles a vector of f64.
+    struct Double(OutputMode);
+
+    impl Kernel for Double {
+        fn arity(&self) -> (usize, usize) {
+            (1, 1)
+        }
+
+        fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+            let x = args.inputs.array::<f64>(0)?;
+            let values = x.as_slice().ok_or("a contiguous vector is expected")?;
+            let mut out = args.outputs.array::<f64>(ctx, 0, self.0, x.shape())?;
+            let mut out = out.matrix_mut(false);
+            for (i, value) in values.iter().enumerate() {
+                out[(i, 0)] = 2.0 * value;
+            }
+            Ok(())
+        }
+    }
+
+    struct Call {
+        values: [f64; 3],
+        // (room for two axes, for the call that claims two)
+        shapes: [[i64; 2]; 2],
+        strides: [[i64; 2]; 2],
+        result: [f64; 3],
+        ctx: PtCtx,
+    }
+
+    impl Call {
+        fn new() -> Call {
+            Call {
+                values: [1.0, 2.0, 3.0],
+                shapes: [[3, 1], [3, 1]],
+                strides: [[8, 8], [8, 8]],
+                result: [0.0; 3],
+                ctx: PtCtx::new(),
+            }
+        }
+
+        /// Call `Double(mode)` with the input and one output, changed by `change`.
+        fn run(
+            &mut self,
+            mode: OutputMode,
+            n: (i32, i32),
+            change: fn(&mut [PtArray; 2]),
+        ) -> Result<PtArray, String> {
+            let [in_shape, out_shape] = &mut self.shapes;
+            let [in_strides, out_strides] = &mut self.strides;
+            let array = |data: *mut f64, shape: &mut [i64; 2], strides: &mut [i64; 2]| PtArray {
+                data: data as *mut u8,
+                shape: shape.as_mut_ptr(),
+                strides: strides.as_mut_ptr(),
+                owner: std::ptr::null_mut(),
+                ndim: 1,
+                dtype: DType::Float64.code(),
+            };
+            let provided = match mode {
+                OutputMode::Provided => self.result.as_mut_ptr(),
+                _ => std::ptr::null_mut(),
+            };
+            let mut args = [
+                array(self.values.as_mut_ptr(), in_shape, in_strides),
+                array(provided, out_shape, out_strides),
+            ];
+            change(&mut args);
+            let kernel = Double(mode);
+            // SAFETY: a live context, the kernel as its config, and a valid input and
+            // output of f64 that don't overlap (`change` only makes changes that the
+            // kernel's checks reject before it uses any memory).
+            let code = unsafe {
+                entry::<Double>(
+                    &mut self.ctx,
+                    args.as_mut_ptr(),
+                    n.0,
+                    n.1,
+                    &kernel as *const _ as *const u8,
+                )
+            };
+            match code {
+                0 => Ok(args[1]),
+                _ => Err(self.ctx.error.take().unwrap().1),
+            }
+        }
+    }
+
+    #[test]
+    fn a_kernel_writes_provided_and_allocated_outputs() {
+        let mut call = Call::new();
+        call.run(OutputMode::Provided, (1, 1), |_| ()).unwrap();
+        assert_eq!(call.result, [2.0, 4.0, 6.0]);
+
+        let out = call.run(OutputMode::Allocated, (1, 1), |_| ()).unwrap();
+        // SAFETY: the kernel allocated three f64s and handed over its reference.
+        let (values, buf) = unsafe {
+            (
+                std::slice::from_raw_parts(out.data as *const f64, 3),
+                OwnedBuf::from_raw(out.owner),
+            )
+        };
+        assert_eq!(values, [2.0, 4.0, 6.0]);
+        assert!(buf.is_unique());
+    }
+
+    #[test]
+    fn a_kernel_called_with_other_arguments_than_it_asks_for_fails() {
+        let mut call = Call::new();
+        let mut fails = |mode, n, change, message: &str| {
+            let error = call.run(mode, n, change).err().unwrap();
+            assert!(error.contains(message), "{error}");
+        };
+        let p = OutputMode::Provided;
+        fails(p, (2, 0), |_| (), "takes 1 inputs and 1 outputs");
+        fails(p, (-1, 1), |_| (), "-1 inputs");
+        fails(
+            p,
+            (1, 1),
+            |a| a[0].dtype = DType::Float32.code(),
+            "input 0: an array of float64",
+        );
+        fails(
+            p,
+            (1, 1),
+            |a| a[0].dtype = 77,
+            "input 0: unknown dtype code 77",
+        );
+        fails(
+            p,
+            (1, 1),
+            |a| a[1].dtype = DType::Int64.code(),
+            "output 0: it is an array of int64",
+        );
+        fails(
+            p,
+            (1, 1),
+            |a| a[1].ndim = 2,
+            "output 0: it has shape [3, 1]",
+        );
+        fails(
+            p,
+            (1, 1),
+            |a| a[1].data = std::ptr::null_mut(),
+            "provides no memory",
+        );
+        fails(
+            OutputMode::Allocated,
+            (1, 1),
+            |a| a[1].data = a[0].data,
+            "provides memory",
+        );
+        fails(OutputMode::View, (1, 1), |_| (), "can't return a view");
+        assert_eq!(call.result, [0.0; 3]);
+    }
 }

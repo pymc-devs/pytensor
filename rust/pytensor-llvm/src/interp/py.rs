@@ -3,8 +3,11 @@
 use super::consts::ConstData;
 use super::kernels;
 use super::layout::Layout;
-use super::program::{Program as RProgram, ProgramSpec, Task, ValueId, ValueKind, ValueSpec};
+use super::program::{
+    KernelHandle, Program as RProgram, ProgramSpec, Task, ValueId, ValueKind, ValueSpec,
+};
 use crate::abi::OutputMode;
+use crate::array::{OwnedArray, PtArrayRef};
 use crate::dtype::DType;
 use crate::kernel::Kernel;
 use crate::linalg;
@@ -444,12 +447,7 @@ impl Scan {
         // every outer output is one of the kernel's C-contiguous buffers
         let n_outer_out = n_mm + n_ms + n_ss + n_nit_sot + n_untraced;
         let produces = Produces::Fresh(vec![OutputMode::Allocated; n_outer_out]);
-        let mut k = RustKernel::new(
-            super::scan::k_scan as *const () as usize,
-            config,
-            "Scan".into(),
-            produces,
-        );
+        let mut k = RustKernel::of(config, "Scan".into(), produces);
         k.programs.push(body.clone().unbind());
         let _ = py;
         Ok(PyClassInitializer::from(k).add_subclass(Scan))
@@ -591,16 +589,22 @@ impl ProgramBuilder {
         release: Vec<u32>,
         description: String,
         keepalive: Py<PyAny>,
-    ) {
+    ) -> PyResult<()> {
+        // SAFETY: what Python promises when it adds a task: `address` and `config`
+        // are those of a compiled function (a kernel wrapper), of a kernel object
+        // (`RustKernel`, `Program`: its `address` and `config`) or of a numba kernel,
+        // made for this node, and `keepalive` is what they belong to.
+        let kernel = unsafe { KernelHandle::from_raw(address, config) }
+            .ok_or_else(|| PyValueError::new_err(format!("task {description}: null function")))?;
         self.tasks.push(Task {
-            func: address,
-            config,
+            kernel,
             inputs: inputs.into_iter().map(ValueId).collect(),
             outputs: outputs.into_iter().map(ValueId).collect(),
             release: release.into_iter().map(ValueId).collect(),
             desc: description,
         });
         self.keepalive.push(keepalive);
+        Ok(())
     }
 
     fn set_arena_bytes(&mut self, n: u64) {
@@ -632,28 +636,19 @@ impl ProgramBuilder {
     }
 }
 
-struct SendPtr(*mut crate::abi::PtBuffer);
-// SAFETY: moves one buffer reference into a capsule destructor; refcounts are atomic.
-unsafe impl Send for SendPtr {}
-
-fn wrap_output<'py>(
-    py: Python<'py>,
-    dt: DType,
-    o: &super::program::OutArray,
-) -> PyResult<Bound<'py, PyAny>> {
-    let owner = SendPtr(o.owner);
-    // SAFETY: the capsule holds the one reference of `o`; numpy calls the destructor
-    // once, when the array (its base) is freed.
-    let capsule = PyCapsule::new_with_value_and_destructor(
-        py,
-        owner,
-        c"pytensor_llvm.buffer",
-        |b: SendPtr, _| unsafe { crate::abi::PtBuffer::decref(b.0) },
-    )?;
-    let mut dims: Vec<npy_intp> = o.shape.iter().map(|&s| s as npy_intp).collect();
-    let mut strides: Vec<npy_intp> = o.strides.iter().map(|&s| s as npy_intp).collect();
-    // SAFETY: `o` describes a valid array in the buffer the capsule keeps alive; the
-    // descr and capsule references are stolen by the numpy calls.
+/// A numpy array of `array` (not copied: the numpy array holds its buffer).
+fn wrap_output<'py>(py: Python<'py>, array: OwnedArray) -> PyResult<Bound<'py, PyAny>> {
+    let dt = array.dtype();
+    let (buf, data, shape, strides) = array.into_parts();
+    // the capsule holds the buffer reference until numpy frees the array (its base)
+    let capsule = PyCapsule::new_with_value(py, buf, c"pytensor_llvm.buffer")?;
+    let mut dims: Vec<npy_intp> = shape.iter().map(|&s| s as npy_intp).collect();
+    let mut strides: Vec<npy_intp> = strides.iter().map(|&s| s as npy_intp).collect();
+    // SAFETY: a valid array of `dt` in the buffer the capsule keeps alive (the
+    // invariant of `OwnedArray`); the descr and capsule references are stolen by the
+    // numpy calls. numpy may write the array: the call has let go of the buffer, so
+    // the only other holder there can be is another output of the call that is the
+    // same memory.
     unsafe {
         let ty = numpy::npyffi::get_type_object(py, NpyTypes::PyArray_Type);
         let arr = PY_ARRAY_API.PyArray_NewFromDescr(
@@ -663,7 +658,7 @@ fn wrap_output<'py>(
             dims.len() as i32,
             dims.as_mut_ptr(),
             strides.as_mut_ptr(),
-            o.data as *mut _,
+            data as *mut _,
             NPY_ARRAY_WRITEABLE,
             std::ptr::null_mut(),
         );
@@ -718,9 +713,12 @@ impl Program {
             memory: prog.take_memory(),
             ctx: crate::runtime::PtCtx::new(),
         });
-        let mut keep = Vec::with_capacity(args.len());
+        // the arrays to call with, kept alive until the call is over, and their
+        // data, shapes and strides
+        let mut keep: Vec<Bound<'_, PyAny>> = Vec::with_capacity(args.len());
+        let mut parts: Vec<(*const u8, Vec<i64>, Vec<i64>)> = Vec::with_capacity(args.len());
         let mut work = 0usize;
-        let res = (|| -> PyResult<Vec<super::program::OutArray>> {
+        let res = (|| -> PyResult<Vec<OwnedArray>> {
             for (k, a) in args.iter().enumerate() {
                 let want = prog.input_dtype(k);
                 let exact = match a.cast::<PyUntypedArray>() {
@@ -753,52 +751,41 @@ impl Program {
                     a
                 };
                 let arr = a.cast::<PyUntypedArray>()?;
-                // SAFETY: the data pointer of a live array, kept alive by `keep` until the
-                // call is finished.
-                let data = unsafe { (*arr.as_array_ptr()).fields.data as *mut u8 };
+                // SAFETY: reading the data pointer of a live array.
+                let data = unsafe { (*arr.as_array_ptr()).fields.data as *const u8 };
                 let shape: Vec<i64> = arr.shape().iter().map(|&n| n as i64).collect();
                 let strides: Vec<i64> = arr.strides().iter().map(|&s| s as i64).collect();
-                prog.set_input(st, k, data, &shape, &strides)
-                    .map_err(PyValueError::new_err)?;
+                parts.push((data, shape, strides));
                 work += arr.len();
                 keep.push(a);
             }
-            let run = |st: &mut super::program::CallMemory,
-                       ctx: &mut crate::runtime::PtCtx|
-             -> Result<Vec<super::program::OutArray>, String> {
-                let none = vec![None; prog.n_outputs()];
-                prog.execute(st, ctx, &none)?;
-                let outs = (0..prog.n_outputs())
-                    .map(|o| prog.take_output(st, ctx, o))
-                    .collect::<Result<Vec<_>, _>>();
-                prog.finish(st);
-                outs
+            let mut call = prog.begin(st).map_err(PyValueError::new_err)?;
+            for (k, (data, shape, strides)) in parts.iter().enumerate() {
+                // SAFETY: the memory of a numpy array of the input's dtype (converted
+                // above), which `keep` keeps alive until the call is over. Nothing
+                // here writes it; as everywhere with numpy, that no other thread
+                // does meanwhile is up to the user.
+                unsafe { PtArrayRef::checked(*data, shape, strides, prog.input_dtype(k)) }
+                    .and_then(|a| call.set_input(k, a))
+                    .map_err(PyValueError::new_err)?;
+            }
+            let run = move |ctx: &mut crate::runtime::PtCtx| -> Result<Vec<OwnedArray>, String> {
+                let done = call.run(ctx)?;
+                (0..prog.n_outputs()).map(|o| done.take_output(o)).collect()
             };
             // releasing the GIL costs ~100ns: only worth it with real work
             let r = if work > 20_000 {
-                struct S<'a>(
-                    &'a mut super::program::CallMemory,
-                    &'a mut crate::runtime::PtCtx,
-                );
-                // SAFETY: the session and context are exclusively ours for this call.
-                unsafe impl Send for S<'_> {}
-                let s = S(&mut *st, &mut *ctx);
-                py.detach(move || {
-                    let s = s;
-                    run(s.0, s.1)
-                })
+                py.detach(move || run(ctx))
             } else {
-                run(st, ctx)
+                run(ctx)
             };
             r.map_err(runtime_error)
         })();
         drop(keep);
         drop(guard);
-        let outs = res?;
-        let arrays: Vec<Bound<'_, PyAny>> = outs
-            .iter()
-            .enumerate()
-            .map(|(o, a)| wrap_output(py, prog.output_dtype(o), a))
+        let arrays: Vec<Bound<'_, PyAny>> = res?
+            .into_iter()
+            .map(|a| wrap_output(py, a))
             .collect::<PyResult<_>>()?;
         Ok(PyList::new(py, arrays)?.unbind())
     }
@@ -806,7 +793,7 @@ impl Program {
     /// The kernel ABI entry for running this program as a subprogram.
     #[getter]
     fn address(&self) -> usize {
-        super::program::ptl_program_call as *const () as usize
+        crate::kernel::address::<RProgram>()
     }
 
     /// The environment for `address`: this program (valid while this object lives).

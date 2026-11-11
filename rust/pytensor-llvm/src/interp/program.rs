@@ -1,8 +1,8 @@
 //! The interpreter: runs a task list planned in Python.
 //!
 //! Every task calls a kernel with the kernel ABI
-//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* config)`:
-//! a generated kernel, a Rust kernel, a subprogram, or a numba
+//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, int32 n_inputs, int32 n_outputs,
+//! const void* config)`: a generated kernel, a Rust kernel, a subprogram, or a numba
 //! kernel. The program doesn't know which.
 //!
 //! Python decides everything else: which values live where (arena offsets for static
@@ -10,11 +10,25 @@
 //! allocate, views), when values are released, and how outputs are produced. The
 //! interpreter checks what it can cheaply (shapes of kernel-set outputs against the
 //! static types) and cleans up on errors.
+//!
+//! A call goes `begin` -> `Call` (set the inputs, provide memory for outputs) -> `run`
+//! -> `Done` (read or take the outputs). The arrays of a call are borrowed until the
+//! `Done` is dropped, which is also what releases the memory the call holds.
+//!
+//! The raw `PtArray`s of all values live in a `CallMemory`, and the interpreter is who
+//! fills them in: what it knows about them (from the plan) is what makes its calls of
+//! the kernels keep the kernel contract. That reasoning is in `execute_inner`; what
+//! comes in from outside and goes out arrives and leaves as the views of
+//! `crate::array`.
 
 use super::consts::ConstData;
-use crate::abi::{PtArray, PtBuffer, validate_array};
+use crate::abi::{KernelFn, OwnedBuf, PtArray};
+pub use crate::abi::{c_strides, is_c_contiguous};
+use crate::array::{OutSlot, OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
+use crate::kernel::{Args, Kernel};
 use crate::runtime::PtCtx;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
@@ -69,12 +83,43 @@ impl ValueSpec {
     }
 }
 
-use crate::abi::KernelFn;
 pub use crate::abi::OutputMode;
 
+/// A kernel to call: a function with the kernel ABI, and its config.
+#[derive(Clone, Copy)]
+pub struct KernelHandle {
+    func: KernelFn,
+    config: *const u8,
+}
+
+// SAFETY: a function and the config it reads, both usable from any thread
+// (`from_raw`'s contract).
+unsafe impl Send for KernelHandle {}
+// SAFETY: as above.
+unsafe impl Sync for KernelHandle {}
+
+impl KernelHandle {
+    /// The kernel at `address` with `config` (None if the address is null).
+    ///
+    /// # Safety
+    /// `address` is a function with the kernel ABI (`KernelFn`) and `config` is the
+    /// config it expects. Both stay valid for as long as the handle is used, from any
+    /// thread. Called with arguments that keep the kernel contract for the node it
+    /// was made for, the function keeps its side of it: it reads and writes only what
+    /// the arguments describe, and returns allocated outputs and views as the ABI
+    /// says.
+    pub unsafe fn from_raw(address: usize, config: usize) -> Option<KernelHandle> {
+        // SAFETY: a null or a function pointer of this type (the function's contract).
+        let func = unsafe { std::mem::transmute::<usize, Option<KernelFn>>(address) }?;
+        Some(KernelHandle {
+            func,
+            config: config as *const u8,
+        })
+    }
+}
+
 pub struct Task {
-    pub func: usize,
-    pub config: usize,
+    pub kernel: KernelHandle,
     pub inputs: Vec<ValueId>,
     pub outputs: Vec<ValueId>,
     pub release: Vec<ValueId>,
@@ -95,7 +140,11 @@ pub struct ProgramSpec {
 }
 
 pub struct Program {
+    /// which program this is (its call memories carry it)
+    id: usize,
     spec: ProgramSpec,
+    /// the value of each graph input
+    input_values: Vec<ValueId>,
     /// the first graph output each Fresh value is
     fresh_output: Vec<Option<usize>>,
     memories: Mutex<Vec<CallMemory>>,
@@ -126,7 +175,17 @@ struct Align64([u8; 64]);
 /// Per-call memory of one program; not shared between concurrent calls. (The context,
 /// `PtCtx`, belongs to the caller's session: subprograms run with their
 /// caller's.)
+///
+/// Invariants, between calls and at every step of one:
+/// * `vals[v]` has the ndim and dtype of value `v` and its `shape` and `strides` point
+///   to the two halves of `storage[v]`.
+/// * The memory of constants and arena values is there for good. The data of inputs,
+///   of graph outputs and of what tasks return is set during a call, and only used
+///   after it was set in that call; `Call`'s drop clears it.
+/// * `owned[v]` says that `vals[v].owner` is a buffer reference this memory holds.
 pub struct CallMemory {
+    /// the program this is the memory of
+    program: usize,
     vals: Vec<PtArray>,
     /// shape ++ strides of every value
     storage: Vec<Box<[i64]>>,
@@ -135,37 +194,15 @@ pub struct CallMemory {
     #[allow(dead_code)]
     arena: Vec<Align64>,
     args: Vec<PtArray>,
+    /// which graph inputs the current call has set
+    input_set: Vec<bool>,
+    /// memory the caller of the current call provides, per graph output (null: none)
+    provided: Vec<*mut u8>,
 }
 
 // SAFETY: the raw pointers in a CallMemory point into its own storage and arena, into
 // buffers it owns, or into constants of its program; nothing is shared between memories.
 unsafe impl Send for CallMemory {}
-
-/// An output handed to the caller: one buffer reference.
-pub struct OutArray {
-    pub data: *mut u8,
-    pub shape: Vec<i64>,
-    pub strides: Vec<i64>,
-    pub owner: *mut PtBuffer,
-}
-
-// SAFETY: an OutArray is one buffer reference, owned by whoever holds it.
-unsafe impl Send for OutArray {}
-
-/// numpy's C-contiguity: length-1 axes and empty arrays don't count.
-pub fn is_c_contiguous(shape: &[i64], strides: &[i64], itemsize: usize) -> bool {
-    if shape.contains(&0) {
-        return true;
-    }
-    let mut acc = itemsize as i64;
-    for (&n, &s) in shape.iter().zip(strides).rev() {
-        if n != 1 && s != acc {
-            return false;
-        }
-        acc *= n;
-    }
-    true
-}
 
 /// Strides of an array packed in axis `order` (outermost first; empty: C order).
 pub fn packed_strides(shape: &[i64], itemsize: i64, order: &[usize]) -> Vec<i64> {
@@ -177,16 +214,6 @@ pub fn packed_strides(shape: &[i64], itemsize: i64, order: &[usize]) -> Vec<i64>
     for &a in order.iter().rev() {
         st[a] = acc;
         acc = acc.saturating_mul(shape[a].max(1));
-    }
-    st
-}
-
-pub fn c_strides(shape: &[i64], itemsize: i64) -> Vec<i64> {
-    let mut st = vec![0i64; shape.len()];
-    let mut acc = itemsize;
-    for d in (0..shape.len()).rev() {
-        st[d] = acc;
-        acc = acc.saturating_mul(shape[d].max(1));
     }
     st
 }
@@ -275,9 +302,6 @@ impl Program {
             }
         }
         for s in &spec.tasks {
-            if s.func == 0 {
-                return Err(format!("task {}: null function", s.desc));
-            }
             for &v in s.inputs.iter().chain(&s.release) {
                 ok(v)?;
             }
@@ -324,8 +348,22 @@ impl Program {
             }
         }
         let profile = Profile::new(spec.tasks.len());
+        let mut input_values = vec![None; spec.n_inputs];
+        for (k, v) in spec.values.iter().enumerate() {
+            if let ValueKind::Input(i) = v.kind {
+                input_values[i] = Some(ValueId(k as u32));
+            }
+        }
+        let input_values = input_values
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| v.ok_or(format!("input {i} has no value")))
+            .collect::<R<Vec<_>>>()?;
+        static PROGRAMS: AtomicUsize = AtomicUsize::new(0);
         Ok(Program {
+            id: PROGRAMS.fetch_add(1, Relaxed),
             spec,
+            input_values,
             fresh_output,
             memories: Mutex::new(vec![]),
             profile,
@@ -371,15 +409,19 @@ impl Program {
                 shape: st,
                 strides,
                 owner: std::ptr::null_mut(),
-                ndim: nd as i64,
+                ndim: nd as i32,
+                dtype: v.dtype.code(),
             });
         }
         CallMemory {
+            program: self.id,
             vals,
             storage,
             owned: vec![false; self.spec.values.len()],
             arena,
             args: vec![],
+            input_set: vec![false; self.spec.n_inputs],
+            provided: vec![std::ptr::null_mut(); self.spec.outputs.len()],
         }
     }
 
@@ -400,40 +442,15 @@ impl Program {
     }
 
     fn input_value(&self, k: usize) -> ValueId {
-        let i = self
-            .spec
-            .values
-            .iter()
-            .position(|v| matches!(v.kind, ValueKind::Input(j) if j == k));
-        ValueId(i.expect("every input has a value") as u32)
+        self.input_values[k]
     }
 
-    /// Set graph input `k`; returns the byte range it covers. The memory must stay
-    /// valid until `finish`.
-    pub fn set_input(
-        &self,
-        st: &mut CallMemory,
-        k: usize,
-        data: *mut u8,
-        shape: &[i64],
-        strides: &[i64],
-    ) -> R<(usize, usize)> {
-        let v = self.input_value(k);
-        let spec = &self.spec.values[v.i()];
-        check_shape(spec, shape).map_err(|m| format!("input {k}: {m}"))?;
-        let range = validate_array(data, shape, strides, spec.dtype.itemsize())
-            .map_err(|m| format!("input {k}: {m}"))?;
-        if self.input_contiguous(k) && !is_c_contiguous(shape, strides, spec.dtype.itemsize()) {
-            return Err(format!(
-                "input {k}: must be C-contiguous (the function was compiled for C-contiguous inputs)"
-            ));
+    /// Start a call in `st`, a memory of this program (`take_memory`).
+    pub fn begin<'c>(&'c self, st: &'c mut CallMemory) -> R<Call<'c>> {
+        if st.program != self.id {
+            return Err("this call memory belongs to another program".into());
         }
-        let nd = shape.len();
-        st.storage[v.i()][..nd].copy_from_slice(shape);
-        st.storage[v.i()][nd..].copy_from_slice(strides);
-        st.vals[v.i()].data = data;
-        st.vals[v.i()].owner = std::ptr::null_mut();
-        Ok(range)
+        Ok(Call { prog: self, st })
     }
 
     /// Whether input `k` must be C-contiguous.
@@ -464,29 +481,26 @@ impl Program {
         self.spec.values[v.i()].kind.is_fresh() && self.fresh_output[v.i()] == Some(o)
     }
 
-    /// Run all tasks. `provided[o]` is C-contiguous memory for static graph output `o`.
-    pub fn execute(
-        &self,
-        st: &mut CallMemory,
-        ctx: &mut PtCtx,
-        provided: &[Option<*mut u8>],
-    ) -> R<()> {
+    /// Run all tasks of the call prepared in `st`.
+    fn execute(&self, st: &mut CallMemory, ctx: &mut PtCtx) -> R<()> {
+        if let Some(k) = st.input_set.iter().position(|&set| !set) {
+            return Err(format!("input {k} was not set"));
+        }
         // whatever happens, the call's scratch is released (a panic skips the tasks' own
         // releases)
         let base = ctx.scratch_mark();
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.execute_inner(st, ctx, provided)
-        }))
-        .unwrap_or_else(|p| {
-            let msg = p
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
-            Err(format!(
-                "internal error (panic): {}",
-                msg.unwrap_or_default()
-            ))
-        });
+        let r =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.execute_inner(st, ctx)))
+                .unwrap_or_else(|p| {
+                    let msg = p
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
+                    Err(format!(
+                        "internal error (panic): {}",
+                        msg.unwrap_or_default()
+                    ))
+                });
         ctx.scratch_release(base);
         if r.is_err() {
             self.release_all(st);
@@ -494,12 +508,7 @@ impl Program {
         r
     }
 
-    fn execute_inner(
-        &self,
-        st: &mut CallMemory,
-        ctx: &mut PtCtx,
-        provided: &[Option<*mut u8>],
-    ) -> R<()> {
+    fn execute_inner(&self, st: &mut CallMemory, ctx: &mut PtCtx) -> R<()> {
         let values = &self.spec.values;
         let profiling = self.profile.on.load(Relaxed);
         if profiling {
@@ -519,7 +528,8 @@ impl Program {
                 }
                 match values[v.i()].kind {
                     ValueKind::Fresh => match self.fresh_output[v.i()]
-                        .and_then(|o| provided.get(o).copied().flatten())
+                        .map(|o| st.provided[o])
+                        .filter(|p| !p.is_null())
                     {
                         Some(p) => {
                             a.data = p;
@@ -527,16 +537,11 @@ impl Program {
                         }
                         None => {
                             let nb = values[v.i()].static_nbytes().unwrap_or(0);
-                            // SAFETY: ctx is the live context.
-                            let (data, owner) = unsafe { PtCtx::alloc(ctx, nb) };
-                            if data.is_null() {
-                                return Err(format!(
-                                    "{}: could not allocate {nb} bytes",
-                                    task.desc
-                                ));
-                            }
-                            a.data = data;
-                            a.owner = owner;
+                            let buf = ctx.alloc(nb).ok_or_else(|| {
+                                format!("{}: could not allocate {nb} bytes", task.desc)
+                            })?;
+                            a.data = buf.data();
+                            a.owner = buf.into_raw();
                             st.owned[v.i()] = true;
                         }
                     },
@@ -550,18 +555,35 @@ impl Program {
                 st.vals[v.i()].owner = a.owner;
                 st.args.push(a);
             }
-            // SAFETY: the arguments follow the task's declared modes: inputs are valid
-            // arrays of their types, provided outputs are arena/fresh/caller memory of
-            // their static types, other outputs have writable shape/strides storage;
-            // `func` has the declared ABI (Python built the task from a compiled
-            // function or a kernel handle).
             let t0 = profiling.then(std::time::Instant::now);
             // the task's scratch lives until it returns (also inside a subprogram:
             // marks, not a reset, so the caller's scratch survives)
             let mark = ctx.scratch_mark();
+            let kernel = task.kernel;
+            // SAFETY: the kernel contract, by what the plan says about the values
+            // (checked by `Program::new` as far as it goes, and otherwise the
+            // planner's promise) and the invariants of `CallMemory`:
+            // * `ctx` is ours for the call; `kernel` and its config are those of the
+            //   task (`KernelHandle::from_raw`).
+            // * `st.args` holds the task's inputs, then its outputs, each with the
+            //   ndim and dtype of its value and its own shape and strides storage.
+            // * Inputs were produced before (`Program::new` checks the order): graph
+            //   inputs came in as valid arrays (`Call::set_input`), constants and arena
+            //   values have their memory, and what a task returned is that task's to
+            //   get right (`KernelHandle::from_raw`; its shape is checked below).
+            //   The planner releases no value a later task still reads, or views.
+            // * Outputs with memory (arena, fresh or the caller's, of the static shape
+            //   in their storage) overlap nothing the task reads, unless the task
+            //   works in place, which the planner only lets generated kernels do.
+            //   The other outputs have no data: the kernel returns them.
             let rc = unsafe {
-                let f: KernelFn = std::mem::transmute::<usize, KernelFn>(task.func);
-                f(ctx, st.args.as_mut_ptr(), task.config as *const u8)
+                (kernel.func)(
+                    ctx,
+                    st.args.as_mut_ptr(),
+                    task.inputs.len() as i32,
+                    task.outputs.len() as i32,
+                    kernel.config,
+                )
             };
             if let Some(t0) = t0 {
                 self.profile.task_ns[k_task].fetch_add(t0.elapsed().as_nanos() as u64, Relaxed);
@@ -592,8 +614,8 @@ impl Program {
             }
             for (k, &v) in task.outputs.iter().enumerate() {
                 if matches!(values[v.i()].kind, ValueKind::Returned(_)) {
-                    // SAFETY: the storage holds ndim entries, written by the kernel.
-                    let shape = unsafe { st.vals[v.i()].shape() };
+                    // (the kernel wrote the shape there, through `vals[v].shape`)
+                    let shape = &st.storage[v.i()][..values[v.i()].ndim()];
                     check_shape(&values[v.i()], shape)
                         .map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
                     if st.vals[v.i()].data.is_null() && shape.iter().product::<i64>() != 0 {
@@ -614,105 +636,15 @@ impl Program {
         }
     }
 
-    /// Output `o` as a new reference (copied if its memory isn't a runtime buffer).
-    pub fn take_output(&self, st: &CallMemory, ctx: &mut PtCtx, o: usize) -> R<OutArray> {
-        let v = self.spec.outputs[o];
-        let a = st.vals[v.i()];
-        // SAFETY: the value was produced by `execute` (or is an input or a constant).
-        let (shape, strides) = unsafe { (a.shape().to_vec(), a.strides().to_vec()) };
-        if !a.owner.is_null() {
-            // SAFETY: a live buffer.
-            unsafe { PtBuffer::incref(a.owner) };
-            return Ok(OutArray {
-                data: a.data,
-                shape,
-                strides,
-                owner: a.owner,
-            });
-        }
-        let isz = self.spec.values[v.i()].dtype.itemsize();
-        let n = crate::abi::checked_nbytes(&shape, isz).ok_or("output too large")?;
-        // SAFETY: ctx is the live context.
-        let (data, owner) = unsafe { PtCtx::alloc(ctx, n) };
-        if data.is_null() {
-            return Err(format!("could not allocate {n} bytes"));
-        }
-        let dst_strides = c_strides(&shape, isz as i64);
-        // SAFETY: a valid array and a fresh buffer of its size.
-        unsafe { copy_strided(a.data, &shape, &strides, data, &dst_strides, isz) };
-        Ok(OutArray {
-            data,
-            shape,
-            strides: dst_strides,
-            owner,
-        })
-    }
-
-    /// Release what the call still holds (after the outputs were taken).
-    pub fn finish(&self, st: &mut CallMemory) {
+    /// Release what the call still holds, and forget its arrays.
+    fn finish(&self, st: &mut CallMemory) {
         self.release_all(st);
-    }
-
-    /// Run as a task of another program (the kernel ABI, see `ptl_program_call`).
-    fn call_as_kernel(&self, ctx: &mut PtCtx, args: *mut PtArray) -> R<()> {
-        let n_in = self.spec.n_inputs;
-        let n_out = self.spec.outputs.len();
-        // SAFETY: the caller passes n_in + n_out arrays (the contract of the task).
-        let args = unsafe { std::slice::from_raw_parts_mut(args, n_in + n_out) };
-        let mut st = self.take_memory();
-        let r = (|| -> R<()> {
-            for k in 0..n_in {
-                let a = args[k];
-                // SAFETY: inputs are valid arrays of their declared types.
-                let (shape, strides) = unsafe { (a.shape().to_vec(), a.strides().to_vec()) };
-                self.set_input(&mut st, k, a.data, &shape, &strides)?;
+        for (k, set) in st.input_set.iter_mut().enumerate() {
+            if std::mem::take(set) {
+                st.vals[self.input_values[k].i()].data = std::ptr::null_mut();
             }
-            let provided: Vec<Option<*mut u8>> = (0..n_out)
-                .map(|o| match self.spec.output_modes[o] {
-                    OutputMode::Provided => Some(args[n_in + o].data),
-                    OutputMode::Allocated | OutputMode::View => None,
-                })
-                .collect();
-            self.execute(&mut st, ctx, &provided)?;
-            for o in 0..n_out {
-                let v = self.spec.outputs[o];
-                let dst = &mut args[n_in + o];
-                match self.spec.output_modes[o] {
-                    OutputMode::Provided => {
-                        if !self.writes_in_place(o) {
-                            let a = st.vals[v.i()];
-                            // SAFETY: a computed value and the caller's memory of the same
-                            // static shape (with the caller's strides).
-                            unsafe {
-                                let (shape, strides) = (a.shape().to_vec(), a.strides().to_vec());
-                                copy_strided(
-                                    a.data,
-                                    &shape,
-                                    &strides,
-                                    dst.data,
-                                    dst.strides(),
-                                    self.spec.values[v.i()].dtype.itemsize(),
-                                );
-                            }
-                        }
-                    }
-                    OutputMode::Allocated | OutputMode::View => {
-                        let out = self.take_output(&st, ctx, o)?;
-                        // SAFETY: the output's shape/strides storage has ndim entries.
-                        unsafe {
-                            dst.shape_mut().copy_from_slice(&out.shape);
-                            dst.strides_mut().copy_from_slice(&out.strides);
-                        }
-                        dst.data = out.data;
-                        dst.owner = out.owner;
-                    }
-                }
-            }
-            Ok(())
-        })();
-        self.finish(&mut st);
-        self.put_memory(st);
-        r
+        }
+        st.provided.fill(std::ptr::null_mut());
     }
 
     pub fn n_inputs(&self) -> usize {
@@ -828,13 +760,6 @@ impl Program {
         s
     }
 
-    /// Output `o` after `execute`, as a borrowed array (valid until `finish`).
-    pub fn output_view(&self, st: &CallMemory, o: usize) -> PtArray {
-        let mut a = st.vals[self.spec.outputs[o].i()];
-        a.owner = std::ptr::null_mut();
-        a
-    }
-
     pub fn output_ndim(&self, o: usize) -> usize {
         self.spec.values[self.spec.outputs[o].i()].ndim()
     }
@@ -866,69 +791,189 @@ impl ValueKind {
 fn release(st: &mut CallMemory, v: ValueId) {
     if st.owned[v.i()] {
         // SAFETY: an owned reference of this memory, released once (the flag is cleared).
-        unsafe { PtBuffer::decref(st.vals[v.i()].owner) };
+        drop(unsafe { OwnedBuf::from_raw(st.vals[v.i()].owner) });
         st.owned[v.i()] = false;
         st.vals[v.i()].owner = std::ptr::null_mut();
     }
 }
 
-/// A program as a task: `config` is the `Program`.
+// ------------------------------------------------------------------ calls
+
+/// A call being prepared: `set_input` every input, `provide` memory for outputs if
+/// you have it, then `run`.
 ///
-/// # Safety
-/// `config` points to a live `Program` (kept alive by the outer program) and `args` holds
-/// its inputs and outputs as the outer task declared them.
-#[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_program_call(
-    ctx: *mut PtCtx,
-    args: *mut PtArray,
-    config: *const u8,
-) -> i32 {
-    // SAFETY: the function's contract.
-    unsafe {
-        let p = &*(config as *const Program);
-        match p.call_as_kernel(&mut *ctx, args) {
-            Ok(()) => 0,
-            Err(m) => PtCtx::fail(ctx, 1, &m),
+/// The arrays the call is given are borrowed for `'c`: until the call, and the `Done`
+/// it becomes, are dropped.
+pub struct Call<'c> {
+    prog: &'c Program,
+    st: &'c mut CallMemory,
+}
+
+impl<'c> Call<'c> {
+    /// Graph input `k` is `a`. Checked: its dtype, its shape against the type, and that
+    /// it is C-contiguous if the function was compiled for that.
+    pub fn set_input(&mut self, k: usize, a: PtArrayRef<'c>) -> R<()> {
+        let prog = self.prog;
+        if k >= prog.n_inputs() {
+            return Err(format!(
+                "no input {k}: the function has {}",
+                prog.n_inputs()
+            ));
         }
+        let v = prog.input_value(k);
+        let spec = &prog.spec.values[v.i()];
+        if a.dtype() != spec.dtype {
+            return Err(format!(
+                "input {k}: an array of {} is expected, got one of {}",
+                spec.dtype.numpy_name(),
+                a.dtype().numpy_name()
+            ));
+        }
+        check_shape(spec, a.shape()).map_err(|m| format!("input {k}: {m}"))?;
+        if prog.input_contiguous(k) && !a.is_c_contiguous() {
+            return Err(format!(
+                "input {k}: must be C-contiguous (the function was compiled for C-contiguous inputs)"
+            ));
+        }
+        let nd = a.ndim();
+        let st = &mut *self.st;
+        st.storage[v.i()][..nd].copy_from_slice(a.shape());
+        st.storage[v.i()][nd..].copy_from_slice(a.strides());
+        // (never written through: nothing overwrites a graph input)
+        st.vals[v.i()].data = a.as_ptr() as *mut u8;
+        st.vals[v.i()].owner = std::ptr::null_mut();
+        st.input_set[k] = true;
+        Ok(())
+    }
+
+    /// Memory for graph output `o`. Checked: its dtype, and its shape against the
+    /// type. If the result can be computed straight into it, it is (None); otherwise
+    /// the memory comes back, for the caller to copy `Done::output(o)` into.
+    pub fn provide(&mut self, o: usize, mut a: PtArrayMut<'c>) -> R<Option<PtArrayMut<'c>>> {
+        let prog = self.prog;
+        if o >= prog.n_outputs() {
+            return Err(format!(
+                "no output {o}: the function has {}",
+                prog.n_outputs()
+            ));
+        }
+        let spec = &prog.spec.values[prog.spec.outputs[o].i()];
+        if a.dtype() != spec.dtype {
+            return Err(format!(
+                "provided output {o}: an array of {} is expected, got one of {}",
+                spec.dtype.numpy_name(),
+                a.dtype().numpy_name()
+            ));
+        }
+        check_shape(spec, a.shape()).map_err(|m| format!("provided output {o}: {m}"))?;
+        // the producing task writes C-contiguous memory of the static shape
+        if prog.writes_in_place(o) && a.is_c_contiguous() {
+            self.st.provided[o] = a.as_mut_ptr();
+            return Ok(None);
+        }
+        Ok(Some(a))
+    }
+
+    /// Run the program.
+    pub fn run(self, ctx: &mut PtCtx) -> R<Done<'c>> {
+        self.prog.execute(self.st, ctx)?;
+        Ok(Done(self))
     }
 }
 
-/// Copy elements between two arrays of the same shape.
-///
-/// # Safety
-/// Both describe valid memory of `shape` with their strides; they don't overlap.
-pub unsafe fn copy_strided(
-    src: *const u8,
-    shape: &[i64],
-    src_strides: &[i64],
-    dst: *mut u8,
-    dst_strides: &[i64],
-    itemsize: usize,
-) {
-    let nd = shape.len();
-    if shape.contains(&0) {
-        return;
+impl Drop for Call<'_> {
+    fn drop(&mut self) {
+        self.prog.finish(self.st);
     }
-    let mut idx = vec![0i64; nd];
-    loop {
-        let (mut so, mut d) = (0isize, 0isize);
-        for a in 0..nd {
-            so += (idx[a] * src_strides[a]) as isize;
-            d += (idx[a] * dst_strides[a]) as isize;
+}
+
+/// A call that ran: its outputs can be read until this is dropped.
+pub struct Done<'c>(Call<'c>);
+
+impl Done<'_> {
+    /// Graph output `o`, borrowed.
+    pub fn output(&self, o: usize) -> R<PtArrayRef<'_>> {
+        let Call { prog, st } = &self.0;
+        let v = *prog
+            .spec
+            .outputs
+            .get(o)
+            .ok_or_else(|| format!("no output {o}: the function has {}", prog.n_outputs()))?;
+        // SAFETY: a value of a call that ran is an input of the call (an array for
+        // `'c`), a constant, memory of `st`, memory the caller provided for `'c`, or
+        // what a task returned, in a buffer `st` holds; and its header keeps the
+        // invariants of `CallMemory`. Nothing writes any of them before the call is
+        // dropped, which can't happen while the result borrows it. What tasks
+        // returned is checked here as far as that goes.
+        unsafe { PtArrayRef::from_raw_checked(&st.vals[v.i()]) }
+            .map_err(|e| format!("output {o}: {e}"))
+    }
+
+    /// Graph output `o`, to keep: a reference to its buffer, or a copy if its memory
+    /// isn't a runtime buffer (an input, a constant, provided memory).
+    pub fn take_output(&self, o: usize) -> R<OwnedArray> {
+        let a = self.output(o)?;
+        if a.owner().is_null() {
+            return OwnedArray::copy_of(&a);
         }
-        // SAFETY: the offsets stay inside both arrays (index < shape on every axis).
-        unsafe { std::ptr::copy_nonoverlapping(src.offset(so), dst.offset(d), itemsize) };
-        let mut a = nd;
-        loop {
-            if a == 0 {
-                return;
-            }
-            a -= 1;
-            idx[a] += 1;
-            if idx[a] < shape[a] {
-                break;
-            }
-            idx[a] = 0;
+        // SAFETY: the buffer the output is in, which the call's memory holds.
+        let buf = unsafe { OwnedBuf::from_borrowed(a.owner()) };
+        OwnedArray::in_buffer(
+            buf,
+            a.as_ptr() as *mut u8,
+            a.shape().to_vec(),
+            a.strides().to_vec(),
+            a.dtype(),
+        )
+        .map_err(|e| format!("output {o}: {e}"))
+    }
+}
+
+/// A program as a kernel: a task of another program, or the body of a loop.
+impl Kernel for Program {
+    fn arity(&self) -> (usize, usize) {
+        (self.n_inputs(), self.n_outputs())
+    }
+
+    fn run(&self, ctx: &mut PtCtx, args: Args) -> R<()> {
+        let mut st = self.take_memory();
+        let result = self.run_as_kernel(&mut st, ctx, args);
+        self.put_memory(st);
+        result
+    }
+}
+
+impl Program {
+    fn run_as_kernel(&self, st: &mut CallMemory, ctx: &mut PtCtx, args: Args) -> R<()> {
+        /// What is left to do for an output after the call.
+        enum Pending<'a> {
+            Written,
+            Copy(PtArrayMut<'a>),
+            Take(OutSlot<'a>),
         }
+        let mut call = self.begin(st)?;
+        for k in 0..self.n_inputs() {
+            call.set_input(k, args.inputs.get(k)?)?;
+        }
+        let mut pending = Vec::with_capacity(self.n_outputs());
+        for (o, slot) in args.outputs.into_slots().enumerate() {
+            let slot = slot?;
+            pending.push(match self.spec.output_modes[o] {
+                OutputMode::Provided => match call.provide(o, slot.provided()?)? {
+                    None => Pending::Written,
+                    Some(memory) => Pending::Copy(memory),
+                },
+                OutputMode::Allocated | OutputMode::View => Pending::Take(slot),
+            });
+        }
+        let done = call.run(ctx)?;
+        for (o, pending) in pending.into_iter().enumerate() {
+            match pending {
+                Pending::Written => {}
+                Pending::Copy(mut memory) => memory.copy_from(&done.output(o)?)?,
+                Pending::Take(slot) => slot.set(done.take_output(o)?)?,
+            }
+        }
+        Ok(())
     }
 }

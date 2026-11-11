@@ -13,9 +13,10 @@
 //! their rows, so a circular buffer whose output row coincides with an input tap is
 //! still correct.
 
-use super::program::{Program, copy_strided};
-use crate::abi::{OwnedBuf, PtArray, PtBuffer};
+use super::program::Program;
+use crate::array::{OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
+use crate::kernel::{Args, Kernel};
 use crate::runtime::PtCtx;
 use std::sync::Arc;
 
@@ -41,108 +42,54 @@ pub struct ScanConfig {
     pub keepalive: pyo3::Py<pyo3::PyAny>,
 }
 
-/// A C-contiguous buffer owned by the driver (until handed out as an output).
-struct Buf {
-    owner: *mut PtBuffer,
-    data: *mut u8,
-    shape: Vec<i64>,
-    strides: Vec<i64>,
-    itemsize: i64,
-}
-
-fn c_strides(shape: &[i64], itemsize: i64) -> Vec<i64> {
-    let mut strides = vec![0; shape.len()];
-    let mut acc = itemsize;
-    for d in (0..shape.len()).rev() {
-        strides[d] = acc;
-        acc *= shape[d].max(1);
-    }
-    strides
-}
+/// A buffer of the loop: a C-contiguous array we hold alone, until it is handed out
+/// as an output. Its first axis counts rows.
+struct Buf(OwnedArray);
 
 impl Buf {
-    /// The buffer reference is pushed onto `owned` (released on errors).
-    fn new(shape: Vec<i64>, itemsize: i64, owned: &mut Vec<OwnedBuf>) -> Result<Buf, String> {
-        let nbytes = crate::abi::checked_nbytes(&shape, itemsize as usize)
-            .ok_or_else(|| crate::abi::bad_size("scan buffer", &shape))?;
-        let owner = PtBuffer::new(nbytes, 64);
-        // SAFETY: a buffer reference we just created and now own.
-        owned.push(unsafe { OwnedBuf::from_raw(owner) });
-        let strides = c_strides(&shape, itemsize);
-        // SAFETY: `owner` was just allocated.
-        Ok(Buf {
-            owner,
-            data: unsafe { (*owner).data },
-            shape,
-            strides,
-            itemsize,
-        })
+    fn zeros(dtype: DType, shape: Vec<i64>) -> Result<Buf, String> {
+        if shape.is_empty() {
+            return Err("Scan: state buffers need at least one dimension".into());
+        }
+        Ok(Buf(OwnedArray::zeros(dtype, shape)?))
+    }
+
+    fn copy_of(source: &PtArrayRef) -> Result<Buf, String> {
+        if source.ndim() == 0 {
+            return Err("Scan: state buffers need at least one dimension".into());
+        }
+        Ok(Buf(OwnedArray::copy_of(source)?))
     }
 
     fn len(&self) -> i64 {
-        self.shape[0]
+        self.0.rows().unwrap_or(0)
     }
 
-    fn row_bytes(&self) -> i64 {
-        self.shape[1..].iter().product::<i64>() * self.itemsize
+    fn row(&self, r: i64) -> Result<PtArrayRef<'_>, String> {
+        self.0
+            .as_ref()
+            .row(r)
+            .ok_or_else(|| format!("Scan: no row {r} in a buffer of {}", self.len()))
     }
 
-    fn row(&self, r: i64) -> *mut u8 {
-        // SAFETY: 0 <= r < len (callers index rows modulo the length): inside the buffer.
-        unsafe { self.data.offset((r * self.row_bytes()) as isize) }
+    fn row_mut(&mut self, r: i64) -> Result<PtArrayMut<'_>, String> {
+        let len = self.len();
+        self.0
+            .as_mut()?
+            .row(r)
+            .ok_or_else(|| format!("Scan: no row {r} in a buffer of {len}"))
     }
 
-    fn view(&mut self, r: Option<i64>) -> PtArray {
-        match r {
-            None => PtArray {
-                data: self.data,
-                shape: self.shape.as_mut_ptr(),
-                strides: self.strides.as_mut_ptr(),
-                owner: std::ptr::null_mut(),
-                ndim: self.shape.len() as i64,
-            },
-            Some(r) => PtArray {
-                data: self.row(r),
-                shape: self.shape[1..].as_mut_ptr(),
-                strides: self.strides[1..].as_mut_ptr(),
-                owner: std::ptr::null_mut(),
-                ndim: self.shape.len() as i64 - 1,
-            },
-        }
-    }
-
-    /// Copy a valid array of this buffer's row shape into row `r`.
-    fn write_row(&self, r: i64, src: &PtArray) -> Result<(), String> {
-        // SAFETY: `src` is a valid array (a body output or input).
-        let (sh, st) = unsafe { (src.shape(), src.strides()) };
-        if sh != &self.shape[1..] {
-            return Err(format!(
-                "Scan: body output has shape {sh:?}, expected {:?}",
-                &self.shape[1..]
-            ));
-        }
-        // SAFETY: row r has this shape (C-contiguous) and doesn't overlap `src` (body
-        // outputs are fresh or provided temporaries).
-        unsafe {
-            copy_strided(
-                src.data,
-                sh,
-                st,
-                self.row(r),
-                &self.strides[1..],
-                self.itemsize as usize,
-            )
-        };
-        Ok(())
+    /// Copy an array of this buffer's row shape into row `r`.
+    fn write_row(&mut self, r: i64, source: &PtArrayRef) -> Result<(), String> {
+        self.row_mut(r)?
+            .copy_from(source)
+            .map_err(|e| format!("Scan: body output: {e}"))
     }
 }
 
-/// # Safety
-/// `a` is a valid 0-d array of `dt`.
-unsafe fn read_int(a: &PtArray, dt: DType) -> i64 {
-    // SAFETY: the function's contract.
-    unsafe { super::consts::read_scalar(a.data, dt).1 }
-}
+/// A state of the loop that isn't traced: the whole array is the state.
+struct Untraced(OwnedArray);
 
 struct Traced {
     buf: Buf,
@@ -152,345 +99,262 @@ struct Traced {
     post_process: bool,
 }
 
-/// args = outer inputs ++ outer outputs (all allocated by this kernel).
-///
-/// # Safety
-/// The kernel ABI; `config` is a `ScanConfig` matching the arguments.
-pub unsafe extern "C-unwind" fn k_scan(
-    ctx: *mut PtCtx,
-    args: *mut PtArray,
-    config: *const u8,
-) -> i32 {
-    // SAFETY: the function's contract.
-    let (d, c) = unsafe { (&*(config as *const ScanConfig), &mut *ctx) };
-    let mut owned: Vec<OwnedBuf> = Vec::new();
-    // SAFETY: the function's contract.
-    match unsafe { run(c, args, d, &mut owned) } {
-        Ok(()) => {
-            // the references now live in the outputs' owner fields
-            owned.into_iter().for_each(|b| {
-                b.into_raw();
-            });
-            0
-        }
-        // SAFETY: ctx is the live context.
-        Err(m) => unsafe { PtCtx::fail(ctx, 1, &m) },
-    }
+/// An output of the loop body after an iteration: in the memory we provided for it,
+/// or an array of its own.
+enum BodyOutput {
+    Provided,
+    Taken(OwnedArray),
 }
 
-/// # Safety
-/// As for `k_scan`.
-unsafe fn run(
-    ctx: &mut PtCtx,
-    args: *mut PtArray,
-    d: &ScanConfig,
-    owned: &mut Vec<OwnedBuf>,
-) -> Result<(), String> {
-    let info = &d.info;
-    // SAFETY: args holds every outer input and output (the contract).
-    let arg = |i: usize| unsafe { *args.add(i) };
-    let (n_mm, n_ms, n_ss) = (
-        info.mit_mot_in.len(),
-        info.mit_sot_in.len(),
-        info.sit_sot_in.len(),
-    );
-    let o_seq = 1;
-    let o_mm = o_seq + info.n_seqs;
-    let o_ms = o_mm + n_mm;
-    let o_ss = o_ms + n_ms;
-    let o_ut = o_ss + n_ss;
-    let o_nit = o_ut + info.n_untraced;
-    let o_ns = o_nit + info.n_nit_sot;
-    let n_outer_in = o_ns + info.n_non_seqs;
-    // SAFETY: n_steps is a valid 0-d integer array.
-    let n_steps = unsafe { read_int(&arg(0), d.outer_in_dtypes[0]) }.max(0);
-    let body = &*d.body;
+/// Scan as a kernel: args = outer inputs ++ outer outputs (all allocated here).
+impl Kernel for ScanConfig {
+    fn arity(&self) -> (usize, usize) {
+        let info = &self.info;
+        let n_states = info.mit_mot_in.len() + info.mit_sot_in.len() + info.sit_sot_in.len();
+        (
+            1 + info.n_seqs + n_states + info.n_untraced + info.n_nit_sot + info.n_non_seqs,
+            n_states + info.n_nit_sot + info.n_untraced,
+        )
+    }
 
-    // ---- buffers: copies of the outer buffers (the loop writes into them)
-    let copy_of = |a: PtArray, dt: DType, owned: &mut Vec<OwnedBuf>| -> Result<Buf, String> {
-        // SAFETY: outer inputs are valid arrays.
-        let (sh, st) = unsafe { (a.shape().to_vec(), a.strides().to_vec()) };
-        let b = Buf::new(sh.clone(), dt.itemsize() as i64, owned)?;
-        // SAFETY: a valid array and a fresh buffer of its shape.
-        unsafe { copy_strided(a.data, &sh, &st, b.data, &b.strides, b.itemsize as usize) };
-        Ok(b)
-    };
-    let mut traced: Vec<Traced> = Vec::new();
-    let groups = [
-        (o_mm, &info.mit_mot_in, true),
-        (o_ms, &info.mit_sot_in, false),
-        (o_ss, &info.sit_sot_in, false),
-    ];
-    for (base, taps, is_mm) in groups {
-        for (j, in_taps) in taps.iter().enumerate() {
-            let a = arg(base + j);
-            if a.ndim < 1 {
-                return Err("Scan: state buffers need at least one dimension".into());
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        let d = self;
+        let info = &d.info;
+        let inputs = &args.inputs;
+        let (n_mm, n_ms, n_ss) = (
+            info.mit_mot_in.len(),
+            info.mit_sot_in.len(),
+            info.sit_sot_in.len(),
+        );
+        let o_seq = 1;
+        let o_mm = o_seq + info.n_seqs;
+        let o_ms = o_mm + n_mm;
+        let o_ss = o_ms + n_ms;
+        let o_ut = o_ss + n_ss;
+        let o_nit = o_ut + info.n_untraced;
+        let o_ns = o_nit + info.n_nit_sot;
+        let n_steps = inputs.get(0)?.item_as_i64()?.max(0);
+        let body = &*d.body;
+
+        // ---- buffers: copies of the outer buffers (the loop writes into them)
+        let mut traced: Vec<Traced> = Vec::new();
+        let groups = [
+            (o_mm, &info.mit_mot_in, true),
+            (o_ms, &info.mit_sot_in, false),
+            (o_ss, &info.sit_sot_in, false),
+        ];
+        for (base, taps, is_mm) in groups {
+            for (j, in_taps) in taps.iter().enumerate() {
+                let buf = Buf::copy_of(&inputs.get(base + j)?)?;
+                let lookback = -in_taps.iter().copied().min().unwrap_or(0).min(0);
+                let out_taps = if is_mm {
+                    info.mit_mot_out[j].clone()
+                } else {
+                    vec![0]
+                };
+                traced.push(Traced {
+                    buf,
+                    lookback,
+                    in_taps: in_taps.clone(),
+                    out_taps,
+                    post_process: !is_mm,
+                });
             }
-            let buf = copy_of(a, d.outer_in_dtypes[base + j], owned)?;
-            let lookback = -in_taps.iter().copied().min().unwrap_or(0).min(0);
-            let out_taps = if is_mm {
-                info.mit_mot_out[j].clone()
-            } else {
-                vec![0]
-            };
-            traced.push(Traced {
-                buf,
-                lookback,
-                in_taps: in_taps.clone(),
-                out_taps,
-                post_process: !is_mm,
-            });
         }
-    }
-    let mut untraced: Vec<Buf> = (0..info.n_untraced)
-        .map(|j| copy_of(arg(o_ut + j), d.outer_in_dtypes[o_ut + j], owned))
-        .collect::<Result<_, _>>()?;
-    let n_mm_outs: usize = info.mit_mot_out.iter().map(|t| t.len()).sum();
-    let first_nit_out = n_mm_outs + n_ms + n_ss;
-    let mut nit: Vec<Option<Buf>> = Vec::new();
-    let mut nit_len: Vec<i64> = Vec::new();
-    for j in 0..info.n_nit_sot {
-        // SAFETY: nit-sot lengths are valid 0-d integer arrays.
-        let len = unsafe { read_int(&arg(o_nit + j), d.outer_in_dtypes[o_nit + j]) }.max(0);
-        nit_len.push(len);
-        nit.push(match body.output_static_shape(first_nit_out + j) {
-            Some(s) => {
-                let mut shape = vec![len];
-                shape.extend(s);
-                Some(Buf::new(
-                    shape,
-                    d.inner_out_dtypes[first_nit_out + j].itemsize() as i64,
-                    owned,
-                )?)
-            }
-            None => None,
-        });
-    }
-
-    // ---- body outputs with static shapes go into temporaries we provide
-    let mut temps: Vec<Option<Buf>> = Vec::new();
-    let mut temp_owned = Vec::new();
-    for o in 0..body.n_outputs() {
-        temps.push(match body.output_static_shape(o) {
-            Some(s) => Some(Buf::new(
-                s,
-                d.inner_out_dtypes[o].itemsize() as i64,
-                &mut temp_owned,
-            )?),
-            None => None,
-        });
-    }
-    let provided: Vec<Option<*mut u8>> = temps.iter().map(|t| t.as_ref().map(|b| b.data)).collect();
-
-    let mut st = body.take_memory();
-    let mut body_in: Vec<PtArray> = Vec::new();
-    let mut i: i64 = 0;
-    let mut stop = false;
-    let mut result: Result<(), String> = Ok(());
-    while i < n_steps && !stop {
-        body_in.clear();
-        for k in 0..info.n_seqs {
-            let a = arg(o_seq + k);
-            // SAFETY: sequences are valid arrays.
-            let (sh, sts) = unsafe { (a.shape(), a.strides()) };
-            if sh.is_empty() || sh[0] <= i {
-                result = Err(format!("Scan: sequence {k} is shorter than n_steps"));
-                break;
-            }
-            // SAFETY: row i of a sequence (i < its length) and its trailing axes.
-            body_in.push(unsafe {
-                PtArray {
-                    data: a.data.offset((i * sts[0]) as isize),
-                    shape: a.shape.add(1),
-                    strides: a.strides.add(1),
-                    owner: std::ptr::null_mut(),
-                    ndim: a.ndim - 1,
+        let mut untraced: Vec<Untraced> = (0..info.n_untraced)
+            .map(|j| Ok(Untraced(OwnedArray::copy_of(&inputs.get(o_ut + j)?)?)))
+            .collect::<Result<_, String>>()?;
+        let n_mm_outs: usize = info.mit_mot_out.iter().map(|t| t.len()).sum();
+        let first_nit_out = n_mm_outs + n_ms + n_ss;
+        let mut nit: Vec<Option<Buf>> = Vec::new();
+        let mut nit_len: Vec<i64> = Vec::new();
+        for j in 0..info.n_nit_sot {
+            let len = inputs.get(o_nit + j)?.item_as_i64()?.max(0);
+            nit_len.push(len);
+            nit.push(match body.output_static_shape(first_nit_out + j) {
+                Some(s) => {
+                    let mut shape = vec![len];
+                    shape.extend(s);
+                    Some(Buf::zeros(d.inner_out_dtypes[first_nit_out + j], shape)?)
                 }
+                None => None,
             });
         }
-        if result.is_err() {
-            break;
-        }
-        for t in traced.iter_mut() {
-            let len = t.buf.len().max(1);
-            for k in 0..t.in_taps.len() {
-                let r = (i + t.lookback + t.in_taps[k]).rem_euclid(len);
-                body_in.push(t.buf.view(Some(r)));
-            }
-        }
-        for u in untraced.iter_mut() {
-            body_in.push(u.view(None));
-        }
-        for k in 0..info.n_non_seqs {
-            body_in.push(arg(o_ns + k));
+
+        // ---- body outputs with static shapes go into temporaries we provide
+        let mut temps: Vec<Option<OwnedArray>> = Vec::new();
+        for o in 0..body.n_outputs() {
+            temps.push(match body.output_static_shape(o) {
+                Some(s) => Some(OwnedArray::zeros(d.inner_out_dtypes[o], s)?),
+                None => None,
+            });
         }
 
-        // run the body
-        let r = (|| -> Result<(), String> {
-            for (k, a) in body_in.iter().enumerate() {
-                // SAFETY: valid arrays (views into live buffers or outer inputs).
-                let (sh, sts) = unsafe { (a.shape().to_vec(), a.strides().to_vec()) };
-                body.set_input(&mut st, k, a.data, &sh, &sts)?;
-            }
-            body.execute(&mut st, ctx, &provided)
-        })();
-        if let Err(m) = r {
-            result = Err(format!("in a Scan iteration: {m}"));
-            body.finish(&mut st);
-            break;
-        }
-        let outs: Vec<PtArray> = (0..body.n_outputs())
-            .map(|o| body.output_view(&st, o))
-            .collect();
+        let mut st = body.take_memory();
+        let mut i: i64 = 0;
+        let mut stop = false;
+        let mut result: Result<(), String> = Ok(());
+        while i < n_steps && !stop {
+            // run the body. Its inputs are rows of our buffers, borrowed until we
+            // have its outputs: in the temporaries, or as arrays of their own.
+            let outs = (|| -> Result<Vec<BodyOutput>, String> {
+                let mut call = body.begin(&mut st)?;
+                // (the body's inputs, in order)
+                let mut k = 0..;
+                for s in 0..info.n_seqs {
+                    let row = inputs
+                        .get(o_seq + s)?
+                        .row(i)
+                        .ok_or_else(|| format!("Scan: sequence {s} is shorter than n_steps"))?;
+                    call.set_input(k.next().unwrap(), row)?;
+                }
+                for t in traced.iter() {
+                    let len = t.buf.len().max(1);
+                    for tap in &t.in_taps {
+                        let r = (i + t.lookback + tap).rem_euclid(len);
+                        call.set_input(k.next().unwrap(), t.buf.row(r)?)?;
+                    }
+                }
+                for u in untraced.iter() {
+                    call.set_input(k.next().unwrap(), u.0.as_ref())?;
+                }
+                for n in 0..info.n_non_seqs {
+                    call.set_input(k.next().unwrap(), inputs.get(o_ns + n)?)?;
+                }
+                let mut outs = Vec::with_capacity(temps.len());
+                for (o, temp) in temps.iter_mut().enumerate() {
+                    let direct = match temp {
+                        Some(temp) => call.provide(o, temp.as_mut()?)?.is_none(),
+                        None => false,
+                    };
+                    outs.push(direct);
+                }
+                let done = call.run(ctx)?;
+                outs.into_iter()
+                    .enumerate()
+                    .map(|(o, direct)| {
+                        Ok(match direct {
+                            true => BodyOutput::Provided,
+                            false => BodyOutput::Taken(done.take_output(o)?),
+                        })
+                    })
+                    .collect()
+            })();
+            let outs = match outs {
+                Ok(outs) => outs,
+                Err(m) => {
+                    result = Err(match m.starts_with("Scan: ") {
+                        true => m,
+                        false => format!("in a Scan iteration: {m}"),
+                    });
+                    break;
+                }
+            };
+            let out = |q: usize| -> Result<PtArrayRef<'_>, String> {
+                match (&outs[q], &temps[q]) {
+                    (BodyOutput::Taken(a), _) => Ok(a.as_ref()),
+                    (BodyOutput::Provided, Some(temp)) => Ok(temp.as_ref()),
+                    (BodyOutput::Provided, None) => Err("Scan: a body output is missing".into()),
+                }
+            };
 
-        // write the body outputs into their rows
-        let mut q = 0;
-        let mut r: Result<(), String> = Ok(());
-        for t in traced.iter_mut() {
-            let len = t.buf.len().max(1);
-            for k in 0..t.out_taps.len() {
-                let row = (i + t.lookback + t.out_taps[k]).rem_euclid(len);
-                r = r.and(t.buf.write_row(row, &outs[q]));
+            // write the body outputs into their rows
+            let mut q = 0;
+            let mut r: Result<(), String> = Ok(());
+            for t in traced.iter_mut() {
+                let len = t.buf.len().max(1);
+                for tap in &t.out_taps {
+                    let row = (i + t.lookback + tap).rem_euclid(len);
+                    r = r.and(t.buf.write_row(row, &out(q)?));
+                    q += 1;
+                }
+            }
+            for j in 0..info.n_nit_sot {
+                let value = out(q)?;
+                if nit[j].is_none() {
+                    let mut shape = vec![nit_len[j]];
+                    shape.extend(value.shape());
+                    nit[j] = Some(Buf::zeros(d.inner_out_dtypes[first_nit_out + j], shape)?);
+                }
+                let b = nit[j].as_mut().unwrap();
+                if b.len() > 0 {
+                    r = r.and(b.write_row(i.rem_euclid(b.len()), &value));
+                }
                 q += 1;
             }
-        }
-        for j in 0..info.n_nit_sot {
-            if nit[j].is_none() {
-                // SAFETY: a body output.
-                let mut shape = vec![nit_len[j]];
-                shape.extend(unsafe { outs[q].shape() });
-                nit[j] = Some(Buf::new(
-                    shape,
-                    d.inner_out_dtypes[first_nit_out + j].itemsize() as i64,
-                    owned,
-                )?);
-            }
-            let b = nit[j].as_ref().unwrap();
-            if b.len() > 0 {
-                r = r.and(b.write_row(i.rem_euclid(b.len()), &outs[q]));
-            }
-            q += 1;
-        }
-        for u in untraced.iter_mut() {
-            // an untraced state becomes the body output (its shape may change)
-            // SAFETY: a body output.
-            let (sh, sts) = unsafe { (outs[q].shape().to_vec(), outs[q].strides().to_vec()) };
-            if sh != u.shape {
-                *u = Buf::new(sh.clone(), u.itemsize, owned)?;
-            }
-            // SAFETY: a valid body output and a buffer of its shape.
-            unsafe {
-                copy_strided(
-                    outs[q].data,
-                    &sh,
-                    &sts,
-                    u.data,
-                    &u.strides,
-                    u.itemsize as usize,
-                )
-            };
-            q += 1;
-        }
-        if info.as_while {
-            // SAFETY: the condition is a valid 0-d bool body output.
-            stop = unsafe { *outs[q].data } != 0;
-        }
-        body.finish(&mut st);
-        if let Err(m) = r {
-            result = Err(m);
-            break;
-        }
-        i += 1;
-    }
-    body.put_memory(st);
-    drop(temp_owned);
-    result?;
-
-    // ---- post-processing: rotate circular buffers, truncate (while) or zero the tail
-    let finish = |b: &mut Buf, max_offset: i64, owned: &mut Vec<OwnedBuf>| -> Result<(), String> {
-        let len = b.len();
-        let used = i + max_offset;
-        if 1 < len && len < used {
-            let shift = used.rem_euclid(len);
-            if shift > 0 {
-                let nb = Buf::new(b.shape.clone(), b.itemsize, owned)?;
-                let rb = b.row_bytes();
-                // SAFETY: both buffers have `len` rows of `rb` bytes; they don't overlap.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        b.row(shift),
-                        nb.data,
-                        ((len - shift) * rb) as usize,
-                    );
-                    std::ptr::copy_nonoverlapping(
-                        b.data,
-                        nb.row(len - shift),
-                        (shift * rb) as usize,
-                    );
+            for u in untraced.iter_mut() {
+                // an untraced state becomes the body output (its shape may change)
+                let value = out(q)?;
+                if value.shape() != u.0.shape() {
+                    u.0 = OwnedArray::copy_of(&value)?;
+                } else {
+                    u.0.as_mut()?.copy_from(&value)?;
                 }
-                *b = nb;
+                q += 1;
             }
-        } else if len > used {
             if info.as_while {
-                b.shape[0] = used; // a shorter view of the same memory
-            } else {
-                // SAFETY: rows used..len are inside the buffer.
-                unsafe {
-                    std::ptr::write_bytes(b.row(used), 0, ((len - used) * b.row_bytes()) as usize)
-                };
+                stop = out(q)?.item_as_i64()? != 0;
             }
+            if let Err(m) = r {
+                result = Err(m);
+                break;
+            }
+            i += 1;
+        }
+        body.put_memory(st);
+        drop(temps);
+        result?;
+
+        // ---- post-processing: rotate circular buffers, truncate (while) or zero the tail
+        let finish = |b: &mut Buf, max_offset: i64| -> Result<(), String> {
+            let len = b.len();
+            let used = i + max_offset;
+            if 1 < len && len < used {
+                let shift = used.rem_euclid(len);
+                if shift > 0 {
+                    let mut rotated = Buf::zeros(b.0.dtype(), b.0.shape().to_vec())?;
+                    for r in 0..len {
+                        rotated.write_row(r, &b.row((r + shift) % len)?)?;
+                    }
+                    *b = rotated;
+                }
+            } else if len > used {
+                if info.as_while {
+                    b.0.truncate(used); // a shorter view of the same memory
+                } else {
+                    for r in used.max(0)..len {
+                        b.row_mut(r)?.zero();
+                    }
+                }
+            }
+            Ok(())
+        };
+        for t in traced.iter_mut() {
+            if t.post_process {
+                let max_offset = t.lookback + t.out_taps.iter().copied().max().unwrap_or(0);
+                finish(&mut t.buf, max_offset)?;
+            }
+        }
+        for (j, b) in nit.iter_mut().enumerate() {
+            if b.is_none() {
+                // no iteration ran and the shape isn't static: an empty array
+                let mut shape = vec![nit_len[j]];
+                shape.extend(std::iter::repeat_n(0, body.output_ndim(first_nit_out + j)));
+                *b = Some(Buf::zeros(d.inner_out_dtypes[first_nit_out + j], shape)?);
+            }
+            finish(b.as_mut().unwrap(), 0)?;
+        }
+
+        // ---- hand the buffers out as the outer outputs: mit-mot, mit-sot, sit-sot,
+        // nit-sot, untraced. (Buffers replaced during the loop were dropped.)
+        let arrays = traced
+            .into_iter()
+            .map(|t| t.buf.0)
+            .chain(nit.into_iter().map(|b| b.unwrap().0))
+            .chain(untraced.into_iter().map(|u| u.0));
+        for (k, array) in arrays.enumerate() {
+            args.outputs.slot(k)?.set(array)?;
         }
         Ok(())
-    };
-    for t in traced.iter_mut() {
-        if t.post_process {
-            let max_offset = t.lookback + t.out_taps.iter().copied().max().unwrap_or(0);
-            finish(&mut t.buf, max_offset, owned)?;
-        }
     }
-    for (j, b) in nit.iter_mut().enumerate() {
-        if b.is_none() {
-            // no iteration ran and the shape isn't static: an empty array
-            let mut shape = vec![nit_len[j]];
-            shape.extend(std::iter::repeat_n(0, body.output_ndim(first_nit_out + j)));
-            *b = Some(Buf::new(
-                shape,
-                d.inner_out_dtypes[first_nit_out + j].itemsize() as i64,
-                owned,
-            )?);
-        }
-        finish(b.as_mut().unwrap(), 0, owned)?;
-    }
-
-    // ---- hand the buffers out as the outer outputs: mit-mot, mit-sot, sit-sot, nit-sot, untraced
-    // Buffers replaced during the loop are still in `owned`: hand out exactly the final
-    // ones and keep the rest there to be released.
-    let mut k = n_outer_in;
-    let mut handed: Vec<*mut PtBuffer> = Vec::new();
-    let mut emit = |b: &Buf| {
-        // SAFETY: output k exists and has shape/strides storage of its ndim.
-        let o = unsafe { &mut *args.add(k) };
-        o.data = b.data;
-        o.owner = b.owner;
-        // SAFETY: as above.
-        unsafe {
-            o.shape_mut().copy_from_slice(&b.shape);
-            o.strides_mut().copy_from_slice(&b.strides);
-        }
-        handed.push(b.owner);
-        k += 1;
-    };
-    for t in &traced {
-        emit(&t.buf);
-    }
-    for b in &nit {
-        emit(b.as_ref().unwrap());
-    }
-    for u in &untraced {
-        emit(u);
-    }
-    // release buffers that aren't outputs; the rest are handed over by the caller
-    owned.retain(|b| handed.contains(&b.as_ptr()));
-    Ok(())
 }

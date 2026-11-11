@@ -56,6 +56,7 @@ double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *i
         PtTypeInfo t;
         api->output_type(fn, k, &t);
         outs[k].ndim = t.ndim;
+        outs[k].dtype = t.dtype;
         outs[k].shape = shapes + k * MAXD;
         outs[k].strides = strides + k * MAXD;
     }
