@@ -277,5 +277,8 @@ optdb.register(
     scan_inner_graph,
     "minimum_compile",
     "compile_inner_graph",
-    position=100,
+    # Must run before ``introduce_explicit_core_shape_blockwise`` (numba, position 100,
+    # and sorted ahead of this rewrite by name), which wraps a ``Blockwise(Scan)`` into
+    # a ``BlockwiseWithCoreShape`` that ``rewrite_inner_graph`` no longer matches.
+    position=99,
 )

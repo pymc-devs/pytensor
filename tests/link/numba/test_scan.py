@@ -759,3 +759,46 @@ def test_scan_2d_state_hmm_forward_trace():
         return_updates=False,
     )
     compare_numba_and_py([], trace, [])
+
+
+def test_vectorized_scan_inner_graph_is_rewritten():
+    """The inner graph of a Blockwise-wrapped Scan must be rewritten for numba.
+
+    Regression test: Matmul was left in the inner graph (run in object mode)
+    because the Scan inner graph was baked after the Blockwise had been wrapped
+    into a BlockwiseWithCoreShape.
+    """
+    from pytensor.graph.replace import vectorize_graph
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.math import Dot
+
+    A = pt.matrix("A", shape=(3, 3))
+    outs = scan(
+        lambda prev, A: prev @ A,
+        outputs_info=[pt.eye(3)],
+        non_sequences=[A],
+        n_steps=4,
+        return_updates=False,
+    )
+    A_batch = pt.tensor3("A_batch", shape=(5, 3, 3))
+    outs_batch = vectorize_graph(outs, {A: A_batch})
+
+    fn = function([A_batch], outs_batch, mode="NUMBA")
+
+    scan_nodes = [
+        node
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(getattr(node.op, "core_op", None), Scan)
+    ]
+    assert len(scan_nodes) == 1
+    inner_ops = [n.op for n in scan_nodes[0].op.core_op.fgraph.apply_nodes]
+    assert any(isinstance(op, Dot) for op in inner_ops)
+    assert not any(
+        isinstance(op, Blockwise) and isinstance(op.core_op, Dot) for op in inner_ops
+    )
+
+    A_val = np.random.default_rng(0).normal(size=(5, 3, 3)).astype(config.floatX)
+    expected = np.stack(
+        [np.stack([np.linalg.matrix_power(a, i) for i in range(1, 5)]) for a in A_val]
+    )
+    np.testing.assert_allclose(fn(A_val), expected, rtol=1e-4)
