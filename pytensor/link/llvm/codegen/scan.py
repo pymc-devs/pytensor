@@ -68,9 +68,9 @@ def _rows(b, buf: Array, start, count):
 
 def _row(b, buf: Array, r, layout=None):
     """Row `r` of `buf` (C-contiguous unless `layout` says what it is)."""
-    p = advance(b, buf.data, r, buf.strides[0], buf.dtype)
-    nd = len(buf.shape)
-    return Array(buf.dtype, p, list(buf.shape[1:]), list(buf.strides[1:]), layout if layout is not None else Layout.c(nd - 1))
+    row = buf.at(b, r)
+    row.layout = layout if layout is not None else Layout.c(row.ndim)
+    return row
 
 
 def _fill_zero(cg, a: Array):

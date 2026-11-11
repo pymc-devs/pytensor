@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import pytensor.scalar.basic as ps
+import operator
+
 from pytensor.link.llvm.codegen.elemwise import output_array
-from pytensor.link.llvm.codegen.emit import advance, Array, cast, constant, copy, load, store
+from pytensor.link.llvm.codegen.emit import Array, cast, constant, copy, load
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm.layout import split_layouts
-from pytensor.link.llvm.codegen.scalar import emit_scalar
+from pytensor.link.llvm.codegen.num import Num
 from pytensor.tensor.basic import ExtractDiag, Split
 from pytensor.tensor.extra_ops import CumOp
 
@@ -26,29 +27,26 @@ def _(op, node, cg, inputs, outputs):
     x = inputs[0]
     if x.ndim == 0:
         raise NotImplementedError("CumOp on a 0-d input")
-    axis = op.axis % x.ndim
     out = output_array(outputs[0], x.shape)
-    dt = out.dtype
-    combine = ps.add if op.mode == "add" else ps.mul
-    init = constant(b, dt, 0 if op.mode == "add" else 1)
-    others = [a for a in range(x.ndim) if a != axis]
+    combine = operator.add if op.mode == "add" else operator.mul
+    init = constant(b, out.dtype, 0 if op.mode == "add" else 1)
 
-    def level(k, px, po):
-        if k == len(others):
+    def level(src: Array, dst: Array, axis: int):
+        """Accumulate along `axis`, for every index of the other axes."""
+        if src.ndim == 1:
 
             def step(i, acc):
-                v = cast(b, load(b, x.dtype, advance(b, px, i, x.strides[axis], x.dtype)), x.dtype, dt)
-                new = emit_scalar(combine, b, [(acc, dt), (v, dt)], [dt])[0]
-                store(b, dt, new, advance(b, po, i, out.strides[axis], out.dtype))
-                return [new]
+                new = combine(Num(b, acc, dst.dtype), src.load(b, i).astype(dst.dtype))
+                dst.store(b, new, i)
+                return new.value
 
-            b.fold(x.shape[axis], [init], step)
+            b.fold(src.shape[0], [init], step)
             return
-        a = others[k]
-        with b.loop(x.shape[a]) as i:
-            level(k + 1, advance(b, px, i, x.strides[a], x.dtype), advance(b, po, i, out.strides[a], out.dtype))
+        other = 1 if axis == 0 else 0
+        with b.loop(src.shape[other]) as i:
+            level(src.at(b, i, other), dst.at(b, i, other), axis - (other < axis))
 
-    level(0, x.data, out.data)
+    level(x, out, op.axis % x.ndim)
 
 
 @llvm_emit.register(ExtractDiag)

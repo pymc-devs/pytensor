@@ -219,9 +219,7 @@ def emit_fused(op, node, cg, inputs, outputs):
 
     def index_value(k, i):
         """idx[i] for index array input k, wrapped and bounds-checked against `n`."""
-        idx = inputs[k]
-        v = load(b, idx.dtype, advance(b, idx.data, i, idx.strides[0], idx.dtype))
-        return cast(b, v, idx.dtype, "int64")
+        return inputs[k].load(b, i).astype("int64").value
 
     def checked(v, n, what):
         v = b.select(b.slt(v, zero), b.add(v, n), v)
