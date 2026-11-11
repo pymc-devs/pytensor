@@ -208,7 +208,7 @@ def build_node_function(
     parallel=True,
     kernel=None,
     links=None,
-    planner=None,
+    scan_body=None,
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
 
@@ -218,7 +218,8 @@ def build_node_function(
     * `kernel`: a `CalledKernel` implementing the node (a Rust kernel, a numba kernel, a
       subprogram): the function calls it (call.py), through an entry of `links`, the
       link table that is the config of the kernel being generated. Code nested in the
-      node (a Scan's loop body) links its kernels there too.
+      node (a Scan's loop body) links its kernels there too;
+    * `scan_body`: for a Scan, its resolved loop body (`plan.resolve.Body`).
     """
     from pytensor.link.llvm.codegen.emit import c_array, constant, store
     from pytensor.link.llvm.codegen.types import memory_type
@@ -230,7 +231,7 @@ def build_node_function(
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]
-    cg = Codegen(b, ctx, config, parallel=parallel, links=links, planner=planner, module=module, name=name)
+    cg = Codegen(b, ctx, config, parallel=parallel, links=links, scan_body=scan_body, module=module, name=name)
     # Aliasing (DESIGN.md): the memory a task writes (provided or allocated outputs)
     # never overlaps its inputs or its other outputs; views are never written.
     b.alias_domain(name)
