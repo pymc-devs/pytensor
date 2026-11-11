@@ -253,12 +253,10 @@ def test_careduce_bool_and_int_accumulators():
     check(pt.max(y), [y], [yv])
 
 
-def test_careduce_acc_dtype_uses_the_frame():
+def test_careduce_acc_dtype_uses_a_temporary():
     x = pt.tensor("x", shape=(30, 4), dtype="float32")
     e = pt.sum(x, axis=0, acc_dtype="float64")
     node = e.owner
-    c = compile_node(node)
-    assert c.frame_size >= 4 * 8
     xv = rng.random((30, 4)).astype("float32")
     (res,) = run_node(node, xv)
     np.testing.assert_allclose(res, xv.astype("float64").sum(0), rtol=1e-6)

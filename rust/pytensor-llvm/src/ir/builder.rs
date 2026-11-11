@@ -1568,6 +1568,13 @@ impl Builder {
             return err("rt_scratch(ctx: ptr, nbytes: i64)");
         }
         let (f, fnty) = self.declare("ptl_rt_scratch", &[Ty::Ptr, Ty::Int(64)], &Ty::Ptr, false);
+        // Like malloc: the memory returned is not reachable through any other pointer
+        // (earlier scratch is disjoint; released scratch is dead by contract).
+        // SAFETY: a return attribute on the declaration just looked up.
+        unsafe {
+            let kind = c::LLVMGetEnumAttributeKindForName(c"noalias".as_ptr(), 7);
+            c::LLVMAddAttributeAtIndex(f, llvm_sys::LLVMAttributeReturnIndex, c::LLVMCreateEnumAttribute(self.m.ctx, kind, 0));
+        }
         let mut raw = [self.v(&ctx)?, self.v(&nbytes)?];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
     }
