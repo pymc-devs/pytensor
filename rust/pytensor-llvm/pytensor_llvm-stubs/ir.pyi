@@ -362,9 +362,16 @@ class Builder:
         """Give up a buffer reference (`buffer`: a PtBuffer pointer, may be null)."""
     def rt_fail(self, ctx: Value, message: str) -> None:
         """Report an error on `ctx` (the function should then return nonzero)."""
-    def rt_scratch(self, ctx: Value, nbytes: Operand) -> Value:
-        """Scratch memory: `nbytes` (i64), 64-byte aligned, valid until the task ends or an
-        earlier mark is released. Null on failure, with the error set.
+    def rt_scratch(self, ctx: Value, nbytes: Operand, at_entry: bool = False) -> Value:
+        """Scratch memory: `nbytes` (i64), 64-byte aligned, valid until `rt_scratch_free`
+        or the release of an earlier mark. Null on failure, with the error set.
+        `at_entry`: taken in the entry block of the function (or parallel body) being
+        built, once per call, wherever this is asked; `nbytes` must be a constant.
+        """
+    def rt_scratch_free(self, ctx: Value, p: Value) -> None:
+        """Give up the scratch memory `p` (a result of `rt_scratch`; anything else is
+        ignored). LLVM sees that it may touch `p`'s memory, so nothing that uses `p` moves
+        past it.
         """
     def rt_scratch_mark(self, ctx: Value) -> Value:
         """Mark the scratch position (an i64 token for `rt_scratch_release`)."""

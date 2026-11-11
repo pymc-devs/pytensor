@@ -31,7 +31,7 @@ def codegen():
 
 def counts(m):
     text = m.ir()
-    return text.count(" = alloca "), text.count("call ptr @ptl_rt_scratch")
+    return text.count(" = alloca "), text.count("call ptr @ptl_rt_scratch(")
 
 
 def test_small_static_temporaries_are_on_the_stack():
@@ -45,20 +45,35 @@ def test_small_static_temporaries_are_on_the_stack():
 
 
 def test_large_dynamic_and_escaping_temporaries_are_scratch():
+    """Scratch memory is freed when its scope ends, last first; memory that escapes is
+    the caller's to free."""
     m, b, cg, n = codegen()
-    cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES + 1))  # too large
-    cg.temp_memory(b.mul(n, 8))  # size only known when running
-    cg.temp_memory(b.i64(8), escapes=True)  # outlives the function
-    cg.temporary("float64", [n])
+    with cg.scratch_scope(function=True):
+        cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES + 1))  # too large
+        cg.temp_memory(b.mul(n, 8))  # size only known when running
+        cg.temp_memory(b.i64(8), escapes=True)  # outlives the function
+        cg.temporary("float64", [n])
+        assert "@ptl_rt_scratch_free" not in m.ir()
     assert counts(m) == (0, 4)
+    lines = m.ir().splitlines()
+    taken = [ln.split()[0] for ln in lines if "call ptr @ptl_rt_scratch(" in ln]
+    freed = [
+        ln.split(", ptr ")[1].rstrip(")")
+        for ln in lines
+        if "call void @ptl_rt_scratch_free" in ln
+    ]
+    assert freed == [taken[3], taken[1], taken[0]]
     assert "declare noalias ptr @ptl_rt_scratch" in m.ir()
+    with pytest.raises(ValueError, match="outside of a scratch_scope"):
+        cg.temp_memory(b.mul(n, 8))
 
 
 def test_the_stack_has_a_budget_per_function():
     m, b, cg, _n = codegen()
     fit = STACK_BUDGET_BYTES // STACK_TEMPORARY_BYTES
-    for _ in range(fit + 3):
-        cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES))
+    with cg.scratch_scope(function=True):
+        for _ in range(fit + 3):
+            cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES))
     assert counts(m) == (fit, 3)
 
 
@@ -93,3 +108,56 @@ def test_temporaries_inside_parallel_loops_belong_to_their_chunk():
     f = pytensor.function([x], pt.sum(x * 2, axis=1, acc_dtype="float64"), mode=STRICT)
     v = np.random.default_rng(1).random((2000, 300)).astype("float32")
     np.testing.assert_allclose(f(v), (v.astype("float64") * 2).sum(axis=1), rtol=1e-6)
+
+
+def test_units_free_their_temporaries_of_dynamic_shape():
+    """Intermediate values of a unit with lengths known only when running are scratch
+    memory their node takes; the unit frees every piece."""
+    x = pt.vector("x")
+    y = pt.cumsum(pt.exp(x))
+    out = pt.cumsum(y[::-1] * 2.0).sum()
+    xo = pt.vector("xo")
+    unit = OpFromGraph([x], [out], execution=Execution.COMPILED, inline=False)
+    f = pytensor.function([xo], unit(xo), mode=STRICT)
+    # (a view's slot has no memory to free: after optimization no call is left for it)
+    ir = f.maker.linker.ir(optimized=True)
+    taken = ir.count("call ptr @ptl_rt_scratch(")
+    assert taken > 0
+    assert ir.count("call void @ptl_rt_scratch_free(") == taken
+    v = np.random.default_rng(2).normal(size=7) * 0.1
+    np.testing.assert_allclose(
+        f(v), np.cumsum(np.cumsum(np.exp(v))[::-1] * 2.0).sum(), rtol=1e-10
+    )
+
+
+def test_batch_loops_without_scratch_call_no_scratch_functions():
+    """A Blockwise loop around a core that takes no scratch memory has no scratch calls
+    (they would keep LLVM from optimizing the loop)."""
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.extra_ops import CumOp
+
+    x = pt.tensor3("x", shape=(2, 3, 4))
+    cum = Blockwise(CumOp(axis=0, mode="add"), signature="(n)->(n)")
+    f = pytensor.function([x], cum(x), mode=STRICT)
+    assert "@ptl_rt_scratch" not in f.maker.linker.ir(optimized=True)
+    v = np.random.default_rng(3).random((2, 3, 4))
+    np.testing.assert_allclose(f(v), np.cumsum(v, axis=-1))
+
+
+def test_large_static_temporaries_of_a_batch_loop_are_taken_once():
+    """Scratch memory of static size is taken when the function starts: a Blockwise
+    loop reuses it in every iteration and frees it after the loop."""
+    from pytensor.tensor.blockwise import Blockwise
+
+    v = pt.vector("v", shape=(200,))  # intermediates of 1600 bytes: scratch
+    core = OpFromGraph([v], [pt.cumsum(pt.cumsum(v) * 2.0)])
+    x = pt.matrix("x", shape=(5, 200))
+    f = pytensor.function([x], Blockwise(core, signature="(n)->(n)")(x), mode=STRICT)
+    ir = f.maker.linker.ir(optimized=True)
+    kernel = next(fn for fn in ir.split("\ndefine")[1:] if "@ptl_rt_scratch(" in fn)
+    entry, rest = kernel.split("\n\n", 1)
+    assert entry.count("@ptl_rt_scratch(") > 0
+    assert "@ptl_rt_scratch(" not in rest
+    assert rest.count("@ptl_rt_scratch_free(") == entry.count("@ptl_rt_scratch(")
+    xv = np.random.default_rng(4).random((5, 200))
+    np.testing.assert_allclose(f(xv), np.cumsum(np.cumsum(xv, -1) * 2, -1))

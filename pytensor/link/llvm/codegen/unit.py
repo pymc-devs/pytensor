@@ -130,48 +130,52 @@ def build_unit_function(
             t = Destination(slot=v)
         out_targets.append(t)
         targets.setdefault(vid, t)
-    bind_constants(cg, constants, vals)
+    # (temporaries are freed before the function returns)
+    with cg.scratch_scope(function=True):
+        bind_constants(cg, constants, vals)
 
-    written, owned = emit_items(cg, module, name, resolved, vals, targets)
+        written, owned = emit_items(cg, module, name, resolved, vals, targets)
 
-    # unit outputs that weren't produced in place: views of the inputs where they are
-    # (and may be), else copies
-    for (vid, t, mode), target, o in zip(outputs, out_targets, outs, strict=True):
-        if vid in written and targets[vid] is target:
-            continue
-        src = vals[vid]
-        if mode is OutputMode.PROVIDED:
-            copy(cg, src, target.array)
-            continue
-        out = SlotOutput(
-            cg,
-            target.slot,
-            t.dtype,
-            t.ndim,
-            aliases=o.aliases,
-            # a copy is in the declared layout if packed, else C-contiguous (which
-            # implies it, see `program._view_layout`)
-            layout=(
-                o.layout if o.aliases and o.layout.fully_packed(o.repr.shape) else None
-            ),
-        )
-        if not o.aliases:
-            copy(cg, src, out.allocate(src.shape))
-            continue
-        inside = b.const_bool(False)
-        for a in o.aliases:
-            inside = b.or_(inside, _lies_in(b, src, in_arrays[a]))
+        # unit outputs that weren't produced in place: views of the inputs where they are
+        # (and may be), else copies
+        for (vid, t, mode), target, o in zip(outputs, out_targets, outs, strict=True):
+            if vid in written and targets[vid] is target:
+                continue
+            src = vals[vid]
+            if mode is OutputMode.PROVIDED:
+                copy(cg, src, target.array)
+                continue
+            out = SlotOutput(
+                cg,
+                target.slot,
+                t.dtype,
+                t.ndim,
+                aliases=o.aliases,
+                # a copy is in the declared layout if packed, else C-contiguous (which
+                # implies it, see `program._view_layout`)
+                layout=(
+                    o.layout
+                    if o.aliases and o.layout.fully_packed(o.repr.shape)
+                    else None
+                ),
+            )
+            if not o.aliases:
+                copy(cg, src, out.allocate(src.shape))
+                continue
+            inside = b.const_bool(False)
+            for a in o.aliases:
+                inside = b.or_(inside, _lies_in(b, src, in_arrays[a]))
 
-        def view(src=src, out=out):
-            out.set_view(src)
+            def view(src=src, out=out):
+                out.set_view(src)
 
-        def copied(src=src, out=out):
-            copy(cg, src, out.allocate(src.shape))
+            def copied(src=src, out=out):
+                copy(cg, src, out.allocate(src.shape))
 
-        b.if_else(inside, view, copied)
-    release(cg, owned)
+            b.if_else(inside, view, copied)
+        release(cg, owned)
     b.ret(0)
-    return NodeFunction(fn, sig, links, cg.uses_scratch)
+    return NodeFunction(fn, sig, links)
 
 
 def _bounds(b, a: Array):
@@ -322,7 +326,6 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
             links=cg.links,
             body=r.body,
         )
-        cg.uses_scratch |= nf.uses_scratch
         args = [ctx, config]
         present = [
             vid
@@ -374,7 +377,9 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                     if kernel is not None:
                         owned.append((slot, o.repr.ndim))
                 args.append(slot)
-                reads.append((vid, slot, "array", o))
+                # a temporary of a generated node is scratch memory it took (or a view)
+                how = "scratch" if kernel is None and j in temporaries else "array"
+                reads.append((vid, slot, how, o))
         rc = b.call(nf.function, args)
         failed = b.ne(rc, 0)
         with b.if_(failed):
@@ -390,6 +395,14 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                 vals[vid] = read_slot(
                     b, slot, var.type.dtype, list(var.type.shape), lays.get(vid)
                 )
+                if how == "scratch":
+                    # (`SlotOutput.temporary`: the owner is the scratch memory)
+                    cg.free_later(
+                        b.load(
+                            ir.ptr,
+                            b.field_ptr(slot_type(o.repr.ndim), slot, Slot.OWNER),
+                        )
+                    )
     return written, owned
 
 

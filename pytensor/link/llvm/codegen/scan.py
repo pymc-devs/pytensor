@@ -382,7 +382,7 @@ def _rotate_and_trim(cg, out, buffer: Array, trace_len, is_while: bool):
     circular = b.and_(b.sgt(n, 1), b.slt(n, trace_len))
     with b.if_(circular):
         shift = b.urem(trace_len, n)
-        with b.if_(b.sgt(shift, 0)):
+        with b.if_(b.sgt(shift, 0)), cg.scratch_scope():
             # in place, through a copy in temporary memory
             aside = cg.temporary(buffer.dtype, list(buffer.shape))
             copy(cg, buffer, aside)
@@ -503,96 +503,92 @@ def emit_scan(op, node, cg, inputs, outputs):
     constants = {}
     bind_constants(cg, body.constants, constants)
 
-    # scratch memory the body takes is released after every iteration (to a mark
-    # taken anew each time: a release ends its mark)
-    scratch_mark = b.alloca(ir.i64)
-    b.store(b.rt_scratch_mark(cg.ctx), scratch_mark)
-
     def step(i, *carried):
         rows = carried[n_counts:]
-        uses_scratch, cg.uses_scratch = cg.uses_scratch, False
-        vals = dict(constants)
+        # the body's scratch memory is freed after every iteration
+        with cg.scratch_scope():
+            vals = dict(constants)
 
-        # the inner inputs
-        for vid, seq in zip(op.inner_seqs(in_vids), sequences, strict=True):
-            vals[vid] = seq.at(b, i)
-        for vid, (s, tap) in zip(state_read_vids, state_reads, strict=True):
-            vals[vid] = s.buffer.at(b, counters.row(rows, s.row_key(tap)))
-        untraced_now = []
-        for vid, out in zip(untraced_in_vids, untraced, strict=True):
-            current = None if out is None else out.read()
-            untraced_now.append(current)
-            if current is not None:
-                vals[vid] = current
-        vals.update(
-            (vid, a)
-            for vid, a in zip(op.inner_non_seqs(in_vids), non_sequences, strict=True)
-            if a is not None
-        )
+            # the inner inputs
+            for vid, seq in zip(op.inner_seqs(in_vids), sequences, strict=True):
+                vals[vid] = seq.at(b, i)
+            for vid, (s, tap) in zip(state_read_vids, state_reads, strict=True):
+                vals[vid] = s.buffer.at(b, counters.row(rows, s.row_key(tap)))
+            untraced_now = []
+            for vid, out in zip(untraced_in_vids, untraced, strict=True):
+                current = None if out is None else out.read()
+                untraced_now.append(current)
+                if current is not None:
+                    vals[vid] = current
+            vals.update(
+                (vid, a)
+                for vid, a in zip(
+                    op.inner_non_seqs(in_vids), non_sequences, strict=True
+                )
+                if a is not None
+            )
 
-        # the rows the outputs go to; where they may be produced directly
-        out_rows = []  # (vid, row, target or None, in_place)
-        targets = {}
-        for vid, (s, k), (in_place, aside) in zip(
-            state_write_vids, state_writes, write_plans, strict=True
-        ):
-            row = s.buffer.at(b, counters.row(rows, s.row_key(s.write_taps[k])))
-            target = None
-            if in_place.const_int != 0:
-                target = row if aside is None else _select(b, in_place, row, aside)
-                targets.setdefault(vid, Destination(array=target, layout=row.layout))
-            out_rows.append((vid, row, target, in_place))
-        for vid, nit in zip(nit_sot_vids, nit_sots, strict=True):
-            if nit.buffer is not None:
-                row = nit.buffer.at(b, counters.row(rows, nit.row_key()))
-                out_rows.append((vid, row, row, None))
-                targets.setdefault(vid, Destination(array=row, layout=row.layout))
+            # the rows the outputs go to; where they may be produced directly
+            out_rows = []  # (vid, row, target or None, in_place)
+            targets = {}
+            for vid, (s, k), (in_place, aside) in zip(
+                state_write_vids, state_writes, write_plans, strict=True
+            ):
+                row = s.buffer.at(b, counters.row(rows, s.row_key(s.write_taps[k])))
+                target = None
+                if in_place.const_int != 0:
+                    target = row if aside is None else _select(b, in_place, row, aside)
+                    targets.setdefault(
+                        vid, Destination(array=target, layout=row.layout)
+                    )
+                out_rows.append((vid, row, target, in_place))
+            for vid, nit in zip(nit_sot_vids, nit_sots, strict=True):
+                if nit.buffer is not None:
+                    row = nit.buffer.at(b, counters.row(rows, nit.row_key()))
+                    out_rows.append((vid, row, row, None))
+                    targets.setdefault(vid, Destination(array=row, layout=row.layout))
 
-        written, owned = emit_items(
-            cg, cg.module, f"{cg.name}_body", body.items, vals, targets
-        )
+            written, owned = emit_items(
+                cg, cg.module, f"{cg.name}_body", body.items, vals, targets
+            )
 
-        # outputs that may be views of the states are copied aside before any state
-        # memory is overwritten
-        results = {}
-        for vid in out_vids:
-            if vid in results:
-                continue
-            v = vals[vid]
-            if vid in may_view_states and isinstance(v, Array):
-                aside = cg.temporary(v.dtype, list(v.shape))
-                copy(cg, v, aside)
-                v = aside
-            results[vid] = v
+            # outputs that may be views of the states are copied aside before any state
+            # memory is overwritten
+            results = {}
+            for vid in out_vids:
+                if vid in results:
+                    continue
+                v = vals[vid]
+                if vid in may_view_states and isinstance(v, Array):
+                    aside = cg.temporary(v.dtype, list(v.shape))
+                    copy(cg, v, aside)
+                    v = aside
+                results[vid] = v
 
-        for vid, row, target, in_place in out_rows:
-            if not (vid in written and targets[vid].array is target):
-                copy(cg, results[vid], row)
-            elif target is not row:
-                # produced aside where the row was one the iteration read
-                with b.if_(b.not_(in_place)):
-                    copy(cg, target, row)
-        for vid, nit in zip(nit_sot_vids, nit_sots, strict=True):
-            if nit.buffer is None:
-                row = counters.row(rows, nit.row_key())
-                _store_nit_sot_row_of_dynamic_shape(cg, nit, i, row, results[vid])
-        for vid, out, current in zip(
-            untraced_out_vids, untraced, untraced_now, strict=True
-        ):
-            if out is not None:
-                _replace_untraced_state(cg, out, current, results[vid])
+            for vid, row, target, in_place in out_rows:
+                if not (vid in written and targets[vid].array is target):
+                    copy(cg, results[vid], row)
+                elif target is not row:
+                    # produced aside where the row was one the iteration read
+                    with b.if_(b.not_(in_place)):
+                        copy(cg, target, row)
+            for vid, nit in zip(nit_sot_vids, nit_sots, strict=True):
+                if nit.buffer is None:
+                    row = counters.row(rows, nit.row_key())
+                    _store_nit_sot_row_of_dynamic_shape(cg, nit, i, row, results[vid])
+            for vid, out, current in zip(
+                untraced_out_vids, untraced, untraced_now, strict=True
+            ):
+                if out is not None:
+                    _replace_untraced_state(cg, out, current, results[vid])
 
-        if info.as_while:
-            cond = results[out_vids[-1]]
-            if isinstance(cond, Array):
-                cond = load(b, cond.dtype, cond.data)
-            dtype = op.fgraph.outputs[-1].type.dtype
-            stop = b.ne(cast(b, cond, dtype, "int8"), 0)
-        release(cg, owned)
-        if cg.uses_scratch:
-            b.rt_scratch_release(cg.ctx, b.load(ir.i64, scratch_mark))
-            b.store(b.rt_scratch_mark(cg.ctx), scratch_mark)
-        cg.uses_scratch |= uses_scratch
+            if info.as_while:
+                cond = results[out_vids[-1]]
+                if isinstance(cond, Array):
+                    cond = load(b, cond.dtype, cond.data)
+                dtype = op.fgraph.outputs[-1].type.dtype
+                stop = b.ne(cast(b, cond, dtype, "int8"), 0)
+            release(cg, owned)
         next_rows = counters.advance(b, rows)
         if info.as_while:
             return [b.add(carried[0], 1), *next_rows, stop]
@@ -604,7 +600,6 @@ def emit_scan(op, node, cg, inputs, outputs):
     else:
         b.fold(n_steps, counters.initial, step)
         steps_run = n_steps
-    b.rt_scratch_release(cg.ctx, b.load(ir.i64, scratch_mark))
 
     for s in states:
         if not s.is_mit_mot:

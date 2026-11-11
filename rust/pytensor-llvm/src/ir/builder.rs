@@ -1757,28 +1757,68 @@ impl Builder {
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
     }
 
-    /// Scratch memory: `nbytes` (i64), 64-byte aligned, valid until the task ends or an
-    /// earlier mark is released. Null on failure, with the error set.
-    fn rt_scratch(&self, ctx: Value, nbytes: Operand) -> PyResult<Value> {
+    /// Scratch memory: `nbytes` (i64), 64-byte aligned, valid until `rt_scratch_free`
+    /// or the release of an earlier mark. Null on failure, with the error set.
+    /// `at_entry`: taken in the entry block of the function (or parallel body) being
+    /// built, once per call, wherever this is asked; `nbytes` must be a constant.
+    #[pyo3(signature = (ctx, nbytes, at_entry = false))]
+    fn rt_scratch(&self, ctx: Value, nbytes: Operand, at_entry: bool) -> PyResult<Value> {
         self.open()?;
         let nbytes = self.i64_of("rt_scratch nbytes", nbytes)?;
         if ctx.ty != Ty::Ptr || nbytes.ty != Ty::Int(64) {
             return err("rt_scratch(ctx: ptr, nbytes: i64)");
         }
+        // SAFETY: inspecting a value of this module.
+        if at_entry && unsafe { c::LLVMIsAConstantInt(nbytes.raw) }.is_null() {
+            return err("rt_scratch at_entry needs a constant size");
+        }
         let (f, fnty) = self.declare("ptl_rt_scratch", &[Ty::Ptr, Ty::Int(64)], &Ty::Ptr, false);
-        // Like malloc: the memory returned is not reachable through any other pointer
-        // (earlier scratch is disjoint; released scratch is dead by contract).
-        // SAFETY: a return attribute on the declaration just looked up.
+        // Like malloc: new memory of `nbytes` (or null), not reachable through any other
+        // pointer, that touches no memory LLVM sees. Its end is `rt_scratch_free`.
+        scratch_attrs(&self.m, f, ALLOC_UNINITIALIZED, MEM_INACCESSIBLE);
+        let a = |kind: &str, value: u64| enum_attr(&self.m, kind, value);
+        // SAFETY: attributes on the declaration just looked up.
         unsafe {
-            let kind = c::LLVMGetEnumAttributeKindForName(c"noalias".as_ptr(), 7);
+            c::LLVMAddAttributeAtIndex(f, llvm_sys::LLVMAttributeReturnIndex, a("noalias", 0));
+            // allocsize(1): the size is argument 1 (no element count)
             c::LLVMAddAttributeAtIndex(
                 f,
-                llvm_sys::LLVMAttributeReturnIndex,
-                c::LLVMCreateEnumAttribute(self.m.ctx, kind, 0),
+                llvm_sys::LLVMAttributeFunctionIndex,
+                a("allocsize", (1 << 32) | 0xFFFF_FFFF),
             );
         }
         let mut raw = [self.v(&ctx)?, self.v(&nbytes)?];
-        Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
+        if !at_entry {
+            return Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap());
+        }
+        // SAFETY: the alloca builder sits before the entry block's terminator, after
+        // the loads of captured values (`v` above) a parallel body starts with.
+        let r = unsafe {
+            c::LLVMBuildCall2(
+                self.allocas.get(),
+                fnty,
+                f,
+                raw.as_mut_ptr(),
+                raw.len() as u32,
+                NONAME,
+            )
+        };
+        Ok(self.mk(r, Ty::Ptr))
+    }
+
+    /// Give up the scratch memory `p` (a result of `rt_scratch`; anything else is
+    /// ignored). LLVM sees that it may touch `p`'s memory, so nothing that uses `p` moves
+    /// past it.
+    fn rt_scratch_free(&self, ctx: Value, p: Value) -> PyResult<()> {
+        self.open()?;
+        if ctx.ty != Ty::Ptr || p.ty != Ty::Ptr {
+            return err("rt_scratch_free(ctx: ptr, p: ptr)");
+        }
+        let (f, fnty) = self.declare("ptl_rt_scratch_free", &[Ty::Ptr, Ty::Ptr], &Ty::Void, false);
+        scratch_attrs(&self.m, f, 0, MEM_ARG | MEM_INACCESSIBLE);
+        let mut raw = [self.v(&ctx)?, self.v(&p)?];
+        self.call_raw(fnty, f, &mut raw, &Ty::Void);
+        Ok(())
     }
 
     /// Give up a buffer reference (`buffer`: a PtBuffer pointer, may be null).
@@ -2434,5 +2474,36 @@ impl If {
         b.position(done);
         b.last_if.set(self.branch.take().map(|br| (br, done)));
         Ok(false)
+    }
+}
+
+/// `memory(...)` locations (LLVM's `IRMemLocation`, 2 bits each: read | write)
+const MEM_ARG: u64 = 0b11;
+const MEM_INACCESSIBLE: u64 = 0b11 << 2;
+/// `allockind("alloc,uninitialized")` (LLVM's `AllocFnKind`)
+const ALLOC_UNINITIALIZED: u64 = 1 | 8;
+
+fn enum_attr(m: &ModuleInner, kind: &str, value: u64) -> llvm_sys::prelude::LLVMAttributeRef {
+    // SAFETY: enum attribute kinds are looked up by name in the module's context.
+    unsafe {
+        let k = c::LLVMGetEnumAttributeKindForName(kind.as_ptr() as *const _, kind.len());
+        c::LLVMCreateEnumAttribute(m.ctx, k, value)
+    }
+}
+
+/// The attributes of the scratch functions (once per declaration): they don't unwind,
+/// return, and touch only `memory` (and `allockind`, if not 0).
+fn scratch_attrs(m: &ModuleInner, f: LLVMValueRef, allockind: u64, memory: u64) {
+    let mut attrs = vec![
+        enum_attr(m, "nounwind", 0),
+        enum_attr(m, "willreturn", 0),
+        enum_attr(m, "memory", memory),
+    ];
+    if allockind != 0 {
+        attrs.push(enum_attr(m, "allockind", allockind));
+    }
+    for a in attrs {
+        // SAFETY: a function attribute on a declaration of `m`.
+        unsafe { c::LLVMAddAttributeAtIndex(f, llvm_sys::LLVMAttributeFunctionIndex, a) };
     }
 }

@@ -195,46 +195,43 @@ def _(op, node, cg, inputs, outputs):
 
     def step(i):
         index = _unravel(b, i, batch)
-        mark = b.rt_scratch_mark(cg.ctx)
-        vals = dict(constants)
-        for vid, x, bcast in zip(body.in_ids, inputs, broadcast, strict=True):
-            if vid not in vals:
-                vals[vid] = _at(
-                    b, x, [0 if bc else j for bc, j in zip(bcast, index, strict=True)]
+        # the core's scratch memory is freed after every iteration (outputs allocated
+        # in iteration 0 are the caller's to free)
+        with inner.scratch_scope():
+            vals = dict(constants)
+            for vid, x, bcast in zip(body.in_ids, inputs, broadcast, strict=True):
+                if vid not in vals:
+                    vals[vid] = _at(
+                        b,
+                        x,
+                        [0 if bc else j for bc, j in zip(bcast, index, strict=True)],
+                    )
+            rows = {k: _at(b, a, index) for k, a in known.items()}
+            targets = {}
+            for k, row in rows.items():
+                targets.setdefault(
+                    body.out_ids[k], Destination(array=row, layout=row.layout)
                 )
-        rows = {k: _at(b, a, index) for k, a in known.items()}
-        targets = {}
-        for k, row in rows.items():
-            targets.setdefault(
-                body.out_ids[k], Destination(array=row, layout=row.layout)
+            written, owned = emit_items(
+                inner, cg.module, f"{cg.name}_core", body.items, vals, targets
             )
-        written, owned = emit_items(
-            inner, cg.module, f"{cg.name}_core", body.items, vals, targets
-        )
-        for k, vid in enumerate(body.out_ids):
-            src = vals[vid]
-            if k in rows:
-                row = rows[k]
-                if vid in written and targets[vid].array is row:
-                    continue
-            else:
-                with b.if_(b.eq(i, 0)):
-                    outputs[k].allocate([*batch, *src.shape])
-                row = _at(b, outputs[k].read(), index)
-            for m, length in zip(src.shape, row.shape, strict=True):
-                cg.check(
-                    b.eq(m, length),
-                    f"Blockwise: core output {k} doesn't have the expected shape",
-                )
-            copy(inner, src, row)
-        release(inner, owned)
-        if later:
-            # the outputs allocated in iteration 0 may be scratch (temporaries of a
-            # unit): its scratch stays
-            with b.if_(b.ne(i, 0)):
-                b.rt_scratch_release(cg.ctx, mark)
-        else:
-            b.rt_scratch_release(cg.ctx, mark)
+            for k, vid in enumerate(body.out_ids):
+                src = vals[vid]
+                if k in rows:
+                    row = rows[k]
+                    if vid in written and targets[vid].array is row:
+                        continue
+                else:
+                    with b.if_(b.eq(i, 0)):
+                        outputs[k].allocate([*batch, *src.shape])
+                    row = _at(b, outputs[k].read(), index)
+                for m, length in zip(src.shape, row.shape, strict=True):
+                    cg.check(
+                        b.eq(m, length),
+                        f"Blockwise: core output {k} doesn't have the expected shape",
+                    )
+                copy(inner, src, row)
+            release(inner, owned)
 
     if par is not None:
         par.range(b, n, per_iteration, step)

@@ -1017,12 +1017,15 @@ Where the memory comes from depends on its size, and the emitter doesn't choose:
 * A small temporary of static size (up to 1 KiB; here, a matrix whose number of
   columns is known and small) is stack memory of the generated function. LLVM sees
   all of it and often keeps it in registers.
-* Anything else is *scratch memory* of the context, valid until the task ends.
+* Anything else is *scratch memory* of the context. Of a static size it is taken when
+  the function starts and freed when it ends; else it is freed at the end of the
+  innermost `cg.scratch_scope()` (every generated function has one around its body).
 
 Two rules follow:
 
 * Ask for temporaries before a loop, not inside it. Every request for scratch is a new
-  piece of memory, and it is only given back when the task ends.
+  piece of memory and a call LLVM can't optimize across; it is only given back when
+  its scope ends. A loop whose body needs scratch opens a scope per iteration.
 * A temporary is uninitialized. `ColumnMeans` zeroes its sums first.
 
 `cg.temp_memory(nbytes)` is the same without the `Array`: a pointer to that many bytes,
