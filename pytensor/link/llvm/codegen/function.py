@@ -18,18 +18,18 @@ from pytensor.link.llvm.codegen.emit import (
     pack,
     unpack,
 )
-from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.codegen.types import (
-    ir,
+    PTARRAY_SIZE,
     NoneRepr,
     PtArray,
-    PTARRAY_SIZE,
-    ptarray_type,
-    repr_of,
     ScalarRepr,
     Slot,
     TensorRepr,
+    ir,
+    ptarray_type,
+    repr_of,
 )
+from pytensor.link.llvm.layout import Layout
 
 
 class OutputMode(enum.Enum):
@@ -79,7 +79,11 @@ class Signature:
     outputs: tuple[Output, ...]
 
     def param_types(self):
-        outs = [o.ir_type for o in self.outputs if o.mode not in (OutputMode.ABSENT, OutputMode.INPLACE)]
+        outs = [
+            o.ir_type
+            for o in self.outputs
+            if o.mode not in (OutputMode.ABSENT, OutputMode.INPLACE)
+        ]
         return [ir.ptr, ir.ptr, *(r.ir_type for r in self.inputs), *outs]
 
     @property
@@ -139,9 +143,15 @@ def inplace_outputs(node, folded=frozenset()) -> dict:
         out, inp = node.outputs[k], node.inputs[i]
         if i not in destroy_map.get(k, ()) or i in folded or i in pairs.values():
             continue
-        if not isinstance(repr_of(out.type), TensorRepr) or not isinstance(repr_of(inp.type), TensorRepr):
+        if not isinstance(repr_of(out.type), TensorRepr) or not isinstance(
+            repr_of(inp.type), TensorRepr
+        ):
             continue
-        if out.type.dtype != inp.type.dtype or out.type.ndim != inp.type.ndim or out.type.broadcastable != inp.type.broadcastable:
+        if (
+            out.type.dtype != inp.type.dtype
+            or out.type.ndim != inp.type.ndim
+            or out.type.broadcastable != inp.type.broadcastable
+        ):
             continue
         pairs[k] = i
     return pairs
@@ -156,7 +166,9 @@ def new_output(var, layout=None) -> Output:
     if isinstance(r, ScalarRepr):
         return Output(r, OutputMode.SCALAR)
     lay = layout if layout is not None else Layout.c(var.type.ndim)
-    return Output(repr_of(var.type, lay), OutputMode.PROVIDED if r.static else OutputMode.RETURNED)
+    return Output(
+        repr_of(var.type, lay), OutputMode.PROVIDED if r.static else OutputMode.RETURNED
+    )
 
 
 def known_layouts(node, in_layouts) -> list:
@@ -164,7 +176,9 @@ def known_layouts(node, in_layouts) -> list:
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
     return [
-        lay if lay is not None or not hasattr(i.type, "ndim") else Layout.dynamic(i.type.ndim)
+        lay
+        if lay is not None or not hasattr(i.type, "ndim")
+        else Layout.dynamic(i.type.ndim)
         for i, lay in zip(node.inputs, in_layouts, strict=True)
     ]
 
@@ -184,9 +198,17 @@ def node_outputs(node, in_layouts=None, inplace=None) -> list[Output]:
     for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
         if k in inplace:
             # the input's memory, so the input's layout
-            outs.append(Output(repr_of(o.type, in_layouts[inplace[k]]), OutputMode.INPLACE, (inplace[k],)))
+            outs.append(
+                Output(
+                    repr_of(o.type, in_layouts[inplace[k]]),
+                    OutputMode.INPLACE,
+                    (inplace[k],),
+                )
+            )
             continue
-        aliases = output_aliases(op, k) if isinstance(repr_of(o.type), TensorRepr) else ()
+        aliases = (
+            output_aliases(op, k) if isinstance(repr_of(o.type), TensorRepr) else ()
+        )
         if not aliases:
             outs.append(new_output(o, lay))
             continue
@@ -200,10 +222,19 @@ def skipped_inputs(node, folded=frozenset()):
     """Input positions that aren't arguments: folded constants and None inputs."""
     from pytensor.link.llvm.codegen.types import is_absent
 
-    return frozenset(folded) | {k for k, i in enumerate(node.inputs) if is_absent(i.type)}
+    return frozenset(folded) | {
+        k for k, i in enumerate(node.inputs) if is_absent(i.type)
+    }
 
 
-def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, declared=None, inplace=None) -> Signature:
+def node_signature(
+    node,
+    folded=frozenset(),
+    in_layouts=None,
+    provided=None,
+    declared=None,
+    inplace=None,
+) -> Signature:
     """`folded`: positions of inputs that are constants folded into the code (not
     arguments). None inputs aren't arguments either.
 
@@ -217,7 +248,11 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
-    inputs = tuple(repr_of(i.type, lay) for k, (i, lay) in enumerate(zip(node.inputs, in_layouts, strict=True)) if k not in folded)
+    inputs = tuple(
+        repr_of(i.type, lay)
+        for k, (i, lay) in enumerate(zip(node.inputs, in_layouts, strict=True))
+        if k not in folded
+    )
 
     def arg_index(pos):
         # position among the function's (non-folded) inputs
@@ -228,8 +263,14 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
         return pos - sum(1 for p in folded if p < pos)
 
     outputs = []
-    for k, o in enumerate(declared if declared is not None else node_outputs(node, in_layouts, inplace)):
-        if o.mode is OutputMode.PROVIDED and provided is not None and provided[k] is not None:
+    for k, o in enumerate(
+        declared if declared is not None else node_outputs(node, in_layouts, inplace)
+    ):
+        if (
+            o.mode is OutputMode.PROVIDED
+            and provided is not None
+            and provided[k] is not None
+        ):
             o = o.with_layout(provided[k])
         if o.aliases:
             o = Output(o.repr, o.mode, tuple(arg_index(pos) for pos in o.aliases))
@@ -285,24 +326,54 @@ def build_node_function(
     from pytensor.link.llvm.codegen.types import memory_type
 
     folded = folded or {}
-    sig = node_signature(node, frozenset(folded), in_layouts, provided, kernel.outputs if kernel is not None else None, inplace)
+    sig = node_signature(
+        node,
+        frozenset(folded),
+        in_layouts,
+        provided,
+        kernel.outputs if kernel is not None else None,
+        inplace,
+    )
     sig_inputs = iter(sig.inputs)
     fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]
-    cg = Codegen(b, ctx, config, parallel=parallel, links=links, scan_body=scan_body, module=module, name=name)
+    cg = Codegen(
+        b,
+        ctx,
+        config,
+        parallel=parallel,
+        links=links,
+        scan_body=scan_body,
+        module=module,
+        name=name,
+    )
     # Aliasing (DESIGN.md): what LLVM is told. Every array the function writes (a
     # provided or returned output, an input overwritten in place) overlaps no other
     # array of the function; inputs that are only read may overlap each other.
     b.alias_domain(name)
-    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.RETURNED, OutputMode.INPLACE)]
+    written = [
+        f"o{j}"
+        for j, o in enumerate(sig.outputs)
+        if o.mode in (OutputMode.PROVIDED, OutputMode.RETURNED, OutputMode.INPLACE)
+    ]
     # the node input each argument is
-    arg_positions = [pos for pos in range(len(node.inputs)) if pos not in skipped_inputs(node, folded)]
+    arg_positions = [
+        pos
+        for pos in range(len(node.inputs))
+        if pos not in skipped_inputs(node, folded)
+    ]
     #: node input -> the output that overwrites it
-    overwritten = {arg_positions[o.aliases[0]]: j for j, o in enumerate(sig.outputs) if o.mode is OutputMode.INPLACE}
+    overwritten = {
+        arg_positions[o.aliases[0]]: j
+        for j, o in enumerate(sig.outputs)
+        if o.mode is OutputMode.INPLACE
+    }
     read_only = [
-        f"i{pos}" for pos, r in zip(arg_positions, sig.inputs, strict=True) if isinstance(r, TensorRepr) and pos not in overwritten
+        f"i{pos}"
+        for pos, r in zip(arg_positions, sig.inputs, strict=True)
+        if isinstance(r, TensorRepr) and pos not in overwritten
     ]
     k = 2
     inputs = []
@@ -332,7 +403,9 @@ def build_node_function(
             a.base, a.writable = pos, False
             if pos in overwritten:
                 mine = f"o{overwritten[pos]}"
-                b.mark_array(a.data, mine, read_only + [w for w in written if w != mine])
+                b.mark_array(
+                    a.data, mine, read_only + [w for w in written if w != mine]
+                )
             else:
                 b.mark_array(a.data, f"i{pos}", written)
             inputs.append(a)
@@ -343,7 +416,14 @@ def build_node_function(
             continue
         if o.mode is OutputMode.INPLACE:
             source = inputs[arg_positions[o.aliases[0]]]
-            outputs.append(InplaceOutput(source.view(source.data, source.shape, source.strides, source.layout), source))
+            outputs.append(
+                InplaceOutput(
+                    source.view(
+                        source.data, source.shape, source.strides, source.layout
+                    ),
+                    source,
+                )
+            )
             outputs[-1].array.writable = True
             continue
         v = params[k]
@@ -377,19 +457,27 @@ def build_node_function(
 
         if links is None:
             raise ValueError("a node function calling a kernel needs a links")
-        ins = [(a, getattr(var.type, "dtype", None)) for a, var in zip(inputs, node.inputs, strict=True)]
+        ins = [
+            (a, getattr(var.type, "dtype", None))
+            for a, var in zip(inputs, node.inputs, strict=True)
+        ]
         call_kernel(cg, kernel, links.link_kernel(kernel), ins, outputs)
     else:
         llvm_emit(node.op, node, cg, inputs, outputs)
     if not b.terminated:
         for k, out in enumerate(outputs):
-            if isinstance(out, SlotOutput | ScalarOutput | InplaceOutput) and not out.done:
+            if (
+                isinstance(out, SlotOutput | ScalarOutput | InplaceOutput)
+                and not out.done
+            ):
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(b.i32(0))
     return NodeFunction(fn, sig, links)
 
 
-def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool = False):
+def build_kernel_wrapper(
+    module, nf: NodeFunction, name: str, check_layouts: bool = False
+):
     """`int32 name(PtCtx*, PtArray* args, const void* config)` around `nf`:
     the kernel ABI.
 
@@ -399,7 +487,9 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     # (outputs without a value have no argument)
     present = [o for o in sig.outputs if o.mode is not OutputMode.ABSENT]
     if sig.has_scalars:
-        raise ValueError("functions with ScalarType inputs or outputs have no kernel ABI")
+        raise ValueError(
+            "functions with ScalarType inputs or outputs have no kernel ABI"
+        )
     pa = ptarray_type()
     fn = module.function(name, [ir.ptr, ir.ptr, ir.ptr], ir.i32, exported=True)
     b = fn.builder()
@@ -417,8 +507,12 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
         if r.ndim == 0:
             return data
         shape_p, strides_p = field(p, 1), field(p, 2)
-        lengths = [b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in r.dynamic_axes]
-        strides = [b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in r.stride_axes]
+        lengths = [
+            b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in r.dynamic_axes
+        ]
+        strides = [
+            b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in r.stride_axes
+        ]
         return b.aggregate(
             r.ir_type,
             [
@@ -432,8 +526,18 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
         from pytensor.link.llvm.codegen.emit import Codegen
 
         cg = Codegen(b, ctx, config)
-        reprs = [*sig.inputs, *(o.repr for o in present if o.mode is OutputMode.PROVIDED)]
-        positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(present) if o.mode is OutputMode.PROVIDED)]
+        reprs = [
+            *sig.inputs,
+            *(o.repr for o in present if o.mode is OutputMode.PROVIDED),
+        ]
+        positions = [
+            *range(len(sig.inputs)),
+            *(
+                len(sig.inputs) + k
+                for k, o in enumerate(present)
+                if o.mode is OutputMode.PROVIDED
+            ),
+        ]
         for k, r in zip(positions, reprs, strict=True):
             if isinstance(r, TensorRepr) and r.ndim > 0 and len(r.stride_axes) < r.ndim:
                 _check_layout(cg, arg(k), r, k)
@@ -457,9 +561,15 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     for k, o, slot in slots:
         p = arg(n_in + k)
         st = o.repr.slot_type
-        b.store(b.load(ir.ptr, b.field_ptr(st, slot, Slot.DATA)), b.field_ptr(pa, p, PtArray.DATA))
+        b.store(
+            b.load(ir.ptr, b.field_ptr(st, slot, Slot.DATA)),
+            b.field_ptr(pa, p, PtArray.DATA),
+        )
         shape_p, strides_p = field(p, 1), field(p, 2)
-        lp, sp = b.field_ptr(st, slot, Slot.LENGTHS), b.field_ptr(st, slot, Slot.STRIDES)
+        lp, sp = (
+            b.field_ptr(st, slot, Slot.LENGTHS),
+            b.field_ptr(st, slot, Slot.STRIDES),
+        )
         for a in range(o.repr.ndim):
             i = b.i64(a)
             b.store(b.load(ir.i64, b.gep(ir.i64, lp, i)), b.gep(ir.i64, shape_p, i))
@@ -487,7 +597,9 @@ def _check_layout(cg, p, r: TensorRepr, k):
     strides_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.STRIDES))
     shape = [b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in range(r.ndim)]
     actual = [b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in range(r.ndim)]
-    expected = r.layout.stride_values(b, itemsize(r.dtype), shape, dict(enumerate(actual)))
+    expected = r.layout.stride_values(
+        b, itemsize(r.dtype), shape, dict(enumerate(actual))
+    )
     ok = b.const_bool(True)
     empty = b.const_bool(False)
     for a in range(r.ndim):
@@ -495,7 +607,9 @@ def _check_layout(cg, p, r: TensorRepr, k):
         same = b.eq(actual[a], expected[a])
         ok = b.and_(ok, b.or_(one, same))
         empty = b.or_(empty, b.eq(shape[a], b.i64(0)))
-    cg.check(b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}")
+    cg.check(
+        b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}"
+    )
 
 
 @dataclass
@@ -508,7 +622,9 @@ class CompiledNode:
         return self.compiled.address("kernel")
 
 
-def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None) -> CompiledNode:
+def compile_node(
+    node, *, fastmath=True, opt_level=3, cache=True, provided=None
+) -> CompiledNode:
     """Compile one node as a kernel (for tests and one-node units).
     `provided`: layouts of the memory the caller will provide (default: as declared)."""
     module = ir.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
@@ -521,20 +637,20 @@ def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None)
 __all__ = [
     "CompiledNode",
     "NodeFunction",
-    "OutputMode",
     "Output",
+    "OutputMode",
     "Signature",
     "build_kernel_wrapper",
     "build_node_function",
     "compile_node",
-    "llvm_emit",
-    "new_output",
-    "known_layouts",
-    "llvm_layout",
-    "node_outputs",
     "inplace_outputs",
+    "known_layouts",
+    "llvm_emit",
     "llvm_inplace",
-    "output_aliases",
+    "llvm_layout",
+    "new_output",
+    "node_outputs",
     "node_signature",
+    "output_aliases",
     "pack",
 ]

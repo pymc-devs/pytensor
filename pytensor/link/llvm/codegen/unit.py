@@ -18,10 +18,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from pytensor.link.llvm.codegen.emit import (
-    c_array,
     Array,
     Codegen,
     SlotOutput,
+    c_array,
     constant,
     copy,
     pack,
@@ -31,13 +31,22 @@ from pytensor.link.llvm.codegen.emit import (
 )
 from pytensor.link.llvm.codegen.function import (
     NodeFunction,
-    OutputMode,
     Output,
+    OutputMode,
     Signature,
     build_node_function,
 )
+from pytensor.link.llvm.codegen.types import (
+    ScalarRepr,
+    Slot,
+    TensorRepr,
+    ir,
+    is_absent,
+    itemsize,
+    repr_of,
+    slot_type,
+)
 from pytensor.link.llvm.layout import Layout
-from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, repr_of, ScalarRepr, Slot, slot_type, TensorRepr
 
 
 def build_unit_function(
@@ -72,10 +81,15 @@ def build_unit_function(
         links = LinkTable()
     if input_layouts is None:
         input_layouts = [None] * len(inputs)
-    in_reprs = [repr_of(t, lay) for (_, t), lay in zip(inputs, input_layouts, strict=True)]
+    in_reprs = [
+        repr_of(t, lay) for (_, t), lay in zip(inputs, input_layouts, strict=True)
+    ]
     if output_layouts is None:
         output_layouts = [None] * len(outputs)
-    outs = [Output(repr_of(t, lay if mode is OutputMode.PROVIDED else None), mode) for (_, t, mode), lay in zip(outputs, output_layouts, strict=True)]
+    outs = [
+        Output(repr_of(t, lay if mode is OutputMode.PROVIDED else None), mode)
+        for (_, t, mode), lay in zip(outputs, output_layouts, strict=True)
+    ]
     for r in [*in_reprs, *(o.repr for o in outs)]:
         if isinstance(r, ScalarRepr):
             raise NotImplementedError("ScalarType values can't cross a unit's boundary")
@@ -87,7 +101,9 @@ def build_unit_function(
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]
-    cg = Codegen(b, ctx, config, parallel=parallel, links=links, module=module, name=name)
+    cg = Codegen(
+        b, ctx, config, parallel=parallel, links=links, module=module, name=name
+    )
     vals = {}  # vid -> Array (tensors) or value (scalars)
     k = 2
     for (vid, _), r in zip(inputs, in_reprs, strict=True):
@@ -136,7 +152,9 @@ class Destination:
 def release(cg, owned):
     """Give up the buffers kernels allocated into `owned` slots ([(slot, ndim)])."""
     for slot, nd in owned:
-        cg.b.rt_decref(cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, Slot.OWNER)))
+        cg.b.rt_decref(
+            cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, Slot.OWNER))
+        )
 
 
 def bind_constants(cg, constants, vals):
@@ -194,7 +212,13 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
     owned = []  # (slot, ndim): buffers kernels allocated
     lays = {}  # vid -> Layout of what the items produced
     for n, r in enumerate(resolved):
-        item, node, kernel, nsig, in_lays = r.item, r.item.node, r.kernel, r.signature, r.in_layouts
+        item, node, kernel, nsig, in_lays = (
+            r.item,
+            r.item.node,
+            r.kernel,
+            r.signature,
+            r.in_layouts,
+        )
         # provided outputs: their target if its layout implies the declared one; else a
         # temporary in the declared layout (copied by the caller if needed)
         in_place = {}
@@ -243,19 +267,29 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
             scan_body=r.body,
         )
         args = [ctx, config]
-        present = [vid for vid, var in zip(item.inputs, node.inputs, strict=True) if not is_absent(var.type)]
+        present = [
+            vid
+            for vid, var in zip(item.inputs, node.inputs, strict=True)
+            if not is_absent(var.type)
+        ]
         for vid, rep in zip(present, nsig.inputs, strict=True):
             if vid not in vals:
-                raise ValueError(f"{name}: {node.op} reads a value that isn't computed yet")
+                raise ValueError(
+                    f"{name}: {node.op} reads a value that isn't computed yet"
+                )
             v = vals[vid]
             if isinstance(rep, ScalarRepr):
                 args.append(v)
                 continue
             if not v.layout.implies(rep.layout, rep.shape, itemsize(rep.dtype)):
-                raise AssertionError(f"{name}: {node.op} was resolved for an input with layout {rep.layout}, got {v.layout}")
+                raise AssertionError(
+                    f"{name}: {node.op} was resolved for an input with layout {rep.layout}, got {v.layout}"
+                )
             args.append(pack(b, rep, v))
         reads = []  # (vid, slot, how)
-        for j, (vid, var, o) in enumerate(zip(item.outputs, node.outputs, nsig.outputs, strict=True)):
+        for j, (vid, var, o) in enumerate(
+            zip(item.outputs, node.outputs, nsig.outputs, strict=True)
+        ):
             if o.mode is OutputMode.ABSENT:
                 continue
             if o.mode is OutputMode.PROVIDED:
@@ -263,8 +297,12 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                     a = in_place[j]
                     written.add(vid)
                 else:
-                    lay = o.layout if o.layout.fully_packed(o.repr.shape) else None  # (C implies any)
-                    a = cg.temporary(var.type.dtype, [b.i64(s) for s in var.type.shape], lay)
+                    lay = (
+                        o.layout if o.layout.fully_packed(o.repr.shape) else None
+                    )  # (C implies any)
+                    a = cg.temporary(
+                        var.type.dtype, [b.i64(s) for s in var.type.shape], lay
+                    )
                 vals[vid] = a
                 args.append(pack(b, o.repr, a))
             elif o.mode is OutputMode.SCALAR:
@@ -294,7 +332,9 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                 vals[vid] = b.load(o.repr.ir_type, slot)
             else:
                 var = node.outputs[item.outputs.index(vid)]
-                vals[vid] = read_slot(b, slot, var.type.dtype, list(var.type.shape), lays.get(vid))
+                vals[vid] = read_slot(
+                    b, slot, var.type.dtype, list(var.type.shape), lays.get(vid)
+                )
     return written, owned
 
 
@@ -304,4 +344,12 @@ def _mem_type(dtype):
     return memory_type(dtype)
 
 
-__all__ = ["Destination", "TensorRepr", "bind_constants", "build_unit_function", "emit_items", "release", "unit_input_layouts"]
+__all__ = [
+    "Destination",
+    "TensorRepr",
+    "bind_constants",
+    "build_unit_function",
+    "emit_items",
+    "release",
+    "unit_input_layouts",
+]

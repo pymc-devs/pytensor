@@ -72,7 +72,7 @@ class MemoryPlan:
 def lifetimes(tasks, kind, aliases, out_ids, forever) -> tuple[dict, dict]:
     """(defined, end) per value: the task that produces it and the last task that
     needs it alive. A value is needed as long as anything that may alias it."""
-    defined = {k: -1 for k in kind}
+    defined = dict.fromkeys(kind, -1)
     end = {}
     for i, task in enumerate(tasks):
         for k in task.inputs:
@@ -143,7 +143,9 @@ def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
             if k in values.consts and k not in kind:
                 kind[k] = "const"
     for task in tasks:
-        for k, mode, may_alias in zip(task.outputs, task.modes, task.aliases, strict=True):
+        for k, mode, may_alias in zip(
+            task.outputs, task.modes, task.aliases, strict=True
+        ):
             if mode is OutputMode.INPLACE:
                 continue
             if mode is OutputMode.PROVIDED:
@@ -166,4 +168,6 @@ def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
             nbytes = int(np.prod(t.shape, dtype=np.int64)) * np.dtype(t.dtype).itemsize
             intervals.append((defined[k], end[k], nbytes, k))
     offsets, arena = first_fit(intervals)
-    return MemoryPlan(kind, aliases, same, defined, end, offsets, arena, first_out, forever)
+    return MemoryPlan(
+        kind, aliases, same, defined, end, offsets, arena, first_out, forever
+    )

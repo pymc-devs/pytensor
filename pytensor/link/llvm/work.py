@@ -39,7 +39,9 @@ class Work:
         return None if n is None else n * self.per_element
 
     def describe(self) -> str:
-        elements = " x ".join("?" if f is None else str(f) for f in self.elements) or "1"
+        elements = (
+            " x ".join("?" if f is None else str(f) for f in self.elements) or "1"
+        )
         return f"{elements} x {self.per_element:g}"
 
 
@@ -60,17 +62,58 @@ def _set(cost, *classes):
 
 _set(
     1,
-    ps.Add, ps.Sub, ps.Mul, ps.Neg, ps.Abs, ps.Identity, ps.Cast, ps.Second, ps.Sqr, ps.Sign,
-    ps.Maximum, ps.Minimum, ps.Switch, ps.Clip, ps.EQ, ps.NEQ, ps.LT, ps.LE, ps.GT, ps.GE,
-    ps.AND, ps.OR, ps.XOR, ps.Invert, ps.Floor, ps.Ceil, ps.Trunc, ps.RoundHalfToEven,
-    ps.RoundHalfAwayFromZero, ps.IsNan, ps.IsInf,
+    ps.Add,
+    ps.Sub,
+    ps.Mul,
+    ps.Neg,
+    ps.Abs,
+    ps.Identity,
+    ps.Cast,
+    ps.Second,
+    ps.Sqr,
+    ps.Sign,
+    ps.Maximum,
+    ps.Minimum,
+    ps.Switch,
+    ps.Clip,
+    ps.EQ,
+    ps.NEQ,
+    ps.LT,
+    ps.LE,
+    ps.GT,
+    ps.GE,
+    ps.AND,
+    ps.OR,
+    ps.XOR,
+    ps.Invert,
+    ps.Floor,
+    ps.Ceil,
+    ps.Trunc,
+    ps.RoundHalfToEven,
+    ps.RoundHalfAwayFromZero,
+    ps.IsNan,
+    ps.IsInf,
 )
 _set(4, ps.TrueDiv, ps.Reciprocal, ps.Sqrt)
 _set(10, ps.IntDiv, ps.Mod)
 _set(
     20,
-    ps.Exp, ps.Exp2, ps.Expm1, ps.Log, ps.Log1p, ps.Log2, ps.Log10, ps.Sin, ps.Cos, ps.Tan,
-    ps.Sinh, ps.Cosh, ps.Tanh, psm.Sigmoid, psm.Erf, psm.Erfc,
+    ps.Exp,
+    ps.Exp2,
+    ps.Expm1,
+    ps.Log,
+    ps.Log1p,
+    ps.Log2,
+    ps.Log10,
+    ps.Sin,
+    ps.Cos,
+    ps.Tan,
+    ps.Sinh,
+    ps.Cosh,
+    ps.Tanh,
+    psm.Sigmoid,
+    psm.Erf,
+    psm.Erfc,
 )
 _set(25, psm.Softplus, psm.Log1mexp, ps.ArcSin, ps.ArcCos, ps.ArcTan)
 _set(30, ps.Pow, ps.ArcTan2, ps.ArcSinh, ps.ArcCosh, ps.ArcTanh)
@@ -135,7 +178,11 @@ def _register():
 
     @llvm_work.register(FusedElemwise)
     def _(op, node):
-        biggest = max((i for i in node.inputs if hasattr(i.type, "shape")), key=lambda v: v.type.ndim, default=None)
+        biggest = max(
+            (i for i in node.inputs if hasattr(i.type, "shape")),
+            key=lambda v: v.type.ndim,
+            default=None,
+        )
         elements = lengths(biggest) if biggest is not None else lengths(node.outputs[0])
         return Work(scalar_cost(op.scalar_op) + 1, elements)
 
@@ -189,7 +236,13 @@ def _register():
 
     @llvm_work.register(RandomVariable)
     def _(op, node):
-        heavy = type(op).__name__ in ("GammaRV", "InvGammaRV", "BetaRV", "PoissonRV", "BinomialRV")
+        heavy = type(op).__name__ in (
+            "GammaRV",
+            "InvGammaRV",
+            "BetaRV",
+            "PoissonRV",
+            "BinomialRV",
+        )
         return Work(60.0 if heavy else 20.0, lengths(node.outputs[1]))
 
     @llvm_work.register(Scan)

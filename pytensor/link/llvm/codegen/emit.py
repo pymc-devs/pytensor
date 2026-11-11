@@ -5,18 +5,18 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from pytensor.link.llvm.layout import DYNAMIC, Layout
 from pytensor.link.llvm.codegen.types import (
+    ScalarRepr,
+    Slot,
+    TensorRepr,
     ir,
     is_float,
     is_signed,
     itemsize,
     memory_type,
-    ScalarRepr,
-    Slot,
-    TensorRepr,
     value_type,
 )
+from pytensor.link.llvm.layout import DYNAMIC, Layout
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
@@ -66,7 +66,15 @@ class Array:
     def view(self, data, shape, strides, layout=None) -> Array:
         """An array in the same memory: `data` points into it. It belongs to the same
         input and is as writable as this one."""
-        return Array(self.dtype, data, list(shape), list(strides), layout, self.base, self.writable)
+        return Array(
+            self.dtype,
+            data,
+            list(shape),
+            list(strides),
+            layout,
+            self.base,
+            self.writable,
+        )
 
     # ---- elements (indices are i64 values or Python ints; nothing is bounds-checked)
 
@@ -92,7 +100,9 @@ class Array:
 
         if isinstance(value, Num):
             if value.dtype != self.dtype:
-                raise TypeError(f"storing a {value.dtype} into an array of {self.dtype}: convert with astype")
+                raise TypeError(
+                    f"storing a {value.dtype} into an array of {self.dtype}: convert with astype"
+                )
             value = value.value
         elif isinstance(value, bool | int | float):
             value = constant(b, self.dtype, value)
@@ -132,7 +142,13 @@ def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
     layout = Layout.make(static, layout.order, layout.strides)
     if not layout.fully_packed(static):
         raise ValueError(f"can't allocate an array of layout {layout}")
-    return Array(dtype, data, list(shape), layout.stride_values(b, itemsize(dtype), shape, {}), layout)
+    return Array(
+        dtype,
+        data,
+        list(shape),
+        layout.stride_values(b, itemsize(dtype), shape, {}),
+        layout,
+    )
 
 
 def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
@@ -140,11 +156,21 @@ def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
     and `zero_axes` get stride 0; the layout records that."""
     zero = b.i64(0)
     static = a.static_shape()
-    bcast = {ax for ax in range(a.ndim) if ax in zero_axes or (static[ax] == 1 and shape[ax].const_int != 1)}
+    bcast = {
+        ax
+        for ax in range(a.ndim)
+        if ax in zero_axes or (static[ax] == 1 and shape[ax].const_int != 1)
+    }
     strides = [zero if ax in bcast else st for ax, st in enumerate(a.strides)]
     kinds = [0 if ax in bcast else k for ax, k in enumerate(a.layout.strides)]
     loop_static = [n.const_int for n in shape]
-    return Array(a.dtype, a.data, list(shape), strides, Layout.make(loop_static, a.layout.order, kinds))
+    return Array(
+        a.dtype,
+        a.data,
+        list(shape),
+        strides,
+        Layout.make(loop_static, a.layout.order, kinds),
+    )
 
 
 def c_strides(b, dtype, shape):
@@ -189,8 +215,12 @@ def pack(b, r: TensorRepr, a: Array):
     """A tensor value in its representation."""
     if r.ndim == 0:
         return a.data
-    lengths = b.aggregate(ir.Type.array(ir.i64, len(r.dynamic_axes)), [a.shape[k] for k in r.dynamic_axes])
-    strides = b.aggregate(ir.Type.array(ir.i64, len(r.stride_axes)), [a.strides[k] for k in r.stride_axes])
+    lengths = b.aggregate(
+        ir.Type.array(ir.i64, len(r.dynamic_axes)), [a.shape[k] for k in r.dynamic_axes]
+    )
+    strides = b.aggregate(
+        ir.Type.array(ir.i64, len(r.stride_axes)), [a.strides[k] for k in r.stride_axes]
+    )
     return b.aggregate(r.ir_type, [a.data, lengths, strides])
 
 
@@ -223,7 +253,9 @@ def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Arr
         layout = Layout.make(static_shape, range(nd), (DYNAMIC,) * nd)
     else:
         layout = Layout.make(static_shape, layout.order, layout.strides)
-    passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, b.i64(a))) for a in layout.dynamic_axes}
+    passed = {
+        a: b.load(ir.i64, b.gep(ir.i64, sp, b.i64(a))) for a in layout.dynamic_axes
+    }
     strides = layout.stride_values(b, itemsize(dtype), shape, passed)
     return Array(dtype, data, shape, strides, layout)
 
@@ -323,7 +355,9 @@ class InplaceOutput:
     def overwrite(self, cg, x: Array) -> Array:
         """The memory of the output, holding the values of `x`: `x` itself."""
         if x is not self.source:
-            raise ValueError(f"this output overwrites input {self.source.base}, not the array given")
+            raise ValueError(
+                f"this output overwrites input {self.source.base}, not the array given"
+            )
         self.done = True
         return self.array
 
@@ -333,7 +367,7 @@ class SlotOutput:
     """An output the kernel returns through a slot: memory it allocates (`allocate`),
     or a view of one of the inputs the op says it may alias (`set_view`)."""
 
-    cg: "Codegen"
+    cg: Codegen
     slot: object
     dtype: str
     ndim: int
@@ -354,7 +388,10 @@ class SlotOutput:
         b = self.cg.b
         t = _slot_type(self.ndim)
         b.store(data, b.field_ptr(t, self.slot, Slot.DATA))
-        lp, sp = b.field_ptr(t, self.slot, Slot.LENGTHS), b.field_ptr(t, self.slot, Slot.STRIDES)
+        lp, sp = (
+            b.field_ptr(t, self.slot, Slot.LENGTHS),
+            b.field_ptr(t, self.slot, Slot.STRIDES),
+        )
         for a in range(self.ndim):
             b.store(shape[a], b.gep(ir.i64, lp, b.i64(a)))
             b.store(strides[a], b.gep(ir.i64, sp, b.i64(a)))
@@ -417,7 +454,9 @@ class SlotOutput:
         """The output is `a`, a view of an input the op's view_map lists for this output
         (the caller knows whose memory that is and keeps it alive)."""
         if not self.aliases:
-            raise ValueError("this output can't be a view: the op's view_map doesn't list an input for it")
+            raise ValueError(
+                "this output can't be a view: the op's view_map doesn't list an input for it"
+            )
         if a.base is not None and a.base not in self.aliases:
             raise ValueError(
                 f"a view of input {a.base}, but the op's view_map only lets this output alias {list(self.aliases)}"
@@ -436,7 +475,11 @@ class SlotOutput:
 def set_output(cg, out, a: Array) -> None:
     """Make the output `out` the array `a`, which lies in an input's memory: as a view
     where the op lets this output alias that input, else as a copy."""
-    if isinstance(out, SlotOutput) and out.aliases and (a.base is None or a.base in out.aliases):
+    if (
+        isinstance(out, SlotOutput)
+        and out.aliases
+        and (a.base is None or a.base in out.aliases)
+    ):
         out.set_view(a)
     else:
         copy(cg, a, out.allocate(a.shape))
@@ -490,7 +533,11 @@ class Codegen:
     def par(self, per_element: float) -> ParallelPolicy | None:
         """How loops over elements costing `per_element` each (`work.py`) may run in
         parallel, or None."""
-        return ParallelPolicy(self, per_element) if self.parallel and per_element > 0 else None
+        return (
+            ParallelPolicy(self, per_element)
+            if self.parallel and per_element > 0
+            else None
+        )
 
     def fail(self, message: str | None):
         """Report `message` (unless a called kernel already did) and return 1."""
@@ -529,7 +576,9 @@ class Codegen:
         self.check(b.ne(p, b.null()), None)
         return p
 
-    def temporary(self, dtype, shape, layout: Layout | None = None, escapes: bool = False) -> Array:
+    def temporary(
+        self, dtype, shape, layout: Layout | None = None, escapes: bool = False
+    ) -> Array:
         """A temporary array (`temp_memory`), packed in `layout` (default C). `shape`:
         i64 values or Python ints."""
         b = self.b
@@ -549,7 +598,9 @@ def is_contiguous(b, shape, a: Array, order=None):
     order = list(range(nd)) if order is None else list(order)
     static = [n.const_int for n in shape]
     lay = a.layout
-    same_order = [ax for ax in lay.order if static[ax] != 1] == [ax for ax in order if static[ax] != 1]
+    same_order = [ax for ax in lay.order if static[ax] != 1] == [
+        ax for ax in order if static[ax] != 1
+    ]
     if lay.fully_packed(static) and same_order:
         return b.const_bool(True)
     if not lay.dynamic_axes and not (lay.fully_packed(static) and same_order):
@@ -618,7 +669,9 @@ class ParallelPolicy:
         """Iterations per chunk (i64), for iterations of `elements_per_iteration` items."""
         per = elements_per_iteration.const_int
         if per is not None:
-            return b.i64(max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1)))))
+            return b.i64(
+                max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1))))
+            )
         target = b.i64(max(1, math.ceil(CHUNK_COST / self.per_element)))
         one = b.i64(1)
         per = b.select(b.sgt(elements_per_iteration, one), elements_per_iteration, one)
@@ -689,7 +742,10 @@ def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
     axis = order[level]
 
     def at(i):
-        ptrs = [advance(b, p, i, a.strides[axis], a.dtype) for p, a in zip(base, arrays, strict=True)]
+        ptrs = [
+            advance(b, p, i, a.strides[axis], a.dtype)
+            for p, a in zip(base, arrays, strict=True)
+        ]
         _strided(b, shape, arrays, body, order, level + 1, ptrs)
 
     if par is not None and level == 0:
@@ -705,28 +761,30 @@ def copy(cg, src: Array, dst: Array):
     b = cg.b
 
     def body(p):
-        store(b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1])
+        store(
+            b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1]
+        )
 
     for_each(b, dst.shape, [src, dst], body, cg.par(1.0))
 
 
 __all__ = [
     "Array",
-    "advance",
-    "c_array",
-    "packed_array",
-    "loop_order",
-    "loop_view",
     "Codegen",
     "ProvidedOutput",
     "ScalarOutput",
     "ScalarRepr",
     "SlotOutput",
     "TensorRepr",
+    "advance",
+    "c_array",
     "cast",
     "constant",
     "copy",
     "for_each",
     "load",
+    "loop_order",
+    "loop_view",
+    "packed_array",
     "store",
 ]
