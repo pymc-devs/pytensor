@@ -447,6 +447,10 @@ def test_fused_elemwise_indexed_increments():
     )
     # (in a unit with the scalar it reads, y[0])
     assert any("FusedElemwise" in s for s in tasks(f))
+    # several chunks (fused.CHUNK), the last one partial, with runs across their ends
+    n = 600
+    long_values = [rng.random(5), rng.random(n), np.sort(rng.integers(-5, 5, n))]
+    compare([x, y, idx], outs(idx), long_values)
 
     # a constant index is bounds-checked when the code is generated
     def ir(f):
