@@ -34,10 +34,9 @@ from pytensor.link.llvm.codegen.types import (
 class OutputMode(enum.Enum):
     #: the caller provides the memory (with its own strides)
     PROVIDED = "provided"
-    #: the kernel allocates and hands over one reference through the slot
-    ALLOCATED = "allocated"
-    #: the kernel returns a view of an input through the slot
-    VIEW = "view"
+    #: the kernel returns the array through a slot: memory it allocated (it hands over
+    #: one reference), or a view of an input the output may alias
+    RETURNED = "returned"
     #: a ScalarType output, stored through a pointer
     SCALAR = "scalar"
     #: no value (a random generator token): no argument
@@ -48,14 +47,14 @@ class OutputMode(enum.Enum):
 class Output:
     repr: TensorRepr | ScalarRepr
     mode: OutputMode
-    #: the input a VIEW output lies in
-    view_of: int | None = None
+    #: the inputs the output may be a view of (RETURNED; none: it is new memory)
+    aliases: tuple = ()
 
     @property
     def layout(self):
-        """The output's layout (None for scalars): for PROVIDED the memory the op asks
-        for (the provider may give it other memory, see `with_layout`), for ALLOCATED
-        what the code allocates, for VIEW what the view has."""
+        """The output's layout (None for scalars). For PROVIDED it is the memory the
+        op asks for (the provider may give it other memory, see `with_layout`); for
+        RETURNED it is what the result has, a view or new memory."""
         return getattr(self.repr, "layout", None)
 
     def with_layout(self, layout):
@@ -88,30 +87,36 @@ class Signature:
 
 
 @singledispatch
-def llvm_outputs(op, node, in_layouts) -> list[Output]:
-    """How each output of `node` comes to be, and its layout (layout.py), given the
-    inputs' layouts (`known_layouts` fills in the unknown ones).
+def llvm_layout(op, node, in_layouts) -> list:
+    """The layout (layout.py) of each output of `node`, given the inputs' layouts
+    (`known_layouts` fills in the unknown ones). None for an output: the default.
 
-    The default follows the types and the op's view_map: a view of unknown layout,
-    scalars, provided memory for static shapes, else allocated; memory C-contiguous.
-    Ops register their own to describe views (DimShuffle, Subtensor, ...) or to choose
-    where and how their outputs are produced (e.g. Elemwise allocating its output in
-    its inputs' memory order). The code must produce what is declared: ALLOCATED
-    outputs in the layout given (`SlotOutput.allocate` does that), VIEW outputs with
-    the layout claimed (`SlotOutput.set_view` checks). PROVIDED memory has the declared
-    layout (packed, or any strides); a provider that can't give it writes the output
-    other memory only through a temporary and a copy."""
-    view_map = getattr(op, "view_map", {}) or {}
-    return [
-        Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutputMode.VIEW, view_map[k][0])
-        if k in view_map and isinstance(repr_of(o.type), TensorRepr)
-        else new_output(o)
-        for k, o in enumerate(node.outputs)
-    ]
+    The default is C-contiguous for an output in new memory, and nothing known
+    (DYNAMIC) for one that may be a view. Ops register their own to say what a view's
+    layout is (DimShuffle, Subtensor, ...) or in which memory order they want their
+    output (Elemwise: its inputs').
+
+    This says what the result looks like, not how it comes to be: whether an output may
+    be a view of an input is the op's `view_map` (`output_aliases`), and whether its
+    memory is provided or returned follows from that and from its type (`node_outputs`).
+    A layout is binding. New memory is provided or allocated in it (it must then be
+    packed; one that isn't means "any strides": C-contiguous memory is used). A view
+    must have it (`SlotOutput.set_view` checks), and so must memory a may-be-view output
+    allocates instead (a Reshape that copies declares C for both)."""
+    return [None] * len(node.outputs)
+
+
+def output_aliases(op, k: int) -> tuple:
+    """The inputs output `k` of `op` may share memory with: those its `view_map` lists,
+    and those its `destroy_map` lists (the output of an op that works in place is the
+    input's memory)."""
+    view_map = getattr(op, "view_map", None) or {}
+    destroy_map = getattr(op, "destroy_map", None) or {}
+    return tuple(dict.fromkeys([*view_map.get(k, ()), *destroy_map.get(k, ())]))
 
 
 def new_output(var, layout=None) -> Output:
-    """An output in new memory: SCALAR, PROVIDED for static shapes, else ALLOCATED; in
+    """An output in new memory: SCALAR, PROVIDED for static shapes, else RETURNED; in
     `layout` (default C-contiguous). ABSENT for values without data."""
     r = repr_of(var.type)
     if isinstance(r, NoneRepr):
@@ -119,11 +124,7 @@ def new_output(var, layout=None) -> Output:
     if isinstance(r, ScalarRepr):
         return Output(r, OutputMode.SCALAR)
     lay = layout if layout is not None else Layout.c(var.type.ndim)
-    return Output(repr_of(var.type, lay), OutputMode.PROVIDED if r.static else OutputMode.ALLOCATED)
-
-
-def view_output(var, layout, view_of=0) -> Output:
-    return Output(repr_of(var.type, layout), OutputMode.VIEW, view_of)
+    return Output(repr_of(var.type, lay), OutputMode.PROVIDED if r.static else OutputMode.RETURNED)
 
 
 def known_layouts(node, in_layouts) -> list:
@@ -137,7 +138,20 @@ def known_layouts(node, in_layouts) -> list:
 
 
 def node_outputs(node, in_layouts=None) -> list[Output]:
-    return llvm_outputs(node.op, node, known_layouts(node, in_layouts))
+    """How each output of `node` comes to be when its code is generated: from its type,
+    the op's `view_map` and `llvm_layout`."""
+    op = node.op
+    layouts = llvm_layout(op, node, known_layouts(node, in_layouts))
+    outs = []
+    for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
+        aliases = output_aliases(op, k) if isinstance(repr_of(o.type), TensorRepr) else ()
+        if not aliases:
+            outs.append(new_output(o, lay))
+            continue
+        if lay is None:
+            lay = Layout.dynamic(o.type.ndim)
+        outs.append(Output(repr_of(o.type, lay), OutputMode.RETURNED, aliases))
+    return outs
 
 
 def skipped_inputs(node, folded=frozenset()):
@@ -151,11 +165,13 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
     """`folded`: positions of inputs that are constants folded into the code (not
     arguments). None inputs aren't arguments either.
 
-    `in_layouts`: the `Layout` of each input; outputs as `llvm_outputs` declares them.
+    `in_layouts`: the `Layout` of each input; outputs as `node_outputs` gives them, with
+    `aliases` counting the function's arguments.
     The declared layout of a PROVIDED output is binding: whoever provides the memory
     provides it in that layout. `provided[k]` replaces the declaration, for a caller
     that generates a function for memory it fixes (tests writing into a slice).
-    `declared`: the outputs instead of `llvm_outputs` (a kernel's, see call.py)."""
+    `declared`: the outputs instead (a kernel's, see call.py; `aliases` counting the
+    node's inputs)."""
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
@@ -173,8 +189,8 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
     for k, o in enumerate(declared if declared is not None else node_outputs(node, in_layouts)):
         if o.mode is OutputMode.PROVIDED and provided is not None and provided[k] is not None:
             o = o.with_layout(provided[k])
-        if o.view_of is not None:
-            o = Output(o.repr, o.mode, arg_index(o.view_of))
+        if o.aliases:
+            o = Output(o.repr, o.mode, tuple(arg_index(pos) for pos in o.aliases))
         outputs.append(o)
     return Signature(inputs, tuple(outputs))
 
@@ -235,10 +251,11 @@ def build_node_function(
     # Aliasing (DESIGN.md): the memory a task writes (provided or allocated outputs)
     # never overlaps its inputs or its other outputs; views are never written.
     b.alias_domain(name)
-    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.ALLOCATED, OutputMode.VIEW)]
+    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.RETURNED)]
     marked_inputs = []
     k = 2
     inputs = []
+    arg_positions = []  # the node input each argument is
     from pytensor.link.llvm.codegen.types import is_absent
 
     for pos, var in enumerate(node.inputs):
@@ -258,10 +275,12 @@ def build_node_function(
         v = params[k]
         k += 1
         r = next(sig_inputs)
+        arg_positions.append(pos)
         if isinstance(r, ScalarRepr):
             inputs.append(v)
         else:
             a = unpack(b, r, v)
+            a.base, a.writable = pos, False
             b.mark_array(a.data, f"i{pos}", written)
             marked_inputs.append(f"i{pos}")
             inputs.append(a)
@@ -287,12 +306,12 @@ def build_node_function(
                     v,
                     o.repr.dtype,
                     o.repr.ndim,
-                    view_of=o.view_of,
-                    temporary=len(outputs) in temporary_outputs and o.mode in (OutputMode.ALLOCATED, OutputMode.VIEW),
+                    aliases=tuple(arg_positions[i] for i in o.aliases),
+                    temporary=len(outputs) in temporary_outputs,
                     # what `allocate` produces: the declared layout (a view that copies
                     # instead, like Reshape, declares C)
                     layout=o.layout if o.layout.fully_packed(o.repr.shape) else None,
-                    declared=o.layout if o.mode is OutputMode.VIEW else None,
+                    declared=o.layout if o.aliases else None,
                     alias=alias,
                 )
             )
@@ -387,10 +406,12 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
             b.store(b.load(ir.i64, b.gep(ir.i64, lp, i)), b.gep(ir.i64, shape_p, i))
             b.store(b.load(ir.i64, b.gep(ir.i64, sp, i)), b.gep(ir.i64, strides_p, i))
         owner = b.load(ir.ptr, b.field_ptr(st, slot, Slot.OWNER))
-        if o.mode is OutputMode.VIEW:
-            # a view lies in the input's buffer, unless the kernel allocated one
+        if len(o.aliases) == 1:
+            # a view lies in the input's buffer, unless the kernel allocated one. (With
+            # several inputs it may alias, a view's owner stays null: the caller keeps
+            # all of them alive.)
             mine = b.ne(owner, b.null())
-            owner = b.select(mine, owner, field(arg(o.view_of), 3))
+            owner = b.select(mine, owner, field(arg(o.aliases[0]), PtArray.OWNER))
         b.store(owner, b.field_ptr(pa, p, PtArray.OWNER))
     b.ret(rc)
     return fn
@@ -450,9 +471,9 @@ __all__ = [
     "llvm_emit",
     "new_output",
     "known_layouts",
-    "llvm_outputs",
+    "llvm_layout",
     "node_outputs",
-    "view_output",
+    "output_aliases",
     "node_signature",
     "pack",
 ]

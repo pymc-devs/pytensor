@@ -362,14 +362,10 @@ impl ProgramBuilder {
         self.add(&dtype, shape.into_iter().map(Some).collect(), ValueKind::Fresh)
     }
 
-    /// A value its producer allocates.
-    fn allocated(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>) -> PyResult<u32> {
-        self.add(&dtype, shape, ValueKind::Allocated)
-    }
-
-    /// A value its producer sets as a view into the memory of `source`.
-    fn view(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, source: u32) -> PyResult<u32> {
-        self.add(&dtype, shape, ValueKind::View(ValueId(source)))
+    /// A value its producer returns: a buffer it allocates, or a view into the memory
+    /// of one of the values `may_alias`.
+    fn returned(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, may_alias: Vec<u32>) -> PyResult<u32> {
+        self.add(&dtype, shape, ValueKind::Returned(may_alias.into_iter().map(ValueId).collect()))
     }
 
     /// Append a task. `keepalive` is kept alive as long as the program (the compiled
