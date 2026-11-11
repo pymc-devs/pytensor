@@ -59,3 +59,62 @@ def __getattr__(name):
 # imports were executed, we can warn about remaining flags provided by the user
 # through PYTENSOR_FLAGS.
 config.warn_unused_flags()
+
+from pytensor.compile.rewriting import register_canonicalize
+from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.tensor.basic import Alloc, MakeVector, constant
+from pytensor.tensor.elemwise import Cast
+from pytensor.tensor.shape import Reshape
+from pytensor.tensor.variable import TensorConstant
+
+def _is_int(dtype):
+    return dtype.startswith(("int", "uint"))
+
+def _strip_cast(var):
+    if var.owner is not None and isinstance(var.owner.op, Cast):
+        inp = var.owner.inputs[0]
+        if _is_int(var.dtype) and _is_int(inp.dtype):
+            return _strip_cast(inp)
+    return var
+
+def _strip_shape(var):
+    if var.owner is None:
+        return var
+    if isinstance(var.owner.op, Cast):
+        inp = var.owner.inputs[0]
+        if _is_int(var.dtype) and _is_int(inp.dtype):
+            return _strip_shape(inp)
+    if isinstance(var.owner.op, MakeVector):
+        new = [_strip_cast(i) for i in var.owner.inputs]
+        if all(n is o for n, o in zip(new, var.owner.inputs)):
+            return var
+        dtypes = {i.dtype for i in new}
+        if len(dtypes) == 1:
+            return MakeVector(dtypes.pop())(*new)
+        target = next((i.dtype for i in new if not isinstance(i, TensorConstant)), new[0].dtype)
+        out = []
+        for i in new:
+            if i.dtype == target:
+                out.append(i)
+            elif isinstance(i, TensorConstant):
+                try:
+                    out.append(constant(i.data, dtype=target))
+                except (OverflowError, ValueError):
+                    return var
+            else:
+                return var
+        return MakeVector(target)(*out)
+    return var
+
+@register_canonicalize
+@node_rewriter([Alloc, Reshape])
+def local_useless_int_shape_cast(fgraph, node):
+    if isinstance(node.op, Alloc):
+        new = [node.inputs[0]] + [_strip_cast(i) for i in node.inputs[1:]]
+        if all(n is o for n, o in zip(new, node.inputs)):
+            return None
+        return [node.op(*new)]
+    new = _strip_shape(node.inputs[1])
+    if new is node.inputs[1]:
+        return None
+    return [node.op(node.inputs[0], new)]
