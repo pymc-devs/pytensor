@@ -152,6 +152,13 @@ class CompiledModule:
     @property
     def key(self) -> str: ...
     @property
+    def ir(self) -> str:
+        """The module's LLVM IR as compiled, before optimization."""
+    def optimized_ir(self, opt_level: int | None = None) -> str:
+        """The IR after optimization (by default at the level the module was compiled
+        with), computed on demand from `ir`: the same whether the object was compiled,
+        read from the disk cache or already in the process."""
+    @property
     def source(self) -> str: ...
     @property
     def compile_s(self) -> float: ...

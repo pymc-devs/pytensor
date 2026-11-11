@@ -90,6 +90,13 @@ def current_options() -> Options:
     return _current_options.get() or Options()
 
 
+#: the stats of the program being planned: the planner of a subprogram or a Scan body
+#: hands its modules to it
+_current_stats: contextvars.ContextVar = contextvars.ContextVar(
+    "llvm_stats", default=None
+)
+
+
 @dataclass
 class Task:
     """One entry of a program: a kernel called with the values `inputs`, producing the
@@ -108,6 +115,23 @@ class Task:
 
 
 @dataclass
+class GeneratedModule:
+    """A module the planner generated for a task, compiled."""
+
+    description: str
+    compiled: object  # ir.CompiledModule
+
+    @property
+    def ir(self) -> str:
+        """The LLVM IR as generated."""
+        return self.compiled.ir
+
+    def optimized_ir(self, opt_level: int | None = None) -> str:
+        """The LLVM IR after optimization."""
+        return self.compiled.optimized_ir(opt_level)
+
+
+@dataclass
 class Stats:
     plan_s: float = 0.0
     codegen_s: float = 0.0
@@ -120,6 +144,18 @@ class Stats:
     numba: list = field(default_factory=list)
     #: the ops of the tasks that overwrite an input
     inplace: list = field(default_factory=list)
+    #: the generated modules (GeneratedModule), including those of subprograms and
+    #: Scan bodies planned for this program
+    modules: list = field(default_factory=list)
+
+    def ir(self, optimized: bool = False, opt_level: int | None = None) -> str:
+        """The LLVM IR of all generated modules, each under a comment naming its task.
+        `optimized`: after the optimization pipeline instead of as generated."""
+        parts = []
+        for m in self.modules:
+            text = m.optimized_ir(opt_level) if optimized else m.ir
+            parts.append(f"; ===== {' '.join(m.description.split())}\n{text}")
+        return "\n".join(parts)
 
 
 class Planner:
@@ -481,10 +517,16 @@ class Planner:
         """`input_layouts`: what the caller guarantees about each input's layout (default:
         from `Options.input_layout`)."""
         token = _current_options.set(self.opts)
+        parent = _current_stats.get()
+        stats_token = _current_stats.set(self.stats)
         try:
-            return self._plan(fgraph, output_modes, input_layouts)
+            prog = self._plan(fgraph, output_modes, input_layouts)
         finally:
+            _current_stats.reset(stats_token)
             _current_options.reset(token)
+        if parent is not None:
+            parent.modules.extend(self.stats.modules)
+        return prog
 
     def _plan(self, fgraph, output_modes, input_layouts):
         t0 = time.perf_counter()
@@ -540,24 +582,21 @@ class Planner:
         t1 = time.perf_counter()
 
         # 3. compile all generated modules at once
-        modules = []
-        for s in tasks:
-            if s.module is not None:
-                s.module.label = (
-                    "ptl:" + " ".join(s.description.split())[:160]
-                )  # perf maps
-                modules.append(s.module)
-        if modules:
+        generated = [s for s in tasks if s.module is not None]
+        for s in generated:
+            s.module.label = "ptl:" + " ".join(s.description.split())[:160]  # perf maps
+        if generated:
             compiled = ir.compile_many(
-                modules, opt_level=self.opts.opt_level, cache=self.opts.cache
+                [s.module for s in generated],
+                opt_level=self.opts.opt_level,
+                cache=self.opts.cache,
             )
-            for s, c in zip(
-                [s for s in tasks if s.module is not None], compiled, strict=True
-            ):
+            for s, c in zip(generated, compiled, strict=True):
                 s.address = c.address("kernel")
                 s.keepalive = (s.keepalive, c)  # (the links table, if any)
                 s.module = None
-        self.stats.n_modules = len(modules)
+                self.stats.modules.append(GeneratedModule(s.description, c))
+        self.stats.n_modules = len(generated)
         t2 = time.perf_counter()
 
         # 4. and 5. memory, and the program
