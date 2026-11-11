@@ -9,7 +9,11 @@ fn digamma(mut x: f64) -> f64 {
         return f64::NAN;
     }
     if x == 0.0 {
-        return if x.is_sign_negative() { f64::INFINITY } else { f64::NEG_INFINITY };
+        return if x.is_sign_negative() {
+            f64::INFINITY
+        } else {
+            f64::NEG_INFINITY
+        };
     }
     if x < 0.0 {
         if x == x.floor() {
@@ -23,7 +27,9 @@ fn digamma(mut x: f64) -> f64 {
         x += 1.0;
     }
     let f = 1.0 / (x * x);
-    let t = f * (-1.0 / 12.0 + f * (1.0 / 120.0 + f * (-1.0 / 252.0 + f * (1.0 / 240.0 + f * (-1.0 / 132.0)))));
+    let t = f
+        * (-1.0 / 12.0
+            + f * (1.0 / 120.0 + f * (-1.0 / 252.0 + f * (1.0 / 240.0 + f * (-1.0 / 132.0)))));
     result + x.ln() - 0.5 / x + t
 }
 

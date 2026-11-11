@@ -1,4 +1,3 @@
-
 /// Element types of arrays the runtime handles. Names match numpy dtype names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DType {
@@ -27,7 +26,10 @@ impl DType {
     }
 
     pub fn is_signed_int(self) -> bool {
-        matches!(self, DType::Int64 | DType::Int32 | DType::Int16 | DType::Int8)
+        matches!(
+            self,
+            DType::Int64 | DType::Int32 | DType::Int16 | DType::Int8
+        )
     }
 
     pub fn bits(self) -> u32 {
@@ -68,5 +70,4 @@ impl DType {
             _ => return None,
         })
     }
-
 }

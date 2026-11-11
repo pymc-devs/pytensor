@@ -25,9 +25,9 @@
 //! arena keeps its largest size, so after the first call a kernel's scratch requests
 //! don't allocate. Several requests per kernel are fine; they never move earlier ones.
 
-use crate::abi::{PtBuffer, ABI_VERSION};
-use std::alloc::{alloc, dealloc, Layout};
-use std::ffi::{c_char, CStr};
+use crate::abi::{ABI_VERSION, PtBuffer};
+use std::alloc::{Layout, alloc, dealloc};
+use std::ffi::{CStr, c_char};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -94,8 +94,12 @@ pub struct Runtime {
     n_threads: AtomicUsize,
 }
 
-static RUNTIME: Runtime =
-    Runtime { functions: FUNCTIONS, jit: OnceLock::new(), pool: OnceLock::new(), n_threads: AtomicUsize::new(0) };
+static RUNTIME: Runtime = Runtime {
+    functions: FUNCTIONS,
+    jit: OnceLock::new(),
+    pool: OnceLock::new(),
+    n_threads: AtomicUsize::new(0),
+};
 
 pub fn runtime() -> &'static Runtime {
     &RUNTIME
@@ -107,14 +111,18 @@ impl Runtime {
     pub fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let want = self.n_threads.load(Ordering::Relaxed);
-            let env = std::env::var("PYTENSOR_LLVM_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+            let env = std::env::var("PYTENSOR_LLVM_THREADS")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0);
             let n = if want > 0 { want } else { env };
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(n)
                 .thread_name(|i| format!("pytensor-llvm-{i}"))
                 .build()
                 .expect("failed to create the thread pool");
-            self.n_threads.store(pool.current_num_threads(), Ordering::Relaxed);
+            self.n_threads
+                .store(pool.current_num_threads(), Ordering::Relaxed);
             pool
         })
     }
@@ -127,7 +135,14 @@ impl Runtime {
     /// Choose the pool's size; only before it is first used.
     pub fn set_threads(&self, n: usize) -> Result<(), String> {
         if let Some(p) = self.pool.get() {
-            return if p.current_num_threads() == n { Ok(()) } else { Err(format!("the thread pool already has {} threads", p.current_num_threads())) };
+            return if p.current_num_threads() == n {
+                Ok(())
+            } else {
+                Err(format!(
+                    "the thread pool already has {} threads",
+                    p.current_num_threads()
+                ))
+            };
         }
         self.n_threads.store(n, Ordering::Relaxed);
         Ok(())
@@ -135,7 +150,8 @@ impl Runtime {
 
     /// The JIT all generated code is linked into.
     pub fn jit(&self) -> &Mutex<crate::jit::Jit> {
-        self.jit.get_or_init(|| Mutex::new(crate::jit::Jit::new().expect("failed to create LLJIT")))
+        self.jit
+            .get_or_init(|| Mutex::new(crate::jit::Jit::new().expect("failed to create LLJIT")))
     }
 }
 
@@ -185,7 +201,14 @@ const SCRATCH_ALIGN: usize = 64;
 
 impl Scratch {
     fn new() -> Self {
-        Scratch { block: std::ptr::null_mut(), cap: 0, off: 0, overflow: Vec::new(), overflow_bytes: 0, peak: 0 }
+        Scratch {
+            block: std::ptr::null_mut(),
+            cap: 0,
+            off: 0,
+            overflow: Vec::new(),
+            overflow_bytes: 0,
+            peak: 0,
+        }
     }
 
     fn get(&mut self, bytes: usize) -> *mut u8 {
@@ -197,8 +220,13 @@ impl Scratch {
             p
         } else {
             // SAFETY: bytes >= 64 (non-zero layout).
-            let p = unsafe { alloc(Layout::from_size_align(bytes, SCRATCH_ALIGN).expect("bad layout")) };
-            assert!(!p.is_null(), "out of memory allocating {bytes} bytes of scratch");
+            let p = unsafe {
+                alloc(Layout::from_size_align(bytes, SCRATCH_ALIGN).expect("bad layout"))
+            };
+            assert!(
+                !p.is_null(),
+                "out of memory allocating {bytes} bytes of scratch"
+            );
             self.overflow.push((p, bytes));
             self.overflow_bytes += bytes;
             p
@@ -208,7 +236,11 @@ impl Scratch {
     }
 
     fn mark(&self) -> ScratchMark {
-        ScratchMark { off: self.off, n_overflow: self.overflow.len(), overflow_bytes: self.overflow_bytes }
+        ScratchMark {
+            off: self.off,
+            n_overflow: self.overflow.len(),
+            overflow_bytes: self.overflow_bytes,
+        }
     }
 
     fn release(&mut self, m: ScratchMark) {
@@ -229,8 +261,12 @@ impl Scratch {
             self.free_block();
             let cap = self.peak.next_power_of_two();
             // SAFETY: cap >= peak > 0 (non-zero layout).
-            self.block = unsafe { alloc(Layout::from_size_align(cap, SCRATCH_ALIGN).expect("bad layout")) };
-            assert!(!self.block.is_null(), "out of memory allocating {cap} bytes of scratch");
+            self.block =
+                unsafe { alloc(Layout::from_size_align(cap, SCRATCH_ALIGN).expect("bad layout")) };
+            assert!(
+                !self.block.is_null(),
+                "out of memory allocating {cap} bytes of scratch"
+            );
             self.cap = cap;
         }
         self.peak = 0;
@@ -239,7 +275,12 @@ impl Scratch {
     fn free_block(&mut self) {
         if !self.block.is_null() {
             // SAFETY: allocated in `regrow` with this size and alignment; reset to null after.
-            unsafe { dealloc(self.block, Layout::from_size_align_unchecked(self.cap, SCRATCH_ALIGN)) };
+            unsafe {
+                dealloc(
+                    self.block,
+                    Layout::from_size_align_unchecked(self.cap, SCRATCH_ALIGN),
+                )
+            };
             self.block = std::ptr::null_mut();
             self.cap = 0;
         }
@@ -265,7 +306,12 @@ unsafe impl Send for PtCtx {}
 // These are "C" (not "C-unwind") because generated and numba frames can't be unwound;
 // a panic here (out of memory) aborts.
 
-unsafe extern "C" fn rt_alloc(ctx: *mut PtCtx, bytes: usize, align: usize, owner: *mut *mut PtBuffer) -> *mut u8 {
+unsafe extern "C" fn rt_alloc(
+    ctx: *mut PtCtx,
+    bytes: usize,
+    align: usize,
+    owner: *mut *mut PtBuffer,
+) -> *mut u8 {
     if bytes > isize::MAX as usize {
         // SAFETY: `owner` is writable and `ctx` live (the contract).
         unsafe {
@@ -299,7 +345,12 @@ unsafe extern "C" fn rt_decref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
 unsafe extern "C" fn rt_scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
     if bytes > isize::MAX as usize {
         // SAFETY: `ctx` is live.
-        unsafe { (*ctx).error = Some((1, format!("could not allocate {} bytes of scratch", bytes as isize))) };
+        unsafe {
+            (*ctx).error = Some((
+                1,
+                format!("could not allocate {} bytes of scratch", bytes as isize),
+            ))
+        };
         return std::ptr::null_mut();
     }
     // SAFETY: see above for `ctx`.
@@ -309,7 +360,11 @@ unsafe extern "C" fn rt_scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
 unsafe extern "C" fn rt_set_error(ctx: *mut PtCtx, code: i32, msg: *const c_char) {
     // SAFETY: `msg` is null or a NUL-terminated string (the ABI contract); `ctx` as above.
     unsafe {
-        let m = if msg.is_null() { String::new() } else { CStr::from_ptr(msg).to_string_lossy().into_owned() };
+        let m = if msg.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(msg).to_string_lossy().into_owned()
+        };
         (*ctx).error = Some((code, m));
     }
 }
@@ -326,7 +381,14 @@ unsafe extern "C" fn rt_scratch_release(ctx: *mut PtCtx, token: i64) {
 
 impl PtCtx {
     pub fn new() -> Self {
-        PtCtx { rt: &RUNTIME.functions, error: None, scratch: Scratch::new(), marks: Vec::new(), rng: entropy_rng(), parallel: true }
+        PtCtx {
+            rt: &RUNTIME.functions,
+            error: None,
+            scratch: Scratch::new(),
+            marks: Vec::new(),
+            rng: entropy_rng(),
+            parallel: true,
+        }
     }
 
     /// Restart the random state from `seed`.

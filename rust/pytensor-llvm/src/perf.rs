@@ -25,7 +25,12 @@ fn map_file() -> Option<&'static Mutex<File>> {
     static MAP: OnceLock<Option<Mutex<File>>> = OnceLock::new();
     MAP.get_or_init(|| {
         let path = format!("/tmp/perf-{}.map", std::process::id());
-        std::fs::OpenOptions::new().create(true).append(true).open(path).ok().map(Mutex::new)
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+            .map(Mutex::new)
     })
     .as_ref()
 }
@@ -41,12 +46,24 @@ pub fn register_object(obj: &[u8], name: &str, addr: usize, label: &str) {
         return;
     }
     let Some(file) = map_file() else { return };
-    let Ok(o) = object::File::parse(obj) else { return };
+    let Ok(o) = object::File::parse(obj) else {
+        return;
+    };
     // (the module's FILE symbol has the same name as the kernel)
-    let Some(anchor) = o.symbols().find(|s| s.kind() == SymbolKind::Text && s.name() == Ok(name)) else { return };
-    let Some(section) = anchor.section_index() else { return };
+    let Some(anchor) = o
+        .symbols()
+        .find(|s| s.kind() == SymbolKind::Text && s.name() == Ok(name))
+    else {
+        return;
+    };
+    let Some(section) = anchor.section_index() else {
+        return;
+    };
     let base = (addr as u64).wrapping_sub(anchor.address());
-    let section_name = o.section_by_index(section).ok().and_then(|s| s.name().ok().map(str::to_owned));
+    let section_name = o
+        .section_by_index(section)
+        .ok()
+        .and_then(|s| s.name().ok().map(str::to_owned));
 
     let mut lines = String::new();
     for s in o.symbols() {
@@ -55,11 +72,19 @@ pub fn register_object(obj: &[u8], name: &str, addr: usize, label: &str) {
         }
         let Ok(sym) = s.name() else { continue };
         let pretty = pretty_name(name, sym, label);
-        lines.push_str(&format!("{:x} {:x} {}\n", base + s.address(), s.size(), pretty));
+        lines.push_str(&format!(
+            "{:x} {:x} {}\n",
+            base + s.address(),
+            s.size(),
+            pretty
+        ));
     }
     if lines.is_empty() {
         // no sized function symbols: at least name the entry point
-        lines = format!("{addr:x} 1 {name} [{label}] ({})\n", section_name.unwrap_or_default());
+        lines = format!(
+            "{addr:x} 1 {name} [{label}] ({})\n",
+            section_name.unwrap_or_default()
+        );
     }
     if let Ok(mut f) = file.lock() {
         let _ = f.write_all(lines.as_bytes());
@@ -71,7 +96,10 @@ pub fn register_object(obj: &[u8], name: &str, addr: usize, label: &str) {
 /// shown as `<label>::<fn> [<hash prefix>]`. Other code shows the entry point with its
 /// label, helpers as `<entry>::<helper>`.
 fn pretty_name(entry: &str, sym: &str, label: &str) -> String {
-    let label: String = label.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let label: String = label
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     if let Some((hash, func)) = split_ir_symbol(sym) {
         return format!("{label}::{func} [{}]", &hash[..8]);
     }
@@ -89,6 +117,7 @@ fn pretty_name(entry: &str, sym: &str, label: &str) -> String {
 fn split_ir_symbol(sym: &str) -> Option<(&str, &str)> {
     let rest = sym.strip_prefix("pt")?;
     let (hash, func) = (rest.get(..32)?, rest.get(32..)?.strip_prefix('_')?);
-    hash.bytes().all(|b| b.is_ascii_hexdigit()).then_some((hash, func))
+    hash.bytes()
+        .all(|b| b.is_ascii_hexdigit())
+        .then_some((hash, func))
 }
-

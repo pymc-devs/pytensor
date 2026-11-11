@@ -12,9 +12,9 @@
 //! static types) and cleans up on errors.
 
 use super::consts::ConstData;
-use crate::abi::{validate_array, PtArray, PtBuffer};
-use crate::runtime::{PtCtx};
+use crate::abi::{PtArray, PtBuffer, validate_array};
 use crate::dtype::DType;
+use crate::runtime::PtCtx;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
@@ -69,8 +69,8 @@ impl ValueSpec {
     }
 }
 
-pub use crate::abi::OutputMode;
 use crate::abi::KernelFn;
+pub use crate::abi::OutputMode;
 
 pub struct Task {
     pub func: usize,
@@ -80,7 +80,6 @@ pub struct Task {
     pub release: Vec<ValueId>,
     pub desc: String,
 }
-
 
 pub struct ProgramSpec {
     pub values: Vec<ValueSpec>,
@@ -112,7 +111,11 @@ pub struct Profile {
 
 impl Profile {
     fn new(n_tasks: usize) -> Profile {
-        Profile { on: AtomicBool::new(false), calls: AtomicU64::new(0), task_ns: (0..n_tasks).map(|_| AtomicU64::new(0)).collect() }
+        Profile {
+            on: AtomicBool::new(false),
+            calls: AtomicU64::new(0),
+            task_ns: (0..n_tasks).map(|_| AtomicU64::new(0)).collect(),
+        }
     }
 }
 
@@ -190,7 +193,11 @@ pub fn c_strides(shape: &[i64], itemsize: i64) -> Vec<i64> {
 
 fn check_shape(v: &ValueSpec, shape: &[i64]) -> R<()> {
     if shape.len() != v.ndim() {
-        return Err(format!("expected {} dimensions, got {}", v.ndim(), shape.len()));
+        return Err(format!(
+            "expected {} dimensions, got {}",
+            v.ndim(),
+            shape.len()
+        ));
     }
     for (a, (&n, s)) in shape.iter().zip(&v.shape).enumerate() {
         if n < 0 {
@@ -223,7 +230,10 @@ impl Program {
                 let mut seen = v.order.clone();
                 seen.sort_unstable();
                 if seen != (0..v.ndim()).collect::<Vec<_>>() {
-                    return Err(format!("value {k}: memory order {:?} isn't a permutation of the axes", v.order));
+                    return Err(format!(
+                        "value {k}: memory order {:?} isn't a permutation of the axes",
+                        v.order
+                    ));
                 }
                 if !matches!(v.kind, ValueKind::Arena(_)) {
                     return Err(format!("value {k}: only arena values have a memory order"));
@@ -243,13 +253,19 @@ impl Program {
                     produced[k] = true;
                 }
                 ValueKind::Arena(off) => {
-                    let nb = v.static_nbytes().ok_or(format!("value {k}: arena value without static size"))? as u64;
+                    let nb = v
+                        .static_nbytes()
+                        .ok_or(format!("value {k}: arena value without static size"))?
+                        as u64;
                     if off % 64 != 0 || off + nb > spec.arena_bytes {
-                        return Err(format!("value {k}: arena placement {off}+{nb} outside the arena"));
+                        return Err(format!(
+                            "value {k}: arena placement {off}+{nb} outside the arena"
+                        ));
                     }
                 }
                 ValueKind::Fresh => {
-                    v.static_nbytes().ok_or(format!("value {k}: fresh value without static size"))?;
+                    v.static_nbytes()
+                        .ok_or(format!("value {k}: fresh value without static size"))?;
                 }
                 ValueKind::Returned(sources) => {
                     for src in sources {
@@ -267,7 +283,10 @@ impl Program {
             }
             for &v in &s.inputs {
                 if !produced[v.i()] {
-                    return Err(format!("task {}: value {} used before it is produced", s.desc, v.0));
+                    return Err(format!(
+                        "task {}: value {} used before it is produced",
+                        s.desc, v.0
+                    ));
                 }
             }
             for &v in &s.outputs {
@@ -277,7 +296,13 @@ impl Program {
                 if in_place && matches!(spec.values[v.i()].kind, ValueKind::Const(_)) {
                     return Err(format!("task {}: a constant can't be overwritten", s.desc));
                 }
-                if !in_place && (produced[v.i()] || matches!(spec.values[v.i()].kind, ValueKind::Input(_) | ValueKind::Const(_))) {
+                if !in_place
+                    && (produced[v.i()]
+                        || matches!(
+                            spec.values[v.i()].kind,
+                            ValueKind::Input(_) | ValueKind::Const(_)
+                        ))
+                {
                     return Err(format!("task {}: value {} produced twice", s.desc, v.0));
                 }
                 produced[v.i()] = true;
@@ -299,7 +324,12 @@ impl Program {
             }
         }
         let profile = Profile::new(spec.tasks.len());
-        Ok(Program { spec, fresh_output, memories: Mutex::new(vec![]), profile })
+        Ok(Program {
+            spec,
+            fresh_output,
+            memories: Mutex::new(vec![]),
+            profile,
+        })
     }
 
     pub fn spec(&self) -> &ProgramSpec {
@@ -336,34 +366,67 @@ impl Program {
             };
             // SAFETY: the storage has 2 * ndim entries.
             let strides = unsafe { st.add(nd) };
-            vals.push(PtArray { data, shape: st, strides, owner: std::ptr::null_mut(), ndim: nd as i64 });
+            vals.push(PtArray {
+                data,
+                shape: st,
+                strides,
+                owner: std::ptr::null_mut(),
+                ndim: nd as i64,
+            });
         }
-        CallMemory { vals, storage, owned: vec![false; self.spec.values.len()], arena, args: vec![] }
+        CallMemory {
+            vals,
+            storage,
+            owned: vec![false; self.spec.values.len()],
+            arena,
+            args: vec![],
+        }
     }
 
     pub fn take_memory(&self) -> CallMemory {
-        let s = self.memories.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let s = self
+            .memories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop();
         s.unwrap_or_else(|| self.new_memory())
     }
 
     pub fn put_memory(&self, st: CallMemory) {
-        self.memories.lock().unwrap_or_else(|e| e.into_inner()).push(st);
+        self.memories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(st);
     }
 
     fn input_value(&self, k: usize) -> ValueId {
-        let i = self.spec.values.iter().position(|v| matches!(v.kind, ValueKind::Input(j) if j == k));
+        let i = self
+            .spec
+            .values
+            .iter()
+            .position(|v| matches!(v.kind, ValueKind::Input(j) if j == k));
         ValueId(i.expect("every input has a value") as u32)
     }
 
     /// Set graph input `k`; returns the byte range it covers. The memory must stay
     /// valid until `finish`.
-    pub fn set_input(&self, st: &mut CallMemory, k: usize, data: *mut u8, shape: &[i64], strides: &[i64]) -> R<(usize, usize)> {
+    pub fn set_input(
+        &self,
+        st: &mut CallMemory,
+        k: usize,
+        data: *mut u8,
+        shape: &[i64],
+        strides: &[i64],
+    ) -> R<(usize, usize)> {
         let v = self.input_value(k);
         let spec = &self.spec.values[v.i()];
         check_shape(spec, shape).map_err(|m| format!("input {k}: {m}"))?;
-        let range = validate_array(data, shape, strides, spec.dtype.itemsize()).map_err(|m| format!("input {k}: {m}"))?;
+        let range = validate_array(data, shape, strides, spec.dtype.itemsize())
+            .map_err(|m| format!("input {k}: {m}"))?;
         if self.input_contiguous(k) && !is_c_contiguous(shape, strides, spec.dtype.itemsize()) {
-            return Err(format!("input {k}: must be C-contiguous (the function was compiled for C-contiguous inputs)"));
+            return Err(format!(
+                "input {k}: must be C-contiguous (the function was compiled for C-contiguous inputs)"
+            ));
         }
         let nd = shape.len();
         st.storage[v.i()][..nd].copy_from_slice(shape);
@@ -402,15 +465,28 @@ impl Program {
     }
 
     /// Run all tasks. `provided[o]` is C-contiguous memory for static graph output `o`.
-    pub fn execute(&self, st: &mut CallMemory, ctx: &mut PtCtx, provided: &[Option<*mut u8>]) -> R<()> {
+    pub fn execute(
+        &self,
+        st: &mut CallMemory,
+        ctx: &mut PtCtx,
+        provided: &[Option<*mut u8>],
+    ) -> R<()> {
         // whatever happens, the call's scratch is released (a panic skips the tasks' own
         // releases)
         let base = ctx.scratch_mark();
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.execute_inner(st, ctx, provided)))
-            .unwrap_or_else(|p| {
-                let msg = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
-                Err(format!("internal error (panic): {}", msg.unwrap_or_default()))
-            });
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.execute_inner(st, ctx, provided)
+        }))
+        .unwrap_or_else(|p| {
+            let msg = p
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
+            Err(format!(
+                "internal error (panic): {}",
+                msg.unwrap_or_default()
+            ))
+        });
         ctx.scratch_release(base);
         if r.is_err() {
             self.release_all(st);
@@ -418,7 +494,12 @@ impl Program {
         r
     }
 
-    fn execute_inner(&self, st: &mut CallMemory, ctx: &mut PtCtx, provided: &[Option<*mut u8>]) -> R<()> {
+    fn execute_inner(
+        &self,
+        st: &mut CallMemory,
+        ctx: &mut PtCtx,
+        provided: &[Option<*mut u8>],
+    ) -> R<()> {
         let values = &self.spec.values;
         let profiling = self.profile.on.load(Relaxed);
         if profiling {
@@ -437,7 +518,9 @@ impl Program {
                     continue;
                 }
                 match values[v.i()].kind {
-                    ValueKind::Fresh => match self.fresh_output[v.i()].and_then(|o| provided.get(o).copied().flatten()) {
+                    ValueKind::Fresh => match self.fresh_output[v.i()]
+                        .and_then(|o| provided.get(o).copied().flatten())
+                    {
                         Some(p) => {
                             a.data = p;
                             a.owner = std::ptr::null_mut();
@@ -447,7 +530,10 @@ impl Program {
                             // SAFETY: ctx is the live context.
                             let (data, owner) = unsafe { PtCtx::alloc(ctx, nb) };
                             if data.is_null() {
-                                return Err(format!("{}: could not allocate {nb} bytes", task.desc));
+                                return Err(format!(
+                                    "{}: could not allocate {nb} bytes",
+                                    task.desc
+                                ));
                             }
                             a.data = data;
                             a.owner = owner;
@@ -492,18 +578,24 @@ impl Program {
                     st.vals[v.i()].owner = a.owner;
                     // A buffer the task allocated is ours to release. A view comes back
                     // with the owner of the value it lies in, or with none.
-                    st.owned[v.i()] = !a.owner.is_null() && sources.iter().all(|src| a.owner != st.vals[src.i()].owner);
+                    st.owned[v.i()] = !a.owner.is_null()
+                        && sources.iter().all(|src| a.owner != st.vals[src.i()].owner);
                 }
             }
             if rc != 0 {
-                let msg = ctx.error.take().map(|(_, m)| m).unwrap_or_else(|| format!("error {rc}"));
+                let msg = ctx
+                    .error
+                    .take()
+                    .map(|(_, m)| m)
+                    .unwrap_or_else(|| format!("error {rc}"));
                 return Err(format!("{}: {msg}", task.desc));
             }
             for (k, &v) in task.outputs.iter().enumerate() {
                 if matches!(values[v.i()].kind, ValueKind::Returned(_)) {
                     // SAFETY: the storage holds ndim entries, written by the kernel.
                     let shape = unsafe { st.vals[v.i()].shape() };
-                    check_shape(&values[v.i()], shape).map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
+                    check_shape(&values[v.i()], shape)
+                        .map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
                     if st.vals[v.i()].data.is_null() && shape.iter().product::<i64>() != 0 {
                         return Err(format!("{}: output {k} was not set", task.desc));
                     }
@@ -531,7 +623,12 @@ impl Program {
         if !a.owner.is_null() {
             // SAFETY: a live buffer.
             unsafe { PtBuffer::incref(a.owner) };
-            return Ok(OutArray { data: a.data, shape, strides, owner: a.owner });
+            return Ok(OutArray {
+                data: a.data,
+                shape,
+                strides,
+                owner: a.owner,
+            });
         }
         let isz = self.spec.values[v.i()].dtype.itemsize();
         let n = crate::abi::checked_nbytes(&shape, isz).ok_or("output too large")?;
@@ -543,7 +640,12 @@ impl Program {
         let dst_strides = c_strides(&shape, isz as i64);
         // SAFETY: a valid array and a fresh buffer of its size.
         unsafe { copy_strided(a.data, &shape, &strides, data, &dst_strides, isz) };
-        Ok(OutArray { data, shape, strides: dst_strides, owner })
+        Ok(OutArray {
+            data,
+            shape,
+            strides: dst_strides,
+            owner,
+        })
     }
 
     /// Release what the call still holds (after the outputs were taken).
@@ -583,7 +685,14 @@ impl Program {
                             // static shape (with the caller's strides).
                             unsafe {
                                 let (shape, strides) = (a.shape().to_vec(), a.strides().to_vec());
-                                copy_strided(a.data, &shape, &strides, dst.data, dst.strides(), self.spec.values[v.i()].dtype.itemsize());
+                                copy_strided(
+                                    a.data,
+                                    &shape,
+                                    &strides,
+                                    dst.data,
+                                    dst.strides(),
+                                    self.spec.values[v.i()].dtype.itemsize(),
+                                );
                             }
                         }
                     }
@@ -617,12 +726,22 @@ impl Program {
 
     pub fn reset_profile(&self) {
         self.profile.calls.store(0, Relaxed);
-        self.profile.task_ns.iter().for_each(|t| t.store(0, Relaxed));
+        self.profile
+            .task_ns
+            .iter()
+            .for_each(|t| t.store(0, Relaxed));
     }
 
     /// (number of calls, seconds per task) since the last reset.
     pub fn profile(&self) -> (u64, Vec<f64>) {
-        (self.profile.calls.load(Relaxed), self.profile.task_ns.iter().map(|t| t.load(Relaxed) as f64 * 1e-9).collect())
+        (
+            self.profile.calls.load(Relaxed),
+            self.profile
+                .task_ns
+                .iter()
+                .map(|t| t.load(Relaxed) as f64 * 1e-9)
+                .collect(),
+        )
     }
 
     /// The program as text: values with their types and storage, then the tasks.
@@ -640,27 +759,50 @@ impl Program {
         );
         let _ = writeln!(s, "values:");
         for (k, v) in sp.values.iter().enumerate() {
-            let shape: Vec<String> = v.shape.iter().map(|d| d.map_or("?".to_string(), |n| n.to_string())).collect();
+            let shape: Vec<String> = v
+                .shape
+                .iter()
+                .map(|d| d.map_or("?".to_string(), |n| n.to_string()))
+                .collect();
             let ty = format!("{}[{}]", v.dtype.numpy_name(), shape.join(", "));
             let kind = match &v.kind {
-                ValueKind::Input(i) if self.input_contiguous(*i) => format!("input {i} (C-contiguous)"),
+                ValueKind::Input(i) if self.input_contiguous(*i) => {
+                    format!("input {i} (C-contiguous)")
+                }
                 ValueKind::Input(i) => format!("input {i}"),
                 ValueKind::Const(_) => "constant".to_string(),
-                ValueKind::Arena(off) if !v.order.is_empty() => format!("arena +{off}, order {:?}", v.order),
+                ValueKind::Arena(off) if !v.order.is_empty() => {
+                    format!("arena +{off}, order {:?}", v.order)
+                }
                 ValueKind::Arena(off) => format!("arena +{off}"),
                 ValueKind::Fresh => "fresh (output)".to_string(),
-                ValueKind::Returned(sources) if sources.is_empty() => "allocated by its task".to_string(),
+                ValueKind::Returned(sources) if sources.is_empty() => {
+                    "allocated by its task".to_string()
+                }
                 ValueKind::Returned(sources) => {
                     let names: Vec<String> = sources.iter().map(|s| format!("%{}", s.0)).collect();
-                    format!("returned by its task, may be a view of {}", names.join(", "))
+                    format!(
+                        "returned by its task, may be a view of {}",
+                        names.join(", ")
+                    )
                 }
             };
             let _ = writeln!(s, "  %{k:<4} {ty:<24} {kind}");
         }
         let _ = writeln!(s, "tasks:");
-        let ids = |v: &[ValueId]| v.iter().map(|x| format!("%{}", x.0)).collect::<Vec<_>>().join(", ");
+        let ids = |v: &[ValueId]| {
+            v.iter()
+                .map(|x| format!("%{}", x.0))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         for (k, st) in sp.tasks.iter().enumerate() {
-            let mut line = format!("  {k:<4} ({}) -> ({})  {}", ids(&st.inputs), ids(&st.outputs), st.desc);
+            let mut line = format!(
+                "  {k:<4} ({}) -> ({})  {}",
+                ids(&st.inputs),
+                ids(&st.outputs),
+                st.desc
+            );
             if !st.release.is_empty() {
                 let _ = write!(line, "  [release {}]", ids(&st.release));
             }
@@ -670,7 +812,17 @@ impl Program {
             .outputs
             .iter()
             .zip(&sp.output_modes)
-            .map(|(v, m)| format!("%{} ({})", v.0, if *m == OutputMode::Provided { "provided" } else { "allocated" }))
+            .map(|(v, m)| {
+                format!(
+                    "%{} ({})",
+                    v.0,
+                    if *m == OutputMode::Provided {
+                        "provided"
+                    } else {
+                        "allocated"
+                    }
+                )
+            })
             .collect();
         let _ = writeln!(s, "outputs: {}", outs.join(", "));
         s
@@ -726,7 +878,11 @@ fn release(st: &mut CallMemory, v: ValueId) {
 /// `config` points to a live `Program` (kept alive by the outer program) and `args` holds
 /// its inputs and outputs as the outer task declared them.
 #[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_program_call(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_program_call(
+    ctx: *mut PtCtx,
+    args: *mut PtArray,
+    config: *const u8,
+) -> i32 {
     // SAFETY: the function's contract.
     unsafe {
         let p = &*(config as *const Program);
@@ -741,7 +897,14 @@ pub unsafe extern "C-unwind" fn ptl_program_call(ctx: *mut PtCtx, args: *mut PtA
 ///
 /// # Safety
 /// Both describe valid memory of `shape` with their strides; they don't overlap.
-pub unsafe fn copy_strided(src: *const u8, shape: &[i64], src_strides: &[i64], dst: *mut u8, dst_strides: &[i64], itemsize: usize) {
+pub unsafe fn copy_strided(
+    src: *const u8,
+    shape: &[i64],
+    src_strides: &[i64],
+    dst: *mut u8,
+    dst_strides: &[i64],
+    itemsize: usize,
+) {
     let nd = shape.len();
     if shape.contains(&0) {
         return;

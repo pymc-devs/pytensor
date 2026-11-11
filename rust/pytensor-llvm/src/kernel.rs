@@ -24,7 +24,7 @@
 //! promise of the kernel: it asks for the element types it was planned with (that is
 //! why `Kernel` is an unsafe trait, and the only `unsafe` a kernel needs).
 
-use crate::abi::{bad_size, checked_nbytes, OutputMode, PtArray};
+use crate::abi::{OutputMode, PtArray, bad_size, checked_nbytes};
 use crate::dtype::DType;
 use crate::runtime::PtCtx;
 use faer::{MatMut, MatRef};
@@ -72,7 +72,11 @@ pub unsafe trait Kernel: Send + Sync + 'static {
 /// overlaps no input and no other output; otherwise writable shape and strides
 /// storage of the output's ndim). Strides are multiples of the itemsize and data is
 /// aligned (the C API checks both for what comes from outside).
-pub unsafe extern "C-unwind" fn entry<K: Kernel>(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
+pub unsafe extern "C-unwind" fn entry<K: Kernel>(
+    ctx: *mut PtCtx,
+    args: *mut PtArray,
+    config: *const u8,
+) -> i32 {
     // SAFETY: the function's contract.
     let (kernel, c) = unsafe { (&*(config as *const K), &mut *ctx) };
     let (n_in, n_out) = kernel.arity();
@@ -80,7 +84,13 @@ pub unsafe extern "C-unwind" fn entry<K: Kernel>(ctx: *mut PtCtx, args: *mut PtA
     // else uses them during the call.
     let arrays = unsafe { std::slice::from_raw_parts_mut(args, n_in + n_out) };
     let (inputs, outputs) = arrays.split_at_mut(n_in);
-    match kernel.run(c, Args { inputs: Inputs { arrays: inputs }, outputs: Outputs { arrays: outputs } }) {
+    match kernel.run(
+        c,
+        Args {
+            inputs: Inputs { arrays: inputs },
+            outputs: Outputs { arrays: outputs },
+        },
+    ) {
         Ok(()) => 0,
         Err(message) => {
             c.error = Some((1, message));
@@ -119,12 +129,20 @@ impl<'a> Inputs<'a> {
         // SAFETY: inputs are valid arrays (`entry`'s contract): shape and strides have
         // `ndim` entries, which nothing writes during the call.
         let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-        Bytes { data: a.data, shape, strides, itemsize }
+        Bytes {
+            data: a.data,
+            shape,
+            strides,
+            itemsize,
+        }
     }
 
     /// Input `i`, an array of `T` (the kernel's promise: it is one).
     pub fn array<T: Element>(&self, i: usize) -> Array<'a, T> {
-        Array { bytes: self.bytes(i, size_of::<T>()), _t: PhantomData }
+        Array {
+            bytes: self.bytes(i, size_of::<T>()),
+            _t: PhantomData,
+        }
     }
 }
 
@@ -135,7 +153,14 @@ pub struct Outputs<'a> {
 impl Outputs<'_> {
     /// Memory for output `o` of `shape`: the provided memory (whose shape must match),
     /// or a new C-contiguous buffer.
-    pub fn bytes(&mut self, ctx: &mut PtCtx, o: usize, mode: OutputMode, itemsize: usize, shape: &[i64]) -> Result<BytesMut<'_>, String> {
+    pub fn bytes(
+        &mut self,
+        ctx: &mut PtCtx,
+        o: usize,
+        mode: OutputMode,
+        itemsize: usize,
+        shape: &[i64],
+    ) -> Result<BytesMut<'_>, String> {
         let a = &mut self.arrays[o];
         match mode {
             OutputMode::Provided => {
@@ -144,11 +169,20 @@ impl Outputs<'_> {
                 if have != shape {
                     return Err(format!("output {o} has shape {have:?}, expected {shape:?}"));
                 }
-                Ok(BytesMut { data: a.data, shape: have, strides, itemsize })
+                Ok(BytesMut {
+                    data: a.data,
+                    shape: have,
+                    strides,
+                    itemsize,
+                })
             }
             OutputMode::Allocated => {
                 if a.ndim as usize != shape.len() {
-                    return Err(format!("output {o} has {} axes, expected {}", a.ndim, shape.len()));
+                    return Err(format!(
+                        "output {o} has {} axes, expected {}",
+                        a.ndim,
+                        shape.len()
+                    ));
                 }
                 let n = checked_nbytes(shape, itemsize).ok_or_else(|| bad_size("output", shape))?;
                 // SAFETY: ctx is the live context.
@@ -170,23 +204,49 @@ impl Outputs<'_> {
                 a.owner = owner;
                 // SAFETY: as above; only read from here on.
                 let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-                Ok(BytesMut { data, shape, strides, itemsize })
+                Ok(BytesMut {
+                    data,
+                    shape,
+                    strides,
+                    itemsize,
+                })
             }
-            OutputMode::View => Err(format!("output {o}: this kernel writes its outputs, it can't return a view")),
+            OutputMode::View => Err(format!(
+                "output {o}: this kernel writes its outputs, it can't return a view"
+            )),
         }
     }
 
     /// Memory for output `o`, an array of `T` (the kernel's promise: it is one).
-    pub fn array<T: Element>(&mut self, ctx: &mut PtCtx, o: usize, mode: OutputMode, shape: &[i64]) -> Result<ArrayMut<'_, T>, String> {
-        Ok(ArrayMut { bytes: self.bytes(ctx, o, mode, size_of::<T>(), shape)?, _t: PhantomData })
+    pub fn array<T: Element>(
+        &mut self,
+        ctx: &mut PtCtx,
+        o: usize,
+        mode: OutputMode,
+        shape: &[i64],
+    ) -> Result<ArrayMut<'_, T>, String> {
+        Ok(ArrayMut {
+            bytes: self.bytes(ctx, o, mode, size_of::<T>(), shape)?,
+            _t: PhantomData,
+        })
     }
 
     /// Output `o` is a view of input `i`: its memory, seen with `shape` and `strides`
     /// (per output axis, the input axis it is, or None for a new axis of length 1).
-    pub fn view(&mut self, o: usize, inputs: &Inputs, i: usize, axes: &[Option<usize>]) -> Result<(), String> {
+    pub fn view(
+        &mut self,
+        o: usize,
+        inputs: &Inputs,
+        i: usize,
+        axes: &[Option<usize>],
+    ) -> Result<(), String> {
         let (out, source) = (&mut self.arrays[o], &inputs.arrays[i]);
         if out.ndim as usize != axes.len() {
-            return Err(format!("output {o} has {} axes, expected {}", out.ndim, axes.len()));
+            return Err(format!(
+                "output {o} has {} axes, expected {}",
+                out.ndim,
+                axes.len()
+            ));
         }
         // SAFETY: a valid input (`entry`'s contract).
         let (shape, strides) = unsafe { (source.shape(), source.strides()) };
@@ -243,11 +303,23 @@ impl BytesMut<'_> {
     /// Copy the elements of `source`, an array of the same shape and element size.
     pub fn copy_from(&mut self, source: &Bytes) -> Result<(), String> {
         if source.shape != self.shape || source.itemsize != self.itemsize {
-            return Err(format!("can't copy an array of shape {:?} into one of shape {:?}", source.shape, self.shape));
+            return Err(format!(
+                "can't copy an array of shape {:?} into one of shape {:?}",
+                source.shape, self.shape
+            ));
         }
         // SAFETY: both are valid memory of this shape with their strides, and memory
         // to write overlaps nothing else (the invariants of the two types).
-        unsafe { crate::interp::program::copy_strided(source.data, self.shape, source.strides, self.data, self.strides, self.itemsize) };
+        unsafe {
+            crate::interp::program::copy_strided(
+                source.data,
+                self.shape,
+                source.strides,
+                self.data,
+                self.strides,
+                self.itemsize,
+            )
+        };
         Ok(())
     }
 }
@@ -267,10 +339,20 @@ pub struct ArrayMut<'a, T> {
 
 /// (rows, columns, row stride, column stride) of a vector or matrix, strides in
 /// elements. A vector is a column, or a row if `as_row`; a scalar is 1 x 1.
-fn matrix_parts(shape: &[i64], strides: &[i64], itemsize: usize, as_row: bool) -> (usize, usize, isize, isize) {
+fn matrix_parts(
+    shape: &[i64],
+    strides: &[i64],
+    itemsize: usize,
+    as_row: bool,
+) -> (usize, usize, isize, isize) {
     let isz = itemsize as i64;
     match (shape.len(), as_row) {
-        (2, _) => (shape[0] as usize, shape[1] as usize, (strides[0] / isz) as isize, (strides[1] / isz) as isize),
+        (2, _) => (
+            shape[0] as usize,
+            shape[1] as usize,
+            (strides[0] / isz) as isize,
+            (strides[1] / isz) as isize,
+        ),
         (1, true) => (1, shape[0] as usize, 0, (strides[0] / isz) as isize),
         (1, false) => (shape[0] as usize, 1, (strides[0] / isz) as isize, 0),
         (0, _) => (1, 1, 0, 0),
@@ -293,10 +375,19 @@ impl<'a, T: Element> Array<'a, T> {
 
     /// A vector or matrix as a faer matrix. A vector is a column, or a row if `as_row`.
     pub fn matrix(&self, as_row: bool) -> MatRef<'a, T> {
-        let (rows, cols, row_stride, col_stride) = matrix_parts(self.bytes.shape, self.bytes.strides, size_of::<T>(), as_row);
+        let (rows, cols, row_stride, col_stride) =
+            matrix_parts(self.bytes.shape, self.bytes.strides, size_of::<T>(), as_row);
         // SAFETY: valid, aligned memory of `T` for this shape and these strides, not
         // written while 'a lasts (the type's invariant).
-        unsafe { MatRef::from_raw_parts(self.bytes.data as *const T, rows, cols, row_stride, col_stride) }
+        unsafe {
+            MatRef::from_raw_parts(
+                self.bytes.data as *const T,
+                rows,
+                cols,
+                row_stride,
+                col_stride,
+            )
+        }
     }
 
     /// The elements of a vector whose elements are adjacent in memory, else None.
@@ -304,7 +395,11 @@ impl<'a, T: Element> Array<'a, T> {
         match (self.bytes.shape, self.bytes.strides) {
             (&[n], &[stride]) if n <= 1 || stride == size_of::<T>() as i64 => {
                 // SAFETY: n adjacent, aligned, valid `T`s, not written while 'a lasts.
-                Some(if n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(self.bytes.data as *const T, n as usize) } })
+                Some(if n == 0 {
+                    &[]
+                } else {
+                    unsafe { std::slice::from_raw_parts(self.bytes.data as *const T, n as usize) }
+                })
             }
             _ => None,
         }
@@ -322,10 +417,19 @@ impl<T: Element> ArrayMut<'_, T> {
 
     /// A vector or matrix as a faer matrix. A vector is a column, or a row if `as_row`.
     pub fn matrix_mut(&mut self, as_row: bool) -> MatMut<'_, T> {
-        let (rows, cols, row_stride, col_stride) = matrix_parts(self.bytes.shape, self.bytes.strides, size_of::<T>(), as_row);
+        let (rows, cols, row_stride, col_stride) =
+            matrix_parts(self.bytes.shape, self.bytes.strides, size_of::<T>(), as_row);
         // SAFETY: valid, aligned memory of `T` for this shape and these strides that
         // nothing else uses while `self` is borrowed (the type's invariant).
-        unsafe { MatMut::from_raw_parts_mut(self.bytes.data as *mut T, rows, cols, row_stride, col_stride) }
+        unsafe {
+            MatMut::from_raw_parts_mut(
+                self.bytes.data as *mut T,
+                rows,
+                cols,
+                row_stride,
+                col_stride,
+            )
+        }
     }
 }
 
@@ -359,14 +463,22 @@ impl<T: Element> Lane<'_, T> {
     pub fn read_into(&self, values: &mut Vec<T>) {
         values.clear();
         // SAFETY: the lane's `len` elements, `stride` bytes apart, are valid `T`s.
-        values.extend((0..self.len as isize).map(|i| unsafe { *self.first.byte_offset(i * self.stride) }));
+        values.extend(
+            (0..self.len as isize).map(|i| unsafe { *self.first.byte_offset(i * self.stride) }),
+        );
     }
 }
 
 impl<T: Element> LaneMut<'_, T> {
     /// Set the lane's elements; `values` has one for each.
     pub fn write(&mut self, values: &[T]) {
-        assert_eq!(values.len(), self.len, "a lane of {} elements can't take {}", self.len, values.len());
+        assert_eq!(
+            values.len(),
+            self.len,
+            "a lane of {} elements can't take {}",
+            self.len,
+            values.len()
+        );
         for (i, value) in values.iter().enumerate() {
             // SAFETY: the lane's `len` elements, `stride` bytes apart, are ours to write.
             unsafe { *self.first.byte_offset(i as isize * self.stride) = *value };
@@ -376,10 +488,18 @@ impl<T: Element> LaneMut<'_, T> {
 
 /// Call `f` with every lane of `source` along `axis` and the same lane of `target`,
 /// an array of the same shape.
-pub fn zip_lanes<T: Element>(source: &Array<T>, target: &mut ArrayMut<T>, axis: usize, mut f: impl FnMut(Lane<T>, LaneMut<T>)) -> Result<(), String> {
+pub fn zip_lanes<T: Element>(
+    source: &Array<T>,
+    target: &mut ArrayMut<T>,
+    axis: usize,
+    mut f: impl FnMut(Lane<T>, LaneMut<T>),
+) -> Result<(), String> {
     let shape = source.bytes.shape;
     if shape != target.bytes.shape {
-        return Err(format!("arrays of shape {:?} and {:?} don't have the same lanes", shape, target.bytes.shape));
+        return Err(format!(
+            "arrays of shape {:?} and {:?} don't have the same lanes",
+            shape, target.bytes.shape
+        ));
     }
     if axis >= shape.len() {
         return Err(format!("axis {axis} of an array with {} axes", shape.len()));
@@ -397,8 +517,18 @@ pub fn zip_lanes<T: Element>(source: &Array<T>, target: &mut ArrayMut<T>, axis: 
         // once, and for the duration of `f` only.
         let (lane, lane_mut) = unsafe {
             (
-                Lane { first: source.bytes.data.offset(source_offset) as *const T, len, stride: s[axis] as isize, _t: PhantomData },
-                LaneMut { first: target.bytes.data.offset(target_offset) as *mut T, len, stride: t[axis] as isize, _t: PhantomData },
+                Lane {
+                    first: source.bytes.data.offset(source_offset) as *const T,
+                    len,
+                    stride: s[axis] as isize,
+                    _t: PhantomData,
+                },
+                LaneMut {
+                    first: target.bytes.data.offset(target_offset) as *mut T,
+                    len,
+                    stride: t[axis] as isize,
+                    _t: PhantomData,
+                },
             )
         };
         f(lane, lane_mut);
@@ -429,7 +559,9 @@ pub fn zip_lanes<T: Element>(source: &Array<T>, target: &mut ArrayMut<T>, axis: 
 
 /// Temporary memory for `n` values of `T`, valid until the task ends.
 pub fn scratch<T: Element>(ctx: &mut PtCtx, n: usize) -> &mut [MaybeUninit<T>] {
-    let bytes = n.checked_mul(size_of::<T>()).expect("scratch size overflows");
+    let bytes = n
+        .checked_mul(size_of::<T>())
+        .expect("scratch size overflows");
     // SAFETY: `ctx` is a live context. Scratch memory is aligned for every element
     // type, at least `bytes` long, distinct from everything else, and stays valid
     // until the task ends, which outlives the borrow of `ctx`.

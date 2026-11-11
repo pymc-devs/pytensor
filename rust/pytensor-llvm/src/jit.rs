@@ -24,7 +24,6 @@ pub struct Jit {
 // the Mutex in `jit()`.
 unsafe impl Send for Jit {}
 
-
 /// SAFETY: `err` is a live LLVMErrorRef; this consumes it.
 unsafe fn err_to_string(err: LLVMErrorRef) -> String {
     // SAFETY: the function's contract; the message is disposed once.
@@ -65,7 +64,12 @@ impl Jit {
             // libm etc. from the host process
             let mut gen1: LLVMOrcDefinitionGeneratorRef = std::ptr::null_mut();
             check(
-                LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(&mut gen1, prefix, None, std::ptr::null_mut()),
+                LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(
+                    &mut gen1,
+                    prefix,
+                    None,
+                    std::ptr::null_mut(),
+                ),
                 "process symbol generator",
             )?;
             LLVMOrcJITDylibAddGenerator(jd, gen1);
@@ -74,7 +78,11 @@ impl Jit {
             let path = CString::new("libmvec.so.1").unwrap();
             let mut gen2: LLVMOrcDefinitionGeneratorRef = std::ptr::null_mut();
             let err = LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(
-                &mut gen2, path.as_ptr(), prefix, None, std::ptr::null_mut(),
+                &mut gen2,
+                path.as_ptr(),
+                prefix,
+                None,
+                std::ptr::null_mut(),
             );
             if err.is_null() {
                 LLVMOrcJITDylibAddGenerator(jd, gen2);
@@ -105,7 +113,11 @@ impl Jit {
             let mu = LLVMOrcAbsoluteSymbols(pairs.as_mut_ptr(), pairs.len());
             check(LLVMOrcJITDylibDefine(jd, mu), "define Rust symbols")?;
 
-            Ok(Jit { jit, jd, symbols: HashMap::new() })
+            Ok(Jit {
+                jit,
+                jd,
+                symbols: HashMap::new(),
+            })
         }
     }
 
@@ -121,7 +133,12 @@ impl Jit {
         let n = CString::new(name).map_err(|e| e.to_string())?;
         let mut addr: LLVMOrcExecutorAddress = 0;
         // SAFETY: looking up a symbol in the live JIT.
-        unsafe { check(LLVMOrcLLJITLookup(self.jit, &mut addr, n.as_ptr()), "lookup")? };
+        unsafe {
+            check(
+                LLVMOrcLLJITLookup(self.jit, &mut addr, n.as_ptr()),
+                "lookup",
+            )?
+        };
         self.symbols.insert(name.to_string(), addr as usize);
         Ok(addr as usize)
     }
@@ -140,9 +157,15 @@ impl Jit {
                 obj.len(),
                 bufname.as_ptr(),
             );
-            check(LLVMOrcLLJITAddObjectFile(self.jit, self.jd, buf), "add object")?;
+            check(
+                LLVMOrcLLJITAddObjectFile(self.jit, self.jd, buf),
+                "add object",
+            )?;
             let mut addr: LLVMOrcExecutorAddress = 0;
-            check(LLVMOrcLLJITLookup(self.jit, &mut addr, bufname.as_ptr()), "lookup")?;
+            check(
+                LLVMOrcLLJITLookup(self.jit, &mut addr, bufname.as_ptr()),
+                "lookup",
+            )?;
             self.symbols.insert(name.to_string(), addr as usize);
             crate::perf::register_object(obj, name, addr as usize, label);
             Ok(addr as usize)

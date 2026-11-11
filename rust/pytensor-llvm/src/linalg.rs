@@ -5,17 +5,23 @@
 //! allocate.
 
 use crate::abi::OutputMode;
-use crate::kernel::{scratch, Args, Array, ArrayMut, Element, Kernel};
+use crate::kernel::{Args, Array, ArrayMut, Element, Kernel, scratch};
 use crate::runtime::PtCtx;
+use faer::Par;
 use faer::dyn_stack::MemStack;
 use faer::linalg::cholesky::llt::factor::{cholesky_in_place, cholesky_in_place_scratch};
 use faer::linalg::triangular_solve as tri;
 use faer::prelude::ReborrowMut;
-use faer::Par;
 use std::marker::PhantomData;
 
 /// float32 and float64.
-pub trait Float: Element + faer::traits::RealField + Default + std::ops::Add<Output = Self> + std::ops::Mul<Output = Self> {
+pub trait Float:
+    Element
+    + faer::traits::RealField
+    + Default
+    + std::ops::Add<Output = Self>
+    + std::ops::Mul<Output = Self>
+{
     const NAN: Self;
     const ZERO: Self;
 
@@ -58,7 +64,11 @@ unsafe impl<T: Float> Kernel for Dot<T> {
         let (a, b) = (args.inputs.array::<T>(0), args.inputs.array::<T>(1));
         let (sa, sb) = (a.shape(), b.shape());
         if !matches!(sa.len(), 1 | 2) || !matches!(sb.len(), 1 | 2) {
-            return Err(format!("Dot: of arrays with {} and {} axes", sa.len(), sb.len()));
+            return Err(format!(
+                "Dot: of arrays with {} and {} axes",
+                sa.len(),
+                sb.len()
+            ));
         }
         if sa.last() != sb.first() {
             return Err(format!("Dot: shapes {sa:?} and {sb:?} are not aligned"));
@@ -83,14 +93,24 @@ const SHORT_ROW: usize = 64;
 
 /// `out = a b`, with `a` a matrix or a row, `b` a matrix or a column, `out` of the
 /// product's shape (a vector result is a row if `out_as_row`).
-fn matmul<T: Float>(ctx: &mut PtCtx, a: &Array<T>, b: &Array<T>, out: &mut ArrayMut<T>, out_as_row: bool) {
+fn matmul<T: Float>(
+    ctx: &mut PtCtx,
+    a: &Array<T>,
+    b: &Array<T>,
+    out: &mut ArrayMut<T>,
+    out_as_row: bool,
+) {
     let (lhs, rhs, mut dst) = (a.matrix(true), b.matrix(false), out.matrix_mut(out_as_row));
     let (m, n) = (lhs.nrows(), rhs.ncols());
     // matrix times vector: (the matrix, the vector, the result)
     let gemv = if n == 1 {
         Some((lhs, rhs.col(0), dst.rb_mut().col_mut(0)))
     } else if m == 1 {
-        Some((rhs.transpose(), lhs.row(0).transpose(), dst.rb_mut().row_mut(0).transpose_mut()))
+        Some((
+            rhs.transpose(),
+            lhs.row(0).transpose(),
+            dst.rb_mut().row_mut(0).transpose_mut(),
+        ))
     } else {
         None
     };
@@ -112,7 +132,17 @@ fn matmul<T: Float>(ctx: &mut PtCtx, a: &Array<T>, b: &Array<T>, out: &mut Array
             // apart; `x` points to `k` adjacent initialized elements (the vector's
             // own, or the copy just made); `y` has `rows` elements `row_stride`
             // apart, ours to write.
-            unsafe { simd::gemv_short_rows(rows, k, matrix.as_ptr(), matrix.row_stride(), x, y.as_ptr_mut(), y.row_stride()) };
+            unsafe {
+                simd::gemv_short_rows(
+                    rows,
+                    k,
+                    matrix.as_ptr(),
+                    matrix.row_stride(),
+                    x,
+                    y.as_ptr_mut(),
+                    y.row_stride(),
+                )
+            };
             return;
         }
     }
@@ -131,7 +161,15 @@ mod simd {
     /// poorly: 4 rows at a time, 4 independent lanes along each row (so LLVM vectorizes
     /// without reassociating), x contiguous.
     #[inline(always)]
-    unsafe fn gemv_short_rows_impl<T: Float, const FMA: bool>(m: usize, k: usize, a: *const T, rsa: isize, x: *const T, y: *mut T, incy: isize) {
+    unsafe fn gemv_short_rows_impl<T: Float, const FMA: bool>(
+        m: usize,
+        k: usize,
+        a: *const T,
+        rsa: isize,
+        x: *const T,
+        y: *mut T,
+        incy: isize,
+    ) {
         const L: usize = 4;
         let kl = k - k % L;
         let mut i = 0;
@@ -169,7 +207,15 @@ mod simd {
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2,fma")]
-    unsafe fn gemv_short_rows_avx2<T: Float>(m: usize, k: usize, a: *const T, rsa: isize, x: *const T, y: *mut T, incy: isize) {
+    unsafe fn gemv_short_rows_avx2<T: Float>(
+        m: usize,
+        k: usize,
+        a: *const T,
+        rsa: isize,
+        x: *const T,
+        y: *mut T,
+        incy: isize,
+    ) {
         gemv_short_rows_impl::<T, true>(m, k, a, rsa, x, y, incy)
     }
 
@@ -179,7 +225,15 @@ mod simd {
     ///
     /// # Safety
     /// The pointers are valid for those elements, and `y` overlaps neither `A` nor `x`.
-    pub unsafe fn gemv_short_rows<T: Float>(m: usize, k: usize, a: *const T, rsa: isize, x: *const T, y: *mut T, incy: isize) {
+    pub unsafe fn gemv_short_rows<T: Float>(
+        m: usize,
+        k: usize,
+        a: *const T,
+        rsa: isize,
+        x: *const T,
+        y: *mut T,
+        incy: isize,
+    ) {
         #[cfg(target_arch = "x86_64")]
         {
             if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
@@ -211,7 +265,10 @@ unsafe impl<T: Float> Kernel for Cholesky<T> {
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
         let a = args.inputs.array::<T>(0);
         let &[n, columns] = a.shape() else {
-            return Err(format!("Cholesky: input must be a matrix, got {} axes", a.ndim()));
+            return Err(format!(
+                "Cholesky: input must be a matrix, got {} axes",
+                a.ndim()
+            ));
         };
         if n != columns {
             return Err(format!("Cholesky: input must be square, got {n}x{columns}"));
@@ -230,7 +287,14 @@ unsafe impl<T: Float> Kernel for Cholesky<T> {
         }
         let work = cholesky_in_place_scratch::<T>(n, Par::Seq, Default::default());
         let stack = MemStack::new(scratch::<u8>(ctx, work.unaligned_bytes_required()));
-        let ok = cholesky_in_place(factor.rb_mut(), Default::default(), Par::Seq, stack, Default::default()).is_ok();
+        let ok = cholesky_in_place(
+            factor.rb_mut(),
+            Default::default(),
+            Par::Seq,
+            stack,
+            Default::default(),
+        )
+        .is_ok();
         // faer leaves the other triangle unspecified; LAPACK-clean output zeroes it
         for j in 0..n {
             for i in 0..n {
@@ -266,13 +330,21 @@ unsafe impl<T: Float> Kernel for SolveTriangular<T> {
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
         let (a, b) = (args.inputs.array::<T>(0), args.inputs.array::<T>(1));
         let &[n, columns] = a.shape() else {
-            return Err(format!("SolveTriangular: A must be a matrix, got {} axes", a.ndim()));
+            return Err(format!(
+                "SolveTriangular: A must be a matrix, got {} axes",
+                a.ndim()
+            ));
         };
         if n != columns {
-            return Err(format!("SolveTriangular: A must be square, got {n}x{columns}"));
+            return Err(format!(
+                "SolveTriangular: A must be square, got {n}x{columns}"
+            ));
         }
         if !matches!(b.ndim(), 1 | 2) || b.shape()[0] != n {
-            return Err(format!("SolveTriangular: shapes of A ({n}x{n}) and b ({:?}) are incompatible", b.shape()));
+            return Err(format!(
+                "SolveTriangular: shapes of A ({n}x{n}) and b ({:?}) are incompatible",
+                b.shape()
+            ));
         }
         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, b.shape())?;
         let matrix = a.matrix(false);

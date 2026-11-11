@@ -8,13 +8,13 @@ use crate::abi::OutputMode;
 use crate::dtype::DType;
 use crate::kernel::Kernel;
 use crate::linalg;
-use std::marker::PhantomData;
-use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
+use numpy::npyffi::{NPY_ARRAY_WRITEABLE, NpyTypes, PY_ARRAY_API, npy_intp};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
+use pyo3::PyClassInitializer;
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::PyClassInitializer;
 use pyo3::types::{PyCapsule, PyList, PyTuple};
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 fn err<T>(msg: impl Into<String>) -> PyResult<T> {
@@ -22,7 +22,8 @@ fn err<T>(msg: impl Into<String>) -> PyResult<T> {
 }
 
 fn dtype_of(d: &Bound<'_, PyArrayDescr>) -> PyResult<DType> {
-    DType::from_numpy(d.kind(), d.itemsize()).ok_or_else(|| PyTypeError::new_err(format!("dtype {d} is not supported")))
+    DType::from_numpy(d.kind(), d.itemsize())
+        .ok_or_else(|| PyTypeError::new_err(format!("dtype {d} is not supported")))
 }
 
 fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
@@ -77,10 +78,22 @@ impl RustKernel {
         Ok(RustKernel::of(kernel, desc, Produces::Fresh(vec![mode])))
     }
 
-    fn new<T: Send + Sync + 'static>(f: usize, config: T, desc: String, produces: Produces) -> Self {
+    fn new<T: Send + Sync + 'static>(
+        f: usize,
+        config: T,
+        desc: String,
+        produces: Produces,
+    ) -> Self {
         let config: Box<T> = Box::new(config);
         let config_ptr = &*config as *const T as usize;
-        RustKernel { address: f, config, config_ptr, desc, produces, programs: vec![] }
+        RustKernel {
+            address: f,
+            config,
+            config_ptr,
+            desc,
+            produces,
+            programs: vec![],
+        }
     }
 }
 
@@ -106,16 +119,35 @@ impl RustKernel {
     /// where unknown): `[(mode, view_of, layout)]` with mode "provided", "allocated" or
     /// "view" (the Python side's `llvm_outputs`, for this kernel).
     /// `out_ndims`: the number of axes of each output.
-    fn outputs(&self, in_layouts: Vec<Option<Layout>>, out_ndims: Vec<usize>) -> PyResult<Vec<(&'static str, Option<usize>, Layout)>> {
+    fn outputs(
+        &self,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
+    ) -> PyResult<Vec<(&'static str, Option<usize>, Layout)>> {
         match &self.produces {
             Produces::Fresh(modes) => {
                 if modes.len() != out_ndims.len() {
-                    return err(format!("{}: {} outputs, got {} ndims", self.desc, modes.len(), out_ndims.len()));
+                    return err(format!(
+                        "{}: {} outputs, got {} ndims",
+                        self.desc,
+                        modes.len(),
+                        out_ndims.len()
+                    ));
                 }
                 Ok(modes
                     .iter()
                     .zip(&out_ndims)
-                    .map(|(m, &nd)| (if *m == OutputMode::Provided { "provided" } else { "allocated" }, None, Layout::c(nd)))
+                    .map(|(m, &nd)| {
+                        (
+                            if *m == OutputMode::Provided {
+                                "provided"
+                            } else {
+                                "allocated"
+                            },
+                            None,
+                            Layout::c(nd),
+                        )
+                    })
                     .collect())
             }
             Produces::DimShuffle(order) => {
@@ -161,7 +193,14 @@ pub struct Copy;
 impl Copy {
     #[new]
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
-        let k = RustKernel::writing(kernels::Copy { mode, dtype: dtype_of(&dtype)? }, mode, "Copy".into())?;
+        let k = RustKernel::writing(
+            kernels::Copy {
+                mode,
+                dtype: dtype_of(&dtype)?,
+            },
+            mode,
+            "Copy".into(),
+        )?;
         Ok(PyClassInitializer::from(k).add_subclass(Copy))
     }
 }
@@ -175,8 +214,22 @@ impl Dot {
     fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
         let desc = "Dot".to_string();
         let k = match dtype_of(&dtype)? {
-            DType::Float64 => RustKernel::writing(linalg::Dot::<f64> { mode, element: PhantomData }, mode, desc)?,
-            DType::Float32 => RustKernel::writing(linalg::Dot::<f32> { mode, element: PhantomData }, mode, desc)?,
+            DType::Float64 => RustKernel::writing(
+                linalg::Dot::<f64> {
+                    mode,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )?,
+            DType::Float32 => RustKernel::writing(
+                linalg::Dot::<f32> {
+                    mode,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )?,
             dt => return err(format!("Dot of {dt:?}")),
         };
         Ok(PyClassInitializer::from(k).add_subclass(Dot))
@@ -190,10 +243,29 @@ pub struct Sort;
 #[pymethods]
 impl Sort {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, axis: usize, stable: bool) -> PyResult<PyClassInitializer<Self>> {
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        axis: usize,
+        stable: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("Sort(axis={axis})");
-        fn sort<T: crate::sort::Sortable>(mode: OutputMode, axis: usize, stable: bool, desc: String) -> PyResult<RustKernel> {
-            RustKernel::writing(crate::sort::Sort::<T> { mode, axis, stable, element: PhantomData }, mode, desc)
+        fn sort<T: crate::sort::Sortable>(
+            mode: OutputMode,
+            axis: usize,
+            stable: bool,
+            desc: String,
+        ) -> PyResult<RustKernel> {
+            RustKernel::writing(
+                crate::sort::Sort::<T> {
+                    mode,
+                    axis,
+                    stable,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )
         }
         let k = match dtype_of(&dtype)? {
             DType::Float64 => sort::<f64>(mode, axis, stable, desc)?,
@@ -212,11 +284,31 @@ pub struct Cholesky;
 #[pymethods]
 impl Cholesky {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, lower: bool) -> PyResult<PyClassInitializer<Self>> {
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        lower: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("Cholesky(lower={lower})");
         let k = match dtype_of(&dtype)? {
-            DType::Float64 => RustKernel::writing(linalg::Cholesky::<f64> { mode, lower, element: PhantomData }, mode, desc)?,
-            DType::Float32 => RustKernel::writing(linalg::Cholesky::<f32> { mode, lower, element: PhantomData }, mode, desc)?,
+            DType::Float64 => RustKernel::writing(
+                linalg::Cholesky::<f64> {
+                    mode,
+                    lower,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )?,
+            DType::Float32 => RustKernel::writing(
+                linalg::Cholesky::<f32> {
+                    mode,
+                    lower,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )?,
             dt => return err(format!("Cholesky of {dt:?}")),
         };
         Ok(PyClassInitializer::from(k).add_subclass(Cholesky))
@@ -230,10 +322,29 @@ pub struct SolveTriangular;
 #[pymethods]
 impl SolveTriangular {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>, lower: bool, unit_diagonal: bool) -> PyResult<PyClassInitializer<Self>> {
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        lower: bool,
+        unit_diagonal: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("SolveTriangular(lower={lower}, unit_diagonal={unit_diagonal})");
-        fn solve<T: linalg::Float>(mode: OutputMode, lower: bool, unit_diagonal: bool, desc: String) -> PyResult<RustKernel> {
-            RustKernel::writing(linalg::SolveTriangular::<T> { mode, lower, unit_diagonal, element: PhantomData }, mode, desc)
+        fn solve<T: linalg::Float>(
+            mode: OutputMode,
+            lower: bool,
+            unit_diagonal: bool,
+            desc: String,
+        ) -> PyResult<RustKernel> {
+            RustKernel::writing(
+                linalg::SolveTriangular::<T> {
+                    mode,
+                    lower,
+                    unit_diagonal,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )
         }
         let k = match dtype_of(&dtype)? {
             DType::Float64 => solve::<f64>(mode, lower, unit_diagonal, desc)?,
@@ -268,11 +379,35 @@ impl Scan {
         outer_in_dtypes: Vec<Bound<'_, PyArrayDescr>>,
         inner_out_dtypes: Vec<Bound<'_, PyArrayDescr>>,
     ) -> PyResult<PyClassInitializer<Self>> {
-        let info = super::scan::ScanInfo { n_seqs, mit_mot_in, mit_mot_out, mit_sot_in, sit_sot_in, n_untraced, n_nit_sot, n_non_seqs, as_while };
-        let (n_mm, n_ms, n_ss) = (info.mit_mot_in.len(), info.mit_sot_in.len(), info.sit_sot_in.len());
-        let n_in = 1 + n_seqs + info.mit_mot_in.len() + info.mit_sot_in.len() + info.sit_sot_in.len() + n_untraced + n_nit_sot + n_non_seqs;
+        let info = super::scan::ScanInfo {
+            n_seqs,
+            mit_mot_in,
+            mit_mot_out,
+            mit_sot_in,
+            sit_sot_in,
+            n_untraced,
+            n_nit_sot,
+            n_non_seqs,
+            as_while,
+        };
+        let (n_mm, n_ms, n_ss) = (
+            info.mit_mot_in.len(),
+            info.mit_sot_in.len(),
+            info.sit_sot_in.len(),
+        );
+        let n_in = 1
+            + n_seqs
+            + info.mit_mot_in.len()
+            + info.mit_sot_in.len()
+            + info.sit_sot_in.len()
+            + n_untraced
+            + n_nit_sot
+            + n_non_seqs;
         if outer_in_dtypes.len() != n_in {
-            return err(format!("Scan: {n_in} outer inputs, got {} dtypes", outer_in_dtypes.len()));
+            return err(format!(
+                "Scan: {n_in} outer inputs, got {} dtypes",
+                outer_in_dtypes.len()
+            ));
         }
         let prog = body.get().prog.clone();
         let n_body_in = n_seqs
@@ -287,20 +422,34 @@ impl Scan {
             + n_nit_sot
             + n_untraced
             + as_while as usize;
-        if prog.n_inputs() != n_body_in || prog.n_outputs() != n_body_out || inner_out_dtypes.len() != n_body_out {
+        if prog.n_inputs() != n_body_in
+            || prog.n_outputs() != n_body_out
+            || inner_out_dtypes.len() != n_body_out
+        {
             return err("Scan: the loop body doesn't match the scan's layout");
         }
         let config = super::scan::ScanConfig {
             info,
             body: prog,
-            outer_in_dtypes: outer_in_dtypes.iter().map(dtype_of).collect::<PyResult<_>>()?,
-            inner_out_dtypes: inner_out_dtypes.iter().map(dtype_of).collect::<PyResult<_>>()?,
+            outer_in_dtypes: outer_in_dtypes
+                .iter()
+                .map(dtype_of)
+                .collect::<PyResult<_>>()?,
+            inner_out_dtypes: inner_out_dtypes
+                .iter()
+                .map(dtype_of)
+                .collect::<PyResult<_>>()?,
             keepalive: body.clone().into_any().unbind(),
         };
         // every outer output is one of the kernel's C-contiguous buffers
         let n_outer_out = n_mm + n_ms + n_ss + n_nit_sot + n_untraced;
         let produces = Produces::Fresh(vec![OutputMode::Allocated; n_outer_out]);
-        let mut k = RustKernel::new(super::scan::k_scan as *const () as usize, config, "Scan".into(), produces);
+        let mut k = RustKernel::new(
+            super::scan::k_scan as *const () as usize,
+            config,
+            "Scan".into(),
+            produces,
+        );
         k.programs.push(body.clone().unbind());
         let _ = py;
         Ok(PyClassInitializer::from(k).add_subclass(Scan))
@@ -321,8 +470,18 @@ pub struct ProgramBuilder {
 }
 
 impl ProgramBuilder {
-    fn add(&mut self, dtype: &Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, kind: ValueKind) -> PyResult<u32> {
-        self.values.push(ValueSpec { dtype: dtype_of(dtype)?, shape, kind, order: vec![] });
+    fn add(
+        &mut self,
+        dtype: &Bound<'_, PyArrayDescr>,
+        shape: Vec<Option<u64>>,
+        kind: ValueKind,
+    ) -> PyResult<u32> {
+        self.values.push(ValueSpec {
+            dtype: dtype_of(dtype)?,
+            shape,
+            kind,
+            order: vec![],
+        });
         Ok((self.values.len() - 1) as u32)
     }
 }
@@ -331,14 +490,26 @@ impl ProgramBuilder {
 impl ProgramBuilder {
     #[new]
     fn new() -> Self {
-        ProgramBuilder { values: vec![], n_inputs: 0, tasks: vec![], keepalive: vec![], arena_bytes: 0, contiguous_inputs: vec![] }
+        ProgramBuilder {
+            values: vec![],
+            n_inputs: 0,
+            tasks: vec![],
+            keepalive: vec![],
+            arena_bytes: 0,
+            contiguous_inputs: vec![],
+        }
     }
 
     /// The next graph input. Returns its value id.
     /// A graph input; `contiguous`: the generated code assumes it is C-contiguous
     /// (Python calls copy other arrays, the C API rejects them).
     #[pyo3(signature = (dtype, shape, contiguous = false))]
-    fn input(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, contiguous: bool) -> PyResult<u32> {
+    fn input(
+        &mut self,
+        dtype: Bound<'_, PyArrayDescr>,
+        shape: Vec<Option<u64>>,
+        contiguous: bool,
+    ) -> PyResult<u32> {
         let k = self.n_inputs;
         self.n_inputs += 1;
         self.contiguous_inputs.push(contiguous);
@@ -349,32 +520,63 @@ impl ProgramBuilder {
         let dt = dtype_of(&array.dtype())?;
         let np = array.py().import("numpy")?;
         let native = np.call_method1("ascontiguousarray", (array,))?;
-        let native = native.call_method1("astype", (array.dtype().call_method1("newbyteorder", ("=",))?,))?;
+        let native = native.call_method1(
+            "astype",
+            (array.dtype().call_method1("newbyteorder", ("=",))?,),
+        )?;
         let bytes: Vec<u8> = native.call_method0("tobytes")?.extract()?;
         let shape: Vec<i64> = array.shape().iter().map(|&n| n as i64).collect();
         let c = ConstData::new(dt, shape.clone(), &bytes).map_err(PyValueError::new_err)?;
-        self.values.push(ValueSpec { dtype: dt, shape: shape.iter().map(|&n| Some(n as u64)).collect(), kind: ValueKind::Const(Arc::new(c)), order: vec![] });
+        self.values.push(ValueSpec {
+            dtype: dt,
+            shape: shape.iter().map(|&n| Some(n as u64)).collect(),
+            kind: ValueKind::Const(Arc::new(c)),
+            order: vec![],
+        });
         Ok((self.values.len() - 1) as u32)
     }
 
     /// A static temporary at `offset` in the arena (provided to its producer).
     /// `order`: the memory order (outermost axis first) the value is packed in; default C.
     #[pyo3(signature = (dtype, shape, offset, order = None))]
-    fn arena(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<u64>, offset: u64, order: Option<Vec<usize>>) -> PyResult<u32> {
-        let k = self.add(&dtype, shape.into_iter().map(Some).collect(), ValueKind::Arena(offset))?;
+    fn arena(
+        &mut self,
+        dtype: Bound<'_, PyArrayDescr>,
+        shape: Vec<u64>,
+        offset: u64,
+        order: Option<Vec<usize>>,
+    ) -> PyResult<u32> {
+        let k = self.add(
+            &dtype,
+            shape.into_iter().map(Some).collect(),
+            ValueKind::Arena(offset),
+        )?;
         self.values[k as usize].order = order.unwrap_or_default();
         Ok(k)
     }
 
     /// A static graph output: a fresh buffer per call, provided to its producer.
     fn fresh(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<u64>) -> PyResult<u32> {
-        self.add(&dtype, shape.into_iter().map(Some).collect(), ValueKind::Fresh)
+        self.add(
+            &dtype,
+            shape.into_iter().map(Some).collect(),
+            ValueKind::Fresh,
+        )
     }
 
     /// A value its producer returns: a buffer it allocates, or a view into the memory
     /// of one of the values `may_alias`.
-    fn returned(&mut self, dtype: Bound<'_, PyArrayDescr>, shape: Vec<Option<u64>>, may_alias: Vec<u32>) -> PyResult<u32> {
-        self.add(&dtype, shape, ValueKind::Returned(may_alias.into_iter().map(ValueId).collect()))
+    fn returned(
+        &mut self,
+        dtype: Bound<'_, PyArrayDescr>,
+        shape: Vec<Option<u64>>,
+        may_alias: Vec<u32>,
+    ) -> PyResult<u32> {
+        self.add(
+            &dtype,
+            shape,
+            ValueKind::Returned(may_alias.into_iter().map(ValueId).collect()),
+        )
     }
 
     /// Append a task. `keepalive` is kept alive as long as the program (the compiled
@@ -422,7 +624,11 @@ impl ProgramBuilder {
             contiguous_inputs: std::mem::take(&mut self.contiguous_inputs),
         };
         let prog = RProgram::new(spec).map_err(PyValueError::new_err)?;
-        Ok(Program { prog: Arc::new(prog), keepalive: std::mem::take(&mut self.keepalive), session: std::sync::Mutex::new(None) })
+        Ok(Program {
+            prog: Arc::new(prog),
+            keepalive: std::mem::take(&mut self.keepalive),
+            session: std::sync::Mutex::new(None),
+        })
     }
 }
 
@@ -430,13 +636,20 @@ struct SendPtr(*mut crate::abi::PtBuffer);
 // SAFETY: moves one buffer reference into a capsule destructor; refcounts are atomic.
 unsafe impl Send for SendPtr {}
 
-fn wrap_output<'py>(py: Python<'py>, dt: DType, o: &super::program::OutArray) -> PyResult<Bound<'py, PyAny>> {
+fn wrap_output<'py>(
+    py: Python<'py>,
+    dt: DType,
+    o: &super::program::OutArray,
+) -> PyResult<Bound<'py, PyAny>> {
     let owner = SendPtr(o.owner);
     // SAFETY: the capsule holds the one reference of `o`; numpy calls the destructor
     // once, when the array (its base) is freed.
-    let capsule = PyCapsule::new_with_value_and_destructor(py, owner, c"pytensor_llvm.buffer", |b: SendPtr, _| unsafe {
-        crate::abi::PtBuffer::decref(b.0)
-    })?;
+    let capsule = PyCapsule::new_with_value_and_destructor(
+        py,
+        owner,
+        c"pytensor_llvm.buffer",
+        |b: SendPtr, _| unsafe { crate::abi::PtBuffer::decref(b.0) },
+    )?;
     let mut dims: Vec<npy_intp> = o.shape.iter().map(|&s| s as npy_intp).collect();
     let mut strides: Vec<npy_intp> = o.strides.iter().map(|&s| s as npy_intp).collect();
     // SAFETY: `o` describes a valid array in the buffer the capsule keeps alive; the
@@ -493,11 +706,18 @@ impl Program {
     fn __call__(&self, py: Python<'_>, args: &Bound<'_, PyTuple>) -> PyResult<Py<PyList>> {
         let prog = &*self.prog;
         if args.len() != prog.n_inputs() {
-            return err(format!("expected {} inputs, got {}", prog.n_inputs(), args.len()));
+            return err(format!(
+                "expected {} inputs, got {}",
+                prog.n_inputs(),
+                args.len()
+            ));
         }
         let np = py.import("numpy")?;
         let mut guard = self.lock_session(py);
-        let Session { memory: st, ctx } = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::runtime::PtCtx::new() });
+        let Session { memory: st, ctx } = guard.get_or_insert_with(|| Session {
+            memory: prog.take_memory(),
+            ctx: crate::runtime::PtCtx::new(),
+        });
         let mut keep = Vec::with_capacity(args.len());
         let mut work = 0usize;
         let res = (|| -> PyResult<Vec<super::program::OutArray>> {
@@ -506,7 +726,8 @@ impl Program {
                 let exact = match a.cast::<PyUntypedArray>() {
                     Ok(arr) => {
                         let d = arr.dtype();
-                        DType::from_numpy(d.kind(), d.itemsize()) == Some(want) && d.is_native_byteorder() != Some(false)
+                        DType::from_numpy(d.kind(), d.itemsize()) == Some(want)
+                            && d.is_native_byteorder() != Some(false)
                     }
                     Err(_) => false,
                 };
@@ -522,8 +743,11 @@ impl Program {
                 let flags = unsafe { (*arr.as_array_ptr()).fields.flags };
                 let aligned = flags & numpy::npyffi::NPY_ARRAY_ALIGNED != 0;
                 let a = if !aligned {
-                    np.call_method1("ascontiguousarray", (a,))?.call_method0("copy")?
-                } else if prog.input_contiguous(k) && flags & numpy::npyffi::NPY_ARRAY_C_CONTIGUOUS == 0 {
+                    np.call_method1("ascontiguousarray", (a,))?
+                        .call_method0("copy")?
+                } else if prog.input_contiguous(k)
+                    && flags & numpy::npyffi::NPY_ARRAY_C_CONTIGUOUS == 0
+                {
                     np.call_method1("ascontiguousarray", (a,))?
                 } else {
                     a
@@ -534,20 +758,28 @@ impl Program {
                 let data = unsafe { (*arr.as_array_ptr()).fields.data as *mut u8 };
                 let shape: Vec<i64> = arr.shape().iter().map(|&n| n as i64).collect();
                 let strides: Vec<i64> = arr.strides().iter().map(|&s| s as i64).collect();
-                prog.set_input(st, k, data, &shape, &strides).map_err(PyValueError::new_err)?;
+                prog.set_input(st, k, data, &shape, &strides)
+                    .map_err(PyValueError::new_err)?;
                 work += arr.len();
                 keep.push(a);
             }
-            let run = |st: &mut super::program::CallMemory, ctx: &mut crate::runtime::PtCtx| -> Result<Vec<super::program::OutArray>, String> {
+            let run = |st: &mut super::program::CallMemory,
+                       ctx: &mut crate::runtime::PtCtx|
+             -> Result<Vec<super::program::OutArray>, String> {
                 let none = vec![None; prog.n_outputs()];
                 prog.execute(st, ctx, &none)?;
-                let outs = (0..prog.n_outputs()).map(|o| prog.take_output(st, ctx, o)).collect::<Result<Vec<_>, _>>();
+                let outs = (0..prog.n_outputs())
+                    .map(|o| prog.take_output(st, ctx, o))
+                    .collect::<Result<Vec<_>, _>>();
                 prog.finish(st);
                 outs
             };
             // releasing the GIL costs ~100ns: only worth it with real work
             let r = if work > 20_000 {
-                struct S<'a>(&'a mut super::program::CallMemory, &'a mut crate::runtime::PtCtx);
+                struct S<'a>(
+                    &'a mut super::program::CallMemory,
+                    &'a mut crate::runtime::PtCtx,
+                );
                 // SAFETY: the session and context are exclusively ours for this call.
                 unsafe impl Send for S<'_> {}
                 let s = S(&mut *st, &mut *ctx);
@@ -563,8 +795,11 @@ impl Program {
         drop(keep);
         drop(guard);
         let outs = res?;
-        let arrays: Vec<Bound<'_, PyAny>> =
-            outs.iter().enumerate().map(|(o, a)| wrap_output(py, prog.output_dtype(o), a)).collect::<PyResult<_>>()?;
+        let arrays: Vec<Bound<'_, PyAny>> = outs
+            .iter()
+            .enumerate()
+            .map(|(o, a)| wrap_output(py, prog.output_dtype(o), a))
+            .collect::<PyResult<_>>()?;
         Ok(PyList::new(py, arrays)?.unbind())
     }
 
@@ -630,8 +865,21 @@ impl Program {
         let mut s = String::new();
         let (calls, _) = self.prog.profile();
         let total: f64 = self.prog.profile().1.iter().sum();
-        let _ = writeln!(s, "{calls} calls, {:.3} ms in tasks ({:.2} us per call)", total * 1e3, if calls > 0 { total / calls as f64 * 1e6 } else { 0.0 });
-        let _ = writeln!(s, "{:>7} {:>10} {:>10}  task (subprogram tasks indented)", "%", "total ms", "us/call");
+        let _ = writeln!(
+            s,
+            "{calls} calls, {:.3} ms in tasks ({:.2} us per call)",
+            total * 1e3,
+            if calls > 0 {
+                total / calls as f64 * 1e6
+            } else {
+                0.0
+            }
+        );
+        let _ = writeln!(
+            s,
+            "{:>7} {:>10} {:>10}  task (subprogram tasks indented)",
+            "%", "total ms", "us/call"
+        );
         self.report_into(py, 0, total, calls, &mut s);
         s
     }
@@ -641,7 +889,10 @@ impl Program {
     fn seed(&self, py: Python<'_>, seed: u64) {
         let prog = &self.prog;
         let mut guard = self.lock_session(py);
-        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::runtime::PtCtx::new() });
+        let s = guard.get_or_insert_with(|| Session {
+            memory: prog.take_memory(),
+            ctx: crate::runtime::PtCtx::new(),
+        });
         s.ctx.seed(seed);
     }
 
@@ -650,7 +901,10 @@ impl Program {
     fn set_parallel(&self, py: Python<'_>, on: bool) {
         let prog = &self.prog;
         let mut guard = self.lock_session(py);
-        let s = guard.get_or_insert_with(|| Session { memory: prog.take_memory(), ctx: crate::runtime::PtCtx::new() });
+        let s = guard.get_or_insert_with(|| Session {
+            memory: prog.take_memory(),
+            ctx: crate::runtime::PtCtx::new(),
+        });
         s.ctx.parallel = on;
     }
 
@@ -671,7 +925,12 @@ impl Program {
     #[getter]
     fn tasks(&self) -> Vec<String> {
         let _ = &self.keepalive;
-        self.prog.spec().tasks.iter().map(|s| s.desc.clone()).collect()
+        self.prog
+            .spec()
+            .tasks
+            .iter()
+            .map(|s| s.desc.clone())
+            .collect()
     }
 }
 
@@ -719,7 +978,11 @@ impl Program {
                 if let Ok(p) = k.cast::<Program>() {
                     vec![p.clone().unbind()]
                 } else if let Ok(kern) = k.cast::<RustKernel>() {
-                    kern.get().programs.iter().map(|p| p.clone_ref(py)).collect()
+                    kern.get()
+                        .programs
+                        .iter()
+                        .map(|p| p.clone_ref(py))
+                        .collect()
                 } else {
                     vec![]
                 }
@@ -727,7 +990,12 @@ impl Program {
             .collect()
     }
 
-    fn profile_rows(&self, py: Python<'_>, depth: usize, rows: &mut Vec<(usize, String, u64, f64)>) {
+    fn profile_rows(
+        &self,
+        py: Python<'_>,
+        depth: usize,
+        rows: &mut Vec<(usize, String, u64, f64)>,
+    ) {
         let (calls, secs) = self.prog.profile();
         let children = self.children(py);
         for (k, task) in self.prog.spec().tasks.iter().enumerate() {
@@ -746,10 +1014,23 @@ impl Program {
         let mut order: Vec<usize> = (0..secs.len()).collect();
         order.sort_by(|&a, &b| secs[b].total_cmp(&secs[a]));
         for k in order {
-            let pct = if total > 0.0 { 100.0 * secs[k] / total } else { 0.0 };
-            let per = if calls > 0 { secs[k] / calls as f64 * 1e6 } else { 0.0 };
+            let pct = if total > 0.0 {
+                100.0 * secs[k] / total
+            } else {
+                0.0
+            };
+            let per = if calls > 0 {
+                secs[k] / calls as f64 * 1e6
+            } else {
+                0.0
+            };
             let desc: String = self.prog.spec().tasks[k].desc.chars().take(100).collect();
-            let _ = writeln!(s, "{pct:>6.1}% {:>10.3} {per:>10.2}  {}{desc}", secs[k] * 1e3, "  ".repeat(depth));
+            let _ = writeln!(
+                s,
+                "{pct:>6.1}% {:>10.3} {per:>10.2}  {}{desc}",
+                secs[k] * 1e3,
+                "  ".repeat(depth)
+            );
             for c in children.get(k).into_iter().flatten() {
                 c.get().report_into(py, depth + 1, total, calls, s);
             }
@@ -761,7 +1042,9 @@ impl Program {
 /// first parallel loop runs). Default: `PYTENSOR_LLVM_THREADS`, else one per CPU.
 #[pyfunction]
 pub fn set_threads(n: usize) -> PyResult<()> {
-    crate::runtime::runtime().set_threads(n).map_err(PyRuntimeError::new_err)
+    crate::runtime::runtime()
+        .set_threads(n)
+        .map_err(PyRuntimeError::new_err)
 }
 
 /// The number of threads parallel loops use.
