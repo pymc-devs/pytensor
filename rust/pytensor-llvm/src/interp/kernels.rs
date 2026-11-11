@@ -40,6 +40,8 @@ unsafe impl Kernel for Copy {
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
         let source = args.inputs.bytes(0, self.dtype.itemsize());
-        args.outputs.bytes(ctx, 0, self.mode, self.dtype.itemsize(), source.shape())?.copy_from(&source)
+        args.outputs
+            .bytes(ctx, 0, self.mode, self.dtype.itemsize(), source.shape())?
+            .copy_from(&source)
     }
 }

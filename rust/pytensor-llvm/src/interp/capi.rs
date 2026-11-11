@@ -8,12 +8,12 @@
 //! the Python object it came from. A `PtSession*` owns a clone of that Arc and one
 //! [`CallMemory`]. Every entry point catches panics so they never unwind into C.
 
-use super::program::{c_strides, copy_strided, CallMemory, Program};
-use crate::abi::{overlaps, validate_array, PtArray, PtBuffer, ABI_VERSION};
-use crate::runtime::{PtCtx};
+use super::program::{CallMemory, Program, c_strides, copy_strided};
+use crate::abi::{ABI_VERSION, PtArray, PtBuffer, overlaps, validate_array};
+use crate::runtime::PtCtx;
 use pyo3::prelude::*;
-use std::ffi::{c_char, CString};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ffi::{CString, c_char};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 pub const API_VERSION: u32 = 3;
@@ -43,7 +43,11 @@ impl Function {
             .map(|k| prog.input_shape(k))
             .chain((0..prog.n_outputs()).map(|o| prog.output_shape(o)))
             .collect();
-        Function { prog, keepalive, shapes }
+        Function {
+            prog,
+            keepalive,
+            shapes,
+        }
     }
 
     /// A new reference as a `PtFunction*`.
@@ -119,7 +123,13 @@ unsafe extern "C" fn input_type(f: *const Function, i: usize, out: *mut PtTypeIn
     }
     let sh = &f.shapes[i];
     // SAFETY: `out` is writable; the shape lives as long as `f`.
-    unsafe { *out = PtTypeInfo { dtype: f.prog.input_dtype(i).code(), ndim: sh.len() as i32, static_shape: sh.as_ptr() } };
+    unsafe {
+        *out = PtTypeInfo {
+            dtype: f.prog.input_dtype(i).code(),
+            ndim: sh.len() as i32,
+            static_shape: sh.as_ptr(),
+        }
+    };
     0
 }
 
@@ -131,7 +141,13 @@ unsafe extern "C" fn output_type(f: *const Function, o: usize, out: *mut PtTypeI
     }
     let sh = &f.shapes[f.prog.n_inputs() + o];
     // SAFETY: `out` is writable; the shape lives as long as `f`.
-    unsafe { *out = PtTypeInfo { dtype: f.prog.output_dtype(o).code(), ndim: sh.len() as i32, static_shape: sh.as_ptr() } };
+    unsafe {
+        *out = PtTypeInfo {
+            dtype: f.prog.output_dtype(o).code(),
+            ndim: sh.len() as i32,
+            static_shape: sh.as_ptr(),
+        }
+    };
     0
 }
 
@@ -142,7 +158,15 @@ unsafe extern "C" fn session_new(f: *const Function) -> *mut PtSession {
         Arc::from_raw(f)
     };
     let memory = f.prog.take_memory();
-    let s = PtSession { f, memory, ctx: PtCtx::new(), in_ranges: vec![], out_ranges: vec![], provided: vec![], err: CString::default() };
+    let s = PtSession {
+        f,
+        memory,
+        ctx: PtCtx::new(),
+        in_ranges: vec![],
+        out_ranges: vec![],
+        provided: vec![],
+        err: CString::default(),
+    };
     Box::into_raw(Box::new(s))
 }
 
@@ -193,7 +217,8 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
         check_header("input", k, a, prog.input_ndim(k))?;
         // SAFETY: ndim and the pointers were just checked.
         let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-        s.in_ranges.push(prog.set_input(&mut s.memory, k, a.data, shape, strides)?);
+        s.in_ranges
+            .push(prog.set_input(&mut s.memory, k, a.data, shape, strides)?);
     }
     // SAFETY: `outputs` holds n_outputs arrays (contract).
     let outs = unsafe { std::slice::from_raw_parts_mut(outputs, n_out) };
@@ -208,17 +233,24 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
         // SAFETY: ndim and the pointers were just checked.
         let (shape, strides) = unsafe { (a.shape(), a.strides()) };
         let isz = prog.output_dtype(o).itemsize();
-        let r = validate_array(a.data, shape, strides, isz).map_err(|e| format!("provided output {o}: {e}"))?;
+        let r = validate_array(a.data, shape, strides, isz)
+            .map_err(|e| format!("provided output {o}: {e}"))?;
         if let Some(i) = s.in_ranges.iter().position(|&x| overlaps(x, r)) {
-            return Err(format!("provided output {o} overlaps the memory of input {i}"));
+            return Err(format!(
+                "provided output {o} overlaps the memory of input {i}"
+            ));
         }
         if s.out_ranges.iter().any(|&x| overlaps(x, r)) {
-            return Err(format!("provided output {o} overlaps another provided output"));
+            return Err(format!(
+                "provided output {o} overlaps another provided output"
+            ));
         }
         s.out_ranges.push(r);
         if let Some(st) = prog.output_static_shape(o) {
             if st != shape {
-                return Err(format!("provided output {o}: shape {shape:?}, the output has shape {st:?}"));
+                return Err(format!(
+                    "provided output {o}: shape {shape:?}, the output has shape {st:?}"
+                ));
             }
         }
         // written in place by the producing task when it has the layout we'd choose
@@ -247,7 +279,10 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
                     let (shape, strides) = unsafe { (v.shape(), v.strides()) };
                     // SAFETY: as above, ndim was checked.
                     if shape != unsafe { a.shape() } {
-                        return Err(format!("provided output {o}: shape mismatch: the result has shape {shape:?}, got {:?}", unsafe { a.shape() }));
+                        return Err(format!(
+                            "provided output {o}: shape mismatch: the result has shape {shape:?}, got {:?}",
+                            unsafe { a.shape() }
+                        ));
                     }
                     let isz = prog.output_dtype(o).itemsize();
                     // SAFETY: same shape, both valid arrays, no overlap with inputs (checked).

@@ -1,7 +1,7 @@
 //! Sort along an axis, NaNs last.
 
 use crate::abi::OutputMode;
-use crate::kernel::{zip_lanes, Args, Element, Kernel};
+use crate::kernel::{Args, Element, Kernel, zip_lanes};
 use crate::runtime::PtCtx;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
@@ -66,7 +66,13 @@ mod tests {
     use crate::kernel::entry;
 
     fn array(data: &mut [f64], shape: &mut [i64], strides: &mut [i64]) -> PtArray {
-        PtArray { data: data.as_mut_ptr() as *mut u8, shape: shape.as_mut_ptr(), strides: strides.as_mut_ptr(), owner: std::ptr::null_mut(), ndim: shape.len() as i64 }
+        PtArray {
+            data: data.as_mut_ptr() as *mut u8,
+            shape: shape.as_mut_ptr(),
+            strides: strides.as_mut_ptr(),
+            owner: std::ptr::null_mut(),
+            ndim: shape.len() as i64,
+        }
     }
 
     #[test]
@@ -76,12 +82,26 @@ mod tests {
         let mut sorted = [0.0; 6];
         let (mut shape, mut out_shape) = ([2i64, 3], [2i64, 3]);
         let (mut strides, mut out_strides) = ([24i64, 8], [8i64, 16]);
-        let mut args = [array(&mut source, &mut shape, &mut strides), array(&mut sorted, &mut out_shape, &mut out_strides)];
-        let kernel = Sort::<f64> { mode: OutputMode::Provided, axis: 1, stable: true, element: PhantomData };
+        let mut args = [
+            array(&mut source, &mut shape, &mut strides),
+            array(&mut sorted, &mut out_shape, &mut out_strides),
+        ];
+        let kernel = Sort::<f64> {
+            mode: OutputMode::Provided,
+            axis: 1,
+            stable: true,
+            element: PhantomData,
+        };
         let mut ctx = PtCtx::new();
         // SAFETY: a live context, the kernel as its config, and one valid input and
         // one provided output of f64 that don't overlap.
-        let code = unsafe { entry::<Sort<f64>>(&mut ctx, args.as_mut_ptr(), &kernel as *const _ as *const u8) };
+        let code = unsafe {
+            entry::<Sort<f64>>(
+                &mut ctx,
+                args.as_mut_ptr(),
+                &kernel as *const _ as *const u8,
+            )
+        };
         assert_eq!(code, 0);
         assert_eq!(sorted[0], 1.0);
         assert_eq!(sorted[2], 3.0);
@@ -90,9 +110,18 @@ mod tests {
 
         // a provided output of another shape is an error, not a write out of bounds
         out_shape[1] = 2;
-        let mut args = [array(&mut source, &mut shape, &mut strides), array(&mut sorted, &mut out_shape, &mut out_strides)];
+        let mut args = [
+            array(&mut source, &mut shape, &mut strides),
+            array(&mut sorted, &mut out_shape, &mut out_strides),
+        ];
         // SAFETY: as above.
-        let code = unsafe { entry::<Sort<f64>>(&mut ctx, args.as_mut_ptr(), &kernel as *const _ as *const u8) };
+        let code = unsafe {
+            entry::<Sort<f64>>(
+                &mut ctx,
+                args.as_mut_ptr(),
+                &kernel as *const _ as *const u8,
+            )
+        };
         assert_eq!(code, 1);
         assert!(ctx.error.take().unwrap().1.contains("expected [2, 3]"));
     }

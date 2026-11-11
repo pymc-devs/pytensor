@@ -1,9 +1,9 @@
 //! A runner for kernels (tests): `ir.call_kernel`.
 
 use crate::abi::{PtArray, PtBuffer};
-use crate::runtime::{PtCtx};
 use crate::dtype::DType;
-use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
+use crate::runtime::PtCtx;
+use numpy::npyffi::{NPY_ARRAY_WRITEABLE, NpyTypes, PY_ARRAY_API, npy_intp};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -16,7 +16,8 @@ use pyo3::types::PyCapsule;
 use crate::abi::KernelFn;
 
 fn dtype_of(d: &Bound<'_, PyArrayDescr>) -> PyResult<DType> {
-    DType::from_numpy(d.kind(), d.itemsize()).ok_or_else(|| PyTypeError::new_err(format!("dtype {d} is not supported")))
+    DType::from_numpy(d.kind(), d.itemsize())
+        .ok_or_else(|| PyTypeError::new_err(format!("dtype {d} is not supported")))
 }
 
 struct SendPtr(*mut PtBuffer);
@@ -24,7 +25,14 @@ struct SendPtr(*mut PtBuffer);
 unsafe impl Send for SendPtr {}
 
 /// A numpy array over `data`; owns `owner` (one reference) if not null, else copies.
-fn to_numpy<'py>(py: Python<'py>, dtype: &Bound<'py, PyArrayDescr>, data: *mut u8, shape: &[i64], strides: &[i64], owner: *mut PtBuffer) -> PyResult<Bound<'py, PyAny>> {
+fn to_numpy<'py>(
+    py: Python<'py>,
+    dtype: &Bound<'py, PyArrayDescr>,
+    data: *mut u8,
+    shape: &[i64],
+    strides: &[i64],
+    owner: *mut PtBuffer,
+) -> PyResult<Bound<'py, PyAny>> {
     let mut dims: Vec<npy_intp> = shape.iter().map(|&s| s as npy_intp).collect();
     let mut st: Vec<npy_intp> = strides.iter().map(|&s| s as npy_intp).collect();
     // SAFETY: `data` with shape/strides is a valid array (a kernel output); the descr
@@ -48,7 +56,12 @@ fn to_numpy<'py>(py: Python<'py>, dtype: &Bound<'py, PyArrayDescr>, data: *mut u
             return arr.call_method0("copy");
         }
         let o = SendPtr(owner);
-        let capsule = PyCapsule::new_with_value_and_destructor(py, o, c"pytensor_llvm.buffer", |b: SendPtr, _| PtBuffer::decref(b.0))?;
+        let capsule = PyCapsule::new_with_value_and_destructor(
+            py,
+            o,
+            c"pytensor_llvm.buffer",
+            |b: SendPtr, _| PtBuffer::decref(b.0),
+        )?;
         if PY_ARRAY_API.PyArray_SetBaseObject(py, arr.as_ptr() as *mut _, capsule.into_ptr()) != 0 {
             return Err(PyErr::fetch(py));
         }
@@ -78,7 +91,10 @@ pub fn call_kernel<'py>(
     let mut arrays: Vec<PtArray> = Vec::with_capacity(n);
     let mut out_kind: Vec<Option<Bound<'py, PyArrayDescr>>> = Vec::new();
     let mut keep = Vec::new();
-    let push_array = |a: &Bound<'py, PyAny>, storage: &mut Vec<Vec<i64>>, arrays: &mut Vec<PtArray>| -> PyResult<()> {
+    let push_array = |a: &Bound<'py, PyAny>,
+                      storage: &mut Vec<Vec<i64>>,
+                      arrays: &mut Vec<PtArray>|
+     -> PyResult<()> {
         let arr = a.cast::<PyUntypedArray>()?;
         dtype_of(&arr.dtype())?;
         let nd = arr.ndim();
@@ -89,7 +105,13 @@ pub fn call_kernel<'py>(
         // SAFETY: reading the data pointer of a live array, kept alive by `keep`; the
         // inner storage vector holds 2 * ndim entries (its buffer never moves).
         let (data, strides) = unsafe { ((*arr.as_array_ptr()).fields.data as *mut u8, st.add(nd)) };
-        arrays.push(PtArray { data, shape: st, strides, owner: std::ptr::null_mut(), ndim: nd as i64 });
+        arrays.push(PtArray {
+            data,
+            shape: st,
+            strides,
+            owner: std::ptr::null_mut(),
+            ndim: nd as i64,
+        });
         Ok(())
     };
     for a in &inputs {
@@ -107,7 +129,13 @@ pub fn call_kernel<'py>(
             let st = storage.last_mut().unwrap().as_mut_ptr();
             // SAFETY: the storage holds 2 * ndim entries.
             let strides = unsafe { st.add(nd) };
-            arrays.push(PtArray { data: std::ptr::null_mut(), shape: st, strides, owner: std::ptr::null_mut(), ndim: nd as i64 });
+            arrays.push(PtArray {
+                data: std::ptr::null_mut(),
+                shape: st,
+                strides,
+                owner: std::ptr::null_mut(),
+                ndim: nd as i64,
+            });
             out_kind.push(Some(dt));
         }
     }
@@ -126,7 +154,11 @@ pub fn call_kernel<'py>(
                 unsafe { PtBuffer::decref(a.owner) };
             }
         }
-        let msg = ctx.error.take().map(|(_, m)| m).unwrap_or_else(|| format!("error {rc}"));
+        let msg = ctx
+            .error
+            .take()
+            .map(|(_, m)| m)
+            .unwrap_or_else(|| format!("error {rc}"));
         return Err(PyRuntimeError::new_err(msg));
     }
     let mut res = Vec::new();

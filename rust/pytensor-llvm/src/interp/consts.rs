@@ -17,9 +17,13 @@ pub struct ConstData {
 
 impl ConstData {
     pub fn new(dtype: DType, shape: Vec<i64>, bytes: &[u8]) -> Result<Self, String> {
-        let n = crate::abi::checked_nbytes(&shape, dtype.itemsize()).ok_or_else(|| crate::abi::bad_size("constant", &shape))?;
+        let n = crate::abi::checked_nbytes(&shape, dtype.itemsize())
+            .ok_or_else(|| crate::abi::bad_size("constant", &shape))?;
         if n != bytes.len() {
-            return Err(format!("constant of shape {shape:?} needs {n} bytes, got {}", bytes.len()));
+            return Err(format!(
+                "constant of shape {shape:?} needs {n} bytes, got {}",
+                bytes.len()
+            ));
         }
         let mut buf = vec![Align64([0; 64]); n.div_ceil(64).max(1)];
         buf.as_mut_bytes()[..n].copy_from_slice(bytes);
@@ -29,7 +33,12 @@ impl ConstData {
             strides[d] = acc;
             acc *= shape[d].max(1);
         }
-        Ok(ConstData { dtype, shape, strides, buf })
+        Ok(ConstData {
+            dtype,
+            shape,
+            strides,
+            buf,
+        })
     }
 
     pub fn data(&self) -> *const u8 {

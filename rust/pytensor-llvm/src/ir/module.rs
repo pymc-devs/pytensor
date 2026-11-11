@@ -3,13 +3,13 @@
 use super::builder::Builder;
 use super::ty::{PyType, Ty};
 use crate::target::{cache_dir, init_llvm, target_cpu, target_machine, vfabi_variants};
+use llvm_sys::LLVMLinkage;
 use llvm_sys::analysis::{LLVMVerifierFailureAction, LLVMVerifyModule};
 use llvm_sys::core as c;
 use llvm_sys::prelude::{LLVMContextRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::LLVMSetModuleDataLayout;
 use llvm_sys::target_machine as tm;
 use llvm_sys::transforms::pass_builder as pb;
-use llvm_sys::LLVMLinkage;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use sha2::Digest;
@@ -209,11 +209,19 @@ impl Function {
 impl Function {
     pub fn signature_matches(&self, args: &[Value]) -> PyResult<()> {
         if args.len() != self.params.len() {
-            return err(format!("{} takes {} arguments, got {}", self.name, self.params.len(), args.len()));
+            return err(format!(
+                "{} takes {} arguments, got {}",
+                self.name,
+                self.params.len(),
+                args.len()
+            ));
         }
         for (k, (a, t)) in args.iter().zip(&self.params).enumerate() {
             if &a.ty != t {
-                return err(format!("argument {k} of {}: expected {t}, got {}", self.name, a.ty));
+                return err(format!(
+                    "argument {k} of {}: expected {t}, got {}",
+                    self.name, a.ty
+                ));
             }
         }
         Ok(())
@@ -251,7 +259,11 @@ impl Module {
             vector_decls: RefCell::new(vec![]),
             types: RefCell::new(HashMap::new()),
         };
-        Module { m: Rc::new(m), functions: RefCell::new(vec![]), label: RefCell::new(None) }
+        Module {
+            m: Rc::new(m),
+            functions: RefCell::new(vec![]),
+            label: RefCell::new(None),
+        }
     }
 
     #[getter]
@@ -262,7 +274,10 @@ impl Module {
     /// Readable name of the code in perf maps (default: the module name).
     #[getter]
     fn get_label(&self) -> String {
-        self.label.borrow().clone().unwrap_or_else(|| self.m.name.clone())
+        self.label
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| self.m.name.clone())
     }
 
     #[setter]
@@ -273,12 +288,23 @@ impl Module {
     /// Add a function. `exported` functions keep a symbol after compilation (their
     /// address can be looked up); the others are internal.
     #[pyo3(signature = (name, params, ret, exported = false, inline = Inline::Default))]
-    fn function(&self, name: &str, params: Vec<PyType>, ret: PyType, exported: bool, inline: Inline) -> PyResult<Function> {
+    fn function(
+        &self,
+        name: &str,
+        params: Vec<PyType>,
+        ret: PyType,
+        exported: bool,
+        inline: Inline,
+    ) -> PyResult<Function> {
         self.m.check_open()?;
         if self.functions.borrow().iter().any(|(n, _, _)| n == name) {
             return err(format!("function {name} already exists"));
         }
-        if name.is_empty() || !name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
             return err(format!("bad function name {name:?}"));
         }
         let params: Vec<Ty> = params.into_iter().map(|t| t.0).collect();
@@ -290,10 +316,18 @@ impl Module {
         // this module.
         let (raw, fnty) = unsafe {
             let mut ps: Vec<LLVMTypeRef> = params.iter().map(|t| self.m.llvm_type(t)).collect();
-            let fnty = c::LLVMFunctionType(self.m.llvm_type(&ret), ps.as_mut_ptr(), ps.len() as u32, 0);
+            let fnty =
+                c::LLVMFunctionType(self.m.llvm_type(&ret), ps.as_mut_ptr(), ps.len() as u32, 0);
             let n = cstring(name);
             let f = c::LLVMAddFunction(self.m.module, n.as_ptr(), fnty);
-            c::LLVMSetLinkage(f, if exported { LLVMLinkage::LLVMExternalLinkage } else { LLVMLinkage::LLVMInternalLinkage });
+            c::LLVMSetLinkage(
+                f,
+                if exported {
+                    LLVMLinkage::LLVMExternalLinkage
+                } else {
+                    LLVMLinkage::LLVMInternalLinkage
+                },
+            );
             match inline {
                 Inline::Always => add_fn_attr(&self.m, f, "alwaysinline"),
                 Inline::Never => add_fn_attr(&self.m, f, "noinline"),
@@ -301,7 +335,9 @@ impl Module {
             }
             (f, fnty)
         };
-        self.functions.borrow_mut().push((name.to_string(), raw, exported));
+        self.functions
+            .borrow_mut()
+            .push((name.to_string(), raw, exported));
         Ok(Function {
             m: self.m.clone(),
             raw,
@@ -357,8 +393,13 @@ impl Module {
         h.update(salt(opt_level).as_bytes());
         h.update(text.as_bytes());
         let key = hex::encode(&h.finalize()[..16]);
-        let exported: Vec<(String, LLVMValueRef)> =
-            self.functions.borrow().iter().filter(|(_, _, e)| *e).map(|(n, f, _)| (n.clone(), *f)).collect();
+        let exported: Vec<(String, LLVMValueRef)> = self
+            .functions
+            .borrow()
+            .iter()
+            .filter(|(_, _, e)| *e)
+            .map(|(n, f, _)| (n.clone(), *f))
+            .collect();
         if exported.is_empty() {
             return err(format!("module {} exports no function", self.m.name));
         }
@@ -370,8 +411,17 @@ impl Module {
             unsafe { c::LLVMSetValueName2(*f, s.as_ptr(), sym.len()) };
             symbols.push((name.clone(), sym));
         }
-        let name = self.label.borrow().clone().unwrap_or_else(|| self.m.name.clone());
-        Ok(Prepared { key, symbols, module: ModPtr(self.m.module), name })
+        let name = self
+            .label
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| self.m.name.clone());
+        Ok(Prepared {
+            key,
+            symbols,
+            module: ModPtr(self.m.module),
+            name,
+        })
     }
 }
 
@@ -384,13 +434,24 @@ struct Prepared {
 
 /// Compile several modules: prepared one by one, optimized and code-generated in
 /// parallel (without the GIL), linked one by one.
-pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cache: bool) -> PyResult<Vec<CompiledModule>> {
+pub fn compile_modules(
+    py: Python<'_>,
+    modules: &[&Module],
+    opt_level: u32,
+    cache: bool,
+) -> PyResult<Vec<CompiledModule>> {
     use rayon::prelude::*;
     let t0 = std::time::Instant::now();
-    let prepared: Vec<Prepared> = modules.iter().map(|m| m.prepare(opt_level)).collect::<PyResult<_>>()?;
+    let prepared: Vec<Prepared> = modules
+        .iter()
+        .map(|m| m.prepare(opt_level))
+        .collect::<PyResult<_>>()?;
     let in_process: Vec<bool> = {
         let j = crate::jit::jit().lock().unwrap_or_else(|e| e.into_inner());
-        prepared.iter().map(|p| j.has(&p.symbols[0].1).is_some()).collect()
+        prepared
+            .iter()
+            .map(|p| j.has(&p.symbols[0].1).is_some())
+            .collect()
     };
     let dir = cache_dir();
     if cache {
@@ -398,13 +459,17 @@ pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cach
     }
     // the same module twice (same key) is compiled once
     let mut first_of: HashMap<&str, usize> = HashMap::new();
-    let todo: Vec<usize> =
-        (0..prepared.len()).filter(|&i| !in_process[i] && *first_of.entry(prepared[i].key.as_str()).or_insert(i) == i).collect();
+    let todo: Vec<usize> = (0..prepared.len())
+        .filter(|&i| !in_process[i] && *first_of.entry(prepared[i].key.as_str()).or_insert(i) == i)
+        .collect();
     struct Job(usize, LLVMModuleRef, String);
     // SAFETY: each module is finished (no Python code touches it) and used by exactly
     // one worker; distinct modules have distinct LLVM contexts.
     unsafe impl Send for Job {}
-    let jobs: Vec<Job> = todo.iter().map(|&i| Job(i, prepared[i].module.0, prepared[i].key.clone())).collect();
+    let jobs: Vec<Job> = todo
+        .iter()
+        .map(|&i| Job(i, prepared[i].module.0, prepared[i].key.clone()))
+        .collect();
     let results: Vec<(usize, Result<(Vec<u8>, bool, f64), String>)> = py.detach(move || {
         jobs.into_par_iter()
             .map(|Job(i, m, key)| {
@@ -428,14 +493,21 @@ pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cach
             })
             .collect()
     });
-    let mut stats: Vec<CompileStats> = in_process.iter().map(|&p| CompileStats { in_process: p, ..Default::default() }).collect();
+    let mut stats: Vec<CompileStats> = in_process
+        .iter()
+        .map(|&p| CompileStats {
+            in_process: p,
+            ..Default::default()
+        })
+        .collect();
     let mut j = crate::jit::jit().lock().unwrap_or_else(|e| e.into_inner());
     for (i, r) in results {
         let (obj, disk, secs) = r.map_err(PyRuntimeError::new_err)?;
         stats[i].disk_cache = disk;
         stats[i].compile_s = secs;
         let p = &prepared[i];
-        j.add_object(&p.symbols[0].1, &obj, &p.name).map_err(PyRuntimeError::new_err)?;
+        j.add_object(&p.symbols[0].1, &obj, &p.name)
+            .map_err(PyRuntimeError::new_err)?;
     }
     let total = t0.elapsed().as_secs_f64();
     let mut out = Vec::with_capacity(prepared.len());
@@ -446,7 +518,11 @@ pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cach
         }
         let mut st = stats[i].clone();
         st.total_s = total;
-        out.push(CompiledModule { key: p.key, addresses, stats: st });
+        out.push(CompiledModule {
+            key: p.key,
+            addresses,
+            stats: st,
+        });
     }
     Ok(out)
 }
@@ -454,7 +530,12 @@ pub fn compile_modules(py: Python<'_>, modules: &[&Module], opt_level: u32, cach
 /// Compile several modules in parallel (see `Module.compile`).
 #[pyfunction]
 #[pyo3(signature = (modules, opt_level = 3, cache = true))]
-pub fn compile_many(py: Python<'_>, modules: Vec<PyRef<'_, Module>>, opt_level: u32, cache: bool) -> PyResult<Vec<CompiledModule>> {
+pub fn compile_many(
+    py: Python<'_>,
+    modules: Vec<PyRef<'_, Module>>,
+    opt_level: u32,
+    cache: bool,
+) -> PyResult<Vec<CompiledModule>> {
     let refs: Vec<&Module> = modules.iter().map(|m| &**m).collect();
     compile_modules(py, &refs, opt_level, cache)
 }
@@ -481,7 +562,10 @@ pub struct CompiledModule {
 #[pymethods]
 impl CompiledModule {
     fn address(&self, name: &str) -> PyResult<usize> {
-        self.addresses.get(name).copied().ok_or_else(|| PyValueError::new_err(format!("no exported function {name}")))
+        self.addresses
+            .get(name)
+            .copied()
+            .ok_or_else(|| PyValueError::new_err(format!("no exported function {name}")))
     }
 
     /// How the object was obtained: "compiled", "disk cache" or "in process".
@@ -521,7 +605,13 @@ pub fn add_fn_attr(m: &ModuleInner, f: LLVMValueRef, name: &str) {
 pub fn add_fn_string_attr(m: &ModuleInner, f: LLVMValueRef, k: &str, v: &str) {
     // SAFETY: as above; the attribute copies the strings.
     unsafe {
-        let a = c::LLVMCreateStringAttribute(m.ctx, k.as_ptr() as *const _, k.len() as u32, v.as_ptr() as *const _, v.len() as u32);
+        let a = c::LLVMCreateStringAttribute(
+            m.ctx,
+            k.as_ptr() as *const _,
+            k.len() as u32,
+            v.as_ptr() as *const _,
+            v.len() as u32,
+        );
         c::LLVMAddAttributeAtIndex(f, llvm_sys::LLVMAttributeFunctionIndex, a);
     }
 }
@@ -540,8 +630,16 @@ fn verify(m: &ModuleInner) -> PyResult<()> {
     // SAFETY: verifying a live module; the message is freed.
     unsafe {
         let mut msg = std::ptr::null_mut();
-        let bad = LLVMVerifyModule(m.module, LLVMVerifierFailureAction::LLVMReturnStatusAction, &mut msg);
-        let text = if msg.is_null() { String::new() } else { CStr::from_ptr(msg).to_string_lossy().into_owned() };
+        let bad = LLVMVerifyModule(
+            m.module,
+            LLVMVerifierFailureAction::LLVMReturnStatusAction,
+            &mut msg,
+        );
+        let text = if msg.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(msg).to_string_lossy().into_owned()
+        };
         if !msg.is_null() {
             c::LLVMDisposeMessage(msg);
         }
@@ -615,12 +713,23 @@ fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
         }
         if let Ok(dir) = std::env::var("PYTENSOR_LLVM_DUMP_IR") {
             let _ = std::fs::create_dir_all(&dir);
-            let name = CStr::from_ptr(c::LLVMGetModuleIdentifier(m, &mut 0)).to_string_lossy().into_owned();
-            let _ = std::fs::write(std::path::Path::new(&dir).join(format!("{name}.opt.ll")), print_module(m));
+            let name = CStr::from_ptr(c::LLVMGetModuleIdentifier(m, &mut 0))
+                .to_string_lossy()
+                .into_owned();
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join(format!("{name}.opt.ll")),
+                print_module(m),
+            );
         }
         let mut msg = std::ptr::null_mut();
         let mut buf = std::ptr::null_mut();
-        let bad = tm::LLVMTargetMachineEmitToMemoryBuffer(tmr, m, tm::LLVMCodeGenFileType::LLVMObjectFile, &mut msg, &mut buf);
+        let bad = tm::LLVMTargetMachineEmitToMemoryBuffer(
+            tmr,
+            m,
+            tm::LLVMCodeGenFileType::LLVMObjectFile,
+            &mut msg,
+            &mut buf,
+        );
         if bad != 0 {
             let s = CStr::from_ptr(msg).to_string_lossy().into_owned();
             c::LLVMDisposeMessage(msg);
