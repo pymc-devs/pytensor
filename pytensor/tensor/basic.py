@@ -2735,6 +2735,8 @@ def roll(x, shift, axis=None):
     """
     _x = as_tensor_variable(x)
     if axis is None:
+        if _x.ndim == 0:
+            return _x.copy()
         if _x.ndim > 1:
             y = _x.flatten()
             return roll(y, shift, axis=0).reshape(_x.shape)
@@ -2746,8 +2748,13 @@ def roll(x, shift, axis=None):
 
     # Shift may be larger than the size of the axis. If so, since the
     # roll operation is cyclic, we can take the shift modulo the size
-    # of the axis
-    shift = shift % _x.shape[axis]
+    # of the axis. Guard zero-sized axes against C integer modulo-by-zero
+    # (for any integer shift, shift % 1 == 0).
+    from pytensor.tensor.math import eq
+
+    axis_size = _x.shape[axis]
+    safe_axis_size = switch(eq(axis_size, 0), 1, axis_size)
+    shift = shift % safe_axis_size
 
     # A slice of all elements in a dimension ':'
     allslice = slice(None)
