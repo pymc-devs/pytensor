@@ -150,9 +150,9 @@ def test_c_inputs_are_checked_by_the_c_api():
     v = np.arange(10.0)
     out = np.empty(5)
     ins, k1 = as_ptarrays([v[::2]])
-    outs, k2 = as_ptarrays([out])
+    outs, _k2 = as_ptarrays([out])
     assert call(st, ins, outs) != 0 and b"must be C-contiguous" in err(st)
-    ins, k1 = as_ptarrays([v[:5]])
+    ins, _k1 = as_ptarrays([v[:5]])
     assert call(st, ins, outs) == 0
     np.testing.assert_allclose(out, np.exp(v[:5]))
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.session_free)(st)

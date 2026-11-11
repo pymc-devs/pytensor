@@ -53,7 +53,7 @@ def _register():
 
     def lognormal(b, cg, z, p):
         mean, sigma = p
-        return b.intrinsic(ir.Intrinsic.Exp, [b.fadd(mean, b.fmul(sigma, z))])
+        return b.libm(ir.Libm.Exp, [b.fadd(mean, b.fmul(sigma, z))])
 
     def uniform(b, cg, u, p):
         low, high = p

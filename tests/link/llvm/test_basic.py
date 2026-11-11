@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 
@@ -106,6 +108,23 @@ def test_ir_of_the_generated_code():
     text = linker.ir()
     assert text.startswith("; =====") and "define" in text
     assert "define" in linker.ir(optimized=True)
+
+
+@pytest.mark.parametrize(
+    "fn", [pt.exp, pt.exp2, pt.log, pt.log2, pt.log10, pt.sin, pt.cos, pt.tanh]
+)
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_math_functions_use_vector_library(fn, dtype):
+    # LLVM only vectorizes math calls to libmvec through vector-function-abi-variant
+    # attributes (not through intrinsics), so each of these must keep them
+    x = pt.vector("x", dtype=dtype)
+    f = pytensor.function([x], fn(x) * 2, mode=LLVM)
+    linker = f.maker.linker
+    if "vector-function-abi-variant" not in linker.ir():
+        pytest.skip("no vector library on this target")
+    assert re.search(
+        r"call [\w ]*<\d+ x (double|float)> @_ZGV", linker.ir(optimized=True)
+    )
 
 
 def test_interpreted_ofg():

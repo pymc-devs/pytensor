@@ -115,24 +115,20 @@ pub enum FCmp {
 }
 
 /// LLVM intrinsics on floats (overloaded on the operand type).
+///
+/// Functions that have libmvec SIMD variants (exp, log, sin, pow, ...) are in `Libm`
+/// instead: LLVM no longer maps vectorized intrinsics to libmvec, only calls that carry a
+/// `vector-function-abi-variant` attribute get vectorized.
 #[pyclass(module = "pytensor_llvm.ir", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
-    Exp,
-    Exp2,
-    Log,
-    Log2,
-    Log10,
     Sqrt,
-    Sin,
-    Cos,
     Floor,
     Ceil,
     Trunc,
     RoundEven,
     Round,
     Fabs,
-    Pow,
     Maximum,
     Minimum,
     Copysign,
@@ -142,21 +138,14 @@ pub enum Intrinsic {
 impl Intrinsic {
     fn name(self) -> &'static str {
         match self {
-            Intrinsic::Exp => "llvm.exp",
-            Intrinsic::Exp2 => "llvm.exp2",
-            Intrinsic::Log => "llvm.log",
-            Intrinsic::Log2 => "llvm.log2",
-            Intrinsic::Log10 => "llvm.log10",
             Intrinsic::Sqrt => "llvm.sqrt",
-            Intrinsic::Sin => "llvm.sin",
-            Intrinsic::Cos => "llvm.cos",
             Intrinsic::Floor => "llvm.floor",
             Intrinsic::Ceil => "llvm.ceil",
             Intrinsic::Trunc => "llvm.trunc",
             Intrinsic::RoundEven => "llvm.roundeven",
             Intrinsic::Round => "llvm.round",
             Intrinsic::Fabs => "llvm.fabs",
-            Intrinsic::Pow => "llvm.pow",
+
             Intrinsic::Maximum => "llvm.maximum",
             Intrinsic::Minimum => "llvm.minimum",
             Intrinsic::Copysign => "llvm.copysign",
@@ -166,7 +155,7 @@ impl Intrinsic {
 
     fn arity(self) -> usize {
         match self {
-            Intrinsic::Pow | Intrinsic::Maximum | Intrinsic::Minimum | Intrinsic::Copysign => 2,
+            Intrinsic::Maximum | Intrinsic::Minimum | Intrinsic::Copysign => 2,
             Intrinsic::Fma => 3,
             _ => 1,
         }
@@ -219,6 +208,14 @@ impl Rng {
 #[pyclass(module = "pytensor_llvm.ir", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Libm {
+    Exp,
+    Exp2,
+    Log,
+    Log2,
+    Log10,
+    Sin,
+    Cos,
+    Pow,
     Expm1,
     Log1p,
     Tan,
@@ -239,6 +236,14 @@ pub enum Libm {
 impl Libm {
     fn c_name(self) -> &'static str {
         match self {
+            Libm::Exp => "exp",
+            Libm::Exp2 => "exp2",
+            Libm::Log => "log",
+            Libm::Log2 => "log2",
+            Libm::Log10 => "log10",
+            Libm::Sin => "sin",
+            Libm::Cos => "cos",
+            Libm::Pow => "pow",
             Libm::Expm1 => "expm1",
             Libm::Log1p => "log1p",
             Libm::Tan => "tan",
@@ -258,7 +263,11 @@ impl Libm {
     }
 
     fn arity(self) -> usize {
-        if self == Libm::Atan2 { 2 } else { 1 }
+        if matches!(self, Libm::Atan2 | Libm::Pow) {
+            2
+        } else {
+            1
+        }
     }
 
     fn has_vector_variant(self) -> bool {
@@ -1577,8 +1586,6 @@ impl Builder {
         Ok(r)
     }
 
-    /// A libm function (`f`-suffixed for float). Advertises libmvec SIMD variants so the
-    /// loop vectorizer can use them.
     /// Draw from the call context's random state: `b.rng(ir.Rng.Normal, ctx)`,
     /// `b.rng(ir.Rng.Gamma, ctx, [shape])`, ... Returns the value (None for the fills).
     #[pyo3(signature = (which, ctx, args = vec![]))]
@@ -1602,6 +1609,8 @@ impl Builder {
         Ok(self.call_raw(fnty, f, &mut raw, &ret))
     }
 
+    /// A libm function (`f`-suffixed for float). Advertises libmvec SIMD variants so the
+    /// loop vectorizer can use them.
     fn libm(&self, which: Libm, args: Vec<Operand>) -> PyResult<Value> {
         self.open()?;
         let args = self.many(which.c_name(), args)?;
