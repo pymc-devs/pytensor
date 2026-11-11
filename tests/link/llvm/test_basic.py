@@ -91,6 +91,16 @@ def test_compiled_ofg_calls_kernels():
     assert any("Dot" in s for s in tasks)
 
 
+def test_ir_of_the_generated_code():
+    x = pt.vector("x")
+    f = pytensor.function([x], pt.exp(x) * 2 + 1, mode=LLVM)
+    linker = f.maker.linker
+    assert len(linker.stats.modules) == linker.stats.n_modules >= 1
+    text = linker.ir()
+    assert text.startswith("; =====") and "define" in text
+    assert "define" in linker.ir(optimized=True)
+
+
 def test_interpreted_ofg():
     x = pt.vector("x")
     inner = OpFromGraph([x], [pt.exp(x).sum(), x * 2], execution=Execution.INTERPRETED)

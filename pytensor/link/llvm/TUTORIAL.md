@@ -84,8 +84,7 @@ What happened:
   closed: nothing can be added to it.
 
 `module.ir()` is the module as LLVM IR text, the first thing to look at when something
-misbehaves. Before `compile()` it is what the builder wrote; afterwards it is the
-optimized code (here: a vectorized loop).
+misbehaves. Before `compile()` it is what the builder wrote.
 
 ```python
 print(unoptimized)
@@ -109,6 +108,17 @@ fold:                                             ; preds = %fold, %body
 
 The flags on `fmul` and `fadd` are the fast-math flags the backend uses by default
 (`Module(name, fastmath=False)` and the linker option `fastmath` turn them off).
+
+The compiled module keeps both versions of its IR: `compiled.ir` as it was generated,
+and `compiled.optimized_ir()` after the optimization pipeline (here: a vectorized
+loop), which is what the machine code is made from. The optimized IR is computed when
+asked for, so it is the same whether the object was compiled, taken from the disk
+cache or already in the process. (After `compile()` the module itself is closed and
+its `ir()` may or may not have been optimized, depending on the cache.)
+
+```python
+optimized = compiled.optimized_ir()
+```
 
 ### What the builder offers
 
@@ -393,9 +403,20 @@ alone = compile_node(node)
 np.testing.assert_array_equal(result, [1.0, 3.0, 3.0, 5.0, 5.0])
 ```
 
-Setting `PYTENSOR_LLVM_DUMP_IR=<directory>` writes the optimized IR of every module
-that is compiled there (not of those taken from the cache), which shows whether a loop
-was vectorized.
+`f.maker.linker.ir()` is the IR of the code generated for a compiled function: one
+module per generated task, each under a comment naming the task, as in
+`program.dump()`. `ir(optimized=True)` is the IR after optimization, which shows whether
+a loop was vectorized. The modules of Scan bodies and subprograms are included. Ops
+running Rust or numba kernels have no module. For one module at a time,
+`f.maker.linker.stats.modules` lists them with their `description`, `ir` and
+`optimized_ir()`.
+
+```python
+text = f.maker.linker.ir()
+```
+
+Setting `PYTENSOR_LLVM_DUMP_IR=<directory>` instead writes the optimized IR of every
+module that is compiled there (not of those taken from the cache) to files.
 
 ### Errors
 

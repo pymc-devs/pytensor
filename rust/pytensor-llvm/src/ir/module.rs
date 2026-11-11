@@ -421,6 +421,7 @@ impl Module {
             symbols,
             module: ModPtr(self.m.module),
             name,
+            ir: text,
         })
     }
 }
@@ -430,6 +431,8 @@ struct Prepared {
     symbols: Vec<(String, String)>,
     module: ModPtr,
     name: String,
+    /// the IR before optimization
+    ir: String,
 }
 
 /// Compile several modules: prepared one by one, optimized and code-generated in
@@ -522,6 +525,8 @@ pub fn compile_modules(
             key: p.key,
             addresses,
             stats: st,
+            ir: p.ir,
+            opt_level,
         });
     }
     Ok(out)
@@ -557,6 +562,8 @@ pub struct CompiledModule {
     key: String,
     addresses: HashMap<String, usize>,
     stats: CompileStats,
+    ir: String,
+    opt_level: u32,
 }
 
 #[pymethods]
@@ -566,6 +573,23 @@ impl CompiledModule {
             .get(name)
             .copied()
             .ok_or_else(|| PyValueError::new_err(format!("no exported function {name}")))
+    }
+
+    /// The module's LLVM IR as it was compiled, before optimization.
+    #[getter]
+    fn ir(&self) -> &str {
+        &self.ir
+    }
+
+    /// The IR after the optimization pipeline the module was compiled with (or
+    /// `opt_level`). Computed on demand from `ir`, so it is the same whether the object
+    /// was compiled, read from the disk cache or already in the process. Exported
+    /// functions keep their plain names here (compiled, they get a unique symbol).
+    #[pyo3(signature = (opt_level = None))]
+    fn optimized_ir(&self, py: Python<'_>, opt_level: Option<u32>) -> PyResult<String> {
+        let level = opt_level.unwrap_or(self.opt_level);
+        py.detach(|| optimized_text(&self.ir, level))
+            .map_err(PyRuntimeError::new_err)
     }
 
     /// How the object was obtained: "compiled", "disk cache" or "in process".
@@ -683,12 +707,10 @@ fn salt(opt_level: u32) -> String {
     )
 }
 
-/// Optimize a module and generate an object file.
-fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
-    let machine = target_machine(opt_level)?;
-    let tmr = machine.as_mut_ptr();
-    // SAFETY: `m` is a finished module used only by this thread; `tmr` is a live target
-    // machine; buffers and messages are freed.
+/// Set the target of `m` and run the optimization pipeline of `opt_level` on it.
+fn optimize(m: LLVMModuleRef, tmr: tm::LLVMTargetMachineRef, opt_level: u32) -> Result<(), String> {
+    // SAFETY: `m` is a module used only by this thread; `tmr` is a live target machine;
+    // messages are freed.
     unsafe {
         let triple = tm::LLVMGetTargetMachineTriple(tmr);
         c::LLVMSetTarget(m, triple);
@@ -711,6 +733,50 @@ fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
             llvm_sys::error::LLVMDisposeErrorMessage(msg);
             return Err(format!("optimization failed: {s}"));
         }
+    }
+    Ok(())
+}
+
+/// The IR of a module as the compiler sees it after optimization: `ir` (as printed
+/// before compiling) parsed into a fresh context and run through the same pipeline.
+fn optimized_text(ir: &str, opt_level: u32) -> Result<String, String> {
+    init_llvm();
+    let machine = target_machine(opt_level)?;
+    let tmr = machine.as_mut_ptr();
+    let text = cstring(ir);
+    let name = cstring("ir");
+    // SAFETY: a private context and module, disposed on every path; parsing consumes the
+    // memory buffer; messages are freed.
+    unsafe {
+        let ctx = c::LLVMContextCreate();
+        let buf = c::LLVMCreateMemoryBufferWithMemoryRangeCopy(
+            text.as_ptr(),
+            text.as_bytes().len(),
+            name.as_ptr(),
+        );
+        let mut module = std::ptr::null_mut();
+        let mut msg = std::ptr::null_mut();
+        if llvm_sys::ir_reader::LLVMParseIRInContext(ctx, buf, &mut module, &mut msg) != 0 {
+            let s = CStr::from_ptr(msg).to_string_lossy().into_owned();
+            c::LLVMDisposeMessage(msg);
+            c::LLVMContextDispose(ctx);
+            return Err(format!("can't parse the IR: {s}"));
+        }
+        let r = optimize(module, tmr, opt_level).map(|()| print_module(module));
+        c::LLVMDisposeModule(module);
+        c::LLVMContextDispose(ctx);
+        r
+    }
+}
+
+/// Optimize a module and generate an object file.
+fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
+    let machine = target_machine(opt_level)?;
+    let tmr = machine.as_mut_ptr();
+    optimize(m, tmr, opt_level)?;
+    // SAFETY: `m` is a finished module used only by this thread; `tmr` is a live target
+    // machine; buffers and messages are freed.
+    unsafe {
         if let Ok(dir) = std::env::var("PYTENSOR_LLVM_DUMP_IR") {
             let _ = std::fs::create_dir_all(&dir);
             let name = CStr::from_ptr(c::LLVMGetModuleIdentifier(m, &mut 0))

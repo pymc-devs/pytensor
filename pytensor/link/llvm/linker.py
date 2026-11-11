@@ -87,5 +87,16 @@ class LLVMLinker(JITLinker):
     def jit_compile(self, fn):
         return fn
 
+    def ir(self, optimized=False, opt_level=None) -> str:
+        """The LLVM IR of the code generated for the compiled graph, one module per
+        generated task, each under a comment naming the task (see `program.dump()`).
+        With `optimized`, the IR after the optimization pipeline, i.e. what the machine
+        code is generated from (at `opt_level`, default the one compiled with).
+
+        Ops that run Rust or numba kernels have no module here."""
+        if self.stats is None:
+            raise RuntimeError("nothing compiled yet")
+        return self.stats.ir(optimized, opt_level)
+
     def create_thunk_inputs(self, storage_map):
         return [storage_map[n] for n in self.fgraph.inputs]
