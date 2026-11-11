@@ -1649,6 +1649,9 @@ impl Builder {
             for (isa, lanes64) in variants {
                 let lanes = if f32 { lanes64 * 2 } else { lanes64 };
                 let vname = format!("_ZGV{isa}N{lanes}{vparams}_{name}");
+                if !crate::target::has_symbol(&vname) {
+                    continue;
+                }
                 names.push(format!("{vname}({vname})"));
                 let n = cstring(&vname);
                 // SAFETY: declaring the vector variant in this module (once).
@@ -1661,6 +1664,9 @@ impl Builder {
                         self.m.vector_decls.borrow_mut().push(vf);
                     }
                 }
+            }
+            if names.is_empty() {
+                return Ok(r);
             }
             let k = "vector-function-abi-variant";
             let v = names.join(",");
