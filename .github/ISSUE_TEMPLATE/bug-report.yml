@@ -31,11 +31,12 @@ body:
       A short code example that reproduces the problem/missing feature. It
       should be self-contained, i.e., can be copy-pasted into the Python
       interpreter or run as-is via `python myproblem.py`.
-    placeholder: |
+    value: |
+      ```python
       import pytensor
       import pytensor.tensor as pt
       << your code here >>
-    render: python
+      ```
   validations:
     required: true
 
@@ -44,11 +45,10 @@ body:
     label: "Error message:"
     description: >
       Please include the full error message below.
-    placeholder: |
+    value: |
       <details>
       << Full traceback starting from `Traceback: ...` >>
       </details>
-    render: shell
 
 - type: textarea
   attributes:
@@ -61,7 +61,7 @@ body:
       Specific config for the issue if any
       (you may use `python -c "import pytensor; print(pytensor.config)"` 
       to get it and enclose in `<details>` `</details>`)
-    placeholder: |
+    value: |
       <details>
       configuration information
       </details>
