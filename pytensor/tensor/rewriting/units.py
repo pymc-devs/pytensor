@@ -76,6 +76,45 @@ def _boxed_argument(node):
     return isinstance(node.op, TensorFromScalar) and node.inputs[0].owner is None
 
 
+def _unit_views(fgraph, group, inputs, outs):
+    """The `view_map` of a unit of the nodes `group`: the outputs that may be views of
+    an input, from the `view_map`s of its nodes. With it the destroy handler keeps
+    ordering the readers of such an output before what overwrites the input.
+
+    A unit never overwrites its inputs (the planner gives the nodes in it copies to
+    overwrite) and its other outputs are new memory, so that is all it must declare.
+    Returns None when it can't: an output that may view several inputs, one of which
+    something overwrites."""
+    pos = {v: k for k, v in enumerate(inputs)}
+    views = {}  # inner variable -> positions of the inputs it may be a view of
+    for n in group:
+        for k, srcs in n.op.view_map.items():
+            viewed = set().union(
+                *(
+                    {pos[i]} if i in pos else views.get(i, set())
+                    for i in (n.inputs[s] for s in srcs)
+                )
+            )
+            if viewed:
+                views[n.outputs[k]] = viewed
+    view_map = {}
+    for j, o in enumerate(outs):
+        viewed = views.get(o, set())
+        if len(viewed) == 1:
+            view_map[j] = list(viewed)
+        elif (
+            viewed
+            and hasattr(fgraph, "destroy_handler")
+            and fgraph.has_destroyers([inputs[i] for i in viewed])
+        ):
+            return None
+    return view_map
+
+
+def _has_scalars(group):
+    return any(_scalar(i) for n in group if not _boxed_argument(n) for i in n.inputs)
+
+
 class GroupIntoUnits(GraphRewriter):
     def __init__(self, max_elems=128):
         super().__init__()
@@ -84,12 +123,8 @@ class GroupIntoUnits(GraphRewriter):
     def eligible(self, node):
         if isinstance(node.op, GROUPABLE):
             return True
-        return (
-            isinstance(node.op, SMALL_GROUPABLE)
-            and all(
-                _small(v, self.max_elems)
-                for v in (*node.inputs, *node.outputs)
-            )
+        return isinstance(node.op, SMALL_GROUPABLE) and all(
+            _small(v, self.max_elems) for v in (*node.inputs, *node.outputs)
         )
 
     @staticmethod
@@ -209,13 +244,8 @@ class GroupIntoUnits(GraphRewriter):
                 tainted.add(it)
         groups.append(current)
 
-        def has_scalars(g):
-            return any(
-                _scalar(i) for n in g if not _boxed_argument(n) for i in n.inputs
-            )
-
         # a group with scalars is a unit even on its own
-        return [g for g in groups if len(g) > 1 or has_scalars(g)]
+        return [g for g in groups if len(g) > 1 or _has_scalars(g)]
 
     def apply(self, fgraph):
         self.box_scalar_arguments(fgraph)
@@ -241,8 +271,21 @@ class GroupIntoUnits(GraphRewriter):
             ]
             if not outs:
                 continue
+            view_map = _unit_views(fgraph, group, inputs, outs)
+            if view_map is None:
+                if _has_scalars(group):
+                    raise NotImplementedError(
+                        "LLVM backend: a unit output may view several inputs that "
+                        "are overwritten"
+                    )
+                continue
             op = OpFromGraph(
-                inputs, outs, inline=False, execution=Execution.COMPILED, name="unit"
+                inputs,
+                outs,
+                inline=False,
+                execution=Execution.COMPILED,
+                name="unit",
+                view_map=view_map,
             )
             new = op(*inputs, return_list=True)
             fgraph.replace_all(list(zip(outs, new, strict=True)), reason="llvm_units")

@@ -4,10 +4,15 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import deep_copy_op
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.rewriting.units import GroupIntoUnits
 
 
 pytest.importorskip("pytensor_llvm")
@@ -137,6 +142,22 @@ def test_units_respect_inplace_orderings():
     s = pt.set_subtensor(a[0], y)
     out = [a.T * 2, pt.exp(s) + 1]
     compare([x, y], out, [rng.random((2, 3)), rng.random(3)])
+
+
+def test_units_declare_their_views():
+    # a unit holding `a.T` returns a view of `a`: what reads it still runs before the
+    # node that overwrites `a`
+    x = pt.tensor("x", shape=(200, 3))
+    v = pt.vector("v", shape=(200,))
+    a = pt.sort(x, axis=0)
+    out = a.T @ v
+    read = out.owner.inputs[0].owner  # the Matmul (under a Squeeze)
+    destroy = Elemwise(ps.exp, inplace_pattern={0: 0})(a).owner
+    fgraph = FunctionGraph([x, v], [out, destroy.out], clone=False)
+    fgraph.attach_feature(DestroyHandler())
+    GroupIntoUnits().apply(fgraph)
+    assert any(isinstance(n.op, OpFromGraph) for n in fgraph.apply_nodes)
+    assert read in fgraph.orderings()[destroy]
 
 
 def test_units_include_copies():
