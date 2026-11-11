@@ -35,21 +35,9 @@ from pytensor.link.llvm.codegen.function import (
     Output,
     Signature,
     build_node_function,
-    node_signature,
 )
 from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, repr_of, ScalarRepr, Slot, slot_type, TensorRepr
-
-
-@dataclass
-class NodeItem:
-    """A node the planner schedules, with the value ids (vids: the planner's names for
-    values) of what it reads and writes. The same PyTensor node can appear with
-    different vids (inlined OpFromGraphs)."""
-
-    node: object
-    inputs: list
-    outputs: list
 
 
 def build_unit_function(
@@ -57,28 +45,26 @@ def build_unit_function(
     name,
     inputs,
     outputs,
-    items,
+    resolved,
     constants,
     input_layouts=None,
     output_layouts=None,
     parallel=True,
-    kernel_for=None,
     links=None,
-    planner=None,
 ) -> NodeFunction:
-    """A function computing `outputs` from `inputs` by running `items` in order.
+    """A function computing `outputs` from `inputs` by running the items `resolved`.
 
     * `inputs`: [(vid, PyTensor type)] -- tensors only;
-    * `input_layouts`: a `Layout` per input (None: nothing known); the layouts of the
-      values inside follow from how they are produced (`llvm_outputs`);
+    * `input_layouts`: a `Layout` per input (None: nothing known), the ones the items
+      were resolved for (`unit_input_layouts`);
+    * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or ALLOCATED;
     * `output_layouts`: the layout of the memory provided for each PROVIDED output
       (None: any strides);
-    * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or ALLOCATED;
-    * `constants`: {vid: (type, ndarray)} (0-d ones folded, arrays from the link table);
-    * `kernel_for(node, in_layouts)`: a `CalledKernel` for a node the unit calls instead of
-      generating (a kernel, numba, ...), or None; its handle goes into `links` (the
-      returned function's `links`: call it with that config). Buffers kernels allocate
-      for values inside the unit are released when it returns.
+    * `resolved`: the unit's items in order, resolved (`plan.resolve.Resolved`): each
+      says whether its code is generated or which kernel it calls. A kernel's handle
+      goes into `links` (the returned function's `links`: call it with that config).
+      Buffers kernels allocate for values inside the unit are released when it returns;
+    * `constants`: {vid: (type, ndarray)} (0-d ones folded, arrays from the link table).
     """
     from pytensor.link.llvm.codegen.call import LinkTable
 
@@ -87,7 +73,6 @@ def build_unit_function(
     if input_layouts is None:
         input_layouts = [None] * len(inputs)
     in_reprs = [repr_of(t, lay) for (_, t), lay in zip(inputs, input_layouts, strict=True)]
-    lays = {vid: r.layout for (vid, _), r in zip(inputs, in_reprs, strict=True)}
     if output_layouts is None:
         output_layouts = [None] * len(outputs)
     outs = [Output(repr_of(t, lay if mode is OutputMode.PROVIDED else None), mode) for (_, t, mode), lay in zip(outputs, output_layouts, strict=True)]
@@ -102,7 +87,7 @@ def build_unit_function(
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]
-    cg = Codegen(b, ctx, config, parallel=parallel, links=links, planner=planner, module=module, name=name)
+    cg = Codegen(b, ctx, config, parallel=parallel, links=links, module=module, name=name)
     vals = {}  # vid -> Array (tensors) or value (scalars)
     k = 2
     for (vid, _), r in zip(inputs, in_reprs, strict=True):
@@ -121,7 +106,7 @@ def build_unit_function(
         targets.setdefault(vid, t)
     bind_constants(cg, constants, vals)
 
-    written, owned = emit_items(cg, module, name, items, vals, lays, targets, kernel_for)
+    written, owned = emit_items(cg, module, name, resolved, vals, targets)
 
     # unit outputs that weren't produced in place: copy
     for (vid, t, mode), target in zip(outputs, out_targets, strict=True):
@@ -181,13 +166,19 @@ def bind_constants(cg, constants, vals):
             vals[vid] = c_array(t.dtype, ptr, shape, strides)
 
 
-def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=None, on_fail=None):
-    """Emit `items` (in order) into the function being built in `cg`: each node's
-    function is called (and inlined), or its kernel.
+def unit_input_layouts(types, layouts) -> list:
+    """The layouts a unit's inputs have inside it, given what is known outside: what
+    their representations keep."""
+    return [repr_of(t, lay).layout for t, lay in zip(types, layouts, strict=True)]
+
+
+def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
+    """Emit the items `resolved` (`plan.resolve.Resolved`, in order) into the function
+    being built in `cg`: each node's function is called (and inlined), or its kernel.
 
     * `vals`: vid -> Array (tensors) or value (scalars); must hold every value the
-      items read but don't produce; filled with what they produce;
-    * `lays`: vid -> Layout of the values (filled too);
+      items read but don't produce, with the layouts they were resolved for; filled
+      with what they produce;
     * `targets`: vid -> `Destination`: where a value may be produced directly (PROVIDED
       outputs whose declared layout the target's implies; ALLOCATED C-contiguous
       ones into a slot); other values go into temporary memory or kernel buffers;
@@ -201,11 +192,9 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
     targets = targets or {}
     written = set()
     owned = []  # (slot, ndim): buffers kernels allocated
-    for n, item in enumerate(items):
-        node = item.node
-        in_lays = [lays.get(vid) for vid in item.inputs]
-        kernel = kernel_for(node, in_lays) if kernel_for is not None else None
-        nsig = node_signature(node, frozenset(), in_lays, declared=None if kernel is None else kernel.outputs)
+    lays = {}  # vid -> Layout of what the items produced
+    for n, r in enumerate(resolved):
+        item, node, kernel, nsig, in_lays = r.item, r.item.node, r.kernel, r.signature, r.in_layouts
         # provided outputs: their target if its layout implies the declared one; else a
         # temporary in the declared layout (copied by the caller if needed)
         in_place = {}
@@ -250,15 +239,20 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
             parallel=cg.parallel,
             kernel=kernel,
             links=cg.links,
-            planner=cg.planner,
+            scan_body=r.body,
         )
         args = [ctx, config]
         present = [vid for vid, var in zip(item.inputs, node.inputs, strict=True) if not is_absent(var.type)]
-        for vid, r in zip(present, nsig.inputs, strict=True):
+        for vid, rep in zip(present, nsig.inputs, strict=True):
             if vid not in vals:
                 raise ValueError(f"{name}: {node.op} reads a value that isn't computed yet")
             v = vals[vid]
-            args.append(v if isinstance(r, ScalarRepr) else pack(b, r, v))
+            if isinstance(rep, ScalarRepr):
+                args.append(v)
+                continue
+            if not v.layout.implies(rep.layout, rep.shape, itemsize(rep.dtype)):
+                raise AssertionError(f"{name}: {node.op} was resolved for an input with layout {rep.layout}, got {v.layout}")
+            args.append(pack(b, rep, v))
         reads = []  # (vid, slot, how)
         for j, (vid, var, o) in enumerate(zip(item.outputs, node.outputs, nsig.outputs, strict=True)):
             if o.mode is OutputMode.ABSENT:
@@ -309,4 +303,4 @@ def _mem_type(dtype):
     return memory_type(dtype)
 
 
-__all__ = ["NodeItem", "Destination", "TensorRepr", "bind_constants", "build_unit_function", "emit_items", "release"]
+__all__ = ["Destination", "TensorRepr", "bind_constants", "build_unit_function", "emit_items", "release", "unit_input_layouts"]
