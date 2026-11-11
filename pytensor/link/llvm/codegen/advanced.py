@@ -14,9 +14,8 @@ from dataclasses import dataclass
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import advance, Array, cast, copy, for_each, load, store
-from pytensor.link.llvm.codegen.function import OutputMode, new_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.link.llvm.codegen.types import ir, repr_of
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, unflatten_index_variables
 
 

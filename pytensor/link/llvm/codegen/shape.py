@@ -6,7 +6,6 @@ from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import Array, cast, copy, load, store
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
-from pytensor.link.llvm.codegen.types import ir
 from pytensor.link.llvm.layout import dimshuffle_layout, same_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle

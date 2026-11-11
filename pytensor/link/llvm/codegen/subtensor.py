@@ -7,7 +7,6 @@ from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, s
 from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs, view_output
 from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.link.llvm.codegen.types import ir
 from pytensor.scalar.basic import add as scalar_add
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor, unflatten_index_variables
 
@@ -20,54 +19,45 @@ def index(cg, x: Array, entries) -> Array:
     """`x[entries]` as a view: `entries` hold (value, dtype) for integer indices and
     slices of (value, dtype) / None, like `unflatten_index_variables` returns them."""
     b = cg.b
-    zero, one = b.i64(0), b.i64(1)
-    offset = zero
+    offset = b.i64(0)
     shape, strides = [], []
     empty = b.const_bool(False)
     axis = 0
     for e in entries:
         n, st = x.shape[axis], x.strides[axis]
         if isinstance(e, slice):
-            step = one if e.step is None else _i64(b, *e.step)
-            cg.check(b.ne(step, zero), "slice step cannot be zero")
-            pos = b.sgt(step, zero)
-            minus1 = b.i64(-1)
-            nm1 = b.sub(n, one)
-            lower = b.select(pos, zero, minus1)
-            upper = b.select(pos, n, nm1)
+            step = b.i64(1) if e.step is None else _i64(b, *e.step)
+            cg.check(b.ne(step, 0), "slice step cannot be zero")
+            pos = b.sgt(step, 0)
+            lower = b.select(pos, b.i64(0), -1)
+            upper = b.select(pos, n, b.sub(n, 1))
 
             def bound(v, default):
                 if v is None:
                     return default
                 v = _i64(b, *v)
-                neg = b.slt(v, zero)
-                return b.select(neg, b.smax(b.add(v, n), lower), b.smin(v, upper))
+                return b.select(b.slt(v, 0), b.smax(b.add(v, n), lower), b.smin(v, upper))
 
             start = bound(e.start, b.select(pos, lower, upper))
             stop = bound(e.stop, b.select(pos, upper, lower))
             # length = ceil((stop - start) / step), at least 0
             span = b.select(pos, b.sub(stop, start), b.sub(start, stop))
             astep = b.select(pos, step, b.neg(step))
-            length = b.select(
-                b.sgt(span, zero),
-                b.add(b.sdiv(b.sub(span, one), astep), one),
-                zero,
-            )
-            empty = b.or_(empty, b.eq(length, zero))
+            length = b.select(b.sgt(span, 0), b.add(b.sdiv(b.sub(span, 1), astep), 1), 0)
+            empty = b.or_(empty, b.eq(length, 0))
             offset = b.add(offset, b.mul(start, st, nsw=True))
             shape.append(length)
             strides.append(b.mul(st, step, nsw=True))
         else:
             i = _i64(b, *e)
-            i = b.select(b.slt(i, zero), b.add(i, n), i)
-            ok = b.and_(b.sge(i, zero), b.slt(i, n))
-            cg.check(ok, f"index out of bounds for axis {axis}")
+            i = b.select(b.slt(i, 0), b.add(i, n), i)
+            cg.check(b.and_(b.sge(i, 0), b.slt(i, n)), f"index out of bounds for axis {axis}")
             offset = b.add(offset, b.mul(i, st, nsw=True))
         axis += 1
     shape += x.shape[axis:]
     strides += x.strides[axis:]
     # an empty view may start out of range: keep the pointer inside the array
-    offset = b.select(empty, zero, offset)
+    offset = b.select(empty, 0, offset)
     data = x.data if offset.const_int == 0 else b.gep_bytes(x.data, offset)
     return Array(x.dtype, data, shape, strides)
 

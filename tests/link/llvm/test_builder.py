@@ -64,15 +64,33 @@ def test_integer_arithmetic_simplifies():
     x, y, flag = f.params
     same = repr(x)
     # identities return the operand
-    for v in [b.add(x, 0), b.add(0, x), b.sub(x, 0), b.mul(x, 1), b.mul(1, x, nsw=True), b.sdiv(x, 1)]:
+    for v in [
+        b.add(x, 0),
+        b.add(0, x),
+        b.sub(x, 0),
+        b.mul(x, 1),
+        b.mul(1, x, nsw=True),
+        b.sdiv(x, 1),
+    ]:
         assert repr(v) == same
-    for v in [b.shl(x, 0), b.or_(x, 0), b.xor(0, x), b.and_(x, -1), b.and_(x, x), b.smin(x, x)]:
+    for v in [
+        b.shl(x, 0),
+        b.or_(x, 0),
+        b.xor(0, x),
+        b.and_(x, -1),
+        b.and_(x, x),
+        b.smin(x, x),
+    ]:
         assert repr(v) == same
-    assert repr(b.and_(flag, True)) == repr(flag) and repr(b.or_(False, flag)) == repr(flag)
+    assert repr(b.and_(flag, True)) == repr(flag) and repr(b.or_(False, flag)) == repr(
+        flag
+    )
     # absorbing elements and constants fold to constants
     assert b.mul(x, 0).const_int == 0 and b.and_(0, x).const_int == 0
     assert b.or_(flag, True).const_int == 1 and b.and_(flag, False).const_int == 0
-    assert b.add(b.i64(2), 3).const_int == 5 and b.mul(b.i64(4), b.i64(5)).const_int == 20
+    assert (
+        b.add(b.i64(2), 3).const_int == 5 and b.mul(b.i64(4), b.i64(5)).const_int == 20
+    )
     assert b.slt(b.i64(1), 2).const_int == 1 and b.eq(b.i64(1), 2).const_int == 0
     assert b.smin(b.i64(3), 5).const_int == 3 and b.smax(b.i64(3), 5).const_int == 5
     assert b.umin(b.i64(-1), 5).const_int == 5 and b.umax(b.i64(-1), 5).const_int == -1
@@ -87,15 +105,22 @@ def test_integer_arithmetic_simplifies():
     assert [fn(3, 5, 0), fn(5, 3, 0), fn(-2, 9, 0)] == [3, 3, 0]
 
 
-@pytest.mark.parametrize("name", ["eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge"])
+@pytest.mark.parametrize(
+    "name", ["eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge"]
+)
 def test_comparison_shortcuts(name):
     m, f, b = _function([ir.i64, ir.i64], ir.i32)
     x, y = f.params
     short = getattr(b, name)(x, y)
-    assert repr(short).split("=")[1] == repr(b.icmp(getattr(ir.ICmp, name.upper()), x, y)).split("=")[1]
+    assert (
+        repr(short).split("=")[1]
+        == repr(b.icmp(getattr(ir.ICmp, name.upper()), x, y)).split("=")[1]
+    )
     b.ret(b.zext(short, ir.i32))
     fn = _compile(m, ctypes.c_int32, ctypes.c_int64, ctypes.c_int64)
-    py = {"eq": "==", "ne": "!=", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}[name[-2:]]
+    py = {"eq": "==", "ne": "!=", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}[
+        name[-2:]
+    ]
     for xv, yv in [(1, 2), (2, 1), (3, 3), (-1, 2)]:
         ux, uy = (xv % 2**64, yv % 2**64) if name[0] == "u" else (xv, yv)
         assert fn(xv, yv) == int(eval(f"{ux} {py} {uy}"))
@@ -157,3 +182,39 @@ def test_named_values_show_in_the_ir():
     b.ret(total)
     text = m.ir()
     assert "%total = add i64 %x" in text and "one" not in text
+
+
+def test_stubs_list_the_builders_methods():
+    """The type stubs shipped with the extension know every builder method."""
+    import ast
+    import pathlib
+
+    import pytensor_llvm
+
+    stub = (
+        pathlib.Path(pytensor_llvm.__file__).parent.parent
+        / "pytensor_llvm-stubs"
+        / "ir.pyi"
+    )
+    if not stub.exists():
+        pytest.skip("pytensor_llvm is installed without its stubs")
+    classes = {
+        n.name: n
+        for n in ast.parse(stub.read_text()).body
+        if isinstance(n, ast.ClassDef)
+    }
+    for cls in [
+        "Builder",
+        "Value",
+        "Module",
+        "Function",
+        "Type",
+        "CompiledModule",
+        "Parallel",
+    ]:
+        typed = {n.name for n in classes[cls].body if isinstance(n, ast.FunctionDef)}
+        typed |= {
+            n.target.id for n in classes[cls].body if isinstance(n, ast.AnnAssign)
+        }
+        real = {n for n in dir(getattr(ir, cls)) if not n.startswith("_")}
+        assert real <= typed, f"{cls}: the stubs miss {sorted(real - typed)}"

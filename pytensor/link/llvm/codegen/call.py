@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from pytensor.link.llvm.codegen.types import PTARRAY_SIZE, ir, memory_type, ptarray_type, slot_type
+from pytensor.link.llvm.codegen.types import ir, memory_type, PtArray, PTARRAY_SIZE, ptarray_type, Slot, slot_type
 
 
 @dataclass
@@ -125,7 +125,7 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
             args_of.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
         elif isinstance(o, SlotOutput):
             st = slot_type(o.ndim)
-            args_of.append((b.null(), b.field_ptr(st, o.slot, 1), b.field_ptr(st, o.slot, 2), o.ndim, o))
+            args_of.append((b.null(), b.field_ptr(st, o.slot, Slot.LENGTHS), b.field_ptr(st, o.slot, Slot.STRIDES), o.ndim, o))
         else:
             raise NotImplementedError(f"{kernel.description}: a {type(o).__name__} output")
 
@@ -133,11 +133,11 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
     ptrs = []
     for k, (data, shape, strides, nd, _) in enumerate(args_of):
         p = b.gep_bytes(args, b.i64(k * PTARRAY_SIZE))
-        b.store(data, b.field_ptr(pa, p, 0))
-        b.store(shape, b.field_ptr(pa, p, 1))
-        b.store(strides, b.field_ptr(pa, p, 2))
-        b.store(b.null(), b.field_ptr(pa, p, 3))
-        b.store(b.i64(nd), b.field_ptr(pa, p, 4))
+        b.store(data, b.field_ptr(pa, p, PtArray.DATA))
+        b.store(shape, b.field_ptr(pa, p, PtArray.SHAPE))
+        b.store(strides, b.field_ptr(pa, p, PtArray.STRIDES))
+        b.store(b.null(), b.field_ptr(pa, p, PtArray.OWNER))
+        b.store(b.i64(nd), b.field_ptr(pa, p, PtArray.NDIM))
         ptrs.append(p)
 
     fn = linked(cg, index)
@@ -151,8 +151,8 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
         if o is None:
             continue
         st = slot_type(o.ndim)
-        b.store(b.load(ir.ptr, b.field_ptr(pa, p, 0)), b.field_ptr(st, o.slot, 0))
-        b.store(b.load(ir.ptr, b.field_ptr(pa, p, 3)), b.field_ptr(st, o.slot, 3))
+        b.store(b.load(ir.ptr, b.field_ptr(pa, p, PtArray.DATA)), b.field_ptr(st, o.slot, Slot.DATA))
+        b.store(b.load(ir.ptr, b.field_ptr(pa, p, PtArray.OWNER)), b.field_ptr(st, o.slot, Slot.OWNER))
         o.done = True
     with b.if_(b.ne(rc, b.i32(0))):
         b.ret(rc)

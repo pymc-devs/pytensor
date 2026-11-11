@@ -131,8 +131,15 @@ def _tensor_ir_type(ndim, n_lengths, n_strides):
     return ir.Type.struct_([ir.ptr, ir.Type.array(ir.i64, n_lengths), ir.Type.array(ir.i64, n_strides)])
 
 
+class Slot:
+    """Fields of an output slot (`slot_type`), for `b.field_ptr(slot_type(nd), slot, Slot.OWNER)`."""
+
+    DATA, LENGTHS, STRIDES, OWNER = range(4)
+
+
 @cache
 def slot_type(ndim):
+    """The output slot a kernel fills: `{ptr data, [n x i64] lengths, [n x i64] strides, ptr owner}`."""
     return ir.Type.struct_([ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr])
 
 
@@ -168,6 +175,12 @@ def repr_of(t, layout: Layout | None = None):
             layout = Layout.make(shape, layout.order, layout.strides)
         return TensorRepr(check_dtype(t.dtype), shape, layout)
     raise NotImplementedError(f"LLVM backend: no representation for {t}")
+
+
+class PtArray:
+    """Fields of the kernel ABI array (`ptarray_type`)."""
+
+    DATA, SHAPE, STRIDES, OWNER, NDIM = range(5)
 
 
 #: The kernel ABI array: `{data, shape*, strides*, owner, ndim}` (40 bytes).

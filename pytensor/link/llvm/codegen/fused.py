@@ -30,10 +30,10 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import OutputMode, new_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.layout import Layout
-from pytensor.link.llvm.codegen.types import ScalarRepr, check_dtype, ir, repr_of
+from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor

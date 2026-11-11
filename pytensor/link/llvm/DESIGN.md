@@ -359,12 +359,36 @@ A small LLVM wrapper (`rust/pytensor-llvm/src/ir`) on top of `llvm-sys`:
 * Every builder method checks its operands (types, module, terminated blocks) before
   calling LLVM, and raises a Python exception otherwise: with assertions off, LLVM's
   behavior on malformed IR is undefined.
-* Control flow comes as `with b.loop(n) as i:`, `with b.if_(cond):`, and closures for
-  values that flow out: `b.fold(n, init, body)`, `b.if_else(cond, then, else_)`.
+* Operands may be Python literals: `b.add(i, 1)`, `b.select(c, x, 0.0)`, `b.loop(4)`.
+  A literal takes the type of the other operand, or the one the method asks for.
+  `b.i64(v)`, `b.f64(v)`, ... make constants.
+* Integer arithmetic simplifies what it sees: constants fold, and so do `x + 0`,
+  `x * 1`, `x * 0`, `x & 0`, a select on a constant condition, `b.smin`/`b.smax` of
+  constants. A static shape therefore stays a constant (`value.const_int`) through the
+  arithmetic of an emitter without the emitter doing anything for it.
+* Comparisons are `b.slt(a, b)`, `b.eq(a, b)`, ... (and `b.icmp(ir.ICmp.SLT, a, b)`).
+* Control flow comes as `with b.loop(n) as i:`, `with b.if_(cond):` followed by
+  `with b.else_():`, and closures for values that flow out: `b.fold(n, init, body)`,
+  `b.if_else(cond, then, else_)`.
+* `value.named("n")` names a value in the IR text, for reading dumps.
 * Things that need care are Rust methods: libm calls with vector variants,
   intrinsics, runtime calls.
 * `Module.compile()` verifies, optimizes, generates machine code and adds it to the JIT;
   objects are cached by a hash of the IR text and the target.
+* The wheel ships type stubs (`pytensor_llvm-stubs`), so editors and type checkers know
+  the builder.
+
+On top of it, in Python (`codegen/`):
+
+* `types.ir` is the module itself, imported on first use: emitters write `ir.i64`.
+* `num.Num` is a value with its dtype. LLVM integers have no sign and floats have their
+  own instructions, so code that depends on the dtype (the scalar ops) is written with
+  operators, which pick the instruction: `x + y`, `x // y`, `x < y`, `x.astype(dtype)`,
+  `cond.select(a, b)`, `x.maximum(y)`. They follow numpy for the dtype. Operands must
+  have the same dtype; `==` stays identity (`x.eq(y)` compares) and a `Num` can't be a
+  Python condition. Index arithmetic, which is always i64, uses the builder directly.
+* `types.Slot` and `types.PtArray` name the fields of the two structs emitters reach
+  into: `b.field_ptr(slot_type(nd), slot, Slot.OWNER)`.
 
 ## 8. Programs
 
