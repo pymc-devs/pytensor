@@ -32,12 +32,23 @@ def scan_tasks(f):
 def generated(f):
     """Are the top-level Scan tasks generated loops? (A generated task is described by
     the op, "Scan{...}"; the kernel's by just "Scan". Scans inside units are skipped.)"""
-    tops = [s.split(")  ", 1)[1] for s in scan_tasks(f) if s.split(")  ", 1)[1].startswith("Scan")]
-    return all(t.startswith("Scan{") for t in tops) and any(t.startswith("Scan{") for t in tops) if tops else None
+    tops = [
+        s.split(")  ", 1)[1]
+        for s in scan_tasks(f)
+        if s.split(")  ", 1)[1].startswith("Scan")
+    ]
+    return (
+        all(t.startswith("Scan{") for t in tops)
+        and any(t.startswith("Scan{") for t in tops)
+        if tops
+        else None
+    )
 
 
 def compare(inputs, outputs, values, modes=(GEN, KERNEL)):
-    ref = pytensor.function(inputs, outputs, mode=REF, on_unused_input="ignore")(*values)
+    ref = pytensor.function(inputs, outputs, mode=REF, on_unused_input="ignore")(
+        *values
+    )
     if not isinstance(ref, list):
         ref = [ref]
     fs = []
@@ -47,7 +58,12 @@ def compare(inputs, outputs, values, modes=(GEN, KERNEL)):
         if not isinstance(res, list):
             res = [res]
         for r, e in zip(res, ref, strict=True):
-            assert r.shape == e.shape and r.dtype == e.dtype, (r.shape, e.shape, r.dtype, e.dtype)
+            assert r.shape == e.shape and r.dtype == e.dtype, (
+                r.shape,
+                e.shape,
+                r.dtype,
+                e.dtype,
+            )
             np.testing.assert_allclose(r, e, rtol=1e-12, atol=1e-14)
         assert scan_tasks(f), "no Scan task"
         g = generated(f)
@@ -59,15 +75,26 @@ def compare(inputs, outputs, values, modes=(GEN, KERNEL)):
 def test_sit_sot_with_sequence_and_non_sequence():
     x0, rho = pt.dscalars("x0", "rho")
     eps = pt.vector("eps")
-    xs = scan(lambda e, x, r: r * x + e, sequences=[eps], outputs_info=[x0], non_sequences=[rho])
-    compare([x0, rho, eps], [xs, (xs**2).sum()], [np.array(0.3), np.array(0.9), rng.normal(size=50)])
+    xs = scan(
+        lambda e, x, r: r * x + e,
+        sequences=[eps],
+        outputs_info=[x0],
+        non_sequences=[rho],
+    )
+    compare(
+        [x0, rho, eps],
+        [xs, (xs**2).sum()],
+        [np.array(0.3), np.array(0.9), rng.normal(size=50)],
+    )
 
 
 def test_ir_includes_the_modules_of_the_loop_body():
     # the kernel runs the body as a subprogram, planned by a planner of its own: its
     # generated modules are listed with the program's
     eps = pt.vector("eps")
-    xs = scan(lambda e, x: pt.exp(x) * 0.5 + e, sequences=[eps], outputs_info=[pt.zeros(())])
+    xs = scan(
+        lambda e, x: pt.exp(x) * 0.5 + e, sequences=[eps], outputs_info=[pt.zeros(())]
+    )
     f = pytensor.function([eps], xs, mode=KERNEL)
     stats = f.maker.linker.stats
     assert len(stats.modules) > stats.n_modules
@@ -89,7 +116,9 @@ def test_nit_sot_map_over_matrix_rows():
     m = pt.matrix("m")
     w = pt.vector("w")
     # sort (a Rust kernel, called from the loop) isn't pushed out by the scan rewrites
-    ys = scan(lambda row, w: pt.sort(pt.exp(row) * w)[::-1], sequences=[m], non_sequences=[w])
+    ys = scan(
+        lambda row, w: pt.sort(pt.exp(row) * w)[::-1], sequences=[m], non_sequences=[w]
+    )
     compare([m, w], [ys, ys.sum()], [rng.normal(size=(7, 4)), rng.normal(size=4)])
 
 
@@ -124,26 +153,53 @@ def test_while_loop_truncates():
 def test_only_last_value_uses_circular_buffer():
     x0, rho = pt.dscalars("x0", "rho")
     eps = pt.vector("eps")
-    xs = scan(lambda e, x, r: r * x + e, sequences=[eps], outputs_info=[x0], non_sequences=[rho])
+    xs = scan(
+        lambda e, x, r: r * x + e,
+        sequences=[eps],
+        outputs_info=[x0],
+        non_sequences=[rho],
+    )
     # only the last states are needed: the save-memory rewrites shrink the buffer
-    compare([x0, rho, eps], [xs[-1], xs[-2]], [np.array(0.3), np.array(0.7), rng.normal(size=33)])
+    compare(
+        [x0, rho, eps],
+        [xs[-1], xs[-2]],
+        [np.array(0.3), np.array(0.7), rng.normal(size=33)],
+    )
 
 
 def test_gradient_of_scan_mit_mot():
     x0, rho = pt.dscalars("x0", "rho")
     eps = pt.vector("eps")
-    xs = scan(lambda e, x, r: r * x + pt.tanh(e), sequences=[eps], outputs_info=[x0], non_sequences=[rho])
+    xs = scan(
+        lambda e, x, r: r * x + pt.tanh(e),
+        sequences=[eps],
+        outputs_info=[x0],
+        non_sequences=[rho],
+    )
     logp = (-0.5 * xs**2).sum()
-    compare([x0, rho, eps], [logp, *pytensor.grad(logp, [x0, rho, eps])], [np.array(0.3), np.array(0.8), rng.normal(size=60)])
+    compare(
+        [x0, rho, eps],
+        [logp, *pytensor.grad(logp, [x0, rho, eps])],
+        [np.array(0.3), np.array(0.8), rng.normal(size=60)],
+    )
 
 
 def test_kernel_inside_the_loop_body():
     A = pt.matrix("A")
     x0 = pt.vector("x0")
     seq = pt.matrix("seq")
-    xs = scan(lambda s, x, A: pt.tanh(A @ x) + s, sequences=[seq], outputs_info=[x0], non_sequences=[A])
+    xs = scan(
+        lambda s, x, A: pt.tanh(A @ x) + s,
+        sequences=[seq],
+        outputs_info=[x0],
+        non_sequences=[A],
+    )
     out = [xs, pytensor.grad(xs.sum(), A)]
-    compare([A, x0, seq], out, [rng.normal(size=(5, 5)) * 0.3, rng.normal(size=5), rng.normal(size=(12, 5))])
+    compare(
+        [A, x0, seq],
+        out,
+        [rng.normal(size=(5, 5)) * 0.3, rng.normal(size=5), rng.normal(size=(12, 5))],
+    )
 
 
 def test_zero_steps_and_n_steps_input():
@@ -153,13 +209,20 @@ def test_zero_steps_and_n_steps_input():
     for nv in [0, 1, 5]:
         ref = pytensor.function([x0, n], xs, mode=REF)(np.array(2.0), nv)
         for mode in (GEN, KERNEL):
-            np.testing.assert_allclose(pytensor.function([x0, n], xs, mode=mode)(np.array(2.0), nv), ref)
+            np.testing.assert_allclose(
+                pytensor.function([x0, n], xs, mode=mode)(np.array(2.0), nv), ref
+            )
 
 
 def test_n_steps_shorter_than_the_sequence():
     x = pt.vector("x")
     n = pt.lscalar("n")
-    ys = scan(lambda v, acc: acc * 0.5 + v, sequences=[x], outputs_info=[pt.zeros(())], n_steps=n)
+    ys = scan(
+        lambda v, acc: acc * 0.5 + v,
+        sequences=[x],
+        outputs_info=[pt.zeros(())],
+        n_steps=n,
+    )
     compare([x, n], ys, [np.arange(4.0), np.int64(3)])
 
 
@@ -167,7 +230,11 @@ def test_nested_scan():
     x = pt.matrix("x")
 
     def outer_step(row):
-        inner = scan(lambda v, acc: acc + v, sequences=[row], outputs_info=[pt.zeros((), dtype=row.dtype)])
+        inner = scan(
+            lambda v, acc: acc + v,
+            sequences=[row],
+            outputs_info=[pt.zeros((), dtype=row.dtype)],
+        )
         return inner[-1]
 
     sums = scan(outer_step, sequences=[x])

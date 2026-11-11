@@ -86,7 +86,12 @@ def test_numba_through_c_api_without_gil():
     v = rng.normal(size=(30, 7))
     fn = compiled(f).c_function()
     a = Api.from_address(compiled(f).c_api_table())
-    call_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.POINTER(PtArray))
+    call_t = ctypes.CFUNCTYPE(
+        ctypes.c_int32,
+        ctypes.c_void_p,
+        ctypes.POINTER(PtArray),
+        ctypes.POINTER(PtArray),
+    )
     new_t = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
     free_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
     # ctypes.CFUNCTYPE callables release the GIL while the native call runs

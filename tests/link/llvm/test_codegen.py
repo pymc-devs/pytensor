@@ -22,14 +22,20 @@ def run_node(node, *values, provided=None, provided_layouts=None):
     for k, (o, spec) in enumerate(zip(node.outputs, c.signature.outputs, strict=True)):
         if spec.mode is OutputMode.PROVIDED:
             arr = None if provided is None else provided[k]
-            outs.append(np.empty(o.type.shape, dtype=o.type.dtype) if arr is None else arr)
+            outs.append(
+                np.empty(o.type.shape, dtype=o.type.dtype) if arr is None else arr
+            )
         else:
             outs.append((np.dtype(o.type.dtype), o.type.ndim))
     # constants are inputs of the node function too
     ins = []
     it = iter(values)
     for i in node.inputs:
-        ins.append(np.asarray(i.data if isinstance(i, Constant) else next(it), dtype=i.type.dtype))
+        ins.append(
+            np.asarray(
+                i.data if isinstance(i, Constant) else next(it), dtype=i.type.dtype
+            )
+        )
     return ir.call_kernel(c.address, ins, outs)
 
 
@@ -44,7 +50,9 @@ def check(out, inputs, values, rtol=1e-12, atol=1e-14):
     node_inputs = [i for i in node.inputs if not isinstance(i, Constant)]
     in_values = reference(node_inputs, inputs, values) if node_inputs else []
     (res,) = run_node(node, *in_values)
-    np.testing.assert_allclose(res, reference(out, inputs, values), rtol=rtol, atol=atol)
+    np.testing.assert_allclose(
+        res, reference(out, inputs, values), rtol=rtol, atol=atol
+    )
     return res
 
 
@@ -161,7 +169,19 @@ def test_elemwise_int_ops(dtype):
     yv[:5] = 0
     if info.min < 0:
         xv[5], yv[5] = info.min, -1
-    for e in [x + y, x * y, x - y, x // y, x % y, pt.maximum(x, y), pt.minimum(x, y), x < y, pt.eq(x, y), abs(x), x & y]:
+    for e in [
+        x + y,
+        x * y,
+        x - y,
+        x // y,
+        x % y,
+        pt.maximum(x, y),
+        pt.minimum(x, y),
+        x < y,
+        pt.eq(x, y),
+        abs(x),
+        x & y,
+    ]:
         check(e, [x, y], [xv, yv])
 
 
@@ -265,7 +285,13 @@ def test_careduce_acc_dtype_uses_a_temporary():
 def test_empty_arrays():
     x = pt.matrix("x")
     z = np.zeros((0, 3))
-    for e in [pt.exp(x), pt.sum(x, axis=1), pt.sum(x), pt.prod(x, axis=0), pt.max(x, axis=1)]:
+    for e in [
+        pt.exp(x),
+        pt.sum(x, axis=1),
+        pt.sum(x),
+        pt.prod(x, axis=0),
+        pt.max(x, axis=1),
+    ]:
         (res,) = run_node(e.owner, z)
         np.testing.assert_allclose(res, reference(e, [x], [z]))
     for e in [pt.max(x, axis=0), pt.max(x)]:

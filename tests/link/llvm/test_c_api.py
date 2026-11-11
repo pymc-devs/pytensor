@@ -43,7 +43,11 @@ DTYPE_CODES = {
 
 
 class PtTypeInfo(ctypes.Structure):
-    _fields_ = [("dtype", ctypes.c_int32), ("ndim", ctypes.c_int32), ("static_shape", ctypes.POINTER(ctypes.c_int64))]
+    _fields_ = [
+        ("dtype", ctypes.c_int32),
+        ("ndim", ctypes.c_int32),
+        ("static_shape", ctypes.POINTER(ctypes.c_int64)),
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -55,12 +59,29 @@ def harness(tmp_path_factory):
     (d / "pytensor_llvm.h").write_text(pytensor_llvm.c_header())
     lib = d / "libharness.so"
     src = Path(__file__).with_name("c_harness.c")
-    subprocess.run([cc, "-O2", "-shared", "-fPIC", f"-I{d}", str(src), "-o", str(lib)], check=True)
+    subprocess.run(
+        [cc, "-O2", "-shared", "-fPIC", f"-I{d}", str(src), "-o", str(lib)], check=True
+    )
     h = ctypes.CDLL(str(lib))
     h.pt_run_once.restype = ctypes.c_int
-    h.pt_run_once.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.POINTER(PtArray), ctypes.c_char_p, ctypes.c_size_t]
+    h.pt_run_once.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(PtArray),
+        ctypes.POINTER(PtArray),
+        ctypes.c_char_p,
+        ctypes.c_size_t,
+    ]
     h.pt_bench.restype = ctypes.c_double
-    h.pt_bench.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.c_int, ctypes.c_long, ctypes.c_char_p, ctypes.c_size_t]
+    h.pt_bench.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(PtArray),
+        ctypes.c_int,
+        ctypes.c_long,
+        ctypes.c_char_p,
+        ctypes.c_size_t,
+    ]
     return h
 
 
@@ -80,8 +101,19 @@ class Api(ctypes.Structure):
     _fields_ = [("abi_version", ctypes.c_uint32), ("api_version", ctypes.c_uint32)] + [
         (name, ctypes.c_void_p)
         for name in [
-            "function_incref", "function_decref", "n_inputs", "n_outputs", "input_type", "output_type",
-            "session_new", "session_free", "call", "last_error", "buffer_decref", "seed", "set_parallel",
+            "function_incref",
+            "function_decref",
+            "n_inputs",
+            "n_outputs",
+            "input_type",
+            "output_type",
+            "session_new",
+            "session_free",
+            "call",
+            "last_error",
+            "buffer_decref",
+            "seed",
+            "set_parallel",
         ]
     ]
 
@@ -100,7 +132,11 @@ def _model():
     log_sigma = pt.dscalar("log_sigma")
     data = pt.vector("data")
     sigma = pt.exp(log_sigma)
-    logp = (-0.5 * ((data - mu) / sigma) ** 2 - pt.log(sigma)).sum() - 0.5 * mu**2 + log_sigma
+    logp = (
+        (-0.5 * ((data - mu) / sigma) ** 2 - pt.log(sigma)).sum()
+        - 0.5 * mu**2
+        + log_sigma
+    )
     grads = pytensor.grad(logp, [mu, log_sigma])
     f = pytensor.function([mu, log_sigma, data], [logp, *grads, data * 2], mode=LLVM)
     vals = [np.array(0.3), np.array(-0.2), np.random.default_rng(0).normal(size=200)]
@@ -114,7 +150,9 @@ def test_api_table_and_introspection():
     fn = f.maker.linker.program.c_function()
     n_in = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p)(a.n_inputs)
     n_out = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p)(a.n_outputs)
-    in_type = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(PtTypeInfo))(a.input_type)
+    in_type = ctypes.CFUNCTYPE(
+        ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(PtTypeInfo)
+    )(a.input_type)
     assert n_in(fn) == 3 and n_out(fn) == 4
     t = PtTypeInfo()
     assert in_type(fn, 2, ctypes.byref(t)) == 0
@@ -141,7 +179,9 @@ def test_call_from_c(harness, provided):
             keep2 += [sh, st]
             outs[k] = PtArray(None, sh, st, None, r.ndim, DTYPE_CODES[r.dtype.name])
     err = ctypes.create_string_buffer(512)
-    assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, err.value
+    assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, (
+        err.value
+    )
     decref = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.buffer_decref)
     for k, r in enumerate(ref):
         if provided:
@@ -229,7 +269,10 @@ def test_c_boundary_checks(harness):
     # misaligned data, negative length, NULL data, wrong ndim, wrong dtype
     raw = np.zeros(7 * 8 + 1, dtype=np.uint8)
     bad = [
-        (lambda p: setattr(p, "dtype", DTYPE_CODES["float32"]), b"input 0: expected dtype float64"),
+        (
+            lambda p: setattr(p, "dtype", DTYPE_CODES["float32"]),
+            b"input 0: expected dtype float64",
+        ),
         (lambda p: setattr(p, "dtype", 99), b"input 0: expected dtype float64"),
         (lambda p: setattr(p, "data", raw.ctypes.data + 1), b"not aligned"),
         (lambda p: p.shape.__setitem__(0, -1), b"negative length"),
@@ -272,6 +315,8 @@ def test_provided_output_with_other_strides(harness, static):
     ins, k1 = as_ptarrays([xv])
     outs, k2 = as_ptarrays([out])
     err = ctypes.create_string_buffer(512)
-    assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, err.value
+    assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, (
+        err.value
+    )
     np.testing.assert_allclose(out, np.exp(xv) + 1)
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)

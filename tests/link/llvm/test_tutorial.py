@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("pytensor_llvm")
 
-import pytensor.link.llvm  # noqa: E402
+import pytensor.link.llvm
 
 
 TUTORIAL = Path(pytensor.link.llvm.__file__).parent / "TUTORIAL.md"

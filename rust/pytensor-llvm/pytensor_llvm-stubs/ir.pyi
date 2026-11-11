@@ -1,4 +1,5 @@
 """Types of `pytensor_llvm.ir`, the IR builder (generated from the extension's signatures)."""
+
 from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import Any, TypeAlias
@@ -171,14 +172,21 @@ class Module:
     def name(self) -> str: ...
     label: str
     def function(
-        self, name: str, params: Sequence[Type], ret: Type, exported: bool = False, inline: Inline = ...
+        self,
+        name: str,
+        params: Sequence[Type],
+        ret: Type,
+        exported: bool = False,
+        inline: Inline = ...,
     ) -> Function: ...
     def ir(self) -> str:
         """The module as LLVM IR text."""
     def verify(self) -> None: ...
     def compile(self, opt_level: int = 3, cache: bool = True) -> CompiledModule: ...
 
-def compile_many(modules: Sequence[Module], opt_level: int = 3, cache: bool = True) -> list[CompiledModule]: ...
+def compile_many(
+    modules: Sequence[Module], opt_level: int = 3, cache: bool = True
+) -> list[CompiledModule]: ...
 def call_kernel(
     address: int, inputs: Sequence[np.ndarray], outputs: Sequence[Any], config: int = 0
 ) -> list[np.ndarray]: ...
@@ -227,7 +235,9 @@ class Builder:
     def ashr(self, a: Operand, b: Operand) -> Value: ...
     def call(self, f: Function, args: Sequence[Operand]) -> Value | None:
         """Call a function of this module."""
-    def call_ptr(self, f: Value, args: Sequence[Value], ret: Type | None = None) -> Value | None:
+    def call_ptr(
+        self, f: Value, args: Sequence[Value], ret: Type | None = None
+    ) -> Value | None:
         """Call the function at address `f` (a ptr value) with `args`, returning `ret`
         (None: void). For functions outside the module (kernels), whose address is only
         known at run time (loaded from the link table, not part of the IR).
@@ -255,11 +265,17 @@ class Builder:
         """Address of field `index` of a struct of type `ty` at `ptr`."""
     def fmul(self, a: Operand, b: Operand) -> Value: ...
     def fneg(self, a: Value) -> Value: ...
-    def fold(self, n: Operand, init: Sequence[Value], body: Callable[..., Value | Sequence[Value] | None], until: bool = False) -> list[Value]:
+    def fold(
+        self,
+        n: Operand,
+        init: Sequence[Value],
+        body: Callable[..., Value | Sequence[Value] | None],
+        until: bool = False,
+    ) -> list[Value]:
         """Loop with carried values: `acc = init; for i in 0..n: acc = body(i, *acc)`;
         returns the final values (a list). `body` returns the new values: a sequence of
         the init types, or the value itself if there is one.
-        
+
         With `until=True` the body returns one more value, an i1 stop flag; the loop
         ends after the first step that sets it, and the flag is returned last (false
         when no step ran).
@@ -284,7 +300,12 @@ class Builder:
     def icmp(self, pred: ICmp, a: Operand, b: Operand) -> Value: ...
     def if_(self, cond: Value) -> If:
         """`with b.if_(cond):` runs the body if `cond` (i1) is true."""
-    def if_else(self, cond: Value, then: Callable[..., Value | Sequence[Value] | None], else_: Callable[..., Value | Sequence[Value] | None]) -> list[Value]:
+    def if_else(
+        self,
+        cond: Value,
+        then: Callable[..., Value | Sequence[Value] | None],
+        else_: Callable[..., Value | Sequence[Value] | None],
+    ) -> list[Value]:
         """`then()` if `cond` else `else_()`; both return values of the same types (a
         sequence, one value, or None for none), which are merged and returned as a list.
         For branches without values, `with b.if_(cond): ...` and `with b.else_(): ...`
@@ -321,7 +342,7 @@ class Builder:
         function used inside are captured automatically, and `ctx` stands for the
         chunk's context there. After the block, `r.result` (i32) is the runtime's result:
         nonzero if a chunk failed (the error is set on `ctx`).
-        
+
         Chunks must not write memory another chunk reads or writes. Captured values must
         be scalars or pointers.
         """
