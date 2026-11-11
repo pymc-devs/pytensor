@@ -29,7 +29,6 @@ from pytensor.link.llvm.codegen.function import (
     OutputMode,
     build_kernel_wrapper,
     build_node_function,
-    node_outputs,
 )
 from pytensor.link.llvm.codegen.function import skipped_inputs
 from pytensor.link.llvm.codegen.types import ScalarRepr, is_absent, repr_of

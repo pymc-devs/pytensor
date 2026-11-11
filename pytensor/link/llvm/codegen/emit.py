@@ -5,15 +5,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout
+from pytensor.link.llvm.layout import DYNAMIC, Layout
 from pytensor.link.llvm.codegen.types import (
-    ScalarRepr,
-    TensorRepr,
     ir,
     is_float,
     is_signed,
     itemsize,
     memory_type,
+    ScalarRepr,
+    Slot,
+    TensorRepr,
     value_type,
 )
 
@@ -149,8 +150,8 @@ def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Arr
     with a known `layout`, only its dynamic strides are read)."""
     nd = len(static_shape)
     t = _slot_type(nd)
-    data = b.load(ir.ptr, b.field_ptr(t, slot, 0))
-    lp, sp = b.field_ptr(t, slot, 1), b.field_ptr(t, slot, 2)
+    data = b.load(ir.ptr, b.field_ptr(t, slot, Slot.DATA))
+    lp, sp = b.field_ptr(t, slot, Slot.LENGTHS), b.field_ptr(t, slot, Slot.STRIDES)
     shape = [
         b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, b.i64(a)))
         for a, s in enumerate(static_shape)
@@ -260,8 +261,8 @@ class SlotOutput:
     def _write(self, data, shape, strides):
         b = self.cg.b
         t = _slot_type(self.ndim)
-        b.store(data, b.field_ptr(t, self.slot, 0))
-        lp, sp = b.field_ptr(t, self.slot, 1), b.field_ptr(t, self.slot, 2)
+        b.store(data, b.field_ptr(t, self.slot, Slot.DATA))
+        lp, sp = b.field_ptr(t, self.slot, Slot.LENGTHS), b.field_ptr(t, self.slot, Slot.STRIDES)
         for a in range(self.ndim):
             b.store(shape[a], b.gep(ir.i64, lp, b.i64(a)))
             b.store(strides[a], b.gep(ir.i64, sp, b.i64(a)))
@@ -278,7 +279,7 @@ class SlotOutput:
             self.done = True
             return a
         nbytes = b.mul(size(b, shape), b.i64(itemsize(self.dtype)), nsw=True)
-        owner = b.field_ptr(_slot_type(self.ndim), self.slot, 3)
+        owner = b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER)
         data = b.rt_alloc(cg.ctx, nbytes, owner)
         cg.check(b.ne(data, b.null()), None)
         a = packed_array(b, self.dtype, data, shape, self.layout)
@@ -290,12 +291,12 @@ class SlotOutput:
     def data(self):
         """The data pointer in the slot (null until set)."""
         b = self.cg.b
-        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 0))
+        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, Slot.DATA))
 
     def owner(self):
         """The buffer reference in the slot (null for views)."""
         b = self.cg.b
-        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, 3))
+        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER))
 
     def read(self) -> Array:
         """The array in the slot (after `allocate`), in the slot's layout."""
@@ -306,7 +307,7 @@ class SlotOutput:
         """Shorten axis `axis` of the array in the slot to `n` (i64) -- a view of the
         same memory with the same strides."""
         b = self.cg.b
-        lp = b.field_ptr(_slot_type(self.ndim), self.slot, 1)
+        lp = b.field_ptr(_slot_type(self.ndim), self.slot, Slot.LENGTHS)
         b.store(n, b.gep(ir.i64, lp, b.i64(axis)))
 
     def _mark(self, a: Array):
