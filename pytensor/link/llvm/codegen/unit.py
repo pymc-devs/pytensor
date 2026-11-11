@@ -35,6 +35,7 @@ from pytensor.link.llvm.codegen.function import (
     OutputMode,
     Signature,
     build_node_function,
+    debug_name,
 )
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
@@ -105,7 +106,14 @@ def build_unit_function(
         if o.mode not in (OutputMode.PROVIDED, OutputMode.RETURNED):
             raise NotImplementedError(f"unit outputs can't be {o.mode}")
     sig = Signature(tuple(in_reprs), tuple(outs))
-    fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
+    nodes = ", ".join(debug_name(r.item.node) for r in resolved)
+    fn = module.function(
+        name,
+        sig.param_types(),
+        ir.i32,
+        inline=ir.Inline.Always,
+        debug_name=f"unit: {nodes}"[:300],
+    )
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]

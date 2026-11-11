@@ -32,6 +32,7 @@ class LLVMLinker(JITLinker):
         "parallel",
         "linalg_parallel",
         "generate_scan",
+        "debug_info",
     )
 
     def __init__(
@@ -45,6 +46,7 @@ class LLVMLinker(JITLinker):
         parallel=True,
         linalg_parallel=None,
         generate_scan=True,
+        debug_info=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -59,6 +61,7 @@ class LLVMLinker(JITLinker):
             linalg_parallel = parallel
         self.linalg_parallel = linalg_parallel
         self.generate_scan = generate_scan
+        self.debug_info = debug_info
         self.program = None
         self.stats = None
 
@@ -85,16 +88,21 @@ class LLVMLinker(JITLinker):
     def jit_compile(self, fn):
         return fn
 
-    def ir(self, optimized=False, opt_level=None) -> str:
+    def ir(
+        self, optimized=False, opt_level=None, remarks=False, locations=False
+    ) -> str:
         """The LLVM IR of the code generated for the compiled graph, one module per
         generated task, each under a comment naming the task (see `program.dump()`).
         With `optimized`, the IR after the optimization pipeline, i.e. what the machine
-        code is generated from (at `opt_level`, default the one compiled with).
+        code is generated from (at `opt_level`, default the one compiled with); with
+        `remarks` too, LLVM's optimization remarks first (what the loop vectorizer did
+        or why not, inlining, unrolling...). `locations`: with the `debug_info` option,
+        the Python code and node every instruction comes from, as comments.
 
         Ops that run Rust or numba kernels have no module here."""
         if self.stats is None:
             raise RuntimeError("nothing compiled yet")
-        return self.stats.ir(optimized, opt_level)
+        return self.stats.ir(optimized, opt_level, remarks, locations)
 
     def create_thunk_inputs(self, storage_map):
         return [storage_map[n] for n in self.fgraph.inputs]

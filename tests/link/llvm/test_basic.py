@@ -116,6 +116,48 @@ def test_ir_of_the_generated_code():
     assert "define" in linker.ir(optimized=True)
 
 
+def test_debug_info():
+    """With debug information, every instruction is located at the Python code that
+    emitted it, in the function of its node (also in units and parallel bodies); the
+    remarks say where the instructions they are about come from."""
+    x = pt.dmatrix("x")
+    y = pt.dvector("y")
+    unit = OpFromGraph(
+        [y], [pt.cumsum(pt.exp(y))], execution=Execution.COMPILED, inline=False
+    )
+    mode = LLVM.clone(link_kwargs={"debug_info": True})
+    f = pytensor.function([x, y], [(pt.log(x) * y).sum(axis=1), unit(y)], mode=mode)
+    xv, yv = rng.random((300, 400)), rng.random(400)
+    out = f(xv, yv)
+    np.testing.assert_allclose(out[0], (np.log(xv) * yv).sum(axis=1))
+    np.testing.assert_allclose(out[1], np.cumsum(np.exp(yv)))
+
+    linker = f.maker.linker
+    text = linker.ir(optimized=True, locations=True)
+    assert "!dbg" not in text and "!DI" not in text
+    # (inside the unit, nodes are named after its inner graph)
+    assert re.search(r"; emit\.py:\d+ \S+ <.* < Exp\(i0\) < .* < unit: Exp", text)
+    assert "; parallel body of Exp(i0)" in text
+    remarks = linker.ir(optimized=True, remarks=True)
+    assert re.search(r";     at .*fused\.py:\d+ .* < FusedElemwise", remarks)
+
+
+def test_optimization_remarks(capfd):
+    """The remarks name the instruction of the IR before optimization they are about;
+    the IR after them is the optimized IR. Compiling afterwards prints no remarks."""
+    x = pt.vector("x")
+    f = pytensor.function([x], x * 2 + 1, mode=LLVM)
+    m = f.maker.linker.stats.modules[0]
+    remarks, optimized = m.optimized_ir(remarks=True).split("\n\n", 1)
+    assert optimized == m.optimized_ir()
+    lines = remarks.splitlines()
+    k = next(k for k, line in enumerate(lines) if "vectorized loop" in line)
+    about = next(line for line in reversed(lines[:k]) if line.startswith("; @"))
+    assert re.match(r"; @[\w.]+ %[\w.]+: br ", about)
+    pytensor.function([x], x * 3, mode=LLVM.clone(link_kwargs={"cache": False}))
+    assert "remark" not in capfd.readouterr().err
+
+
 @pytest.mark.parametrize(
     "fn", [pt.exp, pt.exp2, pt.log, pt.log2, pt.log10, pt.sin, pt.cos, pt.tanh]
 )

@@ -379,7 +379,7 @@ impl Builder {
             let allocas = c::LLVMCreateBuilderInContext(m.ctx);
             c::LLVMPositionBuilderBefore(allocas, br);
             c::LLVMPositionBuilderAtEnd(b, body);
-            Ok(Builder {
+            let builder = Builder {
                 m,
                 b,
                 allocas: Cell::new(allocas),
@@ -389,7 +389,20 @@ impl Builder {
                 regions: RefCell::new(vec![]),
                 alias: RefCell::new(None),
                 last_if: Cell::new(None),
-            })
+            };
+            builder.update_location();
+            Ok(builder)
+        }
+    }
+
+    /// With debug information: what is built next is at the Python code running now
+    /// (`debug.rs`), in the current function.
+    fn update_location(&self) {
+        if let Some(d) = &self.m.debug
+            && let Some(loc) = d.location(self.m.ctx, self.func.get())
+        {
+            // SAFETY: a location in this module's context, scoped in the current function.
+            unsafe { c::LLVMSetCurrentDebugLocation2(self.b, loc) };
         }
     }
 
@@ -411,6 +424,7 @@ impl Builder {
                 "the current block already ended (after ret); no more instructions can follow",
             );
         }
+        self.update_location();
         Ok(())
     }
 
@@ -2297,9 +2311,20 @@ impl Parallel {
                 captures: vec![],
             };
             b.regions.borrow_mut().push(region);
+            if let Some(d) = &m.debug {
+                // SAFETY: the name of a function of this module, copied.
+                let name = unsafe {
+                    std::ffi::CStr::from_ptr(c::LLVMGetValueName2(body, &mut 0))
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                let parent = d.name_of(b.func.get()).unwrap_or_default();
+                d.add_function(body, &format!("parallel body of {parent}"), &name);
+            }
             b.func.set(body);
             b.allocas.set(body_allocas);
             *b.ret.borrow_mut() = Ty::Int(32);
+            b.update_location();
             me.start = Some(b.mk(params[2], Ty::Int(64)));
             me.end = Some(b.mk(params[3], Ty::Int(64)));
             *b.depth.borrow_mut() += 1;
@@ -2350,6 +2375,7 @@ impl Parallel {
         b.allocas.set(region.parent_allocas);
         *b.ret.borrow_mut() = region.parent_ret;
         b.position(self.parent_block.take().expect("saved at entry"));
+        b.update_location();
         if exc_type.is_some() {
             return Ok(false);
         }

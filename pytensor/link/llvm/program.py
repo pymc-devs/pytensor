@@ -21,6 +21,7 @@ them:
 from __future__ import annotations
 
 import contextvars
+import re
 import time
 from dataclasses import dataclass, field, replace
 
@@ -77,12 +78,18 @@ class Options:
     #: generate Scan loops (False: always the Rust kernel running the loop body
     #: as a subprogram)
     generate_scan: bool = True
+    #: give the generated code debug information: every instruction is located at the
+    #: Python code that emitted it, in a function named after its node (for remarks,
+    #: perf, debuggers; also turned on by PYTENSOR_LLVM_DEBUG_INFO=1)
+    debug_info: bool = False
 
     def __post_init__(self):
         import os
 
         if os.environ.get("PYTENSOR_LLVM_CHECK_LAYOUTS", "0") not in ("", "0"):
             self.check_layouts = True
+        if os.environ.get("PYTENSOR_LLVM_DEBUG_INFO", "0") not in ("", "0"):
+            self.debug_info = True
 
 
 #: the options of the program being planned (subprograms, e.g. a Scan kernel's loop body, use them)
@@ -119,6 +126,68 @@ class Task:
     module: object = None
 
 
+_DEBUG_METADATA = re.compile(r"^!(\d+) = (?:distinct )?!(DI\w+)\((.*)\)$")
+_FIELD = re.compile(r'(\w+): ("(?:[^"\\]|\\.)*"|[^,]+)')
+_DBG = re.compile(r", !dbg !(\d+)")
+
+
+def with_locations(text: str) -> str:
+    """LLVM IR `text` of a module with debug information (`Options.debug_info`), with
+    where every instruction comes from as a comment above it (once for a run of
+    instructions from the same place): the Python frames that emitted it, innermost
+    first ("file:line function"), then the function (node) it was emitted for. The
+    debug metadata itself is left out."""
+    md = {}
+    for line in text.splitlines():
+        if m := _DEBUG_METADATA.match(line):
+            md[m[1]] = dict(_FIELD.findall(m[3]))
+
+    def node(ref, field):
+        """`field` of the metadata node `ref` ("!12"), unquoted."""
+        return md.get(ref.lstrip("!"), {}).get(field, "").strip('"')
+
+    cache = {}
+
+    def where(ref):
+        if ref not in cache:
+            parts = []
+            loc = md.get(ref)
+            while loc is not None:
+                scope = loc.get("scope", "")
+                at = loc.get("inlinedAt")
+                if at is None:  # the function the code is in
+                    parts.append(node(scope, "name"))
+                    break
+                if node(scope, "line"):  # a Python function
+                    file = node(
+                        md.get(scope.lstrip("!"), {}).get("file", ""), "filename"
+                    )
+                    line = loc.get("line", "0")
+                    parts.append(f"{file}:{line} {node(scope, 'name')}")
+                else:  # a generated function, inlined: its node
+                    parts.append(node(scope, "name"))
+                loc = md.get(at.lstrip("!"))
+            cache[ref] = " < ".join(parts)
+        return cache[ref]
+
+    out = []
+    last = None
+    for line in text.splitlines():
+        if _DEBUG_METADATA.match(line) or line.startswith("!llvm.dbg.cu"):
+            continue
+        if m := _DBG.search(line):
+            here = where(m[1])
+            if here != last:
+                out.append(f"  ; {here}")
+                last = here
+            line = line[: m.start()] + line[m.end() :]
+        elif not line.startswith("  "):
+            last = None
+            line = re.sub(r" !dbg !\d+", "", line)
+        out.append(line)
+    return "\n".join(out)
+
+
 @dataclass
 class GeneratedModule:
     """A module the planner generated for a task, compiled."""
@@ -131,9 +200,19 @@ class GeneratedModule:
         """The LLVM IR as generated."""
         return self.compiled.ir
 
-    def optimized_ir(self, opt_level: int | None = None) -> str:
-        """The LLVM IR after optimization."""
-        return self.compiled.optimized_ir(opt_level)
+    def optimized_ir(
+        self,
+        opt_level: int | None = None,
+        remarks: bool = False,
+        locations: bool = False,
+    ) -> str:
+        """The LLVM IR after optimization. `remarks`: start with LLVM's optimization
+        remarks (what the loop vectorizer did or why not, inlining, unrolling...), as
+        comments, each after the instruction of `ir` it is about. `locations`: with
+        debug information (`debug_info`), the Python code and node every instruction
+        comes from, as comments (`with_locations`)."""
+        text = self.compiled.optimized_ir(opt_level, remarks)
+        return with_locations(text) if locations else text
 
 
 @dataclass
@@ -153,12 +232,22 @@ class Stats:
     #: Scan bodies planned for this program
     modules: list = field(default_factory=list)
 
-    def ir(self, optimized: bool = False, opt_level: int | None = None) -> str:
+    def ir(
+        self,
+        optimized: bool = False,
+        opt_level: int | None = None,
+        remarks=False,
+        locations=False,
+    ) -> str:
         """The LLVM IR of all generated modules, each under a comment naming its task.
-        `optimized`: after the optimization pipeline instead of as generated."""
+        `optimized`: after the optimization pipeline instead of as generated, with the
+        optimization remarks first if `remarks` (`GeneratedModule.optimized_ir`).
+        `locations`: with the location of every instruction (`with_locations`)."""
         parts = []
         for m in self.modules:
-            text = m.optimized_ir(opt_level) if optimized else m.ir
+            text = m.optimized_ir(opt_level, remarks) if optimized else m.ir
+            if locations:
+                text = with_locations(text)
             parts.append(f"; ===== {' '.join(m.description.split())}\n{text}")
         return "\n".join(parts)
 
@@ -397,7 +486,9 @@ class Planner:
             else None
         )
         module = ir.Module(
-            f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath
+            f"node_{type(node.op).__name__}",
+            fastmath=self.opts.fastmath,
+            debug_info=self.opts.debug_info,
         )
         links = LinkTable()
         nf = build_node_function(
@@ -466,7 +557,11 @@ class Planner:
                 )
                 out_layouts.append(Layout.c(t.ndim))
                 aliases.append(())
-        module = ir.Module(f"unit_{len(it.items)}", fastmath=self.opts.fastmath)
+        module = ir.Module(
+            f"unit_{len(it.items)}",
+            fastmath=self.opts.fastmath,
+            debug_info=self.opts.debug_info,
+        )
         nf = build_unit_function(
             module,
             "unit",
