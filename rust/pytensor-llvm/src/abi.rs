@@ -23,14 +23,11 @@
 //! * view of input i: the kernel fills data, shape and strides pointing into input i's
 //!   memory. The caller sets `owner`; the kernel must not.
 //!
-//! Legacy kernels (`LegacyFn`, run through `interp::kernels::k_legacy`) have the earlier
-//! ABI `int32_t kernel(PtCtx *ctx, PtArray *args, const void *params)` with one provided
-//! output and a `#[repr(C)]` parameter block.
+//! Rust kernels are written with `crate::kernel`.
 
 use crate::runtime::PtCtx;
 use pyo3::prelude::*;
 use std::alloc::{alloc, dealloc, Layout};
-use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub const ABI_VERSION: u32 = 1;
@@ -147,9 +144,6 @@ pub unsafe fn slice<'a>(p: *const i64, n: usize) -> &'a [i64] {
 /// out-of-memory) unwinds to `Program::execute`, which turns it into an error, instead
 /// of aborting the process. Generated and numba kernels never unwind.
 pub type KernelFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32;
-/// The legacy kernel ABI: `args = [inputs..., one provided output]` and a parameter block.
-pub type LegacyFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32;
-
 /// How an output comes to be (DESIGN.md, section 3).
 #[pyclass(module = "pytensor_llvm.interp", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -240,37 +234,13 @@ impl Drop for OwnedBuf {
     }
 }
 
-// ------------------------------------------------------------------ params
-
-/// Typed kernel parameters, stored with 8-byte alignment so kernels can read them as
-/// `#[repr(C)]` structs.
-#[derive(Clone, Debug, Default)]
-pub struct Params(Vec<u64>);
-
-impl Params {
-    pub fn none() -> Self {
-        Params(vec![0])
-    }
-    pub fn of<T: Copy>(v: T) -> Self {
-        let n = std::mem::size_of::<T>().div_ceil(8).max(1);
-        let mut buf = vec![0u64; n];
-        // SAFETY: `buf` has room for T (checked above) and u64 alignment, enough for the
-        // Copy types used as params.
-        unsafe { std::ptr::write(buf.as_mut_ptr() as *mut T, v) };
-        Params(buf)
-    }
-    pub fn as_ptr(&self) -> *const c_void {
-        self.0.as_ptr() as *const c_void
-    }
-}
-
 pub const MAX_NDIM: usize = 32;
 
 #[cfg(test)]
 mod unwind_tests {
     use super::*;
 
-    unsafe extern "C-unwind" fn panicking_kernel(_ctx: *mut PtCtx, _args: *mut PtArray, _params: *const c_void) -> i32 {
+    unsafe extern "C-unwind" fn panicking_kernel(_ctx: *mut PtCtx, _args: *mut PtArray, _config: *const u8) -> i32 {
         panic!("kernel bug")
     }
 
@@ -278,7 +248,7 @@ mod unwind_tests {
     fn kernel_panic_unwinds_to_the_caller() {
         // what Program::execute relies on: a panic in a KernelFn called through a
         // function pointer is catchable, not an abort
-        let f: LegacyFn = panicking_kernel;
+        let f: KernelFn = panicking_kernel;
         let mut ctx = PtCtx::new();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f(&mut ctx, std::ptr::null_mut(), std::ptr::null()) }));
         let msg = r.unwrap_err();
