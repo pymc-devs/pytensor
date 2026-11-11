@@ -138,8 +138,7 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         if static[a] is not None:
             shape.append(b.i64(static[a]))
         elif not is_absent(size_var.type):
-            p = b.gep_bytes(size_arr.data, b.mul(b.i64(a), size_arr.strides[0], nsw=True))
-            shape.append(cast(b, load(b, size_arr.dtype, p), size_arr.dtype, "int64"))
+            shape.append(size_arr.load(b, a).astype("int64").value)
         else:
             n = None
             for var, x in zip(params_vars, params, strict=True):
@@ -151,8 +150,7 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
     if not is_absent(size_var.type):
         for a in range(nd):
             if static[a] is not None:
-                p = b.gep_bytes(size_arr.data, b.mul(b.i64(a), size_arr.strides[0], nsw=True))
-                n = cast(b, load(b, size_arr.dtype, p), size_arr.dtype, "int64")
+                n = size_arr.load(b, a).astype("int64").value
                 cg.check(b.eq(n, shape[a]), f"{op}: size differs from the static shape")
 
     # ---- the parameters over the loop (right-aligned, broadcast by their types)

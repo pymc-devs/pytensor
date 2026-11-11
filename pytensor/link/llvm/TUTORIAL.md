@@ -2,8 +2,9 @@
 
 This tutorial implements a new op for the LLVM backend, start to finish. It first
 introduces the interface the implementation is written with, `pytensor_llvm.ir`, and
-then uses it for a small tensor op and a scalar op, and explains layouts: what the
-backend knows about the strides of each array, and how an op takes part in that. `DESIGN.md` explains why things are
+then uses it for a small tensor op and a scalar op, and explains layouts (what the
+backend knows about the strides of each array, and how an op takes part in that),
+temporary memory and random variables. `DESIGN.md` explains why things are
 the way they are; this file only shows how to use them.
 
 Every `python` block below is run, in order, by `tests/link/llvm/test_tutorial.py`, so
@@ -257,17 +258,24 @@ def _(op, node, cg, inputs, outputs): ...
   provides (static shapes), or memory allocated here with that shape. The emitter
   doesn't need to know which.
 
-Elements are read and written with three helpers from `codegen/emit.py`:
+Elements are read and written through the array:
 
-* `advance(b, ptr, i, stride, dtype)` is the pointer `i` strides after `ptr`,
-* `load(b, dtype, ptr)` and `store(b, dtype, value, ptr)` read and write one element.
-  Use them and not `b.load`: a bool is a byte in memory and an `i1` in a register.
+* `a.load(b, i, j)` is the element at an index, as a `Num`: a value that knows its
+  dtype (section 4),
+* `a.store(b, value, i, j)` writes one; `value` is a `Num`, an IR value or a Python
+  number,
+* `a.at(b, i)` is the sub-array at index `i` of the first axis (`a.at(b, j, axis=1)`
+  for another one): a row of a matrix, as an `Array` again,
+* `a.ptr(b, i, j)` is the address of an element.
+
+Indices are `i64` values or Python ints, one per axis. All four follow the strides, so
+they work for any view, and none checks bounds. Use them and not `b.load`: a bool is a
+byte in memory and an `i1` in a register, and they know.
 
 ### The emitter
 
 ```python
 from pytensor.link.llvm.codegen.elemwise import output_array
-from pytensor.link.llvm.codegen.emit import advance, load, store
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.num import Num
 
@@ -278,37 +286,35 @@ def _(op, node, cg, inputs, outputs):
     (x,) = inputs
     (n,) = x.shape
     out = output_array(outputs[0], x.shape)
-    dtype = x.dtype
-
-    def element(array, i):
-        return advance(b, array.data, i, array.strides[0], dtype)
 
     def step(i, best):
         """out[i] = max(best, x[i]); returns the new maximum."""
-        value = Num(b, load(b, dtype, element(x, i)), dtype)
+        value = x.load(b, i)
         if best is not None:
-            value = Num(b, best, dtype).maximum(value)
-        store(b, dtype, value.value, element(out, i))
+            value = Num(b, best, x.dtype).maximum(value)
+        out.store(b, value, i)
         return value.value
 
     with b.if_(b.sgt(n, 0)):
-        first = step(b.i64(0), None)
+        first = step(0, None)
         b.fold(b.sub(n, 1), [first], lambda i, best: step(b.add(i, 1), best))
 ```
 
 Line by line:
 
 * `output_array` gets the output's memory, of the shape of `x`.
-* `element` addresses element `i` of an array through its stride. The input may be any
-  view (`x[::-2]`), so the stride is never assumed. Where the planner knows the stride,
-  it is a constant here and the multiplication disappears (section 5).
+* `x.load(b, i)` reads element `i` through the stride of `x`. The input may be any view
+  (`x[::-2]`), so the stride is never assumed. Where the planner knows the stride, it
+  is a constant here and the multiplication disappears (section 5).
 * `step` generates the code for one element. It is plain Python that is called twice
   and so generates code twice: once for the first element, which has no maximum before
   it (`if best is not None` is decided while generating, which is fine: `best` is
   either a value or Python's `None`), and once inside the loop.
 * The maximum itself depends on the dtype: an intrinsic for floats, a signed or an
-  unsigned compare for integers, an `or` for bools. `Num(b, value, dtype).maximum(...)`
-  picks; `.value` is the IR value again.
+  unsigned compare for integers, an `or` for bools. `x.load` returns a `Num`, whose
+  `maximum` picks. The carried value of a `fold` is a plain IR value, so it is wrapped
+  with `Num(b, best, x.dtype)` on the way in and unwrapped with `.value` on the way
+  out.
 * An empty vector has no first element, hence `b.if_(b.sgt(n, 0))`. For a static shape
   `n` is a constant and LLVM removes the branch.
 * `b.fold(count, [first], body)` runs `body` for `i = 0 .. count - 1` with the running
@@ -472,8 +478,9 @@ with pytest.raises(TypeError, match="not a Python condition"):
 assert (i == i) is True  # `==` is identity; `i.eq(j)` compares
 ```
 
-Use `Num` where the code depends on the dtype. Index arithmetic is always `i64` and
-reads fine with the builder directly, as in the `CumMax` emitter.
+Use `Num` where the code depends on the dtype; elements loaded from an `Array` already
+are `Num`s. Index arithmetic is always `i64` and reads fine with the builder directly,
+as in the `CumMax` emitter.
 
 ## 5. Layouts
 
@@ -574,8 +581,8 @@ is why `input_layout="c"` pays off for functions whose inputs are always contigu
 
 Nothing has to be done to benefit. The planner generates each task's code for the
 layouts of its inputs, and what the layout fixes arrives in the emitter as a constant:
-`x.strides[0].const_int` is `8` and not `None`, and `advance` then addresses elements
-with a constant step. A packed stride is not even passed to the generated function:
+`x.strides[0].const_int` is `8` and not `None`, and `x.load(b, i)` then addresses its
+element with a constant step. A packed stride is not even passed to the generated function:
 
 ```python
 from pytensor.link.llvm.codegen.function import build_node_function
@@ -743,7 +750,174 @@ Two things guard against wrong declarations:
   op with its own `llvm_outputs`: it catches a layout that is declared consistently
   but is not what the code produces.
 
-## 6. Estimating the work
+## 6. Temporary memory
+
+Some ops need memory besides their outputs while they run. `cg.temporary(dtype, shape)`
+returns an `Array` for that: C-contiguous, uninitialized, and gone when the task ends.
+
+The example computes the mean of every column of a matrix. To read the matrix in
+memory order it goes row by row, so it needs one running sum per column, and it keeps
+those in double precision whatever the dtype of the matrix:
+
+```python
+class ColumnMeans(Op):
+    """The mean of every column of a matrix."""
+
+    __props__ = ()
+
+    def make_node(self, x):
+        x = pt.as_tensor_variable(x)
+        if x.type.ndim != 2 or x.type.dtype not in ("float32", "float64"):
+            raise TypeError("ColumnMeans needs a float matrix")
+        return Apply(self, [x], [pt.tensor(dtype=x.type.dtype, shape=(x.type.shape[1],))])
+
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        output_storage[0][0] = x.mean(axis=0, dtype="float64").astype(x.dtype)
+
+
+column_means = ColumnMeans()
+
+
+@llvm_emit.register(ColumnMeans)
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
+    (x,) = inputs
+    rows, columns = x.shape
+    out = output_array(outputs[0], [columns])
+    sums = cg.temporary("float64", [columns])
+    with b.loop(columns) as j:
+        sums.store(b, 0.0, j)
+    with b.loop(rows) as i:
+        row = x.at(b, i)
+        with b.loop(columns) as j:
+            sums.store(b, sums.load(b, j) + row.load(b, j).astype("float64"), j)
+    count = Num(b, rows, "int64").astype("float64")
+    with b.loop(columns) as j:
+        out.store(b, (sums.load(b, j) / count).astype(out.dtype), j)
+```
+
+`x.at(b, i)` is row `i` as a vector, so the inner loop reads `row.load(b, j)`; the
+address of the row is computed once per row, not once per element.
+
+```python
+single = pt.matrix("M", dtype="float32")
+m = pytensor.function([single], [column_means(single), column_means(single.T[::2])], mode=STRICT)
+data = (rng.normal(size=(1000, 3)) + 1e4).astype("float32")
+by_column, of_a_view = m(data)
+np.testing.assert_allclose(by_column, data.mean(axis=0, dtype="float64"), rtol=1e-6)
+np.testing.assert_allclose(of_a_view, data.T[::2].mean(axis=0, dtype="float64"), rtol=1e-6)
+```
+
+Where the memory comes from depends on its size, and the emitter doesn't choose:
+
+* A small temporary of static size (up to 1 KiB; here, a matrix whose number of
+  columns is known and small) is stack memory of the generated function. LLVM sees
+  all of it and often keeps it in registers.
+* Anything else is *scratch memory* of the context, valid until the task ends.
+
+Two rules follow:
+
+* Ask for temporaries before a loop, not inside it. Every request for scratch is a new
+  piece of memory, and it is only given back when the task ends.
+* A temporary is uninitialized. `ColumnMeans` zeroes its sums first.
+
+`cg.temp_memory(nbytes)` is the same without the `Array`: a pointer to that many bytes,
+64-byte aligned.
+
+## 7. Random variables
+
+Random numbers don't come from the generator in the graph. Every session (one caller of
+a compiled function) has one random state, and generated code draws from it through the
+context. The generator input and the next-generator output of a `RandomVariable` node
+have no value at all in the backend. Seeding is done on the program:
+
+```py
+program.seed(123)
+```
+
+The draws are the same for every number of threads, so a seeded function is
+reproducible.
+
+`codegen/random.py` implements `RandomVariable` once, for all distributions: it works
+out the shape of the draws, broadcasts the parameters, checks them and loops. A
+distribution only supplies the function for one draw, as a `Sampler`:
+
+```py
+Sampler(base, draw, param_dtypes, checks)
+```
+
+* `base` is `"uniform"` or `"normal"` for distributions that are a transformation of
+  uniform numbers in `[0, 1)` or of standard normal numbers. Those are drawn for the
+  whole array in one call, and `draw` then turns one of them into one draw. The loop
+  doing that has no calls in it and can be vectorized.
+* `base=None` is for distributions that need their own sampler. `draw` then calls the
+  builder, `b.rng(ir.Rng.Gamma, cg.ctx, [shape])`; the runtime has samplers for
+  uniform, normal, gamma, beta, Poisson and binomial numbers.
+* `draw(b, cg, z, params)` returns the value of one draw: `z` is the base number (or
+  `None`), `params` are the parameters as IR values of `param_dtypes`.
+* `checks` has one entry per parameter: `None`, or `(kind, bound, message)` with kind
+  `"ge"`, `"gt"` or `"unit"` (between 0 and 1).
+
+The Gumbel distribution is not implemented:
+
+```python
+import pytensor.tensor.random.basic as rb
+
+generator = pytensor.shared(np.random.default_rng(0))
+draws = rb.gumbel(1.0, 2.0, size=(100_000,), rng=generator)
+with pytest.raises(NotImplementedError, match="no implementation of the random variable gumbel"):
+    pytensor.function([], draws, mode=STRICT)
+```
+
+A Gumbel number is `loc - scale * log(e)` for a standard exponential number `e`, and
+`e` is `-log(1 - u)` for a uniform `u`:
+
+```python
+from pytensor.link.llvm.codegen.random import SAMPLERS, Sampler
+
+
+def gumbel(b, cg, u, params):
+    loc, scale = params
+    exponential = b.fneg(b.libm(ir.Libm.Log1p, [b.fneg(u)]))  # -log(1 - u)
+    return b.fsub(loc, b.fmul(scale, b.intrinsic(ir.Intrinsic.Log, [exponential])))
+
+
+SAMPLERS[rb.GumbelRV] = Sampler("uniform", gumbel, ["float64", "float64"], [None, ("ge", 0.0, "scale < 0")])
+```
+
+The parameters arrive as doubles, so the builder's float instructions are used
+directly; there is no dtype to dispatch on.
+
+```python
+sample = pytensor.function([], draws, mode=STRICT)
+program = sample.maker.linker.program
+
+program.seed(1)
+first = sample()
+np.testing.assert_allclose(first.mean(), 1.0 + 2.0 * np.euler_gamma, atol=0.05)
+np.testing.assert_allclose(first.var(), 4.0 * np.pi**2 / 6, rtol=0.05)
+
+assert not np.array_equal(sample(), first)  # the state advances
+program.seed(1)
+np.testing.assert_array_equal(sample(), first)  # and can be set again
+```
+
+A failed check is an error when the function runs:
+
+```python
+scale = pt.scalar("scale")
+checked = pytensor.function([scale], rb.gumbel(0.0, scale, size=(3,), rng=generator), mode=STRICT)
+with pytest.raises(Exception, match="scale < 0"):
+    checked(-1.0)
+```
+
+Only random variables whose draws are scalars (`ndim_supp == 0`) can be implemented
+this way. The backend has no implementation for the others (the multivariate normal,
+for one), and random variables never fall back to numba, whose generators are a
+different state: compiling a graph with one raises `NotImplementedError`.
+
+## 8. Estimating the work
 
 **`llvm_work(op, node)`** estimates the work as a number of elements times a cost per
 element, in units of one float addition. The planner uses it to decide whether a loop
@@ -763,7 +937,7 @@ def _(op, node):
 assert llvm_work(cummax, cummax(static).owner).total == 8.0
 ```
 
-## 7. Putting it into the backend
+## 9. Putting it into the backend
 
 The registrations above work from anywhere, which is how this tutorial runs. An op that
 belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/codegen/`:
@@ -772,7 +946,7 @@ belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/codegen/
    or in a new one. A new module must be added to the imports at the top of
    `codegen/__init__.py`, which is what registers its emitters.
 2. Scalar ops go into `codegen/scalar.py`, with their cost in `SCALAR_COSTS` in
-   `work.py`.
+   `work.py`; distributions into the `SAMPLERS` table of `codegen/random.py`.
 3. Register `llvm_work` in `work.py` if one unit per output element is far off, and
    `llvm_outputs` next to the emitter if an output is a view (its layout function goes
    into `layout.py`).
@@ -787,11 +961,13 @@ Things that commonly go wrong:
   which raises.
 * **Two literals.** `b.select(cond, 0, 1)` has no type to give them; make one a
   constant (`b.i64(0)`).
-* **`b.load` on a tensor element.** Use `load` and `store` from `codegen/emit.py`, which
-  handle booleans.
-* **Assuming contiguous inputs.** Always go through the strides (`advance`). The
-  planner passes the strides it knows as constants, so this costs nothing when the
-  input is contiguous.
+* **`b.load` on a tensor element.** Use `array.load` and `array.store`, which handle
+  booleans and strides.
+* **Assuming contiguous inputs.** Always go through the array (`load`, `store`, `at`),
+  which follows the strides. The planner passes the strides it knows as constants, so
+  this costs nothing when the input is contiguous.
+* **A temporary inside a loop.** Each request is new memory until the task ends. Ask
+  once, before the loop.
 * **Writing an input.** The planner assumes inputs are only read.
 * **Declaring more than is true.** A layout is trusted. Declare `DYNAMIC` for whatever
   the op can't guarantee.
