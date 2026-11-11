@@ -1,15 +1,16 @@
-"""CumOp, ExtractDiag, Split."""
+"""CumOp, ExtractDiag, Split, Argmax."""
 
 from __future__ import annotations
 
 import operator
 
-from pytensor.link.llvm.codegen.emit import Array, constant, set_output
+from pytensor.link.llvm.codegen.emit import Array, constant, set_output, size
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.layout import split_layouts
 from pytensor.tensor.basic import ExtractDiag, Split
 from pytensor.tensor.extra_ops import CumOp
+from pytensor.tensor.math import Argmax
 
 
 @llvm_emit.register(CumOp)
@@ -108,3 +109,54 @@ def _(op, node, cg, inputs, outputs):
                 lay,
             ),
         )
+
+
+@llvm_emit.register(Argmax)
+def _(op, node, cg, inputs, outputs):
+    """numpy's argmax over the axes, flattened in C order: the first maximum, or the
+    first NaN."""
+    b = cg.b
+    (x,) = inputs
+    reduced = range(x.ndim) if op.axis is None else op.axis
+    kept = [a for a in range(x.ndim) if a not in reduced]
+    out = outputs[0].allocate([x.shape[a] for a in kept])
+    cg.check(
+        b.sgt(size(b, [x.shape[a] for a in reduced]), 0),
+        "attempt to get argmax of an empty sequence",
+    )
+    nan_aware = x.dtype.startswith("float")
+
+    def better(v: Num, best: Num) -> Num:
+        if nan_aware:
+            return (v > best) | (v.ne(v) & best.eq(best))
+        return v > best
+
+    def walk(a: Array, carried):
+        """Fold (best, its index, the flat index) over `a`, in C order."""
+        if a.ndim == 1:
+
+            def step(i, best, index, count):
+                v, best = a.load(b, i), Num(b, best, a.dtype)
+                take = better(v, best)
+                return [
+                    take.select(v, best).value,
+                    b.select(take.value, count, index),
+                    b.add(count, 1),
+                ]
+
+            return b.fold(a.shape[0], carried, step)
+        return b.fold(a.shape[0], carried, lambda i, *c: walk(a.at(b, i), list(c)))
+
+    def level(src: Array, dst: Array, positions):
+        """For every index of the kept axes (at `positions` in `src`)."""
+        if positions:
+            first, *rest = positions
+            with b.loop(src.shape[first]) as i:
+                level(src.at(b, i, first), dst.at(b, i), [p - 1 for p in rest])
+        elif src.ndim == 0:
+            dst.store(b, 0)
+        else:
+            start = src.load(b, *([0] * src.ndim)).value
+            dst.store(b, walk(src, [start, b.i64(0), b.i64(0)])[1])
+
+    level(x, out, kept)

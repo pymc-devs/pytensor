@@ -166,7 +166,7 @@ def _register():
     from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
     from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
     from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
-    from pytensor.tensor.math import Dot
+    from pytensor.tensor.math import Argmax, Dot
     from pytensor.tensor.random.op import RandomVariable
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
     from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
@@ -190,6 +190,10 @@ def _register():
     @llvm_work.register(CAReduce)
     def _(op, node):
         return Work(scalar_cost(op.scalar_op), lengths(node.inputs[0]))
+
+    @llvm_work.register(Argmax)
+    def _(op, node):
+        return Work(3.0, lengths(node.inputs[0]))
 
     @llvm_work.register(DimShuffle)
     @llvm_work.register(Subtensor)
