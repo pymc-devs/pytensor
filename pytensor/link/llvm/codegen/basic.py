@@ -16,7 +16,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.types import ir, is_float
+from pytensor.link.llvm.codegen.types import ir, is_float, memory_type
 from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
@@ -27,15 +27,13 @@ def _scalar(b, a):
     """The element of a 0-d array (or a scalar value itself)."""
     if not isinstance(a, Array):
         return a
-    return load(b, a.dtype, a.data)
+    return a.load(b).value
 
 
 @llvm_emit.register(Shape_i)
 def _(op, node, cg, inputs, outputs):
     out = outputs[0].allocate([])
-    store(
-        cg.b, out.dtype, cast(cg.b, inputs[0].shape[op.i], "int64", out.dtype), out.data
-    )
+    out.store(cg.b, cast(cg.b, inputs[0].shape[op.i], "int64", out.dtype))
 
 
 @llvm_emit.register(Shape)
@@ -44,8 +42,7 @@ def _(op, node, cg, inputs, outputs):
     x = inputs[0]
     out = outputs[0].allocate([b.i64(x.ndim)])
     for a, n in enumerate(x.shape):
-        p = b.gep_bytes(out.data, b.mul(b.i64(a), out.strides[0], nsw=True))
-        store(b, out.dtype, cast(b, n, "int64", out.dtype), p)
+        out.store(b, cast(b, n, "int64", out.dtype), a)
 
 
 @llvm_emit.register(MakeVector)
@@ -53,8 +50,7 @@ def _(op, node, cg, inputs, outputs):
     b = cg.b
     out = outputs[0].allocate([b.i64(len(inputs))])
     for k, x in enumerate(inputs):
-        p = b.gep_bytes(out.data, b.mul(b.i64(k), out.strides[0], nsw=True))
-        store(b, out.dtype, cast(b, _scalar(b, x), x.dtype, out.dtype), p)
+        out.store(b, cast(b, _scalar(b, x), x.dtype, out.dtype), k)
 
 
 def _shape_from(cg, node, values, first):
@@ -64,10 +60,10 @@ def _shape_from(cg, node, values, first):
     static = node.outputs[0].type.shape
     for a, x in enumerate(values[first:]):
         n = cast(b, _scalar(b, x), x.dtype, "int64")
-        cg.check(b.sge(n, b.i64(0)), "negative dimensions are not allowed")
+        cg.check(b.sge(n, 0), "negative dimensions are not allowed")
         if static[a] is not None:
             cg.check(
-                b.eq(n, b.i64(static[a])),
+                b.eq(n, static[a]),
                 f"the shape on axis {a} doesn't match the static shape {static[a]}",
             )
             n = b.i64(static[a])
@@ -91,12 +87,12 @@ def _(op, node, cg, inputs, outputs):
             strides.append(b.i64(0))
             continue
         if not (ln.const_int is not None and ln.const_int == on.const_int):
-            one = b.eq(ln, b.i64(1))
+            one = b.eq(ln, 1)
             cg.check(
                 b.or_(b.eq(ln, on), one),
                 "Alloc: the value can't be broadcast to the shape",
             )
-            strides.append(b.select(one, b.i64(0), v.strides[a]))
+            strides.append(b.select(one, 0, v.strides[a]))
         else:
             strides.append(v.strides[a])
     src = Array(v.dtype, v.data, shape, strides)
@@ -124,29 +120,27 @@ def _(op, node, cg, inputs, outputs):
             cast(b, v, d, "int64")
             for v, d in zip((start, stop, step), dts, strict=True)
         )
-        cg.check(b.ne(step, b.i64(0)), "arange: step can't be zero")
+        cg.check(b.ne(step, 0), "arange: step can't be zero")
         # length = ceil((stop - start) / step), at least 0
         span = b.sub(stop, start)
-        pos = b.sgt(step, b.i64(0))
-        adj = b.select(pos, b.sub(step, b.i64(1)), b.add(step, b.i64(1)))
-        n = b.sdiv(b.add(span, adj), step)
-        n = b.select(b.sgt(n, b.i64(0)), n, b.i64(0))
+        adj = b.select(b.sgt(step, 0), b.sub(step, 1), b.add(step, 1))
+        n = b.smax(b.sdiv(b.add(span, adj), step), 0)
         start_v, step_v, dt = start, step, "int64"
     else:
         start, stop, step = (
             cast(b, v, d, "float64")
             for v, d in zip((start, stop, step), dts, strict=True)
         )
-        cg.check(b.fcmp(ir.FCmp.UNE, step, b.f64(0.0)), "arange: step can't be zero")
+        cg.check(b.fcmp(ir.FCmp.UNE, step, 0.0), "arange: step can't be zero")
         q = b.intrinsic(ir.Intrinsic.Ceil, [b.fdiv(b.fsub(stop, start), step)])
-        ok = b.fcmp(ir.FCmp.OLT, b.intrinsic(ir.Intrinsic.Fabs, [q]), b.f64(2.0**62))
+        ok = b.fcmp(ir.FCmp.OLT, b.intrinsic(ir.Intrinsic.Fabs, [q]), 2.0**62)
         cg.check(ok, "arange: invalid or too large range")
-        q = b.select(b.fcmp(ir.FCmp.OGT, q, b.f64(0.0)), q, b.f64(0.0))
+        q = b.select(b.fcmp(ir.FCmp.OGT, q, 0.0), q, 0.0)
         n = b.fptosi(q, i64)
         start_v, step_v, dt = start, step, "float64"
     static = node.outputs[0].type.shape[0]
     if static is not None:
-        cg.check(b.eq(n, b.i64(static)), "arange: length differs from the static shape")
+        cg.check(b.eq(n, static), "arange: length differs from the static shape")
     out = outputs[0].allocate([n])
     with b.loop(n) as i:
         if dt == "int64":
@@ -170,25 +164,21 @@ def _(op, node, cg, inputs, outputs):
     x, shp = inputs
     total = size(b, x.shape)
     static = node.outputs[0].type.shape
-    raw = []
-    for a in range(op.ndim):
-        p = b.gep_bytes(shp.data, b.mul(b.i64(a), shp.strides[0], nsw=True))
-        raw.append(cast(b, load(b, shp.dtype, p), shp.dtype, "int64"))
+    raw = [shp.load(b, a).astype("int64").value for a in range(op.ndim)]
     # one -1 is inferred from the size
-    minus1 = b.i64(-1)
     known = b.i64(1)
     n_infer = b.i64(0)
     for v in raw:
-        neg = b.eq(v, minus1)
+        neg = b.eq(v, -1)
         known = b.select(neg, known, b.mul(known, v))
         n_infer = b.add(n_infer, b.zext(neg, i64))
-        cg.check(b.sge(v, minus1), "reshape: negative length")
-    cg.check(b.sle(n_infer, b.i64(1)), "reshape: can only infer one length")
-    nz = b.ne(known, b.i64(0))
-    inferred = b.select(nz, b.sdiv(total, b.select(nz, known, b.i64(1))), b.i64(0))
+        cg.check(b.sge(v, -1), "reshape: negative length")
+    cg.check(b.sle(n_infer, 1), "reshape: can only infer one length")
+    nz = b.ne(known, 0)
+    inferred = b.select(nz, b.sdiv(total, b.select(nz, known, 1)), 0)
     shape = []
     for a, v in enumerate(raw):
-        n = b.select(b.eq(v, minus1), inferred, v)
+        n = b.select(b.eq(v, -1), inferred, v)
         if static[a] is not None:
             n = b.i64(static[a])
         shape.append(n)
@@ -222,24 +212,20 @@ def _(op, node, cg, inputs, outputs):
 def _copy_reshaped(cg, src: Array, dst: Array):
     """Copy `src` into contiguous `dst` (same size, other shape), in C order."""
     b = cg.b
-    k = [b.i64(0)]
+    k = b.alloca(ir.i64)
+    b.store(b.i64(0), k)
 
     def body(p):
-        i = b.load(ir.i64, kptr)
+        i = b.load(ir.i64, k)
         store(
-            b, dst.dtype, load(b, src.dtype, p[0]), b.gep(_mem(dst.dtype), dst.data, i)
+            b,
+            dst.dtype,
+            load(b, src.dtype, p[0]),
+            b.gep(memory_type(dst.dtype), dst.data, i),
         )
-        b.store(b.add(i, b.i64(1)), kptr)
+        b.store(b.add(i, 1), k)
 
-    kptr = b.alloca(ir.i64)
-    b.store(k[0], kptr)
     for_each(b, src.shape, [Array(src.dtype, src.data, src.shape, src.strides)], body)
-
-
-def _mem(dtype):
-    from pytensor.link.llvm.codegen.types import memory_type
-
-    return memory_type(dtype)
 
 
 @llvm_emit.register(Join)

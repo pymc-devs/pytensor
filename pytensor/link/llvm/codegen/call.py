@@ -90,7 +90,7 @@ class LinkTable:
 def linked(cg, index: int):
     """The pointer in entry `index` of the link table."""
     b = cg.b
-    return b.load(ir.ptr, b.gep_bytes(cg.config, b.i64(8 * index)))
+    return b.load(ir.ptr, b.gep_bytes(cg.config, 8 * index))
 
 
 def call_kernel(
@@ -113,7 +113,7 @@ def call_kernel(
     def storage(values):
         p = b.alloca(ir.Type.array(i64, max(len(values), 1)))
         for k, v in enumerate(values):
-            b.store(v, b.gep(i64, p, b.i64(k)))
+            b.store(v, b.gep(i64, p, k))
         return p
 
     for a, dtype in inputs:
@@ -154,7 +154,7 @@ def call_kernel(
     args = b.alloca(ir.Type.array(pa, max(len(args_of), 1)))
     ptrs = []
     for k, (data, shape, strides, nd, _) in enumerate(args_of):
-        p = b.gep_bytes(args, b.i64(k * PTARRAY_SIZE))
+        p = b.gep_bytes(args, k * PTARRAY_SIZE)
         b.store(data, b.field_ptr(pa, p, PtArray.DATA))
         b.store(shape, b.field_ptr(pa, p, PtArray.SHAPE))
         b.store(strides, b.field_ptr(pa, p, PtArray.STRIDES))
@@ -181,7 +181,7 @@ def call_kernel(
             b.field_ptr(st, o.slot, Slot.OWNER),
         )
         o.done = True
-    with b.if_(b.ne(rc, b.i32(0))):
+    with b.if_(b.ne(rc, 0)):
         b.ret(rc)
 
 

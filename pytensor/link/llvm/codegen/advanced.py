@@ -102,14 +102,13 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
     """Pointer to the indexed element of `base`: base_ptr plus the index offsets
     (negative indices wrap; out-of-range ones fail)."""
     b = cg.b
-    zero = b.i64(0)
     p = base_ptr
     for j, ((arr, var), ip) in enumerate(zip(pat.indices, idx_ptrs, strict=True)):
         axis = pat.first + j
         n = base.shape[axis]
         i = cast(b, load(b, arr.dtype, ip), arr.dtype, "int64")
-        i = b.select(b.slt(i, zero), b.add(i, n), i)
-        ok = b.and_(b.sge(i, zero), b.slt(i, n))
+        i = b.select(b.slt(i, 0), b.add(i, n), i)
+        ok = b.and_(b.sge(i, 0), b.slt(i, n))
         cg.check(ok, f"index out of bounds for axis {axis} ({what})")
         p = advance(b, p, i, base.strides[axis], base.dtype)
     return p
@@ -162,12 +161,12 @@ def _(op, node, cg, inputs, outputs):
         if ln.const_int is not None and ln.const_int == vn.const_int:
             yst.append(y.strides[a])
             continue
-        one = b.eq(ln, b.i64(1))
+        one = b.eq(ln, 1)
         cg.check(
             b.or_(b.eq(ln, vn), one),
             "shape mismatch: value array could not be broadcast to the indexing result",
         )
-        yst.append(b.select(one, zero, y.strides[a]))
+        yst.append(b.select(one, 0, y.strides[a]))
     ys = Array(y.dtype, y.data, vs, yst)
     k = len(idx_ops)
     dt = out.dtype

@@ -119,11 +119,10 @@ class _Traced:
 
     def row_index(self, b, i, tap):
         n = self.buf.shape[0]
-        off = b.add(i, b.i64(self.lookback + tap))
+        off = b.add(i, self.lookback + tap)
         if n.const_int is not None:
-            return b.urem(off, b.i64(max(n.const_int, 1)))
-        one = b.i64(1)
-        return b.urem(off, b.select(b.sgt(n, one), n, one))
+            return b.urem(off, max(n.const_int, 1))
+        return b.urem(off, b.smax(n, 1))
 
     def direct_write_ok(self, k_out):
         """Can the body produce out tap `k_out` straight into its row? Only if that row
@@ -358,7 +357,7 @@ def emit_scan(op, node, cg, inputs, outputs):
                     copy(cg, src, rows[n_traced_outs + j])
                 continue
             # rows without a static shape: the buffer is allocated by the first iteration
-            first = b.eq(i, b.i64(0))
+            first = b.eq(i, 0)
             with b.if_(first):
                 out.allocate([length, *src.shape])
             cur = out.read()
@@ -396,11 +395,11 @@ def emit_scan(op, node, cg, inputs, outputs):
         if info.as_while:
             c = value(out_ids[-1])
             v = load(b, c.dtype, c.data) if isinstance(c, Array) else c
-            stop = b.ne(cast(b, v, fg.outputs[-1].type.dtype, "int8"), b.i8(0))
+            stop = b.ne(cast(b, v, fg.outputs[-1].type.dtype, "int8"), 0)
         release(cg, owned)
         b.rt_scratch_release(cg.ctx, mark)
         if info.as_while:
-            return [b.add(acc[0], b.i64(1)), stop]
+            return [b.add(acc[0], 1), stop]
         return []
 
     if info.as_while:
@@ -413,19 +412,18 @@ def emit_scan(op, node, cg, inputs, outputs):
     # ---- post-processing
     def finish(out, buf, max_offset):
         n = buf.shape[0]
-        used = b.add(taken, b.i64(max_offset))
-        one = b.i64(1)
-        rotate = b.and_(b.sgt(n, one), b.slt(n, used))
+        used = b.add(taken, max_offset)
+        rotate = b.and_(b.sgt(n, 1), b.slt(n, used))
         with b.if_(rotate):
             shift = b.urem(used, n)
-            with b.if_(b.sgt(shift, b.i64(0))):
+            with b.if_(b.sgt(shift, 0)):
                 old_owner = out.owner()
                 nb = out.allocate(list(buf.shape))
                 rest = b.sub(n, shift)
-                copy(cg, _rows(b, buf, shift, rest), _rows(b, nb, b.i64(0), rest))
-                copy(cg, _rows(b, buf, b.i64(0), shift), _rows(b, nb, rest, shift))
+                copy(cg, _rows(b, buf, shift, rest), _rows(b, nb, 0, rest))
+                copy(cg, _rows(b, buf, 0, shift), _rows(b, nb, rest, shift))
                 b.rt_decref(cg.ctx, old_owner)
-        tail = b.and_(b.xor(rotate, b.const_bool(True)), b.sgt(n, used))
+        tail = b.and_(b.not_(rotate), b.sgt(n, used))
         with b.if_(tail):
             if info.as_while:
                 out.set_length(0, used)

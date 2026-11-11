@@ -164,10 +164,10 @@ def _(op, node, cg, inputs, outputs):
     out_shape = [x.shape[a] for a in range(nd) if not reduced[a]]
     if isinstance(op.scalar_op, NO_EMPTY_REDUCTION):
         # like numpy: maximum/minimum have no identity for empty reductions
-        empty = b.eq(size(b, [x.shape[a] for a in axes]), b.i64(0))
-        some_out = b.ne(size(b, out_shape), b.i64(0))
+        empty = b.eq(size(b, [x.shape[a] for a in axes]), 0)
+        some_out = b.ne(size(b, out_shape), 0)
         cg.check(
-            b.xor(b.and_(empty, some_out), b.const_bool(True)),
+            b.not_(b.and_(empty, some_out)),
             "zero-size array to reduction operation which has no identity",
         )
     res = out.allocate(out_shape)
@@ -233,9 +233,9 @@ def reduce_row(b, x: Array, axis, row, init, combine):
             ],
         )
 
-    isz = b.i64(np.dtype(x.dtype).itemsize)
+    isz = np.dtype(x.dtype).itemsize
     if st.const_int is not None:
-        return (unit() if st.const_int == isz.const_int else strided())[0]
+        return (unit() if st.const_int == isz else strided())[0]
     return b.if_else(b.eq(st, isz), unit, strided)[0]
 
 

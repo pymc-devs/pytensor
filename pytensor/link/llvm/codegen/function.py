@@ -471,7 +471,7 @@ def build_node_function(
                 and not out.done
             ):
                 raise ValueError(f"{node.op}: output {k} was never set")
-        b.ret(b.i32(0))
+        b.ret(0)
     return NodeFunction(fn, sig, links)
 
 
@@ -496,7 +496,7 @@ def build_kernel_wrapper(
     ctx, args, config = fn.params
 
     def arg(k):
-        return b.gep_bytes(args, b.i64(k * PTARRAY_SIZE))
+        return b.gep_bytes(args, k * PTARRAY_SIZE)
 
     def field(p, f):
         return b.load(ir.ptr, b.field_ptr(pa, p, f))
@@ -507,12 +507,8 @@ def build_kernel_wrapper(
         if r.ndim == 0:
             return data
         shape_p, strides_p = field(p, 1), field(p, 2)
-        lengths = [
-            b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in r.dynamic_axes
-        ]
-        strides = [
-            b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in r.stride_axes
-        ]
+        lengths = [b.load(ir.i64, b.gep(ir.i64, shape_p, a)) for a in r.dynamic_axes]
+        strides = [b.load(ir.i64, b.gep(ir.i64, strides_p, a)) for a in r.stride_axes]
         return b.aggregate(
             r.ir_type,
             [
@@ -571,9 +567,8 @@ def build_kernel_wrapper(
             b.field_ptr(st, slot, Slot.STRIDES),
         )
         for a in range(o.repr.ndim):
-            i = b.i64(a)
-            b.store(b.load(ir.i64, b.gep(ir.i64, lp, i)), b.gep(ir.i64, shape_p, i))
-            b.store(b.load(ir.i64, b.gep(ir.i64, sp, i)), b.gep(ir.i64, strides_p, i))
+            b.store(b.load(ir.i64, b.gep(ir.i64, lp, a)), b.gep(ir.i64, shape_p, a))
+            b.store(b.load(ir.i64, b.gep(ir.i64, sp, a)), b.gep(ir.i64, strides_p, a))
         owner = b.load(ir.ptr, b.field_ptr(st, slot, Slot.OWNER))
         if len(o.aliases) == 1:
             # a view lies in the input's buffer, unless the kernel allocated one. (With
@@ -595,18 +590,18 @@ def _check_layout(cg, p, r: TensorRepr, k):
     pa = ptarray_type()
     shape_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.SHAPE))
     strides_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.STRIDES))
-    shape = [b.load(ir.i64, b.gep(ir.i64, shape_p, b.i64(a))) for a in range(r.ndim)]
-    actual = [b.load(ir.i64, b.gep(ir.i64, strides_p, b.i64(a))) for a in range(r.ndim)]
+    shape = [b.load(ir.i64, b.gep(ir.i64, shape_p, a)) for a in range(r.ndim)]
+    actual = [b.load(ir.i64, b.gep(ir.i64, strides_p, a)) for a in range(r.ndim)]
     expected = r.layout.stride_values(
         b, itemsize(r.dtype), shape, dict(enumerate(actual))
     )
     ok = b.const_bool(True)
     empty = b.const_bool(False)
     for a in range(r.ndim):
-        one = b.eq(shape[a], b.i64(1))
+        one = b.eq(shape[a], 1)
         same = b.eq(actual[a], expected[a])
         ok = b.and_(ok, b.or_(one, same))
-        empty = b.or_(empty, b.eq(shape[a], b.i64(0)))
+        empty = b.or_(empty, b.eq(shape[a], 0))
     cg.check(
         b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}"
     )

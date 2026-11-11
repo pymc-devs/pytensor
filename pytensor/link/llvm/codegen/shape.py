@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm.codegen.emit import Array, cast, copy, load, store
+from pytensor.link.llvm.codegen.emit import Array, cast, copy
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import dimshuffle_layout, same_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
@@ -55,7 +55,7 @@ def _(op, node, cg, inputs, outputs):
             continue
         want = cast(
             b,
-            load(b, n.dtype, n.data) if isinstance(n, Array) else n,
+            n.load(b).value if isinstance(n, Array) else n,
             var.type.dtype,
             "int64",
         )
@@ -72,10 +72,9 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(ScalarFromTensor)
 def _(op, node, cg, inputs, outputs):
     x = inputs[0]
-    outputs[0].set(cg.b, load(cg.b, x.dtype, x.data))
+    outputs[0].set(cg.b, x.load(cg.b).value)
 
 
 @llvm_emit.register(TensorFromScalar)
 def _(op, node, cg, inputs, outputs):
-    out = outputs[0].allocate([])
-    store(cg.b, out.dtype, inputs[0], out.data)
+    outputs[0].allocate([]).store(cg.b, inputs[0])
