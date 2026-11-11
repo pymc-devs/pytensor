@@ -21,7 +21,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
 from pytensor.link.llvm.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.work import scalar_cost
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -63,6 +63,13 @@ def _(op, node, in_layouts):
         order = common_order(in_layouts, shape)
         layouts.append(None if order is None else Layout.make(shape, order, [PACKED] * len(shape)))
     return layouts
+
+
+@llvm_inplace.register(Elemwise)
+def _(op, node):
+    # Every element is read before it is written, so an output can be an input's
+    # memory (`allocate` gives it back, with the input's values).
+    return dict(op.inplace_pattern)
 
 
 @llvm_emit.register(Elemwise)

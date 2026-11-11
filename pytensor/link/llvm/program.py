@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import contextvars
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -32,6 +32,7 @@ from pytensor.link.llvm.codegen.function import (
     OutputMode,
     build_kernel_wrapper,
     build_node_function,
+    inplace_outputs,
     skipped_inputs,
 )
 from pytensor.link.llvm.codegen.types import ScalarRepr, ir, is_absent, repr_of
@@ -115,6 +116,8 @@ class Stats:
     n_units: int = 0
     n_subprograms: int = 0
     numba: list = field(default_factory=list)
+    #: the ops of the tasks that overwrite an input
+    inplace: list = field(default_factory=list)
 
 
 class Planner:
@@ -129,8 +132,15 @@ class Planner:
         self.graph_outputs = set()
         #: (temporary, graph output) pairs to copy after the current task
         self.pending_copies = []
+        #: copy tasks that have to run before the task being made (`keep_destroyed`)
+        self.copies_first = []
         #: layouts of the program's outputs (after `plan`)
         self.output_layouts = []
+        #: vid -> the values whose memory it may lie in (itself, for new memory)
+        self.roots = {}
+        #: may tasks overwrite inputs their ops destroy? Only for a graph whose
+        #: DestroyHandler has validated the order of its nodes (`plan`)
+        self.allow_inplace = False
 
     # ------------------------------------------------------------ layouts of values
 
@@ -176,10 +186,16 @@ class Planner:
         tasks = []
         for it in items:
             try:
-                tasks.append(self.task(it))
+                task = self.task(it)
+                tasks += self.copies_first
+                self.copies_first = []
+                tasks.append(task)
+                self.note_roots(task)
                 while self.pending_copies:
                     tasks.append(self.copy_task(*self.pending_copies.pop(0)))
+                    self.note_roots(tasks[-1])
             except NotImplementedError:
+                self.copies_first = []
                 if not isinstance(it, UnitItem) or it.description == "scalars":
                     raise
                 # a compiled OpFromGraph we can't generate: run its nodes as tasks, and
@@ -188,7 +204,45 @@ class Planner:
                 tasks += self.tasks_for(group_scalars(self.values, it.items, inner_outs))
                 for inner, outer in it.outputs:
                     tasks.append(self.copy_task(inner, outer))
+                    self.note_roots(tasks[-1])
         return tasks
+
+    def roots_of(self, k) -> frozenset:
+        return self.roots.get(k, frozenset([k]))
+
+    def note_roots(self, task) -> None:
+        """Record whose memory the outputs of `task` may lie in."""
+        for k, mode, may_alias in zip(task.outputs, task.modes, task.aliases, strict=True):
+            sources = [task.inputs[pos] for pos in may_alias]
+            if mode is OutputMode.INPLACE or (mode is OutputMode.RETURNED and sources):
+                self.roots[k] = frozenset().union(*(self.roots_of(src) for src in sources))
+
+    def grant_inplace(self, it, folded) -> dict:
+        """{output: input} for the outputs of a node that may overwrite an input: its
+        op destroys it, its emitter can (`llvm_inplace`), and nothing else can see it."""
+        if not (self.allow_inplace and it.of_the_graph):
+            return {}
+        values = self.values
+        granted = {}
+        for k, i in inplace_outputs(it.node, folded).items():
+            vid = it.inputs[i]
+            if vid in values.consts or it.inputs.count(vid) > 1:
+                continue
+            # The graph says the destroyed variable is not used again. The value must
+            # not stand for other variables too, nor share memory with another input.
+            mine = self.roots_of(vid)
+            if any(root in values.shared for root in mine):
+                continue
+            others = [k2 for pos, k2 in enumerate(it.inputs) if pos != i and hasattr(values.types[k2], "ndim")]
+            if any(mine & self.roots_of(k2) for k2 in others):
+                continue
+            # a graph output in memory the planner provides is C-contiguous
+            memory = self.memory_layouts.get(vid)
+            shape = tuple(None if s is None else int(s) for s in values.types[vid].shape)
+            if it.outputs[k] in self.graph_outputs and memory is not None and not memory.is_c(shape):
+                continue
+            granted[k] = i
+        return granted
 
     def task(self, it) -> Task:
         """The task running an item."""
@@ -213,12 +267,13 @@ class Planner:
         # generate (its body is inlined into the loop), and not with folded constants
         # (a kernel would need them as arguments).
         scan = self.resolver.generates_scan(node)
-        if not folded and not scan:
+        inplace = self.grant_inplace(it, folded)
+        if not folded and not scan and not inplace:
             kernel = self.resolver.rust(node, in_layouts)
             if kernel is not None:
                 return self.kernel_task(it, kernel)
         try:
-            return self.generated_task(it, folded, in_layouts)
+            return self.generated_task(it, folded, in_layouts, inplace)
         except NotImplementedError:
             if scan:
                 kernel = self.resolver.rust(node, in_layouts)
@@ -226,7 +281,25 @@ class Planner:
                     return self.kernel_task(it, kernel)
             if not self.opts.numba_fallback:
                 raise
-        return self.kernel_task(it, self.resolver.numba(node))
+        return self.kernel_task(self.keep_destroyed(it), self.resolver.numba(node))
+
+    def keep_destroyed(self, it):
+        """A numba implementation overwrites the inputs its op destroys. That is what
+        the graph asks for; where the planner can't be sure nothing else sees the
+        memory (as in `grant_inplace`), the kernel gets a copy to overwrite."""
+        values = self.values
+        destroyed = {i for ins in getattr(it.node.op, "destroy_map", {}).values() for i in ins}
+        inputs = list(it.inputs)
+        for i in sorted(destroyed):
+            vid = inputs[i]
+            if not isinstance(values.types[vid], TensorType):
+                continue
+            safe = self.allow_inplace and it.of_the_graph and vid not in values.consts
+            if safe and not any(root in values.shared for root in self.roots_of(vid)):
+                continue
+            inputs[i] = values.new(values.types[vid])
+            self.copies_first.append(self.copy_task(vid, inputs[i]))
+        return replace(it, inputs=inputs)
 
     def kernel_task(self, it, kernel: CalledKernel) -> Task:
         """A task that runs a kernel (Rust, numba, a subprogram)."""
@@ -239,15 +312,24 @@ class Planner:
         return Task(present, outs, modes, aliases, address=kernel.address, config=kernel.config,
                     description=kernel.description, keepalive=kernel.keepalive)
 
-    def generated_task(self, it, folded, in_layouts) -> Task:
+    def generated_task(self, it, folded, in_layouts, inplace=None) -> Task:
         """A task whose kernel is generated for the node. Raises NotImplementedError if
-        no emitter handles it."""
+        no emitter handles it. `inplace`: {output: input} for the outputs that
+        overwrite an input (`grant_inplace`)."""
         node = it.node
         body = self.resolver.scan_body(node, in_layouts) if self.resolver.generates_scan(node) else None
         module = ir.Module(f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath)
         links = LinkTable()
         nf = build_node_function(
-            module, node, "node", folded=folded, in_layouts=in_layouts, parallel=self.opts.parallel, links=links, scan_body=body
+            module,
+            node,
+            "node",
+            folded=folded,
+            in_layouts=in_layouts,
+            parallel=self.opts.parallel,
+            links=links,
+            scan_body=body,
+            inplace=inplace,
         )
         build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)
         declared = nf.signature.outputs
@@ -255,6 +337,11 @@ class Planner:
         inputs = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
         outs = self.provide(it.outputs, declared)
         self.set_layouts(outs, [o.layout for o in declared])
+        for k, i in (inplace or {}).items():
+            if it.inputs[i] in self.memory_layouts:
+                self.memory_layouts[outs[k]] = self.memory_layouts[it.inputs[i]]
+        if inplace:
+            self.stats.inplace.append(str(node.op))
         outs, modes, aliases = _present_outputs(declared, outs)
         desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
         return Task(inputs, outs, modes, aliases, description=desc, module=module,
@@ -342,7 +429,9 @@ class Planner:
 
         # 1. items
         items = [NodeItem(scalar_from_tensor(values.types[t]()).owner, [t], [k]) for t, k in scalar_inputs]
-        items += flatten(values, fgraph.toposort(), scope)
+        # (the order of a graph with a DestroyHandler respects what its ops destroy)
+        self.allow_inplace = hasattr(fgraph, "destroyers")
+        items += flatten(values, fgraph.toposort(), scope, of_the_graph=True)
         out_ids = [values.of(o, scope) for o in fgraph.outputs]
         self.graph_outputs = set(out_ids)
         items = group_scalars(values, items, set(out_ids))
@@ -418,6 +507,8 @@ class Planner:
                     ids[k] = pb.arena(dtype(k), shape(k), memory.offsets[k], order(k))
             else:
                 ids[k] = pb.returned(dtype(k), shape(k), [ids[a] for a in memory.aliases[k]])
+        for k, source in memory.same.items():
+            ids[k] = ids[source]  # (overwritten in place: the same value)
         release = memory.release_points(len(tasks))
         for s, after in zip(tasks, release, strict=True):
             pb.task(

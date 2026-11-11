@@ -22,7 +22,6 @@ class LLVMLinker(JITLinker):
         "BlasOpt",
         "local_careduce_fusion",
         "scan_reduce_trace_prealloc",
-        "inplace",
     )
 
     #: options passed on to the planner (program.Options)
