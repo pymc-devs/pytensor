@@ -17,18 +17,18 @@ from pytensor.graph.op import Op
 
 pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.emit import copy, for_each, load, store  # noqa: E402
-from pytensor.link.llvm.codegen.function import (  # noqa: E402
+from pytensor.link.llvm.codegen.emit import copy, for_each, load, store
+from pytensor.link.llvm.codegen.function import (
     OutputMode,
     inplace_outputs,
     llvm_emit,
     llvm_inplace,
     node_outputs,
 )
-from pytensor.link.llvm.plan.memory import plan_memory  # noqa: E402
-from pytensor.link.llvm.program import Options, build_program  # noqa: E402
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit  # noqa: E402
-from tests.link.llvm.test_aliasing import task, values_of  # noqa: E402
+from pytensor.link.llvm.plan.memory import plan_memory
+from pytensor.link.llvm.program import Options, build_program
+from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from tests.link.llvm.test_aliasing import task, values_of
 
 
 # (fused, a chain of Elemwise is one loop and has nothing to overwrite)
@@ -218,8 +218,9 @@ def test_overwrite_takes_the_destroyed_input_only():
         copy(cg, inputs[0], outputs[0].overwrite(cg, inputs[1]))
 
     llvm_inplace.register(Wrong, lambda op, node: {0: 0})
-    from pytensor.link.llvm.codegen.function import build_node_function
     from pytensor_llvm import ir
+
+    from pytensor.link.llvm.codegen.function import build_node_function
 
     with pytest.raises(ValueError, match="overwrites input 0"):
         build_node_function(ir.Module("m"), Wrong()(x, y).owner, "f", inplace={0: 0})

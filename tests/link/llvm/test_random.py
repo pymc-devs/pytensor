@@ -118,11 +118,13 @@ def test_generator_as_explicit_input():
 
 
 def test_nested_program_draws_from_the_callers_state():
-    from pytensor.compile.builders import OpFromGraph, Execution
+    from pytensor.compile.builders import Execution, OpFromGraph
 
     a = pt.dscalar("a")
     r = pt.random.type.random_generator_type("r")
-    inner = OpFromGraph([a, r], [a + rb.normal(0, 1, size=(4,), rng=r)], execution=Execution.INTERPRETED)
+    inner = OpFromGraph(
+        [a, r], [a + rb.normal(0, 1, size=(4,), rng=r)], execution=Execution.INTERPRETED
+    )
     x = pt.dscalar("x")
     rng = pytensor.shared(np.random.default_rng(0))
     f = pytensor.function([x], inner(x, rng), mode=MODE)
@@ -145,7 +147,12 @@ def test_c_api_seed():
     new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.session_new)
     free = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.session_free)
     seed = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint64)(a.seed)
-    call = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(PtArray), ctypes.POINTER(PtArray))(a.call)
+    call = ctypes.CFUNCTYPE(
+        ctypes.c_int32,
+        ctypes.c_void_p,
+        ctypes.POINTER(PtArray),
+        ctypes.POINTER(PtArray),
+    )(a.call)
 
     def run(st):
         out = np.empty(6)

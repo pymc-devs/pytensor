@@ -19,18 +19,27 @@ def test_region_captures_and_results():
     """A region filling out[i] = a * x[i] + b with captured a, b and pointers; chunks
     of 7 over 100 elements; the result is checked in the parent."""
     m = ir.Module("par")
-    f = m.function("f", [ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.ptr], ir.i32, exported=True)
+    f = m.function(
+        "f",
+        [ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.ptr, ir.ptr],
+        ir.i32,
+        exported=True,
+    )
     b = f.builder()
     ctx, args = f.params[0], f.params[1]
     x = b.load(ir.ptr, b.gep_bytes(args, b.const_int(ir.i64, 0)))
     out = b.load(ir.ptr, b.gep_bytes(args, b.const_int(ir.i64, 40)))
-    a = b.fmul(b.const_float(ir.f64, 1.5), b.const_float(ir.f64, 2.0))  # 3.0 (a value of f)
+    a = b.fmul(
+        b.const_float(ir.f64, 1.5), b.const_float(ir.f64, 2.0)
+    )  # 3.0 (a value of f)
     n = b.const_int(ir.i64, 100)
     with b.parallel(ctx, n, b.const_int(ir.i64, 7)) as r:
         with b.loop(b.sub(r.end, r.start)) as j:
             i = b.add(r.start, j)
             v = b.load(ir.f64, b.gep(ir.f64, x, i))
-            b.store(b.fadd(b.fmul(a, v), b.const_float(ir.f64, 1.0)), b.gep(ir.f64, out, i))
+            b.store(
+                b.fadd(b.fmul(a, v), b.const_float(ir.f64, 1.0)), b.gep(ir.f64, out, i)
+            )
     ok = b.icmp(ir.ICmp.EQ, r.result, b.const_int(ir.i32, 0))
     b.ret(b.zext(b.xor(ok, b.const_bool(True)), ir.i32))
     c = m.compile(cache=False)
@@ -94,7 +103,9 @@ def test_random_draws_dont_depend_on_parallelism():
     p.seed(3)
     r2 = f(av)
     np.testing.assert_array_equal(r1, r2)
-    np.testing.assert_allclose((r1 / av).mean(), 1.0, rtol=0.02)  # gamma(a, rate 1) has mean a
+    np.testing.assert_allclose(
+        (r1 / av).mean(), 1.0, rtol=0.02
+    )  # gamma(a, rate 1) has mean a
 
 
 def test_errors_in_a_chunk():

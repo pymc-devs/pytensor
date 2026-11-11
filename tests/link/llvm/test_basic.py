@@ -3,7 +3,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.builders import OpFromGraph, Execution
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.mode import get_mode
 
 
@@ -27,7 +27,12 @@ def compare(inputs, outputs, values, mode=LLVM, rtol=1e-10, atol=1e-12):
 
 def info(f):
     p = f.maker.linker.program
-    return {"tasks": p.tasks, "n_tasks": p.n_tasks, "arena_bytes": p.arena_bytes, "stats": f.maker.linker.stats}
+    return {
+        "tasks": p.tasks,
+        "n_tasks": p.n_tasks,
+        "arena_bytes": p.arena_bytes,
+        "stats": f.maker.linker.stats,
+    }
 
 
 def test_elemwise_reduce_dot_dynamic_shapes():
@@ -83,7 +88,9 @@ def test_arena_reuses_temporaries():
 def test_compiled_ofg_calls_kernels():
     A = pt.matrix("A")
     v = pt.vector("v")
-    inner = OpFromGraph([A, v], [((A @ v) ** 2).sum(), A @ v], execution=Execution.COMPILED)
+    inner = OpFromGraph(
+        [A, v], [((A @ v) ** 2).sum(), A @ v], execution=Execution.COMPILED
+    )
     out = inner(A, v)
     f = compare([A, v], out, [rng.random((4, 3)), rng.random(3)])
     tasks = info(f)["tasks"]
@@ -113,7 +120,9 @@ def test_nested_ofg_kinds():
     x = pt.vector("x")
     compiled = OpFromGraph([x], [pt.exp(x) + 1], execution=Execution.COMPILED)
     y = pt.vector("y")
-    interp = OpFromGraph([y], [compiled(y).sum() * pt.log1p(y)], execution=Execution.INTERPRETED)
+    interp = OpFromGraph(
+        [y], [compiled(y).sum() * pt.log1p(y)], execution=Execution.INTERPRETED
+    )
     z = pt.vector("z")
     outer = OpFromGraph([z], [interp(z) - 1], execution=Execution.COMPILED)
     compare([z], outer(z), [rng.random(5)])
@@ -129,7 +138,9 @@ def test_numba_fallback_inside_compiled_unit():
 def test_shape_error_inside_unit_and_function_still_works():
     x = pt.vector("x")
     y = pt.vector("y")
-    inner = OpFromGraph([x, y], [pt.exp(x) + y, (x * y).sum()], execution=Execution.COMPILED)
+    inner = OpFromGraph(
+        [x, y], [pt.exp(x) + y, (x * y).sum()], execution=Execution.COMPILED
+    )
     f = pytensor.function([x, y], inner(x, y), mode=LLVM)
     with pytest.raises(Exception, match="shape mismatch"):
         f(np.ones(3), np.ones(4))
@@ -181,7 +192,12 @@ def test_profiling_with_subprograms():
 
     x = pt.dmatrix("x")
     w = pt.dvector("w")
-    res = pytensor.scan(lambda r, acc: acc + pt.exp(r) @ w, sequences=[x], outputs_info=[pt.zeros(())], return_updates=False)
+    res = pytensor.scan(
+        lambda r, acc: acc + pt.exp(r) @ w,
+        sequences=[x],
+        outputs_info=[pt.zeros(())],
+        return_updates=False,
+    )
     # the Scan kernel runs its loop body as a subprogram (a generated Scan has none)
     mode = get_mode("LLVM").clone(link_kwargs={"generate_scan": False})
     f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode=mode)
@@ -197,7 +213,9 @@ def test_profiling_with_subprograms():
     nested = [r for r in rows if r[0] == 1]
     assert top and nested
     assert all(calls == 3 for _, _, calls, _ in top)
-    assert all(calls == 15 for _, _, calls, _ in nested)  # the loop body ran 5 times per call
+    assert all(
+        calls == 15 for _, _, calls, _ in nested
+    )  # the loop body ran 5 times per call
     assert sum(s for *_, s in top) > 0
     assert "Scan" in p.profile_report()
     p.reset_profile()
@@ -212,7 +230,10 @@ def test_scalars_around_a_scan():
     x = pt.vector("x")
     n = pt.iscalar("n")
     ys = pytensor.scan(
-        lambda xt, acc: acc * 0.5 + xt, sequences=[x[:n]], outputs_info=[pt.zeros(())], return_updates=False
+        lambda xt, acc: acc * 0.5 + xt,
+        sequences=[x[:n]],
+        outputs_info=[pt.zeros(())],
+        return_updates=False,
     )
     compare([x, n], [ys.sum(), pt.grad(ys.sum(), x)], [np.arange(5.0), np.int32(3)])
 
@@ -223,7 +244,8 @@ def test_kernel_reading_a_scalar():
     # compiled unit
     from pytensor.compile.mode import Mode
     from pytensor.graph.replace import clone_replace
-    from pytensor.scalar import ScalarType, bool as scalar_bool
+    from pytensor.scalar import ScalarType
+    from pytensor.scalar import bool as scalar_bool
     from pytensor.scan.op import Scan
     from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 
@@ -243,7 +265,9 @@ def test_kernel_reading_a_scalar():
     s = scalar_bool()
     inner = op.fgraph.unfreeze()
     inner_in = list(inner.inputs)
-    inner_out = clone_replace(list(inner.outputs), {inner_in[-1]: tensor_from_scalar(s)})
+    inner_out = clone_replace(
+        list(inner.outputs), {inner_in[-1]: tensor_from_scalar(s)}
+    )
     new_op = Scan([*inner_in[:-1], s], inner_out, op.info, mode=op.mode)
     flag = scalar_from_tensor(node.inputs[-1])
     new = new_op(*node.inputs[:-1], flag, return_list=True)

@@ -16,9 +16,13 @@ NO_FALLBACK = LLVM.clone(link_kwargs={"numba_fallback": False})
 rng = np.random.default_rng(3)
 
 
-def compare(inputs, outputs, values, mode=NO_FALLBACK, rtol=1e-10, atol=1e-12, check_dtype=True):
+def compare(
+    inputs, outputs, values, mode=NO_FALLBACK, rtol=1e-10, atol=1e-12, check_dtype=True
+):
     f = pytensor.function(inputs, outputs, mode=mode, on_unused_input="ignore")
-    g = pytensor.function(inputs, outputs, mode="FAST_COMPILE", on_unused_input="ignore")
+    g = pytensor.function(
+        inputs, outputs, mode="FAST_COMPILE", on_unused_input="ignore"
+    )
     res, ref = f(*values), g(*values)
     if not isinstance(res, list):
         res, ref = [res], [ref]
@@ -63,7 +67,12 @@ def test_inc_and_set_subtensor_broadcasting():
     y = pt.vector("y")
     i = pt.lscalar("i")
     for fn in (pt.inc_subtensor, pt.set_subtensor):
-        outs = [fn(x[1:, i], y), fn(x[::2], 2.5), fn(x[i], y[:1] * 3), fn(x[:, ::-1], 1.0)]
+        outs = [
+            fn(x[1:, i], y),
+            fn(x[::2], 2.5),
+            fn(x[i], y[:1] * 3),
+            fn(x[:, ::-1], 1.0),
+        ]
         compare([x, y, i], outs, [rng.normal(size=(5, 4)), rng.normal(size=4), 2])
 
 
@@ -74,7 +83,11 @@ def test_take_patterns(idx_dtype):
     m = pt.matrix("m", dtype=idx_dtype)
     outs = [x[v], x[:, v], x[:, :, v], x[m], x[:, m], x[v, v], x[:, m, m]]
     vi = [0, 2, 1, 2] if idx_dtype == "uint8" else [0, 2, -1, 2]
-    vals = [rng.normal(size=(5, 4, 3)), np.array(vi, dtype=idx_dtype), np.array([[0, 1], [2, 2]], dtype=idx_dtype)]
+    vals = [
+        rng.normal(size=(5, 4, 3)),
+        np.array(vi, dtype=idx_dtype),
+        np.array([[0, 1], [2, 2]], dtype=idx_dtype),
+    ]
     compare([x, v, m], outs, vals)
 
 
@@ -95,7 +108,16 @@ def test_inc_and_set_take_with_duplicates(set_):
     idx = np.array([0, 2, 2, -1])
     z = pt.matrix("z")
     outs = [fn(x[v], y), fn(x[v], 1.5), fn(x[:, v], z)]
-    compare([x, v, y, z], outs, [rng.normal(size=(5, 3)), idx, rng.normal(size=(4, 3)), rng.normal(size=(5, 4))])
+    compare(
+        [x, v, y, z],
+        outs,
+        [
+            rng.normal(size=(5, 3)),
+            idx,
+            rng.normal(size=(4, 3)),
+            rng.normal(size=(5, 4)),
+        ],
+    )
 
 
 def test_shape_alloc_arange_reshape_join_split():
@@ -146,13 +168,22 @@ def test_cumop(op, axis):
     compare([x], op(x, axis=axis), [rng.random((4, 5)) + 0.5])
     # the reference returns int64 here although the output type is int32: compare values
     xi = pt.matrix("xi", dtype="int32")
-    compare([xi], op(xi, axis=axis), [rng.integers(-3, 4, (4, 5)).astype("int32")], check_dtype=False)
+    compare(
+        [xi],
+        op(xi, axis=axis),
+        [rng.integers(-3, 4, (4, 5)).astype("int32")],
+        check_dtype=False,
+    )
 
 
 @pytest.mark.parametrize("offset", [0, 1, -2, 7])
 def test_extract_diag(offset):
     x = pt.tensor3("x")
-    compare([x], pt.diagonal(x, offset=offset, axis1=0, axis2=2) * 1.0, [rng.random((4, 3, 5))])
+    compare(
+        [x],
+        pt.diagonal(x, offset=offset, axis1=0, axis2=2) * 1.0,
+        [rng.random((4, 3, 5))],
+    )
     m = pt.matrix("m")
     compare([m], pt.diag(m) + 0.0, [rng.random((4, 6))])
 
@@ -174,7 +205,11 @@ def test_cholesky_and_solve_triangular(lower):
     m = rng.random((5, 5))
     spd = m @ m.T + 5 * np.eye(5)
     L = cholesky(a, lower=lower)
-    outs = [L, solve_triangular(L, b, lower=lower), solve_triangular(L, bv, lower=lower, unit_diagonal=True)]
+    outs = [
+        L,
+        solve_triangular(L, b, lower=lower),
+        solve_triangular(L, bv, lower=lower, unit_diagonal=True),
+    ]
     compare([a, b, bv], outs, [spd, rng.random((5, 3)), rng.random(5)], rtol=1e-8)
     f = pytensor.function([a], cholesky(a, lower=lower), mode=NO_FALLBACK)
     assert np.isnan(f(-np.eye(3))).all()
@@ -192,7 +227,11 @@ def test_fused_elemwise_patterns():
         (pt.exp(m) * y[: m.shape[1]]).sum(axis=1),
         (pt.log1p(m) * y[: m.shape[1]]).sum(axis=0),
     ]
-    f = compare([x, y, idx, m], outs, [rng.random(10), rng.random(30), rng.integers(0, 10, 30), rng.random((5, 7))])
+    f = compare(
+        [x, y, idx, m],
+        outs,
+        [rng.random(10), rng.random(30), rng.integers(0, 10, 30), rng.random((5, 7))],
+    )
     assert any(s.startswith("FusedElemwise") for s in tasks(f))
 
 
@@ -205,15 +244,27 @@ def test_scan_sit_sot_mit_sot_nit_sot():
         return nxt, nxt**2
 
     init = pt.stack([x0, x0 + 1])
-    (traj, sq) = pytensor.scan(step, sequences=[seq], outputs_info=[{"initial": init, "taps": [-2, -1]}, None], return_updates=False)
-    acc = pytensor.scan(lambda a, b: a + b, sequences=[seq], outputs_info=[x0], return_updates=False)
+    (traj, sq) = pytensor.scan(
+        step,
+        sequences=[seq],
+        outputs_info=[{"initial": init, "taps": [-2, -1]}, None],
+        return_updates=False,
+    )
+    acc = pytensor.scan(
+        lambda a, b: a + b, sequences=[seq], outputs_info=[x0], return_updates=False
+    )
     compare([x0, seq], [traj, sq, acc], [0.3, rng.random(12)], rtol=1e-9)
 
 
 def test_scan_gradient_and_while():
     x = pt.vector("x")
     w = pt.dscalar("w")
-    ys = pytensor.scan(lambda xi, acc: acc * w + xi, sequences=[x], outputs_info=[pt.zeros(())], return_updates=False)
+    ys = pytensor.scan(
+        lambda xi, acc: acc * w + xi,
+        sequences=[x],
+        outputs_info=[pt.zeros(())],
+        return_updates=False,
+    )
     cost = ys[-1] ** 2
     compare([x, w], [cost, pytensor.grad(cost, w)], [rng.random(6), 0.7], rtol=1e-8)
 
@@ -267,7 +318,11 @@ def test_betainc_grad_uses_scalar_loop():
     g = pt.grad(pt.betainc(a, b, z).sum(), [a, b])
     f = pytensor.function([a, b, z], g, mode=NO_FALLBACK)
     ref = pytensor.function([a, b, z], g)
-    args = (np.array([0.5, 2.0, 5.0]), np.array([1.5, 3.0, 0.7]), np.array([0.2, 0.6, 0.9]))
+    args = (
+        np.array([0.5, 2.0, 5.0]),
+        np.array([1.5, 3.0, 0.7]),
+        np.array([0.2, 0.6, 0.9]),
+    )
     for r, e in zip(f(*args), ref(*args), strict=True):
         np.testing.assert_allclose(r, e, rtol=1e-10)
 
