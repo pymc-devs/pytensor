@@ -82,16 +82,9 @@ pub struct Value {
     pub func: Option<LLVMValueRef>,
 }
 
-#[pymethods]
 impl Value {
-    #[getter]
-    fn r#type(&self) -> PyType {
-        PyType(self.ty.clone())
-    }
-
-    /// The value if this is an integer constant.
-    #[getter]
-    fn const_int(&self) -> Option<i64> {
+    /// The value if this is an integer constant (booleans: 0 or 1).
+    pub fn const_int_value(&self) -> Option<i64> {
         // SAFETY: `raw` is a live value of this module.
         unsafe {
             if self.ty.is_int() && !c::LLVMIsAConstantInt(self.raw).is_null() {
@@ -102,6 +95,35 @@ impl Value {
             }
         }
         None
+    }
+}
+
+#[pymethods]
+impl Value {
+    #[getter]
+    fn r#type(&self) -> PyType {
+        PyType(self.ty.clone())
+    }
+
+    /// The value if this is an integer constant.
+    #[getter]
+    fn const_int(&self) -> Option<i64> {
+        self.const_int_value()
+    }
+
+    /// Name the value in the IR text (`%name` instead of `%7`), for reading dumps.
+    /// Returns the value. Constants have no names.
+    fn named(slf: Py<Self>, py: Python<'_>, name: &str) -> Py<Self> {
+        {
+            let v = slf.borrow(py);
+            // SAFETY: `raw` is a live value; LLVM copies the name.
+            unsafe {
+                if c::LLVMIsConstant(v.raw) == 0 {
+                    c::LLVMSetValueName2(v.raw, name.as_ptr() as *const _, name.len());
+                }
+            }
+        }
+        slf
     }
 
     /// The value if this is a float constant.

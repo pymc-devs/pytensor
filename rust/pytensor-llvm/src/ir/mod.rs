@@ -22,6 +22,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<builder::Builder>()?;
     m.add_class::<builder::Loop>()?;
     m.add_class::<builder::If>()?;
+    m.add_class::<builder::Else>()?;
     m.add_class::<builder::ICmp>()?;
     m.add_class::<builder::FCmp>()?;
     m.add_class::<builder::Intrinsic>()?;
