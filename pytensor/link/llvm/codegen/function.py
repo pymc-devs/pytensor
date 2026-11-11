@@ -233,7 +233,7 @@ def build_node_function(
     params = fn.params
     ctx, config, frame = params[:3]
     cg = Codegen(b, ctx, config, frame, parallel=parallel, links=links, planner=planner, module=module, name=name)
-    # Aliasing (DESIGN.md): the memory a step writes (provided or allocated outputs)
+    # Aliasing (DESIGN.md): the memory a task writes (provided or allocated outputs)
     # never overlaps its inputs or its other outputs; views are never written.
     b.alias_domain(name)
     written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.ALLOCATED, OutputMode.VIEW)]
