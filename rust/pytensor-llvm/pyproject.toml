@@ -14,3 +14,15 @@ module-name = "pytensor_llvm"
 features = ["pyo3/extension-module"]
 # type stubs for the extension (PEP 561 stub-only package next to the module)
 include = [{ path = "pytensor_llvm-stubs/*.pyi", format = ["sdist", "wheel"] }]
+
+# Rebuild when the Rust sources change: by default uv/pixi key their cache of a path
+# dependency on pyproject.toml alone and would reuse a stale binary after Rust edits.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/**/*.rs" },
+    { file = "include/*.h" },
+    { file = "pytensor_llvm-stubs/*.pyi" },
+]
