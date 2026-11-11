@@ -53,11 +53,17 @@ fn pytensor_llvm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let ir_mod = PyModule::new(m.py(), "ir")?;
     ir::register(&ir_mod)?;
     m.add_submodule(&ir_mod)?;
-    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.ir", &ir_mod)?;
+    m.py()
+        .import("sys")?
+        .getattr("modules")?
+        .set_item("pytensor_llvm.ir", &ir_mod)?;
     let interp_mod = PyModule::new(m.py(), "interp")?;
     interp::py::register(&interp_mod)?;
     m.add_submodule(&interp_mod)?;
-    m.py().import("sys")?.getattr("modules")?.set_item("pytensor_llvm.interp", &interp_mod)?;
+    m.py()
+        .import("sys")?
+        .getattr("modules")?
+        .set_item("pytensor_llvm.interp", &interp_mod)?;
     // the process-wide runtime
     m.add_function(wrap_pyfunction!(interp::py::set_threads, m)?)?;
     m.add_function(wrap_pyfunction!(interp::py::threads, m)?)?;

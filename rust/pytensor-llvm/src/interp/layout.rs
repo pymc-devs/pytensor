@@ -23,11 +23,17 @@ pub struct Layout {
 impl Layout {
     /// C-contiguous.
     pub fn c(ndim: usize) -> Layout {
-        Layout { order: (0..ndim).collect(), strides: vec![Stride::Packed; ndim] }
+        Layout {
+            order: (0..ndim).collect(),
+            strides: vec![Stride::Packed; ndim],
+        }
     }
 
     pub fn dynamic(ndim: usize) -> Layout {
-        Layout { order: (0..ndim).collect(), strides: vec![Stride::Dynamic; ndim] }
+        Layout {
+            order: (0..ndim).collect(),
+            strides: vec![Stride::Dynamic; ndim],
+        }
     }
 
     pub fn ndim(&self) -> usize {
@@ -48,9 +54,17 @@ impl Layout {
                 None => strides.push(Stride::Packed),
             }
         }
-        let mut new_order: Vec<usize> = order.iter().enumerate().filter(|(_, o)| o.is_none()).map(|(j, _)| j).collect();
+        let mut new_order: Vec<usize> = order
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.is_none())
+            .map(|(j, _)| j)
+            .collect();
         new_order.extend(self.order.iter().filter_map(|&a| out_of[a]));
-        Layout { order: new_order, strides }
+        Layout {
+            order: new_order,
+            strides,
+        }
     }
 }
 
@@ -93,6 +107,9 @@ impl<'py> IntoPyObject<'py> for Layout {
                 Stride::Static(n) => strides.append(n)?,
             }
         }
-        PyTuple::new(py, [PyList::new(py, &self.order)?.into_any(), strides.into_any()])
+        PyTuple::new(
+            py,
+            [PyList::new(py, &self.order)?.into_any(), strides.into_any()],
+        )
     }
 }

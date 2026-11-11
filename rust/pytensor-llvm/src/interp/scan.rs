@@ -13,10 +13,10 @@
 //! their rows, so a circular buffer whose output row coincides with an input tap is
 //! still correct.
 
-use super::program::{copy_strided, Program};
+use super::program::{Program, copy_strided};
 use crate::abi::{OwnedBuf, PtArray, PtBuffer};
-use crate::runtime::{PtCtx};
 use crate::dtype::DType;
+use crate::runtime::PtCtx;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -63,13 +63,20 @@ fn c_strides(shape: &[i64], itemsize: i64) -> Vec<i64> {
 impl Buf {
     /// The buffer reference is pushed onto `owned` (released on errors).
     fn new(shape: Vec<i64>, itemsize: i64, owned: &mut Vec<OwnedBuf>) -> Result<Buf, String> {
-        let nbytes = crate::abi::checked_nbytes(&shape, itemsize as usize).ok_or_else(|| crate::abi::bad_size("scan buffer", &shape))?;
+        let nbytes = crate::abi::checked_nbytes(&shape, itemsize as usize)
+            .ok_or_else(|| crate::abi::bad_size("scan buffer", &shape))?;
         let owner = PtBuffer::new(nbytes, 64);
         // SAFETY: a buffer reference we just created and now own.
         owned.push(unsafe { OwnedBuf::from_raw(owner) });
         let strides = c_strides(&shape, itemsize);
         // SAFETY: `owner` was just allocated.
-        Ok(Buf { owner, data: unsafe { (*owner).data }, shape, strides, itemsize })
+        Ok(Buf {
+            owner,
+            data: unsafe { (*owner).data },
+            shape,
+            strides,
+            itemsize,
+        })
     }
 
     fn len(&self) -> i64 {
@@ -87,7 +94,13 @@ impl Buf {
 
     fn view(&mut self, r: Option<i64>) -> PtArray {
         match r {
-            None => PtArray { data: self.data, shape: self.shape.as_mut_ptr(), strides: self.strides.as_mut_ptr(), owner: std::ptr::null_mut(), ndim: self.shape.len() as i64 },
+            None => PtArray {
+                data: self.data,
+                shape: self.shape.as_mut_ptr(),
+                strides: self.strides.as_mut_ptr(),
+                owner: std::ptr::null_mut(),
+                ndim: self.shape.len() as i64,
+            },
             Some(r) => PtArray {
                 data: self.row(r),
                 shape: self.shape[1..].as_mut_ptr(),
@@ -103,11 +116,23 @@ impl Buf {
         // SAFETY: `src` is a valid array (a body output or input).
         let (sh, st) = unsafe { (src.shape(), src.strides()) };
         if sh != &self.shape[1..] {
-            return Err(format!("Scan: body output has shape {sh:?}, expected {:?}", &self.shape[1..]));
+            return Err(format!(
+                "Scan: body output has shape {sh:?}, expected {:?}",
+                &self.shape[1..]
+            ));
         }
         // SAFETY: row r has this shape (C-contiguous) and doesn't overlap `src` (body
         // outputs are fresh or provided temporaries).
-        unsafe { copy_strided(src.data, sh, st, self.row(r), &self.strides[1..], self.itemsize as usize) };
+        unsafe {
+            copy_strided(
+                src.data,
+                sh,
+                st,
+                self.row(r),
+                &self.strides[1..],
+                self.itemsize as usize,
+            )
+        };
         Ok(())
     }
 }
@@ -131,7 +156,11 @@ struct Traced {
 ///
 /// # Safety
 /// The kernel ABI; `config` is a `ScanConfig` matching the arguments.
-pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
+pub unsafe extern "C-unwind" fn k_scan(
+    ctx: *mut PtCtx,
+    args: *mut PtArray,
+    config: *const u8,
+) -> i32 {
     // SAFETY: the function's contract.
     let (d, c) = unsafe { (&*(config as *const ScanConfig), &mut *ctx) };
     let mut owned: Vec<OwnedBuf> = Vec::new();
@@ -151,11 +180,20 @@ pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, conf
 
 /// # Safety
 /// As for `k_scan`.
-unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut Vec<OwnedBuf>) -> Result<(), String> {
+unsafe fn run(
+    ctx: &mut PtCtx,
+    args: *mut PtArray,
+    d: &ScanConfig,
+    owned: &mut Vec<OwnedBuf>,
+) -> Result<(), String> {
     let info = &d.info;
     // SAFETY: args holds every outer input and output (the contract).
     let arg = |i: usize| unsafe { *args.add(i) };
-    let (n_mm, n_ms, n_ss) = (info.mit_mot_in.len(), info.mit_sot_in.len(), info.sit_sot_in.len());
+    let (n_mm, n_ms, n_ss) = (
+        info.mit_mot_in.len(),
+        info.mit_sot_in.len(),
+        info.sit_sot_in.len(),
+    );
     let o_seq = 1;
     let o_mm = o_seq + info.n_seqs;
     let o_ms = o_mm + n_mm;
@@ -178,7 +216,11 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
         Ok(b)
     };
     let mut traced: Vec<Traced> = Vec::new();
-    let groups = [(o_mm, &info.mit_mot_in, true), (o_ms, &info.mit_sot_in, false), (o_ss, &info.sit_sot_in, false)];
+    let groups = [
+        (o_mm, &info.mit_mot_in, true),
+        (o_ms, &info.mit_sot_in, false),
+        (o_ss, &info.sit_sot_in, false),
+    ];
     for (base, taps, is_mm) in groups {
         for (j, in_taps) in taps.iter().enumerate() {
             let a = arg(base + j);
@@ -187,12 +229,23 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
             }
             let buf = copy_of(a, d.outer_in_dtypes[base + j], owned)?;
             let lookback = -in_taps.iter().copied().min().unwrap_or(0).min(0);
-            let out_taps = if is_mm { info.mit_mot_out[j].clone() } else { vec![0] };
-            traced.push(Traced { buf, lookback, in_taps: in_taps.clone(), out_taps, post_process: !is_mm });
+            let out_taps = if is_mm {
+                info.mit_mot_out[j].clone()
+            } else {
+                vec![0]
+            };
+            traced.push(Traced {
+                buf,
+                lookback,
+                in_taps: in_taps.clone(),
+                out_taps,
+                post_process: !is_mm,
+            });
         }
     }
-    let mut untraced: Vec<Buf> =
-        (0..info.n_untraced).map(|j| copy_of(arg(o_ut + j), d.outer_in_dtypes[o_ut + j], owned)).collect::<Result<_, _>>()?;
+    let mut untraced: Vec<Buf> = (0..info.n_untraced)
+        .map(|j| copy_of(arg(o_ut + j), d.outer_in_dtypes[o_ut + j], owned))
+        .collect::<Result<_, _>>()?;
     let n_mm_outs: usize = info.mit_mot_out.iter().map(|t| t.len()).sum();
     let first_nit_out = n_mm_outs + n_ms + n_ss;
     let mut nit: Vec<Option<Buf>> = Vec::new();
@@ -205,7 +258,11 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
             Some(s) => {
                 let mut shape = vec![len];
                 shape.extend(s);
-                Some(Buf::new(shape, d.inner_out_dtypes[first_nit_out + j].itemsize() as i64, owned)?)
+                Some(Buf::new(
+                    shape,
+                    d.inner_out_dtypes[first_nit_out + j].itemsize() as i64,
+                    owned,
+                )?)
             }
             None => None,
         });
@@ -216,7 +273,11 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
     let mut temp_owned = Vec::new();
     for o in 0..body.n_outputs() {
         temps.push(match body.output_static_shape(o) {
-            Some(s) => Some(Buf::new(s, d.inner_out_dtypes[o].itemsize() as i64, &mut temp_owned)?),
+            Some(s) => Some(Buf::new(
+                s,
+                d.inner_out_dtypes[o].itemsize() as i64,
+                &mut temp_owned,
+            )?),
             None => None,
         });
     }
@@ -239,7 +300,13 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
             }
             // SAFETY: row i of a sequence (i < its length) and its trailing axes.
             body_in.push(unsafe {
-                PtArray { data: a.data.offset((i * sts[0]) as isize), shape: a.shape.add(1), strides: a.strides.add(1), owner: std::ptr::null_mut(), ndim: a.ndim - 1 }
+                PtArray {
+                    data: a.data.offset((i * sts[0]) as isize),
+                    shape: a.shape.add(1),
+                    strides: a.strides.add(1),
+                    owner: std::ptr::null_mut(),
+                    ndim: a.ndim - 1,
+                }
             });
         }
         if result.is_err() {
@@ -273,7 +340,9 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
             body.finish(&mut st);
             break;
         }
-        let outs: Vec<PtArray> = (0..body.n_outputs()).map(|o| body.output_view(&st, o)).collect();
+        let outs: Vec<PtArray> = (0..body.n_outputs())
+            .map(|o| body.output_view(&st, o))
+            .collect();
 
         // write the body outputs into their rows
         let mut q = 0;
@@ -291,7 +360,11 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
                 // SAFETY: a body output.
                 let mut shape = vec![nit_len[j]];
                 shape.extend(unsafe { outs[q].shape() });
-                nit[j] = Some(Buf::new(shape, d.inner_out_dtypes[first_nit_out + j].itemsize() as i64, owned)?);
+                nit[j] = Some(Buf::new(
+                    shape,
+                    d.inner_out_dtypes[first_nit_out + j].itemsize() as i64,
+                    owned,
+                )?);
             }
             let b = nit[j].as_ref().unwrap();
             if b.len() > 0 {
@@ -307,7 +380,16 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
                 *u = Buf::new(sh.clone(), u.itemsize, owned)?;
             }
             // SAFETY: a valid body output and a buffer of its shape.
-            unsafe { copy_strided(outs[q].data, &sh, &sts, u.data, &u.strides, u.itemsize as usize) };
+            unsafe {
+                copy_strided(
+                    outs[q].data,
+                    &sh,
+                    &sts,
+                    u.data,
+                    &u.strides,
+                    u.itemsize as usize,
+                )
+            };
             q += 1;
         }
         if info.as_while {
@@ -336,8 +418,16 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
                 let rb = b.row_bytes();
                 // SAFETY: both buffers have `len` rows of `rb` bytes; they don't overlap.
                 unsafe {
-                    std::ptr::copy_nonoverlapping(b.row(shift), nb.data, ((len - shift) * rb) as usize);
-                    std::ptr::copy_nonoverlapping(b.data, nb.row(len - shift), (shift * rb) as usize);
+                    std::ptr::copy_nonoverlapping(
+                        b.row(shift),
+                        nb.data,
+                        ((len - shift) * rb) as usize,
+                    );
+                    std::ptr::copy_nonoverlapping(
+                        b.data,
+                        nb.row(len - shift),
+                        (shift * rb) as usize,
+                    );
                 }
                 *b = nb;
             }
@@ -346,7 +436,9 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
                 b.shape[0] = used; // a shorter view of the same memory
             } else {
                 // SAFETY: rows used..len are inside the buffer.
-                unsafe { std::ptr::write_bytes(b.row(used), 0, ((len - used) * b.row_bytes()) as usize) };
+                unsafe {
+                    std::ptr::write_bytes(b.row(used), 0, ((len - used) * b.row_bytes()) as usize)
+                };
             }
         }
         Ok(())
@@ -362,7 +454,11 @@ unsafe fn run(ctx: &mut PtCtx, args: *mut PtArray, d: &ScanConfig, owned: &mut V
             // no iteration ran and the shape isn't static: an empty array
             let mut shape = vec![nit_len[j]];
             shape.extend(std::iter::repeat_n(0, body.output_ndim(first_nit_out + j)));
-            *b = Some(Buf::new(shape, d.inner_out_dtypes[first_nit_out + j].itemsize() as i64, owned)?);
+            *b = Some(Buf::new(
+                shape,
+                d.inner_out_dtypes[first_nit_out + j].itemsize() as i64,
+                owned,
+            )?);
         }
         finish(b.as_mut().unwrap(), 0, owned)?;
     }

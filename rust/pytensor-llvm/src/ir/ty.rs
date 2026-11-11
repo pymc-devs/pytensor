@@ -101,7 +101,14 @@ impl std::fmt::Display for Ty {
 }
 
 /// An LLVM type.
-#[pyclass(module = "pytensor_llvm.ir", name = "Type", frozen, eq, hash, from_py_object)]
+#[pyclass(
+    module = "pytensor_llvm.ir",
+    name = "Type",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PyType(pub Ty);
 
@@ -119,7 +126,9 @@ impl PyType {
     #[staticmethod]
     fn int(bits: u32) -> PyResult<Self> {
         if ![1, 8, 16, 32, 64].contains(&bits) {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!("unsupported integer width {bits}")));
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unsupported integer width {bits}"
+            )));
         }
         Ok(PyType(Ty::Int(bits)))
     }

@@ -12,18 +12,30 @@
 //! condition, ... The result of such a call may be one of its operands or a constant
 //! (`value.const_int`), which is how emitters keep static shapes static.
 
-use super::module::{add_fn_attr, cstring, err, ModuleInner, Value};
+use super::module::{ModuleInner, Value, add_fn_attr, cstring, err};
 use super::ty::{PyType, Ty};
 use llvm_sys::core as c;
-use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMBuilderRef, LLVMMetadataRef, LLVMTypeRef, LLVMValueRef};
+use llvm_sys::prelude::{
+    LLVMBasicBlockRef, LLVMBuilderRef, LLVMMetadataRef, LLVMTypeRef, LLVMValueRef,
+};
 use llvm_sys::{LLVMIntPredicate as IP, LLVMRealPredicate as RP};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-type BuildFn = unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, *const std::ffi::c_char) -> LLVMValueRef;
-type CastFn = unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, *const std::ffi::c_char) -> LLVMValueRef;
+type BuildFn = unsafe extern "C" fn(
+    LLVMBuilderRef,
+    LLVMValueRef,
+    LLVMValueRef,
+    *const std::ffi::c_char,
+) -> LLVMValueRef;
+type CastFn = unsafe extern "C" fn(
+    LLVMBuilderRef,
+    LLVMValueRef,
+    LLVMTypeRef,
+    *const std::ffi::c_char,
+) -> LLVMValueRef;
 
 const NONAME: *const std::ffi::c_char = c"".as_ptr();
 
@@ -246,11 +258,7 @@ impl Libm {
     }
 
     fn arity(self) -> usize {
-        if self == Libm::Atan2 {
-            2
-        } else {
-            1
-        }
+        if self == Libm::Atan2 { 2 } else { 1 }
     }
 
     fn has_vector_variant(self) -> bool {
@@ -387,7 +395,9 @@ impl Builder {
     fn open(&self) -> PyResult<()> {
         self.m.check_open()?;
         if self.is_terminated() {
-            return err("the current block already ended (after ret); no more instructions can follow");
+            return err(
+                "the current block already ended (after ret); no more instructions can follow",
+            );
         }
         Ok(())
     }
@@ -413,7 +423,9 @@ impl Builder {
             return err("value from a different function");
         };
         if !matches!(ty, Ty::Int(_) | Ty::F32 | Ty::F64 | Ty::Ptr) {
-            return err(format!("a parallel region can't use a value of type {ty} from outside"));
+            return err(format!(
+                "a parallel region can't use a value of type {ty} from outside"
+            ));
         }
         let mut raw = raw;
         for region in regions[first..].iter_mut() {
@@ -427,7 +439,14 @@ impl Builder {
             let loaded = unsafe {
                 let i8t = c::LLVMInt8TypeInContext(self.m.ctx);
                 let mut off = c::LLVMConstInt(self.lt(&Ty::Int(64)), 8 * slot as u64, 0);
-                let p = c::LLVMBuildInBoundsGEP2(region.body_allocas, i8t, region.captures_param, &mut off, 1, NONAME);
+                let p = c::LLVMBuildInBoundsGEP2(
+                    region.body_allocas,
+                    i8t,
+                    region.captures_param,
+                    &mut off,
+                    1,
+                    NONAME,
+                );
                 c::LLVMBuildLoad2(region.body_allocas, self.lt(ty), p, NONAME)
             };
             region.captures.push((raw, ty.clone()));
@@ -441,8 +460,15 @@ impl Builder {
     fn mk(&self, raw: LLVMValueRef, ty: Ty) -> Value {
         // SAFETY: `raw` is a live value of this module. A folded result is a constant:
         // it belongs to no function (so parallel regions don't capture it).
-        let konst = unsafe { !c::LLVMIsAConstantInt(raw).is_null() || !c::LLVMIsAConstantFP(raw).is_null() };
-        Value { m: self.m.clone(), raw, ty, func: if konst { None } else { Some(self.func.get()) } }
+        let konst = unsafe {
+            !c::LLVMIsAConstantInt(raw).is_null() || !c::LLVMIsAConstantFP(raw).is_null()
+        };
+        Value {
+            m: self.m.clone(),
+            raw,
+            ty,
+            func: if konst { None } else { Some(self.func.get()) },
+        }
     }
 
     /// `x` as a value of type `ty`: itself, or the literal as a constant of `ty`.
@@ -455,14 +481,18 @@ impl Builder {
             Operand::Float(v) if ty.is_float() => self.const_float(PyType(ty.clone()), v),
             Operand::Bool(v) => err(format!("{what}: the literal {v} can't be a {ty}")),
             Operand::Int(v) => err(format!("{what}: the literal {v} can't be a {ty}")),
-            Operand::Float(v) => err(format!("{what}: the literal {v} can't be a {ty} (convert it explicitly)")),
+            Operand::Float(v) => err(format!(
+                "{what}: the literal {v} can't be a {ty} (convert it explicitly)"
+            )),
         }
     }
 
     /// Two operands of one type: a literal takes the type of the other operand.
     fn pair(&self, what: &str, a: Operand, b: Operand) -> PyResult<(Value, Value)> {
         let Some(ty) = a.ty().or(b.ty()).cloned() else {
-            return err(format!("{what}: one operand must be a value (a literal takes the other operand's type)"));
+            return err(format!(
+                "{what}: one operand must be a value (a literal takes the other operand's type)"
+            ));
         };
         Ok((self.lit(what, a, &ty)?, self.lit(what, b, &ty)?))
     }
@@ -470,7 +500,9 @@ impl Builder {
     /// Operands of one type: literals take the type of the first value.
     fn many(&self, what: &str, args: Vec<Operand>) -> PyResult<Vec<Value>> {
         let Some(ty) = args.iter().find_map(|a| a.ty()).cloned() else {
-            return err(format!("{what}: one argument must be a value (literals take its type)"));
+            return err(format!(
+                "{what}: one argument must be a value (literals take its type)"
+            ));
         };
         args.into_iter().map(|a| self.lit(what, a, &ty)).collect()
     }
@@ -562,7 +594,12 @@ impl Builder {
     }
 
     fn konst(&self, raw: LLVMValueRef, ty: Ty) -> Value {
-        Value { m: self.m.clone(), raw, ty, func: None }
+        Value {
+            m: self.m.clone(),
+            raw,
+            ty,
+            func: None,
+        }
     }
 
     fn lt(&self, t: &Ty) -> LLVMTypeRef {
@@ -595,7 +632,9 @@ impl Builder {
 
     fn md_kind(&self, name: &str) -> u32 {
         // SAFETY: looking up (or registering) a metadata kind by name.
-        unsafe { c::LLVMGetMDKindIDInContext(self.m.ctx, name.as_ptr() as *const _, name.len() as u32) }
+        unsafe {
+            c::LLVMGetMDKindIDInContext(self.m.ctx, name.as_ptr() as *const _, name.len() as u32)
+        }
     }
 
     /// Scope metadata for scope `name` of the function's domain.
@@ -632,7 +671,9 @@ impl Builder {
     fn annotate(&self, inst: LLVMValueRef, ptr: LLVMValueRef, ty: &Ty) {
         let mut guard = self.alias.borrow_mut();
         let Some(a) = guard.as_mut() else { return };
-        let Some(&(scope, noalias)) = a.arrays.get(&(ptr as usize)) else { return };
+        let Some(&(scope, noalias)) = a.arrays.get(&(ptr as usize)) else {
+            return;
+        };
         let tag = self.tbaa_tag(a, ty);
         // SAFETY: attaching metadata of the module's context to an instruction.
         unsafe {
@@ -657,7 +698,10 @@ impl Builder {
 
     fn same_type(&self, what: &str, a: &Value, b: &Value) -> PyResult<()> {
         if a.ty != b.ty {
-            return err(format!("{what}: operand types differ ({} and {})", a.ty, b.ty));
+            return err(format!(
+                "{what}: operand types differ ({} and {})",
+                a.ty, b.ty
+            ));
         }
         Ok(())
     }
@@ -686,14 +730,31 @@ impl Builder {
     fn int_cast(&self, what: &str, f: CastFn, v: &Value, to: &Ty, widen: bool) -> PyResult<Value> {
         self.open()?;
         match (v.ty.int_bits(), to.int_bits()) {
-            (Some(a), Some(b)) if (widen && b > a) || (!widen && b < a) => self.cast(what, f, v, to),
+            (Some(a), Some(b)) if (widen && b > a) || (!widen && b < a) => {
+                self.cast(what, f, v, to)
+            }
             _ => err(format!("{what} from {} to {}", v.ty, to)),
         }
     }
 
-    fn call_raw(&self, fnty: LLVMTypeRef, f: LLVMValueRef, args: &mut [LLVMValueRef], ret: &Ty) -> Option<Value> {
+    fn call_raw(
+        &self,
+        fnty: LLVMTypeRef,
+        f: LLVMValueRef,
+        args: &mut [LLVMValueRef],
+        ret: &Ty,
+    ) -> Option<Value> {
         // SAFETY: `f` has type `fnty` and the arguments were checked against it.
-        let r = unsafe { c::LLVMBuildCall2(self.b, fnty, f, args.as_mut_ptr(), args.len() as u32, NONAME) };
+        let r = unsafe {
+            c::LLVMBuildCall2(
+                self.b,
+                fnty,
+                f,
+                args.as_mut_ptr(),
+                args.len() as u32,
+                NONAME,
+            )
+        };
         if *ret == Ty::Void {
             None
         } else {
@@ -702,7 +763,13 @@ impl Builder {
     }
 
     /// Declare (once) an external function.
-    fn declare(&self, name: &str, params: &[Ty], ret: &Ty, pure: bool) -> (LLVMValueRef, LLVMTypeRef) {
+    fn declare(
+        &self,
+        name: &str,
+        params: &[Ty],
+        ret: &Ty,
+        pure: bool,
+    ) -> (LLVMValueRef, LLVMTypeRef) {
         let n = cstring(name);
         // SAFETY: looking up / adding a declaration in this module.
         unsafe {
@@ -763,7 +830,11 @@ impl Builder {
 
     fn check_values(&self, what: &str, vals: &[Value], want: &[Ty]) -> PyResult<()> {
         if vals.len() != want.len() {
-            return err(format!("{what}: expected {} values, got {}", want.len(), vals.len()));
+            return err(format!(
+                "{what}: expected {} values, got {}",
+                want.len(),
+                vals.len()
+            ));
         }
         for (k, (v, t)) in vals.iter().zip(want).enumerate() {
             self.v(v)?;
@@ -786,8 +857,14 @@ impl Builder {
     // ------------------------------------------------------------ constants
 
     fn const_int(&self, ty: PyType, value: i128) -> PyResult<Value> {
-        let bits = ty.0.int_bits().ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("const_int of {}", ty.0)))?;
-        let (lo, hi): (i128, i128) = if bits == 1 { (0, 1) } else { (-(1i128 << (bits - 1)), (1i128 << bits) - 1) };
+        let bits = ty.0.int_bits().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("const_int of {}", ty.0))
+        })?;
+        let (lo, hi): (i128, i128) = if bits == 1 {
+            (0, 1)
+        } else {
+            (-(1i128 << (bits - 1)), (1i128 << bits) - 1)
+        };
         if value < lo || value > hi {
             return err(format!("{value} doesn't fit in i{bits}"));
         }
@@ -880,7 +957,15 @@ impl Builder {
         match (Self::ci(&a), Self::ci(&b)) {
             (Some(0), _) => Ok(b),
             (_, Some(0)) => Ok(a),
-            _ => self.int_op(if nsw { c::LLVMBuildNSWAdd } else { c::LLVMBuildAdd }, &a, &b),
+            _ => self.int_op(
+                if nsw {
+                    c::LLVMBuildNSWAdd
+                } else {
+                    c::LLVMBuildAdd
+                },
+                &a,
+                &b,
+            ),
         }
     }
 
@@ -889,7 +974,15 @@ impl Builder {
         let (a, b) = self.int_pair("sub", a, b)?;
         match Self::ci(&b) {
             Some(0) => Ok(a),
-            _ => self.int_op(if nsw { c::LLVMBuildNSWSub } else { c::LLVMBuildSub }, &a, &b),
+            _ => self.int_op(
+                if nsw {
+                    c::LLVMBuildNSWSub
+                } else {
+                    c::LLVMBuildSub
+                },
+                &a,
+                &b,
+            ),
         }
     }
 
@@ -903,7 +996,15 @@ impl Builder {
         if cb == Some(0) || ca == Some(1) {
             return Ok(b);
         }
-        self.int_op(if nsw { c::LLVMBuildNSWMul } else { c::LLVMBuildMul }, &a, &b)
+        self.int_op(
+            if nsw {
+                c::LLVMBuildNSWMul
+            } else {
+                c::LLVMBuildMul
+            },
+            &a,
+            &b,
+        )
     }
 
     /// Signed division. Division by zero (or MIN / -1) is undefined: check first.
@@ -1303,7 +1404,9 @@ impl Builder {
         let mut idx = [self.v(&index)?];
         // SAFETY: an inbounds GEP over a first-class element type.
         let base = self.v(&ptr)?;
-        let r = unsafe { c::LLVMBuildInBoundsGEP2(self.b, self.lt(&elem.0), base, idx.as_mut_ptr(), 1, NONAME) };
+        let r = unsafe {
+            c::LLVMBuildInBoundsGEP2(self.b, self.lt(&elem.0), base, idx.as_mut_ptr(), 1, NONAME)
+        };
         self.derive(base, r);
         Ok(self.mk(r, Ty::Ptr))
     }
@@ -1320,7 +1423,8 @@ impl Builder {
             return err(format!("field {index} of {} through {}", ty.0, ptr.ty));
         }
         // SAFETY: a struct GEP with a valid field index.
-        let r = unsafe { c::LLVMBuildStructGEP2(self.b, self.lt(&ty.0), self.v(&ptr)?, index, NONAME) };
+        let r =
+            unsafe { c::LLVMBuildStructGEP2(self.b, self.lt(&ty.0), self.v(&ptr)?, index, NONAME) };
         Ok(self.mk(r, Ty::Ptr))
     }
 
@@ -1349,7 +1453,9 @@ impl Builder {
 
     fn extract(&self, agg: Value, index: u32) -> PyResult<Value> {
         self.open()?;
-        let t = agg.ty.member(index).cloned().ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("no member {index} in {}", agg.ty)))?;
+        let t = agg.ty.member(index).cloned().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("no member {index} in {}", agg.ty))
+        })?;
         // SAFETY: extracting an existing member.
         let r = unsafe { c::LLVMBuildExtractValue(self.b, self.v(&agg)?, index, NONAME) };
         Ok(self.mk(r, t))
@@ -1357,12 +1463,19 @@ impl Builder {
 
     fn insert(&self, agg: Value, value: Value, index: u32) -> PyResult<Value> {
         self.open()?;
-        let t = agg.ty.member(index).ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("no member {index} in {}", agg.ty)))?;
+        let t = agg.ty.member(index).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("no member {index} in {}", agg.ty))
+        })?;
         if *t != value.ty {
-            return err(format!("member {index} of {} has type {t}, got {}", agg.ty, value.ty));
+            return err(format!(
+                "member {index} of {} has type {t}, got {}",
+                agg.ty, value.ty
+            ));
         }
         // SAFETY: inserting a value of the member's type.
-        let r = unsafe { c::LLVMBuildInsertValue(self.b, self.v(&agg)?, self.v(&value)?, index, NONAME) };
+        let r = unsafe {
+            c::LLVMBuildInsertValue(self.b, self.v(&agg)?, self.v(&value)?, index, NONAME)
+        };
         Ok(self.mk(r, agg.ty))
     }
 
@@ -1386,15 +1499,28 @@ impl Builder {
     // ------------------------------------------------------------ calls
 
     /// Call a function of this module.
-    fn call(&self, f: PyRef<'_, super::module::Function>, args: Vec<Operand>) -> PyResult<Option<Value>> {
+    fn call(
+        &self,
+        f: PyRef<'_, super::module::Function>,
+        args: Vec<Operand>,
+    ) -> PyResult<Option<Value>> {
         self.open()?;
         if !Rc::ptr_eq(&f.m, &self.m) {
             return err("function from a different module");
         }
         if args.len() != f.params.len() {
-            return err(format!("{} takes {} arguments, got {}", f.name, f.params.len(), args.len()));
+            return err(format!(
+                "{} takes {} arguments, got {}",
+                f.name,
+                f.params.len(),
+                args.len()
+            ));
         }
-        let args: Vec<Value> = args.into_iter().zip(&f.params).map(|(a, t)| self.lit("call", a, t)).collect::<PyResult<_>>()?;
+        let args: Vec<Value> = args
+            .into_iter()
+            .zip(&f.params)
+            .map(|(a, t)| self.lit("call", a, t))
+            .collect::<PyResult<_>>()?;
         f.signature_matches(&args)?;
         let mut raw: Vec<LLVMValueRef> = args.iter().map(|a| self.v(a)).collect::<PyResult<_>>()?;
         Ok(self.call_raw(f.fnty, f.raw, &mut raw, &f.ret))
@@ -1412,7 +1538,8 @@ impl Builder {
         let ret = ret.map(|t| t.0).unwrap_or(Ty::Void);
         let mut ps: Vec<LLVMTypeRef> = args.iter().map(|a| self.lt(&a.ty)).collect();
         // SAFETY: a function type of first-class parameter types.
-        let fnty = unsafe { c::LLVMFunctionType(self.lt(&ret), ps.as_mut_ptr(), ps.len() as u32, 0) };
+        let fnty =
+            unsafe { c::LLVMFunctionType(self.lt(&ret), ps.as_mut_ptr(), ps.len() as u32, 0) };
         let mut raw: Vec<LLVMValueRef> = args.iter().map(|a| self.v(a)).collect::<PyResult<_>>()?;
         let fp = self.v(&f)?;
         Ok(self.call_raw(fnty, fp, &mut raw, &ret))
@@ -1423,11 +1550,18 @@ impl Builder {
         self.open()?;
         let args = self.many(which.name(), args)?;
         if args.len() != which.arity() {
-            return err(format!("{} takes {} arguments", which.name(), which.arity()));
+            return err(format!(
+                "{} takes {} arguments",
+                which.name(),
+                which.arity()
+            ));
         }
         let t = args[0].ty.clone();
         if !t.is_float() || args.iter().any(|a| a.ty != t) {
-            return err(format!("{} needs float arguments of one type", which.name()));
+            return err(format!(
+                "{} needs float arguments of one type",
+                which.name()
+            ));
         }
         let name = which.name();
         // SAFETY: looking up a known intrinsic and declaring it for a float type.
@@ -1451,7 +1585,10 @@ impl Builder {
     fn rng(&self, which: Rng, ctx: Value, args: Vec<Value>) -> PyResult<Option<Value>> {
         self.open()?;
         let (name, params, ret) = which.signature();
-        if ctx.ty != Ty::Ptr || args.len() != params.len() || args.iter().zip(&params).any(|(a, t)| a.ty != *t) {
+        if ctx.ty != Ty::Ptr
+            || args.len() != params.len()
+            || args.iter().zip(&params).any(|(a, t)| a.ty != *t)
+        {
             let want: Vec<String> = params.iter().map(|t| t.to_string()).collect();
             return err(format!("{name}(ctx: ptr, {})", want.join(", ")));
         }
@@ -1469,14 +1606,25 @@ impl Builder {
         self.open()?;
         let args = self.many(which.c_name(), args)?;
         if args.len() != which.arity() {
-            return err(format!("{} takes {} arguments", which.c_name(), which.arity()));
+            return err(format!(
+                "{} takes {} arguments",
+                which.c_name(),
+                which.arity()
+            ));
         }
         let t = args[0].ty.clone();
         if !t.is_float() || args.iter().any(|a| a.ty != t) {
-            return err(format!("{} needs float arguments of one type", which.c_name()));
+            return err(format!(
+                "{} needs float arguments of one type",
+                which.c_name()
+            ));
         }
         let f32 = t == Ty::F32;
-        let name = if f32 { format!("{}f", which.c_name()) } else { which.c_name().to_string() };
+        let name = if f32 {
+            format!("{}f", which.c_name())
+        } else {
+            which.c_name().to_string()
+        };
         let params = vec![t.clone(); args.len()];
         let (f, fnty) = self.declare(&name, &params, &t, true);
         let mut raw: Vec<LLVMValueRef> = args.iter().map(|a| self.v(a)).collect::<PyResult<_>>()?;
@@ -1506,7 +1654,13 @@ impl Builder {
             let v = names.join(",");
             // SAFETY: adding a string attribute to the call just built.
             unsafe {
-                let a = c::LLVMCreateStringAttribute(self.m.ctx, k.as_ptr() as *const _, k.len() as u32, v.as_ptr() as *const _, v.len() as u32);
+                let a = c::LLVMCreateStringAttribute(
+                    self.m.ctx,
+                    k.as_ptr() as *const _,
+                    k.len() as u32,
+                    v.as_ptr() as *const _,
+                    v.len() as u32,
+                );
                 c::LLVMAddCallSiteAttribute(r.raw, llvm_sys::LLVMAttributeFunctionIndex, a);
             }
         }
@@ -1520,7 +1674,12 @@ impl Builder {
             return err(format!("rust_math of {}", x.ty));
         }
         let t = x.ty.clone();
-        let (f, fnty) = self.declare(which.symbol(t == Ty::F32), std::slice::from_ref(&t), &t, true);
+        let (f, fnty) = self.declare(
+            which.symbol(t == Ty::F32),
+            std::slice::from_ref(&t),
+            &t,
+            true,
+        );
         let mut raw = [self.v(&x)?];
         let r = self.call_raw(fnty, f, &mut raw, &t).unwrap();
         self.fast(r.raw);
@@ -1537,8 +1696,16 @@ impl Builder {
         }
         let msg = self.cstr(message)?;
         // SAFETY: an integer constant of this module's context.
-        let code = self.mk(unsafe { c::LLVMConstInt(self.lt(&Ty::Int(32)), 1, 0) }, Ty::Int(32));
-        let (f, fnty) = self.declare("ptl_rt_set_error", &[Ty::Ptr, Ty::Int(32), Ty::Ptr], &Ty::Void, false);
+        let code = self.mk(
+            unsafe { c::LLVMConstInt(self.lt(&Ty::Int(32)), 1, 0) },
+            Ty::Int(32),
+        );
+        let (f, fnty) = self.declare(
+            "ptl_rt_set_error",
+            &[Ty::Ptr, Ty::Int(32), Ty::Ptr],
+            &Ty::Void,
+            false,
+        );
         let mut raw = [self.v(&ctx)?, self.v(&code)?, self.v(&msg)?];
         self.call_raw(fnty, f, &mut raw, &Ty::Void);
         Ok(())
@@ -1553,9 +1720,22 @@ impl Builder {
             return err("rt_alloc(ctx: ptr, nbytes: i64, owner_slot: ptr)");
         }
         // SAFETY: an integer constant of this module's context.
-        let align = self.mk(unsafe { c::LLVMConstInt(self.lt(&Ty::Int(64)), 64, 0) }, Ty::Int(64));
-        let (f, fnty) = self.declare("ptl_rt_alloc", &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr], &Ty::Ptr, false);
-        let mut raw = [self.v(&ctx)?, self.v(&nbytes)?, self.v(&align)?, self.v(&owner_slot)?];
+        let align = self.mk(
+            unsafe { c::LLVMConstInt(self.lt(&Ty::Int(64)), 64, 0) },
+            Ty::Int(64),
+        );
+        let (f, fnty) = self.declare(
+            "ptl_rt_alloc",
+            &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr],
+            &Ty::Ptr,
+            false,
+        );
+        let mut raw = [
+            self.v(&ctx)?,
+            self.v(&nbytes)?,
+            self.v(&align)?,
+            self.v(&owner_slot)?,
+        ];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
     }
 
@@ -1573,7 +1753,11 @@ impl Builder {
         // SAFETY: a return attribute on the declaration just looked up.
         unsafe {
             let kind = c::LLVMGetEnumAttributeKindForName(c"noalias".as_ptr(), 7);
-            c::LLVMAddAttributeAtIndex(f, llvm_sys::LLVMAttributeReturnIndex, c::LLVMCreateEnumAttribute(self.m.ctx, kind, 0));
+            c::LLVMAddAttributeAtIndex(
+                f,
+                llvm_sys::LLVMAttributeReturnIndex,
+                c::LLVMCreateEnumAttribute(self.m.ctx, kind, 0),
+            );
         }
         let mut raw = [self.v(&ctx)?, self.v(&nbytes)?];
         Ok(self.call_raw(fnty, f, &mut raw, &Ty::Ptr).unwrap())
@@ -1585,7 +1769,12 @@ impl Builder {
         if ctx.ty != Ty::Ptr || buffer.ty != Ty::Ptr {
             return err("rt_decref(ctx: ptr, buffer: ptr)");
         }
-        let (f, fnty) = self.declare("ptl_rt_buffer_decref", &[Ty::Ptr, Ty::Ptr], &Ty::Void, false);
+        let (f, fnty) = self.declare(
+            "ptl_rt_buffer_decref",
+            &[Ty::Ptr, Ty::Ptr],
+            &Ty::Void,
+            false,
+        );
         let mut raw = [self.v(&ctx)?, self.v(&buffer)?];
         self.call_raw(fnty, f, &mut raw, &Ty::Void);
         Ok(())
@@ -1608,7 +1797,12 @@ impl Builder {
         if ctx.ty != Ty::Ptr || mark.ty != Ty::Int(64) {
             return err("rt_scratch_release(ctx: ptr, mark: i64)");
         }
-        let (f, fnty) = self.declare("ptl_rt_scratch_release", &[Ty::Ptr, Ty::Int(64)], &Ty::Void, false);
+        let (f, fnty) = self.declare(
+            "ptl_rt_scratch_release",
+            &[Ty::Ptr, Ty::Int(64)],
+            &Ty::Void,
+            false,
+        );
         let mut raw = [self.v(&ctx)?, self.v(&mark)?];
         self.call_raw(fnty, f, &mut raw, &Ty::Void);
         Ok(())
@@ -1636,7 +1830,12 @@ impl Builder {
                 // SAFETY: the value has the function's return type.
                 unsafe { c::LLVMBuildRet(self.b, self.v(&v)?) };
             }
-            (v, t) => return err(format!("ret of {} in a function returning {t}", v.map_or("nothing".to_string(), |v| v.ty.to_string()))),
+            (v, t) => {
+                return err(format!(
+                    "ret of {} in a function returning {t}",
+                    v.map_or("nothing".to_string(), |v| v.ty.to_string())
+                ));
+            }
         }
         Ok(())
     }
@@ -1651,7 +1850,11 @@ impl Builder {
             b.v(&n)?;
             n
         };
-        Ok(Loop { b: slf, n, state: None })
+        Ok(Loop {
+            b: slf,
+            n,
+            state: None,
+        })
     }
 
     /// `with b.parallel(ctx, n, grain) as r:` a loop over `0..n` split into chunks of
@@ -1664,13 +1867,23 @@ impl Builder {
     ///
     /// Chunks must not write memory another chunk reads or writes. Captured values must
     /// be scalars or pointers.
-    fn parallel(slf: Py<Self>, py: Python<'_>, ctx: Value, n: Operand, grain: Operand) -> PyResult<Parallel> {
+    fn parallel(
+        slf: Py<Self>,
+        py: Python<'_>,
+        ctx: Value,
+        n: Operand,
+        grain: Operand,
+    ) -> PyResult<Parallel> {
         let (n, grain) = {
             let b = slf.borrow(py);
             b.open()?;
             let n = b.i64_of("parallel: n", n)?;
             let grain = b.i64_of("parallel: grain", grain)?;
-            for (what, v, t) in [("ctx", &ctx, Ty::Ptr), ("n", &n, Ty::Int(64)), ("grain", &grain, Ty::Int(64))] {
+            for (what, v, t) in [
+                ("ctx", &ctx, Ty::Ptr),
+                ("n", &n, Ty::Int(64)),
+                ("grain", &grain, Ty::Int(64)),
+            ] {
                 b.v(v)?;
                 if v.ty != t {
                     return err(format!("parallel: {what} must be {t}"));
@@ -1678,7 +1891,16 @@ impl Builder {
             }
             (n, grain)
         };
-        Ok(Parallel { b: slf, ctx, n, grain, parent_block: None, start: None, end: None, result: None })
+        Ok(Parallel {
+            b: slf,
+            ctx,
+            n,
+            grain,
+            parent_block: None,
+            start: None,
+            end: None,
+            result: None,
+        })
     }
 
     /// `with b.if_(cond):` runs the body if `cond` (i1) is true.
@@ -1692,7 +1914,12 @@ impl Builder {
                 return err(format!("if condition of type {}", cond.ty));
             }
         }
-        Ok(If { b: slf, cond, done: None, branch: None })
+        Ok(If {
+            b: slf,
+            cond,
+            done: None,
+            branch: None,
+        })
     }
 
     /// `with b.else_():` right after a `with b.if_(cond):` block runs the body if `cond`
@@ -1717,7 +1944,10 @@ impl Builder {
             b.position(other);
             done
         };
-        Ok(Else { b: slf, done: Some(done) })
+        Ok(Else {
+            b: slf,
+            done: Some(done),
+        })
     }
 
     /// Loop with carried values: `acc = init; for i in 0..n: acc = body(i, *acc)`;
@@ -1728,12 +1958,20 @@ impl Builder {
     /// ends after the first step that sets it, and the flag is returned last (false
     /// when no step ran).
     #[pyo3(signature = (n, init, body, until=false))]
-    fn fold(&self, py: Python<'_>, n: Operand, init: Vec<Value>, body: Py<PyAny>, until: bool) -> PyResult<Vec<Value>> {
+    fn fold(
+        &self,
+        py: Python<'_>,
+        n: Operand,
+        init: Vec<Value>,
+        body: Py<PyAny>,
+        until: bool,
+    ) -> PyResult<Vec<Value>> {
         self.open()?;
         let n = self.i64_of("fold count", n)?;
         let nr = self.v(&n)?;
         let tys: Vec<Ty> = init.iter().map(|v| v.ty.clone()).collect();
-        let init_raw: Vec<LLVMValueRef> = init.iter().map(|v| self.v(v)).collect::<PyResult<_>>()?;
+        let init_raw: Vec<LLVMValueRef> =
+            init.iter().map(|v| self.v(v)).collect::<PyResult<_>>()?;
         let pre = self.block();
         let header = self.new_block(c"fold");
         let exit = self.new_block(c"fold.exit");
@@ -1742,12 +1980,20 @@ impl Builder {
         let (zero, one, nz) = unsafe {
             let zero = c::LLVMConstInt(self.lt(&i64t), 0, 0);
             let one = c::LLVMConstInt(self.lt(&i64t), 1, 0);
-            (zero, one, c::LLVMBuildICmp(self.b, IP::LLVMIntSGT, nr, zero, NONAME))
+            (
+                zero,
+                one,
+                c::LLVMBuildICmp(self.b, IP::LLVMIntSGT, nr, zero, NONAME),
+            )
         };
         self.cond_br(nz, header, exit);
         self.position(header);
         let iphi = self.phi(&i64t, &[(zero, pre)]);
-        let phis: Vec<LLVMValueRef> = tys.iter().zip(&init_raw).map(|(t, &v)| self.phi(t, &[(v, pre)])).collect();
+        let phis: Vec<LLVMValueRef> = tys
+            .iter()
+            .zip(&init_raw)
+            .map(|(t, &v)| self.phi(t, &[(v, pre)]))
+            .collect();
         let i = self.mk(iphi, i64t.clone());
         let mut args = vec![i.into_pyobject(py)?.into_any()];
         for (p, t) in phis.iter().zip(&tys) {
@@ -1808,7 +2054,13 @@ impl Builder {
     /// sequence, one value, or None for none), which are merged and returned as a list.
     /// For branches without values, `with b.if_(cond): ...` and `with b.else_(): ...`
     /// read better.
-    fn if_else(&self, py: Python<'_>, cond: Value, then: Py<PyAny>, else_: Py<PyAny>) -> PyResult<Vec<Value>> {
+    fn if_else(
+        &self,
+        py: Python<'_>,
+        cond: Value,
+        then: Py<PyAny>,
+        else_: Py<PyAny>,
+    ) -> PyResult<Vec<Value>> {
         self.open()?;
         if !cond.ty.is_bool() {
             return err(format!("if_else condition of type {}", cond.ty));
@@ -1818,22 +2070,23 @@ impl Builder {
         let eb = self.new_block(c"else");
         let done = self.new_block(c"endif");
         self.cond_br(cr, tb, eb);
-        let arm = |bb: LLVMBasicBlockRef, f: &Py<PyAny>| -> PyResult<(Vec<Value>, LLVMBasicBlockRef)> {
-            self.position(bb);
-            *self.depth.borrow_mut() += 1;
-            let r = f.call0(py);
-            *self.depth.borrow_mut() -= 1;
-            let vals: Vec<Value> = values_of(py, r?)?;
-            for v in &vals {
-                self.v(v)?;
-            }
-            if self.is_terminated() {
-                return err("if_else branches must not end their block");
-            }
-            let end = self.block();
-            self.br(done);
-            Ok((vals, end))
-        };
+        let arm =
+            |bb: LLVMBasicBlockRef, f: &Py<PyAny>| -> PyResult<(Vec<Value>, LLVMBasicBlockRef)> {
+                self.position(bb);
+                *self.depth.borrow_mut() += 1;
+                let r = f.call0(py);
+                *self.depth.borrow_mut() -= 1;
+                let vals: Vec<Value> = values_of(py, r?)?;
+                for v in &vals {
+                    self.v(v)?;
+                }
+                if self.is_terminated() {
+                    return err("if_else branches must not end their block");
+                }
+                let end = self.block();
+                self.br(done);
+                Ok((vals, end))
+            };
         let (tv, tend) = arm(tb, &then)?;
         let (ev, eend) = arm(eb, &else_)?;
         let tys: Vec<Ty> = tv.iter().map(|v| v.ty.clone()).collect();
@@ -1842,7 +2095,12 @@ impl Builder {
         Ok(tv
             .iter()
             .zip(&ev)
-            .map(|(a, b)| self.mk(self.phi(&a.ty, &[(a.raw, tend), (b.raw, eend)]), a.ty.clone()))
+            .map(|(a, b)| {
+                self.mk(
+                    self.phi(&a.ty, &[(a.raw, tend), (b.raw, eend)]),
+                    a.ty.clone(),
+                )
+            })
             .collect())
     }
 }
@@ -1871,7 +2129,10 @@ impl Loop {
         // SAFETY: i64 constant and compare in the open block.
         let (zero, nz) = unsafe {
             let zero = c::LLVMConstInt(b.lt(&Ty::Int(64)), 0, 0);
-            (zero, c::LLVMBuildICmp(b.b, IP::LLVMIntSGT, nr, zero, NONAME))
+            (
+                zero,
+                c::LLVMBuildICmp(b.b, IP::LLVMIntSGT, nr, zero, NONAME),
+            )
         };
         b.cond_br(nz, header, exit);
         b.position(header);
@@ -1881,7 +2142,13 @@ impl Loop {
         Ok(b.mk(iphi, Ty::Int(64)))
     }
 
-    fn __exit__(&mut self, py: Python<'_>, exc_type: Option<Py<PyAny>>, _v: Option<Py<PyAny>>, _tb: Option<Py<PyAny>>) -> PyResult<bool> {
+    fn __exit__(
+        &mut self,
+        py: Python<'_>,
+        exc_type: Option<Py<PyAny>>,
+        _v: Option<Py<PyAny>>,
+        _tb: Option<Py<PyAny>>,
+    ) -> PyResult<bool> {
         let b = self.b.borrow(py);
         *b.depth.borrow_mut() -= 1;
         let Some((iphi, _header, exit)) = self.state.take() else {
@@ -1943,7 +2210,10 @@ impl Parallel {
                 let (i32t, ptr, i64t) = (b.lt(&Ty::Int(32)), b.lt(&Ty::Ptr), b.lt(&Ty::Int(64)));
                 let mut ps = [ptr, ptr, i64t, i64t];
                 let fnty = c::LLVMFunctionType(i32t, ps.as_mut_ptr(), 4, 0);
-                let parent_name = std::ffi::CStr::from_ptr(c::LLVMGetValueName2(b.func.get(), &mut 0)).to_string_lossy().into_owned();
+                let parent_name =
+                    std::ffi::CStr::from_ptr(c::LLVMGetValueName2(b.func.get(), &mut 0))
+                        .to_string_lossy()
+                        .into_owned();
                 let name = cstring(&format!("{parent_name}.par"));
                 let f = c::LLVMAddFunction(m.module, name.as_ptr(), fnty);
                 c::LLVMSetLinkage(f, llvm_sys::LLVMLinkage::LLVMInternalLinkage);
@@ -1981,21 +2251,33 @@ impl Parallel {
 
     #[getter]
     fn start(&self) -> PyResult<Value> {
-        self.start.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("enter the region first"))
+        self.start
+            .clone()
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("enter the region first"))
     }
 
     #[getter]
     fn end(&self) -> PyResult<Value> {
-        self.end.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("enter the region first"))
+        self.end
+            .clone()
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("enter the region first"))
     }
 
     /// The runtime's result (i32, 0 on success), after the block.
     #[getter]
     fn result(&self) -> PyResult<Value> {
-        self.result.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leave the region first"))
+        self.result
+            .clone()
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leave the region first"))
     }
 
-    fn __exit__(&mut self, py: Python<'_>, exc_type: Option<Py<PyAny>>, _v: Option<Py<PyAny>>, _tb: Option<Py<PyAny>>) -> PyResult<bool> {
+    fn __exit__(
+        &mut self,
+        py: Python<'_>,
+        exc_type: Option<Py<PyAny>>,
+        _v: Option<Py<PyAny>>,
+        _tb: Option<Py<PyAny>>,
+    ) -> PyResult<bool> {
         let b = self.b.borrow(py);
         *b.depth.borrow_mut() -= 1;
         // the body ends with success unless it already returned
@@ -2029,8 +2311,19 @@ impl Parallel {
                 let p = c::LLVMBuildInBoundsGEP2(b.b, i8t, captures, &mut off, 1, NONAME);
                 c::LLVMBuildStore(b.b, *raw, p);
             }
-            let (f, fnty) = b.declare("ptl_rt_parallel_for", &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr, Ty::Ptr], &Ty::Int(32), false);
-            let mut args = [b.v(&self.ctx)?, b.v(&self.n)?, b.v(&self.grain)?, region.body, captures];
+            let (f, fnty) = b.declare(
+                "ptl_rt_parallel_for",
+                &[Ty::Ptr, Ty::Int(64), Ty::Int(64), Ty::Ptr, Ty::Ptr],
+                &Ty::Int(32),
+                false,
+            );
+            let mut args = [
+                b.v(&self.ctx)?,
+                b.v(&self.n)?,
+                b.v(&self.grain)?,
+                region.body,
+                captures,
+            ];
             c::LLVMBuildCall2(b.b, fnty, f, args.as_mut_ptr(), 5, NONAME)
         };
         self.result = Some(b.mk(rc, Ty::Int(32)));
@@ -2065,7 +2358,13 @@ impl Else {
         Ok(())
     }
 
-    fn __exit__(&mut self, py: Python<'_>, exc_type: Option<Py<PyAny>>, _v: Option<Py<PyAny>>, _tb: Option<Py<PyAny>>) -> PyResult<bool> {
+    fn __exit__(
+        &mut self,
+        py: Python<'_>,
+        exc_type: Option<Py<PyAny>>,
+        _v: Option<Py<PyAny>>,
+        _tb: Option<Py<PyAny>>,
+    ) -> PyResult<bool> {
         let b = self.b.borrow(py);
         *b.depth.borrow_mut() -= 1;
         let Some(done) = self.done.take() else {
@@ -2098,7 +2397,13 @@ impl If {
         Ok(())
     }
 
-    fn __exit__(&mut self, py: Python<'_>, exc_type: Option<Py<PyAny>>, _v: Option<Py<PyAny>>, _tb: Option<Py<PyAny>>) -> PyResult<bool> {
+    fn __exit__(
+        &mut self,
+        py: Python<'_>,
+        exc_type: Option<Py<PyAny>>,
+        _v: Option<Py<PyAny>>,
+        _tb: Option<Py<PyAny>>,
+    ) -> PyResult<bool> {
         let b = self.b.borrow(py);
         *b.depth.borrow_mut() -= 1;
         let Some(done) = self.done.take() else {

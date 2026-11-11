@@ -27,7 +27,7 @@
 
 use crate::runtime::PtCtx;
 use pyo3::prelude::*;
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub const ABI_VERSION: u32 = 1;
@@ -60,11 +60,19 @@ impl PtArray {
     }
     pub unsafe fn shape_mut(&mut self) -> &mut [i64] {
         // SAFETY: see the impl docs above.
-        if self.ndim == 0 { &mut [] } else { unsafe { std::slice::from_raw_parts_mut(self.shape, self.ndim as usize) } }
+        if self.ndim == 0 {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(self.shape, self.ndim as usize) }
+        }
     }
     pub unsafe fn strides_mut(&mut self) -> &mut [i64] {
         // SAFETY: see the impl docs above.
-        if self.ndim == 0 { &mut [] } else { unsafe { std::slice::from_raw_parts_mut(self.strides, self.ndim as usize) } }
+        if self.ndim == 0 {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(self.strides, self.ndim as usize) }
+        }
     }
 }
 
@@ -89,7 +97,12 @@ pub fn checked_nbytes(shape: &[i64], itemsize: usize) -> Option<usize> {
 /// "the array is valid" an explicit precondition we've verified rather than assumed:
 /// no negative dims, a non-null pointer for non-empty arrays, data and strides aligned
 /// to the itemsize, and an address range that doesn't overflow.
-pub fn validate_array(data: *const u8, shape: &[i64], strides: &[i64], itemsize: usize) -> Result<(usize, usize), String> {
+pub fn validate_array(
+    data: *const u8,
+    shape: &[i64],
+    strides: &[i64],
+    itemsize: usize,
+) -> Result<(usize, usize), String> {
     if let Some(d) = shape.iter().position(|&s| s < 0) {
         return Err(format!("negative length {} in dim {d}", shape[d]));
     }
@@ -102,19 +115,33 @@ pub fn validate_array(data: *const u8, shape: &[i64], strides: &[i64], itemsize:
     }
     let isz = itemsize as i64;
     if (data as usize) % itemsize != 0 {
-        return Err(format!("data pointer {data:p} is not aligned to {itemsize} bytes"));
+        return Err(format!(
+            "data pointer {data:p} is not aligned to {itemsize} bytes"
+        ));
     }
     let (mut lo, mut hi) = (0i64, 0i64);
     for (d, (&n, &s)) in shape.iter().zip(strides).enumerate() {
         if n > 1 && s % isz != 0 {
-            return Err(format!("stride {s} of dim {d} is not a multiple of the itemsize {itemsize}"));
+            return Err(format!(
+                "stride {s} of dim {d} is not a multiple of the itemsize {itemsize}"
+            ));
         }
         let span = (n - 1).checked_mul(s).ok_or("array extent overflows")?;
-        if span < 0 { lo = lo.checked_add(span).ok_or("array extent overflows")? } else { hi = hi.checked_add(span).ok_or("array extent overflows")? }
+        if span < 0 {
+            lo = lo.checked_add(span).ok_or("array extent overflows")?
+        } else {
+            hi = hi.checked_add(span).ok_or("array extent overflows")?
+        }
     }
     let base = data as i64;
-    let start = base.checked_add(lo).filter(|&x| x >= 0).ok_or("array extent overflows")?;
-    let end = base.checked_add(hi).and_then(|x| x.checked_add(isz)).ok_or("array extent overflows")?;
+    let start = base
+        .checked_add(lo)
+        .filter(|&x| x >= 0)
+        .ok_or("array extent overflows")?;
+    let end = base
+        .checked_add(hi)
+        .and_then(|x| x.checked_add(isz))
+        .ok_or("array extent overflows")?;
     Ok((start as usize, end as usize))
 }
 
@@ -135,7 +162,11 @@ pub fn bad_size(what: &str, shape: &[i64]) -> String {
 /// SAFETY: for n > 0, `p` points to n readable i64s that outlive 'a.
 pub unsafe fn slice<'a>(p: *const i64, n: usize) -> &'a [i64] {
     // SAFETY: the function's contract.
-    if n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(p, n) } }
+    if n == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(p, n) }
+    }
 }
 
 /// The kernel ABI: `int32 f(ctx, args, config)`.
@@ -143,7 +174,8 @@ pub unsafe fn slice<'a>(p: *const i64, n: usize) -> &'a [i64] {
 /// Kernels use the "C-unwind" ABI: a panic in a Rust kernel (a bug, or e.g. an
 /// out-of-memory) unwinds to `Program::execute`, which turns it into an error, instead
 /// of aborting the process. Generated and numba kernels never unwind.
-pub type KernelFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32;
+pub type KernelFn =
+    unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32;
 /// How an output comes to be (DESIGN.md, section 3).
 #[pyclass(module = "pytensor_llvm.interp", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,7 +205,12 @@ impl PtBuffer {
         // SAFETY: size >= 1 (non-zero layout, as `alloc` requires).
         let data = unsafe { alloc(Layout::from_size_align(size, align).expect("bad layout")) };
         assert!(!data.is_null(), "out of memory allocating {bytes} bytes");
-        Box::into_raw(Box::new(PtBuffer { data, size, align, refcount: AtomicUsize::new(1) }))
+        Box::into_raw(Box::new(PtBuffer {
+            data,
+            size,
+            align,
+            refcount: AtomicUsize::new(1),
+        }))
     }
 
     /// Size in bytes (for the checked mode's bounds checks).
@@ -240,7 +277,11 @@ pub const MAX_NDIM: usize = 32;
 mod unwind_tests {
     use super::*;
 
-    unsafe extern "C-unwind" fn panicking_kernel(_ctx: *mut PtCtx, _args: *mut PtArray, _config: *const u8) -> i32 {
+    unsafe extern "C-unwind" fn panicking_kernel(
+        _ctx: *mut PtCtx,
+        _args: *mut PtArray,
+        _config: *const u8,
+    ) -> i32 {
         panic!("kernel bug")
     }
 
@@ -250,7 +291,9 @@ mod unwind_tests {
         // function pointer is catchable, not an abort
         let f: KernelFn = panicking_kernel;
         let mut ctx = PtCtx::new();
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f(&mut ctx, std::ptr::null_mut(), std::ptr::null()) }));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            f(&mut ctx, std::ptr::null_mut(), std::ptr::null())
+        }));
         let msg = r.unwrap_err();
         assert_eq!(*msg.downcast_ref::<&str>().unwrap(), "kernel bug");
     }
