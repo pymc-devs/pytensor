@@ -8,8 +8,10 @@
 //! the Python object it came from. A `PtSession*` owns a clone of that Arc and one
 //! [`CallMemory`]. Every entry point catches panics so they never unwind into C.
 
-use super::program::{CallMemory, Program, c_strides, copy_strided};
-use crate::abi::{ABI_VERSION, PtArray, PtBuffer, overlaps, validate_array};
+use super::program::{CallMemory, Program};
+use crate::abi::{ABI_VERSION, OwnedBuf, PtArray, PtBuffer, overlaps};
+use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
+use crate::dtype::DType;
 use crate::runtime::PtCtx;
 use pyo3::prelude::*;
 use std::ffi::{CString, c_char};
@@ -64,7 +66,9 @@ pub struct PtSession {
     /// byte ranges of the inputs and of the provided outputs of the current call
     in_ranges: Vec<(usize, usize)>,
     out_ranges: Vec<(usize, usize)>,
-    provided: Vec<Option<*mut u8>>,
+    /// per output of the current call: provided memory the result is written into
+    /// directly
+    direct: Vec<bool>,
     err: CString,
 }
 
@@ -93,7 +97,8 @@ pub struct PtFunctionApi {
 // - `s` is a live `PtSession*` from `session_new`, used by one thread at a time.
 // - out-pointers point to writable memory of the right type.
 // Within that contract the functions are sound: everything `call` reads through the
-// arrays it gets is validated first.
+// arrays it gets is validated first. What can't be validated, and so is the caller's
+// to get right, is that the memory the arrays describe is there (see `run`).
 
 unsafe extern "C" fn function_incref(f: *const Function) {
     // SAFETY: `f` is live (contract).
@@ -164,7 +169,7 @@ unsafe extern "C" fn session_new(f: *const Function) -> *mut PtSession {
         ctx: PtCtx::new(),
         in_ranges: vec![],
         out_ranges: vec![],
-        provided: vec![],
+        direct: vec![],
         err: CString::default(),
     };
     Box::into_raw(Box::new(s))
@@ -191,14 +196,22 @@ unsafe extern "C" fn call(s: *mut PtSession, inputs: *const PtArray, outputs: *m
     1
 }
 
-/// Before any slice is built from a caller array: its ndim must be the expected one and
-/// its shape/strides pointers non-null.
-fn check_header(what: &str, k: usize, a: &PtArray, nd: usize) -> Result<(), String> {
+/// The header of a caller array against the function's type, for errors that say what
+/// was expected. (The views check the rest.)
+fn check_header(what: &str, k: usize, a: &PtArray, nd: usize, dtype: DType) -> Result<(), String> {
     if a.ndim < 0 || a.ndim as usize != nd {
         return Err(format!("{what} {k}: expected {nd} dims, got {}", a.ndim));
     }
     if nd > 0 && (a.shape.is_null() || a.strides.is_null()) {
         return Err(format!("{what} {k}: shape and strides must not be NULL"));
+    }
+    if a.dtype != dtype.code() {
+        return Err(format!(
+            "{what} {k}: expected dtype {} (code {}), got code {}",
+            dtype.numpy_name(),
+            dtype.code(),
+            a.dtype
+        ));
     }
     Ok(())
 }
@@ -210,31 +223,47 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
     if (inputs.is_null() && n_in > 0) || (outputs.is_null() && n_out > 0) {
         return Err("inputs and outputs must not be NULL".into());
     }
+    let inputs: &[PtArray] = match n_in {
+        0 => &[],
+        // SAFETY: `inputs` holds n_inputs arrays, not written during the call (the
+        // contract of `call`).
+        _ => unsafe { std::slice::from_raw_parts(inputs, n_in) },
+    };
+    let outputs: &mut [PtArray] = match n_out {
+        0 => &mut [],
+        // SAFETY: `outputs` holds n_outputs arrays, ours during the call (the contract
+        // of `call`).
+        _ => unsafe { std::slice::from_raw_parts_mut(outputs, n_out) },
+    };
+    let ctx = &mut s.ctx;
+    let mut call = prog.begin(&mut s.memory)?;
     s.in_ranges.clear();
-    for k in 0..n_in {
-        // SAFETY: `inputs` holds n_inputs arrays (contract).
-        let a = unsafe { &*inputs.add(k) };
-        check_header("input", k, a, prog.input_ndim(k))?;
-        // SAFETY: ndim and the pointers were just checked.
-        let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-        s.in_ranges
-            .push(prog.set_input(&mut s.memory, k, a.data, shape, strides)?);
+    for (k, a) in inputs.iter().enumerate() {
+        check_header("input", k, a, prog.input_ndim(k), prog.input_dtype(k))?;
+        // SAFETY: the header was just checked against the function's type; what the
+        // constructor can't check is the caller's side of the contract of `call`: the
+        // shape and strides arrays have `ndim` entries, and the memory they describe
+        // exists and isn't written during the call.
+        let a =
+            unsafe { PtArrayRef::from_raw_checked(a) }.map_err(|e| format!("input {k}: {e}"))?;
+        s.in_ranges.push(a.extent());
+        call.set_input(k, a)?;
     }
-    // SAFETY: `outputs` holds n_outputs arrays (contract).
-    let outs = unsafe { std::slice::from_raw_parts_mut(outputs, n_out) };
     s.out_ranges.clear();
-    s.provided.clear();
-    for (o, a) in outs.iter().enumerate() {
-        check_header("output", o, a, prog.output_ndim(o))?;
+    s.direct.clear();
+    s.direct.resize(n_out, false);
+    for (o, a) in outputs.iter().enumerate() {
+        check_header("output", o, a, prog.output_ndim(o), prog.output_dtype(o))?;
         if a.data.is_null() {
-            s.provided.push(None);
             continue;
         }
-        // SAFETY: ndim and the pointers were just checked.
-        let (shape, strides) = unsafe { (a.shape(), a.strides()) };
-        let isz = prog.output_dtype(o).itemsize();
-        let r = validate_array(a.data, shape, strides, isz)
+        // SAFETY: as for the inputs, for memory to write: the caller's side of the
+        // contract is that it exists and that nobody else uses it during the call.
+        // That it overlaps none of the arrays of this call is checked below, before
+        // anything is written.
+        let a = unsafe { PtArrayMut::from_raw_checked(a) }
             .map_err(|e| format!("provided output {o}: {e}"))?;
+        let r = a.extent();
         if let Some(i) = s.in_ranges.iter().position(|&x| overlaps(x, r)) {
             return Err(format!(
                 "provided output {o} overlaps the memory of input {i}"
@@ -246,62 +275,51 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
             ));
         }
         s.out_ranges.push(r);
-        if let Some(st) = prog.output_static_shape(o) {
-            if st != shape {
-                return Err(format!(
-                    "provided output {o}: shape {shape:?}, the output has shape {st:?}"
-                ));
-            }
-        }
-        // written in place by the producing task when it has the layout we'd choose
-        let direct = prog.writes_in_place(o) && strides == c_strides(shape, isz as i64).as_slice();
-        s.provided.push(direct.then_some(a.data));
+        // written in place by the producing task when it has the layout we'd choose;
+        // otherwise copied there below (the view is made again then: this one ends
+        // here)
+        s.direct[o] = call.provide(o, a)?.is_none();
     }
-    let ctx = &mut s.ctx;
+    let done = call.run(ctx)?;
+    // outputs we hand over, taken back if a later one fails
+    let mut taken: Vec<usize> = vec![];
     let r = (|| -> Result<(), String> {
-        prog.execute(&mut s.memory, ctx, &s.provided)?;
-        let mut taken: Vec<(usize, *mut PtBuffer)> = vec![];
-        let r = (|| -> Result<(), String> {
-            for (o, a) in outs.iter_mut().enumerate() {
-                if a.data.is_null() {
-                    let out = prog.take_output(&s.memory, ctx, o)?;
-                    taken.push((o, out.owner));
-                    a.data = out.data;
-                    a.owner = out.owner;
-                    // SAFETY: shape/strides point to caller arrays of length ndim (checked).
-                    unsafe {
-                        a.shape_mut().copy_from_slice(&out.shape);
-                        a.strides_mut().copy_from_slice(&out.strides);
-                    }
-                } else if s.provided[o].is_none() {
-                    let v = prog.output_view(&s.memory, o);
-                    // SAFETY: a computed value; the caller's memory was validated above.
-                    let (shape, strides) = unsafe { (v.shape(), v.strides()) };
-                    // SAFETY: as above, ndim was checked.
-                    if shape != unsafe { a.shape() } {
-                        return Err(format!(
-                            "provided output {o}: shape mismatch: the result has shape {shape:?}, got {:?}",
-                            unsafe { a.shape() }
-                        ));
-                    }
-                    let isz = prog.output_dtype(o).itemsize();
-                    // SAFETY: same shape, both valid arrays, no overlap with inputs (checked).
-                    unsafe { copy_strided(v.data, shape, strides, a.data, a.strides(), isz) };
+        for (o, a) in outputs.iter_mut().enumerate() {
+            if a.data.is_null() {
+                let out = done.take_output(o)?;
+                // SAFETY: shape and strides point to caller arrays of length ndim,
+                // ours during the call (the contract of `call`; the header was
+                // checked above), and no memory is provided.
+                unsafe { OutSlot::from_raw(a) }
+                    .and_then(|slot| slot.set(out))
+                    .map_err(|e| format!("output {o}: {e}"))?;
+                taken.push(o);
+            } else if !s.direct[o] {
+                let result = done.output(o)?;
+                // SAFETY: as when it was provided above (the same checks passed, and
+                // that view is gone).
+                let mut memory = unsafe { PtArrayMut::from_raw_checked(a) }
+                    .map_err(|e| format!("provided output {o}: {e}"))?;
+                if result.shape() != memory.shape() {
+                    return Err(format!(
+                        "provided output {o}: shape mismatch: the result has shape {:?}, got {:?}",
+                        result.shape(),
+                        memory.shape()
+                    ));
                 }
-            }
-            Ok(())
-        })();
-        if r.is_err() {
-            for (o, owner) in taken {
-                // SAFETY: references we just handed out; take them back.
-                unsafe { PtBuffer::decref(owner) };
-                outs[o].data = std::ptr::null_mut();
-                outs[o].owner = std::ptr::null_mut();
+                memory.copy_from(&result)?;
             }
         }
-        r
+        Ok(())
     })();
-    prog.finish(&mut s.memory);
+    if r.is_err() {
+        for o in taken {
+            // SAFETY: the reference we just put there; take it back.
+            drop(unsafe { OwnedBuf::from_raw(outputs[o].owner) });
+            outputs[o].data = std::ptr::null_mut();
+            outputs[o].owner = std::ptr::null_mut();
+        }
+    }
     r
 }
 
@@ -323,7 +341,7 @@ unsafe extern "C" fn set_parallel(s: *mut PtSession, on: i32) {
 unsafe extern "C" fn buffer_decref(b: *mut PtBuffer) {
     if !b.is_null() {
         // SAFETY: the caller releases a reference it got from `call`.
-        unsafe { PtBuffer::decref(b) }
+        drop(unsafe { OwnedBuf::from_raw(b) })
     }
 }
 

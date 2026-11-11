@@ -28,8 +28,18 @@ class PtArray(ctypes.Structure):
         ("shape", ctypes.POINTER(ctypes.c_int64)),
         ("strides", ctypes.POINTER(ctypes.c_int64)),
         ("owner", ctypes.c_void_p),
-        ("ndim", ctypes.c_int64),
+        ("ndim", ctypes.c_int32),
+        ("dtype", ctypes.c_int32),
     ]
+
+
+#: dtype codes of the C API (`PT_FLOAT64` etc. in pytensor_llvm.h)
+DTYPE_CODES = {
+    name: code
+    for code, name in enumerate(
+        ["float64", "float32", "int64", "int32", "int16", "int8", "uint8", "bool"]
+    )
+}
 
 
 class PtTypeInfo(ctypes.Structure):
@@ -62,7 +72,7 @@ def as_ptarrays(arrays):
         sh = (ctypes.c_int64 * max(a.ndim, 1))(*a.shape)
         st = (ctypes.c_int64 * max(a.ndim, 1))(*a.strides)
         keep += [a, sh, st]
-        arr[i] = PtArray(a.ctypes.data, sh, st, None, a.ndim)
+        arr[i] = PtArray(a.ctypes.data, sh, st, None, a.ndim, DTYPE_CODES[a.dtype.name])
     return arr, keep
 
 
@@ -129,7 +139,7 @@ def test_call_from_c(harness, provided):
         for k, r in enumerate(ref):
             sh, st = (ctypes.c_int64 * 4)(), (ctypes.c_int64 * 4)()
             keep2 += [sh, st]
-            outs[k] = PtArray(None, sh, st, None, r.ndim)
+            outs[k] = PtArray(None, sh, st, None, r.ndim, DTYPE_CODES[r.dtype.name])
     err = ctypes.create_string_buffer(512)
     assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, err.value
     decref = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.buffer_decref)
@@ -216,9 +226,11 @@ def test_c_boundary_checks(harness):
     outs, k2 = as_ptarrays([xv])
     rc, msg = run(ins, outs)
     assert rc != 0 and b"overlaps the memory of input 0" in msg
-    # misaligned data, negative length, NULL data, wrong ndim
+    # misaligned data, negative length, NULL data, wrong ndim, wrong dtype
     raw = np.zeros(7 * 8 + 1, dtype=np.uint8)
     bad = [
+        (lambda p: setattr(p, "dtype", DTYPE_CODES["float32"]), b"input 0: expected dtype float64"),
+        (lambda p: setattr(p, "dtype", 99), b"input 0: expected dtype float64"),
         (lambda p: setattr(p, "data", raw.ctypes.data + 1), b"not aligned"),
         (lambda p: p.shape.__setitem__(0, -1), b"negative length"),
         (lambda p: setattr(p, "data", None), b"null data"),
@@ -230,6 +242,15 @@ def test_c_boundary_checks(harness):
         corrupt(ins[0])
         rc, msg = run(ins, outs)
         assert rc != 0 and expected in msg, (expected, msg)
+    # the same for outputs, provided or not
+    for provided in (True, False):
+        ins, k1 = as_ptarrays([xv])
+        outs, k2 = as_ptarrays([np.empty(6)])
+        if not provided:
+            outs[0].data = None
+        outs[0].dtype = DTYPE_CODES["int64"]
+        rc, msg = run(ins, outs)
+        assert rc != 0 and b"output 0: expected dtype float64" in msg, msg
     # still works afterwards
     ins, k1 = as_ptarrays([xv])
     out = np.empty(6)

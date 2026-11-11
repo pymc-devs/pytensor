@@ -6,7 +6,7 @@
 //!   modules, compilation;
 //! * `interp` (Python: `pytensor_llvm.interp`): the program interpreter, Rust kernels,
 //!   the C API;
-//! * `abi`: the kernel ABI (arrays, buffers);
+//! * `abi`: the kernel ABI (arrays, buffers); `array`: the arrays as Rust uses them;
 //! * `runtime`: the process-wide runtime (runtime functions, JIT, thread pool) and the
 //!   context of a call;
 //! * `jit`, `target`: the JIT and LLVM setup; `perf`: perf maps;
@@ -17,6 +17,7 @@
 use pyo3::prelude::*;
 
 pub mod abi;
+pub mod array;
 pub mod dtype;
 pub mod interp;
 pub mod ir;

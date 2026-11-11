@@ -1,6 +1,6 @@
 //! A runner for kernels (tests): `ir.call_kernel`.
 
-use crate::abi::{PtArray, PtBuffer};
+use crate::abi::{OwnedBuf, PtArray, PtBuffer};
 use crate::dtype::DType;
 use crate::runtime::PtCtx;
 use numpy::npyffi::{NPY_ARRAY_WRITEABLE, NpyTypes, PY_ARRAY_API, npy_intp};
@@ -19,10 +19,6 @@ fn dtype_of(d: &Bound<'_, PyArrayDescr>) -> PyResult<DType> {
     DType::from_numpy(d.kind(), d.itemsize())
         .ok_or_else(|| PyTypeError::new_err(format!("dtype {d} is not supported")))
 }
-
-struct SendPtr(*mut PtBuffer);
-// SAFETY: moves one buffer reference into a capsule destructor; refcounts are atomic.
-unsafe impl Send for SendPtr {}
 
 /// A numpy array over `data`; owns `owner` (one reference) if not null, else copies.
 fn to_numpy<'py>(
@@ -55,13 +51,10 @@ fn to_numpy<'py>(
         if owner.is_null() {
             return arr.call_method0("copy");
         }
-        let o = SendPtr(owner);
-        let capsule = PyCapsule::new_with_value_and_destructor(
-            py,
-            o,
-            c"pytensor_llvm.buffer",
-            |b: SendPtr, _| PtBuffer::decref(b.0),
-        )?;
+        // SAFETY: the reference the kernel handed over in its output (the caller's
+        // promise about the kernel).
+        let buf = OwnedBuf::from_raw(owner);
+        let capsule = PyCapsule::new_with_value(py, buf, c"pytensor_llvm.buffer")?;
         if PY_ARRAY_API.PyArray_SetBaseObject(py, arr.as_ptr() as *mut _, capsule.into_ptr()) != 0 {
             return Err(PyErr::fetch(py));
         }
@@ -69,7 +62,7 @@ fn to_numpy<'py>(
     }
 }
 
-/// Call a kernel (`int32 f(ctx, args, config)`), for tests.
+/// Call a kernel (`int32 f(ctx, args, n_inputs, n_outputs, config)`), for tests.
 ///
 /// `inputs` are arrays; `outputs` are arrays (provided memory, written in place) or
 /// `(dtype, ndim)` for outputs the function sets (allocated or views; views of inputs are
@@ -96,7 +89,7 @@ pub fn call_kernel<'py>(
                       arrays: &mut Vec<PtArray>|
      -> PyResult<()> {
         let arr = a.cast::<PyUntypedArray>()?;
-        dtype_of(&arr.dtype())?;
+        let dtype = dtype_of(&arr.dtype())?;
         let nd = arr.ndim();
         let mut s: Vec<i64> = arr.shape().iter().map(|&x| x as i64).collect();
         s.extend(arr.strides().iter().map(|&x| x as i64));
@@ -110,7 +103,8 @@ pub fn call_kernel<'py>(
             shape: st,
             strides,
             owner: std::ptr::null_mut(),
-            ndim: nd as i64,
+            ndim: nd as i32,
+            dtype: dtype.code(),
         });
         Ok(())
     };
@@ -124,7 +118,7 @@ pub fn call_kernel<'py>(
             out_kind.push(None);
         } else {
             let (dt, nd): (Bound<'py, PyArrayDescr>, usize) = o.extract()?;
-            dtype_of(&dt)?;
+            let dtype = dtype_of(&dt)?;
             storage.push(vec![0; 2 * nd.max(1)]);
             let st = storage.last_mut().unwrap().as_mut_ptr();
             // SAFETY: the storage holds 2 * ndim entries.
@@ -134,7 +128,8 @@ pub fn call_kernel<'py>(
                 shape: st,
                 strides,
                 owner: std::ptr::null_mut(),
-                ndim: nd as i64,
+                ndim: nd as i32,
+                dtype: dtype.code(),
             });
             out_kind.push(Some(dt));
         }
@@ -142,16 +137,24 @@ pub fn call_kernel<'py>(
     let mut ctx = PtCtx::new();
     // SAFETY: the caller promises `address` has the C ABI for these arguments.
     let f: KernelFn = unsafe { std::mem::transmute::<usize, KernelFn>(address) };
-    // SAFETY: as above; arrays describe live numpy memory or empty output slots.
     let mark = ctx.scratch_mark();
-    let rc = unsafe { f(&mut ctx, arrays.as_mut_ptr(), config as *const u8) };
+    // SAFETY: as above; arrays describe live numpy memory or empty output slots.
+    let rc = unsafe {
+        f(
+            &mut ctx,
+            arrays.as_mut_ptr(),
+            inputs.len() as i32,
+            outputs.len() as i32,
+            config as *const u8,
+        )
+    };
     ctx.scratch_release(mark);
     let n_in = inputs.len();
     if rc != 0 {
         for a in &arrays[n_in..] {
             if !a.owner.is_null() {
                 // SAFETY: the callee handed this reference over in its output slot.
-                unsafe { PtBuffer::decref(a.owner) };
+                drop(unsafe { OwnedBuf::from_raw(a.owner) });
             }
         }
         let msg = ctx
@@ -167,8 +170,10 @@ pub fn call_kernel<'py>(
         match kind {
             None => res.push(outputs[k].clone()),
             Some(dt) => {
-                // SAFETY: the callee set the slot's shape and strides.
-                let (shape, strides) = unsafe { (a.shape().to_vec(), a.strides().to_vec()) };
+                // (the callee set the slot's shape and strides, in our storage)
+                let nd = a.ndim as usize;
+                let (shape, strides) = storage[n_in + k].split_at(nd);
+                let (shape, strides) = (shape.to_vec(), strides[..nd].to_vec());
                 if a.data.is_null() && shape.iter().product::<i64>() != 0 {
                     return Err(PyValueError::new_err(format!("output {k} was not set")));
                 }

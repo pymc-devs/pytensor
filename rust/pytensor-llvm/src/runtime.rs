@@ -25,7 +25,7 @@
 //! arena keeps its largest size, so after the first call a kernel's scratch requests
 //! don't allocate. Several requests per kernel are fine; they never move earlier ones.
 
-use crate::abi::{ABI_VERSION, PtBuffer};
+use crate::abi::{ABI_VERSION, OwnedBuf, PtBuffer};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -306,31 +306,42 @@ unsafe impl Send for PtCtx {}
 // These are "C" (not "C-unwind") because generated and numba frames can't be unwound;
 // a panic here (out of memory) aborts.
 
+/// The context a runtime function was called with.
+///
+/// # Safety
+/// `ctx` is the context the calling kernel was called with: valid, and used by nobody
+/// else while the reference lives (the contract of the runtime functions).
+unsafe fn context<'a>(ctx: *mut PtCtx) -> &'a mut PtCtx {
+    // SAFETY: the function's contract.
+    unsafe { &mut *ctx }
+}
+
 unsafe extern "C" fn rt_alloc(
     ctx: *mut PtCtx,
     bytes: usize,
     align: usize,
     owner: *mut *mut PtBuffer,
 ) -> *mut u8 {
-    if bytes > isize::MAX as usize {
-        // SAFETY: `owner` is writable and `ctx` live (the contract).
-        unsafe {
-            *owner = std::ptr::null_mut();
-            (*ctx).error = Some((1, format!("could not allocate {} bytes", bytes as isize)));
+    let (data, buffer) = match OwnedBuf::aligned(bytes, align) {
+        Some(buf) => (buf.data(), buf.into_raw()),
+        None => {
+            // SAFETY: the contract of the runtime functions.
+            unsafe { context(ctx) }.fail(1, &format!("could not allocate {bytes} bytes"));
+            (std::ptr::null_mut(), std::ptr::null_mut())
         }
-        return std::ptr::null_mut();
-    }
-    let b = PtBuffer::new(bytes, align);
-    // SAFETY: `owner` points to the kernel's output slot (a PtArray field); `b` is live.
-    unsafe {
-        *owner = b;
-        (*b).data
-    }
+    };
+    // SAFETY: `owner` points to the kernel's output slot (a PtArray field).
+    unsafe { *owner = buffer };
+    data
 }
 
 unsafe extern "C" fn rt_incref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
-    // SAFETY: kernels only pass owners of arrays they were given or allocated.
-    unsafe { PtBuffer::incref(b) }
+    if b.is_null() {
+        return;
+    }
+    // SAFETY: kernels only pass owners of arrays they were given or allocated, which
+    // their caller keeps alive. The new reference is the kernel's.
+    unsafe { OwnedBuf::from_borrowed(b) }.into_raw();
 }
 
 unsafe extern "C" fn rt_decref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
@@ -339,44 +350,40 @@ unsafe extern "C" fn rt_decref(_ctx: *mut PtCtx, b: *mut PtBuffer) {
         return;
     }
     // SAFETY: as above, and the kernel gives up a reference it holds.
-    unsafe { PtBuffer::decref(b) }
+    drop(unsafe { OwnedBuf::from_raw(b) })
 }
 
 unsafe extern "C" fn rt_scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
+    // SAFETY: the contract of the runtime functions.
+    let ctx = unsafe { context(ctx) };
     if bytes > isize::MAX as usize {
-        // SAFETY: `ctx` is live.
-        unsafe {
-            (*ctx).error = Some((
-                1,
-                format!("could not allocate {} bytes of scratch", bytes as isize),
-            ))
-        };
+        ctx.fail(1, &format!("could not allocate {bytes} bytes of scratch"));
         return std::ptr::null_mut();
     }
-    // SAFETY: see above for `ctx`.
-    unsafe { (*ctx).scratch.get(bytes) }
+    ctx.scratch.get(bytes)
 }
 
 unsafe extern "C" fn rt_set_error(ctx: *mut PtCtx, code: i32, msg: *const c_char) {
-    // SAFETY: `msg` is null or a NUL-terminated string (the ABI contract); `ctx` as above.
-    unsafe {
-        let m = if msg.is_null() {
-            String::new()
-        } else {
-            CStr::from_ptr(msg).to_string_lossy().into_owned()
-        };
-        (*ctx).error = Some((code, m));
-    }
+    let message = if msg.is_null() {
+        String::new()
+    } else {
+        // SAFETY: `msg` is a NUL-terminated string (the ABI contract).
+        unsafe { CStr::from_ptr(msg) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    // SAFETY: the contract of the runtime functions.
+    unsafe { context(ctx) }.error = Some((code, message));
 }
 
 unsafe extern "C" fn rt_scratch_mark(ctx: *mut PtCtx) -> i64 {
-    // SAFETY: see above for `ctx`.
-    unsafe { (*ctx).scratch_mark() }
+    // SAFETY: the contract of the runtime functions.
+    unsafe { context(ctx) }.scratch_mark()
 }
 
 unsafe extern "C" fn rt_scratch_release(ctx: *mut PtCtx, token: i64) {
-    // SAFETY: see above for `ctx`.
-    unsafe { (*ctx).scratch_release(token) }
+    // SAFETY: the contract of the runtime functions.
+    unsafe { context(ctx) }.scratch_release(token)
 }
 
 impl PtCtx {
@@ -414,27 +421,32 @@ impl PtCtx {
         }
     }
 
-    // Helpers for Rust kernels. SAFETY (all three): `ctx` is the kernel's context
-    // (valid, not used by anyone else during the call).
-
-    /// Scratch for Rust kernels (same as `rt->scratch`).
-    pub unsafe fn scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
-        // SAFETY: see above for `ctx`.
-        unsafe { (*ctx).scratch.get(bytes) }
+    /// Scratch memory for `n` values of `T` (same memory as `rt->scratch`): valid until
+    /// the task ends, or until a `scratch_release` of an earlier mark. Both need the
+    /// context, which stays borrowed while the memory is used.
+    pub fn scratch<T>(&mut self, n: usize) -> &mut [std::mem::MaybeUninit<T>] {
+        assert!(align_of::<T>() <= SCRATCH_ALIGN);
+        let bytes = n
+            .checked_mul(size_of::<T>())
+            .filter(|&bytes| bytes <= isize::MAX as usize)
+            .expect("scratch size overflows");
+        let p = self.scratch.get(bytes) as *mut std::mem::MaybeUninit<T>;
+        // SAFETY: the arena hands out `bytes` bytes, 64-byte aligned, distinct from
+        // everything it handed out before, that stay valid until a release, which
+        // needs `&mut self`.
+        unsafe { std::slice::from_raw_parts_mut(p, n) }
     }
 
-    pub unsafe fn fail(ctx: *mut PtCtx, code: i32, msg: &str) -> i32 {
-        // SAFETY: see above for `ctx`.
-        unsafe { (*ctx).error = Some((code, msg.to_string())) };
+    /// Set the error of the call; returns `code`, for the kernel to return.
+    pub fn fail(&mut self, code: i32, msg: &str) -> i32 {
+        self.error = Some((code, msg.to_string()));
         code
     }
 
-    /// A new buffer and one reference to it, for a kernel-allocated output.
-    pub unsafe fn alloc(ctx: *mut PtCtx, bytes: usize) -> (*mut u8, *mut PtBuffer) {
-        let mut owner = std::ptr::null_mut();
-        // SAFETY: see above for `ctx`; `rt` is the static runtime table.
-        let p = unsafe { ((*(*ctx).rt).alloc)(ctx, bytes, 64, &mut owner) };
-        (p, owner)
+    /// A new buffer of `bytes` (not initialized), e.g. for a kernel-allocated output.
+    /// None if that is more than can be allocated.
+    pub fn alloc(&mut self, bytes: usize) -> Option<OwnedBuf> {
+        OwnedBuf::new(bytes)
     }
 }
 
@@ -461,32 +473,33 @@ mod tests {
     #[test]
     fn scratch_arena_grows_to_peak_and_keeps_pointers() {
         let mut ctx = PtCtx::new();
-        let c: *mut PtCtx = &mut ctx;
+        let take = |ctx: &mut PtCtx, n: usize| ctx.scratch::<u8>(n).as_mut_ptr() as *mut u8;
+        // first task: nothing reserved, everything overflows but stays valid
+        let task = ctx.scratch_mark();
+        let a = take(&mut ctx, 100);
+        let b = take(&mut ctx, 1000);
+        // SAFETY: scratch of 100 and 1000 bytes, valid until the release below.
         unsafe {
-            // first task: nothing reserved, everything overflows but stays valid
-            let task = ctx.scratch_mark();
-            let a = PtCtx::scratch(c, 100);
-            let b = PtCtx::scratch(c, 1000);
             a.write_bytes(1, 100);
             b.write_bytes(2, 1000);
             assert_eq!(*a.add(99), 1);
-            assert_eq!(a as usize % 64, 0);
-            assert_eq!(b as usize % 64, 0);
-            ctx.scratch_release(task);
-            // second task with the same demand: served from the persistent block
-            let task = ctx.scratch_mark();
-            let a2 = PtCtx::scratch(c, 100);
-            let b2 = PtCtx::scratch(c, 1000);
-            assert!(ctx.scratch.overflow.is_empty());
-            assert_eq!(b2 as usize - a2 as usize, 128);
-            // nested driver: release to a mark frees only what came after it
-            let m = ctx.scratch_mark();
-            let _ = PtCtx::scratch(c, 1 << 20); // overflow
-            assert_eq!(ctx.scratch.overflow.len(), 1);
-            ctx.scratch_release(m);
-            assert!(ctx.scratch.overflow.is_empty());
-            ctx.scratch_release(task);
-            assert!(ctx.scratch.cap >= (1 << 20) + 1152);
         }
+        assert_eq!(a as usize % 64, 0);
+        assert_eq!(b as usize % 64, 0);
+        ctx.scratch_release(task);
+        // second task with the same demand: served from the persistent block
+        let task = ctx.scratch_mark();
+        let a2 = take(&mut ctx, 100);
+        let b2 = take(&mut ctx, 1000);
+        assert!(ctx.scratch.overflow.is_empty());
+        assert_eq!(b2 as usize - a2 as usize, 128);
+        // nested driver: release to a mark frees only what came after it
+        let m = ctx.scratch_mark();
+        let _ = take(&mut ctx, 1 << 20); // overflow
+        assert_eq!(ctx.scratch.overflow.len(), 1);
+        ctx.scratch_release(m);
+        assert!(ctx.scratch.overflow.is_empty());
+        ctx.scratch_release(task);
+        assert!(ctx.scratch.cap >= (1 << 20) + 1152);
     }
 }

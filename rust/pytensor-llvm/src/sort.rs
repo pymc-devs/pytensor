@@ -36,15 +36,13 @@ pub struct Sort<T> {
     pub element: PhantomData<T>,
 }
 
-// SAFETY: one input and one output, both arrays of `T` (`interp::py::Sort` picks `T`
-// from the node's dtype).
-unsafe impl<T: Sortable> Kernel for Sort<T> {
+impl<T: Sortable> Kernel for Sort<T> {
     fn arity(&self) -> (usize, usize) {
         (1, 1)
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
-        let source = args.inputs.array::<T>(0);
+        let source = args.inputs.array::<T>(0)?;
         let mut sorted = args.outputs.array::<T>(ctx, 0, self.mode, source.shape())?;
         let mut values = Vec::new();
         zip_lanes(&source, &mut sorted, self.axis, |lane, mut target| {
@@ -71,7 +69,8 @@ mod tests {
             shape: shape.as_mut_ptr(),
             strides: strides.as_mut_ptr(),
             owner: std::ptr::null_mut(),
-            ndim: shape.len() as i64,
+            ndim: shape.len() as i32,
+            dtype: crate::dtype::DType::Float64.code(),
         }
     }
 
@@ -99,6 +98,8 @@ mod tests {
             entry::<Sort<f64>>(
                 &mut ctx,
                 args.as_mut_ptr(),
+                1,
+                1,
                 &kernel as *const _ as *const u8,
             )
         };
@@ -119,6 +120,8 @@ mod tests {
             entry::<Sort<f64>>(
                 &mut ctx,
                 args.as_mut_ptr(),
+                1,
+                1,
                 &kernel as *const _ as *const u8,
             )
         };

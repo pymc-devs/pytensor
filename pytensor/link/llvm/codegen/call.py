@@ -2,7 +2,7 @@
 
 Rust kernels, numba kernels and subprograms all have the kernel ABI the interpreter
 calls (section 6). Generated code calls them the same way: it packs the arguments into
-`PtArray`s, calls the kernel through its entry in the link table and reads back what
+`PtArray`s (with the number of axes and the dtype of each), calls the kernel through its entry in the link table and reads back what
 the kernel wrote. A node implemented by such a kernel then has a node function like
 any other (`build_node_function(..., kernel=...)`), so units and generated loops can
 contain it.
@@ -22,6 +22,7 @@ from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
     Slot,
+    dtype_code,
     ir,
     memory_type,
     ptarray_type,
@@ -108,7 +109,9 @@ def call_kernel(
     b = cg.b
     pa = ptarray_type()
     i64 = ir.i64
-    args_of = []  # per argument: (data, shape ptr, strides ptr, ndim, SlotOutput or None)
+    # per argument: (data, shape ptr, strides ptr, ndim, dtype, SlotOutput or None)
+    args_of = []
+    n_inputs = 0
 
     def storage(values):
         p = b.alloca(ir.Type.array(i64, max(len(values), 1)))
@@ -119,21 +122,36 @@ def call_kernel(
     for a, dtype in inputs:
         if a is None:
             continue
+        n_inputs += 1
         if isinstance(a, Array):
             args_of.append(
-                (a.data, storage(a.shape), storage(a.strides), len(a.shape), None)
+                (
+                    a.data,
+                    storage(a.shape),
+                    storage(a.strides),
+                    len(a.shape),
+                    dtype,
+                    None,
+                )
             )
         else:  # a scalar: a 0-d array
             p = b.alloca(memory_type(dtype))
             store(b, dtype, a, p)
-            args_of.append((p, storage([]), storage([]), 0, None))
+            args_of.append((p, storage([]), storage([]), 0, dtype, None))
     for o in outputs:
         if o is None:
             continue
         if isinstance(o, ProvidedOutput):
             a = o.array
             args_of.append(
-                (a.data, storage(a.shape), storage(a.strides), len(a.shape), None)
+                (
+                    a.data,
+                    storage(a.shape),
+                    storage(a.strides),
+                    len(a.shape),
+                    a.dtype,
+                    None,
+                )
             )
         elif isinstance(o, SlotOutput):
             st = slot_type(o.ndim)
@@ -143,6 +161,7 @@ def call_kernel(
                     b.field_ptr(st, o.slot, Slot.LENGTHS),
                     b.field_ptr(st, o.slot, Slot.STRIDES),
                     o.ndim,
+                    o.dtype,
                     o,
                 )
             )
@@ -153,22 +172,24 @@ def call_kernel(
 
     args = b.alloca(ir.Type.array(pa, max(len(args_of), 1)))
     ptrs = []
-    for k, (data, shape, strides, nd, _) in enumerate(args_of):
+    for k, (data, shape, strides, nd, dtype, _) in enumerate(args_of):
         p = b.gep_bytes(args, k * PTARRAY_SIZE)
         b.store(data, b.field_ptr(pa, p, PtArray.DATA))
         b.store(shape, b.field_ptr(pa, p, PtArray.SHAPE))
         b.store(strides, b.field_ptr(pa, p, PtArray.STRIDES))
         b.store(b.null(), b.field_ptr(pa, p, PtArray.OWNER))
-        b.store(b.i64(nd), b.field_ptr(pa, p, PtArray.NDIM))
+        b.store(b.i32(nd), b.field_ptr(pa, p, PtArray.NDIM))
+        b.store(b.i32(dtype_code(dtype)), b.field_ptr(pa, p, PtArray.DTYPE))
         ptrs.append(p)
 
     fn = linked(cg, index)
     config = linked(cg, index + 1)
     mark = b.rt_scratch_mark(cg.ctx)
-    rc = b.call_ptr(fn, [cg.ctx, args, config], ir.i32)
+    counts = [b.i32(n_inputs), b.i32(len(args_of) - n_inputs)]
+    rc = b.call_ptr(fn, [cg.ctx, args, *counts, config], ir.i32)
     b.rt_scratch_release(cg.ctx, mark)
 
-    for p, (_, _, _, _, o) in zip(ptrs, args_of, strict=True):
+    for p, (*_, o) in zip(ptrs, args_of, strict=True):
         if o is None:
             continue
         st = slot_type(o.ndim)

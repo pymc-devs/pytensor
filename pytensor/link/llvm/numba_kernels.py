@@ -2,7 +2,7 @@
 
 For such an Op we take PyTensor's numba implementation (``numba_funcify``) and wrap it in
 a numba ``cfunc`` with the kernel ABI, ``int32(PtCtx *ctx, PtArray *args,
-void *config)``:
+int32 n_inputs, int32 n_outputs, void *config)``:
 
 * inputs become numba arrays that view the caller's memory (data, shape, strides; no copy),
   or plain scalars for inputs of ``ScalarType``,
@@ -31,7 +31,7 @@ from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.type import TensorType
 
 
-PTARRAY_SIZE = 40  # sizeof(PtArray): data, shape, strides, owner, ndim
+PTARRAY_SIZE = 40  # sizeof(PtArray): data, shape, strides, owner, (ndim, dtype)
 RUNTIME_ALLOC_OFFSET = 8  # offsetof(PtRuntime, alloc)
 
 _i8p = ir.IntType(8).as_pointer()
@@ -169,10 +169,12 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype):
     return alloc
 
 
-_SIG = types.int32(types.voidptr, types.voidptr, types.voidptr)
+_SIG = types.int32(
+    types.voidptr, types.voidptr, types.int32, types.int32, types.voidptr
+)
 
 # bump when the generated wrapper changes
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 
 def numba_kernel(node):
@@ -184,7 +186,7 @@ def numba_kernel(node):
     op_fn, op_key = numba_funcify_ensure_cache(node.op, node=node)
     # module globals give numba a real module (`__name__`) to rebuild cached environments from
     env = globals() | {"op_fn": op_fn, "np": np}
-    lines = ["def kernel(ctx, args, params):", "    try:"]
+    lines = ["def kernel(ctx, args, n_inputs, n_outputs, params):", "    try:"]
     names = []
     for i, inp in enumerate(node.inputs):
         t = inp.type

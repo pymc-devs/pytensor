@@ -39,9 +39,24 @@ impl DType {
         }
     }
 
-    /// Stable integer code used in kernel params.
+    /// Stable integer code: `PtArray::dtype`, `PT_FLOAT64` etc. in the C header.
     pub fn code(self) -> i32 {
         self as i32
+    }
+
+    /// The dtype with this `code`, if there is one.
+    pub fn from_code(code: i32) -> Option<DType> {
+        Some(match code {
+            0 => DType::Float64,
+            1 => DType::Float32,
+            2 => DType::Int64,
+            3 => DType::Int32,
+            4 => DType::Int16,
+            5 => DType::Int8,
+            6 => DType::Uint8,
+            7 => DType::Bool,
+            _ => return None,
+        })
     }
 
     pub fn numpy_name(self) -> &'static str {
@@ -69,5 +84,19 @@ impl DType {
             (b'b', 1) => DType::Bool,
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_round_trip() {
+        for code in 0..8 {
+            assert_eq!(DType::from_code(code).unwrap().code(), code);
+        }
+        assert!(DType::from_code(8).is_none());
+        assert!(DType::from_code(-1).is_none());
     }
 }

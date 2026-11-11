@@ -54,13 +54,15 @@ typedef struct PtBuffer PtBuffer;       /* refcounted memory owned by the runtim
 typedef struct PtFunction PtFunction;   /* a compiled function, refcounted, immutable */
 typedef struct PtSession PtSession;     /* one caller's session (memory, context) */
 
-/* Same struct as in the kernel ABI. Strides are in bytes. */
+/* Same struct as in the kernel ABI. Strides are in bytes. The caller sets ndim and dtype
+ * of every array it passes, outputs included. */
 typedef struct {
     char *data;
     int64_t *shape;
     int64_t *strides;
     PtBuffer *owner; /* NULL for memory owned by the caller */
-    int64_t ndim;
+    int32_t ndim;
+    int32_t dtype; /* a dtype code (PT_FLOAT64, ...) */
 } PtArray;
 
 typedef struct {
@@ -90,13 +92,15 @@ typedef struct {
     /*
      * Run the function. Returns 0 on success; on failure see last_error(s).
      *
-     * inputs[i]: data, shape and strides of input i. Checked: ndim, static shapes,
-     *   non-negative lengths, non-NULL data for non-empty arrays, alignment of data and
-     *   strides to the itemsize. NOT checked (the caller's responsibility): the dtype
-     *   (it must be the one input_type reports) and that the memory described really
-     *   exists. The runtime never writes to inputs.
+     * inputs[i]: data, shape and strides of input i, with the ndim and dtype that
+     *   input_type reports. Checked: ndim, dtype, static shapes, non-negative lengths,
+     *   non-NULL data for non-empty arrays, alignment of data and strides to the
+     *   itemsize. NOT checked (the caller's responsibility): that shape and strides
+     *   have ndim entries, and that the memory described really exists and holds
+     *   elements of that dtype. The runtime never writes to inputs.
      *
-     * outputs[k], chosen per output by the caller:
+     * outputs[k], with the ndim and dtype that output_type reports (checked), chosen
+     * per output by the caller:
      *   - provided (data != NULL): shape must point to the expected shape (checked),
      *     strides to the strides to write with. The result is written there: directly by
      *     the producing kernel when the strides match what the planner chose (usually
