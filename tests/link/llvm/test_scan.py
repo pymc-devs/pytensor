@@ -1,8 +1,6 @@
 """Scan on LLVM: as a generated loop (its body inlined, kernels called for the rest), and as
 the Rust kernel running its body as a subprogram."""
 
-import re
-
 import numpy as np
 import pytest
 
@@ -91,8 +89,7 @@ def test_sit_sot_with_sequence_and_non_sequence():
 
 
 def test_loop_without_scratch_memory_calls_no_runtime_functions():
-    # the scratch mark is taken before the loop and released after it; inside, only a
-    # body taking scratch memory releases it
+    # a body taking no scratch memory needs no scratch calls around the loop
     x0, rho = pt.dscalars("x0", "rho")
     eps = pt.vector("eps")
     xs = scan(
@@ -104,12 +101,8 @@ def test_loop_without_scratch_memory_calls_no_runtime_functions():
     f = pytensor.function([x0, rho, eps], xs, mode=GEN)
     ir = f.maker.linker.ir()
     kernel = ir[ir.index("; ===== Scan") :].split("; =====")[1].split("define")[1]
-    before_loop, rest = kernel.split("\nfold:")
-    after_loop = rest.split("\nfold.exit:")[1].split("\nthen")[0]
-    calls = re.compile(r"call \S+ @ptl_rt_scratch_(mark|release)\(")
-    assert calls.findall(before_loop) == ["mark"]
-    assert calls.findall(after_loop) == ["release"]
-    assert len(calls.findall(kernel)) == 2
+    loop = kernel.split("\nfold:")[1].split("\nfold.exit:")[0]
+    assert "@ptl_rt_scratch" not in loop
 
 
 def test_ir_includes_the_modules_of_the_loop_body():

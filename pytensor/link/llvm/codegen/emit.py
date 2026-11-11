@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from pytensor.graph.basic import Constant
@@ -431,7 +432,8 @@ class SlotOutput:
     #: the node inputs it may be a view of (the op's view_map)
     aliases: tuple = ()
     #: allocate in temporary memory instead of a runtime buffer (a temporary inside a
-    #: compiled unit): the slot gets no owner
+    #: compiled unit): the slot's owner is then the scratch memory, which the unit
+    #: frees (`emit_items`; null for a view)
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
     layout: Layout = None
@@ -459,9 +461,10 @@ class SlotOutput:
         a non-contiguous array does): the owner it sets tells the caller."""
         cg, b = self.cg, self.cg.b
         if self.temporary:
-            # read by the unit after this node's function returned
+            # read by the unit after this node's function returned, which frees it
             a = cg.temporary(self.dtype, shape, self.layout, escapes=True)
             self._write(a.data, a.shape, a.strides)
+            b.store(a.data, b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER))
             self._mark(a)
             self.done = True
             return a
@@ -562,6 +565,14 @@ def _slot_type(ndim):
 # ------------------------------------------------------------------ the context
 
 
+class _ScratchScope(list):
+    """The (ctx, pointer)s of the scratch memory to free when a scope ends."""
+
+    def __init__(self, function: bool):
+        super().__init__()
+        self.function = function
+
+
 @dataclass
 class Codegen:
     """The state of generating one kernel's code: the builder and the kernel's
@@ -585,9 +596,9 @@ class Codegen:
     #: functions are named after it)
     module: object = None
     name: str = ""
-    #: has the code emitted so far taken scratch memory (`temp_memory`, or a nested
-    #: function that does)? A loop releases it per iteration only then.
-    uses_scratch: bool = False
+    #: the scratch memory taken in the scopes being emitted, innermost last: what to
+    #: free at the end of each (`scratch_scope`)
+    scratch_scopes: list = field(default_factory=list)
     _checks: int = field(default=0)
 
     def par(self, per_element: float) -> ParallelPolicy | None:
@@ -618,10 +629,14 @@ class Codegen:
 
         Small memory of static size is on the stack of the function being generated:
         LLVM sees all of it, and may keep it in registers. Everything else is scratch
-        memory of the context (`rt_scratch`), which is valid until the task ends.
+        memory of the context (`rt_scratch`). Of a static size, it is taken when the
+        function starts, like stack memory (a loop asking for it in every iteration gets
+        the same memory), and freed when the function's scope ends; else it is freed
+        when the innermost `scratch_scope` ends.
 
         `escapes`: the memory is used after the function being generated returns (an
-        output that is a temporary of the unit around it); then it is never on the stack.
+        output that is a temporary of the unit around it); then it is never on the stack,
+        and the caller frees it.
 
         Each call is a new piece of scratch: ask before a loop, not inside it."""
         b = self.b
@@ -631,10 +646,42 @@ class Codegen:
             if self.stack_bytes + rounded <= STACK_BUDGET_BYTES:
                 self.stack_bytes += rounded
                 return b.alloca(ir.Type.array(ir.i8, max(n, 1)))
-        self.uses_scratch = True
-        p = b.rt_scratch(self.ctx, nbytes)
+        at_entry = n is not None and not escapes
+        p = b.rt_scratch(self.ctx, nbytes, at_entry=at_entry)
         self.check(b.ne(p, b.null()), None)
+        if at_entry:
+            self.free_later(p, function=True)
+        elif not escapes:
+            self.free_later(p)
         return p
+
+    def free_later(self, p, function: bool = False):
+        """Free the scratch memory `p` when the innermost `scratch_scope` ends, or with
+        `function` the innermost one of the function being generated (anything else
+        than scratch is ignored when running)."""
+        scopes = [sc for sc in self.scratch_scopes if sc.function or not function]
+        if not scopes:
+            raise ValueError("scratch memory outside of a scratch_scope")
+        scopes[-1].append((self.ctx, p))
+
+    @contextmanager
+    def scratch_scope(self, function: bool = False):
+        """The scratch memory taken inside is freed at its end (on the way out of the
+        code emitted inside, unless that returned; on errors the task's mark releases
+        it). The code emitted inside must be one region of control flow: a function body
+        (`function`, also a parallel body), a loop iteration, a branch."""
+        taken = _ScratchScope(function)
+        self.scratch_scopes.append(taken)
+        try:
+            yield
+        finally:
+            self.scratch_scopes.pop()
+        if not self.b.terminated:
+            b = self.b
+            for ctx, p in reversed(taken):
+                # (folds away for checked scratch, and where a view left null)
+                with b.if_(b.ne(p, b.null())):
+                    b.rt_scratch_free(ctx, p)
 
     def temporary(
         self, dtype, shape, layout: Layout | None = None, escapes: bool = False
@@ -740,7 +787,11 @@ class ParallelPolicy:
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
         with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as r:
-            with b.loop(b.sub(r.end, r.start)) as j:
+            # (a parallel body is a function of its own)
+            with (
+                self.cg.scratch_scope(function=True),
+                b.loop(b.sub(r.end, r.start)) as j,
+            ):
                 body(b.add(r.start, j))
         self.cg.check(b.eq(r.result, 0), None)
 

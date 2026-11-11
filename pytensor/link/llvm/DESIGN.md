@@ -56,8 +56,8 @@ groups small nodes into units.
 * **arena**: a program's static memory, laid out by the planner.
 * **temporary**: memory a kernel needs only while it runs (section 4): stack memory if
   it is small and of static size, else scratch.
-* **scratch**: temporary memory from the context, valid until the task ends, released
-  by marks.
+* **scratch**: temporary memory from the context, freed piece by piece by generated
+  code, else released by marks (at the latest when the task ends).
 * **buffer**: refcounted memory (`PtBuffer`), owned through `owner` pointers.
 * **output slot**: the struct a returned output comes back through.
 
@@ -330,19 +330,42 @@ temporary (`Codegen.temp_memory`, `Codegen.temporary` for an array):
   always inlined, so these are slots of the kernel's own stack frame. Inside a
   parallel region the memory is the chunk's own.
 * **Scratch memory** of the context, for everything else:
-  * `ptl_rt_scratch(ctx, bytes) -> ptr`: 64-byte aligned, valid until the task ends (or
-    an earlier mark is released). The result is `noalias`, like `malloc`'s.
-  * `ptl_rt_scratch_mark(ctx) -> mark`, `ptl_rt_scratch_release(ctx, mark)`: reuse
-    inside loops. The interpreter marks around every task; generated code around
-    every call and every Scan iteration, Rust kernels around subprograms, so nested
-    calls never release their caller's scratch.
+  * `ptl_rt_scratch(ctx, bytes) -> ptr`: 64-byte aligned, or null with the error set.
+    Declared like `malloc`: a `noalias` result, `allockind("alloc,uninitialized")`,
+    `allocsize(1)`, and touching no memory LLVM sees (`memory(inaccessiblemem:
+    readwrite)`).
+  * `ptl_rt_scratch_free(ctx, p)`: gives `p` back (anything that isn't a live piece of
+    scratch, null included, is ignored). It may touch `p`'s memory (`memory(argmem:
+    readwrite, inaccessiblemem: readwrite)`), so nothing using `p` moves past it.
+  * `ptl_rt_scratch_mark(ctx) -> mark`, `ptl_rt_scratch_release(ctx, mark)`: release
+    everything taken since the mark. The interpreter marks around every task (this
+    also frees what an error left behind), generated code around every call of
+    another kernel, Rust kernels around subprograms, so nested calls never release
+    their caller's scratch.
 
   Scratch is an arena of the context that keeps its largest size: after the first call
-  a request is a bump of a pointer.
+  a request is a bump of a pointer. Pieces may be freed in any order; the arena moves
+  back once the pieces on top are all free, never below an outstanding mark.
+
+Generated code frees every piece it takes, so LLVM sees where each one ends (a release
+would free memory behind its back: it can't tell which pieces a mark covers). A
+`Codegen.scratch_scope` frees what was taken inside it at its end: one around every
+function body, every Blockwise and Scan iteration, and every branch that takes scratch.
+Scratch of a static size is taken in the entry block of the function being generated
+(of a parallel body: per chunk), like stack memory, and freed when the function ends:
+a loop asking for it in every iteration gets the same memory, with no calls in the
+loop. Other scratch is held only until its scope ends. On errors, nothing is freed: the
+task's mark releases it.
+
+Node functions are inlined where they are called, entry block included, so their own
+static scratch (above the stack limit) is taken per call: inside a Blockwise or Scan
+loop, per iteration. The values passed between the nodes of a loop body are the loop
+function's own temporaries, taken once.
 
 Memory that is still used after the function that asked for it returned is never stack
 memory: the output of a node inside a unit, when it is a temporary of the unit, is
-scratch (`escapes=True`).
+scratch (`escapes=True`). The node writes the piece into the output slot's owner (null
+for a view), and the unit frees it at the end of its own scope.
 
 There is no memory planned per task. An earlier design passed every kernel a *frame*,
 a fixed-size block in the program's arena, for its static temporaries. It bought
@@ -574,7 +597,7 @@ into their rows when the row can't be one the same iteration reads (a static buf
 length decides), else copied there; nit-sot buffers whose rows have no static shape are
 allocated by the first iteration; untraced states are read from their output slot in
 every iteration and reallocated when an iteration changes their shape. Buffers of
-called kernels and scratch are released after every iteration. The interpreter itself
+called kernels and the body's scratch are freed after every iteration. The interpreter itself
 has no control flow.
 
 The Rust Scan kernel (`interp/scan.rs`), running the loop body as a subprogram, remains for

@@ -17,6 +17,7 @@
 //!     int64_t (*scratch_mark)(PtCtx *);
 //!     void  (*scratch_release)(PtCtx *, int64_t mark);
 //!     ...                                          // see `runtime_functions!`
+//!     void  (*scratch_free)(PtCtx *, void *p);   // give up one piece of scratch
 //! } PtRuntime;
 //! ```
 //!
@@ -24,6 +25,9 @@
 //! that is valid until the task ends. It comes from an arena owned by the context: the
 //! arena keeps its largest size, so after the first call a kernel's scratch requests
 //! don't allocate. Several requests per kernel are fine; they never move earlier ones.
+//! `rt->scratch_free(ctx, p)` gives up one piece early (generated code frees each of
+//! its temporaries, so LLVM sees where they end); whatever isn't freed goes at the next
+//! release of an earlier mark.
 
 use crate::abi::{ABI_VERSION, OwnedBuf, PtBuffer};
 use std::alloc::{Layout, alloc, dealloc};
@@ -80,6 +84,10 @@ runtime_functions! {
     /// `parallel_for(ctx, n, grain, body, captures)`: chunks of `0..n` on the runtime's
     /// thread pool (`crate::parallel`).
     parallel_for: fn(*mut PtCtx, i64, i64, crate::parallel::BodyFn, *const u8) -> i32 = crate::parallel::rt_parallel_for;
+    /// Give up the scratch memory `p` (a result of `scratch`). Anything else, null and
+    /// memory already released are ignored. The memory is reused once everything
+    /// taken after it is freed too (or released).
+    scratch_free: fn(*mut PtCtx, *mut u8) = rt_scratch_free;
 }
 
 /// The process-wide runtime: the function table every context points to, and the
@@ -181,6 +189,10 @@ pub struct PtCtx {
 /// One persistent block. A request that doesn't fit gets its own overflow block (so
 /// earlier pointers stay valid); when everything is released, the persistent block is
 /// regrown to the peak demand, so the next use fits without allocating.
+///
+/// Pieces are freed one by one (`free`, in any order) or all after a mark (`release`).
+/// The arena only moves back over pieces that are all freed: one freed below a live one
+/// waits for that one.
 struct Scratch {
     block: *mut u8,
     cap: usize,
@@ -188,13 +200,24 @@ struct Scratch {
     overflow: Vec<(*mut u8, usize)>,
     overflow_bytes: usize,
     peak: usize,
+    /// the pieces handed out and not released yet, oldest first
+    live: Vec<Piece>,
 }
 
+/// A position of the arena: everything handed out before it.
 #[derive(Clone, Copy)]
 struct ScratchMark {
     off: usize,
     n_overflow: usize,
     overflow_bytes: usize,
+    n_live: usize,
+}
+
+struct Piece {
+    ptr: *mut u8,
+    /// the arena's position before the piece
+    before: ScratchMark,
+    freed: bool,
 }
 
 const SCRATCH_ALIGN: usize = 64;
@@ -208,10 +231,12 @@ impl Scratch {
             overflow: Vec::new(),
             overflow_bytes: 0,
             peak: 0,
+            live: Vec::new(),
         }
     }
 
     fn get(&mut self, bytes: usize) -> *mut u8 {
+        let before = self.mark();
         let bytes = bytes.max(1).next_multiple_of(SCRATCH_ALIGN);
         let p = if self.off + bytes <= self.cap {
             // SAFETY: off + bytes <= cap, inside the block.
@@ -232,6 +257,11 @@ impl Scratch {
             p
         };
         self.peak = self.peak.max(self.off + self.overflow_bytes);
+        self.live.push(Piece {
+            ptr: p,
+            before,
+            freed: false,
+        });
         p
     }
 
@@ -240,10 +270,31 @@ impl Scratch {
             off: self.off,
             n_overflow: self.overflow.len(),
             overflow_bytes: self.overflow_bytes,
+            n_live: self.live.len(),
+        }
+    }
+
+    /// Free the piece at `p`, if it is one. The arena moves back over the freed pieces
+    /// on top, but not below `floor` pieces (those an outstanding mark keeps).
+    fn free(&mut self, p: *mut u8, floor: usize) {
+        if let Some(piece) = self.live.iter_mut().rev().find(|x| x.ptr == p && !x.freed) {
+            piece.freed = true;
+            self.pop_freed(floor);
+        }
+    }
+
+    fn pop_freed(&mut self, floor: usize) {
+        let mut to = None;
+        while self.live.len() > floor && self.live.last().is_some_and(|x| x.freed) {
+            to = self.live.pop().map(|x| x.before);
+        }
+        if let Some(m) = to {
+            self.release(m);
         }
     }
 
     fn release(&mut self, m: ScratchMark) {
+        self.live.truncate(m.n_live);
         for (p, n) in self.overflow.drain(m.n_overflow..) {
             // SAFETY: allocated in `get` with this size and alignment, released once (drained).
             unsafe { dealloc(p, Layout::from_size_align_unchecked(n, SCRATCH_ALIGN)) };
@@ -363,6 +414,11 @@ unsafe extern "C" fn rt_scratch(ctx: *mut PtCtx, bytes: usize) -> *mut u8 {
     ctx.scratch.get(bytes)
 }
 
+unsafe extern "C" fn rt_scratch_free(ctx: *mut PtCtx, p: *mut u8) {
+    // SAFETY: the contract of the runtime functions.
+    unsafe { context(ctx) }.scratch_free(p)
+}
+
 unsafe extern "C" fn rt_set_error(ctx: *mut PtCtx, code: i32, msg: *const c_char) {
     let message = if msg.is_null() {
         String::new()
@@ -418,7 +474,20 @@ impl PtCtx {
             let m = self.marks[token as usize];
             self.marks.truncate(token as usize);
             self.scratch.release(m);
+            // pieces freed before the mark can go now
+            self.scratch.pop_freed(self.scratch_floor());
         }
+    }
+
+    /// Give up the scratch memory `p` (see `rt->scratch_free`).
+    pub fn scratch_free(&mut self, p: *mut u8) {
+        let floor = self.scratch_floor();
+        self.scratch.free(p, floor);
+    }
+
+    /// The pieces the innermost outstanding mark keeps.
+    fn scratch_floor(&self) -> usize {
+        self.marks.last().map_or(0, |m| m.n_live)
     }
 
     /// Scratch memory for `n` values of `T` (same memory as `rt->scratch`): valid until
@@ -501,5 +570,44 @@ mod tests {
         assert!(ctx.scratch.overflow.is_empty());
         ctx.scratch_release(task);
         assert!(ctx.scratch.cap >= (1 << 20) + 1152);
+    }
+
+    #[test]
+    fn scratch_pieces_are_freed_in_any_order() {
+        let mut ctx = PtCtx::new();
+        let take = |ctx: &mut PtCtx, n: usize| ctx.scratch::<u8>(n).as_mut_ptr() as *mut u8;
+        // a first task sizes the block for four pieces of 64 bytes
+        let task = ctx.scratch_mark();
+        for _ in 0..4 {
+            take(&mut ctx, 64);
+        }
+        ctx.scratch_release(task);
+        let task = ctx.scratch_mark();
+        let a = take(&mut ctx, 64);
+        let b = take(&mut ctx, 64);
+        let c = take(&mut ctx, 1 << 20); // overflow
+        // freed below a live piece: kept until that one goes
+        ctx.scratch_free(b);
+        assert_eq!(ctx.scratch.live.len(), 3);
+        ctx.scratch_free(c);
+        assert_eq!(ctx.scratch.live.len(), 1);
+        assert!(ctx.scratch.overflow.is_empty());
+        // unknown pointers and double frees are ignored
+        ctx.scratch_free(c);
+        ctx.scratch_free(std::ptr::null_mut());
+        assert_eq!(ctx.scratch.live.len(), 1);
+        // a mark keeps what was taken before it, even when freed
+        let m = ctx.scratch_mark();
+        let d = take(&mut ctx, 64);
+        ctx.scratch_free(a);
+        assert_eq!(ctx.scratch.live.len(), 2);
+        assert_eq!(take(&mut ctx, 64) as usize, d as usize + 64);
+        ctx.scratch_release(m);
+        // everything is back: the block (regrown to the peak) starts over
+        assert!(ctx.scratch.live.is_empty());
+        let e = take(&mut ctx, 64);
+        assert_eq!(e, ctx.scratch.block);
+        ctx.scratch_release(task);
+        assert!(ctx.scratch.live.is_empty());
     }
 }

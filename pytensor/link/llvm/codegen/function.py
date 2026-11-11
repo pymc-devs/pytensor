@@ -296,8 +296,6 @@ class NodeFunction:
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: object = None
-    #: does it take scratch memory (`Codegen.uses_scratch`)?
-    uses_scratch: bool = False
 
 
 def build_node_function(
@@ -456,24 +454,26 @@ def build_node_function(
                     alias=alias,
                 )
             )
-    if kernel is not None:
-        from pytensor.link.llvm.codegen.call import call_kernel
+    # (the op's scratch memory is freed before the function returns)
+    with cg.scratch_scope(function=True):
+        if kernel is not None:
+            from pytensor.link.llvm.codegen.call import call_kernel
 
-        if links is None:
-            raise ValueError("a node function calling a kernel needs a links")
-        from pytensor.link.llvm.codegen.emit import Array, copy
+            if links is None:
+                raise ValueError("a node function calling a kernel needs a links")
+            from pytensor.link.llvm.codegen.emit import Array, copy
 
-        ins = []
-        for pos, (a, var) in enumerate(zip(inputs, node.inputs, strict=True)):
-            if pos in kernel.destroys and isinstance(a, Array):
-                # (the kernel would overwrite memory it wasn't given)
-                mine = cg.temporary(a.dtype, a.shape)
-                copy(cg, a, mine)
-                a = mine
-            ins.append((a, getattr(var.type, "dtype", None)))
-        call_kernel(cg, kernel, links.link_kernel(kernel), ins, outputs)
-    else:
-        llvm_emit(node.op, node, cg, inputs, outputs)
+            ins = []
+            for pos, (a, var) in enumerate(zip(inputs, node.inputs, strict=True)):
+                if pos in kernel.destroys and isinstance(a, Array):
+                    # (the kernel would overwrite memory it wasn't given)
+                    mine = cg.temporary(a.dtype, a.shape)
+                    copy(cg, a, mine)
+                    a = mine
+                ins.append((a, getattr(var.type, "dtype", None)))
+            call_kernel(cg, kernel, links.link_kernel(kernel), ins, outputs)
+        else:
+            llvm_emit(node.op, node, cg, inputs, outputs)
     if not b.terminated:
         for k, out in enumerate(outputs):
             if (
@@ -482,7 +482,7 @@ def build_node_function(
             ):
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(0)
-    return NodeFunction(fn, sig, links, cg.uses_scratch)
+    return NodeFunction(fn, sig, links)
 
 
 def build_kernel_wrapper(
