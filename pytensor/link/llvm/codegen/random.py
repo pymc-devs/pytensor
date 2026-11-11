@@ -13,7 +13,15 @@ element.
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.emit import Array, c_strides, cast, for_each, load, size, store
+from pytensor.link.llvm.codegen.emit import (
+    Array,
+    c_strides,
+    cast,
+    for_each,
+    load,
+    size,
+    store,
+)
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
 from pytensor.link.llvm.layout import Layout
@@ -27,9 +35,10 @@ def _register():
     def _(op, node, cg, inputs, outputs):
         spec = SAMPLERS.get(type(op))
         if spec is None or op.ndim_supp != 0:
-            raise NotImplementedError(f"LLVM backend: no implementation of the random variable {op}")
+            raise NotImplementedError(
+                f"LLVM backend: no implementation of the random variable {op}"
+            )
         emit_random(op, node, cg, inputs, outputs, spec)
-
 
     # per distribution: the base draws ("normal", "uniform": filled in one call; None:
     # the per-element function draws), the per-element function (b, cg, base value,
@@ -88,18 +97,70 @@ def _register():
     zero = 0.0
     SAMPLERS.update(
         {
-            rb.NormalRV: Sampler("normal", normal, ["float64", "float64"], [None, ("ge", zero, "scale < 0")]),
-            rb.HalfNormalRV: Sampler("normal", halfnormal, ["float64", "float64"], [None, ("ge", zero, "scale < 0")]),
-            rb.LogNormalRV: Sampler("normal", lognormal, ["float64", "float64"], [None, ("ge", zero, "sigma < 0")]),
-            rb.UniformRV: Sampler("uniform", uniform, ["float64", "float64"], [None, None]),
-            rb.ExponentialRV: Sampler("uniform", exponential, ["float64"], [("ge", zero, "scale < 0")]),
-            rb.BernoulliRV: Sampler("uniform", bernoulli, ["float64"], [("unit", None, "p < 0, p > 1 or p is NaN")]),
-            rb.IntegersRV: Sampler("uniform", integers, ["int64", "int64"], [None, None], check=("lt", "low >= high")),
-            rb.GammaRV: Sampler(None, gamma, ["float64", "float64"], [("gt", zero, "shape <= 0"), ("gt", zero, "scale <= 0")]),
-            rb.InvGammaRV: Sampler(None, invgamma, ["float64", "float64"], [("gt", zero, "shape <= 0"), ("gt", zero, "scale <= 0")]),
-            rb.BetaRV: Sampler(None, beta, ["float64", "float64"], [("gt", zero, "a <= 0"), ("gt", zero, "b <= 0")]),
-            rb.PoissonRV: Sampler(None, poisson, ["float64"], [("ge", zero, "lam < 0")]),
-            rb.BinomialRV: Sampler(None, binomial, ["int64", "float64"], [("ge", 0, "n < 0"), ("unit", None, "p < 0, p > 1 or p is NaN")]),
+            rb.NormalRV: Sampler(
+                "normal",
+                normal,
+                ["float64", "float64"],
+                [None, ("ge", zero, "scale < 0")],
+            ),
+            rb.HalfNormalRV: Sampler(
+                "normal",
+                halfnormal,
+                ["float64", "float64"],
+                [None, ("ge", zero, "scale < 0")],
+            ),
+            rb.LogNormalRV: Sampler(
+                "normal",
+                lognormal,
+                ["float64", "float64"],
+                [None, ("ge", zero, "sigma < 0")],
+            ),
+            rb.UniformRV: Sampler(
+                "uniform", uniform, ["float64", "float64"], [None, None]
+            ),
+            rb.ExponentialRV: Sampler(
+                "uniform", exponential, ["float64"], [("ge", zero, "scale < 0")]
+            ),
+            rb.BernoulliRV: Sampler(
+                "uniform",
+                bernoulli,
+                ["float64"],
+                [("unit", None, "p < 0, p > 1 or p is NaN")],
+            ),
+            rb.IntegersRV: Sampler(
+                "uniform",
+                integers,
+                ["int64", "int64"],
+                [None, None],
+                check=("lt", "low >= high"),
+            ),
+            rb.GammaRV: Sampler(
+                None,
+                gamma,
+                ["float64", "float64"],
+                [("gt", zero, "shape <= 0"), ("gt", zero, "scale <= 0")],
+            ),
+            rb.InvGammaRV: Sampler(
+                None,
+                invgamma,
+                ["float64", "float64"],
+                [("gt", zero, "shape <= 0"), ("gt", zero, "scale <= 0")],
+            ),
+            rb.BetaRV: Sampler(
+                None,
+                beta,
+                ["float64", "float64"],
+                [("gt", zero, "a <= 0"), ("gt", zero, "b <= 0")],
+            ),
+            rb.PoissonRV: Sampler(
+                None, poisson, ["float64"], [("ge", zero, "lam < 0")]
+            ),
+            rb.BinomialRV: Sampler(
+                None,
+                binomial,
+                ["int64", "float64"],
+                [("ge", 0, "n < 0"), ("unit", None, "p < 0, p > 1 or p is NaN")],
+            ),
         }
     )
 
@@ -157,10 +218,17 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
                 strides.append(b.i64(0))
             else:
                 if x.shape[pa].const_int is None or shape[a].const_int is None:
-                    cg.check(b.eq(x.shape[pa], shape[a]), f"{op}: parameter {k} has a different length on axis {a}")
+                    cg.check(
+                        b.eq(x.shape[pa], shape[a]),
+                        f"{op}: parameter {k} has a different length on axis {a}",
+                    )
                 strides.append(x.strides[pa])
         same_ndim = var.type.ndim == nd and all(s != 1 for s in var.type.shape)
-        views.append(Array(x.dtype, x.data, list(shape), strides, x.layout if same_ndim else None))
+        views.append(
+            Array(
+                x.dtype, x.data, list(shape), strides, x.layout if same_ndim else None
+            )
+        )
 
     out = outputs[1].allocate(shape)
     arrays = [*views, out]
@@ -170,8 +238,14 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
     if spec.base is not None:
         n = size(b, shape)
         buf = cg.temp_memory(b.mul(n, b.i64(itemsize("float64")), nsw=True))
-        b.rng(ir.Rng.FillNormal if spec.base == "normal" else ir.Rng.FillUniform, cg.ctx, [buf, n])
-        base = Array("float64", buf, list(shape), c_strides(b, "float64", shape), Layout.c(nd))
+        b.rng(
+            ir.Rng.FillNormal if spec.base == "normal" else ir.Rng.FillUniform,
+            cg.ctx,
+            [buf, n],
+        )
+        base = Array(
+            "float64", buf, list(shape), c_strides(b, "float64", shape), Layout.c(nd)
+        )
         arrays.append(base)
 
     def body(ptrs):

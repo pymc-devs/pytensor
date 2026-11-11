@@ -229,7 +229,9 @@ LLVM = get_mode("LLVM")
 STRICT = LLVM.clone(link_kwargs={"numba_fallback": False})
 
 x = pt.vector("x")
-with pytest.raises(NotImplementedError, match="No LLVM backend implementation for CumMax"):
+with pytest.raises(
+    NotImplementedError, match="No LLVM backend implementation for CumMax"
+):
     pytensor.function([x], cummax(x), mode=STRICT)
 ```
 
@@ -507,7 +509,12 @@ unknown = Layout.dynamic(2)
 fortran = Layout.make((None, None), order=(1, 0), strides=(PACKED, PACKED))
 rows = Layout.make((None, None), order=(0, 1), strides=(DYNAMIC, PACKED))
 
-assert [str(c), str(unknown), str(fortran), str(rows)] == ["C", "[?, ?]", "[P0, P1]", "[?, P0]"]
+assert [str(c), str(unknown), str(fortran), str(rows)] == [
+    "C",
+    "[?, ?]",
+    "[P0, P1]",
+    "[?, P0]",
+]
 ```
 
 The printed form is what program dumps show: `C`, or one entry per axis, where `?` is
@@ -562,7 +569,14 @@ def layouts(input_layouts):
 
 
 assert layouts(None) == ["[?, ?]", "[?]", "[?, ?]", "[?, ?]", "C", "C"]
-assert layouts([Layout.c(2)]) == ["[P0, P1]", "C", "[?, 16]", "[?, P0]", "C", "[P0, P1]"]
+assert layouts([Layout.c(2)]) == [
+    "[P0, P1]",
+    "C",
+    "[?, 16]",
+    "[?, P0]",
+    "C",
+    "[P0, P1]",
+]
 ```
 
 | | input unknown | input C-contiguous |
@@ -591,7 +605,9 @@ node = cummax(x).owner
 any_strides = build_node_function(ir.Module("any"), node, "node")
 contiguous = build_node_function(ir.Module("c"), node, "node", in_layouts=[Layout.c(1)])
 
-assert any_strides.signature.inputs[0].stride_axes == (0,)  # the stride of axis 0 is an argument
+assert any_strides.signature.inputs[0].stride_axes == (
+    0,
+)  # the stride of axis 0 is an argument
 assert contiguous.signature.inputs[0].stride_axes == ()  # nothing to pass
 ```
 
@@ -601,7 +617,9 @@ The dump of a program shows, in braces, the input layouts each task was generate
 C_INPUTS = STRICT.clone(link_kwargs={"input_layout": "c"})
 h = pytensor.function([A], cummax(A[:, ::2][1]), mode=C_INPUTS)
 print(h.maker.linker.program.dump())
-np.testing.assert_array_equal(h(np.array([[0.0, 9.0, 0.0], [1.0, 7.0, 0.5]])), [1.0, 1.0])
+np.testing.assert_array_equal(
+    h(np.array([[0.0, 9.0, 0.0], [1.0, 7.0, 0.5]])), [1.0, 1.0]
+)
 ```
 
 ```text
@@ -795,7 +813,9 @@ graph = FunctionGraph([x], [ZeroFirst(inplace=True)(cummax(x))], clone=False)
 graph.attach_feature(DestroyHandler())
 program, stats = build_program(graph, Options(numba_fallback=False))
 print(stats.inplace)
-np.testing.assert_array_equal(program(values)[0], [0.0, *np.maximum.accumulate(values)[1:]])
+np.testing.assert_array_equal(
+    program(values)[0], [0.0, *np.maximum.accumulate(values)[1:]]
+)
 ```
 
 ```text
@@ -828,7 +848,9 @@ from pytensor.link.llvm.layout import itemsize_of, shape_of
 def reverse_layout(node, x: Layout) -> Layout:
     var = node.inputs[0]
     stride = x.static_stride(0, shape_of(var), itemsize_of(var))
-    return Layout.make(shape_of(node.outputs[0]), (0,), (DYNAMIC if stride is None else -stride,))
+    return Layout.make(
+        shape_of(node.outputs[0]), (0,), (DYNAMIC if stride is None else -stride,)
+    )
 
 
 @llvm_layout.register(Reverse)
@@ -859,7 +881,9 @@ backend's own view ops are written (`subtensor_layout`, `dimshuffle_layout` in
 CHECKED = STRICT.clone(link_kwargs={"input_layout": "c", "check_layouts": True})
 r = pytensor.function([x], cummax(reverse(x)), mode=CHECKED)
 np.testing.assert_array_equal(r(values), [4.0, 5.0, 5.0, 5.0, 5.0])
-np.testing.assert_array_equal(r(values[::2]), [4.0, 4.0, 4.0])  # not contiguous: copied on the way in
+np.testing.assert_array_equal(
+    r(values[::2]), [4.0, 4.0, 4.0]
+)  # not contiguous: copied on the way in
 print(r.maker.linker.program.dump())
 ```
 
@@ -921,7 +945,9 @@ class ColumnMeans(Op):
         x = pt.as_tensor_variable(x)
         if x.type.ndim != 2 or x.type.dtype not in ("float32", "float64"):
             raise TypeError("ColumnMeans needs a float matrix")
-        return Apply(self, [x], [pt.tensor(dtype=x.type.dtype, shape=(x.type.shape[1],))])
+        return Apply(
+            self, [x], [pt.tensor(dtype=x.type.dtype, shape=(x.type.shape[1],))]
+        )
 
     def perform(self, node, inputs, output_storage):
         (x,) = inputs
@@ -954,11 +980,15 @@ address of the row is computed once per row, not once per element.
 
 ```python
 single = pt.matrix("M", dtype="float32")
-m = pytensor.function([single], [column_means(single), column_means(single.T[::2])], mode=STRICT)
+m = pytensor.function(
+    [single], [column_means(single), column_means(single.T[::2])], mode=STRICT
+)
 data = (rng.normal(size=(1000, 3)) + 1e4).astype("float32")
 by_column, of_a_view = m(data)
 np.testing.assert_allclose(by_column, data.mean(axis=0, dtype="float64"), rtol=1e-6)
-np.testing.assert_allclose(of_a_view, data.T[::2].mean(axis=0, dtype="float64"), rtol=1e-6)
+np.testing.assert_allclose(
+    of_a_view, data.T[::2].mean(axis=0, dtype="float64"), rtol=1e-6
+)
 ```
 
 Where the memory comes from depends on its size, and the emitter doesn't choose:
@@ -1018,7 +1048,9 @@ import pytensor.tensor.random.basic as rb
 
 generator = pytensor.shared(np.random.default_rng(0))
 draws = rb.gumbel(1.0, 2.0, size=(100_000,), rng=generator)
-with pytest.raises(NotImplementedError, match="no implementation of the random variable gumbel"):
+with pytest.raises(
+    NotImplementedError, match="no implementation of the random variable gumbel"
+):
     pytensor.function([], draws, mode=STRICT)
 ```
 
@@ -1035,7 +1067,9 @@ def gumbel(b, cg, u, params):
     return b.fsub(loc, b.fmul(scale, b.intrinsic(ir.Intrinsic.Log, [exponential])))
 
 
-SAMPLERS[rb.GumbelRV] = Sampler("uniform", gumbel, ["float64", "float64"], [None, ("ge", 0.0, "scale < 0")])
+SAMPLERS[rb.GumbelRV] = Sampler(
+    "uniform", gumbel, ["float64", "float64"], [None, ("ge", 0.0, "scale < 0")]
+)
 ```
 
 The parameters arrive as doubles, so the builder's float instructions are used
@@ -1059,7 +1093,9 @@ A failed check is an error when the function runs:
 
 ```python
 scale = pt.scalar("scale")
-checked = pytensor.function([scale], rb.gumbel(0.0, scale, size=(3,), rng=generator), mode=STRICT)
+checked = pytensor.function(
+    [scale], rb.gumbel(0.0, scale, size=(3,), rng=generator), mode=STRICT
+)
 with pytest.raises(Exception, match="scale < 0"):
     checked(-1.0)
 ```

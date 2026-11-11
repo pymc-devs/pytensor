@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pytensor.link.llvm.codegen.emit import (
-    c_array,
     Array,
     ProvidedOutput,
+    c_array,
     c_strides,
     cast,
     copy,
@@ -16,10 +16,10 @@ from pytensor.link.llvm.codegen.emit import (
     store,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
-from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.types import ir, is_float
+from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.basic import ARange, Alloc, AllocEmpty, Join, MakeVector
+from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
 from pytensor.tensor.shape import Reshape, Shape, Shape_i
 
 
@@ -33,7 +33,9 @@ def _scalar(b, a):
 @llvm_emit.register(Shape_i)
 def _(op, node, cg, inputs, outputs):
     out = outputs[0].allocate([])
-    store(cg.b, out.dtype, cast(cg.b, inputs[0].shape[op.i], "int64", out.dtype), out.data)
+    store(
+        cg.b, out.dtype, cast(cg.b, inputs[0].shape[op.i], "int64", out.dtype), out.data
+    )
 
 
 @llvm_emit.register(Shape)
@@ -90,7 +92,10 @@ def _(op, node, cg, inputs, outputs):
             continue
         if not (ln.const_int is not None and ln.const_int == on.const_int):
             one = b.eq(ln, b.i64(1))
-            cg.check(b.or_(b.eq(ln, on), one), "Alloc: the value can't be broadcast to the shape")
+            cg.check(
+                b.or_(b.eq(ln, on), one),
+                "Alloc: the value can't be broadcast to the shape",
+            )
             strides.append(b.select(one, b.i64(0), v.strides[a]))
         else:
             strides.append(v.strides[a])
@@ -115,7 +120,10 @@ def _(op, node, cg, inputs, outputs):
     out_dtype = node.outputs[0].type.dtype
     i64 = ir.i64
     if all(not is_float(d) for d in dts):
-        start, stop, step = (cast(b, v, d, "int64") for v, d in zip((start, stop, step), dts, strict=True))
+        start, stop, step = (
+            cast(b, v, d, "int64")
+            for v, d in zip((start, stop, step), dts, strict=True)
+        )
         cg.check(b.ne(step, b.i64(0)), "arange: step can't be zero")
         # length = ceil((stop - start) / step), at least 0
         span = b.sub(stop, start)
@@ -125,7 +133,10 @@ def _(op, node, cg, inputs, outputs):
         n = b.select(b.sgt(n, b.i64(0)), n, b.i64(0))
         start_v, step_v, dt = start, step, "int64"
     else:
-        start, stop, step = (cast(b, v, d, "float64") for v, d in zip((start, stop, step), dts, strict=True))
+        start, stop, step = (
+            cast(b, v, d, "float64")
+            for v, d in zip((start, stop, step), dts, strict=True)
+        )
         cg.check(b.fcmp(ir.FCmp.UNE, step, b.f64(0.0)), "arange: step can't be zero")
         q = b.intrinsic(ir.Intrinsic.Ceil, [b.fdiv(b.fsub(stop, start), step)])
         ok = b.fcmp(ir.FCmp.OLT, b.intrinsic(ir.Intrinsic.Fabs, [q]), b.f64(2.0**62))
@@ -215,7 +226,9 @@ def _copy_reshaped(cg, src: Array, dst: Array):
 
     def body(p):
         i = b.load(ir.i64, kptr)
-        store(b, dst.dtype, load(b, src.dtype, p[0]), b.gep(_mem(dst.dtype), dst.data, i))
+        store(
+            b, dst.dtype, load(b, src.dtype, p[0]), b.gep(_mem(dst.dtype), dst.data, i)
+        )
         b.store(b.add(i, b.i64(1)), kptr)
 
     kptr = b.alloca(ir.i64)
@@ -247,14 +260,27 @@ def _(op, node, cg, inputs, outputs):
                 )
     total = first.shape[axis]
     for x in inputs[1:]:
-        total = b.add(total, x.shape[axis], nsw=True) if total.const_int is None or x.shape[axis].const_int is None else b.i64(total.const_int + x.shape[axis].const_int)
+        total = (
+            b.add(total, x.shape[axis], nsw=True)
+            if total.const_int is None or x.shape[axis].const_int is None
+            else b.i64(total.const_int + x.shape[axis].const_int)
+        )
     shape = [total if a == axis else first.shape[a] for a in range(nd)]
     out = outputs[0].allocate(shape)
     offset = b.i64(0)
     for x in inputs:
-        dst = Array(out.dtype, b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)), x.shape, out.strides)
+        dst = Array(
+            out.dtype,
+            b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)),
+            x.shape,
+            out.strides,
+        )
         copy(cg, x, dst)
-        offset = b.add(offset, x.shape[axis]) if offset.const_int is None or x.shape[axis].const_int is None else b.i64(offset.const_int + x.shape[axis].const_int)
+        offset = (
+            b.add(offset, x.shape[axis])
+            if offset.const_int is None or x.shape[axis].const_int is None
+            else b.i64(offset.const_int + x.shape[axis].const_int)
+        )
 
 
 @llvm_layout.register(CheckAndRaise)

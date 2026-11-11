@@ -18,7 +18,15 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from pytensor.link.llvm.codegen.types import ir, memory_type, PtArray, PTARRAY_SIZE, ptarray_type, Slot, slot_type
+from pytensor.link.llvm.codegen.types import (
+    PTARRAY_SIZE,
+    PtArray,
+    Slot,
+    ir,
+    memory_type,
+    ptarray_type,
+    slot_type,
+)
 
 
 @dataclass
@@ -85,7 +93,9 @@ def linked(cg, index: int):
     return b.load(ir.ptr, b.gep_bytes(cg.config, b.i64(8 * index)))
 
 
-def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: list) -> None:
+def call_kernel(
+    cg, kernel: CalledKernel, index: int, inputs: list, outputs: list
+) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
     `outputs` (ProvidedOutput, SlotOutput, or None).
@@ -110,7 +120,9 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
         if a is None:
             continue
         if isinstance(a, Array):
-            args_of.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
+            args_of.append(
+                (a.data, storage(a.shape), storage(a.strides), len(a.shape), None)
+            )
         else:  # a scalar: a 0-d array
             p = b.alloca(memory_type(dtype))
             store(b, dtype, a, p)
@@ -120,12 +132,24 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
             continue
         if isinstance(o, ProvidedOutput):
             a = o.array
-            args_of.append((a.data, storage(a.shape), storage(a.strides), len(a.shape), None))
+            args_of.append(
+                (a.data, storage(a.shape), storage(a.strides), len(a.shape), None)
+            )
         elif isinstance(o, SlotOutput):
             st = slot_type(o.ndim)
-            args_of.append((b.null(), b.field_ptr(st, o.slot, Slot.LENGTHS), b.field_ptr(st, o.slot, Slot.STRIDES), o.ndim, o))
+            args_of.append(
+                (
+                    b.null(),
+                    b.field_ptr(st, o.slot, Slot.LENGTHS),
+                    b.field_ptr(st, o.slot, Slot.STRIDES),
+                    o.ndim,
+                    o,
+                )
+            )
         else:
-            raise NotImplementedError(f"{kernel.description}: a {type(o).__name__} output")
+            raise NotImplementedError(
+                f"{kernel.description}: a {type(o).__name__} output"
+            )
 
     args = b.alloca(ir.Type.array(pa, max(len(args_of), 1)))
     ptrs = []
@@ -148,8 +172,14 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
         if o is None:
             continue
         st = slot_type(o.ndim)
-        b.store(b.load(ir.ptr, b.field_ptr(pa, p, PtArray.DATA)), b.field_ptr(st, o.slot, Slot.DATA))
-        b.store(b.load(ir.ptr, b.field_ptr(pa, p, PtArray.OWNER)), b.field_ptr(st, o.slot, Slot.OWNER))
+        b.store(
+            b.load(ir.ptr, b.field_ptr(pa, p, PtArray.DATA)),
+            b.field_ptr(st, o.slot, Slot.DATA),
+        )
+        b.store(
+            b.load(ir.ptr, b.field_ptr(pa, p, PtArray.OWNER)),
+            b.field_ptr(st, o.slot, Slot.OWNER),
+        )
         o.done = True
     with b.if_(b.ne(rc, b.i32(0))):
         b.ret(rc)

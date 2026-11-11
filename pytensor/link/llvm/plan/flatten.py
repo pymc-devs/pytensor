@@ -7,7 +7,9 @@ from pytensor.link.llvm.plan.values import NodeItem, SubprogramItem, UnitItem, V
 from pytensor.scalar.basic import ScalarType
 
 
-def flatten(values: Values, nodes, scope, inside_unit=False, of_the_graph=False) -> list:
+def flatten(
+    values: Values, nodes, scope, inside_unit=False, of_the_graph=False
+) -> list:
     """The items running `nodes` (in order). `scope` maps variables to values and is
     filled with the nodes' outputs. OpFromGraphs are inlined, become units
     (`Execution.COMPILED`) or subprograms (`Execution.INTERPRETED`); inside a unit every

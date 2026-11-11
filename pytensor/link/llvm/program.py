@@ -81,7 +81,9 @@ class Options:
 
 
 #: the options of the program being planned (subprograms, e.g. a Scan kernel's loop body, use them)
-_current_options: contextvars.ContextVar = contextvars.ContextVar("llvm_options", default=None)
+_current_options: contextvars.ContextVar = contextvars.ContextVar(
+    "llvm_options", default=None
+)
 
 
 def current_options() -> Options:
@@ -201,7 +203,9 @@ class Planner:
                 # a compiled OpFromGraph we can't generate: run its nodes as tasks, and
                 # copy each result into the value the OpFromGraph's output is
                 inner_outs = {inner for inner, _ in it.outputs}
-                tasks += self.tasks_for(group_scalars(self.values, it.items, inner_outs))
+                tasks += self.tasks_for(
+                    group_scalars(self.values, it.items, inner_outs)
+                )
                 for inner, outer in it.outputs:
                     tasks.append(self.copy_task(inner, outer))
                     self.note_roots(tasks[-1])
@@ -212,10 +216,14 @@ class Planner:
 
     def note_roots(self, task) -> None:
         """Record whose memory the outputs of `task` may lie in."""
-        for k, mode, may_alias in zip(task.outputs, task.modes, task.aliases, strict=True):
+        for k, mode, may_alias in zip(
+            task.outputs, task.modes, task.aliases, strict=True
+        ):
             sources = [task.inputs[pos] for pos in may_alias]
             if mode is OutputMode.INPLACE or (mode is OutputMode.RETURNED and sources):
-                self.roots[k] = frozenset().union(*(self.roots_of(src) for src in sources))
+                self.roots[k] = frozenset().union(
+                    *(self.roots_of(src) for src in sources)
+                )
 
     def grant_inplace(self, it, folded) -> dict:
         """{output: input} for the outputs of a node that may overwrite an input: its
@@ -233,13 +241,23 @@ class Planner:
             mine = self.roots_of(vid)
             if any(root in values.shared for root in mine):
                 continue
-            others = [k2 for pos, k2 in enumerate(it.inputs) if pos != i and hasattr(values.types[k2], "ndim")]
+            others = [
+                k2
+                for pos, k2 in enumerate(it.inputs)
+                if pos != i and hasattr(values.types[k2], "ndim")
+            ]
             if any(mine & self.roots_of(k2) for k2 in others):
                 continue
             # a graph output in memory the planner provides is C-contiguous
             memory = self.memory_layouts.get(vid)
-            shape = tuple(None if s is None else int(s) for s in values.types[vid].shape)
-            if it.outputs[k] in self.graph_outputs and memory is not None and not memory.is_c(shape):
+            shape = tuple(
+                None if s is None else int(s) for s in values.types[vid].shape
+            )
+            if (
+                it.outputs[k] in self.graph_outputs
+                and memory is not None
+                and not memory.is_c(shape)
+            ):
                 continue
             granted[k] = i
         return granted
@@ -260,7 +278,9 @@ class Planner:
             if k in self.values.consts and isinstance(var.type, ScalarType)
         }
         if any(isinstance(repr_of(o.type), ScalarRepr) for o in node.outputs) or any(
-            isinstance(repr_of(types[k]), ScalarRepr) for pos, k in enumerate(it.inputs) if pos not in folded
+            isinstance(repr_of(types[k]), ScalarRepr)
+            for pos, k in enumerate(it.inputs)
+            if pos not in folded
         ):
             raise NotImplementedError("scalar node outside a unit")
         # A Rust kernel first: there is nothing to compile. Not for a Scan whose loop we
@@ -288,7 +308,9 @@ class Planner:
         the graph asks for; where the planner can't be sure nothing else sees the
         memory (as in `grant_inplace`), the kernel gets a copy to overwrite."""
         values = self.values
-        destroyed = {i for ins in getattr(it.node.op, "destroy_map", {}).values() for i in ins}
+        destroyed = {
+            i for ins in getattr(it.node.op, "destroy_map", {}).values() for i in ins
+        }
         inputs = list(it.inputs)
         for i in sorted(destroyed):
             vid = inputs[i]
@@ -308,17 +330,35 @@ class Planner:
         self.set_layouts(outs, [o.layout for o in declared])
         outs, modes, aliases = _present_outputs(declared, outs)
         # (values without data aren't arguments)
-        present = [k for k, var in zip(it.inputs, it.node.inputs, strict=True) if not is_absent(var.type)]
-        return Task(present, outs, modes, aliases, address=kernel.address, config=kernel.config,
-                    description=kernel.description, keepalive=kernel.keepalive)
+        present = [
+            k
+            for k, var in zip(it.inputs, it.node.inputs, strict=True)
+            if not is_absent(var.type)
+        ]
+        return Task(
+            present,
+            outs,
+            modes,
+            aliases,
+            address=kernel.address,
+            config=kernel.config,
+            description=kernel.description,
+            keepalive=kernel.keepalive,
+        )
 
     def generated_task(self, it, folded, in_layouts, inplace=None) -> Task:
         """A task whose kernel is generated for the node. Raises NotImplementedError if
         no emitter handles it. `inplace`: {output: input} for the outputs that
         overwrite an input (`grant_inplace`)."""
         node = it.node
-        body = self.resolver.scan_body(node, in_layouts) if self.resolver.generates_scan(node) else None
-        module = ir.Module(f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath)
+        body = (
+            self.resolver.scan_body(node, in_layouts)
+            if self.resolver.generates_scan(node)
+            else None
+        )
+        module = ir.Module(
+            f"node_{type(node.op).__name__}", fastmath=self.opts.fastmath
+        )
         links = LinkTable()
         nf = build_node_function(
             module,
@@ -343,29 +383,58 @@ class Planner:
         if inplace:
             self.stats.inplace.append(str(node.op))
         outs, modes, aliases = _present_outputs(declared, outs)
-        desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
-        return Task(inputs, outs, modes, aliases, description=desc, module=module,
-                    config=links.address, keepalive=links.keepalive)
+        desc = str(node.op) + _layouts_note(
+            [r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0]
+        )
+        return Task(
+            inputs,
+            outs,
+            modes,
+            aliases,
+            description=desc,
+            module=module,
+            config=links.address,
+            keepalive=links.keepalive,
+        )
 
     def unit_task(self, it: UnitItem) -> Task:
         """A task whose kernel is one function for all the items of a unit."""
         types = self.values.types
         out_types = [types[o] for _, o in it.outputs]
-        modes = [OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED for t in out_types]
+        modes = [
+            OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED
+            for t in out_types
+        ]
         # provided memory is C-contiguous, and so is what a unit allocates
         out_layouts = [Layout.c(t.ndim) for t in out_types]
-        in_layouts = unit_input_layouts([types[k] for k in it.inputs], [self.lay(k) for k in it.inputs])
+        in_layouts = unit_input_layouts(
+            [types[k] for k in it.inputs], [self.lay(k) for k in it.inputs]
+        )
         resolved = self.resolver.resolve_items(
-            it.items, {k: lay for k, lay in zip(it.inputs, in_layouts, strict=True) if lay is not None}
+            it.items,
+            {
+                k: lay
+                for k, lay in zip(it.inputs, in_layouts, strict=True)
+                if lay is not None
+            },
         )
         module = ir.Module(f"unit_{len(it.items)}", fastmath=self.opts.fastmath)
         nf = build_unit_function(
             module,
             "unit",
             [(k, types[k]) for k in it.inputs],
-            [(inner, t, mode) for (inner, _), t, mode in zip(it.outputs, out_types, modes, strict=True)],
+            [
+                (inner, t, mode)
+                for (inner, _), t, mode in zip(
+                    it.outputs, out_types, modes, strict=True
+                )
+            ],
             resolved,
-            {k: c for k, c in self.values.constants_of(it.items).items() if self.values.folded(k)},
+            {
+                k: c
+                for k, c in self.values.constants_of(it.items).items()
+                if self.values.folded(k)
+            },
             input_layouts=in_layouts,
             output_layouts=out_layouts,
             parallel=self.opts.parallel,
@@ -374,9 +443,19 @@ class Planner:
         outs = [o for _, o in it.outputs]
         self.set_layouts(outs, out_layouts)
         self.stats.n_units += 1
-        names = ", ".join(str(s.node.op) for s in it.items if isinstance(s, NodeItem))[:120]
-        return Task(it.inputs, outs, modes, [()] * len(modes), description=f"unit[{len(it.items)}]: {names}",
-                    module=module, config=nf.links.address, keepalive=nf.links.keepalive)
+        names = ", ".join(str(s.node.op) for s in it.items if isinstance(s, NodeItem))[
+            :120
+        ]
+        return Task(
+            it.inputs,
+            outs,
+            modes,
+            [()] * len(modes),
+            description=f"unit[{len(it.items)}]: {names}",
+            module=module,
+            config=nf.links.address,
+            keepalive=nf.links.keepalive,
+        )
 
     def copy_task(self, src, dst) -> Task:
         t = self.values.types[dst]
@@ -385,7 +464,16 @@ class Planner:
         self.memory_layouts[dst] = Layout.c(t.ndim)
         k = rust_kernel(node.op, node, [self.lay(src)])
         mode = rust_kernel_outputs(k, node, [self.lay(src)])[0].mode
-        return Task([src], [dst], [mode], [()], address=k.address, config=k.config, description="copy", keepalive=k)
+        return Task(
+            [src],
+            [dst],
+            [mode],
+            [()],
+            address=k.address,
+            config=k.config,
+            description="copy",
+            keepalive=k,
+        )
 
     # ------------------------------------------------------------ the program
 
@@ -421,14 +509,24 @@ class Planner:
             if hasattr(v.type, "ndim"):
                 lay = input_layouts[pos] if input_layouts is not None else None
                 if lay is None:
-                    lay = Layout.c(v.type.ndim) if self.opts.input_layout == "c" else Layout.dynamic(v.type.ndim)
+                    lay = (
+                        Layout.c(v.type.ndim)
+                        if self.opts.input_layout == "c"
+                        else Layout.dynamic(v.type.ndim)
+                    )
                 self.layouts[k] = lay
         self.input_contiguous = [
-            input_layouts is None and self.opts.input_layout == "c" and hasattr(v.type, "ndim") for v in fgraph.inputs
+            input_layouts is None
+            and self.opts.input_layout == "c"
+            and hasattr(v.type, "ndim")
+            for v in fgraph.inputs
         ]
 
         # 1. items
-        items = [NodeItem(scalar_from_tensor(values.types[t]()).owner, [t], [k]) for t, k in scalar_inputs]
+        items = [
+            NodeItem(scalar_from_tensor(values.types[t]()).owner, [t], [k])
+            for t, k in scalar_inputs
+        ]
         # (the order of a graph with a DestroyHandler respects what its ops destroy)
         self.allow_inplace = hasattr(fgraph, "destroyers")
         items += flatten(values, fgraph.toposort(), scope, of_the_graph=True)
@@ -445,11 +543,17 @@ class Planner:
         modules = []
         for s in tasks:
             if s.module is not None:
-                s.module.label = "ptl:" + " ".join(s.description.split())[:160]  # perf maps
+                s.module.label = (
+                    "ptl:" + " ".join(s.description.split())[:160]
+                )  # perf maps
                 modules.append(s.module)
         if modules:
-            compiled = ir.compile_many(modules, opt_level=self.opts.opt_level, cache=self.opts.cache)
-            for s, c in zip([s for s in tasks if s.module is not None], compiled, strict=True):
+            compiled = ir.compile_many(
+                modules, opt_level=self.opts.opt_level, cache=self.opts.cache
+            )
+            for s, c in zip(
+                [s for s in tasks if s.module is not None], compiled, strict=True
+            ):
                 s.address = c.address("kernel")
                 s.keepalive = (s.keepalive, c)  # (the links table, if any)
                 s.module = None
@@ -458,10 +562,16 @@ class Planner:
 
         # 4. and 5. memory, and the program
         # values without data (random generators) aren't inputs or outputs of the program
-        self.program_inputs = [pos for pos, v in enumerate(fgraph.inputs) if not is_absent(v.type)]
-        self.program_outputs = [pos for pos, v in enumerate(fgraph.outputs) if not is_absent(v.type)]
+        self.program_inputs = [
+            pos for pos, v in enumerate(fgraph.inputs) if not is_absent(v.type)
+        ]
+        self.program_outputs = [
+            pos for pos, v in enumerate(fgraph.outputs) if not is_absent(v.type)
+        ]
         modes = output_modes or [OutputMode.RETURNED] * len(out_ids)
-        self.input_contiguous = [self.input_contiguous[pos] for pos in self.program_inputs]
+        self.input_contiguous = [
+            self.input_contiguous[pos] for pos in self.program_inputs
+        ]
         prog = self.build(
             tasks,
             [in_ids[pos] for pos in self.program_inputs],
@@ -499,14 +609,18 @@ class Planner:
                 continue
             what = memory.kind[k]
             if what == "const":
-                ids[k] = pb.constant(np.asarray(consts[k], dtype=types[k].dtype))  # stored C-contiguous
+                ids[k] = pb.constant(
+                    np.asarray(consts[k], dtype=types[k].dtype)
+                )  # stored C-contiguous
             elif what == "provided":
                 if k in memory.first_out:
                     ids[k] = pb.fresh(dtype(k), shape(k))
                 else:
                     ids[k] = pb.arena(dtype(k), shape(k), memory.offsets[k], order(k))
             else:
-                ids[k] = pb.returned(dtype(k), shape(k), [ids[a] for a in memory.aliases[k]])
+                ids[k] = pb.returned(
+                    dtype(k), shape(k), [ids[a] for a in memory.aliases[k]]
+                )
         for k, source in memory.same.items():
             ids[k] = ids[source]  # (overwritten in place: the same value)
         release = memory.release_points(len(tasks))
@@ -521,7 +635,12 @@ class Planner:
                 s.keepalive,
             )
         pb.set_arena_bytes(memory.arena_bytes)
-        modes = [interp.OutputMode.Provided if m is OutputMode.PROVIDED else interp.OutputMode.Allocated for m in output_modes]
+        modes = [
+            interp.OutputMode.Provided
+            if m is OutputMode.PROVIDED
+            else interp.OutputMode.Allocated
+            for m in output_modes
+        ]
         return pb.build([ids[k] for k in out_ids], modes)
 
 
@@ -529,7 +648,11 @@ def _present_outputs(declared, vids):
     """(vids, modes, aliases) of the outputs that have a value. Random generators have
     none: they aren't task outputs."""
     keep = [j for j, o in enumerate(declared) if o.mode is not OutputMode.ABSENT]
-    return [vids[j] for j in keep], [declared[j].mode for j in keep], [declared[j].aliases for j in keep]
+    return (
+        [vids[j] for j in keep],
+        [declared[j].mode for j in keep],
+        [declared[j].aliases for j in keep],
+    )
 
 
 def _layouts_note(reprs):
@@ -541,7 +664,11 @@ def _layouts_note(reprs):
 
     if not reprs or all(unknown(r) for r in reprs):
         return ""
-    return " {" + ", ".join("?" if unknown(r) else r.layout.describe(r.shape) for r in reprs) + "}"
+    return (
+        " {"
+        + ", ".join("?" if unknown(r) else r.layout.describe(r.shape) for r in reprs)
+        + "}"
+    )
 
 
 def _copy_node(t):
@@ -559,10 +686,16 @@ def build_program(fgraph, options: Options | None = None):
     planner = Planner(options or Options())
     prog = planner.plan(fgraph)
     n_in, n_out = len(fgraph.inputs), len(fgraph.outputs)
-    if planner.program_inputs == list(range(n_in)) and planner.program_outputs == list(range(n_out)):
+    if planner.program_inputs == list(range(n_in)) and planner.program_outputs == list(
+        range(n_out)
+    ):
         return prog, planner.stats
     ins, outs = planner.program_inputs, planner.program_outputs
-    sources = {pos: _generator_source(fgraph, o) for pos, o in enumerate(fgraph.outputs) if pos not in outs}
+    sources = {
+        pos: _generator_source(fgraph, o)
+        for pos, o in enumerate(fgraph.outputs)
+        if pos not in outs
+    }
 
     def call(*args):
         res = prog(*[args[k] for k in ins])
@@ -584,7 +717,9 @@ def _generator_source(fgraph, var):
     while var.owner is not None and var not in seen:
         seen.add(var)
         node = var.owner
-        rng_inputs = [i for i in node.inputs if is_absent(i.type) and not _is_none_type(i.type)]
+        rng_inputs = [
+            i for i in node.inputs if is_absent(i.type) and not _is_none_type(i.type)
+        ]
         if not rng_inputs:
             return None
         var = rng_inputs[0]

@@ -86,7 +86,9 @@ class Layout:
             if _is_one(shape[a]):
                 strides[a] = PACKED
         # packed axes of nonzero length, innermost first
-        block = [a for a in reversed(order) if strides[a] is PACKED and not _is_one(shape[a])]
+        block = [
+            a for a in reversed(order) if strides[a] is PACKED and not _is_one(shape[a])
+        ]
         ones = [a for a in range(nd) if _is_one(shape[a])]
         rest = sorted(a for a in range(nd) if a not in block and a not in ones)
         order = [*rest, *reversed(block)]
@@ -104,7 +106,11 @@ class Layout:
 
     def packed_block(self, shape) -> list[int]:
         """The packed axes (not of static length 1), innermost first."""
-        return [a for a in reversed(self.order) if self.strides[a] is PACKED and not _is_one(shape[a])]
+        return [
+            a
+            for a in reversed(self.order)
+            if self.strides[a] is PACKED and not _is_one(shape[a])
+        ]
 
     def fully_packed(self, shape) -> bool:
         """Contiguous in some axis order (`order`)?"""
@@ -164,7 +170,11 @@ class Layout:
             if shape[a] != 1:
                 if s is PACKED and strides[a] != acc:
                     return False
-                if isinstance(s, int) and not isinstance(s, StrideKind) and strides[a] != s:
+                if (
+                    isinstance(s, int)
+                    and not isinstance(s, StrideKind)
+                    and strides[a] != s
+                ):
                     return False
             if s is PACKED:
                 acc *= shape[a]
@@ -180,7 +190,11 @@ class Layout:
             return False
         for a in range(self.ndim):
             s = other.strides[a]
-            if isinstance(s, int) and not isinstance(s, StrideKind) and not _is_one(shape[a]):
+            if (
+                isinstance(s, int)
+                and not isinstance(s, StrideKind)
+                and not _is_one(shape[a])
+            ):
                 if self.static_stride(a, shape, itemsize) != s:
                     return False
         return True
@@ -200,19 +214,32 @@ class Layout:
             if a in common or _is_one(shape[a]):
                 strides.append(PACKED)
                 continue
-            s1, s2 = self.static_stride(a, shape, itemsize), other.static_stride(a, shape, itemsize)
+            s1, s2 = (
+                self.static_stride(a, shape, itemsize),
+                other.static_stride(a, shape, itemsize),
+            )
             strides.append(s1 if s1 is not None and s1 == s2 else DYNAMIC)
         rest = [a for a in range(self.ndim) if a not in common]
         return Layout.make(shape, (*rest, *reversed(common)), strides)
 
     def to_spec(self):
         """`(order, strides)` with strides "P", "?" or bytes: how Rust exchanges layouts."""
-        return (list(self.order), ["P" if s is PACKED else "?" if s is DYNAMIC else int(s) for s in self.strides])
+        return (
+            list(self.order),
+            [
+                "P" if s is PACKED else "?" if s is DYNAMIC else int(s)
+                for s in self.strides
+            ],
+        )
 
     @staticmethod
     def from_spec(spec, shape) -> Layout:
         order, strides = spec
-        return Layout.make(shape, order, [PACKED if s == "P" else DYNAMIC if s == "?" else int(s) for s in strides])
+        return Layout.make(
+            shape,
+            order,
+            [PACKED if s == "P" else DYNAMIC if s == "?" else int(s) for s in strides],
+        )
 
     def describe(self, shape) -> str:
         """Like str(), with static length-1 axes shown as `1`."""
@@ -225,19 +252,29 @@ class Layout:
             if _is_one(shape[a]):
                 parts.append("1")
             else:
-                parts.append(f"P{block.index(a)}" if s is PACKED else ("?" if s is DYNAMIC else str(s)))
+                parts.append(
+                    f"P{block.index(a)}"
+                    if s is PACKED
+                    else ("?" if s is DYNAMIC else str(s))
+                )
         return "[" + ", ".join(parts) + "]"
 
     def __str__(self):
         if self.ndim == 0:
             return "C"
-        if all(s is PACKED for s in self.strides) and list(self.order) == sorted(self.order):
+        if all(s is PACKED for s in self.strides) and list(self.order) == sorted(
+            self.order
+        ):
             return "C"
         block = [a for a in reversed(self.order) if self.strides[a] is PACKED]
         parts = []
         for a in range(self.ndim):
             s = self.strides[a]
-            parts.append(f"P{block.index(a)}" if s is PACKED else ("?" if s is DYNAMIC else str(s)))
+            parts.append(
+                f"P{block.index(a)}"
+                if s is PACKED
+                else ("?" if s is DYNAMIC else str(s))
+            )
         return "[" + ", ".join(parts) + "]"
 
     __repr__ = __str__
@@ -297,7 +334,9 @@ def dimshuffle_layout(op, node, x: Layout) -> Layout:
         else:
             out_of[int(o)] = j
             strides.append(x.strides[int(o)])
-    order = [j for j, o in enumerate(op.new_order) if o == "x"] + [out_of[a] for a in x.order if a in out_of]
+    order = [j for j, o in enumerate(op.new_order) if o == "x"] + [
+        out_of[a] for a in x.order if a in out_of
+    ]
     return Layout.make(shape_of(node.outputs[0]), order, strides)
 
 
@@ -354,7 +393,11 @@ def split_layouts(op, node, x: Layout) -> list[Layout]:
         if os[a] is not None and os[a] == shape[a]:
             outs.append(Layout.make(os, x.order, x.strides))
         else:
-            outs.append(Layout.make(os, x.order, demote(x, outer_in_block(x, a, shape), shape, isz)))
+            outs.append(
+                Layout.make(
+                    os, x.order, demote(x, outer_in_block(x, a, shape), shape, isz)
+                )
+            )
     return outs
 
 
@@ -387,26 +430,34 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
 
     The planner is authoritative (it knows which tasks fall back to numba, for one);
     this is its prediction for graph rewrites and inspection."""
-    from pytensor.compile.builders import OpFromGraph, Execution
+    from pytensor.compile.builders import Execution, OpFromGraph
     from pytensor.link.llvm.codegen.function import node_outputs
 
     op = node.op
     try:
         if isinstance(op, OpFromGraph):
             if getattr(op, "execution", None) is Execution.COMPILED:
-                return [Layout.c(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs]
+                return [
+                    Layout.c(o.type.ndim) if hasattr(o.type, "ndim") else None
+                    for o in node.outputs
+                ]
             inner = infer_layouts(op.fgraph, in_layouts)
             outs = [inner[o] for o in op.fgraph.outputs]
             if getattr(op, "execution", None) is Execution.INTERPRETED:
                 # an allocated output of a subprogram: its value or a C copy
                 outs = [
-                    None if lay is None else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))
+                    None
+                    if lay is None
+                    else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))
                     for lay, o in zip(outs, node.outputs, strict=True)
                 ]
             return outs
         return [o.layout for o in node_outputs(node, in_layouts)]
     except NotImplementedError:
-        return [Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs]
+        return [
+            Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None
+            for o in node.outputs
+        ]
 
 
 def _default_layout(var, inputs_c=False):
@@ -492,7 +543,9 @@ class LayoutFeature(_feature_base()):
                 continue
             node = v.owner
             if node is None:
-                self.cache[v] = _default_layout(v, self.inputs_c and v in self.fgraph.inputs)
+                self.cache[v] = _default_layout(
+                    v, self.inputs_c and v in self.fgraph.inputs
+                )
                 stack.pop()
                 continue
             missing = [i for i in node.inputs if i not in self.cache]
@@ -511,11 +564,11 @@ __all__ = [
     "PACKED",
     "Layout",
     "LayoutFeature",
-    "infer_layouts",
     "common_order",
     "dimshuffle_layout",
+    "infer_layouts",
+    "predict_layouts",
     "same_layout",
     "split_layouts",
     "subtensor_layout",
-    "predict_layouts",
 ]

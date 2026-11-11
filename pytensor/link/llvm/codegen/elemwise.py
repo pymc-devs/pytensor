@@ -6,26 +6,26 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm.codegen.emit import (
-    advance,
-    loop_order,
-    loop_view,
     Array,
     _strided,
+    advance,
     cast,
     constant,
     copy,
     for_each,
     is_contiguous,
     load,
+    loop_order,
+    loop_view,
     memory_type,
     size,
     store,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
-from pytensor.link.llvm.layout import PACKED, Layout, common_order
-from pytensor.link.llvm.work import scalar_cost
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
+from pytensor.link.llvm.layout import PACKED, Layout, common_order
+from pytensor.link.llvm.work import scalar_cost
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 
 
@@ -43,7 +43,9 @@ def broadcast_shape(cg, node, inputs):
             ln = x.shape[a]
             if length is None:
                 length = ln
-            elif not (length.const_int is not None and length.const_int == ln.const_int):
+            elif not (
+                length.const_int is not None and length.const_int == ln.const_int
+            ):
                 cg.check(
                     b.eq(length, ln),
                     f"Elemwise: shape mismatch: input {k} has a different length on axis {a}",
@@ -61,7 +63,9 @@ def _(op, node, in_layouts):
     for o in node.outputs:
         shape = tuple(None if s is None else int(s) for s in o.type.shape)
         order = common_order(in_layouts, shape)
-        layouts.append(None if order is None else Layout.make(shape, order, [PACKED] * len(shape)))
+        layouts.append(
+            None if order is None else Layout.make(shape, order, [PACKED] * len(shape))
+        )
     return layouts
 
 
@@ -93,7 +97,10 @@ def _(op, node, cg, inputs, outputs):
     operands += outs
 
     def body(ptrs):
-        args = [(fixed[k] if slot[k] is None else load(b, d, ptrs[slot[k]]), d) for k, d in enumerate(in_dtypes)]
+        args = [
+            (fixed[k] if slot[k] is None else load(b, d, ptrs[slot[k]]), d)
+            for k, d in enumerate(in_dtypes)
+        ]
         res = emit_scalar(op.scalar_op, b, args, out_dtypes)
         for k, (v, d) in enumerate(zip(res, out_dtypes, strict=True)):
             store(b, d, v, ptrs[n_in + k])
@@ -104,7 +111,10 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(ps.ScalarOp)
 def _(op, node, cg, inputs, outputs):
     """A scalar op applied to ScalarType values."""
-    args = [(v, check_dtype(var.type.dtype)) for v, var in zip(inputs, node.inputs, strict=True)]
+    args = [
+        (v, check_dtype(var.type.dtype))
+        for v, var in zip(inputs, node.inputs, strict=True)
+    ]
     res = emit_scalar(op, cg.b, args, [check_dtype(o.type.dtype) for o in node.outputs])
     for out, v in zip(outputs, res, strict=True):
         out.set(cg.b, v)
@@ -123,7 +133,9 @@ def reduce_identity(op, acc_dtype):
 def identity_value(scalar_op, ident, acc_dtype):
     """The start value of a reduction, representable in `acc_dtype`."""
     if ident is None:
-        raise NotImplementedError(f"LLVM backend: reduction with {scalar_op} has no identity")
+        raise NotImplementedError(
+            f"LLVM backend: reduction with {scalar_op} has no identity"
+        )
     ident = np.asarray(ident).item()
     dt = np.dtype(acc_dtype)
     if dt.kind in "iu" and not np.isfinite(ident):
@@ -145,14 +157,19 @@ def _(op, node, cg, inputs, outputs):
     init = constant(b, acc, reduce_identity(op, acc))
 
     def combine(a, v):
-        return emit_scalar(op.scalar_op, b, [(a, acc), (cast(b, v, x.dtype, acc), acc)], [acc])[0]
+        return emit_scalar(
+            op.scalar_op, b, [(a, acc), (cast(b, v, x.dtype, acc), acc)], [acc]
+        )[0]
 
     out_shape = [x.shape[a] for a in range(nd) if not reduced[a]]
     if isinstance(op.scalar_op, NO_EMPTY_REDUCTION):
         # like numpy: maximum/minimum have no identity for empty reductions
         empty = b.eq(size(b, [x.shape[a] for a in axes]), b.i64(0))
         some_out = b.ne(size(b, out_shape), b.i64(0))
-        cg.check(b.xor(b.and_(empty, some_out), b.const_bool(True)), "zero-size array to reduction operation which has no identity")
+        cg.check(
+            b.xor(b.and_(empty, some_out), b.const_bool(True)),
+            "zero-size array to reduction operation which has no identity",
+        )
     res = out.allocate(out_shape)
 
     if not out_shape:
@@ -203,10 +220,18 @@ def reduce_row(b, x: Array, axis, row, init, combine):
     et = memory_type(x.dtype)
 
     def unit():
-        return b.fold(n, [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep(et, row, i)))])
+        return b.fold(
+            n, [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep(et, row, i)))]
+        )
 
     def strided():
-        return b.fold(n, [init], lambda i, a: [combine(a, load(b, x.dtype, advance(b, row, i, st, x.dtype)))])
+        return b.fold(
+            n,
+            [init],
+            lambda i, a: [
+                combine(a, load(b, x.dtype, advance(b, row, i, st, x.dtype)))
+            ],
+        )
 
     isz = b.i64(np.dtype(x.dtype).itemsize)
     if st.const_int is not None:
@@ -220,19 +245,35 @@ def reduce_all(b, x: Array, init, combine):
     chosen at run time, when the layout doesn't settle it)."""
 
     def flat():
-        (r,) = b.fold(size(b, x.shape), [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep(memory_type(x.dtype), x.data, i)))])
+        (r,) = b.fold(
+            size(b, x.shape),
+            [init],
+            lambda i, a: [
+                combine(a, load(b, x.dtype, b.gep(memory_type(x.dtype), x.data, i)))
+            ],
+        )
         return [r]
 
     def nest():
         def level(axis, p, a):
             if axis == x.ndim:
                 return combine(a, load(b, x.dtype, p))
-            (r,) = b.fold(x.shape[axis], [a], lambda i, acc: [level(axis + 1, advance(b, p, i, x.strides[axis], x.dtype), acc)])
+            (r,) = b.fold(
+                x.shape[axis],
+                [a],
+                lambda i, acc: [
+                    level(axis + 1, advance(b, p, i, x.strides[axis], x.dtype), acc)
+                ],
+            )
             return r
 
         return [level(0, x.data, init)]
 
-    c = b.const_bool(True) if x.layout.fully_packed(x.static_shape()) else is_contiguous(b, x.shape, x)
+    c = (
+        b.const_bool(True)
+        if x.layout.fully_packed(x.static_shape())
+        else is_contiguous(b, x.shape, x)
+    )
     if c.const_int == 1:
         return flat()[0]
     if c.const_int == 0:

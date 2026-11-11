@@ -28,7 +28,16 @@ class _IR:
 ir = _IR()
 
 
-SUPPORTED_DTYPES = ("float64", "float32", "int64", "int32", "int16", "int8", "uint8", "bool")
+SUPPORTED_DTYPES = (
+    "float64",
+    "float32",
+    "int64",
+    "int32",
+    "int16",
+    "int8",
+    "uint8",
+    "bool",
+)
 
 
 def check_dtype(dtype: str) -> str:
@@ -91,7 +100,13 @@ class TensorRepr:
 
     def __post_init__(self):
         if self.layout is None:
-            object.__setattr__(self, "layout", Layout.make(self.shape, range(len(self.shape)), (DYNAMIC,) * len(self.shape)))
+            object.__setattr__(
+                self,
+                "layout",
+                Layout.make(
+                    self.shape, range(len(self.shape)), (DYNAMIC,) * len(self.shape)
+                ),
+            )
 
     @property
     def ndim(self) -> int:
@@ -128,7 +143,9 @@ class TensorRepr:
 def _tensor_ir_type(ndim, n_lengths, n_strides):
     if ndim == 0:
         return ir.ptr
-    return ir.Type.struct_([ir.ptr, ir.Type.array(ir.i64, n_lengths), ir.Type.array(ir.i64, n_strides)])
+    return ir.Type.struct_(
+        [ir.ptr, ir.Type.array(ir.i64, n_lengths), ir.Type.array(ir.i64, n_strides)]
+    )
 
 
 class Slot:
@@ -140,7 +157,9 @@ class Slot:
 @cache
 def slot_type(ndim):
     """The output slot a kernel fills: `{ptr data, [n x i64] lengths, [n x i64] strides, ptr owner}`."""
-    return ir.Type.struct_([ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr])
+    return ir.Type.struct_(
+        [ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr]
+    )
 
 
 @dataclass(frozen=True)

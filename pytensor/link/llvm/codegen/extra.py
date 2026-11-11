@@ -6,8 +6,8 @@ import operator
 
 from pytensor.link.llvm.codegen.emit import Array, cast, constant, load, set_output
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
-from pytensor.link.llvm.layout import split_layouts
 from pytensor.link.llvm.codegen.num import Num
+from pytensor.link.llvm.layout import split_layouts
 from pytensor.tensor.basic import ExtractDiag, Split
 from pytensor.tensor.extra_ops import CumOp
 
@@ -53,10 +53,16 @@ def _(op, node, cg, inputs, outputs):
     l2 = b.sub(n2, b.i64(max(0, off)))
     length = b.select(b.slt(l1, l2), l1, l2)
     length = b.select(b.sgt(length, zero), length, zero)
-    start = b.mul(b.i64(off), x.strides[a2], nsw=True) if off >= 0 else b.mul(b.i64(-off), x.strides[a1], nsw=True)
+    start = (
+        b.mul(b.i64(off), x.strides[a2], nsw=True)
+        if off >= 0
+        else b.mul(b.i64(-off), x.strides[a1], nsw=True)
+    )
     start = b.select(b.sgt(length, zero), start, zero)
     shape = [x.shape[a] for a in range(x.ndim) if a not in (a1, a2)] + [length]
-    strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [b.add(x.strides[a1], x.strides[a2])]
+    strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [
+        b.add(x.strides[a1], x.strides[a2])
+    ]
     set_output(cg, outputs[0], x.view(b.gep_bytes(x.data, start), shape, strides))
 
 
@@ -78,15 +84,30 @@ def _(op, node, cg, inputs, outputs):
         cg.check(b.sge(n, b.i64(0)), "Split: negative split size")
         static = node.outputs[k].type.shape[axis]
         if static is not None:
-            cg.check(b.eq(n, b.i64(static)), "Split: split size differs from the static shape")
+            cg.check(
+                b.eq(n, b.i64(static)),
+                "Split: split size differs from the static shape",
+            )
             n = b.i64(static)
         parts.append((offset, n))
         offset = b.add(offset, n)
-    cg.check(b.eq(offset, x.shape[axis]), "Split: the split sizes don't add up to the length of the axis")
+    cg.check(
+        b.eq(offset, x.shape[axis]),
+        "Split: the split sizes don't add up to the length of the axis",
+    )
     layouts = split_layouts(op, node, x.layout)
     for out, (start, n), lay in zip(outputs, parts, layouts, strict=True):
         shape = list(x.shape)
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
         start = b.select(b.sgt(n, b.i64(0)), start, b.i64(0))
-        set_output(cg, out, x.view(b.gep_bytes(x.data, b.mul(start, x.strides[axis], nsw=True)), shape, list(x.strides), lay))
+        set_output(
+            cg,
+            out,
+            x.view(
+                b.gep_bytes(x.data, b.mul(start, x.strides[axis], nsw=True)),
+                shape,
+                list(x.strides),
+                lay,
+            ),
+        )

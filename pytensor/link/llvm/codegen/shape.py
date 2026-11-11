@@ -35,7 +35,9 @@ def _(op, node, cg, inputs, outputs):
             shape.append(x.shape[o])
             strides.append(x.strides[o])
     # the view's layout follows from the input's (the same rule `llvm_layout` uses)
-    outputs[0].set_view(x.view(x.data, shape, strides, dimshuffle_layout(op, node, x.layout)))
+    outputs[0].set_view(
+        x.view(x.data, shape, strides, dimshuffle_layout(op, node, x.layout))
+    )
 
 
 @llvm_emit.register(ViewOp)
@@ -51,7 +53,12 @@ def _(op, node, cg, inputs, outputs):
     for a, (n, var) in enumerate(zip(inputs[1:], node.inputs[1:], strict=True)):
         if n is None:
             continue
-        want = cast(b, load(b, n.dtype, n.data) if isinstance(n, Array) else n, var.type.dtype, "int64")
+        want = cast(
+            b,
+            load(b, n.dtype, n.data) if isinstance(n, Array) else n,
+            var.type.dtype,
+            "int64",
+        )
         cg.check(b.eq(x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
     outputs[0].set_view(x)
 
@@ -72,4 +79,3 @@ def _(op, node, cg, inputs, outputs):
 def _(op, node, cg, inputs, outputs):
     out = outputs[0].allocate([])
     store(cg.b, out.dtype, inputs[0], out.data)
-

@@ -15,10 +15,16 @@ from functools import reduce, singledispatch
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as psm
 from pytensor.graph.basic import Constant
-from pytensor.scalar.loop import ScalarLoop
 from pytensor.link.llvm.codegen.emit import cast, constant
 from pytensor.link.llvm.codegen.num import Num
-from pytensor.link.llvm.codegen.types import check_dtype, ir, is_float, is_signed, value_type
+from pytensor.link.llvm.codegen.types import (
+    check_dtype,
+    ir,
+    is_float,
+    is_signed,
+    value_type,
+)
+from pytensor.scalar.loop import ScalarLoop
 
 
 @singledispatch
@@ -40,7 +46,9 @@ def _single(fn):
         r = fn(b, args, out)
         if isinstance(r, Num):
             if r.dtype != out:
-                raise AssertionError(f"scalar op {op}: emitted {r.dtype} for an output of {out}")
+                raise AssertionError(
+                    f"scalar op {op}: emitted {r.dtype} for an output of {out}"
+                )
             r = r.value
         return [r]
 
@@ -136,7 +144,12 @@ def int_pow(b, x, e, dtype):
     def step(_i, acc, base, k):
         odd = b.ne(b.and_(k, one), zero)
         k2 = b.lshr(k, one)
-        return [b.select(odd, b.mul(acc, base), acc), b.mul(base, base), k2, b.eq(k2, zero)]
+        return [
+            b.select(odd, b.mul(acc, base), acc),
+            b.mul(base, base),
+            k2,
+            b.eq(k2, zero),
+        ]
 
     acc, _, _, _ = b.fold(constant(b, "int64", bits), [one, x, e], step, until=True)
     if not is_signed(dtype):
@@ -237,7 +250,9 @@ for _cls, _name in [
 def _libm_op(name, arity=1):
     def fn(b, args, out):
         require_float(out, name)
-        return b.libm(getattr(ir.Libm, name), [conv(b, args, k, out) for k in range(arity)])
+        return b.libm(
+            getattr(ir.Libm, name), [conv(b, args, k, out) for k in range(arity)]
+        )
 
     return fn
 
@@ -295,7 +310,9 @@ def _(b, args, out):
     def lt(c):
         return b.fcmp(ir.FCmp.OLT, x, constant(b, out, c))
 
-    return b.select(lt(-37.0), ex, b.select(lt(18.0), log1pex, b.select(lt(33.3), x_plus, x)))
+    return b.select(
+        lt(-37.0), ex, b.select(lt(18.0), log1pex, b.select(lt(33.3), x_plus, x))
+    )
 
 
 @register(psm.Log1mexp)
@@ -304,7 +321,9 @@ def _(b, args, out):
     x = conv(b, args, 0, out)
     small = b.libm(ir.Libm.Log1p, [b.fneg(ir_intrinsic(b, "Exp", x))])
     large = ir_intrinsic(b, "Log", b.fneg(b.libm(ir.Libm.Expm1, [x])))
-    return b.select(b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))), small, large)
+    return b.select(
+        b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))), small, large
+    )
 
 
 # ------------------------------------------------------------------ comparisons & logic
@@ -389,11 +408,18 @@ def emit_inner(b, fg, args):
             return vals[var]
         if isinstance(var, Constant):
             d = check_dtype(var.type.dtype)
-            return constant(b, d, var.data.item() if hasattr(var.data, "item") else var.data), d
+            return constant(
+                b, d, var.data.item() if hasattr(var.data, "item") else var.data
+            ), d
         raise NotImplementedError(f"LLVM backend: unresolved scalar variable {var}")
 
     for node in fg.toposort():
-        outs = emit_scalar(node.op, b, [get(i) for i in node.inputs], [o.type.dtype for o in node.outputs])
+        outs = emit_scalar(
+            node.op,
+            b,
+            [get(i) for i in node.inputs],
+            [o.type.dtype for o in node.outputs],
+        )
         for o, v in zip(node.outputs, outs, strict=True):
             vals[o] = (v, o.type.dtype)
     return [get(o) for o in fg.outputs]
@@ -413,12 +439,18 @@ def _(op, b, args, out_dtypes):
     fg = op.fgraph
     n_carry = len(fg.outputs) - (1 if op.is_while else 0)
     carry_dtypes = [i.type.dtype for i in fg.inputs[:n_carry]]
-    init = [cast(b, v, d, cd) for (v, d), cd in zip(rest[:n_carry], carry_dtypes, strict=True)]
+    init = [
+        cast(b, v, d, cd)
+        for (v, d), cd in zip(rest[:n_carry], carry_dtypes, strict=True)
+    ]
     fixed = rest[n_carry:]
 
     def body(_i, *carry):
         outs = emit_inner(b, fg, [*zip(carry, carry_dtypes), *fixed])
-        new = [cast(b, v, d, cd) for (v, d), cd in zip(outs[:n_carry], carry_dtypes, strict=True)]
+        new = [
+            cast(b, v, d, cd)
+            for (v, d), cd in zip(outs[:n_carry], carry_dtypes, strict=True)
+        ]
         if op.is_while:
             new.append(cast(b, *outs[n_carry], "bool"))
         return new

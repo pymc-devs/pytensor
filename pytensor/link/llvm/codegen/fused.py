@@ -14,26 +14,26 @@ from dataclasses import dataclass
 
 from pytensor.link.llvm.codegen.elemwise import identity_value
 from pytensor.link.llvm.codegen.emit import (
-    advance,
     Array,
     ProvidedOutput,
     ScalarOutput,
+    advance,
     cast,
     constant,
     copy,
     for_each,
     is_contiguous,
+    load,
     loop_order,
     loop_view,
-    load,
     memory_type,
     size,
     store,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.codegen.types import check_dtype
+from pytensor.link.llvm.layout import Layout
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor
@@ -78,7 +78,9 @@ def fused_spec(op, node):
     def check_index(p):
         t = node.inputs[p].type
         if t.ndim != 1 or not t.dtype.startswith(("int", "uint")):
-            raise NotImplementedError("FusedElemwise: only 1-d integer index arrays are fused")
+            raise NotImplementedError(
+                "FusedElemwise: only 1-d integer index arrays are fused"
+            )
 
     reads = [None] * n_elem
     for k, entry in enumerate(op.indexed_inputs):
@@ -88,14 +90,22 @@ def fused_spec(op, node):
         check_index(n_elem + k)
         for s in sources:
             if reads[s] is not None:
-                raise NotImplementedError("FusedElemwise: a source read through several indices")
+                raise NotImplementedError(
+                    "FusedElemwise: a source read through several indices"
+                )
             reads[s] = Read(n_elem + k, int(axis))
     for j, e_in in enumerate(E.inputs):
         src = inner.inputs[j]
         if reads[j] is not None:
-            if not (e_in.owner and isinstance(e_in.owner.op, AdvancedSubtensor) and e_in.owner.inputs[0] is src):
+            if not (
+                e_in.owner
+                and isinstance(e_in.owner.op, AdvancedSubtensor)
+                and e_in.owner.inputs[0] is src
+            ):
                 raise NotImplementedError("FusedElemwise: unexpected indexed read")
-        elif e_in is not src and not (isinstance(node.inputs[j].type, ScalarType) and all(e_in.type.broadcastable)):
+        elif e_in is not src and not (
+            isinstance(node.inputs[j].type, ScalarType) and all(e_in.type.broadcastable)
+        ):
             raise NotImplementedError("FusedElemwise: transformed Elemwise input")
     outs = [None] * len(node.outputs)
     for i, spec in enumerate(op.reduced_outputs):
@@ -104,7 +114,9 @@ def fused_spec(op, node):
         scalar_op, axes, identity, acc = spec
         if node.outputs[i].type.dtype != E.outputs[i].type.dtype:
             raise NotImplementedError("FusedElemwise: reduction changes the dtype")
-        outs[i] = Reduce(scalar_op, tuple(int(a) for a in axes), identity, check_dtype(acc))
+        outs[i] = Reduce(
+            scalar_op, tuple(int(a) for a in axes), identity, check_dtype(acc)
+        )
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
@@ -112,11 +124,20 @@ def fused_spec(op, node):
         check_index(n_elem + k)
         for s in sources:
             if outs[s] is not None:
-                raise NotImplementedError("FusedElemwise: an output written through several indices")
-            outs[s] = Write(n_elem + k, int(axis), n_elem + n_idx + written.index(int(s)), mode == "set")
+                raise NotImplementedError(
+                    "FusedElemwise: an output written through several indices"
+                )
+            outs[s] = Write(
+                n_elem + k,
+                int(axis),
+                n_elem + n_idx + written.index(int(s)),
+                mode == "set",
+            )
     for i, o in enumerate(node.outputs):
         if o.type.dtype != E.outputs[i].type.dtype:
-            raise NotImplementedError("FusedElemwise: output dtype differs from the loop's")
+            raise NotImplementedError(
+                "FusedElemwise: output dtype differs from the loop's"
+            )
     return E, n_elem, reads, outs
 
 
@@ -153,11 +174,17 @@ def emit_fused(op, node, cg, inputs, outputs):
         if isinstance(spec, Write):
             t = inputs[spec.target]
             for a in range(nd):
-                lengths[a].append(inputs[spec.index].shape[0] if a == spec.axis else t.shape[a])
+                lengths[a].append(
+                    inputs[spec.index].shape[0] if a == spec.axis else t.shape[a]
+                )
     shape = []
     for a in range(nd):
         cand = lengths[a]
-        n = b.i64(static[a]) if static[a] is not None else (cand[0] if cand else b.i64(1))
+        n = (
+            b.i64(static[a])
+            if static[a] is not None
+            else (cand[0] if cand else b.i64(1))
+        )
         for c in cand:
             if not (c.const_int is not None and c.const_int == n.const_int):
                 cg.check(b.eq(c, n), f"FusedElemwise: shape mismatch on axis {a}")
@@ -177,8 +204,15 @@ def emit_fused(op, node, cg, inputs, outputs):
             oshape = [shape[a] for a in range(nd) if a not in spec.axes]
             res = out.allocate(oshape)
             acc = res if spec.acc == res.dtype else cg.temporary(spec.acc, oshape)
-            init = constant(b, spec.acc, identity_value(spec.scalar_op, spec.identity, spec.acc))
-            for_each(b, oshape, [acc], lambda p, init=init, spec=spec: store(b, spec.acc, init, p[0]))
+            init = constant(
+                b, spec.acc, identity_value(spec.scalar_op, spec.identity, spec.acc)
+            )
+            for_each(
+                b,
+                oshape,
+                [acc],
+                lambda p, init=init, spec=spec: store(b, spec.acc, init, p[0]),
+            )
             out_arrays.append((res, acc))
         elif isinstance(spec, Write):
             t = inputs[spec.target]
@@ -248,7 +282,12 @@ def emit_fused(op, node, cg, inputs, outputs):
             d = out_dtypes[i]
             if isinstance(spec, Reduce):
                 cur = accs[i] if i in accs else load(b, spec.acc, ptr_out[i])
-                new = emit_scalar(spec.scalar_op, b, [(cur, spec.acc), (cast(b, v, d, spec.acc), spec.acc)], [spec.acc])[0]
+                new = emit_scalar(
+                    spec.scalar_op,
+                    b,
+                    [(cur, spec.acc), (cast(b, v, d, spec.acc), spec.acc)],
+                    [spec.acc],
+                )[0]
                 if i in accs:
                     new_accs[i] = new
                 else:
@@ -257,7 +296,9 @@ def emit_fused(op, node, cg, inputs, outputs):
                 res_arr = out_arrays[i][0]
                 n = res_arr.shape[spec.axis]
                 ix = checked(index_value(spec.index, loop_index[spec.axis]), n, "write")
-                p = advance(b, ptr_out[i], ix, res_arr.strides[spec.axis], res_arr.dtype)
+                p = advance(
+                    b, ptr_out[i], ix, res_arr.strides[spec.axis], res_arr.dtype
+                )
                 if not spec.set:
                     from pytensor.scalar.basic import add
 
@@ -270,13 +311,21 @@ def emit_fused(op, node, cg, inputs, outputs):
     in_keys = sorted(plain_in)
     out_keys = sorted(plain_out)
     arrays = [plain_in[j] for j in in_keys] + [plain_out[i] for i in out_keys]
-    any_indexed = any(r is not None for r in reads) or any(isinstance(s, Write) for s in outs)
+    any_indexed = any(r is not None for r in reads) or any(
+        isinstance(s, Write) for s in outs
+    )
 
     def split(ptrs):
-        return dict(zip(in_keys, ptrs[: len(in_keys)], strict=True)), dict(zip(out_keys, ptrs[len(in_keys) :], strict=True))
+        return dict(zip(in_keys, ptrs[: len(in_keys)], strict=True)), dict(
+            zip(out_keys, ptrs[len(in_keys) :], strict=True)
+        )
 
     # reductions that reduce the innermost axis are carried in registers there
-    inner_red = [i for i, s in enumerate(outs) if isinstance(s, Reduce) and nd > 0 and (nd - 1) in s.axes]
+    inner_red = [
+        i
+        for i, s in enumerate(outs)
+        if isinstance(s, Reduce) and nd > 0 and (nd - 1) in s.axes
+    ]
 
     def nest():
         def level(a, ptrs, index):
@@ -285,9 +334,14 @@ def emit_fused(op, node, cg, inputs, outputs):
                 init = [load(b, outs[i].acc, po[i]) for i in inner_red]
 
                 def step(i, *accs):
-                    q = [advance(b, p, i, arr.strides[a], arr.dtype) for p, arr in zip(ptrs, arrays, strict=True)]
+                    q = [
+                        advance(b, p, i, arr.strides[a], arr.dtype)
+                        for p, arr in zip(ptrs, arrays, strict=True)
+                    ]
                     qi, qo = split(q)
-                    new = body(qi, qo, [*index, i], dict(zip(inner_red, accs, strict=True)))
+                    new = body(
+                        qi, qo, [*index, i], dict(zip(inner_red, accs, strict=True))
+                    )
                     return [new[k] for k in inner_red]
 
                 final = b.fold(shape[a], init, step)
@@ -299,7 +353,10 @@ def emit_fused(op, node, cg, inputs, outputs):
                 body(pi, po, index, {})
                 return
             with b.loop(shape[a]) as i:
-                q = [advance(b, p, i, arr.strides[a], arr.dtype) for p, arr in zip(ptrs, arrays, strict=True)]
+                q = [
+                    advance(b, p, i, arr.strides[a], arr.dtype)
+                    for p, arr in zip(ptrs, arrays, strict=True)
+                ]
                 level(a + 1, q, [*index, i])
 
         level(0, [arr.data for arr in arrays], [])
@@ -311,7 +368,11 @@ def emit_fused(op, node, cg, inputs, outputs):
         not any_indexed
         and nd > 0
         and all(len(s.axes) == nd for s in outs if isinstance(s, Reduce))
-        and all(E.inputs[j].type.shape[a] != 1 or static[a] == 1 for j in plain_in for a in range(nd))
+        and all(
+            E.inputs[j].type.shape[a] != 1 or static[a] == 1
+            for j in plain_in
+            for a in range(nd)
+        )
     )
     if not flat_ok:
         nest()
@@ -320,7 +381,9 @@ def emit_fused(op, node, cg, inputs, outputs):
 
     # every operand packed in the same axis order (from the layouts, so only operands
     # whose layout leaves it open are checked at run time)
-    flat_arrays = [plain_in[j] for j in in_keys] + [plain_out[i] for i in out_keys if not isinstance(outs[i], Reduce)]
+    flat_arrays = [plain_in[j] for j in in_keys] + [
+        plain_out[i] for i in out_keys if not isinstance(outs[i], Reduce)
+    ]
     order = loop_order(shape, flat_arrays)
     contig = b.const_bool(True)
     for arr in flat_arrays:
@@ -331,8 +394,18 @@ def emit_fused(op, node, cg, inputs, outputs):
         init = [load(b, outs[i].acc, plain_out[i].data) for i in red]
 
         def step(i, *accs):
-            pi = {j: b.gep(memory_type(plain_in[j].dtype), plain_in[j].data, i) for j in in_keys}
-            po = {k: (plain_out[k].data if isinstance(outs[k], Reduce) else b.gep(memory_type(plain_out[k].dtype), plain_out[k].data, i)) for k in out_keys}
+            pi = {
+                j: b.gep(memory_type(plain_in[j].dtype), plain_in[j].data, i)
+                for j in in_keys
+            }
+            po = {
+                k: (
+                    plain_out[k].data
+                    if isinstance(outs[k], Reduce)
+                    else b.gep(memory_type(plain_out[k].dtype), plain_out[k].data, i)
+                )
+                for k in out_keys
+            }
             new = body(pi, po, [None] * nd, dict(zip(red, accs, strict=True)))
             return [new[k] for k in red]
 
@@ -362,7 +435,13 @@ def reduced_view(b, acc: Array, shape, axes) -> Array:
         strides[a] = acc.strides[k]
         kinds[a] = acc.layout.strides[k]
     order = [a for a in range(nd) if a in axes] + [kept[k] for k in acc.layout.order]
-    return Array(acc.dtype, acc.data, list(shape), strides, Layout.make([n.const_int for n in shape], order, kinds))
+    return Array(
+        acc.dtype,
+        acc.data,
+        list(shape),
+        strides,
+        Layout.make([n.const_int for n in shape], order, kinds),
+    )
 
 
 def _finish(cg, outs, out_arrays, scalar_outs):

@@ -17,10 +17,24 @@ kernels allocate and scratch memory are released after every iteration.
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.emit import Array, cast, constant, copy, for_each, load, store, advance
+from pytensor.link.llvm.codegen.emit import (
+    Array,
+    advance,
+    cast,
+    constant,
+    copy,
+    for_each,
+    load,
+    store,
+)
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
-from pytensor.link.llvm.codegen.unit import Destination, bind_constants, emit_items, release
+from pytensor.link.llvm.codegen.unit import (
+    Destination,
+    bind_constants,
+    emit_items,
+    release,
+)
 from pytensor.link.llvm.layout import Layout, remove_axis
 
 
@@ -31,7 +45,11 @@ def scan_supported(op) -> bool:
 
 
 def _n_inner_traced_outs(info):
-    return sum(len(t) for t in info.mit_mot_out_slices) + len(info.mit_sot_in_slices) + len(info.sit_sot_in_slices)
+    return (
+        sum(len(t) for t in info.mit_mot_out_slices)
+        + len(info.mit_sot_in_slices)
+        + len(info.sit_sot_in_slices)
+    )
 
 
 def register():
@@ -40,11 +58,18 @@ def register():
     @llvm_layout.register(Scan)
     def _(op, node, in_layouts):
         # buffers allocated by the loop, C-contiguous (as the Rust kernel's)
-        return [None if is_absent(o.type) else Layout.c(o.type.ndim) for o in node.outputs]
+        return [
+            None if is_absent(o.type) else Layout.c(o.type.ndim) for o in node.outputs
+        ]
 
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):
-        if cg.scan_body is None or cg.links is None or cg.module is None or not scan_supported(op):
+        if (
+            cg.scan_body is None
+            or cg.links is None
+            or cg.module is None
+            or not scan_supported(op)
+        ):
             raise NotImplementedError(f"generated {op}")
         emit_scan(op, node, cg, inputs, outputs)
 
@@ -58,7 +83,13 @@ def _i64(b, a: Array | object, dtype):
 def _rows(b, buf: Array, start, count):
     """Rows `start .. start + count` of a C-contiguous buffer."""
     p = advance(b, buf.data, start, buf.strides[0], buf.dtype)
-    return Array(buf.dtype, p, [count, *buf.shape[1:]], list(buf.strides), Layout.c(len(buf.shape)))
+    return Array(
+        buf.dtype,
+        p,
+        [count, *buf.shape[1:]],
+        list(buf.strides),
+        Layout.c(len(buf.shape)),
+    )
 
 
 def _row(b, buf: Array, r, layout=None):
@@ -102,7 +133,9 @@ class _Traced:
             return False
         w = self.lookback + self.out_taps[k_out]
         reads = {(self.lookback + t) % n for t in self.in_taps}
-        others = {(self.lookback + t) % n for j, t in enumerate(self.out_taps) if j != k_out}
+        others = {
+            (self.lookback + t) % n for j, t in enumerate(self.out_taps) if j != k_out
+        }
         return (w % n) not in reads and (w % n) not in others
 
 
@@ -114,7 +147,11 @@ def scan_body_layouts(op, node, in_layouts) -> list:
     from pytensor.link.llvm.layout import itemsize_of, shape_of
 
     info = op.info
-    n_mm, n_ms, n_ss = len(info.mit_mot_in_slices), len(info.mit_sot_in_slices), len(info.sit_sot_in_slices)
+    n_mm, n_ms, n_ss = (
+        len(info.mit_mot_in_slices),
+        len(info.mit_sot_in_slices),
+        len(info.sit_sot_in_slices),
+    )
     o_seq = 1
     o_mm = o_seq + info.n_seqs
     o_ms = o_mm + n_mm
@@ -126,7 +163,9 @@ def scan_body_layouts(op, node, in_layouts) -> list:
         v = node.inputs[pos]
         if is_absent(v.type):
             return None
-        return getattr(repr_of(v.type, in_layouts[pos]), "layout", None)  # (scalars have none)
+        return getattr(
+            repr_of(v.type, in_layouts[pos]), "layout", None
+        )  # (scalars have none)
 
     layouts = []
     for pos in range(o_seq, o_mm):
@@ -134,11 +173,17 @@ def scan_body_layouts(op, node, in_layouts) -> list:
         if v.type.ndim < 1:
             raise NotImplementedError("a 0-d sequence")
         layouts.append(remove_axis(outer(pos), 0, shape_of(v), itemsize_of(v)))
-    for base, taps in [(o_mm, info.mit_mot_in_slices), (o_ms, info.mit_sot_in_slices), (o_ss, info.sit_sot_in_slices)]:
+    for base, taps in [
+        (o_mm, info.mit_mot_in_slices),
+        (o_ms, info.mit_sot_in_slices),
+        (o_ss, info.sit_sot_in_slices),
+    ]:
         for j, in_taps in enumerate(taps):
             ndim = node.inputs[base + j].type.ndim
             if ndim < 1:
-                raise NotImplementedError("Scan: state buffers need at least one dimension")
+                raise NotImplementedError(
+                    "Scan: state buffers need at least one dimension"
+                )
             layouts += [Layout.c(ndim - 1)] * len(in_taps)
     for j in range(info.n_untraced_sit_sot):
         v = node.inputs[o_ut + j]
@@ -151,7 +196,11 @@ def scan_body_layouts(op, node, in_layouts) -> list:
 def emit_scan(op, node, cg, inputs, outputs):
     b = cg.b
     info = op.info
-    n_mm, n_ms, n_ss = len(info.mit_mot_in_slices), len(info.mit_sot_in_slices), len(info.sit_sot_in_slices)
+    n_mm, n_ms, n_ss = (
+        len(info.mit_mot_in_slices),
+        len(info.mit_sot_in_slices),
+        len(info.sit_sot_in_slices),
+    )
     o_seq = 1
     o_mm = o_seq + info.n_seqs
     o_ms = o_mm + n_mm
@@ -168,17 +217,25 @@ def emit_scan(op, node, cg, inputs, outputs):
     for k, a in enumerate(seqs):
         if len(a.shape) < 1:
             raise NotImplementedError("a 0-d sequence")
-        cg.check(b.sge(a.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps")
+        cg.check(
+            b.sge(a.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps"
+        )
 
     # ---- traced buffers: copies of the outer buffers, allocated into the outputs
     q = 0  # next outer output
     traced = []
-    groups = [(o_mm, info.mit_mot_in_slices, True), (o_ms, info.mit_sot_in_slices, False), (o_ss, info.sit_sot_in_slices, False)]
+    groups = [
+        (o_mm, info.mit_mot_in_slices, True),
+        (o_ms, info.mit_sot_in_slices, False),
+        (o_ss, info.sit_sot_in_slices, False),
+    ]
     for base, taps, is_mm in groups:
         for j, in_taps in enumerate(taps):
             a = inputs[base + j]
             if len(a.shape) < 1:
-                raise NotImplementedError("Scan: state buffers need at least one dimension")
+                raise NotImplementedError(
+                    "Scan: state buffers need at least one dimension"
+                )
             out = outputs[q]
             q += 1
             buf = out.allocate(list(a.shape))
@@ -217,7 +274,12 @@ def emit_scan(op, node, cg, inputs, outputs):
     # ---- the loop body: the inner graph's items, resolved (plan/resolve.py)
     fg = op.fgraph
     body_plan = cg.scan_body
-    in_ids, out_ids, items, consts = body_plan.in_ids, body_plan.out_ids, body_plan.items, body_plan.constants
+    in_ids, out_ids, items, consts = (
+        body_plan.in_ids,
+        body_plan.out_ids,
+        body_plan.items,
+        body_plan.constants,
+    )
     n_traced_outs = first_nit
 
     def body(i, *acc):
@@ -227,7 +289,9 @@ def emit_scan(op, node, cg, inputs, outputs):
         vids = iter(in_ids)
         for a in seqs:
             k = next(vids)
-            vals[k] = _row(b, a, i, remove_axis(a.layout, 0, a.static_shape(), _isz(a.dtype)))
+            vals[k] = _row(
+                b, a, i, remove_axis(a.layout, 0, a.static_shape(), _isz(a.dtype))
+            )
         for t in traced:
             for tap in t.in_taps:
                 k = next(vids)
@@ -252,7 +316,9 @@ def emit_scan(op, node, cg, inputs, outputs):
                 r = _row(b, t.buf, t.row_index(b, i, tap))
                 rows.append(r)
                 if t.direct_write_ok(kk):
-                    targets.setdefault(out_ids[oi], Destination(array=r, layout=r.layout))
+                    targets.setdefault(
+                        out_ids[oi], Destination(array=r, layout=r.layout)
+                    )
                 oi += 1
         for out, length, buf, var in nit:
             if buf is not None:
@@ -263,7 +329,9 @@ def emit_scan(op, node, cg, inputs, outputs):
                 rows.append(None)
             oi += 1
 
-        written, owned = emit_items(cg, cg.module, f"{cg.name}_body", items, vals, targets)
+        written, owned = emit_items(
+            cg, cg.module, f"{cg.name}_body", items, vals, targets
+        )
 
         def value(k):
             if k not in vals:
@@ -282,7 +350,11 @@ def emit_scan(op, node, cg, inputs, outputs):
             src = value(k)
             if buf is not None:
                 t = targets.get(k)
-                if not (k in written and t is not None and t.array is rows[n_traced_outs + j]):
+                if not (
+                    k in written
+                    and t is not None
+                    and t.array is rows[n_traced_outs + j]
+                ):
                     copy(cg, src, rows[n_traced_outs + j])
                 continue
             # rows without a static shape: the buffer is allocated by the first iteration
@@ -291,9 +363,17 @@ def emit_scan(op, node, cg, inputs, outputs):
                 out.allocate([length, *src.shape])
             cur = out.read()
             for d, n in enumerate(src.shape):
-                cg.check(b.eq(n, cur.shape[1 + d]), "Scan: nit-sot body outputs have different shapes")
+                cg.check(
+                    b.eq(n, cur.shape[1 + d]),
+                    "Scan: nit-sot body outputs have different shapes",
+                )
             copy(cg, src, _row(b, cur, i))
-        for out, cur, k in zip(untraced, cur_untraced, out_ids[n_traced_outs + info.n_nit_sot :], strict=False):
+        for out, cur, k in zip(
+            untraced,
+            cur_untraced,
+            out_ids[n_traced_outs + info.n_nit_sot :],
+            strict=False,
+        ):
             if out is None:
                 continue
             src = value(k)
