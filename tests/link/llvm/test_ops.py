@@ -289,6 +289,24 @@ def test_argmax(dtype):
         f(np.zeros((0, 3)))
 
 
+@pytest.mark.parametrize("dtype", ["float64", "int8", "uint8", "bool"])
+def test_nonzero(dtype):
+    x = pt.tensor3("x", dtype=dtype)
+    outs = [
+        *pt.nonzero(x),
+        *pt.nonzero(x[:, ::-2].transpose(2, 0, 1)),
+        pt.flatnonzero(x[0]),
+    ]
+    v = (
+        rng.integers(-1, 2, size=(3, 5, 4)) * rng.integers(1, 4, size=(3, 5, 4))
+    ).astype(dtype)
+    if dtype == "float64":
+        v[0, 0, 0], v[1, 1, 1] = np.nan, -0.0  # non-zero, zero
+    compare([x], outs, [v])
+    f = pytensor.function([x], pt.nonzero(x), mode=NO_FALLBACK)
+    assert [i.shape for i in f(np.zeros((2, 0, 3), dtype=dtype))] == [(0,)] * 3
+
+
 @pytest.mark.parametrize("dtype", ["float64", "float32"])
 def test_linalg(dtype):
     """The faer kernels against scipy/numpy; eigenvectors and singular vectors (unique
