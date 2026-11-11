@@ -30,7 +30,7 @@ def run_node(node, *values, provided=None, provided_layouts=None):
     it = iter(values)
     for i in node.inputs:
         ins.append(np.asarray(i.data if isinstance(i, Constant) else next(it), dtype=i.type.dtype))
-    return ir.call_kernel(c.address, ins, outs, c.frame_size)
+    return ir.call_kernel(c.address, ins, outs)
 
 
 def reference(out, inputs, values):

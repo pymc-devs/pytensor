@@ -29,8 +29,6 @@ class CalledKernel:
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
     config: int
-    #: "kernel" (ctx, args, config, frame) or "numba" (ctx, args, config)
-    abi: str
     #: what it produces, per node output (`Output`s, `view_of` counting node inputs)
     outputs: list
     description: str = ""
@@ -143,8 +141,7 @@ def call_kernel(cg, kernel: CalledKernel, index: int, inputs: list, outputs: lis
     fn = linked(cg, index)
     config = linked(cg, index + 1)
     mark = b.rt_scratch_mark(cg.ctx)
-    call_args = [cg.ctx, args, config] + ([b.null()] if kernel.abi == "kernel" else [])
-    rc = b.call_ptr(fn, call_args, ir.i32)
+    rc = b.call_ptr(fn, [cg.ctx, args, config], ir.i32)
     b.rt_scratch_release(cg.ctx, mark)
 
     for p, (_, _, _, _, o) in zip(ptrs, args_of, strict=True):

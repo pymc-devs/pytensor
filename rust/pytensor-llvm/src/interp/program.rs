@@ -1,12 +1,12 @@
 //! The interpreter: runs a task list planned in Python.
 //!
 //! Every task calls a kernel with the kernel ABI
-//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* config, void* frame)`:
-//! a generated kernel, a Rust kernel, a subprogram, or (without `frame`) a numba
+//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* config)`:
+//! a generated kernel, a Rust kernel, a subprogram, or a numba
 //! kernel. The program doesn't know which.
 //!
 //! Python decides everything else: which values live where (arena offsets for static
-//! temporaries and task frames, fresh buffers for graph outputs, buffers the kernels
+//! temporaries, fresh buffers for graph outputs, buffers the kernels
 //! allocate, views), when values are released, and how outputs are produced. The
 //! interpreter checks what it can cheaply (shapes of kernel-set outputs against the
 //! static types) and cleans up on errors.
@@ -69,14 +69,12 @@ impl ValueSpec {
     }
 }
 
-pub use crate::abi::{Abi, OutputMode};
-use crate::abi::{KernelFn, NumbaFn};
+pub use crate::abi::OutputMode;
+use crate::abi::KernelFn;
 
 pub struct Task {
     pub func: usize,
-    pub abi: Abi,
     pub config: usize,
-    pub frame_offset: Option<u64>,
     pub inputs: Vec<ValueId>,
     pub outputs: Vec<ValueId>,
     pub release: Vec<ValueId>,
@@ -130,6 +128,8 @@ pub struct CallMemory {
     /// shape ++ strides of every value
     storage: Vec<Box<[i64]>>,
     owned: Vec<bool>,
+    // (owns the memory arena values point into)
+    #[allow(dead_code)]
     arena: Vec<Align64>,
     args: Vec<PtArray>,
 }
@@ -259,11 +259,6 @@ impl Program {
             if s.func == 0 {
                 return Err(format!("task {}: null function", s.desc));
             }
-            if let Some(off) = s.frame_offset {
-                if off % 64 != 0 || off > spec.arena_bytes {
-                    return Err(format!("task {}: frame outside the arena", s.desc));
-                }
-            }
             for &v in s.inputs.iter().chain(&s.release) {
                 ok(v)?;
             }
@@ -276,9 +271,6 @@ impl Program {
                 ok(v)?;
                 if produced[v.i()] || matches!(spec.values[v.i()].kind, ValueKind::Input(_) | ValueKind::Const(_)) {
                     return Err(format!("task {}: value {} produced twice", s.desc, v.0));
-                }
-                if s.abi == Abi::Numba && !matches!(spec.values[v.i()].kind, ValueKind::Allocated) {
-                    return Err(format!("task {}: foreign kernels allocate their outputs", s.desc));
                 }
                 produced[v.i()] = true;
             }
@@ -420,7 +412,6 @@ impl Program {
 
     fn execute_inner(&self, st: &mut CallMemory, ctx: &mut PtCtx, provided: &[Option<*mut u8>]) -> R<()> {
         let values = &self.spec.values;
-        let arena = st.arena.as_mut_ptr() as *mut u8;
         let profiling = self.profile.on.load(Relaxed);
         if profiling {
             self.profile.calls.fetch_add(1, Relaxed);
@@ -460,11 +451,6 @@ impl Program {
                 st.vals[v.i()].owner = a.owner;
                 st.args.push(a);
             }
-            let frame = match task.frame_offset {
-                // SAFETY: the offset was checked to be inside the arena.
-                Some(off) => unsafe { arena.add(off as usize) },
-                None => std::ptr::null_mut(),
-            };
             // SAFETY: the arguments follow the task's declared modes: inputs are valid
             // arrays of their types, provided outputs are arena/fresh/caller memory of
             // their static types, other outputs have writable shape/strides storage;
@@ -475,16 +461,8 @@ impl Program {
             // marks, not a reset, so the caller's scratch survives)
             let mark = ctx.scratch_mark();
             let rc = unsafe {
-                match task.abi {
-                    Abi::Kernel => {
-                        let f: KernelFn = std::mem::transmute::<usize, KernelFn>(task.func);
-                        f(ctx, st.args.as_mut_ptr(), task.config as *const u8, frame)
-                    }
-                    Abi::Numba => {
-                        let f: NumbaFn = std::mem::transmute::<usize, NumbaFn>(task.func);
-                        f(ctx, st.args.as_mut_ptr(), task.config as *const u8)
-                    }
-                }
+                let f: KernelFn = std::mem::transmute::<usize, KernelFn>(task.func);
+                f(ctx, st.args.as_mut_ptr(), task.config as *const u8)
             };
             if let Some(t0) = t0 {
                 self.profile.task_ns[k_task].fetch_add(t0.elapsed().as_nanos() as u64, Relaxed);
@@ -671,12 +649,6 @@ impl Program {
         let ids = |v: &[ValueId]| v.iter().map(|x| format!("%{}", x.0)).collect::<Vec<_>>().join(", ");
         for (k, st) in sp.tasks.iter().enumerate() {
             let mut line = format!("  {k:<4} ({}) -> ({})  {}", ids(&st.inputs), ids(&st.outputs), st.desc);
-            if st.abi == Abi::Numba {
-                line.push_str("  [foreign]");
-            }
-            if let Some(off) = st.frame_offset {
-                let _ = write!(line, "  [frame +{off}]");
-            }
             if !st.release.is_empty() {
                 let _ = write!(line, "  [release {}]", ids(&st.release));
             }
@@ -742,7 +714,7 @@ fn release(st: &mut CallMemory, v: ValueId) {
 /// `config` points to a live `Program` (kept alive by the outer program) and `args` holds
 /// its inputs and outputs as the outer task declared them.
 #[unsafe(no_mangle)]
-pub unsafe extern "C-unwind" fn ptl_program_call(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
+pub unsafe extern "C-unwind" fn ptl_program_call(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
     // SAFETY: the function's contract.
     unsafe {
         let p = &*(config as *const Program);

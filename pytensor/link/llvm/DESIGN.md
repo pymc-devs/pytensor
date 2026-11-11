@@ -55,8 +55,10 @@ groups small nodes into units.
 *Memory*
 
 * **arena**: a program's static memory, laid out by the planner.
-* **frame**: a task's fixed-size memory for one call, in the arena (section 4).
-* **scratch**: dynamically sized memory from the context, released by marks.
+* **temporary**: memory a kernel needs only while it runs (section 4): stack memory if
+  it is small and of static size, else scratch.
+* **scratch**: temporary memory from the context, valid until the task ends, released
+  by marks.
 * **buffer**: refcounted memory (`PtBuffer`), owned through `owner` pointers.
 * **output slot**: the struct an allocated or view output is returned through.
 
@@ -149,14 +151,13 @@ The LLVM function of a node (or of a compiled unit) has one argument per input a
 output:
 
 ```llvm
-define internal i32 @f(ptr %ctx, ptr %config, ptr %frame, <inputs>, <outputs>)
+define internal i32 @f(ptr %ctx, ptr %config, <inputs>, <outputs>)
 ```
 
 * `ctx`: the context (section 5a): runtime functions, errors, scratch memory, the
   random state.
 * `config`: the kernel's link table (section 2a): the kernels it calls and its array
   constants.
-* `frame`: the kernel's frame, provided by the caller (see 4).
 * Inputs: by value, in their representation.
 * Outputs: by mode (see 3).
 * Returns 0 on success, nonzero on failure with the message set on `ctx`.
@@ -193,8 +194,8 @@ values inside it when it returns (also on errors).
 
 The memory a kernel writes (its provided or allocated outputs) never overlaps its inputs
 or its other outputs: the `inplace` rewrites are excluded, the arena never places an
-output over a value live during the task, temporaries in a frame aren't reused within a
-function, and the C API requires (and checks) that provided outputs don't overlap the
+output over a value live during the task, temporaries are distinct memory (stack
+slots, or scratch, whose pointers are declared `noalias`), and the C API requires (and checks) that provided outputs don't overlap the
 inputs or each other. Views are never written.
 
 Node functions tell LLVM: `Builder.alias_domain(name)` starts a scope domain and a TBAA
@@ -251,28 +252,41 @@ be declared with any strides (e.g. to write into a slice of a larger array), but
 default is C-contiguous. Code reading an array checks contiguity at run time only where
 its layout doesn't settle it.
 
-## 4. Frames and scratch
+## 4. Temporary memory
 
-A generated kernel declares how many bytes of frame it needs: fixed-size memory for
-one call. The caller passes that much memory (64-byte aligned) as `frame`; the
-interpreter takes it from its arena, so frames are reused by liveness like any other
-value. Temporaries of static size are fixed offsets into the frame.
+A kernel has no memory of its own besides its outputs. What it needs while it runs is a
+temporary (`Codegen.temp_memory`, `Codegen.temporary` for an array):
 
-Dynamically sized temporaries come from the context's scratch memory:
+* **Stack memory**, for a static size of at most 1 KiB (`STACK_TEMPORARY_BYTES`; at most
+  16 KiB per generated function): an `alloca` in the entry block, 64-byte aligned. LLVM
+  sees all of it and often keeps it in registers or removes it. Node functions are
+  always inlined, so these are slots of the kernel's own stack frame. Inside a
+  parallel region the memory is the chunk's own.
+* **Scratch memory** of the context, for everything else:
+  * `ptl_rt_scratch(ctx, bytes) -> ptr`: 64-byte aligned, valid until the task ends (or
+    an earlier mark is released). The result is `noalias`, like `malloc`'s.
+  * `ptl_rt_scratch_mark(ctx) -> mark`, `ptl_rt_scratch_release(ctx, mark)`: reuse
+    inside loops. The interpreter marks around every task; generated code around
+    every call and every Scan iteration, Rust kernels around subprograms, so nested
+    calls never release their caller's scratch.
 
-* `ptl_rt_scratch(ctx, bytes) -> ptr`: 64-byte aligned, valid until the task ends (or
-  an earlier mark is released);
-* `ptl_rt_scratch_mark(ctx) -> mark`, `ptl_rt_scratch_release(ctx, mark)`: reuse inside
-  loops. The interpreter marks around every task; generated code around every call and
-  every Scan iteration, Rust kernels around subprograms, so nested calls never release
-  their caller's scratch.
+  Scratch is an arena of the context that keeps its largest size: after the first call
+  a request is a bump of a pointer.
 
-The frame is the planned, static part; scratch the dynamic part.
+Memory that is still used after the function that asked for it returned is never stack
+memory: the output of a node inside a unit, when it is a temporary of the unit, is
+scratch (`escapes=True`).
+
+There is no memory planned per task. An earlier design passed every kernel a *frame*,
+a fixed-size block in the program's arena, for its static temporaries. It bought
+little over the stack for small temporaries and nothing over scratch for large ones,
+and cost an argument in the kernel ABI, a second ABI for numba kernels and a kind of
+interval in the planner.
 
 ## 5. Errors
 
 On failure a function returns nonzero after setting the message
-(`ptl_rt_set_error(ctx, code, msg)`). It does not clean up: the frame belongs to the caller,
+(`ptl_rt_set_error(ctx, code, msg)`). It does not clean up: scratch belongs to the caller,
 and the caller releases every non-null owner in the output slots. A function therefore
 only has to fill a slot's owner as soon as it allocates.
 
@@ -333,10 +347,10 @@ chunks one after the other, e.g. for samplers already running a chain per core.
 
 ## 6. The kernel ABI
 
-Every kernel (generated, Rust, subprogram; numba kernels without `frame`) is called as
+Every kernel (generated, Rust, numba, subprogram) is called as
 
 ```c
-int32_t kernel(PtCtx *ctx, PtArray *args /* inputs, then outputs */, const void *config, void *frame);
+int32_t kernel(PtCtx *ctx, PtArray *args /* inputs, then outputs */, const void *config);
 ```
 
 with `PtArray { data, shape, strides, owner, ndim }`. A wrapper is generated from the
@@ -400,12 +414,12 @@ compiled ones become units, interpreted ones subprograms; nodes touching ScalarT
 values are grouped into units; FusedElemwise stays one node when its pattern is
 supported. Each node's task then runs a Rust kernel (`rust_kernels.py`), a generated kernel
 (`codegen/`), or a numba kernel. Python assigns arena offsets by liveness (static
-temporaries and frames) and release points; all generated modules compile in one
+provided values) and release points; all generated modules compile in one
 parallel batch.
 
 `program.dump()` prints a program: every value with its type and storage (input,
 constant, arena offset, fresh output, allocated by its task, view of another value),
-then every task with its arguments, frame and releases.
+then every task with its arguments and releases.
 
 Scan is generated (`codegen/scan.py`): one kernel holds the loop, the buffers and the
 loop body, whose items are emitted like a unit's (nodes we generate inlined, the

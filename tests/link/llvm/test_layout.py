@@ -159,10 +159,10 @@ def test_layout_check_catches_a_wrong_claim():
     build_kernel_wrapper(m, nf, "kernel", check_layouts=True)
     c = m.compile(cache=False)
     v = rng.normal(size=(3, 4))
-    (r,) = ir.call_kernel(c.address("kernel"), [v], [(np.dtype("float64"), 2)], nf.frame_size)
+    (r,) = ir.call_kernel(c.address("kernel"), [v], [(np.dtype("float64"), 2)])
     np.testing.assert_allclose(r, np.exp(v))
     with pytest.raises(Exception, match="layout check"):
-        ir.call_kernel(c.address("kernel"), [v.T], [(np.dtype("float64"), 2)], nf.frame_size)
+        ir.call_kernel(c.address("kernel"), [v.T], [(np.dtype("float64"), 2)])
 
 
 def test_specialized_signature_passes_fewer_strides():

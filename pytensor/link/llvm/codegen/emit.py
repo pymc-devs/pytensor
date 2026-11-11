@@ -398,17 +398,13 @@ def _slot_type(ndim):
 @dataclass
 class Codegen:
     """The state of generating one kernel's code: the builder and the kernel's
-    parameters (`ctx`, its `config` = link table, its `frame`), and what nested code
+    parameters (`ctx`, its `config` = link table), and what nested code
     needs (link table, planner, module)."""
 
     b: object
     ctx: object
     #: the kernel's config: its link table (call.py)
     config: object
-    #: the kernel's frame: fixed-size memory for one call (DESIGN.md, section 4)
-    frame: object
-    #: bytes of the frame used so far
-    frame_size: int = 0
     #: bytes of stack temporaries so far (`temp_memory`)
     stack_bytes: int = 0
     #: may loops run in parallel (`Options.parallel`)?

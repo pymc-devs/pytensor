@@ -131,7 +131,7 @@ struct Traced {
 ///
 /// # Safety
 /// The kernel ABI; `config` is a `ScanConfig` matching the arguments.
-pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
+pub unsafe extern "C-unwind" fn k_scan(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
     // SAFETY: the function's contract.
     let (d, c) = unsafe { (&*(config as *const ScanConfig), &mut *ctx) };
     let mut owned: Vec<OwnedBuf> = Vec::new();

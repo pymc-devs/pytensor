@@ -78,7 +78,7 @@ class Signature:
 
     def param_types(self):
         outs = [o.ir_type for o in self.outputs if o.mode is not OutputMode.ABSENT]
-        return [ir.ptr, ir.ptr, ir.ptr, *(r.ir_type for r in self.inputs), *outs]
+        return [ir.ptr, ir.ptr, *(r.ir_type for r in self.inputs), *outs]
 
     @property
     def has_scalars(self):
@@ -193,8 +193,6 @@ def llvm_emit(op, node, cg: Codegen, inputs: list, outputs: list) -> None:
 class NodeFunction:
     function: object
     signature: Signature
-    #: bytes of its frame (the fixed-size memory of one call)
-    frame_size: int
     #: its link table (call.py): the config to call it with, or None
     links: object = None
 
@@ -231,14 +229,14 @@ def build_node_function(
     fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
     b = fn.builder()
     params = fn.params
-    ctx, config, frame = params[:3]
-    cg = Codegen(b, ctx, config, frame, parallel=parallel, links=links, planner=planner, module=module, name=name)
+    ctx, config = params[:2]
+    cg = Codegen(b, ctx, config, parallel=parallel, links=links, planner=planner, module=module, name=name)
     # Aliasing (DESIGN.md): the memory a task writes (provided or allocated outputs)
     # never overlaps its inputs or its other outputs; views are never written.
     b.alias_domain(name)
     written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.ALLOCATED, OutputMode.VIEW)]
     marked_inputs = []
-    k = 3
+    k = 2
     inputs = []
     from pytensor.link.llvm.codegen.types import is_absent
 
@@ -311,11 +309,11 @@ def build_node_function(
             if isinstance(out, SlotOutput | ScalarOutput) and not out.done:
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(b.i32(0))
-    return NodeFunction(fn, sig, cg.frame_size, links)
+    return NodeFunction(fn, sig, links)
 
 
 def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: bool = False):
-    """`int32 name(PtCtx*, PtArray* args, const void* config, void* frame)` around `nf`:
+    """`int32 name(PtCtx*, PtArray* args, const void* config)` around `nf`:
     the kernel ABI.
 
     `check_layouts`: verify that the arrays passed have the layouts the signature claims
@@ -326,9 +324,9 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     if sig.has_scalars:
         raise ValueError("functions with ScalarType inputs or outputs have no kernel ABI")
     pa = ptarray_type()
-    fn = module.function(name, [ir.ptr, ir.ptr, ir.ptr, ir.ptr], ir.i32, exported=True)
+    fn = module.function(name, [ir.ptr, ir.ptr, ir.ptr], ir.i32, exported=True)
     b = fn.builder()
-    ctx, args, config, frame = fn.params
+    ctx, args, config = fn.params
 
     def arg(k):
         return b.gep_bytes(args, b.i64(k * PTARRAY_SIZE))
@@ -356,7 +354,7 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     if check_layouts:
         from pytensor.link.llvm.codegen.emit import Codegen
 
-        cg = Codegen(b, ctx, config, frame)
+        cg = Codegen(b, ctx, config)
         reprs = [*sig.inputs, *(o.repr for o in present if o.mode is OutputMode.PROVIDED)]
         positions = [*range(len(sig.inputs)), *(len(sig.inputs) + k for k, o in enumerate(present) if o.mode is OutputMode.PROVIDED)]
         for k, r in zip(positions, reprs, strict=True):
@@ -364,7 +362,7 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
                 _check_layout(cg, arg(k), r, k)
 
     n_in = len(sig.inputs)
-    call_args = [ctx, config, frame]
+    call_args = [ctx, config]
     call_args += [read(k, r) for k, r in enumerate(sig.inputs)]
     slots = []
     for k, o in enumerate(present):
@@ -423,7 +421,6 @@ def _check_layout(cg, p, r: TensorRepr, k):
 class CompiledNode:
     compiled: object
     signature: Signature
-    frame_size: int
 
     @property
     def address(self):
@@ -437,7 +434,7 @@ def compile_node(node, *, fastmath=True, opt_level=3, cache=True, provided=None)
     nf = build_node_function(module, node, "node", provided=provided)
     build_kernel_wrapper(module, nf, "kernel")
     compiled = module.compile(opt_level=opt_level, cache=cache)
-    return CompiledNode(compiled, nf.signature, nf.frame_size)
+    return CompiledNode(compiled, nf.signature)
 
 
 __all__ = [

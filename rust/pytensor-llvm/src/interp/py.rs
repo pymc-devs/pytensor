@@ -4,7 +4,7 @@ use super::consts::ConstData;
 use super::kernels;
 use super::layout::Layout;
 use super::program::{Program as RProgram, ProgramSpec, Task, ValueId, ValueKind, ValueSpec};
-use crate::abi::{Abi, OutputMode};
+use crate::abi::OutputMode;
 use crate::dtype::DType;
 use numpy::npyffi::{npy_intp, NpyTypes, NPY_ARRAY_WRITEABLE, PY_ARRAY_API};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
@@ -374,25 +374,20 @@ impl ProgramBuilder {
 
     /// Append a task. `keepalive` is kept alive as long as the program (the compiled
     /// module or kernel object the address and config belong to).
-    #[pyo3(signature = (address, config, abi, inputs, outputs, release, frame_offset, description, keepalive))]
-    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (address, config, inputs, outputs, release, description, keepalive))]
     fn task(
         &mut self,
         address: usize,
         config: usize,
-        abi: Abi,
         inputs: Vec<u32>,
         outputs: Vec<u32>,
         release: Vec<u32>,
-        frame_offset: Option<u64>,
         description: String,
         keepalive: Py<PyAny>,
     ) {
         self.tasks.push(Task {
             func: address,
-            abi,
             config,
-            frame_offset: frame_offset,
             inputs: inputs.into_iter().map(ValueId).collect(),
             outputs: outputs.into_iter().map(ValueId).collect(),
             release: release.into_iter().map(ValueId).collect(),
@@ -676,7 +671,6 @@ impl Program {
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<Abi>()?;
     m.add_class::<OutputMode>()?;
     m.add_class::<RustKernel>()?;
     m.add_class::<DimShuffle>()?;

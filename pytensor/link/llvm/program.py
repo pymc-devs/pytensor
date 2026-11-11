@@ -8,8 +8,7 @@
    a generated kernel (`llvm_emit`), or a numba kernel.
 3. Output modes decide where values live: provided outputs are arena temporaries (or
    fresh buffers for graph outputs), allocated outputs are released after their last
-   use, views keep their source alive. Arena offsets (also for task frames) are
-   assigned here by liveness.
+   use, views keep their source alive. Arena offsets are assigned here by liveness.
 4. Generated modules are compiled in one parallel batch.
 """
 
@@ -111,16 +110,14 @@ class SubprogramItem:
 @dataclass
 class Task:
     """One entry of a program: a kernel called with the values `inputs`, producing the
-    values `outputs` (vids), with its config and a frame of `frame_size` bytes."""
+    values `outputs` (vids), with its config."""
 
     inputs: list
     outputs: list
     modes: list  # OutputMode per output
     view_of: list  # input index per output (VIEW), else None
-    abi: str = "kernel"
     address: int = 0
     config: int = 0
-    frame_size: int = 0
     description: str = ""
     keepalive: object = None
     #: (module, function name) to compile; the address is filled in afterwards
@@ -393,7 +390,7 @@ class Planner:
             # provided memory is C-contiguous, and so is what a unit allocates
             self.set_layouts([o for _, o in it.outputs], [Layout.c(self.types[o].ndim) for _, o in it.outputs])
             self.stats.n_units += 1
-            return Task(it.inputs, [o for _, o in it.outputs], modes, [None] * len(modes), frame_size=nf.frame_size,
+            return Task(it.inputs, [o for _, o in it.outputs], modes, [None] * len(modes),
                         description=f"unit[{len(it.items)}]: " + ", ".join(str(s.node.op) for s in it.items if isinstance(s, NodeItem))[:120],
                         module=module, config=nf.links.address, keepalive=nf.links.keepalive)
         if isinstance(it, SubprogramItem):
@@ -464,7 +461,7 @@ class Planner:
             self.set_layouts(outs, [o.layout for o in nf.signature.outputs])
             outs, modes, vmap = _present_outputs(nf.signature.outputs, outs, modes, vmap)
             desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
-            return Task(inputs, outs, modes, vmap, frame_size=nf.frame_size, description=desc, module=module,
+            return Task(inputs, outs, modes, vmap, description=desc, module=module,
                         config=links.address, keepalive=links.keepalive)
         except NotImplementedError:
             if generate_first:
@@ -496,7 +493,7 @@ class Planner:
         k = rust_kernel(node.op, node, in_layouts)
         if k is not None:
             self.stats.n_rust_kernels += 1
-            return CalledKernel(k.address, k.config, "kernel", rust_kernel_outputs(k, node, in_layouts), repr(k), k)
+            return CalledKernel(k.address, k.config, rust_kernel_outputs(k, node, in_layouts), repr(k), k)
         if not self.opts.numba_fallback:
             raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
         from pytensor.link.llvm.numba_kernels import numba_kernel
@@ -508,7 +505,7 @@ class Planner:
         self.stats.n_numba += 1
         self.stats.numba.append(str(node.op))
         outs = [Output(repr_of(o.type, Layout.dynamic(o.type.ndim)), OutputMode.ALLOCATED) for o in node.outputs]
-        return CalledKernel(kernel.address, 0, "numba", outs, f"numba: {node.op}", kernel)
+        return CalledKernel(kernel.address, 0, outs, f"numba: {node.op}", kernel)
 
     def _subprogram_kernel(self, node, in_layouts):
         """A subprogram for an OpFromGraph, called from generated code."""
@@ -534,7 +531,7 @@ class Planner:
                 # an allocated output is the inner value if it owns a buffer, else a C copy
                 lay = Layout.c(o.type.ndim) if lay is None else lay.join(Layout.c(o.type.ndim), _shape(o.type), _isz(o.type))
                 outs.append(Output(repr_of(o.type, lay), mode))
-        return CalledKernel(prog.address, prog.config, "kernel", outs, f"program: {node.op}", prog)
+        return CalledKernel(prog.address, prog.config, outs, f"program: {node.op}", prog)
 
     def _can_generate(self, node, in_layouts) -> bool:
         """Can we generate code for `node`? (Tried in a scratch module, so a failure
@@ -559,7 +556,7 @@ class Planner:
         n = len(node.outputs)
         # numba may return any layout
         self.set_layouts(it.outputs, [Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs])
-        return Task(it.inputs, it.outputs, [OutputMode.ALLOCATED] * n, [None] * n, abi="numba", address=kernel.address,
+        return Task(it.inputs, it.outputs, [OutputMode.ALLOCATED] * n, [None] * n, address=kernel.address,
                     description=f"numba: {node.op}", keepalive=kernel)
 
     # ------------------------------------------------------------ the program
@@ -704,7 +701,7 @@ class Planner:
             if what == "view":
                 end[src] = max(end.get(src, -1), end[k])
 
-        # arena: static provided temporaries and task frames, first fit by liveness
+        # arena: static provided temporaries, first fit by liveness
         intervals = []
         first_out = {}
         for o, k in enumerate(out_ids):
@@ -714,9 +711,6 @@ class Planner:
                 t = self.types[k]
                 nbytes = int(np.prod(t.shape, dtype=np.int64)) * np.dtype(t.dtype).itemsize
                 intervals.append((defined[k], end[k], nbytes, ("value", k)))
-        for i, s in enumerate(tasks):
-            if s.frame_size:
-                intervals.append((i, i, s.frame_size, ("frame", i)))
         offsets, arena = {}, 0
         active = []
         for start, stop, nbytes, what in sorted(intervals, key=lambda x: (x[0], x[1])):
@@ -765,11 +759,9 @@ class Planner:
             pb.task(
                 s.address,
                 s.config,
-                interp.Abi.Numba if s.abi == "numba" else interp.Abi.Kernel,
                 [ids[k] for k in s.inputs],
                 [ids[k] for k in s.outputs],
                 release[i],
-                offsets.get(("frame", i)),
                 s.description,
                 s.keepalive,
             )
