@@ -4,7 +4,7 @@
 use inkwell::OptimizationLevel;
 use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
 use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 
 static INIT: Once = Once::new();
 static VECLIB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -26,54 +26,52 @@ pub fn veclib_enabled() -> bool {
     VECLIB.load(std::sync::atomic::Ordering::Acquire)
 }
 
-/// Target CPU and features: the host, or `PYTENSOR_LLVM_CPU` (e.g. "haswell" to run the
-/// generated code under valgrind, which has no AVX-512). Part of the cache key.
+/// Target CPU and features of the host. Part of the cache key.
 pub fn target_cpu() -> (String, String) {
-    match std::env::var("PYTENSOR_LLVM_CPU") {
-        Ok(cpu) if !cpu.is_empty() => (cpu, String::new()),
-        _ => (
-            TargetMachine::get_host_cpu_name().to_string(),
-            TargetMachine::get_host_cpu_features().to_string(),
-        ),
-    }
+    (
+        TargetMachine::get_host_cpu_name().to_string(),
+        TargetMachine::get_host_cpu_features().to_string(),
+    )
 }
 
-/// libmvec ISA variants usable on this target: SSE ('b', 2 x f64) and AVX2 ('d', 4 x f64).
+/// Load glibc's vector math library into the process, once. False where there is none
+/// (macOS, musl).
+fn libmvec_loaded() -> bool {
+    static LOADED: OnceLock<bool> = OnceLock::new();
+    // SAFETY: a NUL-terminated library name; LLVM keeps the library loaded.
+    *LOADED.get_or_init(|| unsafe {
+        llvm_sys::support::LLVMLoadLibraryPermanently(c"libmvec.so.1".as_ptr()) == 0
+    })
+}
+
+/// Whether the process (including libmvec) exports `name`. Which functions libmvec has
+/// depends on the glibc version.
+pub fn has_symbol(name: &str) -> bool {
+    let Ok(name) = std::ffi::CString::new(name) else {
+        return false;
+    };
+    // SAFETY: a NUL-terminated symbol name; only the address is checked.
+    unsafe { !llvm_sys::support::LLVMSearchForAddressOfSymbol(name.as_ptr()).is_null() }
+}
+
+/// libmvec ISA variants usable on this target, as (VFABI ISA letter, f64 lanes):
+/// x86-64 SSE ('b') and AVX2 ('d'), aarch64 AdvSIMD ('n').
 pub fn vfabi_variants() -> Vec<(char, u32)> {
-    if !veclib_enabled() {
+    if !veclib_enabled() || !libmvec_loaded() {
         return vec![];
     }
-    let (cpu, features) = target_cpu();
-    if !features.is_empty() || cpu.is_empty() {
-        let mut v = vec![('b', 2)];
-        if features.split(',').any(|f| f == "+avx2") {
-            v.push(('d', 4));
+    match std::env::consts::ARCH {
+        "x86_64" => {
+            let (_, features) = target_cpu();
+            let mut v = vec![('b', 2)];
+            if features.split(',').any(|f| f == "+avx2") {
+                v.push(('d', 4));
+            }
+            v
         }
-        return v;
+        "aarch64" => vec![('n', 2)],
+        _ => vec![],
     }
-    // named CPU: ask LLVM whether it has AVX2 via a target machine
-    let features = String::from(
-        if [
-            "haswell",
-            "broadwell",
-            "skylake",
-            "znver1",
-            "znver2",
-            "znver3",
-            "x86-64-v3",
-        ]
-        .contains(&cpu.as_str())
-        {
-            "+avx2"
-        } else {
-            ""
-        },
-    );
-    let mut v = vec![('b', 2)];
-    if features.split(',').any(|f| f == "+avx2") {
-        v.push(('d', 4));
-    }
-    v
 }
 
 pub fn target_machine(opt: u32) -> Result<TargetMachine, String> {
