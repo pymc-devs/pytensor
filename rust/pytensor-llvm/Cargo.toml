@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-faer = { version = "0.24.4", default-features = false, features = ["std"] }
+faer = { version = "0.24.4", default-features = false, features = ["std", "rayon"] }
 hex = "0.4.3"
 inkwell = { version = "0.11.0", features = ["llvm23-1"] }
 libm = "0.2.16"

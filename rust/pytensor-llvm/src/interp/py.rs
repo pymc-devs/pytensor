@@ -229,11 +229,16 @@ pub struct Dot;
 #[pymethods]
 impl Dot {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        parallel: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let desc = "Dot".to_string();
         let k = match dtype_of(&dtype)? {
             DType::Float64 => RustKernel::writing(
                 linalg::Dot::<f64> {
+                    parallel,
                     mode,
                     element: PhantomData,
                 },
@@ -242,6 +247,7 @@ impl Dot {
             )?,
             DType::Float32 => RustKernel::writing(
                 linalg::Dot::<f32> {
+                    parallel,
                     mode,
                     element: PhantomData,
                 },
@@ -306,11 +312,13 @@ impl Cholesky {
         mode: OutputMode,
         dtype: Bound<'_, PyArrayDescr>,
         lower: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("Cholesky(lower={lower})");
         let k = match dtype_of(&dtype)? {
             DType::Float64 => RustKernel::writing(
                 linalg::Cholesky::<f64> {
+                    parallel,
                     mode,
                     lower,
                     element: PhantomData,
@@ -320,6 +328,7 @@ impl Cholesky {
             )?,
             DType::Float32 => RustKernel::writing(
                 linalg::Cholesky::<f32> {
+                    parallel,
                     mode,
                     lower,
                     element: PhantomData,
@@ -345,16 +354,19 @@ impl SolveTriangular {
         dtype: Bound<'_, PyArrayDescr>,
         lower: bool,
         unit_diagonal: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("SolveTriangular(lower={lower}, unit_diagonal={unit_diagonal})");
         fn solve<T: linalg::Float>(
             mode: OutputMode,
             lower: bool,
             unit_diagonal: bool,
+            parallel: bool,
             desc: String,
         ) -> PyResult<RustKernel> {
             RustKernel::writing(
                 linalg::SolveTriangular::<T> {
+                    parallel,
                     mode,
                     lower,
                     unit_diagonal,
@@ -365,8 +377,8 @@ impl SolveTriangular {
             )
         }
         let k = match dtype_of(&dtype)? {
-            DType::Float64 => solve::<f64>(mode, lower, unit_diagonal, desc)?,
-            DType::Float32 => solve::<f32>(mode, lower, unit_diagonal, desc)?,
+            DType::Float64 => solve::<f64>(mode, lower, unit_diagonal, parallel, desc)?,
+            DType::Float32 => solve::<f32>(mode, lower, unit_diagonal, parallel, desc)?,
             dt => return err(format!("SolveTriangular of {dt:?}")),
         };
         Ok(PyClassInitializer::from(k).add_subclass(SolveTriangular))
@@ -411,6 +423,7 @@ impl Solve {
         dtype: Bound<'_, PyArrayDescr>,
         assume_a: &str,
         lower: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let assume = match assume_a {
             "gen" => linalg::Assume::General,
@@ -420,7 +433,7 @@ impl Solve {
         };
         let desc = format!("Solve(assume_a={assume_a}, lower={lower})");
         let k = for_float!(dtype, "Solve", T => RustKernel::writing(
-            linalg::Solve::<T> { mode, assume, element: PhantomData },
+            linalg::Solve::<T> { parallel, mode, assume, element: PhantomData },
             mode,
             desc,
         )?);
@@ -439,10 +452,11 @@ impl CholeskySolve {
         mode: OutputMode,
         dtype: Bound<'_, PyArrayDescr>,
         lower: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("CholeskySolve(lower={lower})");
         let k = for_float!(dtype, "CholeskySolve", T => RustKernel::writing(
-            linalg::CholeskySolve::<T> { mode, lower, element: PhantomData },
+            linalg::CholeskySolve::<T> { parallel, mode, lower, element: PhantomData },
             mode,
             desc,
         )?);
@@ -457,9 +471,13 @@ pub struct MatrixInverse;
 #[pymethods]
 impl MatrixInverse {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        parallel: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let k = for_float!(dtype, "MatrixInverse", T => RustKernel::writing(
-            linalg::MatrixInverse::<T> { mode, element: PhantomData },
+            linalg::MatrixInverse::<T> { parallel, mode, element: PhantomData },
             mode,
             "MatrixInverse".into(),
         )?);
@@ -474,9 +492,13 @@ pub struct Det;
 #[pymethods]
 impl Det {
     #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        parallel: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let k = for_float!(dtype, "Det", T => RustKernel::writing(
-            linalg::Det::<T> { mode, element: PhantomData },
+            linalg::Det::<T> { parallel, mode, element: PhantomData },
             mode,
             "Det".into(),
         )?);
@@ -494,10 +516,11 @@ impl SLogDet {
     fn new(
         modes: Vec<OutputMode>,
         dtype: Bound<'_, PyArrayDescr>,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let fixed = self::modes::<2>("SLogDet", modes.clone())?;
         let k = for_float!(dtype, "SLogDet", T => RustKernel::writing_all(
-            linalg::SLogDet::<T> { modes: fixed, element: PhantomData },
+            linalg::SLogDet::<T> { parallel, modes: fixed, element: PhantomData },
             modes,
             "SLogDet".into(),
         )?);
@@ -515,10 +538,11 @@ impl LUFactor {
     fn new(
         modes: Vec<OutputMode>,
         dtype: Bound<'_, PyArrayDescr>,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let fixed = self::modes::<2>("LUFactor", modes.clone())?;
         let k = for_float!(dtype, "LUFactor", T => RustKernel::writing_all(
-            linalg::LUFactor::<T> { modes: fixed, element: PhantomData },
+            linalg::LUFactor::<T> { parallel, modes: fixed, element: PhantomData },
             modes,
             "LUFactor".into(),
         )?);
@@ -538,6 +562,7 @@ impl LU {
         modes: Vec<OutputMode>,
         dtype: Bound<'_, PyArrayDescr>,
         form: &str,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let form = match form {
             "matrix" => linalg::LuForm::Matrix,
@@ -547,7 +572,7 @@ impl LU {
         };
         let desc = format!("LU({form:?})");
         let k = for_float!(dtype, "LU", T => RustKernel::writing_all(
-            linalg::LU::<T> { modes: modes.clone(), form, element: PhantomData },
+            linalg::LU::<T> { parallel, modes: modes.clone(), form, element: PhantomData },
             modes,
             desc,
         )?);
@@ -605,10 +630,11 @@ impl Eigh {
         dtype: Bound<'_, PyArrayDescr>,
         lower: bool,
         vectors: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("Eigh(lower={lower}, vectors={vectors})");
         let k = for_float!(dtype, "Eigh", T => RustKernel::writing_all(
-            linalg::Eigh::<T> { modes: modes.clone(), lower, vectors, element: PhantomData },
+            linalg::Eigh::<T> { parallel, modes: modes.clone(), lower, vectors, element: PhantomData },
             modes,
             desc,
         )?);
@@ -628,10 +654,11 @@ impl SVD {
         dtype: Bound<'_, PyArrayDescr>,
         full_matrices: bool,
         compute_uv: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("SVD(full_matrices={full_matrices}, compute_uv={compute_uv})");
         let k = for_float!(dtype, "SVD", T => RustKernel::writing_all(
-            linalg::Svd::<T> {
+            linalg::Svd::<T> { parallel,
                 modes: modes.clone(),
                 full_matrices,
                 compute_uv,
@@ -655,6 +682,7 @@ impl QR {
         modes: Vec<OutputMode>,
         dtype: Bound<'_, PyArrayDescr>,
         mode: &str,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let qr_mode = match mode {
             "full" => linalg::QrMode::Full,
@@ -664,7 +692,7 @@ impl QR {
         };
         let desc = format!("QR(mode={mode})");
         let k = for_float!(dtype, "QR", T => RustKernel::writing_all(
-            linalg::Qr::<T> { modes: modes.clone(), mode: qr_mode, element: PhantomData },
+            linalg::Qr::<T> { parallel, modes: modes.clone(), mode: qr_mode, element: PhantomData },
             modes,
             desc,
         )?);
@@ -684,10 +712,11 @@ impl MatrixPinv {
         mode: OutputMode,
         dtype: Bound<'_, PyArrayDescr>,
         hermitian: bool,
+        parallel: bool,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("MatrixPinv(hermitian={hermitian})");
         let k = for_float!(dtype, "MatrixPinv", T => RustKernel::writing(
-            linalg::MatrixPinv::<T> { mode, hermitian, element: PhantomData },
+            linalg::MatrixPinv::<T> { parallel, mode, hermitian, element: PhantomData },
             mode,
             desc,
         )?);

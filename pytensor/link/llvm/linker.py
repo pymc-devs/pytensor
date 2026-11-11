@@ -30,6 +30,7 @@ class LLVMLinker(JITLinker):
         "input_layout",
         "check_layouts",
         "parallel",
+        "linalg_parallel",
         "generate_scan",
     )
 
@@ -42,6 +43,7 @@ class LLVMLinker(JITLinker):
         input_layout="any",
         check_layouts=False,
         parallel=True,
+        linalg_parallel=None,
         generate_scan=True,
         **kwargs,
     ):
@@ -53,6 +55,9 @@ class LLVMLinker(JITLinker):
         self.input_layout = input_layout
         self.check_layouts = check_layouts
         self.parallel = parallel
+        if linalg_parallel is None:
+            linalg_parallel = parallel
+        self.linalg_parallel = linalg_parallel
         self.generate_scan = generate_scan
         self.program = None
         self.stats = None
