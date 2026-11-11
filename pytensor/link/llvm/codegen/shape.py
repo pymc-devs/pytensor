@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import Array, cast, copy, load, store
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import dimshuffle_layout, same_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape
 
 
-@llvm_outputs.register(DimShuffle)
+@llvm_layout.register(DimShuffle)
 def _(op, node, in_layouts):
-    return [view_output(node.outputs[0], dimshuffle_layout(op, node, in_layouts[0]))]
+    return [dimshuffle_layout(op, node, in_layouts[0])]
 
 
-@llvm_outputs.register(ViewOp)
-@llvm_outputs.register(SpecifyShape)
+@llvm_layout.register(ViewOp)
+@llvm_layout.register(SpecifyShape)
 def _(op, node, in_layouts):
-    return [view_output(node.outputs[0], same_layout(node, in_layouts[0]))]
+    return [same_layout(node, in_layouts[0])]
 
 
 @llvm_emit.register(DimShuffle)
@@ -35,9 +34,8 @@ def _(op, node, cg, inputs, outputs):
         else:
             shape.append(x.shape[o])
             strides.append(x.strides[o])
-    # the view's layout follows from the input's (the same rule `llvm_outputs` uses)
-    layout = dimshuffle_layout(op, node, x.layout)
-    outputs[0].set_view(Array(x.dtype, x.data, shape, strides, layout))
+    # the view's layout follows from the input's (the same rule `llvm_layout` uses)
+    outputs[0].set_view(x.view(x.data, shape, strides, dimshuffle_layout(op, node, x.layout)))
 
 
 @llvm_emit.register(ViewOp)
@@ -61,7 +59,7 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(DeepCopyOp)
 def _(op, node, cg, inputs, outputs):
     x = inputs[0]
-    copy(cg, x, output_array(outputs[0], x.shape))
+    copy(cg, x, outputs[0].allocate(x.shape))
 
 
 @llvm_emit.register(ScalarFromTensor)
@@ -72,6 +70,6 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_emit.register(TensorFromScalar)
 def _(op, node, cg, inputs, outputs):
-    out = output_array(outputs[0], [])
+    out = outputs[0].allocate([])
     store(cg.b, out.dtype, inputs[0], out.data)
 

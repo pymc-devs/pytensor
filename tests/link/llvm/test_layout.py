@@ -24,7 +24,7 @@ rng = np.random.default_rng(3)
 
 
 def view_layout(out, *ins):
-    """The layout `llvm_outputs` declares for `out` given its node's input layouts."""
+    """The layout `llvm_layout` declares for `out` given its node's input layouts."""
     node = out.owner
     ins = list(ins) + [None] * (len(node.inputs) - len(ins))
     return node_outputs(node, ins)[node.outputs.index(out)].layout
@@ -278,11 +278,11 @@ def test_declared_outputs():
 
     x = pt.dmatrix("x")
     (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
-    assert o.mode is OutputMode.ALLOCATED and str(o.layout) == "[P0, P1]"
+    assert o.mode is OutputMode.RETURNED and o.aliases == () and str(o.layout) == "[P0, P1]"
     (o,) = node_outputs((pt.exp(x.T)).owner, [None])
     assert o.layout == C(2)
     (o,) = node_outputs(x.T.owner, [C(2)])
-    assert o.mode is OutputMode.VIEW and o.view_of == 0 and o.layout == T2
+    assert o.mode is OutputMode.RETURNED and o.aliases == (0,) and o.layout == T2
 
 
 def test_provided_layouts_are_binding():
@@ -309,7 +309,7 @@ def test_view_layout_is_checked_when_generating():
     from pytensor.graph.basic import Apply
     from pytensor.graph.op import Op
     from pytensor.link.llvm.codegen.emit import Array
-    from pytensor.link.llvm.codegen.function import build_node_function, llvm_emit, llvm_outputs, view_output
+    from pytensor.link.llvm.codegen.function import build_node_function, llvm_emit, llvm_layout
 
     class BadTranspose(Op):
         """Claims its view is C-contiguous, but returns the transpose."""
@@ -322,9 +322,9 @@ def test_view_layout_is_checked_when_generating():
         def perform(self, node, inputs, out):
             out[0][0] = inputs[0].T
 
-    @llvm_outputs.register(BadTranspose)
+    @llvm_layout.register(BadTranspose)
     def _(op, node, in_layouts):
-        return [view_output(node.outputs[0], C(2))]
+        return [C(2)]
 
     @llvm_emit.register(BadTranspose)
     def _(op, node, cx, inputs, outputs):
@@ -346,11 +346,11 @@ def test_kernels_declare_their_outputs():
     node = x.T.owner
     k = rust_kernel(node.op, node, [C(2)])
     (o,) = rust_kernel_outputs(k, node, [C(2)])
-    assert o.mode is OutputMode.VIEW and o.view_of == 0 and o.layout == T2
+    assert o.mode is OutputMode.RETURNED and o.aliases == (0,) and o.layout == T2
     # the Rust declaration agrees with the one for generated code
     assert o.layout == node_outputs(node, [C(2)])[0].layout
     a = pt.tensor("a", shape=(3, 4))
-    for out, mode in [(pt.dot(x, x), OutputMode.ALLOCATED), (pt.dot(a, a.T), OutputMode.PROVIDED)]:
+    for out, mode in [(pt.dot(x, x), OutputMode.RETURNED), (pt.dot(a, a.T), OutputMode.PROVIDED)]:
         node = out.owner
         (o,) = rust_kernel_outputs(rust_kernel(node.op, node, None), node, None)
         assert o.mode is mode and o.layout == C(2)

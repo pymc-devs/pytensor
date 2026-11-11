@@ -1,6 +1,18 @@
 """Stage 3: where each value of a program lives, and when it is released.
 
 Plain data in, plain data out: nothing here touches LLVM or the interpreter.
+
+Every value has a kind:
+
+* `input`, `const`: memory the program doesn't own;
+* `provided`: memory the program gives the task that writes it: a place in the arena,
+  or a fresh buffer if the value is a graph output;
+* `returned`: the task hands the array back: a buffer it allocated, or a view of one
+  of the values it may alias (`MemoryPlan.aliases`). Which one is only known when the
+  program runs, so every value a returned value may alias is kept alive as long as it.
+
+The arena is laid out by liveness: a value's place is free again after the last task
+that needs it, or anything that may alias it.
 """
 
 from __future__ import annotations
@@ -15,9 +27,10 @@ from pytensor.link.llvm.plan.values import Values
 
 @dataclass
 class MemoryPlan:
-    #: vid -> (kind, source): "input", "const", "provided", "allocated", or "view" of
-    #: the value `source`
+    #: vid -> "input", "const", "provided" or "returned"
     kind: dict
+    #: vid -> the values a returned value may be a view of
+    aliases: dict
     #: vid -> index of the task that produces it (-1: inputs and constants)
     defined: dict
     #: vid -> index of the last task that needs it alive (`forever` for graph outputs)
@@ -32,65 +45,47 @@ class MemoryPlan:
     def release_points(self, n_tasks) -> list:
         """Per task: the values to release after it."""
         release = [[] for _ in range(n_tasks)]
-        for k, (what, _) in self.kind.items():
+        for k, what in self.kind.items():
             if (
-                what in ("allocated", "view", "provided")
+                what in ("returned", "provided")
                 and self.end.get(k, self.forever) < self.forever
             ):
                 release[max(self.end[k], self.defined[k])].append(k)
         return release
 
+    def in_order(self) -> list:
+        """The values, each after the values it may alias."""
+        return sorted(self.kind, key=lambda k: self.defined[k])
 
-def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
-    """`tasks` have `inputs`, `outputs` (vids), `modes` and `view_of` per output."""
-    n_tasks = len(tasks)
-    INF = n_tasks + 1
-    kind = {}  # vid -> ("input"|"const"|"provided"|"allocated"|"view", source)
-    for k in in_ids:
-        kind[k] = ("input", None)
-    for s in tasks:
-        for k in s.inputs:
-            if k in values.consts and k not in kind:
-                kind[k] = ("const", None)
-    defined, end = {}, {}
-    for k in kind:
-        defined[k] = -1
-    for i, s in enumerate(tasks):
-        for k in s.inputs:
+
+def lifetimes(tasks, kind, aliases, out_ids, forever) -> tuple[dict, dict]:
+    """(defined, end) per value: the task that produces it and the last task that
+    needs it alive. A value is needed as long as anything that may alias it."""
+    defined = {k: -1 for k in kind}
+    end = {}
+    for i, task in enumerate(tasks):
+        for k in task.inputs:
             end[k] = max(end.get(k, -1), i)
-        for j, (k, mode) in enumerate(zip(s.outputs, s.modes, strict=True)):
+        for k in task.outputs:
             defined[k] = i
             end.setdefault(k, i)
-            if mode is OutputMode.VIEW:
-                kind[k] = ("view", s.inputs[s.view_of[j]])
-            elif mode is OutputMode.PROVIDED:
-                kind[k] = ("provided", None)
-            else:
-                kind[k] = ("allocated", None)
     for k in out_ids:
-        if k in values.consts and k not in kind:
-            kind[k] = ("const", None)
-            defined[k] = -1
-        end[k] = INF
-    # views keep their source alive (later values first, so chains propagate)
-    for k in sorted(kind, key=lambda k: defined[k], reverse=True):
-        what, src = kind[k]
-        if what == "view":
-            end[src] = max(end.get(src, -1), end[k])
+        defined.setdefault(k, -1)
+        end[k] = forever
+    # later values first, so chains of views propagate
+    for k in sorted(aliases, key=lambda k: defined[k], reverse=True):
+        for source in aliases[k]:
+            end[source] = max(end.get(source, -1), end[k])
+    return defined, end
 
-    # arena: static provided temporaries, first fit by liveness
-    intervals = []
-    first_out = {}
-    for o, k in enumerate(out_ids):
-        first_out.setdefault(k, o)
-    for k, (what, _) in kind.items():
-        if what == "provided" and k not in first_out:
-            t = values.types[k]
-            nbytes = int(np.prod(t.shape, dtype=np.int64)) * np.dtype(t.dtype).itemsize
-            intervals.append((defined[k], end[k], nbytes, ("value", k)))
-    offsets, arena = {}, 0
-    active = []
-    for start, stop, nbytes, what in sorted(intervals, key=lambda x: (x[0], x[1])):
+
+def first_fit(intervals) -> tuple[dict, int]:
+    """Place `intervals` ((start, stop, nbytes, key), live from start to stop
+    inclusive) at 64-byte aligned offsets, reusing space that is free again. Returns
+    ({key: offset}, total bytes)."""
+    offsets, total = {}, 0
+    active = []  # (offset, size, stop)
+    for start, stop, nbytes, key in sorted(intervals, key=lambda x: (x[0], x[1])):
         size = max(64, -(-nbytes // 64) * 64)
         active = [a for a in active if a[2] >= start]
         off = 0
@@ -99,6 +94,44 @@ def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
                 break
             off = max(off, a_off + a_size)
         active.append((off, size, stop))
-        offsets[what[1]] = off
-        arena = max(arena, off + size)
-    return MemoryPlan(kind, defined, end, offsets, arena, first_out, INF)
+        offsets[key] = off
+        total = max(total, off + size)
+    return offsets, total
+
+
+def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
+    """`tasks` have `inputs`, `outputs` (vids), and per output a mode (`modes`) and the
+    positions of the task inputs it may alias (`aliases`)."""
+    forever = len(tasks) + 1
+    kind, aliases = {}, {}
+    for k in in_ids:
+        kind[k] = "input"
+    for task in tasks:
+        for k in task.inputs:
+            if k in values.consts and k not in kind:
+                kind[k] = "const"
+    for task in tasks:
+        for k, mode, may_alias in zip(
+            task.outputs, task.modes, task.aliases, strict=True
+        ):
+            if mode is OutputMode.PROVIDED:
+                kind[k] = "provided"
+            else:
+                kind[k] = "returned"
+                aliases[k] = [task.inputs[pos] for pos in may_alias]
+    for k in out_ids:
+        if k in values.consts and k not in kind:
+            kind[k] = "const"
+    defined, end = lifetimes(tasks, kind, aliases, out_ids, forever)
+
+    first_out = {}
+    for position, k in enumerate(out_ids):
+        first_out.setdefault(k, position)
+    intervals = []
+    for k, what in kind.items():
+        if what == "provided" and k not in first_out:
+            t = values.types[k]
+            nbytes = int(np.prod(t.shape, dtype=np.int64)) * np.dtype(t.dtype).itemsize
+            intervals.append((defined[k], end[k], nbytes, k))
+    offsets, arena = first_fit(intervals)
+    return MemoryPlan(kind, aliases, defined, end, offsets, arena, first_out, forever)

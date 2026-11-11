@@ -2,7 +2,7 @@
 
 A node is run by generated code (an emitter, `llvm_emit`), by a Rust kernel, by a numba
 kernel, or, for an interpreted OpFromGraph, by a subprogram. `Resolver` decides, and
-says what the choice means for the node's outputs (their modes and layouts): a
+says what the choice means for the node's outputs (how they come to be, and their layouts): a
 `CalledKernel` describes a kernel, `None` stands for generated code.
 
 Tasks of a program and nodes inside generated code (a unit, a Scan's loop body) choose
@@ -113,7 +113,7 @@ class Resolver:
             Output(repr_of(o.type), OutputMode.ABSENT)
             if is_absent(o.type)
             else Output(
-                repr_of(o.type, Layout.dynamic(o.type.ndim)), OutputMode.ALLOCATED
+                repr_of(o.type, Layout.dynamic(o.type.ndim)), OutputMode.RETURNED
             )
             for o in node.outputs
         ]
@@ -139,7 +139,7 @@ class Resolver:
             if is_absent(o.type)
             else OutputMode.PROVIDED
             if repr_of(o.type).static
-            else OutputMode.ALLOCATED
+            else OutputMode.RETURNED
             for o in node.outputs
         ]
         sub = Planner(self.opts)
@@ -152,7 +152,7 @@ class Resolver:
             elif mode is OutputMode.PROVIDED or lay is None:
                 outs.append(Output(repr_of(o.type, Layout.c(o.type.ndim)), mode))
             else:
-                # an allocated output is the inner value if it owns a buffer, else a C copy
+                # a returned output is the inner value if it owns a buffer, else a C copy
                 shape = tuple(None if s is None else int(s) for s in o.type.shape)
                 lay = lay.join(
                     Layout.c(o.type.ndim), shape, np.dtype(o.type.dtype).itemsize

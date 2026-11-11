@@ -29,7 +29,7 @@ class CalledKernel:
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
     config: int
-    #: what it produces, per node output (`Output`s, `view_of` counting node inputs)
+    #: what it produces, per node output (`Output`s, `aliases` counting node inputs)
     outputs: list
     description: str = ""
     keepalive: object = None

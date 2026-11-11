@@ -4,21 +4,12 @@ from __future__ import annotations
 
 import operator
 
-from pytensor.link.llvm.codegen.elemwise import output_array
-from pytensor.link.llvm.codegen.emit import Array, cast, constant, copy, load
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm.codegen.emit import Array, cast, constant, load, set_output
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import split_layouts
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.tensor.basic import ExtractDiag, Split
 from pytensor.tensor.extra_ops import CumOp
-
-
-def _set(out, cg, a: Array):
-    """Make output `out` the array `a`: as a view if it is one, else by copying."""
-    if hasattr(out, "set_view") and out.view_of is not None:
-        out.set_view(a)
-    else:
-        copy(cg, a, output_array(out, a.shape))
 
 
 @llvm_emit.register(CumOp)
@@ -27,7 +18,7 @@ def _(op, node, cg, inputs, outputs):
     x = inputs[0]
     if x.ndim == 0:
         raise NotImplementedError("CumOp on a 0-d input")
-    out = output_array(outputs[0], x.shape)
+    out = outputs[0].allocate(x.shape)
     combine = operator.add if op.mode == "add" else operator.mul
     init = constant(b, out.dtype, 0 if op.mode == "add" else 1)
 
@@ -66,12 +57,12 @@ def _(op, node, cg, inputs, outputs):
     start = b.select(b.sgt(length, zero), start, zero)
     shape = [x.shape[a] for a in range(x.ndim) if a not in (a1, a2)] + [length]
     strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [b.add(x.strides[a1], x.strides[a2])]
-    _set(outputs[0], cg, Array(x.dtype, b.gep_bytes(x.data, start), shape, strides))
+    set_output(cg, outputs[0], x.view(b.gep_bytes(x.data, start), shape, strides))
 
 
-@llvm_outputs.register(Split)
+@llvm_layout.register(Split)
 def _(op, node, in_layouts):
-    return [view_output(o, lay) for o, lay in zip(node.outputs, split_layouts(op, node, in_layouts[0]), strict=True)]
+    return split_layouts(op, node, in_layouts[0])
 
 
 @llvm_emit.register(Split)
@@ -98,4 +89,4 @@ def _(op, node, cg, inputs, outputs):
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
         start = b.select(b.sgt(n, b.i64(0)), start, b.i64(0))
-        _set(out, cg, Array(x.dtype, b.gep_bytes(x.data, b.mul(start, x.strides[axis], nsw=True)), shape, list(x.strides), lay))
+        set_output(cg, out, x.view(b.gep_bytes(x.data, b.mul(start, x.strides[axis], nsw=True)), shape, list(x.strides), lay))

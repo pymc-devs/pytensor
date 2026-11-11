@@ -18,7 +18,7 @@ kernels allocate and scratch memory are released after every iteration.
 from __future__ import annotations
 
 from pytensor.link.llvm.codegen.emit import Array, cast, constant, copy, for_each, load, store, advance
-from pytensor.link.llvm.codegen.function import OutputMode, Output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
 from pytensor.link.llvm.codegen.unit import Destination, bind_constants, emit_items, release
 from pytensor.link.llvm.layout import Layout, remove_axis
@@ -37,15 +37,10 @@ def _n_inner_traced_outs(info):
 def register():
     from pytensor.scan.op import Scan
 
-    @llvm_outputs.register(Scan)
+    @llvm_layout.register(Scan)
     def _(op, node, in_layouts):
         # buffers allocated by the loop, C-contiguous (as the Rust kernel's)
-        return [
-            Output(repr_of(o.type), OutputMode.ABSENT)
-            if is_absent(o.type)
-            else Output(repr_of(o.type, Layout.c(o.type.ndim)), OutputMode.ALLOCATED)
-            for o in node.outputs
-        ]
+        return [None if is_absent(o.type) else Layout.c(o.type.ndim) for o in node.outputs]
 
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):

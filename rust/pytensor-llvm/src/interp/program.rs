@@ -38,10 +38,10 @@ pub enum ValueKind {
     Arena(u64),
     /// a static-shape graph output: a fresh buffer per call (or the caller's memory)
     Fresh,
-    /// set by the producing task, which hands over one reference
-    Allocated,
-    /// set by the producing task, lies in the memory of this value
-    View(ValueId),
+    /// Returned by the producing task: a buffer it allocated (it hands over one
+    /// reference), or a view into the memory of one of these values (the planner keeps
+    /// all of them alive as long as this one).
+    Returned(Vec<ValueId>),
 }
 
 #[derive(Clone, Debug)]
@@ -251,8 +251,11 @@ impl Program {
                 ValueKind::Fresh => {
                     v.static_nbytes().ok_or(format!("value {k}: fresh value without static size"))?;
                 }
-                ValueKind::View(src) => ok(*src)?,
-                ValueKind::Allocated => {}
+                ValueKind::Returned(sources) => {
+                    for src in sources {
+                        ok(*src)?;
+                    }
+                }
             }
         }
         for s in &spec.tasks {
@@ -441,7 +444,7 @@ impl Program {
                             st.owned[v.i()] = true;
                         }
                     },
-                    ValueKind::Allocated | ValueKind::View(_) => {
+                    ValueKind::Returned(_) => {
                         a.data = std::ptr::null_mut();
                         a.owner = std::ptr::null_mut();
                     }
@@ -471,19 +474,12 @@ impl Program {
             let n_in = task.inputs.len();
             for (k, &v) in task.outputs.iter().enumerate() {
                 let a = st.args[n_in + k];
-                match values[v.i()].kind {
-                    ValueKind::Allocated => {
-                        st.vals[v.i()].data = a.data;
-                        st.vals[v.i()].owner = a.owner;
-                        st.owned[v.i()] = !a.owner.is_null();
-                    }
-                    ValueKind::View(src) => {
-                        st.vals[v.i()].data = a.data;
-                        st.vals[v.i()].owner = a.owner;
-                        // a fresh buffer instead of a view is ours to release
-                        st.owned[v.i()] = !a.owner.is_null() && a.owner != st.vals[src.i()].owner;
-                    }
-                    _ => {}
+                if let ValueKind::Returned(sources) = &values[v.i()].kind {
+                    st.vals[v.i()].data = a.data;
+                    st.vals[v.i()].owner = a.owner;
+                    // A buffer the task allocated is ours to release. A view comes back
+                    // with the owner of the value it lies in, or with none.
+                    st.owned[v.i()] = !a.owner.is_null() && sources.iter().all(|src| a.owner != st.vals[src.i()].owner);
                 }
             }
             if rc != 0 {
@@ -491,7 +487,7 @@ impl Program {
                 return Err(format!("{}: {msg}", task.desc));
             }
             for (k, &v) in task.outputs.iter().enumerate() {
-                if matches!(values[v.i()].kind, ValueKind::Allocated | ValueKind::View(_)) {
+                if matches!(values[v.i()].kind, ValueKind::Returned(_)) {
                     // SAFETY: the storage holds ndim entries, written by the kernel.
                     let shape = unsafe { st.vals[v.i()].shape() };
                     check_shape(&values[v.i()], shape).map_err(|m| format!("{}: output {k}: {m}", task.desc))?;
@@ -640,8 +636,11 @@ impl Program {
                 ValueKind::Arena(off) if !v.order.is_empty() => format!("arena +{off}, order {:?}", v.order),
                 ValueKind::Arena(off) => format!("arena +{off}"),
                 ValueKind::Fresh => "fresh (output)".to_string(),
-                ValueKind::Allocated => "allocated by its task".to_string(),
-                ValueKind::View(src) => format!("view of %{}", src.0),
+                ValueKind::Returned(sources) if sources.is_empty() => "allocated by its task".to_string(),
+                ValueKind::Returned(sources) => {
+                    let names: Vec<String> = sources.iter().map(|s| format!("%{}", s.0)).collect();
+                    format!("returned by its task, may be a view of {}", names.join(", "))
+                }
             };
             let _ = writeln!(s, "  %{k:<4} {ty:<24} {kind}");
         }

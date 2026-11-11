@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import (
     c_array,
     Array,
@@ -16,7 +15,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.types import ir, is_float
 from pytensor.raise_op import CheckAndRaise
@@ -33,7 +32,7 @@ def _scalar(b, a):
 
 @llvm_emit.register(Shape_i)
 def _(op, node, cg, inputs, outputs):
-    out = output_array(outputs[0], [])
+    out = outputs[0].allocate([])
     store(cg.b, out.dtype, cast(cg.b, inputs[0].shape[op.i], "int64", out.dtype), out.data)
 
 
@@ -41,7 +40,7 @@ def _(op, node, cg, inputs, outputs):
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x = inputs[0]
-    out = output_array(outputs[0], [b.i64(x.ndim)])
+    out = outputs[0].allocate([b.i64(x.ndim)])
     for a, n in enumerate(x.shape):
         p = b.gep_bytes(out.data, b.mul(b.i64(a), out.strides[0], nsw=True))
         store(b, out.dtype, cast(b, n, "int64", out.dtype), p)
@@ -50,7 +49,7 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(MakeVector)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
-    out = output_array(outputs[0], [b.i64(len(inputs))])
+    out = outputs[0].allocate([b.i64(len(inputs))])
     for k, x in enumerate(inputs):
         p = b.gep_bytes(out.data, b.mul(b.i64(k), out.strides[0], nsw=True))
         store(b, out.dtype, cast(b, _scalar(b, x), x.dtype, out.dtype), p)
@@ -79,7 +78,7 @@ def _(op, node, cg, inputs, outputs):
     b = cg.b
     v = inputs[0]
     shape = _shape_from(cg, node, inputs, 1)
-    out = output_array(outputs[0], shape)
+    out = outputs[0].allocate(shape)
     # the value broadcasts against the output, aligned on the right
     off = len(shape) - v.ndim
     vt = node.inputs[0].type
@@ -105,7 +104,7 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_emit.register(AllocEmpty)
 def _(op, node, cg, inputs, outputs):
-    output_array(outputs[0], _shape_from(cg, node, inputs, 0))
+    outputs[0].allocate(_shape_from(cg, node, inputs, 0))
 
 
 @llvm_emit.register(ARange)
@@ -137,7 +136,7 @@ def _(op, node, cg, inputs, outputs):
     static = node.outputs[0].type.shape[0]
     if static is not None:
         cg.check(b.eq(n, b.i64(static)), "arange: length differs from the static shape")
-    out = output_array(outputs[0], [n])
+    out = outputs[0].allocate([n])
     with b.loop(n) as i:
         if dt == "int64":
             v = b.add(start_v, b.mul(i, step_v))
@@ -146,10 +145,10 @@ def _(op, node, cg, inputs, outputs):
         out.store(b, cast(b, v, dt, out_dtype), i)
 
 
-@llvm_outputs.register(Reshape)
+@llvm_layout.register(Reshape)
 def _(op, node, in_layouts):
     # a view of a C-contiguous input, else a C-contiguous copy: C either way
-    return [view_output(node.outputs[0], Layout.c(node.outputs[0].type.ndim))]
+    return [Layout.c(node.outputs[0].type.ndim)]
 
 
 @llvm_emit.register(Reshape)
@@ -250,7 +249,7 @@ def _(op, node, cg, inputs, outputs):
     for x in inputs[1:]:
         total = b.add(total, x.shape[axis], nsw=True) if total.const_int is None or x.shape[axis].const_int is None else b.i64(total.const_int + x.shape[axis].const_int)
     shape = [total if a == axis else first.shape[a] for a in range(nd)]
-    out = output_array(outputs[0], shape)
+    out = outputs[0].allocate(shape)
     offset = b.i64(0)
     for x in inputs:
         dst = Array(out.dtype, b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)), x.shape, out.strides)
@@ -258,9 +257,9 @@ def _(op, node, cg, inputs, outputs):
         offset = b.add(offset, x.shape[axis]) if offset.const_int is None or x.shape[axis].const_int is None else b.i64(offset.const_int + x.shape[axis].const_int)
 
 
-@llvm_outputs.register(CheckAndRaise)
+@llvm_layout.register(CheckAndRaise)
 def _(op, node, in_layouts):
-    return [view_output(node.outputs[0], same_layout(node, in_layouts[0]))]
+    return [same_layout(node, in_layouts[0])]
 
 
 @llvm_emit.register(CheckAndRaise)

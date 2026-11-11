@@ -57,7 +57,7 @@ def build_unit_function(
     * `inputs`: [(vid, PyTensor type)] -- tensors only;
     * `input_layouts`: a `Layout` per input (None: nothing known), the ones the items
       were resolved for (`unit_input_layouts`);
-    * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or ALLOCATED;
+    * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or RETURNED;
     * `output_layouts`: the layout of the memory provided for each PROVIDED output
       (None: any strides);
     * `resolved`: the unit's items in order, resolved (`plan.resolve.Resolved`): each
@@ -80,7 +80,7 @@ def build_unit_function(
         if isinstance(r, ScalarRepr):
             raise NotImplementedError("ScalarType values can't cross a unit's boundary")
     for o in outs:
-        if o.mode not in (OutputMode.PROVIDED, OutputMode.ALLOCATED):
+        if o.mode not in (OutputMode.PROVIDED, OutputMode.RETURNED):
             raise NotImplementedError(f"unit outputs can't be {o.mode}")
     sig = Signature(tuple(in_reprs), tuple(outs))
     fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
@@ -180,8 +180,8 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
       items read but don't produce, with the layouts they were resolved for; filled
       with what they produce;
     * `targets`: vid -> `Destination`: where a value may be produced directly (PROVIDED
-      outputs whose declared layout the target's implies; ALLOCATED C-contiguous
-      ones into a slot); other values go into temporary memory or kernel buffers;
+      outputs whose declared layout the target's implies; returned new C-contiguous
+      memory into a slot); other values go into temporary memory or kernel buffers;
     * `on_fail()`: emits the caller's cleanup before an error is returned.
 
     Returns (written, owned): the vids produced in their targets, and the slots of
@@ -218,7 +218,8 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
             # node allocates it C-contiguous
             t = targets.get(vid)
             return (
-                o.mode is OutputMode.ALLOCATED
+                o.mode is OutputMode.RETURNED
+                and not o.aliases
                 and t is not None
                 and t.slot is not None
                 and vid not in written
@@ -228,7 +229,7 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
         temporaries = {
             j
             for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True))
-            if (o.mode is OutputMode.ALLOCATED and not into_slot(vid, o)) or o.mode is OutputMode.VIEW
+            if o.mode is OutputMode.RETURNED and not into_slot(vid, o)
         }
         nf = build_node_function(
             module,

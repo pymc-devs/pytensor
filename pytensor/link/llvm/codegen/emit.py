@@ -41,6 +41,10 @@ class Array:
     shape: list
     strides: list
     layout: Layout = None
+    #: the node input this memory belongs to (inputs and their views), if known
+    base: int | None = None
+    #: may code write it? Inputs may not (`store` refuses)
+    writable: bool = True
 
     def __post_init__(self):
         if self.layout is None:
@@ -57,7 +61,12 @@ class Array:
 
     def with_strides(self, shape, strides, layout=None):
         """The same memory with other lengths/strides (e.g. a broadcast view)."""
-        return Array(self.dtype, self.data, list(shape), list(strides), layout)
+        return self.view(self.data, shape, strides, layout)
+
+    def view(self, data, shape, strides, layout=None) -> Array:
+        """An array in the same memory: `data` points into it. It belongs to the same
+        input and is as writable as this one."""
+        return Array(self.dtype, data, list(shape), list(strides), layout, self.base, self.writable)
 
     # ---- elements (indices are i64 values or Python ints; nothing is bounds-checked)
 
@@ -87,6 +96,11 @@ class Array:
             value = value.value
         elif isinstance(value, bool | int | float):
             value = constant(b, self.dtype, value)
+        if not self.writable:
+            raise ValueError(
+                "storing into an input: inputs are only read. Write the output (`out.allocate(shape)`), "
+                "or ask for the input's memory with `out.overwrite(x)` if the op destroys it"
+            )
         store(b, self.dtype, value, self.ptr(b, *index))
 
     def at(self, b, i, axis: int = 0) -> Array:
@@ -96,8 +110,7 @@ class Array:
 
         axis = range(self.ndim)[axis]
         keep = [a for a in range(self.ndim) if a != axis]
-        return Array(
-            self.dtype,
+        return self.view(
             advance(b, self.data, i, self.strides[axis], self.dtype),
             [self.shape[a] for a in keep],
             [self.strides[a] for a in keep],
@@ -281,22 +294,28 @@ class ProvidedOutput:
 
     array: Array
 
+    def allocate(self, shape: list) -> Array:
+        """The memory of the output (the caller's; `shape` is what it has)."""
+        return self.array
+
 
 @dataclass
 class SlotOutput:
-    """An output the kernel sets through a slot (allocated, or a view of input `view_of`)."""
+    """An output the kernel returns through a slot: memory it allocates (`allocate`),
+    or a view of one of the inputs the op says it may alias (`set_view`)."""
 
     cg: "Codegen"
     slot: object
     dtype: str
     ndim: int
-    view_of: int | None = None
+    #: the node inputs it may be a view of (the op's view_map)
+    aliases: tuple = ()
     #: allocate in temporary memory instead of a runtime buffer (a temporary inside a
     #: compiled unit): the slot gets no owner
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
     layout: Layout = None
-    #: for a view: the layout `llvm_outputs` declared (`set_view` checks it)
+    #: for a view: the layout `llvm_layout` declared (`set_view` checks it)
     declared: Layout = None
     #: (scope, noalias scopes) for the memory `allocate` returns (`Builder.mark_array`)
     alias: tuple | None = None
@@ -313,8 +332,8 @@ class SlotOutput:
 
     def allocate(self, shape: list) -> Array:
         """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
-        owns it. (A view output may allocate too, e.g. a reshape of a non-contiguous
-        array: the owner it sets then takes precedence over the viewed input's.)"""
+        owns it. An output that may be a view can always allocate instead (a reshape of
+        a non-contiguous array does): the owner it sets tells the caller."""
         cg, b = self.cg, self.cg.b
         if self.temporary:
             # read by the unit after this node's function returned
@@ -360,19 +379,32 @@ class SlotOutput:
             self.cg.b.mark_array(a.data, *self.alias)
 
     def set_view(self, a: Array):
-        """The output is `a`, which lies in the memory of input `view_of` (the caller
-        sets the owner)."""
-        if self.view_of is None:
-            raise ValueError("not a view output")
+        """The output is `a`, a view of an input the op's view_map lists for this output
+        (the caller knows whose memory that is and keeps it alive)."""
+        if not self.aliases:
+            raise ValueError("this output can't be a view: the op's view_map doesn't list an input for it")
+        if a.base is not None and a.base not in self.aliases:
+            raise ValueError(
+                f"a view of input {a.base}, but the op's view_map only lets this output alias {list(self.aliases)}"
+            )
         if self.declared is not None:
             shape = a.static_shape()
             if not a.layout.implies(self.declared, shape, itemsize(self.dtype)):
                 raise ValueError(
-                    f"the view has layout {a.layout.describe(shape)}, but llvm_outputs declared "
+                    f"the view has layout {a.layout.describe(shape)}, but llvm_layout declared "
                     f"{self.declared.describe(shape)}"
                 )
         self._write(a.data, a.shape, a.strides)
         self.done = True
+
+
+def set_output(cg, out, a: Array) -> None:
+    """Make the output `out` the array `a`, which lies in an input's memory: as a view
+    where the op lets this output alias that input, else as a copy."""
+    if isinstance(out, SlotOutput) and out.aliases and (a.base is None or a.base in out.aliases):
+        out.set_view(a)
+    else:
+        copy(cg, a, out.allocate(a.shape))
 
 
 @dataclass
