@@ -12,7 +12,7 @@
 //! * `jit`, `target`: the JIT and LLVM setup; `perf`: perf maps;
 //! * `math`, `random`, `parallel`: what generated code calls;
 //! * `kernel`: what Rust kernels are written with; `linalg`, `sort`, `interp::kernels`,
-//!   `interp::scan`: the kernels.
+//!   `interp::scan`: the kernels; `testing`: calling them in tests.
 
 use pyo3::prelude::*;
 
@@ -31,6 +31,8 @@ pub mod random;
 pub mod runtime;
 pub mod sort;
 pub mod target;
+#[cfg(test)]
+pub mod testing;
 
 /// Contents of the C header (include/pytensor_llvm.h).
 #[pyfunction]

@@ -282,6 +282,7 @@ pub enum RustMath {
     GammaLn,
     Gamma,
     Psi,
+    Erfcx,
 }
 
 impl RustMath {
@@ -293,6 +294,8 @@ impl RustMath {
             (RustMath::Gamma, true) => "ptl_gamma_f32",
             (RustMath::Psi, false) => "ptl_psi_f64",
             (RustMath::Psi, true) => "ptl_psi_f32",
+            (RustMath::Erfcx, false) => "ptl_erfcx_f64",
+            (RustMath::Erfcx, true) => "ptl_erfcx_f32",
         }
     }
 }

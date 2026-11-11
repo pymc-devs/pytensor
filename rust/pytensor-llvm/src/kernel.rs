@@ -844,4 +844,45 @@ mod tests {
         fails(OutputMode::View, (1, 1), |_| (), "can't return a view");
         assert_eq!(call.result, [0.0; 3]);
     }
+
+    /// Writes 1.0 and 2.0 into the outputs at its two indices, holding both.
+    struct Pair([usize; 2]);
+
+    impl Kernel for Pair {
+        fn arity(&self) -> (usize, usize) {
+            (0, 2)
+        }
+
+        fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+            let [first, second] = args.outputs.slots(self.0)?;
+            let mut first = first.array::<f64>(ctx, OutputMode::Allocated, &[1])?;
+            let mut second = second.array::<i32>(ctx, OutputMode::Provided, &[2])?;
+            first.matrix_mut(false)[(0, 0)] = 1.0;
+            let mut second = second.matrix_mut(false);
+            (second[(0, 0)], second[(1, 0)]) = (2, 2);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn outputs_are_held_together_in_any_order() {
+        use crate::testing::{Out, call};
+
+        let outputs = vec![Out::provided::<i32>(&[2]), Out::allocated::<f64>(1)];
+        let r = call(&Pair([1, 0]), &[], outputs.clone()).unwrap();
+        assert_eq!(
+            (r[0].values::<i32>(), r[1].values::<f64>()),
+            (vec![2, 2], vec![1.0])
+        );
+        for indices in [[0, 0], [1, 2]] {
+            let error = call(&Pair(indices), &[], outputs.clone()).unwrap_err();
+            assert!(error.contains("not distinct, or out of range"), "{error}");
+        }
+        // a slot asked for with another dtype than it has
+        let error = call(&Pair([0, 1]), &[], outputs).unwrap_err();
+        assert!(
+            error.contains("output 0: it is an array of int32"),
+            "{error}"
+        );
+    }
 }
