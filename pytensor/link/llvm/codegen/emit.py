@@ -378,7 +378,7 @@ class Codegen:
     _checks: int = field(default=0)
 
     def par(self, per_element: float) -> ParallelPolicy | None:
-        """How loops of items costing `per_element` (layout of `work.py`) may run in
+        """How loops over elements costing `per_element` each (`work.py`) may run in
         parallel, or None."""
         return ParallelPolicy(self, per_element) if self.parallel and per_element > 0 else None
 
@@ -539,8 +539,8 @@ def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
     else:
         b.if_else(
             contig,
-            lambda: _flat(b, shape, arrays, body, par) or [],
-            lambda: _strided(b, shape, arrays, body, order, par=par) or [],
+            lambda: _flat(b, shape, arrays, body, par),
+            lambda: _strided(b, shape, arrays, body, order, par=par),
         )
 
 
