@@ -40,6 +40,16 @@ def test_gammainc_nan_c():
     assert np.isnan(test_func(1, -1))
     assert np.isnan(test_func(-1, -1))
 
+    for a, x in [
+        (0, 1),
+        (np.nan, 0),
+        (np.nan, 1),
+        (1, np.nan),
+        (np.nan, np.inf),
+        (np.inf, np.nan),
+    ]:
+        assert np.isnan(test_func(a, x))
+
 
 def test_gammainc_inf_c():
     x1 = pt.dscalar()
@@ -68,6 +78,16 @@ def test_gammaincc_nan_c():
     assert np.isnan(test_func(1, -1))
     assert np.isnan(test_func(-1, -1))
 
+    for a, x in [
+        (0, 1),
+        (np.nan, 0),
+        (np.nan, 1),
+        (1, np.nan),
+        (np.nan, np.inf),
+        (np.inf, np.nan),
+    ]:
+        assert np.isnan(test_func(a, x))
+
 
 def test_gammaincc_inf_c():
     x1 = pt.dscalar()
@@ -77,6 +97,72 @@ def test_gammaincc_inf_c():
     assert np.isclose(test_func(np.inf, 1), sp.gammaincc(np.inf, 1))
     assert np.isclose(test_func(1, np.inf), sp.gammaincc(1, np.inf))
     assert np.isnan(test_func(np.inf, np.inf))
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_gammainc_large_c(dtype):
+    a, x = (pt.vector(name, dtype=dtype) for name in ("a", "x"))
+    f = function(
+        [a, x],
+        [pt.gammainc(a, x), pt.gammaincc(a, x)],
+        mode=Mode(linker="c", optimizer=None),
+    )
+    a_vals = np.array([1000, 10001, 100001, 300001, 1000001, 1e8, 1e12])
+    offsets = np.array([-4, -1, 0, 1, 4])
+    x_vals = a_vals[:, None] + np.sqrt(a_vals[:, None]) * offsets
+    # Include the reported Poisson CDF case and adjacent floating-point values.
+    a_vals = np.broadcast_to(a_vals[:, None], x_vals.shape).astype(dtype).ravel()
+    x_vals = x_vals.astype(dtype).ravel()
+    x_vals = np.concatenate(
+        [x_vals, a_vals - 1, np.nextafter(a_vals, 0), np.nextafter(a_vals, np.inf)]
+    )
+    a_vals = np.tile(a_vals, 4)
+    p, q = f(a_vals, x_vals)
+    rtol = 2e-6 if dtype == "float32" else 5e-14
+    np.testing.assert_allclose(p, sp.gammainc(a_vals, x_vals), rtol=rtol, atol=0)
+    np.testing.assert_allclose(q, sp.gammaincc(a_vals, x_vals), rtol=rtol, atol=0)
+    np.testing.assert_allclose(p + q, 1, rtol=0, atol=np.finfo(dtype).eps)
+
+
+def test_gammainc_asymptotic_boundaries_c():
+    a, x = pt.dvectors("a", "x")
+    f = function(
+        [a, x],
+        [pt.gammainc(a, x), pt.gammaincc(a, x)],
+        mode=Mode(linker="c", optimizer=None),
+    )
+    a_vals = np.array([np.nextafter(1000.0, 0), 1000, np.nextafter(1000.0, np.inf)])
+    ratios = np.array([0.7 - 1e-12, 0.7, 0.7 + 1e-12, 1, 1.3 - 1e-12, 1.3, 1.3 + 1e-12])
+    x_vals = a_vals[:, None] * ratios
+    a_vals = np.broadcast_to(a_vals[:, None], x_vals.shape).ravel()
+    x_vals = x_vals.ravel()
+    p, q = f(a_vals, x_vals)
+    np.testing.assert_allclose(p, sp.gammainc(a_vals, x_vals), rtol=3e-12, atol=0)
+    np.testing.assert_allclose(q, sp.gammaincc(a_vals, x_vals), rtol=3e-12, atol=0)
+
+
+def test_gammainc_large_tails_c():
+    a, x = pt.dscalars("a", "x")
+    f = function(
+        [a, x],
+        [pt.gammainc(a, x), pt.gammaincc(a, x)],
+        mode=Mode(linker="c", optimizer=None),
+    )
+    # Independent 70-digit mpmath quadrature of the gamma density, rescaled
+    # by sqrt(a). SciPy's series can also lose accuracy in large-a lower tails.
+    for a_val, x_val, tail, expected in [
+        (1000, 700, 0, 1.0158583345333216374579116938985359e-26),
+        (1000, 1300, 1, 1.8736155715785551242055681977145791e-18),
+        (1e6, 995000, 0, 2.7495803592700707538279083912739602e-7),
+        (1e6, 1005000, 1, 2.9874901401146348544408764692820645e-7),
+        (1e8, 99950000, 0, 2.8546421399586261429767424887672704e-7),
+        (1e12, 999995000000, 0, 2.8663967832502037179692080057750576e-7),
+    ]:
+        np.testing.assert_allclose(f(a_val, x_val)[tail], expected, rtol=5e-14, atol=0)
+    for a_val in [1e100, 1e308]:
+        np.testing.assert_array_equal(f(a_val, a_val), [0.5, 0.5])
+        np.testing.assert_array_equal(f(a_val, 0.9 * a_val), [0, 1])
+        np.testing.assert_array_equal(f(a_val, 1.1 * a_val), [1, 0])
 
 
 def test_gammal_nan_c():
