@@ -1735,6 +1735,15 @@ def test_local_merge_alloc():
         f(0.0, 1, 2, 5, 3, 4)
 
 
+def test_local_merge_alloc_static_broadcast_dim():
+    # The inner dim is not a constant, but its static shape is 1 so the outer Alloc can broadcast it
+    x = pt.matrix("x", shape=(1, 1))
+    m = pt.vector("m", shape=(1,))
+    out = pt.alloc(pt.alloc(m, x.shape[0]), 3)
+    rewritten = rewrite_graph(out, custom_rewrite=out2in(local_merge_alloc))
+    assert_equal_computations([rewritten], [pt.alloc(m, 3)])
+
+
 def test_local_useless_alloc():
     useless_alloc = out2in(local_useless_alloc)
     merge_alloc = out2in(local_merge_alloc)
