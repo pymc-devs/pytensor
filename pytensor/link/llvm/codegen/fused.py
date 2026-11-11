@@ -223,8 +223,6 @@ def emit_fused(op, node, cg, inputs, outputs):
             out_arrays.append((out.allocate(shape), None))
 
     # ---- operands with loop strides (and their layouts)
-    zero = b.i64(0)
-
     plain_in = {}
     fixed = {}  # inputs that are one element for the whole loop: read once, before it
     for j in range(n_elem):
@@ -252,8 +250,8 @@ def emit_fused(op, node, cg, inputs, outputs):
         return inputs[k].load(b, i).astype("int64").value
 
     def checked(v, n, what):
-        v = b.select(b.slt(v, zero), b.add(v, n), v)
-        ok = b.and_(b.sge(v, zero), b.slt(v, n))
+        v = b.select(b.slt(v, 0), b.add(v, n), v)
+        ok = b.and_(b.sge(v, 0), b.slt(v, n))
         cg.check(ok, f"FusedElemwise: index out of bounds ({what})")
         return v
 

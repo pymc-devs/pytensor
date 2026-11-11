@@ -121,12 +121,12 @@ def _(op, node, cg, inputs, outputs):
             if ln.const_int is not None and ln.const_int == vn.const_int:
                 ystrides.append(y.strides[a])
                 continue
-            one = b.eq(ln, b.i64(1))
+            one = b.eq(ln, 1)
             cg.check(
                 b.or_(b.eq(ln, vn), one),
                 "IncSubtensor: shape mismatch between the value and the indexed view",
             )
-            ystrides.append(b.select(one, b.i64(0), y.strides[a]))
+            ystrides.append(b.select(one, 0, y.strides[a]))
     ys = Array(y.dtype, y.data, view.shape, ystrides)
     dt = out.dtype
 

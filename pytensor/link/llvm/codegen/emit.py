@@ -228,7 +228,7 @@ def load(b, dtype, ptr):
     """Load an element; bools become i1."""
     v = b.load(memory_type(dtype), ptr)
     if dtype == "bool":
-        return b.ne(v, b.i8(0))
+        return b.ne(v, 0)
     return v
 
 
@@ -246,16 +246,14 @@ def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Arr
     data = b.load(ir.ptr, b.field_ptr(t, slot, Slot.DATA))
     lp, sp = b.field_ptr(t, slot, Slot.LENGTHS), b.field_ptr(t, slot, Slot.STRIDES)
     shape = [
-        b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, b.i64(a)))
+        b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, a))
         for a, s in enumerate(static_shape)
     ]
     if layout is None:
         layout = Layout.make(static_shape, range(nd), (DYNAMIC,) * nd)
     else:
         layout = Layout.make(static_shape, layout.order, layout.strides)
-    passed = {
-        a: b.load(ir.i64, b.gep(ir.i64, sp, b.i64(a))) for a in layout.dynamic_axes
-    }
+    passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
     strides = layout.stride_values(b, itemsize(dtype), shape, passed)
     return Array(dtype, data, shape, strides, layout)
 
@@ -274,12 +272,12 @@ def advance(b, p, i, stride, dtype):
     if c is not None:
         if c % isz:
             return b.gep_bytes(p, b.mul(i, stride, nsw=True))
-        es = b.i64(c // isz)
+        es = c // isz
     elif isz == 1:
         es = stride
     else:
         # strides of arrays are multiples of the itemsize (validated at the boundary)
-        es = b.ashr(stride, b.i64(isz.bit_length() - 1))
+        es = b.ashr(stride, isz.bit_length() - 1)
     return b.gep(memory_type(dtype), p, b.mul(i, es, nsw=True))
 
 
@@ -294,6 +292,33 @@ def constant(b, dtype, value):
     return b.const_int(value_type(dtype), int(value))
 
 
+def _float_to_int(b, v, dst: str):
+    """Float to integer, saturating; NaN gives 0. (`fptosi`/`fptoui` are poison for
+    values out of range.)"""
+    dt = value_type(dst)
+    if is_signed(dst):
+        lo, hi = -(2.0 ** (dt.bits - 1)), 2.0 ** (dt.bits - 1)
+        low_end, high_end = -(2 ** (dt.bits - 1)), 2 ** (dt.bits - 1) - 1
+        below = b.fcmp(ir.FCmp.OLT, v, lo)
+        lower_ok = b.fcmp(ir.FCmp.OGE, v, lo)
+        convert = b.fptosi
+    else:
+        # truncation takes (-1, 0) to 0, which is in range
+        lo, hi = -1.0, 2.0**dt.bits
+        low_end, high_end = 0, 2**dt.bits - 1
+        below = b.fcmp(ir.FCmp.OLE, v, lo)
+        lower_ok = b.fcmp(ir.FCmp.OGT, v, lo)
+        convert = b.fptoui
+    above = b.fcmp(ir.FCmp.OGE, v, hi)
+    # ordered compares: NaN is neither below, above nor in range, and converts 0.0
+    in_range = b.and_(lower_ok, b.fcmp(ir.FCmp.OLT, v, hi))
+    return b.select(
+        above,
+        high_end,
+        b.select(below, low_end, convert(b.select(in_range, v, 0.0), dt)),
+    )
+
+
 def cast(b, v, src: str, dst: str):
     """Convert a value like numpy's astype."""
     if src == dst:
@@ -301,14 +326,14 @@ def cast(b, v, src: str, dst: str):
     st, dt = value_type(src), value_type(dst)
     if dst == "bool":
         if is_float(src):
-            return b.fcmp(ir.FCmp.UNE, v, b.const_float(st, 0.0))
-        return b.ne(v, b.const_int(st, 0))
+            return b.fcmp(ir.FCmp.UNE, v, 0.0)
+        return b.ne(v, 0)
     if is_float(src) and is_float(dst):
         return b.fpext(v, dt) if dt.bits > st.bits else b.fptrunc(v, dt)
     if is_float(dst):
         return b.sitofp(v, dt) if is_signed(src) else b.uitofp(v, dt)
     if is_float(src):
-        return b.fptosi(v, dt) if is_signed(dst) else b.fptoui(v, dt)
+        return _float_to_int(b, v, dst)
     # integer to integer (bool is i1, unsigned)
     if dt.bits > st.bits:
         return b.sext(v, dt) if is_signed(src) else b.zext(v, dt)
@@ -393,8 +418,8 @@ class SlotOutput:
             b.field_ptr(t, self.slot, Slot.STRIDES),
         )
         for a in range(self.ndim):
-            b.store(shape[a], b.gep(ir.i64, lp, b.i64(a)))
-            b.store(strides[a], b.gep(ir.i64, sp, b.i64(a)))
+            b.store(shape[a], b.gep(ir.i64, lp, a))
+            b.store(strides[a], b.gep(ir.i64, sp, a))
 
     def allocate(self, shape: list) -> Array:
         """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
@@ -408,7 +433,7 @@ class SlotOutput:
             self._mark(a)
             self.done = True
             return a
-        nbytes = b.mul(size(b, shape), b.i64(itemsize(self.dtype)), nsw=True)
+        nbytes = b.mul(size(b, shape), itemsize(self.dtype), nsw=True)
         owner = b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER)
         data = b.rt_alloc(cg.ctx, nbytes, owner)
         cg.check(b.ne(data, b.null()), None)
@@ -444,7 +469,7 @@ class SlotOutput:
         same memory with the same strides."""
         b = self.cg.b
         lp = b.field_ptr(_slot_type(self.ndim), self.slot, Slot.LENGTHS)
-        b.store(n, b.gep(ir.i64, lp, b.i64(axis)))
+        b.store(n, b.gep(ir.i64, lp, axis))
 
     def _mark(self, a: Array):
         if self.alias is not None:
@@ -543,15 +568,14 @@ class Codegen:
         """Report `message` (unless a called kernel already did) and return 1."""
         if message is not None:
             self.b.rt_fail(self.ctx, message)
-        self.b.ret(self.b.i32(1))
+        self.b.ret(1)
 
     def check(self, ok, message: str | None):
         """Fail with `message` unless `ok` (i1). Constant conditions fold."""
         c = ok.const_int
         if c == 1:
             return
-        not_ok = self.b.xor(ok, self.b.const_bool(True))
-        with self.b.if_(not_ok):
+        with self.b.if_(self.b.not_(ok)):
             self.fail(message)
 
     def temp_memory(self, nbytes, escapes: bool = False):
@@ -583,7 +607,7 @@ class Codegen:
         i64 values or Python ints."""
         b = self.b
         shape = [b.i64(n) if isinstance(n, int) else n for n in shape]
-        nbytes = b.mul(size(b, shape), b.i64(itemsize(dtype)), nsw=True)
+        nbytes = b.mul(size(b, shape), itemsize(dtype), nsw=True)
         data = self.temp_memory(nbytes, escapes)
         return packed_array(b, dtype, data, shape, layout)
 
@@ -618,7 +642,7 @@ def is_contiguous(b, shape, a: Array, order=None):
             same = b.const_bool(st.const_int == expect.const_int)
         else:
             eq = b.eq(st, expect)
-            one = b.eq(shape[ax], b.i64(1))
+            one = b.eq(shape[ax], 1)
             same = b.or_(eq, one)
         ok = b.and_(ok, same)
         expect = b.mul(expect, shape[ax], nsw=True)
@@ -672,11 +696,9 @@ class ParallelPolicy:
             return b.i64(
                 max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1))))
             )
-        target = b.i64(max(1, math.ceil(CHUNK_COST / self.per_element)))
-        one = b.i64(1)
-        per = b.select(b.sgt(elements_per_iteration, one), elements_per_iteration, one)
-        g = b.sdiv(target, per)
-        return b.select(b.sgt(g, one), g, one)
+        target = max(1, math.ceil(CHUNK_COST / self.per_element))
+        per = b.smax(elements_per_iteration, 1)
+        return b.smax(b.sdiv(target, per), 1)
 
     def range(self, b, n, elements_per_iteration, body):
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
@@ -684,7 +706,7 @@ class ParallelPolicy:
         with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as r:
             with b.loop(b.sub(r.end, r.start)) as j:
                 body(b.add(r.start, j))
-        self.cg.check(b.eq(r.result, b.i32(0)), None)
+        self.cg.check(b.eq(r.result, 0), None)
 
 
 def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
