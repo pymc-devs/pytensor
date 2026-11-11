@@ -49,7 +49,7 @@ def register():
 
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):
-        if cg.planner is None or cg.links is None or cg.module is None or not scan_supported(op):
+        if cg.scan_body is None or cg.links is None or cg.module is None or not scan_supported(op):
             raise NotImplementedError(f"generated {op}")
         emit_scan(op, node, cg, inputs, outputs)
 
@@ -111,10 +111,51 @@ class _Traced:
         return (w % n) not in reads and (w % n) not in others
 
 
+def scan_body_layouts(op, node, in_layouts) -> list:
+    """The layouts the inner graph's inputs have in the generated loop (`emit_scan`),
+    one per inner input (None for values without one): rows of the sequences keep what
+    the sequence's layout says, rows of the state buffers are C-contiguous (the loop
+    allocates the buffers), the rest is passed through."""
+    from pytensor.link.llvm.layout import itemsize_of, shape_of
+
+    info = op.info
+    n_mm, n_ms, n_ss = len(info.mit_mot_in_slices), len(info.mit_sot_in_slices), len(info.sit_sot_in_slices)
+    o_seq = 1
+    o_mm = o_seq + info.n_seqs
+    o_ms = o_mm + n_mm
+    o_ss = o_ms + n_ms
+    o_ut = o_ss + n_ss
+    o_ns = o_ut + info.n_untraced_sit_sot + info.n_nit_sot
+
+    def outer(pos):
+        v = node.inputs[pos]
+        if is_absent(v.type):
+            return None
+        return getattr(repr_of(v.type, in_layouts[pos]), "layout", None)  # (scalars have none)
+
+    layouts = []
+    for pos in range(o_seq, o_mm):
+        v = node.inputs[pos]
+        if v.type.ndim < 1:
+            raise NotImplementedError("a 0-d sequence")
+        layouts.append(remove_axis(outer(pos), 0, shape_of(v), itemsize_of(v)))
+    for base, taps in [(o_mm, info.mit_mot_in_slices), (o_ms, info.mit_sot_in_slices), (o_ss, info.sit_sot_in_slices)]:
+        for j, in_taps in enumerate(taps):
+            ndim = node.inputs[base + j].type.ndim
+            if ndim < 1:
+                raise NotImplementedError("Scan: state buffers need at least one dimension")
+            layouts += [Layout.c(ndim - 1)] * len(in_taps)
+    for j in range(info.n_untraced_sit_sot):
+        v = node.inputs[o_ut + j]
+        layouts.append(None if is_absent(v.type) else Layout.c(v.type.ndim))
+    for pos in range(o_ns, len(node.inputs)):
+        layouts.append(outer(pos))
+    return layouts
+
+
 def emit_scan(op, node, cg, inputs, outputs):
     b = cg.b
     info = op.info
-    planner = cg.planner
     n_mm, n_ms, n_ss = len(info.mit_mot_in_slices), len(info.mit_sot_in_slices), len(info.sit_sot_in_slices)
     o_seq = 1
     o_mm = o_seq + info.n_seqs
@@ -178,52 +219,35 @@ def emit_scan(op, node, cg, inputs, outputs):
         copy(cg, a, out.allocate(list(a.shape)))
         untraced.append(out)
 
-    # ---- the loop body's graph
+    # ---- the loop body: the inner graph's items, resolved (plan/resolve.py)
     fg = op.fgraph
-    scope = {}
-    in_ids = []
-    for v in fg.inputs:
-        k = planner.new_value(v.type)
-        scope[v] = k
-        in_ids.append(k)
-    items = planner.flatten(fg.toposort(), scope, inside_unit=True)
-    out_ids = [planner.value_of(o, scope) for o in fg.outputs]
-    consts = {}
-    for it in items:
-        for k in it.inputs:
-            if k in planner.consts:
-                consts[k] = (planner.types[k], planner.consts[k])
-    for k in out_ids:
-        if k in planner.consts:
-            consts[k] = (planner.types[k], planner.consts[k])
+    body_plan = cg.scan_body
+    in_ids, out_ids, items, consts = body_plan.in_ids, body_plan.out_ids, body_plan.items, body_plan.constants
     n_traced_outs = first_nit
 
     def body(i, *acc):
         mark = b.rt_scratch_mark(cg.ctx)
-        vals, lays = {}, {}
+        vals = {}
         bind_constants(cg, consts, vals)
         vids = iter(in_ids)
         for a in seqs:
             k = next(vids)
-            r = _row(b, a, i, remove_axis(a.layout, 0, a.static_shape(), _isz(a.dtype)))
-            vals[k], lays[k] = r, r.layout
+            vals[k] = _row(b, a, i, remove_axis(a.layout, 0, a.static_shape(), _isz(a.dtype)))
         for t in traced:
             for tap in t.in_taps:
                 k = next(vids)
-                r = _row(b, t.buf, t.row_index(b, i, tap))
-                vals[k], lays[k] = r, r.layout
+                vals[k] = _row(b, t.buf, t.row_index(b, i, tap))
         cur_untraced = []
         for out in untraced:
             k = next(vids)
             cur = None if out is None else out.read()
             cur_untraced.append(cur)
             if cur is not None:
-                vals[k], lays[k] = cur, cur.layout
+                vals[k] = cur
         for a in inputs[o_ns:]:
             k = next(vids)
             if a is not None:
                 vals[k] = a
-                lays[k] = a.layout if isinstance(a, Array) else None
         # where outputs may be produced directly
         targets = {}
         rows = []  # per inner output: (buffer row Array or None, how)
@@ -244,7 +268,7 @@ def emit_scan(op, node, cg, inputs, outputs):
                 rows.append(None)
             oi += 1
 
-        written, owned = emit_items(cg, cg.module, f"{cg.name}_body", items, vals, lays, targets, planner.kernel_for)
+        written, owned = emit_items(cg, cg.module, f"{cg.name}_body", items, vals, targets)
 
         def value(k):
             if k not in vals:

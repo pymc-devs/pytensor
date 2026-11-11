@@ -399,7 +399,7 @@ def _slot_type(ndim):
 class Codegen:
     """The state of generating one kernel's code: the builder and the kernel's
     parameters (`ctx`, its `config` = link table), and what nested code
-    needs (link table, planner, module)."""
+    needs (link table, module, a Scan's resolved body)."""
 
     b: object
     ctx: object
@@ -411,9 +411,9 @@ class Codegen:
     parallel: bool = True
     #: the link table of the kernel being generated (call.py); None: it calls nothing
     links: object = None
-    #: the planner (program.py), for code that plans inner graphs (Scan); None: no
-    #: inner graphs
-    planner: object = None
+    #: for a Scan: its resolved loop body (`plan.resolve.Body`); None: the Scan can't
+    #: be generated here
+    scan_body: object = None
     #: the module being built, and the name of the function being built in it (nested
     #: functions are named after it)
     module: object = None
