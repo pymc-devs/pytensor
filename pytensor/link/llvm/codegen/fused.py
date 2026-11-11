@@ -41,6 +41,10 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor
 
 
+#: elements per chunk of a loop with register-carried increments (see `chunked`)
+CHUNK = 256
+
+
 @dataclass
 class Read:
     index: int  # outer input position of the index array
@@ -260,12 +264,14 @@ def emit_fused(op, node, cg, inputs, outputs):
             index_bounds(node.inputs[k]),
         )
 
-    def body(ptr_in, ptr_out, loop_index, accs, runs=None):
+    def body(ptr_in, ptr_out, loop_index, accs, runs=None, defer=None):
         """One element. `ptr_in[j]`/`ptr_out[i]`: element pointers of the plain parts;
         `accs`: register accumulators {output: value}; `runs`: {output: (index, value)}
-        of the incremented element of an output kept in registers (see `inc_run`).
-        Returns the new accumulators and runs."""
+        of the incremented element of an output kept in registers (see `inc_run`);
+        `defer`: {output: pointer} where the value of an indexed write is stored
+        instead of written (see `chunked`). Returns the new accumulators and runs."""
         runs = runs or {}
+        defer = defer or {}
         new_runs = {}
         args = []
         for j, d in enumerate(in_dtypes):
@@ -302,6 +308,9 @@ def emit_fused(op, node, cg, inputs, outputs):
                 else:
                     store(b, spec.acc, new, ptr_out[i])
             elif isinstance(spec, Write):
+                if i in defer:
+                    store(b, d, v, defer[i])
+                    continue
                 res_arr = out_arrays[i][0]
                 n = res_arr.shape[spec.axis]
                 ix = checked(
@@ -371,6 +380,60 @@ def emit_fused(op, node, cg, inputs, outputs):
         if isinstance(s, Write) and not s.set and nd > 0 and s.axis == nd - 1
     ]
 
+    def chunked(n, ptrs, index, init, nr):
+        """The innermost loop of `nest` with register-carried increments, in chunks of
+        CHUNK elements: the values of a chunk go to stack buffers first, in a loop
+        without the runs (so it can be vectorized), and are then added to their
+        elements in a second loop. Same results as one loop, in the same order."""
+        a = nd - 1
+        bufs = {i: b.alloca(memory_type(out_dtypes[i]), CHUNK) for i in inner_inc}
+        _, po = split(ptrs)
+
+        def chunk(c, *carried):
+            start = b.mul(c, CHUNK, nsw=True)
+            m = b.smin(b.i64(CHUNK), b.sub(n, start))
+
+            def compute(k, *accs):
+                i = b.add(start, k, nsw=True)
+                q = [
+                    advance(b, p, i, arr.strides[a], arr.dtype)
+                    for p, arr in zip(ptrs, arrays, strict=True)
+                ]
+                qi, qo = split(q)
+                defer = {
+                    j: b.gep(memory_type(out_dtypes[j]), bufs[j], k) for j in inner_inc
+                }
+                new, _ = body(
+                    qi,
+                    qo,
+                    [*index, i],
+                    dict(zip(inner_red, accs, strict=True)),
+                    defer=defer,
+                )
+                return [new[j] for j in inner_red]
+
+            accs = b.fold(m, list(carried[:nr]), compute)
+
+            def increment(k, *runs):
+                i = b.add(start, k, nsw=True)
+                new = []
+                for r, j in enumerate(inner_inc):
+                    spec, d = outs[j], out_dtypes[j]
+                    ix = checked(
+                        index_value(spec.index, i),
+                        out_arrays[j][0].shape[spec.axis],
+                        "write",
+                        spec.index,
+                    )
+                    v = load(b, d, b.gep(memory_type(d), bufs[j], k))
+                    new += inc_run(j, d, po[j], ix, v, *runs[2 * r : 2 * r + 2])
+                return new
+
+            return [*accs, *b.fold(m, list(carried[nr:]), increment)]
+
+        n_chunks = b.udiv(b.add(n, CHUNK - 1, nsw=True), CHUNK)
+        return b.fold(n_chunks, init, chunk)
+
     def nest():
         def level(a, ptrs, index):
             if a == nd - 1 and nd > 0:
@@ -402,7 +465,11 @@ def emit_fused(op, node, cg, inputs, outputs):
                         v for k in inner_inc for v in new_runs[k]
                     ]
 
-                final = b.fold(shape[a], init, step)
+                final = (
+                    chunked(shape[a], ptrs, index, init, nr)
+                    if inner_inc
+                    else b.fold(shape[a], init, step)
+                )
                 for i, v in zip(inner_red, final[:nr], strict=True):
                     store(b, outs[i].acc, v, po[i])
                 for n, i in enumerate(inner_inc):
