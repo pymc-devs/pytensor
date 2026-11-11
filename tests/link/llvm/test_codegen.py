@@ -169,6 +169,19 @@ def test_erfcx():
     check(pt.erfcx(x), [x], [values], rtol=1e-13, atol=0)
 
 
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_gammaln_psi(dtype):
+    """Every branch of the table kernels: below 1, each octave of [1, 64), Stirling,
+    the zeros at 1, 2 and x0, and the fallback for x <= 0 and NaN."""
+    x = pt.vector("x", dtype=dtype)
+    special = [1.0, 2.0, 1.4616321449683622, 4.0, 63.99, 64.0, 1e-30, np.inf]
+    special += [0.0, np.nan]
+    values = np.concatenate([np.geomspace(1e-3, 1e5, 997), special]).astype(dtype)
+    tol = dict(rtol=1e-6, atol=1e-6) if dtype == "float32" else {}
+    check(pt.gammaln(x), [x], [values], **tol)
+    check(pt.psi(x), [x], [values], **tol)
+
+
 @pytest.mark.parametrize(
     "dtype", ["int64", "int32", "int8", "uint8", "uint16", "uint32", "uint64"]
 )

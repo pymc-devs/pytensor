@@ -15,6 +15,7 @@ from functools import reduce, singledispatch
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as psm
 from pytensor.graph.basic import Constant
+from pytensor.link.llvm.codegen import gamma
 from pytensor.link.llvm.codegen.emit import cast, constant
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import (
@@ -287,10 +288,20 @@ def _rust_op(name):
     return fn
 
 
-register(psm.GammaLn)(_rust_op("GammaLn"))
 register(psm.Gamma)(_rust_op("Gamma"))
-register(psm.Psi)(_rust_op("Psi"))
 register(psm.Erfcx)(_rust_op("Erfcx"))
+
+
+@register(psm.GammaLn)
+def _(b, args, out):
+    require_float(out, "gammaln")
+    return gamma.gammaln(b, conv(b, args, 0, out), out)
+
+
+@register(psm.Psi)
+def _(b, args, out):
+    require_float(out, "psi")
+    return gamma.psi(b, conv(b, args, 0, out), out)
 
 
 @register(psm.Sigmoid)
@@ -303,30 +314,25 @@ def _(b, args, out):
 
 @register(psm.Softplus)
 def _(b, args, out):
-    """The same branches as pytensor.scalar.math.Softplus."""
+    """max(x, 0) + log1p(exp(-|x|)), branch-free like the C and Numba backends."""
     require_float(out, "softplus")
-    x = conv(b, args, 0, out)
-    ex = b.libm(ir.Libm.Exp, [x])
-    log1pex = b.libm(ir.Libm.Log1p, [ex])
-    x_plus = b.fadd(x, b.libm(ir.Libm.Exp, [b.fneg(x)]))
-
-    def lt(c):
-        return b.fcmp(ir.FCmp.OLT, x, constant(b, out, c))
-
-    return b.select(
-        lt(-37.0), ex, b.select(lt(18.0), log1pex, b.select(lt(33.3), x_plus, x))
-    )
+    (x,) = nums(b, args, out)
+    e = b.libm(ir.Libm.Exp, [(-abs(x)).value])
+    return x.maximum(0.0) + Num(b, b.libm(ir.Libm.Log1p, [e]), out)
 
 
 @register(psm.Log1mexp)
 def _(b, args, out):
     require_float(out, "log1mexp")
     x = conv(b, args, 0, out)
-    small = b.libm(ir.Libm.Log1p, [b.fneg(b.libm(ir.Libm.Exp, [x]))])
-    large = b.libm(ir.Libm.Log, [b.fneg(b.libm(ir.Libm.Expm1, [x]))])
-    return b.select(
-        b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))), small, large
+    # a branch, not a select: where the loop isn't vectorized, only one pair of libm
+    # calls runs (the vectorizer if-converts it)
+    (r,) = b.if_else(
+        b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))),
+        lambda: b.libm(ir.Libm.Log1p, [b.fneg(b.libm(ir.Libm.Exp, [x]))]),
+        lambda: b.libm(ir.Libm.Log, [b.fneg(b.libm(ir.Libm.Expm1, [x]))]),
     )
+    return r
 
 
 # ------------------------------------------------------------------ comparisons & logic
