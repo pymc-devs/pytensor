@@ -136,7 +136,7 @@ def test_numba_can_be_disabled():
     x = pt.matrix("x")
     mode = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
     with pytest.raises(NotImplementedError, match="No LLVM"):
-        pytensor.function([x], pt.argmax(x, axis=0), mode=mode)
+        pytensor.function([x], pt.argsort(x, axis=0), mode=mode)
 
 
 def test_numba_through_c_api_without_gil():

@@ -96,6 +96,22 @@ def _(op, node, in_layouts=None):
     return interp().Dot(fresh_mode(out), np.dtype(out.type.dtype))
 
 
+def fresh_modes(node):
+    return [fresh_mode(o) for o in node.outputs]
+
+
+def _linalg_dtype(node, int_outputs=()):
+    """The inputs' dtype if they all have the same float dtype, and so do the outputs
+    (except those at `int_outputs`, which are int32), else None."""
+    dt = node.inputs[0].type.dtype
+    if dt not in ("float64", "float32") or any(i.type.dtype != dt for i in node.inputs):
+        return None
+    for k, o in enumerate(node.outputs):
+        if o.type.dtype != ("int32" if k in int_outputs else dt):
+            return None
+    return np.dtype(dt)
+
+
 def _float_dtype(node):
     """The output's dtype if all inputs have it and it is a float, else None."""
     out = node.outputs[0]
@@ -109,7 +125,19 @@ def _float_dtype(node):
 def _register_more():
     from pytensor.scan.op import Scan
     from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+    from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
+    from pytensor.tensor.linalg.decomposition.lu import (
+        LU,
+        LUFactor,
+        PivotToPermutations,
+    )
+    from pytensor.tensor.linalg.decomposition.qr import QR
+    from pytensor.tensor.linalg.decomposition.svd import SVD
+    from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
+    from pytensor.tensor.linalg.solvers.general import Solve
+    from pytensor.tensor.linalg.solvers.psd import CholeskySolve
     from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
+    from pytensor.tensor.linalg.summary import Det, SLogDet
     from pytensor.tensor.sort import SortOp
 
     @rust_kernel.register(SortOp)
@@ -144,6 +172,101 @@ def _register_more():
         return interp().SolveTriangular(
             fresh_mode(node.outputs[0]), dt, bool(op.lower), bool(op.unit_diagonal)
         )
+
+    @rust_kernel.register(Solve)
+    def _(op, node, in_layouts=None):
+        # (real matrices: hermitian is symmetric)
+        assume_a = {"gen": "gen", "sym": "sym", "her": "sym", "pos": "pos"}.get(
+            op.assume_a
+        )
+        dt = _linalg_dtype(node)
+        if dt is None or assume_a is None:
+            return None
+        return interp().Solve(fresh_mode(node.outputs[0]), dt, assume_a, bool(op.lower))
+
+    @rust_kernel.register(CholeskySolve)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        if dt is None:
+            return None
+        return interp().CholeskySolve(fresh_mode(node.outputs[0]), dt, bool(op.lower))
+
+    @rust_kernel.register(MatrixInverse)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        return (
+            None
+            if dt is None
+            else interp().MatrixInverse(fresh_mode(node.outputs[0]), dt)
+        )
+
+    @rust_kernel.register(Det)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        return None if dt is None else interp().Det(fresh_mode(node.outputs[0]), dt)
+
+    @rust_kernel.register(SLogDet)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        return None if dt is None else interp().SLogDet(fresh_modes(node), dt)
+
+    @rust_kernel.register(LUFactor)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node, int_outputs=(1,))
+        return None if dt is None else interp().LUFactor(fresh_modes(node), dt)
+
+    @rust_kernel.register(LU)
+    def _(op, node, in_layouts=None):
+        if op.permute_l:
+            form, ints = "permute_l", ()
+        elif op.p_indices:
+            form, ints = "indices", (0,)
+        else:
+            form, ints = "matrix", ()
+        dt = _linalg_dtype(node, int_outputs=ints)
+        return None if dt is None else interp().LU(fresh_modes(node), dt, form)
+
+    @rust_kernel.register(PivotToPermutations)
+    def _(op, node, in_layouts=None):
+        dt = node.inputs[0].type.dtype
+        if dt not in ("int32", "int64") or node.outputs[0].type.dtype != "int64":
+            return None
+        return interp().PivotToPermutations(
+            fresh_mode(node.outputs[0]), np.dtype(dt), bool(op.inverse)
+        )
+
+    @rust_kernel.register(Eigh)
+    @rust_kernel.register(Eigvalsh)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        if dt is None or len(node.inputs) != 1:
+            return None  # the generalized problem (b): numba
+        return interp().Eigh(
+            fresh_modes(node), dt, bool(op.lower), isinstance(op, Eigh)
+        )
+
+    @rust_kernel.register(SVD)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        if dt is None:
+            return None
+        return interp().SVD(
+            fresh_modes(node), dt, bool(op.full_matrices), bool(op.compute_uv)
+        )
+
+    @rust_kernel.register(QR)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        if dt is None or op.pivoting or op.mode not in ("full", "economic", "r"):
+            return None
+        return interp().QR(fresh_modes(node), dt, op.mode)
+
+    @rust_kernel.register(MatrixPinv)
+    def _(op, node, in_layouts=None):
+        dt = _linalg_dtype(node)
+        if dt is None:
+            return None
+        return interp().MatrixPinv(fresh_mode(node.outputs[0]), dt, bool(op.hermitian))
 
     @rust_kernel.register(Scan)
     def _(op, node, in_layouts=None):

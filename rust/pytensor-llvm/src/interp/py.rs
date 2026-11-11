@@ -78,10 +78,22 @@ impl RustKernel {
 
     /// One that writes a single output, in new memory.
     fn writing<K: Kernel>(kernel: K, mode: OutputMode, desc: String) -> PyResult<Self> {
-        if mode == OutputMode::View {
+        RustKernel::writing_all(kernel, vec![mode], desc)
+    }
+
+    /// One that writes all its outputs, in new memory.
+    fn writing_all<K: Kernel>(kernel: K, modes: Vec<OutputMode>, desc: String) -> PyResult<Self> {
+        if modes.contains(&OutputMode::View) {
             return err(format!("{desc} can't produce a view"));
         }
-        Ok(RustKernel::of(kernel, desc, Produces::Fresh(vec![mode])))
+        if modes.len() != kernel.arity().1 {
+            return err(format!(
+                "{desc}: {} output modes for {} outputs",
+                modes.len(),
+                kernel.arity().1
+            ));
+        }
+        Ok(RustKernel::of(kernel, desc, Produces::Fresh(modes)))
     }
 
     fn new<T: Send + Sync + 'static>(
@@ -358,6 +370,328 @@ impl SolveTriangular {
             dt => return err(format!("SolveTriangular of {dt:?}")),
         };
         Ok(PyClassInitializer::from(k).add_subclass(SolveTriangular))
+    }
+}
+
+/// `$make` with the type `$t` the float type of `dtype` (float64 or float32).
+macro_rules! for_float {
+    ($dtype:expr, $what:expr, $t:ident => $make:expr) => {
+        match dtype_of(&$dtype)? {
+            DType::Float64 => {
+                type $t = f64;
+                $make
+            }
+            DType::Float32 => {
+                type $t = f32;
+                $make
+            }
+            dt => return err(format!("{} of {dt:?}", $what)),
+        }
+    };
+}
+
+/// Exactly `N` output modes.
+fn modes<const N: usize>(what: &str, modes: Vec<OutputMode>) -> PyResult<[OutputMode; N]> {
+    let n = modes.len();
+    modes
+        .try_into()
+        .or_else(|_| err(format!("{what}: {N} outputs, got {n} modes")))
+}
+
+/// Solve (faer), scipy.linalg.solve semantics: NaN if A is singular. `assume_a`:
+/// "gen", "sym" or "pos".
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct Solve;
+
+#[pymethods]
+impl Solve {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        assume_a: &str,
+        lower: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let assume = match assume_a {
+            "gen" => linalg::Assume::General,
+            "sym" => linalg::Assume::Symmetric { lower },
+            "pos" => linalg::Assume::PositiveDefinite { lower },
+            other => return err(format!("Solve: assume_a={other:?} is not supported")),
+        };
+        let desc = format!("Solve(assume_a={assume_a}, lower={lower})");
+        let k = for_float!(dtype, "Solve", T => RustKernel::writing(
+            linalg::Solve::<T> { mode, assume, element: PhantomData },
+            mode,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(Solve))
+    }
+}
+
+/// Solve with a Cholesky factor (faer), LAPACK potrs semantics.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct CholeskySolve;
+
+#[pymethods]
+impl CholeskySolve {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        lower: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("CholeskySolve(lower={lower})");
+        let k = for_float!(dtype, "CholeskySolve", T => RustKernel::writing(
+            linalg::CholeskySolve::<T> { mode, lower, element: PhantomData },
+            mode,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(CholeskySolve))
+    }
+}
+
+/// Matrix inverse (faer LU): fails for a singular matrix, as numpy.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct MatrixInverse;
+
+#[pymethods]
+impl MatrixInverse {
+    #[new]
+    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
+        let k = for_float!(dtype, "MatrixInverse", T => RustKernel::writing(
+            linalg::MatrixInverse::<T> { mode, element: PhantomData },
+            mode,
+            "MatrixInverse".into(),
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(MatrixInverse))
+    }
+}
+
+/// Determinant (faer LU).
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct Det;
+
+#[pymethods]
+impl Det {
+    #[new]
+    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
+        let k = for_float!(dtype, "Det", T => RustKernel::writing(
+            linalg::Det::<T> { mode, element: PhantomData },
+            mode,
+            "Det".into(),
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(Det))
+    }
+}
+
+/// Sign and log of the absolute determinant (faer LU).
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct SLogDet;
+
+#[pymethods]
+impl SLogDet {
+    #[new]
+    fn new(
+        modes: Vec<OutputMode>,
+        dtype: Bound<'_, PyArrayDescr>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let fixed = self::modes::<2>("SLogDet", modes.clone())?;
+        let k = for_float!(dtype, "SLogDet", T => RustKernel::writing_all(
+            linalg::SLogDet::<T> { modes: fixed, element: PhantomData },
+            modes,
+            "SLogDet".into(),
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(SLogDet))
+    }
+}
+
+/// LU factorization as LAPACK getrf (faer): (LU, pivots), NaN if singular.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct LUFactor;
+
+#[pymethods]
+impl LUFactor {
+    #[new]
+    fn new(
+        modes: Vec<OutputMode>,
+        dtype: Bound<'_, PyArrayDescr>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let fixed = self::modes::<2>("LUFactor", modes.clone())?;
+        let k = for_float!(dtype, "LUFactor", T => RustKernel::writing_all(
+            linalg::LUFactor::<T> { modes: fixed, element: PhantomData },
+            modes,
+            "LUFactor".into(),
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(LUFactor))
+    }
+}
+
+/// LU decomposition as scipy.linalg.lu (faer). `form`: "matrix" (P, L, U), "indices"
+/// (p, L, U) or "permute_l" (PL, U).
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct LU;
+
+#[pymethods]
+impl LU {
+    #[new]
+    fn new(
+        modes: Vec<OutputMode>,
+        dtype: Bound<'_, PyArrayDescr>,
+        form: &str,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let form = match form {
+            "matrix" => linalg::LuForm::Matrix,
+            "indices" => linalg::LuForm::Indices,
+            "permute_l" => linalg::LuForm::PermuteL,
+            other => return err(format!("LU: unknown form {other:?}")),
+        };
+        let desc = format!("LU({form:?})");
+        let k = for_float!(dtype, "LU", T => RustKernel::writing_all(
+            linalg::LU::<T> { modes: modes.clone(), form, element: PhantomData },
+            modes,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(LU))
+    }
+}
+
+/// The permutation of LAPACK pivots (int32 or int64), as int64.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct PivotToPermutations;
+
+#[pymethods]
+impl PivotToPermutations {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        inverse: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("PivotToPermutations(inverse={inverse})");
+        fn make<I: crate::kernel::Element + TryInto<usize>>(
+            mode: OutputMode,
+            inverse: bool,
+            desc: String,
+        ) -> PyResult<RustKernel> {
+            RustKernel::writing(
+                linalg::PivotToPermutations::<I> {
+                    mode,
+                    inverse,
+                    element: PhantomData,
+                },
+                mode,
+                desc,
+            )
+        }
+        let k = match dtype_of(&dtype)? {
+            DType::Int32 => make::<i32>(mode, inverse, desc)?,
+            DType::Int64 => make::<i64>(mode, inverse, desc)?,
+            dt => return err(format!("PivotToPermutations of {dt:?}")),
+        };
+        Ok(PyClassInitializer::from(k).add_subclass(PivotToPermutations))
+    }
+}
+
+/// Symmetric eigendecomposition (faer): eigenvalues ascending, and eigenvectors if
+/// `vectors` (Eigh) or not (Eigvalsh).
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct Eigh;
+
+#[pymethods]
+impl Eigh {
+    #[new]
+    fn new(
+        modes: Vec<OutputMode>,
+        dtype: Bound<'_, PyArrayDescr>,
+        lower: bool,
+        vectors: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("Eigh(lower={lower}, vectors={vectors})");
+        let k = for_float!(dtype, "Eigh", T => RustKernel::writing_all(
+            linalg::Eigh::<T> { modes: modes.clone(), lower, vectors, element: PhantomData },
+            modes,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(Eigh))
+    }
+}
+
+/// Singular value decomposition (faer), numpy.linalg.svd semantics.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct SVD;
+
+#[pymethods]
+impl SVD {
+    #[new]
+    fn new(
+        modes: Vec<OutputMode>,
+        dtype: Bound<'_, PyArrayDescr>,
+        full_matrices: bool,
+        compute_uv: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("SVD(full_matrices={full_matrices}, compute_uv={compute_uv})");
+        let k = for_float!(dtype, "SVD", T => RustKernel::writing_all(
+            linalg::Svd::<T> {
+                modes: modes.clone(),
+                full_matrices,
+                compute_uv,
+                element: PhantomData,
+            },
+            modes,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(SVD))
+    }
+}
+
+/// QR decomposition without pivoting (faer). `mode`: "full", "economic" or "r".
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct QR;
+
+#[pymethods]
+impl QR {
+    #[new]
+    fn new(
+        modes: Vec<OutputMode>,
+        dtype: Bound<'_, PyArrayDescr>,
+        mode: &str,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let qr_mode = match mode {
+            "full" => linalg::QrMode::Full,
+            "economic" => linalg::QrMode::Economic,
+            "r" => linalg::QrMode::R,
+            other => return err(format!("QR: mode={other:?} is not supported")),
+        };
+        let desc = format!("QR(mode={mode})");
+        let k = for_float!(dtype, "QR", T => RustKernel::writing_all(
+            linalg::Qr::<T> { modes: modes.clone(), mode: qr_mode, element: PhantomData },
+            modes,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(QR))
+    }
+}
+
+/// Pseudo-inverse (faer SVD, or symmetric eigendecomposition if `hermitian`), as
+/// numpy.linalg.pinv.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct MatrixPinv;
+
+#[pymethods]
+impl MatrixPinv {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        hermitian: bool,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("MatrixPinv(hermitian={hermitian})");
+        let k = for_float!(dtype, "MatrixPinv", T => RustKernel::writing(
+            linalg::MatrixPinv::<T> { mode, hermitian, element: PhantomData },
+            mode,
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(MatrixPinv))
     }
 }
 
@@ -938,6 +1272,18 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Sort>()?;
     m.add_class::<Cholesky>()?;
     m.add_class::<SolveTriangular>()?;
+    m.add_class::<Solve>()?;
+    m.add_class::<CholeskySolve>()?;
+    m.add_class::<MatrixInverse>()?;
+    m.add_class::<Det>()?;
+    m.add_class::<SLogDet>()?;
+    m.add_class::<LUFactor>()?;
+    m.add_class::<LU>()?;
+    m.add_class::<PivotToPermutations>()?;
+    m.add_class::<Eigh>()?;
+    m.add_class::<SVD>()?;
+    m.add_class::<QR>()?;
+    m.add_class::<MatrixPinv>()?;
     m.add_class::<Scan>()?;
     m.add_class::<ProgramBuilder>()?;
     m.add_class::<Program>()?;

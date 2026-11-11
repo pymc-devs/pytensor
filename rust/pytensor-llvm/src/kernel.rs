@@ -283,31 +283,7 @@ impl<'a> Outputs<'a> {
         shape: &[i64],
     ) -> Result<PtArrayMut<'_>, String> {
         let slot = self.slot(o)?;
-        if slot.dtype() != dtype {
-            return Err(output_error(
-                o,
-                format!(
-                    "it is an array of {}, the kernel writes one of {}",
-                    slot.dtype().numpy_name(),
-                    dtype.numpy_name()
-                ),
-            ));
-        }
-        match mode {
-            OutputMode::Provided => match slot.provided() {
-                Ok(array) if array.shape() == shape => Ok(array),
-                Ok(array) => Err(output_error(
-                    o,
-                    format!("it has shape {:?}, expected {shape:?}", array.shape()),
-                )),
-                Err(e) => Err(output_error(o, e)),
-            },
-            OutputMode::Allocated => slot.alloc(ctx, shape).map_err(|e| output_error(o, e)),
-            OutputMode::View => Err(output_error(
-                o,
-                "this kernel writes its outputs, it can't return a view".into(),
-            )),
-        }
+        produce(slot, o, ctx, mode, dtype, shape)
     }
 
     /// Memory for output `o`, an array of `T` and `shape`.
@@ -324,6 +300,32 @@ impl<'a> Outputs<'a> {
         })
     }
 
+    /// Outputs `indices` (distinct), to produce and hold together (`array` lends one
+    /// at a time).
+    pub fn slots<const N: usize>(
+        &mut self,
+        indices: [usize; N],
+    ) -> Result<[Output<'_>; N], String> {
+        let n = self.arrays.len();
+        let raws = self.arrays.get_disjoint_mut(indices).map_err(|_| {
+            format!("outputs {indices:?} of a call with {n}: not distinct, or out of range")
+        })?;
+        let mut k = 0;
+        let slots = raws.map(|raw| {
+            let index = indices[k];
+            k += 1;
+            // SAFETY: the type's invariant.
+            match unsafe { OutSlot::from_raw(raw) } {
+                Ok(slot) => Ok(Output { slot, index }),
+                Err(e) => Err(output_error(index, e)),
+            }
+        });
+        if let Some(Err(e)) = slots.iter().find(|slot| slot.is_err()) {
+            return Err(e.clone());
+        }
+        Ok(slots.map(|slot| slot.unwrap_or_else(|_| unreachable!())))
+    }
+
     /// Output `o` is a view of input `i`: its memory, seen with other axes (per output
     /// axis, the input axis it is, or None for a new axis of length 1).
     pub fn view(
@@ -337,6 +339,64 @@ impl<'a> Outputs<'a> {
         // SAFETY: `source` is an input of the call this is an output of (`Args` makes
         // both, with the same `'a`): the caller keeps it alive with the view.
         unsafe { self.slot(o)?.set_view(&source, axes) }.map_err(|e| output_error(o, e))
+    }
+}
+
+/// One output of a call, to produce (from `Outputs::slots`).
+pub struct Output<'s> {
+    slot: OutSlot<'s>,
+    index: usize,
+}
+
+impl<'s> Output<'s> {
+    /// Memory for the output, an array of `T` and `shape`.
+    pub fn array<T: Element>(
+        self,
+        ctx: &mut PtCtx,
+        mode: OutputMode,
+        shape: &[i64],
+    ) -> Result<ArrayMut<'s, T>, String> {
+        Ok(ArrayMut {
+            raw: produce(self.slot, self.index, ctx, mode, T::DTYPE, shape)?,
+            _t: PhantomData,
+        })
+    }
+}
+
+/// Memory for output `o` from its slot: the provided memory (whose shape must match),
+/// or a new C-contiguous buffer.
+fn produce<'s>(
+    slot: OutSlot<'s>,
+    o: usize,
+    ctx: &mut PtCtx,
+    mode: OutputMode,
+    dtype: DType,
+    shape: &[i64],
+) -> Result<PtArrayMut<'s>, String> {
+    if slot.dtype() != dtype {
+        return Err(output_error(
+            o,
+            format!(
+                "it is an array of {}, the kernel writes one of {}",
+                slot.dtype().numpy_name(),
+                dtype.numpy_name()
+            ),
+        ));
+    }
+    match mode {
+        OutputMode::Provided => match slot.provided() {
+            Ok(array) if array.shape() == shape => Ok(array),
+            Ok(array) => Err(output_error(
+                o,
+                format!("it has shape {:?}, expected {shape:?}", array.shape()),
+            )),
+            Err(e) => Err(output_error(o, e)),
+        },
+        OutputMode::Allocated => slot.alloc(ctx, shape).map_err(|e| output_error(o, e)),
+        OutputMode::View => Err(output_error(
+            o,
+            "this kernel writes its outputs, it can't return a view".into(),
+        )),
     }
 }
 
