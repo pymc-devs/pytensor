@@ -5,8 +5,14 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.mode import get_mode
+from pytensor.raise_op import Assert
+from pytensor.tensor.basic import ExtractDiag
+from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.extra_ops import CumOp
 from pytensor.tensor.linalg import cholesky, solve_triangular
+from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
 
 
 pytest.importorskip("pytensor_llvm")
@@ -229,6 +235,55 @@ def test_cholesky_and_solve_triangular(lower):
     compare([a, b, bv], outs, [spd, rng.random((5, 3)), rng.random(5)], rtol=1e-8)
     f = pytensor.function([a], cholesky(a, lower=lower), mode=NO_FALLBACK)
     assert np.isnan(f(-np.eye(3))).all()
+
+
+def test_blockwise():
+    """Batch loops around a generated core, a Rust kernel and a core returning a view
+    whose length only the core knows; broadcast batch axes, strided inputs, a constant
+    core and a core whose make_node adds a node (Assert's ScalarFromTensor)."""
+    cum = Blockwise(CumOp(axis=0, mode="add"), signature="(n)->(n)")
+    diag = Blockwise(ExtractDiag(), signature="(m,n)->(k)")
+    solve = Blockwise(
+        SolveTriangular(lower=True, b_ndim=2), signature="(m,m),(m,n)->(m,n)"
+    )
+    check = Blockwise(Assert("not ok"), signature="(n),()->(n)")
+    x = pt.tensor3("x")
+    a = pt.tensor("a", shape=(None, 1, None, None))
+    b = pt.tensor("b", shape=(1, None, None, None))
+    ok = pt.vector("ok", dtype="bool")
+    av = np.tril(rng.random((2, 1, 4, 4))) + 4 * np.eye(4)
+    outs = [
+        cum(x),
+        cum(x[:, ::-1, ::2]),
+        diag(x),
+        diag(x[::2].transpose(0, 2, 1)),
+        solve(a, b),
+        solve(a[::-1], b[..., ::2]),
+        solve(pt.constant(av[:1, 0]), x),
+        check(x[0], ok),
+    ]
+    xv = rng.random((4, 4, 5))
+    values = [xv, av, rng.random((1, 3, 4, 6)), np.ones(4, dtype=bool)]
+    f = compare([x, a, b, ok], outs, values, rtol=1e-8)
+    assert f.maker.linker.stats.numba == []
+    with pytest.raises(Exception, match="batch axes of the inputs"):
+        f(xv, av, values[2], np.ones(3, dtype=bool))
+    with pytest.raises(Exception, match="not ok"):
+        f(*values[:3], np.array([1, 1, 0, 1], dtype=bool))
+    empty = pytensor.function([x], [cum(x), diag(x)], mode=NO_FALLBACK)
+    with pytest.raises(Exception, match="isn't known for an empty batch"):
+        empty(np.zeros((0, 4, 5)))
+
+    # in a compiled unit (outputs the first iteration allocates are temporaries), with
+    # static shapes and checked layouts
+    s = pt.tensor("s", shape=(3, 4, 5), dtype="float32")
+    i, j = s.type(), x.type()
+    unit = OpFromGraph([i, j], [cum(i), diag(j) * 2], execution=Execution.COMPILED)
+    checked = NO_FALLBACK.clone(
+        link_kwargs={"input_layout": "c", "check_layouts": True}
+    )
+    values = [rng.random((3, 4, 5)).astype("float32"), xv]
+    compare([s, x], unit(s, x), values, checked, rtol=1e-6)
 
 
 def test_fused_elemwise_patterns():

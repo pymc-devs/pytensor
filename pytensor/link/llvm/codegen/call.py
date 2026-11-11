@@ -42,6 +42,9 @@ class CalledKernel:
     outputs: list
     description: str = ""
     keepalive: object = None
+    #: node inputs the kernel overwrites (a numba implementation of an op that destroys
+    #: them): generated code calling it passes copies
+    destroys: frozenset = frozenset()
 
 
 @dataclass

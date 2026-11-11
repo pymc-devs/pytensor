@@ -7,7 +7,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In
-from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.mode import get_mode
 from pytensor.graph.basic import Apply
 from pytensor.graph.destroyhandler import DestroyHandler
@@ -268,6 +268,18 @@ def test_a_numba_kernel_overwrites_only_what_is_safe():
     )
     xv = X.copy()
     np.testing.assert_allclose(program(xv)[0], 2 * X)
+    np.testing.assert_array_equal(xv, X)
+
+
+def test_a_numba_kernel_inside_generated_code_overwrites_a_copy():
+    # inside a compiled unit nothing grants it the unit's input
+    v = pt.matrix("v")
+    unit = OpFromGraph([v], [Twice()(v)], execution=Execution.COMPILED)
+    x = pt.matrix("x")
+    f, stats = compiled([x], unit(x))
+    assert len(stats.numba) == 1
+    xv = X.copy()
+    np.testing.assert_allclose(f(xv), 2 * X)
     np.testing.assert_array_equal(xv, X)
 
 

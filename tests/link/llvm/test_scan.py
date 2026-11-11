@@ -1,6 +1,8 @@
 """Scan on LLVM: as a generated loop (its body inlined, kernels called for the rest), and as
 the Rust kernel running its body as a subprogram."""
 
+import re
+
 import numpy as np
 import pytest
 
@@ -88,6 +90,28 @@ def test_sit_sot_with_sequence_and_non_sequence():
     )
 
 
+def test_loop_without_scratch_memory_calls_no_runtime_functions():
+    # the scratch mark is taken before the loop and released after it; inside, only a
+    # body taking scratch memory releases it
+    x0, rho = pt.dscalars("x0", "rho")
+    eps = pt.vector("eps")
+    xs = scan(
+        lambda e, x, r: r * x + e,
+        sequences=[eps],
+        outputs_info=[x0],
+        non_sequences=[rho],
+    )
+    f = pytensor.function([x0, rho, eps], xs, mode=GEN)
+    ir = f.maker.linker.ir()
+    kernel = ir[ir.index("; ===== Scan") :].split("; =====")[1].split("define")[1]
+    before_loop, rest = kernel.split("\nfold:")
+    after_loop = rest.split("\nfold.exit:")[1].split("\nthen")[0]
+    calls = re.compile(r"call \S+ @ptl_rt_scratch_(mark|release)\(")
+    assert calls.findall(before_loop) == ["mark"]
+    assert calls.findall(after_loop) == ["release"]
+    assert len(calls.findall(kernel)) == 2
+
+
 def test_ir_includes_the_modules_of_the_loop_body():
     # the kernel runs the body as a subprogram, planned by a planner of its own: its
     # generated modules are listed with the program's
@@ -165,6 +189,19 @@ def test_only_last_value_uses_circular_buffer():
         [xs[-1], xs[-2]],
         [np.array(0.3), np.array(0.7), rng.normal(size=33)],
     )
+
+
+def test_circular_buffer_of_dynamic_length():
+    # whether the row written is one the iteration reads is decided at run time
+    # (k=1: the buffer has the two rows tap -2 needs, and the row read is the one
+    # written)
+    x = pt.matrix("x", shape=(None, 4))
+    k = pt.lscalar("k")
+    ys = scan(
+        lambda x2: x2 * 2 + 1, outputs_info=[{"initial": x, "taps": [-2]}], n_steps=7
+    )
+    for kv in (1, 2, 3):
+        compare([x, k], ys[-k:], [np.arange(8.0).reshape(2, 4), np.int64(kv)])
 
 
 def test_gradient_of_scan_mit_mot():
@@ -276,3 +313,29 @@ def test_untraced_state_of_dynamic_shape():
 
     (node,) = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, Scan)]
     assert node.op.info.n_untraced_sit_sot == 1
+
+
+def test_nit_sot_buffer_shorter_than_n_steps():
+    # only the last outputs are needed: the save-memory rewrites shrink the nit-sot
+    # buffer, written circularly
+    x = pt.vector("x")
+
+    def step(v, acc):
+        new = acc + v
+        return new, pt.sin(new)
+
+    _, ys = scan(step, sequences=[x], outputs_info=[pt.zeros(()), None])
+    compare([x], [ys[-1], ys[-3]], [rng.normal(size=50)])
+
+
+def test_body_output_is_a_view_of_the_state():
+    # the step writes a view of the state it read into memory that state is in: an
+    # untraced state, and a mit-sot buffer whose row read by tap -2 is the row written
+    x0 = pt.vector("x0")
+    xs = scan(lambda x: x[::-1], outputs_info=[x0], n_steps=3)
+    compare([x0], xs[-1], [np.arange(4.0)])
+    x = pt.matrix("x")
+    ys = scan(
+        lambda x2: x2[::-1], outputs_info=[{"initial": x, "taps": [-2]}], n_steps=5
+    )
+    compare([x], ys[-1], [np.arange(8.0).reshape(2, 4)])
