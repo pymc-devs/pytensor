@@ -13,8 +13,8 @@ them:
    the items after it.
 3. The generated modules are compiled in one parallel batch.
 4. Memory is planned (`plan/memory.py`): provided outputs are arena temporaries (or
-   fresh buffers for graph outputs), allocated outputs are released after their last
-   use, views keep their source alive.
+   fresh buffers for graph outputs), returned ones are released after their last use,
+   and whatever a value may be a view of is kept alive as long as it.
 5. The program is built for the interpreter (`Planner.build`).
 """
 
@@ -95,7 +95,7 @@ class Task:
     inputs: list
     outputs: list
     modes: list  # OutputMode per output
-    view_of: list  # input index per output (VIEW), else None
+    aliases: list  # per output: the positions of the inputs it may be a view of
     address: int = 0
     config: int = 0
     description: str = ""
@@ -233,10 +233,10 @@ class Planner:
         declared = kernel.outputs
         outs = self.provide(it.outputs, declared)
         self.set_layouts(outs, [o.layout for o in declared])
-        outs, modes, views = _present_outputs(declared, outs, [o.mode for o in declared], [o.view_of for o in declared])
+        outs, modes, aliases = _present_outputs(declared, outs)
         # (values without data aren't arguments)
         present = [k for k, var in zip(it.inputs, it.node.inputs, strict=True) if not is_absent(var.type)]
-        return Task(present, outs, modes, views, address=kernel.address, config=kernel.config,
+        return Task(present, outs, modes, aliases, address=kernel.address, config=kernel.config,
                     description=kernel.description, keepalive=kernel.keepalive)
 
     def generated_task(self, it, folded, in_layouts) -> Task:
@@ -255,17 +255,16 @@ class Planner:
         inputs = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
         outs = self.provide(it.outputs, declared)
         self.set_layouts(outs, [o.layout for o in declared])
-        # (view_of counts the task's inputs)
-        outs, modes, views = _present_outputs(declared, outs, [o.mode for o in declared], [o.view_of for o in declared])
+        outs, modes, aliases = _present_outputs(declared, outs)
         desc = str(node.op) + _layouts_note([r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0])
-        return Task(inputs, outs, modes, views, description=desc, module=module,
+        return Task(inputs, outs, modes, aliases, description=desc, module=module,
                     config=links.address, keepalive=links.keepalive)
 
     def unit_task(self, it: UnitItem) -> Task:
         """A task whose kernel is one function for all the items of a unit."""
         types = self.values.types
         out_types = [types[o] for _, o in it.outputs]
-        modes = [OutputMode.PROVIDED if repr_of(t).static else OutputMode.ALLOCATED for t in out_types]
+        modes = [OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED for t in out_types]
         # provided memory is C-contiguous, and so is what a unit allocates
         out_layouts = [Layout.c(t.ndim) for t in out_types]
         in_layouts = unit_input_layouts([types[k] for k in it.inputs], [self.lay(k) for k in it.inputs])
@@ -289,7 +288,7 @@ class Planner:
         self.set_layouts(outs, out_layouts)
         self.stats.n_units += 1
         names = ", ".join(str(s.node.op) for s in it.items if isinstance(s, NodeItem))[:120]
-        return Task(it.inputs, outs, modes, [None] * len(modes), description=f"unit[{len(it.items)}]: {names}",
+        return Task(it.inputs, outs, modes, [()] * len(modes), description=f"unit[{len(it.items)}]: {names}",
                     module=module, config=nf.links.address, keepalive=nf.links.keepalive)
 
     def copy_task(self, src, dst) -> Task:
@@ -299,7 +298,7 @@ class Planner:
         self.memory_layouts[dst] = Layout.c(t.ndim)
         k = rust_kernel(node.op, node, [self.lay(src)])
         mode = rust_kernel_outputs(k, node, [self.lay(src)])[0].mode
-        return Task([src], [dst], [mode], [None], address=k.address, config=k.config, description="copy", keepalive=k)
+        return Task([src], [dst], [mode], [()], address=k.address, config=k.config, description="copy", keepalive=k)
 
     # ------------------------------------------------------------ the program
 
@@ -372,7 +371,7 @@ class Planner:
         # values without data (random generators) aren't inputs or outputs of the program
         self.program_inputs = [pos for pos, v in enumerate(fgraph.inputs) if not is_absent(v.type)]
         self.program_outputs = [pos for pos, v in enumerate(fgraph.outputs) if not is_absent(v.type)]
-        modes = output_modes or [OutputMode.ALLOCATED] * len(out_ids)
+        modes = output_modes or [OutputMode.RETURNED] * len(out_ids)
         self.input_contiguous = [self.input_contiguous[pos] for pos in self.program_inputs]
         prog = self.build(
             tasks,
@@ -406,9 +405,10 @@ class Planner:
 
         for k, contiguous in zip(in_ids, self.input_contiguous, strict=True):
             ids[k] = pb.input(dtype(k), shape(k), contiguous)
-        for k, (what, src) in sorted(memory.kind.items(), key=lambda x: memory.defined[x[0]]):
+        for k in memory.in_order():
             if k in ids:
                 continue
+            what = memory.kind[k]
             if what == "const":
                 ids[k] = pb.constant(np.asarray(consts[k], dtype=types[k].dtype))  # stored C-contiguous
             elif what == "provided":
@@ -416,10 +416,8 @@ class Planner:
                     ids[k] = pb.fresh(dtype(k), shape(k))
                 else:
                     ids[k] = pb.arena(dtype(k), shape(k), memory.offsets[k], order(k))
-            elif what == "allocated":
-                ids[k] = pb.allocated(dtype(k), shape(k))
-            elif what == "view":
-                ids[k] = pb.view(dtype(k), shape(k), ids[src])
+            else:
+                ids[k] = pb.returned(dtype(k), shape(k), [ids[a] for a in memory.aliases[k]])
         release = memory.release_points(len(tasks))
         for s, after in zip(tasks, release, strict=True):
             pb.task(
@@ -436,10 +434,11 @@ class Planner:
         return pb.build([ids[k] for k in out_ids], modes)
 
 
-def _present_outputs(declared, vids, modes, views):
-    """Drop the outputs without a value (random generators): they aren't task outputs."""
+def _present_outputs(declared, vids):
+    """(vids, modes, aliases) of the outputs that have a value. Random generators have
+    none: they aren't task outputs."""
     keep = [j for j, o in enumerate(declared) if o.mode is not OutputMode.ABSENT]
-    return [vids[j] for j in keep], [modes[j] for j in keep], [views[j] for j in keep]
+    return [vids[j] for j in keep], [declared[j].mode for j in keep], [declared[j].aliases for j in keep]
 
 
 def _layouts_note(reprs):

@@ -4,7 +4,7 @@
 address + config) or None when the node has no Rust kernel; `in_layouts` are the
 inputs' layouts (layout.py; None where unknown). A kernel declares how it produces its
 outputs and in which layouts (`Kernel.outputs`, in Rust next to the kernel; the
-counterpart of `llvm_outputs` for generated code): `rust_kernel_outputs` reads that.
+counterpart of `node_outputs` for generated code): `rust_kernel_outputs` reads that.
 """
 
 from __future__ import annotations
@@ -47,11 +47,15 @@ def rust_kernel_outputs(kernel, node, in_layouts) -> list[Output]:
 
     ins = [None if lay is None else lay.to_spec() for lay in known_layouts(node, in_layouts)]
     decls = kernel.outputs(ins, [o.type.ndim for o in node.outputs])
-    modes = {"provided": OutputMode.PROVIDED, "allocated": OutputMode.ALLOCATED, "view": OutputMode.VIEW}
     outs = []
     for o, (mode, view_of, spec) in zip(node.outputs, decls, strict=True):
         shape = tuple(None if s is None else int(s) for s in o.type.shape)
-        outs.append(Output(repr_of(o.type, Layout.from_spec(spec, shape)), modes[mode], view_of))
+        r = repr_of(o.type, Layout.from_spec(spec, shape))
+        # (a kernel says what it does: it allocates, or returns a view of one input)
+        if mode == "provided":
+            outs.append(Output(r, OutputMode.PROVIDED))
+        else:
+            outs.append(Output(r, OutputMode.RETURNED, (view_of,) if mode == "view" else ()))
     return outs
 
 
@@ -135,7 +139,7 @@ def _register_more():
         # the loop body returns every output allocated; static ones use memory the
         # Scan kernel provides
         body_modes = [
-            OutputMode.PROVIDED if all(s is not None for s in getattr(o.type, "shape", (None,))) else OutputMode.ALLOCATED
+            OutputMode.PROVIDED if all(s is not None for s in getattr(o.type, "shape", (None,))) else OutputMode.RETURNED
             for o in op.fgraph.outputs
         ]
         body = planner.plan(op.fgraph, output_modes=body_modes, input_layouts=_body_input_layouts(op, node, in_layouts))

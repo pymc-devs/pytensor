@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pytensor.link.llvm.codegen.elemwise import identity_value, output_array
+from pytensor.link.llvm.codegen.elemwise import identity_value
 from pytensor.link.llvm.codegen.emit import (
     advance,
     Array,
@@ -30,7 +30,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.layout import Layout
 from pytensor.link.llvm.codegen.types import check_dtype
@@ -123,10 +123,6 @@ def fused_spec(op, node):
 def _register():
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
-    @llvm_outputs.register(FusedElemwise)
-    def _(op, node, in_layouts):
-        return [new_output(o) for o in node.outputs]
-
     @llvm_emit.register(FusedElemwise)
     def _(op, node, cg, inputs, outputs):
         emit_fused(op, node, cg, inputs, outputs)
@@ -179,18 +175,18 @@ def emit_fused(op, node, cg, inputs, outputs):
     for i, (spec, out) in enumerate(zip(outs, outputs, strict=True)):
         if isinstance(spec, Reduce):
             oshape = [shape[a] for a in range(nd) if a not in spec.axes]
-            res = output_array(out, oshape)
+            res = out.allocate(oshape)
             acc = res if spec.acc == res.dtype else cg.temporary(spec.acc, oshape)
             init = constant(b, spec.acc, identity_value(spec.scalar_op, spec.identity, spec.acc))
             for_each(b, oshape, [acc], lambda p, init=init, spec=spec: store(b, spec.acc, init, p[0]))
             out_arrays.append((res, acc))
         elif isinstance(spec, Write):
             t = inputs[spec.target]
-            res = output_array(out, t.shape)
+            res = out.allocate(t.shape)
             copy(cg, t, res)
             out_arrays.append((res, None))
         else:
-            out_arrays.append((output_array(out, shape), None))
+            out_arrays.append((out.allocate(shape), None))
 
     # ---- operands with loop strides (and their layouts)
     zero = b.i64(0)

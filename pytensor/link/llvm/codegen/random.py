@@ -13,9 +13,8 @@ element.
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import Array, c_strides, cast, for_each, load, size, store
-from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
 from pytensor.link.llvm.layout import Layout
 
@@ -23,11 +22,6 @@ from pytensor.link.llvm.layout import Layout
 def _register():
     import pytensor.tensor.random.basic as rb
     from pytensor.tensor.random.op import RandomVariable
-
-    @llvm_outputs.register(RandomVariable)
-    def _(op, node, in_layouts):
-        # (next generator: no value, draws: new memory)
-        return [new_output(o) for o in node.outputs]
 
     @llvm_emit.register(RandomVariable)
     def _(op, node, cg, inputs, outputs):
@@ -168,7 +162,7 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         same_ndim = var.type.ndim == nd and all(s != 1 for s in var.type.shape)
         views.append(Array(x.dtype, x.data, list(shape), strides, x.layout if same_ndim else None))
 
-    out = output_array(outputs[1], shape)
+    out = outputs[1].allocate(shape)
     arrays = [*views, out]
 
     # ---- base draws, all at once

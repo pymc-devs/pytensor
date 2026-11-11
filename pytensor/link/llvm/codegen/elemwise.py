@@ -10,7 +10,6 @@ from pytensor.link.llvm.codegen.emit import (
     loop_order,
     loop_view,
     Array,
-    ProvidedOutput,
     _strided,
     cast,
     constant,
@@ -22,19 +21,12 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.work import scalar_cost
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.tensor.elemwise import CAReduce, Elemwise
-
-
-def output_array(out, shape):
-    """The memory of an output: the caller's, or freshly allocated."""
-    if isinstance(out, ProvidedOutput):
-        return out.array
-    return out.allocate(shape)
 
 
 def broadcast_shape(cg, node, inputs):
@@ -60,25 +52,24 @@ def broadcast_shape(cg, node, inputs):
     return shape
 
 
-@llvm_outputs.register(Elemwise)
+@llvm_layout.register(Elemwise)
 def _(op, node, in_layouts):
-    """New memory in the memory order most inputs are packed in (C if there is none):
-    then all operands share one order and the loop is flat. Elemwise on transposed
-    inputs gives a transposed output instead of a strided loop."""
-    outs = []
+    """The memory order most inputs are packed in (C if there is none): then all
+    operands share one order and the loop is flat. Elemwise on transposed inputs gives
+    a transposed output instead of a strided loop."""
+    layouts = []
     for o in node.outputs:
         shape = tuple(None if s is None else int(s) for s in o.type.shape)
         order = common_order(in_layouts, shape)
-        lay = None if order is None else Layout.make(shape, order, [PACKED] * len(shape))
-        outs.append(new_output(o, lay))
-    return outs
+        layouts.append(None if order is None else Layout.make(shape, order, [PACKED] * len(shape)))
+    return layouts
 
 
 @llvm_emit.register(Elemwise)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     shape = broadcast_shape(cg, node, inputs)
-    outs = [output_array(o, shape) for o in outputs]
+    outs = [o.allocate(shape) for o in outputs]
     in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
     out_dtypes = [check_dtype(v.type.dtype) for v in node.outputs]
     # inputs that are one element for the whole loop are read once, before it
@@ -155,7 +146,7 @@ def _(op, node, cg, inputs, outputs):
         empty = b.eq(size(b, [x.shape[a] for a in axes]), b.i64(0))
         some_out = b.ne(size(b, out_shape), b.i64(0))
         cg.check(b.xor(b.and_(empty, some_out), b.const_bool(True)), "zero-size array to reduction operation which has no identity")
-    res = output_array(out, out_shape)
+    res = out.allocate(out_shape)
 
     if not out_shape:
         # full reduction: accumulate in a register

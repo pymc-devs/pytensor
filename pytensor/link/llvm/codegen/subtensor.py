@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.elemwise import output_array
-from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, store
-from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs, view_output
+from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, set_output, store
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
@@ -59,7 +58,7 @@ def index(cg, x: Array, entries) -> Array:
     # an empty view may start out of range: keep the pointer inside the array
     offset = b.select(empty, 0, offset)
     data = x.data if offset.const_int == 0 else b.gep_bytes(x.data, offset)
-    return Array(x.dtype, data, shape, strides)
+    return x.view(data, shape, strides)
 
 
 def _entries(op, node, inputs, first):
@@ -71,28 +70,19 @@ def _entries(op, node, inputs, first):
 def _(op, node, cg, inputs, outputs):
     view = index(cg, inputs[0], _entries(op, node, inputs, 1))
     view.layout = subtensor_layout(op, node, inputs[0].layout)
-    out = outputs[0]
-    if hasattr(out, "set_view"):
-        out.set_view(view)
-    else:
-        copy(cg, view, out.array)
+    set_output(cg, outputs[0], view)
 
 
-@llvm_outputs.register(Subtensor)
+@llvm_layout.register(Subtensor)
 def _(op, node, in_layouts):
-    return [view_output(node.outputs[0], subtensor_layout(op, node, in_layouts[0]))]
-
-
-@llvm_outputs.register(IncSubtensor)
-def _(op, node, in_layouts):
-    return [new_output(node.outputs[0])]
+    return [subtensor_layout(op, node, in_layouts[0])]
 
 
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x, y = inputs[0], inputs[1]
-    out = output_array(outputs[0], x.shape)
+    out = outputs[0].allocate(x.shape)
     copy(cg, x, out)
     view = index(cg, out, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type

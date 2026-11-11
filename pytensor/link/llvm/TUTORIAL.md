@@ -253,10 +253,11 @@ def _(op, node, cg, inputs, outputs): ...
   * `a.layout`: what is known about the strides while generating (section 5).
 
   Inputs must not be written.
-* `outputs` has one entry per output, to be filled. For a tensor in new memory,
-  `output_array(out, shape)` returns the `Array` to write: either memory the caller
+* `outputs` has one entry per output, to be filled. For a tensor,
+  `outputs[k].allocate(shape)` returns the `Array` to write: either memory the caller
   provides (static shapes), or memory allocated here with that shape. The emitter
-  doesn't need to know which.
+  doesn't need to know which. (An op whose `view_map` lets an output be a view of an
+  input can hand over a view instead; section 5.)
 
 Elements are read and written through the array:
 
@@ -275,7 +276,6 @@ byte in memory and an `i1` in a register, and they know.
 ### The emitter
 
 ```python
-from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.num import Num
 
@@ -285,7 +285,7 @@ def _(op, node, cg, inputs, outputs):
     b = cg.b
     (x,) = inputs
     (n,) = x.shape
-    out = output_array(outputs[0], x.shape)
+    out = outputs[0].allocate(x.shape)
 
     def step(i, best):
         """out[i] = max(best, x[i]); returns the new maximum."""
@@ -302,7 +302,7 @@ def _(op, node, cg, inputs, outputs):
 
 Line by line:
 
-* `output_array` gets the output's memory, of the shape of `x`.
+* `outputs[0].allocate` gets the output's memory, of the shape of `x`.
 * `x.load(b, i)` reads element `i` through the stride of `x`. The input may be any view
   (`x[::-2]`), so the stride is never assumed. Where the planner knows the stride, it
   is a constant here and the multiplication disappears (section 5).
@@ -627,15 +627,15 @@ For loops that visit every element of several arrays, `for_each` in `codegen/emi
 does exactly this: it picks a flat loop when the layouts allow it, a nest when they
 rule it out, and generates both with a check when they leave it open.
 
-### Declaring the layout of an output
+### Views
 
-`llvm_outputs(op, node, in_layouts)` declares how each output of a node comes to be,
-and with which layout. The default is right for ops that write new memory, like
-`CumMax`: the output is C-contiguous memory, provided by the caller if the shape is
-static and allocated by the task otherwise. An output listed in the op's `view_map`
-is declared a view with a `DYNAMIC` layout, which is always true and never fast.
+Whether an output may share memory with an input is not something the implementation
+declares. It is a property of the op: PyTensor's `view_map`. `view_map = {0: [0]}` says
+output 0 may be a view of input 0, and the backend plans accordingly: it keeps the
+input's memory alive as long as the output is used, and it never hands the op memory
+to write that output into.
 
-An op that returns a view should say what it knows. Here is one: a vector backwards.
+Here is an op with a view: a vector backwards.
 
 ```python
 class Reverse(Op):
@@ -657,11 +657,79 @@ class Reverse(Op):
 reverse = Reverse()
 ```
 
-The stride of the result is minus the stride of the input. If the input's stride is
-known, so is the output's:
+An output that may be a view is filled in one of two ways, and the emitter chooses
+freely, even when the code runs:
+
+* `outputs[k].set_view(array)` hands over a view of an input the `view_map` lists.
+  `array` must come from that input: build it with `x.view(data, shape, strides,
+  layout)`, or with `x.at(...)`, which remember where they come from.
+* `outputs[k].allocate(shape)` allocates instead, as for any other output. An op
+  that only sometimes can return a view (a reshape of a non-contiguous array) does
+  this in a branch.
 
 ```python
-from pytensor.link.llvm.codegen.function import known_layouts, llvm_outputs, view_output
+@llvm_emit.register(Reverse)
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
+    (x,) = inputs
+    (n,) = x.shape
+    (stride,) = x.strides
+    # the last element (the first, for an empty vector: stay inside the array)
+    last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
+    outputs[0].set_view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)]))
+
+
+r = pytensor.function([x], cummax(reverse(x)), mode=STRICT)
+np.testing.assert_array_equal(r(values), [4.0, 5.0, 5.0, 5.0, 5.0])
+```
+
+Mistakes are caught while generating. An output the `view_map` doesn't list can't be a
+view, and inputs can't be written:
+
+```python
+class Careless(Op):
+    __props__ = ()
+
+    def make_node(self, x):
+        return Apply(self, [x], [x.type()])
+
+    def perform(self, node, inputs, output_storage):
+        output_storage[0][0] = inputs[0].copy()
+
+
+@llvm_emit.register(Careless)
+def _(op, node, cg, inputs, outputs):
+    outputs[0].set_view(inputs[0])  # no view_map
+
+
+with pytest.raises(ValueError, match="this output can't be a view"):
+    pytensor.function([x], Careless()(x), mode=STRICT)
+
+
+@llvm_emit.register(Careless)
+def _(op, node, cg, inputs, outputs):
+    inputs[0].store(cg.b, 0.0, 0)  # an input
+
+
+with pytest.raises(ValueError, match="storing into an input"):
+    pytensor.function([x], Careless()(x), mode=STRICT)
+```
+
+These checks cover the array helpers, not raw pointers: the backend trusts an
+implementation to do what its op declares.
+
+### Declaring the layout of an output
+
+`llvm_layout(op, node, in_layouts)` returns the layout of each output, whether it is a
+view or new memory. The defaults are C-contiguous for new memory, which was right for
+`CumMax`, and `DYNAMIC` for an output that may be a view, which is always true and
+never fast. The `CumMax` after `Reverse` above was generated for an unknown stride.
+
+An op that returns a view should say what it knows. The stride of a reversed vector is
+minus the stride of the input, so if the one is known, so is the other:
+
+```python
+from pytensor.link.llvm.codegen.function import llvm_layout
 from pytensor.link.llvm.layout import itemsize_of, shape_of
 
 
@@ -671,37 +739,24 @@ def reverse_layout(node, x: Layout) -> Layout:
     return Layout.make(shape_of(node.outputs[0]), (0,), (DYNAMIC if stride is None else -stride,))
 
 
-@llvm_outputs.register(Reverse)
+@llvm_layout.register(Reverse)
 def _(op, node, in_layouts):
-    (x,) = known_layouts(node, in_layouts)  # unknown layouts as DYNAMIC
-    return [view_output(node.outputs[0], reverse_layout(node, x))]
+    return [reverse_layout(node, in_layouts[0])]
 ```
 
-`view_output(var, layout, view_of=0)` declares a view of input `view_of`. Its
-counterpart for new memory is `new_output(var, layout)`, for an op that wants its
-output in another order than C.
-
-The emitter must produce what was declared. It builds the `Array` of the view, with
-the same layout, and hands it over with `set_view`:
+A declared layout is binding, so the emitter must now produce it: the view it hands
+over carries the same layout.
 
 ```python
-from pytensor.link.llvm.codegen.emit import Array, copy
-
-
 @llvm_emit.register(Reverse)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     (x,) = inputs
     (n,) = x.shape
     (stride,) = x.strides
-    # the last element (the first, for an empty vector: stay inside the array)
     last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
-    view = Array(x.dtype, b.gep_bytes(x.data, last), [n], [b.neg(stride)], reverse_layout(node, x.layout))
-    out = outputs[0]
-    if hasattr(out, "set_view"):
-        out.set_view(view)
-    else:  # asked to write into given memory (inside a compiled unit)
-        copy(cg, view, out.array)
+    layout = reverse_layout(node, x.layout)
+    outputs[0].set_view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)], layout))
 ```
 
 The layout function is shared by the declaration and the emitter, which is how the
@@ -724,6 +779,11 @@ print(r.maker.linker.program.dump())
 `CumMax` now runs backwards over the input with a constant stride of -8 bytes, with no
 copy in between.
 
+`llvm_layout` is also how an op asks for new memory in another order than C: `Elemwise`
+declares the memory order of its inputs, so that an operation on transposed matrices
+gives a transposed result instead of a strided loop. For new memory the layout must be
+packed.
+
 Two things guard against wrong declarations:
 
 * `set_view` compares the layout of the array it is given with the declaration, while
@@ -737,17 +797,17 @@ Two things guard against wrong declarations:
   @llvm_emit.register(Forgetful)
   def _(op, node, cg, inputs, outputs):
       (x,) = inputs
-      outputs[0].set_view(Array(x.dtype, x.data, x.shape, x.strides))  # no layout: all DYNAMIC
+      outputs[0].set_view(x.view(x.data, x.shape, x.strides))  # no layout: all DYNAMIC
 
 
-  with pytest.raises(ValueError, match="llvm_outputs declared"):
+  with pytest.raises(ValueError, match="llvm_layout declared"):
       pytensor.function([x], Forgetful()(x), mode=CHECKED)
   ```
 
 * The linker option `check_layouts=True` (or `PYTENSOR_LLVM_CHECK_LAYOUTS=1`) makes
   every generated task verify, when it runs, that its arguments have the layouts it
   was generated for. It costs a few comparisons per task. Use it in the tests of any
-  op with its own `llvm_outputs`: it catches a layout that is declared consistently
+  op with its own `llvm_layout`: it catches a layout that is declared consistently
   but is not what the code produces.
 
 ## 6. Temporary memory
@@ -784,7 +844,7 @@ def _(op, node, cg, inputs, outputs):
     b = cg.b
     (x,) = inputs
     rows, columns = x.shape
-    out = output_array(outputs[0], [columns])
+    out = outputs[0].allocate([columns])
     sums = cg.temporary("float64", [columns])
     with b.loop(columns) as j:
         sums.store(b, 0.0, j)
@@ -948,7 +1008,7 @@ belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/codegen/
 2. Scalar ops go into `codegen/scalar.py`, with their cost in `SCALAR_COSTS` in
    `work.py`; distributions into the `SAMPLERS` table of `codegen/random.py`.
 3. Register `llvm_work` in `work.py` if one unit per output element is far off, and
-   `llvm_outputs` next to the emitter if an output is a view (its layout function goes
+   `llvm_layout` next to the emitter if an output is a view (its layout function goes
    into `layout.py`).
 4. Add a test to `tests/link/llvm/test_ops.py` that compiles with
    `numba_fallback=False` and compares with numpy, over the dtypes, with a strided

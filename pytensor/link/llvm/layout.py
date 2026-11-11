@@ -19,11 +19,11 @@ its strides. They come from how a value is produced:
 
 * memory the planner provides (arena, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
-* views get theirs from their input's (the op's `llvm_outputs`, with the helpers below);
+* views get theirs from their input's (the op's `llvm_layout`, with the helpers below);
 * graph inputs and values from numba kernels are DYNAMIC unless checked.
 
 How each output comes to be, and with which layout, is declared per op by
-`llvm_outputs` (codegen/function.py); the planner and the `LayoutFeature` (for rewrites
+`llvm_layout` (codegen/function.py); the planner and the `LayoutFeature` (for rewrites
 and inspection) both use it.
 """
 
@@ -279,7 +279,7 @@ def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
 
 
 # ------------------------------------------------------------------ layouts of views
-# (used by the ops' `llvm_outputs`, next to their emitters)
+# (used by the ops' `llvm_layout`, next to their emitters)
 
 
 def same_layout(node, x: Layout) -> Layout:
@@ -383,12 +383,12 @@ def common_order(layouts, shape) -> list[int] | None:
 
 def predict_layouts(node, in_layouts) -> list[Layout | None]:
     """The layouts the planner will (most likely) give `node`'s outputs: what the node's
-    `llvm_outputs` declare (provided memory in the layout asked for).
+    `llvm_layout` declares (provided memory in the layout asked for).
 
     The planner is authoritative (it knows which tasks fall back to numba, for one);
     this is its prediction for graph rewrites and inspection."""
     from pytensor.compile.builders import OpFromGraph, Execution
-    from pytensor.link.llvm.codegen.function import llvm_outputs
+    from pytensor.link.llvm.codegen.function import node_outputs
 
     op = node.op
     try:
@@ -404,7 +404,7 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
                     for lay, o in zip(outs, node.outputs, strict=True)
                 ]
             return outs
-        return [o.layout for o in llvm_outputs(op, node, in_layouts)]
+        return [o.layout for o in node_outputs(node, in_layouts)]
     except NotImplementedError:
         return [Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None for o in node.outputs]
 

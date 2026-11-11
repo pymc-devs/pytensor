@@ -12,9 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytensor.scalar.basic as ps
-from pytensor.link.llvm.codegen.elemwise import output_array
 from pytensor.link.llvm.codegen.emit import advance, Array, cast, copy, for_each, load, store
-from pytensor.link.llvm.codegen.function import new_output, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, unflatten_index_variables
 
@@ -105,18 +104,12 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
     return p
 
 
-@llvm_outputs.register(AdvancedSubtensor)
-@llvm_outputs.register(AdvancedIncSubtensor)
-def _(op, node, in_layouts):
-    return [new_output(node.outputs[0])]
-
-
 @llvm_emit.register(AdvancedSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x = inputs[0]
     pat = pattern(cg, x, node, inputs[1:], node.inputs[1:], op)
-    out = output_array(outputs[0], pat.view_shape)
+    out = outputs[0].allocate(pat.view_shape)
     base_op, idx_ops = operands(cg, x, pat)
     k = len(idx_ops)
 
@@ -131,7 +124,7 @@ def _(op, node, cg, inputs, outputs):
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x, y = inputs[0], inputs[1]
-    out = output_array(outputs[0], x.shape)
+    out = outputs[0].allocate(x.shape)
     copy(cg, x, out)
     pat = pattern(cg, out, node, inputs[2:], node.inputs[2:], op)
     base_op, idx_ops = operands(cg, out, pat)

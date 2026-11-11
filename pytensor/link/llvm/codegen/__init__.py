@@ -34,9 +34,8 @@ from pytensor.link.llvm.codegen.function import (
     compile_node,
     llvm_emit,
     new_output,
-    llvm_outputs,
+    llvm_layout,
     node_outputs,
-    view_output,
     node_signature,
 )
 
