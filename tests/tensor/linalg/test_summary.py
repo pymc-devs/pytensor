@@ -6,7 +6,7 @@ import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
 from pytensor.tensor.linalg import det, norm, slogdet, trace
-from pytensor.tensor.type import matrix, scalar, tensor, vector
+from pytensor.tensor.type import matrix, scalar, tensor, tensor3, vector
 from tests import unittest_tools as utt
 
 
@@ -106,6 +106,22 @@ class TestNorm:
             TypeError, match="'axis' must be None, an integer, or a tuple of integers"
         ):
             norm([[1, 2], [3, 4]], axis=axis)
+
+    @pytest.mark.parametrize("ord", [None, "nuc", np.inf, -np.inf, 1, -1, 2, -2])
+    @pytest.mark.parametrize("keepdims", [True, False])
+    def test_matrix_norm_explicit_axis(self, ord, keepdims):
+        axes = [(0, 1), (1, 0), (0, 2), (2, 0), (1, 2), (-1, -2), (-3, -1)]
+        X = np.random.default_rng(utt.fetch_seed()).normal(size=(2, 3, 4))
+        X = X.astype(config.floatX)
+        x = tensor3("x")
+        f = function(
+            [x],
+            [norm(x, ord=ord, axis=axis, keepdims=keepdims) for axis in axes],
+        )
+        for axis, res in zip(axes, f(X), strict=True):
+            expected = np.linalg.norm(X, ord=ord, axis=axis, keepdims=keepdims)
+            assert res.shape == expected.shape
+            utt.assert_allclose(res, expected)
 
     @pytest.mark.parametrize(
         "ord",
