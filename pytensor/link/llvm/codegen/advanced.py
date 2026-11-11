@@ -12,7 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytensor.scalar.basic as ps
-from pytensor.link.llvm.codegen.emit import Array, advance, cast, for_each, load, store
+from pytensor.link.llvm.codegen.emit import (
+    Array,
+    advance,
+    cast,
+    checked_index,
+    for_each,
+    index_bounds,
+    load,
+    store,
+)
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.tensor.subtensor import (
@@ -28,6 +37,7 @@ class Pattern:
     indices: list  # (Array, PyTensor variable) of the index arrays, in axis order
     bshape: list  # broadcast shape of the indices (i64 values)
     view_shape: list  # shape of x[indices]
+    bounds: list  # index_bounds of each index array
 
 
 def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
@@ -75,7 +85,8 @@ def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
     bshape = [n if n is not None else b.i64(1) for n in bshape]
     k = len(indices)
     view_shape = list(x.shape[:first]) + bshape + list(x.shape[first + k :])
-    return Pattern(first, indices, bshape, view_shape)
+    bounds = [index_bounds(var) for _, var in indices]
+    return Pattern(first, indices, bshape, view_shape, bounds)
 
 
 def operands(cg, base: Array, pat: Pattern):
@@ -107,9 +118,13 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
         axis = pat.first + j
         n = base.shape[axis]
         i = cast(b, load(b, arr.dtype, ip), arr.dtype, "int64")
-        i = b.select(b.slt(i, 0), b.add(i, n), i)
-        ok = b.and_(b.sge(i, 0), b.slt(i, n))
-        cg.check(ok, f"index out of bounds for axis {axis} ({what})")
+        i = checked_index(
+            cg,
+            i,
+            n,
+            f"index out of bounds for axis {axis} ({what})",
+            pat.bounds[j],
+        )
         p = advance(b, p, i, base.strides[axis], base.dtype)
     return p
 

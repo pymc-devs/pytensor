@@ -58,6 +58,7 @@ def build_unit_function(
     constants,
     input_layouts=None,
     output_layouts=None,
+    output_aliases=None,
     parallel=True,
     links=None,
 ) -> NodeFunction:
@@ -68,7 +69,10 @@ def build_unit_function(
       were resolved for (`unit_input_layouts`);
     * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or RETURNED;
     * `output_layouts`: the layout of the memory provided for each PROVIDED output
-      (None: any strides);
+      (None: any strides), and of the result of a RETURNED one that may be a view;
+    * `output_aliases`: per output, the positions of the inputs it may be a view of
+      (RETURNED only): it is returned as a view when it lies in one of their memory,
+      else as a copy in its layout;
     * `resolved`: the unit's items in order, resolved (`plan.resolve.Resolved`): each
       says whether its code is generated or which kernel it calls. A kernel's handle
       goes into `links` (the returned function's `links`: call it with that config).
@@ -86,9 +90,13 @@ def build_unit_function(
     ]
     if output_layouts is None:
         output_layouts = [None] * len(outputs)
+    if output_aliases is None:
+        output_aliases = [()] * len(outputs)
     outs = [
-        Output(repr_of(t, lay if mode is OutputMode.PROVIDED else None), mode)
-        for (_, t, mode), lay in zip(outputs, output_layouts, strict=True)
+        Output(repr_of(t, lay if mode is OutputMode.PROVIDED or al else None), mode, al)
+        for (_, t, mode), lay, al in zip(
+            outputs, output_layouts, output_aliases, strict=True
+        )
     ]
     for r in [*in_reprs, *(o.repr for o in outs)]:
         if isinstance(r, ScalarRepr):
@@ -105,9 +113,11 @@ def build_unit_function(
         b, ctx, config, parallel=parallel, links=links, module=module, name=name
     )
     vals = {}  # vid -> Array (tensors) or value (scalars)
+    in_arrays = []
     k = 2
     for (vid, _), r in zip(inputs, in_reprs, strict=True):
         vals[vid] = unpack(b, r, params[k])
+        in_arrays.append(vals[vid])
         k += 1
     targets = {}  # vid -> Destination, first occurrence
     out_targets = []
@@ -124,19 +134,65 @@ def build_unit_function(
 
     written, owned = emit_items(cg, module, name, resolved, vals, targets)
 
-    # unit outputs that weren't produced in place: copy
-    for (vid, t, mode), target in zip(outputs, out_targets, strict=True):
+    # unit outputs that weren't produced in place: views of the inputs where they are
+    # (and may be), else copies
+    for (vid, t, mode), target, o in zip(outputs, out_targets, outs, strict=True):
         if vid in written and targets[vid] is target:
             continue
         src = vals[vid]
         if mode is OutputMode.PROVIDED:
             copy(cg, src, target.array)
-        else:
-            out = SlotOutput(cg, target.slot, t.dtype, t.ndim)
+            continue
+        out = SlotOutput(
+            cg,
+            target.slot,
+            t.dtype,
+            t.ndim,
+            aliases=o.aliases,
+            # a copy is in the declared layout if packed, else C-contiguous (which
+            # implies it, see `program._view_layout`)
+            layout=(
+                o.layout if o.aliases and o.layout.fully_packed(o.repr.shape) else None
+            ),
+        )
+        if not o.aliases:
             copy(cg, src, out.allocate(src.shape))
+            continue
+        inside = b.const_bool(False)
+        for a in o.aliases:
+            inside = b.or_(inside, _lies_in(b, src, in_arrays[a]))
+
+        def view(src=src, out=out):
+            out.set_view(src)
+
+        def copied(src=src, out=out):
+            copy(cg, src, out.allocate(src.shape))
+
+        b.if_else(inside, view, copied)
     release(cg, owned)
     b.ret(0)
     return NodeFunction(fn, sig, links)
+
+
+def _bounds(b, a: Array):
+    """(first, end) byte addresses of the memory `a` covers (end exclusive), as
+    pointers; and whether it is empty."""
+    lo, hi = b.i64(0), b.i64(itemsize(a.dtype))
+    empty = b.const_bool(False)
+    for n, st in zip(a.shape, a.strides, strict=True):
+        ext = b.mul(b.sub(n, 1), st)
+        lo = b.add(lo, b.smin(ext, 0))
+        hi = b.add(hi, b.smax(ext, 0))
+        empty = b.or_(empty, b.eq(n, 0))
+    return b.gep_bytes(a.data, lo), b.gep_bytes(a.data, hi), empty
+
+
+def _lies_in(b, a: Array, base: Array):
+    """Whether the memory of `a` lies in the memory of `base` (i1)."""
+    a_lo, a_hi, a_empty = _bounds(b, a)
+    lo, hi, empty = _bounds(b, base)
+    inside = b.and_(b.uge(a_lo, lo), b.ule(a_hi, hi))
+    return b.and_(inside, b.not_(b.or_(a_empty, empty)))
 
 
 @dataclass

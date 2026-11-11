@@ -7,6 +7,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.mode import get_mode
+from pytensor.compile.ops import deep_copy_op
 
 
 pytest.importorskip("pytensor_llvm")
@@ -63,7 +64,7 @@ def test_dtypes(dtype):
 def test_small_static_graph_is_one_unit():
     x = pt.tensor("x", shape=(3, 4))
     y = pt.tensor("y", shape=(4,))
-    w = pt.sum(pt.exp(x) * y) * 2 + pt.max(x)
+    w = pt.join(0, x[1:], y[None]).T.sum(axis=0)
     f = compare([x, y], w, [rng.random((3, 4)), rng.random(4)])
     i = info(f)
     assert i["n_tasks"] == 1
@@ -125,6 +126,25 @@ def test_math_functions_use_vector_library(fn, dtype):
     assert re.search(
         r"call [\w ]*<\d+ x (double|float)> @_ZGV", linker.ir(optimized=True)
     )
+
+
+def test_units_respect_inplace_orderings():
+    # `s` is inplace on `a` and so must run after the view `a.T`, while `exp(s)` is again
+    # groupable: one unit holding `a.T` and `exp(s)` would depend on itself through `s`
+    x = pt.tensor("x", shape=(2, 3))
+    y = pt.tensor("y", shape=(3,))
+    a = pt.sort(x, axis=1)
+    s = pt.set_subtensor(a[0], y)
+    out = [a.T * 2, pt.exp(s) + 1]
+    compare([x, y], out, [rng.random((2, 3)), rng.random(3)])
+
+
+def test_units_include_copies():
+    x = pt.tensor("x", shape=(4, 5))
+    out = [deep_copy_op(x[1:].sum(axis=0)), x.sum(axis=1)]
+    f = compare([x], out, [rng.random((4, 5))])
+    s = info(f)["stats"]
+    assert (s.n_units, s.n_modules, s.n_rust_kernels) == (1, 1, 0)
 
 
 def test_interpreted_ofg():
@@ -258,9 +278,9 @@ def test_scalars_around_a_scan():
 
 
 def test_kernel_reading_a_scalar():
-    # a Rust kernel (Scan) reading a ScalarType value (here a non-sequence, as rewrites
-    # produce for merged gradient scans) gets it as a 0-d tensor, made in the scalars'
-    # compiled unit
+    # a node reading a ScalarType value (here a Scan with a non-sequence, as rewrites
+    # produce for merged gradient scans) is in a compiled unit with the scalar nodes
+    # computing it: no ScalarType value is left outside units
     from pytensor.compile.mode import Mode
     from pytensor.graph.replace import clone_replace
     from pytensor.scalar import ScalarType
@@ -293,8 +313,11 @@ def test_kernel_reading_a_scalar():
     out = new[0][1:].sum() + x.sum()
 
     f = pytensor.function([x], out, mode=Mode(linker=LLVM.linker, optimizer=None))
-    scans = [nd for nd in f.maker.fgraph.toposort() if isinstance(nd.op, Scan)]
-    assert any(isinstance(i.type, ScalarType) for i in scans[0].inputs)
+    assert not any(
+        isinstance(o.type, ScalarType)
+        for nd in f.maker.fgraph.apply_nodes
+        for o in nd.outputs
+    )
     g = pytensor.function([x], out, mode=REF)
     for v in (np.arange(3.0), -np.arange(3.0)):
         np.testing.assert_allclose(f(v), g(v))

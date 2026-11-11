@@ -707,7 +707,6 @@ impl Program {
                 args.len()
             ));
         }
-        let np = py.import("numpy")?;
         let mut guard = self.lock_session(py);
         let Session { memory: st, ctx } = guard.get_or_insert_with(|| Session {
             memory: prog.take_memory(),
@@ -736,19 +735,22 @@ impl Program {
                 } else {
                     let kw = pyo3::types::PyDict::new(py);
                     kw.set_item("dtype", descr(py, want))?;
-                    np.call_method("asarray", (a,), Some(&kw))?
+                    py.import("numpy")?
+                        .call_method("asarray", (a,), Some(&kw))?
                 };
                 let arr = a.cast::<PyUntypedArray>()?;
                 // SAFETY: reading the flags of a live array.
                 let flags = unsafe { (*arr.as_array_ptr()).fields.flags };
                 let aligned = flags & numpy::npyffi::NPY_ARRAY_ALIGNED != 0;
                 let a = if !aligned {
-                    np.call_method1("ascontiguousarray", (a,))?
+                    py.import("numpy")?
+                        .call_method1("ascontiguousarray", (a,))?
                         .call_method0("copy")?
                 } else if prog.input_contiguous(k)
                     && flags & numpy::npyffi::NPY_ARRAY_C_CONTIGUOUS == 0
                 {
-                    np.call_method1("ascontiguousarray", (a,))?
+                    py.import("numpy")?
+                        .call_method1("ascontiguousarray", (a,))?
                 } else {
                     a
                 };

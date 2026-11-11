@@ -19,9 +19,11 @@ from pytensor.link.llvm.codegen.emit import (
     ScalarOutput,
     advance,
     cast,
+    checked_index,
     constant,
     copy,
     for_each,
+    index_bounds,
     is_contiguous,
     load,
     loop_order,
@@ -34,7 +36,7 @@ from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.link.llvm.layout import Layout
-from pytensor.scalar.basic import ScalarType
+from pytensor.scalar.basic import ScalarType, add
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor
 
@@ -249,15 +251,22 @@ def emit_fused(op, node, cg, inputs, outputs):
         """idx[i] for index array input k, wrapped and bounds-checked against `n`."""
         return inputs[k].load(b, i).astype("int64").value
 
-    def checked(v, n, what):
-        v = b.select(b.slt(v, 0), b.add(v, n), v)
-        ok = b.and_(b.sge(v, 0), b.slt(v, n))
-        cg.check(ok, f"FusedElemwise: index out of bounds ({what})")
-        return v
+    def checked(v, n, what, k):
+        return checked_index(
+            cg,
+            v,
+            n,
+            f"FusedElemwise: index out of bounds ({what})",
+            index_bounds(node.inputs[k]),
+        )
 
-    def body(ptr_in, ptr_out, loop_index, accs):
+    def body(ptr_in, ptr_out, loop_index, accs, runs=None):
         """One element. `ptr_in[j]`/`ptr_out[i]`: element pointers of the plain parts;
-        `accs`: register accumulators {output: value}. Returns the new accumulators."""
+        `accs`: register accumulators {output: value}; `runs`: {output: (index, value)}
+        of the incremented element of an output kept in registers (see `inc_run`).
+        Returns the new accumulators and runs."""
+        runs = runs or {}
+        new_runs = {}
         args = []
         for j, d in enumerate(in_dtypes):
             x = inputs[j]
@@ -271,7 +280,9 @@ def emit_fused(op, node, cg, inputs, outputs):
             r = reads[j]
             if r is not None:
                 n = x.shape[r.axis]
-                ix = checked(index_value(r.index, loop_index[r.axis]), n, "read")
+                ix = checked(
+                    index_value(r.index, loop_index[r.axis]), n, "read", r.index
+                )
                 p = advance(b, p, ix, x.strides[r.axis], x.dtype)
             args.append((load(b, x.dtype, p), d))
         res = emit_scalar(E.op.scalar_op, b, args, out_dtypes)
@@ -293,18 +304,47 @@ def emit_fused(op, node, cg, inputs, outputs):
             elif isinstance(spec, Write):
                 res_arr = out_arrays[i][0]
                 n = res_arr.shape[spec.axis]
-                ix = checked(index_value(spec.index, loop_index[spec.axis]), n, "write")
-                p = advance(
-                    b, ptr_out[i], ix, res_arr.strides[spec.axis], res_arr.dtype
+                ix = checked(
+                    index_value(spec.index, loop_index[spec.axis]),
+                    n,
+                    "write",
+                    spec.index,
                 )
+                if i in runs:
+                    new_runs[i] = inc_run(i, d, ptr_out[i], ix, v, *runs[i])
+                    continue
+                p = element(i, ptr_out[i], ix)
                 if not spec.set:
-                    from pytensor.scalar.basic import add
-
                     v = emit_scalar(add, b, [(load(b, d, p), d), (v, d)], [d])[0]
                 store(b, d, v, p)
             else:
                 store(b, d, v, ptr_out[i])
-        return new_accs
+        return new_accs, new_runs
+
+    def element(i, base, ix):
+        res_arr = out_arrays[i][0]
+        return advance(b, base, ix, res_arr.strides[outs[i].axis], res_arr.dtype)
+
+    def inc_run(i, d, base, ix, v, prev, cur):
+        """`out[ix] += v` with the element being incremented kept in a register while
+        the index repeats (`prev`, `cur`: its index, -1 before the first, and value):
+        written back when the index changes, so consecutive increments of one element
+        don't wait on each other through memory. The order of the additions is kept."""
+
+        def same():
+            return [prev, emit_scalar(add, b, [(cur, d), (v, d)], [d])[0]]
+
+        def other():
+            with b.if_(b.sge(prev, 0)):
+                store(b, d, cur, element(i, base, prev))
+            old = load(b, d, element(i, base, ix))
+            return [ix, emit_scalar(add, b, [(old, d), (v, d)], [d])[0]]
+
+        return tuple(b.if_else(b.eq(ix, prev), same, other))
+
+    def flush_run(i, d, base, prev, cur):
+        with b.if_(b.sge(prev, 0)):
+            store(b, d, cur, element(i, base, prev))
 
     in_keys = sorted(plain_in)
     out_keys = sorted(plain_out)
@@ -324,27 +364,51 @@ def emit_fused(op, node, cg, inputs, outputs):
         for i, s in enumerate(outs)
         if isinstance(s, Reduce) and nd > 0 and (nd - 1) in s.axes
     ]
+    # increments through an index along the innermost axis keep their run in registers
+    inner_inc = [
+        i
+        for i, s in enumerate(outs)
+        if isinstance(s, Write) and not s.set and nd > 0 and s.axis == nd - 1
+    ]
 
     def nest():
         def level(a, ptrs, index):
             if a == nd - 1 and nd > 0:
                 pi, po = split(ptrs)
                 init = [load(b, outs[i].acc, po[i]) for i in inner_red]
+                nr = len(inner_red)
+                for i in inner_inc:
+                    d = out_dtypes[i]
+                    init += [b.i64(-1), constant(b, d, 0)]
 
-                def step(i, *accs):
+                def step(i, *carried):
                     q = [
                         advance(b, p, i, arr.strides[a], arr.dtype)
                         for p, arr in zip(ptrs, arrays, strict=True)
                     ]
                     qi, qo = split(q)
-                    new = body(
-                        qi, qo, [*index, i], dict(zip(inner_red, accs, strict=True))
+                    runs = {
+                        k: carried[nr + 2 * n : nr + 2 * n + 2]
+                        for n, k in enumerate(inner_inc)
+                    }
+                    new, new_runs = body(
+                        qi,
+                        qo,
+                        [*index, i],
+                        dict(zip(inner_red, carried[:nr], strict=True)),
+                        runs,
                     )
-                    return [new[k] for k in inner_red]
+                    return [new[k] for k in inner_red] + [
+                        v for k in inner_inc for v in new_runs[k]
+                    ]
 
                 final = b.fold(shape[a], init, step)
-                for i, v in zip(inner_red, final, strict=True):
+                for i, v in zip(inner_red, final[:nr], strict=True):
                     store(b, outs[i].acc, v, po[i])
+                for n, i in enumerate(inner_inc):
+                    flush_run(
+                        i, out_dtypes[i], po[i], *final[nr + 2 * n : nr + 2 * n + 2]
+                    )
                 return
             if a == nd:
                 pi, po = split(ptrs)
@@ -404,7 +468,7 @@ def emit_fused(op, node, cg, inputs, outputs):
                 )
                 for k in out_keys
             }
-            new = body(pi, po, [None] * nd, dict(zip(red, accs, strict=True)))
+            new, _ = body(pi, po, [None] * nd, dict(zip(red, accs, strict=True)))
             return [new[k] for k in red]
 
         final = b.fold(size(b, shape), init, step)

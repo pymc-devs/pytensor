@@ -99,7 +99,7 @@ def test_views_feed_specialized_code():
     y = pt.tensor("y", shape=(6, 7))
     outs = [
         pt.exp(x[:, 1:]).sum(axis=1),
-        (x.T * 2).sum(axis=0),
+        pt.exp(x.T) * 2,
         pt.exp(x[::2]) + 1,
         pt.log1p(y[:, ::3] ** 2).sum(),
         (y.T[2:] @ y[:, :3]),

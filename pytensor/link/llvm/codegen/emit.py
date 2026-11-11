@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from pytensor.graph.basic import Constant
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     Slot,
@@ -279,6 +280,37 @@ def advance(b, p, i, stride, dtype):
         # strides of arrays are multiples of the itemsize (validated at the boundary)
         es = b.ashr(stride, isz.bit_length() - 1)
     return b.gep(memory_type(dtype), p, b.mul(i, es, nsw=True))
+
+
+# ------------------------------------------------------------------ indices
+
+
+def index_bounds(var):
+    """(min, max) known of the values of the integer index variable `var` (None where
+    unknown): a constant's values, or at least 0 for an unsigned dtype."""
+    if isinstance(var, Constant):
+        if var.data.size == 0:
+            return 0, -1
+        return int(var.data.min()), int(var.data.max())
+    if var.type.dtype.startswith("uint"):
+        return 0, None
+    return None, None
+
+
+def checked_index(cg, i, n, message, bounds=(None, None)):
+    """Index `i` (i64) into an axis of length `n`: negative values wrap, out-of-range
+    ones fail with `message`. Generates only what `bounds` (`index_bounds`), a constant
+    `i` and a constant `n` don't already guarantee."""
+    b = cg.b
+    if i.const_int is not None:
+        bounds = (i.const_int, i.const_int)
+    lo, hi = bounds
+    if lo is None or lo < 0:
+        i = b.select(b.slt(i, 0), b.add(i, n), i)
+    nc = n.const_int
+    if lo is None or hi is None or nc is None or lo < -nc or hi >= nc:
+        cg.check(b.ult(i, n), message)  # also catches what is still negative
+    return i
 
 
 # ------------------------------------------------------------------ casts
@@ -801,9 +833,11 @@ __all__ = [
     "advance",
     "c_array",
     "cast",
+    "checked_index",
     "constant",
     "copy",
     "for_each",
+    "index_bounds",
     "load",
     "loop_order",
     "loop_view",

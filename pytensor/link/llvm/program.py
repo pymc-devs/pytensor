@@ -4,9 +4,9 @@
 them:
 
 1. Flatten (`plan/flatten.py`): the graph becomes items. OpFromGraphs are inlined,
-   become units (`execution=COMPILED`) or subprograms (`execution=INTERPRETED`); nodes
-   touching ScalarType values are grouped into units, since scalars never cross the
-   kernel ABI.
+   become units (`execution=COMPILED`) or subprograms (`execution=INTERPRETED`).
+   ScalarType values never cross the kernel ABI: the `llvm_units` rewrite keeps them
+   inside units, and a scalar input arrives as a 0-d array.
 2. Each item becomes a task (`Planner.task`): its implementation is resolved
    (`plan/resolve.py`: a Rust kernel, generated code, a numba kernel, a subprogram),
    code is generated for it if needed, and the layouts of its outputs are noted for
@@ -38,13 +38,13 @@ from pytensor.link.llvm.codegen.function import (
 from pytensor.link.llvm.codegen.types import ScalarRepr, ir, is_absent, repr_of
 from pytensor.link.llvm.codegen.unit import build_unit_function, unit_input_layouts
 from pytensor.link.llvm.layout import Layout
-from pytensor.link.llvm.plan.flatten import flatten, group_scalars
+from pytensor.link.llvm.plan.flatten import flatten
 from pytensor.link.llvm.plan.memory import plan_memory
 from pytensor.link.llvm.plan.resolve import Resolver
 from pytensor.link.llvm.plan.values import NodeItem, SubprogramItem, UnitItem, Values
 from pytensor.link.llvm.rust_kernels import rust_kernel, rust_kernel_outputs
 from pytensor.scalar.basic import ScalarType
-from pytensor.tensor.basic import scalar_from_tensor
+from pytensor.tensor.basic import TensorFromScalar
 from pytensor.tensor.type import TensorType
 
 
@@ -234,14 +234,11 @@ class Planner:
                     self.note_roots(tasks[-1])
             except NotImplementedError:
                 self.copies_first = []
-                if not isinstance(it, UnitItem) or it.description == "scalars":
+                if not isinstance(it, UnitItem):
                     raise
                 # a compiled OpFromGraph we can't generate: run its nodes as tasks, and
                 # copy each result into the value the OpFromGraph's output is
-                inner_outs = {inner for inner, _ in it.outputs}
-                tasks += self.tasks_for(
-                    group_scalars(self.values, it.items, inner_outs)
-                )
+                tasks += self.tasks_for(it.items)
                 for inner, outer in it.outputs:
                     tasks.append(self.copy_task(inner, outer))
                     self.note_roots(tasks[-1])
@@ -437,23 +434,31 @@ class Planner:
         """A task whose kernel is one function for all the items of a unit."""
         types = self.values.types
         out_types = [types[o] for _, o in it.outputs]
-        modes = [
-            OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED
-            for t in out_types
-        ]
-        # provided memory is C-contiguous, and so is what a unit allocates
-        out_layouts = [Layout.c(t.ndim) for t in out_types]
         in_layouts = unit_input_layouts(
             [types[k] for k in it.inputs], [self.lay(k) for k in it.inputs]
         )
-        resolved = self.resolver.resolve_items(
-            it.items,
-            {
-                k: lay
-                for k, lay in zip(it.inputs, in_layouts, strict=True)
-                if lay is not None
-            },
-        )
+        inner_layouts = {
+            k: lay
+            for k, lay in zip(it.inputs, in_layouts, strict=True)
+            if lay is not None
+        }
+        resolved = self.resolver.resolve_items(it.items, inner_layouts)
+        # outputs that may be views of the unit's inputs are returned as such (in the
+        # layout their node declared); the others are provided memory when static, else
+        # allocated, C-contiguous
+        views = _unit_views(it, resolved)
+        modes, out_layouts, aliases = [], [], []
+        for (inner, _), t in zip(it.outputs, out_types, strict=True):
+            if views.get(inner):
+                modes.append(OutputMode.RETURNED)
+                out_layouts.append(_view_layout(inner_layouts.get(inner), t))
+                aliases.append(tuple(sorted(views[inner])))
+            else:
+                modes.append(
+                    OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED
+                )
+                out_layouts.append(Layout.c(t.ndim))
+                aliases.append(())
         module = ir.Module(f"unit_{len(it.items)}", fastmath=self.opts.fastmath)
         nf = build_unit_function(
             module,
@@ -473,6 +478,7 @@ class Planner:
             },
             input_layouts=in_layouts,
             output_layouts=out_layouts,
+            output_aliases=aliases,
             parallel=self.opts.parallel,
         )
         build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)
@@ -486,7 +492,7 @@ class Planner:
             it.inputs,
             outs,
             modes,
-            [()] * len(modes),
+            aliases,
             description=f"unit[{len(it.items)}]: {names}",
             module=module,
             config=nf.links.address,
@@ -533,17 +539,17 @@ class Planner:
         values = self.values
         scope = {}
         in_ids = []
-        scalar_inputs = []
+        boxed = {}  # scalar input -> the 0-d array it arrives in
         for pos, v in enumerate(fgraph.inputs):
             if isinstance(v.type, ScalarType):
-                # scalars don't cross the kernel ABI: the input is a 0-d array, read into the
-                # scalar by a ScalarFromTensor (which joins the scalars' compiled unit)
+                # scalars don't cross the kernel ABI: the input is a 0-d array, which is
+                # what `TensorFromScalar` of it is (the units rewrite reads scalar inputs
+                # through it)
                 t = values.new(TensorType(v.type.dtype, shape=()))
-                k = values.new(v.type)
-                scalar_inputs.append((t, k))
                 in_ids.append(t)
                 self.layouts[t] = Layout.c(0)
-                scope[v] = k
+                boxed[v] = t
+                scope[v] = values.new(v.type)
                 continue
             k = values.new(v.type)
             scope[v] = k
@@ -565,16 +571,17 @@ class Planner:
         ]
 
         # 1. items
-        items = [
-            NodeItem(scalar_from_tensor(values.types[t]()).owner, [t], [k])
-            for t, k in scalar_inputs
-        ]
+        nodes = []
+        for node in fgraph.toposort():
+            if isinstance(node.op, TensorFromScalar) and node.inputs[0] in boxed:
+                scope[node.outputs[0]] = boxed[node.inputs[0]]
+            else:
+                nodes.append(node)
         # (the order of a graph with a DestroyHandler respects what its ops destroy)
         self.allow_inplace = hasattr(fgraph, "destroyers")
-        items += flatten(values, fgraph.toposort(), scope, of_the_graph=True)
+        items = flatten(values, nodes, scope, of_the_graph=True)
         out_ids = [values.of(o, scope) for o in fgraph.outputs]
         self.graph_outputs = set(out_ids)
-        items = group_scalars(values, items, set(out_ids))
 
         # 2. tasks: implementations, generated code, layouts
         tasks = self.tasks_for(items)
@@ -681,6 +688,35 @@ class Planner:
             for m in output_modes
         ]
         return pb.build([ids[k] for k in out_ids], modes)
+
+
+def _unit_views(it: UnitItem, resolved) -> dict:
+    """vid -> positions of the unit's inputs the value may be a view of, following the
+    views the unit's nodes may return."""
+    views = {k: {pos} for pos, k in enumerate(it.inputs)}
+    for r in resolved:
+        for vid, o in zip(r.item.outputs, r.signature.outputs, strict=True):
+            if o.mode is OutputMode.RETURNED and o.aliases:
+                views[vid] = set().union(
+                    *(views.get(r.item.inputs[a], ()) for a in o.aliases)
+                )
+    for k in it.inputs:
+        del views[k]
+    return views
+
+
+def _view_layout(declared, t) -> Layout:
+    """The layout of a unit output that may be a view: the one its node declared. The
+    unit copies it when it isn't one of its inputs' memory after all: in that layout if
+    it is packed, else C-contiguous, which must then imply it."""
+    if declared is None:
+        return Layout.dynamic(t.ndim)
+    shape = list(t.shape)
+    if declared.fully_packed(shape) or Layout.c(t.ndim).implies(
+        declared, shape, np.dtype(t.dtype).itemsize
+    ):
+        return declared
+    return Layout.dynamic(t.ndim)
 
 
 def _present_outputs(declared, vids):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pytensor.link.llvm.codegen.emit import (
     Array,
     cast,
+    checked_index,
     for_each,
     load,
     set_output,
@@ -59,10 +60,12 @@ def index(cg, x: Array, entries) -> Array:
             shape.append(length)
             strides.append(b.mul(st, step, nsw=True))
         else:
-            i = _i64(b, *e)
-            i = b.select(b.slt(i, 0), b.add(i, n), i)
-            cg.check(
-                b.and_(b.sge(i, 0), b.slt(i, n)), f"index out of bounds for axis {axis}"
+            i = checked_index(
+                cg,
+                _i64(b, *e),
+                n,
+                f"index out of bounds for axis {axis}",
+                (0, None) if e[1].startswith("uint") else (None, None),
             )
             offset = b.add(offset, b.mul(i, st, nsw=True))
         axis += 1
