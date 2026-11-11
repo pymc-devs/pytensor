@@ -63,6 +63,17 @@ def test_sit_sot_with_sequence_and_non_sequence():
     compare([x0, rho, eps], [xs, (xs**2).sum()], [np.array(0.3), np.array(0.9), rng.normal(size=50)])
 
 
+def test_ir_includes_the_modules_of_the_loop_body():
+    # the kernel runs the body as a subprogram, planned by a planner of its own: its
+    # generated modules are listed with the program's
+    eps = pt.vector("eps")
+    xs = scan(lambda e, x: pt.exp(x) * 0.5 + e, sequences=[eps], outputs_info=[pt.zeros(())])
+    f = pytensor.function([eps], xs, mode=KERNEL)
+    stats = f.maker.linker.stats
+    assert len(stats.modules) > stats.n_modules
+    assert "define" in f.maker.linker.ir()
+
+
 def test_mit_sot_taps():
     x = pt.vector("x")  # initial taps
     eps = pt.vector("eps")

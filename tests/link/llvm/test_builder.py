@@ -184,6 +184,24 @@ def test_named_values_show_in_the_ir():
     assert "%total = add i64 %x" in text and "one" not in text
 
 
+def test_compiled_module_keeps_its_ir():
+    def build():
+        m, f, b = _function([ir.i64], ir.i64)
+        (n,) = f.params
+        b.ret(b.add(b.mul(n, 3), b.mul(n, 7)))
+        return m
+
+    c = build().compile(cache=False)
+    assert "define" in c.ir and c.ir.count("mul") == 2
+    # the optimized IR is what the machine code comes from: n * 3 + n * 7 is n * 10
+    assert c.optimized_ir().count("mul") == 1
+    # ... and doesn't depend on where the object came from
+    again = build().compile(cache=False)
+    assert again.source == "in process"
+    assert again.optimized_ir() == c.optimized_ir()
+    assert again.optimized_ir(0).count("mul") == 2
+
+
 def test_stubs_list_the_builders_methods():
     """The type stubs shipped with the extension know every builder method."""
     import ast
