@@ -11,6 +11,7 @@ from functools import singledispatch
 
 from pytensor.link.llvm.codegen.emit import (
     Codegen,
+    InplaceOutput,
     ProvidedOutput,
     ScalarOutput,
     SlotOutput,
@@ -37,6 +38,8 @@ class OutputMode(enum.Enum):
     #: the kernel returns the array through a slot: memory it allocated (it hands over
     #: one reference), or a view of an input the output may alias
     RETURNED = "returned"
+    #: the output is an input's memory, overwritten: no argument (`aliases` has the input)
+    INPLACE = "inplace"
     #: a ScalarType output, stored through a pointer
     SCALAR = "scalar"
     #: no value (a random generator token): no argument
@@ -76,7 +79,7 @@ class Signature:
     outputs: tuple[Output, ...]
 
     def param_types(self):
-        outs = [o.ir_type for o in self.outputs if o.mode is not OutputMode.ABSENT]
+        outs = [o.ir_type for o in self.outputs if o.mode not in (OutputMode.ABSENT, OutputMode.INPLACE)]
         return [ir.ptr, ir.ptr, *(r.ir_type for r in self.inputs), *outs]
 
     @property
@@ -107,12 +110,41 @@ def llvm_layout(op, node, in_layouts) -> list:
 
 
 def output_aliases(op, k: int) -> tuple:
-    """The inputs output `k` of `op` may share memory with: those its `view_map` lists,
-    and those its `destroy_map` lists (the output of an op that works in place is the
-    input's memory)."""
+    """The inputs output `k` of `op` may be a view of: what its `view_map` lists."""
     view_map = getattr(op, "view_map", None) or {}
+    return tuple(view_map.get(k, ()))
+
+
+@singledispatch
+def llvm_inplace(op, node) -> dict:
+    """{output: input} for the outputs the op's emitter can produce in the memory of an
+    input the op destroys (`destroy_map`): the result then overwrites the input, element
+    for element, and nothing is allocated.
+
+    The default is none, which is always correct: an implementation may ignore that it
+    is allowed to destroy an input. An op that registers this must write such an
+    output with `out.overwrite(cg, x)` (or `out.allocate`, which is then the input's
+    memory, still holding the input's values). The planner decides per task whether the
+    output really is the input's memory; if not, both give new memory."""
+    return {}
+
+
+def inplace_outputs(node, folded=frozenset()) -> dict:
+    """`llvm_inplace` of the node, for the pairs that can work: the op destroys that
+    input, and input and output are tensors of one type."""
+    op = node.op
     destroy_map = getattr(op, "destroy_map", None) or {}
-    return tuple(dict.fromkeys([*view_map.get(k, ()), *destroy_map.get(k, ())]))
+    pairs = {}
+    for k, i in llvm_inplace(op, node).items():
+        out, inp = node.outputs[k], node.inputs[i]
+        if i not in destroy_map.get(k, ()) or i in folded or i in pairs.values():
+            continue
+        if not isinstance(repr_of(out.type), TensorRepr) or not isinstance(repr_of(inp.type), TensorRepr):
+            continue
+        if out.type.dtype != inp.type.dtype or out.type.ndim != inp.type.ndim or out.type.broadcastable != inp.type.broadcastable:
+            continue
+        pairs[k] = i
+    return pairs
 
 
 def new_output(var, layout=None) -> Output:
@@ -137,13 +169,23 @@ def known_layouts(node, in_layouts) -> list:
     ]
 
 
-def node_outputs(node, in_layouts=None) -> list[Output]:
+def node_outputs(node, in_layouts=None, inplace=None) -> list[Output]:
     """How each output of `node` comes to be when its code is generated: from its type,
-    the op's `view_map` and `llvm_layout`."""
+    the op's `view_map` and `llvm_layout`.
+
+    `inplace`: {output: input} for the outputs that are to overwrite an input
+    (`inplace_outputs`, if the caller grants it). Without it, an op that may destroy
+    an input writes new memory."""
     op = node.op
-    layouts = llvm_layout(op, node, known_layouts(node, in_layouts))
+    in_layouts = known_layouts(node, in_layouts)
+    layouts = llvm_layout(op, node, in_layouts)
+    inplace = inplace or {}
     outs = []
     for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
+        if k in inplace:
+            # the input's memory, so the input's layout
+            outs.append(Output(repr_of(o.type, in_layouts[inplace[k]]), OutputMode.INPLACE, (inplace[k],)))
+            continue
         aliases = output_aliases(op, k) if isinstance(repr_of(o.type), TensorRepr) else ()
         if not aliases:
             outs.append(new_output(o, lay))
@@ -161,7 +203,7 @@ def skipped_inputs(node, folded=frozenset()):
     return frozenset(folded) | {k for k, i in enumerate(node.inputs) if is_absent(i.type)}
 
 
-def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, declared=None) -> Signature:
+def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, declared=None, inplace=None) -> Signature:
     """`folded`: positions of inputs that are constants folded into the code (not
     arguments). None inputs aren't arguments either.
 
@@ -171,7 +213,7 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
     provides it in that layout. `provided[k]` replaces the declaration, for a caller
     that generates a function for memory it fixes (tests writing into a slice).
     `declared`: the outputs instead (a kernel's, see call.py; `aliases` counting the
-    node's inputs)."""
+    node's inputs). `inplace`: see `node_outputs`."""
     folded = skipped_inputs(node, folded)
     if in_layouts is None:
         in_layouts = [None] * len(node.inputs)
@@ -186,7 +228,7 @@ def node_signature(node, folded=frozenset(), in_layouts=None, provided=None, dec
         return pos - sum(1 for p in folded if p < pos)
 
     outputs = []
-    for k, o in enumerate(declared if declared is not None else node_outputs(node, in_layouts)):
+    for k, o in enumerate(declared if declared is not None else node_outputs(node, in_layouts, inplace)):
         if o.mode is OutputMode.PROVIDED and provided is not None and provided[k] is not None:
             o = o.with_layout(provided[k])
         if o.aliases:
@@ -225,6 +267,7 @@ def build_node_function(
     kernel=None,
     links=None,
     scan_body=None,
+    inplace=None,
 ) -> NodeFunction:
     """The LLVM function of one node (DESIGN.md, section 2), always inlined.
 
@@ -235,27 +278,34 @@ def build_node_function(
       subprogram): the function calls it (call.py), through an entry of `links`, the
       link table that is the config of the kernel being generated. Code nested in the
       node (a Scan's loop body) links its kernels there too;
-    * `scan_body`: for a Scan, its resolved loop body (`plan.resolve.Body`).
+    * `scan_body`: for a Scan, its resolved loop body (`plan.resolve.Body`);
+    * `inplace`: {output: input} for outputs that overwrite an input (`node_outputs`).
     """
     from pytensor.link.llvm.codegen.emit import c_array, constant, store
     from pytensor.link.llvm.codegen.types import memory_type
 
     folded = folded or {}
-    sig = node_signature(node, frozenset(folded), in_layouts, provided, kernel.outputs if kernel is not None else None)
+    sig = node_signature(node, frozenset(folded), in_layouts, provided, kernel.outputs if kernel is not None else None, inplace)
     sig_inputs = iter(sig.inputs)
     fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
     b = fn.builder()
     params = fn.params
     ctx, config = params[:2]
     cg = Codegen(b, ctx, config, parallel=parallel, links=links, scan_body=scan_body, module=module, name=name)
-    # Aliasing (DESIGN.md): the memory a task writes (provided or allocated outputs)
-    # never overlaps its inputs or its other outputs; views are never written.
+    # Aliasing (DESIGN.md): what LLVM is told. Every array the function writes (a
+    # provided or returned output, an input overwritten in place) overlaps no other
+    # array of the function; inputs that are only read may overlap each other.
     b.alias_domain(name)
-    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.RETURNED)]
-    marked_inputs = []
+    written = [f"o{j}" for j, o in enumerate(sig.outputs) if o.mode in (OutputMode.PROVIDED, OutputMode.RETURNED, OutputMode.INPLACE)]
+    # the node input each argument is
+    arg_positions = [pos for pos in range(len(node.inputs)) if pos not in skipped_inputs(node, folded)]
+    #: node input -> the output that overwrites it
+    overwritten = {arg_positions[o.aliases[0]]: j for j, o in enumerate(sig.outputs) if o.mode is OutputMode.INPLACE}
+    read_only = [
+        f"i{pos}" for pos, r in zip(arg_positions, sig.inputs, strict=True) if isinstance(r, TensorRepr) and pos not in overwritten
+    ]
     k = 2
     inputs = []
-    arg_positions = []  # the node input each argument is
     from pytensor.link.llvm.codegen.types import is_absent
 
     for pos, var in enumerate(node.inputs):
@@ -275,24 +325,31 @@ def build_node_function(
         v = params[k]
         k += 1
         r = next(sig_inputs)
-        arg_positions.append(pos)
         if isinstance(r, ScalarRepr):
             inputs.append(v)
         else:
             a = unpack(b, r, v)
             a.base, a.writable = pos, False
-            b.mark_array(a.data, f"i{pos}", written)
-            marked_inputs.append(f"i{pos}")
+            if pos in overwritten:
+                mine = f"o{overwritten[pos]}"
+                b.mark_array(a.data, mine, read_only + [w for w in written if w != mine])
+            else:
+                b.mark_array(a.data, f"i{pos}", written)
             inputs.append(a)
     outputs = []
     for o in sig.outputs:
         if o.mode is OutputMode.ABSENT:
             outputs.append(None)
             continue
+        if o.mode is OutputMode.INPLACE:
+            source = inputs[arg_positions[o.aliases[0]]]
+            outputs.append(InplaceOutput(source.view(source.data, source.shape, source.strides, source.layout), source))
+            outputs[-1].array.writable = True
+            continue
         v = params[k]
         k += 1
         j = len(outputs)
-        alias = (f"o{j}", marked_inputs + [w for w in written if w != f"o{j}"])
+        alias = (f"o{j}", read_only + [w for w in written if w != f"o{j}"])
         if o.mode is OutputMode.PROVIDED:
             a = unpack(b, o.repr, v)
             b.mark_array(a.data, *alias)
@@ -326,7 +383,7 @@ def build_node_function(
         llvm_emit(node.op, node, cg, inputs, outputs)
     if not b.terminated:
         for k, out in enumerate(outputs):
-            if isinstance(out, SlotOutput | ScalarOutput) and not out.done:
+            if isinstance(out, SlotOutput | ScalarOutput | InplaceOutput) and not out.done:
                 raise ValueError(f"{node.op}: output {k} was never set")
         b.ret(b.i32(0))
     return NodeFunction(fn, sig, links)
@@ -386,6 +443,8 @@ def build_kernel_wrapper(module, nf: NodeFunction, name: str, check_layouts: boo
     call_args += [read(k, r) for k, r in enumerate(sig.inputs)]
     slots = []
     for k, o in enumerate(present):
+        if o.mode is OutputMode.INPLACE:
+            continue  # (the caller passes the input's memory again; the input is used)
         if o.mode is OutputMode.PROVIDED:
             call_args.append(read(n_in + k, o.repr))
         else:
@@ -473,6 +532,8 @@ __all__ = [
     "known_layouts",
     "llvm_layout",
     "node_outputs",
+    "inplace_outputs",
+    "llvm_inplace",
     "output_aliases",
     "node_signature",
     "pack",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.emit import Array, cast, copy, for_each, load, set_output, store
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.emit import Array, cast, for_each, load, set_output, store
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
 from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
@@ -78,12 +78,16 @@ def _(op, node, in_layouts):
     return [subtensor_layout(op, node, in_layouts[0])]
 
 
+@llvm_inplace.register(IncSubtensor)
+def _(op, node):
+    return {0: 0} if op.inplace else {}
+
+
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x, y = inputs[0], inputs[1]
-    out = outputs[0].allocate(x.shape)
-    copy(cg, x, out)
+    out = outputs[0].overwrite(cg, x)  # x itself if it may be destroyed, else a copy
     view = index(cg, out, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type

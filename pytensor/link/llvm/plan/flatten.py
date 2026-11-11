@@ -7,11 +7,12 @@ from pytensor.link.llvm.plan.values import NodeItem, SubprogramItem, UnitItem, V
 from pytensor.scalar.basic import ScalarType
 
 
-def flatten(values: Values, nodes, scope, inside_unit=False) -> list:
+def flatten(values: Values, nodes, scope, inside_unit=False, of_the_graph=False) -> list:
     """The items running `nodes` (in order). `scope` maps variables to values and is
     filled with the nodes' outputs. OpFromGraphs are inlined, become units
     (`Execution.COMPILED`) or subprograms (`Execution.INTERPRETED`); inside a unit every
-    OpFromGraph is inlined."""
+    OpFromGraph is inlined. `of_the_graph`: `nodes` are the graph being planned itself
+    (marks the items, see `NodeItem`)."""
     items = []
     for node in nodes:
         op = node.op
@@ -32,8 +33,7 @@ def flatten(values: Values, nodes, scope, inside_unit=False) -> list:
                 for iv, ov in zip(inner.inputs, node.inputs, strict=True)
             }
             items += flatten(values, inner.toposort(), sub, inside_unit)
-            for io, oo in zip(inner.outputs, node.outputs, strict=True):
-                scope[oo] = values.of(io, sub)
+            _inlined_outputs(values, inner, node, sub, scope)
         elif isinstance(op, OpFromGraph) and execution is Execution.COMPILED:
             inner = op.fgraph
             sub = {
@@ -49,8 +49,7 @@ def flatten(values: Values, nodes, scope, inside_unit=False) -> list:
                 # can't be one unit (e.g. it contains an interpreted OpFromGraph):
                 # run its nodes as tasks
                 items += flatten(values, inner.toposort(), sub, inside_unit)
-                for io, oo in zip(inner.outputs, node.outputs, strict=True):
-                    scope[oo] = values.of(io, sub)
+                _inlined_outputs(values, inner, node, sub, scope)
                 continue
             sub = inner_scope
             outs = []
@@ -70,8 +69,21 @@ def flatten(values: Values, nodes, scope, inside_unit=False) -> list:
             ins = [values.of(i, scope) for i in node.inputs]
             outs = [values.new(o.type) for o in node.outputs]
             scope.update(zip(node.outputs, outs, strict=True))
-            items.append(NodeItem(node, ins, outs))
+            items.append(NodeItem(node, ins, outs, of_the_graph))
     return items
+
+
+def _inlined_outputs(values: Values, inner, node, inner_scope, scope) -> None:
+    """The outputs of an inlined OpFromGraph are the values of its inner outputs. Where
+    the inner graph passes an input through, or returns one variable twice, a value
+    now stands for several variables of the outer graph (`Values.shared`)."""
+    seen = set()
+    for inner_output, output in zip(inner.outputs, node.outputs, strict=True):
+        k = values.of(inner_output, inner_scope)
+        if inner_output.owner is None or k in seen:
+            values.shared.add(k)
+        seen.add(k)
+        scope[output] = k
 
 
 def group_scalars(values: Values, items, graph_outputs) -> list:

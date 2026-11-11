@@ -1,4 +1,4 @@
-"""Which memory outputs may share: the op's view_map and destroy_map decide."""
+"""Which memory outputs may share: the op's view_map decides."""
 
 from types import SimpleNamespace
 
@@ -35,14 +35,14 @@ P, R = OutputMode.PROVIDED, OutputMode.RETURNED
 # ------------------------------------------------------------------ what the op says
 
 
-def test_aliases_come_from_the_ops_maps():
+def test_aliases_come_from_the_view_map():
     op = SimpleNamespace(view_map={0: [1]}, destroy_map={})
     assert output_aliases(op, 0) == (1,) and output_aliases(op, 1) == ()
-    # the output of an op that works in place is the destroyed input's memory
+    op = SimpleNamespace(view_map={0: [0, 2]})
+    assert output_aliases(op, 0) == (0, 2)
+    # what an op destroys says nothing about its outputs
     op = SimpleNamespace(view_map={}, destroy_map={0: [0]})
-    assert output_aliases(op, 0) == (0,)
-    op = SimpleNamespace(view_map={0: [0, 2]}, destroy_map={0: [0], 1: [1]})
-    assert output_aliases(op, 0) == (0, 2) and output_aliases(op, 1) == (1,)
+    assert output_aliases(op, 0) == ()
     assert output_aliases(SimpleNamespace(), 0) == ()
 
 
@@ -199,7 +199,10 @@ def test_an_output_may_alias_several_inputs():
         assert not np.shares_memory(r, want)
     # of temporaries, read after both of them were last used otherwise
     picked = pick(flag, pt.exp(x), pt.cumsum(y))
-    g = pytensor.function([flag, x, y], [picked * 2, picked[::-1] + 1], mode=STRICT)
+    # (PyTensor's DestroyHandler, which the inplace rewrites bring, doesn't take an
+    # output that views several inputs)
+    mode = STRICT.excluding("inplace")
+    g = pytensor.function([flag, x, y], [picked * 2, picked[::-1] + 1], mode=mode)
     for on, want in [(1, np.exp(xv)), (0, np.cumsum(yv))]:
         r1, r2 = g(on, xv, yv)
         np.testing.assert_allclose(r1, want * 2)

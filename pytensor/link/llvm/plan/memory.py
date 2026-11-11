@@ -11,6 +11,9 @@ Every value has a kind:
   of the values it may alias (`MemoryPlan.aliases`). Which one is only known when the
   program runs, so every value a returned value may alias is kept alive as long as it.
 
+A task may also work in place: an output is then not a value of its own but the input
+it overwrites (`MemoryPlan.same`), whatever kind that is.
+
 The arena is laid out by liveness: a value's place is free again after the last task
 that needs it, or anything that may alias it.
 """
@@ -18,6 +21,7 @@ that needs it, or anything that may alias it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -31,6 +35,9 @@ class MemoryPlan:
     kind: dict
     #: vid -> the values a returned value may be a view of
     aliases: dict
+    #: vid -> the value it is: outputs of tasks that work in place. The other
+    #: dictionaries have no entries for these
+    same: dict
     #: vid -> index of the task that produces it (-1: inputs and constants)
     defined: dict
     #: vid -> index of the last task that needs it alive (`forever` for graph outputs)
@@ -53,6 +60,10 @@ class MemoryPlan:
                 release[max(self.end[k], self.defined[k])].append(k)
         return release
 
+    def value(self, k) -> int:
+        """The value that holds `k`'s memory: `k`, or the value it overwrote."""
+        return self.same.get(k, k)
+
     def in_order(self) -> list:
         """The values, each after the values it may alias."""
         return sorted(self.kind, key=lambda k: self.defined[k])
@@ -67,6 +78,8 @@ def lifetimes(tasks, kind, aliases, out_ids, forever) -> tuple[dict, dict]:
         for k in task.inputs:
             end[k] = max(end.get(k, -1), i)
         for k in task.outputs:
+            if k in task.inputs:
+                continue  # overwritten in place: it was there before
             defined[k] = i
             end.setdefault(k, i)
     for k in out_ids:
@@ -101,8 +114,27 @@ def first_fit(intervals) -> tuple[dict, int]:
 
 def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
     """`tasks` have `inputs`, `outputs` (vids), and per output a mode (`modes`) and the
-    positions of the task inputs it may alias (`aliases`)."""
+    positions of the task inputs it may alias or, in place, is (`aliases`)."""
     forever = len(tasks) + 1
+    # outputs of tasks working in place are the value they overwrite, from here on
+    same = {}
+    for task in tasks:
+        for k, mode, source in zip(task.outputs, task.modes, task.aliases, strict=True):
+            if mode is OutputMode.INPLACE:
+                overwritten = task.inputs[source[0]]
+                same[k] = same.get(overwritten, overwritten)
+    if same:
+        tasks = [
+            SimpleNamespace(
+                inputs=[same.get(k, k) for k in task.inputs],
+                outputs=[same.get(k, k) for k in task.outputs],
+                modes=task.modes,
+                aliases=task.aliases,
+            )
+            for task in tasks
+        ]
+        out_ids = [same.get(k, k) for k in out_ids]
+
     kind, aliases = {}, {}
     for k in in_ids:
         kind[k] = "input"
@@ -111,9 +143,9 @@ def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
             if k in values.consts and k not in kind:
                 kind[k] = "const"
     for task in tasks:
-        for k, mode, may_alias in zip(
-            task.outputs, task.modes, task.aliases, strict=True
-        ):
+        for k, mode, may_alias in zip(task.outputs, task.modes, task.aliases, strict=True):
+            if mode is OutputMode.INPLACE:
+                continue
             if mode is OutputMode.PROVIDED:
                 kind[k] = "provided"
             else:
@@ -134,4 +166,4 @@ def plan_memory(values: Values, tasks, in_ids, out_ids) -> MemoryPlan:
             nbytes = int(np.prod(t.shape, dtype=np.int64)) * np.dtype(t.dtype).itemsize
             intervals.append((defined[k], end[k], nbytes, k))
     offsets, arena = first_fit(intervals)
-    return MemoryPlan(kind, aliases, defined, end, offsets, arena, first_out, forever)
+    return MemoryPlan(kind, aliases, same, defined, end, offsets, arena, first_out, forever)
