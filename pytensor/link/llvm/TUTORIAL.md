@@ -127,7 +127,7 @@ optimized = compiled.optimized_ir()
 | Types | `ir.i1`, `ir.i8`, `ir.i16`, `ir.i32`, `ir.i64`, `ir.f32`, `ir.f64`, `ir.ptr`; `ir.Type.array(elem, n)`, `ir.Type.struct_([...])` |
 | Constants | `b.i64(3)`, `b.i32(3)`, `b.i8(3)`, `b.f64(0.5)`, `b.f32(0.5)`, `b.const_bool(True)`, `b.null()` |
 | Integers | `add`, `sub`, `mul` (each with `nsw=True`: "this doesn't overflow"), `sdiv`, `udiv`, `srem`, `urem`, `shl`, `lshr`, `ashr`, `and_`, `or_`, `xor`, `not_`, `neg`, `smin`, `smax`, `umin`, `umax` |
-| Floats | `fadd`, `fsub`, `fmul`, `fdiv`, `frem`, `fneg`; `b.intrinsic(ir.Intrinsic.Exp, [x])`, `b.libm(ir.Libm.Erf, [x])` |
+| Floats | `fadd`, `fsub`, `fmul`, `fdiv`, `frem`, `fneg`; `b.intrinsic(ir.Intrinsic.Sqrt, [x])`, `b.libm(ir.Libm.Exp, [x])` (libm functions such as exp, log, sin, pow get libmvec SIMD variants; use them rather than intrinsics) |
 | Comparisons | integers: `eq`, `ne`, `slt`, `sle`, `sgt`, `sge` (signed), `ult`, `ule`, `ugt`, `uge` (unsigned); floats: `b.fcmp(ir.FCmp.OLT, x, y)`. The result is an `i1`. |
 | Choosing | `b.select(cond, x, y)` |
 | Conversions | `sext`, `zext`, `trunc`, `sitofp`, `uitofp`, `fptosi`, `fptoui`, `fpext`, `fptrunc` |
@@ -1085,7 +1085,7 @@ from pytensor.link.llvm.codegen.random import SAMPLERS, Sampler
 def gumbel(b, cg, u, params):
     loc, scale = params
     exponential = b.fneg(b.libm(ir.Libm.Log1p, [b.fneg(u)]))  # -log(1 - u)
-    return b.fsub(loc, b.fmul(scale, b.intrinsic(ir.Intrinsic.Log, [exponential])))
+    return b.fsub(loc, b.fmul(scale, b.libm(ir.Libm.Log, [exponential])))
 
 
 SAMPLERS[rb.GumbelRV] = Sampler(

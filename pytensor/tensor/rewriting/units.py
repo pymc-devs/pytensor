@@ -10,8 +10,8 @@ Groups are convex: no path leaves a group and comes back into it.
 
 from __future__ import annotations
 
-from pytensor.compile.builders import OpFromGraph, Execution
 from pytensor.compile import optdb
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import GraphRewriter
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -38,14 +38,18 @@ class GroupIntoUnits(GraphRewriter):
 
     def eligible(self, node):
         return isinstance(node.op, GROUPABLE) and all(
-            _small(v, self.max_elems) for v in (*node.inputs, *node.outputs) if not isinstance(v, Constant)
+            _small(v, self.max_elems)
+            for v in (*node.inputs, *node.outputs)
+            if not isinstance(v, Constant)
         )
 
     def groups(self, fgraph):
         """Convex groups of eligible nodes, in topological order."""
         groups, current = [], []
         in_group = set()  # variables produced by the current group
-        tainted = set()  # variables that depend on the current group through other nodes
+        tainted = (
+            set()
+        )  # variables that depend on the current group through other nodes
         for node in fgraph.toposort():
             if self.eligible(node):
                 if any(i in tainted for i in node.inputs):
@@ -68,7 +72,11 @@ class GroupIntoUnits(GraphRewriter):
             inputs = []
             for n in group:
                 for i in n.inputs:
-                    if i not in produced and not isinstance(i, Constant) and i not in inputs:
+                    if (
+                        i not in produced
+                        and not isinstance(i, Constant)
+                        and i not in inputs
+                    ):
                         inputs.append(i)
             outs = [
                 o
@@ -78,7 +86,9 @@ class GroupIntoUnits(GraphRewriter):
             ]
             if not outs:
                 continue
-            op = OpFromGraph(inputs, outs, inline=False, execution=Execution.COMPILED, name="unit")
+            op = OpFromGraph(
+                inputs, outs, inline=False, execution=Execution.COMPILED, name="unit"
+            )
             new = op(*inputs, return_list=True)
             fgraph.replace_all(list(zip(outs, new, strict=True)), reason="llvm_units")
 

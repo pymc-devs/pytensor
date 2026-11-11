@@ -156,8 +156,8 @@ def test_c_api_seed():
 
     def run(st):
         out = np.empty(6)
-        ins, k1 = as_ptarrays([])
-        outs, k2 = as_ptarrays([out])
+        ins, _k1 = as_ptarrays([])
+        outs, _k2 = as_ptarrays([out])
         assert call(st, ins, outs) == 0
         return out
 

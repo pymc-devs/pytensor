@@ -12,15 +12,10 @@ static VECLIB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 pub fn init_llvm() {
     INIT.call_once(|| {
         Target::initialize_native(&InitializationConfig::default()).expect("init native target");
-        // Must happen before any pass pipeline is built. Process-global, so decided once.
+        // Process-global, so decided once. Whether libmvec variants are advertised to the
+        // vectorizer (`vector-function-abi-variant` on libm calls, see `Builder::libm`).
         let veclib = std::env::var("PYTENSOR_LLVM_NO_VECLIB").is_err();
         if veclib {
-            let args = [c"ptllvm".as_ptr(), c"-vector-library=LIBMVEC-X86".as_ptr()];
-            // SAFETY: two valid NUL-terminated strings; called once (inside INIT), before
-            // any LLVM pass pipeline exists, as LLVM requires for global options.
-            unsafe {
-                llvm_sys::support::LLVMParseCommandLineOptions(2, args.as_ptr(), std::ptr::null())
-            };
             VECLIB.store(true, std::sync::atomic::Ordering::Release);
         }
     });

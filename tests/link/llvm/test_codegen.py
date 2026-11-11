@@ -90,7 +90,7 @@ def test_ir_fold_libm_and_compile_cache():
         lambda b, a, k: b.trunc(k, ir.i64),
         lambda b, a, k: b.extract(a, 0),
         lambda b, a, k: b.const_int(ir.i8, 300),
-        lambda b, a, k: b.intrinsic(ir.Intrinsic.Exp, [k]),
+        lambda b, a, k: b.intrinsic(ir.Intrinsic.Sqrt, [k]),
     ],
 )
 def test_ir_rejects_bad_instructions(bad):

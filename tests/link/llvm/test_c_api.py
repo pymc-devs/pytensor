@@ -167,7 +167,7 @@ def test_call_from_c(harness, provided):
     ref = f(*vals)
     fn = f.maker.linker.program.c_function()
     a = api()
-    ins, keep = as_ptarrays(vals)
+    ins, _keep = as_ptarrays(vals)
     if provided:
         outs_np = [np.empty_like(r) for r in ref]
         outs, keep2 = as_ptarrays(outs_np)
@@ -212,8 +212,8 @@ def test_c_errors_are_reported(harness):
     assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) != 0
     assert b"mismatch" in err.value
     # wrong provided output shape
-    ins, keep = as_ptarrays([np.zeros(3), np.zeros(3)])
-    outs, keep2 = as_ptarrays([np.empty(5)])
+    ins, _keep = as_ptarrays([np.zeros(3), np.zeros(3)])
+    outs, _keep2 = as_ptarrays([np.empty(5)])
     assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) != 0
     assert b"provided output" in err.value
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)
@@ -228,9 +228,9 @@ def test_function_outlives_python_object(harness):
 
     gc.collect()
     a = api()
-    ins, keep = as_ptarrays(vals)
+    ins, _keep = as_ptarrays(vals)
     outs_np = [np.empty_like(r) for r in ref]
-    outs, keep2 = as_ptarrays(outs_np)
+    outs, _keep2 = as_ptarrays(outs_np)
     err = ctypes.create_string_buffer(512)
     assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0
     np.testing.assert_allclose(outs_np[0], ref[0])
@@ -241,7 +241,7 @@ def test_bench_runs(harness):
     f, vals = _model()
     fn = f.maker.linker.program.c_function()
     a = api()
-    ins, keep = as_ptarrays(vals)
+    ins, _keep = as_ptarrays(vals)
     err = ctypes.create_string_buffer(512)
     for provided in (1, 0):
         ns = harness.pt_bench(ctypes.addressof(a), fn, ins, provided, 1000, err, 512)
@@ -295,9 +295,9 @@ def test_c_boundary_checks(harness):
         rc, msg = run(ins, outs)
         assert rc != 0 and b"output 0: expected dtype float64" in msg, msg
     # still works afterwards
-    ins, k1 = as_ptarrays([xv])
+    ins, _k1 = as_ptarrays([xv])
     out = np.empty(6)
-    outs, k2 = as_ptarrays([out])
+    outs, _k2 = as_ptarrays([out])
     assert run(ins, outs)[0] == 0
     np.testing.assert_allclose(out, xv * 2)
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)
@@ -312,8 +312,8 @@ def test_provided_output_with_other_strides(harness, static):
     a = api()
     xv = np.random.default_rng(1).normal(size=(3, 4))
     out = np.asfortranarray(np.zeros((3, 4)))
-    ins, k1 = as_ptarrays([xv])
-    outs, k2 = as_ptarrays([out])
+    ins, _k1 = as_ptarrays([xv])
+    outs, _k2 = as_ptarrays([out])
     err = ctypes.create_string_buffer(512)
     assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) == 0, (
         err.value

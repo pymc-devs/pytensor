@@ -35,7 +35,7 @@ def counts(m):
 
 
 def test_small_static_temporaries_are_on_the_stack():
-    m, b, cg, n = codegen()
+    m, b, cg, _n = codegen()
     cg.temp_memory(b.i64(8))
     a = cg.temporary("float64", [4, b.i64(8)])  # Python ints are fine in shapes
     assert a.layout.is_c((4, 8)) and [s.const_int for s in a.strides] == [64, 8]
@@ -55,7 +55,7 @@ def test_large_dynamic_and_escaping_temporaries_are_scratch():
 
 
 def test_the_stack_has_a_budget_per_function():
-    m, b, cg, n = codegen()
+    m, b, cg, _n = codegen()
     fit = STACK_BUDGET_BYTES // STACK_TEMPORARY_BYTES
     for _ in range(fit + 3):
         cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES))

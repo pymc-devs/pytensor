@@ -34,7 +34,7 @@ def test_literals_take_the_type_of_the_other_operand():
 
 
 def test_literals_that_dont_fit_raise():
-    m, f, b = _function([ir.i64, ir.i8], ir.i64)
+    _m, f, b = _function([ir.i64, ir.i8], ir.i64)
     i, small = f.params
     with pytest.raises(ValueError, match="can't be a i64"):
         b.add(i, 1.5)

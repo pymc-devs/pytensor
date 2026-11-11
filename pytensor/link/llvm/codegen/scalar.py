@@ -129,7 +129,7 @@ def _(b, args, out):
 @register(ps.Pow)
 def _(b, args, out):
     if is_float(out):
-        return ir_intrinsic(b, "Pow", conv(b, args, 0, out), conv(b, args, 1, out))
+        return b.libm(ir.Libm.Pow, [conv(b, args, 0, out), conv(b, args, 1, out)])
     if out == "bool":
         raise NotImplementedError("LLVM backend: pow with output dtype bool")
     return int_pow(b, conv(b, args, 0, out), conv(b, args, 1, out), out)
@@ -230,14 +230,7 @@ def _intrinsic_op(name):
 
 
 for _cls, _name in [
-    (ps.Exp, "Exp"),
-    (ps.Exp2, "Exp2"),
-    (ps.Log, "Log"),
-    (ps.Log2, "Log2"),
-    (ps.Log10, "Log10"),
     (ps.Sqrt, "Sqrt"),
-    (ps.Sin, "Sin"),
-    (ps.Cos, "Cos"),
     (ps.Floor, "Floor"),
     (ps.Ceil, "Ceil"),
     (ps.Trunc, "Trunc"),
@@ -257,7 +250,16 @@ def _libm_op(name, arity=1):
     return fn
 
 
+# libm calls, not intrinsics: LLVM only vectorizes them through libmvec when the call
+# carries a vector-function-abi-variant attribute (see Builder.libm)
 for _cls, _name in [
+    (ps.Exp, "Exp"),
+    (ps.Exp2, "Exp2"),
+    (ps.Log, "Log"),
+    (ps.Log2, "Log2"),
+    (ps.Log10, "Log10"),
+    (ps.Sin, "Sin"),
+    (ps.Cos, "Cos"),
     (ps.Expm1, "Expm1"),
     (ps.Log1p, "Log1p"),
     (ps.Tan, "Tan"),
@@ -294,7 +296,7 @@ register(psm.Psi)(_rust_op("Psi"))
 def _(b, args, out):
     require_float(out, "sigmoid")
     one = constant(b, out, 1.0)
-    e = ir_intrinsic(b, "Exp", b.fneg(conv(b, args, 0, out)))
+    e = b.libm(ir.Libm.Exp, [b.fneg(conv(b, args, 0, out))])
     return b.fdiv(one, b.fadd(one, e))
 
 
@@ -303,9 +305,9 @@ def _(b, args, out):
     """The same branches as pytensor.scalar.math.Softplus."""
     require_float(out, "softplus")
     x = conv(b, args, 0, out)
-    ex = ir_intrinsic(b, "Exp", x)
+    ex = b.libm(ir.Libm.Exp, [x])
     log1pex = b.libm(ir.Libm.Log1p, [ex])
-    x_plus = b.fadd(x, ir_intrinsic(b, "Exp", b.fneg(x)))
+    x_plus = b.fadd(x, b.libm(ir.Libm.Exp, [b.fneg(x)]))
 
     def lt(c):
         return b.fcmp(ir.FCmp.OLT, x, constant(b, out, c))
@@ -319,8 +321,8 @@ def _(b, args, out):
 def _(b, args, out):
     require_float(out, "log1mexp")
     x = conv(b, args, 0, out)
-    small = b.libm(ir.Libm.Log1p, [b.fneg(ir_intrinsic(b, "Exp", x))])
-    large = ir_intrinsic(b, "Log", b.fneg(b.libm(ir.Libm.Expm1, [x])))
+    small = b.libm(ir.Libm.Log1p, [b.fneg(b.libm(ir.Libm.Exp, [x]))])
+    large = b.libm(ir.Libm.Log, [b.fneg(b.libm(ir.Libm.Expm1, [x]))])
     return b.select(
         b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))), small, large
     )
