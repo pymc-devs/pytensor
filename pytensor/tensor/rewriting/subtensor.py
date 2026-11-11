@@ -8,9 +8,9 @@ from pytensor import compile
 from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
-    WalkingGraphRewriter,
     copy_stack_trace,
     dfs_rewriter,
     in2out,
@@ -62,7 +62,10 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
+from pytensor.tensor.rewriting.elemwise import (
+    InplaceGraphOptimizer,
+    apply_local_dimshuffle_merge,
+)
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -1901,72 +1904,62 @@ compile.optdb.register(
 # gemm is the first one now, at priority 70
 
 
-@node_rewriter([IncSubtensor], inplace=True)
-def local_inplace_setsubtensor(fgraph, node):
-    if node.op.inplace:
-        return False
-    dta = node.op.destroyhandler_tolerate_aliased
-    new_op = node.op.__class__(
-        node.op.idx_list,
-        inplace=True,
-        set_instead_of_inc=node.op.set_instead_of_inc,
-        destroyhandler_tolerate_aliased=dta,
-    )
-    new_node = new_op(*node.inputs)
-    val = getattr(node.outputs[0].tag, "nan_guard_mode_check", True)
-    new_node.tag.nan_guard_mode_check = val
+class InplaceIncSubtensorOptimizer(InplaceGraphOptimizer):
+    """Writes of (Advanced)IncSubtensor into their first input, in place."""
 
-    # Copy stacktrace from original outputs to new outputs.
-    # This is sensible, because the new operation is the
-    # same as the old one, but now with different attributes.
-    copy_stack_trace(node.outputs, new_node)
-    return [new_node]
+    def __init__(self, op):
+        self.op = op
+
+    def filter_candidate_pairs(self, fgraph, node, protected_inputs):
+        x = node.inputs[0]
+        if not inplace_candidates(fgraph, [x], protected_inputs=protected_inputs):
+            return []
+        return [((0, node.outputs[0]), (0, x))]
+
+    def create_inplace_node(self, node, inplace_pattern):
+        props = node.op._props_dict() | {"inplace": True}
+        new_node = type(node.op)(**props).make_node(*node.inputs)
+        new_node.tag.nan_guard_mode_check = getattr(
+            node.outputs[0].tag, "nan_guard_mode_check", True
+        )
+        return new_node
+
+    def apply(self, fgraph):
+        # A zeros buffer that is written to by several nodes, or already destroyed,
+        # is duplicated so that each write can go to its own buffer in place.
+        if self.op is AdvancedIncSubtensor:
+            for node in fgraph.toposort():
+                x = node.inputs[0] if isinstance(node.op, self.op) else None
+                if (
+                    x is None
+                    or node.op.inplace
+                    or x.owner is None
+                    or not isinstance(x.owner.op, Alloc)
+                    or not x.owner.op.value_is_scalar_zero(x.owner.inputs[0])
+                ):
+                    continue
+                writers = [
+                    c
+                    for c, i in fgraph.clients[x]
+                    if i == 0 and isinstance(c.op, self.op) and not c.op.inplace
+                ]
+                if fgraph.has_destroyers([x]) or node is not writers[0]:
+                    fgraph.change_node_input(
+                        node, 0, x.owner.clone().outputs[0], reason="unshare_zeros"
+                    )
+        return super().apply(fgraph)
 
 
 compile.optdb.register(
     "local_inplace_setsubtensor",
-    WalkingGraphRewriter(
-        local_inplace_setsubtensor, failure_callback=WalkingGraphRewriter.warn_inplace
-    ),
+    InplaceIncSubtensorOptimizer(IncSubtensor),
     "fast_run",
     "inplace",
     position=50.1,
 )
-
-
-@node_rewriter([AdvancedIncSubtensor], inplace=True)
-def local_inplace_AdvancedIncSubtensor(fgraph, node):
-    if node.op.inplace:
-        return False
-    x, y, *idxs = node.inputs
-    if fgraph.has_destroyers([x]):
-        # In this case we can't operate inplace, but if x is just an alloc of zeros
-        # We're better off duplicating it and then acting on it inplace.
-        if (
-            x.owner is not None
-            and isinstance(x.owner.op, Alloc)
-            and x.owner.op.value_is_scalar_zero(x.owner.inputs[0])
-        ):
-            x = x.owner.clone().outputs[0]
-        else:
-            return None  # Inplace isn't valid
-    new_op = type(node.op)(
-        node.op.idx_list,
-        inplace=True,
-        set_instead_of_inc=node.op.set_instead_of_inc,
-        ignore_duplicates=node.op.ignore_duplicates,
-    )
-    new_node = new_op(x, y, *idxs)
-    copy_stack_trace(node.outputs, new_node)
-    return [new_node]
-
-
 compile.optdb.register(
     "local_inplace_AdvancedIncSubtensor",
-    WalkingGraphRewriter(
-        local_inplace_AdvancedIncSubtensor,
-        failure_callback=WalkingGraphRewriter.warn_inplace,
-    ),
+    InplaceIncSubtensorOptimizer(AdvancedIncSubtensor),
     "fast_run",
     "inplace",
     position=70.6,

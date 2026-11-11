@@ -4,7 +4,7 @@ import operator
 import sys
 from collections import defaultdict
 from collections.abc import Generator, Sequence
-from functools import cache, reduce
+from functools import cache, partial, reduce
 from heapq import heapify, heappop, heappush
 from operator import or_
 from warnings import warn
@@ -58,6 +58,37 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.variable import TensorConstant, TensorVariable
+
+
+def _root_and_readers(fgraph, var):
+    """The variable `var` views (its root) and the nodes that read the root or a view of it."""
+    view_i, view_o = fgraph.destroy_handler.view_i, fgraph.destroy_handler.view_o
+    while var in view_i:
+        var = view_i[var]
+    tree, readers = [var], set()
+    while tree:
+        v = tree.pop()
+        readers.update(c for c, _ in fgraph.clients[v])
+        tree.extend(view_o.get(v, ()))
+    return var, readers
+
+
+def _descendants(fgraph, node):
+    """Nodes that run after `node`, through data edges or the destroy orderings."""
+    after = defaultdict(list)
+    for n, before in fgraph.orderings().items():
+        for b in before:
+            after[b].append(n)
+    seen, stack = set(), [node]
+    while stack:
+        n = stack.pop()
+        for c in itertools.chain(
+            (c for out in n.outputs for c, _ in fgraph.clients[out]), after[n]
+        ):
+            if c not in seen:
+                seen.add(c)
+                stack.append(c)
+    return seen
 
 
 class InplaceGraphOptimizer(GraphRewriter):
@@ -117,6 +148,18 @@ class InplaceGraphOptimizer(GraphRewriter):
             candidate_pairs = self.filter_candidate_pairs(
                 fgraph, node, protected_inputs
             )
+        if len(candidate_pairs) > 1:
+            # Drop pairs whose destroyed memory is read after the node (they'd form a cycle)
+            after = _descendants(fgraph, node)
+            candidate_pairs = [
+                pair
+                for pair in candidate_pairs
+                if not fgraph.has_destroyers([pair[1][1]])
+                and not any(
+                    c is not node and c in after
+                    for c in _root_and_readers(fgraph, pair[1][1])[1]
+                )
+            ]
         if not candidate_pairs:
             return node
 
@@ -241,7 +284,15 @@ class InplaceGraphOptimizer(GraphRewriter):
         }
         set_op_updates = set(op_updates.keys())
 
-        for node in fgraph.toposort():
+        nodes = fgraph.toposort()
+        ancestors, bitflags = ancestor_bitsets(fgraph, nodes)
+        root_and_readers = partial(_root_and_readers, fgraph)
+
+        # Validating each in-placing on its own costs a whole-graph cycle check each.
+        # Pairs that would surely form a cycle (another reader of the destroyed memory
+        # depends on the node) are dropped up front, the rest validated in batches.
+        claimed, batchable, deferred = set(), [], []
+        for node in nodes:
             if not isinstance(node.op, self_op) or node.op.destroy_map:
                 continue
 
@@ -283,12 +334,57 @@ class InplaceGraphOptimizer(GraphRewriter):
                     direct_update_pairs + indirect_update_pairs + other_update_pairs
                 )
 
-            result = self.try_inplace_on_node(
-                fgraph, node, sorted_candidate_pairs, reason=reason
-            )
-            if result is not node:
+            flag, viable, pattern, used = bitflags[node], [], {}, set()
+            for pair in sorted_candidate_pairs:
+                (o, _), (i, inp) = pair
+                root, readers = root_and_readers(inp)
+                if any(c is not node and ancestors.get(c, 0) & flag for c in readers):
+                    continue
+                viable.append(pair)
+                if root not in claimed and o not in pattern and i not in used:
+                    pattern[o] = [i]
+                    used.add(i)
+                    claimed.add(root)
+            if viable:
+                (batchable if pattern else deferred).append((node, viable, pattern))
+
+        def try_batch(batch):
+            new_nodes = [self.create_inplace_node(n, p) for n, _, p in batch]
+            if any(new.op.destroy_map != p for new, (_, _, p) in zip(new_nodes, batch)):
+                return False
+            # In reverse topological order, so a node is replaced after its clients
+            replacements = [
+                pair
+                for new, (n, _, _) in reversed(list(zip(new_nodes, batch)))
+                for pair in zip(n.outputs, new.outputs)
+            ]
+            try:
+                fgraph.replace_all_validate(replacements, reason=reason)
+            except InconsistencyError:
+                return False
+            for new, (n, _, _) in zip(new_nodes, batch):
+                copy_stack_trace(n.outputs, new.outputs)
+            prof["nb_replaced"] += len(batch)
+            return True
+
+        def try_one(node, viable):
+            viable = [p for p in viable if not fgraph.has_destroyers([p[1][1]])]
+            if (
+                viable
+                and self.try_inplace_on_node(fgraph, node, viable, reason) is not node
+            ):
                 prof["nb_replaced"] += 1
 
+        def run(batch):
+            if len(batch) == 1:
+                try_one(*batch[0][:2])
+            elif batch and not try_batch(batch):
+                run(batch[: len(batch) // 2])
+                run(batch[len(batch) // 2 :])
+
+        run(batchable)
+        for node, viable, _ in deferred:
+            try_one(node, viable)
         return prof
 
     @classmethod

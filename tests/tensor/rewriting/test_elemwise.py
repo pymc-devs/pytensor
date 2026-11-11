@@ -13,6 +13,8 @@ from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, equal_computations
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.features import Feature
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -58,6 +60,7 @@ from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.elemwise import (
     FusionOptimizer,
+    InplaceElemwiseOptimizer,
     apply_local_dimshuffle_merge,
     local_dimshuffle_lift,
     local_dimshuffle_merge,
@@ -1714,6 +1717,69 @@ def test_constant_fold_branches_add_mul(op):
     new_out = rewrite_graph(out, include=("add_mul_fusion",))
     assert len(new_out.owner.inputs) == 3
     assert equal_computations([new_out], [op(py_op(a, b), c, x)])
+
+
+class _CountValidations(Feature):
+    def __init__(self):
+        self.n = 0
+
+    def on_validate(self, fgraph):
+        self.n += 1
+
+
+def _random_elemwise_fgraph(seed, n=300):
+    rng = np.random.default_rng(seed)
+    x = pt.vector("x", shape=(5,))
+    vs = [x]
+    for _ in range(n):
+        a, b = (vs[int(i)] for i in rng.integers(max(0, len(vs) - 20), len(vs), 2))
+        vs.append(pt.exp(a) + b if rng.random() < 0.5 else pt.exp(a * b))
+    outs = [vs[-1], *(vs[int(i)] for i in rng.integers(1, len(vs), 10))]
+    fgraph = FunctionGraph([x], outs, clone=False)
+    add_supervisor_to_fgraph(fgraph, [In(x)])
+    # attached before the DestroyHandler, which raises on failed validations
+    fgraph.attach_feature(counter := _CountValidations())
+    fgraph.attach_feature(DestroyHandler())
+    return fgraph, counter
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_inplace_elemwise_batched_matches_sequential(seed):
+    # The batched pass in-places the same pairs as trying node by node, validating less
+    opt = InplaceElemwiseOptimizer()
+    sequential, seq_counter = _random_elemwise_fgraph(seed)
+    for node in sequential.toposort():
+        if isinstance(node.op, Elemwise):
+            opt.try_inplace_on_node(sequential, node)
+    batched, counter = _random_elemwise_fgraph(seed)
+    opt.apply(batched)
+
+    def destroyed(fgraph):
+        return sorted(
+            sum(map(len, n.op.destroy_map.values())) for n in fgraph.apply_nodes
+        )
+
+    assert sum(destroyed(batched)) > 100
+    assert destroyed(batched) == destroyed(sequential)
+    assert counter.n * 3 < seq_counter.n
+
+
+def test_inplace_multi_output_skips_cyclic_pairs():
+    # A wide multi-output node whose inputs are read again downstream: those pairs are
+    # dropped without one failing validation each
+    xs = [pt.vector(f"x{i}", shape=(3,)) for i in range(12)]
+    s = [ps.float64(f"s{i}") for i in range(12)]
+    outs = Elemwise(Composite(s, [si + 1 for si in s]))(*(pt.exp(x) for x in xs))
+    reads = [pt.exp(x) * o for x, o in zip(xs, outs)]
+    fgraph = FunctionGraph(xs, reads, clone=False)
+    add_supervisor_to_fgraph(fgraph, [In(x) for x in xs])
+    rewrite_graph(fgraph, include=("merge",))
+    fgraph.attach_feature(counter := _CountValidations())
+    fgraph.attach_feature(DestroyHandler())
+    [node] = [n for n in fgraph.apply_nodes if len(n.outputs) == 12]
+    InplaceElemwiseOptimizer().try_inplace_on_node(fgraph, node)
+    assert counter.n == 0
+    assert not node.op.destroy_map
 
 
 def test_InplaceElemwiseOptimizer_bug():
