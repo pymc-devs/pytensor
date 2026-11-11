@@ -54,6 +54,51 @@ class Array:
         """The same memory with other lengths/strides (e.g. a broadcast view)."""
         return Array(self.dtype, self.data, list(shape), list(strides), layout)
 
+    # ---- elements (indices are i64 values or Python ints; nothing is bounds-checked)
+
+    def ptr(self, b, *index):
+        """Address of the element at `index` (one index per axis)."""
+        if len(index) != self.ndim:
+            raise ValueError(f"{len(index)} indices for an array with {self.ndim} axes")
+        p = self.data
+        for i, stride in zip(index, self.strides, strict=True):
+            p = advance(b, p, i, stride, self.dtype)
+        return p
+
+    def load(self, b, *index):
+        """The element at `index`, as a `Num` of the array's dtype."""
+        from pytensor.link.llvm.codegen.num import Num
+
+        return Num(b, load(b, self.dtype, self.ptr(b, *index)), self.dtype)
+
+    def store(self, b, value, *index):
+        """Write `value` to the element at `index`: a `Num` of the array's dtype, an IR
+        value of its type, or a Python number."""
+        from pytensor.link.llvm.codegen.num import Num
+
+        if isinstance(value, Num):
+            if value.dtype != self.dtype:
+                raise TypeError(f"storing a {value.dtype} into an array of {self.dtype}: convert with astype")
+            value = value.value
+        elif isinstance(value, bool | int | float):
+            value = constant(b, self.dtype, value)
+        store(b, self.dtype, value, self.ptr(b, *index))
+
+    def at(self, b, i, axis: int = 0) -> Array:
+        """The sub-array at index `i` of `axis` (`a[i]`, `a[:, i]`, ...): a view with
+        one axis less, with what its layout still says."""
+        from pytensor.link.llvm.layout import remove_axis
+
+        axis = range(self.ndim)[axis]
+        keep = [a for a in range(self.ndim) if a != axis]
+        return Array(
+            self.dtype,
+            advance(b, self.data, i, self.strides[axis], self.dtype),
+            [self.shape[a] for a in keep],
+            [self.strides[a] for a in keep],
+            remove_axis(self.layout, axis, self.static_shape(), itemsize(self.dtype)),
+        )
+
 
 def c_array(dtype, data, shape, strides) -> Array:
     """A C-contiguous array (strides from `c_strides`)."""
@@ -173,6 +218,8 @@ def advance(b, p, i, stride, dtype):
     offsets it speculates a byte stride of 1, which never holds, and the vectorized loop
     never runs."""
     isz = itemsize(dtype)
+    if isinstance(i, int):
+        i = b.i64(i)
     c = stride.const_int
     if c is not None:
         if c % isz:
@@ -184,14 +231,6 @@ def advance(b, p, i, stride, dtype):
         # strides of arrays are multiples of the itemsize (validated at the boundary)
         es = b.ashr(stride, b.i64(isz.bit_length() - 1))
     return b.gep(memory_type(dtype), p, b.mul(i, es, nsw=True))
-
-
-def element_ptr(b, a: Array, index: list):
-    """Address of the element at `index` (one i64 per axis)."""
-    p = a.data
-    for i, st in zip(index, a.strides, strict=True):
-        p = advance(b, p, i, st, a.dtype)
-    return p
 
 
 # ------------------------------------------------------------------ casts
