@@ -173,7 +173,7 @@ class Module:
 
 def compile_many(modules: Sequence[Module], opt_level: int = 3, cache: bool = True) -> list[CompiledModule]: ...
 def call_kernel(
-    address: int, inputs: Sequence[np.ndarray], outputs: Sequence[Any], frame_bytes: int = 0, config: int = 0
+    address: int, inputs: Sequence[np.ndarray], outputs: Sequence[Any], config: int = 0
 ) -> list[np.ndarray]: ...
 
 class Loop:

@@ -1,7 +1,7 @@
 """Numba kernels: Ops we don't implement, run through their numba implementation.
 
 For such an Op we take PyTensor's numba implementation (``numba_funcify``) and wrap it in
-a numba ``cfunc`` with the kernel ABI without a frame, ``int32(PtCtx *ctx, PtArray *args,
+a numba ``cfunc`` with the kernel ABI, ``int32(PtCtx *ctx, PtArray *args,
 void *config)``:
 
 * inputs become numba arrays that view the caller's memory (data, shape, strides; no copy),
