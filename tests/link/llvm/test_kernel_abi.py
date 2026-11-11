@@ -88,7 +88,11 @@ def test_generated_kernels_check_their_arguments_when_asked():
     (result,) = ir.call_kernel(kernel, [values], [(f64, 2)])
     np.testing.assert_allclose(result, np.exp(values))
     for inputs, outputs, message in [
-        ([values.astype("float32")], [(f64, 2)], "argument 0 isn't a 2-d array of float64"),
+        (
+            [values.astype("float32")],
+            [(f64, 2)],
+            "argument 0 isn't a 2-d array of float64",
+        ),
         ([values[0]], [(f64, 2)], "argument 0 isn't a 2-d array of float64"),
         ([values], [(f64, 1)], "argument 1 isn't a 2-d array of float64"),
         ([values, values], [(f64, 2)], "the kernel takes 1 inputs and 1 outputs"),
