@@ -10,7 +10,7 @@ FUSION_REWRITES = (
     "fuse_elemwise",
     "wrap_reduced_gather_in_elemwise",
 )
-LLVM_REWRITES = (*FUSION_REWRITES, "scan_save_mem_no_prealloc", "llvm_units")
+LLVM_REWRITES = (*FUSION_REWRITES, "scan_save_mem_no_prealloc")
 
 
 class LLVMLinker(JITLinker):
@@ -20,10 +20,15 @@ class LLVMLinker(JITLinker):
     code generated from Python, or numba implementations; a Rust interpreter runs them.
     """
 
-    required_rewrites = ("minimum_compile",)
+    # llvm_units keeps ScalarType values inside compiled units: they don't cross the
+    # kernel ABI
+    required_rewrites = ("minimum_compile", "llvm_units")
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",
+        # Numba-only: scalar-typed ops neither group into units nor plan
+        "scalarize",
+        "remove_scalar_tensor_boundaries",
         "local_careduce_fusion",
         "scan_reduce_trace_prealloc",
     )

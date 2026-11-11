@@ -97,6 +97,22 @@ def test_take_out_of_bounds_raises():
     f = pytensor.function([x, v], x[v] * 2, mode=NO_FALLBACK)
     with pytest.raises(Exception, match="out of bounds"):
         f(np.arange(3.0), np.array([0, 3]))
+    # unsigned indices don't wrap
+    u = pt.vector("u", dtype="uint8")
+    f = pytensor.function([x, u], [x[u] * 2, x[u[0]] * 2], mode=NO_FALLBACK)
+    f(np.arange(3.0), np.array([2, 0], dtype="uint8"))
+    with pytest.raises(Exception, match="out of bounds"):
+        f(np.arange(3.0), np.array([255, 0], dtype="uint8"))
+
+
+def test_constant_indices_checked_when_generating_code():
+    x = pt.vector("x", shape=(5,))
+    y = pt.vector("y", shape=(4,))
+    idx = np.array([0, 4, -5, 4])
+    outs = [x[idx] * 2, x[-2] * 2, pt.inc_subtensor(x[idx], y), x[2:][[1, -3]] * 2]
+    f = compare([x, y], outs, [rng.random(5), rng.random(4)])
+    ir = "".join(m.optimized_ir() for m in f.maker.linker.stats.modules)
+    assert "out of bounds" not in ir
 
 
 @pytest.mark.parametrize("set_", [False, True])
@@ -233,6 +249,36 @@ def test_fused_elemwise_patterns():
         [rng.random(10), rng.random(30), rng.integers(0, 10, 30), rng.random((5, 7))],
     )
     assert any(s.startswith("FusedElemwise") for s in tasks(f))
+
+
+def test_fused_elemwise_indexed_increments():
+    x = pt.vector("x", shape=(5,))
+    y = pt.vector("y")
+    idx = pt.lvector("idx")
+    # runs, revisits and negative indices; increments of one element in order
+    const_idx = np.array([0, 0, 3, 3, 3, -1, 0, 1, 1, -5])
+
+    def outs(i):
+        v = pt.exp(y[: i.shape[0]])
+        return [pt.inc_subtensor(x[i], v), pt.inc_subtensor(x[i], v * y[0])]
+
+    f = compare(
+        [x, y, idx],
+        [*outs(idx), *outs(pt.as_tensor(const_idx))],
+        [rng.random(5), rng.random(10), np.array([4, 4, 2, 0, 0, 0, 4, -2, 3, 3])],
+    )
+    # (in a unit with the scalar it reads, y[0])
+    assert any("FusedElemwise" in s for s in tasks(f))
+
+    # a constant index is bounds-checked when the code is generated
+    def ir(f):
+        return "".join(m.optimized_ir() for m in f.maker.linker.stats.modules)
+
+    f = pytensor.function([x, y], outs(pt.as_tensor(const_idx)), mode=LLVM)
+    assert "FusedElemwise: index out of bounds" not in ir(f)
+    f = pytensor.function([x, y], outs(pt.as_tensor(const_idx + 5)), mode=LLVM)
+    with pytest.raises(Exception, match="FusedElemwise: index out of bounds"):
+        f(rng.random(5), rng.random(10))
 
 
 def test_scan_sit_sot_mit_sot_nit_sot():
