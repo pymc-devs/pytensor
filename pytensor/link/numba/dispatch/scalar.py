@@ -27,6 +27,7 @@ from pytensor.scalar.basic import (
     Clip,
     Composite,
     Identity,
+    IntDiv,
     Mul,
     Pow,
     Reciprocal,
@@ -270,6 +271,32 @@ def numba_funcify_Sign(op, node, **kwargs):
     return complex_sign, scalar_op_cache_key(
         op, complex_dtype=node.outputs[0].type.dtype
     )
+
+
+@register_scalar_funcify(IntDiv)
+def numba_funcify_IntDiv(op, node, **kwargs):
+    if not node.outputs[0].type.dtype.startswith("float"):
+        return numba_funcify_ScalarOp(op, node, **kwargs)
+
+    # Numba's np.floor_divide on floats is floor(x / y), which differs from NumPy
+    # when x / y rounds to an integer. `//` matches NumPy but raises on a zero divisor.
+    # So this follows NumPy's npy_divmod, with the NumPy error model to return inf or nan.
+    @numba_basic.numba_njit(fastmath=False, error_model="numpy")
+    def floor_div(x, y):
+        if y == 0:
+            return np.divide(x, y)
+        mod = np.fmod(x, y)
+        div = np.divide(x - mod, y)
+        if mod != 0 and ((y < 0) != (mod < 0)):
+            div -= 1
+        if div != 0:
+            floordiv = np.floor(div)
+            if div - floordiv > 0.5:
+                floordiv += 1
+            return floordiv
+        return np.copysign(div * 0, np.divide(x, y))
+
+    return floor_div, scalar_op_cache_key(op, cache_version=1)
 
 
 @register_scalar_funcify(Switch)

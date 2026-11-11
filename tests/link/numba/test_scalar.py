@@ -155,6 +155,20 @@ def test_reciprocal(v, dtype):
     )
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_float_floor_div(dtype):
+    # `floor(x / y)` is not the floor division of the exact operands, which NumPy does
+    x = pt.vector("x", dtype=dtype)
+    y = pt.vector("y", dtype=dtype)
+    x_test = np.array(
+        [3.0, 7.5, -7.5, -3.0, -7.5, 0.5, 7.0, 1.0, -1.0, 0.0], dtype=dtype
+    )
+    y_test = np.array(
+        [-0.3, -0.3, 0.3, 0.3, np.inf, -np.inf, 2.0, 0.0, 0.0, 0.0], dtype=dtype
+    )
+    compare_numba_and_py([x, y], [pt.floor_div(x, y)], [x_test, y_test])
+
+
 @pytest.mark.parametrize("composite", (False, True))
 def test_isnan(composite):
     # Testing with tensor just to make sure Elemwise does not revert the scalar behavior of fastmath
