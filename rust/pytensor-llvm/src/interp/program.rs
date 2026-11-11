@@ -891,36 +891,44 @@ impl Drop for Call<'_> {
 pub struct Done<'c>(Call<'c>);
 
 impl Done<'_> {
-    /// Graph output `o`, borrowed.
-    pub fn output(&self, o: usize) -> R<PtArrayRef<'_>> {
+    /// The header of graph output `o`.
+    fn header(&self, o: usize) -> R<&PtArray> {
         let Call { prog, st } = &self.0;
         let v = *prog
             .spec
             .outputs
             .get(o)
             .ok_or_else(|| format!("no output {o}: the function has {}", prog.n_outputs()))?;
+        Ok(&st.vals[v.i()])
+    }
+
+    /// Graph output `o`, borrowed.
+    pub fn output(&self, o: usize) -> R<PtArrayRef<'_>> {
         // SAFETY: a value of a call that ran is an input of the call (an array for
         // `'c`), a constant, memory of `st`, memory the caller provided for `'c`, or
         // what a task returned, in a buffer `st` holds; and its header keeps the
         // invariants of `CallMemory`. Nothing writes any of them before the call is
         // dropped, which can't happen while the result borrows it. What tasks
         // returned is checked here as far as that goes.
-        unsafe { PtArrayRef::from_raw_checked(&st.vals[v.i()]) }
+        unsafe { PtArrayRef::from_raw_checked(self.header(o)?) }
             .map_err(|e| format!("output {o}: {e}"))
     }
 
     /// Graph output `o`, to keep: a reference to its buffer, or a copy if its memory
     /// isn't a runtime buffer (an input, a constant, provided memory).
     pub fn take_output(&self, o: usize) -> R<OwnedArray> {
-        let a = self.output(o)?;
-        if a.owner().is_null() {
-            return OwnedArray::copy_of(&a);
+        let raw = self.header(o)?;
+        if raw.owner.is_null() {
+            return OwnedArray::copy_of(&self.output(o)?);
         }
+        // SAFETY: as in `output`. (Only the shape and strides are read here; that
+        // they describe an array inside the buffer is checked by `in_buffer`.)
+        let a = unsafe { PtArrayRef::from_raw(raw) }.map_err(|e| format!("output {o}: {e}"))?;
         // SAFETY: the buffer the output is in, which the call's memory holds.
-        let buf = unsafe { OwnedBuf::from_borrowed(a.owner()) };
+        let buf = unsafe { OwnedBuf::from_borrowed(raw.owner) };
         OwnedArray::in_buffer(
             buf,
-            a.as_ptr() as *mut u8,
+            raw.data,
             a.shape().to_vec(),
             a.strides().to_vec(),
             a.dtype(),

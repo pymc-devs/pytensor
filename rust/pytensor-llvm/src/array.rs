@@ -244,11 +244,6 @@ impl<'a> PtArrayRef<'a> {
         // type's invariant).
         Ok(unsafe { crate::interp::consts::read_scalar(self.data, self.dtype).1 })
     }
-
-    /// The buffer this array's memory is in, if it is in one (null otherwise).
-    pub(crate) fn owner(&self) -> *mut PtBuffer {
-        self.owner
-    }
 }
 
 fn extent(data: *const u8, shape: &[i64], strides: &[i64], itemsize: usize) -> (usize, usize) {

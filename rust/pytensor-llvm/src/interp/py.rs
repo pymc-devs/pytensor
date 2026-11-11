@@ -714,9 +714,11 @@ impl Program {
             ctx: crate::runtime::PtCtx::new(),
         });
         // the arrays to call with, kept alive until the call is over, and their
-        // data, shapes and strides
         let mut keep: Vec<Bound<'_, PyAny>> = Vec::with_capacity(args.len());
-        let mut parts: Vec<(*const u8, Vec<i64>, Vec<i64>)> = Vec::with_capacity(args.len());
+        // data, shapes and strides (per array: its data, and where its lengths start in
+        // `dims`; its strides follow them)
+        let mut parts: Vec<(*const u8, usize, usize)> = Vec::with_capacity(args.len());
+        let mut dims: Vec<i64> = Vec::with_capacity(8 * args.len());
         let mut work = 0usize;
         let res = (|| -> PyResult<Vec<OwnedArray>> {
             for (k, a) in args.iter().enumerate() {
@@ -753,19 +755,20 @@ impl Program {
                 let arr = a.cast::<PyUntypedArray>()?;
                 // SAFETY: reading the data pointer of a live array.
                 let data = unsafe { (*arr.as_array_ptr()).fields.data as *const u8 };
-                let shape: Vec<i64> = arr.shape().iter().map(|&n| n as i64).collect();
-                let strides: Vec<i64> = arr.strides().iter().map(|&s| s as i64).collect();
-                parts.push((data, shape, strides));
+                parts.push((data, dims.len(), arr.ndim()));
+                dims.extend(arr.shape().iter().map(|&n| n as i64));
+                dims.extend(arr.strides().iter().map(|&s| s as i64));
                 work += arr.len();
                 keep.push(a);
             }
             let mut call = prog.begin(st).map_err(PyValueError::new_err)?;
-            for (k, (data, shape, strides)) in parts.iter().enumerate() {
+            for (k, &(data, start, ndim)) in parts.iter().enumerate() {
+                let (shape, strides) = dims[start..start + 2 * ndim].split_at(ndim);
                 // SAFETY: the memory of a numpy array of the input's dtype (converted
                 // above), which `keep` keeps alive until the call is over. Nothing
                 // here writes it; as everywhere with numpy, that no other thread
                 // does meanwhile is up to the user.
-                unsafe { PtArrayRef::checked(*data, shape, strides, prog.input_dtype(k)) }
+                unsafe { PtArrayRef::checked(data, shape, strides, prog.input_dtype(k)) }
                     .and_then(|a| call.set_input(k, a))
                     .map_err(PyValueError::new_err)?;
             }
