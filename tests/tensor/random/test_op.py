@@ -288,6 +288,51 @@ def test_vectorize():
     assert vect_node.default_output().type.shape == (10, 2, 5)
 
 
+def test_vectorize_size_from_batched_shape():
+    x = pt.vector("x")
+    x_new = pt.matrix("x_new")
+    out = vectorize_graph(normal(0, size=x.shape), {x: x_new})
+    assert out.type.ndim == 2
+    assert tuple(out.owner.inputs[1].eval({x_new: np.zeros((4, 5))})) == (4, 5)
+
+    from pytensor.xtensor.vectorization import vectorize_graph as xvectorize_graph
+
+    scalar = pt.scalar("scalar")
+    batched = pt.matrix("batched", shape=(3, 4))
+    out = xvectorize_graph(
+        normal(scalar, size=(10,)),
+        {scalar: batched},
+        new_tensor_dims=["a", "b"],
+    )
+    assert out.type.ndim == 3
+    assert tuple(out.owner.inputs[1].eval({batched: np.zeros((3, 4))})) == (
+        3,
+        4,
+        10,
+    )
+
+    sizes = pt.vector("sizes", shape=(1,), dtype="int64")
+    with pytest.raises(NotImplementedError, match="not rectangular"):
+        vectorize_graph(
+            normal(0, size=sizes),
+            {sizes: pt.matrix("sizes_b", dtype="int64")},
+        )
+
+    core = pt.vector("core", shape=(2,), dtype="int64")
+    with pytest.raises(NotImplementedError, match="not rectangular"):
+        vectorize_graph(
+            normal(0, size=core),
+            {core: pt.as_tensor([[2, 3], [4, 5]])},
+        )
+
+    # arange(x.shape[0]) is built only from a shape, but each batch entry
+    # asks for a different length. That is not one rectangular draw.
+    x = pt.vector("x")
+    n = pt.lscalar("n")
+    with pytest.raises(NotImplementedError, match="not rectangular"):
+        vectorize_graph(normal(0, size=(n,)), {n: pt.arange(x.shape[0]) + 1})
+
+
 def test_vectorize_empty_size():
     scalar_mu = pt.scalar("scalar_mu")
     scalar_x = pt.random.normal(loc=scalar_mu, size=())
