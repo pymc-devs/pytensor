@@ -26,8 +26,10 @@ groups small nodes into units.
 * **node function**: the LLVM function generated for one node, inlined into kernels.
 * **kernel wrapper**: the function with the kernel ABI generated around a node or unit
   function (its symbol is `kernel`).
-* **output mode** (`OutputMode`): how an output comes to be: provided, allocated or a
-  view (section 3); in generated code also scalar or absent.
+* **output mode** (`OutputMode`): how an output comes to be (section 3): provided,
+  returned (new memory, or a view of an input the op's `view_map` names) or in place;
+  in generated code also scalar or absent.
+* **stages** of planning (section 8): flatten, resolve, tasks, compile, memory.
 
 *Run time*
 
@@ -60,7 +62,7 @@ groups small nodes into units.
 * **scratch**: temporary memory from the context, valid until the task ends, released
   by marks.
 * **buffer**: refcounted memory (`PtBuffer`), owned through `owner` pointers.
-* **output slot**: the struct an allocated or view output is returned through.
+* **output slot**: the struct a returned output comes back through.
 
 *Scan*
 
@@ -99,12 +101,13 @@ don't matter and are always packed. C-contiguous is "all packed, identity order"
 Layouts are claims the code relies on (packed strides aren't passed, they're computed),
 so they come only from how a value is produced:
 
-* new memory has the layout the op's `llvm_outputs` declares (default C-contiguous;
+* new memory has the layout the op's `llvm_layout` declares (default C-contiguous;
   Elemwise follows its inputs); Rust kernels and Scan allocate C-contiguous, graph
   outputs the planner provides are C-contiguous, constants are stored C-contiguous;
-* a view's layout follows from its input's, as the op's `llvm_outputs` declares it
+* a view's layout follows from its input's, as the op's `llvm_layout` declares it
   (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; helpers in layout.py); a
   view nothing is declared for is DYNAMIC;
+* an output that overwrites an input (section 3) has that input's layout;
 * numba kernels and graph inputs are DYNAMIC. With `input_layout="c"` the inputs are
   C-contiguous: Python calls copy other arrays, the C API rejects them.
 
@@ -183,7 +186,7 @@ array constant (the address of its contents, a C-contiguous copy kept alive with
 table). The IR loads entry `k` from `config`; the link table is the generated kernel's
 config.
 
-Inside generated code the planner decides per node (`Planner.kernel_for`, given the
+Inside generated code the planner decides per node (`Resolver.inside`, given the
 input layouts): generate it if we can (inlined: preferred; tried in a scratch module,
 so a failure leaves nothing behind), else its Rust kernel, else a numba kernel.
 Interpreted OpFromGraphs are subprograms when they are tasks of their own, and inlined
@@ -192,19 +195,31 @@ values inside it when it returns (also on errors).
 
 ### Aliasing
 
-The memory a kernel writes (its provided or allocated outputs) never overlaps its inputs
-or its other outputs: the `inplace` rewrites are excluded, the arena never places an
-output over a value live during the task, temporaries are distinct memory (stack
-slots, or scratch, whose pointers are declared `noalias`), and the C API requires (and checks) that provided outputs don't overlap the
-inputs or each other. Views are never written.
+Which memory may overlap is the op's statement, not the implementation's:
 
-Node functions tell LLVM: `Builder.alias_domain(name)` starts a scope domain and a TBAA
-root for the function, and `Builder.mark_array(ptr, scope, noalias)` marks the data
-pointer of each input (`i<pos>`) and of each written output (`o<j>`, not aliasing the
-inputs and other outputs). Pointers derived from a marked one (GEPs, captures into
-parallel bodies) inherit the marks; loads and stores through them get `!alias.scope`,
-`!noalias` and a `!tbaa` tag of the accessed type. Accesses through anything else
-(slots, shapes, pointers through phis or selects) get none, which is always safe.
+* `view_map[o]` lists the inputs output `o` *may* be a view of (one, or several:
+  `{0: [0, 1]}`). An output with no entry is new memory, distinct from everything the
+  kernel is given.
+* `destroy_map[o]` lists the inputs the op invalidates. By itself it says nothing about
+  the output; an implementation is free to ignore it and write new memory.
+
+So the memory a kernel writes never overlaps what it reads, with one exception it is
+told about: an output that overwrites an input (section 3). The arena never places an
+output over a value live during the task, temporaries are distinct memory (stack
+slots, or scratch, whose pointers are declared `noalias`), and the C API requires (and
+checks) that provided outputs don't overlap the inputs or each other. Memory reached
+through a view is only written by a task that overwrites it.
+
+Node functions tell LLVM exactly that: `Builder.alias_domain(name)` starts a scope
+domain and a TBAA root for the function, and `Builder.mark_array(ptr, scope, noalias)`
+marks the data pointer of each input (`i<pos>`) and of each written output (`o<j>`).
+A written output doesn't alias the inputs or the other outputs; an input that is
+overwritten carries its output's scope instead of one of its own, and inputs of one
+node may overlap each other freely (they are only read). Pointers derived from a
+marked one (GEPs, captures into parallel bodies) inherit the marks; loads and stores
+through them get `!alias.scope`, `!noalias` and a `!tbaa` tag of the accessed type.
+Accesses through anything else (slots, shapes, pointers through phis or selects) get
+none, which is always safe.
 
 Domains and TBAA roots are per node function, so claims never cross nodes: after
 inlining into a unit, memory may be reused for values of other dtypes (tags of different
@@ -214,37 +229,91 @@ before vectorized loops.
 
 ## 3. Outputs
 
-How each output comes to be is declared by the implementation that produces it: for
-generated code by one dispatch per op, `llvm_outputs(op, node, in_layouts) ->
-[Output(repr, mode, view_of)]`, the mode and the layout (section 1a) from the input
-layouts; for a Rust kernel by the kernel itself (`Kernel.outputs`, in Rust next to the
-kernel); a numba kernel allocates with unknown layout. The planner picks the
-implementation first, then asks it.
+How an output comes to be follows from the op and the types, not from the emitter
+(`node_outputs` in `codegen/function.py`):
 
-The default `llvm_outputs` follows the types and `view_map`: C-contiguous new memory,
-views of unknown layout (always true, so always safe). Ops register their own to
-describe their views or to choose their outputs' layout (Elemwise uses the memory
-order most of its inputs share). Declarations are binding:
+| the op says | the type says | mode |
+|---|---|---|
+| new memory (no `view_map` entry) | static shape | provided |
+| new memory | shape known at run time only | returned, aliases nothing |
+| may be a view (`view_map[o] = [i, ...]`) | | returned, may alias inputs `i, ...` |
+| destroys input *i*, and the planner grants it | | in place |
+| | a ScalarType | scalar |
+| | no data (a random generator) | absent |
+
+The one thing an op's implementation declares is the layout of each output, by a
+dispatch per op: `llvm_layout(op, node, in_layouts) -> [Layout | None]` (section 1a;
+`None`: the default, C-contiguous for new memory and DYNAMIC for something that may be
+a view). It describes the output whichever way the emitter produces it. Rust kernels
+say the same about theirs in Rust, next to the kernel (`Kernel.outputs`); a numba
+kernel returns new memory of unknown layout. Declarations are binding:
 
 * provided: whoever provides the memory provides it in the declared layout. The
   planner's arena memory can have any packed order. A graph output must be
   C-contiguous; one declared otherwise is written to an arena temporary and copied. A
   compiled unit does the same with its own outputs;
-* allocated: `SlotOutput.allocate` and temporaries allocate in the declared layout;
-* view: `SlotOutput.set_view` checks, when generating the code, that the view array's
-  layout implies the declared one (view emitters attach layouts to their arrays).
+* returned: `allocate` gives memory in the declared layout, and `set_view` checks,
+  when generating the code, that the view's layout implies the declared one;
+* in place: the output has the input's layout.
 
 | mode | argument | the caller | the called function |
 |---|---|---|---|
 | provided | the representation, like an input | owns the memory, chooses lengths and strides | writes the elements |
-| allocated | `ptr` to an output slot | zero-initializes the slot | allocates, fills the slot (one new reference) |
-| view of input *i* | `ptr` to an output slot | zero-initializes the slot; sets the owner to input *i*'s | fills data, lengths, strides |
+| returned | `ptr` to an output slot | zero-initializes the slot | allocates and fills the slot (one new reference), or fills data, lengths and strides of a view of an input the op names |
+| in place | none: the output is the input | makes sure nothing else reads the input | writes the input's elements |
 | scalar | `ptr` to the value | | stores the value |
 | absent | none | | (a value without data: a random generator) |
 
 An output slot is `{ ptr data, [ndim x i64] lengths, [ndim x i64] strides, ptr owner }`
-(all lengths: the caller needs them). Representations don't carry buffer owners, so for
-views the caller sets the owner from the input the view lies in.
+(all lengths: the caller needs them). Representations don't carry buffer owners. For
+a returned output that may alias exactly one input, the wrapper sets a null owner to
+that input's. One that may alias several comes back without an owner: the interpreter
+keeps all the candidates alive as long as the output, and copies it if it leaves the
+program.
+
+**What emitters do.** Each output the emitter gets has the same three methods, so an
+emitter doesn't need to know the mode:
+
+* `allocate(shape)`: memory for the result (the provided memory, new memory, or,
+  in place, the input's memory still holding the input's values);
+* `overwrite(cg, x)`: memory holding the values of input `x`, for results computed by
+  modifying `x`: `x`'s own memory in place, else `allocate` and a copy;
+* `set_view(array)`: the output is this view of an input (`x.view(...)`). Only where
+  the `view_map` allows that input, and checked when the code is generated.
+  `set_output(cg, out, array)` does this if the output may be a view of the array's
+  input and copies otherwise.
+
+Mistakes that are cheap to see are errors when the code is generated (a view of an
+input the `view_map` doesn't name, `overwrite` with another array than the destroyed
+input, a layout that doesn't hold, an output never produced). Beyond that
+implementations are trusted: an emitter that writes to an input it wasn't given as an
+output is a bug nothing catches.
+
+**In place.** An emitter that can write its result over an input says so:
+`llvm_inplace(op, node) -> {output: input}`, for pairs in the op's `destroy_map`. The
+default is `{}`: ignore `destroy_map` and produce new memory, which is always correct.
+Elemwise (every element is read before it is written), IncSubtensor and
+AdvancedIncSubtensor opt in. The planner grants a pair (`Planner.grant_inplace`) when
+nothing else can see the memory:
+
+* the node is one of the graph being planned, and that graph has a DestroyHandler
+  (PyTensor then guarantees the destroyed variable isn't a protected input or constant
+  and isn't read afterwards, views included);
+* the value is not a constant, appears once among the node's inputs, and doesn't stand
+  for several variables (an inlined OpFromGraph that hands an input on makes two
+  variables one value; PyTensor doesn't know);
+* it shares no memory with the node's other inputs. The planner tracks, per value, the
+  values whose memory it may lie in (from the tasks' alias declarations);
+* if the output is a graph output and the memory is the planner's, it is C-contiguous.
+
+Nodes inside units, in inlined inner graphs and in Scan bodies never work in place. A
+numba kernel does what PyTensor's numba implementation does, which overwrites
+destroyed inputs; where the conditions above don't hold the planner gives it a copy
+to overwrite (`Planner.keep_destroyed`).
+
+For the interpreter an in-place output is not a new value: the task's output id is
+one of its inputs' (`plan/memory.py` maps it to the value it overwrites, which then
+lives until the last reader of either).
 
 **Layout.** Nothing is contiguous unless the signature says so (section 1a). Every
 output's layout is part of the signature, as declared (above); a provided output can
@@ -409,13 +478,31 @@ On top of it, in Python (`codegen/`):
 ## 8. Programs
 
 `program.py` plans a FunctionGraph into a program, a list of tasks for the Rust
-interpreter (`rust/pytensor-llvm/src/interp`): OpFromGraphs without a unit are inlined,
-compiled ones become units, interpreted ones subprograms; nodes touching ScalarType
-values are grouped into units; FusedElemwise stays one node when its pattern is
-supported. Each node's task then runs a Rust kernel (`rust_kernels.py`), a generated kernel
-(`codegen/`), or a numba kernel. Python assigns arena offsets by liveness (static
-provided values) and release points; all generated modules compile in one
-parallel batch.
+interpreter (`rust/pytensor-llvm/src/interp`). Planning runs in stages, each a module
+of `plan/` with its own data, so that each can be read (and tested) alone:
+
+1. **Flatten** (`plan/flatten.py`): the graph becomes a list of items over value ids
+   (`plan/values.py`). OpFromGraphs without a unit are inlined, compiled ones become
+   unit items, interpreted ones subprogram items; nodes touching ScalarType values are
+   grouped into units; FusedElemwise stays one node when its pattern is supported.
+2. **Resolve** (`plan/resolve.py`): which implementation runs each item, given the
+   layouts of its inputs: generated code (`codegen/`), a Rust kernel
+   (`rust_kernels.py`), a numba kernel, a subprogram. For a unit or the body of a
+   generated Scan this resolves all the items inside, in order, layouts flowing from
+   one to the next: the result (`Resolved`, `Body`) is everything code generation
+   needs. `build_unit_function` and the Scan emitter take it as an argument and never
+   ask the planner.
+3. **Tasks** (`Planner.task`): one task per item, with its inputs, outputs, how each
+   output comes to be and what it may alias (section 3). This is where memory is
+   provided, layouts are recorded and in-place work is granted.
+4. **Compile**: all generated modules in one parallel batch.
+5. **Memory** (`plan/memory.py`): from the tasks alone, the kind of every value
+   (input, constant, provided, returned), lifetimes (a value lives as long as anything
+   that may be a view of it), arena offsets by first fit, release points.
+
+Stages 2 and 3 are interleaved for the tasks of the program (a task's output layouts
+are the next one's input layouts), but nothing in stage 2 depends on the planner's
+state.
 
 `program.dump()` prints a program: every value with its type and storage (input,
 constant, arena offset, fresh output, allocated by its task, view of another value),

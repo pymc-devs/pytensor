@@ -4,8 +4,8 @@ This tutorial implements a new op for the LLVM backend, start to finish. It firs
 introduces the interface the implementation is written with, `pytensor_llvm.ir`, and
 then uses it for a small tensor op and a scalar op, and explains layouts (what the
 backend knows about the strides of each array, and how an op takes part in that),
-temporary memory and random variables. `DESIGN.md` explains why things are
-the way they are; this file only shows how to use them.
+views and writing over inputs, temporary memory and random variables. `DESIGN.md`
+explains why things are the way they are; this file only shows how to use them.
 
 Every `python` block below is run, in order, by `tests/link/llvm/test_tutorial.py`, so
 the code is known to work. You can paste the blocks into one session and follow along.
@@ -718,6 +718,98 @@ with pytest.raises(ValueError, match="storing into an input"):
 These checks cover the array helpers, not raw pointers: the backend trusts an
 implementation to do what its op declares.
 
+### Writing over an input
+
+The other thing an op says about memory is `destroy_map`: `{0: [0]}` means computing
+output 0 invalidates input 0. PyTensor's inplace rewrites put such ops into a graph
+where it is safe, and they are an offer, not an obligation: an implementation that
+ignores `destroy_map` and produces new memory is correct. That is what happens unless
+the emitter opts in.
+
+Many results are "the input, with a few changes". `outputs[k].overwrite(cg, x)` gives
+memory that already holds the values of `x`: a copy, or, in place, `x` itself.
+
+```python
+class ZeroFirst(Op):
+    """A vector with its first element set to zero."""
+
+    __props__ = ("inplace",)
+
+    def __init__(self, inplace=False):
+        self.inplace = inplace
+        if inplace:
+            self.destroy_map = {0: [0]}
+
+    def make_node(self, x):
+        x = pt.as_tensor_variable(x)
+        return Apply(self, [x], [x.type()])
+
+    def perform(self, node, inputs, output_storage):
+        x = inputs[0] if self.inplace else inputs[0].copy()
+        x[:1] = 0
+        output_storage[0][0] = x
+
+
+@llvm_emit.register(ZeroFirst)
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
+    (x,) = inputs
+    out = outputs[0].overwrite(cg, x)
+    with b.if_(b.sgt(out.shape[0], 0)):
+        out.store(b, 0.0, 0)
+
+
+z = pytensor.function([x], ZeroFirst()(x), mode=STRICT)
+np.testing.assert_array_equal(z(values), [0.0, *values[1:]])
+```
+
+This emitter is already right for both versions of the op, and both copy. To let the
+in-place version skip the copy, say which output can be written over which input:
+
+```python
+from pytensor.link.llvm.codegen.function import llvm_inplace
+
+
+@llvm_inplace.register(ZeroFirst)
+def _(op, node):
+    return {0: 0} if op.inplace else {}
+```
+
+The planner then decides, node by node. It lets a node overwrite an input when the
+graph was checked for it (it has PyTensor's `DestroyHandler`, as every graph that went
+through the inplace rewrites has) and nothing else can see the memory: the value is
+not a constant and shares no memory with the node's other inputs. When it does,
+`overwrite` returns `x`'s memory and no copy is made; `allocate` would return the same
+memory, still holding `x`'s values, for emitters that read each element before writing
+it (Elemwise does that). Otherwise the output is new memory as before, so the emitter
+never needs to know.
+
+A rewrite would normally put `ZeroFirst(inplace=True)` into the graph. Here we build
+such a graph by hand:
+
+```python
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.link.llvm.program import Options, build_program
+
+graph = FunctionGraph([x], [ZeroFirst(inplace=True)(cummax(x))], clone=False)
+graph.attach_feature(DestroyHandler())
+program, stats = build_program(graph, Options(numba_fallback=False))
+print(stats.inplace)
+np.testing.assert_array_equal(program(values)[0], [0.0, *np.maximum.accumulate(values)[1:]])
+```
+
+```text
+['ZeroFirst{inplace=True}']
+```
+
+Two things to keep in mind when opting in:
+
+* `overwrite` takes the destroyed input and nothing else (anything else is an error
+  when the code is generated), and the result must be correct when the output and that
+  input are the same memory. Reading other inputs is always safe: the planner doesn't
+  grant in-place work when they might overlap.
+* Only opt in for pairs in the op's `destroy_map`; others are ignored.
+
 ### Declaring the layout of an output
 
 `llvm_layout(op, node, in_layouts)` returns the layout of each output, whether it is a
@@ -1009,7 +1101,8 @@ belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/codegen/
    `work.py`; distributions into the `SAMPLERS` table of `codegen/random.py`.
 3. Register `llvm_work` in `work.py` if one unit per output element is far off, and
    `llvm_layout` next to the emitter if an output is a view (its layout function goes
-   into `layout.py`).
+   into `layout.py`), and `llvm_inplace` if the emitter can write over an input its op
+   destroys.
 4. Add a test to `tests/link/llvm/test_ops.py` that compiles with
    `numba_fallback=False` and compares with numpy, over the dtypes, with a strided
    input and with static and unknown shapes; for a view, also with
@@ -1028,7 +1121,8 @@ Things that commonly go wrong:
   this costs nothing when the input is contiguous.
 * **A temporary inside a loop.** Each request is new memory until the task ends. Ask
   once, before the loop.
-* **Writing an input.** The planner assumes inputs are only read.
+* **Writing an input.** The planner assumes inputs are only read. The one way to write
+  over an input is through an output: `outputs[k].overwrite(cg, x)`.
 * **Declaring more than is true.** A layout is trusted. Declare `DYNAMIC` for whatever
   the op can't guarantee.
 * **Leaving an output unset.** Every output must be written, or set with `set_view` for
