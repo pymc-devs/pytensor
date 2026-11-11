@@ -13,7 +13,7 @@
 //! } PtArray;               // 40 bytes
 //!
 //! // args = inputs ++ outputs; 0 = ok
-//! int32_t kernel(PtCtx *ctx, PtArray *args, const void *config, void *frame);
+//! int32_t kernel(PtCtx *ctx, PtArray *args, const void *config);
 //! ```
 //!
 //! Each output of a kernel has a mode (`OutputMode`), fixed in the kernel's config:
@@ -141,26 +141,14 @@ pub unsafe fn slice<'a>(p: *const i64, n: usize) -> &'a [i64] {
     if n == 0 { &[] } else { unsafe { std::slice::from_raw_parts(p, n) } }
 }
 
-/// The kernel ABI: `int32 f(ctx, args, config, frame)`.
+/// The kernel ABI: `int32 f(ctx, args, config)`.
 ///
 /// Kernels use the "C-unwind" ABI: a panic in a Rust kernel (a bug, or e.g. an
 /// out-of-memory) unwinds to `Program::execute`, which turns it into an error, instead
 /// of aborting the process. Generated and numba kernels never unwind.
-pub type KernelFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, frame: *mut u8) -> i32;
-/// Numba kernels: the kernel ABI without a frame; every output is allocated.
-pub type NumbaFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32;
+pub type KernelFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32;
 /// The legacy kernel ABI: `args = [inputs..., one provided output]` and a parameter block.
 pub type LegacyFn = unsafe extern "C-unwind" fn(ctx: *mut PtCtx, args: *mut PtArray, params: *const c_void) -> i32;
-
-/// The calling convention of a task's kernel.
-#[pyclass(module = "pytensor_llvm.interp", eq, eq_int, frozen, from_py_object)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Abi {
-    /// the kernel ABI (`KernelFn`)
-    Kernel,
-    /// numba kernels (`NumbaFn`)
-    Numba,
-}
 
 /// How an output comes to be (DESIGN.md, section 3).
 #[pyclass(module = "pytensor_llvm.interp", eq, eq_int, frozen, from_py_object)]

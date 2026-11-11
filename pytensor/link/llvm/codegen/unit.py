@@ -101,10 +101,10 @@ def build_unit_function(
     fn = module.function(name, sig.param_types(), ir.i32, inline=ir.Inline.Always)
     b = fn.builder()
     params = fn.params
-    ctx, config, frame = params[:3]
-    cg = Codegen(b, ctx, config, frame, parallel=parallel, links=links, planner=planner, module=module, name=name)
+    ctx, config = params[:2]
+    cg = Codegen(b, ctx, config, parallel=parallel, links=links, planner=planner, module=module, name=name)
     vals = {}  # vid -> Array (tensors) or value (scalars)
-    k = 3
+    k = 2
     for (vid, _), r in zip(inputs, in_reprs, strict=True):
         vals[vid] = unpack(b, r, params[k])
         k += 1
@@ -135,7 +135,7 @@ def build_unit_function(
             copy(cg, src, out.allocate(src.shape))
     release(cg, owned)
     b.ret(b.i32(0))
-    return NodeFunction(fn, sig, cg.frame_size, links)
+    return NodeFunction(fn, sig, links)
 
 
 @dataclass
@@ -252,7 +252,7 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
             links=cg.links,
             planner=cg.planner,
         )
-        args = [ctx, config, _frame_part(cg, nf.frame_size)]
+        args = [ctx, config]
         present = [vid for vid, var in zip(item.inputs, node.inputs, strict=True) if not is_absent(var.type)]
         for vid, r in zip(present, nsig.inputs, strict=True):
             if vid not in vals:
@@ -301,15 +301,6 @@ def emit_items(cg, module, name, items, vals, lays, targets=None, kernel_for=Non
                 var = node.outputs[item.outputs.index(vid)]
                 vals[vid] = read_slot(b, slot, var.type.dtype, list(var.type.shape), lays.get(vid))
     return written, owned
-
-
-def _frame_part(cg, nbytes):
-    """A part of the unit's frame for one inner node."""
-    if nbytes == 0:
-        return cg.b.null()
-    off = cg.frame_size
-    cg.frame_size += -(-nbytes // 64) * 64
-    return cg.b.gep_bytes(cg.frame, cg.b.i64(off))
 
 
 def _mem_type(dtype):

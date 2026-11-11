@@ -381,7 +381,7 @@ from pytensor.link.llvm.codegen import compile_node
 
 node = cummax(x).owner
 alone = compile_node(node)
-(result,) = ir.call_kernel(alone.address, [values], [(np.dtype("float64"), 1)], alone.frame_size)
+(result,) = ir.call_kernel(alone.address, [values], [(np.dtype("float64"), 1)])
 np.testing.assert_array_equal(result, [1.0, 3.0, 3.0, 5.0, 5.0])
 ```
 

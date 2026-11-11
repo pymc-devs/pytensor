@@ -1,5 +1,5 @@
 //! Rust kernels, with the kernel ABI:
-//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* config, void* frame)`.
+//! `int32 f(PtCtx*, PtArray* args /* inputs, outputs */, const void* config)`.
 //!
 //! A kernel's config holds its parameters and the mode of each output, which Python
 //! chooses per node (the kernel never infers it from the arguments).
@@ -105,7 +105,7 @@ pub struct DimShuffleConfig {
 
 /// # Safety
 /// The kernel ABI; `config` is a `DimShuffleConfig`; one input, one view output.
-pub unsafe extern "C-unwind" fn k_dimshuffle(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
+pub unsafe extern "C-unwind" fn k_dimshuffle(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
     // SAFETY: the function's contract.
     let (e, mut a) = unsafe { (&*(config as *const DimShuffleConfig), Args::new(args, 1, 1)) };
     let (shape, strides): (Vec<i64>, Vec<i64>) = e
@@ -140,7 +140,7 @@ pub struct CopyConfig {
 
 /// # Safety
 /// The kernel ABI; `config` is a `CopyConfig`.
-pub unsafe extern "C-unwind" fn k_copy(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
+pub unsafe extern "C-unwind" fn k_copy(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
     // SAFETY: the function's contract.
     let (e, mut a, c) = unsafe { (&*(config as *const CopyConfig), Args::new(args, 1, 1), &mut *ctx) };
     let r = (|| {
@@ -167,7 +167,7 @@ pub struct DotConfig {
 ///
 /// # Safety
 /// The kernel ABI; `config` is a `DotConfig`.
-pub unsafe extern "C-unwind" fn k_dot(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
+pub unsafe extern "C-unwind" fn k_dot(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
     // SAFETY: the function's contract.
     let (e, mut a, c) = unsafe { (&*(config as *const DotConfig), Args::new(args, 2, 1), &mut *ctx) };
     let r = (|| {
@@ -213,7 +213,7 @@ pub struct LegacyConfig {
 
 /// # Safety
 /// The kernel ABI; `config` is a `LegacyConfig` whose function expects these arguments.
-pub unsafe extern "C-unwind" fn k_legacy(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8, _frame: *mut u8) -> i32 {
+pub unsafe extern "C-unwind" fn k_legacy(ctx: *mut PtCtx, args: *mut PtArray, config: *const u8) -> i32 {
     // SAFETY: the function's contract.
     let (e, mut a, c) = unsafe { (&*(config as *const LegacyConfig), Args::new(args, (*(config as *const LegacyConfig)).n_in, 1), &mut *ctx) };
     let shape = a.shape(e.shape_from).to_vec();
