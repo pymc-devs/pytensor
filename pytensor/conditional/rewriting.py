@@ -17,10 +17,15 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.traversal import apply_ancestors, apply_depends_on
-from pytensor.tensor.basic import Alloc
+from pytensor.tensor.basic import Alloc, register_infer_shape
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, Dot, Max
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_specialize,
+    register_useless,
+)
 from pytensor.tensor.shape import Reshape, Shape, SpecifyShape
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor
 
@@ -510,37 +515,25 @@ def merge_sibling_ifelse(fgraph, node):
     return False
 
 
+@register_infer_shape
+@register_useless
+@register_canonicalize("fast_compile")
+@register_specialize
 @node_rewriter([IfElse])
-def cond_constant_condition(fgraph, node):
-    """Replace a conditional whose condition is a known constant by its taken branch.
-
-    Pattern::
-
-        ifelse(True, xs, ys)  # any constant condition
-
-    Replacement::
-
-        xs
-
-    The branch that is not taken is never evaluated, so it can be dropped.
-    """
+def local_useless_ifelse(fgraph, node):
+    """ifelse(True, xs, ys) -> xs and ifelse(False, xs, ys) -> ys"""
     condition = node.inputs[0]
     if not isinstance(condition, Constant):
         return False
 
     n_outs = node.op.n_outs
-    return list(
-        node.inputs[1 : 1 + n_outs] if condition.data else node.inputs[1 + n_outs :]
-    )
+    taken = node.inputs[1 : 1 + n_outs] if condition.data else node.inputs[1 + n_outs :]
+    copy_stack_trace(node.outputs, taken)
+    return list(taken)
 
 
 ifelse_simplify_db = EquilibriumDB()
-for rewrite in (
-    cond_constant_condition,
-    cond_merge_ifs_true,
-    cond_merge_ifs_false,
-    merge_sibling_ifelse,
-):
+for rewrite in (cond_merge_ifs_true, cond_merge_ifs_false, merge_sibling_ifelse):
     ifelse_simplify_db.register(
         rewrite.__name__, rewrite, "numba", "jax", "lazy_ifelse"
     )

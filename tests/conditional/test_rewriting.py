@@ -4,9 +4,8 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import function
-from pytensor.conditional.op import IfElse, LazyIfElse, ifelse
+from pytensor.conditional.op import IfElse, ifelse
 from pytensor.conditional.rewriting import cond_make_inplace, ifelse_simplify_db
-from pytensor.tensor.basic import constant
 from pytensor.tensor.type import iscalar, scalar, vector
 from tests import unittest_tools as utt
 
@@ -28,28 +27,19 @@ def test_simplify_nested_ifelse(true_branch):
 
 
 @pytest.mark.parametrize("condition", [True, False])
-def test_simplify_constant_condition(condition):
+def test_local_useless_ifelse(condition):
     x, y, z, w = (vector(name) for name in "xyzw")
-    out = ifelse(constant(condition), [x, y], [z, w])
+    out = ifelse(np.array(condition), [x, y], [z, w])
     expected = [x, y] if condition else [z, w]
-    result = utt.RewriteTester(
-        [x, y, z, w],
-        out,
-        include=None,
-        custom_rewrite=ifelse_simplify_db.query("+numba"),
-    )
+    result = utt.RewriteTester([x, y, z, w], out)
     result.assert_graph(*expected)
 
 
-def test_simplify_constant_condition_from_static_shape():
+def test_local_useless_ifelse_static_shape():
     x = vector("x", shape=(4,))
     out = ifelse(x.shape[0] >= 2, pt.exp(x), pt.log(x))
-    fn = function([x], out, mode="NUMBA")
-    ops = {type(node.op) for node in fn.maker.fgraph.apply_nodes}
-    assert IfElse not in ops
-    assert LazyIfElse not in ops
-    value = np.arange(1, 5, dtype=x.dtype)
-    np.testing.assert_allclose(fn(value), np.exp(value))
+    result = utt.RewriteTester([x], [out], include=("ShapeOpt", "canonicalize"))
+    result.assert_graph(pt.exp(x))
 
 
 @pytest.mark.parametrize(
