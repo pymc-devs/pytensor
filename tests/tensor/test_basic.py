@@ -1650,23 +1650,24 @@ class TestJoinAndSplit:
             # Test empty rolled axis (both explicit axis and axis=None) under FAST_RUN
             x_sym = matrix("x_sym", dtype="int64")
             empty_arr = np.zeros((0, 4), dtype=np.int64)
-            fn_axis0 = pytensor.function(
-                [x_sym], roll(x_sym, get_shift(3), axis=0), mode="FAST_RUN"
-            )
-            out_axis0 = fn_axis0(empty_arr)
-            assert out_axis0.shape == (0, 4)
 
-            fn_none = pytensor.function(
-                [x_sym], roll(x_sym, get_shift(-3), axis=None), mode="FAST_RUN"
+            rolled_axis0 = roll(x_sym, get_shift(3), axis=0)
+            fn_axis0 = pytensor.function([x_sym], rolled_axis0, mode="FAST_RUN")
+            np.testing.assert_array_equal(
+                fn_axis0(empty_arr), np.roll(empty_arr, 3, axis=0)
             )
-            out_none = fn_none(empty_arr)
-            assert out_none.shape == (0, 4)
+
+            rolled_none = roll(x_sym, get_shift(-3), axis=None)
+            fn_none = pytensor.function([x_sym], rolled_none, mode="FAST_RUN")
+            np.testing.assert_array_equal(
+                fn_none(empty_arr), np.roll(empty_arr, -3, axis=None)
+            )
 
             # Test 0D scalar with axis=None
-            s_out = pytensor.function(
-                [], roll(np.array(7, dtype=np.int64), get_shift(3)), mode="FAST_RUN"
-            )()
-            assert s_out.shape == () and s_out == 7
+            scalar_arr = np.array(7, dtype=np.int64)
+            rolled_scalar = roll(scalar_arr, get_shift(3))
+            s_out = pytensor.function([], rolled_scalar, mode="FAST_RUN")()
+            np.testing.assert_array_equal(s_out, np.roll(scalar_arr, 3))
 
     def test_stack_vector(self):
         a = self.shared(np.array([1, 2, 3], dtype=self.floatX))
