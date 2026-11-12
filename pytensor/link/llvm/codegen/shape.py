@@ -26,6 +26,11 @@ def _(op, node, in_layouts):
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x = inputs[0]
+    for a in (a for a in op.drop if node.inputs[0].type.shape[a] is None):
+        cg.check(
+            b.eq(x.shape[a], b.i64(1)),
+            f"DimShuffle: cannot drop axis {a} of length other than 1",
+        )
     shape, strides = [], []
     for o in op.new_order:
         if o == "x":
@@ -60,7 +65,12 @@ def _(op, node, cg, inputs, outputs):
             "int64",
         )
         cg.check(b.eq(x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
-    outputs[0].set_view(x)
+    # the output's type may know lengths the input's doesn't: its layout is declared for those
+    shape = [
+        n if s is None else b.i64(s)
+        for n, s in zip(x.shape, node.outputs[0].type.shape, strict=True)
+    ]
+    outputs[0].set_view(x.view(x.data, shape, x.strides, same_layout(node, x.layout)))
 
 
 @llvm_emit.register(DeepCopyOp)
