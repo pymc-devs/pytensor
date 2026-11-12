@@ -1357,6 +1357,16 @@ def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
     )
 
 
+@pytest.mark.parametrize("op", ["linspace", "logspace"])
+@pytest.mark.parametrize("num_samples", [0, 1, 4])
+def test_space_ops_symbolic_num(op, num_samples):
+    num = pt.lscalar("num")
+    fn = function([num], getattr(pt, op)(1, 8, num))
+    np.testing.assert_allclose(
+        fn(num_samples), getattr(np, op)(1, 8, num_samples), rtol=1e-6
+    )
+
+
 @pytest.mark.parametrize("dtype", [None, "int64"])
 def test_linspace_retstep(dtype):
     samples, step = pt.linspace(0, 1, num=3, retstep=True, dtype=dtype)
