@@ -667,6 +667,15 @@ impl<'a> OutSlot<'a> {
                 source.ndim()
             ));
         }
+        // an axis the view drops must have length 1 (the type may not say so)
+        if let Some(a) =
+            (0..source.ndim()).find(|&a| source.shape[a] != 1 && !axes.contains(&Some(a)))
+        {
+            return Err(format!(
+                "cannot drop axis {a} of length {} (not 1)",
+                source.shape[a]
+            ));
+        }
         let (shape, strides) = self.storage();
         for (k, axis) in axes.iter().enumerate() {
             shape[k] = axis.map_or(1, |axis| source.shape[axis]);

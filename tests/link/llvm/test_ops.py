@@ -566,3 +566,23 @@ def test_integer_pow(dtype):
     r = f(xs, es)
     assert r.dtype == (xs**es).dtype
     np.testing.assert_array_equal(r, xs**es)
+
+
+@pytest.mark.parametrize("unit", [False, True])
+def test_dimshuffle_checks_dropped_axes(unit):
+    # an axis the type doesn't know has length 1 is checked when it is dropped (kernel and generated code)
+    x = pt.matrix("x")
+    out = x.dimshuffle(1)
+    if unit:
+        out = OpFromGraph([x], [out * 2], execution=Execution.COMPILED)(x)
+    f = compare([x], out, [rng.random((1, 3))])
+    with pytest.raises(RuntimeError, match="cannot drop axis 0"):
+        f(np.ones((2, 3)))
+
+
+def test_specify_shape_of_length_one():
+    # the output's type knows a length (1: always packed) its input's doesn't
+    x = pt.vector("x")
+    f = compare([x], pt.specify_shape(x, 1) * 2, [rng.random(1)])
+    with pytest.raises(RuntimeError, match="wrong length"):
+        f(np.ones(2))
