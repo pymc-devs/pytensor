@@ -1600,7 +1600,9 @@ def _linspace_core(
     step = delta / div
     samples = switch(gt(div, 0), samples * delta / div + start, samples * delta + start)
     if endpoint:
-        samples = switch(gt(num, 1), set_subtensor(samples[-1, ...], stop), samples)
+        # A mask instead of ``set_subtensor(samples[-1])``, which fails when num == 0
+        is_last = pt_eq(ptb.shape_padright(ptb.arange(0, num), delta.ndim), num - 1)
+        samples = switch(is_last & gt(num, 1), stop, samples)
 
     if axis != 0:
         samples = ptb.moveaxis(samples, 0, axis)
