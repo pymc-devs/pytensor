@@ -172,15 +172,15 @@ class ScanProfileStats(ProfileStats):
 def expand_empty(tensor_var, size, new_dim: bool = False):
     """
     Transforms the shape of a tensor from (d1, d2 ... ) to
-    (size, d1, d2, ...) if new_dim else (d1 + size, d2, ...)
+    (1 + size, d1, d2, ...) if new_dim else (d1 + size, d2, ...)
     by adding uninitialized memory at the end of the tensor.
     """
 
-    if size == 0:
+    if size == 0 and not new_dim:
         return tensor_var
     shapes = tuple(tensor_var.shape)
     if new_dim:
-        new_shape = (size, *shapes)
+        new_shape = (1 + size, *shapes)
     else:
         new_shape = (size + shapes[0], *shapes[1:])
     empty = AllocEmpty(tensor_var.dtype)(*new_shape)

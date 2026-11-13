@@ -21,6 +21,7 @@ Modules
    d3viz/index
    graph/index
    gradient
+   looping
    printing
    scan
    sparse/index
@@ -52,6 +53,8 @@ Graph
 
 Control flow
 ============
+
+.. autofunction:: pytensor.looping.loop
 
 .. autofunction:: pytensor.scan(...)
 

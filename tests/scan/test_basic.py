@@ -3929,6 +3929,7 @@ def test_rng_outputs_info():
     np.testing.assert_allclose(xs_eval, xs_ref[1:])
 
 
+@pytest.mark.filterwarnings("ignore:pytensor.scan is deprecated:DeprecationWarning")
 @pytest.mark.filterwarnings("error")
 def test_return_updates_api_change():
     err_msg = "return_updates=False but Scan produced updates"
