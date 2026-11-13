@@ -41,6 +41,8 @@ class HasInnerFunction(HasInnerGraph):
 
     def link_mode(self, impl: str | None) -> Mode:
         """The `Mode` to link the inner function with, given a thunk ``impl``."""
+        if impl == "numba":
+            return link_only_mode("numba")
         return link_only_mode("cvm" if impl == "c" else "vm")
 
     def link_fgraph(self, fgraph: FunctionGraph, mode: Mode) -> "Function":
