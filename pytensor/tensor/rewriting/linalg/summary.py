@@ -27,6 +27,7 @@ from pytensor.tensor.linalg.decomposition.svd import SVD
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet, det
 from pytensor.tensor.math import Prod, log, prod, sqr
+from pytensor.tensor.property_inference import is_provably_non_negative
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -38,7 +39,6 @@ from pytensor.tensor.rewriting.linalg.utils import (
     permutation_indices_to_det_sign,
     strip_left_expand_dims_and_transpose,
 )
-from pytensor.tensor.subtensor import _is_provably_non_negative
 
 
 @register_stabilize
@@ -53,7 +53,7 @@ def local_log_prod_to_sum_log(fgraph, node):
             # returns the sign of the prod multiplication.
 
             # TODO: The product of diagonals of a Cholesky(A) are also strictly positive
-            if _is_provably_non_negative(x):
+            if is_provably_non_negative(x):
                 return [log(x).sum(axis=axis)]
 
         # Special case for log(abs(prod(x))) -> sum(log(abs(x))) that shows up in slogdet
