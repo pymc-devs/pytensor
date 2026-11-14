@@ -397,6 +397,18 @@ class OpFromGraph(HasInnerFunction, Op):
         self._frozen_lop = None
         self._frozen_rop = None
 
+    def __getstate__(self):
+        # The pullback and pushforward caches hold closures built per gradient call
+        # (`_build_and_cache_lop_op`), which pickle cannot serialize: an OpFromGraph
+        # stopped being picklable as soon as a gradient had been taken through it. The
+        # cached pullback can also capture an op equal to this one, so a pickler that
+        # does handle the closure cannot necessarily load it back. Both are derived
+        # state, rebuilt on demand, so leave them out and start empty after unpickling.
+        state = self.__dict__.copy()
+        state["_lop_op_cache"] = {}
+        state["_rop_op_cache"] = None
+        return state
+
     # Thread-safe guard against infinite recursion when freezing overrides.
     # When True, __eq__ skips override comparison entirely.
     _freezing_overrides = contextvars.ContextVar(
