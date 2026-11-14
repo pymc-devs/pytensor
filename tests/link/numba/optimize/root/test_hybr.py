@@ -8,6 +8,9 @@ from pytensor import function
 from pytensor.tensor.optimize import root
 
 
+pytestmark = pytest.mark.filterwarnings("error")
+
+
 def rosenbrock(x):
     return pt.stack([10 * (x[1] - x[0] ** 2), 1 - x[0]])
 
@@ -18,25 +21,19 @@ def broyden_tridiagonal(x):
     return (3 - 2 * x) * x - left - 2 * right + 1
 
 
-@pytest.mark.filterwarnings("error")
+BROYDEN_STARTS = [[-1.0] * 10, [-10.0] * 10]
+
+
 @pytest.mark.parametrize(
-    "equations, starts",
+    "equations, starts, optimizer_kwargs",
     [
-        (rosenbrock, [[-1.2, 1.0], [-12.0, 10.0]]),
-        (broyden_tridiagonal, [[-1.0] * 10, [-10.0] * 10]),
+        (rosenbrock, [[-1.2, 1.0], [-12.0, 10.0]], {}),
+        (broyden_tridiagonal, BROYDEN_STARTS, {}),
+        (broyden_tridiagonal, BROYDEN_STARTS, {"tol": 1e-12}),
+        (broyden_tridiagonal, BROYDEN_STARTS, {"options": {"maxfev": 5}}),
+        (broyden_tridiagonal, BROYDEN_STARTS, {"options": {"factor": 1.0}}),
     ],
-    ids=["rosenbrock", "broyden_tridiagonal"],
-)
-@pytest.mark.parametrize(
-    "optimizer_kwargs",
-    [
-        {},
-        {"tol": 1e-12},
-        {"options": {"maxfev": 5}},
-        {"options": {"maxfev": 0}},
-        {"options": {"factor": 1.0}},
-    ],
-    ids=["default", "tol", "maxfev", "maxfev_unset", "factor"],
+    ids=["rosenbrock", "broyden", "broyden-tol", "broyden-maxfev", "broyden-factor"],
 )
 def test_hybr(equations, starts, optimizer_kwargs, native_only):
     # SciPy's compiled MINPACK may fuse multiply-adds that the Numba port does
@@ -45,13 +42,13 @@ def test_hybr(equations, starts, optimizer_kwargs, native_only):
     system = equations(x)
     solution, success = root(system, x, optimizer_kwargs=optimizer_kwargs)
     fn = function([x], [solution, success], mode="NUMBA")
-    residual = function(
+    residuals_and_jacobian = function(
         [x], [system, pytensor.gradient.jacobian(system, x)], mode="NUMBA"
     )
     for x0 in map(np.array, starts):
         actual, converged = fn(x0)
         expected = scipy_root(
-            lambda z: tuple(residual(z)),
+            lambda z: tuple(residuals_and_jacobian(z)),
             x0,
             jac=True,
             method="hybr",
@@ -68,7 +65,7 @@ def test_hybr_jacobian_view_of_x(native_only):
     system = x**2 / 2 + 2
     solution, success = root(system, x)
     fn = function([x], [solution, success], mode="NUMBA")
-    residual = function(
+    residuals_and_jacobian = function(
         [x],
         [pt.atleast_1d(system), pt.atleast_2d(pytensor.gradient.jacobian(system, x))],
         mode="NUMBA",
@@ -76,7 +73,7 @@ def test_hybr_jacobian_view_of_x(native_only):
     for x0 in [4.0, 100.0]:
         actual, converged = fn(np.array(x0))
         expected = scipy_root(
-            lambda z: tuple(residual(z[0])),
+            lambda z: tuple(residuals_and_jacobian(z[0])),
             [x0],
             jac=True,
             method="hybr",

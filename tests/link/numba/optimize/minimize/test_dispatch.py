@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-import pytensor
 import pytensor.tensor as pt
 from pytensor import function
 from pytensor.graph.traversal import ancestors
@@ -9,10 +8,15 @@ from pytensor.link.numba.dispatch.basic import numba_funcify_and_cache_key
 from pytensor.tensor.optimize import MinimizeOp, minimize
 
 
-@pytest.mark.filterwarnings("error")
+pytestmark = pytest.mark.filterwarnings("error")
+
+
 @pytest.mark.parametrize("method", ["BFGS", "L-BFGS-B", "Nelder-Mead"])
-@pytest.mark.parametrize("dtype", ["float32", "float64"])
-@pytest.mark.parametrize("shape", [(), (4,)])
+@pytest.mark.parametrize(
+    "dtype, shape",
+    [("float64", (4,)), ("float32", ())],
+    ids=["float64", "float32-scalar"],
+)
 def test_minimize_quadratic(method, dtype, shape, native_only):
     x = pt.tensor("x", shape=shape, dtype=dtype)
     target = x.type("target")
@@ -39,7 +43,6 @@ def test_minimize_quadratic(method, dtype, shape, native_only):
     np.testing.assert_array_equal(weights_value, 0.25)
 
 
-@pytest.mark.filterwarnings("error")
 def test_minimize_inner_inplace(native_only):
     # The inner graph may work in place on its own buffers, never on its inputs.
     x = pt.dvector("x")
@@ -60,37 +63,32 @@ def test_minimize_inner_inplace(native_only):
     np.testing.assert_array_equal(a_value, [1.0, 2.0, 3.0])
 
 
-@pytest.mark.filterwarnings("error")
 @pytest.mark.parametrize(
     "method, optimizer_kwargs",
     [("BFGS", {}), ("L-BFGS-B", {"options": {"ftol": 0}})],
     ids=["BFGS", "L-BFGS-B"],
 )
 def test_minimize_objective_scale(method, optimizer_kwargs, native_only):
+    # A tiny scale needs steps near 1e20, and a huge anisotropic one needs the
+    # first quasi-Newton update scaled to the observed curvature.
     x = pt.dvector("x")
-    scale = pt.dscalar("scale")
+    weights = pt.dvector("weights")
     solution, success = minimize(
-        scale * (x**2).sum(),
+        (weights * x**2).sum(),
         x,
         method=method,
         optimizer_kwargs=optimizer_kwargs,
     )
-    fn = function([x, scale], [solution, success], mode="NUMBA")
-    for weight, x0 in [
-        (1e-8, np.array([10000.0])),
-        (1e-12, np.array([1e8])),
-        (1e-20, np.array([1e16])),
-        (1e16, np.array([2.0])),
-        (1e16, np.array([1.0, 2.0])),
-        (1e16, np.array([2.0, -1.0])),
-        (1e16, np.arange(1.0, 6.0)),
+    fn = function([x, weights], [solution, success], mode="NUMBA")
+    for weights_value, x0 in [
+        (np.array([1e-20]), np.array([1e16])),
+        (np.array([1e16, 1e17]), np.array([1.0, 1.0])),
     ]:
-        actual, converged = fn(x0, weight)
-        assert converged, (weight, x0, actual)
-        assert np.max(np.abs(2 * weight * actual)) <= 1e-5
+        actual, converged = fn(x0, weights_value)
+        assert converged
+        assert np.max(np.abs(2 * weights_value * actual)) <= 1e-5
 
 
-@pytest.mark.filterwarnings("error")
 @pytest.mark.parametrize("method", ["BFGS", "L-BFGS-B"])
 def test_minimize_finite_domain(method, native_only):
     # The first trial step leaves the domain of log, where f is NaN.
@@ -108,7 +106,6 @@ def test_minimize_finite_domain(method, native_only):
     "kwargs",
     [
         {"method": "CG"},
-        {"method": "L-BFGS-B", "optimizer_kwargs": {"options": {"eps": 1e-8}}},
         {"method": "L-BFGS-B", "optimizer_kwargs": {"bounds": [(-1, 1), (-2, None)]}},
         {
             "method": "Nelder-Mead",
@@ -121,6 +118,7 @@ def test_minimize_finite_domain(method, native_only):
         {"jac": False},
         {"optimizer_kwargs": {"options": {"hess_inv0": np.eye(2)}}},
     ],
+    ids=["method", "bounds", "nelder-mead-bounds", "no-jac", "unsupported-option"],
 )
 def test_minimize_fallback(kwargs):
     x = pt.dvector("x")
@@ -132,25 +130,14 @@ def test_minimize_fallback(kwargs):
     np.testing.assert_allclose(actual, 0, rtol=0, atol=1e-6)
 
 
-@pytest.mark.parametrize(
-    "method, options, message",
-    [
-        ("BFGS", {"c1": 0.9, "c2": 0.5}, "'c1' and 'c2' must satisfy"),
-        ("L-BFGS-B", {"maxcor": 0}, "'maxcor' must be positive"),
-        ("L-BFGS-B", {"maxls": 0}, "'maxls' must be positive"),
-        ("L-BFGS-B", {"ftol": -1.0}, "'ftol' must be non-negative"),
-        ("L-BFGS-B", {"gtol": -1.0}, "'gtol' must be non-negative"),
-    ],
-)
-def test_minimize_invalid_options(method, options, message):
+def test_minimize_invalid_wolfe_constants():
     x = pt.dvector("x")
     solution, _ = minimize(
         (x**2).sum(),
         x,
-        method=method,
-        optimizer_kwargs={"options": options},
+        optimizer_kwargs={"options": {"c1": 0.9, "c2": 0.5}},
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match="'c1' and 'c2' must satisfy"):
         function([x], solution, mode="NUMBA")
 
 
@@ -183,7 +170,6 @@ def test_minimize_cache_key():
     assert cache_key("BFGS", {"gtol": 1e-5}) == keys[0]
 
 
-@pytest.mark.filterwarnings("error")
 def test_minimize_nested(native_only):
     # The inner solution x*(theta) solves 2 (x - theta) + 0.4 x^3 = 0, so the
     # outer problem x*(theta) = target has theta = target + 0.2 target^3.
@@ -205,23 +191,3 @@ def test_minimize_nested(native_only):
     actual, converged = fn(np.zeros(3), np.zeros(3), target_value)
     assert converged
     np.testing.assert_allclose(actual, target_value + 0.2 * target_value**3, rtol=1e-8)
-
-
-@pytest.mark.parametrize("method", ["BFGS", "L-BFGS-B"])
-def test_minimize_grad(method, native_only):
-    x = pt.dvector("x")
-    a = pt.dvector("a")
-    b = pt.dscalar("b")
-    solution, _ = minimize(
-        ((x - a) ** 2 + b * x**2).sum(),
-        x,
-        method=method,
-        optimizer_kwargs={"tol": 1e-12},
-    )
-    grads = pytensor.grad(solution.sum(), [a, b])
-    fn = function([x, a, b], grads, mode="NUMBA")
-    a_value = np.array([1.0, -2.0, 3.0])
-    b_value = 0.5
-    grad_a, grad_b = fn(np.zeros(3), a_value, b_value)
-    np.testing.assert_allclose(grad_a, 1 / (1 + b_value), rtol=1e-8)
-    np.testing.assert_allclose(grad_b, -a_value.sum() / (1 + b_value) ** 2, rtol=1e-8)

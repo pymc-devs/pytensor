@@ -8,7 +8,9 @@ from pytensor import function
 from pytensor.tensor.optimize import minimize
 
 
-@pytest.mark.filterwarnings("error")
+pytestmark = pytest.mark.filterwarnings("error")
+
+
 @pytest.mark.parametrize(
     "jac, optimizer_kwargs",
     [
@@ -41,7 +43,6 @@ def test_nelder_mead(jac, optimizer_kwargs, native_only):
         np.testing.assert_allclose(actual, expected.x, rtol=0, atol=1e-12)
 
 
-@pytest.mark.filterwarnings("error")
 def test_nelder_mead_nan_objective(native_only):
     # Starting at x[0] = 0.99, the initial simplex steps x[0] to 1.04, where log
     # is NaN. That vertex must sort last, as NumPy sorts NaN.

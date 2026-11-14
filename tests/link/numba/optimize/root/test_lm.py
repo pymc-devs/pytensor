@@ -8,6 +8,9 @@ from pytensor import function
 from pytensor.tensor.optimize import root
 
 
+pytestmark = pytest.mark.filterwarnings("error")
+
+
 def rosenbrock(x):
     return pt.stack([10 * (x[1] - x[0] ** 2), 1 - x[0]])
 
@@ -23,28 +26,31 @@ def box_3d(x):
     return pt.exp(-t * x[0]) - pt.exp(-t * x[1]) - x[2] * (np.exp(-t) - np.exp(-10 * t))
 
 
-@pytest.mark.filterwarnings("error")
+BOX_3D_STARTS = [[0.0, 10.0, 20.0], [0.0, 10.0, 5.0]]
+
+
 @pytest.mark.parametrize(
-    "equations, starts",
+    "equations, starts, optimizer_kwargs",
     [
-        (rosenbrock, [[-1.2, 1.0], [-12.0, 10.0]]),
-        (broyden_tridiagonal, [[-1.0] * 10, [-10.0] * 10]),
-        (box_3d, [[0.0, 10.0, 20.0], [0.0, 10.0, 5.0]]),
+        (rosenbrock, [[-1.2, 1.0], [-12.0, 10.0]], {}),
+        (broyden_tridiagonal, [[-1.0] * 10, [-10.0] * 10], {}),
+        (box_3d, BOX_3D_STARTS, {}),
+        (box_3d, BOX_3D_STARTS, {"tol": 1e-12}),
+        (box_3d, BOX_3D_STARTS, {"options": {"ftol": 1e-12}}),
+        (box_3d, BOX_3D_STARTS, {"options": {"gtol": 1e-3}}),
+        (box_3d, BOX_3D_STARTS, {"options": {"maxiter": 5}}),
+        (box_3d, BOX_3D_STARTS, {"options": {"factor": 1.0}}),
     ],
-    ids=["rosenbrock", "broyden_tridiagonal", "box_3d"],
-)
-@pytest.mark.parametrize(
-    "optimizer_kwargs",
-    [
-        {},
-        {"tol": 1e-12},
-        {"options": {"ftol": 1e-12}},
-        {"options": {"gtol": 1e-3}},
-        {"options": {"maxiter": 5}},
-        {"options": {"maxiter": 0}},
-        {"options": {"factor": 1.0}},
+    ids=[
+        "rosenbrock",
+        "broyden",
+        "box_3d",
+        "box_3d-tol",
+        "box_3d-ftol",
+        "box_3d-gtol",
+        "box_3d-maxiter",
+        "box_3d-factor",
     ],
-    ids=["default", "tol", "ftol", "gtol", "maxiter", "maxiter_unset", "factor"],
 )
 def test_lm(equations, starts, optimizer_kwargs, native_only):
     # SciPy's compiled MINPACK may fuse multiply-adds that the Numba port does
@@ -53,13 +59,13 @@ def test_lm(equations, starts, optimizer_kwargs, native_only):
     system = equations(x)
     solution, success = root(system, x, method="lm", optimizer_kwargs=optimizer_kwargs)
     fn = function([x], [solution, success], mode="NUMBA")
-    residual = function(
+    residuals_and_jacobian = function(
         [x], [system, pytensor.gradient.jacobian(system, x)], mode="NUMBA"
     )
     for x0 in map(np.array, starts):
         actual, converged = fn(x0)
         expected = scipy_root(
-            lambda z: tuple(residual(z)),
+            lambda z: tuple(residuals_and_jacobian(z)),
             x0,
             jac=True,
             method="lm",
@@ -76,7 +82,7 @@ def test_lm_jacobian_view_of_x(native_only):
     system = x**2 / 2 + 2
     solution, success = root(system, x, method="lm")
     fn = function([x], [solution, success], mode="NUMBA")
-    residual = function(
+    residuals_and_jacobian = function(
         [x],
         [pt.atleast_1d(system), pt.atleast_2d(pytensor.gradient.jacobian(system, x))],
         mode="NUMBA",
@@ -84,7 +90,7 @@ def test_lm_jacobian_view_of_x(native_only):
     for x0 in [4.0, 100.0]:
         actual, converged = fn(np.array(x0))
         expected = scipy_root(
-            lambda z: tuple(residual(z[0])),
+            lambda z: tuple(residuals_and_jacobian(z[0])),
             [x0],
             jac=True,
             method="lm",

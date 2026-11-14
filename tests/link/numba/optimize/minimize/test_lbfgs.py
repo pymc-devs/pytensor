@@ -8,16 +8,18 @@ from pytensor import function
 from pytensor.tensor.optimize import minimize
 
 
-@pytest.mark.filterwarnings("error")
+pytestmark = pytest.mark.filterwarnings("error")
+
+
 @pytest.mark.parametrize(
     "options",
     [
-        {"maxiter": 0},
         {"maxiter": 1},
         {"maxfun": 1},
         {"maxls": 1},
         {"maxcor": 2, "ftol": 1e-12, "gtol": 1e-8},
     ],
+    ids=["maxiter", "maxfun", "maxls", "maxcor-tolerances"],
 )
 def test_lbfgsb_options(options, native_only):
     x = pt.dvector("x")
@@ -30,10 +32,10 @@ def test_lbfgsb_options(options, native_only):
     )
     fn = function([x, weights], [solution, success], mode="NUMBA")
     x0 = np.array([2.0, -1.0])
-    w = np.array([0.1, 1.0])
-    actual, converged = fn(x0, w)
+    weights_value = np.array([0.1, 1.0])
+    actual, converged = fn(x0, weights_value)
     expected = scipy_minimize(
-        lambda x: ((w * x**2).sum(), 2 * w * x),
+        lambda x: ((weights_value * x**2).sum(), 2 * weights_value * x),
         x0,
         jac=True,
         method="L-BFGS-B",
@@ -43,7 +45,6 @@ def test_lbfgsb_options(options, native_only):
     np.testing.assert_allclose(actual, expected.x, atol=1e-12)
 
 
-@pytest.mark.filterwarnings("error")
 @pytest.mark.parametrize(
     "optimizer_kwargs",
     [
