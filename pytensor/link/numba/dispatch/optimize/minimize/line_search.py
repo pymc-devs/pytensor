@@ -38,6 +38,13 @@ CONVERGED, WARNING, FAILED = 0, 1, 2
 
 
 @numba_njit(fastmath=False, inline="always")
+def _evaluate_step(evaluate, x, p, args, alpha, trial_x):
+    for j in range(x.size):
+        trial_x[j] = x[j] + alpha * p[j]
+    return evaluate(trial_x, *args)
+
+
+@numba_njit(fastmath=False, inline="always")
 def _dcsrch(
     evaluate,
     x,
@@ -69,9 +76,7 @@ def _dcsrch(
         # through _dcstep's IEEE arithmetic, which steps back inside the domain.
         if not np.isfinite(alpha):
             return 0.0, f0, g0, FAILED, evaluation
-        for j in range(x.size):
-            trial_x[j] = x[j] + alpha * p[j]
-        f, g = evaluate(trial_x, *args)
+        f, g = _evaluate_step(evaluate, x, p, args, alpha, trial_x)
         d = np.dot(g, p)
         ftest = f0 + alpha * gtest
         if f <= ftest and abs(d) <= -c2 * d0:
@@ -231,3 +236,135 @@ def _dcstep(stx, fx, dx, sty, fy, dy, stp, fp, dp, brackt, stpmin, stpmax):
         dx = dp
     stp = stpf
     return (stx, fx, dx, sty, fy, dy, stp, brackt)
+
+
+# Ports of SciPy's _cubicmin, _quadmin, _zoom and scalar_search_wolfe2
+# (scipy/optimize/_linesearch.py). NaN stands in for SciPy's None. The numpy
+# error model turns SciPy's ArithmeticError cases into non-finite results,
+# which the isfinite checks reject the same way.
+@numba_njit(fastmath=False, error_model="numpy")
+def _cubicmin(a, fa, fpa, b, fb, c, fc):
+    db = b - a
+    dc = c - a
+    denom = (db * dc) ** 2 * (db - dc)
+    t0 = fb - fa - fpa * db
+    t1 = fc - fa - fpa * dc
+    cubic = (dc**2 * t0 - db**2 * t1) / denom
+    quadratic = (db**3 * t1 - dc**3 * t0) / denom
+    radical = quadratic * quadratic - 3 * cubic * fpa
+    xmin = a + (-quadratic + np.sqrt(radical)) / (3 * cubic)
+    return xmin if np.isfinite(xmin) else np.nan
+
+
+@numba_njit(fastmath=False, error_model="numpy")
+def _quadmin(a, fa, fpa, b, fb):
+    db = b - a
+    curvature = (fb - fa - fpa * db) / (db * db)
+    xmin = a - fpa / (2.0 * curvature)
+    return xmin if np.isfinite(xmin) else np.nan
+
+
+@numba_njit(fastmath=False, inline="always")
+def _zoom(
+    evaluate,
+    x,
+    p,
+    args,
+    a_lo,
+    a_hi,
+    phi_lo,
+    phi_hi,
+    derphi_lo,
+    f0,
+    d0,
+    g0,
+    c1,
+    c2,
+    trial_x,
+):
+    phi_rec, a_rec = f0, 0.0
+    # SciPy's zoom evaluates until i > maxiter, with maxiter = 10.
+    for i in range(11):
+        dalpha = a_hi - a_lo
+        a, b = (a_hi, a_lo) if dalpha < 0 else (a_lo, a_hi)
+        a_j = np.nan
+        if i > 0:
+            cchk = 0.2 * dalpha
+            a_j = _cubicmin(a_lo, phi_lo, derphi_lo, a_hi, phi_hi, a_rec, phi_rec)
+            if a_j > b - cchk or a_j < a + cchk:
+                a_j = np.nan
+        if np.isnan(a_j):
+            qchk = 0.1 * dalpha
+            a_j = _quadmin(a_lo, phi_lo, derphi_lo, a_hi, phi_hi)
+            if np.isnan(a_j) or a_j > b - qchk or a_j < a + qchk:
+                a_j = a_lo + 0.5 * dalpha
+
+        f, g = _evaluate_step(evaluate, x, p, args, a_j, trial_x)
+        if f > f0 + c1 * a_j * d0 or f >= phi_lo:
+            phi_rec, a_rec = phi_hi, a_hi
+            a_hi, phi_hi = a_j, f
+        else:
+            d = np.dot(g, p)
+            if abs(d) <= -c2 * d0:
+                return a_j, f, g, True
+            if d * (a_hi - a_lo) >= 0:
+                phi_rec, a_rec = phi_hi, a_hi
+                a_hi, phi_hi = a_lo, phi_lo
+            else:
+                phi_rec, a_rec = phi_lo, a_lo
+            a_lo, phi_lo, derphi_lo = a_j, f, d
+
+    return 0.0, f0, g0, False
+
+
+@numba_njit(fastmath=False, inline="always")
+def _line_search_wolfe2(evaluate, x, p, args, f0, g0, d0, alpha, c1, c2, trial_x):
+    alpha0, alpha1 = 0.0, alpha
+    phi_a0, derphi_a0 = f0, d0
+    f, g = _evaluate_step(evaluate, x, p, args, alpha1, trial_x)
+    for i in range(10):
+        if f > f0 + c1 * alpha1 * d0 or (f >= phi_a0 and i > 0):
+            return _zoom(
+                evaluate,
+                x,
+                p,
+                args,
+                alpha0,
+                alpha1,
+                phi_a0,
+                f,
+                derphi_a0,
+                f0,
+                d0,
+                g0,
+                c1,
+                c2,
+                trial_x,
+            )
+        d = np.dot(g, p)
+        if abs(d) <= -c2 * d0:
+            return alpha1, f, g, True
+        if d >= 0:
+            return _zoom(
+                evaluate,
+                x,
+                p,
+                args,
+                alpha1,
+                alpha0,
+                f,
+                phi_a0,
+                d,
+                f0,
+                d0,
+                g0,
+                c1,
+                c2,
+                trial_x,
+            )
+        alpha0, alpha1 = alpha1, min(2 * alpha1, 1e100)
+        phi_a0, derphi_a0 = f, d
+        f, g = _evaluate_step(evaluate, x, p, args, alpha1, trial_x)
+
+    # SciPy accepts the last trial step when the doubling phase runs out.
+    return alpha1, f, g, True
