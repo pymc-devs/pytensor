@@ -3639,7 +3639,7 @@ class TestExtractDiag:
             ).all()
 
     @pytest.mark.parametrize("axis1, axis2", [(0, 1), (1, 0)])
-    @pytest.mark.parametrize("offset", (0, 1, -1))
+    @pytest.mark.parametrize("offset", (0, 1, -1, 2, -2))
     def test_grad_2d(self, offset, axis1, axis2):
         diag_fn = ExtractDiag(offset=offset, axis1=axis1, axis2=axis2)
         rng = np.random.default_rng(utt.fetch_seed())
@@ -3657,7 +3657,7 @@ class TestExtractDiag:
             (2, 0),
         ],
     )
-    @pytest.mark.parametrize("offset", (0, 1, -1))
+    @pytest.mark.parametrize("offset", (0, 1, -1, 2, -2))
     def test_grad_3d(self, offset, axis1, axis2):
         diag_fn = ExtractDiag(offset=offset, axis1=axis1, axis2=axis2)
         rng = np.random.default_rng(utt.fetch_seed())

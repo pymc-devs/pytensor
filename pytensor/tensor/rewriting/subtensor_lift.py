@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
+from pytensor.assumptions import DIAGONAL, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import (
     Constant,
@@ -26,27 +27,33 @@ from pytensor.tensor.basic import (
     Join,
     MakeVector,
     alloc,
+    alloc_diag,
     arange,
     as_tensor,
+    diagonal,
     expand_dims,
     get_underlying_scalar_constant_value,
     join,
     register_infer_shape,
 )
+from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
-from pytensor.tensor.math import Dot, dot, minimum
+from pytensor.tensor.math import Dot, dot, maximum, minimum
 from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
     get_simplified_broadcast_shape,
+    get_simplified_shape,
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.rewriting.subtensor import (
+    _canonical_indexing,
+    _has_one_distinct_client,
     _index_provably_unique,
     _indices_jointly_unique,
     local_adv_idx_to_diagonal,
@@ -74,88 +81,8 @@ from pytensor.tensor.subtensor import (
     indexed_result_shape,
     indices_from_subtensor,
 )
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import TensorType, values_eq_approx_remove_nan
 from pytensor.tensor.variable import TensorConstant, TensorVariable
-
-
-def _canonical_indexing(var, indices, drop_broadcasted_index=False):
-    """Index ``var``, squeezing indexed broadcast dims whose index has size 1.
-
-    On a length-1 dim only zero is a valid index, so the index is
-    redundant — squeezing is equivalent and simpler.  If squeezed
-    indices contributed unique output dimensions, those are reinserted
-    via ``expand_dims`` after indexing.
-
-    When ``drop_broadcasted_index`` is set, the index is neutralized on *every*
-    broadcast dim: a size>1 advanced index that would otherwise expand the dim is
-    dropped, and a slice that would otherwise shrink it (e.g. ``[1:]`` -> size 0)
-    is replaced by a full slice. This keeps ``var`` small at the cost of an
-    under-broadcast result; the caller must broadcast it back to the full shape.
-    """
-    squeeze_axes = []
-    kept_indices = []
-    max_drop_ndim = 0
-    max_kept_ndim = 0
-    first_adv_axis = None
-    for axis, (bcast, idx) in enumerate(
-        zip(var.type.broadcastable, indices, strict=False)
-    ):
-        if isinstance(idx, slice):
-            if bcast and drop_broadcasted_index:
-                # Slicing a length-1 dim can shrink it (e.g. [1:] -> size 0);
-                # leave it untouched and let the caller broadcast it back.
-                kept_indices.append(slice(None))
-            else:
-                kept_indices.append(idx)
-        else:
-            if first_adv_axis is None:
-                first_adv_axis = axis
-
-            # np.ndim works for all supported cases: int, numpy arrays, pytensor variables
-            idx_ndim = np.ndim(idx)
-            if bcast:
-                if drop_broadcasted_index:
-                    drop_idx = True
-                else:
-                    match idx:
-                        case Variable():
-                            drop_idx = all(idx.type.broadcastable)
-                        case np.ndarray():
-                            drop_idx = idx.size == 1
-                        case int() | np.integer():
-                            drop_idx = True
-                        case _:
-                            raise AssertionError
-
-                # idx only contributes dummy dimensions (if any), not actual shape
-                # It doesn't really matter what the index was, only valid values are zeros.
-                if drop_idx:
-                    max_drop_ndim = max(max_drop_ndim, idx_ndim)
-                    squeeze_axes.append(axis)
-                    continue
-
-            max_kept_ndim = max(max_kept_ndim, idx_ndim)
-            kept_indices.append(idx)
-
-    # Remove useless trailing slice(None) indices
-    while kept_indices and kept_indices[-1] == slice(None):
-        kept_indices.pop()
-
-    result = var
-
-    if squeeze_axes:
-        result = result.squeeze(axis=tuple(squeeze_axes))
-
-    if kept_indices:
-        result = result[tuple(kept_indices)]
-
-    if (lost := max_drop_ndim - max_kept_ndim) > 0:
-        assert first_adv_axis is not None
-        result = expand_dims(
-            result, tuple(range(first_adv_axis, first_adv_axis + lost))
-        )
-
-    return result
 
 
 def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]:
@@ -302,7 +229,7 @@ def local_subtensor_of_dot(fgraph, node):
         return
     # If there is other node that use the outputs of the dot
     # We don't want to compute twice the sub part.
-    if len(fgraph.clients[x]) > 1:
+    if not _has_one_distinct_client(fgraph, x):
         return
 
     a = x.owner.inputs[0]
@@ -369,14 +296,14 @@ def local_advanced_subtensor_of_dot(fgraph, node):
     x, *idx_vars = node.inputs
 
     match x.owner_op:
-        case Dot() | Blockwise(Dot()):
+        case Dot() | Dot22() | Blockwise(Dot()):
             pass
         case _:
             return None
 
-    # If the product feeds other clients it is materialized anyway, so pushing the
+    # If the product feeds a distinct client it is materialized anyway, so pushing the
     # index into the operands would only add work.
-    if len(fgraph.clients[x]) > 1:
+    if not _has_one_distinct_client(fgraph, x):
         return None
 
     ndim = x.type.ndim
@@ -454,8 +381,11 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
-    if len(fgraph.clients[elem]) > 1:
-        # Elemwise output is used beyond the Subtensor.
+    if len(elem.owner.outputs) > 1:
+        return None
+
+    if not _has_one_distinct_client(fgraph, elem):
+        # Elemwise output has a client that reads something else.
         # Get out to avoid repeated computations
         return None
 
@@ -924,6 +854,8 @@ def _diag_indices(ndim, a1, a2, d, row_off, col_off):
     return idxs
 
 
+@register_canonicalize
+@register_stabilize
 @node_rewriter([ExtractDiag])
 def local_extract_diag_of_alloc_diag(fgraph, node):
     """Short-circuit ``extract_diag(alloc_diag(v, ..., k_alloc), offset)``.
@@ -933,7 +865,7 @@ def local_extract_diag_of_alloc_diag(fgraph, node):
     - ``offset == k_alloc``: full match ``->`` ``v``
     - ``offset != k_alloc``: no overlap ``->`` ``alloc(0, ..., d)`` along the
       read diagonal of the synthesized ``(L+|k_alloc|, L+|k_alloc|)`` matrix
-      where ``d = L + |k_alloc| - |offset|``
+      where ``d = max(L + |k_alloc| - |offset|, 0)``
     """
     inner = node.inputs[0]
     if not isinstance(inner.owner_op, AllocDiag):
@@ -950,6 +882,7 @@ def local_extract_diag_of_alloc_diag(fgraph, node):
         s if s is not None else v.shape[i] for i, s in enumerate(v.type.shape)
     )
     d = v_shape[-1] + abs(diag_op.offset) - abs(op.offset)
+    d = max(d, 0) if isinstance(d, int) else maximum(d, 0)
     out = alloc(np.asarray(0, dtype=v.dtype), *v_shape[:-1], d)
     copy_stack_trace(node.outputs[0], out)
     return [out]
@@ -979,6 +912,60 @@ def local_extract_diag_of_eye(fgraph, node):
     return [out]
 
 
+def _elemwise_of_diagonals(elemwise_out, *, fgraph):
+    """Rebuild the main diagonal of ``elemwise_out`` as the ``Elemwise`` of its inputs' diagonals.
+
+    The diagonal runs over the last two axes. An input broadcast along one of them is a
+    line of values along the other, and reads the entries it puts on the diagonal.
+    """
+    elemwise_inputs = elemwise_out.owner.inputs
+    batch_ndim = elemwise_out.type.ndim - 2
+    rows, columns = get_simplified_broadcast_shape(*elemwise_inputs, fgraph=fgraph)[-2:]
+    diag_length = rows if rows is columns else minimum(rows, columns)
+
+    def read_diagonal(inp):
+        rows_broadcast, columns_broadcast = inp.type.broadcastable[-2:]
+        if not (rows_broadcast or columns_broadcast):
+            return diagonal(inp, axis1=-2, axis2=-1)
+
+        kept_axis = batch_ndim if columns_broadcast else batch_ndim + 1
+        line = inp.dimshuffle(*range(batch_ndim), kept_axis)
+        if rows_broadcast and columns_broadcast:
+            return line
+        return line[..., :diag_length]
+
+    return elemwise_out.owner.op(*(read_diagonal(inp) for inp in elemwise_inputs))
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([Elemwise])
+def local_elemwise_of_diagonal(fgraph, node):
+    """Rewrite an ``Elemwise`` with a diagonal output to act on the diagonal alone.
+
+    alloc_diag(g) * x -> alloc_diag(g * diagonal(x))
+    alloc_diag(g) + alloc_diag(h) -> alloc_diag(g + h)
+    -alloc_diag(g) -> alloc_diag(-g)
+
+    Off-diagonal entries are never read, so a nan that ``0 * inf`` or ``0 / 0`` would
+    produce there is dropped.
+    """
+    if len(node.outputs) > 1:
+        return None
+
+    [out] = node.outputs
+    if out.type.ndim < 2 or not check_assumption(fgraph, out, DIAGONAL):
+        return None
+
+    rows, columns = out.type.shape[-2:]
+    if rows is not None and columns is not None and rows != columns:
+        return None
+
+    new_out = alloc_diag(_elemwise_of_diagonals(out, fgraph=fgraph), axis1=-2, axis2=-1)
+    new_out.tag.values_eq_approx = values_eq_approx_remove_nan
+    copy_stack_trace(out, new_out)
+    return [new_out]
+
+
 @node_rewriter([ExtractDiag])
 def local_extract_diag_lift(fgraph, node):
     """Lower ``ExtractDiag(X)`` to ``X[..., arange(d)+r, arange(d)+c, ...]``
@@ -991,7 +978,7 @@ def local_extract_diag_lift(fgraph, node):
     - ``Alloc`` parent — gated on ``local_subtensor_of_alloc``; rebuilds the
       outer Alloc shape with the diag length ``d`` so ``Shape(arange(d))[0]``
       doesn't survive.
-    - ``Dot`` / ``Blockwise(Dot)`` parent over the two contracted axes — gated on
+    - ``Dot`` / ``Dot22`` / ``Blockwise(Dot)`` parent over the two contracted axes — gated on
       ``local_advanced_subtensor_of_dot``, which turns the paired-arange gather
       into ``(A * B.mT).sum(-1)``.
     - ``Elemwise`` / ``Blockwise`` parent — gated on
@@ -1012,20 +999,20 @@ def local_extract_diag_lift(fgraph, node):
     # A dot whose diagonal straddles both core dims: the paired index couples the
     # two operands, which only the fold below can express.
     elif (
-        isinstance(parent_op, Dot)
+        isinstance(parent_op, Dot | Dot22)
         or (isinstance(parent_op, Blockwise) and isinstance(parent_op.core_op, Dot))
     ) and (a1, a2) == (inner.type.ndim - 2, inner.type.ndim - 1):
-        shape_inputs = inner.shape
+        shape_inputs = get_simplified_shape(inner, fgraph=fgraph)
         gate = local_advanced_subtensor_of_dot
     elif isinstance(parent_op, Elemwise | Blockwise):
         if isinstance(parent_op, Blockwise):
             batch_ndim = inner.owner.op.batch_ndim(inner.owner)
             if a1 >= batch_ndim or a2 >= batch_ndim:
                 return None
-        shape_inputs = inner.shape
+        shape_inputs = get_simplified_shape(inner, fgraph=fgraph)
         gate = local_subtensor_of_batch_dims
     elif isinstance(parent_op, AdvancedIncSubtensor):
-        shape_inputs = inner.shape
+        shape_inputs = get_simplified_shape(inner, fgraph=fgraph)
         gate = local_advanced_read_of_write_constant_indices
     else:
         return None

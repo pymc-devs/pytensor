@@ -122,3 +122,12 @@ def test_batch_inc_subtensor_preserves_the_band():
     y = pt.inc_subtensor(base[1:3], value)
     _, af = make_fgraph(y)
     assert af.check(y, TRIDIAGONAL)
+
+
+def test_switch_of_tridiagonal_branches():
+    x = assume(pt.dmatrix("x"), tridiagonal=True)
+    y = assume(pt.dmatrix("y"), tridiagonal=True)
+    out = pt.switch(pt.matrix("condition", dtype="bool"), x, y)
+
+    _, af = make_fgraph(out)
+    assert af.check(out, TRIDIAGONAL)
