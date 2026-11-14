@@ -73,7 +73,7 @@ class Solve(SolveBase):
                 overwrite_b=self.overwrite_b,
             )
         except np.linalg.LinAlgError:
-            outputs[0][0] = np.full(a.shape, np.nan, dtype=a.dtype)
+            outputs[0][0] = np.full(b.shape, np.nan, dtype=node.outputs[0].dtype)
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:

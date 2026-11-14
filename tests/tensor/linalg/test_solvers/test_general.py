@@ -6,6 +6,7 @@ import scipy
 
 from pytensor import function
 from pytensor import tensor as pt
+from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import TensorVariable
@@ -205,6 +206,16 @@ class TestSolve(utt.InferShapeTester):
         utt.verify_grad(
             lambda A, b: solve_op(A_func(A), b), [A_val, b_val], 3, rng, eps=eps
         )
+
+    @pytest.mark.parametrize("b_shape", [(3,), (3, 2)], ids=["vector_b", "matrix_b"])
+    def test_singular_a_gives_nan_shaped_like_b(self, b_shape):
+        a = pt.dmatrix("a", shape=(3, 3))
+        b = pt.tensor("b", shape=b_shape, dtype="float64")
+        f = function([a, b], solve(a, b), mode=Mode(linker="py", optimizer=None))
+
+        x = f(np.zeros((3, 3)), np.ones(b_shape))
+        assert x.shape == b_shape
+        assert np.isnan(x).all()
 
     def test_solve_tringular_indirection(self):
         a = pt.matrix("a")

@@ -25,14 +25,17 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import Expm, KroneckerProduct
-from pytensor.tensor.linalg.summary import det
+from pytensor.tensor.linalg.summary import Det, det
 from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
+    register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg.utils import (
+    kron_eigh,
+    kron_plus_scaled_eye_consumers,
     permutation_indices_to_det_sign,
     strip_left_expand_dims_and_transpose,
 )
@@ -192,6 +195,78 @@ def det_of_kronecker(fgraph, node):
             )
             [out] = node.outputs
             return [atleast_Nd(det_final, n=out.type.ndim).astype(out.type.dtype)]
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([KroneckerProduct])
+def det_of_kron_plus_diag_noise(fgraph, node):
+    """det(kron(*Ks) + c * I) -> prod(kron(*d_i) + c), from eigh of each K_i"""
+    # Dropping the Add also drops its check that the eye matches the kron's shape.
+    found = kron_plus_scaled_eye_consumers(fgraph, node, Det)
+    if found is None:
+        return None
+    Ks, consumers = found
+
+    replacements = {}
+    for consumer, c in consumers:
+        [old_out] = consumer.outputs
+        _, kron_d = kron_eigh(Ks, old_out.type.dtype)
+        new_out = prod(kron_d + c, axis=-1)
+        new_out = atleast_Nd(new_out, n=old_out.type.ndim).astype(old_out.type.dtype)
+        copy_stack_trace(old_out, new_out)
+        replacements[old_out] = new_out
+    return replacements
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Dot, blockwise_of(Dot)])
+def dot_of_kron(fgraph, node):
+    """kron(A, B) @ X -> (A @ X.reshape(n, q, k) @ B.mT).reshape(m * p, k)
+
+    The Kronecker matrix is never formed, which drops the cost from O(k (np)^2) to
+    O(k np (n + p)) for square factors.
+    """
+    K, X = node.inputs
+    core, transposed = strip_left_expand_dims_and_transpose(K)
+    match core.owner_op_and_inputs:
+        case (KroneckerProduct(), A, B) if A.type.ndim == 2 and B.type.ndim == 2:
+            pass
+        case _:
+            return None
+
+    # kron(A, B).mT == kron(A.mT, B.mT) for 2-D A, B
+    if transposed:
+        A, B = A.mT, B.mT
+
+    # Bring k to the front so each (n, q) slice is a batched matmul argument.
+    batch_shape = tuple(X.shape[i] for i in range(X.type.ndim - 2))
+    k = X.shape[-1]
+    X_3d = X.reshape((*batch_shape, A.shape[-1], B.shape[-1], k))
+    X_3d = pt.moveaxis(X_3d, -1, -3)
+
+    Z = A @ X_3d @ B.mT
+
+    Z = pt.moveaxis(Z, -3, -1)
+    new_out = Z.reshape((*batch_shape, A.shape[-2] * B.shape[-2], k))
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([KroneckerProduct])
+def kron_of_size_one_factor_to_mul(fgraph, node):
+    """kron(a, b) -> a * b when a or b has static size 1 in every dimension"""
+    a, b = node.inputs
+    if not (all(a.type.broadcastable) or all(b.type.broadcastable)):
+        return None
+    new_out = a * b
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize

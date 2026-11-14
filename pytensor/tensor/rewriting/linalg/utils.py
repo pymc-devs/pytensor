@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterator
+from functools import reduce
 
 from pytensor import tensor as pt
 from pytensor.assumptions import (
@@ -15,16 +16,19 @@ from pytensor.graph import Apply, Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.scalar.basic import Mul
+from pytensor.scalar.basic import Add, Mul
 from pytensor.tensor.basic import (
     Eye,
     TensorVariable,
     atleast_Nd,
     diagonal,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
-from pytensor.tensor.math import variadic_mul
+from pytensor.tensor.linalg.products import KroneckerProduct, kron
+from pytensor.tensor.math import outer, variadic_mul
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -169,6 +173,99 @@ def is_eye_mul(x) -> None | tuple[TensorVariable, TensorVariable]:
         return None
 
     return eye_input, variadic_mul(*non_eye_inputs)
+
+
+def kron_leaves(x: TensorVariable) -> list[TensorVariable]:
+    """Return the factors of a nested ``kron(kron(K1, K2), K3)`` chain in order."""
+    match x.owner_op_and_inputs:
+        case (KroneckerProduct(), left, right):
+            return kron_leaves(left) + kron_leaves(right)  # type: ignore[arg-type]
+    return [x]
+
+
+def kron_plus_scaled_eye_consumers(
+    fgraph: FunctionGraph, kron_node: Apply, core_op_type: type
+) -> tuple[list[TensorVariable], list[tuple[Apply, TensorVariable]]] | None:
+    """Find ``Blockwise(core_op_type)`` consumers of ``kron(*Ks) + c * I``.
+
+    Every factor must be real and symmetric, because the eigh form built from the
+    factors reads one triangle of each and treats it as Hermitian. Returns None
+    when the pattern or the consumers are absent.
+
+    Returns
+    -------
+    Ks : list of TensorVariable
+        The Kronecker factors.
+    consumers : list of (Apply, TensorVariable)
+        Each node whose first input is a noisy matrix, possibly left-expanded or
+        transposed, paired with the scalar ``c`` of that noisy matrix.
+        Transposition is harmless because the noisy matrix is symmetric.
+    """
+    [kron_out] = kron_node.outputs
+    Ks = kron_leaves(kron_out)  # type: ignore[arg-type]
+    if any(K.type.ndim != 2 or K.type.dtype.startswith("complex") for K in Ks):
+        return None
+    if not all(check_assumption(fgraph, K, SYMMETRIC) for K in Ks):
+        return None
+
+    consumers: list[tuple[Apply, TensorVariable]] = []
+    # The kron may reach the Add through left expand_dims lifted out of a batched
+    # consumer.
+    for client, kron_idx in clients_through_expand_dims(fgraph, kron_out):  # type: ignore[arg-type]
+        match client.op:
+            case Elemwise(Add()) if len(client.inputs) == 2:
+                pass
+            case _:
+                continue
+        kron_term, eye_term = client.inputs[kron_idx], client.inputs[1 - kron_idx]
+        # A broadcasting operand, such as eye(1) or a 1x1 kron, spreads over every
+        # entry of the other.
+        if any(kron_term.type.broadcastable[-2:]) or any(
+            eye_term.type.broadcastable[-2:]
+        ):
+            continue
+        eye_match = is_eye_mul(eye_term)
+        if eye_match is None:
+            continue
+        _, c = eye_match
+        # The eigh form adds c to a 1-D eigenvalue vector.
+        if not all(c.type.broadcastable):
+            continue
+        c = c.squeeze()
+
+        [noisy] = client.outputs
+        aliases = [noisy] + [
+            transpose_client.outputs[0]
+            for transpose_client, _ in fgraph.clients[noisy]
+            if is_matrix_transpose(transpose_client.outputs[0])  # type: ignore[arg-type]
+        ]
+        consumers.extend(
+            (consumer, c)
+            for alias in aliases
+            for consumer, idx in clients_through_expand_dims(fgraph, alias)  # type: ignore[arg-type]
+            if idx == 0
+            and isinstance(consumer.op, Blockwise)
+            and isinstance(consumer.op.core_op, core_op_type)
+        )
+
+    if not consumers:
+        return None
+    return Ks, consumers
+
+
+def kron_eigh(
+    Ks: list[TensorVariable], dtype: str
+) -> tuple[TensorVariable, TensorVariable]:
+    """Return ``(Q, d)`` with ``kron(*Ks) == Q @ diag(d) @ Q.mT``, from eigh of each K.
+
+    The factors are cast to ``dtype``, or to its real counterpart for a complex
+    ``dtype``, so the decomposition runs at the precision of the consumer.
+    """
+    real_dtype = {"complex64": "float32", "complex128": "float64"}.get(dtype, dtype)
+    ds, Qs = zip(*(eigh(K.astype(real_dtype)) for K in Ks), strict=True)
+    Q = reduce(kron, Qs)
+    d = reduce(lambda a, b: outer(a, b).ravel(), ds)
+    return Q, d
 
 
 @register_canonicalize
