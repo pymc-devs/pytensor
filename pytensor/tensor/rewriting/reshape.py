@@ -54,7 +54,6 @@ def local_join_dims(fgraph, node):
 
     (x,) = node.inputs
     op = node.op
-    start_axis = op.start_axis
     n_axes = op.n_axes
 
     if n_axes == 0:
@@ -66,13 +65,8 @@ def local_join_dims(fgraph, node):
         copy_stack_trace(x, x)
         return [x]
 
-    output_shape = [
-        *x.shape[:start_axis],
-        -1,
-        *x.shape[start_axis + n_axes :],
-    ]
-
-    new_x = x.reshape(output_shape)
+    x_shape = tuple(x.shape)
+    new_x = x.reshape(op.output_shapes(x_shape, op.joined_shape(x_shape)))
 
     copy_stack_trace(x, new_x)
     return [new_x]

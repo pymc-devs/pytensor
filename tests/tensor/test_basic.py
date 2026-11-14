@@ -2338,6 +2338,7 @@ def test_flatten_ndim2_of_3():
     assert np.all(f(a_val) == c_val)
     f = inplace_func([a], c)
     assert np.all(f(a_val) == c_val)
+    assert f(np.zeros((0, 2, 2))).shape == (0, 4)
 
     flatten_2 = partial(flatten, ndim=2)
     utt.verify_grad(flatten_2, [a_val])

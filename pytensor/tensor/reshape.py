@@ -1,3 +1,4 @@
+import math
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
 
@@ -10,7 +11,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import infer_static_shape, join, split
-from pytensor.tensor.math import prod
+from pytensor.tensor.math import prod, variadic_mul
 from pytensor.tensor.type import tensor
 from pytensor.tensor.variable import TensorVariable
 
@@ -34,6 +35,9 @@ class JoinDims(Op):
     @property
     def axis_range(self):
         return range(self.start_axis, self.start_axis + self.n_axes)
+
+    def joined_shape(self, input_shape):
+        return variadic_mul(*(input_shape[i] for i in self.axis_range))
 
     def output_shapes(self, input_shapes, joined_shape):
         return (
@@ -66,20 +70,16 @@ class JoinDims(Op):
 
     def infer_shape(self, node, shapes):
         [input_shape] = shapes
-        joined_shape = prod([input_shape[i] for i in self.axis_range], dtype=int)
-        return [self.output_shapes(input_shape, joined_shape)]
+        return [self.output_shapes(input_shape, self.joined_shape(input_shape))]
 
     def perform(self, node, inputs, outputs):
         (x,) = inputs
         (out,) = outputs
 
-        output_shape = (
-            *x.shape[: self.start_axis],
-            -1,
-            *x.shape[self.start_axis + self.n_axes :],
+        joined_shape = math.prod(
+            x.shape[self.start_axis : self.start_axis + self.n_axes]
         )
-
-        out[0] = x.reshape(output_shape)
+        out[0] = x.reshape(self.output_shapes(x.shape, joined_shape))
 
     def pullback(self, inputs, outputs, output_grads):
         (x,) = inputs
