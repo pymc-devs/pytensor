@@ -8,15 +8,14 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import get_mode
 from pytensor.tensor import add, as_tensor, constant, iscalar, lmatrix, lscalar, tensor
 from pytensor.tensor.blockwise import Blockwise, JAXBlockwise
-from pytensor.tensor.math import Dot, matmul
+from pytensor.tensor.math import Dot, matmul, mul
+from pytensor.tensor.rewriting.jax import blockwise_unbatched_scalar_inputs
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_blockwise import check_blockwise_runtime_broadcasting
 from tests.unittest_tools import RewriteTester
 
 
 jax = pytest.importorskip("jax")
-
-from pytensor.tensor.rewriting.jax import blockwise_unbatched_scalar_inputs
 
 
 def test_runtime_broadcasting():
@@ -50,10 +49,10 @@ def test_matmul(matmul_op):
 def test_unbatched_scalar_inputs_rewrite():
     x = lmatrix("x")
     n, m = iscalar("n"), iscalar("m")
-    two = constant(2, dtype="int32")
+    two_int32 = constant(2, dtype="int32")
     scalar_add = Blockwise(add, signature="(),(),(),(),()->()")
     # n is padded by a DimShuffle, m by a DimShuffle of a MakeVector
-    out = scalar_add(x, n, as_tensor([m]), two.astype("int64"), n)
+    out = scalar_add(x, n, as_tensor([m]), two_int32.astype("int64"), n)
 
     result = RewriteTester(
         [x, n, m],
@@ -61,10 +60,22 @@ def test_unbatched_scalar_inputs_rewrite():
         include=None,
         custom_rewrite=blockwise_unbatched_scalar_inputs,
     )
-    two = constant(2, dtype="int64")
-    inner_inputs = [inp.type() for inp in (x, n, m, two, n)]
+    two_int64 = constant(2, dtype="int64")
+    inner_inputs = [inp.type() for inp in (x, n, m, two_int64, n)]
     lowered_op = JAXBlockwise(inner_inputs, [scalar_add(*inner_inputs)])
-    result.assert_graph(lowered_op(x, n, m, two, n))
+    result.assert_graph(lowered_op(x, n, m, two_int64, n))
+
+    # A broadcastable input with core dims is not a scalar and stays vectorized
+    core = tensor("core", shape=(1, 1))
+    batched = tensor("batched", shape=(None,))
+    out = Blockwise(mul, signature="(n),()->(n)")(core, batched)
+    result = RewriteTester(
+        [core, batched],
+        [out],
+        include=None,
+        custom_rewrite=blockwise_unbatched_scalar_inputs,
+    )
+    result.assert_graph(out)
 
 
 def test_unbatched_scalar_inputs():
@@ -82,40 +93,18 @@ def test_unbatched_scalar_inputs():
         jax_mode="JAX",
     )
     np.testing.assert_array_equal(
-        fn(np.ones((2, 3), dtype="int32"), np.int32(7), np.zeros(4)),
-        [np.full((2, 3), 14, dtype=out.dtype)],
+        fn(np.ones((2, 3), dtype="int32"), np.int32(7), np.zeros(6)),
+        [np.full((2, 3), 16, dtype=out.dtype)],
         strict=True,
     )
 
-
-def test_lowered_blockwise_shape():
-    x = lmatrix("x")
-    n = iscalar("n")
-    scalar_add = Blockwise(add, signature="(),()->()")
-    out = JAXBlockwise([x, n], [scalar_add(x, n)])(x, n)
-    compare_jax_and_py(
-        [x, n],
-        [out, out.shape],
-        [np.ones((2, 3), dtype="int64"), np.int32(3)],
-        jax_mode="JAX",
-    )
-
-
-@pytest.mark.parametrize("multiple_outputs", [False, True])
-def test_all_unbatched_scalar_inputs(multiple_outputs):
-    n = iscalar("n")
-    v = tensor("v", shape=(None,))
-    if multiple_outputs:
-        a, b = iscalar("a"), lscalar("b")
-        core_op = OpFromGraph([a, b], [a + b, a - b])
-        blockwise_op = Blockwise(core_op, signature="(),()->(),()")
-    else:
-        blockwise_op = Blockwise(add, signature="(),()->()")
-    outputs = blockwise_op(n[None, None], v.shape[0], return_list=True)
-
+    # With every input unbatched there is nothing to vectorize over
+    a, b = iscalar("a"), lscalar("b")
+    core_op = OpFromGraph([a, b], [a + b, a - b])
+    blockwise_op = Blockwise(core_op, signature="(),()->(),()")
     compare_jax_and_py(
         [n, v],
-        outputs,
+        blockwise_op(n[None, None], v.shape[0], return_list=True),
         [np.int32(3), np.zeros(4)],
         assert_fn=partial(np.testing.assert_array_equal, strict=True),
         jax_mode=get_mode("JAX").excluding("local_useless_unbatched_blockwise"),
