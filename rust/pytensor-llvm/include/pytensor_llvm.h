@@ -1,0 +1,136 @@
+/*
+ * C interface to functions compiled by PyTensor's LLVM backend.
+ *
+ * A consumer (e.g. a sampler written in Rust or C) gets two things from Python:
+ *
+ *     fn  = program.c_function()                   # address of a PtFunction (new reference)
+ *     api = program.c_api_table()                  # address of the matching PtFunctionApi
+ *
+ * where `program` is `f.maker.linker.program` of a function compiled with mode
+ * "LLVM" (the table is also `pytensor_llvm.interp.c_api_table()`).
+ *
+ * Everything else goes through the function table, so nothing has to link against the
+ * extension. Typical use from one sampler thread:
+ *
+ *     PtSession *s = api->session_new(fn);          // one per caller (e.g. per chain)
+ *     for (...) {
+ *         if (api->call(s, inputs, outputs) != 0)
+ *             fprintf(stderr, "%s\n", api->last_error(s));
+ *     }
+ *     api->session_free(s);
+ *     api->function_decref(fn);
+ *
+ * Threads: a PtFunction is immutable and may be shared; a PtSession must only be used by
+ * one thread at a time. No Python or GIL is involved in `call`. A session is everything
+ * one caller (e.g. one sampler chain) needs to run the function: the memory of its
+ * calls and its context (scratch space, errors, the random state; see `seed`).
+ */
+#ifndef PYTENSOR_LLVM_H
+#define PYTENSOR_LLVM_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define PT_ABI_VERSION 1
+#define PT_API_VERSION 3
+
+/* dtype codes */
+enum {
+    PT_FLOAT64 = 0,
+    PT_FLOAT32 = 1,
+    PT_INT64 = 2,
+    PT_INT32 = 3,
+    PT_INT16 = 4,
+    PT_INT8 = 5,
+    PT_UINT8 = 6,
+    PT_BOOL = 7, /* one byte, 0 or 1 */
+};
+
+typedef struct PtBuffer PtBuffer;       /* refcounted memory owned by the runtime */
+typedef struct PtFunction PtFunction;   /* a compiled function, refcounted, immutable */
+typedef struct PtSession PtSession;     /* one caller's session (memory, context) */
+
+/* Same struct as in the kernel ABI. Strides are in bytes. */
+typedef struct {
+    char *data;
+    int64_t *shape;
+    int64_t *strides;
+    PtBuffer *owner; /* NULL for memory owned by the caller */
+    int64_t ndim;
+} PtArray;
+
+typedef struct {
+    int32_t dtype;
+    int32_t ndim;
+    /* static length per dim, -1 if only known at runtime; valid while the
+     * PtFunction is alive */
+    const int64_t *static_shape;
+} PtTypeInfo;
+
+typedef struct {
+    uint32_t abi_version; /* PT_ABI_VERSION */
+    uint32_t api_version; /* PT_API_VERSION */
+
+    void (*function_incref)(const PtFunction *fn);
+    void (*function_decref)(const PtFunction *fn);
+    size_t (*n_inputs)(const PtFunction *fn);
+    size_t (*n_outputs)(const PtFunction *fn);
+    /* 0 on success, nonzero if i is out of range */
+    int32_t (*input_type)(const PtFunction *fn, size_t i, PtTypeInfo *out);
+    int32_t (*output_type)(const PtFunction *fn, size_t i, PtTypeInfo *out);
+
+    /* The session keeps a reference to fn. */
+    PtSession *(*session_new)(const PtFunction *fn);
+    void (*session_free)(PtSession *s);
+
+    /*
+     * Run the function. Returns 0 on success; on failure see last_error(s).
+     *
+     * inputs[i]: data, shape and strides of input i. Checked: ndim, static shapes,
+     *   non-negative lengths, non-NULL data for non-empty arrays, alignment of data and
+     *   strides to the itemsize. NOT checked (the caller's responsibility): the dtype
+     *   (it must be the one input_type reports) and that the memory described really
+     *   exists. The runtime never writes to inputs.
+     *
+     * outputs[k], chosen per output by the caller:
+     *   - provided (data != NULL): shape must point to the expected shape (checked),
+     *     strides to the strides to write with. The result is written there: directly by
+     *     the producing kernel when the strides match what the planner chose (usually
+     *     C-contiguous), otherwise via one copy. owner is left untouched. Provided
+     *     outputs must not overlap any input or each other (checked).
+     *   - runtime-allocated (data == NULL): shape and strides must point to caller
+     *     arrays of length ndim; the runtime fills them, sets data, and sets owner to a
+     *     new reference the caller releases with buffer_decref.
+     */
+    int32_t (*call)(PtSession *s, const PtArray *inputs, PtArray *outputs);
+
+    /* Message of the last failed call in this session (valid until the next call). */
+    const char *(*last_error)(const PtSession *s);
+
+    void (*buffer_decref)(PtBuffer *buf);
+
+    /*
+     * Restart the random state of session `s` from `seed` (api_version >= 2). A session
+     * has one random state: everything a call runs draws from it, in order, so calls
+     * in a seeded session are reproducible. Unseeded sessions start from process
+     * entropy.
+     */
+    void (*seed)(PtSession *s, uint64_t seed);
+
+    /*
+     * Allow (nonzero, the default) or forbid parallel loops on the runtime's thread
+     * pool for calls in session `s` (api_version >= 3), e.g. forbid when every core already
+     * runs a chain. Results, random draws included, are the same either way.
+     */
+    void (*set_parallel)(PtSession *s, int32_t on);
+} PtFunctionApi;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* PYTENSOR_LLVM_H */

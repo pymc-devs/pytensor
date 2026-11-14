@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+import enum
 import warnings
 from collections.abc import Callable, Sequence
 from copy import copy
@@ -130,6 +131,19 @@ def construct_nominal_fgraph(
     return fgraph
 
 
+class Execution(enum.Enum):
+    """How a backend runs an `OpFromGraph` it does not inline.
+
+    Backends that don't distinguish the two ignore it.
+    """
+
+    #: The inner graph is compiled as one function (the LLVM backend calls this a unit).
+    COMPILED = "compiled"
+    #: The inner graph is run node by node, each node with its own implementation (the
+    #: LLVM backend calls this a subprogram).
+    INTERPRETED = "interpreted"
+
+
 class OpFromGraph(HasInnerFunction, Op):
     r"""Create an Op from inputs and outputs lists of variables.
 
@@ -226,6 +240,7 @@ class OpFromGraph(HasInnerFunction, Op):
         outputs: list[Variable],
         *,
         inline: bool = False,
+        execution: Execution | None = None,
         pullback: Callable | OpFromGraph | None = None,
         pushforward: Callable | OpFromGraph | None = None,
         lop_overrides: Callable | OpFromGraph | None = None,
@@ -247,6 +262,9 @@ class OpFromGraph(HasInnerFunction, Op):
         inline : bool, optional
             If True, the Op's inner graph is inlined during compilation. If False (default), a
             pre-compiled function is used instead.
+        execution : Execution, optional
+            For backends that compile graphs: whether the inner graph is compiled as one
+            function or interpreted node by node. ``None`` leaves it to the backend.
         pullback
             Overrides the :meth:`Op.pullback` (vector-Jacobian product) method.
 
@@ -330,6 +348,9 @@ class OpFromGraph(HasInnerFunction, Op):
             raise NotImplementedError("Updates and givens are not supported")
 
         self.is_inline = inline
+        if execution is not None and not isinstance(execution, Execution):
+            raise TypeError(f"execution must be an Execution or None, got {execution!r}")
+        self.execution = execution
 
         if fgraph is not None:
             # Caller supplies an already-nominalized frozen inner graph (built,
@@ -487,6 +508,7 @@ class OpFromGraph(HasInnerFunction, Op):
         if (
             self.fgraph != other.fgraph
             or self.is_inline != other.is_inline
+            or getattr(self, "execution", None) != getattr(other, "execution", None)
             or self.destroy_map != other.destroy_map
         ):
             return False
@@ -511,12 +533,15 @@ class OpFromGraph(HasInnerFunction, Op):
         )
 
     def __hash__(self):
-        return hash((type(self), self.fgraph, self.is_inline))
+        return hash((type(self), self.fgraph, self.is_inline, getattr(self, "execution", None)))
 
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name
         is_inline = self.is_inline
-        return f"{name}{{inline={is_inline}}}"
+        execution = getattr(self, "execution", None)
+        if execution is None:
+            return f"{name}{{inline={is_inline}}}"
+        return f"{name}{{inline={is_inline}, execution={execution.value}}}"
 
     def _combine_list_overrides(self, default_outs, custom_outs, callable_args):
         """Combines default and custom overrides into a single list of outputs."""

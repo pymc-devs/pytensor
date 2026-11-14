@@ -28,6 +28,7 @@ from pytensor.graph.rewriting.db import (
 from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
+from pytensor.link.llvm.linker import LLVM_REWRITES, LLVMLinker
 from pytensor.link.mlx.linker import MLXLinker
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.link.pytorch.linker import PytorchLinker
@@ -53,6 +54,7 @@ predefined_linkers = {
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
+    "llvm": LLVMLinker(),
 }
 
 
@@ -518,6 +520,11 @@ NUMBA = Mode(
     RewriteDatabaseQuery(include=["fast_run", "numba"]),
 )
 
+LLVM = Mode(
+    LLVMLinker(),
+    RewriteDatabaseQuery(include=["fast_run", *LLVM_REWRITES]),
+)
+
 JAX = Mode(
     JAXLinker(),
     # `fusion` is not incompatible with JAX (it can run `Composite`), just not desired:
@@ -553,6 +560,7 @@ predefined_modes = {
     "CVM": CVM,
     "JAX": JAX,
     "NUMBA": NUMBA,
+    "LLVM": LLVM,
     "PYTORCH": PYTORCH,
     "MLX": MLX,
 }
