@@ -12,9 +12,8 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.optimize.utils import (
     _SOLVER_JIT_OPTIONS,
-    _make_value_at,
+    _scalar_objective,
     _scalar_types,
-    _with_input_dtype,
 )
 from pytensor.tensor.optimize import MinimizeScalarOp
 
@@ -26,7 +25,7 @@ GOLDEN_SECTION = 0.3819660
 GOLDEN_RATIO_CONJUGATE = 0.61803399
 
 
-def make_bracket_search(value_at, point, value, mixed):
+def make_bracket_search(objective, point, value, mixed):
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def bracket_search(points, args):
         # scipy's bracket and Brent.get_bracket_info. Where scipy raises on a bad
@@ -47,7 +46,7 @@ def make_bracket_search(value_at, point, value, mixed):
                 xa, xc = xc, xa
             if not (xa < xb and xb < xc):
                 return invalid
-            fa, fb, fc = value_at(xa, args), value_at(xb, args), value_at(xc, args)
+            fa, fb, fc = objective(xa, args), objective(xb, args), objective(xc, args)
             if not (fb < fa and fb < fc):
                 return invalid
             return xa, xb, xc, fa, fb, fc, True
@@ -55,12 +54,12 @@ def make_bracket_search(value_at, point, value, mixed):
             return invalid
 
         xa, xb = points[0], points[1]
-        fa, fb = value_at(xa, args), value_at(xb, args)
+        fa, fb = objective(xa, args), objective(xb, args)
         if fa < fb:
             xa, xb = xb, xa
             fa, fb = fb, fa
         xc = xb + point(GOLDEN_RATIO) * (xb - xa)
-        fc = value_at(xc, args)
+        fc = objective(xc, args)
         iteration = 0
         while fc < fb:
             tmp1 = (xb - xa) * (fb - fc)
@@ -73,7 +72,7 @@ def make_bracket_search(value_at, point, value, mixed):
                 return invalid
             iteration += 1
             if (w - xc) * (xb - w) > 0.0:
-                fw = value_at(w, args)
+                fw = objective(w, args)
                 if fw < fc:
                     xa, xb = xb, w
                     fa, fb = fb, fw
@@ -82,20 +81,20 @@ def make_bracket_search(value_at, point, value, mixed):
                     xc, fc = w, fw
                     break
                 w = xc + point(GOLDEN_RATIO) * (xc - xb)
-                fw = value_at(w, args)
+                fw = objective(w, args)
             elif (w - wlim) * (wlim - xc) >= 0.0:
                 w = wlim
-                fw = value_at(w, args)
+                fw = objective(w, args)
             elif (w - wlim) * (xc - w) > 0.0:
-                fw = value_at(w, args)
+                fw = objective(w, args)
                 if fw < fc:
                     xb, xc = xc, w
                     w = xc + point(GOLDEN_RATIO) * (xc - xb)
                     fb, fc = fc, fw
-                    fw = value_at(w, args)
+                    fw = objective(w, args)
             else:
                 w = xc + point(GOLDEN_RATIO) * (xc - xb)
-                fw = value_at(w, args)
+                fw = objective(w, args)
             xa, xb, xc = xb, xc, w
             fa, fb, fc = fb, fc, fw
 
@@ -122,9 +121,8 @@ def _best_of_invalid_bracket(xa, xb, xc, fa, fb, fc):
 
 
 def make_minimize_brent(objective, point, value, mixed):
-    value_at = _make_value_at(objective=objective)
     bracket_search = make_bracket_search(
-        value_at=value_at, point=point, value=value, mixed=mixed
+        objective=objective, point=point, value=value, mixed=mixed
     )
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
@@ -175,7 +173,7 @@ def make_minimize_brent(objective, point, value, mixed):
                 u = x + tol1 if rat >= 0 else x - tol1
             else:
                 u = x + rat
-            fu = value_at(u, args)
+            fu = objective(u, args)
 
             if fu > fx:
                 if u < x:
@@ -202,9 +200,8 @@ def make_minimize_brent(objective, point, value, mixed):
 
 
 def make_minimize_golden(objective, point, value, mixed):
-    value_at = _make_value_at(objective=objective)
     bracket_search = make_bracket_search(
-        value_at=value_at, point=point, value=value, mixed=mixed
+        objective=objective, point=point, value=value, mixed=mixed
     )
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
@@ -223,7 +220,7 @@ def make_minimize_golden(objective, point, value, mixed):
         else:
             x2 = xb
             x1 = xb - complement * (xb - xa)
-        f1, f2 = value_at(x1, args), value_at(x2, args)
+        f1, f2 = objective(x1, args), objective(x2, args)
 
         iteration = 0
         for _ in range(maxiter):
@@ -233,12 +230,12 @@ def make_minimize_golden(objective, point, value, mixed):
                 x0, x1 = x1, x2
                 x2 = ratio * x1 + complement * x3
                 f1 = f2
-                f2 = value_at(x2, args)
+                f2 = objective(x2, args)
             else:
                 x3, x2 = x2, x1
                 x1 = ratio * x2 + complement * x0
                 f2 = f1
-                f1 = value_at(x1, args)
+                f1 = objective(x1, args)
             iteration += 1
 
         xmin, fval = (x1, f1) if f1 < f2 else (x2, f2)
@@ -248,7 +245,6 @@ def make_minimize_golden(objective, point, value, mixed):
 
 
 def make_minimize_bounded(objective, point, value, mixed):
-    value_at = _make_value_at(objective=objective)
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def bounded(points, args, xatol, maxiter):
@@ -269,7 +265,7 @@ def make_minimize_bounded(objective, point, value, mixed):
         nfc, xf = fulc, fulc
         rat = e = 0.0
         x = xf
-        fx = value_at(x, args)
+        fx = objective(x, args)
         num = 1
         fu = value(np.inf)
 
@@ -312,7 +308,7 @@ def make_minimize_bounded(objective, point, value, mixed):
 
             si = np.sign(rat) + (1.0 if rat == 0 else 0.0)
             x = xf + si * max(abs(rat), tol1)
-            fu = value_at(x, args)
+            fu = objective(x, args)
             num += 1
 
             if fu <= fx:
@@ -415,8 +411,10 @@ def numba_funcify_MinimizeScalarOp(op, node, **kwargs):
     objective, objective_key = numba_funcify_and_cache_key(
         op.fgraph, fgraph_name="numba_minimize_scalar_objective", **kwargs
     )
-    objective = _with_input_dtype(
-        objective=objective, dtype=op.fgraph.inputs[0].type.dtype
+    objective = _scalar_objective(
+        objective=objective,
+        dtype=op.fgraph.inputs[0].type.dtype,
+        derivatives=0,
     )
 
     method = MINIMIZE_METHODS[op.method]
@@ -469,7 +467,7 @@ def numba_funcify_MinimizeScalarOp(op, node, **kwargs):
     if objective_key is None:
         cache_key = None
     else:
-        minimize_scalar_cache_version = 1
+        minimize_scalar_cache_version = 2
         cache_key = sha256(
             str(
                 (

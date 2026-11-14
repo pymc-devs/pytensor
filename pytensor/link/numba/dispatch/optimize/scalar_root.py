@@ -14,9 +14,8 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.optimize.utils import (
     _SOLVER_JIT_OPTIONS,
-    _make_value_at,
+    _scalar_objective,
     _scalar_types,
-    _with_input_dtype,
 )
 from pytensor.tensor.optimize import RootScalarOp
 
@@ -28,8 +27,7 @@ def make_newton(objective, point, value, mixed):
         tolerance = point(xtol)
         x = following = x0
         for _ in range(maxiter):
-            f, slope = objective(x, *args)
-            f, slope = f.item(), slope.item()
+            f, slope = objective(x, args)
             if f == 0.0:
                 return x, True
             if slope == 0.0:
@@ -50,8 +48,7 @@ def make_halley(objective, point, value, mixed):
         tolerance = point(xtol)
         x = following = x0
         for _ in range(maxiter):
-            f, slope, curvature = objective(x, *args)
-            f, slope, curvature = f.item(), slope.item(), curvature.item()
+            f, slope, curvature = objective(x, args)
             if f == 0.0:
                 return x, True
             if slope == 0.0:
@@ -70,7 +67,6 @@ def make_halley(objective, point, value, mixed):
 
 
 def make_secant(objective, point, value, mixed):
-    value_at = _make_value_at(objective=objective)
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def secant(x0, args, xtol, maxiter):
@@ -79,8 +75,8 @@ def make_secant(objective, point, value, mixed):
         previous = x0
         current = x0 * point(1 + 1e-4)
         current += point(1e-4) if current >= 0 else point(-1e-4)
-        previous_value = value_at(previous, args)
-        current_value = value_at(current, args)
+        previous_value = objective(previous, args)
+        current_value = objective(current, args)
         if abs(current_value) < abs(previous_value):
             previous, current = current, previous
             previous_value, current_value = current_value, previous_value
@@ -99,7 +95,7 @@ def make_secant(objective, point, value, mixed):
                 return following, True
             previous, previous_value = current, current_value
             current = following
-            current_value = value_at(current, args)
+            current_value = objective(current, args)
         return following, False
 
     return secant
@@ -128,12 +124,11 @@ def _check_bracket(lower, upper, lower_value, upper_value):
 
 
 def make_bisect(objective):
-    value_at = _make_value_at(objective=objective)
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def bisect(lower, upper, args, xtol, rtol, maxiter):
-        lower_value = value_at(lower, args)
-        upper_value = value_at(upper, args)
+        lower_value = objective(lower, args)
+        upper_value = objective(upper, args)
         done, root, converged = _check_bracket(lower, upper, lower_value, upper_value)
         if done:
             return root, converged
@@ -142,7 +137,7 @@ def make_bisect(objective):
         for _ in range(maxiter):
             width /= 2
             middle = lower + width
-            middle_value = value_at(middle, args)
+            middle_value = objective(middle, args)
             if np.isnan(middle_value):
                 return middle, False
             if _same_sign(middle_value, lower_value):
@@ -188,7 +183,6 @@ def _brent_step(
 
 
 def make_brent(objective, hyperbolic):
-    value_at = _make_value_at(objective=objective)
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def brent(lower, upper, args, xtol, rtol, maxiter):
@@ -197,8 +191,8 @@ def make_brent(objective, hyperbolic):
         # bisection otherwise.
         previous, current = lower, upper
         previous_value, current_value = (
-            value_at(previous, args),
-            value_at(current, args),
+            objective(previous, args),
+            objective(current, args),
         )
         done, root, converged = _check_bracket(
             previous, current, previous_value, current_value
@@ -244,7 +238,7 @@ def make_brent(objective, hyperbolic):
                 current += current_step
             else:
                 current += tolerance if bisection > 0 else -tolerance
-            current_value = value_at(current, args)
+            current_value = objective(current, args)
             if np.isnan(current_value):
                 return current, False
         return current, False
@@ -253,14 +247,13 @@ def make_brent(objective, hyperbolic):
 
 
 def make_ridder(objective):
-    value_at = _make_value_at(objective=objective)
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def ridder(lower, upper, args, xtol, rtol, maxiter):
         # Ridders' method as in scipy's ridder.c
         tolerance = xtol + rtol * min(abs(lower), abs(upper))
-        lower_value = value_at(lower, args)
-        upper_value = value_at(upper, args)
+        lower_value = objective(lower, args)
+        upper_value = objective(upper, args)
         done, root, converged = _check_bracket(lower, upper, lower_value, upper_value)
         if done:
             return root, converged
@@ -269,7 +262,7 @@ def make_ridder(objective):
         for _ in range(maxiter):
             half_width = (upper - lower) / 2
             middle = lower + half_width
-            middle_value = value_at(middle, args)
+            middle_value = objective(middle, args)
             if np.isnan(middle_value):
                 return middle, False
             if middle_value == 0.0:
@@ -284,7 +277,7 @@ def make_ridder(objective):
             limit = abs(half_width) - tolerance / 2
             offset = abs(step) if abs(step) < limit else limit
             estimate = middle + step_sign * offset
-            estimate_value = value_at(estimate, args)
+            estimate_value = objective(estimate, args)
             if np.isnan(estimate_value):
                 return estimate, False
 
@@ -374,7 +367,6 @@ def _toms748_failure(x, fx):
 
 
 def make_toms748(objective):
-    value_at = _make_value_at(objective=objective)
 
     @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
     def toms748(lower, upper, args, xtol, rtol, maxiter):
@@ -385,12 +377,12 @@ def make_toms748(objective):
 
         eps = np.finfo(np.float64).eps
         k = 1
-        lower_value = value_at(lower, args)
+        lower_value = objective(lower, args)
         if not np.isfinite(lower_value):
             return _toms748_failure(lower, lower_value), False
         if lower_value == 0:
             return lower, True
-        upper_value = value_at(upper, args)
+        upper_value = objective(upper, args)
         if not np.isfinite(upper_value):
             return _toms748_failure(upper, upper_value), False
         if upper_value == 0:
@@ -409,7 +401,7 @@ def make_toms748(objective):
             c = (-fab[1] / fab[0] * ab[0] + ab[1]) / (1 - fab[1] / fab[0])
         if not ab[0] < c < ab[1]:
             c = (ab[0] + ab[1]) / 2.0
-        fc = value_at(c, args)
+        fc = objective(c, args)
         if not np.isfinite(fc):
             return _toms748_failure(c, fc), False
         if fc == 0:
@@ -437,7 +429,7 @@ def make_toms748(objective):
                 if not has_c:
                     c, has_c = _newton_quadratic(ab, fab, d, fd, steps), True
 
-                fc = value_at(c, args)
+                fc = objective(c, args)
                 if not np.isfinite(fc):
                     return _toms748_failure(c, fc), False
                 if fc == 0:
@@ -460,7 +452,7 @@ def make_toms748(objective):
                 if not ab[0] < c < ab[1]:
                     c = (ab[0] + ab[1]) / 2.0
 
-            fc = value_at(c, args)
+            fc = objective(c, args)
             if not np.isfinite(fc):
                 return _toms748_failure(c, fc), False
             if fc == 0:
@@ -471,7 +463,7 @@ def make_toms748(objective):
             if ab[1] - ab[0] > 0.5 * ab_width:
                 e, fe = d, fd
                 z = (ab[0] + ab[1]) / 2.0
-                fz = value_at(z, args)
+                fz = objective(z, args)
                 if not np.isfinite(fz):
                     return _toms748_failure(z, fz), False
                 if fz == 0:
@@ -594,13 +586,15 @@ def numba_funcify_RootScalarOp(op, node, **kwargs):
     objective, objective_key = numba_funcify_and_cache_key(
         op.fgraph, fgraph_name="numba_root_scalar_objective", **kwargs
     )
-    objective = _with_input_dtype(
-        objective=objective, dtype=op.fgraph.inputs[0].type.dtype
+    method = ROOT_METHODS[op.method]
+    objective = _scalar_objective(
+        objective=objective,
+        dtype=op.fgraph.inputs[0].type.dtype,
+        derivatives=method.derivatives or 0,
     )
 
     as_output_dtype = node.outputs[0].type.numpy_dtype.type
     n_args = len(op.inner_inputs) - 1
-    method = ROOT_METHODS[op.method]
     if method.bracketing:
         solve = method.make_solver(objective=objective)
         bracket_index = n_args + op.bound_kwargs.index("bracket")
@@ -639,7 +633,7 @@ def numba_funcify_RootScalarOp(op, node, **kwargs):
     if objective_key is None:
         cache_key = None
     else:
-        root_scalar_cache_version = 1
+        root_scalar_cache_version = 2
         cache_key = sha256(
             str(
                 (

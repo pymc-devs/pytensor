@@ -9,28 +9,37 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 # by zero would raise
 _SOLVER_JIT_OPTIONS: dict[str, Any] = {"fastmath": False, "error_model": "numpy"}
 
+
 # Each solver is built per Op as a closure over that Op's compiled objective. numba
 # caches a closure over a compiled function, but not a function that receives one as
 # an argument, nor any function that calls it.
 
 
-def _with_input_dtype(objective, dtype):
-    """Wrap ``objective`` to take a float ``x`` and evaluate it at ``x`` cast to ``dtype``, as perform does."""
+def _scalar_objective(objective, dtype, derivatives):
+    # Evaluates at x cast to the input dtype, as perform does, with the extra inputs as one
+    # tuple. Returns the value, or the value and its first `derivatives` derivatives, as
+    # Python scalars.
     as_input_dtype = np.dtype(dtype).type
 
-    @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
-    def typed_objective(x, *args):
-        return objective(np.asarray(as_input_dtype(x)), *args)
+    if derivatives == 0:
 
-    return typed_objective
+        def scalar_objective(x, args):
+            outputs = objective(np.asarray(as_input_dtype(x)), *args)
+            return outputs[0].item()
 
+    elif derivatives == 1:
 
-def _make_value_at(objective):
-    @numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)
-    def value_at(x, args):
-        return objective(x, *args)[0].item()
+        def scalar_objective(x, args):
+            outputs = objective(np.asarray(as_input_dtype(x)), *args)
+            return outputs[0].item(), outputs[1].item()
 
-    return value_at
+    else:
+
+        def scalar_objective(x, args):
+            outputs = objective(np.asarray(as_input_dtype(x)), *args)
+            return outputs[0].item(), outputs[1].item(), outputs[2].item()
+
+    return numba_basic.numba_njit(**_SOLVER_JIT_OPTIONS)(scalar_objective)
 
 
 def _scalar_types(point_dtype, value_dtype):
