@@ -240,6 +240,7 @@ def _codegen_return_outputs(
 
 NO_INDEXED_INPUTS = encode_literals(((), ()))
 NO_INDEXED_OUTPUTS = encode_literals(())
+NO_BASIC_OUTPUTS = encode_literals(())
 NO_REDUCE_OUTPUTS = encode_literals(())
 NO_SIZE = None
 
@@ -540,6 +541,96 @@ class _OutputSlice:
             store.set_metadata("noalias", self.noalias)
 
 
+class _BasicOutputSlice(_OutputSlice):
+    """Write scalar loop results into a 1D basic slice without materializing them."""
+
+    def __init__(
+        self,
+        typingctx,
+        context,
+        builder,
+        output_type,
+        output,
+        start,
+        length,
+        broadcast,
+        loop_idx,
+        *,
+        size_type,
+        alias_scope,
+        noalias,
+        update_mode,
+    ):
+        self.typingctx = typingctx
+        self.context = context
+        self.builder = builder
+        self.output_type = output_type
+        self.output = output
+        self.start = start
+        self.length = length
+        self.broadcast = broadcast
+        self.loop_idx = loop_idx
+        self.size_type = size_type
+        self.alias_scope = alias_scope
+        self.noalias = noalias
+        self.update_mode = update_mode
+        self.broadcast_writer = None
+        self.element_writer = None
+
+    def _make_writer(self, broadcast):
+        output_shape = cgutils.unpack_tuple(self.builder, self.output.shape)
+        output_strides = cgutils.unpack_tuple(self.builder, self.output.strides)
+        index = self.start if broadcast else self.builder.add(self.start, self.loop_idx)
+        output_ptr = get_item_pointer2(
+            self.context,
+            self.builder,
+            self.output.data,
+            output_shape,
+            output_strides,
+            self.output_type.layout,
+            [index],
+            False,
+            False,
+        )
+        if broadcast:
+            core_shape = [self.length]
+            core_strides = [output_strides[0]]
+        else:
+            core_shape = []
+            core_strides = []
+        return _OutputSlice(
+            self.typingctx,
+            self.context,
+            self.builder,
+            self.output_type,
+            output_ptr,
+            core_shape,
+            core_strides,
+            self.size_type,
+            self.alias_scope,
+            self.noalias,
+            self.update_mode,
+        )
+
+    def write(self, value, value_type):
+        if self.update_mode is None:
+            value = self.context.cast(
+                self.builder, value, value_type, self.output_type.dtype
+            )
+            value_type = self.output_type.dtype
+        with self.builder.if_else(self.broadcast) as (broadcast, element):
+            with broadcast:
+                self.broadcast_writer = self._make_writer(True)
+                self.broadcast_writer.write(value, value_type)
+            with element:
+                self.element_writer = self._make_writer(False)
+                self.element_writer.write(value, value_type)
+                self.element_writer.finish()
+
+    def finish(self):
+        pass
+
+
 class _ScalarReductionAccumulator:
     """Emit a one-cell reduction into the vectorized loop.
 
@@ -627,6 +718,13 @@ class _CoreCall:
         handles_out,
         output_handlers,
     ):
+        if handles_out and any(
+            isinstance(output, _BasicOutputSlice) for output in output_handlers
+        ):
+            raise TypingError(
+                "Output-handling cores are not supported with basic slice writes"
+            )
+
         self.context = context
         self.builder = builder
         self.core_signature = core_signature
@@ -704,6 +802,8 @@ def make_loop_call(
     idx_load_axes: tuple[tuple[int, ...], ...] | None = None,
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
     output_write_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
+    basic_outputs: tuple | None = None,
+    basic_output_runtime: tuple | None = None,
     inplace: tuple[tuple[int, int], ...] = (),
     scalar_reductions: dict[int, tuple[str, Any]] | None = None,
     output_updates: dict[int, str] | None = None,
@@ -951,6 +1051,26 @@ def make_loop_call(
     ):
         if output_i in scalar_accumulators:
             continue
+        basic_spec = basic_outputs[output_i] if basic_outputs else None
+        if basic_spec is not None:
+            assert basic_output_runtime is not None
+            start, length, broadcast = basic_output_runtime[output_i]
+            output_slices[output_i] = _BasicOutputSlice(
+                typingctx,
+                context,
+                builder,
+                out_type,
+                out,
+                start,
+                length,
+                broadcast,
+                loop_idxs[0],
+                size_type=out.shape.type.element,
+                alias_scope=out_alias_sets[output_i],
+                noalias=out_noalias_sets[output_i],
+                update_mode=(output_updates or {}).get(output_i),
+            )
+            continue
         core_ndim = out_type.ndim - len(out_bc)
         size_type = out.shape.type.element  # pyright: ignore[reportAttributeAccessIssue]
         output_shape = cgutils.unpack_tuple(builder, out.shape)  # pyright: ignore[reportAttributeAccessIssue]
@@ -1103,6 +1223,7 @@ def _vectorized(
     size_type,
     indexed_inputs,
     indexed_outputs,
+    basic_outputs,
     reduce_outputs,
     core_handles_out,
 ):
@@ -1119,6 +1240,10 @@ def _vectorized(
     ``indexed_inputs``).  ``None`` means that index is not used for updates.
     ``((out_0, out_1), source_axis, mode)`` means that index updates outputs
     out_0 and out_1 with *mode* ``"set"`` or ``"inc"``.
+
+    ``basic_outputs`` is a per-output tuple of ``(start, stop, mode)`` for
+    supported 1D unit-step slice writes. ``stop=None`` means the end of the
+    destination.
 
     ``reduce_outputs`` lists ``(output_idx, identity, reducer,
     use_scalar_accumulator, scalar_output)`` entries. Reduction outputs carry ``bc=True`` on
@@ -1144,6 +1269,7 @@ def _vectorized(
         size_type,
         indexed_inputs,
         indexed_outputs,
+        basic_outputs,
         reduce_outputs,
         core_handles_out,
     ]
@@ -1167,6 +1293,9 @@ def _vectorized(
         indexed_inputs, "indexed_inputs"
     )
     indexed_outputs = _decode_literal(indexed_outputs, "indexed_outputs")
+    basic_outputs = _decode_literal(basic_outputs, "basic_outputs")
+    if not basic_outputs:
+        basic_outputs = (None,) * len(output_bc_patterns)
 
     if not isinstance(core_handles_out, types.Literal):
         raise TypingError("core_handles_out must be literal")
@@ -1175,6 +1304,9 @@ def _vectorized(
         if entry is not None and entry[2] == "inc":
             for out_idx in entry[0]:
                 output_updates[out_idx] = "Add"
+    for out_idx, entry in enumerate(basic_outputs):
+        if entry is not None and entry[2] == "inc":
+            output_updates[out_idx] = "Add"
 
     if not isinstance(allow_core_scalar, types.Literal):
         raise TypingError("allow_core_scalar must be literal.")
@@ -1185,6 +1317,9 @@ def _vectorized(
     for entry in indexed_outputs:
         if entry is not None:
             write_out_idxs.update(entry[0])
+    write_out_idxs.update(
+        out_idx for out_idx, entry in enumerate(basic_outputs) if entry is not None
+    )
     n_write_targets = len(write_out_idxs)
 
     inplace_pattern = tuple(
@@ -1249,9 +1384,12 @@ def _vectorized(
     # Write target buffers are appended to the outer inputs in ascending output
     # index order (see the rewriter's sorted(write_targets.items())), so the
     # target buffer index of an output is its rank among the write outputs.
+    write_output_idxs = set(write_spec_dict) | {
+        out_idx for out_idx, entry in enumerate(basic_outputs) if entry is not None
+    }
     out_idx_to_write_target = {
         out_idx: target_idx
-        for target_idx, out_idx in enumerate(sorted(write_spec_dict))
+        for target_idx, out_idx in enumerate(sorted(write_output_idxs))
     }
     output_write_spec = tuple(
         tuple(write_spec_dict[p]) if p in write_spec_dict else None
@@ -1278,7 +1416,9 @@ def _vectorized(
             # Multi-axis indexing: N indexed axes contribute max(idx.ndim)
             # loop dims, so the target can have more batch dims than the loop.
             spec = output_write_spec[out_idx]
-            if spec is not None:
+            if basic_outputs[out_idx] is not None:
+                n_target_batch = 1
+            elif spec is not None:
                 n_indexed = len(spec)
                 n_index_loop_dims = max(idx_types[idx_k].ndim for idx_k, _ in spec)
                 n_target_batch = n_indexed + batch_ndim - n_index_loop_dims
@@ -1319,22 +1459,10 @@ def _vectorized(
     )
 
     def codegen(ctx, builder, sig, args):
-        [
-            _,
-            _,
-            _,
-            _,
-            _,
-            _,
-            constant_inputs,
-            outer_inputs,
-            output_core_shapes,
-            size,
-            _,
-            _,
-            _,
-            _,
-        ] = args
+        constant_inputs = args[6]
+        outer_inputs = args[7]
+        output_core_shapes = args[8]
+        size = args[9]
 
         constant_inputs = cgutils.unpack_tuple(builder, constant_inputs)
         all_outer = cgutils.unpack_tuple(builder, outer_inputs)
@@ -1444,6 +1572,48 @@ def _vectorized(
 
         iter_shape = compute_itershape(ctx, builder, iter_shapes, tuple(iter_bc), size)
 
+        basic_output_runtime = [None] * len(basic_outputs)
+        for out_idx, spec in enumerate(basic_outputs):
+            if spec is None:
+                continue
+            start_value, stop_value, _mode = spec
+            target_idx = out_idx_to_write_target[out_idx]
+            target = write_target_arrs[target_idx]
+            target_length = cgutils.unpack_tuple(builder, target.shape)[0]
+            start = ctx.get_constant(types.intp, start_value)
+            start = builder.select(
+                builder.icmp_unsigned("<", start, target_length),
+                start,
+                target_length,
+            )
+            if stop_value is None:
+                stop = target_length
+            else:
+                stop = ctx.get_constant(types.intp, stop_value)
+                stop = builder.select(
+                    builder.icmp_unsigned("<", stop, target_length),
+                    stop,
+                    target_length,
+                )
+            zero = ctx.get_constant(types.intp, 0)
+            length = builder.select(
+                builder.icmp_unsigned(">", stop, start),
+                builder.sub(stop, start),
+                zero,
+            )
+            source_length = iter_shape[0]
+            is_source_scalar = builder.icmp_unsigned("==", source_length, one)
+            matches = builder.icmp_unsigned("==", source_length, length)
+            with builder.if_then(builder.not_(builder.or_(matches, is_source_scalar))):
+                ctx.call_conv.return_user_exc(
+                    builder, ValueError, ("could not broadcast value into basic slice",)
+                )
+            broadcast = builder.and_(
+                is_source_scalar,
+                builder.icmp_unsigned("!=", length, one),
+            )
+            basic_output_runtime[out_idx] = (start, length, broadcast)
+
         # Build update_outputs dict for make_outputs: out_idx -> (array, type)
         update_outputs_dict = (
             {
@@ -1499,6 +1669,8 @@ def _vectorized(
             idx_load_axes=idx_load_axes,
             idx_bc=idx_broadcastable,
             output_write_spec=output_write_spec,
+            basic_outputs=basic_outputs,
+            basic_output_runtime=tuple(basic_output_runtime),
             inplace=inplace_pattern,
             scalar_reductions=scalar_reductions or None,
             output_updates=output_updates or None,
