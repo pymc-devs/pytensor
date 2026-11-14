@@ -1069,13 +1069,21 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         )
     )
 
-    inc_outputs = frozenset(
-        out_idx
-        for entry in indexed_outputs
-        if entry is not None
-        for out_idx in entry[0]
-        if entry[2] == "inc"
-    )
+    inc_idxs: set[int] = set()
+    for entry in indexed_outputs:
+        if entry is None:
+            continue
+        # One mode per write target: two writes through the same index array can differ.
+        entry_modes = entry[2]
+        if isinstance(entry_modes, str):
+            # pickles from before the per-output mode change carried one mode
+            entry_modes = (entry_modes,) * len(entry[0])
+        inc_idxs.update(
+            out_idx
+            for out_idx, entry_mode in zip(entry[0], entry_modes)
+            if entry_mode == "inc"
+        )
+    inc_outputs = frozenset(inc_idxs)
     reduced_idxs = frozenset(i for i, r in enumerate(reduced_outputs) if r is not None)
     assert not (inc_outputs & reduced_idxs), (
         "An output cannot be both an indexed write and a reduction"

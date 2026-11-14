@@ -1172,8 +1172,14 @@ def _vectorized(
         raise TypingError("core_handles_out must be literal")
     core_handles_out = core_handles_out.literal_value
     for entry in indexed_outputs:
-        if entry is not None and entry[2] == "inc":
-            for out_idx in entry[0]:
+        if entry is None:
+            continue
+        entry_modes = entry[2]
+        if isinstance(entry_modes, str):
+            # pickles from before the per-output mode change carried one mode
+            entry_modes = (entry_modes,) * len(entry[0])
+        for out_idx, entry_mode in zip(entry[0], entry_modes):
+            if entry_mode == "inc":
                 output_updates[out_idx] = "Add"
 
     if not isinstance(allow_core_scalar, types.Literal):
