@@ -137,7 +137,7 @@ is controlled by the value of the ``mode`` parameter.
 PyTensor defines the following modes by name:
 
 - ``'FAST_COMPILE'``: Apply just a few graph optimizations and only use Python implementations.
-- ``'FAST_RUN'``: Apply all optimizations and use C implementations where possible.
+- ``'FAST_RUN'``: Apply all optimizations. Defaults to Numba JIT compilation when ``config.linker == "auto"``, or uses the configured backend linker (such as C/CVM).
 - ``'DebugMode'``: Verify the correctness of all optimizations, and compare C and Python
     implementations. This mode can take much longer than the other modes, but can identify
     several kinds of problems.
@@ -152,7 +152,7 @@ which can be overridden by passing the keyword argument to
 short name        Full constructor                                                What does it do?
 ================= =============================================================== ===============================================================================
 ``FAST_COMPILE``  ``compile.mode.Mode(linker='py', optimizer='fast_compile')``    Python implementations only, quick and cheap graph transformations
-``FAST_RUN``      ``compile.mode.Mode(linker='cvm', optimizer='fast_run')``       C implementations where available, all available graph transformations.
+``FAST_RUN``      ``compile.mode.Mode(linker='numba', optimizer='fast_run')``     Numba JIT by default (or configured linker), all available graph transformations.
 ``DebugMode``     ``compile.debugmode.DebugMode()``                               Both implementations where available, all available graph transformations.
 ================= =============================================================== ===============================================================================
 
