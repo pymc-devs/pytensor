@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 import pytensor.tensor as pt
@@ -15,7 +17,7 @@ from pytensor.assumptions import (
     FactState,
 )
 from pytensor.assumptions.specify import SpecifyAssumptions, assume
-from tests.assumptions.conftest import make_fgraph
+from tests.assumptions.conftest import RankBoundedOp, make_fgraph
 
 
 @pytest.mark.parametrize(
@@ -34,7 +36,7 @@ def test_assume_records_false_assertions(key):
     x = pt.matrix("x", shape=(3, 3))
     x_not = assume(x, **{key.name: False})
     _, af = make_fgraph(x_not)
-    assert af.get(x_not, key) is FactState.FALSE
+    assert key.is_false(af.get(x_not, key))
 
 
 def test_assume_unique_indices_on_vector():
@@ -58,7 +60,7 @@ def test_assume_mixed_true_and_false_kwargs():
     x_mix = assume(x, diagonal=True, orthogonal=False)
     _, af = make_fgraph(x_mix)
     assert af.check(x_mix, DIAGONAL)
-    assert af.get(x_mix, ORTHOGONAL) is FactState.FALSE
+    assert ORTHOGONAL.is_false(af.get(x_mix, ORTHOGONAL))
 
 
 def test_assume_chained_combines_facts():
@@ -106,7 +108,7 @@ def test_assume_keeps_released_positional_order(position, key):
     flags = [None] * position + [True]
     x = assume(pt.matrix("x", shape=(3, 3)), *flags)
     _, af = make_fgraph(x)
-    assert af.get(x, key) is FactState.TRUE
+    assert af.check(x, key)
 
 
 def test_assume_no_kwargs_returns_input_unchanged():
@@ -120,3 +122,26 @@ def test_assume_conflict_with_inferred_fact_raises():
     _, af = make_fgraph(e_not_diag)
     with pytest.raises(ConflictingAssumptionsError):
         af.get(e_not_diag, DIAGONAL)
+
+
+def test_assume_valued_key_joins_declared_and_inferred(rank):
+    x = pt.matrix("x")
+    declared = assume(x, rank_bound=5)
+    tightened = assume(RankBoundedOp(3)(x), rank_bound=5)
+    _, af = make_fgraph(declared, tightened)
+    assert af.get(x, rank) == math.inf
+    assert af.get(declared, rank) == 5
+    assert af.get(tightened, rank) == 3
+
+
+def test_specify_assumptions_valued_round_trip(rank):
+    op = SpecifyAssumptions({rank: 5, DIAGONAL: FactState.TRUE})
+    assert SpecifyAssumptions(dict(op.assumptions)) == op
+    assert str(op) == "SpecifyAssumptions{diagonal, rank_bound=5.0}"
+
+
+def test_valued_key_rejects_bool(rank):
+    with pytest.raises(TypeError, match="takes a float value"):
+        rank.assume(pt.matrix("x"))
+    with pytest.raises(TypeError, match="takes a float value"):
+        SpecifyAssumptions({rank: True})

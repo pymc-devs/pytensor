@@ -174,7 +174,7 @@ def alloc_propagates_matrix_property(
     value = node.inputs[0]
     if value.type.ndim >= 2 and not any(value.type.broadcastable[-2:]):
         return [input_states[0]]
-    return [FactState.UNKNOWN]
+    return [key.unknown]
 
 
 for _key in MATRIX_KEYS:

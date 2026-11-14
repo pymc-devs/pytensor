@@ -1,4 +1,5 @@
 import pickle
+from textwrap import dedent
 
 import pytest
 
@@ -18,7 +19,7 @@ from pytensor.printing import debugprint
 from pytensor.tensor.basic import AllocDiag, alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.rewriting.assumptions import DrainSpecifyAssumptions
-from tests.assumptions.conftest import make_fgraph
+from tests.assumptions.conftest import RankBoundedOp, make_fgraph
 
 
 def test_key_registers_itself():
@@ -142,6 +143,23 @@ def test_extension_key_appears_in_debugprint():
     x_tv = assume(pt.tensor3("x"), time_varying=True)
     printed = debugprint(x_tv, print_assumptions=True, file="str")
     assert "a={tv}" in printed
+
+
+def test_valued_key_appears_in_debugprint(rank):
+    x = pt.matrix("x")
+    printed = debugprint(
+        assume(RankBoundedOp(3)(x), rank_bound=5), print_assumptions=True, file="str"
+    )
+    assert (
+        printed
+        == dedent(
+            """
+        SpecifyAssumptions{rank_bound=5.0} [id A] a={rank_bound=3}
+         └─ RankBoundedOp{bound=3} [id B] a={rank_bound=3}
+            └─ x [id C]
+        """
+        ).lstrip()
+    )
 
 
 def test_drain_resolves_extension_key():

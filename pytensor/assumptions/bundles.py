@@ -1,5 +1,5 @@
 from pytensor.assumptions.alloc import alloc_propagates_matrix_property
-from pytensor.assumptions.core import AssumptionKey, register_assumption
+from pytensor.assumptions.core import AssumptionKey, FactState, register_assumption
 from pytensor.assumptions.dimshuffle import dimshuffle_propagates_matrix_property
 from pytensor.assumptions.reshape import (
     join_dims_propagates_matrix_property,
@@ -27,9 +27,11 @@ def register_matrix_property_rules(key: AssumptionKey) -> None:
     undisturbed? The bundle thus suits any property of a matrix that batch dimensions
     carry elementwise, such as triangularity or a fixed sparsity pattern.
 
-    Rules are tried in registration order until one returns a non-UNKNOWN state, so a
-    key needing different behavior for one Op registers its own with
-    ``register_assumption(..., prepend=True)``.
+    Rules are tried in registration order until one returns a value other than
+    ``key.unknown``, so a key needing different behavior for one Op registers its own
+    with ``register_assumption(..., prepend=True)``. The ``Subtensor`` and
+    ``IncSubtensor`` rules apply to boolean keys only, so a key with another value
+    registers its own for those Ops.
 
     Parameters
     ----------
@@ -51,5 +53,6 @@ def register_matrix_property_rules(key: AssumptionKey) -> None:
     register_assumption(key, JoinDims)(join_dims_propagates_matrix_property)
     register_assumption(key, SplitDims)(split_dims_propagates_matrix_property)
     register_assumption(key, Alloc)(alloc_propagates_matrix_property)
-    register_assumption(key, Subtensor)(subtensor_propagates_matrix_property)
-    register_assumption(key, IncSubtensor)(incsubtensor_propagates_matrix_property)
+    if key.value_type is FactState:
+        register_assumption(key, Subtensor)(subtensor_propagates_matrix_property)
+        register_assumption(key, IncSubtensor)(incsubtensor_propagates_matrix_property)

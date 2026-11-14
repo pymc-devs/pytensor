@@ -89,7 +89,7 @@ def test_incsubtensor_partial_batch_set_with_untagged_base_is_unknown():
     value_orth = assume(value, orthogonal=True)
     y = pt.set_subtensor(base[1:3], value_orth)
     _, af = make_fgraph(y)
-    assert af.get(y, ORTHOGONAL) == FactState.UNKNOWN
+    assert af.get(y, ORTHOGONAL) == ORTHOGONAL.unknown
 
 
 def test_incsubtensor_partial_batch_inc_with_both_tagged_forwards():
@@ -119,7 +119,7 @@ def test_incsubtensor_batch_inc_orthogonal_is_unknown():
     value_orth = assume(value, orthogonal=True)
     y = pt.inc_subtensor(base_orth[1:3], value_orth)
     _, af = make_fgraph(y)
-    assert af.get(y, ORTHOGONAL) == FactState.UNKNOWN
+    assert af.get(y, ORTHOGONAL) == ORTHOGONAL.unknown
 
 
 def test_incsubtensor_index_reaching_core_axis_is_unknown():

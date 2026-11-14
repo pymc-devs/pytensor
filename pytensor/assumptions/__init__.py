@@ -38,6 +38,7 @@ from pytensor.assumptions.core import (
     ConflictingAssumptionsError,
     FactState,
     check_assumption,
+    get_assumption_value,
     register_assumption,
     register_constant_inference,
     register_implies,
@@ -57,32 +58,38 @@ def summarize_assumptions(feature: AssumptionFeature, var) -> str:
     Each TRUE fact appears as its ``short_name``; each FALSE fact as ``!short_name``.
     Implied facts are pruned: a TRUE fact is dropped when a stronger fact (one that
     implies it) is also TRUE, and a FALSE fact is dropped when a weaker fact (one it
-    implies) is also FALSE. Return ``""`` when nothing is known.
+    implies) is also FALSE. Any other value that differs from ``key.unknown`` appears
+    as :meth:`AssumptionKey.format_fact` prints it. Return ``""`` when nothing is
+    known.
     """
     states = {}
+    conflicted = set()
     for key in ALL_KEYS:
         try:
             states[key] = feature.get(var, key)
         except ConflictingAssumptionsError:
-            states[key] = FactState.CONFLICT
+            states[key] = key.unknown
+            conflicted.add(key)
 
     tokens = []
     for key in ALL_KEYS:
         state = states[key]
         label = key.short_name or key.name
-        if state is FactState.TRUE:
+        if key in conflicted:
+            tokens.append(f"{label}=CONFLICT")
+            continue
+        if key.is_true(state):
             if any(
-                key in weaker and states[stronger] is FactState.TRUE
+                key in weaker and stronger.is_true(states[stronger])
                 for stronger, weaker in IMPLIES.items()
             ):
                 continue
-            tokens.append(label)
-        elif state is FactState.FALSE:
-            if any(states[w] is FactState.FALSE for w in IMPLIES.get(key, ())):
+        elif key.is_false(state):
+            if any(w.is_false(states[w]) for w in IMPLIES.get(key, ())):
                 continue
-            tokens.append(f"!{label}")
-        elif state is FactState.CONFLICT:
-            tokens.append(f"{label}=CONFLICT")
+        elif state == key.unknown:
+            continue
+        tokens.append(key.format_fact(label, state))
 
     return "{" + ", ".join(tokens) + "}" if tokens else ""
 
