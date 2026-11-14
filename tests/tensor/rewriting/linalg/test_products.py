@@ -526,3 +526,118 @@ def test_det_of_non_permutation_selection_is_not_rewritten():
     f = function([idx], pt.linalg.det(S), mode="FAST_RUN")
     assert any(isinstance(node.op, Det) for node in f.maker.fgraph.apply_nodes)
     assert_allclose(f(np.array([0, 1, 1, 3])), 0.0)  # duplicate column -> singular
+
+
+def test_dot_of_kronecker_vec_trick():
+    rng = np.random.default_rng(42)
+    a_val = rng.standard_normal((3, 4))
+    b_val = rng.standard_normal((5, 6))
+    c_1d_val = rng.standard_normal(4 * 6)
+    c_col_val = rng.standard_normal((4 * 6, 1))
+    c_transp_val = rng.standard_normal((3 * 5, 1))
+    c_row_val = rng.standard_normal((1, 3 * 5))
+
+    a = pt.dmatrix("a")
+    b = pt.dmatrix("b")
+    c_1d = pt.dvector("c_1d")
+    c_col = pt.matrix("c_col", shape=(None, 1))
+    c_row = pt.matrix("c_row", shape=(1, None))
+
+    # 1D vector
+    f_1d = function([a, b, c_1d], pt.dot(pt.linalg.kron(a, b), c_1d), mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, KroneckerProduct) for node in f_1d.maker.fgraph.apply_nodes
+    )
+    assert_allclose(f_1d(a_val, b_val, c_1d_val), np.kron(a_val, b_val) @ c_1d_val)
+
+    # 2D column vector
+    f_col = function(
+        [a, b, c_col], pt.dot(pt.linalg.kron(a, b), c_col), mode="FAST_RUN"
+    )
+    assert not any(
+        isinstance(node.op, KroneckerProduct) for node in f_col.maker.fgraph.apply_nodes
+    )
+    assert_allclose(f_col(a_val, b_val, c_col_val), np.kron(a_val, b_val) @ c_col_val)
+
+    # Transposed Kronecker
+    f_transp = function(
+        [a, b, c_col], pt.dot(pt.linalg.kron(a, b).T, c_col), mode="FAST_RUN"
+    )
+    assert not any(
+        isinstance(node.op, KroneckerProduct)
+        for node in f_transp.maker.fgraph.apply_nodes
+    )
+    assert_allclose(
+        f_transp(a_val, b_val, c_transp_val), np.kron(a_val, b_val).T @ c_transp_val
+    )
+
+    # Row vector on left
+    f_row = function(
+        [c_row, a, b], pt.dot(c_row, pt.linalg.kron(a, b)), mode="FAST_RUN"
+    )
+    assert not any(
+        isinstance(node.op, KroneckerProduct) for node in f_row.maker.fgraph.apply_nodes
+    )
+    assert_allclose(f_row(c_row_val, a_val, b_val), c_row_val @ np.kron(a_val, b_val))
+
+
+def test_dot_of_kronecker_matrix():
+    rng = np.random.default_rng(43)
+    a_val = rng.standard_normal((3, 4))
+    b_val = rng.standard_normal((5, 6))
+    c_mat_val = rng.standard_normal((4 * 6, 7))
+    c_mat_l_val = rng.standard_normal((8, 3 * 5))
+
+    a = pt.dmatrix("a")
+    b = pt.dmatrix("b")
+    c_mat = pt.matrix("c_mat")
+    c_mat_l = pt.matrix("c_mat_l")
+
+    # Right matrix multiplication
+    f_mat = function(
+        [a, b, c_mat], pt.dot(pt.linalg.kron(a, b), c_mat), mode="FAST_RUN"
+    )
+    assert not any(
+        isinstance(node.op, KroneckerProduct) for node in f_mat.maker.fgraph.apply_nodes
+    )
+    assert_allclose(f_mat(a_val, b_val, c_mat_val), np.kron(a_val, b_val) @ c_mat_val)
+
+    # Left matrix multiplication
+    f_mat_l = function(
+        [c_mat_l, a, b], pt.dot(c_mat_l, pt.linalg.kron(a, b)), mode="FAST_RUN"
+    )
+    assert not any(
+        isinstance(node.op, KroneckerProduct)
+        for node in f_mat_l.maker.fgraph.apply_nodes
+    )
+    assert_allclose(
+        f_mat_l(c_mat_l_val, a_val, b_val), c_mat_l_val @ np.kron(a_val, b_val)
+    )
+
+
+def test_dot_of_kronecker_mixed_product():
+    rng = np.random.default_rng(44)
+    a1_v = rng.standard_normal((2, 3))
+    b1_v = rng.standard_normal((4, 5))
+    a2_v = rng.standard_normal((3, 6))
+    b2_v = rng.standard_normal((5, 7))
+
+    a1 = pt.dmatrix("a1")
+    b1 = pt.dmatrix("b1")
+    a2 = pt.dmatrix("a2")
+    b2 = pt.dmatrix("b2")
+
+    k1 = pt.linalg.kron(a1, b1)
+    k2 = pt.linalg.kron(a2, b2)
+
+    # Test rewrite in canonicalize mode
+    rew = rewrite_graph(pt.dot(k1, k2), include=("canonicalize",))
+    assert isinstance(rew.owner.op, KroneckerProduct)
+    assert isinstance(rew.owner.inputs[0].owner.op, Dot)
+    assert isinstance(rew.owner.inputs[1].owner.op, Dot)
+
+    # Value test in FAST_RUN
+    f = function([a1, b1, a2, b2], pt.dot(k1, k2), mode="FAST_RUN")
+    assert_allclose(
+        f(a1_v, b1_v, a2_v, b2_v), np.kron(a1_v, b1_v) @ np.kron(a2_v, b2_v)
+    )
