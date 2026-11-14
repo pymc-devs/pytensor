@@ -3837,9 +3837,14 @@ class Real(UnaryScalarOp):
         return np.real(x)
 
     def pullback(self, inputs, outputs, gout):
-        (_x,) = inputs
+        (x,) = inputs
         (gz,) = gout
-        return [complex(gz, 0)]
+        if x.type in complex_types:
+            return [complex(gz, 0)]
+        elif x.type in float_types:
+            return [gz]
+        else:
+            return [x.zeros_like(dtype=config.floatX)]
 
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()

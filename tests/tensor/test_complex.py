@@ -59,6 +59,10 @@ class TestRealImag:
         np.all(0 == pytensor.function([x], imag(x))(xval))
         np.all(xval == pytensor.function([x], real(x))(xval))
 
+    def test_grad_on_real_input(self):
+        rng = np.random.default_rng(23)
+        utt.verify_grad(real, [rng.standard_normal(10)])
+
     def test_cast(self):
         x = zvector()
         with pytest.raises(TypeError):
