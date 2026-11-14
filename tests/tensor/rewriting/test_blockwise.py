@@ -63,6 +63,12 @@ def test_useless_unbatched_blockwise():
     result = RewriteTester([s], [out], include="local_useless_unbatched_blockwise")
     result.assert_graph(shape_padleft(add(s, constant(2.0, dtype=s.type.dtype)), 1))
 
+    # A static length-1 core dim is not squeezed along with the batch dims
+    x = tensor("x", shape=(1,))
+    out = Blockwise(mul, signature="(n),()->(n)")(x[None, None], as_tensor([s]))
+    result = RewriteTester([x, s], [out], include="local_useless_unbatched_blockwise")
+    result.assert_graph((x * s)[None, None])
+
     # Equivalent factorizations should share the same core computation.
     x = matrix("x")
     result = RewriteTester([x], [cholesky(x), cholesky(x[None])], include="o3")
@@ -70,15 +76,6 @@ def test_useless_unbatched_blockwise():
     result.assert_graph(core_out, core_out[None])
     unbatched_out, batched_out = result.rewr_fg.outputs
     assert batched_out.owner.inputs[0] is unbatched_out
-
-
-@pytest.mark.parametrize("core_shape", [(None,), (1,)])
-def test_useless_unbatched_blockwise_preserves_core_dims(core_shape):
-    x = tensor("x", shape=core_shape)
-    s = scalar("s")
-    out = Blockwise(mul, signature="(n),()->(n)")(x[None, None], as_tensor([s]))
-    result = RewriteTester([x, s], [out], include="local_useless_unbatched_blockwise")
-    result.assert_graph((x * s)[None, None])
 
 
 def test_local_blockwise_alloc_inputs():
