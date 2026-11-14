@@ -44,8 +44,8 @@ class Softmax(FusibleSymbolicOp):
         super().__init__(**kwargs)
 
     def build_inner_graph(self, x):
-        x_stable = x - x.max(axis=self.axis, keepdims=True)
-        e_x = exp(x_stable)
+        x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
+        e_x = exp(x - x_max)
         return [e_x / e_x.sum(axis=self.axis, keepdims=True)]
 
     def pullback(self, inputs, outputs, output_grads):
@@ -85,7 +85,8 @@ class LogSoftmax(FusibleSymbolicOp):
         super().__init__(**kwargs)
 
     def build_inner_graph(self, x):
-        x_stable = x - x.max(axis=self.axis, keepdims=True)
+        x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
+        x_stable = x - x_max
         return [x_stable - log(exp(x_stable).sum(axis=self.axis, keepdims=True))]
 
     def pullback(self, inputs, outputs, output_grads):
@@ -121,9 +122,8 @@ class LogSumExp(FusibleSymbolicOp):
 
     def build_inner_graph(self, x):
         x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
-        # Do not offset when x_max = -inf, to avoid nan in the output
-        x_max = switch(isinf(x_max), constant(0.0, ndim=x_max.ndim), x_max)
         out = log(exp(x - x_max).sum(axis=self.axis, keepdims=True)) + x_max
+        out = switch(isinf(x_max), x_max, out)
         return [out.squeeze(axis=self.axis)]
 
 
