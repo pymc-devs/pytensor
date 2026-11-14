@@ -4,6 +4,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function
+from pytensor.compile.mode import Mode
 from pytensor.gradient import (
     DisconnectedInputError,
     disconnected_type,
@@ -25,6 +26,9 @@ from tests import unittest_tools as utt
 
 
 floatX = config.floatX
+
+# Runs the scipy-calling perform methods, whatever backend the suite runs under
+py_mode = Mode(linker="py", optimizer=None)
 
 
 def test_constant_expressions_not_in_args():
@@ -374,6 +378,90 @@ def test_root_scalar(method, jac, hess, bracketed):
         return root_scalar(f, x, method=method, jac=jac, hess=hess, **root_kwargs(a))[0]
 
     utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
+
+
+@pytest.mark.parametrize(
+    "solve",
+    [
+        lambda x: root_scalar(
+            equation=x + 2 * pt.cos(x), variable=x, method="brentq", bracket=(0.0, 1.0)
+        ),
+        lambda x: minimize_scalar(
+            objective=pt.cos(x), x=x, method="bounded", bounds=(5.0, 0.0)
+        ),
+    ],
+    ids=["root_scalar", "minimize_scalar"],
+)
+def test_scalar_optimizers_fail_on_bad_runtime_inputs(solve):
+    """Each scipy error caused by a runtime input becomes a NaN solution and a failed flag."""
+    x = pt.scalar("x")
+    solution, success = solve(x)
+    fn = function([x], [solution, success], mode=py_mode)
+
+    value, succeeded = fn(0.0)
+
+    assert not succeeded
+    assert np.isnan(value)
+
+
+def test_scalar_optimizers_raise_on_bad_static_options():
+    x = pt.scalar("x")
+    solution, _ = root_scalar(
+        equation=x + 2 * pt.cos(x),
+        variable=x,
+        method="brentq",
+        bracket=(-2.0, 0.0),
+        optimizer_kwargs={"xtol": 0.0},
+    )
+    fn = function([x], solution, mode=py_mode)
+
+    with pytest.raises(ValueError, match="xtol too small"):
+        fn(0.0)
+
+
+@pytest.mark.parametrize(
+    "solve, name",
+    [
+        (
+            lambda x, **kwargs: root_scalar(
+                equation=x + 2 * pt.cos(x), variable=x, method="brentq", **kwargs
+            ),
+            "bracket",
+        ),
+        (
+            lambda x, **kwargs: minimize_scalar(
+                objective=pt.cos(x), x=x, method="bounded", **kwargs
+            ),
+            "bounds",
+        ),
+    ],
+    ids=["root_scalar_bracket", "minimize_scalar_bounds"],
+)
+def test_bound_in_optimizer_kwargs(solve, name):
+    x = pt.scalar("x")
+
+    with pytest.warns(FutureWarning, match=f"`{name}` in `optimizer_kwargs`"):
+        solution, _ = solve(x, optimizer_kwargs={name: (-2.0, 0.0)})
+    assert solution.owner.op.bound_kwargs == (name,)
+    assert solution.owner.op.optimizer_kwargs == {}
+
+    with pytest.raises(ValueError, match="both as an argument"):
+        solve(x, **{name: (-2.0, 0.0)}, optimizer_kwargs={name: (-2.0, 0.0)})
+
+
+def test_minimize_scalar_bounded_tol_is_absolute():
+    """scipy turns a bounded ``tol`` into ``xatol`` with a warning on every call. The graph does it once, at build time."""
+    x = pt.scalar("x")
+
+    with pytest.warns(RuntimeWarning, match="does not support relative tolerance"):
+        solution, _ = minimize_scalar(
+            objective=pt.cos(x),
+            x=x,
+            method="bounded",
+            bounds=(0.0, 5.0),
+            optimizer_kwargs={"tol": 1e-3},
+        )
+    assert solution.owner.op.optimizer_kwargs == {"options": {"xatol": 1e-3}}
 
 
 def test_root_simple():
