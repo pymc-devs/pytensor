@@ -964,6 +964,19 @@ def test_infer_static_shape():
     _sh, static_shape = infer_static_shape([x.size])
     assert static_shape == (1,)
 
+    n = lscalar("n")
+    known_size = vector(shape=(5,)).shape[0] + 2
+    folded_size = ptm.sum(constant([2, 3]))
+    for sizes, expected in [
+        ([n, constant(2)], (None, 2)),
+        ([known_size], (7,)),
+        ([folded_size], (5,)),
+        ([n, known_size, folded_size], (None, 7, 5)),
+    ]:
+        symbolic_shape, static_shape = infer_static_shape(sizes)
+        assert symbolic_shape == sizes
+        assert static_shape == expected
+
 
 def test_cached_equilibrium_db_invalidates_on_register():
     # Registering after the default query is cached must drop the cache, so the

@@ -1007,6 +1007,9 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         up. Pass ``dedup_nodes=True`` to fold such nodes onto a single interned
         node (no order is baked); only safe for graphs free of inplace ops
         (e.g. ``Composite``/``ScalarLoop``).
+
+        Raises ``MissingInputError`` if a non-constant variable is neither
+        provided in ``inputs`` nor produced by the graph.
         """
         return cls._freeze(inputs, outputs, io_toposort(inputs, outputs), dedup_nodes)
 
@@ -1047,7 +1050,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             if isinstance(inp, Constant):
                 memo[inp] = inp
                 return inp
-            raise ValueError(
+            raise MissingInputError(
                 f"Orphan {inp} found in the graph. "
                 "All variables must be graph inputs, constants, "
                 "or produced by Apply nodes reachable from the inputs."
@@ -1073,14 +1076,13 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             try:
                 resolved = memo[o]
             except KeyError:
-                if not isinstance(o, AtomicVariable):
-                    raise ValueError(
+                if not isinstance(o, Constant):
+                    raise MissingInputError(
                         f"Output variable {o} could not be mapped to a frozen graph variable. "
                         "All outputs must be graph inputs, constants, "
                         "or produced by Apply nodes reachable from the inputs."
                     )
-                # A constant or graph input passed directly as output;
-                # these are the only cases not already in memo.
+                # Inputs are already mapped in memo; only constants can remain.
                 out_node = FrozenApply(Output(i), (o,), ())
                 output_nodes.append(out_node)
                 # FrozenApply interning may return a cached node that holds a previously seen equal constant.
