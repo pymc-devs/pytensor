@@ -82,6 +82,172 @@ mode_opt = get_mode(mode_opt)
 NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 
 
+class TestSinkPessimisticAdvancedIndexing:
+    @pytest.mark.parametrize(
+        ("source_length", "index_length", "operation", "should_sink"),
+        [
+            (5, 640, "log", False),
+            (5, 1023, "log", False),
+            (5, 1024, "log", True),
+            (5, 1024, "sin", True),
+            (5, 1024, "exp", True),
+            (64, 1024, "log", False),
+            (64, 2048, "log", True),
+            (5, 10000, "neg", False),
+        ],
+    )
+    def test_sinking_cost_guard(
+        self, source_length, index_length, operation, should_sink
+    ):
+        x = pt.vector("x", shape=(source_length,))
+        idx = np.arange(index_length, dtype=np.int64) % source_length
+        expr = -x[idx] if operation == "neg" else getattr(pt, operation)(x[idx])
+        fn = function([x], expr, mode="FAST_RUN")
+
+        sunk = any(
+            isinstance(n.op, AdvancedSubtensor)
+            and n.inputs[0].owner is not None
+            and isinstance(n.inputs[0].owner.op, Elemwise)
+            and n.inputs[0].type.shape == (source_length,)
+            for n in fn.maker.fgraph.apply_nodes
+        )
+        assert sunk == should_sink
+
+        values = np.arange(1, source_length + 1, dtype=np.float64)
+        expected = getattr(np, "negative" if operation == "neg" else operation)(
+            values[idx]
+        )
+        np.testing.assert_allclose(fn(values), expected)
+
+    def test_inplace_elemwise_does_not_sink(self):
+        from pytensor.tensor.rewriting.subtensor_lift import (
+            local_sink_unary_elemwise_advanced_indexing,
+        )
+
+        x = pt.vector("x", shape=(5,))
+        idx = np.arange(10_000, dtype=np.int64) % 5
+        inplace_exp = Elemwise(ps.exp, inplace_pattern={0: 0})
+        result = inplace_exp(x[idx])
+        fgraph = FunctionGraph([x], [result], clone=False)
+
+        assert (
+            local_sink_unary_elemwise_advanced_indexing.transform(fgraph, result.owner)
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        ("elem_op", "np_op"),
+        [(pt.log, np.log), (pt.exp, np.exp), (pt.sin, np.sin)],
+    )
+    def test_repeated_index_sinks(self, elem_op, np_op):
+        x = pt.vector("x", shape=(5,))
+        idx = np.tile(np.array([0, -1, 2, 4]), 2500)
+        fn = function([x], elem_op(x[idx]), mode="FAST_RUN")
+
+        assert any(
+            isinstance(n.op, AdvancedSubtensor)
+            and n.inputs[0].owner is not None
+            and isinstance(n.inputs[0].owner.op, Elemwise)
+            and n.inputs[0].type.shape == (5,)
+            for n in fn.maker.fgraph.apply_nodes
+        )
+
+        values = np.array([0.5, 1.2, 2.0, 3.0, 4.0])
+        np.testing.assert_allclose(fn(values), np_op(values[idx]))
+
+    @pytest.mark.parametrize("index_length", [2, 5, 10, 160])
+    def test_small_expansion_does_not_sink(self, index_length):
+        x = pt.vector("x", shape=(5,))
+        idx = np.arange(index_length) % 5
+        fn = function([x], pt.log(x[idx]), mode="FAST_RUN")
+
+        assert not any(
+            isinstance(n.op, AdvancedSubtensor)
+            and n.inputs[0].owner is not None
+            and isinstance(n.inputs[0].owner.op, Elemwise)
+            and n.inputs[0].type.shape == (5,)
+            for n in fn.maker.fgraph.apply_nodes
+        )
+
+    def test_unknown_source_length_does_not_sink(self):
+        x = pt.vector("x")
+        idx = np.arange(10000) % 5
+        fn = function([x], pt.log(x[idx]), mode="FAST_RUN")
+
+        assert not any(
+            isinstance(n.op, AdvancedSubtensor)
+            and n.inputs[0].owner is not None
+            and isinstance(n.inputs[0].owner.op, Elemwise)
+            for n in fn.maker.fgraph.apply_nodes
+        )
+
+    def test_multiple_clients_do_not_sink(self):
+        x = pt.vector("x", shape=(5,))
+        idx = np.arange(10000) % 5
+        gathered = x[idx]
+        fn = function([x], [pt.log(gathered), gathered], mode="FAST_RUN")
+
+        assert not any(
+            isinstance(n.op, AdvancedSubtensor)
+            and n.inputs[0].owner is not None
+            and isinstance(n.inputs[0].owner.op, Elemwise)
+            and n.inputs[0].type.shape == (5,)
+            for n in fn.maker.fgraph.apply_nodes
+        )
+
+    @pytest.mark.parametrize("backend", ["FAST_RUN", "NUMBA"])
+    def test_sink_symbolic_indices_backends(self, backend):
+        x = pt.vector("x", shape=(5,))
+        idx = pt.lvector("idx", shape=(10000,))
+        fn = function([x, idx], pt.log(x[idx]), mode=backend)
+
+        assert any(
+            isinstance(n.op, AdvancedSubtensor)
+            and n.inputs[0].owner is not None
+            and isinstance(n.inputs[0].owner.op, Elemwise)
+            and n.inputs[0].type.shape == (5,)
+            for n in fn.maker.fgraph.apply_nodes
+        )
+
+        values = np.linspace(0.5, 3.0, 5)
+        indices = np.tile(np.array([0, -1, 2, 4], dtype=np.int64), 2500)
+
+        np.testing.assert_allclose(fn(values, indices), np.log(values[indices]))
+
+    def test_sink_invalid_index_raises(self):
+        x = pt.vector("x", shape=(5,))
+        idx = pt.lvector("idx", shape=(10000,))
+        fn = function([x, idx], pt.log(x[idx]), mode="FAST_RUN")
+
+        indices = np.arange(10000, dtype=np.int64) % 5
+        indices[0] = 5
+
+        with pytest.raises(IndexError):
+            fn(np.ones(5), indices)
+
+    def test_sink_gradient_equivalence(self):
+        x = pt.vector("x", shape=(5,))
+        idx = pt.lvector("idx", shape=(10000,))
+        result = pt.log(x[idx]).sum()
+        grad = pt.grad(result, x)
+
+        mode = get_mode("FAST_RUN")
+        original = function(
+            [x, idx],
+            grad,
+            mode=mode.excluding("local_sink_unary_elemwise_advanced_indexing"),
+        )
+        optimized = function([x, idx], grad, mode=mode)
+
+        values = np.arange(1, 6, dtype=np.float64)
+        indices = np.tile(np.array([0, 2, 4, 0], dtype=np.int64), 2500)
+
+        np.testing.assert_allclose(
+            optimized(values, indices),
+            original(values, indices),
+        )
+
+
 class TestLocalSubtensorOfBatchDims:
     rewrite_kw = dict(
         include=("ShapeOpt", "canonicalize", "specialize"),

@@ -18,6 +18,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     out2in,
 )
+from pytensor.scalar.basic import Exp, Log, Sin
 from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
@@ -545,6 +546,61 @@ def local_subtensor_of_batch_dims(fgraph, node):
     copy_stack_trace([old_out, *node.inputs], new_out)
 
     return [new_out]
+
+
+@register_specialize
+@node_rewriter([Elemwise])
+def local_sink_unary_elemwise_advanced_indexing(fgraph, node):
+    """Sink selected unary Elemwise ops through large repeated 1D gathers.
+
+    Transform log(x[idx]) into log(x)[idx] when static size information
+    shows sufficient expansion to justify computing before indexing.
+    """
+    if len(node.inputs) != 1 or len(node.outputs) != 1:
+        return None
+
+    if node.op.inplace_pattern:
+        return None
+
+    if type(node.op.scalar_op) not in (Exp, Log, Sin):
+        return None
+
+    indexed = node.inputs[0]
+    indexed_node = indexed.owner
+    if indexed_node is None or not isinstance(indexed_node.op, AdvancedSubtensor):
+        return None
+    if len(fgraph.clients[indexed]) != 1:
+        return None
+    if indexed_node.op.idx_list != (0,):
+        return None
+    if len(indexed_node.inputs) != 2:
+        return None
+
+    x, idx = indexed_node.inputs
+    if x.ndim != 1 or idx.ndim != 1:
+        return None
+    if np.dtype(idx.dtype).kind not in "iu":
+        return None
+
+    x_len = x.type.shape[0]
+    idx_len = idx.type.shape[0]
+    # Conservative absolute and relative thresholds avoid small-gather regressions.
+    if (
+        x_len is None
+        or idx_len is None
+        or x_len == 0
+        or idx_len < max(1_024, 32 * x_len)
+    ):
+        return None
+
+    smaller_result = node.op(x)
+    result = smaller_result[idx]
+    if result.type != node.outputs[0].type:
+        return None
+
+    copy_stack_trace(node.outputs[0], smaller_result)
+    copy_stack_trace(node.outputs[0], result)
+    return [result]
 
 
 @register_canonicalize
