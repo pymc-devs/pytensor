@@ -192,5 +192,8 @@ random_vars_opt = dfs_rewriter(
 optdb.register("jax_random_vars_rewrites", random_vars_opt, "jax", position=110)
 
 optdb.register(
-    "jax_size_parameter_as_tuple", in2out(size_parameter_as_tuple), "jax", position=100
+    "jax_size_parameter_as_tuple",
+    in2out(size_parameter_as_tuple),
+    "jax",
+    position=48.8,
 )

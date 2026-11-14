@@ -148,7 +148,7 @@ optdb.register(
     "jax_shape_parameter_as_tuple",
     dfs_rewriter(shape_parameter_as_tuple),
     "jax",
-    position=100,
+    position=48.8,
 )
 
 

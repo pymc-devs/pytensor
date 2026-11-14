@@ -1,13 +1,85 @@
 import warnings
+from collections.abc import Sequence
 
+import numpy as np
 from numpy.random import Generator
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.graph.basic import Variable
 from pytensor.link.basic import JITLinker
 
 
+def is_pure_shape_use(var, fgraph, memo=None):
+    from pytensor.compile.builders import OpFromGraph
+    from pytensor.compile.ops import TypeCastingOp
+    from pytensor.conditional.op import LazyIfElse
+    from pytensor.link.jax.dispatch.shape import JAXShapeTuple
+    from pytensor.scalar.basic import Cast
+    from pytensor.tensor.elemwise import Elemwise
+
+    if memo is None:
+        memo = {}
+    if var in memo:
+        return memo[var]
+
+    clients = fgraph.clients.get(var, [])
+    if not clients:
+        memo[var] = False
+        return False
+
+    for cl_node, idx in clients:
+        if isinstance(cl_node.op, JAXShapeTuple):
+            continue
+        elif isinstance(cl_node.op, LazyIfElse):
+            if idx == 0:
+                memo[var] = False
+                return False
+            inner_idx = idx - 1
+            used_in_branch = False
+            for branch in (cl_node.op.true_branch, cl_node.op.false_branch):
+                inner_var = branch.fgraph.inputs[inner_idx]
+                if branch.fgraph.clients.get(inner_var):
+                    if not is_pure_shape_use(inner_var, branch.fgraph, memo):
+                        memo[var] = False
+                        return False
+                    used_in_branch = True
+            if not used_in_branch:
+                memo[var] = False
+                return False
+        elif isinstance(cl_node.op, OpFromGraph):
+            inner_var = cl_node.op.fgraph.inputs[idx]
+            if cl_node.op.fgraph.clients.get(inner_var):
+                if not is_pure_shape_use(inner_var, cl_node.op.fgraph, memo):
+                    memo[var] = False
+                    return False
+            else:
+                memo[var] = False
+                return False
+        elif (
+            isinstance(cl_node.op, Elemwise)
+            and isinstance(cl_node.op.scalar_op, Cast)
+            and cl_node.outputs[0].dtype.startswith("int")
+        ) or isinstance(cl_node.op, TypeCastingOp):
+            if not is_pure_shape_use(cl_node.outputs[0], fgraph, memo):
+                memo[var] = False
+                return False
+        else:
+            memo[var] = False
+            return False
+
+    memo[var] = True
+    return True
+
+
 class JAXLinker(JITLinker):
-    """A `Linker` that JIT-compiles NumPy-based operations using JAX."""
+    """A `Linker` that JIT-compiles NumPy-based operations using JAX.
+
+    Parameters
+    ----------
+    static_argnums
+        Optional sequence of input indices or Variables to treat as static arguments
+        during JAX JIT compilation.
+    """
 
     required_rewrites = (
         "minimum_compile",
@@ -26,14 +98,15 @@ class JAXLinker(JITLinker):
     )
 
     scalar_shape_inputs: tuple[int, ...]
+    user_static_argnums: tuple[int | Variable, ...]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, static_argnums: Sequence[int | Variable] = (), **kwargs):
         self.scalar_shape_inputs = ()
+        self.user_static_argnums = tuple(static_argnums)
         super().__init__(*args, **kwargs)
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.jax.dispatch import jax_funcify
-        from pytensor.link.jax.dispatch.shape import JAXShapeTuple
         from pytensor.tensor.random.type import RandomType
 
         shared_rng_inputs = [
@@ -88,20 +161,22 @@ class JAXLinker(JITLinker):
                 fgraph.inputs.insert(old_inp_fgrap_index, new_inp)
 
         fgraph_inputs = fgraph.inputs
-        clients = fgraph.clients
-        # Detect scalar shape inputs that are used only in JAXShapeTuple nodes
-        scalar_shape_inputs = [
-            inp
-            for node in fgraph.apply_nodes
-            if isinstance(node.op, JAXShapeTuple)
-            for inp in node.inputs
-            if inp in fgraph_inputs
-            and all(
-                isinstance(cl_node.op, JAXShapeTuple) for cl_node, _ in clients[inp]
-            )
+
+        user_static = []
+        for s in self.user_static_argnums:
+            if isinstance(s, int):
+                user_static.append(s)
+            elif s in fgraph_inputs:
+                user_static.append(fgraph_inputs.index(s))
+
+        # Detect scalar shape inputs that are used only in shape operations
+        detected_shape_inputs = [
+            i
+            for i, inp in enumerate(fgraph_inputs)
+            if getattr(inp.type, "ndim", None) == 0 and is_pure_shape_use(inp, fgraph)
         ]
         self.scalar_shape_inputs = tuple(
-            fgraph_inputs.index(inp) for inp in scalar_shape_inputs
+            sorted(set(user_static) | set(detected_shape_inputs))
         )
 
         return jax_funcify(
@@ -119,9 +194,18 @@ class JAXLinker(JITLinker):
         def convert_scalar_shape_inputs(
             *args, scalar_shape_inputs=set(self.scalar_shape_inputs)
         ):
+            def convert_arg(arg):
+                if hasattr(arg, "item") and getattr(arg, "ndim", None) == 0:
+                    return arg.item()
+                if isinstance(arg, list | tuple):
+                    return tuple(convert_arg(x) for x in arg)
+                if isinstance(arg, np.integer | np.floating):
+                    return arg.item()
+                return int(arg) if isinstance(arg, int | float) else arg
+
             return jit_fn(
                 *(
-                    int(arg) if i in scalar_shape_inputs else arg
+                    convert_arg(arg) if i in scalar_shape_inputs else arg
                     for i, arg in enumerate(args)
                 )
             )
