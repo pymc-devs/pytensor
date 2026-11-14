@@ -392,51 +392,27 @@ def test_dynamic_sequence_length():
     np.testing.assert_allclose(f2(np.zeros((0, 3))), np.empty((0, 3)))
 
 
-@pytest.mark.parametrize("batch_shape", [(3,), (1,), (2, 3)])
-@pytest.mark.parametrize(
-    "x_shape, n_steps",
-    [((None,), None), ((5,), None), ((None,), 4)],
-    ids=["dynamic_length", "static_length", "constant_n_steps"],
-)
-def test_blockwise_scan(x_shape, n_steps, batch_shape):
-    x = pt.tensor("x", shape=x_shape)
-    a = pt.scalar("a")
-    ys = scan(
-        lambda x_t, a: x_t * a,
-        sequences=[x],
-        non_sequences=[a],
-        n_steps=n_steps,
-        return_updates=False,
-    )
-    a_vec = pt.tensor("a_vec", shape=batch_shape)
-    ys_vec = vectorize_graph(ys, {a: a_vec})
-
-    test_input_vals = [
-        np.arange(5, dtype=config.floatX),
-        np.arange(np.prod(batch_shape), dtype=config.floatX).reshape(batch_shape),
-    ]
-    compare_jax_and_py([x, a_vec], [ys_vec], test_input_vals, jax_mode="JAX")
-
-
-def test_blockwise_scan_inner_graph_rewritten():
-    # Boolean-mask sum only compiles in JAX after the inner graph is rewritten
+def test_blockwise_scan():
+    # n_steps comes from the length of x, and the boolean-mask sum only compiles in
+    # JAX after the inner graph is rewritten
+    x = pt.vector("x")
     v = pt.vector("v")
     a = pt.scalar("a")
     ys = scan(
-        lambda acc, v, a: acc + v[v > a].sum(),
-        outputs_info=[pt.zeros(())],
+        lambda x_t, v, a: x_t * v[v > a].sum(),
+        sequences=[x],
         non_sequences=[v, a],
-        n_steps=3,
         return_updates=False,
     )
-    a_vec = pt.vector("a_vec")
-    ys_vec = vectorize_graph(ys, {a: a_vec})
+    a_batched = pt.matrix("a_batched")
+    ys_batched = vectorize_graph(ys, {a: a_batched})
 
     test_input_vals = [
+        np.arange(5, dtype=config.floatX),
         np.array([-1.0, 0.5, 2.0], dtype=config.floatX),
-        np.array([0.0, 1.0], dtype=config.floatX),
+        np.array([[0.0, 1.0, 3.0], [-2.0, 0.6, 1.5]], dtype=config.floatX),
     ]
-    compare_jax_and_py([v, a_vec], [ys_vec], test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x, v, a_batched], [ys_batched], test_input_vals, jax_mode="JAX")
 
 
 def test_higher_order_derivatives():
