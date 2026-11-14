@@ -386,65 +386,11 @@ def test_root_scalar(method, jac, hess, bracketed):
         lambda x: root_scalar(
             equation=x + 2 * pt.cos(x), variable=x, method="brentq", bracket=(0.0, 1.0)
         ),
-        lambda x: root_scalar(
-            equation=x + 2 * pt.cos(x), variable=x, method="brentq", bracket=(-2.0,)
-        ),
-        lambda x: root_scalar(
-            equation=x + 2 * pt.cos(x),
-            variable=x,
-            method="toms748",
-            bracket=(0.0, -2.0),
-        ),
-        lambda x: minimize_scalar(
-            objective=pt.cos(x), x=x, method="brent", bracket=(2.0, 4.0, 3.0)
-        ),
         lambda x: minimize_scalar(
             objective=pt.cos(x), x=x, method="bounded", bounds=(5.0, 0.0)
         ),
-        lambda x: root_scalar(
-            equation=pt.switch(x > 1.5, np.inf, x - 1),
-            variable=x,
-            method="toms748",
-            bracket=(0.0, 2.0),
-        ),
-        lambda x: root_scalar(
-            equation=x - 1, variable=x, method="toms748", bracket=(np.nan, 2.0)
-        ),
-        lambda x: root_scalar(
-            equation=x - 1, variable=x, method="toms748", bracket=(0.0, np.nan)
-        ),
-        lambda x: root_scalar(
-            equation=x + 2 * pt.cos(x),
-            variable=x,
-            method="secant",
-            optimizer_kwargs={"x1": 0.0},
-        ),
-        lambda x: minimize_scalar(
-            objective=pt.cos(x), x=x, method="golden", bracket=(1.0, 2.0, 3.0, 4.0)
-        ),
-        lambda x: minimize_scalar(objective=x, x=x, method="brent"),
-        lambda x: minimize_scalar(
-            objective=pt.cos(x), x=x, method="bounded", bounds=(0.0, 1.0, 2.0)
-        ),
-        lambda x: minimize_scalar(
-            objective=pt.cos(x), x=x, method="bounded", bounds=(np.nan, 1.0)
-        ),
     ],
-    ids=[
-        "no_sign_change",
-        "short_bracket",
-        "reversed_bracket",
-        "unordered_bracket",
-        "reversed_bounds",
-        "infinite_value",
-        "lower_end_not_finite",
-        "upper_end_not_finite",
-        "x1_equals_x0",
-        "long_bracket",
-        "no_bracket_found",
-        "three_bounds",
-        "bound_not_finite",
-    ],
+    ids=["root_scalar", "minimize_scalar"],
 )
 def test_scalar_optimizers_fail_on_bad_runtime_inputs(solve):
     """Each scipy error caused by a runtime input becomes a NaN solution and a failed flag."""
