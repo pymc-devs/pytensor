@@ -100,6 +100,8 @@ def _line_search_wolfe12(evaluate, x, p, args, f0, previous_f, g0, c1, c2, trial
 
 @numba_njit(fastmath=False, inline="always")
 def _bfgs(evaluate, x, args, gtol, maxiter, norm, xrtol, c1, c2):
+    if x.size == 0:
+        return x, False
     f, g = evaluate(x, *args)
     if maxiter is None:
         maxiter = x.size * 200

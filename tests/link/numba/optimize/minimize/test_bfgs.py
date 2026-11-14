@@ -69,6 +69,10 @@ def test_bfgs_options(options, native_only):
     assert converged == expected.success
     np.testing.assert_allclose(actual, expected.x)
 
+    # An empty x has a zero gradient norm, which must not count as convergence.
+    _, converged = fn(np.zeros(0), np.zeros(0))
+    assert not converged
+
 
 @pytest.mark.parametrize(
     "objective",
