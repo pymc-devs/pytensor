@@ -1,5 +1,6 @@
 import itertools
 from collections.abc import Iterable, Sequence
+from math import prod
 from typing import cast
 
 import numpy as np
@@ -36,7 +37,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import squeeze
+from pytensor.tensor.extra_ops import broadcast_arrays, squeeze
 from pytensor.tensor.math import Dot, dot, minimum
 from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
@@ -72,11 +73,13 @@ from pytensor.tensor.subtensor import (
     as_index_literal,
     get_constant_idx,
     get_idx_list,
+    group_indices,
     inc_subtensor,
     indexed_result_shape,
     indices_from_subtensor,
+    slice_static_length,
 )
-from pytensor.tensor.type import TensorType, integer_dtypes
+from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -1287,86 +1290,95 @@ def local_subtensor_shape_constant(fgraph, node):
         return [as_tensor(shape_parts, dtype=np.int64)]
 
 
-def _consecutive_integer_adv_idxs(adv_idxs) -> tuple[int, int, int] | None:
-    """Describe advanced indices made of full slices and one group of integer indices.
-
-    Returns ``(n_left, n_adv, adv_ndim)``: the number of full slices to the left of the
-    integer indices, the number of integer indices, and the number of dimensions they
-    index into (after broadcasting). Returns ``None`` for any other flavor of indices.
-    """
-    # Advanced indexing is a minefield, avoid all cases except for consecutive integer indices
-    is_integer_idx = [
-        isinstance(adv_idx, TensorVariable) and adv_idx.type.dtype in integer_dtypes
-        for adv_idx in adv_idxs
-    ]
-    if not any(is_integer_idx):
-        return None
-    if not all(
-        is_integer or adv_idx == slice(None)
-        for is_integer, adv_idx in zip(is_integer_idx, adv_idxs)
-    ):
-        return None
-    if _non_consecutive_adv_indexing(adv_idxs):
-        return None
-
-    n_left = is_integer_idx.index(True)
-    n_adv = sum(is_integer_idx)
-    adv_ndim = max(adv_idx.type.ndim for adv_idx in adv_idxs[n_left : n_left + n_adv])
-    return n_left, n_adv, adv_ndim
-
-
-def _drop_trailing_full_slices(idxs: tuple) -> tuple:
-    while idxs and idxs[-1] == slice(None):
-        idxs = idxs[:-1]
-    return idxs
-
-
 def _lift_basic_idxs_over_adv_idxs(
-    adv_idxs, n_left: int, n_adv: int, adv_ndim: int, basic_idxs
-) -> tuple[tuple, tuple, tuple, tuple] | None:
+    adv_group, basic_idxs
+) -> tuple[tuple, tuple, tuple] | None:
     """Split the basic indices of ``x[adv_idxs][basic_idxs]`` according to how they can be lifted.
 
-    Returns ``(left_idxs, new_adv_idxs, kept_idxs, right_idxs)`` such that
-    ``x[adv_idxs][basic_idxs] == x[*left_idxs, :, ..., :, *right_idxs][new_adv_idxs][kept_idxs]``,
+    Returns ``(left_idxs, new_adv_idxs, right_idxs)`` such that
+    ``x[adv_idxs][basic_idxs] == x[*left_idxs, :, ..., :, *right_idxs][new_adv_idxs]``,
     or ``None`` if no basic index can be lifted.
+
+    ``adv_group`` is the single integer-index group returned by ``group_indices``.
     """
     full_slice = slice(None)
+    if all(idx == full_slice for idx in basic_idxs):
+        return None
+    n_left = adv_group[0][0]
+    adv_ndim = max(idx.ndim for _, idx in adv_group)
 
     # Basic indices on the left and right of the advanced dims commute with the advanced indices
     left_idxs = basic_idxs[:n_left]
     left_idxs = (*left_idxs, *((full_slice,) * (n_left - len(left_idxs))))
     right_idxs = basic_idxs[n_left + adv_ndim :]
 
-    # Basic indices on the advanced dims don't, except for a single vector index,
-    # in which case we can index the index: x[vec_idx][s] -> x[vec_idx[s]]
-    idxs_on_adv_dims = basic_idxs[n_left : n_left + adv_ndim]
-    integer_idxs = adv_idxs[n_left : n_left + n_adv]
-    index_the_index = (
-        n_adv == 1
-        and adv_ndim == 1
-        and len(idxs_on_adv_dims) == 1
-        and idxs_on_adv_dims[0] != full_slice
-    )
-    if index_the_index:
-        integer_idxs = (integer_idxs[0][idxs_on_adv_dims[0]],)
-        idxs_on_adv_dims = ()
-
-    if not index_the_index and all(
-        idx == full_slice for idx in (*left_idxs, *right_idxs)
-    ):
-        return None
+    # Broadcast first so all integer indices share the axes selected by the basic indices.
+    idxs_on_adv_dims = tuple(basic_idxs[n_left : n_left + adv_ndim])
+    integer_idxs = tuple(idx for _, idx in adv_group)
+    if any(idx != full_slice for idx in idxs_on_adv_dims):
+        integer_idxs = tuple(
+            idx[idxs_on_adv_dims] for idx in broadcast_arrays(*integer_idxs)
+        )
 
     # Integer indices lifted on the left drop dimensions before the advanced ones
     n_left_after_lift = sum(isinstance(idx, slice) for idx in left_idxs)
     new_adv_idxs = (*((full_slice,) * n_left_after_lift), *integer_idxs)
-    kept_idxs = _drop_trailing_full_slices(
-        (*((full_slice,) * n_left_after_lift), *idxs_on_adv_dims)
-    )
-    return left_idxs, new_adv_idxs, kept_idxs, right_idxs
+    return left_idxs, new_adv_idxs, right_idxs
 
 
-def _basic_idxs_read_disjoint_ranges(basic_idxs_list) -> bool:
-    """Check if all basic indices select disjoint constant ranges along some dimension."""
+def _subtensor_lift_through_adv_subtensor_is_profitable(
+    adv_subtensor, clients, adv_group
+) -> bool:
+    """Whether lifting all clients avoids increasing the total number of copied entries."""
+    if len(clients) <= 1:
+        return True
+    if not all(isinstance(client.op, Subtensor) for client in clients):
+        return False
+
+    full_slice = slice(None)
+    basic_idxs_list = [
+        indices_from_subtensor(client.inputs[1:], client.op.idx_list)
+        for client in clients
+    ]
+    basic_idxs_list = [
+        (*idxs, *((full_slice,) * (adv_subtensor.ndim - len(idxs))))
+        for idxs in basic_idxs_list
+    ]
+    if any(all(idx == full_slice for idx in idxs) for idxs in basic_idxs_list):
+        return False
+
+    n_left = adv_group[0][0]
+    adv_ndim = max(idx.ndim for _, idx in adv_group)
+    # Selecting every advanced dimension with an integer leaves a basic view.
+    basic_idxs_list = [
+        idxs
+        for idxs in basic_idxs_list
+        if any(isinstance(idx, slice) for idx in idxs[n_left : n_left + adv_ndim])
+    ]
+    if len(basic_idxs_list) <= 1:
+        return True
+
+    # Untouched dimensions are common factors, even when their lengths are unknown.
+    counted_axes = [
+        axis
+        for axis in range(adv_subtensor.ndim)
+        if any(idxs[axis] != full_slice for idxs in basic_idxs_list)
+    ]
+    shape = adv_subtensor.type.shape
+    counted_shape = [shape[axis] for axis in counted_axes]
+    if None not in counted_shape:
+        client_shapes = [
+            [
+                slice_static_length(idxs[axis], shape[axis])
+                for axis in counted_axes
+                if isinstance(idxs[axis], slice)
+            ]
+            for idxs in basic_idxs_list
+        ]
+        if all(None not in shape for shape in client_shapes) and sum(
+            prod(shape) for shape in client_shapes
+        ) <= prod(counted_shape):
+            return True
 
     def constant_range(idx) -> tuple | None:
         idx = as_index_literal(idx)
@@ -1381,7 +1393,7 @@ def _basic_idxs_read_disjoint_ranges(basic_idxs_list) -> bool:
             return None
         return (start, stop)
 
-    for dim in range(min(len(basic_idxs) for basic_idxs in basic_idxs_list)):
+    for dim in range(adv_subtensor.ndim):
         try:
             ranges = [constant_range(basic_idxs[dim]) for basic_idxs in basic_idxs_list]
         except NotScalarConstantError:
@@ -1404,7 +1416,9 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
     x[:, :, vec_idx][i, j] -> x[i, j][vec_idx]
     x[vec_idx][:, i:j] -> x[:, i:j][vec_idx]
     x[vec_idx][i:j] -> x[vec_idx[i:j]]
-    x[:, mat_idx][i, j] -> x[i][mat_idx][j]
+    x[:, mat_idx][i, j] -> x[i][mat_idx[j]]
+    x[mat_idx][:, j] -> x[mat_idx[:, j]]
+    x[iv, jv][i:j] -> x[iv[i:j], jv[i:j]]  (after broadcasting iv and jv)
 
     Basic indexing never increases the number of entries, so it is always optimistic
     to perform it before the (copying) advanced indexing.
@@ -1415,57 +1429,45 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
     """
     adv_subtensor, *idxs = node.inputs
 
-    if not (
-        adv_subtensor.owner and isinstance(adv_subtensor.owner.op, AdvancedSubtensor)
-    ):
-        return None
+    match adv_subtensor.owner_op_and_inputs:
+        case (AdvancedSubtensor() as adv_op, x, *adv_index_vars):
+            pass
+        case _:
+            return None
 
-    x, *adv_index_vars = adv_subtensor.owner.inputs
-    adv_idxs = indices_from_subtensor(adv_index_vars, adv_subtensor.owner.op.idx_list)
-    adv_idxs_info = _consecutive_integer_adv_idxs(adv_idxs)
-    if adv_idxs_info is None:
+    adv_idxs = indices_from_subtensor(adv_index_vars, adv_op.idx_list)
+    if any(idx.dtype == "bool" for idx in adv_index_vars):
         return None
-    _, n_adv, _ = adv_idxs_info
+    if any(idx != slice(None) for idx in adv_idxs if isinstance(idx, slice)):
+        return None
+    adv_groups = [group for basic, group in group_indices(adv_idxs) if not basic]
+    if len(adv_groups) != 1:
+        return None
+    [adv_group] = adv_groups
 
     basic_idxs = indices_from_subtensor(idxs, node.op.idx_list)
-    lifted_idxs = _lift_basic_idxs_over_adv_idxs(adv_idxs, *adv_idxs_info, basic_idxs)
+    lifted_idxs = _lift_basic_idxs_over_adv_idxs(adv_group, basic_idxs)
     if lifted_idxs is None:
         return None
 
     clients = [client for client, _ in fgraph.clients[adv_subtensor]]
-    if len(clients) > 1:
-        # AdvancedSubtensor involves a full copy, and every client would do its own.
-        # That is only an improvement if all of them can be lifted and read disjoint entries.
-        if not all(isinstance(client.op, Subtensor) for client in clients):
-            return None
-        clients_basic_idxs = [
-            indices_from_subtensor(client.inputs[1:], client.op.idx_list)
-            for client in clients
-        ]
-        if any(
-            _lift_basic_idxs_over_adv_idxs(adv_idxs, *adv_idxs_info, client_basic_idxs)
-            is None
-            for client_basic_idxs in clients_basic_idxs
-        ):
-            return None
-        if not _basic_idxs_read_disjoint_ranges(clients_basic_idxs):
-            return None
+    if not _subtensor_lift_through_adv_subtensor_is_profitable(
+        adv_subtensor, clients, adv_group
+    ):
+        return None
 
-    left_idxs, new_adv_idxs, kept_idxs, right_idxs = lifted_idxs
+    left_idxs, new_adv_idxs, right_idxs = lifted_idxs
     [basic_subtensor] = node.outputs
 
-    x_idxs = _drop_trailing_full_slices(
-        (*left_idxs, *((slice(None),) * n_adv), *right_idxs)
-    )
+    x_idxs = (*left_idxs, *((slice(None),) * len(adv_group)), *right_idxs)
+    while x_idxs and x_idxs[-1] == slice(None):
+        x_idxs = x_idxs[:-1]
     x_indexed = x[x_idxs] if x_idxs else x
     copy_stack_trace([basic_subtensor, adv_subtensor], x_indexed)
 
     new_out = x_indexed[new_adv_idxs]
     copy_stack_trace([basic_subtensor, adv_subtensor], new_out)
 
-    if kept_idxs:
-        new_out = new_out[kept_idxs]
-        copy_stack_trace(basic_subtensor, new_out)
     return [new_out]
 
 
@@ -1485,12 +1487,11 @@ def local_adv_inc_subtensor_of_inc_subtensor(fgraph, node):
 
     z, y, *adv_index_vars = node.inputs
 
-    if not (
-        y.owner
-        and isinstance(y.owner.op, IncSubtensor)
-        and not y.owner.op.set_instead_of_inc
-    ):
-        return None
+    match y.owner_op_and_inputs:
+        case (IncSubtensor(set_instead_of_inc=False) as y_op, y_base, g, *idxs):
+            pass
+        case _:
+            return None
 
     if len(fgraph.clients[y]) > 1:
         # The inner increment is needed elsewhere
@@ -1501,23 +1502,28 @@ def local_adv_inc_subtensor_of_inc_subtensor(fgraph, node):
         return None
 
     adv_idxs = indices_from_subtensor(adv_index_vars, node.op.idx_list)
-    adv_idxs_info = _consecutive_integer_adv_idxs(adv_idxs)
-    if adv_idxs_info is None:
+    if any(idx.dtype == "bool" for idx in adv_index_vars):
         return None
-    n_left, n_adv, adv_ndim = adv_idxs_info
+    if any(idx != slice(None) for idx in adv_idxs if isinstance(idx, slice)):
+        return None
+    adv_groups = [group for basic, group in group_indices(adv_idxs) if not basic]
+    if len(adv_groups) != 1:
+        return None
+    [adv_group] = adv_groups
+    n_left = adv_group[0][0]
+    adv_ndim = max(idx.ndim for _, idx in adv_group)
 
-    if y.type.ndim != z.type.ndim - n_adv + adv_ndim:
+    if y.type.ndim != z.type.ndim - len(adv_group) + adv_ndim:
         # y is broadcast from the left by the outer increment
         return None
 
-    y_base, g, *idxs = y.owner.inputs
-    basic_idxs = indices_from_subtensor(idxs, y.owner.op.idx_list)
-    lifted_idxs = _lift_basic_idxs_over_adv_idxs(adv_idxs, *adv_idxs_info, basic_idxs)
+    basic_idxs = indices_from_subtensor(idxs, y_op.idx_list)
+    lifted_idxs = _lift_basic_idxs_over_adv_idxs(adv_group, basic_idxs)
     if lifted_idxs is None:
         return None
-    left_idxs, new_adv_idxs, kept_idxs, right_idxs = lifted_idxs
+    left_idxs, new_adv_idxs, right_idxs = lifted_idxs
 
-    if kept_idxs or any(idx != slice(None) for idx in left_idxs):
+    if any(idx != slice(None) for idx in left_idxs):
         # Not implemented: basic indices that don't end up to the right of the advanced ones
         return None
 
