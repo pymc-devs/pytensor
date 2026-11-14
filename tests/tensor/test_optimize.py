@@ -504,6 +504,7 @@ def test_bound_in_optimizer_kwargs(solve, name):
 
 
 def test_minimize_scalar_bounded_tol_is_absolute():
+    """scipy turns a bounded ``tol`` into ``xatol`` with a warning on every call. The graph does it once, at build time."""
     x = pt.scalar("x")
 
     with pytest.warns(RuntimeWarning, match="does not support relative tolerance"):
