@@ -889,7 +889,7 @@ def minimize(
     optimizer_kwargs: dict | None = None,
 ) -> tuple[TensorVariable | tuple[TensorVariable, ...], TensorVariable]:
     """
-    Minimize a scalar objective function using scipy.optimize.minimize.
+    Minimize a scalar objective function.
 
     Parameters
     ----------
@@ -922,6 +922,20 @@ def minimize(
     success: TensorVariable
         Symbolic boolean flag indicating whether the minimization routine reported convergence to a minimum
         value, based on the requested convergence criteria.
+
+    Notes
+    -----
+    The Numba backend compiles BFGS (``jac=True``, ``hess=False``) directly for float32 and float64 inputs.
+    It supports ``tol`` and the ``gtol``, ``maxiter``, ``norm``, ``xrtol``, ``c1``, and ``c2`` options.
+    Unbounded ``L-BFGS-B`` also runs natively, with ``tol`` and the ``ftol``, ``gtol``,
+    ``maxcor``, ``maxiter``, ``maxfun``, and ``maxls`` options. Bounded ``L-BFGS-B``
+    uses SciPy. Unbounded ``Nelder-Mead`` also runs natively, with ``tol`` and the
+    ``maxiter``, ``maxfev``, ``xatol``, ``fatol``, and ``adaptive`` options.
+    Other methods or options use SciPy. The native line search can take different steps from SciPy,
+    so intermediate iterates and convergence results need not be identical. Native BFGS also scales its
+    initial inverse Hessian to the first observed curvature and, like SciPy's L-BFGS-B, restarts from
+    steepest descent after a failed line search. It can therefore report ``success=True`` on problems
+    where SciPy's BFGS stops with a precision-loss failure.
     """
     objective = as_tensor_variable(objective)
 
@@ -1259,6 +1273,13 @@ def root(
 
     success: TensorVariable
         Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
+
+    Notes
+    -----
+    The Numba backend runs ``hybr`` and ``lm`` with ``jac=True`` natively. ``hybr`` takes ``tol`` and the ``xtol``,
+    ``maxfev``, and ``factor`` options, and ``lm`` takes ``tol`` and the ``xtol``, ``ftol``, ``gtol``, ``maxiter``, and
+    ``factor`` options. Other methods or options use SciPy. The native solvers are ports of SciPy's MINPACK ``hybrj``
+    and ``lmder``. Compilers may fuse multiply-adds differently, so results can differ from SciPy's by rounding.
     """
     packed_variables, packed_shapes, equations = pack_inputs_of_objective(
         equations, variables

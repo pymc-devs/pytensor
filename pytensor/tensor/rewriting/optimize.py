@@ -20,10 +20,14 @@ from pytensor.tensor.rewriting.basic import register_canonicalize
 @rewrite_optimize_inner_graph.register(PerformLinker)
 @rewrite_optimize_inner_graph.register(CLinker)
 @rewrite_optimize_inner_graph.register(OpWiseCLinker)
+@rewrite_optimize_inner_graph.register(NumbaLinker)
 def c_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
     # Same contract as ``OpFromGraph``: inputs (the optimization variable + args)
     # must not be mutated, so they are protected; inplace may still be baked
-    # between purely internal buffers. ``compile_fn`` then only links this graph.
+    # between purely internal buffers. The rewritten graph is then either linked
+    # by ``compile_fn`` (the C, VM and SciPy-fallback paths) or funcified
+    # directly by the native Numba solvers. Outputs may still alias inputs; the
+    # native solvers copy the gradient before updating x.
     # The Supervisor is needed even with no mutable inputs: it is the feature that
     # vetoes input-destroying inplace rewrites while ``mode.optimizer`` runs them.
     input_specs = [In(x, borrow=True, mutable=False) for x in inner.inputs]
@@ -31,15 +35,12 @@ def c_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
     mode.optimizer.rewrite(inner)
 
 
-@rewrite_optimize_inner_graph.register(NumbaLinker)
 @rewrite_optimize_inner_graph.register(JAXLinker)
 @rewrite_optimize_inner_graph.register(PytorchLinker)
 @rewrite_optimize_inner_graph.register(MLXLinker)
 def jit_rewrite_optimize_inner_graph(linker, op, node, inner, *, mode):
-    # JIT backends manage memory themselves, so leave the inner graph functional.
-    # (Unlike ``OpFromGraph`` under numba, no deepcopies are baked in either: a
-    # scipy op is never funcified -- it always perform-links via ``compile_fn``,
-    # whose ``FunctionMaker`` pass inserts the boundary deepcopies.)
+    # These backends have no native solver: the op perform-links the inner graph
+    # through ``compile_fn``, whose FunctionMaker pass inserts boundary copies.
     mode.excluding("inplace").optimizer.rewrite(inner)
 
 
