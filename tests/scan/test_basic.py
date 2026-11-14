@@ -816,8 +816,10 @@ class TestScan:
         """Regression test for #1601: the frozen inner graph keeps a `Scan` `Op`'s
         equality in sync with its hash even after compilation optimizes it."""
         x0 = scalar("x0")
+        # Different n_steps keep the two nodes distinct after compilation; with equal
+        # inputs, merge3 would fold the equal ops into one node
         xs = scan(lambda x: x + 0, outputs_info=[x0], n_steps=5, return_updates=False)
-        ys = scan(lambda x: x * 1, outputs_info=[x0], n_steps=5, return_updates=False)
+        ys = scan(lambda x: x * 1, outputs_info=[x0], n_steps=6, return_updates=False)
 
         # Before compilation the inner graphs differ (``x + 0`` vs ``x * 1``), so the
         # ops -- and their hashes -- differ.

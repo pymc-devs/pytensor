@@ -201,6 +201,15 @@ def test_eager_dimshuffle_merge():
     result.assert_graph(x)
     result.assert_eval(np.arange(6, dtype=config.floatX).reshape(2, 3))
 
+    # A DimShuffle that drops a single-element MakeVector is replaced by its scalar
+    s = scalar("s")
+    out = MakeVector(s.type.dtype)(s).dimshuffle("x", "x").squeeze()
+    result = utt.RewriteTester([s], [out], include=None)
+    fgraph = result.rewr_fg
+    [old_out] = fgraph.outputs
+    fgraph.replace(old_out, apply_local_dimshuffle_merge(fgraph, old_out))
+    result.assert_graph(s)
+
 
 def test_dimshuffle_merge():
     x = matrix("x")
