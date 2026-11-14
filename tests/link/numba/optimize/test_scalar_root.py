@@ -15,13 +15,14 @@ pytestmark = [
     pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning"),
     pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning"),
     pytest.mark.filterwarnings("ignore:Tolerance of:RuntimeWarning"),
+    pytest.mark.filterwarnings("ignore:Derivative was zero:RuntimeWarning"),
 ]
 
 pytest.importorskip("numba")
 
 # Roots and flags match scipy's up to ulp differences between numba's and numpy's math
 # functions in the objective.
-matches_scipy = partial(np.testing.assert_allclose, rtol=1e-10)
+matches_scipy = partial(np.testing.assert_allclose, rtol=1e-10, strict=True)
 
 
 def _bracket(a):
@@ -39,6 +40,12 @@ METHODS = [
     pytest.param("brenth", _bracket, id="brenth"),
     pytest.param("ridder", _bracket, id="ridder"),
     pytest.param("toms748", _bracket, id="toms748"),
+]
+BRACKET_METHODS = ["brentq", "bisect", "brenth", "ridder", "toms748"]
+OPEN_METHODS = [
+    ("secant", {}),
+    ("newton", {"jac": True}),
+    ("halley", {"jac": True, "hess": True}),
 ]
 
 
@@ -66,6 +73,7 @@ def test_root_scalar(method, options):
         graph_outputs=outputs,
         test_inputs=[0.0, 1.0],
         assert_fn=matches_scipy,
+        # The object-mode pass cannot type the float64 bracket ends
         eval_obj_mode=False,
     )
 
@@ -85,9 +93,6 @@ def test_root_scalar_maxiter(method, options):
     _, success, _ = fn(0.0, 1.0)
 
     assert not success
-
-
-BRACKET_METHODS = ["brentq", "bisect", "brenth", "ridder", "toms748"]
 
 
 @pytest.mark.parametrize("method", BRACKET_METHODS)
@@ -139,24 +144,18 @@ def test_root_scalar_bracket_edge_cases(method, equation, bracket):
         graph_outputs=[solution, success],
         test_inputs=[0.0],
         assert_fn=matches_scipy,
+        # The object-mode pass cannot type the float64 bracket ends
         eval_obj_mode=False,
     )
 
 
-@pytest.mark.parametrize(
-    "method, options",
-    [
-        ("secant", {}),
-        ("newton", {"jac": True}),
-        ("halley", {"jac": True, "hess": True}),
-    ],
-)
+@pytest.mark.parametrize("method, options", OPEN_METHODS)
 @pytest.mark.parametrize(
     "dtype, equation, x0",
     [("float32", lambda x: x**3 - 7, 1.0), ("float64", lambda x: x**3 - 1e30, 2e10)],
     ids=["float32", "root_near_1e10"],
 )
-def test_open_methods_match_scipy(method, options, dtype, equation, x0):
+def test_root_scalar_open_methods_match_scipy(method, options, dtype, equation, x0):
     """scipy iterates in the variable's dtype and stops when the iterate stops moving."""
     x = pt.scalar("x", dtype=dtype)
     solution, success = root_scalar(
@@ -167,15 +166,16 @@ def test_open_methods_match_scipy(method, options, dtype, equation, x0):
         graph_inputs=[x],
         graph_outputs=[solution, success],
         test_inputs=[np.array(x0, dtype)],
-        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6),
-        eval_obj_mode=False,
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6, strict=True),
     )
 
 
-def test_secant_flat_region():
+@pytest.mark.parametrize("method, options", OPEN_METHODS)
+def test_root_scalar_open_methods_flat_region(method, options):
+    """A flat objective stops scipy's open methods unconverged: secant on equal values, newton and halley on a zero slope."""
     x = pt.dscalar("x")
     solution, success = root_scalar(
-        equation=pt.switch(x > 5, x - 6, 1.0), variable=x, method="secant"
+        equation=pt.switch(x > 5, x - 6, 1.0), variable=x, method=method, **options
     )
 
     compare_numba_and_py(
@@ -183,14 +183,13 @@ def test_secant_flat_region():
         graph_outputs=[solution, success],
         test_inputs=[0.0],
         assert_fn=matches_scipy,
-        eval_obj_mode=False,
     )
 
 
 @pytest.mark.parametrize(
     "method, options",
-    [("secant", lambda a: {}), ("toms748", _bracket)],
-    ids=["secant", "toms748"],
+    [("newton", lambda a: {"jac": True}), ("brentq", _bracket)],
+    ids=["newton", "brentq"],
 )
 def test_root_scalar_keeps_variable_dtype(method, options):
     x = pt.fscalar("x")
@@ -203,6 +202,7 @@ def test_root_scalar_keeps_variable_dtype(method, options):
         graph_inputs=[x, a],
         graph_outputs=[solution],
         test_inputs=[np.float32(0.0), np.float32(1.0)],
+        # The object-mode pass cannot type the float64 bracket ends
         eval_obj_mode=False,
     )
 

@@ -21,7 +21,7 @@ pytest.importorskip("numba")
 
 # Minima and flags match scipy's up to ulp differences between numba's and numpy's math
 # functions in the objective, which a minimizer amplifies more than a root finder does.
-matches_scipy = partial(np.testing.assert_allclose, rtol=1e-8)
+matches_scipy = partial(np.testing.assert_allclose, rtol=1e-8, strict=True)
 
 
 # cos(x) + 0.1 a x is minimized where sin(x) = 0.1 a, at x = pi - arcsin(0.1 a) near pi.
@@ -74,7 +74,6 @@ def test_minimize_scalar(method, bound):
         graph_outputs=outputs,
         test_inputs=[0.0, 1.0],
         assert_fn=matches_scipy,
-        eval_obj_mode=False,
     )
 
     assert success
@@ -132,11 +131,35 @@ def test_minimize_scalar_nan_inside_bracket(method, bound):
         graph_outputs=[solution, success],
         test_inputs=[0.0],
         assert_fn=matches_scipy,
-        eval_obj_mode=False,
     )
 
 
-def test_golden_cache_key_distinguishes_default_xtol():
+@pytest.mark.parametrize(
+    "method, bound",
+    [
+        ("brent", lambda a: {}),
+        ("bounded", lambda a: {"bounds": pt.stack([0.0, 5.0 * a])}),
+    ],
+    ids=["brent", "bounded"],
+)
+def test_minimize_scalar_keeps_variable_dtype(method, bound):
+    x = pt.fscalar("x")
+    a = pt.fscalar("a")
+    solution, _ = minimize_scalar(
+        objective=pt.cos(x) + 0.1 * a * x, x=x, method=method, **bound(a)
+    )
+
+    _, (minimum,) = compare_numba_and_py(
+        graph_inputs=[x, a],
+        graph_outputs=[solution],
+        test_inputs=[np.float32(0.0), np.float32(1.0)],
+    )
+
+    assert minimum.dtype == np.float32
+    np.testing.assert_allclose(minimum, np.pi - np.arcsin(0.1), rtol=1e-4)
+
+
+def test_minimize_scalar_golden_cache_key_distinguishes_default_xtol():
     """The default xtol is a NumPy float64 and a given one adopts the point dtype, so they compile differently."""
     x = pt.fscalar("x")
     keys = []
