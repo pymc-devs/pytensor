@@ -353,24 +353,28 @@ class MinimizeMethod(NamedTuple):
 
 MINIMIZE_METHODS = {
     "brent": MinimizeMethod(
-        make_minimize_brent, "bracket", {"xtol": 1.48e-8, "maxiter": 500}
+        make_solver=make_minimize_brent,
+        points_name="bracket",
+        defaults={"xtol": 1.48e-8, "maxiter": 500},
     ),
     "golden": MinimizeMethod(
-        make_minimize_golden,
-        "bracket",
-        {"xtol": np.sqrt(np.finfo(float).eps), "maxiter": 5000},
+        make_solver=make_minimize_golden,
+        points_name="bracket",
+        defaults={"xtol": np.sqrt(np.finfo(float).eps), "maxiter": 5000},
     ),
     "bounded": MinimizeMethod(
-        make_minimize_bounded, "bounds", {"xatol": 1e-5, "maxiter": 500}
+        make_solver=make_minimize_bounded,
+        points_name="bounds",
+        defaults={"xatol": 1e-5, "maxiter": 500},
     ),
 }
 
 
 def minimize_options(op: MinimizeScalarOp) -> dict | None:
     """Return the options ``op`` minimizes with, scipy's defaults filled in, or None when they are not implemented."""
-    if op.method not in MINIMIZE_METHODS:
+    method = MINIMIZE_METHODS.get(op.method)
+    if method is None:
         return None
-    method = MINIMIZE_METHODS[op.method]
     defaults = method.defaults
     if "bounds" in op.bound_kwargs and method.points_name != "bounds":
         return None
@@ -465,6 +469,7 @@ def numba_funcify_MinimizeScalarOp(op, node, **kwargs):
         return np.asarray(as_output_dtype(x)), success
 
     if objective_key is None:
+        # If the objective cannot be cached, the minimizer cannot be cached either
         cache_key = None
     else:
         minimize_scalar_cache_version = 2

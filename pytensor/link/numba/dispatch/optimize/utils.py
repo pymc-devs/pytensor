@@ -13,8 +13,6 @@ _SOLVER_JIT_OPTIONS: dict[str, Any] = {"fastmath": False, "error_model": "numpy"
 # Each solver is built per Op as a closure over that Op's compiled objective. numba
 # caches a closure over a compiled function, but not a function that receives one as
 # an argument, nor any function that calls it.
-
-
 def _scalar_objective(objective, dtype, derivatives):
     # Evaluates at x cast to the input dtype, as perform does, with the extra inputs as one
     # tuple. Returns the value, or the value and its first `derivatives` derivatives, as
@@ -43,17 +41,8 @@ def _scalar_objective(objective, dtype, derivatives):
 
 
 def _scalar_types(point_dtype, value_dtype):
-    """Return the scalar types a solver casts its literals to, as NumPy casts Python scalars.
-
-    Returns
-    -------
-    point : type
-        Scalar type of the iterates.
-    value : type
-        Scalar type of the objective's values.
-    mixed : type
-        Scalar type of expressions that combine iterates and values.
-    """
+    # The scalar types of the iterates, the objective's values, and expressions that mix
+    # them, which a solver casts its literals to as NumPy casts Python scalars
     point = np.dtype(point_dtype).type
     value = np.dtype(value_dtype).type
     return point, value, np.promote_types(point, value).type

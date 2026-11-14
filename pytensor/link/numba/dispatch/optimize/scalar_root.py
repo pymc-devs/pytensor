@@ -109,7 +109,9 @@ def _same_sign(a, b):
 
 @numba_basic.numba_njit(inline="always", **_SOLVER_JIT_OPTIONS)
 def _check_bracket(lower, upper, lower_value, upper_value):
-    # The checks scipy's C solvers run on a bracket's ends before iterating
+    # Returns (done, root, converged) as scipy's checks on the ends decide them. Its wrapped
+    # objective raises at the first NaN, reported as an unconverged root, before the C
+    # solvers return a zero end or raise on matching signs (NaN in perform).
     if np.isnan(lower_value):
         return True, lower, False
     if np.isnan(upper_value):
@@ -545,7 +547,7 @@ ROOT_METHODS = {
 }
 
 
-def solver_options(op: RootScalarOp) -> dict | None:
+def root_options(op: RootScalarOp) -> dict | None:
     """Return the options ``op`` solves with, scipy's defaults filled in.
 
     None means the numba solvers do not implement them, or scipy rejects them, so perform runs and raises scipy's
@@ -578,7 +580,7 @@ def solver_options(op: RootScalarOp) -> dict | None:
 
 @register_funcify_and_cache_key(RootScalarOp)
 def numba_funcify_RootScalarOp(op, node, **kwargs):
-    settings = solver_options(op=op)
+    settings = root_options(op=op)
     if settings is None:
         return generate_fallback_impl(op, node, **kwargs), None
 
@@ -631,6 +633,7 @@ def numba_funcify_RootScalarOp(op, node, **kwargs):
             return np.asarray(as_output_dtype(root)), converged
 
     if objective_key is None:
+        # If the objective cannot be cached, the root finder cannot be cached either
         cache_key = None
     else:
         root_scalar_cache_version = 2
