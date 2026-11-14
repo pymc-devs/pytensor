@@ -1194,17 +1194,52 @@ def test_local_subtensor_shape_constant():
             lambda x, iv, jv, im: x[[0, 1]][0],
             lambda x, iv, jv, im: x[pt.as_tensor([0, 1])[0]],
         ),
-        # Basic index on the advanced dims of a matrix index: stays after it
+        # Basic indices on any of the advanced dims of a matrix index
         (
             lambda x, iv, jv, im: x[im][1:, :, 1:],
-            lambda x, iv, jv, im: x[:, 1:][im][1:],
+            lambda x, iv, jv, im: x[:, 1:][im[1:, :]],
         ),
-        # AdvancedSubtensor with several clients: only when they read disjoint ranges
         (
-            lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 2:4])(x[iv]),
-            lambda x, iv, jv, im: x[:, :2][iv] * x[:, 2:4][iv],
+            lambda x, iv, jv, im: x[:, im][1, -1],
+            lambda x, iv, jv, im: x[1][im[-1]],
         ),
-        (lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 1:3])(x[iv]), None),
+        (
+            lambda x, iv, jv, im: x[im][:, 1, ::-1],
+            lambda x, iv, jv, im: x[:, ::-1][im[:, 1]],
+        ),
+        (
+            lambda x, iv, jv, im: x[im][::-1, 0, 1:, -1],
+            lambda x, iv, jv, im: x[:, 1:, -1][im[::-1, 0]],
+        ),
+        # Multiple indices broadcast before selecting their shared dimensions
+        (
+            lambda x, iv, jv, im: x[iv[:, None], jv][:, -1, 1:],
+            lambda x, iv, jv, im: (lambda a, b: x[:, :, 1:][a[:, -1], b[:, -1]])(
+                *pt.broadcast_arrays(iv[:, None], jv)
+            ),
+        ),
+        # Several clients: disjoint reads, static size bounds, or basic views
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:2] * adv[2:4])(x[iv]),
+            lambda x, iv, jv, im: x[iv[:2]] * x[iv[2:4]],
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 1:3])(x[[0, 1]]),
+            lambda x, iv, jv, im: x[:, :2][[0, 1]] * x[:, 1:3][[0, 1]],
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :4] * adv[:, 1:])(x[[0, 1]]),
+            None,
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[1] * adv[1:])(x[iv]),
+            lambda x, iv, jv, im: x[iv[1]] * x[iv[1:]],
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 1:3])(x[iv]),
+            lambda x, iv, jv, im: x[:, :2][iv] * x[:, 1:3][iv],
+        ),
+        (lambda x, iv, jv, im: (lambda adv: adv[:2] * adv[1:3])(x[iv]), None),
         (lambda x, iv, jv, im: (lambda adv: adv[:, :1] * adv.sum())(x[iv]), None),
         # Not implemented, complex flavors of advanced indexing
         (lambda x, iv, jv, im: x[:, 1:, jv][0], None),
@@ -1333,6 +1368,37 @@ def test_local_adv_inc_subtensor_of_inc_subtensor(original_fn, expected_fn):
             else rng.normal(size=test_shapes[inp.name]).astype(inp.dtype)
             for inp in inputs
         )
+    )
+
+
+@pytest.mark.parametrize("index_shapes", [((2, 3),), ((2, 1), (1, 3))])
+def test_local_adv_inc_subtensor_of_inc_subtensor_matrix_indices(index_shapes):
+    rng = np.random.default_rng(257)
+    z = pt.tensor("z", shape=(5,) * len(index_shapes) + (4,))
+    y, g = pt.tensor3("y"), pt.matrix("g")
+    indices = [
+        pt.tensor(f"idx{i}", dtype="int64", shape=shape)
+        for i, shape in enumerate(index_shapes)
+    ]
+    out = z[tuple(indices)].inc(y[:, 1, 1:3].inc(g))
+    broadcast_indices = pt.broadcast_arrays(*indices) if len(indices) > 1 else indices
+    expected = (
+        z[tuple(indices)]
+        .inc(y)[(*[idx[:, 1] for idx in broadcast_indices], slice(1, 3))]
+        .inc(g)
+    )
+    result = RewriteTester(
+        [z, y, g, *indices],
+        [out],
+        include=None,
+        custom_rewrite=local_adv_inc_subtensor_of_inc_subtensor,
+    )
+    result.assert_graph(expected)
+    result.assert_eval(
+        rng.normal(size=z.type.shape),
+        rng.normal(size=(2, 3, 4)),
+        rng.normal(size=(2, 2)),
+        *(rng.integers(0, 5, size=shape) for shape in index_shapes),
     )
 
 
