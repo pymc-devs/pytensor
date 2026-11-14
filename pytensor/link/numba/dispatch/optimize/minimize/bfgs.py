@@ -41,20 +41,36 @@ from pytensor.link.numba.dispatch.optimize.minimize.line_search import (
 
 @numba_njit(fastmath=False)
 def _vecnorm(x, order):
+    # Loop form of SciPy's vecnorm that skips the np.abs(x) temporary. A NaN
+    # entry makes the norm NaN, as in NumPy.
     if order == np.inf:
-        return np.max(np.abs(x))
+        total = 0.0
+        for i in range(x.size):
+            value = abs(x[i])
+            if np.isnan(value):
+                return value
+            total = max(total, value)
+        return total
     if order == -np.inf:
-        return np.min(np.abs(x))
-    return np.sum(np.abs(x) ** order) ** (1.0 / order)
+        total = np.inf
+        for i in range(x.size):
+            value = abs(x[i])
+            if np.isnan(value):
+                return value
+            total = min(total, value)
+        return total
+    total = 0.0
+    for i in range(x.size):
+        total += abs(x[i]) ** order
+    return total ** (1.0 / order)
 
 
 @numba_njit(fastmath=False, inline="always")
-def _line_search_wolfe12(evaluate, x, p, args, f0, previous_f, g0, c1, c2):
+def _line_search_wolfe12(evaluate, x, p, args, f0, previous_f, g0, c1, c2, trial_x):
     d0 = np.dot(g0, p)
     if not np.isfinite(d0) or d0 >= 0:
         return 0.0, f0, g0, False
 
-    trial_x = np.empty_like(x)
     alpha = min(1.0, 2.02 * (f0 - previous_f) / d0)
     # SciPy keeps a zero step, which fails both of its searches.
     if alpha <= 0 or not np.isfinite(alpha):
@@ -93,6 +109,8 @@ def _bfgs(evaluate, x, args, gtol, maxiter, norm, xrtol, c1, c2):
         return x, True
 
     identity = np.eye(x.size)
+    p, s, y = np.empty(x.size), np.empty(x.size), np.empty(x.size)
+    hy, w, trial_x = np.empty(x.size), np.empty(x.size), np.empty(x.size)
     h = identity
     updated = False
     previous_f = f + np.linalg.norm(g) / 2
@@ -100,9 +118,10 @@ def _bfgs(evaluate, x, args, gtol, maxiter, norm, xrtol, c1, c2):
     # a second failure before the next accepted update returns.
     steps = 0
     while steps < maxiter:
-        p = -np.dot(h, g)
+        np.dot(h, g, p)
+        p *= -1.0
         alpha, new_f, new_g, found = _line_search_wolfe12(
-            evaluate, x, p, args, f, previous_f, g, c1, c2
+            evaluate, x, p, args, f, previous_f, g, c1, c2, trial_x
         )
         if not found:
             if not updated:
@@ -114,10 +133,11 @@ def _bfgs(evaluate, x, args, gtol, maxiter, norm, xrtol, c1, c2):
             continue
 
         steps += 1
-        s = alpha * p
+        for j in range(x.size):
+            s[j] = alpha * p[j]
+            y[j] = new_g[j] - g[j]
+            x[j] += s[j]
         descent = -np.dot(g, s)
-        x = x + s
-        y = new_g - g
         previous_f, f, g = f, new_f, new_g
         if _vecnorm(g, norm) <= gtol:
             return x, steps < maxiter
@@ -140,8 +160,10 @@ def _bfgs(evaluate, x, args, gtol, maxiter, norm, xrtol, c1, c2):
         # in place, which is safe because h was rebound to a fresh scaled array
         # when updated became True.
         rho = 1.0 / curvature
-        hy = np.dot(h, y)
-        w = (0.5 * rho * rho * (curvature + np.dot(y, hy))) * s - rho * hy
+        np.dot(h, y, hy)
+        coefficient = 0.5 * rho * rho * (curvature + np.dot(y, hy))
+        for i in range(x.size):
+            w[i] = coefficient * s[i] - rho * hy[i]
         for i in range(x.size):
             for j in range(x.size):
                 h[i, j] = (h[i, j] + s[i] * w[j]) + w[i] * s[j]

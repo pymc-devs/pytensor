@@ -17,7 +17,7 @@ from pytensor.tensor.optimize import MinimizeOp
 
 # Bump when the solvers or the line-search helpers they share change, since
 # the Numba disk cache keys do not see helper sources.
-_SOLVER_CACHE_VERSION = 2
+_SOLVER_CACHE_VERSION = 3
 
 
 def _can_use_native_bfgs(op):

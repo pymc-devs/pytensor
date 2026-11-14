@@ -38,11 +38,12 @@ from pytensor.link.numba.dispatch.optimize.minimize.line_search import FAILED, _
 # reassoc lets LLVM split and vectorize the dot-product reductions. It only
 # reorders sums, so the directions match SciPy's up to rounding.
 @numba_njit(fastmath={"reassoc"})
-def _direction(g, s_history, y_history, rho_history, gamma, count, head):
+def _direction(g, s_history, y_history, rho_history, gamma, count, head, q, alphas):
     # Two-loop recursion over a ring buffer whose newest pair sits before head.
+    # Writes the direction into q.
     m = rho_history.size
-    q = -g
-    alphas = np.zeros(m)
+    for j in range(q.size):
+        q[j] = -g[j]
     for k in range(count):
         i = (head - 1 - k) % m
         total = 0.0
@@ -60,7 +61,6 @@ def _direction(g, s_history, y_history, rho_history, gamma, count, head):
         beta = rho_history[i] * total
         for j in range(q.size):
             q[j] += (alphas[i] - beta) * s_history[i, j]
-    return q
 
 
 @numba_njit(fastmath=False, inline="always")
@@ -102,9 +102,10 @@ def _lbfgs(evaluate, x, args, m, ftol, gtol, maxiter, maxfun, maxls):
     s_history, y_history = np.zeros((m, x.size)), np.zeros((m, x.size))
     rho_history = np.zeros(m)
     s, y, trial_x = np.empty(x.size), np.empty(x.size), np.empty(x.size)
+    p, alphas = np.empty(x.size), np.zeros(m)
     gamma, count, head, iterations, nfev = 1.0, 0, 0, 0, 1
     while True:
-        p = _direction(g, s_history, y_history, rho_history, gamma, count, head)
+        _direction(g, s_history, y_history, rho_history, gamma, count, head, p, alphas)
         alpha = min(1.0 / np.linalg.norm(p), 1e10) if iterations == 0 else 1.0
         alpha, new_f, new_g, found, evaluations = _lnsrlb(
             evaluate, x, p, args, f, g, alpha, maxls, trial_x
