@@ -1147,6 +1147,43 @@ class TestTriangle:
             with pytest.raises(ValueError, match="must be two dimensional"):
                 fn(m)
 
+    @pytest.mark.parametrize("k", [0, -1])
+    @pytest.mark.parametrize("op", [tril, triu])
+    @pytest.mark.parametrize(
+        "shape, mask_shape",
+        [
+            ((3, 4), (3, 4)),
+            ((3, 200), (3, 200)),
+            ((3, None), (3, None)),
+            ((None, 4), (None, 4)),
+            ((2, 3, 4), (1, 3, 4)),
+            ((3,), (3, 3)),
+        ],
+        ids=["static", "wide", "static_rows", "static_cols", "batched", "vector"],
+    )
+    def test_tril_triu_static_mask_shape(self, op, k, shape, mask_shape):
+        m = tensor("m", shape=shape)
+        _, mask = op(m, k=k).owner.inputs
+        assert mask.type.shape == mask_shape
+
+    @pytest.mark.parametrize("op, np_op", [(tril, np.tril), (triu, np.triu)])
+    def test_tril_triu_vectorize(self, op, np_op):
+        m = tensor("m", shape=(3, 4))
+        batched_m = tensor("batched_m", shape=(2, 3, 4))
+        out = vectorize_graph(op(m), {m: batched_m})
+        assert out.type.shape == (2, 3, 4)
+
+        batched_m_test = np.arange(24, dtype=batched_m.dtype).reshape((2, 3, 4))
+        np.testing.assert_allclose(
+            out.eval({batched_m: batched_m_test}), np_op(batched_m_test)
+        )
+
+    @pytest.mark.parametrize("op, np_op", [(tril, np.tril), (triu, np.triu)])
+    def test_tril_triu_vector(self, op, np_op):
+        v = vector("v")
+        v_test = np.arange(1, 4, dtype=v.dtype)
+        np.testing.assert_allclose(op(v).eval({v: v_test}), np_op(v_test))
+
 
 class TestNonzero:
     def test_nonzero(self):
@@ -2890,6 +2927,33 @@ class TestARange:
         assert np.arange(1, -9, 2).shape == arange(1, -9, 2).type.shape
         assert np.arange(1.3, 17.48, 2.67).shape == arange(1.3, 17.48, 2.67).type.shape
         assert np.arange(-64, 64).shape == arange(-64, 64).type.shape
+
+    def test_static_shape_from_shape_bounds(self):
+        x = tensor("x", shape=(200, None))
+        x_test = np.zeros((200, 2), dtype=x.dtype)
+        for out, expected in [
+            (arange(x.shape[0]), (200,)),
+            (arange(1, x.shape[0] - 1), (198,)),
+            (arange(x.shape[0] + 100), (300,)),
+            (arange(Shape_i(0)(x)), (200,)),
+            (arange(0, x.shape[0] * 0.5, 0.5), (200,)),
+            (arange(x.shape[1]), (None,)),
+            (arange(0, 10, x.shape[0] - 200), (None,)),
+        ]:
+            assert out.type.shape == expected
+            if expected != (None,):
+                assert out.eval({x: x_test}).shape == expected
+
+    def test_rebuild(self):
+        x = vector(shape=(50,))
+        y = arange(x.shape[0])
+        assert y.type.shape == (50,)
+
+        x_new = vector(shape=(100,))
+        x_new_test = np.zeros((100,), dtype=config.floatX)
+        y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
+        assert y_new.type.shape == (100,)
+        assert y_new.eval({x_new: x_new_test}).shape == (100,)
 
     def test_c_cache_bug(self):
         # Regression test for bug caused by issues in hash of `np.dtype()` objects
