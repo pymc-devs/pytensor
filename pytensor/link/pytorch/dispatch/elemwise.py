@@ -83,14 +83,32 @@ def pytorch_funcify_all(op, **kwargs):
 
 
 @pytorch_funcify.register(Prod)
-def pytorch_funcify_prod(op, **kwargs):
+def pytorch_funcify_prod(op, node, **kwargs):
+    acc_dtype = getattr(torch, op.acc_dtype)
+    out_dtype = getattr(torch, node.outputs[0].dtype)
+    # PyTorch has no uint16/32/64 prod kernels; int64 preserves their low bits.
+    use_signed_accumulator = op.acc_dtype in {"uint16", "uint32", "uint64"}
+    reduction_dtype = torch.int64 if use_signed_accumulator else acc_dtype
+
     def torch_prod(x):
+        if op.axis == ():
+            return x.to(dtype=out_dtype)
+
+        if use_signed_accumulator and x.dtype == torch.uint64:
+            # Preserve bits so signed multiplication has the same modulo-2**64 result.
+            x = x.view(torch.int64)
+
+        # Keep intermediate reductions in the accumulator dtype, then cast once.
         if isinstance(op.axis, tuple):
             for d in sorted(op.axis, reverse=True):
-                x = torch.prod(x, dim=d)
-            return x
+                x = torch.prod(x, dim=d, dtype=reduction_dtype)
         else:
-            return torch.prod(x.flatten(), dim=0)
+            x = torch.prod(x.flatten(), dim=0, dtype=reduction_dtype)
+
+        if use_signed_accumulator:
+            # Restore unsigned values before converting to a floating output dtype.
+            x = x.to(dtype=acc_dtype)
+        return x.to(dtype=out_dtype)
 
     return torch_prod
 
