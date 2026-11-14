@@ -232,6 +232,10 @@ class ScipyWrapperOp(HasInnerFunction, Op):
             self._fn_wrapped = LRUCache1(self.fn)
         return self._fn_wrapped
 
+    def _reset_inner_fn(self) -> None:
+        super()._reset_inner_fn()
+        self._fn_wrapped = None
+
     def _prop_values(self):
         return tuple(getattr(self, name) for name in self._scipy_props)
 

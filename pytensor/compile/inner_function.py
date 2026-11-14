@@ -1,5 +1,6 @@
 """Shared machinery for `Op`\\s that execute a lazily linked inner function."""
 
+from copy import copy
 from typing import TYPE_CHECKING
 
 from pytensor.compile.io import In, Out
@@ -37,13 +38,36 @@ class HasInnerFunction(HasInnerGraph):
     """
 
     _fn = None
+    # Backend whose python fallback runs ``perform`` (e.g. numba objmode), set on
+    # a private copy by that backend so the inner function is linked with it.
+    _fallback_impl: str | None = None
     fgraph: FrozenFunctionGraph
 
     def link_mode(self, impl: str | None) -> Mode:
         """The `Mode` to link the inner function with, given a thunk ``impl``."""
-        if impl == "numba":
-            return link_only_mode("numba")
-        return link_only_mode("cvm" if impl == "c" else "vm")
+        if impl in (None, "py"):
+            return link_only_mode("vm")
+        if impl == "c":
+            return link_only_mode("cvm")
+        # A JIT backend running ``perform`` through its python fallback
+        # (e.g. numba objmode): link the inner function with that backend.
+        return link_only_mode(impl)
+
+    def _reset_inner_fn(self) -> None:
+        """Drop cached inner functions. Subclasses with extra caches extend this."""
+        self._fn = None
+
+    def with_inner_fn_for(self, impl: str) -> "HasInnerFunction":
+        """A copy of this op whose inner function will be linked for ``impl``.
+
+        Nothing is compiled here: the inner function is still linked lazily on
+        first use. Works on a copy so a shared op instance never carries a
+        backend-specific inner function into other compiles.
+        """
+        new_op = copy(self)
+        new_op._reset_inner_fn()
+        new_op._fallback_impl = impl
+        return new_op
 
     def link_fgraph(self, fgraph: FunctionGraph, mode: Mode) -> "Function":
         """Link an already-baked inner ``fgraph`` under ``mode``, no rewrites."""
@@ -65,7 +89,7 @@ class HasInnerFunction(HasInnerGraph):
     @property
     def fn(self) -> "Function":
         if self._fn is None:
-            self._fn = self.compile_fn(self.link_mode(None))
+            self._fn = self.compile_fn(self.link_mode(self._fallback_impl))
         return self._fn
 
     def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):

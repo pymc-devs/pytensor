@@ -13,7 +13,6 @@ import pytensor.link.numba.dispatch.compile_ops
 import pytensor.link.numba.dispatch.elemwise
 import pytensor.link.numba.dispatch.extra_ops
 import pytensor.link.numba.dispatch.linalg
-import pytensor.link.numba.dispatch.optimize
 import pytensor.link.numba.dispatch.random
 import pytensor.link.numba.dispatch.scan
 import pytensor.link.numba.dispatch.scalar
