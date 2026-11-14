@@ -315,18 +315,31 @@ dimension that is one and ``None``\/``False`` for every dimension with an unknow
 shape.
 
 For Python numbers, the static shape/broadcastable pattern is ``()`` but the dtype must be
-inferred.  Python integers are stored in the smallest dtype that can hold
-them, so small constants like ``1`` are stored in a `bscalar`.
-Likewise, Python floats are stored in an `fscalar` if `fscalar` suffices to hold
-them perfectly, but a `dscalar` otherwise.
+inferred. Under the default ``config.cast_policy == 'numpy+floatX'`` (see
+:mod:`config`), Python integers become ``int64`` and Python floats become
+``config.floatX``. NumPy scalars and arrays keep their own dtype.
+
+A Python number can still upcast the variable it is combined with. With
+``floatX='float64'``, ``pt.fvector() * 2`` is ``float64``, ``pt.ivector() + 1`` is
+``int64``, and a ``float16`` variable plus a Python number is ``float64``. To keep
+the variable's dtype, use a typed constant such as ``np.float32(2)`` or
+``pt.constant(1, dtype=x.dtype)``, or set ``floatX='float32'`` for
+single-precision work. This matters where dtypes must match, as in the initial
+states of :func:`pytensor.scan`, the init and update of a ``ScalarLoop``, and the
+two branches of ``ifelse``.
+
+Constants such as ``pt.sqrt(2.0)`` follow ``floatX``. Code that also runs under
+``cast_policy='custom'`` can compute them in Python (``math.sqrt(2)``), which
+follows ``floatX`` under both policies.
 
 .. note::
 
-    When ``config.floatX == float32`` (see :mod:`config`), then Python floats
-    are stored instead as single-precision floats.
-
-    For fine control of this rounding policy, see
-    `pytensor.tensor.basic.autocast_float`.
+    Under ``cast_policy='custom'``, the previous default, Python integers are
+    stored in the smallest dtype that can hold them, so small constants like
+    ``1`` are stored in a `bscalar`. Python floats are stored in an `fscalar`
+    if it holds them exactly and in a `dscalar` otherwise, or as
+    single-precision floats when ``config.floatX == float32``. For fine control
+    of this rounding policy, see `pytensor.scalar.basic.autocast_float`.
 
 .. function:: as_tensor_variable(x, name=None, ndim=None)
 

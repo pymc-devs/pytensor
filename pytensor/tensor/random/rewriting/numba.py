@@ -137,7 +137,7 @@ def cast_rv_float_params_to_float64(fgraph, node):
     Which RVs actually benefit is not predictable from "the generator samples in
     float64" -- it depends on the specific numba implementation and was measured per
     distribution; see ``_RVS_TO_CAST_FLOAT_PARAMS_TO_FLOAT64`` for the opt-in list. For
-    ``normal``, the ``int8`` literals of ``normal(0, 1)`` becoming float64 is a ~3x win.
+    ``normal``, the integer literals of ``normal(0, 1)`` becoming float64 is a ~3x win.
 
     The target is float64, *not* the output dtype: under ``floatX="float32"`` casting to
     the output dtype would leave the parameter float32 and still mismatched, so it would
@@ -157,7 +157,7 @@ def cast_rv_float_params_to_float64(fgraph, node):
 
     dist_params = op.dist_params(node)
     # Every parameter of these (continuous) RVs is real-valued, so upcast any that is not
-    # already float64 -- ``normal(0, 1)``'s int8 literals included.
+    # already float64 -- ``normal(0, 1)``'s integer literals included.
     cast_idxs = [
         i for i, param in enumerate(dist_params) if param.type.dtype != "float64"
     ]
