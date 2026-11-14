@@ -344,8 +344,9 @@ def _gemm_from_factored_list(fgraph, lst):
 
     """
     lst2 = []
-    # Remove the tuple that can't be cast correctly.
-    # This can happen when we try to cast a complex to a real
+    # Terms gemm can't take: variables, and scales that would upcast their matrix.
+    # They stay in the sum.
+    rest = []
     for sM in lst:
         # Make every pair in list have matching dtypes
         # sM can be a tuple of 2 elements or an PyTensor variable.
@@ -358,6 +359,10 @@ def _gemm_from_factored_list(fgraph, lst):
                 sm0 = ptb.as_tensor_variable(sm0)
             if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
                 lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
+            else:
+                rest.append(sm0 * sm1)
+        else:
+            rest.append(sM)
 
     lst = lst2
 
@@ -393,6 +398,7 @@ def _gemm_from_factored_list(fgraph, lst):
                 add_inputs = [
                     item_to_var(input) for k, input in enumerate(lst) if k not in (i, j)
                 ]
+                add_inputs.extend(rest)
                 add_inputs.extend(gemm_of_sM_list)
                 rval = [variadic_add(*add_inputs)]
                 # print "RETURNING GEMM THING", rval
