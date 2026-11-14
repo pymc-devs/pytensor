@@ -11,11 +11,12 @@ shrink the Scan signature without changing what it computes:
   sequences, and non-sequences that nobody downstream reads.
 """
 
+from collections import defaultdict
 from typing import NamedTuple
 
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.rewriting.basic import node_rewriter
-from pytensor.graph.traversal import explicit_graph_inputs
+from pytensor.graph.traversal import explicit_graph_inputs, toposort
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.utils import _rebuild_scan_with_new_signature
 from pytensor.tensor.basic import Alloc, alloc
@@ -84,6 +85,36 @@ def scan_inline_invariant_constants(fgraph, node):
     )
 
 
+_PAIRWISE_LIMIT = 16
+
+
+def _root_key(var):
+    # equal_computations compares constants by signature and other roots by identity
+    return ("constant", var.signature()) if isinstance(var, Constant) else var
+
+
+def _structural_keys(variables):
+    """Map each variable in the graphs of `variables` to an int, such that
+    variables that are `equal_computations` share the same int."""
+    keys: dict = {}
+    interned: dict = {}
+
+    def _key(var):
+        if (key := keys.get(var)) is None:
+            key = keys[var] = interned.setdefault(_root_key(var), len(interned))
+        return key
+
+    for apply in toposort(variables):
+        input_keys = tuple(_key(i) for i in apply.inputs)
+        for out in apply.outputs:
+            keys[out] = interned.setdefault(
+                (apply.op, out.index, input_keys), len(interned)
+            )
+    for var in variables:
+        _key(var)
+    return keys
+
+
 @node_rewriter([Scan])
 def scan_merge_duplicate_inputs(fgraph, node):
     """Merge outer seqs / non_seqs that are ``equal_computations``.
@@ -93,28 +124,45 @@ def scan_merge_duplicate_inputs(fgraph, node):
     outer input pair is dropped.
     """
     op = node.op
+    outer_seqs = op.outer_seqs(node.inputs)
+    outer_non_seqs = op.outer_non_seqs(node.inputs)
+
+    # Only inputs with the same top node can be equal. Small groups are compared
+    # pairwise, which stops at the first difference. Large groups would need a
+    # quadratic number of comparisons, so they are bucketed by a structural key
+    # computed over their whole graph.
+    bucket: dict = {}
+    by_top = defaultdict(list)
+    for var in outer_seqs + outer_non_seqs:
+        bucket[var] = (var.owner.op, var.index) if var.owner else _root_key(var)
+        by_top[bucket[var]].append(var)
+    large = [
+        var
+        for group in by_top.values()
+        if len(group) > _PAIRWISE_LIMIT
+        for var in group
+    ]
+    keys = _structural_keys(large)
+    bucket.update((var, keys[var]) for var in large)
 
     def _duplicates(inner_list, outer_list):
         subs: dict = {}
         drop: set = set()
-        canonical: list[tuple] = []
+        canonical: dict = {}
         for k, (inner, outer) in enumerate(zip(inner_list, outer_list, strict=True)):
-            for canon_outer, canon_inner in canonical:
+            candidates = canonical.setdefault(bucket[outer], [])
+            for canon_outer, canon_inner in candidates:
                 if equal_computations([outer], [canon_outer]):
                     subs[inner] = canon_inner
                     drop.add(k)
                     break
             else:
-                canonical.append((outer, inner))
+                candidates.append((outer, inner))
         return subs, drop
 
-    seq_subs, drop_seqs = _duplicates(
-        op.inner_seqs(op.inner_inputs),
-        op.outer_seqs(node.inputs),
-    )
+    seq_subs, drop_seqs = _duplicates(op.inner_seqs(op.inner_inputs), outer_seqs)
     non_seq_subs, drop_non_seqs = _duplicates(
-        op.inner_non_seqs(op.inner_inputs),
-        op.outer_non_seqs(node.inputs),
+        op.inner_non_seqs(op.inner_inputs), outer_non_seqs
     )
     substitutions = {**seq_subs, **non_seq_subs}
 

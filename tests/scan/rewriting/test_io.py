@@ -11,6 +11,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import (
     scan_inline_invariant_constants,
+    scan_merge_duplicate_inputs,
     scan_push_out_non_seq,
     scan_remove_unused,
 )
@@ -718,3 +719,23 @@ def test_inline_invariant_alloc():
     result.assert_graph(expected)
     test_value = np.array([0.0, 1.0, 2.0], dtype=h0.dtype)
     result.assert_eval(test_value)
+
+
+@pytest.mark.parametrize("n_distinct", [3, 40])
+def test_merge_duplicate_inputs(n_distinct):
+    """Equal but distinct non-sequences are merged, both in small groups that
+    are compared pairwise and in large groups that are bucketed by structure."""
+    x = vector("x", shape=(3,))
+    non_seqs = [pt.exp(pt.sin(x) + (k % n_distinct)) for k in range(2 * n_distinct)]
+    out = scan(
+        lambda s, *c: sum(c, s),
+        sequences=[pt.arange(3.0)],
+        non_sequences=non_seqs,
+        return_updates=False,
+    )
+    result = RewriteTester(
+        [x], [out], include=None, custom_rewrite=scan_merge_duplicate_inputs
+    )
+    [node] = [n for n in result.rewr_fg.apply_nodes if isinstance(n.op, Scan)]
+    assert len(node.op.outer_non_seqs(node.inputs)) == n_distinct
+    result.assert_eval(np.array([0.1, 0.2, 0.3], dtype=x.dtype))
