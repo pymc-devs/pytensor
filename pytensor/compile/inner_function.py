@@ -45,7 +45,7 @@ class HasInnerFunction(HasInnerGraph):
 
     def link_mode(self, impl: str | None) -> Mode:
         """The `Mode` to link the inner function with, given a thunk ``impl``."""
-        if impl in (None, "py"):
+        if impl is None or impl == "py":
             return link_only_mode("vm")
         if impl == "c":
             return link_only_mode("cvm")
